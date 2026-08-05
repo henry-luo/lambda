@@ -39,7 +39,8 @@ static void lambda_type_format_name_inner(const Type* type, char* buffer,
         snprintf(buffer, capacity, "...");
         return;
     }
-    if (type->type_id == LMD_TYPE_MAP) {
+    if (type->type_id == LMD_TYPE_MAP && type != &TYPE_MAP) {
+        // TYPE_MAP is a compact generic Type, not a TypeMap; only shaped maps own struct_name.
         const TypeMap* map_type = (const TypeMap*)type;
         if (map_type->struct_name) {
             snprintf(buffer, capacity, "%s", map_type->struct_name);

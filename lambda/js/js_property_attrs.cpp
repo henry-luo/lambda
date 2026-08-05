@@ -230,6 +230,89 @@ extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj) {
     return js_typemap_clone_for_mutation(obj);
 }
 
+static bool js_typemap_transition_matches(const TypeMapTransition* transition,
+        const ShapeEntry* entry, TypeId value_type) {
+    if (!transition || !entry || !entry->name || !entry->name->str ||
+            transition->value_type != value_type ||
+            transition->name_len != entry->name->length) {
+        return false;
+    }
+    return transition->name == entry->name->str ||
+        memcmp(transition->name, entry->name->str, transition->name_len) == 0;
+}
+
+static ShapeEntry* js_typemap_transition_entry(TypeMap* target,
+        const ShapeEntry* source) {
+    if (!target || !source || !source->name || !source->name->str) return NULL;
+    if (source->key_ref && property_key_requires_identity(source->key_ref)) {
+        return typemap_hash_lookup_key(target, source->key_ref);
+    }
+    return typemap_hash_lookup(target, source->name->str, (int)source->name->length);
+}
+
+extern "C" TypeMap* js_typemap_transition_for_type(Item obj,
+        ShapeEntry* entry, TypeId value_type) {
+    Map* underlying = js_obj_underlying_map(obj);
+    if (!underlying || !entry || !entry->name || !entry->name->str ||
+            !js_input || !js_input->pool) {
+        return NULL;
+    }
+    TypeMap* source = (TypeMap*)underlying->type;
+    if (!source || !typemap_is_shared_shape(source) || !entry->type ||
+            entry->type->type_id == value_type) {
+        return source;
+    }
+
+    TypeId storage_type = shape_entry_storage_type_id(entry);
+    if (!typemap_entry_uses_fixed_slot(source, entry) &&
+            type_info[storage_type].byte_size != type_info[value_type].byte_size) {
+        // A cached transition may retag a fixed-width constructor slot, but a
+        // packed field can move every following offset.  Reusing its old
+        // offset would overwrite the next property; make the caller rebuild.
+        return NULL;
+    }
+
+    for (TypeMapTransition* transition = source->transitions; transition;
+            transition = transition->next) {
+        if (js_typemap_transition_matches(transition, entry, value_type) &&
+                transition->target) {
+            underlying->type = transition->target;
+            return transition->target;
+        }
+    }
+
+    TypeMapTransition* transition = (TypeMapTransition*)pool_calloc(js_input->pool,
+        sizeof(TypeMapTransition));
+    if (!transition) return NULL;
+
+    TypeMap* target = js_typemap_clone_for_mutation(obj);
+    if (!target) return NULL;
+    ShapeEntry* target_entry = js_typemap_transition_entry(target, entry);
+    if (!target_entry) {
+        underlying->type = source;
+        return NULL;
+    }
+
+    // The source blueprint must stay immutable: a mixed null/Array field is
+    // common in JS constructors, and retagging it forced every later instance
+    // into a private pool-owned TypeMap clone.
+    target->is_private_clone = false;
+    target->is_shared_constructor_shape = false;
+    target->is_transition_shared_shape = true;
+    target->transitions = NULL;
+    target_entry->type = type_info[value_type].type;
+
+    transition->name = entry->name->str;
+    transition->name_len = (uint32_t)entry->name->length;
+    transition->name_hash = entry->name_hash;
+    transition->value_type = value_type;
+    transition->flags = entry->flags;
+    transition->target = target;
+    transition->next = source->transitions;
+    source->transitions = transition;
+    return target;
+}
+
 extern "C" void js_shape_entry_set_accessor(Item obj, const char* name, int name_len,
                                             bool is_accessor) {
     // Same probe-first / clone / mutate pattern as js_shape_entry_update_flags,

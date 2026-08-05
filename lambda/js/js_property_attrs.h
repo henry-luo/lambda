@@ -108,6 +108,12 @@ ShapeEntry* js_find_shape_entry(Item obj, const char* name, int name_len);
 // fallback at an API boundary; SYMBOL and PRIVATE keys are pointer-only.
 ShapeEntry* js_find_shape_entry_key(Item obj, PropertyKeyRef key);
 
+// Move a Map with a shared constructor/transition shape to the cached variant
+// whose `entry` stores `value_type`. The returned TypeMap is installed on obj;
+// NULL means callers must use their ordinary private-clone fallback.
+TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
+                                        TypeId value_type);
+
 // Identity-preserving accessor lookup used by private and Symbol property
 // writes. Raw spelling lookups remain available for ordinary STRING keys.
 JsAccessorPair* js_find_accessor_pair_inheritable_key(Item obj, PropertyKeyRef key);

@@ -3181,27 +3181,17 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         }
 
         if (ctor_fc && ctor_fc->ctor_prop_count > 0) {
-            // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64.
-            MIR_reg_t names_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
-            MIR_reg_t lens_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
-            for (int i = 0; i < ctor_fc->ctor_prop_count; i++) {
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(void*), names_arr, 0, 1),
-                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_ptrs[i])));
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I32, i * (int)sizeof(int), lens_arr, 0, 1),
-                    MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_lens[i])));
-            }
+            // The collected arrays are compiler-pool stable for this generated module.
+            // Do not materialize raw metadata in js_alloc_env: that creates a GC-traced
+            // Item array on every `new`, even though names and lengths are not Items.
             // Pass ItemNull as callee — class path doesn't need prototype from callee
             MIR_reg_t null_callee = jm_emit_null(mt);
             if (ce->shape_cache_ptr) {
                 // §7: Use cached version that captures shape on first call
                 obj = jm_call_5(mt, "js_constructor_create_object_shaped_cached", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, null_callee),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_ptrs),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_lens),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ce->shape_cache_ptr));
                 log_debug("§7: new %.*s using shape-cached pre-shaped object with %d props",
@@ -3209,8 +3199,8 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             } else {
                 obj = jm_call_4(mt, "js_constructor_create_object_shaped", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, null_callee),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_ptrs),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_lens),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
                 log_debug("A5-class: new %.*s using pre-shaped object with %d props",
                           ctor_len, ctor_name, ctor_fc->ctor_prop_count);
@@ -3714,29 +3704,14 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // this reverted code path.
     MIR_reg_t obj = 0;
     if (ctor_fc && ctor_fc->ctor_prop_count > 0) {
-        // Emit static arrays of property name pointers and lengths.
-        // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64.
-        MIR_reg_t names_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
-        MIR_reg_t lens_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
-
-        for (int i = 0; i < ctor_fc->ctor_prop_count; i++) {
-            // Store pointer to pool-stable property name string
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(void*), names_arr, 0, 1),
-                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_ptrs[i])));
-            // Store length
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I32, i * (int)sizeof(int), lens_arr, 0, 1),
-                MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_lens[i])));
-        }
+        // Reuse compiler-pool metadata; the direct class path above explains why
+        // transient GC-traced environments are invalid for these raw arrays.
 
         if (ctor_fc->ctor_shape_cache_ptr) {
             obj = jm_call_5(mt, "js_constructor_create_object_shaped_cached", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_ptrs),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_lens),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_shape_cache_ptr));
             log_debug("Tune12-P2: new %.*s using shape-cached function ctor object with %d props",
@@ -3744,8 +3719,8 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         } else {
             obj = jm_call_4(mt, "js_constructor_create_object_shaped", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_ptrs),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_lens),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
             log_debug("A5: new %.*s using pre-shaped object with %d props",
                       ctor_len, ctor_name, ctor_fc->ctor_prop_count);

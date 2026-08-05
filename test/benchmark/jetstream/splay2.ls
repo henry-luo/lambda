@@ -8,8 +8,8 @@ let TREE_MODIFICATIONS = 80
 
 // Type definitions for direct struct field access
 // Field order must match the map literal order in create_node
-type SplayNode = {key: float, left: SplayNode, right: SplayNode, value: map}
-type SplayTree = {root: SplayNode}
+type SplayNode = {key: float, left: map?, right: map?, value: map?}
+type SplayTree = {root: map?}
 type RngState = {seed: int}
 type PayloadLeaf = {arr: array, str: float}
 type PayloadBranch = {left_p: map, right_p: map}
@@ -17,13 +17,15 @@ type PayloadBranch = {left_p: map, right_p: map}
 // Node: {key, left, right, value}
 // SplayNode type annotation ensures runtime data layout matches direct access offsets
 pn create_node(key: float, value) {
-    var node: SplayNode = {key: key, left: null, right: null, value: value}
+    var node = {key: key, left: null, right: null, value: value}
     return node
 }
 
 // Simple LCG pseudo-random number generator (deterministic)
 // u32 arithmetic intentionally wraps like the original 32-bit PRNG.
-pn next_random(state: RngState) {
+// The PRNG and tree are explicit inout values; ordinary parameters are
+// snapshots under COW and would lose the state update that makes keys unique.
+pn next_random(var state: RngState) {
     var s: u32 = state.seed
     s = s * 1103515245u32 + 12345u32
     state.seed = int(s)
@@ -40,7 +42,7 @@ pn splay_is_empty(tree: SplayTree) {
     return tree.root == null
 }
 
-pn splay(tree: SplayTree, key: float) {
+pn splay(var tree: SplayTree, key: float) {
     if (splay_is_empty(tree)) {
         return 0
     }
@@ -51,9 +53,9 @@ pn splay(tree: SplayTree, key: float) {
     // semantics, so the rotations below never reach the real tree and it collapses
     // to a single node. splay.ls has always done this; splay2.ls had dropped it.
     var links = {left: dummy, right: dummy, current: tree.root}
-    var left: SplayNode = links.left
-    var right: SplayNode = links.right
-    var current: SplayNode = links.current
+    var left = links.left
+    var right = links.right
+    var current = links.current
     var done = false
     while (done == false) {
         if (key < current.key) {
@@ -62,7 +64,7 @@ pn splay(tree: SplayTree, key: float) {
             } else {
                 if (key < (current.left).key) {
                     // rotate right
-                    var tmp: SplayNode = current.left
+                    var tmp = current.left
                     current.left = tmp.right
                     tmp.right = current
                     current = tmp
@@ -84,7 +86,7 @@ pn splay(tree: SplayTree, key: float) {
                 } else {
                     if (key > (current.right).key) {
                         // rotate left
-                        var tmp: SplayNode = current.right
+                    var tmp = current.right
                         current.right = tmp.left
                         tmp.left = current
                         current = tmp
@@ -113,7 +115,7 @@ pn splay(tree: SplayTree, key: float) {
     return 0
 }
 
-pn splay_insert(tree: SplayTree, key: float, value) {
+pn splay_insert(var tree: SplayTree, key: float, value) {
     if (splay_is_empty(tree)) {
         tree.root = create_node(key, value)
         return 0
@@ -122,23 +124,23 @@ pn splay_insert(tree: SplayTree, key: float, value) {
     if ((tree.root).key == key) {
         return 0
     }
-    var node: SplayNode = create_node(key, value)
+    var node = create_node(key, value)
     if (key > (tree.root).key) {
         node.left = tree.root
         node.right = (tree.root).right
-        var root_ref: SplayNode = tree.root
+        var root_ref = tree.root
         root_ref.right = null
     } else {
         node.right = tree.root
         node.left = (tree.root).left
-        var root_ref: SplayNode = tree.root
+        var root_ref = tree.root
         root_ref.left = null
     }
     tree.root = node
     return 0
 }
 
-pn splay_remove(tree: SplayTree, key: float) {
+pn splay_remove(var tree: SplayTree, key: float) {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -146,20 +148,20 @@ pn splay_remove(tree: SplayTree, key: float) {
     if ((tree.root).key != key) {
         return null
     }
-    var removed: SplayNode = tree.root
+    var removed = tree.root
     if ((tree.root).left == null) {
         tree.root = (tree.root).right
     } else {
-        var right_tree: SplayNode = (tree.root).right
+        var right_tree = (tree.root).right
         tree.root = (tree.root).left
         splay(tree, key)
-        var root_ref: SplayNode = tree.root
+        var root_ref = tree.root
         root_ref.right = right_tree
     }
     return removed
 }
 
-pn splay_find(tree: SplayTree, key: float) {
+pn splay_find(var tree: SplayTree, key: float) {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -177,7 +179,7 @@ pn splay_find_max(node: SplayNode) {
     return node
 }
 
-pn splay_find_greatest_less_than(tree: SplayTree, key: float) {
+pn splay_find_greatest_less_than(var tree: SplayTree, key: float) {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -192,7 +194,7 @@ pn splay_find_greatest_less_than(tree: SplayTree, key: float) {
 }
 
 // Count nodes for verification
-pn count_nodes(node: SplayNode) {
+pn count_nodes(node: SplayNode?) {
     if (node == null) {
         return 0
     }
@@ -200,7 +202,7 @@ pn count_nodes(node: SplayNode) {
 }
 
 // Collect keys in-order for verification
-pn traverse_keys(node: SplayNode, keys, idx_in) {
+pn traverse_keys(node: SplayNode?, keys, idx_in) {
     if (node == null) {
         return idx_in
     }
@@ -214,15 +216,15 @@ pn traverse_keys(node: SplayNode, keys, idx_in) {
 // Generate payload tree for node values
 pn generate_payload(depth: int, tag: float) {
     if (depth == 0) {
-        var leaf: PayloadLeaf = {arr: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], str: tag}
+        var leaf = {arr: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], str: tag}
         return leaf
     }
-    var branch: PayloadBranch = {left_p: generate_payload(depth - 1, tag),
+    var branch = {left_p: generate_payload(depth - 1, tag),
             right_p: generate_payload(depth - 1, tag)}
     return branch
 }
 
-pn insert_new_node(tree: SplayTree, rng: RngState) {
+pn insert_new_node(var tree: SplayTree, var rng: RngState) {
     var key = next_random(rng)
     while (splay_find(tree, key) != null) {
         key = next_random(rng)
@@ -233,8 +235,8 @@ pn insert_new_node(tree: SplayTree, rng: RngState) {
 }
 
 pn run_splay() {
-    var tree: SplayTree = splay_tree_new()
-    var rng: RngState = {seed: 49734321}
+    var tree = splay_tree_new()
+    var rng = {seed: 49734321}
 
     // Setup: insert TREE_SIZE nodes
     var i: int = 0
@@ -249,7 +251,7 @@ pn run_splay() {
         var j: int = 0
         while (j < TREE_MODIFICATIONS) {
             var key = insert_new_node(tree, rng)
-            var greatest: SplayNode = splay_find_greatest_less_than(tree, key)
+            var greatest = splay_find_greatest_less_than(tree, key)
             if (greatest == null) {
                 splay_remove(tree, key)
             } else {

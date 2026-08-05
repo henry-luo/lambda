@@ -178,7 +178,9 @@ pn scene_intersect(scene, origin: float[], dir: float[], near: float, far: float
     var i: int = 0
     while (i < scene.n_triangles) {
         var tri = (scene.triangles)[i]
-        var d = triangle_intersect(tri, origin, dir, near, far)
+        // An invalid intersection cannot be a hit; keep the soft error channel explicit.
+        var d_result = triangle_intersect(tri, origin, dir, near, far)
+        var d: float = match d_result { case error: -1.0 case float: d_result }
         if (d > 0.0) {
             far = d
             closest = tri
@@ -201,14 +203,16 @@ pn scene_intersect(scene, origin: float[], dir: float[], near: float, far: float
     while (i < scene.n_lights) {
         var light = (scene.lights)[i]
         var to_light = vec_sub(light.pos, hit)
-        var distance = vec_length(to_light)
+        var distance_result = vec_length(to_light)
+        var distance: float = match distance_result { case error: 1.0 case float: distance_result }
         to_light = vec_scale(to_light, 1.0 / distance)
         // Shadow test
         var blocked = false
         var bi: int = 0
         while (bi < scene.n_triangles) {
             var tri = (scene.triangles)[bi]
-            var sd = triangle_intersect(tri, hit, to_light, 0.0001, distance - 0.0001)
+            var sd_result = triangle_intersect(tri, hit, to_light, 0.0001, distance - 0.0001)
+            var sd: float = match sd_result { case error: -1.0 case float: sd_result }
             if (sd > 0.0) {
                 blocked = true
                 bi = scene.n_triangles  // break
@@ -216,7 +220,8 @@ pn scene_intersect(scene, origin: float[], dir: float[], near: float, far: float
             bi = bi + 1
         }
         if (blocked == false) {
-            var nl = vec_dot(normal, to_light)
+            var nl_result = vec_dot(normal, to_light)
+            var nl: float = match nl_result { case error: 0.0 case float: nl_result }
             if (nl > 0.0) {
                 l = vec_add_inplace(l, vec_scale(light.colour, nl))
             }

@@ -427,16 +427,21 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
 
     typemap_hash_build(child, input->pool);
 
-    if (child->length > 0 && child->length <= 64) {
+    int fixed_slot_count = typemap_fixed_slot_prefix_count(parent);
+    if (fixed_slot_count > 0) {
         ShapeEntry** entries = (ShapeEntry**)pool_calloc(input->pool,
-            (size_t)child->length * sizeof(ShapeEntry*));
+            (size_t)fixed_slot_count * sizeof(ShapeEntry*));
         if (entries) {
             ShapeEntry* e = first;
-            for (int i = 0; i < (int)child->length && e; i++, e = e->next) {
+            for (int i = 0; i < fixed_slot_count && e; i++, e = e->next) {
                 entries[i] = e;
             }
             child->slot_entries = entries;
-            child->slot_count = (int)child->length;
+            // A transition can append packed metadata such as __proto__ to a
+            // constructor shape.  Keep only the inherited fixed-width prefix;
+            // publishing the appended field as a slot would make a later map
+            // rebuild repack the constructor's byte offsets.
+            child->slot_count = fixed_slot_count;
         }
     }
 

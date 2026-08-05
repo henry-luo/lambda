@@ -109,6 +109,8 @@ extern "C" Item js_get_fs_namespace(void);
 extern "C" Item js_get_fs_promises_namespace(void);
 extern "C" Item js_get_internal_fs_promises_namespace(void);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
+extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
+    TypeId value_type);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
@@ -850,6 +852,7 @@ static JsCollectionData* js_get_collection_data(Item obj);
 extern "C" Item js_new_object() {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_NEW_OBJECT);
     Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
+    if (!m) return ItemNull;
     m->type_id = LMD_TYPE_MAP;
     m->type = &EmptyMap;
     return (Item){.map = m};
@@ -1861,6 +1864,11 @@ extern "C" Item js_proxy_trap_construct(Item proxy, Item* args, int arg_count, I
     return result;
 }
 
+static Item js_new_object_with_shape_cached(const char** prop_names,
+    const int* prop_lens, int count, void** shape_cache);
+extern "C" void js_set_function_ctor_shape_metadata(Item fn_item,
+    const char** prop_names, const int* prop_lens, int count);
+
 // Create a new object for a constructor call: sets __proto__ from callee.prototype
 extern "C" Item js_constructor_create_object(Item callee) {
     // Prototype lookup and builtin subclass allocation can compact the
@@ -1880,10 +1888,19 @@ extern "C" Item js_constructor_create_object(Item callee) {
     // Compiled constructor bodies use fixed this.prop slots. A constructor
     // reached through an alias must receive the same pre-shaped object as a
     // statically resolved `new`, or those slot writes address an empty layout.
+    // Rebuilding equivalent immutable map metadata for every dynamic call
+    // made allocation-heavy class workloads pay repeated shape-construction cost.
     object_root.set(shape_fn && shape_fn->ctor_prop_count > 0
-        ? js_new_object_with_shape(shape_fn->ctor_prop_names,
-            shape_fn->ctor_prop_lens, shape_fn->ctor_prop_count)
+        ? js_new_object_with_shape_cached(shape_fn->ctor_prop_names,
+            shape_fn->ctor_prop_lens, shape_fn->ctor_prop_count,
+            &shape_fn->ctor_shape_cache)
         : js_new_object());
+    if (shape_fn && shape_fn->ctor_prop_count > 0 &&
+            get_type_id(object_root.get()) == LMD_TYPE_MAP) {
+        uint16_t reserved = shape_fn->ctor_prop_count >= 16 ? UINT16_MAX :
+            (uint16_t)((1u << shape_fn->ctor_prop_count) - 1u);
+        map_ctor_set_reserved_mask(object_root.get().map, reserved);
+    }
     TypeId callee_type = get_type_id(callee_root.get());
     if (callee_type == LMD_TYPE_FUNC || js_is_proxy(callee_root.get())) {
         proto_source_root.set(callee_root.get());
@@ -3260,7 +3277,12 @@ extern "C" Item js_new_object_with_shape(const char** prop_names, const int* pro
     if (!js_input || count <= 0) return js_new_object();
 
     Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
+    if (!m) return js_new_object();
     m->type_id = LMD_TYPE_MAP;
+    m->type = &EmptyMap;
+    RootFrame roots(1);
+    Rooted<Map*> rooted_map(roots, m);
+    if (!roots.valid()) return js_new_object();
 
     // Allocate TypeMap
     TypeMap* tm = (TypeMap*)alloc_type(js_input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
@@ -3313,9 +3335,19 @@ extern "C" Item js_new_object_with_shape(const char** prop_names, const int* pro
     // Allocate data buffer (pre-sized, zero-initialized = null pointers)
     int data_size = count * (int)sizeof(void*);
     int data_cap = data_size < 64 ? 64 : data_size;
-    m->data = pool_calloc(js_input->pool, data_cap);
-    m->data_cap = data_cap;
+    m = rooted_map.get();
     m->type = tm;
+    // Shapes are compilation metadata, but each instance buffer is mutable
+    // runtime state. Pool allocation pinned every dead class instance until
+    // script exit and made allocation-heavy benchmarks exhaust memory.
+    void* data = heap_data_calloc(data_cap);
+    m = rooted_map.get();
+    if (!data) {
+        m->type = &EmptyMap;
+        return (Item){.map = m};
+    }
+    m->data = data;
+    m->data_cap = data_cap;
     // Reserved shape entries accelerate constructor writes but are not JS own
     // properties until their assignment executes.
     uint16_t reserved = count >= 16 ? UINT16_MAX : (uint16_t)((1u << count) - 1u);
@@ -3345,6 +3377,10 @@ extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
     Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
     if (!m) return js_new_object();
     m->type_id = LMD_TYPE_MAP;
+    m->type = &EmptyMap;
+    RootFrame roots(1);
+    Rooted<Map*> rooted_map(roots, m);
+    if (!roots.valid()) return js_new_object();
 
     int64_t data_size64 = tm->byte_size;
     if (data_size64 < (int64_t)tm->slot_count * (int64_t)sizeof(void*)) {
@@ -3353,10 +3389,16 @@ extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
     if (data_size64 < 0 || data_size64 > INT_MAX) return js_new_object();
     int data_size = (int)data_size64;
     int data_cap = data_size < 64 ? 64 : data_size;
-    m->data = pool_calloc(js_input->pool, data_cap);
-    if (!m->data) { m->type = &EmptyMap; return (Item){.map = m}; }
-    m->data_cap = data_cap;
+    m = rooted_map.get();
     m->type = tm;
+    void* data = heap_data_calloc(data_cap);
+    m = rooted_map.get();
+    if (!data) {
+        m->type = &EmptyMap;
+        return (Item){.map = m};
+    }
+    m->data = data;
+    m->data_cap = data_cap;
     return (Item){.map = m};
 }
 
@@ -3396,9 +3438,11 @@ static Item js_constructor_apply_prototype(Item obj, Item callee) {
     return obj;
 }
 
-// A5: Create pre-shaped object and set __proto__ from constructor's prototype
-extern "C" Item js_constructor_create_object_shaped(Item callee,
-    const char** prop_names, const int* prop_lens, int count) {
+// A5: Create pre-shaped object and set __proto__ from constructor's prototype.
+// The cache belongs to the constructor, while the temporary shape list may
+// contain the two prototype-reservation slots added below.
+static Item js_constructor_create_object_shaped_impl(Item callee,
+    const char** prop_names, const int* prop_lens, int count, void** shape_cache) {
     int ctor_prop_count = count;
     bool has_proto_marker = false;
     bool has_proto = false;
@@ -3436,13 +3480,20 @@ extern "C" Item js_constructor_create_object_shaped(Item callee,
         }
         count = use_count;
     }
-    Item obj = js_new_object_with_shape(use_names, use_lens, count);
+    Item obj = js_new_object_with_shape_cached(use_names, use_lens, count,
+        shape_cache);
     if (get_type_id(obj) == LMD_TYPE_MAP) {
         uint16_t reserved = ctor_prop_count >= 16 ? UINT16_MAX :
             (uint16_t)((1u << ctor_prop_count) - 1u);
         map_ctor_set_reserved_mask(obj.map, reserved);
     }
     return js_constructor_apply_prototype(obj, callee);
+}
+
+extern "C" Item js_constructor_create_object_shaped(Item callee,
+    const char** prop_names, const int* prop_lens, int count) {
+    return js_constructor_create_object_shaped_impl(callee, prop_names, prop_lens,
+        count, NULL);
 }
 
 extern "C" void js_set_class_ctor_shape_metadata(Item class_item,
@@ -3457,6 +3508,16 @@ extern "C" void js_set_class_ctor_shape_metadata(Item class_item,
     Item key = (Item){.item = s2it(heap_create_name("__ctor_shape_names__", 20))};
     js_property_set(class_item, key, names);
     js_mark_non_enumerable(class_item, key);
+    bool ctor_own = false;
+    Item ctor = js_map_get_fast(class_item.map, "__ctor__", 8, &ctor_own);
+    if (ctor_own && get_type_id(ctor) == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)ctor.function;
+        if (fn->ctor_prop_count == 0) {
+            // Class metadata used to remain only on the class map, forcing
+            // dynamic `new Class` to rebuild its identical TypeMap each time.
+            js_set_function_ctor_shape_metadata(ctor, prop_names, prop_lens, count);
+        }
+    }
 }
 
 extern "C" void js_set_function_ctor_shape_metadata(Item fn_item,
@@ -3473,6 +3534,9 @@ extern "C" void js_set_function_ctor_shape_metadata(Item fn_item,
     if (!names_copy || !lens_copy) return;
     memcpy(names_copy, prop_names, (size_t)count * sizeof(const char*));
     memcpy(lens_copy, prop_lens, (size_t)count * sizeof(int));
+    // A metadata update describes a different slot layout, so it must not
+    // retain the TypeMap cached for the constructor's previous field list.
+    fn->ctor_shape_cache = NULL;
     fn->ctor_prop_names = names_copy;
     fn->ctor_prop_lens = lens_copy;
     fn->ctor_prop_count = count;
@@ -3485,48 +3549,56 @@ static Item js_class_create_shaped_instance_object(Item class_item) {
     if (!found || get_type_id(names) != LMD_TYPE_ARRAY) return js_new_object();
     int64_t raw_count = js_array_length(names);
     if (raw_count <= 0 || raw_count > 64) return js_new_object();
-    const char** prop_names = LAMBDA_ALLOCA((int)raw_count, const char*);
-    int* prop_lens = LAMBDA_ALLOCA((int)raw_count, int);
-    int count = 0;
+    int count = (int)raw_count;
+    bool ctor_own = false;
+    Item ctor = js_map_get_fast(class_item.map, "__ctor__", 8, &ctor_own);
+    if (ctor_own && get_type_id(ctor) == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)ctor.function;
+        bool metadata_matches = fn && fn->ctor_prop_count == count;
+        for (int i = 0; metadata_matches && i < count; i++) {
+            Item name_item = js_array_get(names, (Item){.item = i2it(i)});
+            String* name = get_type_id(name_item) == LMD_TYPE_STRING
+                ? name_item.get_string() : NULL;
+            metadata_matches = name && fn->ctor_prop_lens[i] == (int)name->len &&
+                memcmp(fn->ctor_prop_names[i], name->chars, (size_t)name->len) == 0;
+        }
+        if (metadata_matches) {
+            return js_constructor_create_object_shaped_cached(ItemNull,
+                fn->ctor_prop_names, fn->ctor_prop_lens, fn->ctor_prop_count,
+                &fn->ctor_shape_cache);
+        }
+    }
+    const char** prop_names = LAMBDA_ALLOCA(count, const char*);
+    int* prop_lens = LAMBDA_ALLOCA(count, int);
+    int valid_count = 0;
     for (int64_t i = 0; i < raw_count; i++) {
         Item name_item = js_array_get(names, (Item){.item = i2it(i)});
         if (get_type_id(name_item) != LMD_TYPE_STRING) continue;
         String* name = name_item.get_string();
         if (!name || name->len <= 0) continue;
-        prop_names[count] = name->chars;
-        prop_lens[count] = (int)name->len;
-        count++;
+        prop_names[valid_count] = name->chars;
+        prop_lens[valid_count] = (int)name->len;
+        valid_count++;
     }
-    if (count <= 0) return js_new_object();
-    return js_constructor_create_object_shaped(ItemNull, prop_names, prop_lens, count);
+    if (valid_count <= 0) return js_new_object();
+    return js_constructor_create_object_shaped(ItemNull, prop_names, prop_lens,
+        valid_count);
 }
 
-// §7: Create pre-shaped object with shape cache for inline shape guard.
-// On first call, captures the TypeMap pointer into *shape_cache.
-// Subsequent calls skip — the cache is already populated.
-extern "C" Item js_constructor_create_object_shaped_cached(Item callee,
-    const char** prop_names, const int* prop_lens, int count, void** shape_cache) {
+static Item js_new_object_with_shape_cached(const char** prop_names,
+    const int* prop_lens, int count, void** shape_cache) {
 #if !LAMBDA_INLINE_CACHE
-    // Preserve constructor semantics when an older MIR module imports this
-    // helper, but never publish or reuse a constructor shape in a no-IC build.
     (void)shape_cache;
-    return js_constructor_create_object_shaped(callee, prop_names, prop_lens, count);
+    return js_new_object_with_shape(prop_names, prop_lens, count);
 #else
     if (shape_cache && *shape_cache && js_shared_ctor_shape_enabled()) {
         TypeMap* cached = (TypeMap*)*shape_cache;
         if (typemap_ptr_is_plausible(cached) && cached->is_shared_constructor_shape) {
-            Item obj = js_new_object_with_typemap(cached);
-            if (get_type_id(obj) == LMD_TYPE_MAP) {
-                uint16_t reserved = count >= 16 ? UINT16_MAX :
-                    (uint16_t)((1u << count) - 1u);
-                map_ctor_set_reserved_mask(obj.map, reserved);
-            }
-            return js_constructor_apply_prototype(obj, callee);
+            return js_new_object_with_typemap(cached);
         }
     }
 
-    Item obj = js_constructor_create_object_shaped(callee,
-        prop_names, prop_lens, count);
+    Item obj = js_new_object_with_shape(prop_names, prop_lens, count);
     if (shape_cache && *shape_cache == NULL && js_shared_ctor_shape_enabled() &&
             get_type_id(obj) == LMD_TYPE_MAP) {
         Map* m = (Map*)obj.map;
@@ -3538,6 +3610,15 @@ extern "C" Item js_constructor_create_object_shaped_cached(Item callee,
     }
     return obj;
 #endif
+}
+
+// §7: Create pre-shaped object with shape cache for inline shape guard.
+// On first call, captures the TypeMap pointer into *shape_cache.
+// Subsequent calls skip — the cache is already populated.
+extern "C" Item js_constructor_create_object_shaped_cached(Item callee,
+    const char** prop_names, const int* prop_lens, int count, void** shape_cache) {
+    return js_constructor_create_object_shaped_impl(callee, prop_names, prop_lens,
+        count, shape_cache);
 }
 
 // P3/P4: Slot-indexed property access for shaped (constructor-created) objects.
@@ -3553,12 +3634,7 @@ static bool js_shared_ctor_shape_should_detach_for_type(TypeMap* tm,
         TypeId field_type, TypeId value_type) {
     if (!tm || !typemap_is_shared_shape(tm)) return false;
     if (field_type == value_type) return false;
-    // NULL→T is blueprint establishment (slots are born NULL and the first real
-    // write tags them), so it must not detach. T→NULL is a genuine per-instance
-    // divergence: the store below writes a null word but the entry keeps
-    // claiming T, so without detaching, a sibling sharing the blueprint would
-    // read this instance's null back as a zero-valued T (e.g. `false`).
-    if (field_type == LMD_TYPE_NULL) return false;
+    if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) return false;
     return true;
 }
 
@@ -3570,6 +3646,11 @@ static ShapeEntry* js_detach_shared_ctor_shape_for_slot(Item object, int slot,
     TypeMap* tm = (TypeMap*)m->type;
     TypeId field_type = entry->type->type_id;
     if (!js_shared_ctor_shape_should_detach_for_type(tm, field_type, value_type)) return entry;
+    TypeMap* transition = js_typemap_transition_for_type(object, entry, value_type);
+    if (transition) {
+        ShapeEntry* refreshed = js_shape_entry_for_slot_offset(transition, slot, byte_offset);
+        if (refreshed) return refreshed;
+    }
     TypeMap* clone = js_typemap_clone_for_mutation_pub(object);
     if (!clone) return entry;
     return js_shape_entry_for_slot_offset(clone, slot, byte_offset);

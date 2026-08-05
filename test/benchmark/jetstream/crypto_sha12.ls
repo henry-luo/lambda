@@ -11,20 +11,20 @@ let MASK32 = 0xFFFFFFFF
 // int64 and a declared `int` there miscompiles in the MIR JIT
 // (repro: temp/repro_declared_int_len_concat.ls); binb2hex also keeps no `string`
 // return type (repro: temp/repro_string_return_segv.ls)
-pn safe_add(x: int, y: int) {
+pn safe_add(x: int, y: int) int {
     var ux: u32 = x
     var uy: u32 = y
     return int(ux + uy)
 }
 
 // Rotate left (32-bit)
-pn rol(num: int, cnt: int) {
+pn rol(num: int, cnt: int) int {
     var n: u32 = num
     return int(bor(shl(n, cnt), shr(n, 32 - cnt)))
 }
 
 // SHA-1 round function
-pn sha1_ft(t: int, b: int, c: int, d: int) {
+pn sha1_ft(t: int, b: int, c: int, d: int) int {
     if (t < 20) {
         return bor(band(b, c), band(band(bnot(b), MASK32), d))
     }
@@ -38,7 +38,7 @@ pn sha1_ft(t: int, b: int, c: int, d: int) {
 }
 
 // SHA-1 round constant
-pn sha1_kt(t: int) {
+pn sha1_kt(t: int) int {
     if (t < 20) {
         return 0x5A827999
     }
@@ -117,8 +117,10 @@ pn core_sha1(x_in: int[], input_len) {
             } else {
                 w[j] = rol(bxor(bxor(w[j - 3], w[j - 8]), bxor(w[j - 14], w[j - 16])), 1)
             }
-            var t: int = safe_add(safe_add(rol(a, 5), sha1_ft(j, b, c, d)),
+            // An arithmetic error becomes a mismatching digest rather than entering an int local.
+            var t_result = safe_add(safe_add(rol(a, 5), sha1_ft(j, b, c, d)),
                              safe_add(safe_add(e, w[j]), sha1_kt(j)))
+            var t: int = match t_result { case error: 0 case int: t_result }
             e = d
             d = c
             c = rol(b, 30)
@@ -139,7 +141,7 @@ pn core_sha1(x_in: int[], input_len) {
 }
 
 // Convert array of big-endian words to hex string
-pn binb2hex(binarray: int[]) {
+pn binb2hex(binarray: int[]) string {
     let hex_chars = "0123456789abcdef"
     var result: string = ""
     var i: int = 0
@@ -155,7 +157,7 @@ pn binb2hex(binarray: int[]) {
 }
 
 // Compute hex SHA-1 of a string
-pn hex_sha1(s: string) {
+pn hex_sha1(s: string) string {
     var words = str2binb(s)
     var hash = core_sha1(words, len(s) * CHRSZ)
     return binb2hex(hash)
