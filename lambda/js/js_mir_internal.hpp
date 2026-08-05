@@ -390,6 +390,11 @@ int jm_count_params(JsFunctionNode* fn);
 int jm_formal_length(JsFunctionNode* fn);
 JsIdentifierNode* jm_get_param_identifier(JsAstNode* param_node);
 void jm_get_param_name(JsAstNode* param_node, int index, char* out, int out_size);
+// Backend-only formal names are compiler-owned and independent of source
+// spelling; semantic JS binding names continue to use jm_get_param_name.
+static inline void jm_get_backend_param_name(int index, char* out, int out_size) {
+    mir_format_backend_name(out, (size_t)out_size, 'p', (uint64_t)index);
+}
 static inline bool jm_js_name_equal(const String* left, const String* right) {
     return left && right && left->len == right->len &&
         memcmp(left->chars, right->chars, left->len) == 0;

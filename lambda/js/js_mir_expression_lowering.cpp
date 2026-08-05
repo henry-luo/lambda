@@ -3573,7 +3573,7 @@ static bool jm_current_scope_has_var(JsMirTranspiler* mt, const char* vname) {
     }
     JsVarScopeEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", vname);
+    key.name = vname;
     return hashmap_get(mt->var_scopes[mt->scope_depth], &key) != NULL;
 }
 
@@ -3584,7 +3584,7 @@ static JsMirVarEntry* jm_current_scope_find_var_entry(JsMirTranspiler* mt, const
     }
     JsVarScopeEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", vname);
+    key.name = vname;
     JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[mt->scope_depth], &key);
     return found ? &found->var : NULL;
 }
@@ -9960,14 +9960,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             // Phase 2: Assign temps → parameter registers
                             JsAstNode* pnode = mt->tco_func->node->params;
                             for (int i = 0; i < fc->param_count; i++) {
-                                char pname[128];
-                                if (pnode && pnode->node_type == JS_AST_NODE_IDENTIFIER) {
-                                    JsIdentifierNode* pid = (JsIdentifierNode*)pnode;
-                                    snprintf(pname, sizeof(pname), "_js_%.*s",
-                                        (int)pid->name->len, pid->name->chars);
-                                } else {
-                                    snprintf(pname, sizeof(pname), "_js_p%d", i);
-                                }
+                                char pname[32];
+                                jm_get_backend_param_name(i, pname, sizeof(pname));
                                 MIR_reg_t preg = MIR_reg(mt->ctx, pname, mt->em.func);
                                 MIR_type_t mtype = (jm_param_type(fc, i) == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
                                 MIR_insn_code_t mov = (mtype == MIR_T_D) ? MIR_DMOV : MIR_MOV;
@@ -12444,7 +12438,7 @@ static int jm_find_var_scope_depth_for_expr(JsMirTranspiler* mt, const char* nam
         if (!mt->var_scopes[depth]) continue;
         JsVarScopeEntry key;
         memset(&key, 0, sizeof(key));
-        snprintf(key.name, sizeof(key.name), "%s", name);
+        key.name = name;
         if (hashmap_get(mt->var_scopes[depth], &key)) return depth;
     }
     return -1;

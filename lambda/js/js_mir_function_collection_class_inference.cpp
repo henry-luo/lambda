@@ -296,7 +296,7 @@ bool jm_has_tail_call(JsAstNode* node, JsFuncCollected* fc) {
 MIR_item_t jm_find_local_func(JsMirTranspiler* mt, const char* name) {
     JsLocalFuncEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    key.name = name;
     JsLocalFuncEntry* found = (JsLocalFuncEntry*)hashmap_get(mt->local_funcs, &key);
     return found ? found->func_item : NULL;
 }
@@ -304,7 +304,7 @@ MIR_item_t jm_find_local_func(JsMirTranspiler* mt, const char* name) {
 void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t func_item) {
     JsLocalFuncEntry entry;
     memset(&entry, 0, sizeof(entry));
-    snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.name = mir_em_persist_cstr(&mt->em, name).str;
     entry.func_item = func_item;
     hashmap_set(mt->local_funcs, &entry);
 }
@@ -386,9 +386,8 @@ JsIdentifierNode* jm_get_param_identifier(JsAstNode* param_node) {
     return NULL;
 }
 
-// Extract the MIR param name for a function parameter node.
-// For IDENTIFIER: "_js_<name>"; for ASSIGNMENT_PATTERN: extract left identifier name;
-// for REST_ELEMENT: extract argument identifier name; fallback: "_js_p<i>".
+// Extract the semantic binding name for a function parameter.  MIR formals use
+// jm_get_backend_param_name; this spelling remains for JS scope semantics.
 void jm_get_param_name(JsAstNode* param_node, int index, char* out, int out_size) {
     JsIdentifierNode* pid = jm_get_param_identifier(param_node);
     if (pid && pid->name) {

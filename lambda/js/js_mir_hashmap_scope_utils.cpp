@@ -84,6 +84,7 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->tp = tp;
     mt->ctx = ctx;
     mt->em.ctx = ctx;
+    mt->em.name_pool = tp ? tp->name_pool : NULL;
     mt->em.note_mir_call = js_exec_profile_note_mir_call;
     mt->em.call_owner = mt;
     mt->em.root_call_value = js_call_root_value;
@@ -788,7 +789,7 @@ JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
 
     JsVarScopeEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", entry->name);
+    key.name = entry->name;
     JsVarScopeEntry* inserted = (JsVarScopeEntry*)hashmap_get(
         mt->var_scopes[depth], &key);
     if (!inserted) return NULL;
@@ -801,7 +802,7 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     int target_depth = (mt->var_hoist_depth >= 0) ? mt->var_hoist_depth : mt->scope_depth;
     JsVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
-    snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.name = mir_em_persist_cstr(&mt->em, name).str;
     entry.var.reg = reg;
     entry.var.root_slot = -1;
     entry.var.gc_home_id = 0;
@@ -821,7 +822,7 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
         if (target_depth >= 0 && mt->var_scopes[target_depth]) {
             JsVarScopeEntry key;
             memset(&key, 0, sizeof(key));
-            snprintf(key.name, sizeof(key.name), "%s", name);
+            key.name = name;
             JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[target_depth], &key);
             if (found) {
                 existing = &found->var;
@@ -876,7 +877,7 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     hashmap_set(mt->var_scopes[target_depth], &entry);
     JsVarScopeEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    key.name = name;
     JsVarScopeEntry* inserted = (JsVarScopeEntry*)hashmap_get(
         mt->var_scopes[target_depth], &key);
     if (inserted) {
@@ -887,7 +888,7 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
 JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name) {
     JsVarScopeEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    key.name = name;
     for (int i = mt->scope_depth; i >= 0; i--) {
         if (!mt->var_scopes[i]) continue;
         JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[i], &key);

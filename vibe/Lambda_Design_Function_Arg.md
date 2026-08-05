@@ -228,20 +228,17 @@ optimization, or interop boundaries.
 There is no language-level maximum identifier length in the AST/name pool, but
 several compiler boundaries still stage source-derived names in fixed C buffers:
 
-- JS function/local/capture metadata commonly uses `char[128]`; function body
-  names use `char[144]`.
-- JS closure scope-environment keys use dynamically allocated entries of
-  `char[64]` and are copied with bounded `snprintf`, so long keys can be
-  truncated and potentially collide.
-- Core MIR formal-name staging still uses buffers such as `pname[64]` and
-  `prefixed[68]`, in addition to broader `char[128]` scratch names.
-- Shared MIR import/scope metadata also contains `name[128]` fields.
-
-These are remaining name-truncation/collision risks and should be removed or
-changed to stable mapped identifiers in a follow-up. The `%r<hex-serial>`
-scheme already removes source-name dependence for generated MIR registers, but
-it does not yet remove every source-derived formal, local, or environment-name
-buffer.
+- JS semantic binding tables may still use bounded text for diagnostics and
+  AST-side name sets, but those strings are not MIR symbol identities.
+- Shared Core/JS scope maps, local-function maps, and Core function/import
+  metadata now retain NamePool-backed pointers rather than copying source names
+  into fixed-width metadata fields. Their keys therefore remain the exact AST
+  spelling without a 64/128-byte truncation collision. A few JS-only analysis
+  sets still keep bounded diagnostic spellings; they are not MIR identities.
+- Backend-only MIR formals and generated locals no longer embed source text.
+  Core and JS user formals are `%p<lowercase-hex-index>`; generated loop homes
+  use the same compact mapped namespace. Hidden ABI names and external C
+  import/export names remain explicit because they are part of an ABI contract.
 
 ### Retired argument buffers
 
@@ -269,26 +266,42 @@ the dispatcher even though their language-level argument semantics differ.
 
 MIR names are NUL-terminated C strings and are compared by spelling.  They are
 an implementation detail, not LambdaJS or Core Lambda binding identities.
-Therefore the shared internal-register allocator uses this compact scheme:
+Therefore backend-only names use the following compact, source-independent
+encoding:
 
 ```text
-%r<lowercase-hex-register-serial>
+%<namespace><lowercase-hex-index>
 ```
 
-For example, the 42nd generated register in one MIR function is `%r2a`.  The
-serial is the existing monotonic per-function register counter, so it already
-distinguishes lexical shadows and temporaries.  `%` is accepted as an initial
-MIR name character but cannot begin an ordinary Lambda or JavaScript source
-identifier; this keeps generated registers distinct from source-derived formal
-names during the remaining migration.
+The namespace byte identifies what the index means:
+
+| Encoding | Meaning | Index scope |
+|---|---|---|
+| `%r<hex>` | generated temporary/internal MIR register | monotonically allocated per MIR function; `42` is `%r2a` |
+| `%p<hex>` | physical user-formal register | formal ordinal or physical formal slot, according to the language ABI; the third user formal is `%p2` in the ordinary case |
+| `%i<hex>` | generated iterator/environment binding key | compiler-generated loop state |
+| `%v<hex>` | generated loop-value/environment binding key | compiler-generated loop state |
+| `%h<hex>` | generated return-state/environment binding key | compiler-generated generator state |
+
+The index is written in lowercase hexadecimal, has no `0x` marker, and is
+zero-based unless an ABI-specific physical slot requires a hidden-parameter
+offset.  The complete name is always NUL-terminated and is formatted into a
+small backend buffer only after the numeric identity has been chosen; source
+identifier bytes are never copied into the encoded symbol.  Thus long names,
+Unicode names, lexical shadowing, and duplicate JavaScript formals cannot
+truncate or collide with a backend symbol.
+
+`%` is accepted as an initial MIR name character but cannot begin an ordinary
+Lambda or JavaScript source identifier.  The prefix therefore separates the
+backend namespace from language bindings without requiring a source-name
+length limit.
 
 The register allocator must not embed source spellings in these names.  Source
-spelling and lexical scope remain the responsibility of each language's binding
-resolver, which maps a resolved binding to its `MIR_reg_t`.  External ABI names
-(imports, exports, and runtime symbols) remain exact C-string names.  Direct
-source-derived MIR formal names are a separate follow-up: they must be mapped
-or retained by parameter index before the compiler-wide source-name buffers can
-be retired.
+spelling and lexical scope remain the responsibility of each language's AST
+binding resolver, which maps a semantic name to its `MIR_reg_t`.  External ABI
+names (imports, exports, and runtime symbols) remain exact C-string names.
+Import-cache keys and semantic metadata are NamePool-owned so temporary
+formatting buffers cannot dangle.
 
 LambdaJS already has the generic dynamic boundary:
 

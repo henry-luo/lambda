@@ -2410,6 +2410,7 @@ static int jube_host_mir_function_frame_begin(void* compiler_cursor,
             !runtime_register) {
         return -1;
     }
+    if (!emitter->name_pool && ::context) emitter->name_pool = ::context->name_pool;
     // Reset before allocation so a guest cannot carry frame roots or scalar
     // homes across independently lowered functions.
     em_frame_dispose(emitter);
@@ -2472,8 +2473,7 @@ static int jube_host_mir_local_direct_call_prototype_get_or_create(
         return -1;
     }
     MirImportCacheEntry key = {};
-    int key_length = snprintf(key.name, sizeof(key.name), "%s", cache_key);
-    if (key_length <= 0 || (size_t)key_length >= sizeof(key.name)) return -1;
+    key.name = mir_em_persist_cstr(emitter, cache_key).str;
     MirImportCacheEntry* cached =
         (MirImportCacheEntry*)hashmap_get(emitter->import_cache, &key);
     if (cached) {
@@ -2489,7 +2489,7 @@ static int jube_host_mir_local_direct_call_prototype_get_or_create(
         return -1;
     }
     MirImportCacheEntry new_entry = {};
-    snprintf(new_entry.name, sizeof(new_entry.name), "%s", cache_key);
+    new_entry.name = mir_em_persist_cstr(emitter, cache_key).str;
     new_entry.entry.proto = (MIR_item_t)prototype_item;
     hashmap_set(emitter->import_cache, &new_entry);
     if (!jube_host_mir_cursor_track_prototype(compiler_cursor,
@@ -2693,6 +2693,9 @@ static int jube_host_mir_compiler_cursor_create(void* mir_context,
     MirEmitter* emitter = (MirEmitter*)mem_calloc(1, sizeof(MirEmitter), MEM_CAT_SYSTEM);
     if (!emitter) return -1;
     emitter->ctx = context;
+    // Jube cache keys share the active guest's persistent name owner; a
+    // temporary key buffer must never become a hashmap-held pointer.
+    emitter->name_pool = ::context ? ::context->name_pool : NULL;
     void* compiler_cursor = jube_host_mir_cursor_register(emitter);
     if (!compiler_cursor) {
         mem_free(emitter);
