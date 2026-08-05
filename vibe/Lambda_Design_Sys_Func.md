@@ -169,6 +169,13 @@ ord("")                    // null
 index_of(text, needle) or len(text)  // value-or-default
 ```
 
+Migration from the old `-1` sentinel is intentionally asymmetric. A check of
+`index_of(text, needle) >= 0` remains a valid “found a non-negative index” test,
+because `null >= 0` is false. An old `index_of(text, needle) < 0` not-found
+test must be corrected: `null < 0` is false, so the expression can never
+identify absence. Use `index_of(text, needle) is null`; the same applies to
+`last_index_of` and `ord`.
+
 The Lambda choice is deliberate:
 
 1. `null` is one uniform absence value for zero-or-one results; callers do not

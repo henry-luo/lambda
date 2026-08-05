@@ -558,6 +558,12 @@ index_of("hello world", "xyz")     // null
 index_of("abcabc", "bc")           // 1
 ```
 
+When migrating code that tested the former `-1` sentinel, a non-negative
+check remains valid: `index_of(text, needle) >= 0` is true exactly when a valid
+index was found. The old `index_of(...) < 0` miss check is now dead code,
+because `null < 0` is false; use `index_of(...) is null` to test for absence.
+The same rule applies to `last_index_of` and `ord`.
+
 ### last_index_of(str, substring)
 
 Return the index (`int`) of the last occurrence of a substring, or `null` if not found. Also works on collections (see [Collection Functions](#collection-functions)).

@@ -823,6 +823,12 @@ Lambda's nullable native integer lane also keeps `int | null` in the same
 native lane as `int`, so the old boxing performance concern is no longer a
 reason to expose `-1`.
 
+For migration, `index_of(text, needle) >= 0` remains a valid found-index test:
+the comparison is false for `null`. The former `index_of(text, needle) < 0`
+not-found test is no longer valid because `null < 0` is false; absence must be
+tested with `index_of(text, needle) is null`. The same rule applies to
+`last_index_of` and `ord`.
+
 An implementation or foreign-language adapter may still use a private `-1`
 sentinel internally, but it must be normalized to `null` at the Lambda
 boundary. The sentinel is not an `error`; invalid operations and error
