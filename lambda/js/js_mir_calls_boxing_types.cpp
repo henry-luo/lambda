@@ -1316,7 +1316,7 @@ static int jm_find_var_scope_depth_for_name(JsMirTranspiler* mt, const char* nam
         if (!mt->var_scopes[depth]) continue;
         JsVarScopeEntry key;
         memset(&key, 0, sizeof(key));
-        snprintf(key.name, sizeof(key.name), "%s", name);
+        key.name = name;
         JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[depth], &key);
         if (found) return depth;
     }
@@ -1329,7 +1329,7 @@ static bool jm_has_outer_binding_before_depth(JsMirTranspiler* mt, const char* n
         if (!mt->var_scopes[depth]) continue;
         JsVarScopeEntry key;
         memset(&key, 0, sizeof(key));
-        snprintf(key.name, sizeof(key.name), "%s", name);
+        key.name = name;
         if (hashmap_get(mt->var_scopes[depth], &key)) return true;
     }
     return false;

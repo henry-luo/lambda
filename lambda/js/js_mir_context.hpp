@@ -132,7 +132,9 @@ static const int JS_MIR_TDZ_CLOSURE_CAPTURE_MAX = 512;
 typedef MirImportEntry JsMirImportEntry;
 
 struct JsLocalFuncEntry {
-    char name[128];
+    // function lookup is semantic metadata; keep the AST spelling in the
+    // transpiler's NamePool instead of truncating it in a MIR-sized buffer.
+    const char* name;
     MIR_item_t func_item;
 };
 

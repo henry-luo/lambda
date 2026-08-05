@@ -5,7 +5,7 @@
     {
       "in_func": "_accumulate_#",
       "expect": [
-        ":\tfunc\ti64, p:runtime, i64:_n, i64:_acc, p:_scalar_home"
+        ":\tfunc\ti64, p:runtime, i64:%p1, i64:%p2, p:_scalar_home"
       ],
       "expect_seq": [
         { "pattern": "call\tlambda_item_adopt_scalar_home_p" },

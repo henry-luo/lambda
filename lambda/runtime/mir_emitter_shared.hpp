@@ -5,10 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../lambda-data.hpp"
+#include "../core/name_pool.hpp"
 #include "sys_func_registry.h"
 #include "mir_dump.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/strbuf.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 
@@ -27,7 +29,7 @@ struct MirImportEntry {
 };
 
 struct MirImportCacheEntry {
-    char name[128];
+    const char* name;
     MirImportEntry entry;
 };
 
@@ -98,7 +100,7 @@ typedef VarEntry MirVarEntry;
 typedef VarEntry JsMirVarEntry;
 
 struct VarScopeEntry {
-    char name[128];
+    const char* name;
     VarEntry var;
 };
 
@@ -106,12 +108,13 @@ typedef VarScopeEntry JsVarScopeEntry;
 
 static inline int em_var_scope_cmp(const void *a, const void *b, void *udata) {
     (void)udata;
-    return strcmp(((VarScopeEntry*)a)->name, ((VarScopeEntry*)b)->name);
+    return strcmp(((const VarScopeEntry*)a)->name,
+                  ((const VarScopeEntry*)b)->name);
 }
 
 static inline uint64_t em_var_scope_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((VarScopeEntry*)item)->name,
-        strlen(((VarScopeEntry*)item)->name), seed0, seed1);
+    const VarScopeEntry* entry = (const VarScopeEntry*)item;
+    return hashmap_sip(entry->name, strlen(entry->name), seed0, seed1);
 }
 
 static inline struct hashmap* em_var_scope_new(int capacity) {
@@ -121,12 +124,13 @@ static inline struct hashmap* em_var_scope_new(int capacity) {
 
 static inline int em_import_cache_cmp(const void *a, const void *b, void *udata) {
     (void)udata;
-    return strcmp(((MirImportCacheEntry*)a)->name, ((MirImportCacheEntry*)b)->name);
+    return strcmp(((const MirImportCacheEntry*)a)->name,
+                  ((const MirImportCacheEntry*)b)->name);
 }
 
 static inline uint64_t em_import_cache_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((MirImportCacheEntry*)item)->name,
-        strlen(((MirImportCacheEntry*)item)->name), seed0, seed1);
+    const MirImportCacheEntry* entry = (const MirImportCacheEntry*)item;
+    return hashmap_sip(entry->name, strlen(entry->name), seed0, seed1);
 }
 
 static inline struct hashmap* em_import_cache_new(int capacity) {
@@ -437,6 +441,7 @@ struct MirEmitter {
     ArrayList* const_list;        // per-module constant pool, owned by Script/Transpiler
     MIR_reg_t consts_reg;         // register holding const_list->data for current function
     MIR_item_t consts_bss;        // per-module BSS slot holding const_list->data
+    NamePool* name_pool;          // owner for persistent compiler-generated names
     MirFrameState frame;           // canonical physical activation state
     MirFunctionMetadata last_function;
     MirFunctionArgumentState argument_registers;
@@ -446,6 +451,37 @@ struct MirEmitter {
     MIR_item_t bitcast_slot_func;
     MIR_reg_t bitcast_slot_addr;
 };
+
+// MIR accepts only NUL-terminated names, but backend-only symbols must not
+// inherit source identifier length or spelling limits.  The numeric suffix is
+// a compiler-owned identity; source bindings remain represented by AST names.
+static inline int mir_format_backend_name(char* out, size_t out_size,
+                                          char kind, uint64_t id) {
+    if (!out || out_size == 0) return 0;
+    int written = snprintf(out, out_size, "%%%c%llx", kind,
+        (unsigned long long)id);
+    if (written < 0 || (size_t)written >= out_size) {
+        out[out_size - 1] = '\0';
+        return 0;
+    }
+    return written;
+}
+
+static inline StrView mir_em_persist_name(MirEmitter* em, StrView name) {
+    if (!name.str) return (StrView){NULL, 0};
+    if (em && em->name_pool) {
+        String* stable = name_pool_create_strview(em->name_pool, name);
+        if (stable) return (StrView){stable->chars, stable->len};
+    }
+    // All normal emitters have a NamePool.  This fallback is retained for
+    // bootstrap callers whose key lifetime is already externally owned.
+    return name;
+}
+
+static inline StrView mir_em_persist_cstr(MirEmitter* em, const char* name) {
+    return mir_em_persist_name(em, name ? strview_from_cstr(name)
+                                        : (StrView){NULL, 0});
+}
 
 static inline void em_function_arguments_clear(MirEmitter* em) {
     if (!em) return;
@@ -1010,6 +1046,29 @@ static inline void mir_format_import_key(char* out,
     }
 }
 
+static inline StrBuf* mir_build_import_key(const char* name,
+                                           MIR_type_t ret_type,
+                                           int nargs,
+                                           MIR_var_t* args,
+                                           int nres,
+                                           bool include_signature) {
+    // import cache keys are compiler metadata, not MIR source symbols; build
+    // them dynamically so a long generated name cannot be truncated.
+    StrBuf* out = strbuf_new_cap((name ? strlen(name) : 0) + 32 +
+        (size_t)(nargs > 0 ? nargs * 4 : 0));
+    if (!out) return NULL;
+    if (!include_signature) {
+        strbuf_append_str(out, name ? name : "");
+        return out;
+    }
+    strbuf_append_format(out, "%s#r%d#n%d#a%d", name ? name : "",
+        (int)ret_type, nres, nargs);
+    for (int i = 0; i < nargs; i++) {
+        strbuf_append_format(out, "#%d", (int)args[i].type);
+    }
+    return out;
+}
+
 static inline void mir_format_import_proto_name(char* out,
                                                 size_t out_size,
                                                 const char* name,
@@ -1055,14 +1114,17 @@ static inline MirImportEntry* em_ensure_import(MirEmitter* em,
                                                MIR_var_t* args,
                                                int nres,
                                                bool include_signature) {
+    StrBuf* key_buf = mir_build_import_key(name, ret_type, nargs, args,
+        nres, include_signature);
+    if (!key_buf) return NULL;
     MirImportCacheEntry key;
     memset(&key, 0, sizeof(key));
-    mir_format_import_key(key.name, sizeof(key.name), name,
-        ret_type, nargs, args, nres, include_signature);
+    key.name = key_buf->str;
 
     MirImportCacheEntry* found = (MirImportCacheEntry*)hashmap_get(em->import_cache, &key);
     if (found) {
         found->entry.call.abi_args = found->entry.abi_args;
+        strbuf_free(key_buf);
         return &found->entry;
     }
 
@@ -1073,7 +1135,7 @@ static inline MirImportEntry* em_ensure_import(MirEmitter* em,
 
     MirImportCacheEntry new_entry;
     memset(&new_entry, 0, sizeof(new_entry));
-    snprintf(new_entry.name, sizeof(new_entry.name), "%s", key.name);
+    new_entry.name = mir_em_persist_cstr(em, key.name).str;
     new_entry.entry.proto = proto;
     new_entry.entry.import = imp;
     // Unknown imports retain conservative MAY_GC/unknown-value defaults. Each
@@ -1086,6 +1148,7 @@ static inline MirImportEntry* em_ensure_import(MirEmitter* em,
     hashmap_set(em->import_cache, &new_entry);
 
     found = (MirImportCacheEntry*)hashmap_get(em->import_cache, &key);
+    strbuf_free(key_buf);
     // Repair the copied descriptor's self-pointer after hashmap insertion.
     if (found) found->entry.call.abi_args = found->entry.abi_args;
     return found ? &found->entry : NULL;

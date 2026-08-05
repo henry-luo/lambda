@@ -9,7 +9,7 @@ static JsMirVarEntry* jm_find_var_in_scope_depth(JsMirTranspiler* mt, const char
     if (!mt->var_scopes[depth]) return NULL;
     JsVarScopeEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    key.name = name;
     JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[depth], &key);
     return found ? &found->var : NULL;
 }
@@ -4388,7 +4388,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         {
             JsVarScopeEntry entry;
             memset(&entry, 0, sizeof(entry));
-            snprintf(entry.name, sizeof(entry.name), "_foriter_%d", mt->em.label_counter);
+            char backend_name[32];
+            mir_format_backend_name(backend_name, sizeof(backend_name), 'i',
+                (uint64_t)mt->em.label_counter);
+            entry.name = mir_em_persist_cstr(&mt->em, backend_name).str;
             entry.var.reg = iterator;
             entry.var.from_env = true;
             entry.var.env_slot = iter_slot;
@@ -4399,7 +4402,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         {
             JsVarScopeEntry entry;
             memset(&entry, 0, sizeof(entry));
-            snprintf(entry.name, sizeof(entry.name), "_forlv_%d", mt->em.label_counter);
+            char backend_name[32];
+            mir_format_backend_name(backend_name, sizeof(backend_name), 'v',
+                (uint64_t)mt->em.label_counter);
+            entry.name = mir_em_persist_cstr(&mt->em, backend_name).str;
             entry.var.reg = loop_var;
             entry.var.from_env = true;
             entry.var.env_slot = lv_slot;
@@ -4447,7 +4453,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             {
                 JsVarScopeEntry entry;
                 memset(&entry, 0, sizeof(entry));
-                snprintf(entry.name, sizeof(entry.name), "_forit_ret_%d", mt->em.label_counter);
+                char backend_name[32];
+                mir_format_backend_name(backend_name, sizeof(backend_name), 'i',
+                    (uint64_t)mt->em.label_counter);
+                entry.name = mir_em_persist_cstr(&mt->em, backend_name).str;
                 entry.var.reg = forit_return_val;
                 entry.var.from_env = true;
                 entry.var.env_slot = ret_slot;
@@ -4458,7 +4467,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             {
                 JsVarScopeEntry entry;
                 memset(&entry, 0, sizeof(entry));
-                snprintf(entry.name, sizeof(entry.name), "_forit_hret_%d", mt->em.label_counter);
+                char backend_name[32];
+                mir_format_backend_name(backend_name, sizeof(backend_name), 'h',
+                    (uint64_t)mt->em.label_counter);
+                entry.name = mir_em_persist_cstr(&mt->em, backend_name).str;
                 entry.var.reg = forit_has_return;
                 entry.var.from_env = true;
                 entry.var.env_slot = hret_slot;

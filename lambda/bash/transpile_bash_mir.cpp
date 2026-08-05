@@ -4877,6 +4877,7 @@ extern "C" Item bash_source_file(Item filename) {
     memset(mt, 0, sizeof(BashMirTranspiler));
     mt->tp = tp;
     mt->em.ctx = ctx;
+    mt->em.name_pool = tp ? tp->name_pool : NULL;
     mt->vars         = bash_var_new(64);
     mt->em.import_cache = em_import_cache_new(64);
     mt->user_funcs   = bm_user_func_new(16);
@@ -5143,6 +5144,7 @@ extern "C" Item bash_eval_string(Item code) {
     memset(mt, 0, sizeof(BashMirTranspiler));
     mt->tp = tp;
     mt->em.ctx = ctx;
+    mt->em.name_pool = tp ? tp->name_pool : NULL;
     mt->vars         = bash_var_new(32);
     mt->em.import_cache = em_import_cache_new(32);
     mt->user_funcs   = bm_user_func_new(8);
@@ -6246,6 +6248,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     memset(mt, 0, sizeof(BashMirTranspiler));
     mt->tp = tp;
     mt->em.ctx = ctx;
+    mt->em.name_pool = tp ? tp->name_pool : NULL;
     mt->vars         = bash_var_new(64);
     mt->em.import_cache = em_import_cache_new(64);
     mt->user_funcs   = bm_user_func_new(16);

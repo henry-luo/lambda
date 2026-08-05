@@ -1611,7 +1611,7 @@ static JsMirVarEntry* jm_set_current_scope_var_fresh(JsMirTranspiler* mt, const 
     }
     JsVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
-    snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.name = mir_em_persist_cstr(&mt->em, name).str;
     entry.var.reg = reg;
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;
@@ -1620,7 +1620,7 @@ static JsMirVarEntry* jm_set_current_scope_var_fresh(JsMirTranspiler* mt, const 
 
     JsVarScopeEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    key.name = name;
     JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[mt->scope_depth], &key);
     return found ? &found->var : NULL;
 }

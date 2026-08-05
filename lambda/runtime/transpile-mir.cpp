@@ -277,7 +277,7 @@ struct MirTranspiler {
 // ============================================================================
 
 struct LocalFuncEntry {
-    char name[128];
+    const char* name;
     MIR_item_t func_item;
     const FnVariantAnalysis* variant;
 };
@@ -286,7 +286,7 @@ HASHMAP_DEFINE_STRKEY(local_func, struct LocalFuncEntry, name)
 // Native function info: tracks parameter types and return type for functions
 // that have a dual native+boxed version (Phase 4 optimization).
 struct NativeFuncInfo {
-    char name[128];           // mangled function name (native version)
+    const char* name;         // mangled function name (native version)
     AstFuncNode* fn_node;      // source parameter list owns per-param metadata
     int param_count;          // number of user params (excluding _env_ptr, _self, _vargs)
     TypeId return_type;       // resolved return TypeId (LMD_TYPE_ANY if unknown)
@@ -303,7 +303,7 @@ static bool mir_native_func_param_uses_lane(const NativeFuncInfo* info, int inde
 
 // Global variable entry (module-level let bindings stored in BSS)
 struct GlobalVarEntry {
-    char name[128];
+    const char* name;
     MIR_item_t bss_item;  // immutable LambdaModuleVarRef for cross-module imports
     uint32_t slot;
     TypeId type_id;
@@ -1551,10 +1551,23 @@ static void pop_scope(MirTranspiler* mt) {
     mt->scope_depth--;
 }
 
-static void set_var(MirTranspiler* mt, const char* name, MIR_reg_t reg, MIR_type_t mir_type, TypeId type_id) {
+// semantic lookup keys retain the AST spelling; only the backend MIR symbol
+// namespace uses encoded names.  Interning here makes hashmap-held views safe
+// even when the caller supplied a temporary generated C string.
+static StrView mir_persist_semantic_name(MirTranspiler* mt, StrView name) {
+    return mir_em_persist_name(mt ? &mt->em : NULL, name);
+}
+
+static StrView mir_semantic_name_cstr(MirTranspiler* mt, const char* name) {
+    return mir_persist_semantic_name(mt, name ? strview_from_cstr(name)
+                                             : (StrView){NULL, 0});
+}
+
+static void set_var(MirTranspiler* mt, StrView name, MIR_reg_t reg,
+                    MIR_type_t mir_type, TypeId type_id) {
     VarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
-    snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.name = mir_persist_semantic_name(mt, name).str;
     entry.var.reg = reg;
     entry.var.root_slot = -1;
     entry.var.async_slot = -1;
@@ -1572,13 +1585,17 @@ static void set_var(MirTranspiler* mt, const char* name, MIR_reg_t reg, MIR_type
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
 
+static void set_var(MirTranspiler* mt, const char* name, MIR_reg_t reg, MIR_type_t mir_type, TypeId type_id) {
+    set_var(mt, mir_semantic_name_cstr(mt, name), reg, mir_type, type_id);
+}
+
 // set a state variable (writes go to template state store)
 static void set_state_var(MirTranspiler* mt, const char* name, MIR_reg_t reg,
                           MIR_type_t mir_type, TypeId type_id,
                           const char* interned_name_ptr) {
     VarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
-    snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.name = mir_semantic_name_cstr(mt, name).str;
     entry.var.reg = reg;
     entry.var.root_slot = -1;
     entry.var.async_slot = -1;
@@ -1597,10 +1614,10 @@ static void set_state_var(MirTranspiler* mt, const char* name, MIR_reg_t reg,
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
 
-static MirVarEntry* find_var(MirTranspiler* mt, const char* name) {
+static MirVarEntry* find_var(MirTranspiler* mt, StrView name) {
     VarScopeEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    key.name = name.str;
     for (int i = mt->scope_depth; i >= 0; i--) {
         if (!mt->var_scopes[i]) continue;
         VarScopeEntry* found = (VarScopeEntry*)hashmap_get(mt->var_scopes[i], &key);
@@ -1611,13 +1628,21 @@ static MirVarEntry* find_var(MirTranspiler* mt, const char* name) {
     return NULL;
 }
 
+static MirVarEntry* find_var(MirTranspiler* mt, const char* name) {
+    return find_var(mt, name ? strview_from_cstr(name) : (StrView){NULL, 0});
+}
+
 // Look up a global (module-level) variable
-static GlobalVarEntry* find_global_var(MirTranspiler* mt, const char* name) {
+static GlobalVarEntry* find_global_var(MirTranspiler* mt, StrView name) {
     if (!mt->global_vars) return NULL;
     GlobalVarEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    key.name = name.str;
     return (GlobalVarEntry*)hashmap_get(mt->global_vars, &key);
+}
+
+static GlobalVarEntry* find_global_var(MirTranspiler* mt, const char* name) {
+    return find_global_var(mt, name ? strview_from_cstr(name) : (StrView){NULL, 0});
 }
 
 // Forward declarations (defined after emit_box/emit_unbox)
@@ -1631,11 +1656,17 @@ static MIR_reg_t emit_module_state(MirTranspiler* mt);
 
 // Look up a locally defined function
 static LocalFuncEntry* find_local_func_entry(MirTranspiler* mt,
-        const char* name) {
+        StrView name) {
     LocalFuncEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    key.name = name.str;
     return (LocalFuncEntry*)hashmap_get(mt->local_funcs, &key);
+}
+
+static LocalFuncEntry* find_local_func_entry(MirTranspiler* mt,
+        const char* name) {
+    return find_local_func_entry(mt, name ? strview_from_cstr(name)
+                                            : (StrView){NULL, 0});
 }
 
 static MIR_item_t find_local_func(MirTranspiler* mt, const char* name) {
@@ -1647,7 +1678,7 @@ static void register_local_func_contract(MirTranspiler* mt, const char* name,
         MIR_item_t func_item, const FnVariantAnalysis* variant = NULL) {
     LocalFuncEntry entry;
     memset(&entry, 0, sizeof(entry));
-    snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.name = mir_semantic_name_cstr(mt, name).str;
     entry.func_item = func_item;
     entry.variant = variant;
     hashmap_set(mt->local_funcs, &entry);
@@ -1659,19 +1690,24 @@ static void register_local_func(MirTranspiler* mt, const char* name,
 }
 
 // Look up native function info for dual-version functions
-static NativeFuncInfo* find_native_func_info(MirTranspiler* mt, const char* name) {
+static NativeFuncInfo* find_native_func_info(MirTranspiler* mt, StrView name) {
     if (!mt->native_func_info) return NULL;
     NativeFuncInfo key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    key.name = name.str;
     return (NativeFuncInfo*)hashmap_get(mt->native_func_info, &key);
+}
+
+static NativeFuncInfo* find_native_func_info(MirTranspiler* mt, const char* name) {
+    return find_native_func_info(mt, name ? strview_from_cstr(name)
+                                             : (StrView){NULL, 0});
 }
 
 static void register_native_func_info(MirTranspiler* mt, const char* name, NativeFuncInfo* info) {
     if (!mt->native_func_info) {
         mt->native_func_info = native_func_new(16);
     }
-    snprintf(info->name, sizeof(info->name), "%s", name);
+    info->name = mir_semantic_name_cstr(mt, name).str;
     hashmap_set(mt->native_func_info, info);
 }
 
@@ -1872,7 +1908,7 @@ static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
     // Import
     MirImportCacheEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", fn_name);
+    key.name = mir_em_persist_cstr(&mt->em, fn_name).str;
     MirImportCacheEntry* found = (MirImportCacheEntry*)hashmap_get(mt->em.import_cache, &key);
     MIR_item_t imp;
     if (found) {
@@ -1882,7 +1918,7 @@ static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
         // Cache only the import, not proto (proto is unique per call)
         MirImportCacheEntry new_entry;
         memset(&new_entry, 0, sizeof(new_entry));
-        snprintf(new_entry.name, sizeof(new_entry.name), "%s", fn_name);
+        new_entry.name = mir_em_persist_cstr(&mt->em, fn_name).str;
         new_entry.entry.import = imp;
         new_entry.entry.proto = proto; // store last proto
         hashmap_set(mt->em.import_cache, &new_entry);
@@ -1927,7 +1963,7 @@ static MIR_reg_t emit_vararg_call_2(MirTranspiler* mt, const char* fn_name,
 
     MirImportCacheEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", fn_name);
+    key.name = mir_em_persist_cstr(&mt->em, fn_name).str;
     MirImportCacheEntry* found = (MirImportCacheEntry*)hashmap_get(mt->em.import_cache, &key);
     MIR_item_t imp;
     if (found) {
@@ -1936,7 +1972,7 @@ static MIR_reg_t emit_vararg_call_2(MirTranspiler* mt, const char* fn_name,
         imp = MIR_new_import(mt->ctx, fn_name);
         MirImportCacheEntry new_entry;
         memset(&new_entry, 0, sizeof(new_entry));
-        snprintf(new_entry.name, sizeof(new_entry.name), "%s", fn_name);
+        new_entry.name = mir_em_persist_cstr(&mt->em, fn_name).str;
         new_entry.entry.import = imp;
         new_entry.entry.proto = proto;
         hashmap_set(mt->em.import_cache, &new_entry);
@@ -12023,8 +12059,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     // TCO rewrites run after parameter binding; use the resolved MIR
                     // local type, not the raw TypeParam wrapper, or typed float params
                     // can be treated as int when recursive args are assigned back.
-                    char pname[64];
-                    snprintf(pname, sizeof(pname), "%.*s", (int)param->name->len, param->name->chars);
+                    const char* pname = param->name->chars;
                     MirVarEntry* pvar = find_var(mt, pname);
                     TypeId param_tid = pvar ? pvar->type_id : LMD_TYPE_ANY;
 
@@ -12050,8 +12085,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 param = mt->tco_func->param;
                 for (int i = 0; i < arg_idx; i++) {
                     if (!param) break;
-                    char pname[64];
-                    snprintf(pname, sizeof(pname), "%.*s", (int)param->name->len, param->name->chars);
+                    const char* pname = param->name->chars;
                     MirVarEntry* pvar = find_var(mt, pname);
                     if (pvar) {
                         if (pvar->mir_type == MIR_T_D) {
@@ -16659,8 +16693,10 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     }
     AstNamedNode* param = fn_node->param;
     while (param && param_count < WRAPPER_PARAM_CAPACITY - 2) {
-        char pname[64];
-        snprintf(pname, sizeof(pname), "_%.*s", (int)param->name->len, param->name->chars);
+        // source spelling belongs to the AST; MIR only needs a stable indexed
+        // formal so long identifiers cannot collide or truncate in the ABI.
+        char pname[32];
+        mir_format_backend_name(pname, sizeof(pname), 'p', (uint64_t)param_count);
         params[param_count] = {MIR_T_I64, raw_strdup(pname), 0}; // RAWALLOC_OK: MIR manages param name lifetime
         param_name_copies[param_count] = (char*)params[param_count].name;
         param_count++;
@@ -16740,9 +16776,11 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     }
     param = fn_node->param;
     int user_index = 0;
+    int user_param_base = 1 + ((is_closure || is_method) ? 1 : 0);
     while (param && user_index < LAMBDA_MAX_FUNCTION_ARGS) {
-        char prefixed[68];
-        snprintf(prefixed, sizeof(prefixed), "_%.*s", (int)param->name->len, param->name->chars);
+        char prefixed[32];
+        mir_format_backend_name(prefixed, sizeof(prefixed), 'p',
+            (uint64_t)(user_param_base + user_index));
         MIR_reg_t preg = MIR_reg(mt->ctx, prefixed, wrapper_func);
         TypeParam* parameter = (TypeParam*)param->type;
         if (mir_param_short_circuits_item_error(parameter)) {
@@ -16753,9 +16791,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         }
         preg = emit_optional_argument_value(mt, preg, parameter);
 
-        char parameter_name[128];
-        snprintf(parameter_name, sizeof(parameter_name), "%.*s",
-            (int)param->name->len, param->name->chars);
+        const char* parameter_name = param->name->chars;
         // Defaults may refer to earlier parameters.  Keep each resolved value
         // in the wrapper scope and exact-root it before a later default/check
         // can allocate.
@@ -17077,8 +17113,10 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     AstNamedNode* param = fn_node->param;
     int pi_build = 0;
     while (param && param_count < RAW_FUNCTION_PARAM_CAPACITY - 2) {
-        char pname[64];
-        snprintf(pname, sizeof(pname), "_%.*s", (int)param->name->len, param->name->chars);
+        // keep source semantics in the AST and use an indexed backend symbol
+        // for the physical MIR formal.
+        char pname[32];
+        mir_format_backend_name(pname, sizeof(pname), 'p', (uint64_t)param_count);
 
         MIR_type_t mir_ptype = MIR_T_I64;  // default: boxed Item
         if (generate_native && pi_build < user_param_count) {
@@ -17271,16 +17309,18 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         MIR_reg_t launch_args = emit_call_0(mt, "list", MIR_T_P);
         int launch_args_root = create_pointer_gc_root_slot(mt, launch_args);
         AstNamedNode* launch_param = fn_node->param;
+        int launch_index = 0;
         while (launch_param) {
-            char launch_name[68];
-            snprintf(launch_name, sizeof(launch_name), "_%.*s",
-                (int)launch_param->name->len, launch_param->name->chars);
+            char launch_name[32];
+            mir_format_backend_name(launch_name, sizeof(launch_name), 'p',
+                (uint64_t)(1 + ((is_closure || (is_method && !is_closure)) ? 1 : 0) + launch_index));
             MIR_reg_t launch_value = MIR_reg(mt->ctx, launch_name, func);
             launch_args = load_gc_root_slot(mt, launch_args_root, "launch_args");
             emit_call_void_2(mt, "list_push",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, launch_args),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, launch_value));
             launch_param = (AstNamedNode*)launch_param->next;
+            launch_index++;
         }
         launch_args = load_gc_root_slot(mt, launch_args_root, "launch_args");
 
@@ -17464,13 +17504,14 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         name_buf->str, (void*)fn_type, generate_native);
     param = fn_node->param;
     int pi = 0;
+    int user_param_base = 1 + ((is_closure || (is_method && !is_closure)) ? 1 : 0);
     while (param && pi < user_param_count) {
-        char pname[64];
-        snprintf(pname, sizeof(pname), "%.*s", (int)param->name->len, param->name->chars);
+        const char* pname = param->name->chars;
 
         // Function parameter register is already created by MIR with the prefixed name
-        char prefixed[68];
-        snprintf(prefixed, sizeof(prefixed), "_%s", pname);
+        char prefixed[32];
+        mir_format_backend_name(prefixed, sizeof(prefixed), 'p',
+            (uint64_t)(user_param_base + pi));
         MIR_reg_t preg = MIR_reg(mt->ctx, prefixed, func);
 
         TypeId tid = resolved_param_types[pi];
@@ -18625,7 +18666,7 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
 
                     GlobalVarEntry entry;
                     memset(&entry, 0, sizeof(entry));
-                    snprintf(entry.name, sizeof(entry.name), "%s", name);
+                    entry.name = mir_em_persist_cstr(&mt->em, name).str;
                     entry.bss_item = bss;
                     entry.slot = mt->global_var_slot_count++;
                     entry.type_id = tid;
@@ -18640,7 +18681,7 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
                         MIR_item_t err_bss = create_global_var_bss(mt, err_name);
                         GlobalVarEntry err_entry;
                         memset(&err_entry, 0, sizeof(err_entry));
-                        snprintf(err_entry.name, sizeof(err_entry.name), "%s", err_name);
+                        err_entry.name = mir_em_persist_cstr(&mt->em, err_name).str;
                         err_entry.bss_item = err_bss;
                         err_entry.slot = mt->global_var_slot_count++;
                         err_entry.type_id = LMD_TYPE_ANY;
@@ -18657,7 +18698,7 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
 
                         GlobalVarEntry entry;
                         memset(&entry, 0, sizeof(entry));
-                        snprintf(entry.name, sizeof(entry.name), "%s", name);
+                        entry.name = mir_em_persist_cstr(&mt->em, name).str;
                         entry.bss_item = bss;
                         entry.slot = mt->global_var_slot_count++;
                         entry.type_id = LMD_TYPE_ANY;
@@ -19327,6 +19368,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.const_list = const_list;
     mt.script_pool = script_pool;
     mt.name_pool = name_pool;
+    mt.em.name_pool = name_pool;
     mt.native_return_tid = LMD_TYPE_ANY;  // P4-3.4: no native return at module level
 
     // Init import cache
