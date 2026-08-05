@@ -15,13 +15,13 @@
 
 "Test index_of:"
 "7. expect 4:"; index_of("hello world", "o")
-"8. expect -1 (not found):"; index_of("hello world", "x")
+"8. expect null (not found):"; index_of("hello world", "x")
 "9. expect 6:"; index_of("hello world", "world")
 
 "Test last_index_of:"
 "10. expect 7 (second o):"; last_index_of("hello world", "o")
 "11. expect 9 (last l):"; last_index_of("hello world", "l")
-"12. expect -1:"; last_index_of("hello", "x")
+"12. expect null:"; last_index_of("hello", "x")
 
 "Test trim:"
 "13. expect 'hello world':"; trim("  hello world  ")

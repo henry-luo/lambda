@@ -15,7 +15,9 @@ touched here only where enforcement is its prerequisite.
 **Related:** `vibe/Lambda_Issue_Type_Support.md` (TS-1…TS-9 issue ledger; evidence),
 `doc/Lambda_Formal_Semantics.md` (semantic authority), `doc/Lambda_Type.md`,
 `vibe/Lambda_Issues_Outstanding.md` OI-5 (MIR value-representation contract),
-`doc/dev/lambda/LR_13_Schema_Validator.md` (validator design).
+`doc/dev/lambda/LR_13_Schema_Validator.md` (validator design), and
+[`vibe/Lambda_Design_Sys_Func.md`](Lambda_Design_Sys_Func.md) for
+system-function admission policy.
 **Evidence basis:** §§5–6 preserve the 2026-07-29 pre-implementation survey and its release
 reproductions, so they remain useful as the before-state. §8.1 records the shipped implementation
 and regression coverage as of 2026-07-30.
@@ -248,6 +250,41 @@ like any Lambda error value — dischargeable with `let x^err = …`, postfix `^
 `x is error` — and a script whose uncontained result is an error fails with that diagnostic.
 Never `null`, never `0`, never pointer bits, never a silent pass-through. The earlier inline
 code-only error form is rejected: a bare code cannot satisfy this diagnostic contract.
+
+**TE-4A — Type-enforcement failure and system-function admission are different decisions.**
+TE-4's “never `null`” rule applies when a value crosses a declared or deferred type
+boundary: `let x: T = e`, a typed parameter or return, a typed field, or an
+explicit runtime assertion. If the value cannot satisfy `T`, the boundary is
+non-admissive and must produce a rich, case-specific type/value diagnostic.
+
+The system-function contract is one layer earlier. A built-in may explicitly
+classify a particular invalid type/value or empty domain as **admissive** when
+the operation has a meaningful absence result and silent composition is the
+more useful behavior. The target contracts include `arr[-1] -> null`,
+`argmin([]) -> null`, and `varg(non_integer) -> null`. These results are not
+successful claims that the input satisfied a declared type; they are the
+built-in's declared nullable
+result. Assigning such a result to a non-nullable `T` still invokes TE-4 and
+must fail with a type diagnostic.
+
+When absence would hide a malformed source, unreadable resource, or violated
+operation contract, the system function is **non-admissive** and returns an
+error value or raises through `T^E`. `parse` on malformed input and `input` on
+a failed load are examples. Non-admissive paths have the same diagnostic duty
+as TE-4: an anonymous `ItemError` or a bare log line is implementation debt,
+not a conforming result.
+
+This distinction keeps the two designs consistent:
+
+| Boundary | Policy |
+|---|---|
+| Declared/deferred type boundary | Always non-admissive on mismatch; rich error, never graceful `null` |
+| Admissive system-function operation | Contract-declared `null`, `[]`, or `""` for a safe no-answer/miss |
+| Non-admissive system-function operation | Detailed `error`, or raised `T^E` for effectful operations |
+
+The classification is semantic and function-specific; it must not be inferred
+from “wrong type” alone. The authoritative system-function rules and examples
+are maintained in [`Lambda_Design_Sys_Func.md`](Lambda_Design_Sys_Func.md).
 
 **TE-5 — `any` is the top type and the gradual gate.** `any` includes `error`; `T → any` is
 always assignable (though boxing need not be physically cost-free). `any → T` is DEFERRED and
@@ -717,7 +754,7 @@ Every place a declared type meets a value, with today's status and the TE-2 targ
 | B10 | Global/module var round trip | n/a | store boxes by declared tid; load unboxes trusting it | trusted, *provided* B1 enforces the store side |
 | B11 | `is` / `match` / constrained types | no operand checks | three divergent implementations (§5.1, §5.3) | shared subtype/match foundation (TE-6) |
 | B12 | The `it2*` converter family | n/a | six different silent fallback values (§5.2) | boundaries stop calling them unchecked |
-| B13 | Sys-function arguments | none — registry `first_param_type` is dispatch-only metadata | per-function ad hoc: silent value, logged `ItemError`, or message-less `ItemError` (§5.5) | registry-driven static check; TE-9-quality diagnostics on runtime failure |
+| B13 | Sys-function arguments | none — registry `first_param_type` is dispatch-only metadata | per-function ad hoc: silent value, logged `ItemError`, or message-less `ItemError` (§5.5) | registry-driven admission metadata; admissive contracts return their declared absence, while non-admissive failures use TE-9-quality diagnostics |
 
 The pattern: **static checking exists exactly where someone once added it (B4, B5) and nowhere
 else; dynamic checking exists exactly once (B2's coercion) and its result is then thrown away.**
@@ -927,11 +964,14 @@ becomes that boundary's result without further checking — "error in, error out
 `x is error`). This is what keeps the no-spill promise: nothing forces handling for an inferred
 `T | error`, and errors surface at the batch boundary where the user aggregates results.
 
-**Sys functions.** The normative convention (making §5.5's pattern 2 the rule): acceptive on
-input types, **error value returned for invalid types** — never silent wrong values, never
-message-less deaths. The future perf split mirrors user functions: per-func clean/open versions
-(`len(non_error_data) int` vs `len(any) int | error`), selected by the caller's statically-known
-argument types, with registry metadata driving the selection.
+**Sys functions.** The normative convention is now the two-way admission policy in
+`Lambda_Design_Sys_Func.md`: each function classifies its invalid type/value cases as either
+**admissive** (return the documented result-domain absence, such as `null` for `argmin([])`)
+or **non-admissive** (return a detailed `error`, or raise through `T^E`). Neither branch may
+silently produce a wrong value or a message-less death. A future perf split mirrors this
+contract: per-function clean/open versions (`len(non_error_data) int` vs
+`len(any) int | error`) are selected only after the caller's static argument classification,
+while admissive result types remain visible in the public signature.
 
 Open results travel boxed, while a backend may use native lanes where cleanness and carrier
 proofs establish that no error can occupy the lane. The exact entry/return ABI is deferred to
@@ -1831,14 +1871,12 @@ semantics.
    or touched sys-func code; only the retrofit of the existing surface rides the perf stage.
    Scope when it lands: the registry must
    record per-param types (static checking), the success return type, whether the function can
-   *originate* errors (partial `abs` vs total `len`), and error-strictness on inputs.
-   `Lambda_Formal_Semantics.md` §7.3 already supplies the adjudicating principle — system `fn`
-   failures are values, channel `T?` or `T | error` (never `T^E` on a system fn), chosen by
-   *"absence in / no answer → null; present but invalid → error()"* — and `len(123) = 0`
-   conforms to **neither** branch, so the silent 0 is already condemned by spec; the remaining
-   decision is only which branch it takes (present-but-invalid → `error()`, matching
-   `int("abc")`, seems the natural reading). §7.3 also confirms `input`/`fetch` as pn-family
-   raisers (E228 conformant) and supplies the wrapper idiom for set-oriented input.
+   *originate* errors (partial `abs` vs total `len`), and its admission policy on inputs.
+   `Lambda_Formal_Semantics.md` §7.3 and `Lambda_Design_Sys_Func.md` supply the adjudicating
+   principle: system `fn` failures are values, channel `T?` or `T | error` (never `T^E` on a
+   system fn), with admissive no-answer cases using `null`/`[]`/`""` and non-admissive cases
+   using detailed `error()`. §7.3 also confirms `input`/`fetch` as pn-family raisers (E228
+   conformant) and supplies the wrapper idiom for set-oriented input.
 10. **Null strictness — DECIDED 2026-07-29 (user):** enforce `T?`-for-nullable immediately in
     P0; no warn-only release.
 11. **Openness default for named map types — DECIDED 2026-07-29 (user): open** (TE-10). Whether

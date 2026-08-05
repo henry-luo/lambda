@@ -16,25 +16,17 @@ true
 false
 "===== index_of: string =====str index:"
 6
-"str not found:"
--1
-"===== index_of: list =====list index int:"
+"str not found:===== index_of: list =====list index int:"
 1
-"list index not found:"
--1
-"list index string:"
+"list index not found:list index string:"
 2
 "list index first:"
 1
 "===== last_index_of: string =====str last index:"
 12
-"str last not found:"
--1
-"===== last_index_of: list =====list last index:"
+"str last not found:===== last_index_of: list =====list last index:"
 3
-"list last not found:"
--1
-"list last first el:"
+"list last not found:list last first el:"
 4
 "===== starts_with: string (native path) =====sw basic:"
 true

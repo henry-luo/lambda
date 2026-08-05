@@ -632,8 +632,8 @@ fn parse_html_data_attr(part) {
     if (text == "") null
     else
         (let eq_pos = index_of(text, "="),
-         let raw_name = if (eq_pos >= 0) trim(slice(text, 0, eq_pos)) else text,
-         let raw_value = if (eq_pos >= 0) trim(slice(text, eq_pos + 1, len(text))) else null,
+         let raw_name = if (eq_pos != null) trim(slice(text, 0, eq_pos)) else text,
+         let raw_value = if (eq_pos != null) trim(slice(text, eq_pos + 1, len(text))) else null,
          let data_name = normalize_data_attr_name(raw_name),
          if (data_name == "data-") null
          else {
@@ -899,7 +899,7 @@ fn render_text_content_box(content) {
     let tiny_idx = index_of(content, "\\tiny")
     let bx = if (is_ensuremath_text(content)) render_ensuremath_text(content)
         else if (is_text_inline_math_content(content)) render_text_inline_math_content(content)
-        else if (tiny_idx >= 0) render_tiny_text_content(content, tiny_idx)
+        else if (tiny_idx != null) render_tiny_text_content(content, tiny_idx)
         else if (is_text_textcolor_content(content)) render_text_textcolor_content(content)
         else box.text_box(decode_latex_text(content), css.TEXT, "mord")
     text_command_box(bx)
@@ -949,13 +949,13 @@ fn render_ensuremath_text(content) {
 }
 
 fn is_text_inline_math_content(content) =>
-    index_of(content, "$") >= 0
+    index_of(content, "$") != null
 
 fn render_text_inline_math_content(content) {
     let start = index_of(content, "$")
     let after_start = slice(content, start + 1, len(content))
     let end_rel = index_of(after_start, "$")
-    if (start < 0 or end_rel < 0) {
+    if (start == null or end_rel == null) {
         box.text_box(decode_latex_text(content), css.TEXT, "mord")
     } else {
         let end_pos = start + 1 + end_rel
@@ -980,7 +980,7 @@ fn render_text_inline_math_content(content) {
 fn inline_text_math_parse_source(math_src) {
     if (len(math_src) >= 3 and slice(math_src, 0, 1) == "|") {
         let second_rel = index_of(slice(math_src, 1, len(math_src)), "|")
-        if (second_rel >= 0) {
+        if (second_rel != null) {
             let second = second_rel + 1
             "\\lvert " ++ slice(math_src, 1, second) ++ "\\rvert " ++
             slice(math_src, second + 1, len(math_src))
@@ -989,14 +989,14 @@ fn inline_text_math_parse_source(math_src) {
 }
 
 fn is_text_textcolor_content(content) =>
-    index_of(content, "\\textcolor{") >= 0
+    index_of(content, "\\textcolor{") != null
 
 fn render_text_textcolor_content(content) {
     let cmd_idx = index_of(content, "\\textcolor{")
     let before = decode_latex_text(slice(content, 0, cmd_idx))
     let color_start = cmd_idx + 11
     let color_end_rel = index_of(slice(content, color_start, len(content)), "}")
-    if (color_end_rel < 0) {
+    if (color_end_rel == null) {
         box.text_box(decode_latex_text(content), css.TEXT, "mord")
     } else {
         let color_end = color_start + color_end_rel
@@ -2036,7 +2036,7 @@ fn fmt_delim_em(v) {
 }
 
 fn trim_trailing_zeros(s) {
-    if (index_of(s, ".") < 0) s
+    if (index_of(s, ".") == null) s
     else trim_tz_loop(s, len(s))
 }
 

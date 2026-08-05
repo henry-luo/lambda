@@ -6,7 +6,7 @@ import interp: lambda.package.pdf.interp
 fn name(s) { { kind: "name", value: s } }
 fn str(s) { { kind: "string", value: s } }
 fn hex(s) { { kind: "hex", value: s } }
-fn has(s: string, needle: string) { (index_of(s, needle) >= 0) }
+fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 
 pn main() {
     let left = chr(8220)

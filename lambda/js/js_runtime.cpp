@@ -23427,7 +23427,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     if (method->len == 7 && strncmp(method->chars, "indexOf", 7) == 0) {
         Item search_val = js_to_string((argc >= 1) ? args[0] : make_js_undefined());
         if (js_exception_pending) return ItemNull;
-        if (argc < 2) return (Item){.item = i2it(fn_index_of(str, search_val))};
+        if (argc < 2) return (Item){.item = i2it(fn_index_of_raw(str, search_val))};
         // indexOf with start position
         double dpos = 0.0;
         if (!js_string_to_integer_or_infinity(args[1], 0.0, &dpos)) return ItemNull;
@@ -23458,7 +23458,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     }
     if (method->len == 11 && strncmp(method->chars, "lastIndexOf", 11) == 0) {
         Item search_val = js_to_string((argc >= 1) ? args[0] : make_js_undefined());
-        if (argc < 2) return (Item){.item = i2it(fn_last_index_of(str, search_val))};
+        if (argc < 2) return (Item){.item = i2it(fn_last_index_of_raw(str, search_val))};
         // lastIndexOf with start position - search backwards from position
         double dpos = js_get_number(args[1]);
         // ES spec: NaN → +Infinity (search from end)

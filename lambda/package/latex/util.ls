@@ -262,7 +262,7 @@ fn build_kv_pairs(parts, i, n, acc) {
         if (part == "") { build_kv_pairs(parts, i + 1, n, acc) }
         else {
             let eq_pos = index_of(part, "=")
-            if (eq_pos < 0) {
+            if (eq_pos == null) {
                 // flag without value: keepaspectratio → "true"
                 build_kv_pairs(parts, i + 1, n, acc ++ [part, "true"])
             } else {

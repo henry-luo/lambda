@@ -58,7 +58,7 @@ let rw = compute_route(cw, empty_doc)
 
 // 7. curved render path
 "curved_short:"; route_to_curved_svg_path([v2(0.0,0.0),v2(10.0,0.0)], 8.0) == "M 0 0 L 10 0"
-"curved_has_Q:"; (index_of(route_to_curved_svg_path(ro, 8.0), "Q") >= 0)
+"curved_has_Q:"; (index_of(route_to_curved_svg_path(ro, 8.0), "Q") != null)
 
 // 8. point-on-route hit test
 "on_route:"; is_point_on_route(v2(50.0,0.0), [v2(0.0,0.0),v2(100.0,0.0)], 2.0)

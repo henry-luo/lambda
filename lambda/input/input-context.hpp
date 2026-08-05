@@ -106,6 +106,12 @@ public:
 
     void addNote(const char* fmt, ...);
 
+private:
+    void markParseError() {
+        if (input_) input_->parse_failed = true;
+    }
+
+public:
     // Error state queries
     bool hasErrors() const { return errors_.hasErrors(); }
     bool hasWarnings() const { return errors_.hasWarnings(); }

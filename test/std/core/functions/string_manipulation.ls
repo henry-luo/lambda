@@ -26,7 +26,7 @@ contains("hello", "")
 
 // ===== index_of =====
 index_of("hello world", "world")
-index_of("hello world", "xyz")
+type(index_of("hello world", "xyz"))
 index_of("hello", "l")
 
 // ===== Method-style =====

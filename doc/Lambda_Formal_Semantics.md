@@ -30,7 +30,9 @@ an instance of one or more of them; new design questions should be answered from
 them first.
 
 **P1 — Emptiness is not nothingness.** An empty value is a value (`""` is a
-string; an empty box is a box). Absence is expressed by `null` alone. [C1, C2]
+string; an empty box is a box). General absence is expressed by `null`, while
+string-valued system functions use `""` for a successful result with no string
+content. `""` remains distinct from `null`. [C1, C2]
 
 **P2 — Values versus containers.** Scalars are identified by content alone;
 containers are *things* that hold content. The distinction drives truthiness (an
@@ -48,8 +50,9 @@ is a property of bindings, marked by `var` — never a property of values.
 [C4, C12]
 
 **P5 — Set-oriented: absence flows, failure raises.** Lambda processes sets of
-data like SQL processes rows: absence (`null`) lets the computation continue;
-errors exist only where explicitly raised. [C5]
+data like SQL processes rows: absence (`null`, or `""` for a string-valued
+no-content result) lets the computation continue; errors exist only where
+explicitly raised. [C5]
 
 **P6 — Representation is invisible.** Boxing, copy-on-write sharing, unboxed
 numeric arrays, JIT type inference, and decimal width are implementation
@@ -506,18 +509,23 @@ camp; poison-last expresses "broken sorts after everything real". [C11]
 
 ## 7. Absence and Errors
 
-### 7.1 Reads are total; absence is null
+### 7.1 Reads are total; absence follows the result type
 
 Out-of-bounds and negative array indexing, missing map keys, and string
-out-of-range all yield **`null`**. Null **propagates through chained access**
+out-of-range indexing all yield **`null`**. Null **propagates through chained access**
 (`data.users[5].name` → null end-to-end — built-in optional chaining) and
-through scalar arithmetic (`null + 1` → null). Slices **clamp** to bounds.
-`arr[i] or default` is the coalescing idiom.
+through scalar arithmetic (`null + 1` → null). Collection slices **clamp** to
+bounds and return an empty collection when their interval is empty. A
+string-valued slice also clamps to bounds, but returns `""` for an empty
+string result; this preserves its string return type. An absent source such as
+`slice(null, 0, 1)` remains `null`. `arr[i] or default` is the coalescing
+idiom.
 
-*Rationale.* Lambda is set-oriented like SQL: null lets set processing continue
-where a raised error would abort the whole computation — a 10,000-record
-transform should produce 10,000 results with nulls where data was absent, not
-die at record 4,371. [C5]
+*Rationale.* Lambda is set-oriented like SQL: null, or `""` when the declared
+result is string-valued, lets set processing continue where a raised error would
+abort the whole computation — a 10,000-record transform should produce 10,000
+results with absent/no-content values where appropriate, not die at record
+4,371. [C5]
 
 ### 7.2 Writes are checked
 
@@ -568,11 +576,18 @@ delivered the error.
   error. `e is error` is the boolean test.
 - **System `fn` failures are returned values.** They remain chainable and
   set-friendly. Their declared result is `T?` or `T | error`, never `T^E`,
-  chosen by one principle: *absence in / no answer → `null`*
-  (`int(null)`, `avg([])`, lookups); *present but invalid → `error()`*
-  (`int("abc")`). Both are falsy, so `f(x) or default` rescues
-  both uniformly. (Division by zero is *not* in this class — number math
-  yields `inf`/`nan`, C14c.)
+  chosen by one principle: *absence in / no answer → `null`* for non-string
+  result types, while a string-valued function uses `""` for successful
+  no-content results (`chr(null)`, an empty string slice). The system-function
+  contract then chooses between two invalid-input policies: an **admissive**
+  case has a meaningful no-answer interpretation and returns the result-domain
+  absence (`arr[-1]`, `argmin([])`); a **non-admissive** case returns a
+  detailed `error()` where absence would hide a malformed source or violated
+  operation contract (`int("abc")`, malformed `parse`). Both absence forms
+  are falsy, so `f(x) or default` rescues them uniformly. This policy choice
+  does not weaken declared/deferred type enforcement: a value that fails a
+  type boundary still produces the rich TE-4 error. (Division by zero is *not*
+  in this class — number math yields `inf`/`nan`, C14c.)
 - **`input`/`fetch` are effectful readers — pn-family, and they raise**
   (`T^E`, compile-enforced), though permitted in expression position.
   Reading the filesystem/network is an effect at the head of a pipeline, so
@@ -792,22 +807,26 @@ contracts are available, using `ord` as the worked example:
 |---|---|---|
 | **1** | `ord(x: string) -> int` | rejected at the boundary; the call does not type-check |
 | **2** | `ord(x) -> int \| error` | accepted, returns an `error` |
-| **3** | `ord(x) -> int` | accepted, returns `-1` |
+| **3** | `ord(x) -> int \| null` | accepted, returns `null` |
 
-**The ruling is option 3**, and the reason is the same test §7.6 uses
-everywhere: *can the result be mistaken for a successful computation?*
+**The ruling is option 3 with a nullable result**, because the public Lambda
+surface uses one uniform absence value for zero-or-one results. The historical
+C-family `-1` sentinel was convenient: indices and code points are
+non-negative, it is easy to test with `>= 0`, and it keeps the ABI as a plain
+`int` instead of `int | null`. It is not the Lambda convention, however.
 
-`-1` **cannot**. Code points are non-negative, so `-1` lies outside `ord`'s
-result domain entirely and no valid input can produce it. That makes it
-self-announcing, which is exactly what `INT64_ERROR` was not — `INT64_MAX` is a
-perfectly ordinary `int`, indistinguishable from a real answer, which is why
-that convention had to be retired. A value outside the domain is not a sentinel
-in the bad sense; it is the absence of an answer, stated in the result type.
+`index_of`, `last_index_of`, and `ord` therefore return `int | null`: valid
+positions/code points remain `int`, while no match, an empty input, or another
+successful operation with no scalar answer returns `null`. This is consistent
+with all other zero-or-one APIs and supports the `value or default` idiom.
+Lambda's nullable native integer lane also keeps `int | null` in the same
+native lane as `int`, so the old boxing performance concern is no longer a
+reason to expose `-1`.
 
-This is the same shape `index_of` and `last_index_of` already have, where `-1`
-means "not found" and sits outside the valid index range. So the convention is
-one rule, not a per-function habit: **broad input, and a result drawn from
-outside the success domain when there is no answer.**
+An implementation or foreign-language adapter may still use a private `-1`
+sentinel internally, but it must be normalized to `null` at the Lambda
+boundary. The sentinel is not an `error`; invalid operations and error
+operands continue to use the existing error boundary.
 
 *Why not option 1.* Rejecting at the signature contradicts the broad-input
 convention, and buys little: the caller of an untyped `fn f(s) => ord(s)` gains
@@ -824,16 +843,15 @@ default.
 boundary**: the parameter never enters the function, the call's result is that
 error, and it *skips* to the end of the closest enclosing safe boundary [TE-5,
 §11.4]. That is the ordinary soft-error path — nothing is raised, and nothing is
-swallowed. The `-1` results below are for inputs that are perfectly valid and
+swallowed. The `null` results below are for inputs that are perfectly valid and
 simply have no answer, which is a different question from an input that is
 already a failure.
 
 *Consequence for `ord` specifically.* Today `ord` returns `0` for a non-string
 **and** for `""` **and** for the NUL character — three different situations
 collapsed onto one value that is a legitimate answer (U+0000 is a real code
-point). Adopting option 3 means `-1` for the non-string case, and `""` should
-join it: an empty string has no first character, so it has no ordinal, and `0`
-is the wrong answer for the same reason it is wrong for `42`. [2026-08-03]
+point). The public result is now `null` for the non-string and empty-string
+cases, while `0` remains the valid ordinal of a NUL character. [2026-08-05]
 
 ---
 

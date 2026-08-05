@@ -6,6 +6,7 @@
 namespace lambda {
 
 void InputContext::addError(const SourceLocation& loc, const char* fmt, ...) {
+    markParseError();
     char buffer[1024];
     va_list args;
     va_start(args, fmt);
@@ -31,6 +32,7 @@ void InputContext::addError(const SourceLocation& loc, const char* fmt, ...) {
 
 void InputContext::addError(const SourceLocation& loc, const char* message,
                              const char* hint) {
+    markParseError();
     const char* context_line = nullptr;
     if (owned_source_) {
         context_line = tracker.extractLine(loc.line);
@@ -42,6 +44,7 @@ void InputContext::addError(const SourceLocation& loc, const char* message,
 
 void InputContext::addErrorCode(const SourceLocation& loc, const char* code,
                                 const char* fmt, ...) {
+    markParseError();
     char buffer[1024];
     va_list args;
     va_start(args, fmt);
@@ -92,6 +95,7 @@ void InputContext::addNote(const SourceLocation& loc, const char* fmt, ...) {
 }
 
 void InputContext::addError(const char* fmt, ...) {
+    markParseError();
     char buffer[1024];
     va_list args;
     va_start(args, fmt);
@@ -163,7 +167,16 @@ void InputContext::logErrors() const {
     }
 
     const char* formatted = const_cast<ParseErrorList&>(errors_).formatErrors();
-    log_error("%s", formatted);
+    if (input_ && errors_.hasErrors() && !input_->parse_error_message &&
+            formatted && input_->pool) {
+        size_t message_len = strlen(formatted);
+        char* message_copy = (char*)pool_alloc(input_->pool, message_len + 1);
+        if (message_copy) {
+            memcpy(message_copy, formatted, message_len + 1);
+            input_->parse_error_message = message_copy;
+        }
+    }
+    log_error("%s", formatted ? formatted : "parser reported an unspecified error");
 }
 
 } // namespace lambda

@@ -724,8 +724,8 @@ Previously, most string functions crashed or returned error strings when given `
 | `contains(null, x)`      | `false`       | Nothing contains anything                                             |
 | `starts_with(null, x)`   | `false`       | Nothing starts with anything                                          |
 | `ends_with(null, x)`     | `false`       | Nothing ends with anything                                            |
-| `index_of(null, x)`      | `-1`          | Not found (already worked)                                            |
-| `last_index_of(null, x)` | `-1`          | Not found (already worked)                                            |
+| `index_of(null, x)`      | `null`        | No match (uniform scalar absence)                                     |
+| `last_index_of(null, x)` | `null`        | No match (uniform scalar absence)                                     |
 | `trim(null)`             | `null`        | No string to trim                                                     |
 | `upper(null)`            | `null`        | No string to transform                                                |
 | `lower(null)`            | `null`        | No string to transform                                                |

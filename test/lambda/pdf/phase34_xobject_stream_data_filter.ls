@@ -4,7 +4,7 @@ import interp: lambda.package.pdf.interp
 
 fn ref(n) { { type: "indirect_ref", object_num: n } }
 fn name(s) { { kind: "name", value: s } }
-fn has(s: string, needle: string) { (index_of(s, needle) >= 0) }
+fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 
 fn image_obj(n, dict, data) {
     { object_num: n, gen_num: 0, content: { dictionary: dict, stream_data: data } }

@@ -2,7 +2,7 @@
 
 import interp: lambda.package.pdf.interp
 
-fn has(s: string, needle: string) { (index_of(s, needle) >= 0) }
+fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 fn name(s) { { kind: "name", value: s } }
 fn str(s) { { kind: "string", value: s } }
 fn xml_at(items, i) { if (len(items) > i) format(items[i], 'xml') else "" }

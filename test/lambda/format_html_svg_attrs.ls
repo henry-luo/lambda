@@ -1,4 +1,4 @@
-fn has(s: string, needle: string) { (index_of(s, needle) >= 0) }
+fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 
 let tree = <div class: "wrap";
     <svg width: 100, height: 50;

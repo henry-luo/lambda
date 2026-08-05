@@ -748,10 +748,26 @@ static Type* function_call_result_type(Transpiler* tp, TypeFunc* function) {
     return lambda_type_union_normalized(tp->pool, success, error);
 }
 
-static Type* sys_func_success_result_type(SysFuncInfo* info, AstNode* first_arg) {
+static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
+        AstNode* first_arg) {
     Type* success = info && info->success_type ? info->success_type :
         info ? info->return_type : NULL;
-    if (!info || !first_arg || !first_arg->type) return success ? success : &TYPE_ANY;
+    if (!info) return success ? success : &TYPE_ANY;
+
+    // Search and ordinal operations have one optional scalar result: a valid
+    // non-negative integer or no value. Their former -1 sentinel made the
+    // public type look total and prevented Lambda's `value or default` idiom.
+    switch (info->fn) {
+    case SYSFUNC_INDEX_OF:
+    case SYSFUNC_LAST_INDEX_OF:
+    case SYSFUNC_ORD:
+        return lambda_type_nullable_normalized(tp->pool,
+            success ? success : (Type*)&TYPE_INT);
+    default:
+        break;
+    }
+
+    if (!first_arg || !first_arg->type) return success ? success : &TYPE_ANY;
 
     switch (info->fn) {
     case SYSFUNC_FLOOR:
@@ -774,7 +790,7 @@ static Type* sys_func_success_result_type(SysFuncInfo* info, AstNode* first_arg)
 static Type* sys_func_call_result_type(Transpiler* tp, SysFuncInfo* info,
         bool may_return_error, AstNode* first_arg) {
     if (!info) return &TYPE_ANY;
-    Type* success = sys_func_success_result_type(info, first_arg);
+    Type* success = sys_func_success_result_type(tp, info, first_arg);
     return may_return_error
         ? lambda_type_union_normalized(tp->pool, success, &TYPE_ERROR) : success;
 }

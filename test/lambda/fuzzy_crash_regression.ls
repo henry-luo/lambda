@@ -8,8 +8,7 @@
 
 // === Crash 1: argmin/argmax on empty array ===
 'Crash 1: argmin/argmax empty array'
-argmin([])
-argmax([])
+[argmin([]) is null, argmax([]) is null]
 
 // === Crash 2: for-in on error/undefined value ===
 'Crash 2: for-in on error value'

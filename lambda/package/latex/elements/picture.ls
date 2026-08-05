@@ -22,7 +22,7 @@ pub fn parse_coord(text) {
         let t = trim(text)
         let lp = index_of(t, "(")
         let rp = index_of(t, ")")
-        if (lp < 0 or rp < 0) { null }
+        if (lp == null or rp == null) { null }
         else {
             let inner = slice(t, lp + 1, rp)
             let parts = split(inner, ",")
@@ -62,7 +62,7 @@ fn parse_two_coords(text) {
     else {
         let t = trim(text)
         let first_rp = index_of(t, ")")
-        if (first_rp < 0) { [] }
+        if (first_rp == null) { [] }
         else {
             let c1 = parse_coord(slice(t, 0, first_rp + 1))
             let rest = slice(t, first_rp + 1, len(t))
@@ -84,11 +84,11 @@ fn extract_all_coords(text, start, acc) {
     if (start >= len(text)) { acc }
     else {
         let lp = index_of(slice(text, start, len(text)), "(")
-        if (lp < 0) { acc }
+        if (lp == null) { acc }
         else {
             let abs_lp = start + lp
             let rp = index_of(slice(text, abs_lp, len(text)), ")")
-            if (rp < 0) { acc }
+            if (rp == null) { acc }
             else {
                 let abs_rp = abs_lp + rp
                 let c = parse_coord(slice(text, abs_lp, abs_rp + 1))
@@ -295,9 +295,9 @@ fn find_brack_text(body, i, n) {
         if (child is string) {
             let t = trim(child)
             let bp = index_of(t, "[")
-            if (bp >= 0) {
+            if (bp != null) {
                 let ep = index_of(t, "]")
-                if (ep > bp) { trim(slice(t, bp + 1, ep)) }
+                if (ep != null and ep > bp) { trim(slice(t, bp + 1, ep)) }
                 else { null }
             } else { null }
         } else { null }

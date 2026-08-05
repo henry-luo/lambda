@@ -87,6 +87,7 @@ fn atomic_issue(expression) {
     value_after(value, "relationship==") else value);
   let element_value = trim(if (starts_with(value, "element=="))
     value_after(value, "element==") else value);
+  let arrow_pos = index_of(value, "->");
   if (value == "") issue("structurizr.invalid-expression", "Expression must not be empty")
   else if (value == "*" or value == "*?") null
   else if (starts_with(value, "relationship.properties["))
@@ -107,7 +108,7 @@ fn atomic_issue(expression) {
     issue("structurizr.unsupported-expression", "Relationship predicate is not supported")
   else if (starts_with(value, "relationship==")) endpoint_issue(relation)
   else if (value == "*->*" or
-      (index_of(value, "->") > 0 and not ends_with(value, "->"))) endpoint_issue(value)
+      (arrow_pos != null and arrow_pos > 0 and not ends_with(value, "->"))) endpoint_issue(value)
   else if (starts_with(value, "element.properties["))
     property_issue(value, "element.properties[")
   else if (starts_with(value, "element.type=="))
@@ -300,6 +301,7 @@ pub fn relationship_expression(expression) {
   let value = unwrapped(expression);
   let alternative = top_operator(value, "||");
   let term = top_operator(value, "&&");
+  let arrow_pos = index_of(value, "->");
   if (alternative >= 0) {
     relationship_expression(slice(value, 0, alternative)) or
       relationship_expression(slice(value, alternative + 2, len(value)))
@@ -309,7 +311,8 @@ pub fn relationship_expression(expression) {
       relationship_expression(slice(value, term + 2, len(value)))
   }
   else { starts_with(value, "relationship.") or starts_with(value, "relationship==") or
-    value == "*->*" or (index_of(value, "->") > 0 and not ends_with(value, "->")) }
+    value == "*->*" or
+      (arrow_pos != null and arrow_pos > 0 and not ends_with(value, "->")) }
 }
 
 pub fn relationship_matches(elements, relation, expression) {

@@ -158,6 +158,20 @@ static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     log_error("runtime error [%d]: %s", code, message);
 }
 
+static void set_input_parse_error(const char* function_name, Input* input,
+                                  String* type) {
+    if (input && input->parse_error_message) {
+        set_runtime_error(ERR_PARSE_ERROR, "%s: %s", function_name,
+            input->parse_error_message);
+    } else if (type) {
+        set_runtime_error(ERR_PARSE_ERROR,
+            "%s: parser failed for format '%s'", function_name, type->chars);
+    } else {
+        set_runtime_error(ERR_PARSE_ERROR,
+            "%s: parser failed during format auto-detection", function_name);
+    }
+}
+
 /**
  * Public API to set a runtime error from external modules (e.g., lambda-stack.cpp)
  * Does NOT capture stack trace since it may be called in low-stack situations.
@@ -3723,6 +3737,8 @@ extern "C" TypeId item_type_id(Item item) {
 extern "C" Input* input_from_target(Target* target, String* type, String* flavor);
 
 RetItem fn_input2(Item target_item, Item type) {
+    GUARD_ERROR_RI2(target_item, type);
+
     // Dry-run mode: return fabricated input data
     if (g_dry_run) {
         log_debug("dry-run: fabricated input() call");
@@ -3749,16 +3765,18 @@ RetItem fn_input2(Item target_item, Item type) {
     // Validate target type: must be string, symbol, or path
     TypeId target_type_id = get_type_id(target_item);
     if (!is_text_type_id(target_type_id) && target_type_id != LMD_TYPE_PATH) {
-        log_debug("input target must be a string, symbol, or path, got type: %s", get_type_name(target_type_id));
-        return ri_ok(ItemNull);  // todo: push error
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "input target must be a string, symbol, or path, got type: %s",
+            get_type_name(target_type_id));
+        return item_to_ri(ItemError);
     }
 
     // Convert target Item to Target struct
     Url* cwd = context ? (Url*)context->cwd : NULL;
     Target* target = item_to_target(target_item.item, cwd);
     if (!target) {
-        log_error("fn_input2: failed to convert item to target");
-        return ri_ok(ItemNull);
+        set_runtime_error(ERR_INVALID_URL, "input: failed to resolve target");
+        return item_to_ri(ItemError);
     }
 
     log_debug("fn_input2: target scheme=%d, type=%d", target->scheme, target->type);
@@ -3788,9 +3806,11 @@ RetItem fn_input2(Item target_item, Item type) {
                 type_str = fn_string(input_type);
             }
             else {
-        log_debug("input type must be a string or symbol, got type: %s", get_type_name(type_value_type));
-                // todo: push error
-                type_str = NULL;  // input type ignored
+                set_runtime_error(ERR_TYPE_MISMATCH,
+                    "input type option must be a string or symbol, got type: %s",
+                    get_type_name(type_value_type));
+                target_free(target);
+                return item_to_ri(ItemError);
             }
         }
 
@@ -3804,9 +3824,11 @@ RetItem fn_input2(Item target_item, Item type) {
                 flavor_str = fn_string(input_flavor);
             }
             else {
-                log_debug("input flavor must be a string or symbol, got type: %s", get_type_name(flavor_value_type));
-                // todo: push error
-                flavor_str = NULL;  // input flavor ignored
+                set_runtime_error(ERR_TYPE_MISMATCH,
+                    "input flavor option must be a string or symbol, got type: %s",
+                    get_type_name(flavor_value_type));
+                target_free(target);
+                return item_to_ri(ItemError);
             }
         }
 
@@ -3821,22 +3843,35 @@ RetItem fn_input2(Item target_item, Item type) {
         }
     }
     else {
-        log_debug("input type must be a string, symbol, or map, got type: %s", get_type_name(type_id));
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "input format must be a string, symbol, map, or null, got type: %s",
+            get_type_name(type_id));
         target_free(target);
-        return ri_ok(ItemNull);  // todo: push error
+        return item_to_ri(ItemError);
     }
 
     // Check if context is properly initialized
     if (!context) {
-        log_debug("Error: context is NULL in fn_input");
+        set_runtime_error(ERR_INVALID_STATE, "input: runtime context is not initialized");
         target_free(target);
-        return ri_ok(ItemNull);
+        return item_to_ri(ItemError);
     }
 
     log_debug("input type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
 
     // Use the new target-based input function
     Input *input = input_from_target(target, type_str, flavor_str);
+    if (!input) {
+        // input() is a can-raise effect: a loader failure must not become a
+        // successful null, or callers cannot distinguish failed execution from
+        // a valid input whose root happens to be null.
+        set_runtime_error(ERR_IO_ERROR, "input: failed to load target '%s'",
+            target->original ? target->original : "<path target>");
+    } else if (input->parse_failed) {
+        set_input_parse_error("input", input, type_str);
+        target_free(target);
+        return item_to_ri(ItemError);
+    }
     target_free(target);
 
     // todo: input should be cached in context
@@ -3846,7 +3881,7 @@ RetItem fn_input2(Item target_item, Item type) {
         // conversion and validator-path diagnostics cannot diverge from bindings.
         return item_to_ri(lambda_type_check(result, schema_type, "input schema"));
     }
-    return ri_ok(result);
+    return input ? ri_ok(result) : item_to_ri(ItemError);
 }
 
 // declared extern "C" to allow calling from C code (path.c)
@@ -3865,11 +3900,16 @@ RetItem fn_parse2(Item str_item, Item type) {
     // first arg must be a string
     TypeId str_type = get_type_id(str_item);
     if (str_type != LMD_TYPE_STRING) {
-        log_error("parse: 1st argument must be a string, got type: %s", get_type_name(str_type));
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "parse: 1st argument must be a string, got type: %s",
+            get_type_name(str_type));
         return item_to_ri(ItemError);
     }
     String* str = str_item.get_safe_string();
-    if (!str) return ri_ok(ItemNull);
+    if (!str) {
+        set_runtime_error(ERR_INVALID_STATE, "parse: string value is unavailable");
+        return item_to_ri(ItemError);
+    }
 
     // parse the 2nd argument (format symbol or options map) - same logic as fn_input2
     String* type_str = NULL;
@@ -3892,6 +3932,11 @@ RetItem fn_parse2(Item str_item, Item type) {
             TypeId type_value_type = get_type_id(input_type);
             if (is_text_type_id(type_value_type)) {
                 type_str = fn_string(input_type);
+            } else {
+                set_runtime_error(ERR_TYPE_MISMATCH,
+                    "parse: type option must be a string or symbol, got type: %s",
+                    get_type_name(type_value_type));
+                return item_to_ri(ItemError);
             }
         }
 
@@ -3901,21 +3946,45 @@ RetItem fn_parse2(Item str_item, Item type) {
             TypeId flavor_value_type = get_type_id(input_flavor);
             if (is_text_type_id(flavor_value_type)) {
                 flavor_str = fn_string(input_flavor);
+            } else {
+                set_runtime_error(ERR_TYPE_MISMATCH,
+                    "parse: flavor option must be a string or symbol, got type: %s",
+                    get_type_name(flavor_value_type));
+                return item_to_ri(ItemError);
             }
         }
     }
     else {
-        log_error("parse: 2nd argument must be a format symbol or options map, got type: %s", get_type_name(type_id));
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "parse: 2nd argument must be a format symbol or options map, got type: %s",
+            get_type_name(type_id));
         return item_to_ri(ItemError);
     }
 
     // create a dummy URL for the parser infrastructure (no actual file)
     Url* dummy_url = url_parse("parse://inline");
+    if (!dummy_url) {
+        set_runtime_error(ERR_INVALID_STATE,
+            "parse: failed to initialize the in-memory parser URL");
+        return item_to_ri(ItemError);
+    }
 
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
 
     Input* input = input_from_source(str->chars, dummy_url, type_str, flavor_str);
-    return ri_ok((input && input->root.item) ? input->root : ItemNull);
+    if (!input) {
+        set_runtime_error(ERR_OUT_OF_MEMORY,
+            "parse: failed to initialize parser for format '%s'",
+            type_str ? type_str->chars : "auto");
+        return item_to_ri(ItemError);
+    }
+    // ItemNull is a valid parsed value, so only the explicit parser status or
+    // an error root may convert this result into the non-admissive error path.
+    if (input->parse_failed || get_type_id(input->root) == LMD_TYPE_ERROR) {
+        set_input_parse_error("parse", input, type_str);
+        return item_to_ri(ItemError);
+    }
+    return ri_ok(input->root);
 }
 
 RetItem fn_parse1(Item str_item) {
@@ -3925,25 +3994,56 @@ RetItem fn_parse1(Item str_item) {
 Item fn_parse_html_fragment1(Item str_item) {
     GUARD_ERROR1(str_item);
 
+    // HTML fragment parsing is non-admissive: null is reserved for a valid
+    // absence, not for a rejected argument or failed parser allocation.
     TypeId str_type = get_type_id(str_item);
     if (str_type != LMD_TYPE_STRING) {
-        log_error("parse_html_fragment: argument must be a string, got type: %s", get_type_name(str_type));
-        return ItemNull;
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "parse_html_fragment: argument must be a string, got type: %s",
+            get_type_name(str_type));
+        return ItemError;
     }
 
     String* str = str_item.get_safe_string();
-    if (!str) return ItemNull;
+    if (!str) {
+        set_runtime_error(ERR_INVALID_STATE,
+            "parse_html_fragment: string value is unavailable");
+        return ItemError;
+    }
 
     Url* dummy_url = url_parse("parse://html-fragment");
+    if (!dummy_url) {
+        set_runtime_error(ERR_INVALID_STATE,
+            "parse_html_fragment: failed to initialize parser URL");
+        return ItemError;
+    }
     Input* input = InputManager::create_input(dummy_url);
-    if (!input) return ItemNull;
+    if (!input) {
+        set_runtime_error(ERR_OUT_OF_MEMORY,
+            "parse_html_fragment: failed to allocate parser input");
+        return ItemError;
+    }
 
     Html5Parser* parser = html5_fragment_parser_create(input->pool, input->arena, input);
-    if (!parser || !html5_fragment_parse(parser, str->chars)) return ItemNull;
+    if (!parser) {
+        set_runtime_error(ERR_OUT_OF_MEMORY,
+            "parse_html_fragment: failed to allocate HTML fragment parser");
+        return ItemError;
+    }
+    if (!html5_fragment_parse(parser, str->chars)) {
+        set_runtime_error(ERR_PARSE_ERROR,
+            "parse_html_fragment: failed to parse the HTML fragment");
+        return ItemError;
+    }
 
     Element* fragment = html5_fragment_get_body(parser);
     input->root = fragment ? Item{.element = fragment} : ItemNull;
-    return input->root.item ? input->root : ItemNull;
+    if (!fragment) {
+        set_runtime_error(ERR_PARSE_ERROR,
+            "parse_html_fragment: parser produced no fragment body");
+        return ItemError;
+    }
+    return input->root;
 }
 
 // MIR JIT wrappers: RetItem-returning functions adapted to return Item only.
@@ -4896,16 +4996,11 @@ Bool fn_ends_with(Item str_item, Item suffix_item) {
     return (memcmp(str_chars + offset, suffix_chars, suffix_len) == 0) ? BOOL_TRUE : BOOL_FALSE;
 }
 
-// index_of(str, sub) - find first occurrence of substring, returns -1 if not found
-// Also works on lists: index_of(list, item) finds first matching element
-int64_t fn_index_of(Item str_item, Item sub_item) {
-    // Formal semantics 7.7: these parameters are `any - error`, so an error
-    // argument is rejected at the CALL BOUNDARY and never reaches this body --
-    // which is what lets the return type stay a plain `int` instead of going
-    // viral as `int | error`. The arm remains as a defensive floor and answers
-    // -1 ("not found"), never the old INT64_ERROR: that sentinel only ever
-    // surfaced as an error because the retired compact encoder's range check
-    // rejected it, and a double lane cannot -- INT64_MAX is an ordinary int.
+// index_of raw search helper — -1 is retained only for C/JS adapters.
+// The public Lambda wrapper below converts absence to null.
+int64_t fn_index_of_raw(Item str_item, Item sub_item) {
+    // This raw helper keeps the C-family -1 ABI for foreign adapters. Lambda's
+    // public wrapper maps its broad-input no-answer result to null.
     if (get_type_id(str_item) == LMD_TYPE_ERROR || get_type_id(sub_item) == LMD_TYPE_ERROR) {
         return -1;
     }
@@ -4975,16 +5070,23 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
     return -1;
 }
 
-// last_index_of(str, sub) - find last occurrence of substring, returns -1 if not found
-// Also works on lists: last_index_of(list, item) finds last matching element
-int64_t fn_last_index_of(Item str_item, Item sub_item) {
-    // Formal semantics 7.7: these parameters are `any - error`, so an error
-    // argument is rejected at the CALL BOUNDARY and never reaches this body --
-    // which is what lets the return type stay a plain `int` instead of going
-    // viral as `int | error`. The arm remains as a defensive floor and answers
-    // -1 ("not found"), never the old INT64_ERROR: that sentinel only ever
-    // surfaced as an error because the retired compact encoder's range check
-    // rejected it, and a double lane cannot -- INT64_MAX is an ordinary int.
+// Lambda's public search result uses null for absence. Keep the raw -1 helper
+// separate because JavaScript's String#indexOf family requires that sentinel.
+static Item fn_nullable_int_result(int64_t result) {
+    return result < 0 ? ItemNull : (Item){.item = i2it(result)};
+}
+
+Item fn_index_of(Item str_item, Item sub_item) {
+    // preserve the original error payload; only a successful no-match becomes null.
+    GUARD_ERROR2(str_item, sub_item);
+    return fn_nullable_int_result(fn_index_of_raw(str_item, sub_item));
+}
+
+// last_index_of raw search helper — -1 is retained only for C/JS adapters.
+// The public Lambda wrapper below converts absence to null.
+int64_t fn_last_index_of_raw(Item str_item, Item sub_item) {
+    // This raw helper keeps the C-family -1 ABI for foreign adapters. Lambda's
+    // public wrapper maps its broad-input no-answer result to null.
     if (get_type_id(str_item) == LMD_TYPE_ERROR || get_type_id(sub_item) == LMD_TYPE_ERROR) {
         return -1;
     }
@@ -5065,6 +5167,11 @@ int64_t fn_last_index_of(Item str_item, Item sub_item) {
     }
 
     return -1;
+}
+
+Item fn_last_index_of(Item str_item, Item sub_item) {
+    GUARD_ERROR2(str_item, sub_item);
+    return fn_nullable_int_result(fn_last_index_of_raw(str_item, sub_item));
 }
 
 // Helper: check if character is ASCII whitespace
@@ -5648,12 +5755,10 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     return {.array = rooted_result.get()};
 }
 
-// ord(str) - return Unicode code point of first character
-// ord native: String* in, int64_t ABI out; registry exposes compact Lambda int
+// ord raw helper — -1 is retained only for C/JS adapters.
+// The public Lambda wrapper below converts absence to null.
 int64_t fn_ord_str(String* str) {
-    // The typed fast path for fn_ord, so it must answer identically: -1 where
-    // there is no ordinal (7.7). 0 is U+0000, a real character, so it cannot
-    // stand for "no answer" in either variant.
+    // 0 is U+0000, a real character, so it cannot stand for "no answer".
     if (!str || str->len == 0) return -1;
     uint32_t codepoint = 0;
     int decoded = str_utf8_decode(str->chars, str->len, &codepoint);
@@ -5661,15 +5766,11 @@ int64_t fn_ord_str(String* str) {
     return (int64_t)codepoint;
 }
 
-int64_t fn_ord(Item str_item) {
+int64_t fn_ord_raw(Item str_item) {
     TypeId type = get_type_id(str_item);
 
-    // Formal semantics 7.7: broad input, and a result drawn from OUTSIDE the
-    // success domain when there is no answer. Code points are non-negative, so
-    // -1 cannot collide with a real answer -- unlike the 0 these arms used to
-    // return, which is U+0000, a legitimate character. That 0 collapsed three
-    // different situations (non-string, empty string, actual NUL) onto one
-    // valid-looking value.
+    // Code points are non-negative, so the raw -1 sentinel cannot collide with
+    // a real answer. The Lambda wrapper normalizes it to the uniform null value.
     if (!is_text_type_id(type)) {
         log_debug("fn_ord: argument must be a string or symbol, got type %d", type);
         return -1;
@@ -5689,6 +5790,15 @@ int64_t fn_ord(Item str_item) {
         return -1; // invalid UTF-8
     }
     return (int64_t)codepoint;
+}
+
+Item fn_ord(Item str_item) {
+    GUARD_ERROR1(str_item);
+    return fn_nullable_int_result(fn_ord_raw(str_item));
+}
+
+Item fn_ord_str_item(String* str) {
+    return fn_nullable_int_result(fn_ord_str(str));
 }
 
 // chr(int) - return 1-char string from Unicode code point
