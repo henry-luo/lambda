@@ -112,6 +112,18 @@ private:
     }
 
 public:
+    // Release the raise flag after a recovering parser has moved its diagnostics
+    // into the document it returns (see graph_append_diagnostics). Recorded errors
+    // are a failure signal only while they are the parse's sole result; once they
+    // are reified as data the parse succeeded, and input() must not discard the
+    // recovered document.
+    void clearParseError() {
+        if (input_) {
+            input_->parse_failed = false;
+            input_->parse_error_message = nullptr;
+        }
+    }
+
     // Error state queries
     bool hasErrors() const { return errors_.hasErrors(); }
     bool hasWarnings() const { return errors_.hasWarnings(); }

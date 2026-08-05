@@ -382,9 +382,13 @@ own convention and return `[]` for an empty collection result.
 
 Extract a UTF-8 character slice from a string. `slice(str, start, end)` uses a
 zero-based start index inclusive and end index exclusive (`[start, end)`);
-`slice(str, start)` slices from `start` to the end. Negative indices count from
-the end, and out-of-range indices are clamped. For a string input, an empty
-source or a clamped empty range returns `""`.
+`slice(str, start)` slices from `start` to the end. Out-of-range offsets are
+clamped in both directions: a negative offset carries no meaning and clamps to
+`0` rather than counting from the end, exactly as an over-length offset clamps
+to the length. Use `str[last - 2 to last]` or an explicit `len(str) - n` to
+reach from the end. A `null` offset makes the whole selection absent and
+returns `null`. For a string input, an empty source or a clamped empty range
+returns `""`.
 
 Range subscript syntax is also supported: `str[a to b]` returns characters
 `a` through `b`, inclusive. In other words, `str[a to b]` is equivalent to
@@ -401,7 +405,10 @@ slice("hello", 0, 2)      // "he"
 slice("hello", 2)         // "llo"
 slice("café", 2, 4)       // "fé"  — UTF-8 character indices
 slice("hello", 2, 2)      // ""   — empty string result
+slice("hello", -2, 3)     // "hel" — negative clamps to 0; it does not wrap
 slice(null, 0, 1)          // null — absent source propagates
+slice("hello", null, 3)   // null — absent offset propagates
+slice("hello", index_of("hello", "z"), 3)  // null — a missed search stays absent
 "hello"[0 to 4]           // "hello"
 "hello"[1 to 3]           // "ell"
 ```
@@ -558,11 +565,14 @@ index_of("hello world", "xyz")     // null
 index_of("abcabc", "bc")           // 1
 ```
 
-When migrating code that tested the former `-1` sentinel, a non-negative
-check remains valid: `index_of(text, needle) >= 0` is true exactly when a valid
-index was found. The old `index_of(...) < 0` miss check is now dead code,
-because `null < 0` is false; use `index_of(...) is null` to test for absence.
-The same rule applies to `last_index_of` and `ord`.
+When migrating code that tested the former `-1` sentinel, a non-negative check
+remains valid: `index_of(text, needle) >= 0` is true exactly when a valid index
+was found, because an ordered comparison against `null` evaluates to `null`,
+which is falsy. Every old *miss* check is now dead code, and each fails toward
+the found branch: `index_of(...) < 0` is likewise falsy `null`, while
+`index_of(...) == -1` is always false and `!= -1` always true. Use
+`index_of(...) is null` to test for absence. The same rule applies to
+`last_index_of` and `ord`.
 
 ### last_index_of(str, substring)
 

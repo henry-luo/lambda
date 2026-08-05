@@ -517,9 +517,15 @@ out-of-range indexing all yield **`null`**. Null **propagates through chained ac
 through scalar arithmetic (`null + 1` → null). Collection slices **clamp** to
 bounds and return an empty collection when their interval is empty. A
 string-valued slice also clamps to bounds, but returns `""` for an empty
-string result; this preserves its string return type. An absent source such as
-`slice(null, 0, 1)` remains `null`. `arr[i] or default` is the coalescing
-idiom.
+string result; this preserves its string return type. Clamping is symmetric in
+both directions: a negative offset is out of range exactly like an over-length
+one (§7.4), so it clamps to `0` rather than wrapping from the end — reaching
+from the end is the separate `last` keyword. An absent source such as
+`slice(null, 0, 1)` remains `null`, and so does an **absent offset**:
+`slice(s, null, k)` is `null`, never a silent read from position `0`. That
+keeps a missed search composable — `slice(s, index_of(s, c), k)` degrades to
+`null` end-to-end instead of returning a plausible wrong prefix.
+`arr[i] or default` is the coalescing idiom.
 
 *Rationale.* Lambda is set-oriented like SQL: null, or `""` when the declared
 result is string-valued, lets set processing continue where a raised error would

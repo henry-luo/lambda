@@ -139,6 +139,40 @@ static inline uint8_t lambda_item_to_int64_exact(Item item, int64_t* out) {
     return decimal_to_int64_exact(item, out) ? 1 : 0;
 }
 
+// Outcome of reading a slice's offset operands.
+typedef enum {
+    LAMBDA_SLICE_OK = 0,
+    LAMBDA_SLICE_ABSENT,   // a null offset: the whole selection is absent
+    LAMBDA_SLICE_INVALID,  // a non-integral offset: a contract violation
+} LambdaSliceStatus;
+
+// Read a slice's start/end operands without clamping. A null offset means
+// absence, not position 0: a missing position makes the whole selection absent,
+// so slice(s, index_of(s, c), k) degrades to null when the search missed
+// instead of silently reading from the start of the source.
+static inline LambdaSliceStatus lambda_slice_offsets(Item start_item, Item end_item,
+        int64_t* start_out, int64_t* end_out) {
+    if (get_type_id(start_item) == LMD_TYPE_NULL ||
+            get_type_id(end_item) == LMD_TYPE_NULL) return LAMBDA_SLICE_ABSENT;
+    if (!lambda_item_to_int64_exact(start_item, start_out) ||
+            !lambda_item_to_int64_exact(end_item, end_out)) return LAMBDA_SLICE_INVALID;
+    return LAMBDA_SLICE_OK;
+}
+
+// Clamp a slice interval into [0, len]. Negative offsets carry no meaning in
+// Lambda: a negative offset is out of range exactly like an over-length one, so
+// both directions clamp symmetrically instead of wrapping from the end. Wrapping
+// would let a leaked -1 — an old not-found sentinel, or an underflowed computed
+// index — select real members instead of yielding the empty result the caller
+// expects. Reaching from the end is the separate `last` keyword.
+static inline void lambda_clamp_slice_range(int64_t len, int64_t* start, int64_t* end) {
+    if (*start < 0) *start = 0;
+    if (*end < 0) *end = 0;
+    if (*start > len) *start = len;
+    if (*end > len) *end = len;
+    if (*start > *end) *start = *end;
+}
+
 // Exact order of an int64 against a finite/infinite double, without routing
 // either operand through the other's representation. Casting the int64 to
 // double would round above 2^53 (making 2^53 and 2^53+1 compare equal), and

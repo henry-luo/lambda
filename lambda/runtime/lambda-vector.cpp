@@ -3016,20 +3016,14 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
 
     int64_t start = 0;
     int64_t end = 0;
-    if (!lambda_item_to_int64_exact(start_item, &start) ||
-        !lambda_item_to_int64_exact(end_item, &end)) {
+    LambdaSliceStatus status = lambda_slice_offsets(start_item, end_item, &start, &end);
+    if (status == LAMBDA_SLICE_ABSENT) return ItemNull;
+    if (status == LAMBDA_SLICE_INVALID) {
         log_error("fn_slice: start and end must be integer-valued numbers");
         return ItemError;
     }
-
-    // Handle negative indices
-    if (start < 0) start = len + start;
-    if (end < 0) end = len + end;
-
-    // Clamp indices to valid range
-    if (start < 0) start = 0;
-    if (end > len) end = len;
-    if (start > end) start = end;
+    // negative offsets clamp, they do not wrap from the end
+    lambda_clamp_slice_range(len, &start, &end);
 
     int64_t new_len = end - start;
 
@@ -3092,17 +3086,15 @@ Item fn_subview(Item vec, Item start_item, Item end_item) {
         return ItemError;
     }
     int64_t start = 0, end = 0;
-    if (!lambda_item_to_int64_exact(start_item, &start) ||
-            !lambda_item_to_int64_exact(end_item, &end)) {
+    LambdaSliceStatus status = lambda_slice_offsets(start_item, end_item, &start, &end);
+    if (status == LAMBDA_SLICE_ABSENT) return ItemNull;
+    if (status == LAMBDA_SLICE_INVALID) {
         log_error("fn_view: start and end must be integer-valued numbers");
         return ItemError;
     }
     int64_t len = base->length;
-    if (start < 0) start = len + start;
-    if (end < 0) end = len + end;
-    if (start < 0) start = 0;
-    if (end > len) end = len;
-    if (start > end) start = end;
+    // negative offsets clamp, they do not wrap from the end
+    lambda_clamp_slice_range(len, &start, &end);
     int64_t view_len = end - start;
 
     ArrayNumElemType etype = base->get_elem_type();

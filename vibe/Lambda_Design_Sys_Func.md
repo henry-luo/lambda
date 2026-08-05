@@ -4,11 +4,7 @@
 - **Date:** 2026-08-05
 - **Scope:** Lambda system functions and procedures that search, select,
   transform, or mutate collections and strings
-- **Semantic authority:**
-  [`doc/Lambda_Formal_Semantics.md`](../doc/Lambda_Formal_Semantics.md), especially
-  §3 (truthiness), §4.7 (numeric and vector totality), §7.6 (error
-  participation), §7.7 (broad input and in-domain results), §8.1 (iteration
-  and length), and §10.2 (vectorization).
+- **Semantic authority:** [`doc/Lambda_Formal_Semantics.md`](../doc/Lambda_Formal_Semantics.md), especially §3 (truthiness), §4.7 (numeric and vector totality), §5.1 (total equality), §6.1 (magnitude comparison vs total order), §7.1 (total reads and null propagation), §7.5 (aggregation), §7.6 (error participation), §7.7 (broad input and in-domain results), §8.1 (iteration and length), and §10.2 (vectorization).
 
 ---
 
@@ -52,6 +48,7 @@ In short:
    `null`/unit. Never use `[]` as a generic mutation-success sentinel.**
 7. **Admission policy is explicit per function.** Admissive misses return the
    appropriate absence value; non-admissive failures return a detailed error.
+8. **No in-band sentinels.** Absence is never encoded as `-1`, an unchanged input, or another value a caller could mistake for — or compute with as — a success (RF3A).
 
 The result shape must not depend on cardinality. A function whose successful
 result is a collection returns a collection whether it contains ten values, one
@@ -167,24 +164,20 @@ last_index_of("abca", "z") // null
 ord("")                    // null
 
 index_of(text, needle) or len(text)  // value-or-default
+index_of("abc", "a") or 99           // 0 — a position-0 match survives or-coalescing; 0 is truthy (§3)
 ```
 
-Migration from the old `-1` sentinel is intentionally asymmetric. A check of
-`index_of(text, needle) >= 0` remains a valid “found a non-negative index” test,
-because `null >= 0` is false. An old `index_of(text, needle) < 0` not-found
-test must be corrected: `null < 0` is false, so the expression can never
-identify absence. Use `index_of(text, needle) is null`; the same applies to
-`last_index_of` and `ord`.
+Migration from the old `-1` sentinel is intentionally asymmetric. `index_of(text, needle) >= 0` remains a valid “found a non-negative index” test: an ordered comparison absorbs `null` (formal semantics §6.1), so on a miss the expression evaluates to `null`, which is falsy. Every old *not-found* test, however, breaks silently, and each breaks toward the found branch: `idx < 0` likewise evaluates to falsy `null`; `idx == -1` is always false under total equality (§5.1 — `null` is cross-family unequal to `-1`, and a found index is never negative); `idx != -1` is always true. Write `index_of(text, needle) is null`; the same applies to `last_index_of` and `ord`. Because a valid index or code point is never negative, comparing these results against a negative constant is *always* a bug and is statically detectable — a lint rule should flag it, converting the silent migration hazard into a loud one.
 
-The Lambda choice is deliberate:
+The Lambda choice is deliberate, and most of the argument is that `null` is the value the rest of Lambda's semantics was already built around:
 
-1. `null` is one uniform absence value for zero-or-one results; callers do not
-   need to remember which API uses `null` and which uses `-1`.
-2. `null` composes with Lambda's `value or default` idiom. A `-1` sentinel is
-   a real, truthy integer and cannot express that idiom directly.
-3. The former performance objection no longer applies. Lambda's nullable
-   native lane represents `int | null` in the same native lane as `int`, so
-   the public type does not require boxing merely because absence is possible.
+1. **Uniformity.** `null` is the one absence value for every zero-or-one result: out-of-range `arr[i]`, missing map lookup, `find_first`, `reduce([])`, `argmin([])`, `min([])`. An `index_of` returning `-1` would be the lone numeric sentinel on the entire surface — one more convention to memorize, in exchange for nothing.
+2. **A sentinel is only a sentinel at rest; `null` survives computation.** `-1` stops meaning “not found” the moment it flows: `index_of(s, c) + 1` yields `0`, a valid-looking index, and a `-1` reaching a slice offset selects real characters — from the end under the current from-the-end handling, a plausible prefix under a clamping rule — so a missed search silently returns text either way (the classic JavaScript `s.slice(s.indexOf("z"))` footgun). `null` is a fixed point of the same pipeline: `null + 1` is `null` (§7.1), a `null` offset propagates (RF3B), and the miss arrives at the end of the pipeline still recognizable as a miss, to be rescued exactly once with `or`. Under §7.1's set-processing rationale — a 10,000-record transform should produce 10,000 results — `null` is the only return value that participates correctly in the machinery.
+3. **Truthy-`0` makes the coalescing idiom actually safe — a dividend `-1` would refuse.** In JavaScript or Python, `s.indexOf(x) || dflt` is broken because a match at position 0 is falsy. Lambda chose truthy-`0` (§3) precisely to keep `or` a safe coalescing operator, so `index_of(text, needle) or len(text)` is correct even for a match at position 0. A `-1` result is a real, truthy integer and cannot participate in the idiom at all.
+4. **The expressiveness is asymmetric in `null`'s favor.** Where a boundary genuinely wants the sentinel — dense numeric encodings, foreign ABIs — `index_of(s, c) or -1` recovers it in one expression, safe again because `0` is truthy. Recovering absence from a `-1`-returning primitive takes a conditional at every call site. The composable value is the correct primitive; the sentinel is a derived encoding a caller opts into at a boundary.
+5. **The former performance objection no longer applies.** Lambda's nullable native lane represents `int | null` in the same native lane as `int`, so the public type does not require boxing merely because absence is possible.
+
+The cross-language record points the same way: every language that acquired first-class absence with a cheap representation moved its index search onto it (Swift, Rust, Haskell), while the `-1` holdouts keep the sentinel for compatibility with their own legacy `indexOf` (§5).
 
 Valid positions and code points remain `int`. No match, an empty input to
 `ord`, or another successful broad-input operation with no scalar answer is
@@ -193,9 +186,18 @@ boundary rules. These three APIs intentionally retain their broad-input
 contract, so a non-applicable non-error value is treated as “no answer,” not
 as a second absence encoding.
 
-The runtime may retain a private `-1` result in a C/JavaScript compatibility
-adapter, where the foreign API requires it. That sentinel must be normalized
-to `null` before it reaches Lambda code.
+#### Known friction, and the idioms that answer it
+
+Naming where `null` will chafe keeps the ruling honest:
+
+- **Dense index arrays.** Collecting `for (row in rows) index_of(row, key)` with misses produces `int | null` content, which cannot pack into an ArrayNum, so vectorized index pipelines degrade to generic lists. Where dense encoding matters, opt back into the sentinel explicitly — `index_of(row, key) or -1` — and the result packs again. Pandas walked the same path (NaN holes, then the nullable `Int64` dtype); a nullable ArrayNum lane is the eventual clean answer if this bites often.
+- **Aggregation under strict null propagation (§7.5).** The earliest-of-several-needles pattern nulls out when any needle misses; the idiom is explicit skipping: `min([index_of(s, ","), index_of(s, ";")][!null]) or len(s)`. `-1` is no better here — `min` would happily select the sentinel — it merely fails differently.
+- **Emission boundaries.** CSV integer columns, packed binary layouts, and JSON consumers that require a number take `or -1` (or a domain default) at the edge, where the encoding choice is explicit and local.
+- **Mixed Lambda/JS codebases.** The same programmer writes `s.indexOf(x) === -1` in a JavaScript file and `index_of(s, x) is null` in a Lambda file. Web compatibility fixes the JS side; the raw/public adapter split below is the seam.
+
+The classic scan loop is *not* on this list — `idx >= 0` still works as a found test — and enumerate-all-occurrences workflows belong to the all-match `find` under the zero-to-many `[]` convention anyway. In practice `index_of` is genuinely zero-or-one, which is exactly the cardinality `null` serves.
+
+The runtime keeps the compatibility sentinel one layer down: `fn_index_of_raw` and `fn_last_index_of_raw` retain the `-1` ABI for the C/JavaScript adapters (`String.prototype.indexOf` requires it), and the public wrappers map a negative raw result to `null`. Lambda-side code must never call a `_raw` helper directly: the raw path conflates an error operand with `-1`, so the public wrappers guard errors first precisely to keep “operand was an error” distinct from “no match.”
 
 ### RF3B — String-valued results use `""` for no content
 
@@ -211,6 +213,7 @@ chr(-1)              // ""
 slice("", 0, 1)      // ""
 slice("abc", 2, 2)   // ""
 slice(null, 0, 1)      // null — no source value to slice
+slice("abc", null, 1)  // null — a missing offset makes the selection absent (§7.1)
 ```
 
 This is a representation convention for string-valued results, not a new
@@ -221,11 +224,39 @@ particular, the overloaded `slice` keeps the result convention of its input
 domain: string slices return strings (possibly `""`), while array/list slices
 return arrays/lists (possibly `[]`).
 
+Both `slice` overloads take their offset contract from RF3D, which is what makes the `null` rows above absent rather than empty.
+
 *Rationale.* JavaScript, Python, JSON, and XML all distinguish empty text from
 absence and preserve `""` as a real string value. Returning `null` from every
 no-content string operation would make the empty-string result convention
 unobservable and make `""` needlessly redundant at the system-function
 boundary.
+
+### RF3D — Slice offsets: a negative offset clamps, a null offset is absence
+
+Offsets into a sequence obey two rules, both inherited from the formal semantics rather than invented here.
+
+**A negative offset carries no meaning and clamps.** Per §7.4 a negative index is out of range *exactly like* an over-length one — "both failure directions of a computed index are symmetric absence" — and per §7.1 slices clamp to bounds. Combining them, a negative offset clamps to `0` just as an over-length offset clamps to `len`. It never wraps from the end:
+
+```lambda
+slice([1, 2, 3, 4], -2)      // [1, 2, 3, 4] — start clamps to 0
+slice([1, 2, 3, 4], -2, 2)   // [1, 2]
+slice("hello", -2, 3)        // "hel"
+slice("hello", -5, -1)       // ""  — both offsets clamp to 0, empty interval
+[1, 2, 3][-1]                // null — indexing is absence, not clamping
+```
+
+Reaching from the end is the separate `last` keyword in a subscript (`s[last - 2 to last]`), or an explicit `len(s) - n` in a call position, where §7.4 makes `last` unavailable. Function offsets are positions, never signed directions — the same corollary that keeps `take`/`drop` counts unsigned.
+
+**A null offset makes the whole selection absent.** A missing scalar position is not position `0`, so `slice(s, null, k)` is `null` — never a silent read from the start, and never an `error`. This is what keeps a missed search composable end-to-end, and it is the rule that discharges RF3A's most important obligation:
+
+```lambda
+slice(s, index_of(s, c), k)  // null when the search missed
+```
+
+A non-null, non-integral offset remains a non-admissive `error` (RF4).
+
+*Rationale.* Python-style wrapping is precisely what made the old `-1` sentinel dangerous, and the danger outlives the sentinel: under wrapping, *any* underflowed computed index silently selects real members from the far end of the sequence instead of yielding absence. `arr[i - 1]` at `i = 0` returns the last element; a leaked not-found `-1` slices the tail. Clamping makes the two out-of-range directions behave alike, so an index bug degrades to an empty or absent result the caller can see, rather than to plausible wrong data. The cost is that Lambda gives up a familiar shorthand; §7.4 already paid that price for indexing, and a `slice` that wrapped while `arr[-1]` returned `null` would be the worse outcome — one concept with two contradictory spellings.
 
 ### RF4 — Non-admissive invalid input or operation returns `error`
 
@@ -380,17 +411,22 @@ universal empty sentinel:
 | JavaScript `find` | `undefined` — zero-or-one |
 | JavaScript `filter` | `[]` — zero-to-many |
 | JavaScript `splice` | `[]` when no members were removed |
+| JavaScript `indexOf` / ES2015 `findIndex` | `-1` — C-family sentinel, kept for consistency with legacy `indexOf` |
 | Python optional search | value or `None` — zero-or-one |
 | Python comprehension / collected filter | `[]` — zero-to-many |
 | Python in-place list mutators | `None`/unit-like |
 | Rust `Iterator::find` | `Option::None` — zero-or-one |
+| Rust `Iterator::position` | `Option::None` — the zero-or-one index search |
 | Rust collected filtering | empty `Vec` — zero-to-many |
 | Rust `Vec::splice` | iterator over removed members, possibly empty |
+| Swift `firstIndex(of:)` | `nil` — the zero-or-one index search |
 | NumPy ufunc over array-like input | `ndarray`, including a zero-length result; broadcasting determines shape |
 
 The transferable rule is not "always return null" or "always return an empty
 array." It is: preserve the successful result's cardinality, and keep failure
 on a separate channel.
+
+The `-1` holdouts are instructive rather than contradictory. Languages that acquired first-class absence with a cheap representation moved the index search onto it: Swift's `firstIndex(of:)` returns `Index?`, Rust's `Iterator::position` returns `Option<usize>`, Haskell's `elemIndex` returns `Maybe Int`. The APIs that still return `-1` — Java, C#, Kotlin, Go, and JavaScript's ES2015 `findIndex` — keep it for ecosystem compatibility or consistency with their own legacy `indexOf`, not on the merits. The lesson is that uniformity *within* a language is the binding constraint, and Lambda's uniform absence value is `null` (RF3A).
 
 ---
 
@@ -420,6 +456,8 @@ choice between mutation Model A and Model B:
 | `argmin([])`, `argmax([])` | return `null` for an empty collection | conforms to the admissive zero-or-one convention |
 | `index_of`, `last_index_of` | public result is `int | null`; private raw adapter keeps `-1` | `null` for no match or non-applicable broad input; `error` operands remain `error` |
 | `ord("")` / invalid UTF-8 / non-text | public result is `null`; private raw adapter keeps `-1` | `null` for no first code point or non-applicable broad input; `error` operands remain `error` |
+| `slice` / `substring` / `subview` with a `null` offset | now returns `null` | conforms to RF3D; non-null non-integral offsets remain `error` |
+| `slice` / `substring` / `subview` with a negative offset | now clamps to `0` | conforms to RF3D; previously wrapped from the end, contradicting §7.4 |
 | `chr(null)` / invalid code point | returns `""` | conforms to RF3B; error operands and wrong argument shapes remain `error` |
 | `input` invalid target/options or failed input | returns an error-bearing `RetItem` and publishes the runtime diagnostic | conforms to the effectful `T^E` contract |
 | `parse` failed parse | returns an error-bearing `RetItem` with the parser diagnostic | conforms to RF4 non-admissive failure |
@@ -438,6 +476,10 @@ sentinel pair ([`lambda-eval.cpp`](../lambda/runtime/lambda-eval.cpp#L4901)),
 input/parse ([`lambda-eval.cpp`](../lambda/runtime/lambda-eval.cpp#L3725)),
 generic indexing ([`lambda-eval.cpp`](../lambda/runtime/lambda-eval.cpp#L4162)),
 and the PDF tokenizer ([`input-pdf.cpp`](../lambda/input/input-pdf.cpp#L324)).
+
+Two slice-path defects surfaced in the same audit and are now fixed under RF3D. Both were absence violations of exactly the kind RF3A describes, one layer below `index_of` itself: a `null` offset failed integral conversion and became `error`, and a negative offset wrapped Python-style from the end, so a leaked `-1` selected real tail members instead of yielding absence. The offset contract now lives in two shared helpers (`lambda_slice_offsets`, `lambda_clamp_slice_range` in [`lambda-number-runtime.hpp`](../lambda/runtime/lambda-number-runtime.hpp)) used by all three call sites — collection `slice` and `subview` ([`lambda-vector.cpp`](../lambda/runtime/lambda-vector.cpp#L3002)) and string `substring` ([`lambda-eval.cpp`](../lambda/runtime/lambda-eval.cpp#L4735)) — so the rule cannot drift between the string, collection, and view overloads. Regression coverage is [`test/lambda/slice_negative_null_offsets.ls`](../test/lambda/slice_negative_null_offsets.ls).
+
+The JavaScript engine is deliberately unaffected: `String.prototype.slice` and friends keep Web-compatible from-the-end semantics in their own `lambda/js/` implementations, which never route through these helpers.
 
 `index_of`, `last_index_of`, and `ord` were a documented-policy conflict: the
 old formal/library documentation and regression tests preserved the `-1`
@@ -506,6 +548,7 @@ semantics' "cannot be mistaken for success" test.
    COW writeback even when a future public mutation surface returns null/unit.
 6. Tests should cover the three-way distinction for every collection API:
    non-empty success, empty/absent success, and invalid/error.
+7. Raw `-1` helpers (`fn_index_of_raw`, `fn_last_index_of_raw`) are adapter-only surface for C/JavaScript compatibility. Public wrappers must guard error operands first and normalize the negative sentinel to `null`; no Lambda-surface path may call a `_raw` helper directly.
 
 ---
 
@@ -523,6 +566,7 @@ Before registering a collection-related sys func, answer:
 6. If it mutates, does the whole family return the updated owner or null/unit?
 7. Does COW require a distinct internal owner-returning helper?
 8. Can any failure result be mistaken for a valid empty or absent result?
+9. Does the contract smuggle an in-band sentinel — `-1` for absence, `0` or `-1` for "unlimited", an unchanged input for failure? RF3A and the named-option rule of formal-semantics §7.4 forbid all three.
 
 If those answers are explicit, `null`, `[]`, and `error` retain one meaning each
 throughout Lambda's system-function surface.

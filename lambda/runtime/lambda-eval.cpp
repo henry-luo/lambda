@@ -4742,13 +4742,10 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
 
     int64_t start = 0;
     int64_t end = 0;
-    if (!lambda_item_to_int64_exact(start_item, &start)) {
-        log_debug("fn_substring: start index must be an integer-valued number");
-        return ItemError;
-    }
-
-    if (!lambda_item_to_int64_exact(end_item, &end)) {
-        log_debug("fn_substring: end index must be an integer-valued number");
+    LambdaSliceStatus status = lambda_slice_offsets(start_item, end_item, &start, &end);
+    if (status == LAMBDA_SLICE_ABSENT) return ItemNull;
+    if (status == LAMBDA_SLICE_INVALID) {
+        log_debug("fn_substring: start and end must be integer-valued numbers");
         return ItemError;
     }
 
@@ -4774,10 +4771,8 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     // ASCII fast path: char index == byte index
     if (is_ascii) {
         int64_t char_len = (int64_t)str_len;
-        if (start < 0) start = char_len + start;
-        if (end < 0) end = char_len + end;
-        if (start < 0) start = 0;
-        if (end > char_len) end = char_len;
+        // negative offsets clamp, they do not wrap from the end
+        lambda_clamp_slice_range(char_len, &start, &end);
         if (start >= end) {
             if (is_symbol) return {.item = y2it(heap_create_symbol("", 0))};
             String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
@@ -4798,14 +4793,9 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         return {.item = s2it(result)};
     }
 
-    // handle negative indices (count from end)
+    // negative offsets clamp, they do not wrap from the end
     int64_t char_len = (int64_t)str_utf8_count(chars, str_len);
-    if (start < 0) start = char_len + start;
-    if (end < 0) end = char_len + end;
-
-    // clamp to valid range
-    if (start < 0) start = 0;
-    if (end > char_len) end = char_len;
+    lambda_clamp_slice_range(char_len, &start, &end);
     if (start >= end) {
         if (is_symbol) return {.item = y2it(heap_create_symbol("", 0))};
         String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
