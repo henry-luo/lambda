@@ -1,14 +1,17 @@
 # Lambda — Error Handling Implementation Plan (TE-15 / TE-16 / TE-17)
 
-**Status:** NOT STARTED — rev 2, 2026-08-06. **Semantic decisions pending** (downgraded from
-rev 1's "decision-complete"): two questions must be settled before the semantic phases can be
-coded — statement-position defects in `pn`, and whether a handler may protect an expression
-containing `await`. Everything else is decided. No code has moved.
+**Status:** NOT STARTED — rev 2, 2026-08-06. **Semantically decision-complete.** Both questions
+that were open at the start of the revision closed the same day: statement-position defects in
+`pn` by TE-18 case 8 (§8.1), and handler-protected `await` by rejection (§8.2). No code has moved.
+
+**Pre-P1 investigation:** the SIGSEGV/SIGBUS handler conflict between `lambda-stack.cpp` and
+batch mode (§8.4) must be resolved before fault capture by `^ { }` can be tested reliably.
 
 **Design authority:** `vibe/Lambda_Design_Type_Enforcement.md` **TE-15** (soft-error
 containment: skip to the closest safe boundary), **TE-16** (the `^ { }` handler; `let a^err`
-and `if (^err)` retired), and **TE-17** (container acceptance is type-sensitive; native lanes
-gate on provable infallibility — decided 2026-08-06), building on TE-9 (failed checks produce
+and `if (^err)` retired), **TE-17** (container acceptance is type-sensitive; native lanes gate
+on provable infallibility — decided 2026-08-06), and **TE-18** (skip is a declaration-boundary
+mechanism; the guard dominates the scope — decided 2026-08-06), building on TE-9 (failed checks produce
 rich error *values*), TE-13 (unified discharge surface, tightness), and §10.7/§10.8 (return
 firewalls, binding checkpoints). Normative text already lands in `doc/Lambda_Formal_Semantics.md`
 §7.3, §11.4, §13 invariant 7.
@@ -72,9 +75,16 @@ buys and the first two are what §2 was actually protecting:
 > error-freedom, so I1 and I2 hold by construction rather than by inserted guards, and **no
 > error-routing edge is ever emitted inside a native lane.**
 
-I3 is what makes this plan tractable: every routing destination is a boxed position, which is
-exactly the set of positions that could already hold an error today. Phase 5 is therefore
-substantially smaller than rev 1 assumed.
+> **I4 — Dominance (TE-18).** A declaration with a native contract guards **once, on entry**,
+> and that guard dominates every use of the binding in its scope. Inside the scope the binding
+> is native-lane unconditionally, with no per-use error check. Skip triggers at declaration
+> boundaries only — `let` / `var` / `for` variables, declared params, declared returns, and the
+> future `cast … as T`. **Expression interiors never skip.**
+
+I3 and I4 are what make this plan tractable. Every routing destination is a boxed position —
+exactly the set that could already hold an error today — and every routing *source* is a
+boundary that was already emitting a check. Phase 5 adds no control edge to expression
+lowering at all, and is therefore far smaller than rev 1 assumed.
 
 **What I1–I3 do not cover.** System and resource faults are untyped, so no static analysis can
 gate them. They are a separate regime (§4) that unwinds through `LambdaRecoveryFrame` and
@@ -126,7 +136,7 @@ set it accepts:
 | Kind | Origin | Travels as | Accepted by |
 |---|---|---|---|
 | `SOFT_VALUE` | `T \| error` computations, fallible sys-funcs | an ordinary boxed value | any error-admitting contract; the batch idiom |
-| `DEFECT_SKIP` | failed deferred checks, failed conversions/casts | a control edge to the closest accepting destination | destinations declaring `DEFECT_SKIP` |
+| `DEFECT_SKIP` | failed checks **at declaration boundaries only** (TE-18) | a control edge to the end of the boundary's region | destinations declaring `DEFECT_SKIP` |
 | `RAISED_ERROR` | `raise`, calls to `T^E` callees | the declared error channel | E228 acknowledgment forms only |
 | `FAULT` | stack overflow, OOM, resource faults | non-local unwind via `LambdaRecoveryFrame` | recovery frames only |
 
@@ -323,25 +333,58 @@ new/renamed `*.ls` keeps its `*.txt` golden in step.
 
 ### 7.2 P5 — containment
 
-- **Origination sites — a closed set**, each already computing its failure condition: the
-  `lambda_type_check` boundaries funnelled through `emit_checked_boundary` (with the
-  `emit_return_if_item_error` pairings alongside it), fallible converters and sys-funcs, calls
-  to open/`^` callees, and — added by TE-17 — **native-lane stores**. Routing retargets existing
-  branches. (C16 deletes what would have been a further class, the flex-int promote edge.)
+- **Skip sites — declaration boundaries only (TE-18, I4).** `let` / `var` / `for` variables,
+  declared params (guarded at the call site), declared returns, and the future `cast`. Each is
+  already computing its failure condition via `emit_checked_boundary`, so routing **retargets an
+  existing branch** and adds none. **Expression interiors are not skip sites**: a fallible
+  operand makes the expression `T | error`, which by I3 is not lane-eligible and is computed
+  boxed, where the existing contagion helpers already give the right answer.
+- **Origination sites that are not skip sites** — fallible converters and sys-funcs, calls to
+  open/`^` callees, and **native-lane stores** (TE-17) — produce `SOFT_VALUE`. They flow to the
+  nearest error-admitting contract as data. (C16 deletes what would have been a further class,
+  the flex-int promote edge.)
+- **Fix V1 before relying on I4.** `fn_array_set` silently calls
+  `convert_specialized_to_generic` on a mismatched element store (`lambda-eval.cpp`), changing a
+  declared `int[]`'s representation underneath a live binding. Today's mitigation is a runtime
+  elem-type guard on every inline read path (see `mir_store_may_change_elem_type`'s comment in
+  `transpile-mir.cpp`), which means guarded bodies are **not** unconditionally native today. Make
+  the store a gated boundary so declared containers never despecialize, then **delete the
+  per-read guards** — a performance win as well as the fix that makes I4 true.
+- **V2: `for x: T in e` does not parse.** `loop_expr` in `grammar.js` annotates only the *key* of
+  the `for k, v in e` form (`index_type`, an `$.identifier`, not a type expression). Either
+  extend the grammar in P2 or restrict the TE-18 case-1 ruling to `let`/`var` until it is.
+- **V3 / TE-18 case 7: reassignment is its own ruling, with a diagnostic obligation.** `x = e`
+  on a declared binding guards and, on failure, skips to the end of the enclosing block retaining
+  the old value (§10.8) — without this the entry guard does not dominate the scope. But unlike a
+  declaration, the skip here leaves an existing binding holding a stale value *and* abandons code
+  the user wrote after it, so it must be reported rather than merely contained. Three tiers:
+  - **compile error** where the RHS is provably `T | error` — the existing binding rule
+    (`let x: int = a()`) applied to reassignment; no new rule, just confirm it fires here;
+  - **compile warning** where the RHS is only deferred-fallible **and the block has statements
+    after the reassignment** — gate on there being a tail to abandon, so a reassignment in final
+    position warns about nothing;
+  - **runtime report above breadcrumb severity**, naming both consequences: which binding kept
+    its previous value, and how many statements were not executed.
+
+  `x = e ^ { … }` suppresses all three — the recovery was requested, so nothing is being done on
+  the user's behalf.
+- **V6: the `for` skip target is the iteration body, not the loop.** Per-item skip keeps the
+  batch running; the loop's *result* is `(T | error)[]`, Item-lane per TE-17. Body native, result
+  boxed.
 - **Acceptor set** = destinations whose contract admits error (§5.2), plus the engagement forms:
   `or`-left operands, `^ { }` handlers, postfix `^`, `match`/`is` scrutinee positions, positions
   typed `any` / `error` / `T | error` / `T^`, and unannotated bindings. **The smallest enclosing
   *observed* block is the destination of last resort** — see §8.1, this is not yet safe as
   stated. The fn body is the outermost block, so an uncontained defect becomes the function's
   result on §7.3's unenumerated system channel.
-- **Sequence-point semantics.** Origination stops evaluation of the containing expression;
-  operands and effects to its right never run. Vacuous inside `fn`, meaningful inside `pn`.
-  **Corollary to document at implementation time: strict left-to-right evaluation order becomes
-  normative**, not incidental.
-- **Routing vs contagion.** Boxed paths may keep value contagion ("error in, error out", already
-  implemented in the helpers) wherever it is unobservable — i.e. pure `fn` code. `pn` bodies must
-  emit control routing so the two agree on which effects ran. The test target is the equivalence
-  itself (§9 invariant 1).
+- **Sequence points — TE-18 retires rev 1's ruling.** Because expression interiors no longer
+  skip, effects to the right of an error-valued operand **run normally**. Rev 1 made "strict
+  left-to-right evaluation order becomes normative" a corollary; that was forced by interior
+  skip and no longer follows. Evaluation order returns to an ordinary design choice.
+- **Routing vs contagion — largely dissolved.** Expressions use contagion in both `fn` and `pn`,
+  so there are no longer two lowerings that must be proven to agree on which effects ran.
+  Routing exists only at declaration boundaries, where the region is the same in both. §9
+  invariant 1 narrows to those boundaries accordingly.
 - **Cross-function.** Interior routing reaching the outermost region becomes an error return; the
   *call site* is then an origination site in the caller. Boxed-returning calls carry the error in
   the result Item; native-returning calls use the existing context error lane
@@ -362,7 +405,7 @@ new/renamed `*.ls` keeps its `*.txt` golden in step.
 
 ## 8. Open before P1 completes
 
-### 8.1 Statement-position defects in `pn` — blocking P5
+### 8.1 Statement-position defects in `pn` — CLOSED 2026-08-06 by TE-18 case 8
 
 A failed reassignment whose block value is discarded must not evaporate leaving a stale binding
 (`acc = acc + x` in a loop). **"The smallest enclosing block" is not always a safe destination:
@@ -374,16 +417,92 @@ destination; if none exists, exit through the function's implicit defect channel
 this "raise-channel escalation"** — that would convert a defect into a user-raised error and
 contradict TE-16's acknowledgment taxonomy.
 
-TE-17 closes part of this already: a native-lane store is an origination site, never a
-destination, so `arr[i] = f(x)` on `int[]` cannot evaporate — it is a compile-time obligation.
-The residue is the discarded-result *block* case. **Undecided.**
+Two later decisions have shrunk this considerably. TE-17: a native-lane store is an origination
+site, never a destination, so `arr[i] = f(x)` on `int[]` cannot evaporate — it is a compile-time
+obligation. TE-18/V3: reassignment to a declared binding is declaration-shaped, so it guards and
+skips to the enclosing block with the old value retained, rather than leaving a stale binding
+silently.
 
-### 8.2 Handler-protected `await` — blocking P3
+**Resolved by TE-18 case 8.** The skip destination is the end of the block that **declares** the
+binding whose establishment or assignment failed — not the innermost enclosing block. Control
+structures (`while`, `if`, plain blocks, `for_stam`) create no regions; only declarations do.
 
-`local_fault_safe` exists precisely because a recovery frame must not span an async suspension.
-Either the handler inherits that restriction (simplest; `e ^ { … }` over an `await`-containing
-expression is a compile error) or fault recovery must be represented across task polls. **
-Undecided** — the first option is recommended and should be confirmed.
+`acc = acc + f(x)` inside a loop, with `var acc` declared in the fn body, therefore skips to the
+end of the *fn body* — exiting the loop, at an observed position, with the stale binding out of
+scope and one runtime report instead of n. A `let` declared *inside* the iteration body skips to
+the end of that body and the loop continues, so the batch idiom and V6 are untouched. **The
+liveness analysis proposed in rev 2 is withdrawn**: where a binding is declared already encodes
+whether it is carried across iterations.
+
+**Sub-cases S1–S3, decided 2026-08-06** (TE-18):
+
+- **S1, element/field stores.** No binding is assigned, and a partially-mutated container is not
+  scoped away by block exit — it may be aliased or passed in, so scope exit cannot restore the
+  pre-failure state. **Report** using case 7's three tiers and leave the container in a
+  documented partial state; the skip alone does not carry the truth here. TE-17 narrows the
+  runtime case to `any`-sourced and unproven-callee stores.
+- **S2, module-level `var`.** The declaring block is the module body, so a failed reassignment
+  aborts module initialization. Deliberate: a module with half-established top-level state must
+  not become importable.
+- **S3, cross-frame reassignment** from a closure to an outer-frame `var`. Becomes an error
+  return from the inner function plus a call-site origination in the caller, which re-applies the
+  rule in its own frame. Existing cross-function shape, no new mechanism — but the inner function
+  acquires a defect-capable return, so **`may_defect` must treat outer-frame reassignment as an
+  effect** (§5.3).
+
+### 8.2 Handler-protected `await` — DECIDED 2026-08-06: reject
+
+`e ^ { … }` over a possibly-suspending operand is a **compile error**, reusing the existing
+`MayAwaitScan`. A recovery frame's jump buffer records a context inside the current JIT
+activation, and `await` unwinds to the scheduler and resumes on a different frame — so the buffer
+would point at dead stack. This is the restriction `local_fault_safe` already imposes, made loud
+instead of silent (today it degrades quietly to value-error-only handling).
+
+Rejected: silently splitting the capability by operand shape. Follow-on (not now): segment the
+protected region at each `await` and arm one frame per segment, so no buffer crosses a poll —
+backward-compatible with code written under the rejection.
+
+### 8.4 `setjmp` inventory and hazards (surveyed 2026-08-06)
+
+The handler inherits `LambdaRecoveryFrame`, so the plan depends on that machinery being sound.
+Lambda's own `setjmp` users, excluding vendored code and tests:
+
+| Site | Purpose | Storage |
+|---|---|---|
+| `recovery_frame.h` + `lambda-stack.cpp` + `transpile-mir.cpp` | the language-level fault frame | **TLS** (`__thread lambda_recovery_frame_tls_top`) |
+| `sys_func_registry.c` | exports `sigsetjmp`/`setjmp` as a JIT-callable symbol | — |
+| `main.cpp` | batch harness: timeout, MIR error, crash | 3 × process-global |
+| `radiant/script_runner.cpp` | JS execution guard | 1 × process-global |
+| `radiant/cmd_layout.cpp` | layout crash guard | 1 × process-global |
+| `lib/image.c`, `radiant/render_{output,img,svg}.cpp` | libpng/libjpeg error paths | vendor-mandated, unrelated |
+
+- **H1 (blocking, pre-P1). Two SIGSEGV/SIGBUS regimes with no chaining.**
+  `install_signal_handler` in `lambda-stack.cpp` calls `sigaction(SIGSEGV/SIGBUS, …, NULL)` —
+  third argument NULL, so it neither saves nor forwards to a prior handler. Batch mode in
+  `main.cpp` installs its own crash handler for the same signals and *does* save and restore
+  them. Last installer wins, and nothing chains, so one regime silently disables the other.
+  Whether a stack overflow in JIT code lands in the armed `LambdaRecoveryFrame` (language-level
+  recovery) or in `batch_crash_jmp` (harness) depends on install order. **Consequence for this
+  plan: `^ { }` fault capture may behave differently under `make test` batch mode than
+  standalone.** Both also install their own `sigaltstack`, the second replacing the first. Fix
+  before writing the §9 fault-capture tests, or they will not mean what they appear to.
+- **H2 (latent). Process-global jump buffers vs the TLS design.** The recovery frame is correctly
+  `__thread`; `js_exec_jmpbuf`, `layout_crash_jmpbuf`, and `main.cpp`'s three are plain `static`.
+  Single-threaded today, but under the concurrency work (RC1–RC8 isolates, JT1–JT7 JS threading)
+  two threads in guarded execution would clobber each other and longjmp into a dead frame.
+  Cheapest fix is `__thread`.
+- **H3 (fragility, test it).** Calling `setjmp` through an imported symbol is formally UB
+  (C11 7.13.1.1 restricts where it may appear). It works because `sigsetjmp` is a genuine
+  out-of-line function whose saved context is the *caller's* — the MIR activation, which is
+  exactly what is wanted, and the registry comment says so deliberately. Two fragilities: it
+  breaks wherever `setjmp` is a builtin or macro (the `__intrinsic_setjmpex` shim in `main.cpp`
+  suggests this already bit on MSVC), and **MIR must treat the call as returning twice** — any
+  local live across the checkpoint must be memory-backed or the second return reads a stale
+  register. Add an emission test for the second property; it is silent when wrong.
+- **H4 (perf, measure before P3).** `sigsetjmp(env, 1)` saves the signal mask, i.e. a
+  `sigprocmask` syscall per armed frame. Acceptable at today's `^err` frequency; if `^ { }`
+  becomes the primary error-handling form and arms frames routinely, this lands on a warm path.
+  Either audit whether `savemask=0` is safe inside protected regions, or arm lazily.
 
 ### 8.3 Non-blocking residue
 
