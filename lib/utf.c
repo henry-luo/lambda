@@ -213,6 +213,100 @@ int utf16_encode(uint32_t codepoint, uint16_t utf16[2]) {
     return 0; /* invalid codepoint */
 }
 
+int utf8_wtf8_encoded_len(const char* chars, int byte_len) {
+    if (!chars || byte_len <= 0) return 0;
+    int out_len = 0;
+    for (int i = 0; i < byte_len; ) {
+        unsigned char lead = (unsigned char)chars[i];
+        int cp_len = 1;
+        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
+        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
+        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
+
+        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
+            unsigned char second = (unsigned char)chars[i + 1];
+            bool high = second >= 0xA0 && second <= 0xAF;
+            bool low = second >= 0xB0 && second <= 0xBF;
+            if (high) {
+                int next = i + 3;
+                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
+                    unsigned char next_second = (unsigned char)chars[next + 1];
+                    if (next_second >= 0xB0 && next_second <= 0xBF) {
+                        out_len += 4;
+                        i += 6;
+                        continue;
+                    }
+                }
+                out_len += 3;
+                i += 3;
+                continue;
+            }
+            if (low) {
+                out_len += 3;
+                i += 3;
+                continue;
+            }
+        }
+
+        out_len += cp_len;
+        i += cp_len;
+    }
+    return out_len;
+}
+
+void utf8_wtf8_encode(const char* chars, int byte_len, uint8_t* out) {
+    if (!chars || byte_len <= 0 || !out) return;
+    int out_pos = 0;
+    for (int i = 0; i < byte_len; ) {
+        unsigned char lead = (unsigned char)chars[i];
+        int cp_len = 1;
+        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
+        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
+        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
+
+        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
+            unsigned char second = (unsigned char)chars[i + 1];
+            bool high = second >= 0xA0 && second <= 0xAF;
+            bool low = second >= 0xB0 && second <= 0xBF;
+            if (high) {
+                int next = i + 3;
+                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
+                    unsigned char next_second = (unsigned char)chars[next + 1];
+                    if (next_second >= 0xB0 && next_second <= 0xBF) {
+                        uint16_t hi = (uint16_t)(((uint16_t)((unsigned char)chars[i] & 0x0F) << 12) |
+                            ((uint16_t)((unsigned char)chars[i + 1] & 0x3F) << 6) |
+                            (uint16_t)((unsigned char)chars[i + 2] & 0x3F));
+                        uint16_t lo = (uint16_t)(((uint16_t)((unsigned char)chars[next] & 0x0F) << 12) |
+                            ((uint16_t)((unsigned char)chars[next + 1] & 0x3F) << 6) |
+                            (uint16_t)((unsigned char)chars[next + 2] & 0x3F));
+                        uint32_t cp = utf16_decode_pair(hi, lo);
+                        char encoded[4];
+                        size_t n = utf8_encode(cp, encoded);
+                        for (size_t j = 0; j < n; j++) out[out_pos++] = (uint8_t)encoded[j];
+                        i += 6;
+                        continue;
+                    }
+                }
+                out[out_pos++] = 0xEF;
+                out[out_pos++] = 0xBF;
+                out[out_pos++] = 0xBD;
+                i += 3;
+                continue;
+            }
+            if (low) {
+                out[out_pos++] = 0xEF;
+                out[out_pos++] = 0xBF;
+                out[out_pos++] = 0xBD;
+                i += 3;
+                continue;
+            }
+        }
+
+        for (int j = 0; j < cp_len; j++) out[out_pos++] = (uint8_t)chars[i + j];
+        i += cp_len;
+    }
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  *  Codepoint Classification
  * ══════════════════════════════════════════════════════════════════════ */

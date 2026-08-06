@@ -213,105 +213,6 @@ static int buffer_utf8_codepoint_count(const char* str, int len) {
     return count;
 }
 
-static int buffer_utf8_encoded_len(const char* chars, int byte_len) {
-    int out_len = 0;
-    for (int i = 0; i < byte_len; ) {
-        unsigned char lead = (unsigned char)chars[i];
-        int cp_len = 1;
-        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
-        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
-        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
-
-        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
-            unsigned char second = (unsigned char)chars[i + 1];
-            bool high = second >= 0xA0 && second <= 0xAF;
-            bool low = second >= 0xB0 && second <= 0xBF;
-            if (high) {
-                int next = i + 3;
-                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
-                    unsigned char next_second = (unsigned char)chars[next + 1];
-                    if (next_second >= 0xB0 && next_second <= 0xBF) {
-                        out_len += 4;
-                        i += 6;
-                        continue;
-                    }
-                }
-                out_len += 3;
-                i += 3;
-                continue;
-            }
-            if (low) {
-                out_len += 3;
-                i += 3;
-                continue;
-            }
-        }
-
-        out_len += cp_len;
-        i += cp_len;
-    }
-    return out_len;
-}
-
-static uint16_t buffer_decode_wtf8_unit(const char* chars, int pos) {
-    unsigned char b0 = (unsigned char)chars[pos];
-    unsigned char b1 = (unsigned char)chars[pos + 1];
-    unsigned char b2 = (unsigned char)chars[pos + 2];
-    return (uint16_t)(((uint16_t)(b0 & 0x0F) << 12) |
-                      ((uint16_t)(b1 & 0x3F) << 6) |
-                      (uint16_t)(b2 & 0x3F));
-}
-
-static void buffer_write_replacement(uint8_t* out, int* pos) {
-    out[(*pos)++] = 0xEF;
-    out[(*pos)++] = 0xBF;
-    out[(*pos)++] = 0xBD;
-}
-
-static void buffer_write_utf8_encoded(const char* chars, int byte_len, uint8_t* out) {
-    int out_pos = 0;
-    for (int i = 0; i < byte_len; ) {
-        unsigned char lead = (unsigned char)chars[i];
-        int cp_len = 1;
-        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
-        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
-        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
-
-        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
-            unsigned char second = (unsigned char)chars[i + 1];
-            bool high = second >= 0xA0 && second <= 0xAF;
-            bool low = second >= 0xB0 && second <= 0xBF;
-            if (high) {
-                int next = i + 3;
-                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
-                    unsigned char next_second = (unsigned char)chars[next + 1];
-                    if (next_second >= 0xB0 && next_second <= 0xBF) {
-                        uint16_t hi = buffer_decode_wtf8_unit(chars, i);
-                        uint16_t lo = buffer_decode_wtf8_unit(chars, next);
-                        uint32_t cp = utf16_decode_pair(hi, lo);
-                        char encoded[4];
-                        size_t n = utf8_encode(cp, encoded);
-                        for (size_t j = 0; j < n; j++) out[out_pos++] = (uint8_t)encoded[j];
-                        i += 6;
-                        continue;
-                    }
-                }
-                buffer_write_replacement(out, &out_pos);
-                i += 3;
-                continue;
-            }
-            if (low) {
-                buffer_write_replacement(out, &out_pos);
-                i += 3;
-                continue;
-            }
-        }
-
-        for (int j = 0; j < cp_len; j++) out[out_pos++] = (uint8_t)chars[i + j];
-        i += cp_len;
-    }
-}
-
 // Helper: format "Received type <type> (<value>)" suffix for ERR_INVALID_ARG_TYPE errors
 static int format_received_suffix(char* buf, int buf_size, Item value) {
     TypeId tid = get_type_id(value);
@@ -638,12 +539,12 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
             if (bdata && s->len > 0) memcpy(bdata, s->chars, (size_t)buf_byte_len);
             return buf;
         }
-        int byte_len = buffer_utf8_encoded_len(s->chars, (int)s->len);
+        int byte_len = utf8_wtf8_encoded_len(s->chars, (int)s->len);
         Item buf = create_buffer(byte_len);
         int buf_byte_len = 0;
         uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
         if (bdata && byte_len > 0) {
-            buffer_write_utf8_encoded(s->chars, (int)s->len, bdata);
+            utf8_wtf8_encode(s->chars, (int)s->len, bdata);
         }
         return buf;
     }
@@ -1110,7 +1011,7 @@ extern "C" Item js_buffer_byteLength(Item str_item, Item enc_item) {
             return (Item){.item = i2it(utf8_codepoint_count(s->chars, (int)s->len) * 2)};
         }
         // utf8 (default, or unrecognized encoding)
-        return (Item){.item = i2it((int64_t)buffer_utf8_encoded_len(s->chars, (int)s->len))};
+        return (Item){.item = i2it((int64_t)utf8_wtf8_encoded_len(s->chars, (int)s->len))};
     }
     if (js_is_typed_array(str_item)) {
         int blen = 0;
@@ -1666,6 +1567,37 @@ static bool is_ucs2_enc(const char* enc) {
            strcmp(enc, "utf16le") == 0 || strcmp(enc, "utf-16le") == 0;
 }
 
+static bool buffer_prepare_search_needle(Item value, Item enc_item, char* enc,
+        size_t enc_size, uint8_t* enc_buf, int enc_buf_size,
+        const uint8_t** needle, int* needle_len, Item* error_result) {
+    *needle = NULL;
+    *needle_len = 0;
+    *error_result = (Item){.item = ITEM_NULL};
+    strcpy(enc, "utf8");
+    if (normalize_encoding(enc_item, enc, enc_size) && !is_known_encoding(enc)) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc);
+        *error_result = js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
+        return false;
+    }
+    if (get_type_id(value) == LMD_TYPE_STRING) {
+        String* s = it2s(value);
+        if (strcmp(enc, "utf8") == 0 || strcmp(enc, "utf-8") == 0) {
+            *needle = (const uint8_t*)s->chars;
+            *needle_len = (int)s->len;
+        } else {
+            *needle_len = encode_string_bytes(s->chars, (int)s->len, enc,
+                enc_buf, enc_buf_size);
+            *needle = enc_buf;
+        }
+    } else if (js_is_typed_array(value)) {
+        int value_len = 0;
+        *needle = buffer_data(value, &value_len);
+        *needle_len = value_len;
+    }
+    return true;
+}
+
 extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item enc_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
@@ -1702,33 +1634,15 @@ extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item e
         return (Item){.item = i2it(-1)};
     }
 
-    // resolve encoding
-    char enc[32] = "utf8";
-    if (normalize_encoding(enc_item, enc, sizeof(enc)) && !is_known_encoding(enc)) {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc);
-        return js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
-    }
-
     // search for string value
+    char enc[32];
+    Item search_error;
     const uint8_t* needle = NULL;
     int needle_len = 0;
     uint8_t enc_buf[4096]; // stack buffer for encoded needle
-
-    if (vtid == LMD_TYPE_STRING) {
-        String* s = it2s(value);
-        if (strcmp(enc, "utf8") == 0 || strcmp(enc, "utf-8") == 0) {
-            needle = (const uint8_t*)s->chars;
-            needle_len = (int)s->len;
-        } else {
-            needle_len = encode_string_bytes(s->chars, (int)s->len, enc,
-                                             enc_buf, (int)sizeof(enc_buf));
-            needle = enc_buf;
-        }
-    } else if (js_is_typed_array(value)) {
-        int vlen = 0;
-        needle = buffer_data(value, &vlen);
-        needle_len = vlen;
+    if (!buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
+            enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error)) {
+        return search_error;
     }
     if (!needle) return (Item){.item = i2it(-1)};
 
@@ -1853,33 +1767,15 @@ extern "C" Item js_buffer_lastIndexOf(Item buf, Item value, Item offset_item, It
         return (Item){.item = i2it(-1)};
     }
 
-    // resolve encoding
-    char enc[32] = "utf8";
-    if (normalize_encoding(enc_item, enc, sizeof(enc)) && !is_known_encoding(enc)) {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc);
-        return js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
-    }
-
     // search for string or buffer value
+    char enc[32];
+    Item search_error;
     const uint8_t* needle = NULL;
     int needle_len = 0;
     uint8_t enc_buf[4096];
-
-    if (get_type_id(value) == LMD_TYPE_STRING) {
-        String* s = it2s(value);
-        if (strcmp(enc, "utf8") == 0 || strcmp(enc, "utf-8") == 0) {
-            needle = (const uint8_t*)s->chars;
-            needle_len = (int)s->len;
-        } else {
-            needle_len = encode_string_bytes(s->chars, (int)s->len, enc,
-                                             enc_buf, (int)sizeof(enc_buf));
-            needle = enc_buf;
-        }
-    } else if (js_is_typed_array(value)) {
-        int vlen = 0;
-        needle = buffer_data(value, &vlen);
-        needle_len = vlen;
+    if (!buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
+            enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error)) {
+        return search_error;
     }
     if (!needle) return (Item){.item = i2it(-1)};
 

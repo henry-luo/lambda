@@ -203,6 +203,10 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->em.ctx = ctx;
     mt->em.name_pool = tp ? tp->name_pool : NULL;
     mt->em.note_mir_call = js_exec_profile_note_mir_call;
+#if JS_EXEC_PROFILE_ENABLED
+    // profile builds also rank helpers by dynamic call count (env-gated at emit)
+    mt->em.helper_call_counter = js_exec_profile_helper_call_counter;
+#endif
     mt->em.call_owner = mt;
     mt->em.root_call_value = js_call_root_value;
     mt->em.note_call_exception = jm_note_call_exception;

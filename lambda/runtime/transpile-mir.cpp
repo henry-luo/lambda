@@ -1059,6 +1059,19 @@ static MIR_reg_t emit_null_item_reg(MirTranspiler* mt) {
 #define emit_call_5(mt, fn, ret, ...) em_call_5(&(mt)->em, fn, ret, __VA_ARGS__, false)
 #define emit_call_8(mt, fn, ret, ...) em_call_8(&(mt)->em, fn, ret, __VA_ARGS__, false)
 #define emit_call_void_1(mt, fn, ...) em_call_void_1(&(mt)->em, fn, __VA_ARGS__, false)
+
+static void emit_mir_function_abi_markers(MirTranspiler* mt, MIR_reg_t fn_obj,
+        bool uses_wrapper, bool is_proc) {
+    if (!uses_wrapper) return;
+    emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
+        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+    emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
+        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+    emit_call_void_1(mt,
+        is_proc ? "lambda_function_mark_lambda_boxed_procedure"
+                : "lambda_function_mark_lambda_boxed_function",
+        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+}
 #define emit_call_void_2(mt, fn, ...) em_call_void_2(&(mt)->em, fn, __VA_ARGS__, false)
 #define emit_call_void_3(mt, fn, ...) em_call_void_3(&(mt)->em, fn, __VA_ARGS__, false)
 #define emit_call_void_4(mt, fn, ...) em_call_void_4(&(mt)->em, fn, __VA_ARGS__, false)
@@ -4750,17 +4763,8 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
                         MIR_new_int_op(mt->ctx, cap_count)));
-                    if (uses_wrapper) {
-                        emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                        emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                        emit_call_void_1(mt,
-                            fn_node->node_type == AST_NODE_PROC
-                                ? "lambda_function_mark_lambda_boxed_procedure"
-                                : "lambda_function_mark_lambda_boxed_function",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    }
+                    emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
+                        fn_node->node_type == AST_NODE_PROC);
                     mir_attach_function_type(mt, fn_obj, fn_node);
 
                     return fn_obj;
@@ -4779,17 +4783,8 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                             MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
                             MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
                     }
-                    if (uses_wrapper) {
-                        emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                        emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                        emit_call_void_1(mt,
-                            fn_node->node_type == AST_NODE_PROC
-                                ? "lambda_function_mark_lambda_boxed_procedure"
-                                : "lambda_function_mark_lambda_boxed_function",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    }
+                    emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
+                        fn_node->node_type == AST_NODE_PROC);
                     mir_attach_function_type(mt, fn_obj, fn_node);
 
                     strbuf_free(nm_buf);
@@ -7682,6 +7677,65 @@ static MIR_reg_t mir_finalize_for_output(MirTranspiler* mt, AstForNode* for_node
     return final_reg;
 }
 
+static void mir_emit_for_let_clause(MirTranspiler* mt, AstForNode* for_node) {
+    if (!for_node->let_clause) return;
+    AstNode* lc = for_node->let_clause;
+    while (lc) {
+        AstNamedNode* let_node = (AstNamedNode*)lc;
+        if (let_node->as) {
+            MIR_reg_t val = transpile_expr(mt, let_node->as);
+            char lc_name[128];
+            snprintf(lc_name, sizeof(lc_name), "%.*s",
+                (int)let_node->name->len, let_node->name->chars);
+            TypeId lc_tid = get_effective_type(mt, let_node->as);
+            MIR_type_t lc_mtype = type_to_mir(lc_tid);
+            set_var(mt, lc_name, val, lc_mtype, lc_tid);
+        }
+        lc = lc->next;
+    }
+}
+
+static void mir_emit_for_where_clause(MirTranspiler* mt, AstForNode* for_node,
+        MIR_label_t continue_label) {
+    if (!for_node->where) return;
+    MIR_reg_t where_val = transpile_expr(mt, for_node->where);
+    TypeId where_tid = get_effective_type(mt, for_node->where);
+    MIR_reg_t where_test = where_val;
+    if (where_tid != LMD_TYPE_BOOL) {
+        MIR_reg_t boxw = emit_box(mt, where_val, where_tid);
+        where_test = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxw)));
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, continue_label),
+        MIR_new_reg_op(mt->ctx, where_test)));
+}
+
+static void mir_emit_for_body_and_order(MirTranspiler* mt, AstForNode* for_node,
+        MIR_reg_t output, MIR_reg_t keys_arr, bool result_demanded) {
+    MIR_reg_t body_result = transpile_expr(mt, for_node->then);
+    if (result_demanded) {
+        TypeId body_tid = get_effective_type(mt, for_node->then);
+        MIR_reg_t boxed_result = body_result ? emit_box(mt, body_result, body_tid)
+            : emit_null_item_reg(mt);
+        emit_call_void_2(mt, "array_push_spread", MIR_T_P,
+            MIR_new_reg_op(mt->ctx, output),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_result));
+    }
+
+    if (for_node->order) {
+        AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
+        MIR_reg_t key_val = transpile_expr(mt, first_spec->expr);
+        if (result_demanded) {
+            TypeId key_tid = get_effective_type(mt, first_spec->expr);
+            MIR_reg_t boxed_key = emit_box(mt, key_val, key_tid);
+            emit_call_void_2(mt, "array_push", MIR_T_P,
+                MIR_new_reg_op(mt->ctx, keys_arr),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
+        }
+    }
+}
+
 static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node,
         AstLoopNode* first, bool result_demanded) {
     if (!mir_validate_join_sources(first)) {
@@ -7794,54 +7848,9 @@ static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
     mir_join_bind_tuple_vars(mt, first, NULL, tuple_item);
 
-    if (for_node->let_clause) {
-        AstNode* lc = for_node->let_clause;
-        while (lc) {
-            AstNamedNode* let_node = (AstNamedNode*)lc;
-            if (let_node->as) {
-                MIR_reg_t val = transpile_expr(mt, let_node->as);
-                char lc_name[128];
-                snprintf(lc_name, sizeof(lc_name), "%.*s", (int)let_node->name->len, let_node->name->chars);
-                TypeId lc_tid = get_effective_type(mt, let_node->as);
-                MIR_type_t lc_mtype = type_to_mir(lc_tid);
-                set_var(mt, lc_name, val, lc_mtype, lc_tid);
-            }
-            lc = lc->next;
-        }
-    }
-
-    if (for_node->where) {
-        MIR_reg_t where_val = transpile_expr(mt, for_node->where);
-        TypeId where_tid = get_effective_type(mt, for_node->where);
-        MIR_reg_t where_test = where_val;
-        if (where_tid != LMD_TYPE_BOOL) {
-            MIR_reg_t boxw = emit_box(mt, where_val, where_tid);
-            where_test = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxw)));
-        }
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_continue),
-            MIR_new_reg_op(mt->ctx, where_test)));
-    }
-
-    MIR_reg_t body_result = transpile_expr(mt, for_node->then);
-    if (result_demanded) {
-        TypeId body_tid = get_effective_type(mt, for_node->then);
-        MIR_reg_t boxed_result = body_result ? emit_box(mt, body_result, body_tid)
-            : emit_null_item_reg(mt);
-        emit_call_void_2(mt, "array_push_spread", MIR_T_P, MIR_new_reg_op(mt->ctx, output),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_result));
-    }
-
-    if (has_order) {
-        AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-        MIR_reg_t key_val = transpile_expr(mt, first_spec->expr);
-        TypeId key_tid = get_effective_type(mt, first_spec->expr);
-        if (result_demanded) {
-            MIR_reg_t boxed_key = emit_box(mt, key_val, key_tid);
-            emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, keys_arr),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
-        }
-    }
+    mir_emit_for_let_clause(mt, for_node);
+    mir_emit_for_where_clause(mt, for_node, l_continue);
+    mir_emit_for_body_and_order(mt, for_node, output, keys_arr, result_demanded);
 
     emit_label(mt, l_continue);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, idx),
@@ -8096,47 +8105,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
             return emit_null_item_reg(mt);
         }
 
-        MIR_reg_t final_reg;
-        if (has_order) {
-            AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-            emit_call_void_3(mt, "fn_sort_by_keys",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, output),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, keys_arr),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, first_spec->descending ? 1 : 0));
-        }
-        if (has_order && (has_offset || has_limit)) {
-            if (has_offset) {
-                MIR_reg_t off_raw = emit_machine_count(mt, for_node->offset);
-                emit_call_void_2(mt, "array_drop_inplace", MIR_T_P, MIR_new_reg_op(mt->ctx, output),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, off_raw));
-            }
-            if (has_limit) {
-                MIR_reg_t lim_raw = emit_machine_count(mt, for_node->limit);
-                emit_call_void_2(mt, for_node->limit_from_end ? "array_limit_last_inplace" : "array_limit_inplace",
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, output),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, lim_raw));
-            }
-            final_reg = emit_call_1(mt, "array_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, output));
-        } else if (has_offset || has_limit) {
-            MIR_reg_t cur_result = emit_box_container(mt, output);
-            if (has_offset) {
-                MIR_reg_t off_val = transpile_expr(mt, for_node->offset);
-                TypeId off_tid = get_effective_type(mt, for_node->offset);
-                cur_result = emit_call_2(mt, "fn_drop", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_result),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box(mt, off_val, off_tid)));
-            }
-            if (has_limit) {
-                MIR_reg_t lim_val = transpile_expr(mt, for_node->limit);
-                TypeId lim_tid = get_effective_type(mt, for_node->limit);
-                cur_result = emit_call_2(mt, for_node->limit_from_end ? "fn_take_last" : "fn_take", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_result),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box(mt, lim_val, lim_tid)));
-            }
-            final_reg = cur_result;
-        } else {
-            final_reg = emit_call_1(mt, "array_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, output));
-        }
+        MIR_reg_t final_reg = mir_finalize_for_output(mt, for_node, output, keys_arr);
         pop_scope(mt);
         return final_reg;
     }
@@ -8397,69 +8366,9 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
     MIR_label_t innermost_continue = (nested_count > 0)
         ? nested_loops[nested_count - 1].ncont : l_continue;
 
-    // Process let clauses (additional variable bindings)
-    if (for_node->let_clause) {
-        AstNode* lc = for_node->let_clause;
-        while (lc) {
-            AstNamedNode* let_node = (AstNamedNode*)lc;
-            if (let_node->as) {
-                MIR_reg_t val = transpile_expr(mt, let_node->as);
-                char lc_name[128];
-                snprintf(lc_name, sizeof(lc_name), "%.*s", (int)let_node->name->len, let_node->name->chars);
-                // for-let values may be boxed by numeric overflow-safe helpers;
-                // track the emitted representation so later uses do not unbox the wrong shape.
-                TypeId lc_tid = get_effective_type(mt, let_node->as);
-                MIR_type_t lc_mtype = type_to_mir(lc_tid);
-                set_var(mt, lc_name, val, lc_mtype, lc_tid);
-            }
-            lc = lc->next;
-        }
-    }
-
-    // Where clause — skip to innermost continue on failure
-    if (for_node->where) {
-        MIR_reg_t where_val = transpile_expr(mt, for_node->where);
-        TypeId where_tid = get_effective_type(mt, for_node->where);
-        MIR_reg_t where_test = where_val;
-        if (where_tid != LMD_TYPE_BOOL) {
-            MIR_reg_t boxw = emit_box(mt, where_val, where_tid);
-            where_test = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxw)));
-        }
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, innermost_continue),
-            MIR_new_reg_op(mt->ctx, where_test)));
-    }
-
-    // Body expression
-    MIR_reg_t body_result = transpile_expr(mt, for_node->then);
-    TypeId body_tid = get_effective_type(mt, for_node->then);
-    if (result_demanded) {
-        // A pure-statement body returns no register; only the value-producing
-        // path needs a null placeholder for spread collection.
-        MIR_reg_t boxed_result;
-        if (body_result == 0) {
-            boxed_result = new_reg(mt, "for_void_null", MIR_T_I64);
-            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, boxed_result),
-                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-        } else {
-            boxed_result = emit_box(mt, body_result, body_tid);
-        }
-        emit_call_void_2(mt, "array_push_spread", MIR_T_P, MIR_new_reg_op(mt->ctx, output),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_result));
-    }
-
-    // If order by is present, also push the sort key value
-    if (has_order) {
-        AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-        MIR_reg_t key_val = transpile_expr(mt, first_spec->expr);
-        if (result_demanded) {
-            TypeId key_tid = get_effective_type(mt, first_spec->expr);
-            MIR_reg_t boxed_key = emit_box(mt, key_val, key_tid);
-            emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, keys_arr),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
-        }
-    }
+    mir_emit_for_let_clause(mt, for_node);
+    mir_emit_for_where_clause(mt, for_node, innermost_continue);
+    mir_emit_for_body_and_order(mt, for_node, output, keys_arr, result_demanded);
 
     // Close nested loops (in reverse order, innermost first)
     for (int ni = nested_count - 1; ni >= 0; ni--) {
@@ -12543,6 +12452,37 @@ static void emit_array_num_elem_guard(MirTranspiler* mt, MIR_reg_t arr_ptr,
         MIR_new_reg_op(mt->ctx, elem_byte), MIR_new_int_op(mt->ctx, expected_elem)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_bail),
         MIR_new_reg_op(mt->ctx, elem_ok)));
+}
+
+static void emit_array_num_bounds_check(MirTranspiler* mt, MIR_reg_t arr_ptr,
+        MIR_reg_t idx_int, MIR_label_t oob_label) {
+    MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
+    MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
+        MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 0)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, oob_label),
+        MIR_new_reg_op(mt->ctx, neg_check)));
+    MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
+        MIR_new_reg_op(mt->ctx, idx_int), MIR_new_reg_op(mt->ctx, arr_len)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, oob_label),
+        MIR_new_reg_op(mt->ctx, ge_check)));
+}
+
+static MIR_reg_t emit_array_num_element_address(MirTranspiler* mt,
+        MIR_reg_t arr_ptr, MIR_reg_t idx_int) {
+    MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
+    MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
+        MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 3)));
+    MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
+        MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+    return elem_addr;
 }
 
 static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
@@ -17023,21 +16963,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             }
 
             // Bounds check
-            MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-            MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-                MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 0)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                MIR_new_reg_op(mt->ctx, neg_check)));
-
-            MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-                MIR_new_reg_op(mt->ctx, idx_int), MIR_new_reg_op(mt->ctx, arr_len)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                MIR_new_reg_op(mt->ctx, ge_check)));
+            emit_array_num_bounds_check(mt, arr_ptr, idx_int, l_oob);
 
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
 
@@ -17066,17 +16992,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             // that D1 needed is gone.
             emit_label(mt, l_ok);
             {
-                MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-                MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-                    MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 3)));
-
-                MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+                MIR_reg_t elem_addr = emit_array_num_element_address(mt, arr_ptr, idx_int);
 
                 // The element lane is fixed by the array's storage, not by the
                 // value's static type, so the value is coerced into the int
@@ -17148,33 +17064,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_slow),
                     MIR_new_reg_op(mt->ctx, is_raw_int)));
 
-                MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-                MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-                    MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 0)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                    MIR_new_reg_op(mt->ctx, neg_check)));
-
-                MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-                    MIR_new_reg_op(mt->ctx, idx_int), MIR_new_reg_op(mt->ctx, arr_len)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                    MIR_new_reg_op(mt->ctx, ge_check)));
-
-                MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-                MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-                    MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 3)));
-
-                MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+                emit_array_num_bounds_check(mt, arr_ptr, idx_int, l_oob);
+                MIR_reg_t elem_addr = emit_array_num_element_address(mt, arr_ptr, idx_int);
 
                 // The guard above admits only ELEM_INT64, a machine-word
                 // array, so an `int` value leaves its double lane here.
@@ -17243,21 +17134,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 MIR_new_reg_op(mt->ctx, fview)));
 
             // Bounds check
-            MIR_reg_t arr_len = new_reg(mt, "aflen", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-            MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-                MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 0)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                MIR_new_reg_op(mt->ctx, neg_check)));
-
-            MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-                MIR_new_reg_op(mt->ctx, idx_int), MIR_new_reg_op(mt->ctx, arr_len)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                MIR_new_reg_op(mt->ctx, ge_check)));
+            emit_array_num_bounds_check(mt, arr_ptr, idx_int, l_oob);
 
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
 
@@ -17284,17 +17161,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             // In bounds: direct store items[idx] = double_val
             emit_label(mt, l_ok);
             {
-                MIR_reg_t items_ptr = new_reg(mt, "fitms", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-                MIR_reg_t byte_off = new_reg(mt, "fboff", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-                    MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 3)));
-
-                MIR_reg_t elem_addr = new_reg(mt, "feadr", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+                MIR_reg_t elem_addr = emit_array_num_element_address(mt, arr_ptr, idx_int);
 
                 // Store native double directly
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
@@ -18137,17 +18004,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
                     MIR_new_int_op(mt->ctx, cap_count)));
-                if (uses_wrapper) {
-                    emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    emit_call_void_1(mt,
-                        fn_node->node_type == AST_NODE_PROC
-                            ? "lambda_function_mark_lambda_boxed_procedure"
-                            : "lambda_function_mark_lambda_boxed_function",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                }
+                emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
+                    fn_node->node_type == AST_NODE_PROC);
                 mir_attach_function_type(mt, fn_obj, fn_node);
 
                 return fn_obj;
@@ -18166,17 +18024,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
                 }
-                if (uses_wrapper) {
-                    emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    emit_call_void_1(mt,
-                        fn_node->node_type == AST_NODE_PROC
-                            ? "lambda_function_mark_lambda_boxed_procedure"
-                            : "lambda_function_mark_lambda_boxed_function",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                }
+                emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
+                    fn_node->node_type == AST_NODE_PROC);
                 mir_attach_function_type(mt, fn_obj, fn_node);
 
                 strbuf_free(name_buf);

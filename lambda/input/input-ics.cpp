@@ -36,6 +36,19 @@ static void normalize_property_name(char* name) {
     str_upper_inplace(name, strlen(name));
 }
 
+static bool parse_datetime_component(InputContext& ctx, Map* dt_map, const char** ptr,
+                                     int digit_count, const char* key_name) {
+    stringbuf_reset(ctx.sb);
+    for (int i = 0; i < digit_count; i++) {
+        if (!str_char_is_digit(**ptr)) return false;
+        stringbuf_append_char(ctx.sb, *(*ptr)++);
+    }
+    String* value = stringbuf_to_string(ctx.sb);
+    String* key = ctx.builder.createName(key_name);
+    ctx.builder.putToMap(lam::gc_borrow(dt_map), key, {.item = s2it(value)});
+    return true;
+}
+
 // Helper function to parse date-time values
 static Map* parse_datetime(InputContext& ctx, const char* value) {
     Input* input = ctx.input();
@@ -49,102 +62,29 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
     // Parse various date-time formats
     // Format: YYYYMMDD, YYYYMMDDTHHMMSS, YYYYMMDDTHHMMSSZ
     const char* ptr = value;
-    StringBuf* sb = ctx.sb;
 
     // Parse year (4 digits)
     if (strlen(ptr) >= 8) {
-        stringbuf_reset(sb);
-        for (int i = 0; i < 4; i++) {
-            if (str_char_is_digit(*ptr)) {
-                stringbuf_append_char(sb, *ptr++);
-            } else {
-                return dt_map; // Invalid format
-            }
-        }
-        if (sb->length > 0) {
-            String* year_str = stringbuf_to_string(sb);
-            String* year_key = builder.createName("year");
-            ctx.builder.putToMap(lam::gc_borrow(dt_map), year_key, {.item = s2it(year_str)});
-        }
+        if (!parse_datetime_component(ctx, dt_map, &ptr, 4, "year")) return dt_map;
 
         // Parse month (2 digits)
-        stringbuf_reset(sb);
-        for (int i = 0; i < 2; i++) {
-            if (str_char_is_digit(*ptr)) {
-                stringbuf_append_char(sb, *ptr++);
-            } else {
-                return dt_map;
-            }
-        }
-        if (sb->length > 0) {
-            String* month_str = stringbuf_to_string(sb);
-            String* month_key = builder.createName("month");
-            ctx.builder.putToMap(lam::gc_borrow(dt_map), month_key, {.item = s2it(month_str)});
-        }
+        if (!parse_datetime_component(ctx, dt_map, &ptr, 2, "month")) return dt_map;
 
         // Parse day (2 digits)
-        stringbuf_reset(sb);
-        for (int i = 0; i < 2; i++) {
-            if (str_char_is_digit(*ptr)) {
-                stringbuf_append_char(sb, *ptr++);
-            } else {
-                return dt_map;
-            }
-        }
-        if (sb->length > 0) {
-            String* day_str = stringbuf_to_string(sb);
-            String* day_key = builder.createName("day");
-            ctx.builder.putToMap(lam::gc_borrow(dt_map), day_key, {.item = s2it(day_str)});
-        }
+        if (!parse_datetime_component(ctx, dt_map, &ptr, 2, "day")) return dt_map;
 
         // Check for time part (T separator)
         if (*ptr == 'T' && strlen(ptr) >= 7) {
             ptr++; // skip 'T'
 
             // Parse hour (2 digits)
-            stringbuf_reset(sb);
-            for (int i = 0; i < 2; i++) {
-                if (str_char_is_digit(*ptr)) {
-                    stringbuf_append_char(sb, *ptr++);
-                } else {
-                    return dt_map;
-                }
-            }
-            if (sb->length > 0) {
-                String* hour_str = stringbuf_to_string(sb);
-                String* hour_key = builder.createName("hour");
-                ctx.builder.putToMap(lam::gc_borrow(dt_map), hour_key, {.item = s2it(hour_str)});
-            }
+            if (!parse_datetime_component(ctx, dt_map, &ptr, 2, "hour")) return dt_map;
 
             // Parse minute (2 digits)
-            stringbuf_reset(sb);
-            for (int i = 0; i < 2; i++) {
-                if (str_char_is_digit(*ptr)) {
-                    stringbuf_append_char(sb, *ptr++);
-                } else {
-                    return dt_map;
-                }
-            }
-            if (sb->length > 0) {
-                String* minute_str = stringbuf_to_string(sb);
-                String* minute_key = builder.createName("minute");
-                ctx.builder.putToMap(lam::gc_borrow(dt_map), minute_key, {.item = s2it(minute_str)});
-            }
+            if (!parse_datetime_component(ctx, dt_map, &ptr, 2, "minute")) return dt_map;
 
             // Parse second (2 digits)
-            stringbuf_reset(sb);
-            for (int i = 0; i < 2; i++) {
-                if (str_char_is_digit(*ptr)) {
-                    stringbuf_append_char(sb, *ptr++);
-                } else {
-                    return dt_map;
-                }
-            }
-            if (sb->length > 0) {
-                String* second_str = stringbuf_to_string(sb);
-                String* second_key = builder.createName("second");
-                ctx.builder.putToMap(lam::gc_borrow(dt_map), second_key, {.item = s2it(second_str)});
-            }
+            if (!parse_datetime_component(ctx, dt_map, &ptr, 2, "second")) return dt_map;
 
             // Check for timezone (Z for UTC)
             if (*ptr == 'Z') {

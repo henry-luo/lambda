@@ -1327,106 +1327,6 @@ static uint32_t crypto_next_utf8_codepoint(const char* str, int len, int* index)
     return ch;
 }
 
-static int crypto_utf8_encoded_len(const char* chars, int byte_len) {
-    int out_len = 0;
-    for (int i = 0; i < byte_len; ) {
-        unsigned char lead = (unsigned char)chars[i];
-        int cp_len = 1;
-        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
-        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
-        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
-
-        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
-            unsigned char second = (unsigned char)chars[i + 1];
-            bool high = second >= 0xA0 && second <= 0xAF;
-            bool low = second >= 0xB0 && second <= 0xBF;
-            if (high) {
-                int next = i + 3;
-                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
-                    unsigned char next_second = (unsigned char)chars[next + 1];
-                    if (next_second >= 0xB0 && next_second <= 0xBF) {
-                        out_len += 4;
-                        i += 6;
-                        continue;
-                    }
-                }
-                out_len += 3;
-                i += 3;
-                continue;
-            }
-            if (low) {
-                out_len += 3;
-                i += 3;
-                continue;
-            }
-        }
-
-        out_len += cp_len;
-        i += cp_len;
-    }
-    return out_len;
-}
-
-static uint16_t crypto_decode_wtf8_unit(const char* chars, int pos) {
-    unsigned char b0 = (unsigned char)chars[pos];
-    unsigned char b1 = (unsigned char)chars[pos + 1];
-    unsigned char b2 = (unsigned char)chars[pos + 2];
-    return (uint16_t)(((uint16_t)(b0 & 0x0F) << 12) |
-                      ((uint16_t)(b1 & 0x3F) << 6) |
-                      (uint16_t)(b2 & 0x3F));
-}
-
-static void crypto_write_replacement(uint8_t* out, int* pos) {
-    out[(*pos)++] = 0xEF;
-    out[(*pos)++] = 0xBF;
-    out[(*pos)++] = 0xBD;
-}
-
-static void crypto_write_utf8_encoded(const char* chars, int byte_len, uint8_t* out) {
-    int out_pos = 0;
-    for (int i = 0; i < byte_len; ) {
-        unsigned char lead = (unsigned char)chars[i];
-        int cp_len = 1;
-        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
-        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
-        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
-
-        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
-            unsigned char second = (unsigned char)chars[i + 1];
-            bool high = second >= 0xA0 && second <= 0xAF;
-            bool low = second >= 0xB0 && second <= 0xBF;
-            if (high) {
-                int next = i + 3;
-                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
-                    unsigned char next_second = (unsigned char)chars[next + 1];
-                    if (next_second >= 0xB0 && next_second <= 0xBF) {
-                        uint16_t hi = crypto_decode_wtf8_unit(chars, i);
-                        uint16_t lo = crypto_decode_wtf8_unit(chars, next);
-                        uint32_t cp = 0x10000 + (((uint32_t)hi - 0xD800) << 10) +
-                                      ((uint32_t)lo - 0xDC00);
-                        char encoded[4];
-                        size_t n = utf8_encode(cp, encoded);
-                        for (size_t j = 0; j < n; j++) out[out_pos++] = (uint8_t)encoded[j];
-                        i += 6;
-                        continue;
-                    }
-                }
-                crypto_write_replacement(out, &out_pos);
-                i += 3;
-                continue;
-            }
-            if (low) {
-                crypto_write_replacement(out, &out_pos);
-                i += 3;
-                continue;
-            }
-        }
-
-        for (int j = 0; j < cp_len; j++) out[out_pos++] = (uint8_t)chars[i + j];
-        i += cp_len;
-    }
-}
-
 static int crypto_utf8_codepoint_count(const char* str, int len) {
     int count = 0;
     int index = 0;
@@ -1446,10 +1346,10 @@ static bool crypto_string_bytes_for_encoding(String* s, const char* enc, bool ha
 
     if (!has_encoding || !enc || enc[0] == '\0' ||
         strcmp(enc, "utf8") == 0 || strcmp(enc, "utf-8") == 0) {
-        int byte_len = crypto_utf8_encoded_len(s->chars, (int)s->len);
+        int byte_len = utf8_wtf8_encoded_len(s->chars, (int)s->len);
         size_t alloc_len = byte_len > 0 ? (size_t)byte_len : 1;
         *out = (uint8_t*)mem_alloc(alloc_len, MEM_CAT_JS_RUNTIME);
-        if (byte_len > 0) crypto_write_utf8_encoded(s->chars, (int)s->len, *out);
+        if (byte_len > 0) utf8_wtf8_encode(s->chars, (int)s->len, *out);
         *out_len = byte_len;
         return true;
     }
@@ -5185,9 +5085,10 @@ static int crypto_openssl_dsa_signature_width(void* pkey) {
     return (divisor_bits + 7) / 8;
 }
 
-static void* crypto_openssl_dsa_parse_key(const uint8_t* key_bytes, int key_len,
-                                          bool prefer_private,
-                                          bool* out_private) {
+static void* crypto_openssl_parse_key_bytes(const uint8_t* key_bytes, int key_len,
+                                            bool prefer_private,
+                                            bool require_dsa_details,
+                                            bool* out_private) {
     if (out_private) *out_private = false;
     if (!key_bytes || key_len <= 0 || !crypto_openssl_dsa_load()) return NULL;
 
@@ -5238,15 +5139,25 @@ static void* crypto_openssl_dsa_parse_key(const uint8_t* key_bytes, int key_len,
         }
     }
 
-    int modulus_bits = 0;
-    int divisor_bits = 0;
-    if (!pkey || !crypto_openssl_dsa_key_details_from_pkey(pkey,
-            &modulus_bits, &divisor_bits)) {
-        if (pkey) b->pkey_free(pkey);
-        return NULL;
+    if (!pkey) return NULL;
+    if (require_dsa_details) {
+        int modulus_bits = 0;
+        int divisor_bits = 0;
+        if (!crypto_openssl_dsa_key_details_from_pkey(pkey,
+                &modulus_bits, &divisor_bits)) {
+            b->pkey_free(pkey);
+            return NULL;
+        }
     }
     if (out_private) *out_private = parsed_private;
     return pkey;
+}
+
+static void* crypto_openssl_dsa_parse_key(const uint8_t* key_bytes, int key_len,
+                                          bool prefer_private,
+                                          bool* out_private) {
+    return crypto_openssl_parse_key_bytes(key_bytes, key_len, prefer_private,
+        true, out_private);
 }
 
 static bool crypto_openssl_dsa_can_parse(const uint8_t* key_bytes, int key_len,
@@ -5281,58 +5192,8 @@ static bool crypto_key_bytes_are_rsa(const uint8_t* key_bytes, int key_len) {
 
 static void* crypto_openssl_parse_evp_key(const uint8_t* key_bytes, int key_len,
                                           bool prefer_private, bool* out_private) {
-    if (out_private) *out_private = false;
-    if (!key_bytes || key_len <= 0 || !crypto_openssl_dsa_load()) return NULL;
-
-    CryptoOpenSslDsaBackend* b = &crypto_openssl_dsa_backend;
-    void* pkey = NULL;
-    bool parsed_private = false;
-
-    if (crypto_bytes_look_like_pem(key_bytes, key_len)) {
-        int pem_len = crypto_visible_pem_len(key_bytes, key_len);
-        void* bio = b->bio_new_mem_buf(key_bytes, pem_len);
-        if (!bio) return NULL;
-        if (prefer_private) {
-            pkey = b->pem_read_bio_private_key(bio, NULL, NULL, NULL);
-            parsed_private = pkey != NULL;
-        } else {
-            pkey = b->pem_read_bio_pubkey(bio, NULL, NULL, NULL);
-        }
-        b->bio_free(bio);
-
-        if (!pkey) {
-            bio = b->bio_new_mem_buf(key_bytes, pem_len);
-            if (!bio) return NULL;
-            if (prefer_private) {
-                pkey = b->pem_read_bio_pubkey(bio, NULL, NULL, NULL);
-            } else {
-                pkey = b->pem_read_bio_private_key(bio, NULL, NULL, NULL);
-                parsed_private = pkey != NULL;
-            }
-            b->bio_free(bio);
-        }
-    } else {
-        const unsigned char* ptr = key_bytes;
-        long der_len = key_len;
-        if (prefer_private) {
-            pkey = b->d2i_auto_private_key(NULL, &ptr, der_len);
-            parsed_private = pkey != NULL;
-        } else {
-            pkey = b->d2i_pubkey(NULL, &ptr, der_len);
-        }
-        if (!pkey) {
-            ptr = key_bytes;
-            if (prefer_private) {
-                pkey = b->d2i_pubkey(NULL, &ptr, der_len);
-            } else {
-                pkey = b->d2i_auto_private_key(NULL, &ptr, der_len);
-                parsed_private = pkey != NULL;
-            }
-        }
-    }
-
-    if (out_private) *out_private = parsed_private;
-    return pkey;
+    return crypto_openssl_parse_key_bytes(key_bytes, key_len, prefer_private,
+        false, out_private);
 }
 
 static bool crypto_openssl_bio_to_mem(void* bio, uint8_t** out, int* out_len) {
@@ -8457,33 +8318,42 @@ extern "C" Item js_subtle_importKey(Item format_item, Item key_data_item, Item a
     return js_promise_resolve(key_obj);
 }
 
-// subtle.encrypt({name, iv}, key, data) → Promise<ArrayBuffer>
-extern "C" Item js_subtle_encrypt(Item alg_item, Item key_item, Item data_item) {
-    // extract algorithm name and IV from options object
-    if (get_type_id(alg_item) != LMD_TYPE_MAP) return ItemNull;
+typedef struct CryptoCipherInputs {
+    char full_alg[32];
+    uint8_t* key_bytes;
+    int key_len;
+    uint8_t* iv_bytes;
+    int iv_len;
+} CryptoCipherInputs;
+
+static bool crypto_prepare_cipher_inputs(Item alg_item, Item key_item, Item data_item,
+        bool encrypt, CryptoCipherInputs* inputs) {
+    if (!inputs || get_type_id(alg_item) != LMD_TYPE_MAP) return false;
     Item name_item = js_property_get(alg_item, make_string_item_crypto("name"));
     Item iv_item = js_property_get(alg_item, make_string_item_crypto("iv"));
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return false;
 
-    if (get_type_id(name_item) != LMD_TYPE_STRING) return ItemNull;
     String* name_s = it2s(name_item);
-
-    // determine cipher
     char name_buf[32] = {0};
     int nlen = (int)name_s->len < 31 ? (int)name_s->len : 31;
     memcpy(name_buf, name_s->chars, (size_t)nlen);
-
-    // normalize: "AES-CBC" → "aes-cbc", "AES-GCM" → "aes-gcm", "AES-CTR" → "aes-ctr"
     for (int i = 0; name_buf[i]; i++) {
-        if (name_buf[i] >= 'A' && name_buf[i] <= 'Z')
-            name_buf[i] = (char)(name_buf[i] + 32);
+        if (name_buf[i] >= 'A' && name_buf[i] <= 'Z') name_buf[i] = (char)(name_buf[i] + 32);
     }
 
-    uint8_t* key_bytes = NULL; int key_len = 0;
-    uint8_t* iv_bytes = NULL; int iv_len = 0;
-    const uint8_t* data_buf = NULL; int data_len = 0;
-
-    if (!extract_bytes(key_item, &key_bytes, &key_len)) return ItemNull;
-    if (!extract_bytes(iv_item, &iv_bytes, &iv_len)) { mem_free(key_bytes); return ItemNull; }
+    inputs->key_bytes = NULL;
+    inputs->iv_bytes = NULL;
+    inputs->key_len = 0;
+    inputs->iv_len = 0;
+    if (!extract_bytes(key_item, &inputs->key_bytes, &inputs->key_len)) return false;
+    if (!extract_bytes(iv_item, &inputs->iv_bytes, &inputs->iv_len)) {
+        mem_free(inputs->key_bytes);
+        inputs->key_bytes = NULL;
+        return false;
+    }
+    // Keep the input-shape probe shared with the two cipher paths; the JS call below owns actual data conversion.
+    const uint8_t* data_buf = NULL;
+    int data_len = 0;
     if (js_is_typed_array(data_item)) {
         get_uint8_buffer(data_item, &data_buf, &data_len);
     } else if (get_type_id(data_item) == LMD_TYPE_STRING) {
@@ -8491,18 +8361,31 @@ extern "C" Item js_subtle_encrypt(Item alg_item, Item key_item, Item data_item) 
         data_buf = (const uint8_t*)s->chars;
         data_len = (int)s->len;
     }
+    (void)data_buf;
+    (void)data_len;
 
-    // build full algorithm name with key size (e.g. "aes-256-cbc")
-    char full_alg[32];
-    snprintf(full_alg, sizeof(full_alg), "aes-%d-%s", key_len * 8, name_buf + 4); // skip "aes-"
-
-    // if name is just "aes-cbc" etc, resolve_cipher_type handles it
-    if (strncmp(name_buf, "aes-", 4) != 0) {
-        // try as full name
-        snprintf(full_alg, sizeof(full_alg), "%s", name_buf);
+    if (encrypt) {
+        if (strncmp(name_buf, "aes-", 4) == 0) {
+            snprintf(inputs->full_alg, sizeof(inputs->full_alg), "aes-%d-%s",
+                inputs->key_len * 8, name_buf + 4);
+        } else {
+            snprintf(inputs->full_alg, sizeof(inputs->full_alg), "%s", name_buf);
+        }
+    } else if (strncmp(name_buf, "aes-", 4) == 0 && strlen(name_buf) < 12) {
+        snprintf(inputs->full_alg, sizeof(inputs->full_alg), "aes-%d-%s",
+            inputs->key_len * 8, name_buf + 4);
+    } else {
+        snprintf(inputs->full_alg, sizeof(inputs->full_alg), "%s", name_buf);
     }
+    return true;
+}
 
-    Item cipher_obj = create_cipher_object(full_alg, true, key_bytes, key_len, iv_bytes, iv_len);
+// subtle.encrypt({name, iv}, key, data) → Promise<ArrayBuffer>
+extern "C" Item js_subtle_encrypt(Item alg_item, Item key_item, Item data_item) {
+    CryptoCipherInputs inputs;
+    if (!crypto_prepare_cipher_inputs(alg_item, key_item, data_item, true, &inputs)) return ItemNull;
+    Item cipher_obj = create_cipher_object(inputs.full_alg, true,
+        inputs.key_bytes, inputs.key_len, inputs.iv_bytes, inputs.iv_len);
     if (cipher_obj.item == ITEM_NULL) return ItemNull;
 
     // set AAD if present (for GCM)
@@ -8539,43 +8422,10 @@ extern "C" Item js_subtle_encrypt(Item alg_item, Item key_item, Item data_item) 
 
 // subtle.decrypt({name, iv}, key, data) → Promise<ArrayBuffer>
 extern "C" Item js_subtle_decrypt(Item alg_item, Item key_item, Item data_item) {
-    if (get_type_id(alg_item) != LMD_TYPE_MAP) return ItemNull;
-    Item name_item = js_property_get(alg_item, make_string_item_crypto("name"));
-    Item iv_item = js_property_get(alg_item, make_string_item_crypto("iv"));
-
-    if (get_type_id(name_item) != LMD_TYPE_STRING) return ItemNull;
-    String* name_s = it2s(name_item);
-
-    char name_buf[32] = {0};
-    int nlen = (int)name_s->len < 31 ? (int)name_s->len : 31;
-    memcpy(name_buf, name_s->chars, (size_t)nlen);
-    for (int i = 0; name_buf[i]; i++) {
-        if (name_buf[i] >= 'A' && name_buf[i] <= 'Z')
-            name_buf[i] = (char)(name_buf[i] + 32);
-    }
-
-    uint8_t* key_bytes = NULL; int key_len = 0;
-    uint8_t* iv_bytes = NULL; int iv_len = 0;
-    const uint8_t* data_buf = NULL; int data_len = 0;
-
-    if (!extract_bytes(key_item, &key_bytes, &key_len)) return ItemNull;
-    if (!extract_bytes(iv_item, &iv_bytes, &iv_len)) { mem_free(key_bytes); return ItemNull; }
-    if (js_is_typed_array(data_item)) {
-        get_uint8_buffer(data_item, &data_buf, &data_len);
-    } else if (get_type_id(data_item) == LMD_TYPE_STRING) {
-        String* s = it2s(data_item);
-        data_buf = (const uint8_t*)s->chars;
-        data_len = (int)s->len;
-    }
-
-    char full_alg[32];
-    if (strncmp(name_buf, "aes-", 4) == 0 && strlen(name_buf) < 12) {
-        snprintf(full_alg, sizeof(full_alg), "aes-%d-%s", key_len * 8, name_buf + 4);
-    } else {
-        snprintf(full_alg, sizeof(full_alg), "%s", name_buf);
-    }
-
-    Item decipher_obj = create_cipher_object(full_alg, false, key_bytes, key_len, iv_bytes, iv_len);
+    CryptoCipherInputs inputs;
+    if (!crypto_prepare_cipher_inputs(alg_item, key_item, data_item, false, &inputs)) return ItemNull;
+    Item decipher_obj = create_cipher_object(inputs.full_alg, false,
+        inputs.key_bytes, inputs.key_len, inputs.iv_bytes, inputs.iv_len);
     if (decipher_obj.item == ITEM_NULL) return ItemNull;
 
     // set auth tag for GCM if present

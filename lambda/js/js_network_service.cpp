@@ -133,16 +133,15 @@ int js_node_stream_tcp_bind(void* session, uint32_t resource_id, const char* add
         (unsigned int)flags);
 }
 
-int js_node_stream_tcp_address(void* session, uint32_t resource_id, char* address,
-        size_t address_size, int* out_port, int* out_family) {
+int js_node_tcp_handle_address(uv_tcp_t* handle, char* address, size_t address_size,
+        int* out_port, int* out_family) {
     if (address && address_size > 0) address[0] = '\0';
     if (out_port) *out_port = 0;
     if (out_family) *out_family = 0;
-    JubeNodeStreamTcp* stream = js_node_stream_tcp_from_resource(session, resource_id);
-    if (!stream || !stream->initialized || stream->close_started || !address || address_size == 0) return UV_EINVAL;
+    if (!handle || !address || address_size == 0) return UV_EINVAL;
     struct sockaddr_storage socket_address = {};
     int address_length = (int)sizeof(socket_address);
-    int status = uv_tcp_getsockname(&stream->handle, (struct sockaddr*)&socket_address, &address_length);
+    int status = uv_tcp_getsockname(handle, (struct sockaddr*)&socket_address, &address_length);
     if (status != 0) return status;
     if (socket_address.ss_family == AF_INET) {
         const struct sockaddr_in* ipv4 = (const struct sockaddr_in*)&socket_address;
@@ -159,6 +158,17 @@ int js_node_stream_tcp_address(void* session, uint32_t resource_id, char* addres
         return 0;
     }
     return UV_EAFNOSUPPORT;
+}
+
+int js_node_stream_tcp_address(void* session, uint32_t resource_id, char* address,
+        size_t address_size, int* out_port, int* out_family) {
+    if (address && address_size > 0) address[0] = '\0';
+    if (out_port) *out_port = 0;
+    if (out_family) *out_family = 0;
+    JubeNodeStreamTcp* stream = js_node_stream_tcp_from_resource(session, resource_id);
+    if (!stream || !stream->initialized || stream->close_started) return UV_EINVAL;
+    return js_node_tcp_handle_address(&stream->handle, address, address_size,
+        out_port, out_family);
 }
 
 int js_node_stream_tcp_fd(void* session, uint32_t resource_id, int* out_fd) {

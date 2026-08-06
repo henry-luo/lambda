@@ -1809,19 +1809,18 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                             p1_ce->constructor->fc->name : "anon");
                     }
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
-                    if (field_type == LMD_TYPE_FLOAT) {
-                        // §7: Inline shape guard → direct memory load (no function call)
+                    if (field_type == LMD_TYPE_FLOAT || field_type == LMD_TYPE_INT) {
+                        bool field_is_float = field_type == LMD_TYPE_FLOAT;
                         if (p1_ce->shape_cache_ptr) {
                             MIR_label_t l_fast = jm_new_label(mt);
                             MIR_label_t l_slow = jm_new_label(mt);
                             MIR_label_t l_end = jm_new_label(mt);
-                            MIR_reg_t result_f = jm_new_reg(mt, "s7f", MIR_T_D);
-                            // Load obj->type (offset 8)
+                            MIR_reg_t result = jm_new_reg(mt, field_is_float ? "s7f" : "s7i",
+                                field_is_float ? MIR_T_D : MIR_T_I64);
                             MIR_reg_t shape_reg = jm_new_reg(mt, "s7s", MIR_T_I64);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, shape_reg),
                                 MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, obj_reg, 0, 1)));
-                            // Load expected shape from cache slot
                             MIR_reg_t cache_addr_reg = jm_new_reg(mt, "s7a", MIR_T_I64);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, cache_addr_reg),
@@ -1830,7 +1829,6 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, expected_reg),
                                 MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, cache_addr_reg, 0, 1)));
-                            // Compare shape pointers
                             MIR_reg_t match_reg = jm_new_reg(mt, "s7m", MIR_T_I64);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
                                 MIR_new_reg_op(mt->ctx, match_reg),
@@ -1841,127 +1839,54 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                 MIR_new_reg_op(mt->ctx, match_reg)));
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                                 MIR_new_label_op(mt->ctx, l_slow)));
-                            // Shape inference is speculative across methods; read the
-                            // live boxed slot before numeric coercion so an object value
-                            // still receives ToPrimitive instead of a native bit load.
                             jm_emit_label(mt, l_fast);
                             MIR_reg_t fast_boxed = jm_call_2(mt, "js_get_shaped_slot", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, p1_slot));
-                            MIR_reg_t fast_f = jm_ensure_native_float(mt,
-                                fast_boxed, LMD_TYPE_ANY);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                                MIR_new_reg_op(mt->ctx, result_f),
-                                MIR_new_reg_op(mt->ctx, fast_f)));
+                            MIR_reg_t fast_native = field_is_float
+                                ? jm_ensure_native_float(mt, fast_boxed, LMD_TYPE_ANY)
+                                : jm_ensure_native_int(mt, fast_boxed, LMD_TYPE_ANY);
+                            jm_emit(mt, MIR_new_insn(mt->ctx,
+                                field_is_float ? MIR_DMOV : MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, result),
+                                MIR_new_reg_op(mt->ctx, fast_native)));
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                                 MIR_new_label_op(mt->ctx, l_end)));
-                            // A shape miss disproves the inferred slot; reading
-                            // that offset again would expose an unrelated field.
                             jm_emit_label(mt, l_slow);
                             MIR_reg_t slow_boxed = jm_get_named_property_boxed(mt,
                                 obj_reg, p1_prop->name);
-                            MIR_reg_t slow_f = jm_ensure_native_float(mt,
-                                slow_boxed, LMD_TYPE_ANY);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                                MIR_new_reg_op(mt->ctx, result_f),
-                                MIR_new_reg_op(mt->ctx, slow_f)));
+                            MIR_reg_t slow_native = field_is_float
+                                ? jm_ensure_native_float(mt, slow_boxed, LMD_TYPE_ANY)
+                                : jm_ensure_native_int(mt, slow_boxed, LMD_TYPE_ANY);
+                            jm_emit(mt, MIR_new_insn(mt->ctx,
+                                field_is_float ? MIR_DMOV : MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, result),
+                                MIR_new_reg_op(mt->ctx, slow_native)));
                             jm_emit_label(mt, l_end);
-                            log_debug("§7: inline shape guard float %.*s.%.*s → offset %d",
-                                      (int)p1_obj->name->len, p1_obj->name->chars,
-                                      (int)p1_prop->name->len, p1_prop->name->chars, (int)byte_offset);
-                            if (target_type == LMD_TYPE_FLOAT)
-                                return result_f;
-                            else
-                                return jm_emit_double_to_int(mt, result_f);
+                            log_debug("§7: inline shape guard %s %.*s.%.*s → offset %d",
+                                field_is_float ? "float" : "int",
+                                (int)p1_obj->name->len, p1_obj->name->chars,
+                                (int)p1_prop->name->len, p1_prop->name->chars, (int)byte_offset);
+                            if ((field_is_float && target_type == LMD_TYPE_FLOAT) ||
+                                (!field_is_float && target_type == LMD_TYPE_INT)) return result;
+                            return field_is_float
+                                ? jm_emit_double_to_int(mt, result)
+                                : jm_ensure_native_float(mt, result, LMD_TYPE_INT);
                         }
-                        MIR_reg_t boxed_f = jm_get_named_property_boxed(mt,
+                        MIR_reg_t boxed = jm_get_named_property_boxed(mt,
                             obj_reg, p1_prop->name);
-                        MIR_reg_t native_f = jm_ensure_native_float(mt,
-                            boxed_f, LMD_TYPE_ANY);
-                        log_debug("P1: dynamic float load %.*s.%.*s (no shape cache)",
-                                  (int)p1_obj->name->len, p1_obj->name->chars,
-                                  (int)p1_prop->name->len, p1_prop->name->chars);
-                        if (target_type == LMD_TYPE_FLOAT)
-                            return native_f;
-                        else
-                            return jm_emit_double_to_int(mt, native_f);
-                    }
-                    if (field_type == LMD_TYPE_INT) {
-                        // §7: Inline shape guard → direct memory load (no function call)
-                        if (p1_ce->shape_cache_ptr) {
-                            MIR_label_t l_fast = jm_new_label(mt);
-                            MIR_label_t l_slow = jm_new_label(mt);
-                            MIR_label_t l_end = jm_new_label(mt);
-                            MIR_reg_t result_i = jm_new_reg(mt, "s7i", MIR_T_I64);
-                            // Load obj->type (offset 8)
-                            MIR_reg_t shape_reg = jm_new_reg(mt, "s7s", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, shape_reg),
-                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, obj_reg, 0, 1)));
-                            // Load expected shape from cache slot
-                            MIR_reg_t cache_addr_reg = jm_new_reg(mt, "s7a", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, cache_addr_reg),
-                                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)p1_ce->shape_cache_ptr)));
-                            MIR_reg_t expected_reg = jm_new_reg(mt, "s7e", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, expected_reg),
-                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, cache_addr_reg, 0, 1)));
-                            // Compare shape pointers
-                            MIR_reg_t match_reg = jm_new_reg(mt, "s7m", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-                                MIR_new_reg_op(mt->ctx, match_reg),
-                                MIR_new_reg_op(mt->ctx, shape_reg),
-                                MIR_new_reg_op(mt->ctx, expected_reg)));
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                                MIR_new_label_op(mt->ctx, l_fast),
-                                MIR_new_reg_op(mt->ctx, match_reg)));
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                                MIR_new_label_op(mt->ctx, l_slow)));
-                            // Shape inference is speculative across methods; read the
-                            // live boxed slot before numeric coercion so an object value
-                            // still receives ToPrimitive instead of a native bit load.
-                            jm_emit_label(mt, l_fast);
-                            MIR_reg_t fast_boxed = jm_call_2(mt, "js_get_shaped_slot", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, p1_slot));
-                            MIR_reg_t fast_i = jm_ensure_native_int(mt,
-                                fast_boxed, LMD_TYPE_ANY);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, result_i),
-                                MIR_new_reg_op(mt->ctx, fast_i)));
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                                MIR_new_label_op(mt->ctx, l_end)));
-                            // Shape mismatch uses ordinary lookup, not the
-                            // disproved compile-time slot.
-                            jm_emit_label(mt, l_slow);
-                            MIR_reg_t slow_boxed = jm_get_named_property_boxed(mt,
-                                obj_reg, p1_prop->name);
-                            MIR_reg_t slow_i = jm_ensure_native_int(mt,
-                                slow_boxed, LMD_TYPE_ANY);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, result_i),
-                                MIR_new_reg_op(mt->ctx, slow_i)));
-                            jm_emit_label(mt, l_end);
-                            log_debug("§7: inline shape guard int %.*s.%.*s → offset %d",
-                                      (int)p1_obj->name->len, p1_obj->name->chars,
-                                      (int)p1_prop->name->len, p1_prop->name->chars, (int)byte_offset);
-                            if (target_type == LMD_TYPE_INT)
-                                return result_i;
-                            else
-                                return jm_ensure_native_float(mt, result_i, LMD_TYPE_INT);
-                        }
-                        MIR_reg_t boxed_i = jm_get_named_property_boxed(mt,
-                            obj_reg, p1_prop->name);
-                        MIR_reg_t native_i = jm_ensure_native_int(mt,
-                            boxed_i, LMD_TYPE_ANY);
-                        log_debug("P1: dynamic int load %.*s.%.*s (no shape cache)",
-                                  (int)p1_obj->name->len, p1_obj->name->chars,
-                                  (int)p1_prop->name->len, p1_prop->name->chars);
-                        if (target_type == LMD_TYPE_INT)
-                            return native_i;
-                        else
-                            return jm_ensure_native_float(mt, native_i, LMD_TYPE_INT);
+                        MIR_reg_t native = field_is_float
+                            ? jm_ensure_native_float(mt, boxed, LMD_TYPE_ANY)
+                            : jm_ensure_native_int(mt, boxed, LMD_TYPE_ANY);
+                        log_debug("P1: dynamic %s load %.*s.%.*s (no shape cache)",
+                            field_is_float ? "float" : "int",
+                            (int)p1_obj->name->len, p1_obj->name->chars,
+                            (int)p1_prop->name->len, p1_prop->name->chars);
+                        if ((field_is_float && target_type == LMD_TYPE_FLOAT) ||
+                            (!field_is_float && target_type == LMD_TYPE_INT)) return native;
+                        return field_is_float
+                            ? jm_emit_double_to_int(mt, native)
+                            : jm_ensure_native_float(mt, native, LMD_TYPE_INT);
                     }
                 }
             }

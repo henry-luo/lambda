@@ -16,20 +16,50 @@
 namespace lambda {
 namespace markup {
 
-// Helper: Create string from parser
-static inline String* create_string(MarkupParser* parser, const char* text) {
-    return parser->builder.createString(text);
+typedef Item (*InlineItemParser)(MarkupParser*, const char**);
+
+static bool try_parse_inline_item(MarkupParser* parser, Element* span, StringBuf* sb,
+                                  const char** pos, InlineItemParser parse) {
+    if (sb->length > 0) {
+        String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+        Item text_item = {.item = s2it(text_content)};
+        list_push((List*)span, text_item);
+        increment_element_content_length(span);
+        stringbuf_reset(sb);
+    }
+    Item item = parse(parser, pos);
+    if (item.item == ITEM_ERROR || item.item == ITEM_UNDEFINED) return false;
+    list_push((List*)span, item);
+    increment_element_content_length(span);
+    return true;
 }
 
-// Helper: Create element from parser
-static inline Element* create_element(MarkupParser* parser, const char* tag) {
-    return parser->builder.element(tag).final().element;
-}
-
-// Helper: Increment element content length
-static inline void increment_element_content_length(Element* elem) {
-    TypeElmt* elmt_type = (TypeElmt*)elem->type;
-    elmt_type->content_length++;
+static void parse_code_span_item(MarkupParser* parser, Element* span,
+        StringBuf* sb, const char** pos) {
+    if (sb->length > 0) {
+        String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+        Item text_item = {.item = s2it(text_content)};
+        list_push((List*)span, text_item);
+        increment_element_content_length(span);
+        stringbuf_reset(sb);
+    }
+    const char* backtick_start = *pos;
+    int opening_count = 0;
+    while (**pos == '`') {
+        opening_count++;
+        (*pos)++;
+    }
+    *pos = backtick_start;
+    Item code_item = parse_code_span(parser, pos);
+    if (code_item.item != ITEM_ERROR && code_item.item != ITEM_UNDEFINED) {
+        list_push((List*)span, code_item);
+        increment_element_content_length(span);
+        return;
+    }
+    for (int i = 0; i < opening_count; i++) {
+        stringbuf_append_char(sb, '`');
+    }
+    *pos = backtick_start + opening_count;
 }
 
 /**
@@ -381,36 +411,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         if (format == Format::RST && *pos == '`') {
             // Check for double backticks first - these are inline literals (code)
             if (*(pos + 1) == '`') {
-                // This is a double backtick - let the code span parser handle it
-                // Flush text first
-                if (sb->length > 0) {
-                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                    Item text_item = {.item = s2it(text_content)};
-                    list_push((List*)span, text_item);
-                    increment_element_content_length(span);
-                    stringbuf_reset(sb);
-                }
-
-                // Count opening backticks
-                const char* backtick_start = pos;
-                int opening_count = 0;
-                while (*pos == '`') {
-                    opening_count++;
-                    pos++;
-                }
-                pos = backtick_start;
-
-                Item code_item = parse_code_span(parser, &pos);
-                if (code_item.item != ITEM_ERROR && code_item.item != ITEM_UNDEFINED) {
-                    list_push((List*)span, code_item);
-                    increment_element_content_length(span);
-                    continue;
-                }
-                // Code span failed - treat as literal text
-                for (int i = 0; i < opening_count; i++) {
-                    stringbuf_append_char(sb, '`');
-                }
-                pos = backtick_start + opening_count;
+                parse_code_span_item(parser, span, sb, &pos);
                 continue;
             }
 
@@ -448,36 +449,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
         // Check for code span (`)
         if (*pos == '`') {
-            // Flush text and parse code span
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
-
-            // Count opening backticks first (for proper failure handling)
-            const char* backtick_start = pos;
-            int opening_count = 0;
-            while (*pos == '`') {
-                opening_count++;
-                pos++;
-            }
-            pos = backtick_start;  // Reset for parse_code_span
-
-            Item code_item = parse_code_span(parser, &pos);
-            if (code_item.item != ITEM_ERROR && code_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, code_item);
-                increment_element_content_length(span);
-                continue;
-            }
-            // Code span failed - treat ALL opening backticks as literal text
-            // (CommonMark: backtick strings are maximal runs, can't retry with fewer)
-            for (int i = 0; i < opening_count; i++) {
-                stringbuf_append_char(sb, '`');
-            }
-            pos = backtick_start + opening_count;  // Skip past all backticks
+            parse_code_span_item(parser, span, sb, &pos);
             continue;
         }
 
@@ -485,59 +457,17 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         if (format == Format::ASCIIDOC) {
             // Check for link:url[text]
             if (strncmp(pos, "link:", 5) == 0) {
-                // Flush text first
-                if (sb->length > 0) {
-                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                    Item text_item = {.item = s2it(text_content)};
-                    list_push((List*)span, text_item);
-                    increment_element_content_length(span);
-                    stringbuf_reset(sb);
-                }
-
-                Item link_item = parse_asciidoc_link(parser, &pos);
-                if (link_item.item != ITEM_ERROR && link_item.item != ITEM_UNDEFINED) {
-                    list_push((List*)span, link_item);
-                    increment_element_content_length(span);
-                    continue;
-                }
+                if (try_parse_inline_item(parser, span, sb, &pos, parse_asciidoc_link)) continue;
             }
 
             // Check for image:path[alt]
             if (strncmp(pos, "image:", 6) == 0) {
-                // Flush text first
-                if (sb->length > 0) {
-                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                    Item text_item = {.item = s2it(text_content)};
-                    list_push((List*)span, text_item);
-                    increment_element_content_length(span);
-                    stringbuf_reset(sb);
-                }
-
-                Item image_item = parse_asciidoc_image(parser, &pos);
-                if (image_item.item != ITEM_ERROR && image_item.item != ITEM_UNDEFINED) {
-                    list_push((List*)span, image_item);
-                    increment_element_content_length(span);
-                    continue;
-                }
+                if (try_parse_inline_item(parser, span, sb, &pos, parse_asciidoc_image)) continue;
             }
 
             // Check for cross-reference <<anchor>>
             if (*pos == '<' && *(pos+1) == '<') {
-                // Flush text first
-                if (sb->length > 0) {
-                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                    Item text_item = {.item = s2it(text_content)};
-                    list_push((List*)span, text_item);
-                    increment_element_content_length(span);
-                    stringbuf_reset(sb);
-                }
-
-                Item xref_item = parse_asciidoc_cross_reference(parser, &pos);
-                if (xref_item.item != ITEM_ERROR && xref_item.item != ITEM_UNDEFINED) {
-                    list_push((List*)span, xref_item);
-                    increment_element_content_length(span);
-                    continue;
-                }
+                if (try_parse_inline_item(parser, span, sb, &pos, parse_asciidoc_cross_reference)) continue;
 
                 // Not a valid cross-reference, add < to buffer and continue
                 stringbuf_append_char(sb, *pos);
@@ -548,29 +478,9 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
         // Check for raw HTML (<) - Markdown only
         if (*pos == '<' && format == Format::MARKDOWN) {
-            // Flush text first
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
-
             // Try autolink first (<http://...> or <email@...>)
-            Item autolink_item = parse_autolink(parser, &pos);
-            if (autolink_item.item != ITEM_ERROR && autolink_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, autolink_item);
-                increment_element_content_length(span);
-                continue;
-            }
-
-            Item html_item = parse_raw_html(parser, &pos);
-            if (html_item.item != ITEM_ERROR && html_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, html_item);
-                increment_element_content_length(span);
-                continue;
-            }
+            if (try_parse_inline_item(parser, span, sb, &pos, parse_autolink) ||
+                try_parse_inline_item(parser, span, sb, &pos, parse_raw_html)) continue;
 
             // Not valid HTML, add < to buffer
             stringbuf_append_char(sb, *pos);
@@ -580,72 +490,33 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
         // Check for link or special bracket content ([)
         if (*pos == '[') {
-            // Flush text first
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
-
             // Org-mode link parsing: [[url]] or [[url][description]]
             if (format == Format::ORG && *(pos+1) == '[') {
-                Item org_link_item = parse_org_link(parser, &pos);
-                if (org_link_item.item != ITEM_ERROR && org_link_item.item != ITEM_UNDEFINED) {
-                    list_push((List*)span, org_link_item);
-                    increment_element_content_length(span);
-                    continue;
-                }
+                if (try_parse_inline_item(parser, span, sb, &pos, parse_org_link)) continue;
             }
 
             // MediaWiki-specific link parsing
             if (format == Format::WIKI && *(pos+1) == '[') {
-                Item wiki_link_item = parse_wiki_link(parser, &pos);
-                if (wiki_link_item.item != ITEM_ERROR && wiki_link_item.item != ITEM_UNDEFINED) {
-                    list_push((List*)span, wiki_link_item);
-                    increment_element_content_length(span);
-                    continue;
-                }
+                if (try_parse_inline_item(parser, span, sb, &pos, parse_wiki_link)) continue;
             }
 
             // MediaWiki external link
             if (format == Format::WIKI) {
-                Item wiki_external = parse_wiki_external_link(parser, &pos);
-                if (wiki_external.item != ITEM_ERROR && wiki_external.item != ITEM_UNDEFINED) {
-                    list_push((List*)span, wiki_external);
-                    increment_element_content_length(span);
-                    continue;
-                }
+                if (try_parse_inline_item(parser, span, sb, &pos, parse_wiki_external_link)) continue;
             }
 
             // Check for footnote reference [^1]
             if (*(pos+1) == '^') {
-                Item footnote_ref = parse_footnote_reference(parser, &pos);
-                if (footnote_ref.item != ITEM_ERROR && footnote_ref.item != ITEM_UNDEFINED) {
-                    list_push((List*)span, footnote_ref);
-                    increment_element_content_length(span);
-                    continue;
-                }
+                if (try_parse_inline_item(parser, span, sb, &pos, parse_footnote_reference)) continue;
             }
 
             // Check for citation [@key]
             if (*(pos+1) == '@') {
-                Item citation = parse_citation(parser, &pos);
-                if (citation.item != ITEM_ERROR && citation.item != ITEM_UNDEFINED) {
-                    list_push((List*)span, citation);
-                    increment_element_content_length(span);
-                    continue;
-                }
+                if (try_parse_inline_item(parser, span, sb, &pos, parse_citation)) continue;
             }
 
             // Regular link parsing
-            Item link_item = parse_link(parser, &pos);
-            if (link_item.item != ITEM_ERROR && link_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, link_item);
-                increment_element_content_length(span);
-                continue;
-            }
+            if (try_parse_inline_item(parser, span, sb, &pos, parse_link)) continue;
 
             // If not a link, add the [ character to buffer
             stringbuf_append_char(sb, *pos);
@@ -655,20 +526,8 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
         // MediaWiki bold/italic (')
         if (*pos == '\'' && format == Format::WIKI) {
-            // Flush text
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
-
             const char* old_pos = pos;
-            Item wiki_format = parse_wiki_bold_italic(parser, &pos);
-            if (wiki_format.item != ITEM_ERROR && wiki_format.item != ITEM_UNDEFINED) {
-                list_push((List*)span, wiki_format);
-                increment_element_content_length(span);
+            if (try_parse_inline_item(parser, span, sb, &pos, parse_wiki_bold_italic)) {
                 continue;
             } else if (pos == old_pos) {
                 // Parse failed and didn't advance, add character and move on
@@ -680,21 +539,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
         // Check for image (![)
         if (*pos == '!' && *(pos+1) == '[') {
-            // Flush text
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
-
-            Item image_item = parse_image(parser, &pos);
-            if (image_item.item != ITEM_ERROR && image_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, image_item);
-                increment_element_content_length(span);
-                continue;
-            }
+            if (try_parse_inline_item(parser, span, sb, &pos, parse_image)) continue;
 
             // Not an image, add the ! to buffer
             stringbuf_append_char(sb, *pos);
@@ -728,21 +573,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 continue;
             }
 
-            // Flush text before attempting strikethrough
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
-
-            Item strike_item = parse_strikethrough(parser, &pos);
-            if (strike_item.item != ITEM_ERROR && strike_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, strike_item);
-                increment_element_content_length(span);
-                continue;
-            }
+            if (try_parse_inline_item(parser, span, sb, &pos, parse_strikethrough)) continue;
 
             // Not strikethrough, add ~ to buffer
             stringbuf_append_char(sb, *pos);
@@ -752,21 +583,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
         // Check for superscript (^)
         if (*pos == '^') {
-            // Flush text
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
-
-            Item sup_item = parse_superscript(parser, &pos);
-            if (sup_item.item != ITEM_ERROR && sup_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, sup_item);
-                increment_element_content_length(span);
-                continue;
-            }
+            if (try_parse_inline_item(parser, span, sb, &pos, parse_superscript)) continue;
 
             // Not superscript, add ^ to buffer
             stringbuf_append_char(sb, *pos);
@@ -776,21 +593,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
         // Check for inline math ($)
         if (*pos == '$') {
-            // Flush text
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
-
-            Item math_item = parse_inline_math(parser, &pos);
-            if (math_item.item != ITEM_ERROR && math_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, math_item);
-                increment_element_content_length(span);
-                continue;
-            }
+            if (try_parse_inline_item(parser, span, sb, &pos, parse_inline_math)) continue;
 
             // Not math, add $ to buffer
             stringbuf_append_char(sb, *pos);
@@ -801,22 +604,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         // Check for emoji shortcode (:)
         if (*pos == ':') {
             const char* old_pos = pos;
-
-            // Flush text
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
-
-            Item emoji_item = parse_emoji_shortcode(parser, &pos);
-            if (emoji_item.item != ITEM_ERROR && emoji_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, emoji_item);
-                increment_element_content_length(span);
-                continue;
-            }
+            if (try_parse_inline_item(parser, span, sb, &pos, parse_emoji_shortcode)) continue;
 
             // Not emoji, restore position and add : to buffer
             pos = old_pos;
@@ -827,21 +615,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
         // Check for wiki template ({{)
         if (*pos == '{' && *(pos+1) == '{' && format == Format::WIKI) {
-            // Flush text
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
-
-            Item template_item = parse_wiki_template(parser, &pos);
-            if (template_item.item != ITEM_ERROR && template_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, template_item);
-                increment_element_content_length(span);
-                continue;
-            }
+            if (try_parse_inline_item(parser, span, sb, &pos, parse_wiki_template)) continue;
 
             // Not template, add { to buffer
             stringbuf_append_char(sb, *pos);
@@ -856,21 +630,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
             // Man page font escapes: \fB, \fI, \fR, \fP
             if (format == Format::MAN && next == 'f') {
-                // Flush text first
-                if (sb->length > 0) {
-                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                    Item text_item = {.item = s2it(text_content)};
-                    list_push((List*)span, text_item);
-                    increment_element_content_length(span);
-                    stringbuf_reset(sb);
-                }
-
-                Item font_item = parse_man_font_escape(parser, &pos);
-                if (font_item.item != ITEM_ERROR && font_item.item != ITEM_UNDEFINED) {
-                    list_push((List*)span, font_item);
-                    increment_element_content_length(span);
-                    continue;
-                }
+                if (try_parse_inline_item(parser, span, sb, &pos, parse_man_font_escape)) continue;
                 // Font escape failed, treat as literal
                 stringbuf_append_char(sb, *pos);
                 pos++;
@@ -921,21 +681,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
         // Check for entity reference (&)
         if (*pos == '&') {
-            // Flush text first
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
-
-            Item entity_item = parse_entity_reference(parser, &pos);
-            if (entity_item.item != ITEM_ERROR && entity_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, entity_item);
-                increment_element_content_length(span);
-                continue;
-            }
+            if (try_parse_inline_item(parser, span, sb, &pos, parse_entity_reference)) continue;
 
             // Not a valid entity, add & to buffer
             stringbuf_append_char(sb, *pos);

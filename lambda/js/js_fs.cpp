@@ -962,28 +962,6 @@ extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     return stream_root.get();
 }
 
-static bool fs_item_bytes(Item item, const char** data, int* len) {
-    if (!data || !len) return false;
-    *data = NULL;
-    *len = 0;
-    if (get_type_id(item) == LMD_TYPE_STRING) {
-        String* s = it2s(item);
-        *data = s->chars;
-        *len = (int)s->len;
-        return true;
-    }
-    if (js_is_typed_array(item)) {
-        if (js_typed_array_is_out_of_bounds_item(item)) return false;
-        int byte_len = js_typed_array_byte_length(item);
-        void* ptr = js_typed_array_current_data_ptr(item);
-        if (byte_len > 0 && !ptr) return false;
-        *data = (const char*)ptr;
-        *len = byte_len;
-        return true;
-    }
-    return false;
-}
-
 static void js_fs_writestream_call_write_hook(Item stream, Item fd_item);
 static void js_fs_writestream_schedule_open(Item stream);
 static void js_fs_writestream_schedule_drain(Item stream);
@@ -1002,7 +980,7 @@ static Item js_fs_writestream_write(Item chunk_item, Item callback_item) {
 
     const char* data = NULL;
     int len = 0;
-    if (!fs_item_bytes(chunk_item, &data, &len)) return (Item){.item = b2it(false)};
+    if (!js_item_bytes(chunk_item, &data, &len)) return (Item){.item = b2it(false)};
 
     Item fd_item = js_property_get(stream, make_string_item("fd"));
     int fd = 0;
@@ -1415,6 +1393,39 @@ extern "C" Item js_fs_unlinkSync(Item path_item) {
 }
 
 // fs.mkdirSync(path[, options])
+static void fs_parse_mkdir_options(Item options, int* mode, bool* recursive) {
+    if (!mode || !recursive) return;
+    *mode = 0777;
+    *recursive = false;
+    // options can be an integer (mode) or an object { recursive, mode }
+    if (get_type_id(options) == LMD_TYPE_INT) {
+        *mode = (int)it2i(options);
+    } else if (get_type_id(options) == LMD_TYPE_FLOAT) {
+        *mode = (int)it2d(options);
+    } else if (get_type_id(options) == LMD_TYPE_MAP) {
+        Item mode_val = js_property_get(options, make_string_item("mode"));
+        if (get_type_id(mode_val) == LMD_TYPE_INT) *mode = (int)it2i(mode_val);
+        else if (get_type_id(mode_val) == LMD_TYPE_FLOAT) *mode = (int)it2d(mode_val);
+        Item rec_val = js_property_get(options, make_string_item("recursive"));
+        *recursive = js_is_truthy(rec_val);
+    }
+}
+
+static void fs_mkdir_recursive(const char* path, int mode) {
+    if (!path) return;
+    char tmp[1024];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    for (char* p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            uv_fs_t req;
+            uv_fs_mkdir(NULL, &req, tmp, mode, NULL);
+            uv_fs_req_cleanup(&req);
+            *p = '/';
+        }
+    }
+}
+
 extern "C" Item js_fs_mkdirSync(Item path_item, Item options) {
     char path_buf[1024];
     const char* path = fs_path_to_cstr(path_item, "path", path_buf, sizeof(path_buf));
@@ -1423,33 +1434,10 @@ extern "C" Item js_fs_mkdirSync(Item path_item, Item options) {
 
     int mode = 0777;
     bool recursive = false;
-
-    // options can be an integer (mode) or an object { recursive, mode }
-    if (get_type_id(options) == LMD_TYPE_INT) {
-        mode = (int)it2i(options);
-    } else if (get_type_id(options) == LMD_TYPE_FLOAT) {
-        mode = (int)it2d(options);
-    } else if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item mode_val = js_property_get(options, make_string_item("mode"));
-        if (get_type_id(mode_val) == LMD_TYPE_INT) mode = (int)it2i(mode_val);
-        else if (get_type_id(mode_val) == LMD_TYPE_FLOAT) mode = (int)it2d(mode_val);
-        Item rec_val = js_property_get(options, make_string_item("recursive"));
-        recursive = js_is_truthy(rec_val);
-    }
+    fs_parse_mkdir_options(options, &mode, &recursive);
 
     if (recursive) {
-        // create parent directories as needed
-        char tmp[1024];
-        snprintf(tmp, sizeof(tmp), "%s", path);
-        for (char* p = tmp + 1; *p; p++) {
-            if (*p == '/') {
-                *p = '\0';
-                uv_fs_t req;
-                uv_fs_mkdir(NULL, &req, tmp, mode, NULL);
-                uv_fs_req_cleanup(&req);
-                *p = '/';
-            }
-        }
+        fs_mkdir_recursive(path, mode);
     }
 
     uv_fs_t req;
@@ -1488,31 +1476,10 @@ extern "C" Item js_fs_mkdir_async(Item path_item, Item options_or_cb, Item callb
 
     int mode = 0777;
     bool recursive = false;
-
-    if (get_type_id(options) == LMD_TYPE_INT) {
-        mode = (int)it2i(options);
-    } else if (get_type_id(options) == LMD_TYPE_FLOAT) {
-        mode = (int)it2d(options);
-    } else if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item mode_val = js_property_get(options, make_string_item("mode"));
-        if (get_type_id(mode_val) == LMD_TYPE_INT) mode = (int)it2i(mode_val);
-        else if (get_type_id(mode_val) == LMD_TYPE_FLOAT) mode = (int)it2d(mode_val);
-        Item rec_val = js_property_get(options, make_string_item("recursive"));
-        recursive = js_is_truthy(rec_val);
-    }
+    fs_parse_mkdir_options(options, &mode, &recursive);
 
     if (recursive) {
-        char tmp[1024];
-        snprintf(tmp, sizeof(tmp), "%s", path);
-        for (char* p = tmp + 1; *p; p++) {
-            if (*p == '/') {
-                *p = '\0';
-                uv_fs_t req;
-                uv_fs_mkdir(NULL, &req, tmp, mode, NULL);
-                uv_fs_req_cleanup(&req);
-                *p = '/';
-            }
-        }
+        fs_mkdir_recursive(path, mode);
     }
 
     uv_fs_t req;

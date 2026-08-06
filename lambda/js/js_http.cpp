@@ -803,28 +803,6 @@ static void http_response_schedule_error(Item res, Item err) {
     js_next_tick_enqueue(tick);
 }
 
-static bool http_item_bytes(Item item, const char** data, int* len) {
-    if (!data || !len) return false;
-    *data = NULL;
-    *len = 0;
-    if (get_type_id(item) == LMD_TYPE_STRING) {
-        String* s = it2s(item);
-        *data = s->chars;
-        *len = (int)s->len;
-        return true;
-    }
-    if (js_is_typed_array(item)) {
-        if (js_typed_array_is_out_of_bounds_item(item)) return false;
-        int byte_len = js_typed_array_byte_length(item);
-        void* ptr = js_typed_array_current_data_ptr(item);
-        if (byte_len > 0 && !ptr) return false;
-        *data = (const char*)ptr;
-        *len = byte_len;
-        return true;
-    }
-    return false;
-}
-
 static Item http_encode_write_chunk(Item chunk_item, Item encoding_item) {
     if (get_type_id(chunk_item) == LMD_TYPE_STRING &&
         get_type_id(encoding_item) == LMD_TYPE_STRING) {
@@ -842,7 +820,7 @@ static void http_call_write_callback(Item callback) {
 static void http_response_append_body(Item self, Item chunk_item) {
     const char* chunk_data = NULL;
     int chunk_len = 0;
-    if (!http_item_bytes(chunk_item, &chunk_data, &chunk_len)) return;
+    if (!js_item_bytes(chunk_item, &chunk_data, &chunk_len)) return;
     if (chunk_len <= 0) return;
 
     Item chunks = js_property_get(self, make_string_item("__chunks__"));
@@ -885,7 +863,7 @@ static int http_response_body_len(Item self) {
                 Item chunk = js_array_get_int(chunks, i);
                 const char* data = NULL;
                 int len = 0;
-                if (http_item_bytes(chunk, &data, &len)) total += len;
+                if (js_item_bytes(chunk, &data, &len)) total += len;
             }
             return total;
         }
@@ -909,7 +887,7 @@ static int http_response_copy_body_range(Item self, char* dest, int start, int l
             Item chunk = js_array_get_int(chunks, i);
             const char* chunk_data = NULL;
             int chunk_len = 0;
-            if (!http_item_bytes(chunk, &chunk_data, &chunk_len)) continue;
+            if (!js_item_bytes(chunk, &chunk_data, &chunk_len)) continue;
             if (skip >= chunk_len) {
                 skip -= chunk_len;
                 continue;
@@ -968,7 +946,7 @@ static bool http_response_single_body_bytes(Item self, const char** data, int* l
     Item chunks = js_property_get(self, make_string_item("__chunks__"));
     if (get_type_id(chunks) != LMD_TYPE_ARRAY || js_array_length(chunks) != 1) return false;
     Item chunk = js_array_get_int(chunks, 0);
-    if (!http_item_bytes(chunk, data, len)) return false;
+    if (!js_item_bytes(chunk, data, len)) return false;
     return *len == http_response_body_len(self);
 }
 
@@ -1787,7 +1765,7 @@ static void http_response_flush(Item self) {
                 Item chunk = js_array_get_int(chunks, i);
                 const char* chunk_data = NULL;
                 int chunk_len = 0;
-                if (http_item_bytes(chunk, &chunk_data, &chunk_len)) {
+                if (js_item_bytes(chunk, &chunk_data, &chunk_len)) {
                     chunk_cap += chunk_len + 32;
                 }
             }
@@ -1800,7 +1778,7 @@ static void http_response_flush(Item self) {
                 Item chunk = js_array_get_int(chunks, i);
                 const char* chunk_data = NULL;
                 int chunk_len = 0;
-                if (!http_item_bytes(chunk, &chunk_data, &chunk_len) || chunk_len <= 0) continue;
+                if (!js_item_bytes(chunk, &chunk_data, &chunk_len) || chunk_len <= 0) continue;
                 cpos += snprintf(output_body + cpos, chunk_cap - cpos, "%X\r\n", (unsigned int)chunk_len);
                 memcpy(output_body + cpos, chunk_data, (size_t)chunk_len);
                 cpos += chunk_len;
@@ -2618,7 +2596,7 @@ static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_a
     if (!conn || conn->destroyed) return false;
     const char* data = NULL;
     int len = 0;
-    if (!http_item_bytes(data_item, &data, &len)) return false;
+    if (!js_item_bytes(data_item, &data, &len)) return false;
 
     HttpConnWriteReq* write_req =
         (HttpConnWriteReq*)mem_calloc(1, sizeof(HttpConnWriteReq), MEM_CAT_JS_RUNTIME);
@@ -3085,6 +3063,46 @@ static void http_server_send_expectation_failed(JsHttpConn* conn, ParsedRequest*
     http_response_flush(res_obj);
 }
 
+static void http_server_dispatch_request(JsHttpConn* conn, ParsedRequest* req,
+        Item on_req, Item on_expect, bool has_handler, bool has_request_event,
+        bool has_expect_handler, bool expect_continue, bool response_at_eof,
+        bool has_buffered_request) {
+    JsHttpServer* srv = conn->server;
+    if (conn->async_resource.item == 0) conn->async_resource = js_new_object();
+    Item req_obj = make_request_object(conn, req);
+    Item res_obj = http_response_for_request(conn, req, response_at_eof, false, has_buffered_request);
+    js_property_set(res_obj, make_string_item("__request__"), req_obj);
+    if (!req->body_complete) {
+        conn->current_request = req_obj;
+        conn->request_body_remaining = req->content_length - req->body_len;
+        conn->request_body_chunked = http_request_is_chunked(req);
+    }
+
+    Item args[2] = { req_obj, res_obj };
+    if (has_expect_handler) {
+        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
+        js_call_function(on_expect, srv->js_object, args, 2);
+        js_async_hooks_restore_resource(previous_resource);
+        js_microtask_flush();
+        return;
+    }
+    if (expect_continue) {
+        http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
+    }
+    if (has_handler) {
+        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
+        js_call_function(srv->request_handler, srv->js_object, args, 2);
+        js_async_hooks_restore_resource(previous_resource);
+        js_microtask_flush();
+    }
+    if (has_request_event && (!has_handler || on_req.item != srv->request_handler.item)) {
+        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
+        js_call_function(on_req, srv->js_object, args, 2);
+        js_async_hooks_restore_resource(previous_resource);
+        js_microtask_flush();
+    }
+}
+
 static void http_server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
     buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
     buf->len = buf->base ? suggested_size : 0;
@@ -3210,41 +3228,9 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                     conn->recv_len = remaining;
                     continue;
                 }
-                if (conn->async_resource.item == 0) conn->async_resource = js_new_object();
-                Item req_obj = make_request_object(conn, &req);
-                Item res_obj = http_response_for_request(conn, &req, false, false, has_buffered_request);
-                js_property_set(res_obj, make_string_item("__request__"), req_obj);
-                if (!req.body_complete) {
-                    conn->current_request = req_obj;
-                    conn->request_body_remaining = req.content_length - req.body_len;
-                    conn->request_body_chunked = http_request_is_chunked(&req);
-                }
-
-                Item args[2] = { req_obj, res_obj };
-                if (has_expect_handler) {
-                    Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                    js_call_function(on_expect, srv->js_object, args, 2);
-                    js_async_hooks_restore_resource(previous_resource);
-                    js_microtask_flush();
-                } else {
-                    if (expect_continue) {
-                        http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
-                    }
-                    if (has_handler) {
-                        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                        js_call_function(srv->request_handler, srv->js_object, args, 2);
-                        js_async_hooks_restore_resource(previous_resource);
-                        js_microtask_flush();
-                    }
-
-                    // emit 'request' event
-                    if (has_request_event && (!has_handler || on_req.item != srv->request_handler.item)) {
-                        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                        js_call_function(on_req, srv->js_object, args, 2);
-                        js_async_hooks_restore_resource(previous_resource);
-                        js_microtask_flush();
-                    }
-                }
+                http_server_dispatch_request(conn, &req, on_req, on_expect,
+                    has_handler, has_request_event, has_expect_handler,
+                    expect_continue, false, has_buffered_request);
             }
             int remaining = conn->recv_len - consumed;
             if (remaining > 0) memmove(conn->recv_buf, conn->recv_buf + consumed, (size_t)remaining);
@@ -3284,37 +3270,9 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                         http_server_send_expectation_failed(conn, &req, false);
                     } else if (has_expect_handler || has_handler || has_request_event) {
                         if (conn->async_resource.item == 0) conn->async_resource = js_new_object();
-                        Item req_obj = make_request_object(conn, &req);
-                        Item res_obj = http_response_for_request(conn, &req, true, false, false);
-                        js_property_set(res_obj, make_string_item("__request__"), req_obj);
-                        if (!req.body_complete) {
-                            conn->current_request = req_obj;
-                            conn->request_body_remaining = req.content_length - req.body_len;
-                            conn->request_body_chunked = http_request_is_chunked(&req);
-                        }
-                        Item args[2] = { req_obj, res_obj };
-                        if (has_expect_handler) {
-                            Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                            js_call_function(on_expect, srv->js_object, args, 2);
-                            js_async_hooks_restore_resource(previous_resource);
-                            js_microtask_flush();
-                        } else {
-                            if (expect_continue) {
-                                http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
-                            }
-                            if (has_handler) {
-                                Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                                js_call_function(srv->request_handler, srv->js_object, args, 2);
-                                js_async_hooks_restore_resource(previous_resource);
-                                js_microtask_flush();
-                            }
-                            if (has_request_event && (!has_handler || on_req.item != srv->request_handler.item)) {
-                                Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                                js_call_function(on_req, srv->js_object, args, 2);
-                                js_async_hooks_restore_resource(previous_resource);
-                                js_microtask_flush();
-                            }
-                        }
+                        http_server_dispatch_request(conn, &req, on_req, on_expect,
+                            has_handler, has_request_event, has_expect_handler,
+                            expect_continue, true, false);
                     }
                 }
                 int remaining = conn->recv_len - consumed;
@@ -4707,7 +4665,7 @@ static void http_client_write_chunk(JsHttpClientReq* creq, String* chunk, Item c
 static void http_client_write_chunked_body(JsHttpClientReq* creq, Item chunk_item, Item callback) {
     const char* data = NULL;
     int len = 0;
-    if (!http_item_bytes(chunk_item, &data, &len) || len <= 0) {
+    if (!js_item_bytes(chunk_item, &data, &len) || len <= 0) {
         http_call_write_callback(callback);
         return;
     }
@@ -4929,7 +4887,7 @@ static Item http_client_write_ex(Item self, Item data_item, Item encoding_item, 
     Item encoded_item = http_encode_write_chunk(data_item, encoding_item);
     const char* chunk_data = NULL;
     int chunk_len = 0;
-    if (http_item_bytes(encoded_item, &chunk_data, &chunk_len)) {
+    if (js_item_bytes(encoded_item, &chunk_data, &chunk_len)) {
         String* existing = it2s(body);
         int new_len = (int)existing->len + chunk_len;
         char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_JS_RUNTIME);

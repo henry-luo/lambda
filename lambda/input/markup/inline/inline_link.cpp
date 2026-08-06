@@ -19,27 +19,6 @@
 namespace lambda {
 namespace markup {
 
-// Helper: Create element from parser
-static inline Element* create_element(MarkupParser* parser, const char* tag) {
-    return parser->builder.element(tag).final().element;
-}
-
-// Helper: Increment element content length
-static inline void increment_element_content_length(Element* elem) {
-    TypeElmt* elmt_type = (TypeElmt*)elem->type;
-    elmt_type->content_length++;
-}
-
-// Helper: Add attribute to element
-static inline void add_attribute_to_element(MarkupParser* parser, Element* elem,
-                                            const char* key, const char* val) {
-    String* k = parser->builder.createString(key);
-    String* v = parser->builder.createString(val);
-    if (k && v) {
-        parser->builder.putToElement(lam::gc_borrow(elem), k, Item{.item = s2it(v)});
-    }
-}
-
 // CommonMark escapable punctuation characters
 static bool is_escapable_char(char c) {
     return c == '!' || c == '"' || c == '#' || c == '$' || c == '%' ||

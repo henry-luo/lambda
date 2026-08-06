@@ -19,6 +19,7 @@
 #include "js_class.h"
 #include "js_coerce.h"
 #include "js_runtime_state.hpp"
+#include "js_runtime_internal.hpp"
 #include "js_function.hpp"
 #include "js_builtin_catalog.hpp"
 #include "js_state_guards.h"
@@ -901,80 +902,6 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
 static bool js_is_symbol_item(Item item);
 extern "C" bool js_typed_array_is_out_of_bounds_item(Item ta_item);
 
-static bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero) {
-    if (is_negative_zero) *is_negative_zero = false;
-    TypeId key_type = get_type_id(key);
-    if (key_type == LMD_TYPE_INT) {
-        int64_t iv = it2i(key);
-        if (iv <= -(int64_t)JS_SYMBOL_BASE) return false;
-        if (numeric_index) *numeric_index = (double)iv;
-        return true;
-    }
-    if (key_type == LMD_TYPE_FLOAT) {
-        if (numeric_index) *numeric_index = it2d(key);
-        return true;
-    }
-    if (key_type != LMD_TYPE_STRING) return false;
-    String* str = it2s(key);
-    // Symbols retain their private NamePool identity even when their display
-    // text looks numeric; TypedArray indexed operations must not consume them.
-    if (str && property_key_requires_identity(str)) return false;
-    if (!str || str->len == 0 || str->len >= 128) return false;
-    const char* chars = str->chars;
-    int len = (int)str->len;
-    if (len == 2 && chars[0] == '-' && chars[1] == '0') {
-        if (numeric_index) *numeric_index = -0.0;
-        if (is_negative_zero) *is_negative_zero = true;
-        return true;
-    }
-    if (len == 3 && strncmp(chars, "NaN", 3) == 0) {
-        if (numeric_index) *numeric_index = NAN;
-        return true;
-    }
-    if (len == 8 && strncmp(chars, "Infinity", 8) == 0) {
-        if (numeric_index) *numeric_index = INFINITY;
-        return true;
-    }
-    if (len == 9 && strncmp(chars, "-Infinity", 9) == 0) {
-        if (numeric_index) *numeric_index = -INFINITY;
-        return true;
-    }
-    char buf[128];
-    memcpy(buf, chars, len);
-    buf[len] = '\0';
-    char* endptr = NULL;
-    double value = strtod(buf, &endptr);
-    if (!endptr || *endptr != '\0') return false;
-    char canon[128];
-    if (value == 0.0) {
-        snprintf(canon, sizeof(canon), "0");
-    } else if (isnan(value)) {
-        snprintf(canon, sizeof(canon), "NaN");
-    } else if (isinf(value)) {
-        snprintf(canon, sizeof(canon), value > 0 ? "Infinity" : "-Infinity");
-    } else if (fabs(value) >= 0.000001 && fabs(value) < 1000000000000000000000.0) {
-        snprintf(canon, sizeof(canon), "%.15f", value);
-        int canon_len = (int)strlen(canon);
-        while (canon_len > 0 && canon[canon_len - 1] == '0') canon[--canon_len] = '\0';
-        if (canon_len > 0 && canon[canon_len - 1] == '.') canon[--canon_len] = '\0';
-    } else {
-        snprintf(canon, sizeof(canon), "%.15g", value);
-    }
-    if ((int)strlen(canon) != len || strncmp(canon, chars, len) != 0) return false;
-    if (numeric_index) *numeric_index = value;
-    return true;
-}
-
-static bool js_ta_numeric_index_valid(Item object, double numeric_index, bool is_negative_zero) {
-    if (is_negative_zero || !isfinite(numeric_index)) return false;
-    double int_part = floor(numeric_index);
-    if (int_part != numeric_index || numeric_index < 0) return false;
-    if (js_typed_array_is_out_of_bounds_item(object)) return false;
-    int64_t idx64 = (int64_t)numeric_index;
-    int len = js_typed_array_length(object);
-    return idx64 >= 0 && idx64 < len;
-}
-
 static bool js_ta_numeric_index_to_int(double numeric_index, bool is_negative_zero, int* out_index) {
     if (is_negative_zero || !isfinite(numeric_index)) return false;
     double int_part = floor(numeric_index);
@@ -996,7 +923,7 @@ static bool js_ta_define_own_numeric_index(Item obj, Item key, Item desc, bool* 
     if (!js_descriptor_from_object(desc, &pd)) return false;
 
     int idx = -1;
-    if (!js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero) ||
+    if (!js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero, NULL) ||
         !js_ta_numeric_index_to_int(numeric_index, is_negative_zero, &idx)) {
         return false;
     }
@@ -1074,7 +1001,7 @@ static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item*
         double numeric_index = 0;
         bool is_negative_zero = false;
         if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
-            bool valid_index = js_ta_numeric_index_valid(object, numeric_index, is_negative_zero);
+            bool valid_index = js_ta_numeric_index_valid(object, numeric_index, is_negative_zero, NULL);
             *out_result = (Item){.item = b2it(valid_index)};
             return true;
         }
@@ -1127,7 +1054,7 @@ static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) 
         double numeric_index = 0;
         bool is_negative_zero = false;
         if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
-            bool valid_index = js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero);
+            bool valid_index = js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero, NULL);
             if (valid_index && js_strict_mode) {
                 *out_result = js_throw_type_error("Cannot delete property of TypedArray");
             } else {
@@ -1221,7 +1148,7 @@ static bool js_try_exotic_own_property_descriptor(Item obj, Item name,
         bool is_negative_zero = false;
         if (js_ta_key_canonical_numeric(name, &numeric_index, &is_negative_zero)) {
             int idx = 0;
-            if (!js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero) ||
+            if (!js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero, NULL) ||
                 !js_ta_numeric_index_to_int(numeric_index, is_negative_zero, &idx)) {
                 *out_result = make_js_undefined();
                 return true;
@@ -5100,7 +5027,7 @@ extern "C" Item js_string_charCodeAt(Item str_item, Item index_item) {
 }
 
 static int encode_charcode_utf8(char* buf, int code);
-static int encode_charcode_full_utf8(char* buf, int code);
+static int encode_codepoint_utf8(char* buf, int code);
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out);
 static Item js_uri_make_four_byte_string_from_cp(uint32_t cp);
 extern "C" Item js_decodeURIComponent(Item str_item);
@@ -5214,8 +5141,7 @@ static int js_from_char_code_to_uint16(Item code_item) {
     return ((int)mod) & 0xFFFF;
 }
 
-extern "C" Item js_string_fromCharCode(Item code_item) {
-    int code = js_from_char_code_to_uint16(code_item);
+static Item js_string_from_char_code_uint16(int code) {
     char buf[5]; // max 4 bytes for UTF-8 + null
     int len = 0;
     if (code < 128) {
@@ -5240,32 +5166,15 @@ extern "C" Item js_string_fromCharCode(Item code_item) {
     return result;
 }
 
+extern "C" Item js_string_fromCharCode(Item code_item) {
+    int code = js_from_char_code_to_uint16(code_item);
+    return js_string_from_char_code_uint16(code);
+}
+
 extern "C" Item js_string_fromCharCode_int(int64_t code_value) {
     int64_t mod = code_value % 65536;
     if (mod < 0) mod += 65536;
-    int code = (int)mod;
-    char buf[5];
-    int len = 0;
-    if (code < 128) {
-        buf[0] = (char)code;
-        len = 1;
-    } else if (code < 0x800) {
-        buf[0] = (char)(0xC0 | (code >> 6));
-        buf[1] = (char)(0x80 | (code & 0x3F));
-        len = 2;
-    } else {
-        buf[0] = (char)(0xE0 | (code >> 12));
-        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (code & 0x3F));
-        len = 3;
-    }
-    buf[len] = '\0';
-
-    Item result = js_make_small_string(buf, len, code < 128);
-    g_last_from_char_code_string = result;
-    g_last_from_char_code_cp = code;
-    g_last_from_char_code_epoch = js_get_heap_epoch();
-    return result;
+    return js_string_from_char_code_uint16((int)mod);
 }
 
 extern "C" int64_t js_string_last_fromCharCode_cp(Item str_item) {
@@ -5289,7 +5198,7 @@ extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
             g_uri_last_four_byte_epoch == js_get_heap_epoch()) {
             return g_uri_last_four_byte_string;
         }
-        pos += encode_charcode_full_utf8(buf + pos, cp);
+        pos += encode_codepoint_utf8(buf + pos, (int)cp);
     } else {
         pos += encode_charcode_utf8(buf + pos, first);
         pos += encode_charcode_utf8(buf + pos, second);
@@ -5342,29 +5251,7 @@ static int encode_charcode_utf8(char* buf, int code) {
     }
 }
 
-// encode a full Unicode codepoint (up to U+10FFFF) to UTF-8
-static int encode_charcode_full_utf8(char* buf, int code) {
-    if (code < 0 || code > 0x10FFFF) return 0;
-    if (code < 0x80) {
-        buf[0] = (char)code;
-        return 1;
-    } else if (code < 0x800) {
-        buf[0] = (char)(0xC0 | (code >> 6));
-        buf[1] = (char)(0x80 | (code & 0x3F));
-        return 2;
-    } else if (code < 0x10000) {
-        buf[0] = (char)(0xE0 | (code >> 12));
-        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (code & 0x3F));
-        return 3;
-    } else {
-        buf[0] = (char)(0xF0 | (code >> 18));
-        buf[1] = (char)(0x80 | ((code >> 12) & 0x3F));
-        buf[2] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[3] = (char)(0x80 | (code & 0x3F));
-        return 4;
-    }
-}
+static int encode_codepoint_utf8(char* buf, int code);
 
 // Multi-argument String.fromCharCode: js_string_fromCharCode_array(Item arr)
 // Takes a Lambda Array or TypedArray of code points and returns a concatenated string
@@ -5386,7 +5273,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
                 int lo = js_from_char_code_to_uint16(lo_item);
                 uint32_t cp = utf16_decode_pair((uint16_t)code, (uint16_t)lo);
                 if (cp != 0) {
-                    pos += encode_charcode_full_utf8(buf + pos, cp);
+                    pos += encode_codepoint_utf8(buf + pos, (int)cp);
                     i++; // skip the low surrogate
                     continue;
                 }
@@ -5414,7 +5301,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
             int lo = js_from_char_code_to_uint16(arr->items[i + 1]);
             uint32_t cp = utf16_decode_pair((uint16_t)code, (uint16_t)lo);
             if (cp != 0) {
-                pos += encode_charcode_full_utf8(buf + pos, cp);
+                pos += encode_codepoint_utf8(buf + pos, (int)cp);
                 i++; // skip the low surrogate
                 continue;
             }
@@ -7634,14 +7521,14 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
                 if (js_check_exception()) return ItemNull;
                 return (Item){.item = b2it(true)};
             }
-            bool target_valid_index = js_ta_numeric_index_valid(target, numeric_index, is_negative_zero);
+            bool target_valid_index = js_ta_numeric_index_valid(target, numeric_index, is_negative_zero, NULL);
             if (!target_valid_index) return (Item){.item = b2it(true)};
             TypeId rt = get_type_id(receiver);
             bool recv_is_obj = (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY ||
                                 rt == LMD_TYPE_FUNC || rt == LMD_TYPE_ELEMENT);
             if (!recv_is_obj) return (Item){.item = b2it(false)};
             if (rt == LMD_TYPE_MAP && receiver.map && receiver.map->map_kind == MAP_KIND_TYPED_ARRAY) {
-                bool receiver_valid_index = js_ta_numeric_index_valid(receiver, numeric_index, is_negative_zero);
+                bool receiver_valid_index = js_ta_numeric_index_valid(receiver, numeric_index, is_negative_zero, NULL);
                 if (!receiver_valid_index) return (Item){.item = b2it(false)};
                 js_property_set(receiver, key, value);
                 if (js_check_exception()) return ItemNull;
@@ -12183,21 +12070,30 @@ static Item js_object_test_proxy_integrity(Item obj, bool frozen) {
     return (Item){.item = b2it(true)};
 }
 
-extern "C" Item js_object_is_frozen(Item obj) {
+static Item js_object_test_integrity(Item obj, bool frozen) {
     // ES6: non-objects are frozen
     TypeId ot = get_type_id(obj);
     if (ot != LMD_TYPE_MAP && ot != LMD_TYPE_ARRAY && ot != LMD_TYPE_FUNC && ot != LMD_TYPE_ELEMENT)
         return (Item){.item = b2it(true)};
-    if (js_is_proxy(obj)) return js_object_test_proxy_integrity(obj, true);
+    if (js_is_proxy(obj)) return js_object_test_proxy_integrity(obj, frozen);
     // For arrays and functions, check via marker system
     if (ot == LMD_TYPE_ARRAY || ot == LMD_TYPE_FUNC) {
         bool found = false;
+        if (!frozen) {
+            Item sv = js_defprop_get_internal_state(obj, "__sealed__", 10, &found);
+            if (found && js_is_truthy(sv)) return (Item){.item = b2it(true)};
+        }
         Item fv = js_defprop_get_internal_state(obj, "__frozen__", 10, &found);
         if (found && js_is_truthy(fv)) return (Item){.item = b2it(true)};
         return (Item){.item = b2it(false)};
     }
     if (ot != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
-    // fast path: explicitly frozen
+    // fast path: explicitly sealed or frozen
+    bool sk_found = false;
+    if (!frozen) {
+        Item sv = js_map_get_fast_ext(obj.map, "__sealed__", 10, &sk_found);
+        if (sk_found && js_is_truthy(sv)) return (Item){.item = b2it(true)};
+    }
     bool fk_found = false;
     Item fv = js_map_get_fast_ext(obj.map, "__frozen__", 10, &fk_found);
     if (fk_found && js_is_truthy(fv)) return (Item){.item = b2it(true)};
@@ -12205,7 +12101,7 @@ extern "C" Item js_object_is_frozen(Item obj) {
     bool ne_found = false;
     Item nev = js_map_get_fast_ext(obj.map, "__non_extensible__", 17, &ne_found);
     if (!ne_found || !js_is_truthy(nev)) return (Item){.item = b2it(false)};
-    // check all own properties are non-configurable and non-writable (or accessor)
+    // check all own properties are non-configurable and, when frozen, non-writable (or accessor)
     Map* m = obj.map;
     if (!m || !m->type) return (Item){.item = b2it(true)}; // no shape = no properties
     TypeMap* tm = (TypeMap*)m->type;
@@ -12218,17 +12114,23 @@ extern "C" Item js_object_is_frozen(Item obj) {
             // Stage A3.4: shape-flag-first via helper (falls back to legacy markers).
             // check non-configurable
             if (js_props_query_configurable(m, e, n, nlen)) return (Item){.item = b2it(false)};
-            // accessor properties don't need to be non-writable per ES spec
-            bool is_accessor = jspd_is_accessor(e);
-            // Phase-5D: legacy __get_/__set_ fallback probe removed.
-            // Accessors are detected via IS_ACCESSOR shape flag on the bare-name entry.
-            if (!is_accessor) {
-                if (js_props_query_writable(m, e, n, nlen)) return (Item){.item = b2it(false)};
+            if (frozen) {
+                // accessor properties don't need to be non-writable per ES spec
+                bool is_accessor = jspd_is_accessor(e);
+                // Phase-5D: legacy __get_/__set_ fallback probe removed.
+                // Accessors are detected via IS_ACCESSOR shape flag on the bare-name entry.
+                if (!is_accessor) {
+                    if (js_props_query_writable(m, e, n, nlen)) return (Item){.item = b2it(false)};
+                }
             }
         }
         e = e->next;
     }
     return (Item){.item = b2it(true)};
+}
+
+extern "C" Item js_object_is_frozen(Item obj) {
+    return js_object_test_integrity(obj, true);
 }
 
 // =============================================================================
@@ -12263,48 +12165,7 @@ extern "C" Item js_object_seal(Item obj) {
 }
 
 extern "C" Item js_object_is_sealed(Item obj) {
-    // ES6: non-objects are sealed
-    TypeId ot = get_type_id(obj);
-    if (ot != LMD_TYPE_MAP && ot != LMD_TYPE_ARRAY && ot != LMD_TYPE_FUNC && ot != LMD_TYPE_ELEMENT)
-        return (Item){.item = b2it(true)};
-    if (js_is_proxy(obj)) return js_object_test_proxy_integrity(obj, false);
-    // For arrays and functions, check via marker system
-    if (ot == LMD_TYPE_ARRAY || ot == LMD_TYPE_FUNC) {
-        bool found = false;
-        Item sv = js_defprop_get_internal_state(obj, "__sealed__", 10, &found);
-        if (found && js_is_truthy(sv)) return (Item){.item = b2it(true)};
-        Item fv = js_defprop_get_internal_state(obj, "__frozen__", 10, &found);
-        if (found && js_is_truthy(fv)) return (Item){.item = b2it(true)};
-        return (Item){.item = b2it(false)};
-    }
-    if (ot != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
-    // fast path: explicitly sealed or frozen
-    bool sk_found = false;
-    Item sv = js_map_get_fast_ext(obj.map, "__sealed__", 10, &sk_found);
-    if (sk_found && js_is_truthy(sv)) return (Item){.item = b2it(true)};
-    bool fk_found = false;
-    Item fv = js_map_get_fast_ext(obj.map, "__frozen__", 10, &fk_found);
-    if (fk_found && js_is_truthy(fv)) return (Item){.item = b2it(true)};
-    // must be non-extensible
-    bool ne_found = false;
-    Item nev = js_map_get_fast_ext(obj.map, "__non_extensible__", 17, &ne_found);
-    if (!ne_found || !js_is_truthy(nev)) return (Item){.item = b2it(false)};
-    // check all own properties are non-configurable
-    Map* m = obj.map;
-    if (!m || !m->type) return (Item){.item = b2it(true)}; // no shape = no properties
-    TypeMap* tm = (TypeMap*)m->type;
-    ShapeEntry* e = tm->shape;
-    while (e) {
-        if (e->name) {
-            const char* n = e->name->str;
-            int nlen = (int)e->name->length;
-            if (nlen >= 2 && n[0] == '_' && n[1] == '_') { e = e->next; continue; }
-            // Stage A3.4: shape-flag-first via helper (falls back to legacy markers).
-            if (js_props_query_configurable(m, e, n, nlen)) return (Item){.item = b2it(false)};
-        }
-        e = e->next;
-    }
-    return (Item){.item = b2it(true)};
+    return js_object_test_integrity(obj, false);
 }
 
 // =============================================================================

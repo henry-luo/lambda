@@ -237,6 +237,55 @@ static size_t extract_infix_frac_command(const char* source, uint32_t start, uin
     return 0;
 }
 
+static void add_math_command_attr(MarkBuilder& builder, ElementBuilder& elem,
+        TSNode cmd, const char* source, uint32_t start, uint32_t end, bool infix) {
+    if (!ts_node_is_null(cmd)) {
+        uint32_t cmd_start = ts_node_start_byte(cmd);
+        uint32_t cmd_end = ts_node_end_byte(cmd);
+        elem.attr("cmd", {.item = s2it(builder.createString(
+            source + cmd_start, cmd_end - cmd_start))});
+        return;
+    }
+    char cmd_buf[64];
+    size_t cmd_len = infix ?
+        extract_infix_frac_command(source, start, end, cmd_buf, sizeof(cmd_buf)) : 0;
+    if (cmd_len == 0) {
+        cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+    }
+    if (cmd_len > 0) {
+        elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
+    }
+}
+
+static Item convert_math_dimension_command(MarkBuilder& builder, TSNode node,
+        const char* source, uint32_t start, uint32_t end, const char* element_name) {
+    ElementBuilder elem = builder.element(element_name);
+    TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+    TSNode sign = ts_node_child_by_field_name(node, "sign", 4);
+    TSNode value = ts_node_child_by_field_name(node, "value", 5);
+    TSNode unit = ts_node_child_by_field_name(node, "unit", 4);
+    add_math_command_attr(builder, elem, cmd, source, start, end, false);
+    if (!ts_node_is_null(sign)) {
+        uint32_t child_start = ts_node_start_byte(sign);
+        uint32_t child_end = ts_node_end_byte(sign);
+        elem.attr("sign", {.item = s2it(builder.createString(
+            source + child_start, child_end - child_start))});
+    }
+    if (!ts_node_is_null(value)) {
+        uint32_t child_start = ts_node_start_byte(value);
+        uint32_t child_end = ts_node_end_byte(value);
+        elem.attr("value", {.item = s2it(builder.createString(
+            source + child_start, child_end - child_start))});
+    }
+    if (!ts_node_is_null(unit)) {
+        uint32_t child_start = ts_node_start_byte(unit);
+        uint32_t child_end = ts_node_end_byte(unit);
+        elem.attr("unit", {.item = s2it(builder.createString(
+            source + child_start, child_end - child_start))});
+    }
+    return elem.final();
+}
+
 /**
  * Convert a tree-sitter-latex-math node to Lambda Mark element.
  * This recursively builds an AST representation of the math content.
@@ -373,21 +422,7 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         TSNode numer = ts_node_child_by_field_name(node, "numer", 5);
         TSNode denom = ts_node_child_by_field_name(node, "denom", 5);
 
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_infix_frac_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len == 0) {
-                cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            }
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
+        add_math_command_attr(builder, elem, cmd, source, start, end, true);
         if (!ts_node_is_null(numer)) {
             elem.attr("numer", convert_math_node(ctx, numer, source));
         }
@@ -497,21 +532,7 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         TSNode top = ts_node_child_by_field_name(node, "top", 3);
         TSNode bottom = ts_node_child_by_field_name(node, "bottom", 6);
 
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_infix_frac_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len == 0) {
-                cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            }
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
+        add_math_command_attr(builder, elem, cmd, source, start, end, true);
         if (!ts_node_is_null(top)) {
             elem.attr("top", convert_math_node(ctx, top, source));
         }
@@ -569,18 +590,7 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
         TSNode base = ts_node_child_by_field_name(node, "base", 4);
 
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
+        add_math_command_attr(builder, elem, cmd, source, start, end, false);
         if (!ts_node_is_null(base)) {
             elem.attr("base", convert_math_node(ctx, base, source));
         }
@@ -672,18 +682,7 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
         TSNode content = ts_node_child_by_field_name(node, "content", 7);
 
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
+        add_math_command_attr(builder, elem, cmd, source, start, end, false);
         if (!ts_node_is_null(content)) {
             uint32_t txt_start = ts_node_start_byte(content);
             uint32_t txt_end = ts_node_end_byte(content);
@@ -764,18 +763,7 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
         TSNode arg = ts_node_child_by_field_name(node, "arg", 3);
 
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
+        add_math_command_attr(builder, elem, cmd, source, start, end, false);
         if (!ts_node_is_null(arg)) {
             elem.attr("arg", convert_math_node(ctx, arg, source));
         }
@@ -904,21 +892,7 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         ElementBuilder elem = builder.element("infix_frac");
 
         TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_infix_frac_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len == 0) {
-                cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            }
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
+        add_math_command_attr(builder, elem, cmd, source, start, end, true);
 
         // collect numer and denom children by field name
         uint32_t child_count = ts_node_child_count(node);
@@ -953,18 +927,7 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         TSNode annotation = ts_node_child_by_field_name(node, "annotation", 10);
         TSNode base = ts_node_child_by_field_name(node, "base", 4);
 
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
+        add_math_command_attr(builder, elem, cmd, source, start, end, false);
         if (!ts_node_is_null(annotation)) {
             elem.attr("annotation", convert_math_node(ctx, annotation, source));
         }
@@ -983,18 +946,7 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         TSNode below = ts_node_child_by_field_name(node, "below", 5);
         TSNode above = ts_node_child_by_field_name(node, "above", 5);
 
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
+        add_math_command_attr(builder, elem, cmd, source, start, end, false);
         if (!ts_node_is_null(below)) {
             elem.attr("below", convert_math_node(ctx, below, source));
         }
@@ -1047,18 +999,7 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         TSNode color = ts_node_child_by_field_name(node, "color", 5);
         TSNode content = ts_node_child_by_field_name(node, "content", 7);
 
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
+        add_math_command_attr(builder, elem, cmd, source, start, end, false);
         if (!ts_node_is_null(color)) {
             elem.attr("color", convert_math_node(ctx, color, source));
         }
@@ -1077,18 +1018,7 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         TSNode options = ts_node_child_by_field_name(node, "options", 7);
         TSNode content = ts_node_child_by_field_name(node, "content", 7);
 
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
+        add_math_command_attr(builder, elem, cmd, source, start, end, false);
         if (!ts_node_is_null(options)) {
             elem.attr("options", convert_math_node(ctx, options, source));
         }
@@ -1107,18 +1037,7 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         TSNode options = ts_node_child_by_field_name(node, "options", 7);
         TSNode content = ts_node_child_by_field_name(node, "content", 7);
 
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
+        add_math_command_attr(builder, elem, cmd, source, start, end, false);
         if (!ts_node_is_null(options)) {
             elem.attr("options", convert_math_node(ctx, options, source));
         }
@@ -1169,18 +1088,7 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
         TSNode body = ts_node_child_by_field_name(node, "body", 4);
 
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
+        add_math_command_attr(builder, elem, cmd, source, start, end, false);
         if (!ts_node_is_null(body)) {
             elem.attr("body", convert_math_node(ctx, body, source));
         }
@@ -1204,82 +1112,14 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
 
     // Hspace command: \hspace{dim}, \hspace*{dim}
     if (strcmp(node_type, "hspace_command") == 0) {
-        ElementBuilder elem = builder.element("hspace_command");
-
-        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
-        TSNode sign = ts_node_child_by_field_name(node, "sign", 4);
-        TSNode value = ts_node_child_by_field_name(node, "value", 5);
-        TSNode unit = ts_node_child_by_field_name(node, "unit", 4);
-
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
-        if (!ts_node_is_null(sign)) {
-            uint32_t s_start = ts_node_start_byte(sign);
-            uint32_t s_end = ts_node_end_byte(sign);
-            elem.attr("sign", {.item = s2it(builder.createString(source + s_start, s_end - s_start))});
-        }
-        if (!ts_node_is_null(value)) {
-            uint32_t v_start = ts_node_start_byte(value);
-            uint32_t v_end = ts_node_end_byte(value);
-            elem.attr("value", {.item = s2it(builder.createString(source + v_start, v_end - v_start))});
-        }
-        if (!ts_node_is_null(unit)) {
-            uint32_t u_start = ts_node_start_byte(unit);
-            uint32_t u_end = ts_node_end_byte(unit);
-            elem.attr("unit", {.item = s2it(builder.createString(source + u_start, u_end - u_start))});
-        }
-
-        return elem.final();
+        return convert_math_dimension_command(builder, node, source, start, end,
+            "hspace_command");
     }
 
     // Skip/kern commands: \hskip, \kern, \mskip, \mkern with dimensions
     if (strcmp(node_type, "skip_command") == 0) {
-        ElementBuilder elem = builder.element("skip_command");
-
-        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
-        TSNode sign = ts_node_child_by_field_name(node, "sign", 4);
-        TSNode value = ts_node_child_by_field_name(node, "value", 5);
-        TSNode unit = ts_node_child_by_field_name(node, "unit", 4);
-
-        if (!ts_node_is_null(cmd)) {
-            uint32_t cmd_start = ts_node_start_byte(cmd);
-            uint32_t cmd_end = ts_node_end_byte(cmd);
-            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
-        } else {
-            // extract command from node source text (anonymous token fallback)
-            char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
-            if (cmd_len > 0) {
-                elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
-            }
-        }
-        if (!ts_node_is_null(sign)) {
-            uint32_t s_start = ts_node_start_byte(sign);
-            uint32_t s_end = ts_node_end_byte(sign);
-            elem.attr("sign", {.item = s2it(builder.createString(source + s_start, s_end - s_start))});
-        }
-        if (!ts_node_is_null(value)) {
-            uint32_t v_start = ts_node_start_byte(value);
-            uint32_t v_end = ts_node_end_byte(value);
-            elem.attr("value", {.item = s2it(builder.createString(source + v_start, v_end - v_start))});
-        }
-        if (!ts_node_is_null(unit)) {
-            uint32_t u_start = ts_node_start_byte(unit);
-            uint32_t u_end = ts_node_end_byte(unit);
-            elem.attr("unit", {.item = s2it(builder.createString(source + u_start, u_end - u_start))});
-        }
-
-        return elem.final();
+        return convert_math_dimension_command(builder, node, source, start, end,
+            "skip_command");
     }
 
     // Middle delimiter: \middle\| inside \left...\right

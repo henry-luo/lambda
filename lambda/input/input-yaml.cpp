@@ -1465,6 +1465,108 @@ static Item parse_block_sequence(YamlParser* p, int seq_indent) {
 // Block mapping parsing
 // ============================================================================
 
+static Item parse_mapping_key(YamlParser* p, int key_tag, int map_indent, bool explicit_key,
+                              bool allow_block_scalar) {
+    Item key_item;
+    if (explicit_key) {
+        skip_spaces(p);
+        parse_node_properties(p);
+        if (p->tag == TAG_NONE) p->tag = key_tag;
+        key_tag = p->tag;
+        skip_spaces(p);
+        if (at_end(p) || peek(p) == '\n' || (peek(p) == ':' && is_mapping_indicator(p))) {
+            if (!at_end(p) && peek(p) == ':') {
+                key_item = p->ctx->builder.createNull();
+            } else if (!at_end(p) && peek(p) == '\n') {
+                advance(p);
+                p->tag = key_tag;
+                key_item = parse_block_node(p, map_indent + 1);
+            } else {
+                key_item = p->ctx->builder.createNull();
+            }
+        } else if (peek(p) == '"') {
+            p->tag = key_tag;
+            key_item = parse_double_quoted(p);
+        } else if (peek(p) == '\'') {
+            p->tag = key_tag;
+            key_item = parse_single_quoted(p);
+        } else if (allow_block_scalar && (peek(p) == '|' || peek(p) == '>')) {
+            p->tag = key_tag;
+            key_item = parse_block_scalar(p, map_indent);
+        } else if (peek(p) == '[') {
+            key_item = parse_flow_sequence(p);
+        } else if (peek(p) == '{') {
+            key_item = parse_flow_mapping(p);
+        } else {
+            p->tag = key_tag;
+            key_item = parse_plain_scalar(p, map_indent, false);
+        }
+    } else {
+        p->tag = key_tag;
+        if (!at_end(p) && peek(p) == '"') {
+            key_item = parse_double_quoted(p);
+        } else if (!at_end(p) && peek(p) == '\'') {
+            key_item = parse_single_quoted(p);
+        } else if (!at_end(p) && peek(p) == '*') {
+            key_item = parse_alias(p);
+        } else {
+            StrBuf* ksb = strbuf_new_cap(32);
+            while (!at_end(p) && peek(p) != '\n') {
+                if (is_mapping_indicator(p)) break;
+                if (peek(p) == '#' && ksb->length > 0) {
+                    char prev = ksb->str[ksb->length - 1];
+                    if (prev == ' ' || prev == '\t') break;
+                }
+                strbuf_append_char(ksb, peek(p));
+                advance(p);
+            }
+            yaml_rtrim_line_space(ksb);
+            if (key_tag == TAG_STR || key_tag == TAG_NON_SPECIFIC) {
+                key_item = p->ctx->builder.createStringItem(ksb->str);
+            } else {
+                p->tag = TAG_NONE;
+                key_item = make_scalar(p, ksb->str, false);
+            }
+            strbuf_free(ksb);
+        }
+    }
+    return key_item;
+}
+
+static Item parse_mapping_value(YamlParser* p, int map_indent, bool explicit_key) {
+    skip_spaces(p);
+    if (!at_end(p) && peek(p) == ':') {
+        char nc = peek_at(p, 1);
+        if (nc == ' ' || nc == '\t' || nc == '\n' || nc == '\0') {
+            advance(p);
+            return parse_inline_block_node(p, map_indent);
+        }
+        skip_line(p);
+        return p->ctx->builder.createNull();
+    }
+    if (explicit_key) {
+        if (!at_end(p) && peek(p) == '\n') advance(p);
+        skip_blank_lines(p);
+        int vi = current_indent(p);
+        if (vi == map_indent) {
+            int vlp = line_start_pos(p);
+            int vpos = vlp + vi;
+            if (vpos < p->len && p->src[vpos] == ':') {
+                char vnc = (vpos + 1 < p->len) ? p->src[vpos + 1] : '\0';
+                if (vnc == ' ' || vnc == '\t' || vnc == '\n' || vnc == '\0') {
+                    move_to_line_start(p, vlp);
+                    advance_n(p, vi);
+                    advance(p);
+                    return parse_inline_block_node(p, map_indent);
+                }
+            }
+        }
+        return p->ctx->builder.createNull();
+    }
+    skip_line(p);
+    return p->ctx->builder.createNull();
+}
+
 static Item parse_block_mapping(YamlParser* p, int map_indent) {
     MapBuilder map = p->ctx->builder.map();
     int max_entries = p->len;
@@ -1531,118 +1633,11 @@ static Item parse_block_mapping(YamlParser* p, int map_indent) {
             }
         }
 
-        Item key_item;
-
-        if (explicit_key) {
-            skip_spaces(p);
-            // parse tags/anchors after ? (e.g., "? !!str a")
-            parse_node_properties(p);
-            if (p->tag == TAG_NONE) p->tag = key_tag;
-            key_tag = p->tag;
-            skip_spaces(p);
-            if (at_end(p) || peek(p) == '\n' || (peek(p) == ':' && is_mapping_indicator(p))) {
-                if (!at_end(p) && peek(p) == ':') {
-                    // ? : value  (empty key → null)
-                    key_item = p->ctx->builder.createNull();
-                } else if (!at_end(p) && peek(p) == '\n') {
-                    advance(p);
-                    p->tag = key_tag;
-                    key_item = parse_block_node(p, map_indent + 1);
-                } else {
-                    key_item = p->ctx->builder.createNull();
-                }
-            } else if (peek(p) == '"') {
-                p->tag = key_tag;
-                key_item = parse_double_quoted(p);
-            } else if (peek(p) == '\'') {
-                p->tag = key_tag;
-                key_item = parse_single_quoted(p);
-            } else if (peek(p) == '|' || peek(p) == '>') {
-                p->tag = key_tag;
-                key_item = parse_block_scalar(p, map_indent);
-            } else if (peek(p) == '[') {
-                key_item = parse_flow_sequence(p);
-            } else if (peek(p) == '{') {
-                key_item = parse_flow_mapping(p);
-            } else {
-                p->tag = key_tag;
-                key_item = parse_plain_scalar(p, map_indent, false);
-            }
-        } else {
-            p->tag = key_tag;
-            if (peek(p) == '"') {
-                key_item = parse_double_quoted(p);
-            } else if (peek(p) == '\'') {
-                key_item = parse_single_quoted(p);
-            } else if (peek(p) == '*') {
-                // alias as mapping key
-                key_item = parse_alias(p);
-            } else {
-                StrBuf* ksb = strbuf_new_cap(32);
-                while (!at_end(p) && peek(p) != '\n') {
-                    if (is_mapping_indicator(p)) break;
-                    // stop at comment if preceded by space
-                    if (peek(p) == '#' && ksb->length > 0) {
-                        char prev = ksb->str[ksb->length - 1];
-                        if (prev == ' ' || prev == '\t') break;
-                    }
-                    strbuf_append_char(ksb, peek(p));
-                    advance(p);
-                }
-                yaml_rtrim_line_space(ksb);
-
-                if (key_tag == TAG_STR || key_tag == TAG_NON_SPECIFIC) {
-                    key_item = p->ctx->builder.createStringItem(ksb->str);
-                } else {
-                    p->tag = TAG_NONE;
-                    key_item = make_scalar(p, ksb->str, false);
-                }
-                strbuf_free(ksb);
-            }
-        }
+        Item key_item = parse_mapping_key(p, key_tag, map_indent, explicit_key, true);
 
         if (key_anchor) store_anchor(p, key_anchor, key_item);
 
-        skip_spaces(p);
-
-        Item value;
-        if (!at_end(p) && peek(p) == ':') {
-            char nc = peek_at(p, 1);
-            if (nc == ' ' || nc == '\t' || nc == '\n' || nc == '\0') {
-                advance(p);
-                value = parse_inline_block_node(p, map_indent);
-            } else {
-                value = p->ctx->builder.createNull();
-                skip_line(p);
-            }
-        } else if (explicit_key) {
-            // look for ": " on next line at same indent
-            if (!at_end(p) && peek(p) == '\n') advance(p);
-            skip_blank_lines(p);
-            int vi = current_indent(p);
-            if (vi == map_indent) {
-                int vlp = line_start_pos(p);
-                int vpos = vlp + vi;
-                if (vpos < p->len && p->src[vpos] == ':') {
-                    char vnc = (vpos + 1 < p->len) ? p->src[vpos + 1] : '\0';
-                    if (vnc == ' ' || vnc == '\t' || vnc == '\n' || vnc == '\0') {
-                        move_to_line_start(p, vlp);
-                        advance_n(p, vi);
-                        advance(p); // skip :
-                        value = parse_inline_block_node(p, map_indent);
-                    } else {
-                        value = p->ctx->builder.createNull();
-                    }
-                } else {
-                    value = p->ctx->builder.createNull();
-                }
-            } else {
-                value = p->ctx->builder.createNull();
-            }
-        } else {
-            value = p->ctx->builder.createNull();
-            skip_line(p);
-        }
+        Item value = parse_mapping_value(p, map_indent, explicit_key);
 
         put_key_value(p, map, key_item, value);
 
@@ -1835,111 +1830,11 @@ static Item parse_block_mapping_inline(YamlParser* p, int map_indent) {
             }
         }
 
-        Item key_item;
-
-        if (explicit_key) {
-            skip_spaces(p);
-            // parse tags/anchors after ? (e.g., "? !!str a")
-            parse_node_properties(p);
-            if (p->tag == TAG_NONE) p->tag = key_tag;
-            key_tag = p->tag;
-            skip_spaces(p);
-            if (at_end(p) || peek(p) == '\n' || (peek(p) == ':' && is_mapping_indicator(p))) {
-                if (!at_end(p) && peek(p) == ':') {
-                    key_item = p->ctx->builder.createNull();
-                } else if (!at_end(p) && peek(p) == '\n') {
-                    advance(p);
-                    p->tag = key_tag;
-                    key_item = parse_block_node(p, map_indent + 1);
-                } else {
-                    key_item = p->ctx->builder.createNull();
-                }
-            } else if (peek(p) == '"') {
-                p->tag = key_tag;
-                key_item = parse_double_quoted(p);
-            } else if (peek(p) == '\'') {
-                p->tag = key_tag;
-                key_item = parse_single_quoted(p);
-            } else if (peek(p) == '[') {
-                key_item = parse_flow_sequence(p);
-            } else if (peek(p) == '{') {
-                key_item = parse_flow_mapping(p);
-            } else {
-                p->tag = key_tag;
-                key_item = parse_plain_scalar(p, map_indent, false);
-            }
-        } else {
-            p->tag = key_tag;
-            if (!at_end(p) && peek(p) == '"') {
-                key_item = parse_double_quoted(p);
-            } else if (!at_end(p) && peek(p) == '\'') {
-                key_item = parse_single_quoted(p);
-            } else if (!at_end(p) && peek(p) == '*') {
-                key_item = parse_alias(p);
-            } else {
-                StrBuf* ksb = strbuf_new_cap(32);
-                while (!at_end(p) && peek(p) != '\n') {
-                    if (is_mapping_indicator(p)) break;
-                    if (peek(p) == '#' && ksb->length > 0) {
-                        char prev = ksb->str[ksb->length - 1];
-                        if (prev == ' ' || prev == '\t') break;
-                    }
-                    strbuf_append_char(ksb, peek(p));
-                    advance(p);
-                }
-                yaml_rtrim_line_space(ksb);
-
-                if (key_tag == TAG_STR || key_tag == TAG_NON_SPECIFIC) {
-                    key_item = p->ctx->builder.createStringItem(ksb->str);
-                } else {
-                    p->tag = TAG_NONE;
-                    key_item = make_scalar(p, ksb->str, false);
-                }
-                strbuf_free(ksb);
-            }
-        }
+        Item key_item = parse_mapping_key(p, key_tag, map_indent, explicit_key, false);
 
         if (key_anchor) store_anchor(p, key_anchor, key_item);
 
-        skip_spaces(p);
-
-        Item value;
-        if (!at_end(p) && peek(p) == ':') {
-            char nc = peek_at(p, 1);
-            if (nc == ' ' || nc == '\t' || nc == '\n' || nc == '\0') {
-                advance(p);
-                value = parse_inline_block_node(p, map_indent);
-            } else {
-                value = p->ctx->builder.createNull();
-                skip_line(p);
-            }
-        } else if (explicit_key) {
-            if (!at_end(p) && peek(p) == '\n') advance(p);
-            skip_blank_lines(p);
-            int vi = current_indent(p);
-            if (vi == map_indent) {
-                int vlp = line_start_pos(p);
-                int vpos = vlp + vi;
-                if (vpos < p->len && p->src[vpos] == ':') {
-                    char vnc = (vpos + 1 < p->len) ? p->src[vpos + 1] : '\0';
-                    if (vnc == ' ' || vnc == '\t' || vnc == '\n' || vnc == '\0') {
-                        move_to_line_start(p, vlp);
-                        advance_n(p, vi);
-                        advance(p);
-                        value = parse_inline_block_node(p, map_indent);
-                    } else {
-                        value = p->ctx->builder.createNull();
-                    }
-                } else {
-                    value = p->ctx->builder.createNull();
-                }
-            } else {
-                value = p->ctx->builder.createNull();
-            }
-        } else {
-            value = p->ctx->builder.createNull();
-            skip_line(p);
-        }
+        Item value = parse_mapping_value(p, map_indent, explicit_key);
 
         put_key_value(p, map, key_item, value);
         if (p->pos == loop_guard) break;
@@ -1951,6 +1846,73 @@ static Item parse_block_mapping_inline(YamlParser* p, int map_indent) {
 // ============================================================================
 // Inline block node parsing (after "- " or ": ")
 // ============================================================================
+
+static void parse_inline_mapping_tail(YamlParser* p, int parent_indent,
+        MapBuilder* mb, bool allow_sequence_marker, bool allow_alias_marker,
+        bool trim_scalar_comments) {
+    while (!at_end(p)) {
+        if (!skip_blank_lines(p)) break;
+        int ni = current_indent(p);
+        if (ni <= parent_indent) break;
+        int lp = line_start_pos(p);
+        if (is_doc_start_at(p, lp) || is_doc_end_at(p, lp)) break;
+        move_to_line_start(p, lp);
+        advance_n(p, ni);
+        if (allow_sequence_marker && peek(p) == '-' &&
+                (peek_at(p, 1) == ' ' || peek_at(p, 1) == '\n' || peek_at(p, 1) == '\0')) {
+            move_to_line_start(p, lp);
+            break;
+        }
+        if (!is_block_mapping_key(p, 0) && peek(p) != '?' &&
+                (!allow_alias_marker || peek(p) != '*')) {
+            move_to_line_start(p, lp);
+            break;
+        }
+        move_to_line_start(p, lp);
+        advance_n(p, ni);
+        const char* ka = parse_node_properties(p);
+        if (peek(p) == '?' && (peek_at(p, 1) == ' ' || peek_at(p, 1) == '\t' ||
+                peek_at(p, 1) == '\n' || peek_at(p, 1) == '\0')) {
+            advance(p);
+            skip_spaces(p);
+        }
+        Item ki;
+        if (peek(p) == '*') {
+            ki = parse_alias(p);
+        } else if (peek(p) == '"') {
+            ki = parse_double_quoted(p);
+        } else if (peek(p) == '\'') {
+            ki = parse_single_quoted(p);
+        } else {
+            StrBuf* ksb = strbuf_new_cap(32);
+            while (!at_end(p) && peek(p) != '\n') {
+                if (is_mapping_indicator(p)) break;
+                if (trim_scalar_comments && peek(p) == '#' && ksb->length > 0 &&
+                        (ksb->str[ksb->length - 1] == ' ' ||
+                         ksb->str[ksb->length - 1] == '\t')) break;
+                strbuf_append_char(ksb, peek(p));
+                advance(p);
+            }
+            int kl = ksb->length;
+            while (kl > 0 && (ksb->str[kl - 1] == ' ' || ksb->str[kl - 1] == '\t')) kl--;
+            ksb->length = kl;
+            ksb->str[kl] = '\0';
+            ki = make_scalar(p, ksb->str, false);
+            strbuf_free(ksb);
+        }
+        if (ka) store_anchor(p, ka, ki);
+        skip_spaces(p);
+        Item kv;
+        if (!at_end(p) && peek(p) == ':' && is_mapping_indicator(p)) {
+            advance(p);
+            kv = parse_inline_block_node(p, parent_indent);
+        } else {
+            kv = p->ctx->builder.createNull();
+            skip_line(p);
+        }
+        put_key_value(p, *mb, ki, kv);
+    }
+}
 
 static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
     skip_spaces(p);
@@ -2075,64 +2037,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
             Item val = parse_inline_block_node(p, parent_indent);
             MapBuilder mb = p->ctx->builder.map();
             put_key_value(p, mb, result, val);
-            // continue reading mapping entries at greater indent
-            while (!at_end(p)) {
-                if (!skip_blank_lines(p)) break;
-                int ni = current_indent(p);
-                if (ni <= parent_indent) break;
-                int lp = line_start_pos(p);
-                if (is_doc_start_at(p, lp) || is_doc_end_at(p, lp)) break;
-                move_to_line_start(p, lp);
-                advance_n(p, ni);
-                if (peek(p) == '-' && (peek_at(p, 1) == ' ' || peek_at(p, 1) == '\n' || peek_at(p, 1) == '\0')) {
-                    move_to_line_start(p, lp); break;
-                }
-                if (!is_block_mapping_key(p, 0) && peek(p) != '?') {
-                    move_to_line_start(p, lp); break;
-                }
-                move_to_line_start(p, lp);
-                advance_n(p, ni);
-                // parse single mapping entry inline
-                const char* ka = parse_node_properties(p);
-                if (peek(p) == '?') {
-                    char nn = peek_at(p, 1);
-                    if (nn == ' ' || nn == '\t' || nn == '\n' || nn == '\0') {
-                        advance(p);
-                        skip_spaces(p);
-                    }
-                }
-                Item ki;
-                if (peek(p) == '"') {
-                    ki = parse_double_quoted(p);
-                } else if (peek(p) == '\'') {
-                    ki = parse_single_quoted(p);
-                } else if (peek(p) == '*') {
-                    ki = parse_alias(p);
-                } else {
-                    StrBuf* ksb2 = strbuf_new_cap(32);
-                    while (!at_end(p) && peek(p) != '\n') {
-                        if (is_mapping_indicator(p)) break;
-                        if (peek(p) == '#' && ksb2->length > 0 && (ksb2->str[ksb2->length-1] == ' ' || ksb2->str[ksb2->length-1] == '\t')) break;
-                        strbuf_append_char(ksb2, peek(p)); advance(p);
-                    }
-                    int kl = ksb2->length;
-                    while (kl > 0 && (ksb2->str[kl-1] == ' ' || ksb2->str[kl-1] == '\t')) kl--;
-                    ksb2->length = kl; ksb2->str[kl] = '\0';
-                    ki = make_scalar(p, ksb2->str, false);
-                    strbuf_free(ksb2);
-                }
-                if (ka) store_anchor(p, ka, ki);
-                skip_spaces(p);
-                Item kv;
-                if (!at_end(p) && peek(p) == ':' && is_mapping_indicator(p)) {
-                    advance(p);
-                    kv = parse_inline_block_node(p, parent_indent);
-                } else {
-                    kv = p->ctx->builder.createNull();
-                    skip_line(p);
-                }
-                put_key_value(p, mb, ki, kv);
-            }
+            parse_inline_mapping_tail(p, parent_indent, &mb, true, false, true);
             result = mb.final();
             if (anchor_name) store_anchor(p, anchor_name, result);
             return result;
@@ -2147,51 +2052,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
             Item val = parse_inline_block_node(p, parent_indent);
             MapBuilder mb = p->ctx->builder.map();
             put_key_value(p, mb, result, val);
-            while (!at_end(p)) {
-                if (!skip_blank_lines(p)) break;
-                int ni = current_indent(p);
-                if (ni <= parent_indent) break;
-                int lp = line_start_pos(p);
-                if (is_doc_start_at(p, lp) || is_doc_end_at(p, lp)) break;
-                move_to_line_start(p, lp);
-                advance_n(p, ni);
-                if (!is_block_mapping_key(p, 0) && peek(p) != '?') {
-                    move_to_line_start(p, lp); break;
-                }
-                move_to_line_start(p, lp);
-                advance_n(p, ni);
-                const char* ka = parse_node_properties(p);
-                Item ki;
-                if (peek(p) == '"') {
-                    ki = parse_double_quoted(p);
-                } else if (peek(p) == '\'') {
-                    ki = parse_single_quoted(p);
-                } else if (peek(p) == '*') {
-                    ki = parse_alias(p);
-                } else {
-                    StrBuf* ksb2 = strbuf_new_cap(32);
-                    while (!at_end(p) && peek(p) != '\n') {
-                        if (is_mapping_indicator(p)) break;
-                        strbuf_append_char(ksb2, peek(p)); advance(p);
-                    }
-                    int kl = ksb2->length;
-                    while (kl > 0 && (ksb2->str[kl-1] == ' ' || ksb2->str[kl-1] == '\t')) kl--;
-                    ksb2->length = kl; ksb2->str[kl] = '\0';
-                    ki = make_scalar(p, ksb2->str, false);
-                    strbuf_free(ksb2);
-                }
-                if (ka) store_anchor(p, ka, ki);
-                skip_spaces(p);
-                Item kv;
-                if (!at_end(p) && peek(p) == ':' && is_mapping_indicator(p)) {
-                    advance(p);
-                    kv = parse_inline_block_node(p, parent_indent);
-                } else {
-                    kv = p->ctx->builder.createNull();
-                    skip_line(p);
-                }
-                put_key_value(p, mb, ki, kv);
-            }
+            parse_inline_mapping_tail(p, parent_indent, &mb, false, false, false);
             result = mb.final();
             if (anchor_name) store_anchor(p, anchor_name, result);
             return result;
@@ -2207,52 +2068,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
             Item val = parse_inline_block_node(p, parent_indent);
             MapBuilder mb = p->ctx->builder.map();
             put_key_value(p, mb, result, val);
-            // continue with remaining entries
-            while (!at_end(p)) {
-                if (!skip_blank_lines(p)) break;
-                int ni = current_indent(p);
-                if (ni <= parent_indent) break;
-                int lp = line_start_pos(p);
-                if (is_doc_start_at(p, lp) || is_doc_end_at(p, lp)) break;
-                move_to_line_start(p, lp);
-                advance_n(p, ni);
-                if (!is_block_mapping_key(p, 0) && peek(p) != '?' && peek(p) != '*') {
-                    move_to_line_start(p, lp); break;
-                }
-                move_to_line_start(p, lp);
-                advance_n(p, ni);
-                const char* ka = parse_node_properties(p);
-                Item ki;
-                if (peek(p) == '*') {
-                    ki = parse_alias(p);
-                } else if (peek(p) == '"') {
-                    ki = parse_double_quoted(p);
-                } else if (peek(p) == '\'') {
-                    ki = parse_single_quoted(p);
-                } else {
-                    StrBuf* ksb2 = strbuf_new_cap(32);
-                    while (!at_end(p) && peek(p) != '\n') {
-                        if (is_mapping_indicator(p)) break;
-                        strbuf_append_char(ksb2, peek(p)); advance(p);
-                    }
-                    int kl = ksb2->length;
-                    while (kl > 0 && (ksb2->str[kl-1] == ' ' || ksb2->str[kl-1] == '\t')) kl--;
-                    ksb2->length = kl; ksb2->str[kl] = '\0';
-                    ki = make_scalar(p, ksb2->str, false);
-                    strbuf_free(ksb2);
-                }
-                if (ka) store_anchor(p, ka, ki);
-                skip_spaces(p);
-                Item kv;
-                if (!at_end(p) && peek(p) == ':' && is_mapping_indicator(p)) {
-                    advance(p);
-                    kv = parse_inline_block_node(p, parent_indent);
-                } else {
-                    kv = p->ctx->builder.createNull();
-                    skip_line(p);
-                }
-                put_key_value(p, mb, ki, kv);
-            }
+            parse_inline_mapping_tail(p, parent_indent, &mb, false, true, false);
             result = mb.final();
             if (anchor_name) store_anchor(p, anchor_name, result);
             return result;

@@ -442,6 +442,10 @@ struct MirEmitter {
     int label_counter;            // monotonic label/proto-id source
     struct hashmap* import_cache; // name -> import (proto+import) memo
     void (*note_mir_call)(const char* name); // optional per-language call telemetry hook
+    // optional per-language hook returning a per-helper counter slot; when set
+    // (JS exec profiling), each import call gets an inline (*slot)++ emitted so
+    // helpers can be ranked by dynamic call frequency, not just emitted sites
+    uint64_t* (*helper_call_counter)(const char* name);
     void* call_owner;
     void (*before_may_gc_call)(void* owner);
     void (*after_may_gc_call)(void* owner);
@@ -2790,6 +2794,30 @@ static inline void em_finalize_function_metadata(MirEmitter* em) {
     }
 }
 
+// Emit an inline `(*slot)++` ahead of an import call so a profiling build can
+// rank runtime helpers by dynamic call count. Plain integer loads/stores on a
+// process-global slot: no GC interaction and no call-site bookkeeping needed.
+static inline void em_emit_helper_call_count(MirEmitter* em, const char* fn_name) {
+    if (!em->helper_call_counter) return;
+    uint64_t* slot = em->helper_call_counter(fn_name);
+    if (!slot) return;
+    MIR_reg_t addr = em_new_reg(em, "prof_addr", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, addr),
+        MIR_new_uint_op(em->ctx, (uint64_t)(uintptr_t)slot)));
+    MIR_reg_t count = em_new_reg(em, "prof_cnt", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, count),
+        MIR_new_mem_op(em->ctx, MIR_T_I64, 0, addr, 0, 1)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ADD,
+        MIR_new_reg_op(em->ctx, count),
+        MIR_new_reg_op(em->ctx, count),
+        MIR_new_int_op(em->ctx, 1)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_mem_op(em->ctx, MIR_T_I64, 0, addr, 0, 1),
+        MIR_new_reg_op(em->ctx, count)));
+}
+
 static inline void em_before_resolved_call(MirEmitter* em,
         const char* call_name, const JitCallMetadata* metadata, int nargs,
         MIR_type_t* arg_types, MIR_op_t* arg_ops) {
@@ -2964,6 +2992,7 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
         source_base = em_load_frame_top(em, em->frame.runtime,
             offsetof(Context, side_number_top), "call_number_base");
     }
+    em_emit_helper_call_count(em, fn_name);
     em_before_resolved_call(em, fn_name, &resolved.call, nargs,
         arg_types, arg_ops);
 
@@ -3000,6 +3029,7 @@ static inline void em_call_void_with_args(MirEmitter* em,
         nargs ? args : NULL, 0, include_signature);
     if (!ie) return;
 
+    em_emit_helper_call_count(em, fn_name);
     em_before_resolved_call(em, fn_name, &ie->call, nargs,
         arg_types, arg_ops);
 

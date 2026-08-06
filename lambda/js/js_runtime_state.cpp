@@ -20,6 +20,62 @@ extern "C" void js_dom_observers_destroy_context(JsRuntimeState* state);
 extern "C" void js_xhr_reset(void);
 extern "C" void js_xhr_destroy_context(JsRuntimeState* state);
 extern "C" void js_history_reset(void);
+extern "C" void js_iterator_proto_cache_reset(void);
+
+extern "C" void js_reset_buffer_module(void);
+extern "C" void js_crypto_reset(void);
+extern "C" void js_dns_reset(void);
+extern "C" void js_zlib_reset(void);
+extern "C" void js_readline_reset(void);
+extern "C" void js_stream_reset(void);
+extern "C" void js_net_reset(void);
+extern "C" void js_tls_reset(void);
+extern "C" void js_http_reset(void);
+extern "C" void js_https_reset(void);
+extern "C" void js_assert_reset(void);
+extern "C" void js_node_test_reset(void);
+
+static void js_reset_cached_realm_objects(void) {
+    // Cached realm objects all point into the batch heap and must be invalidated together.
+    js_canvas_cleanup();
+    js_reset_math_object();
+    js_reset_json_object();
+    js_reset_intl_object();
+    js_reset_console_object();
+    js_reset_reflect_object();
+    js_reset_atomics_object();
+    js_reset_262_object();
+    js_reset_css_namespace_object();
+    js_reset_proto_key();
+    js_reset_template_registry();
+    js_iterator_proto_cache_reset();
+    js_symbol_registry_batch_reset();
+    js_func_cache_reset();
+    js_builtin_cache_reset();
+    js_deep_batch_reset();
+    extern void js_reset_constructor_prototypes(void);
+    js_reset_constructor_prototypes();
+}
+
+static void js_reset_core_module_caches(void) {
+    js_child_process_reset();
+    js_fs_reset();
+    js_util_reset();
+    js_reset_buffer_module();
+    js_crypto_reset();
+    js_dns_reset();
+    js_zlib_reset();
+    js_readline_reset();
+    js_stream_reset();
+    js_net_reset();
+    js_tls_reset();
+    js_http_reset();
+    js_https_reset();
+    js_fetch_reset();
+    js_history_reset();
+    js_assert_reset();
+    js_node_test_reset();
+}
 extern "C" void js_history_destroy_context(JsRuntimeState* state);
 extern "C" void js_window_dialog_reset(void);
 extern "C" void js_dom_collections_release_context(void);
@@ -1117,36 +1173,7 @@ extern "C" void js_batch_reset() {
     js_reset_transient_call_state();
     js_reset_heap_bound_runtime_state();
     js_decimal_number_egress_warning_reset();
-    // reset cached global objects (Math, JSON, console, Reflect) so they're recreated fresh
-    // — tests may modify them (delete/overwrite properties)
-    js_canvas_cleanup();
-    js_reset_math_object();
-    js_reset_json_object();
-    // Intl is heap-backed like the neighboring namespace caches; leaving it
-    // out makes the next isolated document install a pointer to the freed heap.
-    js_reset_intl_object();
-    js_reset_console_object();
-    js_reset_reflect_object();
-    js_reset_atomics_object();
-    js_reset_262_object();
-    js_reset_css_namespace_object();
-    // reset interned __proto__ key (allocated in old pool)
-    js_reset_proto_key();
-    js_reset_template_registry();
-    js_iterator_proto_cache_reset();
-    // Registry symbol keys belong to the discarded realm's NamePool; retaining
-    // them would let a fresh realm dereference dead unique NameRecords.
-    js_symbol_registry_batch_reset();
-    // reset function pointer → JsFunction cache (JsFunction* in old pool)
-    js_func_cache_reset();
-    // reset builtin function cache (defined later in file, called via forward decl)
-    js_builtin_cache_reset();
-    // deep reset: generators, promises, async contexts, pending calls
-    js_deep_batch_reset();
-    // reset constructor prototypes and globalThis — tests may mutate built-in
-    // prototypes (Object.prototype, Error.prototype, etc.).
-    extern void js_reset_constructor_prototypes(void);
-    js_reset_constructor_prototypes();
+    js_reset_cached_realm_objects();
     // js_batch_reset() is the heavy/crash-recovery path. After restoring the
     // prototype snapshot above, invalidate it so (a) the upcoming
     // js_ctor_cache_reset actually runs, (b) the upcoming heap teardown
@@ -1179,40 +1206,7 @@ extern "C" void js_batch_reset() {
     js_process_reset_listeners();
     // reset strict mode — prevents strict-mode test from poisoning subsequent tests
     js_strict_mode = false;
-    // reset module namespace caches (pool-allocated function wrappers become dangling)
-    js_child_process_reset();
-    js_fs_reset();
-    js_util_reset();
-    // node-core owns EventEmitter's session cache and resets it through Jube.
-    extern void js_reset_buffer_module(void);
-    js_reset_buffer_module();
-    // reset Phase 4 modules
-    extern void js_crypto_reset(void);
-    js_crypto_reset();
-    extern void js_dns_reset(void);
-    js_dns_reset();
-    extern void js_zlib_reset(void);
-    js_zlib_reset();
-    extern void js_readline_reset(void);
-    js_readline_reset();
-    extern void js_stream_reset(void);
-    js_stream_reset();
-    extern void js_net_reset(void);
-    js_net_reset();
-    extern void js_tls_reset(void);
-    js_tls_reset();
-    extern void js_http_reset(void);
-    js_http_reset();
-    extern void js_https_reset(void);
-    js_https_reset();
-    // fetch() Response bodies live in a static side table so promise methods can
-    // read them later; batch cleanup must release the table before memtrack.
-    js_fetch_reset();
-    js_history_reset();
-    extern void js_assert_reset(void);
-    js_assert_reset();
-    extern void js_node_test_reset(void);
-    js_node_test_reset();
+    js_reset_core_module_caches();
     js_eval_preamble_cache_reset();
     js_dynfunc_cache_reset();
     js_array_runtime_items_cleanup_all();
@@ -1291,32 +1285,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_reset_transient_call_state();
     js_reset_heap_bound_runtime_state();
     js_decimal_number_egress_warning_reset();
-    // reset cached global objects — tests may modify them
-    js_canvas_cleanup();
-    js_reset_math_object();
-    js_reset_json_object();
-    js_reset_intl_object();
-    js_reset_console_object();
-    js_reset_reflect_object();
-    js_reset_atomics_object();
-    js_reset_262_object();
-    js_reset_css_namespace_object();
-    // reset interned __proto__ key
-    js_reset_proto_key();
-    js_reset_template_registry();
-    js_iterator_proto_cache_reset();
-    // Partial resets can also release the active heap, so reset realm-owned
-    // registry keys before a subsequent compilation can reuse stale records.
-    js_symbol_registry_batch_reset();
-    // reset function pointer → JsFunction cache
-    js_func_cache_reset();
-    js_builtin_cache_reset();
-    // deep reset: generators, promises, async contexts, pending calls
-    js_deep_batch_reset();
-    // reset constructor prototypes and globalThis — tests may mutate built-in
-    // prototypes (Object.prototype, Error.prototype, etc.).
-    extern void js_reset_constructor_prototypes(void);
-    js_reset_constructor_prototypes();
+    js_reset_cached_realm_objects();
     // fs async requests release session-bound roots before Jube invalidates
     // their token; late libuv callbacks are then explicitly delivery-suppressed.
     js_fs_runtime_detach();
@@ -1340,38 +1309,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
     // reset regex compilation cache — AST pointers from previous test are stale
     js_regex_cache_reset();
-    // reset module namespace caches (epoch-cached objects may be stale after test mutations)
-    js_child_process_reset();
-    js_fs_reset();
-    js_util_reset();
-    extern void js_reset_buffer_module(void);
-    js_reset_buffer_module();
-    extern void js_crypto_reset(void);
-    js_crypto_reset();
-    extern void js_dns_reset(void);
-    js_dns_reset();
-    extern void js_zlib_reset(void);
-    js_zlib_reset();
-    extern void js_readline_reset(void);
-    js_readline_reset();
-    extern void js_stream_reset(void);
-    js_stream_reset();
-    extern void js_net_reset(void);
-    js_net_reset();
-    extern void js_tls_reset(void);
-    js_tls_reset();
-    extern void js_http_reset(void);
-    js_http_reset();
-    extern void js_https_reset(void);
-    js_https_reset();
-    // fetch() Response bodies live in a static side table so promise methods can
-    // read them later; batch cleanup must release the table before memtrack.
-    js_fetch_reset();
-    js_history_reset();
-    extern void js_assert_reset(void);
-    js_assert_reset();
-    extern void js_node_test_reset(void);
-    js_node_test_reset();
+    js_reset_core_module_caches();
     js_dynfunc_cache_reset();
     js_root_range_reset_all();
     js_assert_batch_runtime_state_clear("js_batch_reset_to", true);

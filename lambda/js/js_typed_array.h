@@ -117,6 +117,7 @@ bool js_is_typed_array(Item val);
 JsTypedArray* js_get_typed_array_ptr(Map* m);
 void* js_typed_array_current_data_ptr(Item ta_item);
 void* js_typed_array_prepare_write_ptr(Item ta_item);
+bool js_item_bytes(Item item, const char** data, int* len);
 Item js_typed_array_subarray(Item ta, int start, int end, bool end_is_default);
 Item js_typed_array_slice(Item ta, int start, int end);
 Item js_typed_array_set_from(Item ta, Item source, int offset);

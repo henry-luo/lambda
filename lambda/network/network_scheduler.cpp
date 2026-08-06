@@ -183,29 +183,34 @@ static void scheduler_curl_multi_complete(void* request_data, bool success, void
     scheduled_task_free(task);
 }
 
+static ScheduledTask* scheduler_take_task(NetworkScheduler* scheduler) {
+    if (!scheduler) return NULL;
+
+    pthread_mutex_lock(&scheduler->mutex);
+    ScheduledTask* task = NULL;
+    while (!scheduler->stop_workers) {
+        task = pop_dispatchable_locked(scheduler);
+        if (task) {
+            mark_task_active_locked(scheduler, task);
+            break;
+        }
+        pthread_cond_wait(&scheduler->cond, &scheduler->mutex);
+    }
+    if (scheduler->stop_workers && !task) {
+        pthread_mutex_unlock(&scheduler->mutex);
+        return NULL;
+    }
+    pthread_mutex_unlock(&scheduler->mutex);
+    return task;
+}
+
 static void* scheduler_worker_main(void* arg) {
     NetworkScheduler* scheduler = (NetworkScheduler*)arg;
     if (!scheduler) return NULL;
 
     while (true) {
-        pthread_mutex_lock(&scheduler->mutex);
-
-        ScheduledTask* task = NULL;
-        while (!scheduler->stop_workers) {
-            task = pop_dispatchable_locked(scheduler);
-            if (task) {
-                mark_task_active_locked(scheduler, task);
-                break;
-            }
-            pthread_cond_wait(&scheduler->cond, &scheduler->mutex);
-        }
-
-        if (scheduler->stop_workers && !task) {
-            pthread_mutex_unlock(&scheduler->mutex);
-            break;
-        }
-
-        pthread_mutex_unlock(&scheduler->mutex);
+        ScheduledTask* task = scheduler_take_task(scheduler);
+        if (!task) break;
 
         if (task->completion_fn) {
             bool success = network_download_resource((NetworkResource*)task->task_data);
@@ -227,24 +232,8 @@ static void* scheduler_multi_dispatcher_main(void* arg) {
     if (!scheduler) return NULL;
 
     while (true) {
-        pthread_mutex_lock(&scheduler->mutex);
-
-        ScheduledTask* task = NULL;
-        while (!scheduler->stop_workers) {
-            task = pop_dispatchable_locked(scheduler);
-            if (task) {
-                mark_task_active_locked(scheduler, task);
-                break;
-            }
-            pthread_cond_wait(&scheduler->cond, &scheduler->mutex);
-        }
-
-        if (scheduler->stop_workers && !task) {
-            pthread_mutex_unlock(&scheduler->mutex);
-            break;
-        }
-
-        pthread_mutex_unlock(&scheduler->mutex);
+        ScheduledTask* task = scheduler_take_task(scheduler);
+        if (!task) break;
 
         bool submitted = false;
         if (task->completion_fn && scheduler->curl_multi_backend) {

@@ -39,6 +39,11 @@ typedef struct JsExecProfileMirCall {
     uint64_t sites;
 } JsExecProfileMirCall;
 
+typedef struct JsExecProfileHelperCall {
+    char name[192];
+    uint64_t calls;
+} JsExecProfileHelperCall;
+
 typedef struct JsExecProfileShapeGuardSite {
     char label[96];
     uintptr_t expected_shape;
@@ -114,6 +119,9 @@ static JsExecProfileSlot g_js_exec_profile_slots[JS_EXEC_PROF_EVENT_COUNT] = {
 
 static JsExecProfileFrame g_js_exec_profile_stack[4096];
 static JsExecProfileMirCall g_js_exec_profile_mir_calls[1024];
+// separate table from the site tally: direct JS->JS call names also flow
+// through note_mir_call and could crowd out helper slots in a large test run
+static JsExecProfileHelperCall g_js_exec_profile_helper_calls[2048];
 static JsExecProfileShapeGuardSite g_js_exec_profile_shape_guard_sites[128];
 static JsExecProfilePropertySetSite g_js_exec_profile_property_set_sites[256];
 static JsExecProfilePropertySetBranch g_js_exec_profile_property_set_branches[64];
@@ -121,13 +129,13 @@ static JsExecProfileLoadICSite g_js_exec_profile_load_ic_sites[512];
 static JsExecProfileStoreICSite g_js_exec_profile_store_ic_sites[512];
 static int g_js_exec_profile_stack_depth = 0;
 static int g_js_exec_profile_mir_call_count = 0;
+static int g_js_exec_profile_helper_call_count = 0;
 static int g_js_exec_profile_shape_guard_site_count = 0;
 static int g_js_exec_profile_property_set_site_count = 0;
 static int g_js_exec_profile_property_set_branch_count = 0;
 static int g_js_exec_profile_load_ic_site_count = 0;
 static int g_js_exec_profile_store_ic_site_count = 0;
 static int g_js_exec_profile_registered = 0;
-static bool g_js_exec_profile_dumped = false;
 static uint64_t g_js_name_lookup_calls = 0;
 static uint64_t g_js_name_lookup_hits = 0;
 static uint64_t g_js_name_lookup_misses = 0;
@@ -199,7 +207,6 @@ int js_exec_profile_mode(void) {
 }
 
 void js_exec_profile_reset(void) {
-    g_js_exec_profile_dumped = false;
     for (int i = 0; i < JS_EXEC_PROF_EVENT_COUNT; i++) {
         g_js_exec_profile_slots[i].calls = 0;
         g_js_exec_profile_slots[i].inclusive_ns = 0;
@@ -208,6 +215,7 @@ void js_exec_profile_reset(void) {
     }
     g_js_exec_profile_stack_depth = 0;
     g_js_exec_profile_mir_call_count = 0;
+    g_js_exec_profile_helper_call_count = 0;
     g_js_exec_profile_shape_guard_site_count = 0;
     g_js_exec_profile_property_set_site_count = 0;
     g_js_exec_profile_property_set_branch_count = 0;
@@ -241,6 +249,27 @@ static void js_exec_profile_note_mir_call_name(const char* fn_name) {
     snprintf(g_js_exec_profile_mir_calls[index].name,
         sizeof(g_js_exec_profile_mir_calls[index].name), "%s", fn_name);
     g_js_exec_profile_mir_calls[index].sites = 1;
+}
+
+uint64_t* js_exec_profile_helper_call_counter(const char* fn_name) {
+    int mode = g_js_exec_profile_mode >= 0 ? g_js_exec_profile_mode : js_exec_profile_mode();
+    if (mode <= 0 || !fn_name || !fn_name[0]) return NULL;
+    for (int i = 0; i < g_js_exec_profile_helper_call_count; i++) {
+        if (strcmp(g_js_exec_profile_helper_calls[i].name, fn_name) == 0) {
+            return &g_js_exec_profile_helper_calls[i].calls;
+        }
+    }
+    if (g_js_exec_profile_helper_call_count >=
+            (int)(sizeof(g_js_exec_profile_helper_calls) / sizeof(g_js_exec_profile_helper_calls[0]))) {
+        return NULL;
+    }
+    int index = g_js_exec_profile_helper_call_count++;
+    // import names are transpiler-pool-owned; the JIT'd counter stores outlive
+    // that pool, so the profiler keeps its own copy of the label with the slot
+    snprintf(g_js_exec_profile_helper_calls[index].name,
+        sizeof(g_js_exec_profile_helper_calls[index].name), "%s", fn_name);
+    g_js_exec_profile_helper_calls[index].calls = 0;
+    return &g_js_exec_profile_helper_calls[index].calls;
 }
 
 uint64_t js_exec_profile_enter(JsExecProfileEvent event) {
@@ -540,10 +569,10 @@ void js_exec_profile_name_lookup_bypassed(void) {
 }
 
 void js_exec_profile_dump(void) {
-    if (g_js_exec_profile_mode <= 0 || g_js_exec_profile_dumped) return;
-    // MIR-call labels can be pool-owned by the transpiler; runtime cleanup must
-    // flush them before pool destruction, while atexit remains a safe fallback.
-    g_js_exec_profile_dumped = true;
+    if (g_js_exec_profile_mode <= 0) return;
+    // Every runtime cleanup rewrites the cumulative snapshot: a gtest process
+    // hosts many runtimes, so a once-only dump would keep only the first
+    // test's data. The atomic rewrite keeps atexit as a safe final fallback.
     create_dir_recursive("temp");
 
     char default_path[128];
@@ -581,6 +610,16 @@ void js_exec_profile_dump(void) {
             strbuf_append_str(buf, g_js_exec_profile_mir_calls[i].name);
             strbuf_append_char(buf, '\t');
             strbuf_append_uint64(buf, g_js_exec_profile_mir_calls[i].sites);
+            strbuf_append_char(buf, '\n');
+        }
+    }
+    if (g_js_exec_profile_helper_call_count > 0) {
+        strbuf_append_str(buf, "\n# JS runtime helper dynamic calls from JIT code\n");
+        strbuf_append_str(buf, "runtime_helper\tcalls\n");
+        for (int i = 0; i < g_js_exec_profile_helper_call_count; i++) {
+            strbuf_append_str(buf, g_js_exec_profile_helper_calls[i].name);
+            strbuf_append_char(buf, '\t');
+            strbuf_append_uint64(buf, g_js_exec_profile_helper_calls[i].calls);
             strbuf_append_char(buf, '\n');
         }
     }

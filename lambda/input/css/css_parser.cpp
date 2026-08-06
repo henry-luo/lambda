@@ -121,6 +121,37 @@ static CssSelectorType css_functional_pseudo_type(const char* func_name) {
     return CSS_SELECTOR_PSEUDO_NOT;                   // unknown — default fallback
 }
 
+static bool css_parse_anb_suffix(const CssToken* tokens, int end, int* pos, int* b) {
+    while (*pos < end && tokens[*pos].type == CSS_TOKEN_WHITESPACE) (*pos)++;
+    if (*pos >= end) return true;
+
+    if (tokens[*pos].type == CSS_TOKEN_NUMBER) {
+        double value = tokens[*pos].data.number_value;
+        if (value != (int)value) return false;
+        const char* number_start = tokens[*pos].start;
+        if (number_start && *number_start != '+' && *number_start != '-') return false;
+        *b = (int)value;
+        (*pos)++;
+    } else if (tokens[*pos].type == CSS_TOKEN_DELIM &&
+               (tokens[*pos].data.delimiter == '+' || tokens[*pos].data.delimiter == '-')) {
+        int sign = tokens[*pos].data.delimiter == '-' ? -1 : 1;
+        (*pos)++;
+        while (*pos < end && tokens[*pos].type == CSS_TOKEN_WHITESPACE) (*pos)++;
+        if (*pos >= end || tokens[*pos].type != CSS_TOKEN_NUMBER) return false;
+        double value = tokens[*pos].data.number_value;
+        if (value != (int)value) return false;
+        const char* number_start = tokens[*pos].start;
+        if (number_start && (*number_start == '+' || *number_start == '-')) return false;
+        *b = sign * (int)value;
+        (*pos)++;
+    } else {
+        return false;
+    }
+
+    while (*pos < end && tokens[*pos].type == CSS_TOKEN_WHITESPACE) (*pos)++;
+    return *pos == end;
+}
+
 // ============================================================================
 // An+B Token-Level Parser (CSS Syntax Level 3 §6.1)
 // ============================================================================
@@ -255,45 +286,7 @@ static bool css_parse_anb_from_tokens(const CssToken* tokens, int start, int end
         // plain n-dimension like "2n"
         formula->a = (int)t->data.dimension.value;
         pos++;
-
-        // skip whitespace
-        while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
-        if (pos >= end) {
-            // just "2n" with no b
-            return true;
-        }
-
-        // check for <signed-integer> (e.g., "+3" or "-3" as a single number token)
-        if (tokens[pos].type == CSS_TOKEN_NUMBER) {
-            double bv = tokens[pos].data.number_value;
-            if (bv != (int)bv) return false;
-            // signed-integer: the token must include the sign
-            const char* ns = tokens[pos].start;
-            if (ns && *ns != '+' && *ns != '-') return false; // signless not allowed here
-            formula->b = (int)bv;
-            EXPECT_END(pos + 1);
-            return true;
-        }
-
-        // check for ['+' | '-'] <signless-integer>
-        if (tokens[pos].type == CSS_TOKEN_DELIM &&
-            (tokens[pos].data.delimiter == '+' || tokens[pos].data.delimiter == '-')) {
-            int sign = (tokens[pos].data.delimiter == '-') ? -1 : 1;
-            pos++;
-            // skip whitespace between sign and integer
-            while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
-            if (pos >= end || tokens[pos].type != CSS_TOKEN_NUMBER) return false;
-            double bv = tokens[pos].data.number_value;
-            if (bv != (int)bv) return false;
-            // signless-integer: must NOT have a sign
-            const char* ns = tokens[pos].start;
-            if (ns && (*ns == '+' || *ns == '-')) return false;
-            formula->b = sign * (int)bv;
-            EXPECT_END(pos + 1);
-            return true;
-        }
-
-        return false; // unexpected token after dimension
+        return css_parse_anb_suffix(tokens, end, &pos, &formula->b);
     }
 
     // ---- Patterns starting with IDENT: "n", "-n", "n-3", "-n-3" ----
@@ -348,39 +341,7 @@ static bool css_parse_anb_from_tokens(const CssToken* tokens, int start, int end
         // bare "n" or "-n"
         formula->a = negated ? -1 : 1;
         pos++;
-
-        // skip whitespace
-        while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
-        if (pos >= end) return true; // just "n" or "-n"
-
-        // check for <signed-integer>
-        if (tokens[pos].type == CSS_TOKEN_NUMBER) {
-            double bv = tokens[pos].data.number_value;
-            if (bv != (int)bv) return false;
-            const char* ns = tokens[pos].start;
-            if (ns && *ns != '+' && *ns != '-') return false; // must be signed
-            formula->b = (int)bv;
-            EXPECT_END(pos + 1);
-            return true;
-        }
-
-        // check for ['+' | '-'] <signless-integer>
-        if (tokens[pos].type == CSS_TOKEN_DELIM &&
-            (tokens[pos].data.delimiter == '+' || tokens[pos].data.delimiter == '-')) {
-            int sign = (tokens[pos].data.delimiter == '-') ? -1 : 1;
-            pos++;
-            while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
-            if (pos >= end || tokens[pos].type != CSS_TOKEN_NUMBER) return false;
-            double bv = tokens[pos].data.number_value;
-            if (bv != (int)bv) return false;
-            const char* ns = tokens[pos].start;
-            if (ns && (*ns == '+' || *ns == '-')) return false; // must be signless
-            formula->b = sign * (int)bv;
-            EXPECT_END(pos + 1);
-            return true;
-        }
-
-        return false;
+        return css_parse_anb_suffix(tokens, end, &pos, &formula->b);
     }
 
     // ---- Patterns starting with '+' DELIM: "+n", "+n-3", "+n" <signed-integer> etc. ----
@@ -430,36 +391,7 @@ static bool css_parse_anb_from_tokens(const CssToken* tokens, int start, int end
             // bare "+n"
             formula->a = 1;
             pos++;
-            while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
-            if (pos >= end) return true;
-
-            // <signed-integer>
-            if (tokens[pos].type == CSS_TOKEN_NUMBER) {
-                double bv = tokens[pos].data.number_value;
-                if (bv != (int)bv) return false;
-                const char* ns = tokens[pos].start;
-                if (ns && *ns != '+' && *ns != '-') return false;
-                formula->b = (int)bv;
-                EXPECT_END(pos + 1);
-                return true;
-            }
-
-            // ['+' | '-'] <signless-integer>
-            if (tokens[pos].type == CSS_TOKEN_DELIM &&
-                (tokens[pos].data.delimiter == '+' || tokens[pos].data.delimiter == '-')) {
-                int sign = (tokens[pos].data.delimiter == '-') ? -1 : 1;
-                pos++;
-                while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
-                if (pos >= end || tokens[pos].type != CSS_TOKEN_NUMBER) return false;
-                double bv = tokens[pos].data.number_value;
-                if (bv != (int)bv) return false;
-                const char* ns = tokens[pos].start;
-                if (ns && (*ns == '+' || *ns == '-')) return false;
-                formula->b = sign * (int)bv;
-                EXPECT_END(pos + 1);
-                return true;
-            }
-            return false;
+            return css_parse_anb_suffix(tokens, end, &pos, &formula->b);
         }
 
         // + followed by a number: "+1" → just an integer with leading +
@@ -1244,6 +1176,49 @@ CssCompoundSelector* css_parse_compound_selector_from_tokens(const CssToken* tok
 }
 
 // Helper: Parse a full selector with combinators (e.g., "div p.intro" or "nav > ul li")
+static const char* css_parse_attribute_value(const CssToken* tokens, int* pos,
+                                             int token_count, Pool* pool) {
+    if (*pos >= token_count || (tokens[*pos].type != CSS_TOKEN_STRING &&
+                                tokens[*pos].type != CSS_TOKEN_IDENT)) return NULL;
+    const char* value = tokens[*pos].value;
+    if (tokens[*pos].type == CSS_TOKEN_STRING) {
+        if (value && (value[0] == '"' || value[0] == '\'')) {
+            size_t len = strlen(value);
+            if (len >= 2) {
+                char* value_buf = (char*)pool_calloc(pool, len - 1);
+                if (value_buf) {
+                    memcpy(value_buf, value + 1, len - 2);
+                    value_buf[len - 2] = '\0';
+                    value = value_buf;
+                }
+            }
+        } else if (value) {
+            value = pool_strdup(pool, value);
+        }
+    } else if (!value && tokens[*pos].start && tokens[*pos].length > 0) {
+        char* value_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
+        if (value_buf) {
+            memcpy(value_buf, tokens[*pos].start, tokens[*pos].length);
+            value_buf[tokens[*pos].length] = '\0';
+            value = value_buf;
+        }
+    }
+    (*pos)++;
+    return value;
+}
+
+static void css_parse_attribute_case_flag(const CssToken* tokens, int* pos,
+                                          int token_count, bool* case_insensitive) {
+    if (*pos >= token_count || tokens[*pos].type != CSS_TOKEN_IDENT) return;
+    const char* flag = tokens[*pos].value;
+    if (flag && (strcmp(flag, "i") == 0 || strcmp(flag, "I") == 0)) {
+        *case_insensitive = true;
+        (*pos)++;
+    } else if (flag && (strcmp(flag, "s") == 0 || strcmp(flag, "S") == 0)) {
+        (*pos)++;
+    }
+}
+
 CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
     if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
 
@@ -1870,50 +1845,13 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
             // Skip whitespace
             *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
 
-            // Get attribute value if present
-            if (*pos < token_count && (tokens[*pos].type == CSS_TOKEN_STRING || tokens[*pos].type == CSS_TOKEN_IDENT)) {
-                if (tokens[*pos].type == CSS_TOKEN_STRING) {
-                    const char* str_val = tokens[*pos].value;
-                    if (str_val && (str_val[0] == '"' || str_val[0] == '\'')) {
-                        size_t len = strlen(str_val);
-                        if (len >= 2) {
-                            char* val_buf = (char*)pool_calloc(pool, len - 1);
-                            if (val_buf) {
-                                memcpy(val_buf, str_val + 1, len - 2);
-                                val_buf[len - 2] = '\0';
-                                attr_value = val_buf;
-                            }
-                        }
-                    } else {
-                        attr_value = pool_strdup(pool, str_val);
-                    }
-                } else {
-                    attr_value = tokens[*pos].value;
-                    if (!attr_value && tokens[*pos].start && tokens[*pos].length > 0) {
-                        char* val_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
-                        if (val_buf) {
-                            memcpy(val_buf, tokens[*pos].start, tokens[*pos].length);
-                            val_buf[tokens[*pos].length] = '\0';
-                            attr_value = val_buf;
-                        }
-                    }
-                }
-                (*pos)++;
-            }
+            attr_value = css_parse_attribute_value(tokens, pos, token_count, pool);
 
             // Skip whitespace
             *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
 
             // Check for case insensitivity flag 'i' or 's'
-            if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_IDENT) {
-                const char* flag = tokens[*pos].value;
-                if (flag && (strcmp(flag, "i") == 0 || strcmp(flag, "I") == 0)) {
-                    case_insensitive = true;
-                    (*pos)++;
-                } else if (flag && (strcmp(flag, "s") == 0 || strcmp(flag, "S") == 0)) {
-                    (*pos)++;
-                }
-            }
+            css_parse_attribute_case_flag(tokens, pos, token_count, &case_insensitive);
 
             // Skip whitespace
             *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
@@ -1946,53 +1884,13 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
             // Skip whitespace
             *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
 
-            // Get attribute value if present
-            if (*pos < token_count && (tokens[*pos].type == CSS_TOKEN_STRING || tokens[*pos].type == CSS_TOKEN_IDENT)) {
-                if (tokens[*pos].type == CSS_TOKEN_STRING) {
-                    // String token - strip quotes
-                    const char* str_val = tokens[*pos].value;
-                    if (str_val && (str_val[0] == '"' || str_val[0] == '\'')) {
-                        size_t len = strlen(str_val);
-                        if (len >= 2) {
-                            char* val_buf = (char*)pool_calloc(pool, len - 1);
-                            if (val_buf) {
-                                memcpy(val_buf, str_val + 1, len - 2);
-                                val_buf[len - 2] = '\0';
-                                attr_value = val_buf;
-                            }
-                        }
-                    } else {
-                        attr_value = pool_strdup(pool, str_val);
-                    }
-                } else {
-                    // IDENT token
-                    attr_value = tokens[*pos].value;
-                    if (!attr_value && tokens[*pos].start && tokens[*pos].length > 0) {
-                        char* val_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
-                        if (val_buf) {
-                            memcpy(val_buf, tokens[*pos].start, tokens[*pos].length);
-                            val_buf[tokens[*pos].length] = '\0';
-                            attr_value = val_buf;
-                        }
-                    }
-                }
-                (*pos)++;
-            }
+            attr_value = css_parse_attribute_value(tokens, pos, token_count, pool);
 
             // Skip whitespace
             *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
 
             // Check for case insensitivity flag 'i' or 's'
-            if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_IDENT) {
-                const char* flag = tokens[*pos].value;
-                if (flag && (strcmp(flag, "i") == 0 || strcmp(flag, "I") == 0)) {
-                    case_insensitive = true;
-                    (*pos)++;
-                } else if (flag && (strcmp(flag, "s") == 0 || strcmp(flag, "S") == 0)) {
-                    // Case sensitive (default)
-                    (*pos)++;
-                }
-            }
+            css_parse_attribute_case_flag(tokens, pos, token_count, &case_insensitive);
 
             // Skip whitespace
             *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);

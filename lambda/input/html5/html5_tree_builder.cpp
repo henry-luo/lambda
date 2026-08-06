@@ -17,6 +17,68 @@ static bool html5_is_heading_tag(const char* tag) {
            strcmp(tag, "h5") == 0 || strcmp(tag, "h6") == 0;
 }
 
+static bool html5_is_list_scope_stop_tag(const char* tag) {
+    static const char* stop_tags[] = {
+        "applet", "area", "article", "aside", "base", "basefont", "bgsound",
+        "blockquote", "body", "br", "button", "caption", "center", "col",
+        "colgroup", "dd", "details", "dir", "dl", "dt", "embed", "fieldset",
+        "figcaption", "figure", "footer", "form", "frame", "frameset", "h1",
+        "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr",
+        "html", "iframe", "img", "input", "keygen", "li", "link", "listing",
+        "main", "marquee", "menu", "meta", "nav", "noembed", "noframes",
+        "noscript", "object", "ol", "param", "plaintext", "pre", "script",
+        "search", "section", "select", "source", "style", "summary", "table",
+        "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "title",
+        "tr", "track", "ul", "wbr", "xmp", NULL
+    };
+    for (const char** stop = stop_tags; *stop; stop++) {
+        if (strcmp(tag, *stop) == 0) return true;
+    }
+    return false;
+}
+
+static void html5_close_list_item_scope(Html5Parser* parser,
+                                        const char* target_tag,
+                                        const char* alternate_target_tag) {
+    for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+        Element* node = (Element*)parser->open_elements->items[i].element;
+        const char* node_tag = ((TypeElmt*)node->type)->name.str;
+        if (strcmp(node_tag, target_tag) == 0 ||
+            (alternate_target_tag && strcmp(node_tag, alternate_target_tag) == 0)) {
+            html5_generate_implied_end_tags_except(parser, node_tag);
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+                if (strcmp(popped_tag, target_tag) == 0 ||
+                    (alternate_target_tag && strcmp(popped_tag, alternate_target_tag) == 0)) {
+                    break;
+                }
+            }
+            break;
+        }
+        if (strcmp(node_tag, "address") == 0 || strcmp(node_tag, "div") == 0 ||
+            strcmp(node_tag, "p") == 0) continue;
+        if (html5_is_list_scope_stop_tag(node_tag)) break;
+    }
+}
+
+static bool html5_handle_comment_or_doctype(Html5Parser* parser, Html5Token* token,
+                                            const char* mode, bool ignore_doctype) {
+    if (token->type == HTML5_TOKEN_COMMENT) {
+        html5_insert_comment(parser, token);
+        return true;
+    }
+    if (token->type == HTML5_TOKEN_DOCTYPE) {
+        if (ignore_doctype) {
+            log_error("html5: ignoring DOCTYPE in %s", mode);
+        } else {
+            log_error("html5: unexpected doctype in %s", mode);
+        }
+        return true;
+    }
+    return false;
+}
+
 // ============================================================================
 // QUIRKS MODE DETECTION
 // Per WHATWG HTML5 spec section 13.2.6.4.1
@@ -707,15 +769,7 @@ static void html5_process_in_initial_mode(Html5Parser* parser, Html5Token* token
 
 // ===== BEFORE HTML MODE =====
 static void html5_process_in_before_html_mode(Html5Parser* parser, Html5Token* token) {
-    if (token->type == HTML5_TOKEN_DOCTYPE) {
-        log_error("html5: unexpected doctype in before html mode");
-        return;
-    }
-
-    if (token->type == HTML5_TOKEN_COMMENT) {
-        html5_insert_comment(parser, token);
-        return;
-    }
+    if (html5_handle_comment_or_doctype(parser, token, "before html mode", false)) return;
 
     if (is_whitespace_token(token)) {
         // ignore whitespace
@@ -747,15 +801,7 @@ static void html5_process_in_before_head_mode(Html5Parser* parser, Html5Token* t
         return;
     }
 
-    if (token->type == HTML5_TOKEN_COMMENT) {
-        html5_insert_comment(parser, token);
-        return;
-    }
-
-    if (token->type == HTML5_TOKEN_DOCTYPE) {
-        log_error("html5: unexpected doctype in before head mode");
-        return;
-    }
+    if (html5_handle_comment_or_doctype(parser, token, "before head mode", false)) return;
 
     if (token->type == HTML5_TOKEN_START_TAG &&
         strcmp(token->tag_name->chars, "head") == 0) {
@@ -849,15 +895,7 @@ static void html5_process_in_head_mode(Html5Parser* parser, Html5Token* token) {
         return;  // Empty character token, ignore
     }
 
-    if (token->type == HTML5_TOKEN_COMMENT) {
-        html5_insert_comment(parser, token);
-        return;
-    }
-
-    if (token->type == HTML5_TOKEN_DOCTYPE) {
-        log_error("html5: unexpected doctype in head mode");
-        return;
-    }
+    if (html5_handle_comment_or_doctype(parser, token, "head mode", false)) return;
 
     if (token->type == HTML5_TOKEN_START_TAG) {
         const char* tag = token->tag_name->chars;
@@ -936,15 +974,7 @@ void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* token) {
         return;
     }
 
-    if (token->type == HTML5_TOKEN_COMMENT) {
-        html5_insert_comment(parser, token);
-        return;
-    }
-
-    if (token->type == HTML5_TOKEN_DOCTYPE) {
-        log_error("html5: unexpected doctype in after head mode");
-        return;
-    }
+    if (html5_handle_comment_or_doctype(parser, token, "after head mode", false)) return;
 
     if (token->type == HTML5_TOKEN_START_TAG) {
         const char* tag = token->tag_name->chars;
@@ -1135,15 +1165,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         parser->ignore_next_lf = false;
     }
 
-    if (token->type == HTML5_TOKEN_COMMENT) {
-        html5_insert_comment(parser, token);
-        return;
-    }
-
-    if (token->type == HTML5_TOKEN_DOCTYPE) {
-        log_error("html5: unexpected doctype in body mode");
-        return;
-    }
+    if (html5_handle_comment_or_doctype(parser, token, "body mode", false)) return;
 
     if (token->type == HTML5_TOKEN_START_TAG) {
         const char* tag = token->tag_name->chars;
@@ -1295,74 +1317,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         // <li> has special auto-closing behavior per WHATWG 12.2.6.4.7
         if (strcmp(tag, "li") == 0) {
             parser->frameset_ok = false;
-            // close any <li> elements in list item scope
-            // Per spec: loop through stack, looking for <li>
-            // Stop only at special elements EXCEPT address, div, p
-            for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
-                Element* node = (Element*)parser->open_elements->items[i].element;
-                const char* node_tag = ((TypeElmt*)node->type)->name.str;
-                if (strcmp(node_tag, "li") == 0) {
-                    // generate implied end tags except for li
-                    html5_generate_implied_end_tags_except(parser, "li");
-                    // pop until we pop the li
-                    while (parser->open_elements->length > 0) {
-                        Element* popped = html5_pop_element(parser);
-                        if (strcmp(((TypeElmt*)popped->type)->name.str, "li") == 0) {
-                            break;
-                        }
-                    }
-                    break;
-                }
-                // Per WHATWG spec: stop at special elements EXCEPT address, div, p
-                // address, div, p are special but explicitly exempted
-                if (strcmp(node_tag, "address") == 0 || strcmp(node_tag, "div") == 0 ||
-                    strcmp(node_tag, "p") == 0) {
-                    continue;  // these don't stop the search
-                }
-                // Check for other special elements that DO stop the search
-                if (strcmp(node_tag, "applet") == 0 || strcmp(node_tag, "area") == 0 ||
-                    strcmp(node_tag, "article") == 0 || strcmp(node_tag, "aside") == 0 ||
-                    strcmp(node_tag, "base") == 0 || strcmp(node_tag, "basefont") == 0 ||
-                    strcmp(node_tag, "bgsound") == 0 || strcmp(node_tag, "blockquote") == 0 ||
-                    strcmp(node_tag, "body") == 0 || strcmp(node_tag, "br") == 0 ||
-                    strcmp(node_tag, "button") == 0 || strcmp(node_tag, "caption") == 0 ||
-                    strcmp(node_tag, "center") == 0 || strcmp(node_tag, "col") == 0 ||
-                    strcmp(node_tag, "colgroup") == 0 || strcmp(node_tag, "dd") == 0 ||
-                    strcmp(node_tag, "details") == 0 || strcmp(node_tag, "dir") == 0 ||
-                    strcmp(node_tag, "dl") == 0 || strcmp(node_tag, "dt") == 0 ||
-                    strcmp(node_tag, "embed") == 0 || strcmp(node_tag, "fieldset") == 0 ||
-                    strcmp(node_tag, "figcaption") == 0 || strcmp(node_tag, "figure") == 0 ||
-                    strcmp(node_tag, "footer") == 0 || strcmp(node_tag, "form") == 0 ||
-                    strcmp(node_tag, "frame") == 0 || strcmp(node_tag, "frameset") == 0 ||
-                    strcmp(node_tag, "h1") == 0 || strcmp(node_tag, "h2") == 0 ||
-                    strcmp(node_tag, "h3") == 0 || strcmp(node_tag, "h4") == 0 ||
-                    strcmp(node_tag, "h5") == 0 || strcmp(node_tag, "h6") == 0 ||
-                    strcmp(node_tag, "head") == 0 || strcmp(node_tag, "header") == 0 ||
-                    strcmp(node_tag, "hgroup") == 0 || strcmp(node_tag, "hr") == 0 ||
-                    strcmp(node_tag, "html") == 0 || strcmp(node_tag, "iframe") == 0 ||
-                    strcmp(node_tag, "img") == 0 || strcmp(node_tag, "input") == 0 ||
-                    strcmp(node_tag, "keygen") == 0 || strcmp(node_tag, "link") == 0 ||
-                    strcmp(node_tag, "listing") == 0 || strcmp(node_tag, "main") == 0 ||
-                    strcmp(node_tag, "marquee") == 0 || strcmp(node_tag, "menu") == 0 ||
-                    strcmp(node_tag, "meta") == 0 || strcmp(node_tag, "nav") == 0 ||
-                    strcmp(node_tag, "noembed") == 0 || strcmp(node_tag, "noframes") == 0 ||
-                    strcmp(node_tag, "noscript") == 0 || strcmp(node_tag, "object") == 0 ||
-                    strcmp(node_tag, "ol") == 0 || strcmp(node_tag, "param") == 0 ||
-                    strcmp(node_tag, "plaintext") == 0 || strcmp(node_tag, "pre") == 0 ||
-                    strcmp(node_tag, "script") == 0 || strcmp(node_tag, "search") == 0 ||
-                    strcmp(node_tag, "section") == 0 || strcmp(node_tag, "select") == 0 ||
-                    strcmp(node_tag, "source") == 0 || strcmp(node_tag, "style") == 0 ||
-                    strcmp(node_tag, "summary") == 0 || strcmp(node_tag, "table") == 0 ||
-                    strcmp(node_tag, "tbody") == 0 || strcmp(node_tag, "td") == 0 ||
-                    strcmp(node_tag, "template") == 0 || strcmp(node_tag, "textarea") == 0 ||
-                    strcmp(node_tag, "tfoot") == 0 || strcmp(node_tag, "th") == 0 ||
-                    strcmp(node_tag, "thead") == 0 || strcmp(node_tag, "title") == 0 ||
-                    strcmp(node_tag, "tr") == 0 || strcmp(node_tag, "track") == 0 ||
-                    strcmp(node_tag, "ul") == 0 || strcmp(node_tag, "wbr") == 0 ||
-                    strcmp(node_tag, "xmp") == 0) {
-                    break;  // stop at special elements
-                }
-            }
+            html5_close_list_item_scope(parser, "li", NULL);
             // close any <p> in button scope
             if (html5_has_element_in_button_scope(parser, "p")) {
                 html5_close_p_element(parser);
@@ -1374,73 +1329,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         // <dd>, <dt> have similar auto-closing behavior per WHATWG spec
         if (strcmp(tag, "dd") == 0 || strcmp(tag, "dt") == 0) {
             parser->frameset_ok = false;
-            // close any <dd> or <dt> elements
-            // Per spec: loop through stack, looking for <dd> or <dt>
-            // Stop only at special elements EXCEPT address, div, p
-            for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
-                Element* node = (Element*)parser->open_elements->items[i].element;
-                const char* node_tag = ((TypeElmt*)node->type)->name.str;
-                if (strcmp(node_tag, "dd") == 0 || strcmp(node_tag, "dt") == 0) {
-                    html5_generate_implied_end_tags_except(parser, node_tag);
-                    while (parser->open_elements->length > 0) {
-                        Element* popped = html5_pop_element(parser);
-                        const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
-                        if (strcmp(popped_tag, "dd") == 0 || strcmp(popped_tag, "dt") == 0) {
-                            break;
-                        }
-                    }
-                    break;
-                }
-                // Per WHATWG spec: stop at special elements EXCEPT address, div, p
-                if (strcmp(node_tag, "address") == 0 || strcmp(node_tag, "div") == 0 ||
-                    strcmp(node_tag, "p") == 0) {
-                    continue;  // these don't stop the search
-                }
-                // Check for other special elements that DO stop the search
-                if (strcmp(node_tag, "applet") == 0 || strcmp(node_tag, "area") == 0 ||
-                    strcmp(node_tag, "article") == 0 || strcmp(node_tag, "aside") == 0 ||
-                    strcmp(node_tag, "base") == 0 || strcmp(node_tag, "basefont") == 0 ||
-                    strcmp(node_tag, "bgsound") == 0 || strcmp(node_tag, "blockquote") == 0 ||
-                    strcmp(node_tag, "body") == 0 || strcmp(node_tag, "br") == 0 ||
-                    strcmp(node_tag, "button") == 0 || strcmp(node_tag, "caption") == 0 ||
-                    strcmp(node_tag, "center") == 0 || strcmp(node_tag, "col") == 0 ||
-                    strcmp(node_tag, "colgroup") == 0 ||
-                    strcmp(node_tag, "details") == 0 || strcmp(node_tag, "dir") == 0 ||
-                    strcmp(node_tag, "dl") == 0 ||
-                    strcmp(node_tag, "embed") == 0 || strcmp(node_tag, "fieldset") == 0 ||
-                    strcmp(node_tag, "figcaption") == 0 || strcmp(node_tag, "figure") == 0 ||
-                    strcmp(node_tag, "footer") == 0 || strcmp(node_tag, "form") == 0 ||
-                    strcmp(node_tag, "frame") == 0 || strcmp(node_tag, "frameset") == 0 ||
-                    strcmp(node_tag, "h1") == 0 || strcmp(node_tag, "h2") == 0 ||
-                    strcmp(node_tag, "h3") == 0 || strcmp(node_tag, "h4") == 0 ||
-                    strcmp(node_tag, "h5") == 0 || strcmp(node_tag, "h6") == 0 ||
-                    strcmp(node_tag, "head") == 0 || strcmp(node_tag, "header") == 0 ||
-                    strcmp(node_tag, "hgroup") == 0 || strcmp(node_tag, "hr") == 0 ||
-                    strcmp(node_tag, "html") == 0 || strcmp(node_tag, "iframe") == 0 ||
-                    strcmp(node_tag, "img") == 0 || strcmp(node_tag, "input") == 0 ||
-                    strcmp(node_tag, "keygen") == 0 || strcmp(node_tag, "li") == 0 ||
-                    strcmp(node_tag, "link") == 0 ||
-                    strcmp(node_tag, "listing") == 0 || strcmp(node_tag, "main") == 0 ||
-                    strcmp(node_tag, "marquee") == 0 || strcmp(node_tag, "menu") == 0 ||
-                    strcmp(node_tag, "meta") == 0 || strcmp(node_tag, "nav") == 0 ||
-                    strcmp(node_tag, "noembed") == 0 || strcmp(node_tag, "noframes") == 0 ||
-                    strcmp(node_tag, "noscript") == 0 || strcmp(node_tag, "object") == 0 ||
-                    strcmp(node_tag, "ol") == 0 || strcmp(node_tag, "param") == 0 ||
-                    strcmp(node_tag, "plaintext") == 0 || strcmp(node_tag, "pre") == 0 ||
-                    strcmp(node_tag, "script") == 0 || strcmp(node_tag, "search") == 0 ||
-                    strcmp(node_tag, "section") == 0 || strcmp(node_tag, "select") == 0 ||
-                    strcmp(node_tag, "source") == 0 || strcmp(node_tag, "style") == 0 ||
-                    strcmp(node_tag, "summary") == 0 || strcmp(node_tag, "table") == 0 ||
-                    strcmp(node_tag, "tbody") == 0 || strcmp(node_tag, "td") == 0 ||
-                    strcmp(node_tag, "template") == 0 || strcmp(node_tag, "textarea") == 0 ||
-                    strcmp(node_tag, "tfoot") == 0 || strcmp(node_tag, "th") == 0 ||
-                    strcmp(node_tag, "thead") == 0 || strcmp(node_tag, "title") == 0 ||
-                    strcmp(node_tag, "tr") == 0 || strcmp(node_tag, "track") == 0 ||
-                    strcmp(node_tag, "ul") == 0 || strcmp(node_tag, "wbr") == 0 ||
-                    strcmp(node_tag, "xmp") == 0) {
-                    break;  // stop at special elements
-                }
-            }
+            html5_close_list_item_scope(parser, "dd", "dt");
             if (html5_has_element_in_button_scope(parser, "p")) {
                 html5_close_p_element(parser);
             }
@@ -2084,15 +1973,7 @@ static void html5_process_in_after_body_mode(Html5Parser* parser, Html5Token* to
 static void html5_process_in_after_after_body_mode(Html5Parser* parser, Html5Token* token) {
     // https://html.spec.whatwg.org/#the-after-after-body-insertion-mode
 
-    if (token->type == HTML5_TOKEN_COMMENT) {
-        html5_insert_comment(parser, token);
-        return;
-    }
-
-    if (token->type == HTML5_TOKEN_DOCTYPE) {
-        log_error("html5: unexpected doctype in after after body mode");
-        return;
-    }
+    if (html5_handle_comment_or_doctype(parser, token, "after after body mode", false)) return;
 
     if (token->type == HTML5_TOKEN_CHARACTER) {
         if (is_whitespace_token(token)) {
@@ -2239,15 +2120,7 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
         return;
     }
 
-    if (token->type == HTML5_TOKEN_COMMENT) {
-        html5_insert_comment(parser, token);
-        return;
-    }
-
-    if (token->type == HTML5_TOKEN_DOCTYPE) {
-        log_error("html5: unexpected doctype in table mode");
-        return;
-    }
+    if (html5_handle_comment_or_doctype(parser, token, "table mode", false)) return;
 
     if (token->type == HTML5_TOKEN_START_TAG) {
         const char* tag = token->tag_name->chars;
@@ -2675,15 +2548,7 @@ static void html5_process_in_select_mode(Html5Parser* parser, Html5Token* token)
         return;
     }
 
-    if (token->type == HTML5_TOKEN_COMMENT) {
-        html5_insert_comment(parser, token);
-        return;
-    }
-
-    if (token->type == HTML5_TOKEN_DOCTYPE) {
-        log_error("html5: unexpected doctype in select mode");
-        return;
-    }
+    if (html5_handle_comment_or_doctype(parser, token, "select mode", false)) return;
 
     if (token->type == HTML5_TOKEN_START_TAG) {
         const char* tag = token->tag_name->chars;
@@ -2970,18 +2835,7 @@ static void html5_process_in_frameset_mode(Html5Parser* parser, Html5Token* toke
         return;
     }
 
-    // Handle comments
-    if (token->type == HTML5_TOKEN_COMMENT) {
-        html5_insert_comment(parser, token);
-        return;
-    }
-
-    // Handle doctype
-    if (token->type == HTML5_TOKEN_DOCTYPE) {
-        // Ignore
-        log_error("html5: ignoring DOCTYPE in frameset mode");
-        return;
-    }
+    if (html5_handle_comment_or_doctype(parser, token, "frameset mode", true)) return;
 
     // Handle start tags
     if (token->type == HTML5_TOKEN_START_TAG) {
@@ -3074,17 +2928,7 @@ static void html5_process_in_after_frameset_mode(Html5Parser* parser, Html5Token
         return;
     }
 
-    // Handle comments
-    if (token->type == HTML5_TOKEN_COMMENT) {
-        html5_insert_comment(parser, token);
-        return;
-    }
-
-    // Handle doctype
-    if (token->type == HTML5_TOKEN_DOCTYPE) {
-        log_error("html5: ignoring DOCTYPE in after frameset mode");
-        return;
-    }
+    if (html5_handle_comment_or_doctype(parser, token, "after frameset mode", true)) return;
 
     // Handle start tags
     if (token->type == HTML5_TOKEN_START_TAG) {
@@ -3225,17 +3069,7 @@ static void html5_process_in_column_group_mode(Html5Parser* parser, Html5Token* 
         return;
     }
 
-    // Comment
-    if (token->type == HTML5_TOKEN_COMMENT) {
-        html5_insert_comment(parser, token);
-        return;
-    }
-
-    // DOCTYPE - ignore
-    if (token->type == HTML5_TOKEN_DOCTYPE) {
-        log_error("html5: ignoring DOCTYPE in column group mode");
-        return;
-    }
+    if (html5_handle_comment_or_doctype(parser, token, "column group mode", true)) return;
 
     // Start tags
     if (token->type == HTML5_TOKEN_START_TAG) {

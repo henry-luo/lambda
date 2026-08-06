@@ -218,14 +218,13 @@ public:
     {}
 };
 
-// HTML formatter context
-class HtmlContext : public FormatterContextCpp {
+// Shared tag formatter context
+class TagContext : public FormatterContextCpp {
 public:
-    HtmlContext(Pool* pool, StringBuf* output)
+    TagContext(Pool* pool, StringBuf* output)
         : FormatterContextCpp(pool, output, 50)
     {}
 
-    // HTML-specific utilities
     inline void write_tag_open(const char* tag_name) {
         write_char('<');
         write_text(tag_name);
@@ -249,22 +248,36 @@ public:
         write_char(' ');
         write_text(name);
         write_text("=\"");
-        if (value) {
-            write_html_escaped_attribute(value);
-        }
+        if (value) write_escaped_attribute(value);
         write_char('"');
-    }
-
-    inline void write_html_escaped_attribute(const char* text) {
-        if (!text) return;
-        format_escaped_string(output_, text, strlen(text),
-            HTML_ATTR_ESCAPE_RULES, HTML_ATTR_ESCAPE_RULES_COUNT);
     }
 
     inline void write_comment(const char* text) {
         write_text("<!--");
         if (text) write_text(text);
         write_text("-->");
+    }
+
+protected:
+    virtual void write_escaped_attribute(const char* text) = 0;
+};
+
+// HTML formatter context
+class HtmlContext : public TagContext {
+public:
+    HtmlContext(Pool* pool, StringBuf* output)
+        : TagContext(pool, output)
+    {}
+
+    inline void write_html_escaped_attribute(const char* text) {
+        write_escaped_attribute(text);
+    }
+
+protected:
+    void write_escaped_attribute(const char* text) override {
+        if (!text) return;
+        format_escaped_string(output_, text, strlen(text),
+            HTML_ATTR_ESCAPE_RULES, HTML_ATTR_ESCAPE_RULES_COUNT);
     }
 };
 
@@ -295,54 +308,22 @@ public:
 };
 
 // XML formatter context
-class XmlContext : public FormatterContextCpp {
+class XmlContext : public TagContext {
 public:
     XmlContext(Pool* pool, StringBuf* output)
-        : FormatterContextCpp(pool, output, 50)
+        : TagContext(pool, output)
     {}
 
-    // XML-specific utilities
-    inline void write_tag_open(const char* tag_name) {
-        write_char('<');
-        write_text(tag_name);
-    }
-
-    inline void write_tag_close() {
-        write_char('>');
-    }
-
-    inline void write_tag_self_close() {
-        write_text(" />");
-    }
-
-    inline void write_closing_tag(const char* tag_name) {
-        write_text("</");
-        write_text(tag_name);
-        write_char('>');
-    }
-
-    inline void write_attribute(const char* name, const char* value) {
-        write_char(' ');
-        write_text(name);
-        write_text("=\"");
-        if (value) {
-            write_xml_escaped_attribute(value);
-        }
-        write_char('"');
-    }
-
     inline void write_xml_escaped_attribute(const char* text) {
+        write_escaped_attribute(text);
+    }
+
+protected:
+    void write_escaped_attribute(const char* text) override {
         if (!text) return;
         format_escaped_string(output_, text, strlen(text),
             XML_ATTR_ESCAPE_RULES, XML_ATTR_ESCAPE_RULES_COUNT);
     }
-
-    inline void write_comment(const char* text) {
-        write_text("<!--");
-        if (text) write_text(text);
-        write_text("-->");
-    }
-
 };
 
 class TomlContext : public FormatterContextCpp {

@@ -384,37 +384,42 @@ Item decimal_deep_copy(Item item, void* arena_ptr, bool is_unlimited) {
     return result;
 }
 
-// Create a fixed-precision Decimal from a string, arena-allocated.
-// The Decimal struct lives in the arena; the mpd_t* is malloc'd by mpdecimal
-// (not GC-managed). Safe to use from input parsers where GC heap allocation
-// would cause the object to be collected before it can be traced.
-Item decimal_from_string_arena(const char* str, void* arena_ptr) {
+static Item decimal_from_string_arena_with_context(const char* str, void* arena_ptr,
+                                                   mpd_context_t* ctx, uint8_t unlimited) {
     if (!str || !arena_ptr) return ItemNull;
-    
+
     Arena* arena = (Arena*)arena_ptr;
-    mpd_context_t* ctx = decimal_fixed_context();
     mpd_t* dec_val = mpd_new(ctx);
     if (!dec_val) return ItemNull;
-    
+
     uint32_t status = 0;
     mpd_qset_string(dec_val, str, ctx, &status);
     if (status != 0 || mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
         mpd_del(dec_val);
         return ItemNull;
     }
-    
+
     Decimal* dec = (Decimal*)arena_alloc(arena, sizeof(Decimal));
     if (!dec) {
         mpd_del(dec_val);
         return ItemNull;
     }
-    
-    dec->unlimited = 0;
+
+    dec->unlimited = unlimited;
     dec->dec_val = dec_val;
-    
+
     Item result;
     result.item = c2it(dec);
     return result;
+}
+
+// Create a fixed-precision Decimal from a string, arena-allocated.
+// The Decimal struct lives in the arena; the mpd_t* is malloc'd by mpdecimal
+// (not GC-managed). Safe to use from input parsers where GC heap allocation
+// would cause the object to be collected before it can be traced.
+Item decimal_from_string_arena(const char* str, void* arena_ptr) {
+    return decimal_from_string_arena_with_context(str, arena_ptr,
+        decimal_fixed_context(), 0);
 }
 
 static int decimal_count_literal_significant_digits(const char* str) {
@@ -435,61 +440,16 @@ static int decimal_count_literal_significant_digits(const char* str) {
 Item decimal_from_literal_string_arena(const char* str, void* arena_ptr, bool is_integer_literal) {
     if (!str || !arena_ptr) return ItemNull;
 
-    Arena* arena = (Arena*)arena_ptr;
     bool needs_unlimited = is_integer_literal ||
         decimal_count_literal_significant_digits(str) > DECIMAL_FIXED_PRECISION;
     mpd_context_t* ctx = needs_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
-    mpd_t* dec_val = mpd_new(ctx);
-    if (!dec_val) return ItemNull;
-
-    uint32_t status = 0;
-    mpd_qset_string(dec_val, str, ctx, &status);
-    if (status != 0 || mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
-        mpd_del(dec_val);
-        return ItemNull;
-    }
-
-    Decimal* dec = (Decimal*)arena_alloc(arena, sizeof(Decimal));
-    if (!dec) {
-        mpd_del(dec_val);
-        return ItemNull;
-    }
-
-    dec->unlimited = is_integer_literal ? DECIMAL_BIGINT : (needs_unlimited ? 1 : 0);
-    dec->dec_val = dec_val;
-
-    Item result;
-    result.item = c2it(dec);
-    return result;
+    uint8_t unlimited = is_integer_literal ? DECIMAL_BIGINT : (needs_unlimited ? 1 : 0);
+    return decimal_from_string_arena_with_context(str, arena_ptr, ctx, unlimited);
 }
 
 Item decimal_from_integer_string_arena(const char* str, void* arena_ptr) {
-    if (!str || !arena_ptr) return ItemNull;
-
-    Arena* arena = (Arena*)arena_ptr;
-    mpd_context_t* ctx = decimal_unlimited_context();
-    mpd_t* dec_val = mpd_new(ctx);
-    if (!dec_val) return ItemNull;
-
-    uint32_t status = 0;
-    mpd_qset_string(dec_val, str, ctx, &status);
-    if (status != 0 || mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
-        mpd_del(dec_val);
-        return ItemNull;
-    }
-
-    Decimal* dec = (Decimal*)arena_alloc(arena, sizeof(Decimal));
-    if (!dec) {
-        mpd_del(dec_val);
-        return ItemNull;
-    }
-
-    dec->unlimited = 1;
-    dec->dec_val = dec_val;
-
-    Item result;
-    result.item = c2it(dec);
-    return result;
+    return decimal_from_string_arena_with_context(str, arena_ptr,
+        decimal_unlimited_context(), 1);
 }
 
 // Create a fixed-precision Decimal from a double, arena-allocated.

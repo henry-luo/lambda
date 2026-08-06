@@ -200,6 +200,8 @@ void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt);
 void jm_emit_break_completion(JsMirTranspiler* mt, JsBreakContinueNode* brk);
 void jm_emit_continue_completion(JsMirTranspiler* mt, JsBreakContinueNode* cont);
 int jm_next_resume_state(JsMirTranspiler* mt, JsMirSuspendKind kind);
+MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_val,
+    JsMirSuspendKind kind);
 void jm_emit_suspend_env_save(JsMirTranspiler* mt);
 void jm_emit_resume_env_restore(JsMirTranspiler* mt);
 void jm_emit_try_state_reset(JsMirTranspiler* mt);
@@ -321,6 +323,8 @@ void jm_emit_set_class_assignment_name(JsMirTranspiler* mt, JsAssignmentNode* as
 void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFunctionNode* fn_node);
 void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNode* cls_node);
 MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce);
+MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
+        MIR_reg_t proto_obj, JsClassEntry* static_superclass);
 void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_class_instance_computed_field_metadata_keys(JsMirTranspiler* mt,
@@ -506,6 +510,8 @@ MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond)
 MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNode* tmpl);
 MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode* tt);
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc);
+MIR_reg_t jm_emit_module_const_value(JsMirTranspiler* mt,
+    const JsModuleConstEntry* mc);
 bool jm_capture_uses_live_module_var(JsMirTranspiler* mt, FnCapture* capture);
 bool jm_capture_is_lexical_meta_binding(const char* name);
 int jm_capture_env_slot(FnCapture* capture, int dense_slot);
@@ -523,6 +529,18 @@ void jm_env_reload_shared_captures(JsMirTranspiler* mt);
 void jm_emit_exc_propagate_check(JsMirTranspiler* mt);
 void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf);
 void jm_emit_class_static_block(JsMirTranspiler* mt, JsClassEntry* ce, JsAstNode* block);
+void jm_emit_class_static_initializers(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce,
+    MIR_reg_t ctor_super_val);
+typedef struct JsMirClassSetup {
+    MIR_reg_t ctor_super_val;
+    MIR_reg_t class_proto_obj;
+    JsAstNode* heritage;
+    JsClassEntry* static_superclass;
+} JsMirClassSetup;
+void jm_emit_class_setup(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce,
+    JsAstNode* class_node, bool computed_key_before_function, JsMirClassSetup* setup);
+void jm_emit_class_instance_setup_tail(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+    JsClassEntry* ce, MIR_reg_t proto_obj, MIR_reg_t ctor_super_val, bool heritage_is_null);
 void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh);
 void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node);
 MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count);

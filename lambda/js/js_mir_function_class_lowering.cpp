@@ -6,6 +6,57 @@
 // Function definition transpiler
 // ============================================================================
 
+MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
+        MIR_reg_t proto_obj, JsClassEntry* static_superclass) {
+    if (!static_superclass) return 0;
+    // a synthetic superclass identifier must resolve through its definition-time entry.
+    MIR_reg_t super_val = jm_emit_class_object_for_entry(mt, static_superclass);
+    if (!super_val) super_val = jm_emit_undefined(mt);
+    MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
+    MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
+    jm_call_void_1(mt, "js_check_class_prototype_parent",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
+    jm_emit_exc_propagate_check(mt);
+    jm_call_void_2(mt, "js_set_prototype",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
+    return super_val;
+}
+
+static void jm_validate_destructured_params(JsMirTranspiler* mt,
+        JsAstNode* params, int param_count, MIR_func_t func) {
+    JsAstNode* param = params;
+    for (int i = 0; i < param_count; i++) {
+        if (param) {
+            JsAstNode* pattern = param;
+            bool skip_undefined = pattern->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN;
+            if (skip_undefined) pattern = ((JsAssignmentPatternNode*)pattern)->left;
+            if (pattern && (pattern->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                            pattern->node_type == JS_AST_NODE_ARRAY_PATTERN)) {
+                char backend_name[32];
+                jm_get_backend_param_name(i, backend_name, sizeof(backend_name));
+                MIR_reg_t preg = MIR_reg(mt->ctx, backend_name, func);
+                if (skip_undefined) {
+                    MIR_label_t skip = jm_new_label(mt);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                        MIR_new_label_op(mt->ctx, skip),
+                        MIR_new_reg_op(mt->ctx, preg),
+                        MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
+                    jm_call_void_1(mt, "js_require_object_coercible",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
+                    jm_emit_label(mt, skip);
+                } else {
+                    jm_call_void_1(mt, "js_require_object_coercible",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
+                }
+            }
+            param = param->next;
+        }
+    }
+}
+
 static MIR_reg_t jm_emit_keyed_scope_env_tdz(JsMirTranspiler* mt) {
     MIR_reg_t value = jm_new_reg(mt, "keyed_lex_tdz", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -2724,61 +2775,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             gp_node = gp_node ? gp_node->next : NULL;
         }
 
-        // ES spec: FunctionDeclarationInstantiation — parameter binding must happen
-        // at call time, not lazily on .next(). Eagerly validate destructured params
-        // so TypeError is thrown from the call site, not from .next().
-        {
-            JsAstNode* ep_node = fn->params;
-            for (int i = 0; i < param_count; i++) {
-                if (ep_node) {
-                    JsAstNode* pat = ep_node;
-                    // unwrap assignment pattern to get the destructuring target
-                    if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
-                        // for default params like ({a} = {}) — only validate when
-                        // the raw param is NOT undefined (otherwise default applies)
-                        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)pat;
-                        pat = ap->left;
-                        if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-                            pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
-                            const char* vn = jm_get_param_name(ep_node, i);
-                            char backend_name[32];
-                            jm_get_backend_param_name(i, backend_name, sizeof(backend_name));
-                            MIR_reg_t preg = MIR_reg(mt->ctx, backend_name, func);
-                            MIR_label_t skip = jm_new_label(mt);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
-                                MIR_new_label_op(mt->ctx, skip),
-                                MIR_new_reg_op(mt->ctx, preg),
-                                MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
-                            if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-                                jm_call_void_1(mt, "js_require_object_coercible",
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                            } else {
-                                // array pattern: null/undefined not iterable
-                                jm_call_void_1(mt, "js_require_object_coercible",
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                            }
-                            jm_emit_label(mt, skip);
-                        }
-                    } else if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-                        const char* vn = jm_get_param_name(ep_node, i);
-                        char backend_name[32];
-                        jm_get_backend_param_name(i, backend_name, sizeof(backend_name));
-                        MIR_reg_t preg = MIR_reg(mt->ctx, backend_name, func);
-                        jm_call_void_1(mt, "js_require_object_coercible",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                    } else if (pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
-                        const char* vn = jm_get_param_name(ep_node, i);
-                        char backend_name[32];
-                        jm_get_backend_param_name(i, backend_name, sizeof(backend_name));
-                        MIR_reg_t preg = MIR_reg(mt->ctx, backend_name, func);
-                        // array pattern: null/undefined not iterable
-                        jm_call_void_1(mt, "js_require_object_coercible",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                    }
-                    ep_node = ep_node->next;
-                }
-            }
-        }
+        // validate destructured parameters before lazy generator execution.
+        jm_validate_destructured_params(mt, fn->params, param_count, func);
 
         // Store 'this' into env[this_slot] so the state machine can access it.
         // Must not use js_get_this here: a generator whose body never reads
@@ -2876,44 +2874,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             ap_node = ap_node ? ap_node->next : NULL;
         }
 
-        // ES spec: Eagerly validate destructured params for async generators
-        // so TypeError is thrown at call time, not on first .next()
-        if (fn->is_generator) {
-            JsAstNode* ep_node = fn->params;
-            for (int i = 0; i < param_count; i++) {
-                if (ep_node) {
-                    JsAstNode* pat = ep_node;
-                    if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
-                        JsAssignmentPatternNode* ap2 = (JsAssignmentPatternNode*)pat;
-                        pat = ap2->left;
-                        if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-                            pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
-                            const char* vn = jm_get_param_name(ep_node, i);
-                            char backend_name[32];
-                            jm_get_backend_param_name(i, backend_name, sizeof(backend_name));
-                            MIR_reg_t preg = MIR_reg(mt->ctx, backend_name, func);
-                            MIR_label_t skip = jm_new_label(mt);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
-                                MIR_new_label_op(mt->ctx, skip),
-                                MIR_new_reg_op(mt->ctx, preg),
-                                MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
-                            jm_call_void_1(mt, "js_require_object_coercible",
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                            jm_emit_label(mt, skip);
-                        }
-                    } else if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
-                               pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
-                        const char* vn = jm_get_param_name(ep_node, i);
-                        char backend_name[32];
-                        jm_get_backend_param_name(i, backend_name, sizeof(backend_name));
-                        MIR_reg_t preg = MIR_reg(mt->ctx, backend_name, func);
-                        jm_call_void_1(mt, "js_require_object_coercible",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                    }
-                    ep_node = ep_node->next;
-                }
-            }
-        }
+        // async generators use the same eager parameter validation as generators.
+        if (fn->is_generator)
+            jm_validate_destructured_params(mt, fn->params, param_count, func);
 
         // Store 'this' into env[this_slot] so the async state machine can access it.
         // Same TDZ-sentinel rule as the generator env capture above.
