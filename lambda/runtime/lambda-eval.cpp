@@ -8114,12 +8114,10 @@ Item array_set_cow(Item owner, int64_t index, Item value) {
         // no-op while positive out-of-range writes still report their error.
         return replacement;
     }
-    if (type_id == LMD_TYPE_ARRAY_NUM) {
-        // ArrayNum remains on its Stage-2 specialized mutation path; generic
-        // Item writes would otherwise widen compact bool and numeric storage.
-        array_num_set_item(replacement.array_num, index, value);
-        return replacement;
-    }
+    // COW receives the semantic Item value from a procedural assignment. The
+    // canonical setter must decide whether the compact lane can admit it or
+    // whether the array must widen; calling array_num_set_item directly would
+    // coerce an incompatible value and silently lose the required Item shape.
     if (fn_array_set(replacement.array, index, value).item == ItemError.item) return ItemError;
     return replacement;
 }
