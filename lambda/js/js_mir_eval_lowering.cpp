@@ -29,18 +29,66 @@ int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
 static const int64_t JS_EVAL_FLAG_VM_GLOBAL_CONTEXT = 16;
 
-void js_eval_preamble_entries_free(void) {
-    if (g_eval_preamble_entries) {
-        for (int i = 0; i < g_eval_preamble_entry_count; i++) {
-            if (g_eval_preamble_entries[i].name) {
-                mem_free((void*)g_eval_preamble_entries[i].name);
-            }
-            if (g_eval_preamble_entries[i].live_binding_specifier) {
-                mem_free((void*)g_eval_preamble_entries[i].live_binding_specifier);
-            }
-        }
-        mem_free(g_eval_preamble_entries);
+static char* js_preamble_name_copy(const char* name) {
+    if (!name) return NULL;
+    size_t length = strlen(name);
+    char* copy = (char*)mem_alloc(length + 1, MEM_CAT_JS_RUNTIME);
+    if (!copy) return NULL;
+    memcpy(copy, name, length + 1);
+    return copy;
+}
+
+bool js_preamble_entry_copy(const JsModuleConstEntry* source,
+                            JsModuleConstEntry* target) {
+    if (!source || !target) return false;
+
+    *target = *source;
+    target->name = NULL;
+    target->live_binding_specifier = NULL;
+    target->name = js_preamble_name_copy(source->name);
+    target->live_binding_specifier = js_preamble_name_copy(source->live_binding_specifier);
+    if ((source->name && !target->name) ||
+            (source->live_binding_specifier && !target->live_binding_specifier)) {
+        mem_free((void*)target->name);
+        mem_free((void*)target->live_binding_specifier);
+        target->name = NULL;
+        target->live_binding_specifier = NULL;
+        return false;
     }
+    return true;
+}
+
+void js_preamble_entries_free(JsModuleConstEntry* entries, int count) {
+    if (!entries) return;
+    for (int i = 0; i < count; i++) {
+        mem_free((void*)entries[i].name);
+        mem_free((void*)entries[i].live_binding_specifier);
+    }
+    mem_free(entries);
+}
+
+bool js_preamble_entries_copy(const JsModuleConstEntry* source, int count,
+                              JsModuleConstEntry** out_entries) {
+    if (!out_entries || count < 0) return false;
+    *out_entries = NULL;
+    if (count == 0) return true;
+    if (!source) return false;
+
+    JsModuleConstEntry* entries = (JsModuleConstEntry*)mem_calloc(
+        (size_t)count, sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
+    if (!entries) return false;
+    for (int i = 0; i < count; i++) {
+        if (!js_preamble_entry_copy(&source[i], &entries[i])) {
+            js_preamble_entries_free(entries, count);
+            return false;
+        }
+    }
+    *out_entries = entries;
+    return true;
+}
+
+void js_eval_preamble_entries_free(void) {
+    js_preamble_entries_free(g_eval_preamble_entries, g_eval_preamble_entry_count);
     g_eval_preamble_entries = NULL;
     g_eval_preamble_entry_count = 0;
     g_eval_preamble_var_count = 0;

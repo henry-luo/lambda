@@ -436,15 +436,6 @@ static bool js_source_contains_ascii(const char* source, size_t source_len, cons
     return false;
 }
 
-static char* js_preamble_name_copy(const char* name) {
-    if (!name) return NULL;
-    size_t length = strlen(name);
-    char* copy = (char*)mem_alloc(length + 1, MEM_CAT_JS_RUNTIME);
-    if (!copy) return NULL;
-    memcpy(copy, name, length + 1);
-    return copy;
-}
-
 static bool js_is_line_terminator(char ch) {
     return ch == '\n' || ch == '\r';
 }
@@ -1024,28 +1015,35 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     // eval()/new Function() called during js_main can resolve outer-scope
     // var declarations via the active context-owned module slab.
     if (mt->module_consts && !g_jm_preamble_mode) {
-        js_eval_preamble_entries_free();
         int ecount = (int)hashmap_count(mt->module_consts);
-        g_eval_preamble_entries = (JsModuleConstEntry*)mem_alloc(ecount * sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
-        g_eval_preamble_entry_count = 0;
-        size_t eiter = 0; void* eitem;
-        while (hashmap_iter(mt->module_consts, &eiter, &eitem)) {
-            JsModuleConstEntry* source_entry = (JsModuleConstEntry*)eitem;
-            JsModuleConstEntry* target_entry =
-                &g_eval_preamble_entries[g_eval_preamble_entry_count];
-            *target_entry = *source_entry;
-            target_entry->name = js_preamble_name_copy(source_entry->name);
-            target_entry->live_binding_specifier =
-                js_preamble_name_copy(source_entry->live_binding_specifier);
-            if ((source_entry->name && !target_entry->name) ||
-                    (source_entry->live_binding_specifier &&
-                     !target_entry->live_binding_specifier)) {
-                js_eval_preamble_entries_free();
-                break;
-            }
-            g_eval_preamble_entry_count++;
+        JsModuleConstEntry* next_entries = NULL;
+        if (ecount > 0) {
+            next_entries = (JsModuleConstEntry*)mem_calloc(
+                (size_t)ecount, sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
         }
-        g_eval_preamble_var_count = mt->module_var_count;
+        int next_entry_count = 0;
+        bool copy_succeeded = ecount == 0 || next_entries != NULL;
+        size_t eiter = 0; void* eitem;
+        while (copy_succeeded && hashmap_iter(mt->module_consts, &eiter, &eitem)) {
+            JsModuleConstEntry* source_entry = (JsModuleConstEntry*)eitem;
+            copy_succeeded = js_preamble_entry_copy(
+                source_entry, &next_entries[next_entry_count]);
+            if (copy_succeeded) next_entry_count++;
+        }
+        if (copy_succeeded) {
+            // defer releasing the previous slab until every shallow map entry
+            // has been copied; freeing it before this loop leaves source_entry
+            // names dangling in the current transpiler.
+            js_eval_preamble_entries_free();
+            g_eval_preamble_entries = next_entries;
+            g_eval_preamble_entry_count = next_entry_count;
+            g_eval_preamble_var_count = mt->module_var_count;
+        } else {
+            js_preamble_entries_free(next_entries, ecount);
+            // The old slab was only needed while constructing this replacement.
+            // Do not leave a failed replacement visible to a nested eval.
+            js_eval_preamble_entries_free();
+        }
         log_debug("js-mir: saved eval preamble: %d entries, %d module vars",
             g_eval_preamble_entry_count, g_eval_preamble_var_count);
     }
@@ -1155,14 +1153,31 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
 
     // Preamble mode: snapshot module_consts so tests can inherit harness definitions
     if (g_jm_preamble_out && mt->module_consts) {
+        js_preamble_entries_free(g_jm_preamble_out->entries,
+                                 g_jm_preamble_out->entry_count);
+        g_jm_preamble_out->entries = NULL;
+        g_jm_preamble_out->entry_count = 0;
         g_jm_preamble_out->module_var_count = mt->module_var_count;
         int count = (int)hashmap_count(mt->module_consts);
-        g_jm_preamble_out->entries = (JsModuleConstEntry*)mem_alloc(count * sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
-        g_jm_preamble_out->entry_count = 0;
+        JsModuleConstEntry* entries = NULL;
+        if (count > 0) {
+            entries = (JsModuleConstEntry*)mem_calloc(
+                (size_t)count, sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
+        }
+        bool copy_succeeded = count == 0 || entries != NULL;
+        int entry_count = 0;
         size_t snap_iter = 0; void* snap_item;
-        while (hashmap_iter(mt->module_consts, &snap_iter, &snap_item)) {
-            g_jm_preamble_out->entries[g_jm_preamble_out->entry_count++] =
-                *(JsModuleConstEntry*)snap_item;
+        while (copy_succeeded && hashmap_iter(mt->module_consts, &snap_iter, &snap_item)) {
+            copy_succeeded = js_preamble_entry_copy(
+                (JsModuleConstEntry*)snap_item, &entries[entry_count]);
+            if (copy_succeeded) entry_count++;
+        }
+        if (copy_succeeded) {
+            g_jm_preamble_out->entries = entries;
+            g_jm_preamble_out->entry_count = entry_count;
+        } else {
+            js_preamble_entries_free(entries, count);
+            g_jm_preamble_out->module_var_count = 0;
         }
         log_debug("js-mir: preamble snapshot: %d entries, %d module vars",
             g_jm_preamble_out->entry_count, g_jm_preamble_out->module_var_count);
@@ -1431,12 +1446,10 @@ bool clone_js_preamble_state(const JsPreambleState* source, JsPreambleState* out
     out_state->module_state_id = UINT32_MAX;
     out_state->entry_count = source->entry_count;
     out_state->owns_compiled_state = false;
-    if (source->entry_count > 0) {
-        out_state->entries = (JsModuleConstEntry*)mem_alloc(
-            (size_t)source->entry_count * sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
-        if (!out_state->entries) return false;
-        memcpy(out_state->entries, source->entries,
-               (size_t)source->entry_count * sizeof(JsModuleConstEntry));
+    if (!js_preamble_entries_copy(source->entries, source->entry_count,
+                                  &out_state->entries)) {
+        memset(out_state, 0, sizeof(*out_state));
+        return false;
     }
     return true;
 }
@@ -1530,15 +1543,13 @@ bool preamble_state_update_from_eval_snapshot(JsPreambleState* state) {
     }
 
     int count = g_eval_preamble_entry_count;
-    JsModuleConstEntry* entries = (JsModuleConstEntry*)mem_alloc(
-        count * sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
-    if (!entries) {
-        log_error("js-mir: failed to refresh preamble snapshot");
+    JsModuleConstEntry* entries = NULL;
+    if (!js_preamble_entries_copy(g_eval_preamble_entries, count, &entries)) {
+        log_error("js-mir: failed to copy refreshed preamble snapshot");
         return false;
     }
-    memcpy(entries, g_eval_preamble_entries, count * sizeof(JsModuleConstEntry));
 
-    mem_free(state->entries);
+    js_preamble_entries_free(state->entries, state->entry_count);
     state->entries = entries;
     state->entry_count = count;
     state->module_var_count = g_eval_preamble_var_count >= state->module_var_count
@@ -1569,7 +1580,7 @@ void preamble_state_destroy(JsPreambleState* state) {
         mem_free(state->source_buffer);
         state->source_buffer = NULL;
     }
-    mem_free(state->entries);
+    js_preamble_entries_free(state->entries, state->entry_count);
     state->entries = NULL;
     state->entry_count = 0;
     state->module_var_count = 0;
