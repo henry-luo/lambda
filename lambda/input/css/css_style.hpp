@@ -1335,7 +1335,6 @@ typedef CssValueType CSSPropertyType;
 typedef CssDeclaration CSSProperty;
 
 // Function declarations (compatibility layer using css_style.h types)
-CssValueType css_property_get_expected_type(CssPropertyCode property_code);
 bool css_property_validate_value(CssPropertyCode id, CssValue* value);
 bool css_property_validate_value_from_string(CssPropertyCode property_code,
     const char* value_str, void** parsed_value, Pool* pool);

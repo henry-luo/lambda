@@ -125,9 +125,17 @@ RULES
 )
 
 # Kick off ast-grep and grep in parallel — they share no input/output.
+# exclude vendored and separately hosted subsystem definitions from the maintained-source scan.
+# Keep their identifiers in the reference count so calls into retained code still prove liveness.
 (
   ast-grep scan -c "$SGCONFIG" --inline-rules "$ASTGREP_RULES" --json=stream \
-    --globs '!**/tree-sitter*/**' "${SCAN_PATHS[@]}" 2> "$TMP/ast-grep.stderr" \
+    --globs '!**/tree-sitter*/**' \
+    --globs '!lambda/mir/**' \
+    --globs '!lambda/module/**' \
+    --globs '!lambda/bash/**' \
+    --globs '!lambda/serve/**' \
+    --globs '!lambda/network/**' \
+    --globs '!lambda/jube/**' "${SCAN_PATHS[@]}" 2> "$TMP/ast-grep.stderr" \
     | jq -r '[.ruleId,
               .metaVariables.single.NAME.text // "",
               .file // "",
@@ -208,7 +216,13 @@ EOF
 grep -rhn 'UNUSED_FUNCTION_OK' "${SCAN_PATHS[@]}" \
   --include='*.cpp' --include='*.hpp' --include='*.c' --include='*.h' \
   --include='*.mm' --include='*.cc' --include='*.cxx' \
-  --exclude-dir='tree-sitter*' 2>/dev/null \
+  --exclude-dir='tree-sitter*' \
+  --exclude-dir='mir' \
+  --exclude-dir='module' \
+  --exclude-dir='bash' \
+  --exclude-dir='serve' \
+  --exclude-dir='network' \
+  --exclude-dir='jube' 2>/dev/null \
   | grep -oE '\b[A-Za-z_][A-Za-z0-9_]*\b' \
   | sort -u > "$TMP/excl_suppressed.txt"
 

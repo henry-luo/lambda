@@ -96,14 +96,6 @@ double pn_clock() {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
-#ifdef _WIN32
-// Helper: copy path into buf converting forward slashes to backslashes
-static void win_path_buf(char* buf, size_t bufsz, const char* path) {
-    snprintf(buf, bufsz, "%s", path);
-    for (char* p = buf; *p; p++) if (*p == '/') *p = '\\';
-}
-#endif
-
 // Helper: Create parent directories recursively for a file path
 static int create_parent_dirs(const char* file_path) {
     char* dir = file_path_dirname(file_path);

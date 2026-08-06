@@ -976,18 +976,6 @@ static inline MIR_reg_t em_load_const(MirEmitter* em, int const_index,
         MIR_new_mem_op(em->ctx, as_type, const_index * 8, consts, 0, 1)));
     return ptr;
 }
-static inline MIR_reg_t em_load_consts_from_bss(MirEmitter* em) {
-    MIR_reg_t bss_addr = em_new_reg(em, "mod_consts_bss", MIR_T_I64);
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
-        MIR_new_reg_op(em->ctx, bss_addr), MIR_new_ref_op(em->ctx, em->consts_bss)));
-    em->consts_reg = em_new_reg(em, "consts", MIR_T_I64);
-    // Per-function consts_reg must be loaded from module BSS so cross-module
-    // function calls read the callee module's constant pool, not the caller's.
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
-        MIR_new_reg_op(em->ctx, em->consts_reg),
-        MIR_new_mem_op(em->ctx, MIR_T_I64, 0, bss_addr, 0, 1)));
-    return em->consts_reg;
-}
 static inline void mir_emit_i64_const_to_reg(MIR_context_t ctx,
                                              MIR_item_t func_item,
                                              MIR_reg_t reg,
@@ -1036,28 +1024,6 @@ static inline MIR_insn_t mir_new_call_with_args(MIR_context_t ctx,
     MIR_insn_t call = MIR_new_insn_arr(ctx, MIR_CALL, oi, ops);
     mem_free(ops);
     return call;
-}
-
-static inline void mir_format_import_key(char* out,
-                                         size_t out_size,
-                                         const char* name,
-                                         MIR_type_t ret_type,
-                                         int nargs,
-                                         MIR_var_t* args,
-                                         int nres,
-                                         bool include_signature) {
-    if (!out || out_size == 0) return;
-    if (!include_signature) {
-        snprintf(out, out_size, "%s", name);
-        return;
-    }
-
-    int key_len = snprintf(out, out_size, "%s#r%d#n%d#a%d",
-        name, (int)ret_type, nres, nargs);
-    for (int i = 0; i < nargs && key_len > 0 && key_len < (int)out_size; i++) {
-        key_len += snprintf(out + key_len, out_size - (size_t)key_len,
-            "#%d", (int)args[i].type);
-    }
 }
 
 static inline StrBuf* mir_build_import_key(const char* name,

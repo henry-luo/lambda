@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "description": "Tune13 typed array stores retain native indexed arithmetic and type-preserving builtin results.",
+  "checks": [
+    {
+      "in_func": "_tune13_store_#",
+      "expect": [
+        "call\titem_at_p, item_at",
+        "call\tlambda_array_set_checked_p, lambda_array_set_checked",
+        "lsh\t{{r}}, {{r}}, 3"
+      ]
+    },
+    {
+      "in_func": "_tune13_builtin_#",
+      "expect": [
+        "call\tfn_abs_p, fn_abs",
+        "call\tfn_min2_p, fn_min2",
+        "call\tlambda_array_set_checked_p, lambda_array_set_checked"
+      ]
+    }
+  ]
+}
