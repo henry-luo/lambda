@@ -126,6 +126,12 @@ extern "C" {
 #define SYM_STATE_DECL sym_state_decl
 #define SYM_STATE_ENTRY sym_state_entry
 #define SYM_EVENT_HANDLER sym_event_handler
+#define SYM_HANDLER_EXPR sym_handler_expr
+#define SYM_HANDLER_PREFIX_EXPR sym_handler_prefix_expr
+#define SYM_HANDLER_BINARY_EXPR sym_handler_binary_expr
+#define SYM_HANDLER_LITERAL_EXPR sym_handler_literal_expr
+#define SYM_PROPAGATE_EXPR sym_propagate_expr
+#define SYM_HANDLER_MEMBER_EXPR sym_handler_member_expr
 
 #define FIELD_COND field_cond
 #define FIELD_THEN field_then
@@ -465,6 +471,11 @@ typedef struct Transpiler : Script {
 
     // unique counter for temporary variables (e.g., error propagation temps)
     int temp_var_counter;
+
+    // Parsing a braced handler reuses call_expr, whose legacy caret field is
+    // syntactically consumed before the handler body.  Suppress propagation
+    // validation while that operand is being built; the handler owns routing.
+    bool building_handler_operand;
 
     // 'that' clause context: when true, bare identifiers not found in scope
     // are rewritten to ~.name (member access on current item)

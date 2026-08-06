@@ -1836,6 +1836,13 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         }
         break;
     }
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM: {
+        AstHandlerNode* handler = (AstHandlerNode*)node;
+        collect_captures_from_node(tp, handler->operand, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, handler->body, fn_scope, global_scope, captures);
+        break;
+    }
     case AST_NODE_START: {
         AstStartNode* start = (AstStartNode*)node;
         collect_captures_from_node(tp, (AstNode*)start->call, fn_scope, global_scope, captures);
@@ -1975,7 +1982,9 @@ void analyze_captures(Transpiler* tp, AstFuncNode* fn_node, NameScope* global_sc
             fn_node->analysis->capture_count++;
             String* capture_name = c->lambda_name;
             log_debug("  - %.*s", (int)capture_name->len, capture_name->chars);
-            if (c->is_mutable) {
+            // A mutable capture is an explicit cross-frame write only when the
+            // outer binding itself is a `var`; immutable captures remain pure.
+            if (c->is_mutable && (!c->entry || !c->entry->is_mutable)) {
                 record_semantic_error(tp, fn_node->node, ERR_IMMUTABLE_ASSIGNMENT,
                     "cannot mutate captured binding '%.*s'. pass it as `var` to a pn or return a new value.",
                     (int)capture_name->len, capture_name->chars);
@@ -3361,7 +3370,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
 
     // check for '^' propagation operator on the call
     TSNode propagate_node = ts_node_child_by_field_id(call_node, FIELD_PROPAGATE);
-    if (!ts_node_is_null(propagate_node)) {
+    if (!ts_node_is_null(propagate_node) && !tp->building_handler_operand) {
         ast_node->propagate = true;
         log_debug("call has '^' propagation operator");
         // '^' is only valid on can_raise calls
@@ -5407,6 +5416,12 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_CURRENT_ITEM:
     case AST_NODE_CURRENT_INDEX:
         return true;
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM: {
+        AstHandlerNode* handler = (AstHandlerNode*)node;
+        return has_current_item_ref(handler->operand) ||
+            has_current_item_ref(handler->body);
+    }
     case AST_NODE_PRIMARY:
         return has_current_item_ref(((AstPrimaryNode*)node)->expr);
     case AST_NODE_UNARY:
@@ -7976,6 +7991,12 @@ static bool join_expr_mentions_name(AstNode* node, String* name) {
         }
         return false;
     }
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM: {
+        AstHandlerNode* handler = (AstHandlerNode*)node;
+        return join_expr_mentions_name(handler->operand, name) ||
+            join_expr_mentions_name(handler->body, name);
+    }
     default:
         return false;
     }
@@ -9339,6 +9360,17 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         }
         return;
     }
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM: {
+        AstHandlerNode* handler = (AstHandlerNode*)node;
+        // The operand is the acknowledged error-producing boundary; errors
+        // introduced by the recovery body still need their own acknowledgment.
+        validate_enforcing_calls_in_expression(tp, handler->operand, true,
+            return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, handler->body, false,
+            return_acknowledgment);
+        return;
+    }
     case AST_NODE_BINARY:
     case AST_NODE_PIPE: {
         AstBinaryNode* binary = (AstBinaryNode*)node;
@@ -9450,6 +9482,391 @@ static void validate_function_enforcing_calls(Transpiler* tp, AstFuncNode* fn,
 
 static void validate_top_level_enforcing_calls(Transpiler* tp, AstNode* node) {
     validate_enforcing_calls_in_expression(tp, node, false, false);
+}
+
+// Cross-frame writes are deliberately a source-level invalidation, not a
+// runtime aliasing rule: a caller may not read an outer `var` after a closure
+// that can write it unless an explicit assignment re-establishes the binding.
+typedef struct InvalidatedBindingState {
+    Transpiler* tp;
+    String* names[64];
+    int count;
+} InvalidatedBindingState;
+
+static bool invalidated_binding_contains(InvalidatedBindingState* state,
+        String* name) {
+    if (!state || !name) return false;
+    for (int i = 0; i < state->count; i++) {
+        if (same_name_string(state->names[i], name)) return true;
+    }
+    return false;
+}
+
+static void invalidated_binding_add(InvalidatedBindingState* state, String* name) {
+    if (!state || !name || invalidated_binding_contains(state, name)) return;
+    if (state->count < 64) state->names[state->count++] = name;
+}
+
+static void invalidated_binding_remove(InvalidatedBindingState* state, String* name) {
+    if (!state || !name) return;
+    for (int i = 0; i < state->count; i++) {
+        if (!same_name_string(state->names[i], name)) continue;
+        state->names[i] = state->names[--state->count];
+        return;
+    }
+}
+
+static void invalidated_binding_union(InvalidatedBindingState* dst,
+        const InvalidatedBindingState* left,
+        const InvalidatedBindingState* right) {
+    if (!dst) return;
+    dst->count = 0;
+    if (left) {
+        for (int i = 0; i < left->count; i++) {
+            invalidated_binding_add(dst, left->names[i]);
+        }
+    }
+    if (right) {
+        for (int i = 0; i < right->count; i++) {
+            invalidated_binding_add(dst, right->names[i]);
+        }
+    }
+}
+
+static bool ast_reads_binding(AstNode* node, String* name);
+
+static bool ast_reads_any_invalidated_binding(AstNode* node,
+        InvalidatedBindingState* state, String** offending) {
+    if (offending) *offending = NULL;
+    if (!state) return false;
+    for (int i = 0; i < state->count; i++) {
+        if (ast_reads_binding(node, state->names[i])) {
+            if (offending) *offending = state->names[i];
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool ast_reads_binding(AstNode* node, String* name) {
+    if (!node || !name) return false;
+    if (node->node_type == AST_NODE_PRIMARY) {
+        return ast_reads_binding(((AstPrimaryNode*)node)->expr, name);
+    }
+    switch (node->node_type) {
+    case AST_NODE_IDENT:
+        return same_name_string(((AstIdentNode*)node)->name, name);
+    case AST_NODE_UNARY:
+    case AST_NODE_SPREAD:
+        return ast_reads_binding(((AstUnaryNode*)node)->operand, name);
+    case AST_NODE_BINARY:
+    case AST_NODE_PIPE: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        return ast_reads_binding(binary->left, name) ||
+            ast_reads_binding(binary->right, name);
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        // A direct callee name is a declaration reference, not a value read.
+        AstNode* callee = boundary_unwrap_primary(call->function);
+        if (!callee || callee->node_type != AST_NODE_IDENT) {
+            if (ast_reads_binding(call->function, name)) return true;
+        }
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if (ast_reads_binding(arg, name)) return true;
+        }
+        return false;
+    }
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM: {
+        AstHandlerNode* handler = (AstHandlerNode*)node;
+        return ast_reads_binding(handler->operand, name) ||
+            ast_reads_binding(handler->body, name);
+    }
+    case AST_NODE_MEMBER_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        return ast_reads_binding(field->object, name);
+    }
+    case AST_NODE_INDEX_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        return ast_reads_binding(field->object, name) ||
+            ast_reads_binding(field->field, name);
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* branch = (AstIfNode*)node;
+        return ast_reads_binding(branch->cond, name) ||
+            ast_reads_binding(branch->then, name) ||
+            ast_reads_binding(branch->otherwise, name);
+    }
+    case AST_NODE_MATCH_EXPR: {
+        AstMatchNode* match = (AstMatchNode*)node;
+        if (ast_reads_binding(match->scrutinee, name)) return true;
+        for (AstMatchArm* arm = match->first_arm; arm; arm = (AstMatchArm*)arm->next) {
+            if (ast_reads_binding(arm->body, name)) return true;
+        }
+        return false;
+    }
+    case AST_NODE_CONTENT:
+    case AST_NODE_LIST:
+    case AST_NODE_ARRAY:
+    case AST_NODE_MAP:
+    case AST_NODE_ELEMENT: {
+        for (AstNode* item = ((AstArrayNode*)node)->item; item; item = item->next) {
+            if (ast_reads_binding(item, name)) return true;
+        }
+        return false;
+    }
+    case AST_NODE_ASSIGN:
+    case AST_NODE_KEY_EXPR:
+    case AST_NODE_NAMED_ARG:
+        return ast_reads_binding(((AstNamedNode*)node)->as, name);
+    case AST_NODE_ASSIGN_STAM:
+        return ast_reads_binding(((AstAssignStamNode*)node)->value, name);
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: {
+        AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
+        return ast_reads_binding(assign->object, name) ||
+            ast_reads_binding(assign->key, name) ||
+            ast_reads_binding(assign->value, name);
+    }
+    case AST_NODE_RETURN_STAM:
+        return ast_reads_binding(((AstReturnNode*)node)->value, name);
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_PROC: {
+        AstFuncNode* fn = (AstFuncNode*)node;
+        for (FnCapture* capture = fn->captures; capture; capture = capture->next) {
+            if (same_name_string(capture->lambda_name, name)) return true;
+        }
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
+static AstFuncNode* direct_user_callable(AstCallNode* call) {
+    AstNode* callee = call ? boundary_unwrap_primary(call->function) : NULL;
+    if (!callee || callee->node_type != AST_NODE_IDENT) return NULL;
+    AstIdentNode* ident = (AstIdentNode*)callee;
+    AstNode* target = ident->entry ? ident->entry->node : NULL;
+    if (target && target->node_type == AST_NODE_ASSIGN) {
+        target = boundary_unwrap_primary(((AstNamedNode*)target)->as);
+    }
+    return target && (target->node_type == AST_NODE_FUNC ||
+        target->node_type == AST_NODE_FUNC_EXPR || target->node_type == AST_NODE_PROC)
+        ? (AstFuncNode*)target : NULL;
+}
+
+static void report_invalidated_read(InvalidatedBindingState* state,
+        AstNode* node, String* name) {
+    if (!state || !state->tp || !node || !name) return;
+    record_semantic_error(state->tp, node->node, ERR_INVALIDATED_BINDING,
+        "binding '%.*s' may have been changed invisibly by a previous call; "
+        "assign the returned value back to '%.*s' before reading it",
+        (int)name->len, name->chars, (int)name->len, name->chars);
+}
+
+static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* node);
+
+static void scan_invalidated_call(InvalidatedBindingState* state,
+        AstCallNode* call) {
+    if (!state || !call) return;
+    AstFuncNode* callee = direct_user_callable(call);
+    // Evaluate arguments before applying the callee's captured writes.
+    for (AstNode* arg = call->argument; arg; arg = arg->next) {
+        scan_invalidated_bindings(state, arg);
+    }
+    if (!callee) return;
+    for (FnCapture* capture = callee->captures; capture; capture = capture->next) {
+        if (!capture->lambda_name || !capture->entry) continue;
+        if (invalidated_binding_contains(state, capture->lambda_name)) {
+            report_invalidated_read(state, (AstNode*)call, capture->lambda_name);
+        }
+        if (capture->is_mutable && capture->entry->is_mutable) {
+            invalidated_binding_add(state, capture->lambda_name);
+        }
+    }
+}
+
+static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* node) {
+    if (!state) return;
+    while (node) {
+        switch (node->node_type) {
+        case AST_NODE_CONTENT:
+        case AST_NODE_LIST:
+        case AST_NODE_ARRAY:
+        case AST_NODE_MAP:
+        case AST_NODE_ELEMENT:
+            scan_invalidated_bindings(state, ((AstArrayNode*)node)->item);
+            break;
+        case AST_NODE_PRIMARY:
+            scan_invalidated_bindings(state, ((AstPrimaryNode*)node)->expr);
+            break;
+        case AST_NODE_CALL_EXPR:
+            scan_invalidated_call(state, (AstCallNode*)node);
+            break;
+        case AST_NODE_ASSIGN_STAM: {
+            AstAssignStamNode* assign = (AstAssignStamNode*)node;
+            scan_invalidated_bindings(state, assign->value);
+            if (assign->target && invalidated_binding_contains(state, assign->target)) {
+                if (ast_reads_binding(assign->value, assign->target)) {
+                    report_invalidated_read(state, (AstNode*)assign, assign->target);
+                } else {
+                    // An explicit assignment is the only re-establishment edge.
+                    invalidated_binding_remove(state, assign->target);
+                }
+            }
+            break;
+        }
+        case AST_NODE_HANDLER_EXPR:
+        case AST_NODE_HANDLER_STAM: {
+            AstHandlerNode* handler = (AstHandlerNode*)node;
+            scan_invalidated_bindings(state, handler->operand);
+            InvalidatedBindingState operand_state = *state;
+            InvalidatedBindingState body_state = *state;
+            scan_invalidated_bindings(&body_state, handler->body);
+            invalidated_binding_union(state, &operand_state, &body_state);
+            break;
+        }
+        case AST_NODE_BINARY:
+        case AST_NODE_PIPE: {
+            AstBinaryNode* binary = (AstBinaryNode*)node;
+            scan_invalidated_bindings(state, binary->left);
+            scan_invalidated_bindings(state, binary->right);
+            break;
+        }
+        case AST_NODE_UNARY:
+        case AST_NODE_SPREAD:
+            scan_invalidated_bindings(state, ((AstUnaryNode*)node)->operand);
+            break;
+        case AST_NODE_IF_EXPR: {
+            AstIfNode* branch = (AstIfNode*)node;
+            scan_invalidated_bindings(state, branch->cond);
+            InvalidatedBindingState then_state = *state;
+            InvalidatedBindingState else_state = *state;
+            scan_invalidated_bindings(&then_state, branch->then);
+            scan_invalidated_bindings(&else_state, branch->otherwise);
+            invalidated_binding_union(state, &then_state, &else_state);
+            break;
+        }
+        case AST_NODE_MATCH_EXPR: {
+            AstMatchNode* match = (AstMatchNode*)node;
+            scan_invalidated_bindings(state, match->scrutinee);
+            InvalidatedBindingState before_arms = *state;
+            InvalidatedBindingState merged = before_arms;
+            for (AstMatchArm* arm = match->first_arm; arm; arm = (AstMatchArm*)arm->next) {
+                InvalidatedBindingState arm_state = before_arms;
+                scan_invalidated_bindings(&arm_state, arm->pattern);
+                scan_invalidated_bindings(&arm_state, arm->body);
+                InvalidatedBindingState merged_before = merged;
+                invalidated_binding_union(&merged, &merged_before, &arm_state);
+            }
+            *state = merged;
+            break;
+        }
+        case AST_NODE_WHILE_STAM: {
+            AstWhileNode* loop = (AstWhileNode*)node;
+            scan_invalidated_bindings(state, loop->cond);
+            InvalidatedBindingState before_body = *state;
+            InvalidatedBindingState body_state = before_body;
+            scan_invalidated_bindings(&body_state, loop->body);
+            // A while body may execute zero times, so retain both the
+            // pre-loop state and every invalidation reachable from one pass.
+            invalidated_binding_union(state, &before_body, &body_state);
+            break;
+        }
+        case AST_NODE_DO_WHILE_STAM: {
+            AstWhileNode* loop = (AstWhileNode*)node;
+            InvalidatedBindingState before_body = *state;
+            scan_invalidated_bindings(state, loop->body);
+            scan_invalidated_bindings(state, loop->cond);
+            InvalidatedBindingState after_body = *state;
+            invalidated_binding_union(state, &before_body, &after_body);
+            break;
+        }
+        case AST_NODE_FOR_EXPR:
+        case AST_NODE_FOR_STAM: {
+            AstForNode* loop = (AstForNode*)node;
+            for (AstNode* binding = loop->loop; binding; binding = binding->next) {
+                AstLoopNode* loop_binding = (AstLoopNode*)binding;
+                scan_invalidated_bindings(state, loop_binding->as);
+                scan_invalidated_bindings(state, loop_binding->on);
+            }
+            scan_invalidated_bindings(state, loop->let_clause);
+            scan_invalidated_bindings(state, loop->where);
+            if (loop->group) {
+                for (AstGroupKey* key = loop->group->keys; key; key = (AstGroupKey*)key->next) {
+                    scan_invalidated_bindings(state, key->expr);
+                }
+            }
+            scan_invalidated_bindings(state, loop->order);
+            scan_invalidated_bindings(state, loop->limit);
+            scan_invalidated_bindings(state, loop->offset);
+            InvalidatedBindingState before_body = *state;
+            InvalidatedBindingState body_state = before_body;
+            scan_invalidated_bindings(&body_state, loop->then);
+            invalidated_binding_union(state, &before_body, &body_state);
+            break;
+        }
+        case AST_NODE_MEMBER_EXPR:
+        case AST_NODE_INDEX_EXPR: {
+            AstFieldNode* field = (AstFieldNode*)node;
+            scan_invalidated_bindings(state, field->object);
+            scan_invalidated_bindings(state, field->field);
+            break;
+        }
+        case AST_NODE_ASSIGN:
+        case AST_NODE_KEY_EXPR:
+        case AST_NODE_NAMED_ARG:
+            scan_invalidated_bindings(state, ((AstNamedNode*)node)->as);
+            break;
+        case AST_NODE_INDEX_ASSIGN_STAM:
+        case AST_NODE_MEMBER_ASSIGN_STAM: {
+            AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
+            scan_invalidated_bindings(state, assign->object);
+            scan_invalidated_bindings(state, assign->key);
+            scan_invalidated_bindings(state, assign->value);
+            break;
+        }
+        case AST_NODE_RETURN_STAM:
+            scan_invalidated_bindings(state, ((AstReturnNode*)node)->value);
+            break;
+        case AST_NODE_FUNC:
+        case AST_NODE_FUNC_EXPR:
+        case AST_NODE_PROC: {
+            AstFuncNode* fn = (AstFuncNode*)node;
+            for (FnCapture* capture = fn->captures; capture; capture = capture->next) {
+                if (capture->lambda_name && invalidated_binding_contains(state,
+                        capture->lambda_name)) {
+                    report_invalidated_read(state, node, capture->lambda_name);
+                }
+            }
+            break;
+        }
+        default: {
+            String* offending = NULL;
+            if (ast_reads_any_invalidated_binding(node, state, &offending)) {
+                report_invalidated_read(state, node, offending);
+            }
+            break;
+        }
+        }
+        node = node->next;
+    }
+}
+
+static void validate_cross_frame_binding_reads(Transpiler* tp, AstFuncNode* fn) {
+    if (!tp || !fn || !fn->body) return;
+    InvalidatedBindingState state = {tp, {0}, 0};
+    scan_invalidated_bindings(&state, fn->body);
+}
+
+static void validate_top_level_cross_frame_binding_reads(Transpiler* tp,
+        AstNode* node) {
+    if (!tp || !node) return;
+    InvalidatedBindingState state = {tp, {0}, 0};
+    scan_invalidated_bindings(&state, node);
 }
 
 typedef struct ProcReturnTypeScan {
@@ -9699,6 +10116,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     // Analyze captures for closure support
     NameScope* global_scope = find_global_scope(ast_node->vars);
     analyze_captures(tp, ast_node, global_scope);
+    validate_cross_frame_binding_reads(tp, ast_node);
 
     log_debug("end building fn");
     return (AstNode*)ast_node;
@@ -10146,6 +10564,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                     // Analyze captures
                     NameScope* global_scope = find_global_scope(fn_node->vars->parent);
                     analyze_captures(tp, fn_node, global_scope);
+                    validate_cross_frame_binding_reads(tp, fn_node);
 
                     item = (AstNode*)fn_node;
                     log_debug("pass 2: completed function '%.*s' with body=%p",
@@ -10348,6 +10767,165 @@ AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSy
     return (AstNode*)ast_node;
 }
 
+static bool handler_operand_is_proc(AstNode* operand) {
+    if (!operand || operand->node_type != AST_NODE_CALL_EXPR) return false;
+    AstCallNode* call = (AstCallNode*)operand;
+    AstNode* callee = boundary_unwrap_primary(call->function);
+    if (!callee) return false;
+    if (callee->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+        return info && info->is_proc;
+    }
+    return callee->type && callee->type->type_id == LMD_TYPE_FUNC &&
+        ((TypeFunc*)callee->type)->is_proc;
+}
+
+static bool handler_is_statement_position(TSNode handler_node) {
+    // A `_statement` ancestor is the unambiguous statement spelling; let/array
+    // operands remain value-producing expressions.
+    TSNode parent = ts_node_parent(handler_node);
+    while (!ts_node_is_null(parent)) {
+        if (strcmp(ts_node_type(parent), "_statement") == 0) return true;
+        if (strcmp(ts_node_type(parent), "content") == 0 &&
+                !ts_node_is_null(ts_node_next_named_sibling(handler_node))) return true;
+        if (strcmp(ts_node_type(parent), "assign_expr") == 0 ||
+                strcmp(ts_node_type(parent), "let_expr") == 0) return false;
+        parent = ts_node_parent(parent);
+    }
+    return false;
+}
+
+static bool handler_is_value_context(TSNode handler_node) {
+    TSNode parent = ts_node_parent(handler_node);
+    while (!ts_node_is_null(parent)) {
+        const char* type = ts_node_type(parent);
+        if (strcmp(type, "assign_expr") == 0 || strcmp(type, "let_expr") == 0 ||
+                strcmp(type, "array") == 0 || strcmp(type, "map_item") == 0 ||
+                strcmp(type, "named_argument") == 0) return true;
+        if (strcmp(type, "content") == 0 || strcmp(type, "_statement") == 0) return false;
+        parent = ts_node_parent(parent);
+    }
+    return false;
+}
+
+static bool handler_operand_has_propagate(TSNode node) {
+    if (ts_node_is_null(node)) return false;
+    if (ts_node_symbol(node) == SYM_CALL_EXPR &&
+            !ts_node_is_null(ts_node_child_by_field_id(node, FIELD_PROPAGATE))) {
+        return true;
+    }
+    uint32_t child_count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        if (handler_operand_has_propagate(ts_node_child(node, i))) return true;
+    }
+    return false;
+}
+
+static AstNode* build_handler(Transpiler* tp, TSNode handler_node,
+        bool is_statement) {
+    AstHandlerNode* ast_node = (AstHandlerNode*)alloc_ast_node(tp,
+        is_statement ? AST_NODE_HANDLER_STAM : AST_NODE_HANDLER_EXPR,
+        handler_node, sizeof(AstHandlerNode));
+    ast_node->is_statement = is_statement;
+
+    TSNode operand_node = ts_node_child_by_field_id(handler_node, FIELD_OPERAND);
+    TSNode body_node = ts_node_child_by_field_id(handler_node, FIELD_BODY);
+    if (ts_node_symbol(handler_node) != SYM_HANDLER_PREFIX_EXPR &&
+            ts_node_symbol(operand_node) == SYM_CALL_EXPR &&
+            ts_node_is_null(ts_node_child_by_field_id(operand_node, FIELD_PROPAGATE))) {
+        // The optional call caret is grammar-owned so legacy `call()^` can
+        // coexist with handlers; reject the otherwise indistinguishable
+        // `call() { ... }` spelling before it becomes a recovery node.
+        record_semantic_error(tp, handler_node, ERR_INVALID_CALL,
+            "braced error handler requires `^` before `{`");
+    }
+    if (ts_node_symbol(handler_node) == SYM_HANDLER_BINARY_EXPR &&
+            ts_node_is_null(ts_node_child_by_field_id(handler_node, FIELD_PROPAGATE)) &&
+            !handler_operand_has_propagate(operand_node)) {
+        // The binary production permits a nested call to own the legacy caret;
+        // reject the no-caret recovery spelling when neither level supplied it.
+        record_semantic_error(tp, handler_node, ERR_INVALID_CALL,
+            "braced error handler requires `^` before `{`");
+    }
+    bool saved_handler_operand = tp->building_handler_operand;
+    tp->building_handler_operand = true;
+    ast_node->operand = build_expr(tp, operand_node);
+    tp->building_handler_operand = saved_handler_operand;
+    ast_node->body = build_expr(tp, body_node);
+
+    // The legacy postfix caret is consumed by call_expr when it is followed
+    // by a braced handler.  It marks propagation only when no handler owns
+    // the call; clear it here so the enclosing handler can inspect the error
+    // value instead of returning before its recovery body runs.
+    if (ast_node->operand && ast_node->operand->node_type == AST_NODE_CALL_EXPR) {
+        ((AstCallNode*)ast_node->operand)->propagate = false;
+    }
+
+    bool statement_position = is_statement || handler_is_statement_position(handler_node);
+    bool value_context = handler_is_value_context(handler_node);
+    if (!is_statement && value_context && handler_operand_is_proc(ast_node->operand)) {
+        record_semantic_error(tp, handler_node, ERR_INVALID_EXPR_CONTEXT,
+            "procedure call handlers are statement-only; use a value-producing fn call here");
+    }
+    if (!is_statement && statement_position) {
+        is_statement = true;
+        ast_node->is_statement = true;
+        ast_node->node_type = AST_NODE_HANDLER_STAM;
+    }
+
+    if (!ast_node->operand) {
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    // A handler in content position is the statement spelling when its
+    // operand is a procedure call.  The grammar shares the braced form with
+    // expressions so ordinary call statements do not become partial handler
+    // nodes before a caret is present.
+    if (!is_statement && handler_operand_is_proc(ast_node->operand)) {
+        is_statement = true;
+        ast_node->is_statement = true;
+        ast_node->node_type = AST_NODE_HANDLER_STAM;
+    }
+    if (is_statement && !handler_operand_is_proc(ast_node->operand)) {
+        record_semantic_error(tp, handler_node, ERR_INVALID_CALL,
+            "statement error handler operand must be a procedure call");
+    }
+
+    if (is_statement) {
+        ast_node->type = &TYPE_ANY;
+        return (AstNode*)ast_node;
+    }
+
+    Type* successful = lambda_type_remove_error(tp->pool, ast_node->operand->type);
+    if (!successful) successful = &TYPE_ANY;
+    Type* body_type = ast_node->body && ast_node->body->type
+        ? ast_node->body->type : &TYPE_ANY;
+    // The handled branch produces the body value; the success branch preserves
+    // the operand's non-error contract for the surrounding expression.
+    ast_node->type = lambda_type_union_normalized(tp->pool, successful, body_type);
+    return (AstNode*)ast_node;
+}
+
+static AstNode* build_propagate_expr(Transpiler* tp, TSNode propagate_node) {
+    TSNode operand_node = ts_node_child_by_field_id(propagate_node, FIELD_OPERAND);
+    AstNode* operand = build_expr(tp, operand_node);
+    if (operand && operand->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)operand;
+        call->propagate = true;
+        if (!call->can_raise) {
+            record_semantic_error(tp, propagate_node, ERR_SEMANTIC_ERROR,
+                "postfix `^` used on a call that does not return errors");
+        } else {
+            Type* success_type = lambda_type_remove_error(tp->pool, call->type);
+            if (success_type) call->type = success_type;
+        }
+        return operand;
+    }
+    record_semantic_error(tp, propagate_node, ERR_INVALID_CALL,
+        "postfix `^` propagation requires a call expression");
+    return operand;
+}
+
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     // depth guard: bail (NULL, the existing error convention) before the recursion
     // can overflow the stack on deeply nested source.
@@ -10385,6 +10963,18 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         // `start_expr` names its call operand directly instead of routing it
         // through primary_expr, so the shared call builder must accept both.
         return build_call_expr(tp, expr_node, symbol);
+    case SYM_HANDLER_EXPR:
+        return build_handler(tp, expr_node, false);
+    case SYM_HANDLER_PREFIX_EXPR:
+        return build_handler(tp, expr_node, false);
+    case SYM_HANDLER_BINARY_EXPR:
+        return build_handler(tp, expr_node, false);
+    case SYM_HANDLER_LITERAL_EXPR:
+        return build_handler(tp, expr_node, false);
+    case SYM_HANDLER_MEMBER_EXPR:
+        return build_field_expr(tp, expr_node, AST_NODE_MEMBER_EXPR);
+    case SYM_PROPAGATE_EXPR:
+        return build_propagate_expr(tp, expr_node);
     case SYM_UNARY_EXPR:
         return build_unary_expr(tp, expr_node);
     case SYM_BINARY_EXPR:
@@ -11242,6 +11832,13 @@ static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
         }
         break;
     }
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM: {
+        AstHandlerNode* handler = (AstHandlerNode*)node;
+        walk_lambda_ast(handler->operand, visitor, data, descend_functions);
+        walk_lambda_ast(handler->body, visitor, data, descend_functions);
+        break;
+    }
     case AST_NODE_START:
         walk_lambda_ast((AstNode*)((AstStartNode*)node)->call, visitor, data, descend_functions);
         break;
@@ -11583,6 +12180,27 @@ static bool classify_error_destructure_fault_boundary_node(AstNode* node,
     return true;
 }
 
+typedef struct HandlerAwaitValidation {
+    Transpiler* tp;
+} HandlerAwaitValidation;
+
+static bool validate_handler_await_node(AstNode* node, void* data) {
+    if (node->node_type != AST_NODE_HANDLER_EXPR &&
+            node->node_type != AST_NODE_HANDLER_STAM) return true;
+    HandlerAwaitValidation* validation = (HandlerAwaitValidation*)data;
+    AstHandlerNode* handler = (AstHandlerNode*)node;
+    MayAwaitScan scan = {};
+    walk_lambda_ast(handler->operand, scan_may_await_node, &scan, false);
+    if (scan.found) {
+        // Fault recovery owns a native jump buffer; letting its protected
+        // operand suspend would leave that buffer pointing at a dead stack.
+        record_semantic_error(validation->tp, node->node, ERR_INVALID_EXPR_CONTEXT,
+            "error handler operand may suspend (%s); await before applying `^ { ... }`",
+            scan.cause ? scan.cause : "possible await");
+    }
+    return true;
+}
+
 static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
     ArrayList* functions = arraylist_new(16);
     if (!functions) return;
@@ -11630,6 +12248,10 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
             }
         }
     }
+
+    HandlerAwaitValidation handler_validation = {.tp = tp};
+    walk_lambda_ast((AstNode*)script, validate_handler_await_node,
+        &handler_validation, true);
 
     // Resolve the may-await fixed point before classifying each `^err` RHS.
     // A direct pn call can become suspending only after its callee's analysis
@@ -11705,6 +12327,7 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
     if (tp->error_count == 0) {
         for (AstNode* item = ast_node->child; item; item = item->next) {
             validate_top_level_enforcing_calls(tp, item);
+            validate_top_level_cross_frame_binding_reads(tp, item);
         }
     }
     // Duplicate/invalid declarations can leave recovery placeholders linked

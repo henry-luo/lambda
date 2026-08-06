@@ -1086,7 +1086,7 @@ TEST_F(NegativeScriptTest, SemanticError_ProcMethodRequiresMutableReceiver) {
 
 TEST_F(NegativeScriptTest, SemanticError_CaptureMutation) {
     ExpectErrorMessage("test/lambda/negative/semantic/capture_mutation.ls",
-        "cannot mutate captured binding");
+                       "changed invisibly by a previous call");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_StartOutsideProcedure) {
