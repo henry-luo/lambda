@@ -450,42 +450,6 @@ static CssProperty property_definitions[] = {
 
 #define PROPERTY_DEFINITION_COUNT (sizeof(property_definitions) / sizeof(property_definitions[0]))
 
-CSSPropertyType css_property_get_expected_type(CssPropertyCode property_code) {
-    switch (property_code) {
-        case CSS_PROP_COLOR:
-        case CSS_PROP_BACKGROUND_COLOR:
-            return CSS_PROP_TYPE_COLOR;
-
-        case CSS_PROP_FONT_SIZE:
-        case CSS_PROP_WIDTH:
-        case CSS_PROP_HEIGHT:
-        case CSS_PROP_TOP:
-        case CSS_PROP_RIGHT:
-        case CSS_PROP_BOTTOM:
-        case CSS_PROP_LEFT:
-        case CSS_PROP_LINE_HEIGHT:
-            return CSS_PROP_TYPE_LENGTH;
-
-        case CSS_PROP_Z_INDEX:
-        case CSS_PROP_OPACITY:
-        case CSS_PROP_FONT_WEIGHT:
-            return CSS_PROP_TYPE_NUMBER;
-
-        case CSS_PROP_FONT_FAMILY:
-            return CSS_PROP_TYPE_STRING;
-
-        default:
-            return CSS_PROP_TYPE_KEYWORD;
-    }
-}
-
-bool css_property_enhanced_validate_value(CssPropertyCode id, CSSPropertyValue* value) {
-    if (!value) return false;
-
-    CSSPropertyType expected = css_property_get_expected_type(id);
-    return value->type == expected || value->type == CSS_PROP_TYPE_KEYWORD;
-}
-
 bool css_property_validate_value(CssPropertyCode id, CssValue* value) {
     if (!value) return false;
 

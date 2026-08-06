@@ -292,14 +292,6 @@ bool jm_has_tail_call(JsAstNode* node, JsFuncCollected* fc) {
 // Local function management
 // ============================================================================
 
-MIR_item_t jm_find_local_func(JsMirTranspiler* mt, const char* name) {
-    JsLocalFuncEntry key;
-    memset(&key, 0, sizeof(key));
-    key.name = name;
-    JsLocalFuncEntry* found = (JsLocalFuncEntry*)hashmap_get(mt->local_funcs, &key);
-    return found ? found->func_item : NULL;
-}
-
 void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t func_item) {
     JsLocalFuncEntry entry;
     memset(&entry, 0, sizeof(entry));
