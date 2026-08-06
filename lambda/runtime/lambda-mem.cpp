@@ -912,6 +912,32 @@ int64_t lambda_int_lane_mul_slow(int64_t a, int64_t b) {
     return lane_inf_of(sign);
 }
 
+// Division and remainder share one slow classifier because zero-divisor and
+// poison handling must agree; the native emitter only reaches this arm when
+// either operand is poison or the divisor is zero.
+int64_t lambda_int_lane_divmod_slow(int64_t a, int64_t b, int64_t is_mod) {
+    if (a == INT_LANE_NULL || b == INT_LANE_NULL) return INT_LANE_NULL;
+    if (lane_is_nan(a) || lane_is_nan(b)) return INT_LANE_NAN;
+    if (b == 0) {
+        if (is_mod || a == 0) return INT_LANE_NAN;
+        return a < 0 ? INT_LANE_NEG_INF : INT_LANE_INF;
+    }
+    if (lane_is_inf(a)) {
+        // inf / finite preserves sign; inf % finite is indeterminate.
+        if (is_mod) return INT_LANE_NAN;
+        int sign = lane_inf_sign(a) * (b < 0 ? -1 : 1);
+        return lane_inf_of(sign);
+    }
+    if (lane_is_inf(b)) {
+        // finite / inf truncates to zero, while finite % inf is the dividend.
+        return is_mod ? a : 0;
+    }
+    // This branch keeps the helper total if a future caller reaches it with a
+    // finite lane; the emitter's fast arm already handles this case directly.
+    if (a == INT64_MIN && b == -1) return is_mod ? 0 : INT_LANE_INF;
+    return is_mod ? a % b : a / b;
+}
+
 // Cold arms of the emitted lane<->double converters (design doc 5.1's map).
 // Thin wrappers so the JIT registry has callable symbols; the logic is
 // header-only in lambda.h because `core/` needs it and must not link `runtime/`.
@@ -936,7 +962,10 @@ int64_t lambda_item_to_int_lane_c(uint64_t item_bits) {
     // could silently turn an admitted `int?` argument into numeric zero.
     if (item_bits == ITEM_NULL) return INT_LANE_NULL;
     TypeId t = get_type_id(it);
-    if (t == LMD_TYPE_INT) return lambda_int_item_to_lane(item_bits);
+    if (t == LMD_TYPE_INT) {
+        int64_t lane = lambda_int_item_to_lane(item_bits);
+        return lane;
+    }
     if (t == LMD_TYPE_FLOAT) return lambda_double_to_int_lane(it.get_double());
     return it2i(it);
 }

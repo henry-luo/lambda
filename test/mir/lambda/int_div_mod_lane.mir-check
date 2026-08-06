@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "description": "Exact int div/mod use native signed lanes for finite operands while retaining the shared poison slow arm.",
+  "checks": [
+    {
+      "in_func": "_lane_div_#",
+      "forbid": [
+        "call\tfn_idiv_p, fn_idiv",
+        "call\tfn_mod_p, fn_mod",
+        "call\tfmod_p, fmod",
+        "call\tlambda_numeric_boundary_admit_p, lambda_numeric_boundary_admit"
+      ],
+      "expect": [
+        "div\t%r",
+        "call\tlambda_int_lane_divmod_slow_p, lambda_int_lane_divmod_slow"
+      ]
+    },
+    {
+      "in_func": "_lane_mod_#",
+      "forbid": [
+        "call\tfn_idiv_p, fn_idiv",
+        "call\tfn_mod_p, fn_mod",
+        "call\tfmod_p, fmod",
+        "call\tlambda_numeric_boundary_admit_p, lambda_numeric_boundary_admit"
+      ],
+      "expect": [
+        "mod\t%r",
+        "call\tlambda_int_lane_divmod_slow_p, lambda_int_lane_divmod_slow"
+      ]
+    }
+  ]
+}

@@ -1468,6 +1468,11 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
+    {"lambda_int_lane_divmod_slow", FPTR(lambda_int_lane_divmod_slow),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR)}},
     {"int2it_i64", FPTR(int2it_i64),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -3278,6 +3283,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_int_lane_to_double_c", "lambda_float_null_lane_c",
         "lambda_double_to_int_lane_c", "lambda_item_to_int_lane_c",
         "lambda_int_lane_add_slow", "lambda_int_lane_sub_slow", "lambda_int_lane_mul_slow",
+        "lambda_int_lane_divmod_slow",
         "js_is_truthy", "js_is_nullish",
         // Only the flag read is an audited NO_GC helper. Debug assertions can
         // log on failure and exception extraction can allocate a number home.

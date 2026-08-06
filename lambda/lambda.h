@@ -2041,6 +2041,7 @@ extern "C" {
     int64_t lambda_int_lane_add_slow(int64_t a, int64_t b);
     int64_t lambda_int_lane_sub_slow(int64_t a, int64_t b);
     int64_t lambda_int_lane_mul_slow(int64_t a, int64_t b);
+    int64_t lambda_int_lane_divmod_slow(int64_t a, int64_t b, int64_t is_mod);
     Item int2it_i64(int64_t value); // same encoder, native-int64 caller
     Item int2it_i64_or_error(int64_t value); // + legacy INT64_ERROR boundary
     Item push_d(double dval);

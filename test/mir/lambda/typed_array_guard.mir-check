@@ -28,6 +28,26 @@
         { "pattern": "call\tlambda_module_const_at_p" },
         { "pattern": "call\tfn_array_set_p, fn_array_set" }
       ]
+    },
+    {
+      "in_func": "_dense_int_sum_#",
+      "forbid": [
+        "call\titem_at_p, item_at",
+        "dmov\t{{r}}, d:({{r}})"
+      ],
+      "expect": [
+        "mov\t{{r}}, i64:({{r}})"
+      ]
+    },
+    {
+      "in_func": "_dense_int_linear_sum_#",
+      "forbid": [
+        "call\titem_at_p, item_at",
+        "dmov\t{{r}}, d:({{r}})"
+      ],
+      "expect": [
+        "mov\t{{r}}, i64:({{r}})"
+      ]
     }
   ]
 }

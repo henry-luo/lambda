@@ -7999,6 +7999,10 @@ static Type* runtime_array_contract_element(Type* expected) {
     expected = runtime_boundary_unwrap_type(expected);
     if (!expected) return NULL;
     if (expected->type_id == LMD_TYPE_ARRAY) {
+        // `list` is the compact open-sequence type, not a TypeArray payload;
+        // reading nested/item_patterns from it crosses the adjacent compact
+        // type globals and turns a valid list boundary into a bad Type*.
+        if (expected == &TYPE_LIST) return NULL;
         TypeArray* array = (TypeArray*)expected;
         if (array->item_patterns || !array->nested) return NULL;
         return runtime_boundary_unwrap_type(array->nested);
@@ -8344,7 +8348,13 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
             // `int?` must encode null as its lane sentinel rather than using
             // the historical raw Item fallback selected by TypeId alone.
             if (!map_shape_field_store_native_lane(new_field, new_e, new_value)) {
-                map_field_store(new_field, new_value, get_type_id(new_value));
+            // Store according to the rebuilt shape, not the source Item tag.
+            // Composite contracts such as `int[]` use the self-describing
+            // TypedItem slot even though their current value is an Array
+            // pointer; using the value tag here leaves `_map_read_field`
+            // interpreting that pointer as an uninitialized TypedItem.
+            map_field_store(new_field, new_value,
+                shape_entry_storage_type_id(new_e));
             }
         } else {
             // unchanged field — copy bytes (ref count unchanged, same pointers)
@@ -8531,10 +8541,28 @@ static bool runtime_type_admit_map(Item value, Type* expected, Item* converted,
         bool candidate_native_lane = shape_entry_uses_native_lane(candidate_field,
             &candidate_lane);
         bool value_changed = rooted_converted.get().item != rooted_field.get().item;
-        bool needs_native_reification = expected_native_lane && !candidate_native_lane;
-        if (!value_changed && !needs_native_reification) continue;
+        // A dynamic ANY field can hold the right value while retaining a
+        // different packed width/offset. Direct MIR reads use the admitted
+        // contract's layout, so publish that layout instead of accepting the
+        // value-only match and letting later fields be read at the wrong byte.
+        bool semantic_reification = !lambda_type_contract_semantically_compatible(
+            candidate_field->type, expected_field->type);
+        bool storage_reification = candidate_field->byte_offset != expected_field->byte_offset ||
+            shape_entry_storage_type_id(candidate_field) !=
+                shape_entry_storage_type_id(expected_field);
+        if (candidate_native_lane != expected_native_lane) storage_reification = true;
+        if (candidate_native_lane && expected_native_lane &&
+                (candidate_lane.kind != expected_lane.kind ||
+                    candidate_lane.byte_size != expected_lane.byte_size ||
+                    candidate_lane.nullable != expected_lane.nullable ||
+                    candidate_lane.base_contract != expected_lane.base_contract)) {
+            storage_reification = true;
+        }
+        bool needs_reification = semantic_reification || storage_reification ||
+            (expected_native_lane && !candidate_native_lane);
+        if (!value_changed && !needs_reification) continue;
 
-        if (needs_native_reification || candidate_field->type->type_id != converted_type) {
+        if (needs_reification) {
             // `fn_map_set` deliberately widens an int back into a float slot.
             // Boundary admission instead changes the detached candidate shape so
             // the stored field's observable tag satisfies the named contract.
@@ -8543,8 +8571,7 @@ static bool runtime_type_admit_map(Item value, Type* expected, Item* converted,
             map_rebuild_for_type_change((void**)&candidate_map->type,
                 &candidate_map->data, &candidate_map->data_cap, LMD_TYPE_MAP,
                 (Container*)candidate_map, candidate_field,
-                needs_native_reification ? expected_field->type :
-                    type_info[converted_type].type,
+                expected_field->type,
                 rooted_converted.get());
         } else {
             String* field_name = heap_create_name(expected_field->name->str,

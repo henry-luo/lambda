@@ -57,10 +57,10 @@ let m2 = multiply(5, 3)   // 15
 
 // Test 11: Optional typed parameter
 // With typed optional params, the default is the zero value (0 for int)
-// is_truthy(0) = false for numeric types, so the else branch is taken
+// numeric zero is truthy, so the supplied zero follows the `a + b` branch
 fn opt_typed(a: int, b?: int) => if (b) a + b else a * 2
 
-let o1 = opt_typed(5)      // 10 (b=0 which is falsy, so a*2=10)
+let o1 = opt_typed(5)      // 5 (b=0 is truthy, so a+b=5)
 let o2 = opt_typed(5, 3)   // 8 (5 + 3)
 
 // Test 11b: Optional typed parameter with 'and'/'or' operators
