@@ -36,6 +36,11 @@ MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
 extern JsModuleConstEntry* g_eval_preamble_entries;
 extern int g_eval_preamble_entry_count;
 extern int g_eval_preamble_var_count;
+bool js_preamble_entry_copy(const JsModuleConstEntry* source,
+                            JsModuleConstEntry* target);
+bool js_preamble_entries_copy(const JsModuleConstEntry* source, int count,
+                              JsModuleConstEntry** out_entries);
+void js_preamble_entries_free(JsModuleConstEntry* entries, int count);
 void js_eval_preamble_entries_free(void);
 extern __thread NamePool* g_js_mir_name_pool_override;
 void jm_set_name_pool_override(NamePool* pool);

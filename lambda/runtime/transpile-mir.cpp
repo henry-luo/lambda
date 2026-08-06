@@ -4956,6 +4956,23 @@ static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
                 // nested type is not a runtime storage proof.
                 return LMD_TYPE_ANY;
             }
+            // An immutable binding can lose its witness when a nested
+            // representation-changing store is discovered after its AST type
+            // was inferred; only that proven invalidation clears the witness.
+            if (var->type_id == LMD_TYPE_ARRAY_NUM ||
+                    var->type_id == LMD_TYPE_ARRAY) {
+                Type* object_type = object ? object->type : NULL;
+                if (object_type && (object_type->type_id == LMD_TYPE_ARRAY_NUM ||
+                        object_type->type_id == LMD_TYPE_ARRAY)) {
+                    TypeArray* array_type = (TypeArray*)object_type;
+                    TypeId nested = array_type->nested ? array_type->nested->type_id
+                        : LMD_TYPE_ANY;
+                    if (nested != LMD_TYPE_ANY && mt->func_body &&
+                            has_elem_type_invalidation(name, mt->func_body, nested)) {
+                        return LMD_TYPE_ANY;
+                    }
+                }
+            }
         }
     }
     Type* object_type = object ? object->type : NULL;
@@ -12702,7 +12719,10 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
                     char oname[128];
                     snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
                     MirVarEntry* ov = find_var(mt, oname);
-                    if (ov && ov->elem_type == LMD_TYPE_INT) safe_native_int = true;
+                    // A module/static literal has no local witness, but its
+                    // immutable Item representation is still safe to decode;
+                    // mutable bindings require an explicit INT witness.
+                    if (!ov || ov->elem_type == LMD_TYPE_INT) safe_native_int = true;
                 }
             }
             MIR_reg_t idx_native = emit_index_value(mt, field_node->field, idx_use_native);
@@ -12803,7 +12823,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
                     char oname[128];
                     snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
                     MirVarEntry* ov = find_var(mt, oname);
-                    if (ov && ov->elem_type == LMD_TYPE_INT) safe_native_int = true;
+                    if (!ov || ov->elem_type == LMD_TYPE_INT) safe_native_int = true;
                 }
             }
             MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
