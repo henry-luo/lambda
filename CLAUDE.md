@@ -20,6 +20,7 @@ These rules MUST be followed. Violations are considered errors.
 14. **The legacy C2MIR path is FROZEN.** and new runtime/ABI/design work do NOT need C2MIR support.
 15. **NEVER restore or rely on conservative native-stack GC scanning.** It is retired. Fix GC lifetime bugs with precise `RootFrame` / `Rooted` ownership only.
 16. **NEVER patch third-party vendor code.** MIR (`lambda/mir/`), Tree-sitter (`lambda/tree-sitter*/`), ThorVG, re2, curl and every other vendored dependency are off limits — do not edit them in place. Fix the defect on the Lambda side instead. If the fix genuinely belongs upstream, STOP and ask for approval first, explaining the root cause. Once approved, record the change as a patch under `patches/` so the delta versus upstream stays auditable — see `lambda/mir/VENDOR.md` for the pattern.
+17. **Cite rulings by formal-spec ID.** `doc/Lambda_Formal_Semantics.md` (`S#`) and `doc/Lambda_Formal_Design.md` (`D#`) are the single sources of truth. In chat/discussion and in every new or updated design/impl doc, quote the `S#`/`D#` point when one covers the topic; only when none exists, quote the vibe design-doc ledger ID (e.g. TE-16, K13, CW9). When a semantics or design ruling changes, update BOTH the `./doc` formal spec (revise the ruling in place: `v2` suffix + doc semver bump) and the relevant `./vibe` working design doc.
 
 | DON'T | DO |
 |-------|-----|
@@ -32,6 +33,7 @@ These rules MUST be followed. Violations are considered errors.
 | `int width = (int)block->width` | `float width = block->width` |
 | Copy a `static` helper into another file | Promote it to the module header, then call it |
 | Add a 3rd/4th copy of a per-type/kind/case block | Extract a parameterized helper or table first |
+| Cite only a vibe ledger ID when an `S#`/`D#` ruling exists | Quote `S#`/`D#` first; vibe IDs only for uncovered points |
 | Modify `transpile.cpp` or extend `--c2mir` | Evolve only MIR Direct (`transpile-mir.cpp`) |
 | Edit `lambda/mir/`, `lambda/tree-sitter*/`, ThorVG, or any vendored dep | Fix it on the Lambda side; if it must be upstream, ask first, then record it under `patches/` |
 
@@ -163,6 +165,7 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 
 ## Lambda Language Documentation
 - `doc/Lambda_Formal_Semantics.md` — **Normative semantics specification (ADR)** — core principles, value domain, truthiness, numerics, equality, total order, absence/errors, mutability, operators, metaprogramming; the semantic authority when docs or implementation disagree (decision records in `vibe/Lambda_Semantics_Formal*.md`)
+- `doc/Lambda_Formal_Design.md` — **Normative design/implementation specification** — D-numbered rulings D1–D8 (architecture, data representation, type & shape, memory, stacks/rooting, functions, modules/Jube, compilation) with impl footnotes and open issues `DO#`; the design authority when design docs or implementation disagree
 - `doc/Lambda_Reference.md` — Language overview and quick reference
 - `doc/Lambda_Data.md` — Literals and collections (primitives, arrays, lists, maps, elements, ranges)
 - `doc/Lambda_Type.md` — Type system (union types, function types, type patterns)

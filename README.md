@@ -282,12 +282,14 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | [Validator Guide](doc/Lambda_Validator_Guide.md)          | Schema-based validation for data structures                   |
 | [Doc Schema](doc/Doc_Schema.md)                           | Schema for lightweight markup (Markdown, Wiki, RST)           |
 | [Markup & Data Format Support](doc/Markup_Formats_Support.md) | Supported input formats and how they map to Lambda/Mark   |
+| [Formal Semantics](doc/Lambda_Formal_Semantics.md)  | Normative semantics specification — S-numbered rulings; the semantic authority when docs or implementation disagree |
 
 ### Developer Documentation
 
 | Document                                              | Description                                                                            |
 | ----------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | [Developer Guide](doc/dev/Developer_Guide.md)         | Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT                 |
+| [Formal Design](doc/Lambda_Formal_Design.md)          | Normative design/implementation specification — D-numbered rulings for the core runtime and Jube hosting; the design authority when docs or implementation disagree |
 | [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                                |
 | [Lambda Runtime](doc/dev/Lamdba_Runtime.md)           | Runtime internals and architecture                                                     |
 | [Lambda Core Runtime Design](doc/dev/lambda/LR_00_Overview.md) | Detailed design of the core runtime — compilation pipeline, value & type model, the C and MIR-Direct transpilers, MIR JIT, memory & GC, builtins, error handling, Mark API, and the procedural runtime |
