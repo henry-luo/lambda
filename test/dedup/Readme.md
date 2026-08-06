@@ -1,9 +1,10 @@
 # Duplicate-code checks
 
 `check_code_dup.py` runs Lizard's duplicate-code detector in C/C++ mode, removes
-reviewed false positives described in `exclude.json`, clusters overlapping
-windows into review families, and checks the maintained Lambda metrics against
-`baseline.json`. Run it from the repository root.
+reviewed false positives described in `exclude.json`, ignores short token-window
+fragments, clusters substantive overlapping windows into review families, and
+checks the maintained Lambda metrics against `baseline.json`. Run it from the
+repository root.
 
 ## Prerequisites
 
@@ -40,10 +41,15 @@ Lizard location for an audit. Long reports must remain under the repository's
 python3 test/dedup/check_code_dup.py lambda --full > temp/dedup-lambda.txt
 ```
 
-The summary reports raw and remaining blocks, clone-family counts, union
-duplicate lines, top files and cross-file pairs, and reviewed exclusions. Raw
-Lizard block count remains diagnostic because one logical family can produce
-many overlapping windows.
+The summary reports raw and post-exclusion blocks, ignored short windows,
+substantive clone-family counts, union duplicate lines, top files and cross-file
+pairs, and reviewed exclusions. Raw Lizard block count remains diagnostic
+because one logical family can produce many overlapping windows. A substantive
+family must have a duplicate location spanning at least the configured
+`duplicate_policy.minimum_source_span_lines` source lines; Lizard's minimum
+token threshold otherwise creates misleading two-to-ten-line fragments from
+long expressions and declarations. `--full` still prints every post-exclusion
+Lizard block, including those short diagnostic windows.
 
 The checked-in Lambda ratchet fails if either reviewed clone-family count or
 union duplicate lines grows beyond `baseline.json`. A reduction passes without
@@ -56,12 +62,14 @@ abnormal Lizard failure, or ratchet growth return a nonzero status.
 
 Every exclusion in `exclude.json` must identify its affected modules and give a
 non-empty reason. Exclusions are for generated code or reviewed false positives,
-not for suppressing ordinary duplication.
+not for suppressing ordinary duplication. The substantive-span policy is
+separate from exclusions and keeps short detector fragments visible in the
+diagnostics.
 
 File exclusions are passed directly to Lizard with `-x`. Paths and patterns are
-relative to the repository root. The current Lambda exclusions cover the
-every vendored `lambda/tree-sitter*` tree, including runtimes, grammar sources,
-generated parsers, scanners, and language bindings.
+relative to the repository root. The current Lambda exclusions cover vendored
+`lambda/tree-sitter*` and `lambda/mir/*` trees, plus the separately hosted
+`lambda/module/*` implementations.
 
 ```json
 {

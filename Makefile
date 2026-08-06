@@ -3159,7 +3159,10 @@ build-input-baseline: build-lambda-data
 # Build the Lambda host and only the native projects selected by the Lambda
 # baseline runner. The release-host branch preserves the existing convention
 # that baseline tests use an already-selected release host when available.
-build-lambda-baseline: build-input-baseline
+# The Lambda baseline includes JS cases that require the external Node Jube
+# modules. Build them here because the focused lane intentionally does not use
+# the aggregate build-test target that normally supplies these DSOs.
+build-lambda-baseline: build-input-baseline build-node-core build-node-fs
 	@echo "Building the Lambda baseline runtime and native test executables..."
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental)..."; \

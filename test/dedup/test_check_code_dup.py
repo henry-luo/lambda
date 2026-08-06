@@ -52,16 +52,19 @@ class FileExclusionConfigTest(unittest.TestCase):
 
         self.assertEqual(
             CHECK_CODE_DUP.active_file_exclusions(config, ("lambda",)),
-            ["lambda/tree-sitter*"],
+            ["lambda/tree-sitter*", "lambda/mir/*", "lambda/module/*"],
         )
 
-    def test_lambda_css_table_is_the_only_reviewed_block_exclusion(self):
+    def test_lambda_block_exclusions_are_reviewed_declarative_regions(self):
         config = CHECK_CODE_DUP.load_config(SCRIPT_PATH.with_name("exclude.json"))
         root = SCRIPT_PATH.resolve().parents[2]
 
         rules = CHECK_CODE_DUP.active_block_exclusions(config, ("lambda",), root)
 
-        self.assertEqual([rule["id"] for rule in rules], ["declarative_css_property_rows"])
+        self.assertEqual(
+            [rule["id"] for rule in rules],
+            ["declarative_css_property_rows", "declarative_lambda_enum_declarations"],
+        )
         self.assertTrue(rules[0]["allow_within_region"])
         region = rules[0]["regions"][0]
         inside = [[location(region["file"], region["start"] + 1, region["end"] - 1)]]
@@ -75,11 +78,22 @@ class FileExclusionConfigTest(unittest.TestCase):
         self.assertEqual(
             baselines["lambda"],
             {
-                "family_count": 1378,
-                "union_duplicate_lines": 56407,
-                "diagnostic_raw_blocks": 3539,
-                "diagnostic_remaining_blocks": 3383,
+                "family_count": 614,
+                "union_duplicate_lines": 25459,
+                "diagnostic_raw_blocks": 2808,
+                "diagnostic_remaining_blocks": 2654,
             },
+        )
+
+    def test_substantive_policy_reads_configured_source_span(self):
+        config = CHECK_CODE_DUP.load_config(SCRIPT_PATH.with_name("exclude.json"))
+
+        self.assertEqual(CHECK_CODE_DUP.minimum_source_span_lines(config), 11)
+        short = [location("a.cpp", 1, 10), location("b.cpp", 20, 29)]
+        long = [location("a.cpp", 1, 11), location("b.cpp", 20, 30)]
+        self.assertEqual(
+            CHECK_CODE_DUP.filter_substantive_blocks([short, long], 11),
+            [long],
         )
 
 

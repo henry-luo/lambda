@@ -322,6 +322,97 @@ static void bm_emit_call_void_4(BashMirTranspiler* mt, const char* fn_name,
         MIR_T_I64, arg1, MIR_T_I64, arg2, MIR_T_I64, arg3, MIR_T_I64, arg4, false);
 }
 
+// pack ordinary command arguments once so builtin, function, runtime, and external
+// dispatches keep identical splat semantics while choosing their own storage owner.
+static void bm_emit_simple_command_args(BashMirTranspiler* mt, BashCommandNode* cmd,
+                                         MIR_reg_t args_ptr, MIR_reg_t argc_reg,
+                                         bool prepend_name, MIR_op_t command_name,
+                                         bool heap_storage) {
+    bool needs_splat = false;
+    BashAstNode* probe = cmd->args;
+    while (probe) {
+        if (arg_is_at_splat(probe)) {
+            needs_splat = true;
+            break;
+        }
+        probe = probe->next;
+    }
+
+    if (needs_splat) {
+        bm_emit_call_void_0(mt, "bash_arg_builder_start");
+        if (prepend_name) {
+            bm_emit_call_void_1(mt, "bash_arg_builder_push", command_name);
+        }
+        BashAstNode* arg = cmd->args;
+        while (arg) {
+            if (arg_is_at_splat(arg)) {
+                bm_emit_call_void_0(mt, "bash_arg_builder_push_at");
+            } else {
+                MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
+                bm_emit_call_void_1(mt, "bash_arg_builder_push", arg_val);
+            }
+            arg = arg->next;
+        }
+        MIR_reg_t ptr_r = bm_emit_call_0(mt, "bash_arg_builder_get_ptr");
+        MIR_reg_t cnt_r = bm_emit_call_0(mt, "bash_arg_builder_get_count");
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                         MIR_new_reg_op(mt->em.ctx, ptr_r)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                         MIR_new_reg_op(mt->em.ctx, cnt_r)));
+        return;
+    }
+
+    int total_argc = cmd->arg_count + (prepend_name ? 1 : 0);
+    if (total_argc == 0) {
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                         MIR_new_uint_op(mt->em.ctx, 0)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                         MIR_new_int_op(mt->em.ctx, 0)));
+        return;
+    }
+
+    MIR_op_t storage_size = MIR_new_int_op(mt->em.ctx,
+        total_argc * (int)sizeof(Item));
+    if (heap_storage) {
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                         MIR_new_uint_op(mt->em.ctx,
+                             (uint64_t)(uintptr_t)mem_alloc(total_argc * sizeof(Item),
+                                                           MEM_CAT_BASH_RUNTIME))));
+    } else {
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_ALLOCA, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                         storage_size));
+    }
+
+    int index = 0;
+    if (prepend_name) {
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV,
+                MIR_new_mem_op(mt->em.ctx, MIR_T_I64, 0, args_ptr, 0, 1),
+                command_name));
+        index = 1;
+    }
+    BashAstNode* arg = cmd->args;
+    while (arg && index < total_argc) {
+        MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV,
+                MIR_new_mem_op(mt->em.ctx, MIR_T_I64,
+                               index * (int)sizeof(Item), args_ptr, 0, 1),
+                arg_val));
+        arg = arg->next;
+        index++;
+    }
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                     MIR_new_int_op(mt->em.ctx, total_argc)));
+}
+
 // emit a varargs builtin call: func(Item* args, int argc) -> Item
 // builds args buffer, fills it, and calls the function
 
@@ -2206,60 +2297,9 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             return MIR_new_reg_op(mt->em.ctx, result);
         }
 
-        // check if any arg needs $@ splatting
-        bool needs_splat = false;
-        {
-            BashAstNode* a = cmd->args;
-            while (a) {
-                if (arg_is_at_splat(a)) { needs_splat = true; break; }
-                a = a->next;
-            }
-        }
-
         MIR_reg_t args_ptr = bm_new_temp(mt);
         MIR_reg_t argc_reg = bm_new_temp(mt);
-
-        if (needs_splat) {
-            bm_emit_call_void_0(mt, "bash_arg_builder_start");
-            BashAstNode* arg = cmd->args;
-            while (arg) {
-                if (arg_is_at_splat(arg)) {
-                    bm_emit_call_void_0(mt, "bash_arg_builder_push_at");
-                } else {
-                    MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                    bm_emit_call_void_1(mt, "bash_arg_builder_push", arg_val);
-                }
-                arg = arg->next;
-            }
-            MIR_reg_t ptr_r = bm_emit_call_0(mt, "bash_arg_builder_get_ptr");
-            MIR_reg_t cnt_r = bm_emit_call_0(mt, "bash_arg_builder_get_count");
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
-                             MIR_new_reg_op(mt->em.ctx, ptr_r)));
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
-                             MIR_new_reg_op(mt->em.ctx, cnt_r)));
-        } else {
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
-                             MIR_new_uint_op(mt->em.ctx, (uint64_t)(uintptr_t)mem_alloc(argc * sizeof(Item), MEM_CAT_BASH_RUNTIME))));
-
-            int i = 0;
-            BashAstNode* arg = cmd->args;
-            while (arg && i < argc) {
-                MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                    MIR_new_insn(mt->em.ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
-                                       args_ptr, 0, 1),
-                        arg_val));
-                arg = arg->next;
-                i++;
-            }
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
-                             MIR_new_int_op(mt->em.ctx, argc)));
-        }
+        bm_emit_simple_command_args(mt, cmd, args_ptr, argc_reg, false, NULL, true);
 
         MIR_reg_t result = bm_emit_call_2(mt, "bash_builtin_echo",
             MIR_new_reg_op(mt->em.ctx, args_ptr), MIR_new_reg_op(mt->em.ctx, argc_reg));
@@ -2270,60 +2310,9 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         // printf [-v var] format [args...]
         if (cmd->arg_count == 0) return bm_emit_int_literal(mt, 0);
 
-        // check if any arg needs $@ splatting
-        bool needs_splat = false;
-        {
-            BashAstNode* a = cmd->args;
-            while (a) {
-                if (arg_is_at_splat(a)) { needs_splat = true; break; }
-                a = a->next;
-            }
-        }
-
         MIR_reg_t args_ptr = bm_new_temp(mt);
         MIR_reg_t argc_reg = bm_new_temp(mt);
-
-        if (needs_splat) {
-            bm_emit_call_void_0(mt, "bash_arg_builder_start");
-            BashAstNode* arg = cmd->args;
-            while (arg) {
-                if (arg_is_at_splat(arg)) {
-                    bm_emit_call_void_0(mt, "bash_arg_builder_push_at");
-                } else {
-                    MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                    bm_emit_call_void_1(mt, "bash_arg_builder_push", arg_val);
-                }
-                arg = arg->next;
-            }
-            MIR_reg_t ptr_r = bm_emit_call_0(mt, "bash_arg_builder_get_ptr");
-            MIR_reg_t cnt_r = bm_emit_call_0(mt, "bash_arg_builder_get_count");
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
-                             MIR_new_reg_op(mt->em.ctx, ptr_r)));
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
-                             MIR_new_reg_op(mt->em.ctx, cnt_r)));
-        } else {
-            int total_argc = cmd->arg_count;
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
-                             MIR_new_uint_op(mt->em.ctx, (uint64_t)(uintptr_t)mem_alloc(total_argc * sizeof(Item), MEM_CAT_BASH_RUNTIME))));
-            int i = 0;
-            BashAstNode* arg = cmd->args;
-            while (arg && i < total_argc) {
-                MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                    MIR_new_insn(mt->em.ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
-                                       args_ptr, 0, 1),
-                        arg_val));
-                arg = arg->next;
-                i++;
-            }
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
-                             MIR_new_int_op(mt->em.ctx, total_argc)));
-        }
+        bm_emit_simple_command_args(mt, cmd, args_ptr, argc_reg, false, NULL, true);
 
         MIR_reg_t result = bm_emit_call_2(mt, "bash_builtin_printf",
             MIR_new_reg_op(mt->em.ctx, args_ptr),
@@ -3022,70 +3011,9 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
     const BashMirUserFunc* uf = (const BashMirUserFunc*)hashmap_get(mt->user_funcs, &key);
     if (uf) {
         // build a function call with arguments
-        int argc = cmd->arg_count;
-
-        // check if any arg needs $@ splatting (dynamic arg count)
-        bool needs_splat = false;
-        {
-            BashAstNode* a = cmd->args;
-            while (a) {
-                if (arg_is_at_splat(a)) { needs_splat = true; break; }
-                a = a->next;
-            }
-        }
-
         MIR_reg_t args_ptr = bm_new_temp(mt);
         MIR_reg_t argc_reg = bm_new_temp(mt);
-
-        if (needs_splat) {
-            // use dynamic arg builder to handle $@ expansion
-            bm_emit_call_void_0(mt, "bash_arg_builder_start");
-            BashAstNode* arg = cmd->args;
-            while (arg) {
-                if (arg_is_at_splat(arg)) {
-                    bm_emit_call_void_0(mt, "bash_arg_builder_push_at");
-                } else {
-                    MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                    bm_emit_call_void_1(mt, "bash_arg_builder_push", arg_val);
-                }
-                arg = arg->next;
-            }
-            MIR_reg_t ptr_r = bm_emit_call_0(mt, "bash_arg_builder_get_ptr");
-            MIR_reg_t cnt_r = bm_emit_call_0(mt, "bash_arg_builder_get_count");
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
-                             MIR_new_reg_op(mt->em.ctx, ptr_r)));
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
-                             MIR_new_reg_op(mt->em.ctx, cnt_r)));
-        } else if (argc > 0) {
-            // static arg count: allocate args buffer on stack
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_ALLOCA, MIR_new_reg_op(mt->em.ctx, args_ptr),
-                             MIR_new_int_op(mt->em.ctx, argc * (int)sizeof(Item))));
-            int i = 0;
-            BashAstNode* arg = cmd->args;
-            while (arg && i < argc) {
-                MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                    MIR_new_insn(mt->em.ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
-                                       args_ptr, 0, 1),
-                        arg_val));
-                arg = arg->next;
-                i++;
-            }
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
-                             MIR_new_int_op(mt->em.ctx, argc)));
-        } else {
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
-                             MIR_new_uint_op(mt->em.ctx, 0)));
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
-                             MIR_new_int_op(mt->em.ctx, 0)));
-        }
+        bm_emit_simple_command_args(mt, cmd, args_ptr, argc_reg, false, NULL, false);
 
         // handle prefix assignments (e.g., IFS=: ff args)
         int n_pa = 0;
@@ -3177,69 +3105,11 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
     MIR_label_t done_label_rt = bm_new_label(mt);
 
     {
-        int argc = cmd->arg_count;
         MIR_op_t rt_name_val = bm_emit_string_literal(mt, cmd_name, cmd_len);
-
-        // check if any arg needs $@ splatting
-        bool needs_splat = false;
-        {
-            BashAstNode* a = cmd->args;
-            while (a) {
-                if (arg_is_at_splat(a)) { needs_splat = true; break; }
-                a = a->next;
-            }
-        }
 
         MIR_reg_t rt_args_ptr = bm_new_temp(mt);
         MIR_reg_t rt_argc_reg = bm_new_temp(mt);
-
-        if (needs_splat) {
-            bm_emit_call_void_0(mt, "bash_arg_builder_start");
-            BashAstNode* arg = cmd->args;
-            while (arg) {
-                if (arg_is_at_splat(arg)) {
-                    bm_emit_call_void_0(mt, "bash_arg_builder_push_at");
-                } else {
-                    MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                    bm_emit_call_void_1(mt, "bash_arg_builder_push", arg_val);
-                }
-                arg = arg->next;
-            }
-            MIR_reg_t ptr_r = bm_emit_call_0(mt, "bash_arg_builder_get_ptr");
-            MIR_reg_t cnt_r = bm_emit_call_0(mt, "bash_arg_builder_get_count");
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, rt_args_ptr),
-                             MIR_new_reg_op(mt->em.ctx, ptr_r)));
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, rt_argc_reg),
-                             MIR_new_reg_op(mt->em.ctx, cnt_r)));
-        } else if (argc > 0) {
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_ALLOCA, MIR_new_reg_op(mt->em.ctx, rt_args_ptr),
-                             MIR_new_int_op(mt->em.ctx, argc * (int)sizeof(Item))));
-            int i = 0;
-            BashAstNode* arg = cmd->args;
-            while (arg && i < argc) {
-                MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                    MIR_new_insn(mt->em.ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
-                                       rt_args_ptr, 0, 1),
-                        arg_val));
-                arg = arg->next;
-                i++;
-            }
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, rt_argc_reg),
-                             MIR_new_int_op(mt->em.ctx, argc)));
-        } else {
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, rt_args_ptr),
-                             MIR_new_uint_op(mt->em.ctx, 0)));
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, rt_argc_reg),
-                             MIR_new_int_op(mt->em.ctx, 0)));
-        }
+        bm_emit_simple_command_args(mt, cmd, rt_args_ptr, rt_argc_reg, false, NULL, false);
 
         MIR_reg_t rt_res = bm_emit_call_3(mt, "bash_call_rt_func",
             rt_name_val,
@@ -3265,71 +3135,11 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
     // fallback: external command execution via posix_spawn
     // build argv[] with command name as argv[0] + all arguments
     {
-        // check if any arg needs $@ splatting
-        bool needs_splat = false;
-        {
-            BashAstNode* a = cmd->args;
-            while (a) {
-                if (arg_is_at_splat(a)) { needs_splat = true; break; }
-                a = a->next;
-            }
-        }
-
         MIR_reg_t ext_args_ptr = bm_new_temp(mt);
         MIR_reg_t ext_argc_reg = bm_new_temp(mt);
         MIR_op_t name_val = bm_emit_string_literal(mt, cmd_name, cmd_len);
-
-        if (needs_splat) {
-            bm_emit_call_void_0(mt, "bash_arg_builder_start");
-            // argv[0] = command name
-            bm_emit_call_void_1(mt, "bash_arg_builder_push", name_val);
-            BashAstNode* arg = cmd->args;
-            while (arg) {
-                if (arg_is_at_splat(arg)) {
-                    bm_emit_call_void_0(mt, "bash_arg_builder_push_at");
-                } else {
-                    MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                    bm_emit_call_void_1(mt, "bash_arg_builder_push", arg_val);
-                }
-                arg = arg->next;
-            }
-            MIR_reg_t ptr_r = bm_emit_call_0(mt, "bash_arg_builder_get_ptr");
-            MIR_reg_t cnt_r = bm_emit_call_0(mt, "bash_arg_builder_get_count");
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, ext_args_ptr),
-                             MIR_new_reg_op(mt->em.ctx, ptr_r)));
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, ext_argc_reg),
-                             MIR_new_reg_op(mt->em.ctx, cnt_r)));
-        } else {
-            int total_argc = 1 + cmd->arg_count;
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_ALLOCA, MIR_new_reg_op(mt->em.ctx, ext_args_ptr),
-                             MIR_new_int_op(mt->em.ctx, total_argc * (int)sizeof(Item))));
-
-            // argv[0] = command name
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->em.ctx, MIR_T_I64, 0, ext_args_ptr, 0, 1),
-                    name_val));
-
-            // argv[1..] = arguments
-            int i = 1;
-            BashAstNode* arg = cmd->args;
-            while (arg && i < total_argc) {
-                MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                    MIR_new_insn(mt->em.ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
-                                       ext_args_ptr, 0, 1),
-                        arg_val));
-                arg = arg->next;
-                i++;
-            }
-            MIR_append_insn(mt->em.ctx, mt->em.func_item,
-                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, ext_argc_reg),
-                             MIR_new_int_op(mt->em.ctx, total_argc)));
-        }
+        bm_emit_simple_command_args(mt, cmd, ext_args_ptr, ext_argc_reg,
+                                     true, name_val, false);
 
         MIR_reg_t ext_result = bm_emit_call_2(mt, "bash_exec_external",
             MIR_new_reg_op(mt->em.ctx, ext_args_ptr),

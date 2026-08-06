@@ -134,6 +134,21 @@ static gc_object_slab_t* allocate_slab(gc_object_zone_t* oz, int cls) {
     return slab;
 }
 
+// return the class cursor, creating a slab only when every existing fresh slot
+// has been consumed. The cursor is the only slab that can have fresh capacity;
+// older slabs are full because new slabs are prepended at exhaustion.
+static gc_object_slab_t* get_fresh_slab(gc_object_zone_t* oz, int cls) {
+    gc_object_slab_t* slab = oz->fresh_slabs[cls];
+    if (slab && slab->next_fresh < slab->slot_count) return slab;
+
+    slab = allocate_slab(oz, cls);
+    if (!slab) return NULL;
+    slab->next = oz->slabs[cls];
+    oz->slabs[cls] = slab;
+    oz->fresh_slabs[cls] = slab;
+    return slab;
+}
+
 gc_object_zone_t* gc_object_zone_create(Pool* pool) {
     gc_object_zone_t* oz = (gc_object_zone_t*)calloc(1, sizeof(gc_object_zone_t));
     if (!oz) {
@@ -151,6 +166,7 @@ gc_object_zone_t* gc_object_zone_create(Pool* pool) {
             gc_object_zone_destroy(oz);
             return NULL;
         }
+        oz->fresh_slabs[i] = oz->slabs[i];
     }
 
     log_debug("gc_object_zone_create: created with %d size classes", GC_NUM_SIZE_CLASSES);
@@ -195,21 +211,8 @@ void* gc_object_zone_alloc(gc_object_zone_t* oz, size_t size, uint16_t type_tag,
         memset((void*)(header + 1), 0, actual_user_size);
     } else {
         // 2. Try fresh slot from current slab
-        gc_object_slab_t* slab = oz->slabs[cls];
-
-        // find a slab with free sequential slots
-        while (slab && slab->next_fresh >= slab->slot_count) {
-            slab = slab->next;
-        }
-
-        if (!slab) {
-            // 3. All slabs full — allocate a new slab
-            slab = allocate_slab(oz, cls);
-            if (!slab) return NULL;
-            // prepend new slab to chain
-            slab->next = oz->slabs[cls];
-            oz->slabs[cls] = slab;
-        }
+        gc_object_slab_t* slab = get_fresh_slab(oz, cls);
+        if (!slab) return NULL;
 
         // allocate from sequential slot
         header = (gc_header_t*)(slab->base + slab->next_fresh * slab->slot_size);
@@ -246,21 +249,8 @@ void* gc_object_zone_alloc_class(gc_object_zone_t* oz, int cls, size_t size,
         memset((void*)(header + 1), 0, actual_user_size);
     } else {
         // 2. Try fresh slot from current slab
-        gc_object_slab_t* slab = oz->slabs[cls];
-
-        // find a slab with free sequential slots
-        while (slab && slab->next_fresh >= slab->slot_count) {
-            slab = slab->next;
-        }
-
-        if (!slab) {
-            // 3. All slabs full — allocate a new slab
-            slab = allocate_slab(oz, cls);
-            if (!slab) return NULL;
-            // prepend new slab to chain
-            slab->next = oz->slabs[cls];
-            oz->slabs[cls] = slab;
-        }
+        gc_object_slab_t* slab = get_fresh_slab(oz, cls);
+        if (!slab) return NULL;
 
         // allocate from sequential slot
         header = (gc_header_t*)(slab->base + slab->next_fresh * slab->slot_size);

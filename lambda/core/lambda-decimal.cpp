@@ -787,6 +787,9 @@ static bool decimal_binary_result_is_bigint(Item a, Item b) {
 // Arithmetic Operations
 // ─────────────────────────────────────────────────────────────────────
 
+typedef void (*DecimalMpdBinaryOp)(mpd_t* result, const mpd_t* left,
+        const mpd_t* right, mpd_context_t* context);
+
 // Helper: determine if result should be unlimited based on operands
 static bool should_be_unlimited(Item a, Item b) {
     // Check if either operand requires the extended decimal context.
@@ -813,7 +816,8 @@ static void cleanup_temp(mpd_t* dec, bool was_decimal) {
     }
 }
 
-Item decimal_add(Item a, Item b) {
+static Item decimal_binary_arithmetic(Item a, Item b, DecimalMpdBinaryOp operation,
+        const char* name) {
     bool is_unlimited = should_be_unlimited(a, b);
     mpd_context_t* dec_ctx = get_decimal_context(a, b);
     
@@ -826,7 +830,7 @@ Item decimal_add(Item a, Item b) {
     if (!a_dec || !b_dec) {
         if (!a_is_dec) cleanup_temp(a_dec, false);
         if (!b_is_dec) cleanup_temp(b_dec, false);
-        log_error("decimal_add: conversion failed");
+        log_error("decimal_%s: conversion failed", name);
         return ItemError;
     }
     
@@ -837,82 +841,25 @@ Item decimal_add(Item a, Item b) {
         return ItemError;
     }
     
-    mpd_add(result, a_dec, b_dec, dec_ctx);
+    operation(result, a_dec, b_dec, dec_ctx);
     
     if (!a_is_dec) cleanup_temp(a_dec, false);
     if (!b_is_dec) cleanup_temp(b_dec, false);
     
-    // integer + integer stays integer; mixed numeric ops leave the integer lane.
     if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
     return decimal_push_result(result, is_unlimited);
+}
+
+Item decimal_add(Item a, Item b) {
+    return decimal_binary_arithmetic(a, b, mpd_add, "add");
 }
 
 Item decimal_sub(Item a, Item b) {
-    bool is_unlimited = should_be_unlimited(a, b);
-    mpd_context_t* dec_ctx = get_decimal_context(a, b);
-    
-    bool a_is_dec = decimal_is_any(a);
-    bool b_is_dec = decimal_is_any(b);
-    
-    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, dec_ctx);
-    mpd_t* b_dec = b_is_dec ? b.get_decimal()->dec_val : decimal_item_to_mpd(b, dec_ctx);
-    
-    if (!a_dec || !b_dec) {
-        if (!a_is_dec) cleanup_temp(a_dec, false);
-        if (!b_is_dec) cleanup_temp(b_dec, false);
-        log_error("decimal_sub: conversion failed");
-        return ItemError;
-    }
-    
-    mpd_t* result = mpd_new(dec_ctx);
-    if (!result) {
-        if (!a_is_dec) cleanup_temp(a_dec, false);
-        if (!b_is_dec) cleanup_temp(b_dec, false);
-        return ItemError;
-    }
-    
-    mpd_sub(result, a_dec, b_dec, dec_ctx);
-    
-    if (!a_is_dec) cleanup_temp(a_dec, false);
-    if (!b_is_dec) cleanup_temp(b_dec, false);
-    
-    // integer - integer stays integer; mixed numeric ops leave the integer lane.
-    if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
-    return decimal_push_result(result, is_unlimited);
+    return decimal_binary_arithmetic(a, b, mpd_sub, "sub");
 }
 
 Item decimal_mul(Item a, Item b) {
-    bool is_unlimited = should_be_unlimited(a, b);
-    mpd_context_t* dec_ctx = get_decimal_context(a, b);
-    
-    bool a_is_dec = decimal_is_any(a);
-    bool b_is_dec = decimal_is_any(b);
-    
-    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, dec_ctx);
-    mpd_t* b_dec = b_is_dec ? b.get_decimal()->dec_val : decimal_item_to_mpd(b, dec_ctx);
-    
-    if (!a_dec || !b_dec) {
-        if (!a_is_dec) cleanup_temp(a_dec, false);
-        if (!b_is_dec) cleanup_temp(b_dec, false);
-        log_error("decimal_mul: conversion failed");
-        return ItemError;
-    }
-    
-    mpd_t* result = mpd_new(dec_ctx);
-    if (!result) {
-        if (!a_is_dec) cleanup_temp(a_dec, false);
-        if (!b_is_dec) cleanup_temp(b_dec, false);
-        return ItemError;
-    }
-    
-    mpd_mul(result, a_dec, b_dec, dec_ctx);
-    
-    if (!a_is_dec) cleanup_temp(a_dec, false);
-    if (!b_is_dec) cleanup_temp(b_dec, false);
-    
-    // integer * integer stays integer; mixed numeric ops leave the integer lane.
-    if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
-    return decimal_push_result(result, is_unlimited);
+    return decimal_binary_arithmetic(a, b, mpd_mul, "mul");
 }
 
 typedef enum DecimalDivisionOp {
@@ -1191,7 +1138,10 @@ char* decimal_to_string(Decimal* decimal) {
 // Rounding Operations (floor, ceil, round, trunc)
 // ─────────────────────────────────────────────────────────────────────
 
-Item decimal_floor(Item a) {
+typedef void (*DecimalMpdUnaryOp)(mpd_t* result, const mpd_t* value,
+        mpd_context_t* context);
+
+static Item decimal_unary_rounding(Item a, DecimalMpdUnaryOp operation) {
     if (!decimal_is_any(a)) return ItemError;
     bool is_unlimited = decimal_is_unlimited(a);
     mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
@@ -1201,24 +1151,17 @@ Item decimal_floor(Item a) {
     
     mpd_t* result = mpd_new(dec_ctx);
     if (!result) return ItemError;
-    
-    mpd_floor(result, dec_ptr->dec_val, dec_ctx);
+
+    operation(result, dec_ptr->dec_val, dec_ctx);
     return decimal_push_result(result, is_unlimited);
 }
 
+Item decimal_floor(Item a) {
+    return decimal_unary_rounding(a, mpd_floor);
+}
+
 Item decimal_ceil(Item a) {
-    if (!decimal_is_any(a)) return ItemError;
-    bool is_unlimited = decimal_is_unlimited(a);
-    mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
-    
-    Decimal* dec_ptr = a.get_decimal();
-    if (!dec_ptr || !dec_ptr->dec_val) return ItemError;
-    
-    mpd_t* result = mpd_new(dec_ctx);
-    if (!result) return ItemError;
-    
-    mpd_ceil(result, dec_ptr->dec_val, dec_ctx);
-    return decimal_push_result(result, is_unlimited);
+    return decimal_unary_rounding(a, mpd_ceil);
 }
 
 Item decimal_round(Item a) {
@@ -1248,18 +1191,7 @@ Item decimal_round(Item a) {
 }
 
 Item decimal_trunc(Item a) {
-    if (!decimal_is_any(a)) return ItemError;
-    bool is_unlimited = decimal_is_unlimited(a);
-    mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
-    
-    Decimal* dec_ptr = a.get_decimal();
-    if (!dec_ptr || !dec_ptr->dec_val) return ItemError;
-    
-    mpd_t* result = mpd_new(dec_ctx);
-    if (!result) return ItemError;
-    
-    mpd_trunc(result, dec_ptr->dec_val, dec_ctx);
-    return decimal_push_result(result, is_unlimited);
+    return decimal_unary_rounding(a, mpd_trunc);
 }
 #endif
 

@@ -60,13 +60,6 @@ extern "C" Item js_func_get_custom_proto(Item func);
 extern "C" Item js_get_typed_array_base();
 extern "C" uint64_t js_get_heap_epoch(void);
 
-static const JubeTypeDef* js_host_object_type(Item object) {
-    if (get_type_id(object) != LMD_TYPE_VMAP || !object.vmap || !object.vmap->host_type) {
-        return NULL;
-    }
-    return jube_find_type_by_host_type(object.vmap->host_type);
-}
-
 static bool js_host_object_has_property(Item object, Item key, Item* out) {
     // DOM3: declared-interface types dispatch through compiled member records
     if (jube_member_has(object, key, out)) return true;
@@ -126,14 +119,6 @@ static bool js_host_object_own_property_descriptor(Item object, Item key, Item* 
         type->host_ops->get_own_property_descriptor(object, key, out);
 }
 
-static bool js_host_object_prototype(Item object, Item* out) {
-    if (jube_member_prototype(object, out)) return true;
-    const JubeTypeDef* type = js_host_object_type(object);
-    if (!type || !type->host_ops || !type->host_ops->prototype || !out) return false;
-    *out = type->host_ops->prototype(object);
-    return true;
-}
-
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
 
 #include "../format/format.h"
@@ -178,28 +163,6 @@ static bool js_global_is_bigint(Item value) {
     if (type != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
     return dec && dec->unlimited == DECIMAL_BIGINT;
-}
-
-static int64_t js_global_utf16_len(const char* chars, int str_len, bool is_ascii) {
-    if (is_ascii) return (int64_t)str_len;
-    int64_t units = 0;
-    int pos = 0;
-    while (pos < str_len) {
-        unsigned char b = (unsigned char)chars[pos];
-        int bytes;
-        uint32_t cp;
-        if (b < 0x80) { cp = b; bytes = 1; }
-        else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F; bytes = 2; }
-        else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F; bytes = 3; }
-        else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; bytes = 4; }
-        else { cp = b; bytes = 1; }
-        for (int i = 1; i < bytes && pos + i < str_len; i++) {
-            cp = (cp << 6) | ((unsigned char)chars[pos + i] & 0x3F);
-        }
-        units += (cp >= 0x10000) ? 2 : 1;
-        pos += bytes;
-    }
-    return units;
 }
 
 #ifdef _WIN32
@@ -413,8 +376,6 @@ static bool js_array_apply_failed_length_shrink(Item obj, int64_t new_len, bool 
     return true;
 }
 static int64_t js_parse_array_index(const char* s, int len);
-static bool js_is_arguments_exotic_array_for_proto(Item value);
-
 typedef struct JsDefineExistingState {
     bool is_new_property;
     bool has_existing_desc;
@@ -909,7 +870,7 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
         name = js_to_property_key(name);
     }
 
-    bool is_arguments_exotic = js_is_arguments_exotic_array_for_proto(obj);
+    bool is_arguments_exotic = js_is_arguments_exotic_array(obj);
     if (!js_define_property_validate_array_exotic(
             obj, name, descriptor, is_arguments_exotic)) {
         return obj;
@@ -6710,18 +6671,6 @@ extern "C" bool js_is_typed_array_ctor_name(const char* name, int len) {
     return js_builtin_global_has_flag(name, len, JS_BUILTIN_GLOBAL_TYPED_ARRAY);
 }
 
-static bool js_is_arguments_exotic_array_for_proto(Item value) {
-    if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->is_content != 1 ||
-        !js_array_has_props(value.array)) {
-        return false;
-    }
-    Map* props = js_array_props(value.array);
-    Item tag = js_property_get((Item){.map = props}, js_well_known_symbol_key(4));
-    if (get_type_id(tag) != LMD_TYPE_STRING) return false;
-    String* str = it2s(tag);
-    return str && str->len == 9 && strncmp(str->chars, "Arguments", 9) == 0;
-}
-
 // v90: GeneratorFunction.prototype singleton — returned by Object.getPrototypeOf for generator functions.
 // Its .constructor creates generator-flagged functions (non-constructable via 'new').
 // Function-prototype identity is observable and therefore belongs to each JS
@@ -6902,7 +6851,7 @@ extern "C" Item js_get_prototype_of(Item object) {
     }
     // v18g: Arrays → return Array.prototype (or custom if set via Object.setPrototypeOf)
     if (get_type_id(object) == LMD_TYPE_ARRAY) {
-        if (js_is_arguments_exotic_array_for_proto(object)) {
+        if (js_is_arguments_exotic_array(object)) {
             return js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
         }
         Item custom_proto = js_array_get_custom_proto(object);
@@ -8167,6 +8116,40 @@ extern "C" bool js_func_is_builtin_ctor(Item fn) {
     return js_func_is_intrinsic_ctor_named(fn, en, el);
 }
 
+static Item js_make_data_descriptor(Item value, bool writable, bool enumerable,
+                                    bool configurable) {
+    RootFrame roots(2);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> desc_root(roots, js_new_object());
+    // Descriptor construction changes object shapes; root the result and value
+    // so a GC during any property transition cannot invalidate either handle.
+    js_property_set(desc_root.get(), (Item){.item = s2it(heap_create_name("value", 5))}, value_root.get());
+    js_property_set(desc_root.get(), (Item){.item = s2it(heap_create_name("writable", 8))},
+                    (Item){.item = b2it(writable)});
+    js_property_set(desc_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))},
+                    (Item){.item = b2it(enumerable)});
+    js_property_set(desc_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))},
+                    (Item){.item = b2it(configurable)});
+    return desc_root.get();
+}
+
+static Item js_make_accessor_descriptor(Item getter, Item setter, bool enumerable,
+                                        bool configurable) {
+    RootFrame roots(3);
+    Rooted<Item> getter_root(roots, getter);
+    Rooted<Item> setter_root(roots, setter);
+    Rooted<Item> desc_root(roots, js_new_object());
+    // Accessor values can be heap objects too, so keep both callbacks rooted
+    // while descriptor shape transitions allocate.
+    js_property_set(desc_root.get(), (Item){.item = s2it(heap_create_name("get", 3))}, getter_root.get());
+    js_property_set(desc_root.get(), (Item){.item = s2it(heap_create_name("set", 3))}, setter_root.get());
+    js_property_set(desc_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))},
+                    (Item){.item = b2it(enumerable)});
+    js_property_set(desc_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))},
+                    (Item){.item = b2it(configurable)});
+    return desc_root.get();
+}
+
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     RootFrame roots(4);
     Rooted<Item> object_root(roots, obj);
@@ -8214,20 +8197,16 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             descriptor_root.set(js_new_object());
             Item desc = descriptor_root.get();
             if (js_pd_is_accessor(&pd)) {
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
-                                (pd.flags & JS_PD_HAS_GET) ? pd.getter : make_js_undefined());
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))},
-                                (pd.flags & JS_PD_HAS_SET) ? pd.setter : make_js_undefined());
+                desc = js_make_accessor_descriptor(
+                    (pd.flags & JS_PD_HAS_GET) ? pd.getter : make_js_undefined(),
+                    (pd.flags & JS_PD_HAS_SET) ? pd.setter : make_js_undefined(),
+                    (pd.flags & JS_PD_ENUMERABLE) != 0, js_pd_is_configurable(&pd));
             } else {
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))},
-                                (pd.flags & JS_PD_HAS_VALUE) ? pd.value : make_js_undefined());
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))},
-                                (Item){.item = b2it((pd.flags & JS_PD_WRITABLE) != 0)});
+                desc = js_make_data_descriptor(
+                    (pd.flags & JS_PD_HAS_VALUE) ? pd.value : make_js_undefined(),
+                    (pd.flags & JS_PD_WRITABLE) != 0,
+                    (pd.flags & JS_PD_ENUMERABLE) != 0, js_pd_is_configurable(&pd));
             }
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))},
-                            (Item){.item = b2it((pd.flags & JS_PD_ENUMERABLE) != 0)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))},
-                            (Item){.item = b2it(js_pd_is_configurable(&pd))});
             return desc;
         }
     }
@@ -8282,20 +8261,16 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                                                 (int)name_str->len, &pd)) {
                 Item desc = js_new_object();
                 if (js_pd_is_accessor(&pd)) {
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
-                                    (pd.flags & JS_PD_HAS_GET) ? pd.getter : make_js_undefined());
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))},
-                                    (pd.flags & JS_PD_HAS_SET) ? pd.setter : make_js_undefined());
+                    desc = js_make_accessor_descriptor(
+                        (pd.flags & JS_PD_HAS_GET) ? pd.getter : make_js_undefined(),
+                        (pd.flags & JS_PD_HAS_SET) ? pd.setter : make_js_undefined(),
+                        (pd.flags & JS_PD_ENUMERABLE) != 0, js_pd_is_configurable(&pd));
                 } else {
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))},
-                                    (pd.flags & JS_PD_HAS_VALUE) ? pd.value : make_js_undefined());
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))},
-                                    (Item){.item = b2it((pd.flags & JS_PD_WRITABLE) != 0)});
+                    desc = js_make_data_descriptor(
+                        (pd.flags & JS_PD_HAS_VALUE) ? pd.value : make_js_undefined(),
+                        (pd.flags & JS_PD_WRITABLE) != 0,
+                        (pd.flags & JS_PD_ENUMERABLE) != 0, js_pd_is_configurable(&pd));
                 }
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))},
-                                (Item){.item = b2it((pd.flags & JS_PD_ENUMERABLE) != 0)});
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))},
-                                (Item){.item = b2it(js_pd_is_configurable(&pd))});
                 return desc;
             }
             // Special case: properties_map may carry a deleted-sentinel for
@@ -8316,34 +8291,19 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         }
         if (name_str->len == 6 && strncmp(name_str->chars, "length", 6) == 0) {
             Item value = js_property_get(obj, name);
-            Item desc = js_new_object();
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(false)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
-            return desc;
+            return js_make_data_descriptor(value, false, false, true);
         }
         if (name_str->len == 4 && strncmp(name_str->chars, "name", 4) == 0) {
             Item name_val = js_property_get(obj, name);
-            Item desc = js_new_object();
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, name_val);
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(false)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
-            return desc;
+            return js_make_data_descriptor(name_val, false, false, true);
         }
         if (name_str->len == 9 && strncmp(name_str->chars, "prototype", 9) == 0) {
             func_prototype_synth:
             // Only constructor functions have prototype as own property
             if (!js_func_has_own_prototype(obj)) return make_js_undefined();
-            Item desc = js_new_object();
             Item proto = js_property_get(obj, name);
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, proto);
             bool is_builtin_ctor = js_func_is_builtin_ctor(obj);
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(!is_builtin_ctor)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
-            return desc;
+            return js_make_data_descriptor(proto, !is_builtin_ctor, false, false);
         }
         // v18: check custom properties backing map
         {
@@ -8353,12 +8313,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 JsShapeSlotStatus status = js_own_shape_slot_status(
                     fn->properties_map, name_str->chars, (int)name_str->len, &val, NULL);
                 if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) {
-                    Item desc = js_new_object();
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, val);
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
-                    return desc;
+                    return js_make_data_descriptor(val, true, true, true);
                 }
             }
         }
@@ -8369,12 +8324,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     if (type == LMD_TYPE_STRING) {
         String* s = it2s(obj);
         if (name_str->len == 6 && strncmp(name_str->chars, "length", 6) == 0) {
-            Item desc = js_new_object();
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, (Item){.item = i2it(s->len)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(false)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
-            return desc;
+            return js_make_data_descriptor((Item){.item = i2it(s->len)}, false, false, false);
         }
         // numeric index → character at that position
         if (name_str->len > 0 && name_str->chars[0] >= '0' && name_str->chars[0] <= '9') {
@@ -8386,12 +8336,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             }
             if (valid && idx >= 0 && idx < (int)s->len) {
                 Item ch = item_at(obj, (int64_t)idx);
-                Item desc = js_new_object();
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, ch);
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(false)});
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
-                return desc;
+                return js_make_data_descriptor(ch, false, true, false);
             }
         }
         return make_js_undefined();
@@ -8400,7 +8345,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     // Array properties: length, numeric indices
     if (type == LMD_TYPE_ARRAY) {
         if (name_str->len == 6 && strncmp(name_str->chars, "length", 6) == 0) {
-            if (js_is_arguments_exotic_array_for_proto(obj)) {
+            if (js_is_arguments_exotic_array(obj)) {
                 Item companion = (Item){.map = js_array_props(obj.array)};
                 JsPropertyDescriptor pd = {};
                 if (js_get_own_property_descriptor(companion, name_str->chars,
@@ -8943,7 +8888,7 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
                     Item pv = js_map_get_fast_ext(obj.map, "__primitiveValue__", 18, &pv_found);
                     if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
                         String* pv_s = it2s(pv);
-                        int64_t slen = pv_s ? js_global_utf16_len(pv_s->chars, (int)pv_s->len, (bool)pv_s->is_ascii) : 0;
+                        int64_t slen = pv_s ? js_utf16_len(pv_s->chars, (int)pv_s->len, (bool)pv_s->is_ascii) : 0;
                         is_string_exotic_key = idx >= 0 && idx < slen;
                         current_enumerable = true;
                     }
@@ -9169,18 +9114,6 @@ extern "C" Item js_object_create_define_properties(Item obj, Item props) {
 // Array.isArray — check if value is an array
 // =============================================================================
 
-static bool js_array_is_arguments_exotic(Item value) {
-    if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->is_content != 1 ||
-        !js_array_has_props(value.array)) {
-        return false;
-    }
-    Map* props = js_array_props(value.array);
-    Item tag = js_property_get((Item){.map = props}, js_well_known_symbol_key(4));
-    if (get_type_id(tag) != LMD_TYPE_STRING) return false;
-    String* str = it2s(tag);
-    return str && str->len == 9 && strncmp(str->chars, "Arguments", 9) == 0;
-}
-
 extern "C" Item js_array_is_array(Item value) {
     int depth = 0;
     while (js_is_proxy(value) && depth < 32) {
@@ -9200,7 +9133,7 @@ extern "C" Item js_array_is_array(Item value) {
         }
     }
     // Arguments exotic objects use LMD_TYPE_ARRAY internally but are not arrays per spec
-    if (type == LMD_TYPE_ARRAY && js_array_is_arguments_exotic(value)) return (Item){.item = ITEM_FALSE};
+    if (type == LMD_TYPE_ARRAY && js_is_arguments_exotic_array(value)) return (Item){.item = ITEM_FALSE};
     return (Item){.item = (type == LMD_TYPE_ARRAY) ? ITEM_TRUE : ITEM_FALSE};
 }
 
@@ -13898,7 +13831,7 @@ static bool js_delete_string_exotic_property(Item obj, Item key, Item* out_resul
             Item pv = js_map_get_fast_ext(obj.map, "__primitiveValue__", 18, &pv_found);
             if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
                 String* pv_s = it2s(pv);
-                int64_t slen = pv_s ? js_global_utf16_len(pv_s->chars, (int)pv_s->len, (bool)pv_s->is_ascii) : 0;
+                int64_t slen = pv_s ? js_utf16_len(pv_s->chars, (int)pv_s->len, (bool)pv_s->is_ascii) : 0;
                 reject = idx >= 0 && idx < slen;
             }
         }
