@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 1.0.0 (2026-08-06)
+**Spec version:** 1.1.0 (2026-08-06)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -73,6 +73,63 @@ answered from them first.
   infer what doesn't; put must-respond channels in types.* Purity is the
   declared `fn`/`pn` bit; errors and resource ownership live in return types;
   may-suspend is inferred and invisible. [Features §3.6]
+
+### The invariant ledger (SI)
+
+Standing invariants distilled from the rulings — the checkable face of the
+principles. Any observed violation is a bug, never a semantics change; the
+representation-facing subset is verified by the differential and forced-GC
+harnesses.
+
+- **SI1 — Boxing invisibility.** Representation choices — tagging, unboxed
+  arrays, decimal width, lane selection — never affect results. [S1.6]
+- **SI2 — COW unobservability.** Sharing until first mutation is
+  undetectable; `let`-finality holds absolutely; reference identity is not
+  observable (no `===`, ever). [S9.1, S5.1.4]
+- **SI3 — Inference unobservability** (the gradual guarantee). Erasing all
+  inferred types and running boxed produces identical results — *inference
+  buys performance only.* [S11.4]
+- **SI4 — Equality laws.** `==` is total (cross-family is `false`, never an
+  error) and an equivalence modulo exactly two poison carve-outs (`nan`,
+  `error`); numbers tie across all representations;
+  `a == b ⟹ hash(a) == hash(b)`. [S5]
+- **SI5 — Order refinement.** The total order totally refines `==` — equal
+  values always tie; sort is stable; `desc` is exact reversal. [S6.2]
+- **SI6 — Printer injectivity.** Distinct doubles print distinctly;
+  print→parse round-trips exactly; two numbers are equal iff they print the
+  same (modulo the nan carve-out). [S4.7, S4.8]
+- **SI7 — Int totality.** `int` is closed and total under `+ - * div % neg
+  abs`, bitwise, shifts, and `**`: the result is always an `int` — finite,
+  saturated `±inf`, or `nan` — and integer math never returns `error()`.
+  [S4.1, S4.5]
+- **SI8 — Poison symmetry.** Every unbounded numeric domain is closed with
+  its own poison; nans never equal anything, themselves included;
+  same-signed infinities are one value across domains; poison is unequal,
+  not untypeable — it classifies normally. [S4.2]
+- **SI9 — Truthiness tag-decidability.** Truthiness is decidable from the
+  type tag alone; the falsy set is exactly `{null, false, error, ""}`. [S3]
+- **SI10 — Literal strictness, data totality.** An unsuffixed int-form
+  literal outside the band is a compile error; parsed data always lands in
+  an exact home — parsers never reject numeric data and never silently
+  place it in float. [S4.3]
+- **SI11 — Total reads, checked writes.** Reads never raise — absence is
+  `null` (or `""` for string results), slices clamp; an out-of-bounds
+  write always raises. [S7.1]
+- **SI12 — The length law.** `len(x)` is exactly the number of iterations
+  `for (i in x)` performs; `len` is shallow;
+  `len(container) = Σ count(item)`. [S8.3]
+- **SI13 — No aliasing.** Values never alias; construction captures by
+  value; cycles are unconstructible natively, so deep `==` terminates
+  (depth-limited only against interop imports). [S9.1, S9.3, S5.1.3]
+- **SI14 — Error containment.** Every error value is deliberate; discharge
+  strips error constituents from its success type; no binding ever holds a
+  placeholder for a failure, at establishment or reassignment; no boundary
+  silently substitutes `0`, `null`, or reinterpreted bits. (Fault *timing*
+  is exempt from SI3.) [S7.4, S7.7, S11.4]
+- **SI15 — Schedule invisibility.** `fn` results are identical under any
+  schedule, thread count, or backend; builtin reductions are bit-identical
+  by the pairwise spec; thread count is semantically unobservable.
+  [S12.1, S13.4]
 
 ---
 
@@ -1095,34 +1152,6 @@ word.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concu
   (element tag, function name, type name); `null` for unnamed values.
   Operators and functions, not properties, are the reliable surface over
   open containers. [C9a]
-
----
-
-## S16 Verifiable Properties
-
-The checkable face of S1.6 and S1.9; any observed violation is a bug, never a
-semantics change:
-
-1. **Boxing invisibility** — representation choices never affect results.
-2. **COW unobservability** — sharing until first mutation is undetectable;
-   `let`-finality holds absolutely.
-3. **Inference unobservability** (the gradual guarantee) — erasing all
-   inferred types and running boxed produces identical results. *Inference
-   buys performance only.*
-4. **Equality laws** — `==` total modulo the two poison carve-outs;
-   cross-representation ties; `a == b ⟹ hash(a) == hash(b)`.
-5. **Order refinement** — the total order refines `==`; sort stable; `desc`
-   exact reversal.
-6. **Printer injectivity** — distinct floats print distinctly; print→parse
-   exact; equal iff printed the same.
-7. **Error containment** — every error value is deliberate; discharge is
-   channel-agnostic and strips error constituents from its success type; no
-   binding ever holds a placeholder for a failure, at establishment **or
-   reassignment**; no boundary silently substitutes `0`, `null`, or
-   reinterpreted bits. (Fault *timing* is exempt from invariant 3.)
-8. **Schedule invisibility** — `fn` results are identical under any
-   schedule, thread count, or backend; builtin reductions are bit-identical
-   by the pairwise spec.
 
 ---
 
