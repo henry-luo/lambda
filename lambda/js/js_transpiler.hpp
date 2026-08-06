@@ -148,7 +148,7 @@ struct JsPreambleState {
     void* entry_func;           // compiled js_main, reusable with a fresh EvalContext
     int module_var_count;       // number of harness module vars
     uint32_t module_state_id;   // live realm slab that retains those harness vars
-    JsModuleConstEntry* entries;// snapshot of harness module_consts
+    JsModuleConstEntry* entries;// owned snapshot of harness module_consts
     int entry_count;
     bool owns_compiled_state;   // clones share the immutable MIR context and pools
 };

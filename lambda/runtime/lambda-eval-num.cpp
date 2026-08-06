@@ -863,6 +863,32 @@ Item vec_idiv(Item a, Item b);
 Item vec_mod(Item a, Item b);
 Item vec_pow(Item a, Item b);
 
+typedef Item (*NumericVectorBinaryFn)(Item left, Item right);
+
+static Item fn_numeric_binary(Item item_a, Item item_b,
+        LambdaNumericOpFamily numeric_op, int complex_op,
+        NumericVectorBinaryFn vector_op, const char* name) {
+    GUARD_ERROR2(item_a, item_b);
+    TypeId type_a = get_type_id(item_a);
+    TypeId type_b = get_type_id(item_b);
+
+    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
+    if (complex_op >= 0 &&
+            (type_a == LMD_TYPE_COMPLEX || type_b == LMD_TYPE_COMPLEX)) {
+        return complex_binary(item_a, item_b, complex_op);
+    }
+    if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
+        return vector_op(item_a, item_b);
+    }
+    Item result;
+    if (apply_classified_numeric(item_a, type_a, item_b, type_b,
+            numeric_op, &result)) return result;
+    log_error("unknown %s type: %d, %d", name, type_a, type_b);
+    return ItemError;
+}
+
 // helper: get length of a vector-like item
 static int64_t vector_length(Item item) {
     TypeId type = get_type_id(item);
@@ -973,111 +999,28 @@ Item fn_numeric_fold(Item item, int multiply, int skip_null, int64_t* count_out)
 }
 
 Item fn_add(Item item_a, Item item_b) {
-    GUARD_ERROR2(item_a, item_b);
-    TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
-
-    // null propagation: null + x = null
-    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
-    if (type_a == LMD_TYPE_COMPLEX || type_b == LMD_TYPE_COMPLEX)
-        return complex_binary(item_a, item_b, OPERATOR_ADD);
-
-    // vector operations: scalar+vector, vector+scalar, or vector+vector
-    if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
-        (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
-        (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
-        return vec_add(item_a, item_b);
-    }
-    Item result;
-    if (apply_classified_numeric(item_a, type_a, item_b, type_b,
-            LAMBDA_NUM_OP_ADD, &result)) return result;
-    log_error("unknown add type: %d, %d", type_a, type_b);
-    return ItemError;
+    return fn_numeric_binary(item_a, item_b, LAMBDA_NUM_OP_ADD,
+        OPERATOR_ADD, vec_add, "add");
 }
 
 Item fn_mul(Item item_a, Item item_b) {
-    GUARD_ERROR2(item_a, item_b);
-    TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
-
-    // null propagation: null * x = null
-    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
-    if (type_a == LMD_TYPE_COMPLEX || type_b == LMD_TYPE_COMPLEX)
-        return complex_binary(item_a, item_b, OPERATOR_MUL);
-
-    // vector operations
-    if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
-        (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
-        (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
-        return vec_mul(item_a, item_b);
-    }
-    Item result;
-    if (apply_classified_numeric(item_a, type_a, item_b, type_b,
-            LAMBDA_NUM_OP_MUL, &result)) return result;
-    log_error("unknown mul type: %d, %d", type_a, type_b);
-    return ItemError;
+    return fn_numeric_binary(item_a, item_b, LAMBDA_NUM_OP_MUL,
+        OPERATOR_MUL, vec_mul, "mul");
 }
 
 Item fn_sub(Item item_a, Item item_b) {
-    GUARD_ERROR2(item_a, item_b);
-    TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
-
-    // null propagation: null - x = null
-    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
-    if (type_a == LMD_TYPE_COMPLEX || type_b == LMD_TYPE_COMPLEX)
-        return complex_binary(item_a, item_b, OPERATOR_SUB);
-
-    // vector operations
-    if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
-        (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
-        (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
-        return vec_sub(item_a, item_b);
-    }
-    Item result;
-    if (apply_classified_numeric(item_a, type_a, item_b, type_b,
-            LAMBDA_NUM_OP_SUB, &result)) return result;
-    log_error("unknown sub type: %d, %d", type_a, type_b);
-    return ItemError;
+    return fn_numeric_binary(item_a, item_b, LAMBDA_NUM_OP_SUB,
+        OPERATOR_SUB, vec_sub, "sub");
 }
 
 Item fn_div(Item item_a, Item item_b) {
-    GUARD_ERROR2(item_a, item_b);
-    TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
-
-    // null propagation: null / x = null, x / null = null
-    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
-    if (type_a == LMD_TYPE_COMPLEX || type_b == LMD_TYPE_COMPLEX)
-        return complex_binary(item_a, item_b, OPERATOR_DIV);
-
-    // vector operations
-    if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
-        (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
-        (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
-        return vec_div(item_a, item_b);
-    }
-    Item result;
-    if (apply_classified_numeric(item_a, type_a, item_b, type_b,
-            LAMBDA_NUM_OP_TRUE_DIV, &result)) return result;
-    log_error("unknown div type: %d, %d", type_a, type_b);
-    return ItemError;
+    return fn_numeric_binary(item_a, item_b, LAMBDA_NUM_OP_TRUE_DIV,
+        OPERATOR_DIV, vec_div, "div");
 }
 
 Item fn_idiv(Item item_a, Item item_b) {
-    GUARD_ERROR2(item_a, item_b);
-
-    // null propagation: null // x = null
-    TypeId ta = get_type_id(item_a), tb = get_type_id(item_b);
-    if (ta == LMD_TYPE_NULL || tb == LMD_TYPE_NULL) return ItemNull;
-
-    if ((IS_SCALAR_NUMERIC(ta) && IS_VECTOR_TYPE(tb)) ||
-        (IS_VECTOR_TYPE(ta) && IS_SCALAR_NUMERIC(tb)) ||
-        (IS_VECTOR_TYPE(ta) && IS_VECTOR_TYPE(tb))) {
-        return vec_idiv(item_a, item_b);
-    }
-
-    Item result;
-    if (apply_classified_numeric(item_a, ta, item_b, tb,
-            LAMBDA_NUM_OP_IDIV, &result)) return result;
-    log_error("unknown idiv type: %d, %d", ta, tb);
-    return ItemError;
+    return fn_numeric_binary(item_a, item_b, LAMBDA_NUM_OP_IDIV,
+        -1, vec_idiv, "idiv");
 }
 
 Item fn_pow(Item item_a, Item item_b) {
@@ -1143,23 +1086,8 @@ Item fn_pow(Item item_a, Item item_b) {
 }
 
 Item fn_mod(Item item_a, Item item_b) {
-    GUARD_ERROR2(item_a, item_b);
-    TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
-
-    // null propagation: null % x = null
-    if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
-
-    // vector operations
-    if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
-        (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
-        (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
-        return vec_mod(item_a, item_b);
-    }
-    Item result;
-    if (apply_classified_numeric(item_a, type_a, item_b, type_b,
-            LAMBDA_NUM_OP_MOD, &result)) return result;
-    log_error("unknown mod type: %d, %d", type_a, type_b);
-    return ItemError;
+    return fn_numeric_binary(item_a, item_b, LAMBDA_NUM_OP_MOD,
+        -1, vec_mod, "mod");
 }
 
 // Numeric system functions implementation
@@ -1210,89 +1138,47 @@ Item fn_abs(Item item) {
     }
 }
 
-Item fn_round(Item item) {
+typedef Item (*NumericDecimalUnaryFn)(Item item);
+
+static Item fn_numeric_rounding(Item item, NumericVectorUnaryOp vector_op,
+        const char* name, double (*rounding_op)(double),
+        NumericDecimalUnaryFn decimal_op) {
     GUARD_ERROR1(item);
-    // round() - round to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
     LambdaNumericKind kind = lambda_numeric_kind_from_item(item);
     if (kind == LAMBDA_NUM_INT || kind == LAMBDA_NUM_INTEGER ||
-        lambda_numeric_is_sized_integer(kind)) {
-        // Already an integer, return as-is
+            lambda_numeric_is_sized_integer(kind)) {
         return item;
     }
-    else if (lambda_numeric_is_sized_float(kind)) {
-        return push_d(round(item.get_num_sized_as_double()));
+    if (lambda_numeric_is_sized_float(kind)) {
+        return push_d(rounding_op(item.get_num_sized_as_double()));
     }
-    else if (type == LMD_TYPE_FLOAT) {
-        double val = item.get_double();
-        return push_d(round(val));
+    if (type == LMD_TYPE_FLOAT) {
+        return push_d(rounding_op(item.get_double()));
     }
-    else if (IS_VECTOR_TYPE(type)) {
-        return numeric_vector_unary_float(item, NUMERIC_VECTOR_ROUND, "round");
+    if (IS_VECTOR_TYPE(type)) {
+        return numeric_vector_unary_float(item, vector_op, name);
     }
-    else if (type == LMD_TYPE_DECIMAL) {
-        return decimal_round(item);
+    if (type == LMD_TYPE_DECIMAL) {
+        return decimal_op(item);
     }
-    else {
-        log_debug("round not supported for type: %d", type);
-        return ItemError;
-    }
+    log_debug("%s not supported for type: %d", name, type);
+    return ItemError;
+}
+
+Item fn_round(Item item) {
+    return fn_numeric_rounding(item, NUMERIC_VECTOR_ROUND, "round",
+        round, decimal_round);
 }
 
 Item fn_floor(Item item) {
-    GUARD_ERROR1(item);
-    // floor() - round down to nearest integer, or element-wise for arrays
-    TypeId type = get_type_id(item);
-    LambdaNumericKind kind = lambda_numeric_kind_from_item(item);
-    if (kind == LAMBDA_NUM_INT || kind == LAMBDA_NUM_INTEGER ||
-        lambda_numeric_is_sized_integer(kind)) {
-        return item;  // return as-is
-    }
-    else if (lambda_numeric_is_sized_float(kind)) {
-        return push_d(floor(item.get_num_sized_as_double()));
-    }
-    else if (type == LMD_TYPE_FLOAT) {
-        double val = item.get_double();
-        return push_d(floor(val));
-    }
-    else if (IS_VECTOR_TYPE(type)) {
-        return numeric_vector_unary_float(item, NUMERIC_VECTOR_FLOOR, "floor");
-    }
-    else if (type == LMD_TYPE_DECIMAL) {
-        return decimal_floor(item);
-    }
-    else {
-        log_debug("floor not supported for type: %d", type);
-        return ItemError;
-    }
+    return fn_numeric_rounding(item, NUMERIC_VECTOR_FLOOR, "floor",
+        floor, decimal_floor);
 }
 
 Item fn_ceil(Item item) {
-    GUARD_ERROR1(item);
-    // ceil() - round up to nearest integer, or element-wise for arrays
-    TypeId type = get_type_id(item);
-    LambdaNumericKind kind = lambda_numeric_kind_from_item(item);
-    if (kind == LAMBDA_NUM_INT || kind == LAMBDA_NUM_INTEGER ||
-        lambda_numeric_is_sized_integer(kind)) {
-        return item;  // return as-is
-    }
-    else if (lambda_numeric_is_sized_float(kind)) {
-        return push_d(ceil(item.get_num_sized_as_double()));
-    }
-    else if (type == LMD_TYPE_FLOAT) {
-        double val = item.get_double();
-        return push_d(ceil(val));
-    }
-    else if (IS_VECTOR_TYPE(type)) {
-        return numeric_vector_unary_float(item, NUMERIC_VECTOR_CEIL, "ceil");
-    }
-    else if (type == LMD_TYPE_DECIMAL) {
-        return decimal_ceil(item);
-    }
-    else {
-        log_debug("ceil not supported for type: %d", type);
-        return ItemError;
-    }
+    return fn_numeric_rounding(item, NUMERIC_VECTOR_CEIL, "ceil",
+        ceil, decimal_ceil);
 }
 
 static Item numeric_extreme_pair(Item left, Item right, bool minimum, bool* valid) {

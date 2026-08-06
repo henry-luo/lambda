@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "description": "Tune13 result demand removes dead comprehension output allocation while preserving observed for-expression output.",
+  "checks": [
+    {
+      "in_func": "_tune13_discard_#",
+      "forbid": [
+        "call\tarray_spreadable_p, array_spreadable",
+        "call\tarray_push_spread_p, array_push_spread",
+        "call\tarray_end_p, array_end"
+      ],
+      "expect": [
+        "add\t{{r}}, {{r}}, {{r}}"
+      ]
+    },
+    {
+      "in_func": "_tune13_observed_#",
+      "expect": [
+        "call\tarray_spreadable_p, array_spreadable",
+        "call\tarray_push_spread_p, array_push_spread",
+        "call\tarray_end_p, array_end"
+      ]
+    }
+  ]
+}

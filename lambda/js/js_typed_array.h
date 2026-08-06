@@ -50,9 +50,6 @@ static inline int js_arraybuffer_length(const JsArrayBuffer* ab) {
 static inline int js_arraybuffer_max_length(const JsArrayBuffer* ab) {
     return ab ? (int)ab->handle.max_byte_length : 0;
 }
-static inline uint64_t js_arraybuffer_generation(const JsArrayBuffer* ab) {
-    return ab ? ab->handle.generation : 0;
-}
 static inline bool js_arraybuffer_detached(const JsArrayBuffer* ab) {
     return !ab || byte_buffer_is_detached(&ab->handle);
 }

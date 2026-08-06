@@ -7,10 +7,6 @@
 #include <time.h>
 #include "../../../lib/str.h"
 
-// Forward declarations
-int css_style_node_compare(const void* a, const void* b, void* udata);
-void css_style_node_cleanup(void* node, void* udata);
-
 // Enhanced CSS Engine creation
 CssEngine* css_engine_create(Pool* pool) {
     // Note: CssValue size is 24 bytes on 64-bit systems (1 byte enum + 7 padding + 16 byte union)
@@ -330,16 +326,6 @@ void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* ru
     }
 }
 
-// Statistics and monitoring
-void css_engine_update_stats(CssEngine* engine) {
-    if (!engine) return;
-
-    // Update memory usage (actual memory tracking would require walking all pools)
-    engine->stats.memory_usage = 0; // Memory tracking requires pool introspection
-
-    // Other statistics are updated during parsing and cascade operations
-}
-
 void css_engine_print_stats(CssEngine* engine) {
     if (!engine) return;
 
@@ -360,19 +346,6 @@ double css_engine_get_parse_time(CssEngine* engine) {
 
 size_t css_engine_get_memory_usage(CssEngine* engine) {
     return engine ? engine->stats.memory_usage : 0;
-}
-
-// Additional utility functions for the CSS integration layer
-
-// Compare function for style nodes in AVL tree
-int css_style_node_compare(const void* a, const void* b, void* udata) {
-    (void)a; (void)b; (void)udata;
-    return 0; // Simple comparison, full implementation would compare property IDs
-}
-
-void css_style_node_cleanup(void* node, void* udata) {
-    (void)node; (void)udata;
-    // Cleanup is handled by pool deallocation
 }
 
 CssStyleEngine* css_style_engine_create(Pool* pool) {

@@ -231,24 +231,3 @@ void add_edge_to_graph(Input* input, Element* graph, Element* edge) {
 void add_cluster_to_graph(Input* input, Element* graph, Element* cluster) {
     add_child_to_graph_element(input, graph, cluster);
 }
-
-// Helper functions for attribute parsing with CSS-aligned naming
-void add_node_attributes(Input* input, Element* node, const char* attr_string) {
-    // Parse attribute string and add individual attributes directly to node
-    // This would parse strings like: [shape=circle, fill=red, font-size=12]
-    // For now, this is a placeholder for the full parsing implementation
-    if (!attr_string || !node) return;
-
-    // TODO: Implement full attribute string parsing
-    // Should handle CSS-aligned attribute names
-}
-
-void add_edge_attributes(Input* input, Element* edge, const char* attr_string) {
-    // Parse attribute string and add individual attributes directly to edge
-    // This would parse strings like: [color=blue, stroke-width=2, stroke-dasharray=dashed]
-    // For now, this is a placeholder for the full parsing implementation
-    if (!attr_string || !edge) return;
-
-    // TODO: Implement full attribute string parsing
-    // Should handle CSS-aligned attribute names
-}

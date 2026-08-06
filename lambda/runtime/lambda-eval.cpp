@@ -6673,6 +6673,28 @@ static bool array_native_lane_supported(const LaneStorageDesc* desc) {
          desc->kind == LANE_STORAGE_SIZED_I64)));
 }
 
+static bool runtime_array_representation_matches_contract(Item value,
+        const LaneStorageDesc* desc) {
+    if (!desc) return false;
+    TypeId value_type = get_type_id(value);
+    if (value_type == LMD_TYPE_ARRAY) {
+        return array_native_lane_matches_desc(value.array, desc);
+    }
+    if (value_type != LMD_TYPE_ARRAY_NUM || desc->nullable || !value.array_num) {
+        return false;
+    }
+    // ArrayNum is the legacy non-nullable carrier for the three scalar lanes;
+    // its element tag is already a whole-container representation proof.
+    switch (desc->kind) {
+    case LANE_STORAGE_INT:
+        return value.array_num->get_elem_type() == ELEM_INT;
+    case LANE_STORAGE_FLOAT64:
+        return value.array_num->get_elem_type() == ELEM_FLOAT64;
+    default:
+        return false;
+    }
+}
+
 static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
         Item* rebuilt) {
     if (!rebuilt || !array_native_lane_supported(desc)) return false;
@@ -7404,6 +7426,7 @@ Item fn_mutable_value(Item value) {
 bool cow_item_is_container(Item value) {
     switch (get_type_id(value)) {
     case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP:
     case LMD_TYPE_OBJECT:
     case LMD_TYPE_ELEMENT:
@@ -7762,6 +7785,7 @@ static Item cow_clone_map_like_one_level(Item source_item) {
 static Item cow_clone_one_level(Item source) {
     switch (get_type_id(source)) {
     case LMD_TYPE_ARRAY: return cow_clone_array_one_level(source.array);
+    case LMD_TYPE_ARRAY_NUM: return clone_mutable_array_num(source.array_num, NULL);
     case LMD_TYPE_MAP:
     case LMD_TYPE_OBJECT:
     case LMD_TYPE_ELEMENT: return cow_clone_map_like_one_level(source);
@@ -8029,18 +8053,20 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
     if (!element_type) return lambda_type_error(value, expected, boundary);
     Item checked_value = lambda_type_check(value, element_type, boundary);
     if (get_type_id(checked_value) == LMD_TYPE_ERROR) return checked_value;
-    if (publish_in_place && !lambda_type_matches(owner, expected)) {
+    LaneStorageDesc lane_desc = {};
+    bool has_lane_contract = lambda_type_lane_storage_desc(element_type, &lane_desc);
+    bool owner_representation_proven = has_lane_contract &&
+        runtime_array_representation_matches_contract(owner, &lane_desc);
+    if (publish_in_place && !owner_representation_proven &&
+            !lambda_type_matches(owner, expected)) {
         return lambda_type_error(owner, expected, boundary);
     }
 
     RootFrame roots(3);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_value(roots, checked_value);
-    TypeId owner_type = get_type_id(rooted_owner.get());
     Item candidate = publish_in_place ? rooted_owner.get() :
-        (owner_type == LMD_TYPE_ARRAY_NUM
-            ? fn_mutable_value(rooted_owner.get())
-            : cow_prepare_write(rooted_owner.get()));
+        cow_prepare_write(rooted_owner.get());
     Rooted<Item> rooted_candidate(roots, candidate);
     if (!publish_in_place && cow_profile_enabled() &&
             rooted_candidate.get().item != rooted_owner.get().item) {
@@ -8057,10 +8083,8 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
             candidate_type != LMD_TYPE_ELEMENT) {
         return lambda_type_error(rooted_owner.get(), expected, boundary);
     }
-    LaneStorageDesc lane_desc = {};
-    if (candidate_type == LMD_TYPE_ARRAY_NUM &&
-            lambda_type_lane_storage_desc(element_type, &lane_desc) &&
-            array_native_lane_supported(&lane_desc)) {
+    if (candidate_type == LMD_TYPE_ARRAY_NUM && array_native_lane_supported(&lane_desc) &&
+            !runtime_array_representation_matches_contract(rooted_candidate.get(), &lane_desc)) {
         if (publish_in_place) {
             // The current pn-var ABI owns an ArrayNum pointer. Publishing an
             // Array replacement needs a separate ABI transition, so reject it.
@@ -8078,7 +8102,12 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
     }
     Item set_result = fn_array_set(rooted_candidate.get().array, index, rooted_value.get());
     if (get_type_id(set_result) == LMD_TYPE_ERROR) return set_result;
-    if (!lambda_type_matches(rooted_candidate.get(), expected)) {
+    bool post_store_proven = has_lane_contract &&
+        runtime_array_representation_matches_contract(rooted_candidate.get(), &lane_desc);
+    if (cow_profile_enabled() && post_store_proven) {
+        g_cow_profile.array_checked_store_direct++;
+    }
+    if (!post_store_proven && !lambda_type_matches(rooted_candidate.get(), expected)) {
         ValidationResult* validation = NULL;
         (void)runtime_validate_value_against_type(rooted_candidate.get(), expected, &validation);
         // The validator inspected the rebuilt array. Reporting only the leaf
@@ -8114,12 +8143,10 @@ Item array_set_cow(Item owner, int64_t index, Item value) {
         // no-op while positive out-of-range writes still report their error.
         return replacement;
     }
-    if (type_id == LMD_TYPE_ARRAY_NUM) {
-        // ArrayNum remains on its Stage-2 specialized mutation path; generic
-        // Item writes would otherwise widen compact bool and numeric storage.
-        array_num_set_item(replacement.array_num, index, value);
-        return replacement;
-    }
+    // COW receives the semantic Item value from a procedural assignment. The
+    // canonical setter must decide whether the compact lane can admit it or
+    // whether the array must widen; calling array_num_set_item directly would
+    // coerce an incompatible value and silently lose the required Item shape.
     if (fn_array_set(replacement.array, index, value).item == ItemError.item) return ItemError;
     return replacement;
 }

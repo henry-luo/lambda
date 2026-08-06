@@ -73,7 +73,3 @@ extern "C" Item pn_io_http_static_mir(Item server, Item url_path, Item dir_path)
 extern "C" Item pn_io_http_stop_mir(Item server) {
     (void)server; return ItemError;
 }
-
-void http_module_cleanup(void) {
-    // nothing to clean up in stubbed version
-}

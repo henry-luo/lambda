@@ -271,14 +271,6 @@ inline bool is_type_optional(Type* type) {
     return false;
 }
 
-/**
- * Check if a type is a TypeUnary (occurrence operator)
- */
-inline bool is_type_unary(Type* type) {
-    Type* unwrapped = unwrap_type(type);
-    return unwrapped && unwrapped->kind == TYPE_KIND_UNARY;
-}
-
 // ==================== Validation State Helpers ====================
 
 /**

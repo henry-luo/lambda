@@ -5,6 +5,16 @@
       "pattern": "lambda/tree-sitter*",
       "modules": ["lambda"],
       "reason": "Vendored Tree-sitter runtimes, grammars, generated parsers, scanners, and bindings are not maintained Lambda source code."
+    },
+    {
+      "pattern": "lambda/mir/*",
+      "modules": ["lambda"],
+      "reason": "Vendored MIR sources and generated build artifacts are outside the maintained Lambda scan."
+    },
+    {
+      "pattern": "lambda/module/*",
+      "modules": ["lambda"],
+      "reason": "Hosted module implementations are maintained as separate module trees and are outside the core Lambda duplication scan."
     }
   ],
   "block_exclusions": [
@@ -338,16 +348,6 @@
       "reason": "Lizard reports the common indexed CssValue-list loop prologue while these walkers independently resolve borders, transforms, fonts, filters, backgrounds, and list styles; callback abstraction would add indirection without sharing their bodies.",
       "regions": [
         {
-          "file": "radiant/intrinsic_sizing.cpp",
-          "start": "static float intrinsic_border_width_from_shorthand_value(",
-          "end": "static float intrinsic_border_width_from_spacing_value("
-        },
-        {
-          "file": "radiant/intrinsic_sizing.cpp",
-          "start": "static float intrinsic_pseudo_border_side_shorthand(",
-          "end": "static void intrinsic_pseudo_horizontal_border_widths("
-        },
-        {
           "file": "radiant/cmd_layout.cpp",
           "start": "float extract_transform_scale(",
           "end": "void extract_body_transform_scale("
@@ -577,16 +577,6 @@
       "reason": "Lizard matches only the common DomNode text-kind guard and text-data load; each predicate then enforces a different whitespace, suppression, or table-content policy.",
       "regions": [
         {
-          "file": "radiant/intrinsic_sizing.cpp",
-          "start": "static bool text_node_is_ascii_whitespace(",
-          "end": "static bool intrinsic_white_space_preserves_space_advance("
-        },
-        {
-          "file": "radiant/intrinsic_sizing.cpp",
-          "start": "static bool text_node_has_intrinsic_table_content(",
-          "end": "static DomNode* previous_non_whitespace_sibling("
-        },
-        {
           "file": "radiant/layout.hpp",
           "start": "static inline bool layout_suppress_ignorable_container_text(",
           "end": "static inline bool layout_text_node_has_content("
@@ -694,7 +684,7 @@
       "regions": [
         {
           "file": "radiant/render_svg_inline.cpp",
-          "start": "static bool parse_svg_transform(const char* transform_str, float matrix[6]) {",
+          "start": "bool svg_parse_transform(const char* transform_str, float matrix[6]) {",
           "end": "static RdtMatrix compose_element_transform("
         }
       ]
@@ -790,43 +780,6 @@
           "file": "radiant/dom_range_resolver.cpp",
           "start": "static void find_text_edge_boundary_hit(",
           "end": "static bool is_non_caret_container_element("
-        }
-      ]
-    },
-    {
-      "id": "independent_intrinsic_dom_traversals",
-      "modules": ["radiant"],
-      "reason": "The H7 audit confirmed that Lizard normalizes only the first element-filtering statements of independent table-height, anonymous-row, caption, grid-width, flex-height, and select-option traversals; their bodies aggregate different dimensions, unresolved-style policies, and CSS structures while their contribution primitives are already shared.",
-      "regions": [
-        {
-          "file": "radiant/intrinsic_sizing.cpp",
-          "start": "static float intrinsic_table_structure_height(",
-          "end": "static bool intrinsic_text_ends_with_whitespace("
-        },
-        {
-          "file": "radiant/intrinsic_sizing.cpp",
-          "start": "// Helper: iterate rows in table (handles direct rows and row groups)",
-          "end": "// Pass 1: determine column count"
-        },
-        {
-          "file": "radiant/intrinsic_sizing.cpp",
-          "start": "// Sum per-column widths to get table intrinsic widths",
-          "end": "// Add table's own padding and border"
-        },
-        {
-          "file": "radiant/intrinsic_sizing.cpp",
-          "start": "// Check if this is a grid container.",
-          "end": "is_flex_container = intrinsic_element_display_matches("
-        },
-        {
-          "file": "radiant/intrinsic_sizing.cpp",
-          "start": "} else if (is_flex_row && is_flex_wrap && width > 0) {",
-          "end": "// Calculate children's heights (original logic for non-grid or single-column)"
-        },
-        {
-          "file": "radiant/layout_form.cpp",
-          "start": "static void calc_select_size(",
-          "end": "void layout_form_control("
         }
       ]
     },

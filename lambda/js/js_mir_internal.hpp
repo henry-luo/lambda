@@ -36,6 +36,11 @@ MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
 extern JsModuleConstEntry* g_eval_preamble_entries;
 extern int g_eval_preamble_entry_count;
 extern int g_eval_preamble_var_count;
+bool js_preamble_entry_copy(const JsModuleConstEntry* source,
+                            JsModuleConstEntry* target);
+bool js_preamble_entries_copy(const JsModuleConstEntry* source, int count,
+                              JsModuleConstEntry** out_entries);
+void js_preamble_entries_free(JsModuleConstEntry* entries, int count);
 void js_eval_preamble_entries_free(void);
 extern __thread NamePool* g_js_mir_name_pool_override;
 void jm_set_name_pool_override(NamePool* pool);
@@ -150,8 +155,6 @@ typedef struct JsMirClassMethodInstallPolicy {
 } JsMirClassMethodInstallPolicy;
 
 // internal function declarations
-int js_var_scope_cmp(const void *a, const void *b, void *udata);
-uint64_t js_var_scope_hash(const void *item, uint64_t seed0, uint64_t seed1);
 int js_local_func_cmp(const void *a, const void *b, void *udata);
 uint64_t js_local_func_hash(const void *item, uint64_t seed0, uint64_t seed1);
 int js_module_const_cmp(const void *a, const void *b, void *udata);
@@ -191,7 +194,6 @@ MIR_reg_t jm_emit_iterator_step(JsMirTranspiler* mt, MIR_reg_t iterator);
 MIR_reg_t jm_emit_iterator_done_test(JsMirTranspiler* mt, MIR_reg_t step_result, const char* prefix);
 MIR_reg_t jm_emit_iterator_collect_rest(JsMirTranspiler* mt, MIR_reg_t iterator);
 void jm_emit_iterator_close(JsMirTranspiler* mt, MIR_reg_t iterator);
-void jm_emit_iterator_close_on_exception(JsMirTranspiler* mt, MIR_reg_t iterator, MIR_label_t target);
 void jm_emit_iterator_close_on_exception_if_open(JsMirTranspiler* mt, MIR_reg_t iterator,
     MIR_reg_t iter_done, MIR_label_t target);
 void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt);
@@ -220,7 +222,6 @@ MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t value);
 MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r);
 struct hashmap* jm_var_scope_at(JsMirTranspiler* mt, int depth);
 bool jm_var_scope_set(JsMirTranspiler* mt, int depth, struct hashmap* scope);
-int jm_var_scope_length(JsMirTranspiler* mt);
 JsLoopLabels* jm_loop_label_at(JsMirTranspiler* mt, int index);
 JsMirIteratorFrame* jm_for_of_iterator_at(JsMirTranspiler* mt, int index);
 JsTryContext* jm_try_context_at(JsMirTranspiler* mt, int index);
@@ -336,7 +337,6 @@ void jm_emit_begin_lexical_this_rebind(JsMirTranspiler* mt, MIR_reg_t value,
 void jm_emit_end_lexical_this_rebind(JsMirTranspiler* mt,
     const JsMirLexicalThisRebind* state);
 void jm_emit_class_ctor_shape_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
-void jm_emit_formal_length(JsMirTranspiler* mt, MIR_reg_t fn_reg, int formal_length);
 MIR_reg_t jm_build_error_stack_string(JsMirTranspiler* mt, const char* error_type);
 MIR_reg_t jm_emit_unbox_int(JsMirTranspiler* mt, MIR_reg_t item);
 MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item);
@@ -395,7 +395,6 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call);
 bool jm_is_recursive_call(JsCallNode* call, JsFuncCollected* fc);
 bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc);
 bool jm_has_tail_call(JsAstNode* node, JsFuncCollected* fc);
-MIR_item_t jm_find_local_func(JsMirTranspiler* mt, const char* name);
 void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t func_item);
 const char* jm_make_fn_name(JsFunctionNode* fn, JsMirTranspiler* mt);
 int jm_count_params(JsFunctionNode* fn);
@@ -410,14 +409,6 @@ static inline void jm_get_backend_param_name(int index, char* out, int out_size)
 static inline bool jm_js_name_equal(const String* left, const String* right) {
     return left && right && left->len == right->len &&
         memcmp(left->chars, right->chars, left->len) == 0;
-}
-static inline bool jm_js_generated_name_equal(const String* source, const char* generated) {
-    static const char prefix[] = "_js_";
-    if (!source || !generated) return false;
-    size_t generated_len = strlen(generated);
-    return generated_len == sizeof(prefix) - 1 + source->len &&
-        memcmp(generated, prefix, sizeof(prefix) - 1) == 0 &&
-        memcmp(generated + sizeof(prefix) - 1, source->chars, source->len) == 0;
 }
 static inline const String* jm_param_binding_name(JsAstNode* param_node) {
     JsIdentifierNode* identifier = jm_get_param_identifier(param_node);

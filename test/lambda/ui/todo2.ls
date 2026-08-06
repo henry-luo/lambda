@@ -2,7 +2,7 @@
 // Demonstrates Phase 5: multi-panel layout, file ops, inline editing
 // Run: ./lambda.exe view test/lambda/ui/todo2.ls
 
-let data_dir = './data/todo/'
+let data_dir = './test/lambda/ui/data/todo/'
 
 // ============================================================================
 // Templates — reactive components with state and event handlers

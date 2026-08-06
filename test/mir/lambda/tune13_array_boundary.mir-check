@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "description": "Tune13 stable exact int[] occurrence bindings elide only the redundant direct-call boundary while retaining the guarded entry witness.",
+  "checks": [
+    {
+      "in_func": "_tune13_stable_call_#",
+      "expect": [
+        "call\tensure_typed_array_p, ensure_typed_array",
+        "call\t_tune13_first_"
+      ],
+      "count": {
+        "call\t_tune13_first_": 1
+      },
+      "forbid": [
+        "call\tlambda_type_check_p, lambda_type_check"
+      ]
+    },
+    {
+      "in_func": "_tune13_widened_call_#",
+      "expect": [
+        "call\tlambda_type_check_p, lambda_type_check",
+        "call\t_tune13_first_"
+      ]
+    }
+  ]
+}
