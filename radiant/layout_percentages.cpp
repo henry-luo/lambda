@@ -242,8 +242,25 @@ bool layout_block_has_automatic_height(ViewBlock* block) {
 }
 
 WritingMode layout_block_writing_mode(ViewBlock* block) {
-    return block && block->embed && block->embedp()->flex
-        ? block->embedp()->flex->writing_mode : WM_HORIZONTAL_TB;
+    WritingMode mode = block && block->blk ? block->block()->writing_mode : WM_HORIZONTAL_TB;
+    if (mode != WM_HORIZONTAL_TB || !block) return mode;
+
+    // Intrinsic sizing may run before the computed BlockProp exists; resolve
+    // the inherited specified axis there instead of falling back to horizontal.
+    DomElement* current = block->as_element();
+    for (DomNode* node = current; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* element = node->as_element();
+        CssDeclaration* declaration = element && element->specified_style
+            ? style_tree_get_declaration(element->specified_style, CSS_PROPERTY_WRITING_MODE)
+            : nullptr;
+        if (!declaration || !declaration->value ||
+            declaration->value->type != CSS_VALUE_TYPE_KEYWORD) continue;
+        if (declaration->value->data.keyword == CSS_VALUE_VERTICAL_LR) return WM_VERTICAL_LR;
+        if (declaration->value->data.keyword == CSS_VALUE_VERTICAL_RL) return WM_VERTICAL_RL;
+        if (declaration->value->data.keyword == CSS_VALUE_HORIZONTAL_TB) return WM_HORIZONTAL_TB;
+    }
+    return mode;
 }
 
 bool layout_block_inline_axis_is_vertical(ViewBlock* block) {

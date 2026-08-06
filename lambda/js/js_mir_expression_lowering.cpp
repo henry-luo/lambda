@@ -1178,6 +1178,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
     ref.is_private = false;
     ref.computed_key = false;
     ref.named_key = NULL;
+    ref.named_key_ref = NULL;
     ref.named_key_len = 0;
     ref.named_key_item = 0;
     ref.profile_label = NULL;
@@ -1215,6 +1216,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
             ref.is_private = jm_is_private_name(key_name);
             if (key_name && !ref.is_private) {
                 ref.named_key = key_name->chars;
+                ref.named_key_ref = key_name;
                 ref.named_key_len = (int)key_name->len;
                 ref.named_key_item = s2it(key_name);
                 if (JS_EXEC_PROFILE_ENABLED && js_exec_profile_mode() > 0) {
@@ -1304,7 +1306,8 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
                 MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0));
         }
 #if LAMBDA_INLINE_CACHE
-        else if (jm_store_ic_enabled() && ref->named_key && ref->named_key_len >= 0 &&
+        else if (jm_store_ic_enabled() && ref->named_key_ref &&
+                ref->named_key && ref->named_key_len >= 0 &&
                 mt->tp && mt->tp->ast_pool) {
             JsStoreIC* ic = (JsStoreIC*)pool_calloc(mt->tp->ast_pool, sizeof(JsStoreIC));
             if (ic) {
@@ -1313,13 +1316,13 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
                 ic->name_len = ref->named_key_len;
                 ic->key_item = ref->named_key_item;
                 ic->profile_label = ref->profile_label;
-                result = jm_call_6(mt, "js_property_set_named_ic", MIR_T_I64,
+                result = jm_call_5(mt, "js_property_set_key_ic", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ref->named_key),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ref->named_key_len),
+                    MIR_T_P, MIR_new_int_op(mt->ctx,
+                        (int64_t)(uintptr_t)ref->named_key_ref),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ic));
+                    MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ic));
             } else if (ref->strict) {
                 result = jm_call_4(mt, "js_property_set_v", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
@@ -11106,11 +11109,10 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 if (JS_EXEC_PROFILE_ENABLED && js_exec_profile_mode() > 0) {
                     ic->profile_label = jm_profile_load_ic_label(mt, mem);
                 }
-                MIR_reg_t val = jm_call_4(mt, "js_property_access_named_ic", MIR_T_I64,
+                MIR_reg_t val = jm_call_3(mt, "js_property_access_key_ic", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)key_name->chars),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)key_name->len),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ic));
+                    MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)key_name),
+                    MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ic));
                 jm_emit_exc_propagate_check(mt);
                 return val;
             }

@@ -24,6 +24,8 @@ static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int
 static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 static void calculate_line_cross_sizes(FlexContainerLayout* flex_layout);
 static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayout* flex_layout);
+static bool flex_sizing_skips_rendered_legend(DomElement* rendered_legend,
+                                               DomNode* child);
 
 struct FlexLineBaselineMetrics {
     float max_pre;
@@ -77,6 +79,10 @@ static float flex_container_line_baseline(ViewBlock* container,
         }
         int item_index = prefer_last ? line->item_count - 1 : 0;
         ViewElement* item = lam::view_as_element(line->items[item_index]);
+        if (item && layout_block_inline_axis_is_vertical(container)) {
+            return layout_vertical_item_baseline_from_border_edges(
+                container, static_cast<View*>(item));
+        }
         return item ? line->cross_position + calculate_item_baseline(item) : 0.0f;
     }
 
@@ -341,6 +347,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         log_debug("%s init_flex_container: source->direction=%d (0x%04X), row=%d, col=%d", container->source_loc(),
                   source->direction, source->direction, DIR_ROW, DIR_COLUMN);
         memcpy(flex, container->embedp()->flex, sizeof(FlexProp));
+        flex->writing_mode = layout_block_writing_mode(container);
         flex->scratch_mark = mark;
         flex->lycon = lycon;  // Restore after memcpy
         log_debug("%s init_flex_container: after copy flex->direction=%d", container->source_loc(), flex->direction);
@@ -357,7 +364,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         flex->column_gap = 0;
         flex->row_gap_is_percent = false;
         flex->column_gap_is_percent = false;
-        flex->writing_mode = WM_HORIZONTAL_TB;
+        flex->writing_mode = layout_block_writing_mode(container);
         flex->text_direction = TD_LTR;
     }
 
@@ -776,6 +783,7 @@ void FlexLayoutScope::close() {
 void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     log_info("=== layout_flex_container ENTRY ===");
     FlexContainerLayout* flex_layout = lycon->flex_container;
+    DomElement* rendered_legend = find_fieldset_rendered_legend(container);
 
     log_info("FLEX START %s - container: %dx%d at (%d,%d)",
            container->source_loc(), container->width, container->height, container->x, container->y);
@@ -861,6 +869,9 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         DomElement* container_elem = lam::dom_require<DOM_NODE_ELEMENT>(container);
                         for (DomNode* dom_child = container_elem->first_child; dom_child; dom_child = dom_child->next_sibling) {
                             float item_width = 0.0f;
+                            if (flex_sizing_skips_rendered_legend(rendered_legend, dom_child)) {
+                                continue;
+                            }
                             if (dom_child->is_element()) {
                                 ViewElement* item = lam::view_require_element(dom_child);
                                 // Skip display:none and absolute/hidden items
@@ -1134,6 +1145,10 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
             for (DomNode* child = container_elem->first_child; child; child = child->next_sibling) {
                 float item_width = 0.0f;
+
+                if (flex_sizing_skips_rendered_legend(rendered_legend, child)) {
+                    continue;
+                }
 
                 if (child->is_element()) {
                     ViewElement* item = lam::view_require_element(child);
@@ -2026,6 +2041,13 @@ static bool should_skip_flex_item(ViewElement* item) {
           (item->in_line && item->inl()->visibility == VIS_HIDDEN);
 }
 
+static bool flex_sizing_skips_rendered_legend(DomElement* rendered_legend,
+                                               DomNode* child) {
+    // HTML Rendering §15.3.12 promotes the rendered legend outside the
+    // fieldset flex container, so intrinsic sizing must use the same item set.
+    return rendered_legend && child == static_cast<DomNode*>(rendered_legend);
+}
+
 // Helper: Ensure the exact scratch-sized flex item array is not overrun.
 static bool ensure_flex_items_capacity(FlexContainerLayout* flex, int required) {
     return flex && required >= 0 && required <= flex->allocated_items;
@@ -2047,6 +2069,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
 
     int item_count = 0;
     DomNode* child = container->first_child;
+    DomElement* rendered_legend = find_fieldset_rendered_legend(container);
 
     // CSS §8.3: Percentage margins and paddings of flex items resolve against
     // the flex container's content-box width (their containing block).
@@ -2060,6 +2083,13 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
 
     // Single pass through all children
     while (child) {
+        // HTML Rendering §15.3.12 places the rendered legend outside the
+        // fieldset's flex container; it is laid out by the fieldset phase.
+        if (child == static_cast<DomNode*>(rendered_legend)) {
+            child = child->next_sibling;
+            continue;
+        }
+
         // Skip non-element nodes (text nodes)
         // CSS Flexbox §4: "if the entire sequence of child text runs contains
         // only white space... it is instead not rendered"
@@ -5156,8 +5186,13 @@ void set_main_axis_position(ViewElement* item, float position, FlexContainerLayo
 
     log_debug("set_main_axis_position: item=%p, position=%.1f, offset=%.1f (border+padding)", item, position, offset);
 
-    bool reverse = flex_layout->direction == CSS_VALUE_ROW_REVERSE ||
+    bool direction_reverse = flex_layout->direction == CSS_VALUE_ROW_REVERSE ||
         flex_layout->direction == CSS_VALUE_COLUMN_REVERSE;
+    bool vertical_rl_block_axis = flex_layout->writing_mode == WM_VERTICAL_RL &&
+        main_axis == LAYOUT_AXIS_X;
+    // vertical-rl reverses the physical block axis; column-reverse then
+    // toggles that writing-mode direction instead of replacing it.
+    bool reverse = direction_reverse != vertical_rl_block_axis;
     if (reverse) {
         float container_main_size = flex_layout->main_axis_size;
         float item_main_size = get_main_axis_size(item, flex_layout);

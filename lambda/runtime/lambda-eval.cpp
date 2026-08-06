@@ -8041,7 +8041,7 @@ static Type* runtime_array_contract_element(Type* expected) {
 }
 
 static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value, Type* expected,
-        const char* boundary, bool publish_in_place) {
+        const char* boundary, bool publish_in_place, const LaneStorageDesc* lane_hint) {
     if (cow_profile_enabled()) {
         g_cow_profile.array_checked_store_calls++;
         if (publish_in_place) g_cow_profile.array_checked_store_unique_inplace++;
@@ -8054,7 +8054,13 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
     Item checked_value = lambda_type_check(value, element_type, boundary);
     if (get_type_id(checked_value) == LMD_TYPE_ERROR) return checked_value;
     LaneStorageDesc lane_desc = {};
-    bool has_lane_contract = lambda_type_lane_storage_desc(element_type, &lane_desc);
+    bool has_lane_contract = false;
+    if (lane_hint) {
+        lane_desc = *lane_hint;
+        has_lane_contract = true;
+    } else {
+        has_lane_contract = lambda_type_lane_storage_desc(element_type, &lane_desc);
+    }
     bool owner_representation_proven = has_lane_contract &&
         runtime_array_representation_matches_contract(owner, &lane_desc);
     if (publish_in_place && !owner_representation_proven &&
@@ -8121,12 +8127,40 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
 
 Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary) {
-    return lambda_array_set_checked_impl(owner, index, value, expected, boundary, false);
+    return lambda_array_set_checked_impl(owner, index, value, expected, boundary, false, NULL);
 }
 
 Item lambda_array_set_checked_inplace(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary) {
-    return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true);
+    return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true, NULL);
+}
+
+static LaneStorageDesc lambda_array_lane_hint(Type* expected, uint8_t lane_kind,
+        uint8_t lane_nullable, uint8_t lane_byte_size) {
+    LaneStorageDesc hint = {};
+    Type* element_type = runtime_array_contract_element(expected);
+    hint.semantic_contract = element_type;
+    hint.base_contract = element_type;
+    hint.kind = lane_kind;
+    hint.nullable = lane_nullable;
+    hint.byte_size = lane_byte_size;
+    return hint;
+}
+
+Item lambda_array_set_checked_lane(Item owner, int64_t index, Item value, Type* expected,
+        const char* boundary, uint8_t lane_kind, uint8_t lane_nullable,
+        uint8_t lane_byte_size) {
+    LaneStorageDesc hint = lambda_array_lane_hint(expected, lane_kind, lane_nullable,
+        lane_byte_size);
+    return lambda_array_set_checked_impl(owner, index, value, expected, boundary, false, &hint);
+}
+
+Item lambda_array_set_checked_inplace_lane(Item owner, int64_t index, Item value,
+        Type* expected, const char* boundary, uint8_t lane_kind, uint8_t lane_nullable,
+        uint8_t lane_byte_size) {
+    LaneStorageDesc hint = lambda_array_lane_hint(expected, lane_kind, lane_nullable,
+        lane_byte_size);
+    return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true, &hint);
 }
 
 Item array_set_cow(Item owner, int64_t index, Item value) {

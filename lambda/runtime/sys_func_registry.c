@@ -1233,7 +1233,10 @@ extern int64_t js_typeof_is(Item value, const char* type_str);
 extern Item js_property_get_str(Item object, const char* key, int key_len);
 #if LAMBDA_INLINE_CACHE
 extern Item js_property_access_named_ic(Item object, const char* name, int64_t name_len, JsLoadIC* ic);
+extern Item js_property_access_key_ic(Item object, PropertyKeyRef key, JsLoadIC* ic);
 extern Item js_property_set_named_ic(Item object, const char* name, int64_t name_len, Item value,
+    int64_t strict, JsStoreIC* ic);
+extern Item js_property_set_key_ic(Item object, PropertyKeyRef key, Item value,
     int64_t strict, JsStoreIC* ic);
 #endif
 extern Item js_using_dispose(Item resource);
@@ -1806,6 +1809,8 @@ JitImport jit_runtime_imports[] = {
     {"lambda_map_path_set_checked", FPTR(lambda_map_path_set_checked)},
     {"lambda_array_set_checked", FPTR(lambda_array_set_checked)},
     {"lambda_array_set_checked_inplace", FPTR(lambda_array_set_checked_inplace)},
+    {"lambda_array_set_checked_lane", FPTR(lambda_array_set_checked_lane)},
+    {"lambda_array_set_checked_inplace_lane", FPTR(lambda_array_set_checked_inplace_lane)},
     // Ret* constructor helpers
     {"ri_ok", FPTR(ri_ok)},
     {"ri_err", FPTR(ri_err)},
@@ -1941,7 +1946,11 @@ JitImport jit_runtime_imports[] = {
     {"js_property_access_named_ic", FPTR(js_property_access_named_ic),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
+    {"js_property_access_key_ic", FPTR(js_property_access_key_ic),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
     {"js_property_set_named_ic", FPTR(js_property_set_named_ic)},
+    {"js_property_set_key_ic", FPTR(js_property_set_key_ic)},
 #endif
     {"js_super_property_get", FPTR(js_super_property_get)},
     {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
