@@ -41,6 +41,9 @@
 #include <shlobj.h>
 #endif
 
+#ifdef __APPLE__
+// this trace switch is used only by CoreText metric probes; keep it out of
+// non-macOS builds so the Linux compiler does not reject it as unused.
 static int font_platform_trace_enabled(void) {
     static int enabled = -1;
     if (enabled < 0) {
@@ -50,6 +53,7 @@ static int font_platform_trace_enabled(void) {
     }
     return enabled != 0;
 }
+#endif
 
 // ============================================================================
 // Platform font directories

@@ -1,5 +1,14 @@
 #pragma once
 
+// GLFW/GTK may expose X11's Bool and Complex macros before this public header;
+// clear them at the Radiant/Lambda boundary so they cannot rewrite type names.
+#ifdef Bool
+#undef Bool
+#endif
+#ifdef Complex
+#undef Complex
+#endif
+
 #include "view.hpp"
 #include "layout.hpp"
 #include "render.hpp"

@@ -52,7 +52,6 @@
   "exclude_source_files": [
     "lambda/runtime/lambda-decimal-runtime.cpp",
     "lambda/runtime/path_runtime.c",
-    "radiant/ime_mac_static.cpp",
     "radiant/webview_child_mac_static.cpp",
     "radiant/webview_layer_mac_static.cpp",
     "radiant/rdt_vector_cg.mm",
@@ -847,19 +846,33 @@
         "radiant/webview_child_mac_static.cpp",
         "radiant/webview_layer_mac_static.cpp"
       ],
-      "libraries": [
-        "lambda-rt",
-        "lambda-data",
-        "lambda-lib",
-        "ThorVG",
+    "libraries": [
+      "lambda-rt",
+      "lambda-data",
+      "lambda-lib",
+      "ThorVG",
         "glfw",
         "png",
         "turbojpeg",
-        "rpmalloc",
-        "pthread"
-      ],
-      "link": "static"
-    }
+      "rpmalloc",
+      "pthread"
+    ],
+    "linux": {
+      "additional_libraries": [
+        "GL",
+        "GLU",
+        "gomp",
+        "webkit2gtk-4.1",
+        "gtk+-3.0",
+        "glib-2.0",
+        "gio-2.0",
+        "gobject-2.0",
+        "cairo",
+        "javascriptcoregtk-4.1"
+      ]
+    },
+    "link": "static"
+  }
   ],
   "static_module_validation": {
     "mode": "enforced-with-class-f-defer",
@@ -1472,11 +1485,36 @@
       "output": "lambda.exe",
       "compiler": "clang",
       "exclude_source_files": [
-        "lib/clock_compat.c"
+        "lib/clock_compat.c",
+        "lib/font/font_backend_dwrite.cpp"
       ],
       "includes": [
         "/usr/include",
-        "/usr/include/libpng16"
+        "/usr/include/libpng16",
+        "/usr/lib/aarch64-linux-gnu/glib-2.0/include",
+        "/usr/include/at-spi2-atk/2.0",
+        "/usr/include/at-spi-2.0",
+        "/usr/include/dbus-1.0",
+        "/usr/lib/aarch64-linux-gnu/dbus-1.0/include",
+        "/usr/include/gio-unix-2.0",
+        "/usr/include/cairo",
+        "/usr/include/pango-1.0",
+        "/usr/include/harfbuzz",
+        "/usr/include/fribidi",
+        "/usr/include/atk-1.0",
+        "/usr/include/pixman-1",
+        "/usr/include/uuid",
+        "/usr/include/freetype2",
+        "/usr/include/gdk-pixbuf-2.0",
+        "/usr/include/aarch64-linux-gnu",
+        "/usr/include/webkit2gtk-4.1",
+        "/usr/include/webkitgtk-4.1",
+        "/usr/include/gtk-3.0",
+        "/usr/include/glib-2.0",
+        "/usr/include/libsoup-3.0",
+        "/usr/include/sysprof-4",
+        "/usr/include/libmount",
+        "/usr/include/blkid"
       ],
       "libraries": [
         {
@@ -1610,8 +1648,8 @@
           "name": "libuv",
           "description": "Cross-platform async I/O library (replaces libevent)",
           "include": "/usr/include",
-          "lib": "/usr/lib/aarch64-linux-gnu/libuv.a",
-          "link": "static"
+          "lib": "-luv",
+          "link": "dynamic"
         },
         {
           "name": "brotlidec",
@@ -1660,6 +1698,13 @@
           "description": "GLib — required by GTK/WebKitGTK",
           "include": "/usr/include/glib-2.0",
           "lib": "-lglib-2.0",
+          "link": "dynamic"
+        },
+        {
+          "name": "gio-2.0",
+          "description": "GIO — required by the Linux WebKit resource bridge",
+          "include": "/usr/include/gio-unix-2.0",
+          "lib": "-lgio-2.0",
           "link": "dynamic"
         },
         {
@@ -1714,6 +1759,7 @@
     "macos": {
       "exclude_source_files": [
         "lib/clock_compat.c",
+        "radiant/ime_mac_static.cpp",
         "radiant/rdt_video_stub.cpp"
       ],
       "additional_source_files": [],

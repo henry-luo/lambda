@@ -44,6 +44,14 @@ extern Element* input_create_element_internal(Input *input, const char* tag_name
 
 extern TypeMap EmptyMap;
 
+static inline Item mark_item_from_bits(uint64_t bits) {
+    // clang 14 rejects designated Item initializers in instantiated deep-copy
+    // branches, so construct the same tagged word through its raw field.
+    Item result = ItemNull;
+    result.item = bits;
+    return result;
+}
+
 //==============================================================================
 // MarkBuilder Implementation
 //==============================================================================
@@ -888,7 +896,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         Symbol* sym = typed.ptr();
         if (!sym) return createNull();
         Symbol* copied_sym = createSymbol(sym->chars, sym->len);
-        return {.item = y2it(copied_sym)};
+        return mark_item_from_bits(y2it(copied_sym));
     } else if constexpr (Tag == LMD_TYPE_STRING) {
         String* str = typed.ptr();
         if (!str) return createNull();
@@ -898,7 +906,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         if (!bin) return createNull();
         Binary* copied = createBinary(binary_data(bin), binary_length(bin));
         if (!copied) return createNull();
-        return {.item = x2it(copied)};
+        return mark_item_from_bits(x2it(copied));
     } else if constexpr (Tag == LMD_TYPE_DTIME) {
         DateTime* dt = typed.ptr();
         return dt ? createDateTime(*dt) : ItemNull;
@@ -920,7 +928,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         new_arr->capacity = new_arr->length = arr->length;
         new_arr->items = (int64_t*)((char*)new_arr + sizeof(ArrayNum));
         memcpy(new_arr->items, arr->items, arr->length * elem_size);
-        return {.array_num = new_arr};
+        return mark_item_from_bits((uint64_t)(uintptr_t)new_arr);
     } else if constexpr (Tag == LMD_TYPE_ARRAY) {
         Array* arr = typed.ptr();
         int64_t length = arr->length;       // arr->length is int64_t — do not truncate to int
@@ -1003,7 +1011,8 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
             case LMD_TYPE_RANGE: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
                 Container* container = *(Container**)dst_ptr;
                 if (container) {
-                    Item copied = deep_copy_internal({.container = container});
+                    Item container_item = mark_item_from_bits((uint64_t)(uintptr_t)container);
+                    Item copied = deep_copy_internal(container_item);
                     *(Container**)dst_ptr = copied.container;
                 }
                 break;
@@ -1015,7 +1024,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
             field = lam::shape_next(field);
         }
 
-        return {.object = new_obj};
+        return mark_item_from_bits((uint64_t)(uintptr_t)new_obj);
     } else if constexpr (Tag == LMD_TYPE_ELEMENT) {
         log_enter();
         Element* elem = typed.ptr();
@@ -1068,7 +1077,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         if (path && path_get_scheme(path) == PATH_SCHEME_SYS) {
             // If already resolved, deep-copy the result
             if (path->result != 0) {
-                return deep_copy_internal({.item = path->result});
+                return deep_copy_internal(mark_item_from_bits(path->result));
             }
             // Note: path_resolve_for_iteration is only available in full lambda runtime,
             // not in lambda-input library. Caller is responsible for resolving paths

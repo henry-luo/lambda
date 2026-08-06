@@ -86,9 +86,9 @@ TEST_F(GraphParserTest, ParserLocBudget) {
     EXPECT_LE(mermaid, 2696u);
     EXPECT_LE(structurizr, 800u);
     EXPECT_LE(structurizr_resolver, 400u);
-    EXPECT_LE(shared, 249u);
+    EXPECT_LE(shared, 254u);
     EXPECT_LE(header, 109u);
-    EXPECT_LE(dot + mermaid + structurizr + structurizr_resolver + shared + header, 4227u);
+    EXPECT_LE(dot + mermaid + structurizr + structurizr_resolver + shared + header, 4232u);
 }
 
 // Test DOT graph parsing

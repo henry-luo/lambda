@@ -14867,7 +14867,10 @@ static inline Item js_entry_invoke_body(JsFunction* fn, const Item* a,
         return ItemError;
     }
     if (HasEnv) {
-        Item env = {.item = (uint64_t)fn->env};
+        // clang 14 rejects a designated initializer here after template
+        // instantiation, although the same extension works in non-template code.
+        Item env = ItemNull;
+        env.item = (uint64_t)fn->env;
         if (ContextAbi) {
             if (PublicAbi) {
                 if (N == 0) return ((JsEntryCP1H)p)(runtime, env, home);
