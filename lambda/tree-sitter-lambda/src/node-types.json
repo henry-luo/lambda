@@ -1196,6 +1196,11 @@
     "fields": {}
   },
   {
+    "type": "current_error_expr",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "document",
     "named": true,
     "root": true,
@@ -4382,6 +4387,10 @@
         },
         {
           "type": "call_expr",
+          "named": true
+        },
+        {
+          "type": "current_error_expr",
           "named": true
         },
         {

@@ -55,6 +55,7 @@ extern "C" {
 
 // Pipe expression current item references (pipe is now part of binary_expr)
 #define SYM_CURRENT_EXPR sym_current_expr
+#define SYM_CURRENT_ERROR_EXPR sym_current_error_expr
 #define SYM_LAST_INDEX sym_last_index
 
 #define SYM_ASSIGN_EXPR sym_assign_expr
@@ -476,6 +477,11 @@ typedef struct Transpiler : Script {
     // syntactically consumed before the handler body.  Suppress propagation
     // validation while that operand is being built; the handler owns routing.
     bool building_handler_operand;
+
+    // A bare `^`/`^.`/`^[...]` is valid only while building a handler body.
+    // Keep this separate from `building_handler_operand`: nested handlers may
+    // use the enclosing handler error in their operand.
+    bool building_handler_body;
 
     // 'that' clause context: when true, bare identifiers not found in scope
     // are rewritten to ~.name (member access on current item)

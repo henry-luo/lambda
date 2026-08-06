@@ -1014,6 +1014,10 @@ static void emit_expr(const char* source, AstNode* node) {
         printf("~#");
         break;
 
+    case AST_NODE_CURRENT_ERROR:
+        printf("^");
+        break;
+
     case AST_NODE_BINARY: {
         AstBinaryNode* bn = (AstBinaryNode*)node;
         if (bn->op == OPERATOR_IS_NAN) {
@@ -2088,6 +2092,7 @@ static const char* ast_dump_kind_name(AstNodeType type) {
         case AST_NODE_PIPE: return "AST_NODE_PIPE";
         case AST_NODE_CURRENT_ITEM: return "AST_NODE_CURRENT_ITEM";
         case AST_NODE_CURRENT_INDEX: return "AST_NODE_CURRENT_INDEX";
+        case AST_NODE_CURRENT_ERROR: return "AST_NODE_CURRENT_ERROR";
         case AST_NODE_LAST_INDEX: return "AST_NODE_LAST_INDEX";
         case AST_NODE_CONTENT: return "AST_NODE_CONTENT";
         case AST_NODE_ELEMENT: return "AST_NODE_ELEMENT";
