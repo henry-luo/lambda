@@ -4277,6 +4277,10 @@
           },
           {
             "type": "SYMBOL",
+            "name": "current_error_expr"
+          },
+          {
+            "type": "SYMBOL",
             "name": "variadic"
           }
         ]
@@ -6188,6 +6192,17 @@
             "value": "~"
           }
         ]
+      }
+    },
+    "current_error_expr": {
+      "type": "PREC",
+      "value": 100,
+      "content": {
+        "type": "TOKEN",
+        "content": {
+          "type": "STRING",
+          "value": "^"
+        }
       }
     },
     "_at": {

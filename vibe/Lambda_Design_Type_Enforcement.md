@@ -6,7 +6,10 @@ firewall, E228 acknowledgment forms, `or`-narrowing, fault channel), tracked in
 [`vibe/Lambda_Impl_Type_Enforce.md`](Lambda_Impl_Type_Enforce.md). The annotation-performance
 work explicitly deferred by §1/§9 remains a separate follow-on. TE-15 (soft-error containment:
 skip to the closest safe boundary) and TE-16 (the `^ { }` handler; `let a^err` and `if (^err)`
-retired) decided 2026-08-01, neither yet implemented.
+planned separately) decided 2026-08-01; the handler grammar/runtime slice is now landed. Rev 5
+(2026-08-06)
+assigns the handler-local error to `^`
+(`^`, `^.field`, `^[index]`) and leaves `~` under its existing current-value rules.
 **Date:** 2026-07-29; revised 2026-07-30; TE-15 and TE-16 added 2026-08-01
 **Scope:** making declared types *binding* — statically checked where provable, runtime-enforced
 where not, never silently dropped or lossy. This document is **only about enforcement
@@ -1471,14 +1474,17 @@ ANY-poisoning this design exists to remove), or a polled side-flag (cost on ever
 context-selected forms:
 
 ```lambda
-let a = e ^ { … ~ … }      // expression form: the whole handler has a value
+let a = e ^ { … ^ … }      // expression form: ^ is the handled error
 pn_call() ^ {               // statement form: handle, then continue
-    … ~ …
+    … ^ …
 }
 ```
 
-`let a^err = e` and the prefix error test `if (^err)` are **retired**. This closes the last
-"static type lies" hole in the language and reduces `^` from four roles to three.
+The planned retirement of `let a^err = e` and the old prefix error test `if (^err)` remains a
+separate migration pass; the current implementation keeps those legacy forms for compatibility.
+A bare `^`, `^.field`, or `^[index]` is now a current-error reference only inside an active handler body; `^ { … }`
+inside that body always starts a nested prefix handler. This keeps the error channel consistently
+spelled with `^` while leaving `~` available for its existing current-value contexts.
 
 #### Why the destructure had to go
 
@@ -1533,15 +1539,18 @@ then resumes after the handled statement.
   shorthand for value-level error matching, not a contextual checked-cast construct.
 - **Statement (`stam`) form.** `pn_call() ^ { H }` protects a procedural call whose value is
   discarded. Success continues with the next statement. On error, `H` runs as a statement body
-  with `~` bound; if `H` completes normally, execution likewise continues after the handled
+  with `^` bound to the handled error; if `H` completes normally, execution likewise continues after the handled
   statement. No handler-result type is required. `return` or `raise` in `H` still acts on the
   enclosing procedure.
 - **No implicit divergence rule.** In expression position the handler may return any value; its
   union participates in ordinary contextual typing. In statement position it may complete
   normally. Letting some enclosing block skip is a runtime outcome, never a static claim that the
   handler diverges.
-- **`~` binds the error**, consistent with `match` arms and pipes. Nested `^` inside a `match`
-  arm shadows innermost-wins.
+- **`^` binds the handler error.** Bare `^`, `^.field`, and `^[index]` are valid only inside an
+  active handler body and resolve to the innermost handler's error. The handler introduces no
+  `~` binding: `~` remains the current item/index or object model supplied by its enclosing
+  pipe, match, constraint, or view context. A nested `^ { ... }` is always a nested prefix
+  handler; it is never parsed as current-error `^` followed by a block.
 - **Channel-agnostic**, per TE-13: `^ { }` discharges both raised (`T^E`) and soft
   (`T | error`) errors.
 
@@ -1568,7 +1577,7 @@ division of labor:
 | Form | Catches | Error accessible |
 |---|---|---|
 | `e or default` | falsy: error, null, false, `""` | no |
-| `e ^ { … ~ … }` | error only | yes, as `~` |
+| `e ^ { … ^ … }` | error only | yes, as `^` |
 | `e^` | error only | no — propagates |
 
 Note this corrects a tempting mis-framing: `or` and `^` are **not** a soft/hard split. Both
@@ -1578,11 +1587,11 @@ real distinction is coalescing-without-access versus error-specific-with-access 
 
 #### Retiring `if (^err)`
 
-With the destructure gone there is no `err` binding convention to test, and the general
-spelling already works: **`err is error`** (verified 2026-08-01). This removes the
-prefix-unary `^` (`grammar.js:542`), leaving `^` with three roles — postfix propagate
-(`:466`), infix handler (new), and the type-level channel (`:1080`, `:1139`) — all meaning
-"the error channel".
+The migration spelling **`err is error`** is available for new code (verified 2026-08-01), while
+the legacy destructure and prefix test remain accepted until their separate retirement pass. The
+handler-local current-error atom adds a distinct scoped use of `^`: postfix propagation, braced
+handler delimitation/prefix shorthand, the type-level channel, and the handler-local current error
+remain separate contexts. Outside a handler body, a bare `^` is not a value expression.
 
 #### Acknowledgement taxonomy for the enforcing channel
 
@@ -1647,8 +1656,10 @@ error to allowed is backward-compatible, so no code written under the rejection 
   consumed by a common tail or leaves the scope. Rewrite a command-style capture as
   `pn_call() ^ { H }`; its handler may complete and execution continues afterward.
 - Rewrite `if (^err)` as `if (err is error)`.
-- Grammar: remove `:542`'s prefix `^` and `:702`'s destructure; add the braced infix form;
-  `make generate-grammar` (never hand-edit `parser.c`).
+- Grammar: in the future retirement pass, remove the legacy prefix-unary error test and old
+  destructure production; the landed slice adds the braced handler plus `current_error_expr` (`^`,
+  `^.field`, `^[index]`) with handler-body scope. Run `make generate-grammar` (never hand-edit
+  `parser.c`).
 - **E228 diagnostics advertise the retired form verbatim** — "use `d(...)^` to propagate,
   `let result^err = d(...)` to capture, or `d(...) or default` to recover"
   (`build_ast.cpp:5199`, `:9017`). They must be updated in the same change or they will

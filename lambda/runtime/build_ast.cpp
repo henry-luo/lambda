@@ -5501,6 +5501,20 @@ AstNode* build_current_expr(Transpiler* tp, TSNode node) {
     }
 }
 
+// Build the handler-local current error reference (`^`).  The grammar admits
+// the token as a primary so ordinary member/index builders can compose with it;
+// semantic scope is enforced here rather than letting `^` become a global value.
+static AstNode* build_current_error_expr(Transpiler* tp, TSNode node) {
+    AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_ERROR, node, sizeof(AstNode));
+    ast_node->type = &TYPE_ERROR;
+    if (!tp->building_handler_body) {
+        record_semantic_error(tp, node, ERR_INVALID_EXPR_CONTEXT,
+            "current error `^` is only valid inside an error-handler body");
+    }
+    log_debug("build current handler error (^)");
+    return ast_node;
+}
+
 static AstNode* build_null_noop(Transpiler* tp, TSNode source_node) {
     AstPrimaryNode* null_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY,
         source_node, sizeof(AstPrimaryNode));
@@ -10099,7 +10113,12 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     // ast_node->locals->parent = tp->current_scope;
     // tp->current_scope = ast_node->locals;
     TSNode fn_body_node = ts_node_child_by_field_id(func_node, FIELD_BODY);
+    bool saved_handler_body = tp->building_handler_body;
+    // A function literal created inside a handler is a separate callable
+    // scope; its body cannot capture the handler's ephemeral current error.
+    tp->building_handler_body = false;
     ast_node->body = build_expr(tp, fn_body_node);
+    tp->building_handler_body = saved_handler_body;
 
     // determine the function return type
     fn_type->inferred_return = is_proc ? infer_procedural_return_type(tp, ast_node) :
@@ -10545,7 +10564,12 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
 
                     // Build function body
                     TSNode fn_body_node = ts_node_child_by_field_id(child, FIELD_BODY);
+                    bool saved_handler_body = tp->building_handler_body;
+                    // A function body is compiled independently of the
+                    // surrounding handler and cannot use its current error.
+                    tp->building_handler_body = false;
                     fn_node->body = build_expr(tp, fn_body_node);
+                    tp->building_handler_body = saved_handler_body;
 
                     fn_type->inferred_return = fn_type->is_proc ?
                         infer_procedural_return_type(tp, fn_node) :
@@ -10851,7 +10875,10 @@ static AstNode* build_handler(Transpiler* tp, TSNode handler_node,
     tp->building_handler_operand = true;
     ast_node->operand = build_expr(tp, operand_node);
     tp->building_handler_operand = saved_handler_operand;
+    bool saved_handler_body = tp->building_handler_body;
+    tp->building_handler_body = true;
     ast_node->body = build_expr(tp, body_node);
+    tp->building_handler_body = saved_handler_body;
 
     // The legacy postfix caret is consumed by call_expr when it is followed
     // by a braced handler.  It marks propagation only when no handler owns
@@ -10981,6 +11008,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_binary_expr(tp, expr_node);
     case SYM_CURRENT_EXPR:
         return build_current_expr(tp, expr_node);
+    case SYM_CURRENT_ERROR_EXPR:
+        return build_current_error_expr(tp, expr_node);
     case SYM_LET_EXPR:
         return build_let_expr(tp, expr_node);
     case SYM_LET_BLOCK:

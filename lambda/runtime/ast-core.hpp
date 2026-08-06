@@ -136,6 +136,9 @@ typedef enum AstNodeType : uint16_t {
     AST_NODE_EVENT_HANDLER = 542,
     AST_NODE_HANDLER_EXPR = 543,
     AST_NODE_HANDLER_STAM = 544,
+    // `^` is the current error value only while building/transpiling a
+    // braced error-handler body; it is distinct from `~` current-item state.
+    AST_NODE_CURRENT_ERROR = 545,
 } AstNodeType;
 
 typedef enum Operator {

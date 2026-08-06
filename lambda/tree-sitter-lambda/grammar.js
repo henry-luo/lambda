@@ -502,6 +502,7 @@ module.exports = grammar({
       $.let_block,    // let-block: (let x = a, expr) — sequential let bindings
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
       $.current_expr,   // ~ or ~# for pipe context
+      $.current_error_expr, // ^ inside an active error-handler body
       $.variadic,       // ... (to prevent ... being parsed as .. + .)
     )),
 
@@ -665,6 +666,12 @@ module.exports = grammar({
 
     // Current item (~) or key/index (~#) reference in pipe context
     current_expr: _ => token(choice('~#', '~')),
+
+    // Current error reference.  The token is admitted by the general
+    // expression grammar so member/index parsing can reuse the normal
+    // primary rules; build_ast enforces that it occurs only in a handler
+    // body.  `^ { ... }` remains the prefix-handler opener by precedence.
+    current_error_expr: _ => prec(100, token('^')),
 
     _at: _ => token(prec(2, 'at')),
     _into: _ => token(prec(2, 'into')),

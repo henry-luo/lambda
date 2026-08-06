@@ -263,7 +263,8 @@ $(TREE_SITTER_LIB):
 
 # Build tree-sitter-lambda library (depends on parser generation)
 $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
-	$(call ts_lib_build,lambda,)
+	# pass the pinned CLI because the sub-make otherwise falls back to an unqualified tree-sitter
+	$(call ts_lib_build,lambda,TS="$(TREE_SITTER_CLI)")
 
 # Build tree-sitter-javascript library (depends on scanner source)
 $(TREE_SITTER_JAVASCRIPT_LIB): $(JS_SCANNER_C)

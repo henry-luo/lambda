@@ -196,8 +196,8 @@ struct MirTranspiler {
     bool in_pipe;
     AstNode* last_index_object;
 
-    // Handler bodies resolve `~` against the operand's failure Item.  This is
-    // a lexical lowering context, independent of the pipe current-item lane.
+    // Handler bodies resolve `^` against the operand's failure Item.  `~`
+    // remains the ordinary current-item lane and is not rebound by a handler.
     MIR_reg_t handler_error_reg;
     bool in_handler;
     bool in_handler_operand;
@@ -17487,13 +17487,22 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
     case AST_NODE_PIPE:
         return transpile_pipe(mt, (AstPipeNode*)node);
     case AST_NODE_CURRENT_ITEM: {
-        if (mt->in_handler) return mt->handler_error_reg;
         if (mt->in_pipe) return mt->pipe_item_reg;
         // in view/edit template context, ~ resolves to the model parameter
         if (mt->in_view_context) return mt->view_model_reg;
         MIR_reg_t r = new_reg(mt, "pipe_item", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
             MIR_new_int_op(mt->ctx, 0)));
+        return r;
+    }
+    case AST_NODE_CURRENT_ERROR: {
+        // The AST builder rejects this node outside a handler body.  Keep a
+        // defensive fallback here so malformed trees cannot read an unset MIR
+        // register and turn a syntax diagnostic into a native crash.
+        if (mt->in_handler) return mt->handler_error_reg;
+        MIR_reg_t r = new_reg(mt, "handler_error_outside", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+            MIR_new_uint_op(mt->ctx, ITEM_ERROR)));
         return r;
     }
     case AST_NODE_CURRENT_INDEX: {

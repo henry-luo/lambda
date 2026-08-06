@@ -1,7 +1,7 @@
 # Lambda — Error Handling Implementation Plan (TE-15 / TE-16 / TE-17 / TE-18)
 
-**Status:** IMPLEMENTATION IN PROGRESS — rev 4, 2026-08-06. **Semantically decision-complete;
-the first handler, fault-frame, typed-lane, and cross-frame-state slices are landed.** Rev 4
+**Status:** IMPLEMENTATION IN PROGRESS — rev 5, 2026-08-06. **Semantically decision-complete;
+the first handler, fault-frame, typed-lane, and cross-frame-state slices are landed.** Rev 5
 separates value flow from control routing, narrows `may_defect` to
 escaping boundary defects, makes signal/recovery ownership an explicit phase, and resolves the
 remaining destination, store, handler-context, precedence, and V1 proof obligations. The
@@ -26,7 +26,10 @@ must reconcile its §7.3, §11.4, and §13 invariant 7 wording with these accept
 `Lambda_Impl_Type_Enforce (done).md` (round-2 enforcement, whose `emit_checked_boundary` choke
 point is where TE-15 attaches).
 
-**Revision history.** Rev 4 (2026-08-06) incorporates the remaining review revisions: `SOFT_VALUE`
+**Revision history.** Rev 5 (2026-08-06) assigns the handler-local current error to `^`: bare
+`^`, `^.field`, and `^[index]` are valid only inside an active handler body, while `~` keeps its
+existing current-value semantics. A `^ { … }` sequence inside a handler body is always a nested
+prefix handler. Rev 4 (2026-08-06) incorporates the remaining review revisions: `SOFT_VALUE`
 is explicitly not a control route; declaration skips, raised errors, and faults use separate
 contexts; function-boundary defect materialization is specified; fixed native stores receive a
 single classification; `may_defect` excludes resource faults; fault-catching is procedural;
@@ -49,7 +52,7 @@ A→P2+P4, B→P2+P4, C→P5, D→P1+P5, E→P3+P4.
 
 **What is being built, in one line.** Soft errors remain ordinary values in expressions; a
 failed declared boundary cannot establish or update its target and follows its local containment
-rule; `e ^ { … ~ … }` explicitly recovers an error outcome before any surrounding boundary is
+rule; `e ^ { … ^ … }` explicitly recovers an error outcome before any surrounding boundary is
 checked.
 
 ---
@@ -67,8 +70,10 @@ Six coupled changes:
    the call-expression error, and return mismatch becomes the callable's defect outcome.
 3. **TE-17 lane gating** — acceptance is read from the destination *contract*; a value inferable
    only as `T | error` cannot enter a native lane at all (§5.2).
-4. **TE-16 handler** — brace-delimited with `~` bound to the error: value-producing
-   `e ^ { … }` in expression context, and continuing `pn_call() ^ { …; }` in statement context.
+4. **TE-16 handler** — brace-delimited with `^` bound to the handled error: value-producing
+  `e ^ { … }` in expression context, and continuing `pn_call() ^ { …; }` in statement context.
+  The handler does not rebind `~`; pipes, matches, and object contexts keep their ordinary
+  current-value meaning.
    In procedural context it also covers the system-fault regime; pure `fn` handlers cover value
    and raised-error outcomes only (§6.2).
 5. **Two retirements** — `let a^err = e` and prefix `if (^err)`.
@@ -369,7 +374,11 @@ own bisect point. H2/H3/H4 remain the portability/performance audit in §8.3.
     remains an expression-form expression statement; a `pn` call cannot be smuggled into an
     expression by writing a value-looking handler body.
   - Keep the type-level `^` untouched.
-  - `~` needs no new token: `current_expr` already exists in `grammar.js`.
+  - Add a `current_error_expr` grammar symbol for bare `^`. It is semantically valid only while
+    building an active handler body; `^.` and `^[...]` reuse ordinary member/index productions.
+    A `^ { ... }` sequence in that body is always parsed as a nested prefix handler, never as a
+    current-error expression followed by a block. `~` keeps the existing `current_expr` token and
+    is not rebound by the handler.
 - **No contextual boundary fusion.** In `let v: T = e ^ { h }`, lower the complete handler
   expression first and then run the ordinary declaration boundary. A failure of that outer
   `T` check skips exactly like `let v: T = e`; it is not delivered back into `h`. The same rule
@@ -426,15 +435,17 @@ Before P4 can retire the old form, P3 must specify and implement:
 
 ### 6.3 AST and typing
 
-- **Handler node + `~` binding.** Model on the `match`-arm path, which already binds `~` per arm
-  and narrows it (`AST_NODE_MATCH_ARM`; arm classification in `match_arm_is_error_handler`).
-  Form the handled-error type from every statically possible operand outcome: error constituents
-  of the value type, the declared raised channel, and generic `error` when `may_defect` is set.
+- **Handler node + `^` binding.** Model the handler error as a distinct current-error AST node,
+  separate from `AST_NODE_CURRENT_ITEM`/`AST_NODE_CURRENT_INDEX`. Form the handled-error type from
+  every statically possible operand outcome: error constituents of the value type, the declared
+  raised channel, and generic `error` when `may_defect` is set.
   In procedural fault-capable context, union generic `error` for the unchecked system channel as
   well. Normalization may therefore collapse a more precise union to `error`; do not promise
-  subtype precision the runtime cannot preserve. Implement `~` through a **nested current-value
-  context stack** — the existing match/pipe machinery is not sufficient for reliable innermost
-  shadowing or precise error typing. Shadowing rule: innermost `~` wins.
+  subtype precision the runtime cannot preserve. Lower `^` through the existing nested handler
+  error register/context stack; the innermost active handler wins. Do **not** route ordinary `~`
+  nodes through that register: `~` remains the current item/index or object model according to
+  the enclosing pipe, match, constraint, or view context. A plain handler introduces no new `~`
+  binding.
 - **Expression-form typing**, mirroring `or`: `type(e ^ h) = (type(e) \ error) | type(h)`.
   Unannotated bindings infer that union. A surrounding declared `T` applies the ordinary static
   proven/rejected/deferred rules to the complete union; there is no handler-specific requirement
@@ -576,7 +587,7 @@ keeps its `*.txt` golden in step.
 - **Rescue elision.** In `let a: T = e ^ { 0 }`, an error edge originating while evaluating `e`
   may branch straight to the handler and avoid materializing an error object (keep the
   origination log line as the breadcrumb). This never includes failure of the surrounding `T`
-  boundary, which runs after the handler expression. The optimization is valid **only when `~`
+  boundary, which runs after the handler expression. The optimization is valid **only when `^`
   is unused in the handler** and the operand origin supports a status-only path. After the outer
   boundary succeeds, `a` enters its native lane.
 - Whether `or`-left rescue should also elide materialization (same conditions).
@@ -752,15 +763,17 @@ Lambda's own `setjmp` users, excluding vendored code and tests:
 **Test additions beyond the per-zone tests.**
 
 - A handler grammar/precedence matrix: calls, operators, pipes, member access, indexing,
-  parentheses, nested handlers, `or`, `f()^ - 1`, and expression-versus-statement classification.
+  parentheses, nested handlers, handler-local `^`/`^.`/`^[...]`, `~` current-value behavior,
+  `or`, `f()^ - 1`, and expression-versus-statement classification.
 - Expression boundary order: `let v: T = e ^ { h }` evaluates the whole handler first, then checks
   `T`; its mismatch is not caught by `h`. Statement form runs `H` only on `pn_call()` failure and
   continues after `H` completes.
 - The exact handler binding table from §6.1, asserted as AST shapes rather than only parse success.
 - Negative context parses/builds: a statement handler whose operand is not a `pn` call, a `pn`
   call forced into expression form, and a handler-protected operand that may `await`.
-- `~` typing across a returned union error, declared `^E`, implicit `may_defect`, and procedural
-  system fault, including normalization to generic `error` when precision cannot be preserved.
+- `^` typing across a returned union error, declared `^E`, implicit `may_defect`, and procedural
+  system fault, including normalization to generic `error` when precision cannot be preserved;
+  `~` remains independent and follows its enclosing current-value context.
 - Typed-container rejection versus inferred/error-admitting acceptance (TE-17): explicit
   `T | error` store rejection, inferred Item-lane widening, dynamic checked-store success/failure,
   failed-store atomicity, and earlier-mutation partial state.
@@ -780,7 +793,8 @@ Lambda's own `setjmp` users, excluding vendored code and tests:
 - Per zone: binding failure collapses the block to the error; a `for` body yields per-item errors
   and keeps iterating (the batch theorem, on an Item-lane container); statements after a failed
   declaration boundary are not evaluated, while expression interiors retain ordinary contagion;
-  handler exit via `raise`/`return`; `~` shadowing inside a `match` arm.
+  handler exit via `raise`/`return`; innermost handler-error `^` and independent `~` shadowing
+  inside a `match`/pipe arm.
 - Cross-frame reassignment: `mutate(); use(x)` is a compile error;
   `mutate()` with no later `x` read and `x = mutate(); use(x)` are legal; merges, loop backedges,
   RHS self-reads, argument/member/index reads, existing-closure reads, and bounded indirect-call
