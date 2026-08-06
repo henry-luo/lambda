@@ -104,6 +104,7 @@ typedef struct JsMirReference {
     bool is_private;
     bool computed_key;
     const char* named_key;
+    PropertyKeyRef named_key_ref;
     int named_key_len;
     uint64_t named_key_item;
     const char* profile_label;

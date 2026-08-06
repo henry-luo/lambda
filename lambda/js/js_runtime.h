@@ -11,6 +11,7 @@ extern "C" {
 #endif
 
 #include "../lambda.h"
+#include "../core/name_identity.h"
 #include <string.h>
 
 static inline bool js_map_kind_uses_default_object_to_primitive(uint8_t map_kind) {
@@ -192,8 +193,11 @@ Item js_private_field_define(Item object, Item private_key, Item value);
 Item js_create_data_property(Item object, Item key, Item value);
 Item js_property_access(Item object, Item key);
 Item js_property_access_named_ic(Item object, const char* name, int64_t name_len, JsLoadIC* ic);
+Item js_property_access_key_ic(Item object, PropertyKeyRef key, JsLoadIC* ic);
 Item js_property_set_named_ic(Item object, const char* name, int64_t name_len, Item value,
     int64_t strict, JsStoreIC* ic);
+Item js_property_set_key_ic(Item object, PropertyKeyRef key, Item value, int64_t strict,
+    JsStoreIC* ic);
 
 // =============================================================================
 // Array Functions

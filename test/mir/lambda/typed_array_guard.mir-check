@@ -26,7 +26,7 @@
       "expect_seq": [
         { "pattern": "call\tensure_typed_array_p, ensure_typed_array" },
         { "pattern": "call\tlambda_module_const_at_p" },
-        { "pattern": "call\tlambda_array_set_checked_inplace_p, lambda_array_set_checked_inplace" }
+        { "pattern": "call\tlambda_array_set_checked_inplace_lane_p, lambda_array_set_checked_inplace_lane" }
       ]
     },
     {

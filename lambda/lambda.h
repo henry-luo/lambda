@@ -2180,6 +2180,12 @@ extern "C" {
         const char* boundary);
     Item lambda_array_set_checked_inplace(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary);
+    Item lambda_array_set_checked_lane(Item owner, int64_t index, Item value, Type* expected,
+        const char* boundary, uint8_t lane_kind, uint8_t lane_nullable,
+        uint8_t lane_byte_size);
+    Item lambda_array_set_checked_inplace_lane(Item owner, int64_t index, Item value,
+        Type* expected, const char* boundary, uint8_t lane_kind, uint8_t lane_nullable,
+        uint8_t lane_byte_size);
     Bool fn_is_nan(Item a);  // IEEE NaN check: expr is nan
     Bool fn_in(Item a, Item b);
     Bool fn_at(Item a, Item b);

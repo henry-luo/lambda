@@ -8027,7 +8027,15 @@ static inline bool js_load_ic_offset_ok(Map* m, int64_t byte_offset) {
 }
 
 static inline bool js_load_ic_name_matches(ShapeEntry* entry,
-        const char* name, int name_len, uint32_t name_id) {
+        const char* name, int name_len, uint32_t name_id, PropertyKeyRef key_ref) {
+    if (key_ref) {
+        // A predefined catalog ID is definitive even when an input-owned shape
+        // has no runtime key reference; otherwise use the canonical key pointer
+        // and retain byte matching only for id-less ordinary names (NI10).
+        NameId key_id = property_key_id(key_ref);
+        if (key_id != NAME_ID_NONE && entry && entry->predefined_id == key_id) return true;
+        return typemap_shape_key_equals(entry, key_ref);
+    }
     return typemap_shape_name_equals_hash(entry, name, name_len, name_id);
 }
 
@@ -8080,7 +8088,7 @@ static inline bool js_load_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
 }
 
 static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
-        uint32_t name_id,
+        uint32_t name_id, PropertyKeyRef key_ref,
         JsLoadICEntry* out_entry, Item* out_value, JsLoadICProfileReason* out_reason) {
     if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
     if (!out_entry || !out_value || !name || name_len < 0) return false;
@@ -8100,12 +8108,13 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
         return false;
     }
 
-    ShapeEntry* entry = typemap_hash_lookup_by_hash(tm, name, name_len, name_id);
+    ShapeEntry* entry = key_ref ? typemap_hash_lookup_key(tm, key_ref) :
+        typemap_hash_lookup_by_hash(tm, name, name_len, name_id);
     if (!entry) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
         return false;
     }
-    if (!js_load_ic_name_matches(entry, name, name_len, name_id)) {
+    if (!js_load_ic_name_matches(entry, name, name_len, name_id, key_ref)) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NAME;
         return false;
     }
@@ -8166,8 +8175,8 @@ static Item js_property_access_named_ic_slow(Item object, const char* name,
     return js_property_access(object, key);
 }
 
-extern "C" Item js_property_access_named_ic(Item object, const char* name,
-        int64_t name_len64, JsLoadIC* ic) {
+static Item js_property_access_named_ic_impl(Item object, const char* name,
+        int64_t name_len64, PropertyKeyRef key_ref, JsLoadIC* ic) {
 #if !LAMBDA_INLINE_CACHE
     if (!name || name_len64 < 0 || name_len64 > 2147483647LL) {
         return js_property_access_named_ic_slow(object, name, 0, ic);
@@ -8180,8 +8189,8 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
         return js_property_access_named_ic_slow(object, name, 0, ic);
     }
     int name_len = (int)name_len64;
-    uint32_t name_id = ic->name_id;
-    if (!js_load_ic_key_matches(ic, name, name_len, &name_id)) {
+    uint32_t name_id = key_ref ? property_key_id(key_ref) : ic->name_id;
+    if (!key_ref && !js_load_ic_key_matches(ic, name, name_len, &name_id)) {
         js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_MISS_KEY);
         return js_property_access_named_ic_slow(object, name, name_len, ic);
     }
@@ -8222,7 +8231,7 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
         memset(&entry, 0, sizeof(entry));
         Item value = ItemNull;
         JsLoadICProfileReason miss_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
-        if (js_load_ic_build_entry(object, name, name_len, name_id,
+        if (js_load_ic_build_entry(object, name, name_len, name_id, key_ref,
                 &entry, &value, &miss_reason)) {
             if (!ic->name) {
                 ic->name = name;
@@ -8261,6 +8270,25 @@ extern "C" Item js_property_access_named_ic(Item object, const char* name,
 
     return js_property_access_named_ic_slow(object, name, name_len, ic);
 #endif
+}
+
+extern "C" Item js_property_access_named_ic(Item object, const char* name,
+        int64_t name_len64, JsLoadIC* ic) {
+    return js_property_access_named_ic_impl(object, name, name_len64, NULL, ic);
+}
+
+extern "C" Item js_property_access_key_ic(Item object, PropertyKeyRef key,
+        JsLoadIC* ic) {
+    // The key-specialized entry is an optimization boundary, not a semantic
+    // filter: an unexpected non-pooled key must retain ordinary named lookup.
+    if (!key || !string_is_pooled(key) || property_key_id(key) == NAME_ID_NONE) {
+        // ordinary pooled names can come from a different string pool; keep
+        // canonical named lookup so key identity cannot change DOM semantics.
+        return js_property_access_named_ic_impl(object,
+            key ? key->chars : NULL, key ? (int64_t)key->len : 0, NULL, ic);
+    }
+    return js_property_access_named_ic_impl(object, key->chars, (int64_t)key->len,
+        key, ic);
 }
 
 #if LAMBDA_INLINE_CACHE
@@ -8398,7 +8426,7 @@ static inline bool js_store_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
 }
 
 static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
-        uint32_t name_id,
+        uint32_t name_id, PropertyKeyRef key_ref,
         Item value, JsLoadICEntry* out_entry, JsStoreICProfileReason* out_reason) {
     if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
     if (!out_entry || !name || name_len < 0) return false;
@@ -8418,12 +8446,13 @@ static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
         return false;
     }
 
-    ShapeEntry* entry = typemap_hash_lookup_by_hash(tm, name, name_len, name_id);
+    ShapeEntry* entry = key_ref ? typemap_hash_lookup_key(tm, key_ref) :
+        typemap_hash_lookup_by_hash(tm, name, name_len, name_id);
     if (!entry) {
         if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
         return false;
     }
-    if (!js_load_ic_name_matches(entry, name, name_len, name_id)) {
+    if (!js_load_ic_name_matches(entry, name, name_len, name_id, key_ref)) {
         if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NAME;
         return false;
     }
@@ -8496,8 +8525,9 @@ static void js_store_ic_install(JsStoreIC* ic, const char* name, int name_len,
 }
 #endif
 
-extern "C" Item js_property_set_named_ic(Item object, const char* name,
-        int64_t name_len64, Item value, int64_t strict, JsStoreIC* ic) {
+static Item js_property_set_named_ic_impl(Item object, const char* name,
+        int64_t name_len64, PropertyKeyRef key_ref, Item value, int64_t strict,
+        JsStoreIC* ic) {
 #if !LAMBDA_INLINE_CACHE
     if (!name || name_len64 < 0 || name_len64 > 2147483647LL) {
         return js_property_set_named_ic_slow(object, name, 0, value, strict, ic);
@@ -8511,8 +8541,8 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
         return js_property_set_named_ic_slow(object, name, 0, value, strict, ic);
     }
     int name_len = (int)name_len64;
-    uint32_t name_id = ic->name_id;
-    if (!js_store_ic_key_matches(ic, name, name_len, &name_id)) {
+    uint32_t name_id = key_ref ? property_key_id(key_ref) : ic->name_id;
+    if (!key_ref && !js_store_ic_key_matches(ic, name, name_len, &name_id)) {
         js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_MISS_KEY);
         return js_property_set_named_ic_slow(object, name, name_len, value, strict, ic);
     }
@@ -8565,7 +8595,7 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
     JsLoadICEntry entry;
     memset(&entry, 0, sizeof(entry));
     JsStoreICProfileReason miss_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
-    if (js_store_ic_build_entry(object, name, name_len, name_id,
+    if (js_store_ic_build_entry(object, name, name_len, name_id, key_ref,
             value, &entry, &miss_reason)) {
         js_store_ic_install(ic, name, name_len, name_id, &entry);
     } else {
@@ -8573,6 +8603,27 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
     }
     return result;
 #endif
+}
+
+extern "C" Item js_property_set_named_ic(Item object, const char* name,
+        int64_t name_len64, Item value, int64_t strict, JsStoreIC* ic) {
+    return js_property_set_named_ic_impl(object, name, name_len64, NULL,
+        value, strict, ic);
+}
+
+extern "C" Item js_property_set_key_ic(Item object, PropertyKeyRef key, Item value,
+        int64_t strict, JsStoreIC* ic) {
+    // Preserve the named IC slow path if a caller hands this ABI an ordinary
+    // string; key identity is an optional proof, never a different behavior.
+    if (!key || !string_is_pooled(key) || property_key_id(key) == NAME_ID_NONE) {
+        // ordinary pooled names can come from a different string pool; keep
+        // canonical named lookup so key identity cannot change DOM semantics.
+        return js_property_set_named_ic_impl(object,
+            key ? key->chars : NULL, key ? (int64_t)key->len : 0, NULL,
+            value, strict, ic);
+    }
+    return js_property_set_named_ic_impl(object, key->chars, (int64_t)key->len,
+        key, value, strict, ic);
 }
 
 // Convert a UTF-16 unit index to the corresponding byte offset in a UTF-8 string.
