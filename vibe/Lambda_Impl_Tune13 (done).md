@@ -268,10 +268,14 @@ and `levenshtein` remain a separate conditional track.
   comprehension result; observed loops retain the old materializing path [S1.4, D3.2, D8.3].
 
 The structural fixtures are `test/mir/lambda/tune13_array_lane.ls` plus its expected output and
-MIR check, `test/mir/lambda/tune13_for_demand.ls` plus its expected output and MIR check, and the
-updated `typed_array_guard.mir-check`. The MIR budget was re-baselined for the justified guard
-growth: module instructions 1089, guarded-load instructions 102, guarded-store instructions 170;
-guarded-load roots/safepoints 3/4 and guarded-store roots/safepoints 5/7 [D8.6.1–D8.6.2].
+MIR check, `test/mir/lambda/tune13_for_demand.ls` plus its expected output and MIR check, the
+updated `typed_array_guard.mir-check`, `tune13_array_boundary.ls` plus its expected output and
+MIR check, and `tune13_native_facts.ls` plus its expected output and MIR check. The two new
+fixtures lock the stable exact-array occurrence boundary against its widened fallback and keep
+audited `abs`/`min` integer result facts native through typed locals and returns [S4.1, D2.4,
+D8.3.2–D8.3.3]. The MIR budget was re-baselined for the justified guard growth: module
+instructions 1089, guarded-load instructions 102, guarded-store instructions 170; guarded-load
+roots/safepoints 3/4 and guarded-store roots/safepoints 5/7 [D8.6.1–D8.6.2].
 
 ### P2 explicitly deferred
 
@@ -297,10 +301,10 @@ current untyped control or the archived row [S1.4–S1.6, D4.4].
 | Gate | Result |
 |---|---|
 | `make build-test` | pass; all test executables built |
-| `make test-lambda-baseline` | **3596/3596**: input 2104/2104, Lambda runtime 1492/1492 |
+| `make test-lambda-baseline` | **3600/3600**: input 2104/2104, Lambda runtime 1496/1496 |
 | `make test262-baseline` | **40261/40261**, zero failures, zero regressions; ref/test262 `673e9bacbe28590f501e2dcd817aadcc31899191` |
-| Focused MIR checks | Tune13 array lane, result-demand, and typed guard checks pass 3/3 |
-| Forced-GC/poison | Tune13 array lane stressed output matches; focused forced-GC pass 1/1; full MIR GC stress 30/30 |
+| Focused MIR checks | Tune13 fixtures pass 4/4; full MIR emission corpus 17/17; MIR ratchet 15/15 |
+| Forced-GC/poison | Tune13 array lane stressed output matches; focused forced-GC pass 1/1; full MIR GC stress 32/32 |
 | Typed rejection controls | typed write rejection plus nullable-array rejection pass 3/3 |
 | Regression probes | `nqueens`, `nqueens2`, and the sequential native-store probe pass after proof narrowing |
 | Release matrix | 56/56 MIR typed and Node rows; 44/56 C2MIR rows; three runs per row, exit status 0 |
