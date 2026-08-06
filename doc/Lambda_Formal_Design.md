@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.3.0 (2026-08-06)
+**Spec version:** 1.4.0 (2026-08-06)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -65,6 +65,68 @@ the decision records.
   budget is governed, emission size is ratcheted at 0% slack, module
   boundaries are link-checked, and **every module kind names its
   conformance gate; no module lands without its gate**. [Item_Boxing R7, MT7, SM5, JA9]
+
+### The invariant ledger (DI)
+
+Standing design invariants distilled from the rulings. Each holds in every
+build unless marked otherwise; any observed violation is a defect. The
+language-visible counterparts are the semantics spec's SI ledger.
+
+- **DI1 — The Item contract.** `sizeof(Item) == 8`, passed by value; leaf
+  pointers fit the low 56 bits; raw container pointers stay in the
+  supported low range and outside the inline-double discriminator space;
+  TBI/MTE top-byte metadata never leaks into an Item. [D2.1]
+- **DI2 — Canonical encoding.** One encoding per value per build;
+  `get_type_id` is the only semantic-type interface; a raw Item word
+  compare is never semantic equality unless canonicality proves it. [D2.1.2, D2.1.5]
+- **DI3 — The tag budget is governed.** 64 legal high-byte values under
+  inline doubles; claiming one updates the partition assertions and this
+  doc in the same change. [D2.1.4]
+- **DI4 — Lane sentinels are private.** Int-lane sentinels never escape
+  into an Item, container, or guest bridge; an INT-tagged Item always
+  decodes to a finite band value. [D2.2.2]
+- **DI5 — No sentinel laundering.** A nullable lane value is tested before
+  arithmetic, compare, deref, or typed store; a plain-`T` carrier never
+  holds a null sentinel; `box(NULL_LANE(T)) == ItemNull` exactly. [D2.5]
+- **DI6 — GC sees only pointers.** Numeric/bool sentinels and scalar homes
+  are never roots; the number stack is never scanned. [D2.5.1, D5.1.1, D5.2.2]
+- **DI7 — No scalar cells in the GC heap.** No `INT64`/`UINT64`/`FLOAT`
+  payload is ever a standalone GC allocation; an Item with those tags can
+  never point into the GC zone. [D2.7.1]
+- **DI8 — ArrayNum is null-free.** Its contract may be `T?`; its storage
+  never holds any null encoding — an admitted null store demotes first.
+  [D2.6.2]
+- **DI9 — Container-owned scalars.** A container's wide-scalar Items point
+  only into its own buffer; headers are never reallocated out from under
+  an identity. [D2.6.4]
+- **DI10 — The safepoint contract.** GC begins only inside a `MAY_GC`
+  call; `MAY_GC` is the default and `NO_GC` a mechanically verified claim;
+  all `MAY_GC` cleanup runs before watermark restoration. [D5.3.2, D5.1.4]
+- **DI11 — One context, no baked addresses.** One `EvalContext` per
+  isolate, one TLS root; no context-dependent value at a code-baked
+  address; capsules never reallocate. [D5.4]
+- **DI12 — Hot paths stay lock-free.** No lock, atomic RMW, publication
+  check, or coherence op is ever added to a repeated execution path. [D5.4.4]
+- **DI13 — Representation is carried.** Emitted MIR register classes are
+  never consulted for semantics, representation, nullability, or
+  ownership. [D2.4.1]
+- **DI14 — Entry integrity.** The unboxed entry has exactly two
+  proof-producing paths, and a guard-failing input never reaches it;
+  generated code is immutable — never patched. [D8.3.3, D8.4.1]
+- **DI15 — Nothing unwinds across a boundary.** Errors are return values
+  at every language and module boundary; no exception, `longjmp`, or guest
+  unwind crosses one; faults never cross a thread boundary. [D1.4, D6.3.3]
+- **DI16 — Transactional initialization.** A half-initialized package or a
+  failed module registration is never observable — init commits or rolls
+  back. [D7.2.2, D7.3.2]
+- **DI17 — One value currency.** `Item` crosses every boundary; a raw C
+  pointer never appears in a script-visible signature; compiled artifacts
+  are local derived caches, never distributed. [D7.4.1, D1.7]
+- **DI18 — The emission ratchet.** Budgets carry 0% slack; the commit that
+  grows emission carries the budget edit. [D8.6.1]
+- **DI19 — The COW bit.** The shared flag is monotonic; a false "shared"
+  is a wasted copy, a false "unique" is a semantic bug; the unique fast
+  path is one byte load/test/branch. [D4.4]
 
 ## D2 Data Representation
 
@@ -274,7 +336,7 @@ that carries them.
 
 - **D3.3.1** **Inference is unobservable — it buys performance only.**
   Erasing every inferred type and running boxed must produce identical
-  results; this is a verifiable property (semantics §S16.3), checked by
+  results; this is a standing invariant (semantics SI3), checked by
   the boxed-vs-JIT differential harness. [B7]
 - **D3.3.2** Entry-shape inference and body/result inference are
   **separate products**: float arithmetic on a parameter does not retype
