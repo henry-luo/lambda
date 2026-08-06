@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 1.1.0 (2026-08-06)
+**Spec version:** 1.1.1 (2026-08-06)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -121,11 +121,14 @@ harnesses.
 - **SI13 — No aliasing.** Values never alias; construction captures by
   value; cycles are unconstructible natively, so deep `==` terminates
   (depth-limited only against interop imports). [S9.1, S9.3, S5.1.3]
-- **SI14 — Error containment.** Every error value is deliberate; discharge
-  strips error constituents from its success type; no binding ever holds a
-  placeholder for a failure, at establishment or reassignment; no boundary
-  silently substitutes `0`, `null`, or reinterpreted bits. (Fault *timing*
-  is exempt from SI3.) [S7.4, S7.7, S11.4]
+- **SI14 — A binding's static type is never a lie.** If `x : T` is
+  readable, it holds a real `T`: failure either never reaches the binding
+  (establishment skips before it exists) or leaves it unchanged
+  (reassignment keeps the previous value) — never a null-for-failure
+  placeholder. Every error value is deliberate; discharge strips error
+  constituents from its success type; no boundary silently substitutes
+  `0`, `null`, or reinterpreted bits. (Fault *timing* is exempt from SI3.)
+  [S7.4, S7.7, S11.4]
 - **SI15 — Schedule invisibility.** `fn` results are identical under any
   schedule, thread count, or backend; builtin reductions are bit-identical
   by the pairwise spec; thread count is semantically unobservable.
@@ -549,8 +552,8 @@ it.* [TE-13, C14]
   Typing mirrors `or`: `type(e ^ h) = (type(e) \ error) | type(h)`. The
   handler produces a value of the expected type or does not complete normally
   (`raise` / `return`); either way the binding it feeds is **statically
-  clean** — *sound by construction*, no flow analysis, no binding ever holds
-  a placeholder for a failure. [TE-16]
+  clean** — *sound by construction*, no flow analysis: *a binding's static
+  type is never a lie* (SI14). [TE-16]
 - **S7.6.2** The handler is brace-delimited, mandatorily: `^` followed by `{`
   is the handler; `^` followed by anything else is propagation — a purely
   lexical discriminator (`f()^ - 1` propagates then subtracts). [TE-16]

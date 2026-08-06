@@ -6,14 +6,16 @@
 let CHRSZ = 8  // bits per input character (ASCII)
 let MASK32 = 0xFFFFFFFF
 
-// 32-bit addition relies on u32 wraparound.
+// 32-bit addition relies on u32 wraparound. Unsigned sized contracts reject
+// negative signed inputs, so normalize each signed 32-bit word before the
+// explicit conversion instead of relying on an invalid negative-to-u32 cast.
 // NOTE: locals derived from len() (slen/bin_len/x_len) stay unannotated — len() is
 // int64 and a declared `int` there miscompiles in the MIR JIT
 // (repro: temp/repro_declared_int_len_concat.ls); binb2hex also keeps no `string`
 // return type (repro: temp/repro_string_return_segv.ls)
 pn safe_add(x: int, y: int) int {
-    var ux: u32 = x
-    var uy: u32 = y
+    var ux: u32 = if (x < 0) { x + 4294967296 } else { x }
+    var uy: u32 = if (y < 0) { y + 4294967296 } else { y }
     return int(ux + uy)
 }
 
