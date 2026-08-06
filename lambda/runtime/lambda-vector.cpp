@@ -129,6 +129,14 @@ static void stable_sort_items_by_total_order(Item* items, int64_t len, bool desc
 // ArrayNum transforms used to fall back to generic Item arrays for the
 // representation-specific branches. Stage through Items for shared comparison
 // semantics, then restore the source lane type at the result boundary.
+static inline Item item_from_array_num(ArrayNum* array_num) {
+    // clang 14 rejects designated aggregate initialization when these results
+    // are returned from function templates, so assign the union field directly.
+    Item result = ItemNull;
+    result.array_num = array_num;
+    return result;
+}
+
 static Item array_num_from_items(ArrayNumElemType elem_type, Array* items) {
     if (!items) return ItemError;
 
@@ -4495,7 +4503,7 @@ static Item array_num_point_op(ArrayNum* in, Fn fn) {
         write_arr_elem_from_double(out, lin, fn(array_num_read_double(in, off)));
         for (int d = ndim - 1; d >= 0; d--) { if (++idx[d] < shp[d]) break; idx[d] = 0; }
     }
-    return { .array_num = out };
+    return item_from_array_num(out);
 }
 
 // invert(img): photographic negative, white - v.
@@ -4569,7 +4577,7 @@ static Item array_num_remap(ArrayNum* in, int ndim, const int64_t* str, int64_t 
             }
         }
     }
-    return { .array_num = out };
+    return item_from_array_num(out);
 }
 
 // flip(img, axis): axis 0 = vertical (reverse rows), 1 = horizontal (reverse cols).
@@ -4791,7 +4799,7 @@ static Item bilinear_gather(ArrayNum* in, int ndim, const int64_t* str, int64_t 
                 write_arr_elem_from_double(out, lin++, bilinear_sample(in, sy, sx, c, H, W, ndim, str, edge_clamp));
         }
     }
-    return { .array_num = out };
+    return item_from_array_num(out);
 }
 
 // resize(img, new_h, new_w) -> bilinear-resampled image (half-pixel-centre mapping).

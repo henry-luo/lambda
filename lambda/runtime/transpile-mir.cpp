@@ -2274,6 +2274,46 @@ static MIR_reg_t emit_item_tag(MirTranspiler* mt, MIR_reg_t item_reg) {
     return tag;
 }
 
+static MIR_reg_t emit_box_int_if_needed(MirTranspiler* mt, MIR_reg_t value) {
+    MIR_reg_t tag = emit_item_tag(mt, value);
+    MIR_reg_t is_item = new_reg(mt, "indexed_int_item", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_item),
+        MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, LMD_TYPE_INT)));
+    MIR_reg_t result = new_reg(mt, "indexed_int_boxed", MIR_T_I64);
+    MIR_label_t boxed = new_label(mt);
+    MIR_label_t done = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, boxed),
+        MIR_new_reg_op(mt->ctx, is_item)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, emit_box_int(mt, value))));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
+    emit_label(mt, boxed);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, value)));
+    emit_label(mt, done);
+    return result;
+}
+
+static MIR_reg_t emit_int_lane_if_item(MirTranspiler* mt, MIR_reg_t value) {
+    MIR_reg_t tag = emit_item_tag(mt, value);
+    MIR_reg_t is_item = new_reg(mt, "indexed_int_lane", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_item),
+        MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, LMD_TYPE_INT)));
+    MIR_reg_t result = new_reg(mt, "indexed_int_native", MIR_T_I64);
+    MIR_label_t boxed = new_label(mt);
+    MIR_label_t done = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, boxed),
+        MIR_new_reg_op(mt->ctx, is_item)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, value)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
+    emit_label(mt, boxed);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, emit_unbox(mt, value, LMD_TYPE_INT))));
+    emit_label(mt, done);
+    return result;
+}
+
 static void emit_return_if_item_error(MirTranspiler* mt, MIR_reg_t item_reg) {
     MIR_reg_t type_id = emit_item_tag(mt, item_reg);
     MIR_reg_t is_error = new_reg(mt, "stmt_err", MIR_T_I64);
@@ -4947,6 +4987,13 @@ static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
         if (var && (var->type_id == LMD_TYPE_ARRAY_NUM ||
                 var->type_id == LMD_TYPE_ARRAY) &&
                 var->elem_type != LMD_TYPE_ANY) return var->elem_type;
+        if (var && (var->type_id == LMD_TYPE_ARRAY_NUM ||
+                var->type_id == LMD_TYPE_ARRAY)) {
+            // mutation analysis may invalidate the runtime lane while the AST
+            // still carries the literal's homogeneous element type; keep the
+            // indexed result boxed instead of reviving that stale witness.
+            return LMD_TYPE_ANY;
+        }
     }
     Type* object_type = object ? object->type : NULL;
     if (object_type && (object_type->type_id == LMD_TYPE_ARRAY_NUM ||
@@ -6823,8 +6870,35 @@ static bool mir_binary_arithmetic_result_is_boxed(MirTranspiler* mt,
     return true;
 }
 
+static bool mir_value_expr_is_boxed(MirTranspiler* mt, AstNode* node) {
+    AstNode* evaluated = mir_unwrap_primary(node);
+    return evaluated && (evaluated->node_type == AST_NODE_MATCH_EXPR ||
+        (evaluated->node_type == AST_NODE_IF_EXPR &&
+         get_effective_type(mt, evaluated) == LMD_TYPE_ANY));
+}
+
 static MIR_reg_t mir_box_evaluated_node(MirTranspiler* mt, AstNode* node,
         MIR_reg_t value, TypeId type_id) {
+    AstNode* evaluated = mir_unwrap_primary(node);
+    if (type_id == LMD_TYPE_INT && evaluated &&
+            (evaluated->node_type == AST_NODE_CONTENT ||
+             evaluated->node_type == AST_NODE_LIST)) {
+        // List/content blocks may return either a native lane or an Item,
+        // depending on their final expression; normalize both carriers once.
+        return emit_box_int_if_needed(mt, value);
+    }
+    if (mir_value_expr_is_boxed(mt, node)) {
+        // nested value branches already publish a boxed Item; reboxing their
+        // static branch type interprets the Item tag as a numeric payload.
+        return value;
+    }
+    if (type_id == LMD_TYPE_INT &&
+            mir_unwrap_primary(node) &&
+            mir_unwrap_primary(node)->node_type == AST_NODE_INDEX_EXPR) {
+        // indexed reads may already carry an Item when the container witness
+        // is dynamic; preserve that carrier instead of tagging it a second time.
+        return emit_box_int_if_needed(mt, value);
+    }
     if (type_id == LMD_TYPE_DECIMAL || type_id == LMD_TYPE_COMPLEX) {
         // The arithmetic fallback unboxed concrete pointer-scalar results so
         // local/native users see the lane. A generic Item consumer must put
@@ -7052,8 +7126,7 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
             // (e.g. FLOAT for a side-effect-only block). Use ANY for CONTENT
             // branches to avoid type mismatches like emit_box_float(I64_reg).
             TypeId box_tid = then_tid;
-            if (if_node->then->node_type == AST_NODE_CONTENT ||
-                if_node->then->node_type == AST_NODE_LIST) {
+            if (mir_value_expr_is_boxed(mt, if_node->then)) {
                 box_tid = LMD_TYPE_ANY;
             }
             // Binary div/mod already returns a canonical boxed Item in an
@@ -7114,8 +7187,7 @@ static MIR_reg_t transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
                 MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
         } else if (need_boxing) {
             TypeId box_tid = else_tid;
-            if (if_node->otherwise->node_type == AST_NODE_CONTENT ||
-                if_node->otherwise->node_type == AST_NODE_LIST) {
+            if (mir_value_expr_is_boxed(mt, if_node->otherwise)) {
                 box_tid = LMD_TYPE_ANY;
             }
             // Keep the same single-box invariant on the else edge; this is
@@ -10279,16 +10351,25 @@ static bool side_effect_result_can_error(int node_type) {
 }
 
 static MIR_reg_t transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
+    AstNode* tail_value = mir_unwrap_primary(node);
     if (mt->native_return_tid == LMD_TYPE_INT && mt->native_body_tail_expr &&
-            mir_unwrap_primary(node) == mt->native_body_tail_expr &&
-            mir_is_native_int_arith(mt, node)) {
+            tail_value == mt->native_body_tail_expr) {
         // A braced native body reaches this helper after content lowering has
         // executed its declarations and side effects. Keep the final exact
         // int arithmetic in the raw return lane; boxing it here would make the
         // native epilogue either discard the value or unbox it twice.
         AstNode* native_value = mir_unwrap_primary(node);
-        mt->native_body_result_is_raw = true;
-        return transpile_binary_out(mt, (AstBinaryNode*)native_value, true);
+        if (mir_is_native_int_arith(mt, native_value)) {
+            mt->native_body_result_is_raw = true;
+            return transpile_binary_out(mt, (AstBinaryNode*)native_value, true);
+        }
+        if (native_value && native_value->node_type == AST_NODE_INDEX_EXPR &&
+                get_effective_type(mt, native_value) == LMD_TYPE_INT) {
+            // native int index reads already produce the lane; boxing this tail
+            // made the generated function return an Item while callers expected i64.
+            mt->native_body_result_is_raw = true;
+            return emit_int_lane_if_item(mt, transpile_expr(mt, native_value));
+        }
     }
     return transpile_box_item(mt, node);
 }
@@ -15736,6 +15817,39 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             // as a pointer and exposes the address as the slice value.
             return transpile_expr(mt, node);
         }
+        TypeId index_tid = get_effective_type(mt, node);
+        TypeId field_tid = get_effective_type(mt, index->field);
+        bool scalar_index = is_integer_type_id(field_tid) ||
+            mir_index_expr_is_native_int(mt, index->field);
+        bool known_int_index = scalar_index &&
+            (index_tid == LMD_TYPE_INT ||
+             (index->object &&
+              mir_known_index_element_type(mt, index->object) == LMD_TYPE_INT));
+        if (known_int_index) {
+            // Indexed reads may carry a boxed Item even when literal
+            // propagation marks the index expression as int; handle that
+            // carrier before a missing node type or literal branch can
+            // interpret its tag word as a native lane.
+            MIR_reg_t val = transpile_expr(mt, node);
+            return emit_box_int_if_needed(mt, val);
+        }
+    }
+
+    AstNode* evaluated = mir_unwrap_primary(node);
+    if (evaluated && (evaluated->node_type == AST_NODE_MATCH_EXPR ||
+            (evaluated->node_type == AST_NODE_IF_EXPR &&
+             get_effective_type(mt, evaluated) == LMD_TYPE_ANY))) {
+        // value-producing control flow has already joined its branches as an
+        // Item; applying the static branch type here would double-box it.
+        bool saved_preserve_proc_if_result = mt->preserve_proc_if_result;
+        if (evaluated->node_type == AST_NODE_IF_EXPR) {
+            // an implicit final proc if must publish its branch value before
+            // the boxed-control-flow fast path returns the already-joined Item
+            mt->preserve_proc_if_result = true;
+        }
+        MIR_reg_t result = transpile_expr(mt, node);
+        mt->preserve_proc_if_result = saved_preserve_proc_if_result;
+        return result;
     }
 
     // ASSIGN_STAM nodes have NULL type but return the expression value.
@@ -15777,6 +15891,14 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         if (pri->expr) {
             return transpile_box_item(mt, pri->expr);
         }
+    }
+
+    if (tid == LMD_TYPE_INT &&
+            (node->node_type == AST_NODE_CONTENT ||
+             node->node_type == AST_NODE_LIST)) {
+        // A block expression may publish a raw int lane or an Item from its
+        // final branch; inspect the carrier before crossing a generic boundary.
+        return emit_box_int_if_needed(mt, transpile_expr(mt, node));
     }
 
     if (node->node_type == AST_NODE_IDENT) {

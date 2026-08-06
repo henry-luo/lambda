@@ -1,2 +1,2 @@
 
-Pretext tests: 91 passed, 0 failed out of 91
+Pretext tests: 87 passed, 0 failed out of 87

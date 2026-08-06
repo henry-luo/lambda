@@ -1181,8 +1181,13 @@ class PremakeGenerator:
                     '    '
                 ])
 
-        # Add exclude patterns if specified
-        exclude_patterns = lib.get('exclude_patterns', [])
+        # Add target exclusions plus Linux platform exclusions. Library targets
+        # expand their own source patterns here, so the main-project platform
+        # filter must also protect them from platform-incompatible sources.
+        exclude_patterns = list(lib.get('exclude_patterns', []))
+        if self.use_linux_config:
+            linux_config = self.config.get('platforms', {}).get('linux', {})
+            exclude_patterns.extend(linux_config.get('exclude_source_files', []))
         if exclude_patterns:
             self.premake_content.extend([
                 '    removefiles {',
@@ -1618,6 +1623,10 @@ class PremakeGenerator:
 
             # Add critical static linking defines for Windows
             platform_defines.extend(['UTF8PROC_STATIC', 'CURL_STATICLIB'])
+        elif self.use_linux_config:
+            # library projects do not inherit the workspace-level Linux filter;
+            # keep POSIX feature declarations consistent with the main binary.
+            platform_defines.extend(['LINUX', '_GNU_SOURCE', 'NATIVE_LINUX_BUILD'])
 
         # Add target-specific defines
         target_defines = lib.get('defines', []) if isinstance(lib, dict) else []
@@ -2382,6 +2391,12 @@ class PremakeGenerator:
 
         # Add library dependencies
         self.premake_content.append('    links {')
+        internal_project_links = []
+
+        def add_internal_project_link(project_name: str) -> None:
+            self.premake_content.append(f'        "{project_name}",')
+            if project_name not in internal_project_links:
+                internal_project_links.append(project_name)
 
         # Initialize test frameworks tracking
         test_frameworks_added = []
@@ -2395,23 +2410,23 @@ class PremakeGenerator:
                     # Special handling for MIR, Lambda, Math, and Markup tests
                     if ('mir' in test_name.lower() or 'lambda' in test_name.lower() or 'math' in test_name.lower() or 'markup' in test_name.lower()) and dep == 'lambda-runtime-full':
                         # All tests only need the -cpp versions (C++ project includes all C files)
-                        self.premake_content.append('        "lambda-runtime-full-cpp",')
-                        self.premake_content.append('        "lambda-data-cpp",')
+                        add_internal_project_link('lambda-runtime-full-cpp')
+                        add_internal_project_link('lambda-data-cpp')
                     else:
                         # Regular tests: only need -cpp version (C++ project includes all C files)
-                        self.premake_content.append(f'        "{dep}-cpp",')
+                        add_internal_project_link(f'{dep}-cpp')
                     if dep == 'lambda-data':
                         # lambda-data consumes the lower general-purpose archive;
                         # link its concrete mixed-language project for test executables.
-                        self.premake_content.append('        "lambda-lib-cpp",')
+                        add_internal_project_link('lambda-lib-cpp')
                     elif dep == 'lambda-rt':
                         # A static wrapper archive contains no objects. Runtime
                         # white-box tests must therefore link the concrete rt
                         # archive and its lower concrete providers in archive
                         # order; otherwise GC/side-stack symbols resolve but
                         # their lib providers remain invisible to the linker.
-                        self.premake_content.append('        "lambda-data-cpp",')
-                        self.premake_content.append('        "lambda-lib-cpp",')
+                        add_internal_project_link('lambda-data-cpp')
+                        add_internal_project_link('lambda-lib-cpp')
                 elif dep in configured_targets:
                     target = configured_targets[dep]
                     target_sources = target.get('source_files', []) or target.get('sources', [])
@@ -2421,7 +2436,7 @@ class PremakeGenerator:
                     has_c = any(path.endswith('.c') for path in target_sources) or any(
                         '*.c' in pattern for pattern in target_patterns)
                     project_name = f'{dep}-cpp' if has_cpp and has_c else dep
-                    self.premake_content.append(f'        "{project_name}",')
+                    add_internal_project_link(project_name)
 
         # Add test framework libraries
         # Add libraries specified in the test configuration
@@ -2519,8 +2534,10 @@ class PremakeGenerator:
                         else:
                             external_static_libs.append(lib_path)
 
-            # Note: tree-sitter libraries are now handled via external_static_libs (linkoptions)
-            # No longer adding them to links block which causes incorrect -l flags
+            # Linux's GNU linker scans static archives once from left to right.
+            # Keep external providers in the final LIBS sequence after Lambda's
+            # archives; placing them in ALL_LDFLAGS makes image, MIR, and TLS
+            # symbols invisible before their references have been seen.
 
             # Add late static libraries to links block (must come after internal libs on Linux)
             if late_static_libs:
@@ -2545,23 +2562,73 @@ class PremakeGenerator:
                 ])
 
             if external_static_libs:
+                if self.use_linux_config:
+                    # These archives live outside the normal Linux libdirs;
+                    # expose their parent directories before linking them by
+                    # basename through the final LIBS sequence.
+                    static_lib_dirs = []
+                    for lib_path in external_static_libs:
+                        lib_dir = os.path.dirname(lib_path)
+                        # Premake resolves relative libdirs from the project
+                        # root; do not pass the build-directory prefix that
+                        # belongs to raw linkoptions paths.
+                        if lib_dir.startswith('../../'):
+                            lib_dir = lib_dir[6:]
+                        if lib_dir and lib_dir not in static_lib_dirs:
+                            static_lib_dirs.append(lib_dir)
+                    if static_lib_dirs:
+                        self.premake_content.append('    libdirs {')
+                        for lib_dir in static_lib_dirs:
+                            self.premake_content.append(f'        "{lib_dir}",')
+                        self.premake_content.extend([
+                            '    }',
+                            '    '
+                        ])
+
+                    self.premake_content.append('    links {')
+                    for lib_path in external_static_libs:
+                        self.premake_content.append(
+                            f'        ":{os.path.basename(lib_path)}",')
+                    self.premake_content.extend([
+                        '    }',
+                        '    '
+                    ])
+                else:
+                    self.premake_content.append('    linkoptions {')
+                    for lib_path in external_static_libs:
+                        self.premake_content.append(f'        "{lib_path}",')
+                    # Windows: add system libs that static libraries depend on
+                    if self.use_windows_config:
+                        self.premake_content.extend([
+                            '        "-lws2_32",',
+                            '        "-lwsock32",',
+                            '        "-lwinmm",',
+                            '        "-lcrypt32",',
+                            '        "-lbcrypt",',
+                            '        "-ladvapi32",',
+                            '        "-lsecur32",',
+                            '        "-lwldap32",',
+                            '        "-liphlpapi",',
+                        ])
+                    self.premake_content.extend([
+                        '    }',
+                        '    '
+                    ])
+
+            if self.use_linux_config and (internal_project_links or external_static_libs):
+                # Keep a complete copy of the static closure inside one GNU ld
+                # group.  The executable's archives are mutually recursive,
+                # so a single left-to-right pass is insufficient even after
+                # external providers are placed after the runtime archives.
                 self.premake_content.append('    linkoptions {')
+                self.premake_content.append('        "-Wl,--start-group",')
+                for project_name in internal_project_links:
+                    self.premake_content.append(
+                        f'        "../lib/lib{project_name}.a",')
                 for lib_path in external_static_libs:
                     self.premake_content.append(f'        "{lib_path}",')
-                # Windows: add system libs that static libraries depend on
-                if self.use_windows_config:
-                    self.premake_content.extend([
-                        '        "-lws2_32",',
-                        '        "-lwsock32",',
-                        '        "-lwinmm",',
-                        '        "-lcrypt32",',
-                        '        "-lbcrypt",',
-                        '        "-ladvapi32",',
-                        '        "-lsecur32",',
-                        '        "-lwldap32",',
-                        '        "-liphlpapi",',
-                    ])
                 self.premake_content.extend([
+                    '        "-Wl,--end-group",',
                     '    }',
                     '    '
                 ])
@@ -2803,7 +2870,11 @@ class PremakeGenerator:
             if self.use_linux_config:
                 # Linux: use --whole-archive
                 self.premake_content.append('        "-Wl,--whole-archive",')
-                for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
+                # lambda-data references the LaTeX parser entry points from
+                # its archive, so these archives must remain live after the
+                # data library is placed on the link line.
+                for lib_name in ['tree-sitter-lambda', 'tree-sitter',
+                                 'tree-sitter-latex', 'tree-sitter-latex-math']:
                     if lib_name in self.external_libraries:
                         lib_path = self.external_libraries[lib_name]['lib']
                         if not lib_path.startswith('/'):
@@ -3310,6 +3381,14 @@ class PremakeGenerator:
                     '    }',
                     '    ',
                 ])
+
+        if self.use_linux_config:
+            # Linux Jube DSOs resolve their host ABI from the executable; export
+            # those definitions in every host configuration, including debug.
+            self.premake_content.extend([
+                '    linkoptions { "-Wl,--export-dynamic" }',
+                '    ',
+            ])
 
         self.premake_content.extend([
             '    defines {',

@@ -18,6 +18,7 @@ ALL_LIBS=(
     "libncurses5-dev"        # ncurses
     "build-essential"        # includes pthread
     "libevent-dev"           # libevent (HTTP server)
+    "libuv1-dev"             # libuv async I/O
     "libbrotli-dev"          # brotlidec + brotlicommon (WOFF2 dep)
 )
 
@@ -247,6 +248,18 @@ echo "Installing npm dependencies..."
 if [ -f "$SCRIPT_DIR/package.json" ]; then
     npm install --ignore-scripts --prefix "$SCRIPT_DIR"
     echo "npm dependencies installed"
+
+    # npm install --ignore-scripts avoids premature native parser builds, but
+    # the tree-sitter CLI itself needs its install script to provide the
+    # executable used by make's automatic grammar regeneration.
+    if [ ! -x "$SCRIPT_DIR/node_modules/tree-sitter-cli/tree-sitter" ]; then
+        echo "Restoring the Tree-sitter CLI executable..."
+        npm rebuild --prefix "$SCRIPT_DIR" tree-sitter-cli
+    fi
+    if [ ! -x "$SCRIPT_DIR/node_modules/tree-sitter-cli/tree-sitter" ]; then
+        echo "❌ Tree-sitter CLI executable is still missing"
+        exit 1
+    fi
 else
     echo "Warning: package.json not found, skipping npm install"
 fi
@@ -1226,30 +1239,38 @@ else
         mkdir -p build_temp
         cd build_temp
 
-        # Clone and build premake5 from source (works on all architectures)
+        # clone premake5 from source (works on all architectures)
         echo "Cloning premake5 source..."
         if git clone --recurse-submodules https://github.com/premake/premake-core.git premake5; then
-            cd premake5
-
-            # Build premake5 using make
-            echo "Building premake5..."
-            if make -f Bootstrap.mak linux; then
-                # Install the binary
-                if sudo cp bin/release/premake5 /usr/local/bin/ && sudo chmod +x /usr/local/bin/premake5; then
-                    echo "✅ premake5 installed successfully"
-                else
-                    echo "❌ Failed to install premake5"
-                fi
-            else
-                echo "❌ Failed to build premake5"
-            fi
+            echo "✅ premake5 source cloned"
         else
             echo "❌ Failed to clone premake5"
+            exit 1
         fi
 
         cd "$SCRIPT_DIR"
     else
         echo "✅ premake5 build directory already exists"
+    fi
+
+    # a source tree can survive a disposable container while its installed
+    # binary is gone, so check the binary before skipping the rebuild/install.
+    PREMAKE_BINARY="$PREMAKE_BUILD_DIR/bin/release/premake5"
+    if [ ! -x "$PREMAKE_BINARY" ]; then
+        echo "Building premake5..."
+        if (cd "$PREMAKE_BUILD_DIR" && make -f Bootstrap.mak linux); then
+            echo "✅ premake5 built successfully"
+        else
+            echo "❌ Failed to build premake5"
+            exit 1
+        fi
+    fi
+
+    if sudo cp "$PREMAKE_BINARY" /usr/local/bin/ && sudo chmod +x /usr/local/bin/premake5; then
+        echo "✅ premake5 installed successfully"
+    else
+        echo "❌ Failed to install premake5"
+        exit 1
     fi
 fi
 

@@ -15,6 +15,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdbool.h>
+#include <setjmp.h>
 #include "sys_func_registry.h"  // includes lambda.h (brings in FPTR/NPTR macros)
 #include "lambda-error.h"
 #include "concurrency.h"
@@ -1299,7 +1300,13 @@ JitImport jit_runtime_imports[] = {
 #if defined(__APPLE__) || defined(__linux__)
     // This is the platform primitive itself. The generated MIR activation
     // owns the setjmp call; a C wrapper would make a later longjmp undefined.
+#if defined(__linux__)
+    // glibc exposes sigsetjmp as a function-like macro; function-pointer
+    // registration must name its underlying __sigsetjmp symbol directly.
+    {"sigsetjmp", FPTR(__sigsetjmp),
+#else
     {"sigsetjmp", FPTR(sigsetjmp),
+#endif
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},

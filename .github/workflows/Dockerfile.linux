@@ -19,10 +19,12 @@ RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4-openssl-dev libmpdec-dev libutf8proc-dev libssl-dev \
     zlib1g-dev libnghttp2-dev libncurses5-dev libevent-dev \
+    libuv1-dev \
     libbrotli-dev \
     libglfw3-dev libfreetype6-dev libpng-dev libbz2-dev \
     libturbojpeg0-dev libgif-dev gettext \
     libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+    libwebkit2gtk-4.1-dev \
     ninja-build \
     && rm -rf /var/lib/apt/lists/*
 
@@ -33,17 +35,23 @@ RUN pip3 install meson
 # On Ubuntu 22.04, source is at /usr/src/googletest (not /usr/src/gtest)
 RUN apt-get update && apt-get install -y --no-install-recommends libgtest-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /tmp/gtest-build && cd /tmp/gtest-build \
+    && mkdir -p /opt/gtest-build && cd /opt/gtest-build \
     && cmake /usr/src/googletest -DBUILD_GMOCK=ON -DCMAKE_INSTALL_PREFIX=/usr/local \
     && make -j$(nproc) \
     && make install \
     && ldconfig \
-    && rm -rf /tmp/gtest-build
+    && rm -rf /opt/gtest-build
 
 # Premake5 (build system generator)
-RUN PREMAKE_VERSION="5.0.0-beta2" \
-    && curl -fsSL "https://github.com/premake/premake-core/releases/download/v${PREMAKE_VERSION}/premake-${PREMAKE_VERSION}-linux.tar.gz" \
-    | tar -xz -C /usr/local/bin \
-    && chmod +x /usr/local/bin/premake5
+# use the x86-64 archive only on amd64; ARM64 builds compile Premake from
+# source in setup-linux-deps.sh because the beta2 Linux archive is x86-64.
+RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+        PREMAKE_VERSION="5.0.0-beta2"; \
+        curl -fsSL "https://github.com/premake/premake-core/releases/download/v${PREMAKE_VERSION}/premake-${PREMAKE_VERSION}-linux.tar.gz" \
+        | tar -xz -C /usr/local/bin; \
+        chmod +x /usr/local/bin/premake5; \
+    else \
+        echo "Premake will be built from source for $(dpkg --print-architecture)"; \
+    fi
 
 WORKDIR /lambda
