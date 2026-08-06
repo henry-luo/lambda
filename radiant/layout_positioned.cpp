@@ -557,8 +557,8 @@ static bool static_position_parent_uses_right_block_start(ViewElement* parent) {
     for (View* ancestor = parent; ancestor && ancestor->is_element();
          ancestor = ancestor->parent) {
         ViewBlock* block = lam::view_as_block(ancestor);
-        if (block && block->embed && block->embedp()->flex) {
-            WritingMode writing_mode = block->embedp()->flex->writing_mode;
+        if (block) {
+            WritingMode writing_mode = layout_block_writing_mode(block);
             if (writing_mode == WM_VERTICAL_RL) return true;
             if (writing_mode == WM_VERTICAL_LR || writing_mode == WM_HORIZONTAL_TB) return false;
         }

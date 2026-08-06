@@ -767,6 +767,19 @@ float calc_normal_line_height(FontHandle* handle) {
     return font_calc_normal_line_height(handle);
 }
 
+float layout_br_line_box_extent(LayoutContext* lycon, FontHandle* handle) {
+    if (!lycon) return 0.0f;
+
+    float extent = lycon->block.line_height > 0.0f
+        ? lycon->block.line_height : 0.0f;
+    if (handle) {
+        float normal_line_height = font_calc_normal_line_height(handle);
+        if (normal_line_height > extent) extent = normal_line_height;
+        if (extent <= 0.0f) extent = font_get_cell_height(handle);
+    }
+    return extent > 0.0f ? extent : lycon->font.current_font_size;
+}
+
 CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
                                  CssEnum fallback) {
     if (!element || !element->specified_style) return fallback;
@@ -1253,8 +1266,8 @@ bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block) {
     for (DomNode* node = block->parent; node; node = node->parent) {
         if (!node->is_element()) continue;
         ViewBlock* ancestor = lam::view_as_block(static_cast<View*>(node->as_element()));
-        if (!ancestor || !ancestor->embed || !ancestor->embedp()->flex) continue;
-        WritingMode mode = ancestor->embedp()->flex->writing_mode;
+        if (!ancestor) continue;
+        WritingMode mode = layout_block_writing_mode(ancestor);
         if (mode == WM_VERTICAL_LR) return true;
         if (mode == WM_VERTICAL_RL || mode == WM_HORIZONTAL_TB) return false;
     }
@@ -1590,6 +1603,23 @@ float line_baseline_position(LayoutContext* lycon, float* out_line_height) {
     return max(lycon->line.max_ascender, strut_baseline);
 }
 
+float layout_inline_atomic_extent(LayoutContext* lycon, ViewBlock* block) {
+    if (!block) return 0.0f;
+
+    ViewElement* parent_view = block->parent_view();
+    ViewBlock* parent = layout_nearest_block_ancestor(parent_view);
+    bool vertical_parent = parent && layout_block_inline_axis_is_vertical(parent);
+    float extent = vertical_parent ? block->width : block->height;
+    if (block->bound) {
+        if (vertical_parent) {
+            extent += block->boundary()->margin.left + block->boundary()->margin.right;
+        } else {
+            extent += block->boundary()->margin.top + block->boundary()->margin.bottom;
+        }
+    }
+    return extent;
+}
+
 float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
                                float span_line_height,
                                float ascender, float descender,
@@ -1677,7 +1707,15 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // Range rectangles use raster font extents, so their baseline uses
             // the raster face ascender rather than the CSS inline-box metric split.
             float item_baseline = item_height;
-            if (text_view->font && text_view->font->font_handle) {
+            ViewBlock* text_parent = layout_nearest_block_ancestor(text_view->parent_view());
+            bool vertical_text_parent = text_parent &&
+                layout_block_inline_axis_is_vertical(text_parent);
+            if (vertical_text_parent) {
+                // Vertical writing maps this rect's baseline coordinate to the
+                // physical block axis; using the raster ascent leaves the
+                // whitespace rect displaced by the font's half-leading.
+                item_baseline = item_height;
+            } else if (text_view->font && text_view->font->font_handle) {
                 float rendering_ascender = font_get_rendering_ascender(
                     text_view->font->font_handle);
                 if (rendering_ascender > 0.0f) item_baseline = rendering_ascender;
@@ -1704,8 +1742,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         bool is_inline_table = view->view_type == RDT_VIEW_TABLE &&
             (block->display.outer == CSS_VALUE_INLINE ||
              block->display.outer == CSS_VALUE_INLINE_BLOCK);
-        float item_height = block->height + (block->bound ?
-            block->boundary()->margin.top + block->boundary()->margin.bottom : 0);
+        float item_height = layout_inline_atomic_extent(lycon, block);
         // CSS 2.1 §10.8.1: For inline-blocks, the baseline depends on content:
         // - Replaced elements / overflow != visible with no content: bottom margin edge
         // - Non-replaced with overflow:visible and in-flow line boxes: last line baseline
@@ -1715,12 +1752,22 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // For non-replaced empty inline-blocks: baseline = bottom margin edge.
         float item_baseline;
         if (is_inline_table) {
-            float table_baseline = find_first_baseline_recursive(lycon, view, 0.0f, true);
-            if (table_baseline >= 0.0f) {
+            bool prefers_last = layout_block_inline_axis_is_vertical(block) &&
+                radiant::layout_prefers_last_baseline(block, false);
+            float table_baseline = prefers_last
+                ? find_last_baseline_recursive(lycon, view, 0.0f, true)
+                : find_first_baseline_recursive(lycon, view, 0.0f, true);
+            if (table_baseline >= 0.0f &&
+                !prefers_last) {
                 item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
                     table_baseline;
             } else {
-                item_baseline = item_height;
+                item_baseline = prefers_last
+                    ? item_height / 2.0f : item_height;
+                if (table_baseline >= 0.0f) {
+                    item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
+                        table_baseline;
+                }
             }
         } else if (block->tag() == MARKUP_NAME_TEXTAREA &&
                    radiant::layout_uses_explicit_baseline_source(block)) {
@@ -1751,9 +1798,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 block, block->embedp()->flex->first_baseline,
                 block->embedp()->flex->last_baseline, false, 0.0f);
             if (flex_baseline > 0.0f) {
-                BoxMetrics box = layout_box_metrics(block);
                 item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
-                    box.border.top + box.padding.top + flex_baseline;
+                    layout_block_start_content_offset(block) + flex_baseline;
             }
         } else if (block->blk && block->block_mut()->last_line_max_ascender > 0) {
             bool is_replaced_elem = (block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
@@ -2077,6 +2123,78 @@ static void shift_span_line_fragment_unions(ViewSpan* span, float offset) {
         span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_x += offset;
         span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_x += offset;
     }
+}
+
+static void rtl_initial_letter_line_metrics(View* view, int line_number,
+                                            float* line_width,
+                                            float* initial_width) {
+    while (view) {
+        if (view->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require_text(view);
+            InitialLetterInfo initial = {};
+            bool is_initial = layout_get_text_initial_letter_info(
+                static_cast<DomNode*>(text), &initial);
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                if (rect->line_number != line_number) continue;
+                *line_width += rect->width;
+                if (is_initial) *initial_width += rect->width;
+            }
+        } else if (view->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+            if (span->first_child) {
+                rtl_initial_letter_line_metrics(
+                    span->first_child, line_number, line_width, initial_width);
+            }
+        }
+        view = view->next();
+    }
+}
+
+static float rtl_initial_letter_place_line(View* view, int line_number,
+                                           float cursor) {
+    while (view) {
+        if (view->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require_text(view);
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                if (rect->line_number != line_number) continue;
+                rect->x = cursor - rect->width;
+                cursor = rect->x;
+            }
+            adjust_text_bounds(text);
+        } else if (view->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+            if (span->first_child) {
+                cursor = rtl_initial_letter_place_line(
+                    span->first_child, line_number, cursor);
+            }
+        } else if (view->view_type == RDT_VIEW_BR) {
+            view->x = cursor;
+        }
+        view = view->next();
+    }
+    return cursor;
+}
+
+static void place_rtl_initial_letter_line(LayoutContext* lycon) {
+    if (!lycon || !lycon->line.has_initial_letter ||
+        lycon->block.direction != CSS_VALUE_RTL || !lycon->line.start_view) return;
+
+    CssEnum text_align = lycon->block.text_align;
+    if (text_align == CSS_VALUE_START) text_align = CSS_VALUE_RIGHT;
+    if (text_align != CSS_VALUE_RIGHT) return;
+
+    float line_width = 0.0f;
+    float initial_width = 0.0f;
+    rtl_initial_letter_line_metrics(
+        lycon->line.start_view, lycon->block.line_number,
+        &line_width, &initial_width);
+    if (line_width <= 0.0f || initial_width <= 0.0f) return;
+
+    // CSS Inline 3 §7.5.2 places the initial at the inline-end in RTL;
+    // split text fragments must therefore consume the line from right to left.
+    float inline_end = lycon->line.effective_right - lycon->line.text_indent_offset;
+    rtl_initial_letter_place_line(
+        lycon->line.start_view, lycon->block.line_number, inline_end);
 }
 
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
@@ -2639,6 +2757,13 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         // Use resolve_display_value which handles both Lexbor and Lambda CSS nodes
         DisplayValue display = resolve_display_value(node);
+        if (display.outer == CSS_VALUE_INLINE && display.inner == CSS_VALUE_FLOW &&
+            layout_inline_element_is_orthogonal(elem)) {
+            // CSS Writing Modes 4 §7.3: a perpendicular inline flow is atomic so
+            // its dimensions can be sized in its own writing mode.
+            display.outer = CSS_VALUE_INLINE_BLOCK;
+            log_debug("%s orthogonal inline: promoting inline flow to inline-block", node->source_loc());
+        }
         // CSS 2.2 Section 9.7: When float is not 'none', display is computed as 'block'
         // Check float property from specified styles (before view is created)
         CssEnum float_value = CSS_VALUE_NONE;
@@ -3153,9 +3278,9 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     finalize_block_flow(lycon, html, CSS_VALUE_BLOCK);
 
-    bool root_uses_vertical_writing = html->embed && html->embedp()->flex &&
-        (html->embedp()->flex->writing_mode == WM_VERTICAL_LR ||
-         html->embedp()->flex->writing_mode == WM_VERTICAL_RL);
+    WritingMode root_writing_mode = layout_block_writing_mode(html);
+    bool root_uses_vertical_writing =
+        root_writing_mode == WM_VERTICAL_LR || root_writing_mode == WM_VERTICAL_RL;
     if (!root_has_explicit_width && !root_has_explicit_height &&
         root_uses_vertical_writing && body_view) {
         float body_margin_left = body_view->bound ? body_view->boundary()->margin.left : 0.0f;

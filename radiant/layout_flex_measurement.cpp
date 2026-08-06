@@ -489,9 +489,8 @@ static float flex_measure_item_content_width_for_height(LayoutContext* lycon,
 
 static bool flex_measure_item_uses_vertical_writing_mode(ViewElement* item) {
     ViewBlock* block = lam::view_as_block(item);
-    return block && block->embed && block->embedp()->flex &&
-        (block->embedp()->flex->writing_mode == WM_VERTICAL_LR ||
-         block->embedp()->flex->writing_mode == WM_VERTICAL_RL);
+    WritingMode writing_mode = layout_block_writing_mode(block);
+    return writing_mode == WM_VERTICAL_LR || writing_mode == WM_VERTICAL_RL;
 }
 
 // ============================================================================
@@ -2423,9 +2422,8 @@ store_results:
     // always produces horizontal metrics, but in vertical-lr/rl the inline axis is vertical
     {
         ViewBlock* block_view = lam::view_as_block(item);
-        if (block_view && block_view->embed && block_view->embedp()->flex &&
-            (block_view->embedp()->flex->writing_mode == WM_VERTICAL_LR ||
-             block_view->embedp()->flex->writing_mode == WM_VERTICAL_RL)) {
+        WritingMode writing_mode = layout_block_writing_mode(block_view);
+        if (writing_mode == WM_VERTICAL_LR || writing_mode == WM_VERTICAL_RL) {
             float tmp;
             tmp = min_width;  min_width = min_height;  min_height = tmp;
             tmp = max_width;  max_width = max_height;  max_height = tmp;

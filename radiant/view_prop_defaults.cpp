@@ -9,6 +9,7 @@ static BlockProp make_block_prop_default() {
     value.text_align = CSS_VALUE_START;
     value.align_content = CSS_VALUE__UNDEF;
     value.direction = CSS_VALUE_LTR;
+    value.writing_mode = WM_HORIZONTAL_TB;
     value.text_spacing_trim = CSS_VALUE_NORMAL;
     value.break_before = CSS_VALUE_AUTO;
     value.break_after = CSS_VALUE_AUTO;

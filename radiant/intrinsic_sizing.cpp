@@ -4201,8 +4201,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             is_row_flex = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE ||
                           dir == DIR_ROW || dir == DIR_ROW_REVERSE);
             flex_gap = view_block->embedp()->flex->column_gap;
-            is_vertical_wm = (view_block->embedp()->flex->writing_mode == WM_VERTICAL_LR ||
-                              view_block->embedp()->flex->writing_mode == WM_VERTICAL_RL);
+            WritingMode writing_mode = layout_block_writing_mode(view_block);
+            is_vertical_wm = writing_mode == WM_VERTICAL_LR ||
+                writing_mode == WM_VERTICAL_RL;
         } else if (element->specified_style) {
             intrinsic_style_flex_direction_is_row(element->specified_style, &is_row_flex);
             CssEnum wm = (CssEnum)0;

@@ -1142,6 +1142,7 @@ typedef struct BlockProp {
     bool legacy_align_center_blocks;  // HTML align=center compatibility: center block/table descendants
     CssEnum legacy_block_align;  // HTML align compatibility for block/table descendants
     CssEnum direction;  // CSS_VALUE_LTR or CSS_VALUE_RTL (CSS 2.1 §9.2.1)
+    WritingMode writing_mode;  // CSS Writing Modes: the element's own block/inline axes
     CssEnum text_transform;  // CSS_VALUE_NONE, CSS_VALUE_UPPERCASE, CSS_VALUE_LOWERCASE, CSS_VALUE_CAPITALIZE
     const CssValue* line_height;
     float text_indent;  // can be negative
@@ -1211,6 +1212,7 @@ typedef struct BlockProp {
     float bfc_float_avoidance_shift_y;
     // Transient layout state: this float was lowered below a sunk initial letter.
     bool initial_letter_float_clearance;
+    bool vertical_geometry_published; // transient: direct vertical-flow children were axis-mapped
     CssEnum text_overflow;  // CSS_VALUE_CLIP (default 0) | CSS_VALUE_ELLIPSIS
     int line_clamp;         // -webkit-line-clamp: max visible lines (0 = no clamp)
     bool line_clamp_inherited; // transient: this block is consuming an ancestor clamp
