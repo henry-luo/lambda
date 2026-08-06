@@ -3696,10 +3696,14 @@ assertGt(lwl.lines[0].width, 0, "7.7 line width > 0");
 var ps3 = pretext.prepareWithSegments("The quick brown fox jumps over the lazy dog", "16px monospace");
 var lwl2 = pretext.layoutWithLines(ps3, 100, 20);
 assertGt(lwl2.lines.length, 1, "8.1 wraps into multiple lines");
-// Each line should have text
+// keep the assertion count independent of platform-specific line wrapping.
+var allWrappedLinesHaveText = true;
 for (var li = 0; li < lwl2.lines.length; li++) {
-  assertType(lwl2.lines[li].text, "string", "8.2 line[" + li + "] has text");
+  if (typeof lwl2.lines[li].text !== "string") {
+    allWrappedLinesHaveText = false;
+  }
 }
+assert(allWrappedLinesHaveText, "8.2 every wrapped line has text");
 
 // ============================================================
 // 9. walkLineRanges()

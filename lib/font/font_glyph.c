@@ -334,7 +334,9 @@ apply_overrides:
 // Kerning
 // ============================================================================
 
-// kern pair cache hashmap callbacks
+#ifdef __APPLE__
+// these callbacks serve only the CoreText kerning cache; compiling them on
+// Linux leaves platform-inactive static functions subject to -Wunused-function.
 #define KERN_CACHE_MAX_ENTRIES 4096
 
 static uint64_t kern_pair_hash(const void* item, uint64_t seed0, uint64_t seed1) {
@@ -352,7 +354,6 @@ static int kern_pair_compare(const void* a, const void* b, void* udata) {
     return 0;
 }
 
-#ifdef __APPLE__
 static float font_get_kerning_coretext(FontHandle* handle, uint32_t left, uint32_t right) {
     if (!handle->ct_font_ref) return 0.0f;
 

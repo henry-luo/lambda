@@ -1059,6 +1059,7 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
 #define SVG_MAX_GRAD_DEFS  4096
 #define SVG_MAX_GRAD_STOPS 64
 #define SVG_MAX_ELEM_DEFS  4096
+#define SVG_DEF_INITIAL_CAPACITY 16
 
 struct SvgGradStop {
     float   offset;
@@ -1081,10 +1082,13 @@ struct SvgElemDef {
 };
 
 struct SvgDefTable {
-    SvgGradDef grads[SVG_MAX_GRAD_DEFS];
+    // grow definition arrays on demand; a full 4096-entry table exceeds the Linux render scratch arena.
+    SvgGradDef* grads;
     int        grad_count;
-    SvgElemDef elems[SVG_MAX_ELEM_DEFS];
+    int        grad_capacity;
+    SvgElemDef* elems;
     int        elem_count;
+    int        elem_capacity;
 };
 
 static float parse_svg_pct_or_num(const char* s, float fallback) {
@@ -1113,6 +1117,38 @@ static Element* lookup_elem_def(SvgDefTable* table, const char* id) {
     return nullptr;
 }
 
+static bool grow_svg_grad_defs(SvgInlineRenderContext* ctx, SvgDefTable* table) {
+    if (!ctx || !table || table->grad_capacity >= SVG_MAX_GRAD_DEFS) return false;
+    int next_capacity = table->grad_capacity > 0
+        ? table->grad_capacity * 2 : SVG_DEF_INITIAL_CAPACITY;
+    if (next_capacity > SVG_MAX_GRAD_DEFS) next_capacity = SVG_MAX_GRAD_DEFS;
+    SvgGradDef* defs = (SvgGradDef*)scratch_calloc(
+        ctx->resource_scratch, (size_t)next_capacity * sizeof(SvgGradDef));
+    if (!defs) return false;
+    if (table->grads && table->grad_count > 0) {
+        memcpy(defs, table->grads, (size_t)table->grad_count * sizeof(SvgGradDef));
+    }
+    table->grads = defs;
+    table->grad_capacity = next_capacity;
+    return true;
+}
+
+static bool grow_svg_elem_defs(SvgInlineRenderContext* ctx, SvgDefTable* table) {
+    if (!ctx || !table || table->elem_capacity >= SVG_MAX_ELEM_DEFS) return false;
+    int next_capacity = table->elem_capacity > 0
+        ? table->elem_capacity * 2 : SVG_DEF_INITIAL_CAPACITY;
+    if (next_capacity > SVG_MAX_ELEM_DEFS) next_capacity = SVG_MAX_ELEM_DEFS;
+    SvgElemDef* defs = (SvgElemDef*)scratch_calloc(
+        ctx->resource_scratch, (size_t)next_capacity * sizeof(SvgElemDef));
+    if (!defs) return false;
+    if (table->elems && table->elem_count > 0) {
+        memcpy(defs, table->elems, (size_t)table->elem_count * sizeof(SvgElemDef));
+    }
+    table->elems = defs;
+    table->elem_capacity = next_capacity;
+    return true;
+}
+
 static SvgDefTable* ensure_svg_def_table(SvgInlineRenderContext* ctx) {
     if (!ctx->defs) {
         if (!ctx->resource_scratch) return nullptr;
@@ -1138,6 +1174,8 @@ static void register_svg_def_element(SvgInlineRenderContext* ctx, Element* elem)
         SvgGradDef* def = existing;
         if (!def) {
             if (table->grad_count >= SVG_MAX_GRAD_DEFS) return;
+            if (table->grad_count >= table->grad_capacity &&
+                !grow_svg_grad_defs(ctx, table)) return;
             def = &table->grads[table->grad_count++];
         }
         memset(def, 0, sizeof(SvgGradDef));
@@ -1182,6 +1220,8 @@ static void register_svg_def_element(SvgInlineRenderContext* ctx, Element* elem)
         SvgElemDef* ed = existing;
         if (!ed) {
             if (table->elem_count >= SVG_MAX_ELEM_DEFS) return;
+            if (table->elem_count >= table->elem_capacity &&
+                !grow_svg_elem_defs(ctx, table)) return;
             ed = &table->elems[table->elem_count++];
         }
         str_copy(ed->id, sizeof(ed->id), id, strlen(id));

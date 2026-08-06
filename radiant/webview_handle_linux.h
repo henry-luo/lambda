@@ -13,6 +13,8 @@
 #include <gtk/gtk.h>
 #include "../lib/file.h"
 
+struct GLFWwindow;
+
 static inline const char* webview_linux_mime_for_path(const char* path) {
     if (!path) return "application/octet-stream";
     if (file_path_has_ext_ci(path, "html") || file_path_has_ext_ci(path, "htm")) return "text/html";

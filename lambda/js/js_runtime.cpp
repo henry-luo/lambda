@@ -123,7 +123,7 @@ static Item js_runtime_make_string_item(const char* str, int len) {
     return (Item){.item = s2it(heap_strcpy((char*)str, len))};
 }
 
-static const JubeTypeDef* js_host_object_type(Item object) {
+const JubeTypeDef* js_host_object_type(Item object) {
     if (get_type_id(object) != LMD_TYPE_VMAP || !object.vmap || !object.vmap->host_type) {
         return NULL;
     }
@@ -172,7 +172,7 @@ static bool js_host_object_call_method(Item object,
         type->host_ops->call_method(object, method_name, args, argc, out);
 }
 
-static bool js_host_object_prototype(Item object, Item* out) {
+bool js_host_object_prototype(Item object, Item* out) {
     if (jube_member_prototype(object, out)) return true;
     const JubeTypeDef* type = js_host_object_type(object);
     if (!type || !type->host_ops || !type->host_ops->prototype || !out) return false;
@@ -1366,7 +1366,7 @@ static bool js_array_key_is_index(Item key, int64_t* out_index);
 static Item js_array_numeric_key_to_property_key(Item key);
 static bool js_is_constructor_internal(Item callee);
 static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end);
-static int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii);
+int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii);
 extern "C" Item js_intern_ascii_char(int code);  // §7.2.B (defined in js_globals.cpp)
 
 static Item js_proxy_missing_own_key_error(Item key) {
@@ -5905,7 +5905,7 @@ static PropertyKeyRef js_canonical_string_key(String* key) {
 
 extern "C" Item js_property_set(Item object, Item key, Item value);
 
-static bool js_runtime_is_arguments_exotic(Item value);
+bool js_is_arguments_exotic_array(Item value);
 static Item js_arguments_companion_item(Item arguments);
 
 static bool js_is_property_reference_primitive(TypeId type, Item value) {
@@ -6574,7 +6574,7 @@ static Item js_property_set_array(Item object, Item key, Item value) {
         String* str_key = it2s(key);
         if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
             JS_PROPERTY_SET_BRANCH("array_length");
-            if (js_runtime_is_arguments_exotic(object)) {
+            if (js_is_arguments_exotic_array(object)) {
                 JS_PROPERTY_SET_BRANCH("array_length_arguments_companion");
                 js_property_set(js_arguments_companion_item(object), key, value);
                 return value;
@@ -8745,7 +8745,7 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
 }
 
 // Compute UTF-16 unit count of a non-ASCII UTF-8 string.
-static int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii) {
+int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii) {
     if (is_ascii) return (int64_t)str_len;
     int64_t units = 0;
     int pos = 0;
@@ -8952,7 +8952,7 @@ extern "C" Item js_get_length_item(Item object) {
         }
     }
     if (get_type_id(object) == LMD_TYPE_ARRAY) {
-        if (js_runtime_is_arguments_exotic(object)) {
+        if (js_is_arguments_exotic_array(object)) {
             Item key = (Item){.item = s2it(heap_create_name("length", 6))};
             return js_property_get(object, key);
         }
@@ -10451,7 +10451,7 @@ static bool js_regex_internal_has_indices(Item obj);
 // v18k: Forward declarations for Object/Array/Number static methods (js_globals.cpp)
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 
-static bool js_runtime_is_arguments_exotic(Item value) {
+bool js_is_arguments_exotic_array(Item value) {
     if (get_type_id(value) != LMD_TYPE_ARRAY || !value.array ||
         value.array->is_content != 1 || !js_array_has_props(value.array)) {
         return false;
@@ -14918,7 +14918,10 @@ static inline Item js_entry_invoke_body(JsFunction* fn, const Item* a,
         return ItemError;
     }
     if (HasEnv) {
-        Item env = {.item = (uint64_t)fn->env};
+        // clang 14 rejects a designated initializer here after template
+        // instantiation, although the same extension works in non-template code.
+        Item env = ItemNull;
+        env.item = (uint64_t)fn->env;
         if (ContextAbi) {
             if (PublicAbi) {
                 if (N == 0) return ((JsEntryCP1H)p)(runtime, env, home);
@@ -23416,6 +23419,86 @@ static Item js_string_matchall_get_flags(Item rx) {
 // String Method Dispatcher
 // =============================================================================
 
+typedef struct JsStringHtmlWrapper {
+    const char* name;
+    int name_len;
+    const char* prefix;
+    int prefix_len;
+    const char* closing_tag;
+    int closing_len;
+} JsStringHtmlWrapper;
+
+static Item js_string_html_wrapper(Item str, String* method, Item* args, int argc,
+                                   bool* handled) {
+    static const JsStringHtmlWrapper simple[] = {
+        {"big", 3, "<big>", 5, "</big>", 6},
+        {"blink", 5, "<blink>", 7, "</blink>", 8},
+        {"bold", 4, "<b>", 3, "</b>", 4},
+        {"fixed", 5, "<tt>", 4, "</tt>", 5},
+        {"italics", 7, "<i>", 3, "</i>", 4},
+        {"small", 5, "<small>", 7, "</small>", 8},
+        {"strike", 6, "<strike>", 8, "</strike>", 9},
+        {"sub", 3, "<sub>", 5, "</sub>", 6},
+        {"sup", 3, "<sup>", 5, "</sup>", 6},
+        {NULL, 0, NULL, 0, NULL, 0}
+    };
+    static const JsStringHtmlWrapper attributes[] = {
+        {"fontsize", 8, "<font size=\"", 12, "</font>", 7},
+        {"fontcolor", 9, "<font color=\"", 13, "</font>", 7},
+        {"link", 4, "<a href=\"", 9, "</a>", 4},
+        {"anchor", 6, "<a name=\"", 9, "</a>", 4},
+        {NULL, 0, NULL, 0, NULL, 0}
+    };
+    const JsStringHtmlWrapper* wrapper = NULL;
+    bool has_attribute = false;
+    for (const JsStringHtmlWrapper* entry = simple; entry->name; entry++) {
+        if ((int)method->len == entry->name_len &&
+            strncmp(method->chars, entry->name, entry->name_len) == 0) {
+            wrapper = entry;
+            break;
+        }
+    }
+    if (!wrapper) {
+        for (const JsStringHtmlWrapper* entry = attributes; entry->name; entry++) {
+            if ((int)method->len == entry->name_len &&
+                strncmp(method->chars, entry->name, entry->name_len) == 0) {
+                wrapper = entry;
+                has_attribute = true;
+                break;
+            }
+        }
+    }
+    if (!wrapper) {
+        *handled = false;
+        return ItemNull;
+    }
+
+    String* source = it2s(str);
+    if (!source) {
+        *handled = true;
+        return ItemNull;
+    }
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str_n(sb, wrapper->prefix, wrapper->prefix_len);
+    if (has_attribute) {
+        Item arg_str = js_to_string(argc >= 1 ? args[0] : make_js_undefined());
+        String* attr = get_type_id(arg_str) == LMD_TYPE_STRING ? it2s(arg_str) : NULL;
+        if (attr) {
+            for (int i = 0; i < (int)attr->len; i++) {
+                if (attr->chars[i] == '"') strbuf_append_str_n(sb, "&quot;", 6);
+                else strbuf_append_str_n(sb, attr->chars + i, 1);
+            }
+        }
+        strbuf_append_str_n(sb, "\">", 2);
+    }
+    strbuf_append_str_n(sb, source->chars, (int)source->len);
+    strbuf_append_str_n(sb, wrapper->closing_tag, wrapper->closing_len);
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    *handled = true;
+    return (Item){.item = s2it(result)};
+}
+
 extern "C" Item js_string_method(Item str, Item method_name, Item* args, int argc) {
     if (get_type_id(str) == LMD_TYPE_MAP && get_type_id(method_name) == LMD_TYPE_STRING) {
         String* deleted_method = it2s(method_name);
@@ -24588,118 +24671,10 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return js_string_method(str, uc_name, args, argc);
     }
 
-    // HTML wrapper methods (Annex B §B.2.3)
-    // Simple wrappers: tag without attributes
-    {
-        struct { const char* name; int nlen; const char* tag; int tlen; } simple_html[] = {
-            {"big", 3, "big", 3}, {"blink", 5, "blink", 5}, {"bold", 4, "b", 1},
-            {"fixed", 5, "tt", 2}, {"italics", 7, "i", 1}, {"small", 5, "small", 5},
-            {"strike", 6, "strike", 6}, {"sub", 3, "sub", 3}, {"sup", 3, "sup", 3},
-            {NULL, 0, NULL, 0}
-        };
-        for (int i = 0; simple_html[i].name; i++) {
-            if ((int)method->len == simple_html[i].nlen && strncmp(method->chars, simple_html[i].name, simple_html[i].nlen) == 0) {
-                String* s = it2s(str);
-                if (!s) return ItemNull;
-                StrBuf* sb = strbuf_new();
-                strbuf_append_str_n(sb, "<", 1);
-                strbuf_append_str_n(sb, simple_html[i].tag, simple_html[i].tlen);
-                strbuf_append_str_n(sb, ">", 1);
-                strbuf_append_str_n(sb, s->chars, (int)s->len);
-                strbuf_append_str_n(sb, "</", 2);
-                strbuf_append_str_n(sb, simple_html[i].tag, simple_html[i].tlen);
-                strbuf_append_str_n(sb, ">", 1);
-                String* result = heap_create_name(sb->str, sb->length);
-                strbuf_free(sb);
-                return (Item){.item = s2it(result)};
-            }
-        }
-    }
-    // fontsize(size) → <font size="size">str</font>
-    if (method->len == 8 && strncmp(method->chars, "fontsize", 8) == 0) {
-        String* s = it2s(str);
-        if (!s) return ItemNull;
-        Item arg_str = js_to_string(argc >= 1 ? args[0] : make_js_undefined());
-        String* arg_s = (get_type_id(arg_str) == LMD_TYPE_STRING) ? it2s(arg_str) : NULL;
-        StrBuf* sb = strbuf_new();
-        strbuf_append_str_n(sb, "<font size=\"", 12);
-        if (arg_s) {
-            // Escape double quotes in attribute value
-            for (int i = 0; i < (int)arg_s->len; i++) {
-                if (arg_s->chars[i] == '"') strbuf_append_str_n(sb, "&quot;", 6);
-                else strbuf_append_str_n(sb, arg_s->chars + i, 1);
-            }
-        }
-        strbuf_append_str_n(sb, "\">", 2);
-        strbuf_append_str_n(sb, s->chars, (int)s->len);
-        strbuf_append_str_n(sb, "</font>", 7);
-        String* result = heap_create_name(sb->str, sb->length);
-        strbuf_free(sb);
-        return (Item){.item = s2it(result)};
-    }
-    // fontcolor(color) → <font color="color">str</font>
-    if (method->len == 9 && strncmp(method->chars, "fontcolor", 9) == 0) {
-        String* s = it2s(str);
-        if (!s) return ItemNull;
-        Item arg_str = js_to_string(argc >= 1 ? args[0] : make_js_undefined());
-        String* arg_s = (get_type_id(arg_str) == LMD_TYPE_STRING) ? it2s(arg_str) : NULL;
-        StrBuf* sb = strbuf_new();
-        strbuf_append_str_n(sb, "<font color=\"", 13);
-        if (arg_s) {
-            for (int i = 0; i < (int)arg_s->len; i++) {
-                if (arg_s->chars[i] == '"') strbuf_append_str_n(sb, "&quot;", 6);
-                else strbuf_append_str_n(sb, arg_s->chars + i, 1);
-            }
-        }
-        strbuf_append_str_n(sb, "\">", 2);
-        strbuf_append_str_n(sb, s->chars, (int)s->len);
-        strbuf_append_str_n(sb, "</font>", 7);
-        String* result = heap_create_name(sb->str, sb->length);
-        strbuf_free(sb);
-        return (Item){.item = s2it(result)};
-    }
-    // link(href) → <a href="href">str</a>
-    if (method->len == 4 && strncmp(method->chars, "link", 4) == 0) {
-        String* s = it2s(str);
-        if (!s) return ItemNull;
-        Item arg_str = js_to_string(argc >= 1 ? args[0] : make_js_undefined());
-        String* arg_s = (get_type_id(arg_str) == LMD_TYPE_STRING) ? it2s(arg_str) : NULL;
-        StrBuf* sb = strbuf_new();
-        strbuf_append_str_n(sb, "<a href=\"", 9);
-        if (arg_s) {
-            for (int i = 0; i < (int)arg_s->len; i++) {
-                if (arg_s->chars[i] == '"') strbuf_append_str_n(sb, "&quot;", 6);
-                else strbuf_append_str_n(sb, arg_s->chars + i, 1);
-            }
-        }
-        strbuf_append_str_n(sb, "\">", 2);
-        strbuf_append_str_n(sb, s->chars, (int)s->len);
-        strbuf_append_str_n(sb, "</a>", 4);
-        String* result = heap_create_name(sb->str, sb->length);
-        strbuf_free(sb);
-        return (Item){.item = s2it(result)};
-    }
-    // anchor(name) → <a name="name">str</a>
-    if (method->len == 6 && strncmp(method->chars, "anchor", 6) == 0) {
-        String* s = it2s(str);
-        if (!s) return ItemNull;
-        Item arg_str = js_to_string(argc >= 1 ? args[0] : make_js_undefined());
-        String* arg_s = (get_type_id(arg_str) == LMD_TYPE_STRING) ? it2s(arg_str) : NULL;
-        StrBuf* sb = strbuf_new();
-        strbuf_append_str_n(sb, "<a name=\"", 9);
-        if (arg_s) {
-            for (int i = 0; i < (int)arg_s->len; i++) {
-                if (arg_s->chars[i] == '"') strbuf_append_str_n(sb, "&quot;", 6);
-                else strbuf_append_str_n(sb, arg_s->chars + i, 1);
-            }
-        }
-        strbuf_append_str_n(sb, "\">", 2);
-        strbuf_append_str_n(sb, s->chars, (int)s->len);
-        strbuf_append_str_n(sb, "</a>", 4);
-        String* result = heap_create_name(sb->str, sb->length);
-        strbuf_free(sb);
-        return (Item){.item = s2it(result)};
-    }
+    // HTML wrapper methods (Annex B §B.2.3) share one table-driven renderer.
+    bool html_handled = false;
+    Item html_result = js_string_html_wrapper(str, method, args, argc, &html_handled);
+    if (html_handled) return html_result;
 
     // Fallback: check Object.prototype for user-set methods
     // (e.g. Object.prototype.exec = RegExp.prototype.exec; ".".exec("test"))
@@ -24737,40 +24712,28 @@ static Item js_throw_not_callable(const char* method_name) {
     return ItemNull;
 }
 
-// v20: Helper: throw RangeError
-extern "C" Item js_throw_range_error(const char* message) {
-    Item type_name = (Item){.item = s2it(heap_create_name("RangeError"))};
+static Item js_throw_named_error(const char* type_name, const char* message) {
+    Item type_item = (Item){.item = s2it(heap_create_name(type_name))};
     Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
-    Item error = js_new_error_with_name(type_name, msg_item);
+    Item error = js_new_error_with_name(type_item, msg_item);
     js_throw_value(error);
     return ItemNull;
+}
+
+// v20: Helper: throw RangeError
+extern "C" Item js_throw_range_error(const char* message) {
+    return js_throw_named_error("RangeError", message);
 }
 
 extern "C" Item js_throw_type_error(const char* message) {
-    Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
-    Item error = js_new_error_with_name(type_name, msg_item);
-    js_throw_value(error);
-    return ItemNull;
+    return js_throw_named_error("TypeError", message);
 }
 
-// Throw TypeError/RangeError with Node.js error code (e.g. ERR_INVALID_ARG_TYPE)
-extern "C" Item js_throw_type_error_code(const char* code, const char* message) {
-    Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+static Item js_throw_named_error_code(const char* type_name, const char* code,
+                                      const char* message) {
+    Item type_item = (Item){.item = s2it(heap_create_name(type_name))};
     Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
-    Item error = js_new_error_with_name(type_name, msg_item);
-    // set .code property
-    Item code_key = (Item){.item = s2it(heap_create_name("code"))};
-    Item code_val = (Item){.item = s2it(heap_create_name(code, strlen(code)))};
-    js_property_set(error, code_key, code_val);
-    js_throw_value(error);
-    return ItemNull;
-}
-
-extern "C" Item js_throw_uri_error_code(const char* code, const char* message) {
-    Item type_name = (Item){.item = s2it(heap_create_name("URIError"))};
-    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
-    Item error = js_new_error_with_name(type_name, msg_item);
+    Item error = js_new_error_with_name(type_item, msg_item);
     Item code_key = (Item){.item = s2it(heap_create_name("code"))};
     Item code_value = (Item){.item = s2it(heap_create_name(code, strlen(code)))};
     js_property_set(error, code_key, code_value);
@@ -24778,27 +24741,21 @@ extern "C" Item js_throw_uri_error_code(const char* code, const char* message) {
     return ItemNull;
 }
 
+// Throw TypeError/RangeError with Node.js error code (e.g. ERR_INVALID_ARG_TYPE)
+extern "C" Item js_throw_type_error_code(const char* code, const char* message) {
+    return js_throw_named_error_code("TypeError", code, message);
+}
+
+extern "C" Item js_throw_uri_error_code(const char* code, const char* message) {
+    return js_throw_named_error_code("URIError", code, message);
+}
+
 extern "C" Item js_throw_range_error_code(const char* code, const char* message) {
-    Item type_name = (Item){.item = s2it(heap_create_name("RangeError"))};
-    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
-    Item error = js_new_error_with_name(type_name, msg_item);
-    // set .code property
-    Item code_key = (Item){.item = s2it(heap_create_name("code"))};
-    Item code_val = (Item){.item = s2it(heap_create_name(code, strlen(code)))};
-    js_property_set(error, code_key, code_val);
-    js_throw_value(error);
-    return ItemNull;
+    return js_throw_named_error_code("RangeError", code, message);
 }
 
 extern "C" Item js_throw_error_with_code(const char* code, const char* message) {
-    Item type_name = (Item){.item = s2it(heap_create_name("Error"))};
-    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
-    Item error = js_new_error_with_name(type_name, msg_item);
-    Item code_key = (Item){.item = s2it(heap_create_name("code"))};
-    Item code_val = (Item){.item = s2it(heap_create_name(code, strlen(code)))};
-    js_property_set(error, code_key, code_val);
-    js_throw_value(error);
-    return ItemNull;
+    return js_throw_named_error_code("Error", code, message);
 }
 
 static void js_format_invalid_arg_string(char* out, int out_size, String* str) {
@@ -31316,7 +31273,7 @@ static bool js_array_iterator_next_is_default() {
 
 static int64_t js_array_iterator_source_length(Item source) {
     if (get_type_id(source) != LMD_TYPE_ARRAY) return 0;
-    if (!js_runtime_is_arguments_exotic(source)) return source.array->length;
+    if (!js_is_arguments_exotic_array(source)) return source.array->length;
     Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
     return js_array_to_length(js_property_get(source, len_key));
 }

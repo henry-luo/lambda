@@ -129,6 +129,14 @@ static void stable_sort_items_by_total_order(Item* items, int64_t len, bool desc
 // ArrayNum transforms used to fall back to generic Item arrays for the
 // representation-specific branches. Stage through Items for shared comparison
 // semantics, then restore the source lane type at the result boundary.
+static inline Item item_from_array_num(ArrayNum* array_num) {
+    // clang 14 rejects designated aggregate initialization when these results
+    // are returned from function templates, so assign the union field directly.
+    Item result = ItemNull;
+    result.array_num = array_num;
+    return result;
+}
+
 static Item array_num_from_items(ArrayNumElemType elem_type, Array* items) {
     if (!items) return ItemError;
 
@@ -1901,6 +1909,19 @@ static Item vec_unary_math(Item item, double (*func)(double), const char* name) 
     return { .array_num = result };
 }
 
+typedef Item (*ComplexUnaryMathFn)(Item item);
+
+static Item fn_math_unary(Item item, double (*func)(double), const char* name,
+                          ComplexUnaryMathFn complex_func) {
+    GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (complex_func && type == LMD_TYPE_COMPLEX) return complex_func(item);
+    if (is_scalar_numeric(type)) {
+        return push_d(func(item_to_double(item)));
+    }
+    return vec_unary_math(item, func, name);
+}
+
 //==============================================================================
 // Pipe Operations
 //==============================================================================
@@ -2086,119 +2107,52 @@ Item fn_pipe_call(Item collection, Item func_or_result) {
 
 // sqrt(vec) - element-wise square root
 Item fn_math_sqrt(Item item) {
-    GUARD_ERROR1(item);
-    // Check if scalar
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_COMPLEX) return fn_complex_sqrt(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(sqrt(val));
-    }
-    return vec_unary_math(item, sqrt, "fn_math_sqrt");
+    return fn_math_unary(item, sqrt, "fn_math_sqrt", fn_complex_sqrt);
 }
 
 // log(vec) - element-wise natural logarithm
 Item fn_math_log(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_COMPLEX) return fn_complex_log(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(log(val));
-    }
-    return vec_unary_math(item, log, "fn_math_log");
+    return fn_math_unary(item, log, "fn_math_log", fn_complex_log);
 }
 
 // log10(vec) - element-wise base-10 logarithm
 Item fn_math_log10(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(log10(val));
-    }
-    return vec_unary_math(item, log10, "fn_math_log10");
+    return fn_math_unary(item, log10, "fn_math_log10", NULL);
 }
 
 // exp(vec) - element-wise exponential
 Item fn_math_exp(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_COMPLEX) return fn_complex_exp(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(exp(val));
-    }
-    return vec_unary_math(item, exp, "fn_math_exp");
+    return fn_math_unary(item, exp, "fn_math_exp", fn_complex_exp);
 }
 
 // sin(vec) - element-wise sine
 Item fn_math_sin(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_COMPLEX) return fn_complex_sin(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(sin(val));
-    }
-    return vec_unary_math(item, sin, "fn_math_sin");
+    return fn_math_unary(item, sin, "fn_math_sin", fn_complex_sin);
 }
 
 // cos(vec) - element-wise cosine
 Item fn_math_cos(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_COMPLEX) return fn_complex_cos(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(cos(val));
-    }
-    return vec_unary_math(item, cos, "fn_math_cos");
+    return fn_math_unary(item, cos, "fn_math_cos", fn_complex_cos);
 }
 
 // tan(vec) - element-wise tangent
 Item fn_math_tan(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_COMPLEX) return fn_complex_tan(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(tan(val));
-    }
-    return vec_unary_math(item, tan, "fn_math_tan");
+    return fn_math_unary(item, tan, "fn_math_tan", fn_complex_tan);
 }
 
 // asin(vec) - element-wise inverse sine
 Item fn_math_asin(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(asin(val));
-    }
-    return vec_unary_math(item, asin, "fn_math_asin");
+    return fn_math_unary(item, asin, "fn_math_asin", NULL);
 }
 
 // acos(vec) - element-wise inverse cosine
 Item fn_math_acos(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(acos(val));
-    }
-    return vec_unary_math(item, acos, "fn_math_acos");
+    return fn_math_unary(item, acos, "fn_math_acos", NULL);
 }
 
 // atan(vec) - element-wise inverse tangent
 Item fn_math_atan(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(atan(val));
-    }
-    return vec_unary_math(item, atan, "fn_math_atan");
+    return fn_math_unary(item, atan, "fn_math_atan", NULL);
 }
 
 // atan2(y, x) - two-argument inverse tangent
@@ -2217,101 +2171,47 @@ Item fn_math_atan2(Item item_y, Item item_x) {
 
 // sinh(vec) - element-wise hyperbolic sine
 Item fn_math_sinh(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(sinh(val));
-    }
-    return vec_unary_math(item, sinh, "fn_math_sinh");
+    return fn_math_unary(item, sinh, "fn_math_sinh", NULL);
 }
 
 // cosh(vec) - element-wise hyperbolic cosine
 Item fn_math_cosh(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(cosh(val));
-    }
-    return vec_unary_math(item, cosh, "fn_math_cosh");
+    return fn_math_unary(item, cosh, "fn_math_cosh", NULL);
 }
 
 // tanh(vec) - element-wise hyperbolic tangent
 Item fn_math_tanh(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(tanh(val));
-    }
-    return vec_unary_math(item, tanh, "fn_math_tanh");
+    return fn_math_unary(item, tanh, "fn_math_tanh", NULL);
 }
 
 // asinh(vec) - element-wise inverse hyperbolic sine
 Item fn_math_asinh(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(asinh(val));
-    }
-    return vec_unary_math(item, asinh, "fn_math_asinh");
+    return fn_math_unary(item, asinh, "fn_math_asinh", NULL);
 }
 
 // acosh(vec) - element-wise inverse hyperbolic cosine
 Item fn_math_acosh(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(acosh(val));
-    }
-    return vec_unary_math(item, acosh, "fn_math_acosh");
+    return fn_math_unary(item, acosh, "fn_math_acosh", NULL);
 }
 
 // atanh(vec) - element-wise inverse hyperbolic tangent
 Item fn_math_atanh(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(atanh(val));
-    }
-    return vec_unary_math(item, atanh, "fn_math_atanh");
+    return fn_math_unary(item, atanh, "fn_math_atanh", NULL);
 }
 
 // exp2(vec) - element-wise base-2 exponential
 Item fn_math_exp2(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(exp2(val));
-    }
-    return vec_unary_math(item, exp2, "fn_math_exp2");
+    return fn_math_unary(item, exp2, "fn_math_exp2", NULL);
 }
 
 // expm1(vec) - element-wise exp(x)-1
 Item fn_math_expm1(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(expm1(val));
-    }
-    return vec_unary_math(item, expm1, "fn_math_expm1");
+    return fn_math_unary(item, expm1, "fn_math_expm1", NULL);
 }
 
 // log2(vec) - element-wise base-2 logarithm
 Item fn_math_log2(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(log2(val));
-    }
-    return vec_unary_math(item, log2, "fn_math_log2");
+    return fn_math_unary(item, log2, "fn_math_log2", NULL);
 }
 
 // pow(base, exp) - math module power function (delegates to fn_pow)
@@ -2321,24 +2221,12 @@ Item fn_math_pow(Item item_a, Item item_b) {
 
 // cbrt(vec) - element-wise cube root
 Item fn_math_cbrt(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(cbrt(val));
-    }
-    return vec_unary_math(item, cbrt, "fn_math_cbrt");
+    return fn_math_unary(item, cbrt, "fn_math_cbrt", NULL);
 }
 
 // trunc(vec) - element-wise truncation toward zero
 Item fn_trunc(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(trunc(val));
-    }
-    return vec_unary_math(item, trunc, "fn_trunc");
+    return fn_math_unary(item, trunc, "fn_trunc", NULL);
 }
 
 // item_to_bool: coerce an item to a boolean for any()/all() reductions
@@ -2469,13 +2357,7 @@ Item fn_math_hypot(Item item_y, Item item_x) {
 
 // log1p(vec) - element-wise ln(1+x), precise for small x
 Item fn_math_log1p(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    if (is_scalar_numeric(type)) {
-        double val = item_to_double(item);
-        return push_d(log1p(val));
-    }
-    return vec_unary_math(item, log1p, "fn_math_log1p");
+    return fn_math_unary(item, log1p, "fn_math_log1p", NULL);
 }
 
 // sign(vec) - element-wise sign (-1, 0, 1)
@@ -4495,7 +4377,7 @@ static Item array_num_point_op(ArrayNum* in, Fn fn) {
         write_arr_elem_from_double(out, lin, fn(array_num_read_double(in, off)));
         for (int d = ndim - 1; d >= 0; d--) { if (++idx[d] < shp[d]) break; idx[d] = 0; }
     }
-    return { .array_num = out };
+    return item_from_array_num(out);
 }
 
 // invert(img): photographic negative, white - v.
@@ -4569,7 +4451,7 @@ static Item array_num_remap(ArrayNum* in, int ndim, const int64_t* str, int64_t 
             }
         }
     }
-    return { .array_num = out };
+    return item_from_array_num(out);
 }
 
 // flip(img, axis): axis 0 = vertical (reverse rows), 1 = horizontal (reverse cols).
@@ -4791,7 +4673,7 @@ static Item bilinear_gather(ArrayNum* in, int ndim, const int64_t* str, int64_t 
                 write_arr_elem_from_double(out, lin++, bilinear_sample(in, sy, sx, c, H, W, ndim, str, edge_clamp));
         }
     }
-    return { .array_num = out };
+    return item_from_array_num(out);
 }
 
 // resize(img, new_h, new_w) -> bilinear-resampled image (half-pixel-centre mapping).
