@@ -5,6 +5,16 @@
       "pattern": "lambda/tree-sitter*",
       "modules": ["lambda"],
       "reason": "Vendored Tree-sitter runtimes, grammars, generated parsers, scanners, and bindings are not maintained Lambda source code."
+    },
+    {
+      "pattern": "lambda/mir/*",
+      "modules": ["lambda"],
+      "reason": "Vendored MIR sources and generated build artifacts are outside the maintained Lambda scan."
+    },
+    {
+      "pattern": "lambda/module/*",
+      "modules": ["lambda"],
+      "reason": "Hosted module implementations are maintained as separate module trees and are outside the core Lambda duplication scan."
     }
   ],
   "block_exclusions": [

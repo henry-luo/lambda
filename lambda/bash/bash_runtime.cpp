@@ -606,50 +606,71 @@ static const char* bash_item_cstr(Item value, char* buf, size_t buf_size) {
 }
 
 // numeric test comparisons: -eq, -ne, -gt, -ge, -lt, -le
-extern "C" Item bash_test_eq(Item left, Item right) {
-    bool result = (bash_coerce_int(left) == bash_coerce_int(right));
+typedef enum BashTestComparison {
+    BASH_TEST_EQ,
+    BASH_TEST_NE,
+    BASH_TEST_GT,
+    BASH_TEST_GE,
+    BASH_TEST_LT,
+    BASH_TEST_LE,
+} BashTestComparison;
+
+static bool bash_compare_ints(int64_t left, int64_t right, BashTestComparison comparison) {
+    switch (comparison) {
+    case BASH_TEST_EQ: return left == right;
+    case BASH_TEST_NE: return left != right;
+    case BASH_TEST_GT: return left > right;
+    case BASH_TEST_GE: return left >= right;
+    case BASH_TEST_LT: return left < right;
+    case BASH_TEST_LE: return left <= right;
+    }
+    return false;
+}
+
+static Item bash_test_numeric(Item left, Item right, BashTestComparison comparison) {
+    bool result = bash_compare_ints(
+        bash_coerce_int(left), bash_coerce_int(right), comparison);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_eq(Item left, Item right) {
+    return bash_test_numeric(left, right, BASH_TEST_EQ);
 }
 
 extern "C" Item bash_test_ne(Item left, Item right) {
-    bool result = (bash_coerce_int(left) != bash_coerce_int(right));
-    bash_last_exit_code = result ? 0 : 1;
-    return (Item){.item = b2it(result)};
+    return bash_test_numeric(left, right, BASH_TEST_NE);
 }
 
 extern "C" Item bash_test_gt(Item left, Item right) {
-    bool result = (bash_coerce_int(left) > bash_coerce_int(right));
-    bash_last_exit_code = result ? 0 : 1;
-    return (Item){.item = b2it(result)};
+    return bash_test_numeric(left, right, BASH_TEST_GT);
 }
 
 extern "C" Item bash_test_ge(Item left, Item right) {
-    bool result = (bash_coerce_int(left) >= bash_coerce_int(right));
-    bash_last_exit_code = result ? 0 : 1;
-    return (Item){.item = b2it(result)};
+    return bash_test_numeric(left, right, BASH_TEST_GE);
 }
 
 extern "C" Item bash_test_lt(Item left, Item right) {
-    bool result = (bash_coerce_int(left) < bash_coerce_int(right));
-    bash_last_exit_code = result ? 0 : 1;
-    return (Item){.item = b2it(result)};
+    return bash_test_numeric(left, right, BASH_TEST_LT);
 }
 
 extern "C" Item bash_test_le(Item left, Item right) {
-    bool result = (bash_coerce_int(left) <= bash_coerce_int(right));
+    return bash_test_numeric(left, right, BASH_TEST_LE);
+}
+
+static Item bash_test_string(Item left, Item right, BashTestComparison comparison) {
+    char buf_l[64], buf_r[64];
+    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
+    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
+    int ordering = strcmp(l, r);
+    bool result = bash_compare_ints(ordering, 0, comparison);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
 
 // string test comparisons — literal only (no glob)
 extern "C" Item bash_str_eq(Item left, Item right) {
-    char buf_l[64], buf_r[64];
-    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
-    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    bool result = (strcmp(l, r) == 0);
-    bash_last_exit_code = result ? 0 : 1;
-    return (Item){.item = b2it(result)};
+    return bash_test_string(left, right, BASH_TEST_EQ);
 }
 
 extern "C" Item bash_test_str_eq(Item left, Item right) {
@@ -666,62 +687,30 @@ extern "C" Item bash_test_str_eq(Item left, Item right) {
 // pattern match without backslash escaping: for word-literal patterns where
 // backslash escapes have already been processed at the quote-removal stage
 extern "C" Item bash_test_str_eq_noescape(Item left, Item right) {
-    char buf_l[64], buf_r[64];
-    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
-    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    // use bash_pattern_match with extglob — backslashes already stripped by transpiler
-    int flags = BASH_PAT_EXTGLOB;
-    bool result = (bash_pattern_match(l, r, flags) == 1);
-    bash_last_exit_code = result ? 0 : 1;
-    return (Item){.item = b2it(result)};
+    return bash_test_str_eq(left, right);
 }
 
 // literal string comparison: for quoted RHS in [[ $x = 'literal' ]]
 // quotes have been stripped at AST build time so this is a pure strcmp
 extern "C" Item bash_test_str_eq_literal(Item left, Item right) {
-    char buf_l[64], buf_r[64];
-    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
-    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    bool result = (strcmp(l, r) == 0);
-    bash_last_exit_code = result ? 0 : 1;
-    return (Item){.item = b2it(result)};
+    return bash_test_string(left, right, BASH_TEST_EQ);
 }
 
 // literal string not-equal: for quoted RHS in [[ $x != 'literal' ]]
 extern "C" Item bash_test_str_ne_literal(Item left, Item right) {
-    char buf_l[64], buf_r[64];
-    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
-    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    bool result = (strcmp(l, r) != 0);
-    bash_last_exit_code = result ? 0 : 1;
-    return (Item){.item = b2it(result)};
+    return bash_test_string(left, right, BASH_TEST_NE);
 }
 
 extern "C" Item bash_test_str_ne(Item left, Item right) {
-    char buf_l[64], buf_r[64];
-    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
-    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    bool result = (strcmp(l, r) != 0);
-    bash_last_exit_code = result ? 0 : 1;
-    return (Item){.item = b2it(result)};
+    return bash_test_string(left, right, BASH_TEST_NE);
 }
 
 extern "C" Item bash_test_str_lt(Item left, Item right) {
-    char buf_l[64], buf_r[64];
-    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
-    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    bool result = (strcmp(l, r) < 0);
-    bash_last_exit_code = result ? 0 : 1;
-    return (Item){.item = b2it(result)};
+    return bash_test_string(left, right, BASH_TEST_LT);
 }
 
 extern "C" Item bash_test_str_gt(Item left, Item right) {
-    char buf_l[64], buf_r[64];
-    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
-    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    bool result = (strcmp(l, r) > 0);
-    bash_last_exit_code = result ? 0 : 1;
-    return (Item){.item = b2it(result)};
+    return bash_test_string(left, right, BASH_TEST_GT);
 }
 
 extern "C" Item bash_test_regex(Item left, Item right) {

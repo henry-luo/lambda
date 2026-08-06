@@ -52,7 +52,7 @@ class FileExclusionConfigTest(unittest.TestCase):
 
         self.assertEqual(
             CHECK_CODE_DUP.active_file_exclusions(config, ("lambda",)),
-            ["lambda/tree-sitter*"],
+            ["lambda/tree-sitter*", "lambda/mir/*", "lambda/module/*"],
         )
 
     def test_lambda_css_table_is_the_only_reviewed_block_exclusion(self):
@@ -75,10 +75,10 @@ class FileExclusionConfigTest(unittest.TestCase):
         self.assertEqual(
             baselines["lambda"],
             {
-                "family_count": 1378,
-                "union_duplicate_lines": 56407,
-                "diagnostic_raw_blocks": 3539,
-                "diagnostic_remaining_blocks": 3383,
+                "family_count": 1357,
+                "union_duplicate_lines": 55081,
+                "diagnostic_raw_blocks": 3441,
+                "diagnostic_remaining_blocks": 3285,
             },
         )
 

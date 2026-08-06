@@ -59,9 +59,9 @@ non-empty reason. Exclusions are for generated code or reviewed false positives,
 not for suppressing ordinary duplication.
 
 File exclusions are passed directly to Lizard with `-x`. Paths and patterns are
-relative to the repository root. The current Lambda exclusions cover the
-every vendored `lambda/tree-sitter*` tree, including runtimes, grammar sources,
-generated parsers, scanners, and language bindings.
+relative to the repository root. The current Lambda exclusions cover vendored
+`lambda/tree-sitter*` and `lambda/mir/*` trees, plus the separately hosted
+`lambda/module/*` implementations.
 
 ```json
 {
