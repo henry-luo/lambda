@@ -196,6 +196,12 @@ struct MirTranspiler {
     bool in_pipe;
     AstNode* last_index_object;
 
+    // Handler bodies resolve `~` against the operand's failure Item.  This is
+    // a lexical lowering context, independent of the pipe current-item lane.
+    MIR_reg_t handler_error_reg;
+    bool in_handler;
+    bool in_handler_operand;
+
     // TCO
     AstFuncNode* tco_func;
     MIR_label_t tco_label;
@@ -3009,6 +3015,112 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg,
     return em_require_rep(&mt->em, value, VALUE_REP_ITEM).reg;
 }
 
+// Direct calls to a named closure do not pass through Function dispatch, so
+// they must materialize the same flat Item environment that a first-class
+// closure carries.  The environment is rooted for the complete call because
+// populating a slot may allocate and compact the GC heap.
+static MIR_reg_t emit_capture_environment(MirTranspiler* mt,
+        AstFuncNode* fn_node, int* count_out) {
+    int cap_count = 0;
+    for (FnCapture* cap = fn_node ? fn_node->captures : NULL;
+            cap; cap = cap->next) cap_count++;
+    if (count_out) *count_out = cap_count;
+    if (cap_count <= 0) return 0;
+
+    MIR_reg_t env = emit_call_2(mt, "heap_calloc", MIR_T_P,
+        MIR_T_I64, MIR_new_int_op(mt->ctx,
+            (int64_t)(cap_count * 2 * sizeof(uint64_t))),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+    int env_root = create_pointer_gc_root_slot(mt, env);
+    env = load_gc_root_slot(mt, env_root, "direct_env");
+
+    int cap_index = 0;
+    for (FnCapture* cap = fn_node->captures; cap; cap = cap->next) {
+        MIR_reg_t cap_val = 0;
+        MirVarEntry* var = find_var(mt, cap->name);
+        if (var) {
+            cap_val = emit_box(mt, var->reg, var->type_id);
+        } else {
+            GlobalVarEntry* gvar = find_global_var(mt, cap->name);
+            if (gvar) {
+                cap_val = emit_box(mt, load_global_var(mt, gvar), gvar->type_id);
+            }
+        }
+        if (!cap_val) {
+            cap_val = emit_null_item_reg(mt);
+        }
+        int cap_root = create_gc_root_slot(mt, cap_val);
+        cap_val = load_gc_root_slot(mt, cap_root, "direct_cap");
+        env = load_gc_root_slot(mt, env_root, "direct_env_live");
+        emit_call_void_4(mt, "owned_item_slot_store",
+            MIR_T_P, MIR_new_reg_op(mt->ctx, env),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_index),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, cap_val));
+        cap_index++;
+    }
+    return load_gc_root_slot(mt, env_root, "direct_env_done");
+}
+
+// A direct closure call uses a fresh environment for the invocation.  Copy
+// each captured slot back to its outer binding afterwards so assignment to a
+// captured scalar remains visible, while in-place container mutation naturally
+// remains shared through the captured pointer.
+static void emit_capture_writeback(MirTranspiler* mt, AstFuncNode* fn_node,
+        MIR_reg_t env, int cap_count) {
+    if (!fn_node || !env || cap_count <= 0) return;
+    int env_root = create_pointer_gc_root_slot(mt, env);
+    int cap_index = 0;
+    for (FnCapture* cap = fn_node->captures; cap; cap = cap->next) {
+        MirVarEntry* outer = find_var(mt, cap->name);
+        MIR_reg_t item = emit_call_4(mt, "owned_item_slot_read", MIR_T_I64,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, env),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_index),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+        int item_root = create_gc_root_slot(mt, item);
+        item = load_gc_root_slot(mt, item_root, "direct_cap_result");
+        if (outer) {
+            MIR_reg_t value = item;
+            if (outer->type_id == LMD_TYPE_NUM_SIZED) {
+                value = emit_call_2(mt, "coerce_num_sized", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, item),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)outer->num_type));
+            } else if (outer->type_id != LMD_TYPE_ANY &&
+                    outer->type_id != LMD_TYPE_ERROR) {
+                value = emit_unbox(mt, item, outer->type_id);
+            }
+            if (outer->mir_type == MIR_T_D) {
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                    MIR_new_reg_op(mt->ctx, outer->reg),
+                    MIR_new_reg_op(mt->ctx, value)));
+            } else {
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, outer->reg),
+                    MIR_new_reg_op(mt->ctx, value)));
+            }
+            update_gc_root_slot(mt, outer);
+
+            // Nested closures may themselves capture this binding.  Preserve
+            // the same mutation through the enclosing environment as well.
+            if (outer->env_offset >= 0 && mt->env_reg) {
+                MIR_reg_t boxed = emit_box(mt, outer->reg, outer->type_id);
+                int enclosing_count = 0;
+                for (FnCapture* enclosing = mt->current_closure
+                        ? mt->current_closure->captures : NULL;
+                        enclosing; enclosing = enclosing->next) enclosing_count++;
+                emit_call_void_4(mt, "owned_item_slot_store",
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, mt->env_reg),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, enclosing_count),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, outer->env_offset / 8),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+            }
+        }
+        env = load_gc_root_slot(mt, env_root, "direct_env_next");
+        cap_index++;
+    }
+}
+
 static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
 
 // All dynamic-to-annotated crossings go through this one boxed boundary before
@@ -4850,10 +4962,25 @@ static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
 
 static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
     if (!node) return LMD_TYPE_ANY;
+    // Braced handlers join a successful value with a body value in the boxed
+    // Item lane; keep callers from interpreting the merged register as a raw
+    // native scalar merely because static inference found one.
+    if (node->node_type == AST_NODE_HANDLER_EXPR ||
+            node->node_type == AST_NODE_HANDLER_STAM) return LMD_TYPE_ANY;
     // Unwrap PRIMARY nodes (parenthesized expressions)
     if (node->node_type == AST_NODE_PRIMARY) {
         AstPrimaryNode* pri = (AstPrimaryNode*)node;
         if (pri->expr) return get_effective_type(mt, pri->expr);
+    }
+    if (node->node_type == AST_NODE_IDENT) {
+        // Closure captures are loaded from the environment as boxed Items even
+        // when the source binding was an ArrayNum/scalar.  Using the AST's
+        // outer-frame type here would unbox that Item as a raw pointer/value
+        // and can crash on a captured container store.
+        AstIdentNode* ident = (AstIdentNode*)node;
+        MirVarEntry* captured = ident->name ? find_var(mt, ident->name->chars) : NULL;
+        if (captured && captured->type_id == LMD_TYPE_ANY &&
+                captured->mir_type == MIR_T_I64) return LMD_TYPE_ANY;
     }
     // transpile_match always boxes each arm's body into the result slot, so a match
     // result is a boxed Item regardless of its declared (arm-union) type. Report ANY
@@ -9015,6 +9142,68 @@ static MIR_reg_t transpile_local_fault_expression(MirTranspiler* mt,
     return result;
 }
 
+// Lower both handler forms through the boxed Item lane.  A handler consumes
+// only an ItemError result; ordinary successful values bypass its body.
+static MIR_reg_t transpile_handler(MirTranspiler* mt, AstHandlerNode* handler) {
+    bool saved_in_handler_operand = mt->in_handler_operand;
+    mt->in_handler_operand = true;
+    MIR_reg_t operand;
+    if (handler->is_statement && mt->in_proc && !mt->in_async_proc) {
+        // Procedural handlers own the local fault regime.  The frame protects
+        // only the operand; the recovery body runs after that frame is retired.
+        operand = transpile_local_fault_expression(mt, handler->operand);
+    } else {
+        operand = transpile_box_item(mt, handler->operand);
+    }
+    mt->in_handler_operand = saved_in_handler_operand;
+    MIR_reg_t type_tag = new_reg(mt, "handler_tag", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH,
+        MIR_new_reg_op(mt->ctx, type_tag), MIR_new_reg_op(mt->ctx, operand),
+        MIR_new_int_op(mt->ctx, 56)));
+    MIR_reg_t is_error = new_reg(mt, "handler_error", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+        MIR_new_reg_op(mt->ctx, is_error), MIR_new_reg_op(mt->ctx, type_tag),
+        MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
+
+    MIR_reg_t result = new_reg(mt, "handler_result", MIR_T_I64);
+    MIR_label_t handle = new_label(mt);
+    MIR_label_t done = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, handle), MIR_new_reg_op(mt->ctx, is_error)));
+
+    if (handler->is_statement) {
+        uint64_t null_value = (uint64_t)LMD_TYPE_NULL << 56;
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx,
+                (int64_t)null_value)));
+    } else {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, operand)));
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, done)));
+
+    emit_label(mt, handle);
+    MIR_reg_t saved_handler_error = mt->handler_error_reg;
+    bool saved_in_handler = mt->in_handler;
+    mt->handler_error_reg = operand;
+    mt->in_handler = true;
+    MIR_reg_t body_value = transpile_box_item(mt, handler->body);
+    mt->handler_error_reg = saved_handler_error;
+    mt->in_handler = saved_in_handler;
+    if (handler->is_statement) {
+        uint64_t null_value = (uint64_t)LMD_TYPE_NULL << 56;
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx,
+                (int64_t)null_value)));
+    } else {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, body_value)));
+    }
+    emit_label(mt, done);
+    return result;
+}
+
 static void transpile_error_destructure(MirTranspiler* mt, AstNamedNode* asn) {
     const uint64_t null_value = (uint64_t)LMD_TYPE_NULL << 56;
     // Event handlers have their own transaction/re-entry policy in ER-S5.
@@ -10063,6 +10252,7 @@ static bool is_side_effect_stam(int node_type) {
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_PIPE_FILE_STAM:
+    case AST_NODE_HANDLER_STAM:
         return true;
     default:
         return false;
@@ -14286,6 +14476,13 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                         arg_root_slots[i], "call_arg")) : arg_ops[i];
             }
 
+            int direct_capture_count = 0;
+            MIR_reg_t direct_env = 0;
+            if (local_func && fn_def && fn_def->captures) {
+                direct_env = emit_capture_environment(mt, fn_def,
+                    &direct_capture_count);
+            }
+
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = 0;
             if (local_func) {
@@ -14293,9 +14490,15 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 // contract, but its generated body always has Context first.
                 // Keep the bound ABI in that conservative case instead of
                 // falling through to the legacy Item-only MIR call below.
-                MirCallOptions options = {{MIR_FRAME_REF_NONE, 0},
-                    (uint8_t)(FN_RETURN_HOME_NORMAL | FN_RETURN_HOME_ERROR),
-                    false, true};
+                MirCallOptions options = {};
+                options.scalar_return_home = {MIR_FRAME_REF_NONE, 0};
+                options.observed_return_lane_mask =
+                    (uint8_t)(FN_RETURN_HOME_NORMAL | FN_RETURN_HOME_ERROR);
+                options.has_hidden_context = true;
+                if (direct_env) {
+                    options.has_hidden_env = true;
+                    options.hidden_env = direct_env;
+                }
                 MirCallResult direct = em_call_direct(&mt->em, direct_call_name,
                     local_func, local_entry ? local_entry->variant : NULL, ai, call_types,
                     call_ops, &options);
@@ -14303,6 +14506,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 scalar_home_id = direct.normal.scalar_home_id
                     ? direct.normal.scalar_home_id
                     : direct.error.scalar_home_id;
+                if (direct_env) {
+                    emit_capture_writeback(mt, fn_def, direct_env,
+                        direct_capture_count);
+                }
             } else {
                 char proto_name[160];
                 snprintf(proto_name, sizeof(proto_name), "%s_cp%d",
@@ -14403,7 +14610,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 // straight into String*-taking helpers. Leaving it boxed made
                 // fn_len_s dereference a tagged Item and segfault on any
                 // `len(f())`, regardless of string length.
-                if (!call_error_lane && !call_node->propagate && !mt->emitting_async_call &&
+                if (!call_error_lane && !call_node->propagate &&
+                        !mt->in_handler_operand && !mt->emitting_async_call &&
                         (mir_is_native_scalar_value_type(call_tid) ||
                          call_tid == LMD_TYPE_STRING)) {
                     Type* call_return_contract = call_fn_type
@@ -17185,6 +17393,9 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         }
         return call_result;
     }
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM:
+        return transpile_handler(mt, (AstHandlerNode*)node);
     case AST_NODE_QUERY_EXPR: {
         // query expression: expr?T or expr.?T → fn_query(data, type_val, direct)
         AstQueryNode* query = (AstQueryNode*)node;
@@ -17203,6 +17414,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
     case AST_NODE_PIPE:
         return transpile_pipe(mt, (AstPipeNode*)node);
     case AST_NODE_CURRENT_ITEM: {
+        if (mt->in_handler) return mt->handler_error_reg;
         if (mt->in_pipe) return mt->pipe_item_reg;
         // in view/edit template context, ~ resolves to the model parameter
         if (mt->in_view_context) return mt->view_model_reg;
@@ -20466,6 +20678,13 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             // a consumed callee ident is a call, not an escaping reference
             if (call->function && !consumed_callee) prepass_forward_declare(mt, call->function);
             if (call->argument) prepass_forward_declare(mt, call->argument);
+            break;
+        }
+        case AST_NODE_HANDLER_EXPR:
+        case AST_NODE_HANDLER_STAM: {
+            AstHandlerNode* handler = (AstHandlerNode*)node;
+            if (handler->operand) prepass_forward_declare(mt, handler->operand);
+            if (handler->body) prepass_forward_declare(mt, handler->body);
             break;
         }
         case AST_NODE_START: {

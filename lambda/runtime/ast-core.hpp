@@ -134,6 +134,8 @@ typedef enum AstNodeType : uint16_t {
     // 542, not 541: AST_NODE_START accidentally reused the event-handler value,
     // making the two node kinds indistinguishable in node_type dispatch.
     AST_NODE_EVENT_HANDLER = 542,
+    AST_NODE_HANDLER_EXPR = 543,
+    AST_NODE_HANDLER_STAM = 544,
 } AstNodeType;
 
 typedef enum Operator {
@@ -306,6 +308,14 @@ typedef struct AstCallNode : AstNode {
     bool optional;
     bool is_proc_method;
 } AstCallNode;
+
+// A handler keeps the operand and recovery body together so both expression
+// and statement forms share the same outcome-routing semantics in the backend.
+typedef struct AstHandlerNode : AstNode {
+    AstNode* operand;
+    AstNode* body;
+    bool is_statement;
+} AstHandlerNode;
 
 typedef struct AstStartNode : AstNode {
     AstCallNode* call;

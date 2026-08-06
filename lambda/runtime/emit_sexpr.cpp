@@ -1297,6 +1297,17 @@ static void emit_expr(const char* source, AstNode* node) {
         break;
     }
 
+    case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM: {
+        AstHandlerNode* handler = (AstHandlerNode*)node;
+        printf("(handle ");
+        emit_expr(source, handler->operand);
+        printf(" ");
+        emit_expr(source, handler->body);
+        printf(")");
+        break;
+    }
+
     case AST_NODE_SYS_FUNC: {
         // standalone sys func reference (not in a call)
         AstSysFuncNode* sys = (AstSysFuncNode*)node;
@@ -2117,6 +2128,8 @@ static const char* ast_dump_kind_name(AstNodeType type) {
         case AST_NODE_STATE_ENTRY: return "AST_NODE_STATE_ENTRY";
         case AST_NODE_START: return "AST_NODE_START";
         case AST_NODE_EVENT_HANDLER: return "AST_NODE_EVENT_HANDLER";
+        case AST_NODE_HANDLER_EXPR: return "AST_NODE_HANDLER_EXPR";
+        case AST_NODE_HANDLER_STAM: return "AST_NODE_HANDLER_STAM";
         default: return "AST_NODE_UNKNOWN";
     }
 }
@@ -2420,6 +2433,14 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             emit_dump_value_effect_field(node->type);
             emit_lambda_dump_field(source, "function", call->function, indent + 1);
             emit_lambda_dump_list(source, "argument", call->argument, indent + 1);
+            break;
+        }
+        case AST_NODE_HANDLER_EXPR:
+        case AST_NODE_HANDLER_STAM: {
+            AstHandlerNode* handler = (AstHandlerNode*)node;
+            emit_dump_type_field("value_type", node->type);
+            emit_lambda_dump_field(source, "operand", handler->operand, indent + 1);
+            emit_lambda_dump_field(source, "body", handler->body, indent + 1);
             break;
         }
         case AST_NODE_SYS_FUNC: {

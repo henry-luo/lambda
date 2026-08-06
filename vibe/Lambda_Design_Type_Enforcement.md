@@ -1467,10 +1467,14 @@ ANY-poisoning this design exists to remove), or a polled side-flag (cost on ever
 
 ### TE-16 — The `^ { }` error handler; `let a^err` and `if (^err)` retired (decided 2026-08-01, user)
 
-**Decision.** Local error handling becomes a single expression form:
+**Decision.** Local error handling uses one braced syntax with two
+context-selected forms:
 
 ```lambda
-let a = e ^ { … ~ … }      // ~ is the error; `a` is statically clean T
+let a = e ^ { … ~ … }      // expression form: the whole handler has a value
+pn_call() ^ {               // statement form: handle, then continue
+    … ~ …
+}
 ```
 
 `let a^err = e` and the prefix error test `if (^err)` are **retired**. This closes the last
@@ -1502,8 +1506,9 @@ binding — which is the same reasoning that chose TE-15's block scoping over fu
 TE-15's skip is *safe* but *blind*: `{ let a: T = e; … }` cannot tell whether an error
 occurred and cannot access it. Skip is a fail-stop mechanism; `^ { }` is the handling
 mechanism. Together they are the intended pair — **skip is the default (fail-safe, the error
-becomes the block's value), and `^ { }` is the engagement form that suppresses the skip and
-puts the error in hand.**
+becomes the block's value), and `^ { }` handles an error outcome produced while evaluating its
+own operand and puts that error in hand.** It does not reach outward and absorb a later boundary
+check imposed by the surrounding declaration.
 
 #### Prior art (the shape being adopted)
 
@@ -1513,15 +1518,28 @@ or the failure path is required to leave the scope entirely (`let … else { }` 
 must diverge; `?`). Lambda already had two of the three: `match` arms genuinely narrow the
 scrutinee (verified 2026-08-01 — `case error:` binds `~` as the error, `case int:` binds it
 as an int, so no scope holds "an int that might be null"), and postfix `^` is `?`. TE-16
-supplies the third: `e ^ { }` is `let … else { }` in expression form.
+supplies the third: `e ^ { }` is `let … else { }` in expression form; the statement-position
+form is the ordinary command counterpart, where the handler body runs only on failure and control
+then resumes after the handled statement.
 
-#### The form
+#### The two context forms
 
-- **Typing** mirrors `or`: `type(e ^ h) = (type(e) \ error) | type(h)`. So `let a: T = e ^ h`
-  requires `h : T` or a diverging `h`; unannotated bindings infer the union.
-- **Handler contract:** produce a value of the expected type, *or* diverge — `raise`,
-  `return`, or letting the enclosing block skip. Value-form is `or`-with-access; diverge-form
-  is let-else. `raise`/`return` inside the handler are legal and act on the enclosing frame.
+- **Expression form.** `e ^ { h }` is evaluated as one ordinary expression, with
+  `type(e ^ h) = (type(e) \ error) | type(h)`. It has no privileged relationship with a
+  surrounding declaration. In `let a: T = e ^ { h }`, the handler expression finishes first;
+  its result then crosses the normal `T` assignment boundary. A mismatch there behaves exactly
+  like `let a: T = other_expr`: static rejection where provable, otherwise a deferred check and
+  TE-18 skip. The outer check is **not** caught by the inner handler. This makes the form a
+  shorthand for value-level error matching, not a contextual checked-cast construct.
+- **Statement (`stam`) form.** `pn_call() ^ { H }` protects a procedural call whose value is
+  discarded. Success continues with the next statement. On error, `H` runs as a statement body
+  with `~` bound; if `H` completes normally, execution likewise continues after the handled
+  statement. No handler-result type is required. `return` or `raise` in `H` still acts on the
+  enclosing procedure.
+- **No implicit divergence rule.** In expression position the handler may return any value; its
+  union participates in ordinary contextual typing. In statement position it may complete
+  normally. Letting some enclosing block skip is a runtime outcome, never a static claim that the
+  handler diverges.
 - **`~` binds the error**, consistent with `match` arms and pipes. Nested `^` inside a `match`
   arm shadows innermost-wins.
 - **Channel-agnostic**, per TE-13: `^ { }` discharges both raised (`T^E`) and soft
@@ -1530,7 +1548,8 @@ supplies the third: `e ^ { }` is `let … else { }` in expression form.
 #### Syntax: brace-delimited, and why
 
 The handler **must** be braced. `^` followed by `{` is the handler; `^` followed by anything
-else (or nothing) is postfix propagate. This is a purely lexical discriminator.
+else (or nothing) is postfix propagate. This is the lexical discriminator for both the
+expression and statement forms; the surrounding AST context selects which form applies.
 
 The rejected alternative was the terser `e ^ expr` with "any expression after `^` is the
 handler, EOL means propagate." Two measured problems: (1) `f(5)^ - 1` **parses today and
@@ -1623,8 +1642,10 @@ error to allowed is backward-compatible, so no code written under the rejection 
 
 #### Migration
 
-- Rewrite `let a^err = e; if (^err) { H } else { B }` as `let a = e ^ { H }` followed by `B`,
-  or as a `match` when both outcomes need full arms.
+- Rewrite a value-producing recovery as `let a = e ^ { H }`. A legacy two-arm
+  `let a^err = e; if (^err) { H } else { B }` becomes a `match` unless `H` supplies the value
+  consumed by a common tail or leaves the scope. Rewrite a command-style capture as
+  `pn_call() ^ { H }`; its handler may complete and execution continues afterward.
 - Rewrite `if (^err)` as `if (err is error)`.
 - Grammar: remove `:542`'s prefix `^` and `:702`'s destructure; add the braced infix form;
   `make generate-grammar` (never hand-edit `parser.c`).
@@ -1802,7 +1823,7 @@ becomes normative"* was forced by interior skip (effects to the right of an orig
 be provably unevaluated). With no interior skip, effects to the right of an error-valued operand
 run normally, and evaluation order returns to being an ordinary design choice.
 
-#### The six scenarios
+#### The boundary scenarios
 
 | # | Form | Ruling |
 |---|---|---|
@@ -1814,11 +1835,12 @@ run normally, and evaluation order returns to being an ordinary design choice.
 | 6 | `pn` bodies | One extra ruling only — case 7. |
 | 7 | `x = e` — reassignment to a declared `var` | Its own ruling: skip to the **declaring block** of `x`, old value retained, **and diagnose** — see below. |
 | 8 | `while (c) { … }` in a `pn` | Contributes **no region**. A skip inside it exits the loop, landing at the declaring block of the assigned binding. |
+| 9 | inner callable assigns an outer-frame `var` | Failure stops at the mutating callable's boundary and returns an error. The call invalidates subsequent reads of the outer binding until the caller explicitly re-establishes it; `mutate(); use(x)` is rejected, while no later use and `x = mutate(); use(x)` are legal (S3). |
 
 Cases 1–3 are the same mechanism (a declared boundary with a region behind it); 4 and 5 are the
 same mechanism (values flowing through error-admitting positions); 7 is case 1's mechanism with
-a diagnostic obligation case 1 does not have. **The whole design is those two mechanisms and
-nothing else.**
+a diagnostic obligation case 1 does not have. Case 9 is the cross-frame termination rule: the
+callee can return an error but cannot branch into another frame's declaring block.
 
 #### Case 7 — reassignment is not case 1, and must be diagnosed
 
@@ -1852,9 +1874,10 @@ an origination breadcrumb.
   how many statements of the block were not executed. Reporting only "an error originated here"
   hides exactly the part that distinguishes case 7 from case 1.
 
-**The escape is the handler, as everywhere else.** `x = e ^ { … }` makes the recovery explicit
-and suppresses both the warning and the runtime report — the user asked for it, so nothing is
-being done on their behalf.
+**The handler is not an assignment-boundary catch.** In `x = e ^ { … }`, the handler first
+produces the complete RHS value; the ordinary `x` contract check happens afterward. Handling can
+make the RHS statically clean and thereby remove the warning, but a later dynamic mismatch at the
+assignment boundary still reports and skips exactly as it would without `^ { … }`.
 
 #### Case 8 — `while`, and the rule that makes it a corollary
 
@@ -1876,13 +1899,14 @@ declarations inside them do. This also **corrects case 7's destination**: "the e
 was ambiguous between the block enclosing the *statement* and the block declaring the *variable*.
 It is the declaring block, and that choice is load-bearing:
 
-> **No use of a binding ever observes a value left by a failed assignment.** Skipping to the
-> declaring block ends the stale binding's scope at the same moment the skip lands. Skipping
-> only to the innermost enclosing block would leave the stale value readable for the rest of the
-> declaring block — precisely the "an earlier binding may remain visible" failure mode.
+> **Within one frame, no use of a binding observes a value left by a failed assignment.**
+> Skipping to the declaring block ends the stale binding's scope at the same moment the skip
+> lands. Cross-frame reassignment stops at the mutating callable's boundary, but statically
+> invalidates the outer binding for later reads until the caller explicitly re-establishes it.
 
-This is spec §13 invariant 7 ("no binding holds a placeholder for a failure") extended from
-establishment to reassignment.
+Spec §13 invariant 7 ("no binding holds a placeholder for a failure") still holds: the retained
+outer value is a real previously-established `T`, not a null/error placeholder. S3 enforces the
+stronger source-level rule by rejecting reads of that value after a hidden outer write.
 
 #### The `acc = acc + f(x)` weak spot is closed — and the liveness proposal is withdrawn
 
@@ -1929,12 +1953,43 @@ module whose top-level state is half-established must not become importable. Par
 state is exactly the "stale binding visible to later code" failure at module scope.
 
 **S3 — Reassignment from an inner function or closure** to a `var` declared in an outer frame.
-The destination is in another frame, so the skip cannot be an intra-function branch. It becomes
-an **error return from the inner function, resuming as an origination at the call site**, which
-then applies the rule again in the caller's frame. No new mechanism — this is the existing
-cross-function shape (`FN_ERROR_LANE_CONTEXT_ITEM` for native returns, the result Item for boxed
-ones). Note the consequence: the inner function acquires a defect-capable return, so the
-`may_defect` fixed point must treat outer-frame reassignment as an effect.
+The destination is in another frame, so the skip cannot be an intra-function branch. The accepted
+rule is deliberately local: failure returns an error from the mutating callable and stops at that
+callable's boundary. The call site receives the error as its ordinary result; it does **not**
+re-apply the outer binding's declaring-block skip. Execution may continue after a discarded
+result, but a call that may write captured `x` makes `x` unavailable for subsequent reads in the
+caller until a definite explicit assignment re-establishes it:
+
+```lambda
+mutate()
+use(x)       // compile error: x may have changed invisibly inside mutate
+```
+
+Two shapes are legal:
+
+```lambda
+mutate()     // mutate may read/use x internally
+             // no later read of x in this caller
+
+x = mutate() // the returned outcome explicitly re-establishes x
+use(x)
+```
+
+The rule bans **invisible mutate-then-use flow**, not cross-frame mutation itself. Any read counts:
+direct use, passing `x` as an argument, member/index access through `x`, capture by a later closure,
+or reading it on the RHS of a purported re-establishment. An assignment re-establishes `x` only
+when its RHS does not itself read the invalidated `x`; `x = x` is therefore not an escape.
+
+This is ordinary definite-state analysis. At a control-flow merge `x` remains unavailable if any
+reachable predecessor contains the hidden write without a definite re-establishment. A hidden
+write in a loop therefore carries into later iterations. The analysis affects diagnostics only;
+runtime routing remains local to `mutate`, and the previous runtime value remains a valid `T`.
+
+The inner function is defect-capable, so `may_defect` must still treat outer-frame reassignment as
+an effect. The compiler additionally needs the exact captured-write set for a known callee, not
+only a boolean. An indirect call whose write set was erased must conservatively invalidate every
+in-scope mutable binding that the callable may capture, or be rejected when that set cannot be
+bounded soundly.
 
 #### Violations found against the live tree (2026-08-06)
 

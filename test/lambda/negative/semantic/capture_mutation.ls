@@ -1,5 +1,6 @@
-// Negative test: closures may read captured snapshots, but cannot mutate them
-// Expected error: E211 - pass mutable state as a var parameter or return a value
+// Negative test: an invisible cross-frame mutation cannot be observed by a
+// later read. Propagate the new value explicitly or keep the read in `inner`.
+// Expected error: E231 - assign the returned value back before reading it
 
 pn main() {
     var xs = [1, 2, 3]
@@ -7,4 +8,5 @@ pn main() {
         xs[0] = 99
     }
     inner()
+    xs
 }
