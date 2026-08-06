@@ -1,1703 +1,1246 @@
 # Lambda Formal Semantics — Specification
 
-**Status:** normative — an Architecture Decision Record for the Lambda language
-**Basis:** decision records C1–C17 (with findings A1–A10 and the probe evidence) in
-[`vibe/Lambda_Semantics_Formal.md`](../vibe/Lambda_Semantics_Formal.md) and
-[`vibe/Lambda_Semantics_Formal2.md`](../vibe/Lambda_Semantics_Formal2.md); type-enforcement
-decisions TE-1–TE-16 (with the boundary inventory and measured evidence) in
-[`vibe/Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md),
-summarized in §11.4.
-**Scope:** this document specifies what Lambda's semantics **is by decision** — not
-what any given build implements. Where the implementation disagrees, the
-implementation is wrong; the conformance work is tracked in
-[`vibe/Lambda_Semantics_Impl_Plan.md`](../vibe/Lambda_Semantics_Impl_Plan.md)
-(C16's flex-`int` conformance has its own plan,
-[`vibe/Lambda_Impl_Int_Total.md`](../vibe/Lambda_Impl_Int_Total.md); TE-15/TE-16 error
-handling has [`vibe/Lambda_Impl_Error_Handling.md`](../vibe/Lambda_Impl_Error_Handling.md)),
-and
-the executable formal model is specified in
-[`vibe/Lambda_Semantics_DSL_Proposal.md`](../vibe/Lambda_Semantics_DSL_Proposal.md).
-**Style:** each section states the rule in the declarative present, followed by a
-concise *Rationale*. The full arguments — including the alternatives that lost and
-why — live in the decision records cited as `[C#]`.
+**Spec version:** 1.0.0 (2026-08-06)
+
+**Status:** normative — the single source of truth for Lambda language semantics.
+This document records what Lambda's semantics **is by decision**, not what any
+build implements. Where any other document — including the `vibe/` design
+records — or the implementation disagrees, this specification wins; the design
+records govern the history and preserve the full deliberations.
+
+**Ruling IDs.** Every ruling carries a section-path ID: `S4.6.2` is the second
+ruling of §4.6. A revised ruling keeps its ID with a version suffix
+(`S4.6.2v2`), replacing its predecessor in place; superseded text is not
+carried. The spec itself uses semantic versioning: MAJOR — an existing ruling
+changed meaning; MINOR — rulings added; PATCH — editorial.
+
+**Implementation marks.** A ruling marked `*` is not, or only partially,
+implemented; Appendix A carries the footnote. Unmarked rulings are believed
+implemented; any conformance gap is a bug, never a semantics change.
+Appendix B lists open design issues.
+
+**Basis:** decision records C1–C17
+([`Lambda_Semantics_Formal.md`](../vibe/Lambda_Semantics_Formal.md),
+[`Lambda_Semantics_Formal2.md`](../vibe/Lambda_Semantics_Formal2.md));
+int v5 ([`Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md));
+the number model
+([`Lambda_Semantics_Number_Model.md`](../vibe/Lambda_Semantics_Number_Model.md));
+TE-1–TE-18
+([`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md));
+ER-D1–D13 ([`Lambda_Design_Exec_Recovery.md`](../vibe/Lambda_Design_Exec_Recovery.md));
+K11–K32 ([`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concurrency.md));
+PD9–PD16 / FC1–FC11
+([`Lambda_Design_Data_Processing.md`](../vibe/Lambda_Design_Data_Processing.md),
+[`Lambda_Expr_For_Clauses2.md`](../vibe/Lambda_Expr_For_Clauses2.md));
+RF1–RF6 ([`Lambda_Design_Sys_Func.md`](../vibe/Lambda_Design_Sys_Func.md));
+R1–R5 and the effect doctrine
+([`Lambda_Semantics_Features.md`](../vibe/Lambda_Semantics_Features.md));
+C4/CW ([`Lambda_Design_Runtime_COW.md`](../vibe/Lambda_Design_Runtime_COW.md)).
+Appendix C maps sections to records.
 
 ---
 
-## 1. Core Principles
+## S1 Core Principles
 
-Lambda's semantics rests on a small set of axioms. Every rule in this document is
-an instance of one or more of them; new design questions should be answered from
-them first.
+Every rule below is an instance of these axioms; new design questions are
+answered from them first.
 
-**P1 — Emptiness is not nothingness.** An empty value is a value (`""` is a
-string; an empty box is a box). General absence is expressed by `null`, while
-string-valued system functions use `""` for a successful result with no string
-content. `""` remains distinct from `null`. [C1, C2]
-
-**P2 — Values versus containers.** Scalars are identified by content alone;
-containers are *things* that hold content. The distinction drives truthiness (an
-empty container is still something) and equality shape. [C2]
-
-**P3 — Exactness lives in the exact tier.** `integer` and `decimal` arithmetic
-is exact, and parsed data always lands in an exact home (§4.2) — inexactness
-can enter *computed* values, never ingested ones. Flex `int` shares binary64
-precision by definition (C16): exact within ±(2⁵³ − 1), correctly rounded
-beyond. `float` remains the explicitly inexact type. *(Historical form: "exact
-until you ask for float" — retired with C3's promotion arm.)* [C3, C13, C16]
-
-**P4 — Mutation is visible or it does not exist.** Values never alias. Mutability
-is a property of bindings, marked by `var` — never a property of values.
-[C4, C12]
-
-**P5 — Set-oriented: absence flows, failure raises.** Lambda processes sets of
-data like SQL processes rows: absence (`null`, or `""` for a string-valued
-no-content result) lets the computation continue; errors exist only where
-explicitly raised. [C5]
-
-**P6 — Representation is invisible.** Boxing, copy-on-write sharing, unboxed
-numeric arrays, JIT type inference, and decimal width are implementation
-strategies; none may be observable in results. Every violation is a bug by
-definition. [B7, C4, C8, C13]
-
-**P7 — One symbol, one concept.** Each operator spelling has a single meaning
-everywhere (`|` is union; `|>` is pipe; `in` is value membership; `at` is key
-membership). Operators over containers mean one thing across the map/list duality,
-because elements are both. [C6, C5.3a]
-
-**P8 — Strings are never code.** Programs enter the system as source files or as
-constructed AST values; no API accepts a runtime string for execution. [C9]
-
-**P9 — Equality is the root relation.** `==` is a total equivalence (with two
-designed poison carve-outs); the sort order totally refines it; hashing respects
-it; printing distinguishes exactly what it distinguishes. [C8, C11]
+- **S1.1 — Emptiness is not nothingness.** An empty value is a value (`""` is a
+  string; an empty box is a box). General absence is `null`. [C1, C2]
+- **S1.2 — Values versus containers.** Scalars are identified by content alone;
+  containers are *things* that hold content. [C2]
+- **S1.3 — Exactness lives in the exact tier.** `integer` and `decimal`
+  arithmetic is exact; parsed data always lands in an exact home (§S4.3).
+  `int` is exact over its whole domain (§S4.1); `float` is the explicitly
+  inexact type. [C3, C13, C16, v5]
+- **S1.4 — Mutation is visible or it does not exist.** Values never alias;
+  mutability is a property of bindings, marked by `var`. [C4]
+- **S1.5 — Set-oriented: absence flows, failure is deliberate.** *Total reads,
+  checked writes, deliberate failures.* Absence lets set processing continue;
+  every error value is deliberate. [C5, C14]
+- **S1.6 — Representation is invisible.** Boxing, COW sharing, unboxed arrays,
+  JIT inference, decimal width, thread count: implementation strategies, never
+  observable in results. Every violation is a bug by definition. [B7, C4, C8, K13]
+- **S1.7 — One symbol, one concept.** Each operator spelling has one meaning
+  everywhere; container operators mean one thing across the map/list duality,
+  because an element is both. [C6, C5.3a]
+- **S1.8 — Strings are never code.** Programs enter as source files or
+  constructed AST values; no API accepts a runtime string for execution. [C9]
+- **S1.9 — Equality is the root relation.** `==` is total (two designed poison
+  carve-outs); the sort order totally refines it; hashing respects it; two
+  numbers are equal iff they print the same. [C8, C11]
+- **S1.10 — The effect doctrine.** *Color what changes the caller's contract;
+  infer what doesn't; put must-respond channels in types.* Purity is the
+  declared `fn`/`pn` bit; errors and resource ownership live in return types;
+  may-suspend is inferred and invisible. [Features §3.6]
 
 ---
 
-## 2. The Value Domain
+## S2 The Value Domain
 
-### 2.1 Types
+### S2.1 Types
 
-Scalars: `null`, `bool`, `int`, `integer`, `int64`/`i64`, `uint64`/`u64`,
-`i8 i16 i32 u8 u16 u32` (sized storage ints), `f16 f32`, `float`/`f64`,
-`decimal` (two tiers, §4.4), `string`, `symbol` (with
-`path` as a special symbol), `binary`, `datetime` (with `date`/`time` sub-kinds).
-Containers: `range`, `list`, `array` (with transparently unboxed numeric arrays),
-`map`, `element` (simultaneously a list of children and a map of attributes),
-`object` (nominally-typed map). First-class: `function`, `type`, `error`.
+- **S2.1.1** Scalars: `null`, `bool`, `int`, `integer`, `int64`/`i64`,
+  `uint64`/`u64`, sized ints `i8 i16 i32 u8 u16 u32`, `f16 f32`, `float`/`f64`,
+  `decimal`, `string`, `symbol` (with `path` as a special symbol), `binary`,
+  `datetime` (with `date`/`time` sub-kinds). Containers: `range`, `list`,
+  `array` (transparently unboxed numeric variants), `map`, `element` (a list of
+  children *and* a map of attributes), `object` (nominally-typed map).
+  First-class: `function`, `type`, `error`.
+- **S2.1.2** `number` is a declared union only; `type()` never returns it, an
+  alias, or a storage-tier name. Aliases in, canon out. [NM §2.6]
 
-### 2.2 Empty and solid values
+### S2.2 Empty and solid values
 
-- `""` **is a string**: a genuine value of type `string` with `len 0`.
-  `"" == null` is false; `"" is string` is true. [C1]
-- **`symbol` and `binary` are solid types**: every value has `len ≥ 1`. The
-  literals `''` and `b''` do not exist — writing them is a compile error
-  ("empty symbol does not exist; use `null`"). Runtime operations that would
-  produce a zero-length symbol or binary produce `null`. [C1, C1.6a]
-- **Element content is normalized**: an empty text child is dropped at
-  construction (`<e "">` ≡ `<e>`) — a tree-construction rule, independent of
-  string equality (the XQuery/XPath Data Model position). [C1]
-- **An empty file is an object, not an empty binary**: file reads yield a
-  `<file>` element whose content is absent when the file is empty. Existence
-  lives in the container; content lives in the value. [C2]
+- **S2.2.1** `""` is a genuine `string` with `len 0`. `"" == null` is false;
+  `"" is string` is true. [C1]
+- **S2.2.2** `symbol` and `binary` are **solid types**: every value has
+  `len ≥ 1`. The literals `''` and `b''` do not exist — writing them is a
+  compile error; runtime operations that would produce a zero-length symbol or
+  binary produce `null`. [C1, C1.6a]
+- **S2.2.3** Element construction normalizes empty text: `<e "">` ≡ `<e>` — a
+  tree-construction rule (the XDM position), independent of string equality. [C1]
+- **S2.2.4** An empty file is a childless `<file>` element, not an empty
+  binary: existence lives in the container, content in the value. [C2]
 
-*Rationale.* Identifying `""` with `null` made the string type not closed under
-its own operations and broke round-trips (the deciding argument was interop: JS,
-Python, JSON, and XML all have real empty strings). Symbols are identifiers —
-the empty name names nothing — so their empty case is removed *syntactically*,
-making the invariant visible rather than silently enforced. [C1, C1.6a]
+### S2.3 Ordered storage, unordered equality
 
-### 2.3 Maps are ordered; equality is not
-
-Maps store keys **in source/insertion order** — for round-trip fidelity,
-deterministic `for (k at m)` iteration, and order-significant formats (CSS).
-Map **equality compares keys unordered** (§5.4). This is the two-level model:
-representation order is data; identity is content. [C8.6-R]
+- **S2.3.1** Maps store keys in source/insertion order — round-trip fidelity,
+  deterministic iteration, order-significant formats — while map **equality
+  compares keys unordered** (§S5.4). Representation order is data; identity is
+  content. [C8.6-R]
 
 ---
 
-## 3. Truthiness
+## S3 Truthiness
 
-The falsy set is exactly:
-
-> **`null` · `false` · `error` values · `""`**
-
-Everything else is truthy — including **all numbers** (`0`, `-0.0`, `nan`),
-**all containers** (`[]`, `{}`, elements, ranges — empty or not), all datetimes,
-symbols, binaries, functions, and types.
-
-Formally: `truthy(v) = false  iff  v = null ∨ v = false ∨ v is error ∨
-(v is string ∧ len(v) = 0)`.
-
-**Truthiness is decidable from the type tag alone** — a deliberate invariant, not
-an accident of the current set (C17). It keeps the runtime test a tag compare and
-lets inference fold conditions statically. A proposal to make some *value* of an
-otherwise-truthy type falsy — a `nan`, an empty container, a zero — must clear
-both bars before it can be entertained. This is why `nan` is truthy despite
-marking failure: `error` carries its falsiness in its tag, poison does not.
-
-*Rationale.* Falsy-0 is C's boolless legacy; languages with real booleans chose
-truthy-0 (Ruby, Lua, Lisp). Truthy-0 also keeps `or` a safe coalescing operator —
-`config.port or 8080` never clobbers a legitimate 0 — so Lambda never needs a
-separate `??`. Containers are truthy because an empty box is empty but is not
-nothing (P2); the resulting system is JavaScript's object rule with the C-legacy
-number mistakes removed. Consequence to teach: `if (results)` does **not** ask
-"any results?" — write `len(results) > 0`; and since poison is truthy,
-`a div b or 0` does not rescue a zero divisor (guard it, or test `is nan`).
-[C2, C17]
+- **S3.1** The falsy set is exactly **`null` · `false` · error values · `""`**.
+  Everything else is truthy — all numbers (`0`, `-0.0`, `nan`), all containers
+  (empty or not), datetimes, symbols, binaries, functions, types. [C2]
+- **S3.2** **Truthiness is decidable from the type tag alone** — a design
+  invariant, not an accident. Any proposal to make a *value* of a truthy type
+  falsy must clear this bar; `nan` stays truthy because poison carries no
+  falsy tag. [C17]
+- **S3.3** Consequences to teach: truthy-0 keeps `or` a safe coalescing
+  operator (no `??` needed); `if (results)` does not mean "any results" —
+  write `len(results) > 0`; `a div b or 0` does not rescue a zero divisor
+  (poison is truthy) — guard the divisor or test `is nan`. [C2, C17]
 
 ---
 
-## 4. Numerics
+## S4 Numerics
 
-**The poison symmetry (C16).** The organizing principle of this section: **every
-unbounded numeric domain is closed and total with its own poison; classification
-flows up, checks only guard the way down.** `float`, `int`, `integer`, and
-`decimal` each close their arithmetic with an `inf`/`nan` pair; every nan is
-unequal to everything, itself included. Only the sized machine ints stand
-outside the symmetry: bounded, wrapping, poison-free.
+**The poison symmetry.** *Every unbounded numeric domain is closed and total
+with its own poison; classification flows up, checks only guard the way down.*
+Only the sized machine ints stand outside it: bounded, wrapping, poison-free.
+[C16, Int_Type §2.1]
 
-> **The int-specific treatment has moved.** The full poison-symmetry section —
-> the `int`/`float` inf/nan merge and its consequence table, the surface/decoder
-> seam, the guest-language `float` mapping, and the `int.inf`/`int.nan` history —
-> is maintained in [`vibe/Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md) §2.1, now the authority on the `int` type (its
-> v1–v5 design history and the active v5 design).
+**Interior versus ingress.** Poison arises only *inside* number math (computed
+zero divisors, saturation); failure at the numeric world's boundaries —
+parsing, casting, narrowing admission, validation — reports `error()`. So
+`1 div 0` is `inf` while `int("abc")` is an `error`; `int(s) or 0` is the
+working default idiom and `a div b or 0` is not. [C14c, C17]
 
-**Where poison comes from — interior versus ingress (C17).** Poison arises
-*only inside number math*: a computed zero divisor, saturation at the
-float-range extremes. Both operands are already numbers and the operation is
-number math, so the result stays in number rather than leaving for the error
-channel. Failure at the numeric world's *boundaries* is the opposite —
-parsing, casting, narrowing admission, and validation report `error()`, because
-there a non-number is being asked to become a number, or a number is being
-asked to fit a domain it does not belong to. So `1 div 0` is `inf` while
-`int("abc")` is an `error` — the same distinction that makes `int(s) or 0` the
-working default idiom and `a div b or 0` not one. The line is derived from
-where a value came from, not from a list of exceptions. [C14c, C17]
+### S4.1 The `int` type (v5: int53, total)
 
-### 4.1 The two-tier integer model
+*"int is an i64 that borrows IEEE's edge semantics."* Authority:
+[`Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md) §3/§5.
 
-> Moved to [`vibe/Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md) §2.2 (the v4 record; the v5 design is §3/§5 of that doc).
-> In brief: flex **`int`** is a distinct runtime type, closed and total under
-> arithmetic, with `i32 ⊑ int ⊑ integer` and `int ∥ int64`; **machine ints**
-> (`i8`…`u64`) are Go-aligned — runtime overflow wraps, literal overflow is a
-> compile error, division by zero yields the entered domain's poison per §4.7.
+- **S4.1.1** The `int` domain is **{n ∈ ℤ : |n| ≤ 2⁵³−1} plus the three
+  closure points `inf`/`-inf`/`nan`**, carried natively in i64. The int53 band
+  is simultaneously the domain, the carrier capacity, the saturation point,
+  and the `int ⊑ float` subtyping edge — *the band is the subtyping edge*.
+  (Supersedes the v4/C16 domain of all float64-representable integers: beyond
+  2⁵³ the integers inside a double are not contiguous — `big + 1 == big` —
+  against all understanding of what an integer is.)
+- **S4.1.2** `int` arithmetic is **closed and total**: `+ - * div % neg abs`,
+  bitwise `& | ^`, shifts, and `**` never change type. An out-of-band finite
+  result **saturates to sign-preserving `±inf`**; `nan` is reserved for
+  indeterminate forms (`0 * inf`, `inf - inf`). Overflow has a definite sign
+  and direction; wrapping bit-mixing belongs in `i32`/`i64`. [C16, v5]
+- **S4.1.3** Aggregates use **mathematical-value semantics**: the result is the
+  true sum if in band, `±inf` by the true sum's sign otherwise, `nan` if any
+  element is nan. Intermediate excursions do not saturate (reassociation must
+  not change the answer). Arithmetic sys funcs returning int stay total
+  (`sum` overflow → `inf`, never an error). [v5 §5.2]
+- **S4.1.4** `int ∥ int64`: poison has no `int64` home; every finite int is an
+  int64 value. Narrowing into `int` is band-membership — former sparse
+  representables (`2⁵⁴`) are admission errors, *loud where v4 was quietly
+  non-contiguous*. [v5 §5.5]
+- **S4.1.5** Machine ints are Go-aligned: runtime overflow wraps
+  two's-complement; literal/constant overflow is a compile error;
+  poison-free. [C3]
 
-### 4.2 Literals are strict; data always fits
+### S4.2 Poison
 
-> Moved to [`vibe/Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md) §2.3. In brief: a numeric literal is `int` iff it has no
-> decimal point and no exponent (`1e2` is float); an unsuffixed int-form literal
-> outside ±(2⁵³ − 1) is a compile error; suffixes (`n`, `m`, sized) name types
-> explicitly; input parsers place integer tokens in the smallest exact home
-> (`int`, else `int64`, else `decimal`) — data is never rejected and never
-> silently placed in float.
+- **S4.2.1** `int` and `float` share **one poison identity**, spelled bare
+  `inf` / `-inf` / `nan` — ordinary IEEE values. `integer` and `decimal` keep
+  their prefixed spellings (`integer.inf`, `decimal.nan`, …). There is no
+  `int.`-prefixed spelling. [v5 §5.1, C16]
+- **S4.2.2** A value shared across domains **types as its narrowest**:
+  `type(nan)` → `int`; `nan is int` and `nan is float` are both true. The
+  classification seam lives at `type()`/`is` only. [Int_Type §2.1]
+- **S4.2.3** Same-signed infinities are **one value** across all
+  poison-bearing domains (`inf == decimal.inf`); **nans are never shared** and
+  never equal anything, themselves included. *Poison is unequal, not
+  untypeable* — `is`, `match`, and the total order classify it normally. [C16]
+- **S4.2.4** Classification flows up: widening admits poison with no check
+  (`nan` flows into a `float` or `integer` position and stays `nan`); at
+  *narrowing* boundaries a foreign nan is rejected exactly like `3.5`;
+  sized-int boundaries admit no poison at all. [C16 f14]
 
-### 4.3 Mixed-operation promotion lattice
+### S4.3 Literals and ingestion
 
-> numeric operations use the exact-embedding lattice: `int` can enter both
-> `float` and `integer`; the *exact unbounded* `integer` and `float` meet at
-> `decimal`. Binary-domain integers (`i8`…`u32`, `int`, `i64`, `u64`) meet
-> `float` in `float` — see §4.3.
+- **S4.3.1** Literal type is **lexical, never value-selected**: a numeric
+  literal is `int` iff it has no decimal point and no negative exponent
+  (`10e1` is int 100; `10.0`, `10e-1` are float). [C16 f9]
+- **S4.3.2** An unsuffixed int-form literal outside ±(2⁵³−1) is a **compile
+  error** — under v5 the literal band *is* the domain band. [C16, v5]
+- **S4.3.3** The suffix names the type: `n` = `integer` always; `m` = `decimal`
+  always (including integer-valued `100m`); fractional `n` is a compile error
+  pointing at `m`. The retired uppercase `N` suffix is not in the grammar. [C13]
+- **S4.3.4** **Data cannot be rejected**: input parsers place integer tokens in
+  the smallest exact home — `int` if in band, else `int64`, else `decimal` —
+  never silently in float. *Literals are strict; data always fits.* [C3, C16]
 
-The exact meeting type is contagious. **A float entering the decimal world is
-converted by one rule: it denotes its shortest round-trip decimal** (§4.5), and
-the operation proceeds in decimal arithmetic. [C3, C8.5a, C13]
+### S4.4 Promotion lattice
 
-Promotion is type-directed, never selected from the operands' current
-magnitudes. Sized-integer arithmetic has two cases:
+- **S4.4.1** One subsumption principle: `T1 ⊑ T2` iff every T1 value embeds
+  **exactly** into T2. Chains: `i8 ⊑ i16 ⊑ i32 ⊑ int ⊑ int64 ⊑ integer ⊑
+  decimal` (with `int ∥ int64` per S4.1.4 — finite ints embed, poison does
+  not); `u8 ⊑ u16 ⊑ u32 ⊑ int`; `f16 ⊑ f32 ⊑ float ⊑ decimal`;
+  `int ⊑ float`. Never `i* ⊑ u*`; same width never fits its float. [NM §3.4]
+- **S4.4.2** Meets are **type-directed, never magnitude-directed**:
+  int×int→int; int×integer→integer; int×float→float; ×decimal→decimal;
+  integer×float→**decimal**.
+- **S4.4.3** Every **bounded** integer type (`i8`…`u32`, `int`, `i64`, `u64`)
+  meets `float` in **`float`**; only the unbounded `integer` meets `float` in
+  `decimal`. *Exactness is already gone* once a binary float is an operand.
+  [NM 2026-07-29]
+- **S4.4.4** Sized×sized selects the smallest containing machine lane and
+  stays there for `+ - *`, bitwise, shifts (`i8 + u8 → i16`,
+  `i64 + u64 → u64`); sized×non-sized leaves the machine domain first
+  (`i8`…`u32` → `int`; `i64`/`u64` → `integer`). [NM §3.3]
 
-- **sized × sized:** select the smallest Lambda machine lane that contains both
-  operand type domains, then stay in that lane for `+`, `-`, `*`, bitwise
-  operations, and shifts. `div` and `%` are the deliberate §4.7 exceptions:
-  they leave the machine lane and follow number-domain division semantics.
-  Same-signed operands use the wider width; a
-  signed/unsigned pair uses a containing signed width when one exists,
-  otherwise the next wider signed width, otherwise the wider unsigned width.
-  Thus `i8 + u8 → i16`, `i32 + u32 → i64`, and `i64 + u64 → u64`.
-  Runtime overflow then follows §4.1's Go-aligned rule.
-- **sized × non-sized:** leave the machine domain before the operation.
-  `i8`…`u32` enter `int`; `i64` and `u64` enter `integer`. The resulting
-  non-sized operands meet through `int → float` or
-  `int → integer → decimal`. Consequently `u8 + int → int` and
-  `i64 + int → integer`. Small and large `u64` values take the same path.
-- **binary-domain integer × float → `float`.** Every binary-precision integer
-  type — `i8`…`u32`, `int` (C16: binary64-domain, no longer bounded), `i64`,
-  `u64` — meets a binary float in `float`. Only the exact unbounded
-  `integer` domain meets `float` in `decimal`. So `i64 * float → float`
-  and `u64 * float → float`, while `integer * float → decimal`. This is the one
-  place a fixed-width type does **not** follow its semantic domain to the meet:
-  `i64`/`u64` enter `integer` for exactness joins against a bigint, but not
-  against a float.
+### S4.5 Division and modulo
 
-*Rationale (fixed-width integer × float).* Three arguments, in order of weight.
-**Exactness is already gone.** Once a binary float is an operand the result is
-inexact regardless of carrier; routing it into `decimal` does not recover
-precision the float never had, it only re-encodes an approximation in an exact
-type and misrepresents its accuracy. **Cost.** `float` is an inline
-self-tagged lane while `decimal` is a heap carrier, so the old rule allocated —
-and added GC pressure — on every mixed `i64`/`float` operation in ordinary code.
-**Convention.** Every mainstream language pairing a fixed-width integer with a
-binary float promotes toward the float; a language that instead produced an
-exact decimal would surprise every reader of the expression. The deliberate cost
-is that an `i64` magnitude above 2^53 loses precision in a mixed operation —
-accepted, because a caller who needs that exactness has `integer` and `decimal`
-and can ask for them by name. The unbounded `integer` domain keeps the decimal
-meet, where the exactness argument does hold: a bigint can carry values no float
-can represent even approximately, so there is real precision to preserve. [C3, C13]
+- **S4.5.1** A **literal** zero divisor (`x div 0`, `x % 0`) is a compile
+  error; the rules below govern computed zeros. Division by zero never
+  raises, at any width or tier. [C14b]
+- **S4.5.2** `/` is true division, domain-selected: `int / int → float`;
+  float-involved → `float` (IEEE: `1/0 → inf`, `0.0/0.0 → nan`);
+  `integer / integer → decimal`; any decimal participation → decimal.
+- **S4.5.3** `div` and `%` **stay in their operand domain**: `int div int →
+  int`; a computed zero divisor yields the domain's poison (`7 div 0 → inf`,
+  `0 div 0 → nan`, `x % 0 → nan`; `integer div 0 → integer.inf`). Integer
+  math stays in number and never returns `error()`. Sized operands enter the
+  non-sized domains first (`i8 div 0 → inf`; `i64 div u64 → integer`). [C16, C14c]
+- **S4.5.4** `div` truncates toward zero; `%` takes the dividend's sign (C
+  convention, not Python flooring). IEEE closure rows apply: `inf - inf =
+  nan`, `inf * 0 = nan`, `x % ±inf = x`, `0 ** 0 = 1`. [A2, v5 §5.2]
+- **S4.5.5** Vectorized integer division is per-lane: the result stays an
+  int-family array with `inf`/`nan` at offending lanes — representable and
+  type-stable. [C16]
 
-True division `/` always leaves the sized machine domain and follows §4.7.
-This operational lane selection is separate from the exact-embedding relation
-used by `is`; neither permits value-dependent promotion.
+### S4.6 Decimal
 
-### 4.4 Decimal storage tiers
+- **S4.6.1** `decimal` is one source-level type with invisible storage tiers
+  (decimal128 when it fits, unbounded above); `type()` reports `decimal` at
+  every tier; literal digits are preserved exactly. [C13]
+- **S4.6.2** `+ - *` are exact and may grow storage; division and other
+  inexact operations round at the documented decimal context — per-operation
+  or per-value, **never a mutable global**. A rational (`p/q`) type is
+  rejected: no data format round-trips rationals. [C13]
 
-`decimal` is one source-level type with invisible storage tiers. Values that fit
-the fixed decimal tier may use it; larger exact literals and results use the
-extended tier. Literal digits are preserved exactly regardless of tier. Precision
-control belongs on operations (`decimal(x, prec:, rounding:)`, `quantize`,
-`round`) rather than on a second literal suffix. The decimal literal suffix is
-`m` (all numeric spellings, including integer-valued: `100m`); the retired
-uppercase `N` suffix is not part of the grammar.
+### S4.7 Float ↔ decimal
 
-Decimal `+`, `-`, and `*` are exact and may grow storage; division and other
-inexact operations round at the documented decimal context. `integer ÷ integer`
-exits to `decimal`, not floor division (truncating `div`/`%` stay in `integer`
-— §4.7, C16).
+- **S4.7.1** **A float denotes its shortest round-trip decimal** — the fewest
+  digits that parse back to the same double. This one injective conversion
+  governs every mixed float↔decimal operation: `==`, ordering, arithmetic,
+  hashing. `0.1m == 0.1` → true; `0.1 + 0.2 == 0.3m` → false (the float sum
+  *is* a different number); **decimal contagion is the escape**:
+  `0.1m + 0.2 == 0.3m` → true. [C8.5a]
 
-*Rationale.* The third instance of the two-tier philosophy. Precision carried in
-the type is the value-semantics-compatible design; Python's context — mutable
-global state that changes what arithmetic means — is the cautionary alternative.
-A rational type (exact division) was consciously rejected: no data format
-round-trips `p/q`. [C13]
+### S4.8 Printing
 
-### 4.5 Float ↔ decimal: the shortest-round-trip convention
+- **S4.8.1** Floats print as their shortest round-trip decimal; the printer is
+  **injective** — distinct doubles print distinctly, print→parse is exact.
+  With S4.7.1, WYSIWYG equality holds: two numbers are equal iff they print
+  the same (modulo the nan carve-out).* [C8.5a]
+- **S4.8.2** Finite `int` values print as integers at every magnitude — no
+  decimal point, no exponent — keeping int and float output visibly distinct.
+  Merged poison prints bare `inf`/`-inf`/`nan`; `integer`/`decimal` poison
+  prints prefixed, and all poison spellings round-trip through the grammar. [C16, v5]
 
-**A float denotes its shortest round-trip decimal** — the fewest digits that
-parse back to exactly the same double. This one conversion governs *every*
-mixed float↔decimal operation: `==`, ordering, the total order, arithmetic,
-hashing. Consequences:
+### S4.9 Guest boundary
 
-- `0.1m == 0.1` → true; `0.1 - 0.1m` → `0m`.
-- `0.1 + 0.2 == 0.3m` → **false**: the float sum *is* a different number
-  (`0.30000000000000004`); the convention aligns values with their decimal
-  twins — it cannot make float arithmetic decimal.
-- **Decimal contagion is the escape**: one decimal operand promotes the whole
-  chain — `0.1m + 0.2 == 0.3m` → **true**.
-
-*Rationale.* The naive alternative (round the decimal to a double and compare)
-destroys transitivity — many decimals map to one float. Shortest-round-trip is
-injective, so equality remains an equivalence; it matches the conversion Java
-blesses (`BigDecimal.valueOf`) and what serialization does universally; and it
-is cheaper than the exact-binary-expansion alternative (≤ 17 digits always fits
-decimal128). [C8.5a]
-
-### 4.6 Float and decimal printing
-
-`print`/`format` render a float as its shortest round-trip decimal
-(`print(0.3)` → `0.3`; `print(0.1 + 0.2)` → `0.30000000000000004`). The printer
-is **injective**: distinct doubles print distinctly — artifacts are visible,
-never hidden — and print→parse round-trips are exact. With §4.5, WYSIWYG
-equality holds literally: **two numbers are equal iff they print the same.**
-except for the NaN poison carve-out in §5.
-
-Decimal finite values print in their decimal form. Decimal poison uses the distinct,
-parseable Lambda spellings `decimal.inf`, `-decimal.inf`, and `decimal.nan`; bare
-`inf`/`nan` remain float. Decimal poison participates in arithmetic as decimal poison,
-so `0m * decimal.inf` is `decimal.nan`, never an error or process fault. [C8.5a, C14c]
-
-Finite `int` values print as integers at every magnitude — no decimal point, no
-exponent form (`18014398509481982`, not `1.80144e+16`) — keeping int and float
-output visibly distinct, which data emission relies on. Int poison follows the
-float pattern: the parseable spellings are `inf`, `-inf` and `nan` — the same
-ones `float` uses, since `int` and `float` share one poison representation
-(§4). There is no `int.`-prefixed spelling to parse or print; `integer` and
-`decimal` keep their own prefixed spellings.
-
-### 4.7 Division and modulo
-
-Division by zero never raises, at any width or tier:
-
-- **A literal zero divisor is a compile error** (`x div 0`, `x % 0`) —
-  statically-visible nonsense, caught early like the other literal-strictness
-  rules (Go's constant layer). The rules below govern *computed* zeros.
-- `/` is true division, but its result is selected by the promoted operand
-  domain rather than by one universal float rule: `int / int → float`;
-  `float` with `int` or `float → float`; `integer / integer → decimal`;
-  `integer / float → decimal`; and any decimal participation → decimal.
-  Sized integer operands first enter the non-sized domains from §4.3, so
-  `i8 / u8 → float` while `i64 / u64 → decimal`. Float-domain division
-  follows IEEE: `1/0` → `inf`, `0.0/0.0` → `nan`.
-- `div` and `%` are integer *operations* and **stay in their operand domain —
-  C16 (2026-08-01), revising C14c's result-typing arm while keeping its
-  substance**: `int div int → int` and `int % int → int`; a computed zero
-  divisor yields the int domain's poison — `7 div 0 → inf`,
-  `0 div 0 → nan` — the same values float division yields, and
-  decimal division yields `decimal.inf`/`decimal.nan`. The `integer` domain
-  closes the same way: `integer div integer → integer` with
-  `integer.inf`/`integer.nan` on a computed zero divisor, and sized
-  `i64`/`u64` operands enter `integer` first (§4.3), so `i64 div u64 →
-  integer`. Integer math stays in number and never returns `error()` (C14c,
-  unchanged). True division `/` is untouched: `int / int → float` and
-  `integer / integer → decimal` — fractional results take the fractional
-  domains.
-  Staying finite is the user's explicit choice — `if (b != 0) a div b else 0`
-  — and the `or`-rescue does not apply (poison is truthy): guard the divisor
-  or test `is nan`.
-- Vectorized integer division follows the scalar rule: the result stays an
-  int-family array with per-lane `inf`/`nan` at offending lanes —
-  representable and type-stable, so C14b's whole-op single-`error` remains
-  retired. The pre-mask idiom (`b eq 0`) remains available for salvage but is
-  no longer required. Decimal-domain division by zero likewise yields
-  `decimal.inf`, `-decimal.inf`, or `decimal.nan`; all poison spellings
-  round-trip through the Lambda grammar and remain visibly distinct from
-  float poison.
-
-`div` truncates toward zero; `%` takes the dividend's sign (C convention;
-contrast Python's flooring — relevant when modeling guest languages).
-[A2, C3, C14b (historical), C14c, C16]
-
-### 4.8 `int` ranges are band-limited; use `integer` beyond
-
-> Moved to [`vibe/Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md) §2.4. In brief: an `int` range `a to b` requires bounds
-> within ±(2⁵³ − 1) — beyond that spacing exceeds 1, successor is undefined, and
-> the range is an out-of-range error; write `1n to N` with `integer` bounds
-> instead.
-
-### 4.9 `int` overflow saturates to `±inf`, following IEEE
-
-> Moved to [`vibe/Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md) §2.5. In brief: an `int` result that cannot be carried as
-> an `int` returns sign-preserving `±inf` (never `nan`, which is reserved for
-> indeterminate forms like `0 * inf` and `inf - inf`); `int` arithmetic is
-> closed in `int` at every magnitude.
+- **S4.9.1** Numeric FFI is **type-directed, never value-directed** — one rule
+  per type, per direction; no rule consults magnitude. Lambda `int` → JS
+  `number` (exact always: int53 ⊂ exact doubles); JS number → Lambda `float`,
+  always; BigInt ⇄ `integer` losslessly; `int64`/`u64` → BigInt; a guest
+  whose numeric type is IEEE double maps to `float`, never `int`. Poison
+  crosses as itself. [NM §5, v5 §5.6]
 
 ---
 
-## 5. Equality
+## S5 Equality
 
-### 5.1 The complete definition
+### S5.1 Total deep value equality
 
-`==` is **total deep value equality** over all value pairs:
+- **S5.1.1** `==` is total over all value pairs: cross-family comparison
+  returns `false`, never an error; within-family it is deep, structural, and
+  value-based. `!=` is the exact negation. [C8]
+- **S5.1.2** **Two designed poison carve-outs**: `nan` (the whole family) and
+  `error` values never equal anything, including themselves — the only
+  exceptions to reflexivity. An error compared equal could silently enter an
+  `if` branch. Detection is `is error` / `is nan`, never `==`. [C8.5]
+- **S5.1.3** Structural recursion is depth-limited; exceeding the limit
+  **raises** a system fault (a wrong `false` would be silent; a hang worse).
+  Cycles are unconstructible natively (§S9) but importable via interop. [C8.5-8]
+- **S5.1.4** `==` is the only equality. Values have no identity; no `===`,
+  `ref_eq`, or identity operator exists or ever will — reference identity is
+  not observable (S1.6). [C4, C8]
 
-- **Cross-family** comparison returns `false` — never an error.
-- **Within-family**: deep, structural, value-based comparison, with
-  cross-representation numeric equality (§4.5) and sequence-family unification
-  (§5.3).
-- **Two designed poison carve-outs**: `nan` and `error` values never equal
-  anything, including themselves. These are the only exceptions to
-  reflexivity. `nan` means the whole family — the `nan` shared by `int` and
-  `float`, plus `integer.nan` and `decimal.nan` — nans are never shared across or within
-  representations (IEEE); same-signed infinities, by contrast, are one value
-  across `float`, `int`, `integer`, and `decimal` (C16). **Poison is unequal, not untypeable**: classification is a
-  different relation — `err is error` → true, `nan is float` → true, and
-  `match` type arms (which dispatch via `is`) catch them:
-  `match int(s) { case error: fallback  case int: ~ * 2 }`. Errors reach
-  `default` only when no `error` arm exists.
-- `!=` is the exact negation.
-- Structural recursion is depth-limited; exceeding the limit **raises** (a
-  wrong `false` would be silent; a hang would be worse).
-- `==` is the *only* equality: values have no identity, so no `===` exists or
-  ever will. [C8, C8.5, C4]
+### S5.2 Numbers
 
-*Rationale for totality*: a raising `==` violates the error discipline (§7) and
-aborts set processing (`data that (~.id == 'x')` must not-match mixed rows, not
-crash). *Rationale for poison*: an error or nan compared equal could flow into
-an `if` branch silently; `error == error → false` mirrors `nan` by design.
-[C8, C8.5]
+- **S5.2.1** Numeric equality is by mathematical value across all
+  representations: `1 == 1.0 == 1n == 1m`; `-0.0 == 0.0`; storage width is
+  representation, not identity; `decimal.inf == inf`. [C8.5, C16]
 
-### 5.2 Numbers
+### S5.3 Sequences
 
-Numeric equality is by mathematical value across all representations:
-`1 == 1.0 == 1n == 1m`; `0.1m == 0.1` per §4.5; `-0.0 == 0.0`. Decimal storage width
-is representation, not value identity. `decimal.inf == inf` and
-`-decimal.inf == -inf`; every float or decimal NaN remains unequal to every value
-(IEEE, and the poison rule).
+- **S5.3.1** `range`, `list`, and `array` are one sequence family:
+  `(1 to 3) == [1,2,3]`, element-wise in order. Unboxed numeric arrays are
+  representation only — equality is never layout-based.* [C8.5-2]
 
-### 5.3 Sequences
+### S5.4 Maps, objects, elements
 
-`range`, `list`, and `array` form **one sequence family**: `(1 to 3) == [1,2,3]`.
-Equality is element-wise in order. Unboxed numeric arrays are representation
-only (P6) — equality is value-based, never layout-based.
+- **S5.4.1** Map equality is key-unordered (JSON/XML, the document standards);
+  accepted consequence: `a == b` does not imply `format(a) == format(b)`. [C8.6-R]
+- **S5.4.2** Objects are a distinct nominal family; a plain map never equals
+  an object.
+- **S5.4.3** Element equality = tag + namespace, attributes as an unordered
+  map (XML InfoSet), children ordered (document order is meaning).* [C8.6-R]
 
-### 5.4 Maps, objects, elements
+### S5.5 Functions and types
 
-- **Map equality is key-unordered**: `{a:1, b:2} == {b:2, a:1}` — consistent
-  with JSON and XML, the major document standards (even though storage is
-  ordered, §2.3). Consequence, accepted: `a == b` does not imply
-  `format(a) == format(b)` for maps.
-- **Objects** are a distinct nominal family: a plain map never equals an
-  object.
-- **Element equality** = tag + namespace, attributes (as a map — unordered,
-  matching XML InfoSet's "attribute order is not significant"), children
-  (ordered — document order is meaning). [C8.6-R]
+- **S5.5.1** Function equality is **intensional**: same definition site +
+  deep-equal captures. Site = static AST node identity `(module, node)` —
+  never a memory address. Dynamically constructed functions compare by the
+  content hash of their normalized AST (alpha-normalized), so
+  `(x) => x + 1 == (y) => y + 1`. `f == f` is always true.* [C8.7, C9]
+- **S5.5.2** Type equality is **representational** — normalized forms compare
+  (`int|string == string|int`), not semantic equivalence (undecidable with
+  constraints). [C8.5-4]
 
-### 5.5 Functions
+### S5.6 Dedup, grouping, hashing
 
-Function equality is **intensional**: same definition site + deep-equal
-captures. Site = static AST node identity `(module, node)` — never a memory
-address (addresses break under COW copying and JIT recompilation). Dynamically
-constructed functions (§10) use the **content hash of their normalized AST**
-(positions stripped, bound variables alpha-normalized) — so
-`(x) => x + 1 == (y) => y + 1`, and compiling the same AST twice yields equal
-functions. `f == f` is always true. [C8.7, C9]
-
-### 5.6 Dedup and grouping
-
-`unique`, `set` semantics, and grouping are **defined by `==` with no special
-cases**: nulls group together (`null == null` is true); each `nan`/`error`
-stands alone (poison values are never duplicates). Lambda thereby avoids SQL's
-DISTINCT contradiction outright. [C8.6]
-
-### 5.7 Hashing
-
-Wherever values are hashed: `a == b ⟹ hash(a) == hash(b)`. Maps hash in
-canonically sorted key order; numbers hash via their canonical value across
-representations (`1`, `1.0`, `1n`, `1m` hash equal). [C8.6-R, C8.5a]
+- **S5.6.1** `unique`, set semantics, and grouping are defined by `==` with no
+  special cases: nulls group together; each `nan`/`error` stands alone. [C8.6]
+- **S5.6.2** `a == b ⟹ hash(a) == hash(b)` wherever values are hashed: maps
+  hash in canonically sorted key order; numbers hash via canonical value
+  across representations. [C8.6-R, C8.5a]
 
 ---
 
-## 6. Ordering and Sort
+## S6 Ordering and Sort
 
-### 6.1 Two relations, by design
+### S6.1 Two relations, by design
 
-**The total order says where things go on a shelf; `<` says which is
-smaller.** Every value has a shelf position — everything sorts (§6.2) — but
-only some families have *magnitude*, and the comparison operators
-(`< <= > >=`) answer only magnitude questions:
+*The total order says where things go on a shelf; `<` says which is smaller.*
 
-- **Comparable**: numbers (magnitude is their essence), strings (dictionary
-  order is a domain concept), datetimes (before/after is the natural semantics
-  of time; same-kind by instant, `date` vs `datetime` via day-start coercion,
-  `time` vs the others → `error()`).
-- **Not comparable — `error()`**: symbols and binaries (identifiers and blobs
-  have places, not sizes; `'a' < 'b'` and `hash1 < hash2` are filing needs the
-  shelf already serves), booleans, containers, and all cross-family pairs.
-  Statically-visible invalid comparisons are compile errors (the two-layer
-  pattern); dynamic ones return `error()`.
-- Poison stays incomparable (`nan < x` false both ways, IEEE; `error` operands
-  taint); `null < x` → `null` (absorption, one rule with `null + 1` → null).
+- **S6.1.1** The comparison operators `< <= > >=` answer magnitude questions
+  only. Comparable: numbers, strings (dictionary order), datetimes (same-kind
+  by instant; `date` vs `datetime` via day-start coercion; `time` vs the
+  others → `error()`). Not comparable — `error()`: symbols, binaries,
+  booleans, containers, all cross-family pairs. Statically-visible invalid
+  comparisons are compile errors; dynamic ones return `error()`.* [C11.5]
+- **S6.1.2** Poison stays incomparable (`nan < x` false both ways; `error`
+  operands taint); `null < x` → `null` (absorption, one rule with
+  `null + 1 → null`). [C11.5]
 
-`sort` and `order by` use the separate **total order** of §6.2 — the same
-two-relation split as IEEE `totalOrder` vs `<`, Java `compare` vs `<`, and SQL
-`ORDER BY` vs `WHERE NULL`. [C11, C11.5]
+### S6.2 The Lambda total order
 
-### 6.2 The Lambda total order
+- **S6.2.1** `sort` and `order by` use the separate total order:*
 
-> **null < false < true < number (by value) < datetime < symbol (path ⊂ symbol)
-> < string < binary < sequence (range = list = array) < map < object < element
-> < type < function < nan < error**
+  > **null < false < true < number (by value) < datetime < symbol (path ⊂
+  > symbol) < string < binary < sequence (range = list = array) < map <
+  > object < element < type < function < nan < error**
 
-- **The governing principle: the total order totally refines `==`** — equal
-  values always tie; ties are resolved by stability.
-- Numbers order by mathematical value across all representations — no
-  representation ranks. Decimal infinities stay in that numeric band; float and decimal
-  NaNs both occupy the final `nan` band.
-- Within-band: `false < true`; strings/symbols/binaries bytewise UTF-8
-  (= codepoint order; no locale collation); sequences lexicographic; maps via
-  canonically sorted keys; elements by tag, attributes, children; datetimes by
-  time value.
-- `desc` is **full reversal** — one pure order, no pinning exceptions.
-  Sort is stable.
-- Mental model: *null is less than everything (absence); nan and error are
-  beyond everything (broken).*
-
-*Rationale.* Lambda's document kin (jq, MongoDB, CouchDB, SQLite, Erlang's term
-order) all define a total cross-type order — heterogeneous `any[]` must sort
-deterministically; erroring on mixed data (Python 3's choice) targets operator
-comparisons, which Lambda keeps strict anyway. Null-first follows the document
-camp; poison-last expresses "broken sorts after everything real". [C11]
+  *Null is less than everything (absence); nan and error are beyond
+  everything (broken).* [C11.4]
+- **S6.2.2** The total order **totally refines `==`** — equal values always
+  tie; ties resolve by stability. Numbers order by mathematical value with no
+  representation ranks. Within-band: strings/symbols/binaries bytewise UTF-8
+  (no locale collation); sequences lexicographic; maps via canonically sorted
+  keys; elements by tag, attributes, children. [C11.4]
+- **S6.2.3** Sort is stable; `desc` is **full reversal** — one pure order, no
+  pinning exceptions. [C11.4]
 
 ---
 
-## 7. Absence and Errors
+## S7 Absence and Errors
 
-### 7.1 Reads are total; absence follows the result type
+*Total reads, checked writes, deliberate failures.*
 
-Out-of-bounds and negative array indexing, missing map keys, and string
-out-of-range indexing all yield **`null`**. Null **propagates through chained access**
-(`data.users[5].name` → null end-to-end — built-in optional chaining) and
-through scalar arithmetic (`null + 1` → null). Collection slices **clamp** to
-bounds and return an empty collection when their interval is empty. A
-string-valued slice also clamps to bounds, but returns `""` for an empty
-string result; this preserves its string return type. Clamping is symmetric in
-both directions: a negative offset is out of range exactly like an over-length
-one (§7.4), so it clamps to `0` rather than wrapping from the end — reaching
-from the end is the separate `last` keyword. An absent source such as
-`slice(null, 0, 1)` remains `null`, and so does an **absent offset**:
-`slice(s, null, k)` is `null`, never a silent read from position `0`. That
-keeps a missed search composable — `slice(s, index_of(s, c), k)` degrades to
-`null` end-to-end instead of returning a plausible wrong prefix.
-`arr[i] or default` is the coalescing idiom.
+### S7.1 Reads are total; writes are checked
 
-*Rationale.* Lambda is set-oriented like SQL: null, or `""` when the declared
-result is string-valued, lets set processing continue where a raised error would
-abort the whole computation — a 10,000-record transform should produce 10,000
-results with absent/no-content values where appropriate, not die at record
-4,371. [C5]
+- **S7.1.1** Out-of-bounds and negative indexing, missing map keys, and
+  string out-of-range indexing yield **`null`**. Null propagates through
+  chained access (`data.users[5].name` → null end-to-end) and scalar
+  arithmetic (`null + 1` → null). `arr[i] or default` is the coalescing
+  idiom.* [C5]
+- **S7.1.2** Slices **clamp** to bounds and return an empty collection (or
+  `""` for string results — the result type is preserved). Clamping is
+  symmetric: a negative offset clamps to 0, never wraps from the end
+  (`slice("hello", -2, 3)` = `"hel"`). An absent source *or absent offset*
+  makes the whole selection `null` — a missed search degrades end-to-end
+  instead of returning a plausible wrong prefix. A non-null non-integral
+  offset is an `error`. [C5, RF3D]
+- **S7.1.3** An out-of-bounds **write is a raised error** — not null, not a
+  silent no-op. *Reads ask a question; writes issue a command, and a command
+  that silently does nothing hides bugs.* Growth is explicit
+  (`push`/`splice`). [C5]
 
-### 7.2 Writes are checked
+### S7.2 Indexing and `last`
 
-An out-of-bounds write is a **raised error** — not null, not a silent no-op.
-Reads ask a question; writes issue a command, and a command that silently does
-nothing hides bugs. Growth is explicit (`push`/`splice`). [C5]
+- **S7.2.1** Indexing is 0-based; an index is a position, not a direction.
+  **Negative indices carry no meaning**: `a[-1]` is out-of-range → `null`,
+  exactly like `a[len]` — both failure directions of a computed index are
+  symmetric absence. [C15]
+- **S7.2.2** Reaching from the end is the reserved word **`last`** =
+  `len(container) − 1` of the innermost enclosing subscript's container;
+  ordinary arithmetic applies (`a[last - 1]`, `a[5 to last]`). On an empty
+  sequence `last = −1`, so `a[last]` → null and `a[last] = v` raises — no
+  special case. On N-D arrays `last` resolves against the leading axis.* [C15]
+- **S7.2.3** **The two-homes rule**: `last` is legal only inside subscripts
+  and as a modifier in `limit` clauses (`limit last 10` — the last 10, in
+  original order); everywhere else it is a syntax error. No `last()`
+  function, `.last` property, or `first` keyword. [C15a]
+- **S7.2.4** Functions never take the `last` keyword and never accept signed
+  counts. The blessed API mirror is the named-option pair — the standard for
+  every limit-taking function: `{limit: n}` = first n, `{last: n}` = last n;
+  both = error; `{limit: 0}` means zero (*a count counts* — no zero
+  sentinel); unlimited is absence, never `-1`.* [C15b]
 
-### 7.3 Two error forms, one discharge surface: fn return, pn raise
+### S7.3 Aggregation
 
-**The general style remains: `fn` returns error data; `pn` raises failures.**
-The two forms retain different caller obligations, but the discharge forms —
-the `^ { }` handler and postfix `^` — are channel-agnostic: they operate on the
-combined outcome rather than forcing the caller to know which representation
-delivered the error.
+- **S7.3.1** A `null` input makes the aggregate `null` — uniformly. `sum =
+  reduce(+, v, 0)` stays literally true (SQL's skipping aggregates contradict
+  SQL's own scalar algebra). Skipping is explicit: `xs[!null]`, or the
+  `skip_null` option on denominator-sensitive statistics.* [C5.3]
+- **S7.3.2** Monoid identities: `sum([])` = 0, `prod([])` = 1; identity-less
+  aggregates (`avg`, `min`, `max`) over empty input yield `null`. [C5.3]
 
-- **Returned errors are data.** `T | error` is an ordinary union and never
-  triggers must-handle checking. It is the natural result of set-friendly
-  computations and of inference when an undeclared expression can produce an
-  error. `let x = e` therefore infers `T | error` when appropriate. The core
-  top type `any` includes error; removing error produces the non-error top
-  `any \ error`.
-- **Raised errors are an enforcing channel.** `T^E` is explicit-only:
-  inference never creates `^`. Calls carrying a `^` channel must engage the
-  error possibility immediately, through exactly one of: an error arm in
-  `match`; the `^ { }` handler; postfix `^`; a receiving position that
-  textually admits error (`let x: T^ = e`, `let x: T | error = e`, or a
-  declared parameter/return of that shape); or an explicit `or` rescue.
-  `raise` is licensed only inside a function with a declared `T^E` result.
-  `E` constrains user-raised errors. **Automatic containment does not
-  acknowledge**: §11.4's boundary skip contains *defects*, and a raised error
-  is gated before it can reach that machinery. [TE-16]
-- **`e ^ { … ~ … }` handles the error locally and is channel-agnostic.** It
-  receives both error values returned in the value lane and errors delivered
-  through a raised channel, binding the error to `~` inside the braces. Its
-  typing mirrors `or`: `type(e ^ h) = (type(e) \ error) | type(h)`. The handler
-  either produces a value of the expected type or diverges (`raise`, `return`,
-  or letting the enclosing block skip); either way the binding it feeds is
-  **statically clean** — the failure path provably does not reach it, so no
-  binding ever holds a null-for-failure placeholder. The handler must be
-  braced: `^` followed by `{` is the handler, `^` followed by anything else is
-  propagation.
-- **Postfix `e^` applies the same split but propagates instead of handling.**
-  It yields the error-free success type and forwards the combined error set to
-  the enclosing function's declared channel. Using it in a declared plain-`T`
-  function is a compile error. An unannotated `fn` has the implicit clean
-  contract in §11.4, so an error-possible inferred return is likewise a
-  compile error until it is contained or the signature explicitly admits the
-  error. `e is error` is the boolean test.
-- **System `fn` failures are returned values.** They remain chainable and
-  set-friendly. Their declared result is `T?` or `T | error`, never `T^E`,
-  chosen by one principle: *absence in / no answer → `null`* for non-string
-  result types, while a string-valued function uses `""` for successful
-  no-content results (`chr(null)`, an empty string slice). The system-function
-  contract then chooses between two invalid-input policies: an **admissive**
-  case has a meaningful no-answer interpretation and returns the result-domain
-  absence (`arr[-1]`, `argmin([])`); a **non-admissive** case returns a
-  detailed `error()` where absence would hide a malformed source or violated
-  operation contract (`int("abc")`, malformed `parse`). Both absence forms
-  are falsy, so `f(x) or default` rescues them uniformly. This policy choice
-  does not weaken declared/deferred type enforcement: a value that fails a
-  type boundary still produces the rich TE-4 error. (Division by zero is *not*
-  in this class — number math yields `inf`/`nan`, C14c.)
-- **`input`/`fetch` are effectful readers — pn-family, and they raise**
-  (`T^E`, compile-enforced), though permitted in expression position.
-  Reading the filesystem/network is an effect at the head of a pipeline, so
-  failure must be consciously engaged. Set-oriented input remains an explicit
-  wrapper: `fn my_input(f) { input(f) ^ { ~ } }` — the handler returns the
-  error as data — then map over the wrapper.
-- **System/resource faults are implicit system errors.** Stack overflow,
-  memory exhaustion, comparison-depth exhaustion, and compiler-inserted
-  boundary defects may propagate through frames without being enumerated in a
-  user error type. Operationally every `R^E` can therefore deliver
-  `R^(E | error)`: `E` describes user-raised errors, while `error` covers
-  system defects. The channel-agnostic `^ { }` handler captures both — code
-  matching on `~.code` must not assume `E`. Unhandled resource faults still
-  abort with a report.
-- **Every error value is deliberate.** It is constructed by `error()`,
-  returned by a `T | error` computation, raised in a `T^E` context, or
-  constructed by an explicit runtime contract check such as a failed deferred
-  type boundary. Silent `0`, `null`, pointer reinterpretation, or anonymous
-  error emission remains a bug.
+### S7.4 The three failure channels
 
-The two forms in one line: *raised errors impose an immediate engagement
-obligation; returned errors are data; discharge operators inspect the combined
-outcome.* The mixed type `T | E1 ^ E2` is legal, and callers need only the one
-value-directed discharge surface.
+*Lambda has exactly three failure channels. Two are types — always visible in
+the signature, always enforced. The third is never a type — the system owns
+it.* [TE-13, C14]
 
-*Rationale.* C5's read/write asymmetry lifted to functions: fn is the query
-world (failures flow per item), while pn is the command world (failures demand
-immediate engagement). Channel-agnostic discharge keeps that author-selected
-discipline without making callers depend on the runtime ABI or on whether an
-error arrived in a value lane or raised lane. IEEE is the poison precedent:
-returned `error()` values preserve set processing, and their falsiness,
-never-equality, sorting, and arithmetic tainting make them loud rather than
-silent. Resource-fault timing remains exempt from P6. [C5, C14]
+- **S7.4.1** **Value errors `T | error`** — soft; flow as data; no caller
+  obligation; detected at type boundaries. This is the only form inference
+  produces. *Interiors flow, interfaces enforce.*
+- **S7.4.2** **Raised errors `T^` / `T^E`** — enforcing; explicit-only
+  (inference never creates `^`); must be engaged at the immediate expression;
+  alone license `raise`. `raise` in a `T | error` fn is a compile error —
+  construct and return `error(...)` instead. *`^` raises; `| error` returns.*
+  In value positions `T^` ≡ `T | error`; `^` is semantically distinctive only
+  on function returns. Every `R^E` is operationally `R^(E | error)`: `E`
+  constrains user-raised errors, system defects flow implicitly.
+- **S7.4.3** **System faults** — stack exhaustion, out-of-memory, the `==`
+  depth limit, compiler-inserted boundary defects. Never in types;
+  transparent through `fn` frames; caught only at a `pn` `^ { }` boundary or
+  the global handler (§S7.11). *We handle it for the user.*
+- **S7.4.4** An error value is a first-class value carrying `code`, `message`,
+  and source location; constructors `error(msg)`, `error(msg, source)`,
+  `error({...})`. **Every error value is deliberate** — constructed by
+  `error()`, returned by a `T | error` computation, raised in a `T^E`
+  context, or produced by a failed deferred type check. Rich diagnostics are
+  mandatory at every checked-channel failure (fault-channel records are
+  pre-reserved and lean).* [C14, TE-4, TE-9]
+- **S7.4.5** System `fn` failures are values, never `T^E`: *absence in / no
+  answer → `null`* (or `""` for string results); present-but-invalid →
+  `error()` (§S7.10). `input`/`fetch` are effectful readers — pn-family, they
+  **raise** (`T^E`), though permitted in expression position; set-oriented
+  input is an explicit wrapper (`fn my_input(f) { input(f) ^ { ~ } }`).
+  [C14, C14a]
 
-### 7.4 Array indexing and the `last` keyword
+### S7.5 Acknowledgment
 
-Indexing is **0-based**, and an index is a *position, not a direction*:
+- **S7.5.1** A call carrying a `^` channel must engage the error at the
+  **immediate expression**, through exactly one of: an `error` arm in
+  `match`; the `^ { }` handler; postfix `^`; an `or` rescue; or a receiving
+  position that textually admits error (`let x: T^`, `let x: T | error`, or
+  a declared param/return of that shape). *Must-handle = must-engage-
+  explicitly.* [TE-13, TE-16]
+- **S7.5.2** `any` never acknowledges (it admits error but engages nothing);
+  a bare `let x = a()` never acknowledges. Automatic containment (§S7.7)
+  never acknowledges: *skip is containment, not acknowledgement.* [TE-13, TE-16]
+- **S7.5.3** `or`-rescue is not a rule-bend: errors are falsy, so `a() or 0`
+  consumes the error by the truthiness definitions and counts as engagement.
+  The typing rule is normative: `type(a or b) = (type(a) \ {error, null}) |
+  type(b)`, so `int(s) or 0 : int` — plain union arithmetic, no flow
+  analysis. Errors log at origination, so a consumed diagnostic still leaves
+  a breadcrumb. [TE-13]
 
-- **Negative indices carry no meaning.** `a[-1]` is an out-of-range read →
-  `null`, exactly like `a[len]`. Both failure directions of a computed index
-  are symmetric absence.
-- **Reaching from the end is a named operation**: within a subscript, the
-  reserved word **`last`** denotes `len(container) − 1` of the innermost
-  enclosing subscript's container (innermost-wins, like `~`). Ordinary
-  arithmetic applies: `a[last]`, `a[last - 1]`, `a[5 to last]`,
-  `a[last div 2]` — on arrays, lists, ranges, and strings. Outside a
-  subscript, `last` is a syntax error. There is no `last()` function, `.last`
-  property, or `first` keyword — one concept, one spelling (P7); `0` is the
-  first index.
-- On an empty sequence `last = −1`, so `a[last]` → null (absence, no special
-  case) and `a[last] = v` raises (§7.2).
-- **The two-homes rule**: `last` has exactly two grammatical homes — the
-  subscript expression above, and a **modifier inside `limit` clauses**
-  (`for (x in xs limit last 10) x` — the last 10, in original order; the
-  `desc` precedent: clause syntax, not an expression). It is never a value and
-  never a range (`last N` as a first-class "relative range" is rejected — it
-  would have no container to anchor to), and it is a syntax error everywhere
-  else. There is no `first` keyword or `limit first` — plain `limit N` and
-  `[0 to N-1]` already *are* first-N; front-anchored is the default direction.
-- Corollaries: functions never take the `last` *keyword* (no anchor in call
-  position) and never accept *signed counts* (`take`/`drop`, `find`/`replace`
-  limits — sign-punning through the back door). The blessed API-level mirror
-  of the clause pair is the **named-option pair**, and it is **the standard
-  convention for every function that takes a limit/range option**:
-  `{limit: n}` = first n, `{last: n}` = last n (e.g.
-  `replace(s, ",", " and", {last: 1})`); both together = error; `{limit: 0}`
-  means zero (a count counts — no Python-style zero-sentinel); unlimited is
-  expressed by *absence* (option omitted or `null`), never by `-1` or `0`. No
-  function invents its own limit spelling. On N-D numeric arrays, `last`
-  resolves against the leading axis (`img[last]` = last row), matching
-  iteration. [C15b]
+### S7.6 Discharge: the handler and postfix `^`
 
-*Rationale.* Negative indexing rewards an underflow bug (`a[i-1]` at `i = 0`)
-with a plausible wrong answer while C5 forgives overflow as visible null — an
-incoherent asymmetry, amplified because Lambda indices are typically computed
-from data. Negative indices are not even a universal idiom (R's `x[-1]` means
-*exclusion*). Julia's explicit end-marker is the adopted precedent —
-JavaScript's ES2022 `.at(-1)` confirms the need while also refusing to touch
-`[]`. `last` is chosen over `end` because `end` is ambiguous between
-last-valid-index and one-past-the-end — doubly loaded against Lambda's
-inclusive ranges. [C15]
+- **S7.6.1*** **`e ^ { … ~ … }` handles the error locally and is
+  channel-agnostic** — it receives soft values, raised errors, and (at `pn`
+  boundaries) system faults alike, binding the error to `~` (innermost-wins).
+  Typing mirrors `or`: `type(e ^ h) = (type(e) \ error) | type(h)`. The
+  handler produces a value of the expected type or does not complete normally
+  (`raise` / `return`); either way the binding it feeds is **statically
+  clean** — *sound by construction*, no flow analysis, no binding ever holds
+  a placeholder for a failure. [TE-16]
+- **S7.6.2** The handler is brace-delimited, mandatorily: `^` followed by `{`
+  is the handler; `^` followed by anything else is propagation — a purely
+  lexical discriminator (`f()^ - 1` propagates then subtracts). [TE-16]
+- **S7.6.3*** **Postfix `e^` propagates**: it yields the error-free success
+  type (a type-narrowing operator — `let b = a()^` gives `b : T`,
+  lane-eligible) and forwards the combined error set to the enclosing
+  function's declared channel. In a declared plain-`T` function it is a
+  compile error. `^` on an operand whose *explicit* type excludes error is a
+  compile error; where cleanness is merely inferred, a defensive `^` is
+  warn-only. [TE-13]
+- **S7.6.4** **`?` is not propagation.** Postfix `?` is the query operator;
+  `T?` is the nullable type marker. The propagation spelling is `^` — a
+  deliberate divergence from Rust/Swift habits. [TE-13]
+- **S7.6.5** The retired forms `let a^err = e` and prefix `^err` /
+  `if (^err)` do not exist: the destructure was Go's `(v, err)` product with
+  a typing hole (`a` claimed `T` while holding null), and the test is spelled
+  `e is error`. `^` has exactly three roles — postfix propagate, infix
+  handler, type-level channel — all meaning "the error channel".* [TE-16]
+- **S7.6.6** Division of labor: `or` catches all falsy without access;
+  `^ { }` catches errors only, with access; `e^` catches errors only,
+  propagating. `or` and `^` are *not* a soft/hard split — both work on both
+  channels; the axis is coalescing-without-access vs error-specific-with-
+  access. [TE-16]
+- **S7.6.7*** `e ^ { … }` over a possibly-suspending operand is a **compile
+  error** — a recovery frame cannot span a scheduler yield, and silently
+  splitting the capability ("same construct, two behaviours by invisible
+  context") is rejected. [TE-16, ER-D13]
 
-### 7.5 Aggregation: strict null propagation
+### S7.7 Containment: the declaration-boundary skip
 
-A `null` in an aggregation input makes the aggregate `null` — uniformly
-(`sum`, `avg`, `min`, `max`, statistics). Skipping is always **explicit**:
-the general idiom `xs[!null]`, or the `skip_null` option on
-denominator-sensitive statistical functions.
+*Regions are created by declarations, not by control structures. The guard
+dominates the scope.* [TE-15, TE-18]
 
-Empty-collection aggregates: `sum([])` = 0 and `prod([])` = 1 (monoid
-identities); identity-less aggregates (`avg`, `min`, `max`) over empty input
-yield `null`.
+- **S7.7.1*** Skip is a **declaration-boundary mechanism only** — `let`,
+  `var`, `for` loop variables, declared parameters, declared returns.
+  **Expression interiors never skip**: in `a + e + b` the error flows as a
+  value and the expression types `T | error`. (Strict left-to-right
+  evaluation order is *not* normative.) [TE-18]
+- **S7.7.2*** A failed deferred check at a declaration skips to the end of
+  the block that **declares** the binding; that block yields the error; the
+  binding is never established, and code between failure and boundary never
+  runs. On success, the declaration's guard **dominates every use of the
+  binding in its scope** — native-lane, no per-use checks. [TE-18]
+- **S7.7.3*** A declared parameter guards at the **call site**: on failure the
+  function is not entered and **the call expression evaluates to that
+  error** — call-site contagion, never a hidden early return, never a
+  widening of the callee's signature. [TE-18, TE-5]
+- **S7.7.4*** Reassignment to a declared `var` carries a diagnostic
+  obligation, in three tiers: compile error where the RHS is provably
+  `T | error`; compile warning where deferred-fallible with a tail to
+  abandon; a runtime report naming the binding that kept its previous value.
+  `x = e ^ { … }` suppresses all three. **No use of a binding ever observes
+  a value left by a failed assignment.** [TE-18]
+- **S7.7.5*** In a `for`, the skip target is the **iteration body**, not the
+  loop: per-item skip keeps the batch alive; *body native, result boxed* —
+  the loop result is `(T | error)[]`. An accumulator declared outside the
+  loop dies with the batch, correctly (a stale accumulator would poison every
+  later iteration); a per-item temp declared inside it continues. *Batch
+  friendliness is a theorem, not a hope.* [TE-15, TE-18]
+- **S7.7.6*** Edge sites: element/field stores report via S7.7.4's tiers
+  (containers are not scoped away — documented partial state); a failed
+  module-level reassignment **aborts module initialization**; a cross-frame
+  reassignment from a closure becomes an error return of the inner function,
+  re-originating at the call site. [TE-18]
+- **S7.7.7** Rescue moves to the initializer: `let a: T = e or 0` and
+  `let a = e ^ { … }`; an `a or 0` *after* the binding is unreachable by
+  construction. [TE-15]
 
-*Rationale.* Lambda's own `+` propagates null, and `sum = reduce(+, v, 0)` must
-stay literally true — SQL's skip contradicts its own scalar algebra (`1 + NULL`
-is `NULL`, yet `SUM` skips), a standard criticism. Skipping silently changes
-`avg`'s denominator; R and Julia force acknowledgment for the same reason.
-[C5.3]
+### S7.8 Containers and errors
 
-### 7.6 What an error participates in
+- **S7.8.1*** Acceptance is read from the **destination contract**, never from
+  syntactic position — uniformly for literal elements, indexed/field stores,
+  `push`/`splice`, parameters, and returns: a contract that admits error
+  (`any`, `error`, `T | error`, unannotated boxed slot) **accepts**; a native
+  lane whose source is provably infallible enters the lane branch-free; a
+  native lane whose source is only `T | error` **cannot enter the lane** —
+  the value stays boxed until discharged, and the standing acknowledgment
+  obligation is what narrows it. *Typed containers are all-or-nothing by
+  construction; per-element error retention is a capability of Item-lane
+  containers.* [TE-17]
+- **S7.8.2** Both spellings are visible in source:
+  `[ f(x) ^ { 0 } for x in xs ]` → `int[]`, lane preserved;
+  `[ f(x) for x in xs ]` → `(int | error)[]`, boxed, per-element errors
+  retained. This is type-level, not representation-level: `int[]` excludes
+  error because its element type does; `ArrayNum` may hold `nan` (a float
+  value, not an error). [TE-17]
 
-An error is **not an ordinary value**. Unlike JavaScript, where an exception
-object is just an object once caught, a Lambda error is a failure that has not
-yet been discharged: it must reach a handler, and every computation it passes
-through must carry it there rather than absorb it into a plausible answer.
+### S7.9 What an error participates in
 
-Operations on an error fall into exactly three families.
+*An error is a failure that has not yet been discharged.* The split is one
+question: **can the result be mistaken for a successful computation?** [§7.6 record]
 
-**1. Type family — participates.** Asking what something *is* must work on an
-error, or errors could never be detected.
+- **S7.9.1** **Type family participates**: `err is error` → true, `type(err)`
+  → `error`, `match` dispatches the error arm — detection must always work.
+- **S7.9.2** **Truthy family participates**: `if (err)`, `not err`,
+  `err or d`, `err == err`, `err ^ { }` — these are the discharge surfaces;
+  absorbing is their job.
+- **S7.9.3** **Value family propagates**: `string/symbol/name(err)`,
+  `len(err)`, arithmetic, comparisons, conversions, `err in x`, `err at x`,
+  and every other value function return the error. `in` searches one level,
+  so a `false` would read as "error-free" — the honest answer is that the
+  question was not answered. One exemption: **`print(err)` participates** —
+  inspection, and it emits rather than returning a flowable value.
+- **S7.9.4** **Containment is not participation**: `[err]` is an array,
+  `len([1, err, 3])` is 3 — propagation concerns an error *being* the
+  operand, not being reachable from it.
 
-| form | result |
-|---|---|
-| `err is error` | `true` — the detection primitive |
-| `type(err)` | `error` |
-| `match (err) { … }` | dispatches on the error arm |
+### S7.10 The sys-func return contract
 
-**2. Truthy family — participates.** An error has a definite truth value
-(false), and every form below is that truth value being read. These are the
-discharge and defaulting surfaces: they exist to *handle* the error, so
-absorbing it is their job.
+*Take input broadly; keep results in domain. Preserve the successful result's
+cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
 
-| form | result |
-|---|---|
-| `if (err)` | falsy |
-| `not err` | `true` |
-| `err or default` | `default` |
-| `err == err` | a `bool` |
-| `err ^ { … }` | the handler's value |
+- **S7.10.1** Result shape is fixed by the contract, never by cardinality:
+  zero-to-many → `[]`; zero-or-one → `null`; string-valued no-content →
+  `""`; non-admissive invalid input → `error`. The four are distinct and must
+  stay distinguishable.
+- **S7.10.2** Admission is an explicit per-function contract: an **admissive**
+  case has a meaningful no-answer reading and returns result-domain absence
+  (`arr[-1]`, `argmin([])`); a **non-admissive** case returns a detailed
+  `error()` where absence would hide a malformed source (`int("abc")`,
+  malformed `parse`). Both absences are falsy, so `f(x) or default` rescues
+  uniformly. A declared type boundary is always non-admissive on mismatch.
+- **S7.10.3** **No in-band sentinels, ever.** `index_of`, `last_index_of`,
+  and `ord` return `int | null` — absence is never `-1`, never an unchanged
+  input. *A sentinel is only a sentinel at rest; `null` survives
+  computation.* Migration: `idx >= 0` remains a valid found test; `idx < 0`
+  silently breaks (null comparisons are false) — absence is tested with
+  `is null`. Private `-1` adapters must normalize at the Lambda boundary.
+- **S7.10.4** Error operands are rejected at the call boundary (parameters
+  are `any \ error`), keeping "error operand" distinct from "no match".
+- **S7.10.5*** Vectorized sys funcs are array-in/array-out: one lane does not
+  collapse to a scalar; zero lanes produce a typed empty; lane exceptions
+  produce lane values (`nan`/`inf`), never a shape change.
+- **S7.10.6** A mutator family picks one public convention (updated owner, or
+  unit) and holds it; `[]` never means "mutation succeeded"; invalid mutation
+  is `error`, never the unchanged input. (Which convention — open, App. B.)
 
-**3. Value family — returns a soft error, with one named exemption.**
-Everything else. Any operation whose result is a *value computed from* the error
-propagates instead, including the text and name conversions:
+### S7.11 System faults and recovery
 
-| form | result |
-|---|---|
-| `string(err)`, `symbol(err)`, `name(err)` | `error` |
-| `len(err)` | `error` |
-| `err + 1`, `err < 1`, `err ++ "x"` | `error` |
-| `int(err)`, `float(err)`, `bool(err)` | `error` |
-| `err in x`, `err at x` | `error` |
-| `contains(err, "x")`, and every other value function | `error` |
-
-**`err in x` deserves its own note, because a `bool` answer looks safe.** The
-membership operators are value computations and propagate like the rest — but
-the reason is sharper than category. `in` searches **one level**, so an error
-nested deeper in the structure is invisible to it. A `false` result would then
-read as *"this data is error-free"* when it may not be, and that is a worse
-outcome than no answer at all. Returning the error says the honest thing: this
-question was not answered.
-
-(An error also cannot be found by search in the first place: `in` matches by
-equality, and `error == error` is false by §5. So the participating reading
-would have returned a confident `false` in every case, including the one where
-the error is sitting right there in the container.)
-
-*Deferred.* Asking "does this data contain an error anywhere?" is a real
-question and needs a real answer — a deep check, most likely alongside
-type/schema validation, in the shape of a `valid(item)` sys func. That is future
-design; what this section fixes is that `in` must not be mistaken for it.
-
-The one exemption:
-
-- **`print(err)` participates.** It is a debugging and inspection function: its
-  purpose is to show you what a value is, which for an error is the one thing
-  you most need to see. It also *emits* rather than returning a value that can
-  flow onward, which is the whole distinction from `string(err)`.
-
-**`len(err)` is an error, and that is what keeps §8.1's law intact** rather than
-breaking it. The law says `len(x)` is the number of iterations `for (i in x)`
-performs. `for (x in null)` yields nothing — null is *empty content* — so
-`len(null)` is 0. `for (x in err)` yields an **error**, because the content is
-an error, not because it is empty. So `len(err)` is an error too, and the two
-sides still agree. Answering 0 would have put a failed computation on the same
-branch as an empty collection, which is the swallow this section exists to
-prevent.
-
-*`len` is still total over what it accepts.* Its parameter is `any \ error`
-(§7.7), so an error never reaches the function body — it is rejected at the call
-boundary and skips. The C result therefore still needs no error channel, which
-is what makes the retired `INT64_ERROR` sentinel unnecessary as well as wrong.
-
-*Rationale.* The families are separated by one question: **can the result be
-mistaken for a successful computation?** A type answer and a truth value cannot
-— they are about the error itself and they announce it. A converted value can:
-`string(err)` yielding `"<error>"` puts a failure into a string that flows
-onward as ordinary text, and nothing downstream can tell it from a real one.
-Converting an error to text is therefore written explicitly — `err or "error"`,
-or the handler form — so the swallow is visible at the point it happens.
-
-The exemption bar is deliberately high. `print` and `len` clear it because one
-is inspection and the other is load-bearing for iteration; the remaining value
-functions carry no comparable obligation, so none of them earns a ruling of its
-own and all of them propagate.
-
-**Containment is not participation.** `[err]` is an array and `{k: err}` is a
-map — an error stored *inside* a collection is an ordinary element, and
-`len([1, err, 3])` is 3. Propagation concerns an error *being* the operand, not
-one being reachable from it.
-
-*Implementation status (2026-08-03).* All three families conform. The value
-family propagates through two mechanisms: `len`, `index_of`, `last_index_of`,
-`ord`, `string`, `symbol` and `name` declare `any \ error` parameters, so an
-error is rejected at the call boundary and skips (§7.7); `in` and `at` return
-`BOOL_ERROR` directly, since `Bool` already carries an error state. The one
-form still outstanding is `err ^ { … }`, which is specified here but not yet
-parsed.
-
-### 7.7 Broad input, in-domain results: the sys func return contract
-
-Lambda's sys funcs **take input broadly** — they accept `any` and decide what to
-do — rather than rejecting at the signature. That leaves the question of what a
-value function returns when it is handed something it cannot process. Three
-contracts are available, using `ord` as the worked example:
-
-| | contract | on a non-string |
-|---|---|---|
-| **1** | `ord(x: string) -> int` | rejected at the boundary; the call does not type-check |
-| **2** | `ord(x) -> int \| error` | accepted, returns an `error` |
-| **3** | `ord(x) -> int \| null` | accepted, returns `null` |
-
-**The ruling is option 3 with a nullable result**, because the public Lambda
-surface uses one uniform absence value for zero-or-one results. The historical
-C-family `-1` sentinel was convenient: indices and code points are
-non-negative, it is easy to test with `>= 0`, and it keeps the ABI as a plain
-`int` instead of `int | null`. It is not the Lambda convention, however.
-
-`index_of`, `last_index_of`, and `ord` therefore return `int | null`: valid
-positions/code points remain `int`, while no match, an empty input, or another
-successful operation with no scalar answer returns `null`. This is consistent
-with all other zero-or-one APIs and supports the `value or default` idiom.
-Lambda's nullable native integer lane also keeps `int | null` in the same
-native lane as `int`, so the old boxing performance concern is no longer a
-reason to expose `-1`.
-
-For migration, `index_of(text, needle) >= 0` remains a valid found-index test:
-the comparison is false for `null`. The former `index_of(text, needle) < 0`
-not-found test is no longer valid because `null < 0` is false; absence must be
-tested with `index_of(text, needle) is null`. The same rule applies to
-`last_index_of` and `ord`.
-
-An implementation or foreign-language adapter may still use a private `-1`
-sentinel internally, but it must be normalized to `null` at the Lambda
-boundary. The sentinel is not an `error`; invalid operations and error
-operands continue to use the existing error boundary.
-
-*Why not option 1.* Rejecting at the signature contradicts the broad-input
-convention, and buys little: the caller of an untyped `fn f(s) => ord(s)` gains
-no safety, only a boundary error at a different place.
-
-*Why not option 2.* `int | error` is *viral through untyped code*. An untyped
-`fn f(s) => ord(s)` infers `int | error`, every caller inherits it, and nothing
-is gained at run time. Option 2 remains correct and necessary for any function
-that has **no out-of-domain value to return**; it is the fallback, not the
-default.
-
-*Where the error goes instead.* These functions declare their parameters as
-`any \ error` (§7.6), so an error argument is rejected at the **call
-boundary**: the parameter never enters the function, the call's result is that
-error, and it *skips* to the end of the closest enclosing safe boundary [TE-5,
-§11.4]. That is the ordinary soft-error path — nothing is raised, and nothing is
-swallowed. The `null` results below are for inputs that are perfectly valid and
-simply have no answer, which is a different question from an input that is
-already a failure.
-
-*Consequence for `ord` specifically.* Today `ord` returns `0` for a non-string
-**and** for `""` **and** for the NUL character — three different situations
-collapsed onto one value that is a legitimate answer (U+0000 is a real code
-point). The public result is now `null` for the non-string and empty-string
-cases, while `0` remains the valid ordinal of a NUL character. [2026-08-05]
+- **S7.11.1** Fault reasons are a closed, typed set: stack overflow,
+  side-stack exhaustion, out-of-memory, equality-depth exhaustion, runtime
+  boundary defect. Faults never enter function types and are never a normal
+  call-result ABI — recursion never forces `T^stack_overflow`. [ER-D4, ER-D9]
+- **S7.11.2** Faults pass transparently through `fn` frames; only `pn`
+  boundaries and execution boundaries own them. A caught fault cannot resume
+  the abandoned expression. Recovery frames never survive a scheduler yield —
+  an async task completes with the fault result. [ER-D9, ER-D11]
+- **S7.11.3** Transaction barriers (module init, hosted-guest entry) take
+  priority over inner handlers: no handler may resume through a
+  half-initialized module or abandoned guest activation. Fault delivery
+  cannot allocate; on OOM-during-error the primary error is discarded and
+  `OUT_OF_MEMORY` is raised with the prior code attached. [ER-D2, ER-D6]
+- **S7.11.4** Production containment is fail-stop: recoverable faults use
+  recovery frames; arbitrary memory faults terminate the process and are
+  never recast as language errors. Unhandled faults abort with a report.
+  Fault *timing* is exempt from S1.6 — when a stack limit fires may differ
+  across execution tiers.* [ER-D10]
 
 ---
 
-## 8. Membership and Iteration: the `in`/`at` Axis
+## S8 Membership and Iteration
 
-`in` and `at` are the language's value/key axis, used identically in iteration
-and membership:
+### S8.1 The `in`/`at` axis
 
-| | values (list facet) | keys (map facet) |
-|---|---|---|
-| iteration | `for (x in coll)` | `for (k at m)` |
-| membership | `x in coll` | `k at m` |
-| on elements | attribute values, then children | attribute keys |
+- **S8.1.1** `in` is value membership; `at` is key-name membership — used
+  identically in iteration and membership: `for (x in coll)` ↔ `x in coll`;
+  `for (k at m)` ↔ `k at m`. Operand order: member left, container right.
+  *Whatever `for…in` walks, `in` tests.* [C5.3a]
+- **S8.1.2** On elements, `in` ranges over attribute values then children;
+  `at` ranges over attribute keys — one meaning across the map/list duality.
 
-Operand order is uniform: member left, container right.
+### S8.2 The key space
 
-*Rationale.* An element is both a map and a list, so any container operator
-must mean one thing across the duality (P7) — `in` stays value-membership
-everywhere, and key-membership gets its own operator. Reusing `at` makes the
-membership pair *be* the iteration pair (self-teaching, no new keyword), and a
-keyword operator is shadow-proof where a method (`m.has(k)`) could be shadowed
-by wild data. [C5.3a]
+- **S8.2.1** Every item in every container has a key, in one space: maps key
+  by symbol; arrays/lists/ranges by integer index; elements by **both**.
+  `for (k, v in c)` exposes the key uniformly (`[for (k, v in [10,20]) k]` →
+  `[0, 1]`). [§8.0 record]
+- **S8.2.2*** A *name* is a symbol key only. `at` ranges over names, so
+  `1 at [10, 20, 30]` is **false** — the narrower reading is what lets
+  `for (k at e)` give an element's attributes without its children; an index
+  bound is written `i < len(arr)`. [§8.0.1 record]
 
-*Note on the element row.* `for (x in elem)` yields the attribute **values**
-followed by the children, and `for (k at elem)` yields the attribute keys. An
-earlier revision of this table said `in` meant children alone; the
-implementation has always included attributes, and §8.1's length law depends on
-which is correct, so the table now states what `in` actually ranges over.
+### S8.3 `len`
 
-### 8.0 The key space: every item is keyed
+- **S8.3.1** The law: **`len(x)` is the number of iterations `for (i in x)`
+  performs.** Consequences, not separate rules: `len("str")` = 3;
+  `len([[1,2],[3]])` = **2** (shallow — the count indexing needs);
+  `len({a: null, b: 2})` = 2; `len(null)` = 0 (absence is the empty
+  sequence); `len(err)` = **error** (iterating an error yields an error, not
+  nothing — collapsing it onto 0 would make a failed computation
+  indistinguishable from an empty one); `len(<e a:1, b:2; "t">)` = **3**
+  (attributes + children). [§8.1 record]
+- **S8.3.2*** Lazy sequences: a forceable stream's `len` forces and returns
+  the actual size; a non-forceable/infinite stream's `len` is **`inf`** — the
+  honest answer, impossible to mistake for a size. Consequently a `for` over
+  a statically-infinite stream is a **compile error**; unbounded streams are
+  consumed by recursion with an explicit termination condition. [§8.1 record]
+- **S8.3.3** Two lengths: `len` measures content; `count(x)` — defined, not
+  implemented — is 1 for every value, making shallowness an identity:
+  `len(container) = Σ count(item)`. For-expressions and spreads *splice at
+  the construction site* — by the time `count` applies, there is one value.
+  [§8.3 record]
 
-Containers do not each invent their own addressing. **Every item in every
-container has a key**, and the kinds of key form one space:
+### S8.4 Projections
 
-| container | keys its items by |
-|---|---|
-| map | symbols |
-| array, list, range | integers — the index |
-| element | **both** — attributes by symbol, children by index |
-
-Access is one notation over that space: `item.1` reads by index, `item.name`
-reads by name. And iteration exposes the key alongside the value, uniformly:
-
-```
-[for (k, v in [10, 20, 30]) k]   // [0, 1, 2]      -- integer keys
-[for (k, v in [10, 20, 30]) v]   // [10, 20, 30]
-[for (k, v in {a: 1, b: 2}) k]   // ['a', 'b']     -- symbol keys
-[for (k, v in {a: 1, b: 2}) v]   // [1, 2]
-```
-
-*Rationale — why array items are keyed rather than merely ordered.* The
-`for (k, v in c)` form must work over any container, and it is only useful if
-`k` is meaningful in each. If array items had no keys, `k` would be `null` for
-every array element and the form would be dead weight exactly where the index
-is most wanted. Giving arrays integer keys makes one loop shape serve arrays,
-maps and elements alike, and makes an element's dual nature a *composition* of
-the two key kinds rather than a special case.
-
-### 8.0.1 Named keys: what `at` ranges over
-
-`in` tests **value** presence. `at` tests **name** presence — and a name is a
-**symbol key only**. An integer key is a key, but it is not a *name*.
-
-| `x` | `for … in x` | `for … at x` |
-|---|---|---|
-| `{a: 1, b: 2}` | the values | `'a'`, `'b'` |
-| `<e a:1, b:2; "text">` | attr values, then children | `'a'`, `'b'` |
-| `[10, 20, 30]` | the elements | **nothing** |
-| `"str"`, `1 to 3` | chars / values | nothing |
-
-So `1 at [10, 20, 30]` is **false**: index 1 is a key of that array, but not a
-name, and `at` asks about names.
-
-*Rationale.* `at` could have been defined over the whole key space, which would
-have made `1 at arr` true. It is deliberately narrower, because the narrower
-reading is the one that buys something: **there would otherwise be no way to
-range over just the named members of a collection.** That operation is exactly
-what `at` exists to provide, and it is only meaningful on an element — the one
-container holding both key kinds — where `for (k at e)` gives the attributes
-without the children. Widening `at` to integers would delete the capability and
-leave nothing in its place, while narrowing costs only a spelling: an index
-bound is `i < len(arr)`, which needs no operator.
-
-*Implementation status (2026-08-03).* Iteration conforms — `for (k at arr)`
-correctly yields nothing. Membership does **not**: `1 at [10, 20, 30]` returns
-`true` and `5 at [10, 20, 30]` returns `false`, i.e. it is still testing index
-possession over the whole key space. That is the defect, and it is the sole
-reason the two `at` forms currently disagree. Note that an earlier revision of
-this section advertised `i at arr` as the checked-write pre-check idiom; under
-this ruling that idiom loses its operator and is written as an explicit bound.
-
-### 8.1 `len`: iterable length
-
-**Prior art: Python.** `len()` is the `Sized` protocol — a container or
-pseudo-container (`str`, `bytes`) answers via `__len__`, and everything else is
-a `TypeError`: `len(None)`, `len(5)`, `len(3.14)` and `len(True)` all raise, as
-does `len(generator)` even though a generator is perfectly iterable. Two details
-of that design matter here. Python **enforces** that `__len__` returns a
-non-negative machine int — a negative is a `ValueError`, an oversized one an
-`OverflowError`, a float a `TypeError` — so there is no room in the return type
-to smuggle a failure; failure travels out of band as an exception. And because
-`len` is thereby partial, Python provides a **separate** query,
-`operator.length_hint()`, for the "give me a size for something that isn't
-Sized" case.
-
-**Lambda evolves over it with a single law:**
-
-> `len(x)` is the number of iterations `for (i in x)` performs.
-
-Length and iteration are two views of one concept, so there is nothing to
-memorize per type and nothing to reconcile between them. Everything below is a
-consequence, not a separate rule:
-
-| `x` | `len(x)` | because `for (i in x)` yields |
-|---|---|---|
-| `"str"` | 3 | its characters |
-| `[1, 2, 3]` | 3 | its elements |
-| `[[1,2], [3]]` | **2** | its elements — **shallow**, one level only |
-| `1 to 3` | 3 | the range's values |
-| `{a: 1, b: 2}` | 2 | the map's values, one per entry |
-| `{a: null, b: 2}` | 2 | a null *value* is still an entry |
-| `null` | 0 | nothing; absence is the empty sequence |
-| `err` | **`error`** | an error, not nothing — the content is a failure, not an absence (§7.6) |
-| `<e a:1, b:2; "text">` | **3** | attribute values, then children |
-
-The `null` and `err` rows are the law doing real work rather than being
-restated. Both are "not a collection", but they are not the same answer:
-iterating `null` yields **nothing**, so its length is 0, while iterating an
-error yields **an error**, so its length is an error. Collapsing the second onto
-0 would have made a failed computation indistinguishable from an empty one.
-
-Two consequences worth stating outright, because both have been implemented
-wrongly at some point:
-
-- **`len` is shallow.** `len([[1,2],[3]])` is 2, not 3. A deep leaf count is a
-  different function; the law forbids conflating them, because the shallow count
-  is what indexing needs (`xs[len(xs) - 1]`, `while (i < len(xs))`).
-- **`len(element)` = `len(attrs) + len(children)`.** An element is a map and a
-  list at once (P7), so its length is the sum of both facets — the same
-  sequence `for … in` walks.
-
-**Where Lambda parts company with Python.** Python raises for scalars; Lambda
-answers by the law, so `len(null)` is 0 because iterating null yields nothing.
-Whether a *non-null scalar* iterates once (`len(5) == 1`) or not at all
-(`len(5) == 0`) is still open: `for (i in 5)` currently yields nothing while
-`5 |> ~` yields one item, and the law requires those to agree before `len(5)`
-can be settled.
-
-**Lazy sequences and streams.** The surveyed functional languages are unanimous
-that length over lazy data is an **eager synchronization point** that forces the
-structure, and none returns an infinity: Haskell's `length` diverges on an
-infinite list, as do Clojure's `count`, Scala's `LazyList.length`, F#'s
-`Seq.length` and Java's `Stream.count()`. Equally unanimous is that each then
-adds a **separate, non-forcing** size query — Clojure `bounded-count`, Scala
-`knownSize`, Rust `size_hint` / `ExactSizeIterator`, Python `length_hint` —
-because forcing is not always acceptable and those languages have no value to
-denote "unbounded".
-
-Lambda splits the case instead, because C16 gives it a value those languages
-lack:
-
-| the sequence | `len` | |
-|---|---|---|
-| lazy but **forceable** | the actual size, a normal `int` | forcing is the synchronization point, and it is what makes the count knowable |
-| **not forceable** — unknown, or truly infinite (a generator) | **`inf`** | the honest answer; Lambda has no `int.unknown`, and `inf` is the one value that cannot be mistaken for a size |
-
-`len` therefore stays total and never needs the separate hint query those other
-languages had to add.
-
-**The consequence is that `for` must reject an infinite length.** By this
-section's law, `for (i in s)` runs `len(s)` times, so a `for` over a stream of
-length `inf` would not terminate. Where that length is **statically
-inferable**, the `for` is a **compile error** — the loop is provably
-non-terminating, and diagnosing it at compile time is strictly better than
-hanging at run time. (Haskell, Clojure and Java all hang here instead; Lambda
-can do better precisely because the infinitude is a *value* in the type rather
-than a runtime accident.)
-
-The supported way to consume an unbounded stream is therefore **recursion with
-an explicit termination condition in the function** — the condition is what
-bounds the computation, and writing it is what makes the bound reviewable.
-`for` is for sequences whose extent is known; recursion is for sequences whose
-extent is decided by the consumer.
-
-### 8.2 Projections: `keys`, `values`, `names`
-
-Three projections fall out of the two axes, and each is defined by the
-comprehension it abbreviates rather than by an implementation:
-
-| projection | definition | yields |
-|---|---|---|
-| `keys(c)` | `for (k, v in c) k` | every key — integers for arrays, symbols for maps, both for elements |
-| `values(c)` | `for (k, v in c) v` | every value, in the same order |
-| `names(c)` | `for (k at c) k` | the **named** keys only — symbols (§8.0.1) |
-
-`keys` and `values` range over the `in` axis, so they are total over the
-container: every item contributes exactly one key and one value. `names` ranges
-over the `at` axis, so it sees only the subset that has names. Measured:
-
-```
-[for (k, v in [10, 20, 30]) k]        // [0, 1, 2]        keys: indices
-[for (k, v in {a: 1, b: 2}) k]        // ['a', 'b']       keys: symbols
-[for (k, v in <e a:1, b:2; "t">) k]   // ['a', 'b', 0]    keys: BOTH kinds, composed
-[for (k, v in <e a:1, b:2; "t">) v]   // [1, 2, "t"]      values match, in order
-[for (k at <e a:1, b:2; "t">) k]      // ['a', 'b']       names: attributes only
-```
-
-The element row is the whole key-space design made visible: its keys are the
-attribute symbols followed by the child indices, and nothing about that is a
-special case — it is simply what a container holding both key kinds looks like.
-
-**This closes §8's length question without a new primitive.** `len(keys(c))`
-equals `len(c)` always, since there is one key per item, so `keys` adds no new
-measure. `len(names(c))` *is* the `at`-axis length — the count that differs from
-`len` for arrays (0 vs the element count) and for elements (attributes vs
-attributes plus children).
-
-*Not implemented, deliberately.* All three are short comprehensions in the
-surface language already, so none earns a built-in. They are defined here so the
-projections have names to be reasoned and written about — the same reason
-`count` is defined in §8.3 without being implemented. Add one only when a call
-site needs it often enough to pay for itself.
-
-*Gap.* The paired form on the `at` axis, `for (k, v at c)`, does not parse —
-only the single-variable `for (k at c)` exists. So `names` is expressible but
-"named members with their values" is not directly; whether the paired form
-should exist is open.
-
-### 8.3 Two lengths: content and self
-
-Lambda asks two different length questions, and conflating them is what made
-the earlier candidate law fail:
-
-| question | function | meaning |
-|---|---|---|
-| **length of content** | `len(x)` | how many items `x` holds — its iteration count (§8.1) |
-| **length of self** | `count(x)` | how many items `x` *is*, as a member of a container |
-
-`len` looks inside; `count` looks at the thing itself. That is why `null` and
-`err` have `len` 0 — neither bears content — while each is still one thing, so
-`count` is 1. The two are independent measures, not two spellings of one.
-
-With both named, shallowness becomes an identity rather than a caveat:
-
-> `len(container)` = Σ `count(item)` over its items.
-
-The superficially similar `len(container)` = Σ `len(item)` does **not** hold and
-must not: it would force `len` into a deep leaf count, so `len([[1,2],[3]])`
-would be 3 rather than 2, and the shallow count is the one indexing needs
-(`xs[len(xs) - 1]`, `while (i < len(xs))`). Writing the law with `count` states
-exactly what `len` does — every item contributes one, whatever it is.
-
-**`count(x)` is 1 for every value `x`, with no exception.** Scalars, `null`,
-errors, arrays, maps, elements, ranges and streams alike: a value is one item.
-
-Two constructs *appear* to violate this and do not, because neither is a value:
-
-```
-len([1, for (x in [2, 3]) x, 4])   // 4 -- the for-expression splices
-len([1, *xs, 4])                    // 4 -- the spread splices
-```
-
-Both **splice at the construction site**, contributing their elements to the
-enclosing content. Binding proves the multiplicity is not in the value:
-`let xs = for (x in [2, 3]) x` and `let z = *xs` each bind an ordinary array,
-and `len([1, xs, 4])` is 3. Splicing happens *before* the result becomes an
-item; by the time `count` applies, there is one value.
-
-*Not implemented, deliberately.* Since `count` is constantly 1, calling it would
-be a no-op, and a function that always returns 1 earns no place in the surface
-language on its own. It is defined here for two reasons: the shallowness law
-above needs a name for the quantity it sums, and any future value type that is
-*inherently* several — a genuine multi-value, as opposed to today's syntactic
-splices — would break `count(x) = 1` and should be recognized as doing so.
-Implement it when either becomes load-bearing.
+- **S8.4.1** `keys(c)` ≡ `for (k, v in c) k`; `values(c)` ≡
+  `for (k, v in c) v`; `names(c)` ≡ `for (k at c) k`. Defined by the
+  comprehensions they abbreviate; deliberately not built in until a call
+  site pays for one. `len(names(c))` is the `at`-axis length. [§8.2 record]
 
 ---
 
-## 9. Mutability: Mutable Value Semantics
+## S9 Mutability: Mutable Value Semantics
 
-**State and its lifetime — at a glance.** Values never alias; **`var` is the sole
-mutability marker and the only sharing construct.** `let` is a fixed, referentially
-transparent binding; `var` is a mutable one — a state transition `x′ = f(x)` over a
-value that nothing aliased can observe (§9.6). Two facts orient everything below.
+### S9.1 The model
 
-*State lives exactly as long as the `var` that roots it.* Objects do not hold state
-independently — an object is a value and persists only while some `var` holds it;
-closures hold none at all (captures are immutable snapshots). So the *only* roots of
-persistent state are module-level and view-instance `var`s:
+*Values never alias; `var` is the only mutability marker and the only sharing
+construct; `let` is final.* [C4]
 
-| `var` root binding | State lifetime |
-|---|---|
-| module-level `var` | program / module lifetime — the only home for **global** state |
-| view-instance `var` (view `state`) | the view instance's lifetime |
-| `pn`-local `var` | the activation — **gone when the `pn` returns** |
+- **S9.1.1** `let` is final: nothing reachable through a `let` binding ever
+  changes. `let` is the variable of algebra (referential transparency);
+  `var` is the primed variable of program logic — every mutation is a total
+  function of the old value (`push(b, 2)` ≡ `b′ = b ++ [2]`), which is what
+  makes `pn` *locally imperative but observably functional*.
+- **S9.1.2** Binding, assignment, and construction copy, observably, for
+  every container kind. Implementation is COW; **sharing must be
+  unobservable** — a verifiable property, not a convention.
+- **S9.1.3*** `var` parameters (`pn f(var a: T)`) are the sole sharing
+  construct — an inout borrow. Compile checks: arguments must be `var`;
+  **exclusivity** (writer-vs-writer only: the same `var` or overlapping
+  paths cannot feed two `var` params; plain params snapshot before any
+  borrow's mutation begins, so readers need no check); `pn` methods require
+  a `var` receiver; `var` parameters are **invariant** (S9.2.1).
+- **S9.1.4*** Closures are immutable values: captures snapshot at creation;
+  assignment to a captured name — including interior mutation through it —
+  is a compile error. State lives in module-level `var`s, view state, and
+  objects with `pn` methods; never inside a function value. (A non-escaping
+  nested `pn` used only in call position may later be allowed direct access
+  — designed, deferred.)
+- **S9.1.5** No reference cells; structural `==` is the only equality.
+  Cycles are unconstructible, so `==` is total and no cycle collector is
+  needed.
 
-*Two cases escape "a `pn`'s state dies at return" — by design:*
+### S9.2 Covariance, borrows, and views
 
-1. A `pn`'s **`var` parameters** (and a `pn` method's **`var` receiver**) are *not*
-   activation-scoped — they borrow the caller's `var`, so mutations through them
-   **persist after the `pn` returns**. This is the one sanctioned channel by which a
-   `pn` reaches and mutates state up to global scope (§9.1 rule 3).
-2. A `pn`-local's **value** may leave by `return` or by being stored into a
-   longer-lived home — but only as a by-value **snapshot** (an immutable copy at the
-   destination, §9.3), never as a live mutable binding. What dies at return is the
-   *binding*, not necessarily the data it produced.
+- **S9.2.1** *Covariance where values copy, invariance where they're
+  borrowed*: `int[] <: any[]` holds for `is`, reads, value params, and
+  assignment (which copies — the covariant-array hole cannot arise); passing
+  `var xs: int[]` to `pn f(var a: any[])` is a compile error. [C12]
+- **S9.2.2*** Read views are first-class values with snapshot semantics (a
+  zero-copy slice observably behaves as a copy taken at creation).
+  Write-through views are **borrows, never values** — legal only in
+  `var`-param position, exclusivity-checked, non-escaping. Creating a
+  mutable borrow over shared storage un-shares first. [CW16]
+- **S9.2.3*** Iterating a `var` container walks the entry-time value: the
+  loop share-marks at the head, and the first in-body mutation copies — no
+  iterator invalidation. The same rule covers pipes over `var` containers.
+  [CW §11.6]
+- **S9.2.4*** A module-level or view-state `var` may not be passed as a
+  `var` argument (no call-site check can see the callee's independent path
+  to the same storage). [CW §11.4]
 
-The full rules follow in §9.1 (borrow/covariance detail §9.2, construction-by-value
-§9.3, the mathematical reading §9.6). [C4]
+### S9.3 Construction captures values
 
-### 9.1 The model
-
-**Values never alias. Mutability is a property of bindings, not values, and
-`var` is its only marker.**
-
-1. **`let` is final**: nothing reachable through a `let` binding ever changes.
-2. **Binding, assignment, and construction copy, observably** — for every
-   container kind. Placing a value into a container — literal, insertion, or
-   field write — stores the value, not a reference (§9.3). Implementation is
-   copy-on-write on reference counts; **sharing must be unobservable**
-   (P6 — a verifiable property).
-3. **`var` parameters are the sole sharing construct**: `pn f(var a: T)` is an
-   inout borrow. Compile checks: arguments must be `var` (never `let` or a
-   temporary); **exclusivity** (the same `var`, or overlapping paths, cannot
-   feed two `var` params); `pn` methods require a `var` receiver;
-   **invariance** — a `var` parameter's argument type must match exactly
-   (§9.2).
-4. **Closures are immutable values**: capture copies at creation (snapshot);
-   assignment to a captured name — including interior mutation through it —
-   is a compile error. State lives in objects with `pn` methods, module
-   `var`s, or view state; never inside a function value.
-5. **No reference cells**; structural `==` is the only equality.
-
-A planned, deferred relaxation: a *non-escaping* nested `pn` (name used only in
-call position) is not a value — it may access enclosing `var`s directly
-(equivalent to inlining; the closure-style parser use case). [C4, C4.2a]
-
-*Rationale.* `pn` becomes locally imperative but observably functional. The
-counter paradox decides closure immutability: a mutable capture makes a
-`let`-bound closure change behavior per call, violating rule 1.
-
-The model is not one preference among several — four other commitments rest on
-it, and each fails without it:
-
-- **The `fn`/`pn` effect system.** `pn` may claim "locally imperative,
-  observably functional" only if effects cannot escape through a captured or
-  passed container. Under reference semantics that claim is false, and the
-  one-bit effect colouring means nothing.
-- **Totality of `==`.** Cycles are unconstructible precisely because
-  construction copies (§9.3), so deep structural equality always terminates
-  and needs no cycle detection — and refcounting suffices with no cycle
-  collector.
-- **Race-free concurrency.** Isolates need no shared-memory discipline when
-  values cannot be shared; the concurrency model inherits safety instead of
-  enforcing it.
-- **The covariant-array hole closes by construction** (§9.2): the Java store
-  hole requires aliasing, and aliasing survives only in the borrow channel,
-  which carries the invariance restriction.
-
-The costs are real and are recorded in §9.5, not wished away. For language
-precedent see §9.4; for how `let` and `var` correspond to mathematical binding
-and to the formal-methods model of assignment, see §9.6. [C4]
-
-### 9.2 Covariance: where values copy — invariance: where they're borrowed
-
-`int[] <: any[]` holds for `is` checks, reads, value parameters, and
-**assignment** (which copies, so the classic covariant-array hole cannot
-arise). `var` parameters — the only aliasing channel — are **invariant**:
-passing `var xs: int[]` to `pn f(var a: any[])` is a compile error.
-Representation widening (unboxed → boxed) happens lazily at COW-copy time.
-
-*Rationale.* The Java array-store hole requires aliasing; C4 removed aliasing
-everywhere but the borrow channel, so the borrow channel carries the
-restriction (Rust's `&mut` shape). A8 thus resolves as a corollary of C4.
-[C12]
-
-Exclusivity is **writer-vs-writer only**: a *plain* parameter receiving the
-same variable as a concurrent `var` borrow observes a by-value snapshot
-(§9.3), so read access is self-protecting and needs no check — deliberately
-weaker than Swift's read-excluding Law of Exclusivity, safely. The one
-implementation obligation: value arguments capture their snapshot before any
-borrow's in-place mutation begins. [C4.2c]
-
-### 9.3 Construction captures values
-
-Placing a value into a container **captures it by value**, at every constructor
-and every insertion point:
-
-- array and list literals — `[a, b]`
-- map and element literals, and object construction
-- field and index writes — `m.f = a`, `xs[i] = a`
-- insertion builtins — the appended element in `push`, `splice`, and friends
-
-After construction, container and source are independent: later mutation of the
-source is invisible through the container, and vice versa.
-
-```
-var b = []
-push(b, 1)
-var lit = [b, null]     // captures the VALUE of b
-push(b, 2)
-// len(b) == 2  but  len(lit[0]) == 1
-```
-
-This is a corollary of "values never alias" (§9.1), not an extra rule: a
-constructor storing a reference would make mutation travel, which is the
-definition of aliasing. It is also what makes cycles unconstructible, and hence
-`==` total.
-
-*Consequence for porting.* Reference-semantics idioms do not carry over, and
-they fail **silently** rather than loudly — the shape to watch for is *create an
-empty collection, store it into a structure, then keep filling it through the
-original binding*, which leaves the stored copy empty forever. Ports must
-read-modify-write instead: fill before storing, or retrieve, mutate, and put
-back. `var` parameters (§9.1 rule 3) are the only construct that makes mutation
-travel, and mutation never travels through a value already stored.
-
-### 9.4 Precedents
-
-Mutable value semantics is an established design, not a novel one. Hylo builds
-an entire language on the same two rules; Swift is the proof that the
-implementation strategy scales; Tcl, PHP and R are the proof that it works in a
-*scripting* language over large data.
-
-| Language | Shared with Lambda | Differs |
-|---|---|---|
-| **Hylo** (ex-Val) | The whole model, by name — no first-class references, `inout` as sole sharing channel, exclusivity checking | Compiled systems language; research maturity |
-| **Swift** | COW value containers (`Array`/`Dictionary`/`String`); assignment copies observably; `inout` ≡ `var` param; exclusive-access enforcement | Hybrid — classes are references, closures capture by reference |
-| **Tcl** | Refcounted COW values with no observable aliasing, in a scripting language | Everything-is-a-string value model |
-| **PHP** (arrays) | `$b = $a` copies; explicit `&$x` params are the only sharing channel | Objects reference-semantic since PHP 5 |
-| **R**, **MATLAB** | Copy-on-modify for all data — the data-processing domain precedent | R environments are an escape hatch |
-| **Koka/Perceus**, **Lean 4**, **Roc** | Refcount-uniqueness reuse: functional semantics executed in place when unshared | Immutable-first framing; no `var` marker |
-| **Pascal**, **Ada** | Value assignment of composites; `var` / `in out` parameters (the keyword is borrowed from Pascal) | No COW, no exclusivity checking |
-| **Erlang/Elixir** | "Mutation does not travel" as daily practice at scale | Pure immutability; no sharing channel at all |
-
-Two informative contrasts:
-
-- **Rust** shares only the exclusivity discipline (`&mut` xor shared). It kept
-  references and paid with a borrow checker; Lambda removed references and pays
-  with copies (§9.5).
-- **Go** is the cautionary case for the alternative. Arrays are values while
-  slices and maps alias, and that seam is a well-known defect source. A hybrid
-  is the worst of the three positions — and a hybrid is exactly what an
-  incomplete migration leaves in the implementation.
-
-### 9.5 Open engineering problems
-
-The model is settled; two implementation problems under it are not. Both are
-performance and ergonomics questions, never semantic ones: no resolution may
-change what a program observes (P6).
-
-**9.5.1 COW granularity on large documents.** A naive COW copies the whole
-container at the first mutation of a shared value. Lambda's characteristic
-values are documents — large, long-lived, multiply referenced (views, caches,
-undo history) — so whole-document copying is not an acceptable implementation
-of rule 2.
-
-*Resolution (direction): structural sharing.* A document is a **DAG, not a
-tree**. A copy rewrites only the spine from the mutation point to the root and
-**reuses every untouched subtree by reference**; cost becomes O(depth), not
-O(size). The reused subtrees stay safe because every holder reached them by
-value and so can never mutate them in place. This is the standard
-persistent-data-structure result (Clojure's trees, `immer`, Perceus-style
-reuse), and it composes with refcounting: a node with `ref_cnt == 1` on the
-mutation path is uniquely owned and can still be updated in place, so the
-unshared case stays allocation-free.
-
-Because sharing must be unobservable (P6), structural sharing is pure
-implementation freedom — invisible to `==`, which compares content. Cheap
-undo/history in the editor falls out as a side effect, since a snapshot is what
-the model already produces.
-
-*Still to design:* the node representation that admits spine-copying, the
-refcount discipline that keeps in-place update sound on unique paths, and the
-element/document benchmark that gates the design. [C4.3]
-
-**9.5.2 Nested-mutation ergonomics.** Value semantics makes deep in-place update
-awkward, and the awkward spellings are exactly the ones that copy. Updating
-`t.nodes[i].value` must not degrade into "read a copy, mutate the copy, discard
-it", nor should the idiomatic spelling silently copy a large subtree. **This
-needs a design**; the known shapes are:
-
-- **Path-shaped `var` borrows** — permit `f(var t.nodes[i])`. The exclusivity
-  rule already anticipates this by speaking of *overlapping paths*; it requires
-  a borrow that projects through a path without materialising a copy.
-- **In-place update accessors** — Swift's `_modify` coroutines and Hylo's
-  subscript projections exist for precisely this problem: yield a mutable
-  projection rather than a value.
-- **Guaranteed get-modify-put reuse** — make the naive spelling fast by
-  ensuring the retrieved value is uniquely referenced, so write-back reuses
-  storage instead of copying.
-
-Until this is designed, deep updates in hot code are a copy hazard and the
-correct alternative spelling is a verbosity tax. [C4.4]
-
-### 9.6 Relation to mathematics: `let` as binding, `var` as state transition
-
-`let` and `var` are not two dialects of one idea; they are the two notions
-mathematics already keeps apart, and naming each one's mathematical home
-explains both the `let`-finality rule and why the formal model can be small.
-
-**`let` is the variable of algebra** — a name bound to a fixed value within a
-scope, referentially transparent: inside its scope `let x = e` means `x` *is*
-`e`, substitutable everywhere it occurs (λ-calculus binding, ML/Haskell `let`,
-the `x` of a theorem or a formula). Rule 1 (§9.1 — `let` is final) *is*
-referential transparency stated operationally: the denotation never moves, so
-the name and its value are interchangeable for the life of the binding.
-
-**`var` is assignment in the sense of program logic** — specifically the
-*primed-variable / state-transition* convention of formal methods, **not** the
-free variable of algebra. In Hoare logic and the weakest-precondition calculus,
-in TLA⁺ and Z (unprimed `x` = pre-state, primed `x′` = post-state), and in
-compiler SSA form (`x₀, x₁, x₂, …`), an assignment is not a name for a value but
-a **relation between a before-value and an after-value**. Lambda's `var` is
-exactly that, and it is *well-defined* as such precisely because mutation is
-value-semantic (§9.1, §9.3), never reference-semantic: every mutation is a total
-function of the old value,
-
-```
-x = x + 1     ≡   x′ = x + 1
-push(b, 2)    ≡   b′ = b ++ [2]
-m.f = a       ≡   m′ = { *: m, f: a }
-```
-
-with no intermediate state, and nothing else able to observe the transition. A
-`var`'s history is therefore a sequence v₀, v₁, v₂, … with vₙ₊₁ = fₙ(vₙ);
-"mutation" is the imperative *spelling* of pure state transition over immutable
-values. This is the exact content of the claim that `pn` is *locally imperative
-but observably functional* (§9.1): imperative surface, state-transition
-semantics.
-
-*What licenses the reading is the absence of references.* Under reference
-semantics (Python/JS) assignment is **not** a function of the old value —
-`b.append(2)` is an effect on a shared cell observable through other names, and
-cannot be written `b′ = f(b)` without modelling the whole heap as the state. C4
-closes exactly that gap: with no reference cells (§9.1 rule 5), `x′ = f(x)` holds
-locally for every mutation, and the one construct that couples two names' state,
-the `var` inout parameter (§9.1 rule 3), is exclusivity-checked so it stays a
-single-writer pre→post relation — Hoare-logic assignment *through an lvalue*,
-never a shared reference.
-
-*Rationale.* The correspondence is not decoration. It is why a Stage-4 model
-needs a `⟨store⟩` cell **only for `var` bindings** (`let` is pure denotation and
-needs none), and why `let`-finality and COW-unobservability are *verifiable
-properties* rather than conventions: the model is small because the two
-constructs are the two mathematical notions with nothing between them. The same
-split is what lets the meta-language stay immutable while modelling a mutable
-object language (§ closure/JS discussion, [C4.2]) — `let`-denotation and
-`var`-transition are both expressible over immutable terms. [C4]
+- **S9.3.1** Placing a value into a container captures it **by value** at
+  every constructor and insertion point — literals, field/index writes,
+  `push`/`splice`. After construction, container and source are independent.
+  A corollary of "values never alias", and what makes cycles
+  unconstructible. Porting hazard (silent): *fill-after-storing* leaves the
+  stored copy empty — fill before storing, or read-modify-write. [C4]
 
 ---
 
-## 10. Operators
+## S10 Operators
 
-### 10.1 Union and pipe
+### S10.1 Union and pipe
 
-- **`|` means union/alternative — everywhere**: type expressions, match
-  or-patterns, string patterns, and value expressions (types are first-class:
-  `let T = int | string`).
-- **`|>` is the pipe**, dual-mode on a syntactic test: if the body contains a
-  **free `~`**, it is a mapping pipe (binds `~` per item); with no free `~`,
-  it is whole-value application (`data |> sum` ≡ `sum(data)`). The dispatch is
-  decided at parse time. A `~`-free body that is not callable is a type error.
-- File write/append syntax is deferred; `output(data, file)` is the interim.
+- **S10.1.1** `|` means union/alternative **everywhere**: type expressions,
+  match or-patterns, string patterns, value expressions (types are
+  first-class). `|>` is the pipe. [C6]
+- **S10.1.2** The pipe is dual-mode on a parse-time syntactic test: a body
+  with a **free `~`** is a mapping pipe (binds `~` per item; `~#` is the
+  current key/index); with no free `~` it is whole-value application
+  (`data |> sum` ≡ `sum(data)`; extra args append: `data |> take(3)` ≡
+  `take(data, 3)`). A `~`-free non-callable body is a type error. Scalars
+  pipe as a whole value. [C6]
+- **S10.1.3** `~` is lexically scoped to the RHS of its pipe; nested
+  constructs shadow, **innermost-wins** — uniformly for pipes, `that`
+  clauses, match arms, and `last` (S7.2.2); reach an outer item via a `let`.
+- **S10.1.4** File write/append syntax is deferred; `output(data, file)` is
+  the interim. [C6a]
 
-*Rationale.* The collision was one-directional — union needs expression
-position; pipe never needs type position — and keeping `|` overloaded would
-have required semantic (type-directed) disambiguation, poison for a formal
-grammar. `|>` is the world-standard pipe spelling. [C6]
+### S10.2 Vectorization
 
-### 10.2 Vectorization
+- **S10.2.1** Arithmetic `+ - * /` is vectorized (element-wise with
+  broadcasting) — vector arithmetic is mathematics. [C10]
+- **S10.2.2*** Bare comparisons `< <= > >=` are **scalar-only**, never
+  element-wise (the killing exhibit: `if ([1,2,3] > 99)` took the
+  then-branch — a mask is a container, containers are truthy). Element-wise
+  comparison has its own keyword operators **`eq ne lt le gt ge`**, yielding
+  bool masks; nan lanes compare false. Bare `==` is untouched. [C10]
+- **S10.2.3*** Mask consumption is explicit and non-magical: `sum(mask)`
+  counts true lanes; `a[mask]` is boolean indexing. `and`/`or` remain scalar
+  short-circuit operators, never mask combinators. Condition-position lints
+  protect the truthiness boundary (suggest `any`/`all`/`len`). [C10]
 
-- **Arithmetic `+ - * /` is vectorized** (element-wise with broadcasting):
-  vector arithmetic is mathematics.
-- **Bare comparisons `< <= > >=` are scalar-only** — never element-wise. The
-  killing exhibit: `if ([1,2,3] > 99)` took the then-branch (a mask is a
-  container, containers are truthy — silently wrong, worse than NumPy's
-  raise).
-- **Element-wise comparison has its own keyword operators:
-  `eq ne lt le gt ge`** (XPath lexemes, continuing the `div` borrowing) —
-  `img gt threshold` yields a bool mask. Element-wise `eq`/`ne` are permitted
-  precisely because they are *distinct operators*; bare `==` is untouched.
-  Note the deliberate inversion: in XPath these keywords are the scalar forms;
-  in Lambda they are the element-wise forms — nobody types `gt` by accident,
-  which is the point. [C10]
-- **Mask consumption is explicit and non-magical.** `sum(mask)` counts true
-  lanes; `a[mask]` is boolean indexing, with a full-shape mask selecting
-  matching elements in row-major order and a 1-D mask on an N-D array selecting
-  leading-axis slices. `and`/`or` remain scalar short-circuit truth operators,
-  not element-wise mask combinators. Dedicated mask-combination functions such
-  as `mask_and`/`mask_or` are deferred; until then, mask-producing code should
-  stay readable by naming intermediate masks or using explicit selection.
-  [C10.3]
-- **Condition-position lints protect the truthiness boundary.** A direct
-  element-wise comparison in `if`/`while`/`where` condition position warns and
-  suggests `any(...)`, `all(...)`, `sum(mask)`, or `a[mask]`. A statically-known
-  container condition also warns because every container is truthy under §3;
-  the warning asks for an explicit scalar predicate such as `len(...)` or
-  `any(...)`. These diagnostics are hints, not semantic errors. [C10.2/C2.3]
+### S10.3 Keyword operators
 
-### 10.3 Keyword-operator inventory
-
-`and or not is in to div that where at eq ne lt le gt ge` — Lambda is a
-keyword-operator language; new operators prefer words over sigils.
+- **S10.3.1** `and or not is in to div that where at eq ne lt le gt ge` —
+  Lambda is a keyword-operator language; new operators prefer words over
+  sigils.
 
 ---
 
-## 11. Patterns and Types
+## S11 Types and Patterns
 
-### 11.1 Types compose like values
+### S11.1 Types compose like values
 
-A bracket type is a **structural pattern** whose positions mix values and
-types freely:
+- **S11.1.1** A bracket type is a structural pattern whose positions mix
+  values and types freely: `[1, int, "str"]`; `[int]` is **exactly one int**
+  (TypeScript's reading — forced by compositionality at n = 1) and enforced
+  with a teaching message; `int[]` is the homogeneous-array spelling, with a
+  lint on bare `[T]` in annotation position only.* [C7]
 
-```lambda
-[1, int, "str"]   // array of exactly 3: the value 1, any int, the value "str"
-[int]             // array of exactly one int  (TypeScript's reading, not Haskell's)
-[int*]  int[]     // array of zero or more ints
-```
+### S11.2 Match
 
-`[int]` = exactly-one is forced by compositionality (banning it would break
-composition at n = 1) and is enforced: `let xs: [int] = [1,2,3]` is a compile
-error whose message teaches ("did you mean `int[]`?"); a lint hints on bare
-`[T]` occurrences that `[T]` is an exact-one pattern and `T[]` is the
-homogeneous-array spelling. [C7]
+- **S11.2.1** `match` is a **type match**: arms are type expressions tried in
+  order, first match wins, no fall-through; literal arms are singleton types
+  dispatched by `==`; type arms dispatch via `is`; constrained arms add a
+  predicate (`case int that (~ > 0):`). `~` is the matched value in every
+  arm body, narrowed to the matched type — no destructuring sub-language.
+  The scrutinee evaluates exactly once; `default` must be last.* [C8.5c, Match]
+- **S11.2.2** Poison is unequal, not untypeable: `case float:` catches nan,
+  `case error:` catches errors; errors reach `default` only when no `error`
+  arm exists. The `type(x)` trap: `match type(err) { case error: }` falls to
+  `default` — a type value matches only `case type:`; *`match x` already is
+  Lambda's typeof-switch.* [C8.5c]
+- **S11.2.3*** Exhaustiveness is compiler-checked: unions need every
+  constituent, `bool` both arms, `T?` needs `T` and `null`; open scrutinee
+  types require `default`. Statement arms yield `null` in expression
+  context. [Match]
 
-### 11.2 Match dispatch
+### S11.3 Structural `is`, nominal objects
 
-**Lambda's `match` is a type match, not a mere value match** — unlike
-C/Java-family `switch`/`case`, which compare values. Arms are tried in order;
-first match wins:
+- **S11.3.1** `is` is structural for maps/arrays/elements (extra fields
+  permitted; key lookup by name) and nominal for object types. `is` is
+  type-directional: `3.0 is int` is false even though a deferred `int`
+  boundary admits `3.0` (S11.4.5) — membership asks what a value *is*; the
+  boundary asks what it may *satisfy*. [C7, TE-6]
 
-- **Type arms dispatch via `is`** (`case int:`, `case error:`, `case Circle:`)
-  — classification, not equality.
-- **Literal arms dispatch via `==`** (`case 200:`, `case "hello":`).
-- **Constrained arms** combine both: `is` then the predicate
-  (`case int that (~ > 0):`, `case error that (~.code == 304):`).
-- Consequence of the split: **poison is unequal, not untypeable** — `nan` and
-  `error` match their type arms (`case float:` catches nan; `case error:`
-  catches errors) even though they `==` nothing (§5.1). Errors reach
-  `default` only when no `error` arm exists.
-- **The `type(x)` trap** (documented deliberately): `match type(err)
-  { case error: … }` falls to `default` — the scrutinee is a *type value*,
-  and `type(err) is error` is false even though `type(err) == error` is true
-  (type-value equality is a different relation from classification). There is
-  no `==` fallback for type-valued scrutinees — that would make arm meaning
-  depend on the scrutinee's runtime type. The rule: **`match x` already is
-  Lambda's typeof-switch** — match the value, not its type; `match type(x)` is
-  a habit imported from JS's `switch (typeof x)`, and in Lambda a type value
-  matches only `case type:`.
-- **The `error` name duality**: the bare keyword `error` denotes the error
-  *type* — `type(error)` → `type` — which is what appears in `case error:`
-  arms and `is error` checks; the *constructor* `error("…")` creates an error
-  **value** — `type(error("…"))` → `error`. Same name, two roles, split along
-  the same classification/value axis.
+### S11.4 Declared types are contracts
 
-### 11.3 Structural `is`, nominal objects
+Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md) (TE-1–TE-18).
 
-`is` checks are structural for maps/arrays/elements (extra fields permitted;
-key lookup by name — order-insensitive) and nominal for object types. Type
-matching and value equality answer different questions with different order
-sensitivities (§2.3, §5.4) — both by design.
-
-### 11.4 Type enforcement: declared types are contracts
-
-Detailed decision record:
-[`vibe/Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md)
-(TE-1–TE-16, the boundary inventory, evidence, and the phased plan). This
-section distills its semantic decisions; several are captured nowhere else.
-
-- **Three outcomes, never a fourth.** Every typed boundary resolves to
-  statically proven, statically rejected, or a deferred runtime check; a failed
-  deferred check produces a rich error value (boundary, expected type, actual
-  value, location) — never null, never a wrong value, never silence. [TE-2,
-  TE-4]
-- **Signatures spell both failure dimensions.** Plain `T` excludes null *and*
-  error: absence is `T?`, failure is `T | error` (soft) or `T^E` (enforcing).
-  An unannotated fn is implicitly contracted `(any \ error, …) -> any \ error`
-  and enforced like a declaration — inference finding an error-possible return
-  is a compile error, resolved by containing it, disclosing `| error`, or
-  imposing `^`. Declared returns are effect firewalls; there is no silent
-  signature tier and no effect fixpoint. [TE-5, enforcement §10.7]
-- **Three failure channels** (the taxonomy behind §7.3): value errors
-  (`T | error`) flow as data; raised errors (`T^E`) demand engagement at the
-  immediate expression and alone license `raise`; system faults (stack
-  exhaustion, out-of-memory, the `==` depth limit) are unchecked — never in
-  types, transparent through fn frames, caught at a pn `^ { }` boundary or the
-  global handler. In value positions `T^` ≡ `T | error`; `^` is semantically
-  distinctive only on fn returns. [TE-13, C14]
-- **The top and its default.** `any` includes error; `any \ error` is the
-  non-error top and the *unwritten default* of the untyped world (dynamic
-  reads, unannotated params). Explicit `any` is the opt-in to carry errors; a
-  bare `var` is true `any`. An error argument reaching an `any \ error`
-  parameter never enters the function — the call's result is that error.
-  Validation-space `any` (`is`, the validator) reads as `any \ error`: usable
-  data. [TE-5]
-- **Containment is automatic; handling is explicit.** A failed deferred check
-  *skips* to the end of the closest enclosing safe boundary — the annotated
-  binding, then the enclosing block — and that position receives the error;
-  code between the failure and the boundary never runs, so no binding is ever
-  established from a failed check. Container element positions accept the error
-  as data instead, which is what keeps batch processing alive. Skip is
-  fail-stop and blind; to *handle* an error with access to it, use
-  `e ^ { … ~ … }`, which suppresses the skip. Skip never discharges the raised
-  channel's acknowledgement obligation. [TE-15, TE-16]
-- **Interiors flow, interfaces enforce.** Annotated bindings are contracts: a
-  deferred success establishes a clean `x: T`; failure yields the boundary
-  error *before the binding exists* — `x` never holds an error. Unannotated
-  bindings infer freely, including `T | error`; soft errors cascade through
-  pipelines, loops, and containers, and are detected at type boundaries (`is`,
-  `match`, annotated bindings, firewalls).
-  `type(a or b) = (type(a) \ {error, null}) | type(b)`, so `int(s) or 0 : int`.
-  [enforcement §10.8, TE-13]
-- **Deferred numeric checks are value-aware: admission is domain membership.**
-  An exactly-embedding value passes and is re-represented (`float 3.0` →
-  `int 3`); an inexact one fails with the error. Poison follows the same
-  membership rule (C16): same-signed infinities are one value across
-  float/int/integer/decimal, so `inf` passes an `int` boundary re-tagged as
-  `inf`; classification runs up the `⊑` chain, so *widening* admits poison
-  without any check (`nan` flows into a `float` or `integer` position and
-  remains `nan`); at *narrowing* boundaries a foreign nan is rejected exactly
-  like `3.5` — though `int` and `float` now share one nan, so only `integer`
-  and `decimal` nans are foreign to `int` (nans are never
-  shared); sized-int boundaries admit no poison at all. Static positions
-  reject the whole class (`let x: int = 3.5` *and* `3.0` are compile errors);
-  `is`/`match` stay type-directional (`3.0 is int` is false). [TE-5, TE-6,
-  C16]
-
-*Rationale.* Error is as dangerous as null, or more — a stray null yields
-absence, while a mishandled error is a poisoned computation carrying a
-diagnosis nobody read — so failure receives the same signature-level
-explicitness as absence (`T` vs `T?` ↔ `T` vs `T | error`). Enforcement is
-also the prerequisite for performance: an annotation may drive representation
-only if its boundary is enforced. [TE-3]
+- **S11.4.1** An annotation is a contract on the binding, not a hint.
+  **Three outcomes, never a fourth**: statically proven, statically
+  rejected, or a deferred runtime check whose failure produces a rich error
+  (boundary, expected type, actual value, location) — never null, never a
+  wrong value, never silence. Failure never establishes the binding;
+  reassignment checks before commit and leaves the old value unchanged.
+  An annotation may drive representation only if its boundary is enforced.
+  [TE-1, TE-2, TE-4, TE-9]
+- **S11.4.2** Signatures spell both failure dimensions: plain `T` excludes
+  null *and* error; absence is `T?`, failure is `T | error` (soft) or `T^E`
+  (enforcing). **Declared returns are effect firewalls**: a plain-`T`
+  function with an open body is a compile error — the author must *contain,
+  disclose, or impose*. An unannotated fn is implicitly contracted
+  `(any \ error, …) -> any \ error` and enforced identically; disclosure is
+  soft (`| error`), so a pushed-open function never spills `^` onto callers.
+  [TE-5, TE §10.7]
+- **S11.4.3** `any` is the top type and includes error; **`any \ error` is
+  the non-error top and the unwritten default of the untyped world**
+  (untyped params, dynamic reads, unannotated returns). Explicit `any` is
+  the opt-in to carry errors. An error argument reaching an `any \ error`
+  parameter never enters the function — the call's result is that error.*
+  [TE-5]
+- **S11.4.4** *When the user is explicit, we check explicitly*: an explicitly
+  declared error possibility cannot enter a plain-`T` position without
+  visible discharge (`let x: int = a()` where `a : int | error` is a compile
+  error; the idioms are `or`, `^ { }`, `^`, or the union binding). Only
+  implicitly open values cross as deferred checks. [TE-13]
+- **S11.4.5*** Deferred numeric admission is **value-aware**: an
+  exactly-embedding value passes and is re-represented (`float 3.0` →
+  `int 3`); an inexact one fails with the rich error. Poison follows domain
+  membership (S4.2.4). Static positions reject the whole class
+  (`let x: int = 3.0` is a compile error). [TE-5, TE-6]
+- **S11.4.6*** User-defined types are enforced by the validator: deep, on
+  first crossing, or a rich error with a validator path and no binding.
+  Named map types are **open** — extra fields pass. Constrained types
+  (`T where …`) enforce the base only, for now. [TE-10]
+- **S11.4.7** Containment and discharge follow §S7.7–S7.8: skip at
+  declaration boundaries, destination-contract container acceptance, and
+  `^ { }` as the engagement form that suppresses the skip.
 
 ---
 
-## 12. Metaprogramming
+## S12 Functions, Effects, Resources
 
-### 12.1 Code as data
+### S12.1 The one-bit effect system
 
-Lambda is homoiconic through elements: the canonical AST is an element tree in
-the ambient **`lm.` namespace** (`<lm.if …>`, `<lm.var …>`, `<lm.add …>`) —
-namespaced because AST tags must be distinguishable from the world's documents
-(HTML has a real `<var>` element; XSLT's `xsl:` prefix is the precedent).
-Quoted-symbol tags (`<'if' …>`) exist as general grammar orthogonality for
-ad-hoc keyword-named elements; they denote the plain symbol.
+- **S12.1.1** `fn`/`pn` is a declared, compiler-checked, one-bit effect
+  system: `fn` is pure and deterministic under any schedule; `pn` may have
+  effects; `fn` cannot call `pn`. Accepted price: no reified effects — a
+  `pn` call executes; there is no held, unexecuted effect value. [Features §3.6]
+- **S12.1.2** `break`, `continue`, `return`, `while`, and `var` declarations
+  are `pn`-only; using them in an `fn` is a compile error. `return` inside
+  `for` exits the function; a function without an explicit `return` returns
+  its last expression. [Procedural]
+- **S12.1.3** Reactive templates are the doctrine applied: template body =
+  pure `fn` transformation; mutation only in `on` handlers (`pn`) — the Elm
+  architecture enforced by the effect bit. [Features §3.7]
 
-Element literals are **inverted quasiquotation**: expression children evaluate
-(splices); element-literal children are structure (quoted). *The angle bracket
-is the quote mark.* A `quote { … }` authoring form (parse-time-checked, with
-`$`-splices) is planned but deferred. [C9, C9a]
+### S12.2 Assignment
 
-### 12.2 Construction and execution
+- **S12.2.1** `let` bindings and parameters are immutable; only `var`
+  reassigns; shadowing is allowed. An unannotated `var` may change runtime
+  type on reassignment; an annotated `var` constrains every assignment to
+  the declared type (S11.4.1). Implicit widening at annotated positions is
+  by **exact embedding** only (S4.4.1) — never lossy coercion; assignment
+  never silently corrupts data. [Proc_Assignment]
+- **S12.2.2** Element mutation is defined on both faces: `elem.attr = v` as
+  map-field assignment; `elem[i] = v` as child assignment.
 
-- `input(f, 'lambda')` parses Lambda source into the `lm.` AST.
-- `compile(ast, env?) fn^` compiles a **closed** function: it sees the stdlib
-  plus explicitly passed bindings only — never ambient scope. Failures are
-  ordinary `T^E` errors. Compilation is deterministic and pure.
-- **Strings are never code** (P8): `compile` accepts AST values only; no
-  string-eval API exists in any form.
-- Dynamically constructed functions take their identity from the **content
-  hash of the normalized AST** (§5.5) — value semantics for code.
+### S12.3 The call contract
 
-*Rationale.* The Lisp lineage (code-as-data + eval) with the injection class
-removed wholesale and the environment made explicit (the one good lesson of
-JS's `new Function`). One AST schema is shared by loaded, hand-built, and
-quoted code — homoiconicity with validator-checked terms, which Lisp never
-had. [C9]
+- **S12.3.1** A function has at most **16 source-language argument slots**
+  (a rest collector consumes one); exceeding it is an ordinary Lambda error,
+  statically diagnosed where possible. Hidden ABI operands do not count.
+  [Function_Arg]
+- **S12.3.2** Two dynamic-call restrictions are deliberate: a dynamic call
+  with named arguments is rejected, and a dynamic call to a `var`/inout
+  signature is rejected (a value span carries no writable caller location).
 
-### 12.3 Introspection
+### S12.4 Resources
 
-`name(item)` is the shadow-proof accessor for intrinsic names — element tag,
-function declaration name, type name, an object's type name — returning `null`
-for unnamed values. (The `.name` property remains but is shadowed by user
-attributes; operators and functions, not properties, are the reliable surface
-over open containers.) [C9a]
+*Auto-close is `with` without the `with`. Close is not just release — it is
+the last write.* [Features R1–R5]
+
+- **S12.4.1*** `open()` is resource acquisition and is `pn`-only. The
+  source quartet: `input()` eager value; `stream()` lazy plan; `open()`
+  scoped resource. `input()` is not a resource — it closes inside the call
+  and returns a pure value.
+- **S12.4.2*** A resource auto-closes at the end of its enclosing **block**;
+  ownership escapes only by `return`, and the escape must be visible in the
+  declared return type — any other escape is a compile error.
+  Cleanup-on-failure and transfer-on-success fall out (*`errdefer` for
+  free*). Cleanup runs innermost-out as an error propagates, before any
+  boundary handler observes it; a cancelled await is an error-shaped exit,
+  so cancellation safety is inherited.
+- **S12.4.3*** No `defer`, `with`, or `finally` keyword: auto-close is the
+  only user-facing cleanup mechanism; non-close cases are modeled as scoped
+  resources with a close capability. The GC finalizer is a backstop and
+  leak detector, never the closing mechanism — *GC runs on memory pressure,
+  not resource pressure.*
 
 ---
 
-## 13. Verifiable Properties
+## S13 Concurrency
 
-These invariants are the checkable face of P6 and P9. The formal model and the
-differential test harness verify them; any observed violation is a bug, never
-a semantics change:
+*One keyword, two tiers. Concurrency enters a program through exactly one
+word.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concurrency.md) (K11–K32).
 
-1. **Boxing invisibility** — tagged/unboxed representation choices never affect
-   results.
+### S13.1 Tasks and workers
+
+- **S13.1.1** `start` is the only concurrency keyword — contextual, legal
+  only where an expression begins inside a `pn`, operand a `pn` call.
+  Everything else (`wait`, `send`, `receive`, `select`, `worker`, `cancel`,
+  `self`) is a builtin `pn`. **`async` and `await` do not exist.** [K12]
+- **S13.1.2** Calls are **colorless**: `f(x)` synchronously yields the value
+  and may suspend invisibly (`f(x)` ≡ `wait(start f(x))` minus the handle);
+  may-suspend-ness is inferred and never observable. Every Lambda `pn`
+  exposed to JS is uniformly Promise-returning; a Lambda resume is a
+  macrotask. [K16]
+- **S13.1.3*** Two tiers, one handle vocabulary: tasks (`start f(x)`, shared
+  context) and workers (`start worker(spec, isolation: 'thread'|'process')`,
+  share-nothing isolate; default `'thread'`). Handles are uniform:
+  awaitable, sendable-to, selectable, cancellable; they compare by identity
+  and only the concurrency builtins operate on them. [K11, K31]
+- **S13.1.4** **The capture rule**: a `start` operand must not capture
+  `var`s by reference — compile error. Tasks communicate only via messages
+  and immutable values; consequence: **thread count is semantically
+  unobservable**. [K13]
+- **S13.1.5** **Failures are values; faults are not.** `wait(h)` yields
+  `T^E` for errors, raised values, and cancellation; that surface is total
+  only under process isolation — under thread isolation a hard fault is
+  process-fatal. *Share-nothing is the model; read-only sharing is the
+  representation.* [K18, K31/K32]
+
+### S13.2 Messaging
+
+- **S13.2.1** Handle = address; there is no channel type. One mailbox per
+  task; N:1 by design (a shared work queue is an explicit dispatcher).
+  `receive()` yields the oldest message — FIFO-head only, no in-queue
+  selective receive (*the BEAM rescan trap is unrepresentable*); dispatch
+  with `match`. [K20]
+- **S13.2.2** `send(h, msg)` never blocks and returns `ok^E`: a full mailbox
+  is the error value `'mailbox_full'` — never blocking, silent drop, or
+  unbounded growth. *Backpressure is an error value, visible in the type
+  system.* [K20d]
+- **S13.2.3** Ordering: per-sender FIFO; a task's termination becomes
+  observable only after its previously sent messages are enqueued;
+  end-of-stream *is* handle completion carrying the final `T^E` — no
+  sentinel or injected system messages. [K20e]
+
+### S13.3 Scope and cancellation
+
+- **S13.3.1** A started handle is a scoped resource owned by the nearest
+  lexical block: normal exit **joins**; error exit **cancels then joins**;
+  ownership escapes only by `return` (visible in the type). Storing or
+  sending a handle grants capability, not ownership. [K30a/b]
+- **S13.3.2** Cancellation is an error value at park points (`'cancelled'`),
+  unwinding by ordinary `^` propagation with auto-close cleanup on the
+  path; cleanup runs cancellation-masked. Any holder may cancel; idempotent.
+  `wait(h, timeout:)` times out the **waiter** only — *observing ≠ owning*.
+  [K30c–f]
+
+### S13.4 Determinism
+
+- **S13.4.1*** Builtin numeric reductions (`sum`, `avg`, `prod`, `variance`,
+  dot, `min`/`max` join) are **pairwise-by-spec**: a fixed tree order
+  depending only on n — bit-identical across runs, machines, thread counts,
+  and SIMD/scalar/parallel backends. *Same everywhere, always.*
+  User-supplied `reduce` stays strictly sequential (purity ≠ associativity).
+  [K19]
+- **S13.4.2*** In stream pipelines, `fn` stages auto-parallelize and are
+  **ordered by default** (a re-sequencing buffer restores index order);
+  `pn` stages are sequential anchors. [K22, K23]
+
+---
+
+## S14 Data Processing
+
+### S14.1 For-clause grouping and joins
+
+- **S14.1.1** `group by KEY [as ALIAS], … into g` — and **a group is an
+  element**: keys are attributes, members are children, tag `'group'`. *A
+  group is a document node* — it formats and queries like any element.
+  [FC1, FC10]
+- **S14.1.2** Key equality is `==` with numeric-tower coherence (`1` and
+  `1.0` group together); null keys form one group. Groups emit in
+  first-appearance order; `order by`/`limit`/`offset` after `group by`
+  apply to groups; loop variables go out of scope after grouping — only the
+  `into` binding survives. An omitted `as` infers a name only from a
+  trailing field access; anything else demands `as` (no generated names).
+  [FC2–FC4, FC9]
+- **S14.1.3** Join `on` is restricted to conjunctions of equality tests
+  (non-equi conditions are a compile error pointing at `where` — never a
+  silent O(n·m)); `c? in src on …` is the null-padded side; **null join
+  keys never match** (deliberate asymmetry with grouping, documented at
+  both). Output preserves probe-side order, stable. [FC5–FC7]
+
+### S14.2 Verbs and windows*
+
+- **S14.2.1*** The verb surface is generic over row-oriented data —
+  DataFrame, arrays of maps, element children, RDB rows — *one relational
+  algebra over both documents and tables*, same names, same semantics,
+  Rosetta-tested both ways. [PD15]
+- **S14.2.2*** Column references in verb arguments are `~.field` (the pipe
+  current-item reference extended into verb scope; the leading-dot form is
+  not adopted). `over(part:, order:)` is a postfix construct on
+  window-function calls only. [PD13, PD14]
+
+### S14.3 Streams and laziness*
+
+- **S14.3.1*** `input()` is eager, `stream()` lazy — symmetric over the same
+  source specifiers. **Laziness is carried by the data, never by the
+  operator**: `|>` and `for` are unchanged; stream in → the stage is
+  recorded onto a plan; terminals force. Plan construction never performs
+  I/O and never errors. [PD9, PD10]
+- **S14.3.2*** Two stream kinds: value-backed streams are true values
+  (re-forcible, usable in `fn`); live-I/O streams are one-shot resources,
+  `pn`-only. `fn` stages are fusible by verified purity; `pn` stages are
+  plan barriers. Stream faults surface as `T^E` at the forcing point. [PD10–PD12]
+- **S14.3.3*** Handles are stream sources/sinks (`stream(h)`,
+  `send_to(h)`); a forced pipeline is an implicit task scope — early
+  termination cancels upstream. WHATWG Web Streams are the committed compat
+  target; legacy Node streams are best-effort. [K21, K26, K28]
+
+---
+
+## S15 Metaprogramming
+
+- **S15.1** Lambda is homoiconic through elements: the canonical AST is an
+  element tree in the ambient **`lm.` namespace** (`<lm.if …>`, `<lm.add …>`)
+  — namespaced because AST tags must be distinguishable from the world's
+  documents (HTML has a real `<var>`). Quoted-symbol tags (`<'if' …>`) are
+  general grammar orthogonality. [C9a]
+- **S15.2** Element literals are inverted quasiquotation: expression children
+  evaluate (splice); element-literal children are structure (quoted). *The
+  angle bracket is the quote mark.* A `quote { … }` authoring form is
+  deferred, next in line. [C9, C9a]
+- **S15.3*** `input(f, 'lambda')` parses Lambda source into the `lm.` AST;
+  `compile(ast, env?) fn^` compiles a **closed** function — stdlib plus
+  explicitly passed bindings, never ambient scope; deterministic and pure.
+  **Strings are never code**: `compile` accepts AST values only; no
+  string-eval API exists in any form. Constructed functions take identity
+  from their normalized-AST hash (S5.5.1). [C9]
+- **S15.4** `name(item)` is the shadow-proof accessor for intrinsic names
+  (element tag, function name, type name); `null` for unnamed values.
+  Operators and functions, not properties, are the reliable surface over
+  open containers. [C9a]
+
+---
+
+## S16 Verifiable Properties
+
+The checkable face of S1.6 and S1.9; any observed violation is a bug, never a
+semantics change:
+
+1. **Boxing invisibility** — representation choices never affect results.
 2. **COW unobservability** — sharing until first mutation is undetectable;
    `let`-finality holds absolutely.
-3. **Inference unobservability** (the gradual guarantee) — erasing all inferred
-   types and running boxed must produce identical results to the typed JIT
-   path.
-4. **Equality laws** — `==` is a total equivalence modulo the two poison
-   carve-outs; cross-representation numeric ties; `a == b ⟹ hash(a) == hash(b)`.
-5. **Order refinement** — the total order refines `==`; sort is stable;
-   `desc` is exact reversal.
-6. **Printer injectivity** — distinct floats print distinctly; print→parse is
-   exact; two numbers print the same iff equal.
-7. **Error containment** — every error value is deliberate: constructed by
-   `error()`, returned by a `T | error` computation, raised in a `T^E`
-   context, or constructed by an explicit runtime contract check. Discharge
-   (the `^ { }` handler or postfix `^`) is channel-agnostic and strips all
-   error constituents from its success result. No boundary may silently
-   substitute `0`, `null`, or reinterpreted bits — **and no binding holds a
-   placeholder for a failure**: a handled failure either yields a real value
-   from its handler or never reaches the binding (TE-16). (Resource-fault
-   *timing* is exempt from invariant 3 — when a stack limit fires may differ
-   across tiers.)
+3. **Inference unobservability** (the gradual guarantee) — erasing all
+   inferred types and running boxed produces identical results. *Inference
+   buys performance only.*
+4. **Equality laws** — `==` total modulo the two poison carve-outs;
+   cross-representation ties; `a == b ⟹ hash(a) == hash(b)`.
+5. **Order refinement** — the total order refines `==`; sort stable; `desc`
+   exact reversal.
+6. **Printer injectivity** — distinct floats print distinctly; print→parse
+   exact; equal iff printed the same.
+7. **Error containment** — every error value is deliberate; discharge is
+   channel-agnostic and strips error constituents from its success type; no
+   binding ever holds a placeholder for a failure, at establishment **or
+   reassignment**; no boundary silently substitutes `0`, `null`, or
+   reinterpreted bits. (Fault *timing* is exempt from invariant 3.)
+8. **Schedule invisibility** — `fn` results are identical under any
+   schedule, thread count, or backend; builtin reductions are bit-identical
+   by the pairwise spec.
 
 ---
 
-## 14. Decision Index
+## Appendix A — Implementation Footnotes
 
-| Section | Decisions | Where argued |
+Status of `*`-marked rulings as of 2026-08-06. Conformance plans:
+[`Lambda_Impl_Error_Handling.md`](../vibe/Lambda_Impl_Error_Handling.md),
+[`Lambda_Impl_Int_Total (done).md`](../vibe/Lambda_Impl_Int_Total%20(done).md).
+
+| Ruling | Status |
+|---|---|
+| S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |
+| S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |
+| S5.4.3 | Element `==` defect (map-cast layout bug) — priority fix in the C8.5 bug list. |
+| S5.5.1 | Function self-equality defect open; normalized-AST hash awaits `compile()` (S15.3). |
+| S6.1.1 | `fn_lt` uses `strcmp` (NUL-unsafe) and accepts symbols; two-layer invalid-comparison treatment not landed. |
+| S6.2.1 | `sort()` coerces to float (`sort(["b","a","c"])` → `[nan,nan,nan]`); total order not implemented in `sort`/`order by`. |
+| S7.1.1 | OOB-read→null / write→raise / clamping partially landed; slice-offset rules (RF3D) landed with regression tests. |
+| S7.2.2–S7.2.4 | `last` keyword, `limit last N`, and `{limit:}/{last:}` options not implemented; ArrayNum negative-index audit outstanding. |
+| S7.3.1 | Strict null propagation + `skip_null` option pending. |
+| S7.4.4 | Skip-edge errors currently surface the bare `ITEM_ERROR` singleton — rich payload pending. |
+| S7.6.1, S7.6.3 | `e ^ { … }` is specified but not parsed; postfix `^` propagation implemented. System-fault capture by the handler under-specified in impl plan. |
+| S7.6.5 | Grammar still contains the retired `^err` destructure and prefix `^`; ~240 occurrences across ~121 `.ls` files await migration; E228 diagnostic text still advertises the retired form. |
+| S7.6.7 | May-suspend handler rejection: predicate machinery exists but silently degrades instead of diagnosing. |
+| S7.7.1–S7.7.6 | TE-18 declaration-boundary skip pending (routing, case-7 tiers, edge sites). `for x: T in e` does not parse yet — case 1 is `let`/`var`-only until the grammar is extended. |
+| S7.8.1 | TE-17 lane gating pending (predicates exist, gate does not). Known violation V1: `fn_array_set` silently despecializes a declared `int[]` — the dominance invariant (S7.7.2) is false today. The `may_defect` effect split must land before routing or every unanalyzed call costs a native lane. |
+| S7.10.5 | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
+| S7.11.4 | Exec recovery implemented on POSIX. **Blocking hazard H1**: batch mode overwrites the stack-overflow handler, so fault capture differs between batch and standalone runs. Windows SEH never exercised. |
+| S8.2.2 | `at` membership still tests the whole key space (`1 at [10,20,30]` returns true); iteration conforms. |
+| S8.3.2 | Streams (and hence stream `len`) not implemented. |
+| S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap). Stage 2 pending: `var`-param grammar + exclusivity checks (all four faces), capture-assignment compile errors, view-borrow confinement, module-`var` rule, snapshot iteration. |
+| S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
+| S11.1.1 | Array-pattern composition unbuilt; `is [T]` inline parse crash open. |
+| S11.2.3 | Match exhaustiveness checking unverified in the implementation. |
+| S11.4.3 | `any \ error` has no working surface spelling (the `!` exclusion operator is broken for general types); it exists as the unwritten default only. |
+| S11.4.5 | Landed check implements the superseded type-directional reject: an ANY-held `3.0` into an `int` boundary errors instead of admitting as `3`. Round-2 deliverable #1. |
+| S11.4.6 | Constrained-type `is`/`fn_is`/validator divergence open; base-only interim is the shipped behavior. |
+| S12.4.1–S12.4.3 | Resource model R1–R5 designed, not implemented. |
+| S13.1.3 | Tasks fully implemented (2026-07-15); the worker tier (thread/process isolation) is pending — process first, thread gated on the isolate-state audit and open item O-D. |
+| S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |
+| S14.2, S14.3 | Group-by and joins (S14.1) are implemented; verbs, `over(...)`, DataFrame, and the whole stream/plan system are pending (phases P3–P8). |
+| S15.3 | `compile()`, closed environments, and `quote` unimplemented; C9 grammar worklist open (general expression children). |
+| int v5 (S4.1) | Substantially landed (lane, encoding, saturation, printing, goldens). Residue: `INT64_ERROR` collides with `INT_LANE_INF` (pre-cutover gate unsatisfied); ELEM_INT SIMD kernels partly gated; nullable lane (`INT_LANE_NULL`) partial; `IntLane`/ValueRep typing of the four i64 meanings pending (known silent bug class). |
+
+## Appendix B — Open Design Issues
+
+Numbered `SO#` (semantics-open) for stable reference; each links to its
+record. (The prefix is the spec's own — distinct from the historic review
+findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
+`vibe/Lambda_Issues_Outstanding.md`.)
+
+**Numerics**
+- **SO1** Sized-lane `div`/`%`: [Number_Model §3.3.2](../vibe/Lambda_Semantics_Number_Model.md) says sized×sized `div` stays in the machine lane; this spec (S4.5.3, per Int_Type §2.2) says it leaves the lane — `3i8 div 0i8` needs an explicit call, and Number_Model needs a supersession note.
+- **SO2** Int v5 §5 details: poison-algebra table ratification; finiteness-proof dataflow home; formal ruling on the 56-bit packing (de facto shipped) and the freed encoding octant; migration gates. [Int_Type §5]
+- **SO3** The `int?` fourth lane value (`INT_LANE_NULL`) is undocumented in the Int_Type sentinel table; the `int | null` ABI for `index_of`/`ord` needs restating under the nullable lane.
+- **SO4** Bitwise semantics were ruled (S4.1.2), but the interaction with the retired sparse band in old goldens needs a sweep.
+
+**Errors and enforcement**
+- **SO5** TE-17 transitivity: does discharging `(int | error)[]` re-narrow in place, or only by copy? Copy is the safe default. [TE-17 §Open]
+- **SO6** Lazy/streaming `for` bodies vs typed-lane destinations (boxed-until-proven presumed, undecided); where containment materializes under deferred evaluation.
+- **SO7** TE-5 R5 sticky `any`; validator schema-`any` uniformity.
+- **SO8** Should `is` become value-aware? Deliberately undecided (S11.3.1 records the intentional asymmetry).
+- **SO9** A surface spelling for `any \ error` (the `!` exclusion operator route is broken); closed named-map opt-in; constrained-type predicate enforcement; checked-cast surface (`as`/`as?`); generics; flow-sensitive narrowing — all out of scope or unowned.
+- **SO10** A deep "does this data contain an error anywhere?" check (`valid(item)`-shaped) — real question, future design (S7.9.3).
+- **SO11** Whether a non-null scalar iterates once (`len(5)`): `for (i in 5)` yields nothing while `5 |> ~` yields one item; the S8.3.1 law requires them to agree before `len(5)` is settled.
+- **SO12** `for (k, v at c)` paired form does not parse; whether it should exist is open.
+
+**Values, COW, resources**
+- **SO13** COW granularity on large documents: node representation for spine-copying, refcount discipline for unique-path in-place update, and the gating benchmark. [C4.3]
+- **SO14** Nested-mutation ergonomics (`t.nodes[i].value`): path-shaped `var` borrows, `_modify`-style accessors, or guaranteed get-modify-put — no owner document yet. [C4.4]
+- **SO15** Exclusivity granularity endpoint (whole-base vs blessed splitters vs dynamic bookkeeping); module-`var`-as-borrow final rule (forbid vs dynamic bit).
+- **SO16** Close-error routing (double fault): proposed — normal-exit close failure becomes the `pn`'s error; on error exit the original wins, close error attached suppressed. To confirm. [Features §3.5.2]
+- **SO17** Resource-carrying-type containment rules (when a wrapping value is itself resource-typed). [R3]
+- **SO18** Snapshot iteration to be formally recorded (C4.2d) when implemented.
+- **SO19** Upward/lateral document axes must be path-carrying or zippers, never parent pointers — needs a design note before someone hacks pointers in.
+
+**Concurrency**
+- **SO20** O-D: cross-isolate lifetime for shared graph Items (promote-on-share recommended) — must precede thread-mode workers.
+- **SO21** `select` surface syntax; a first-class static `handle` type.
+- **SO22** Deferred opt-ins: blocking send, true selective receive, `unordered` streams, CPU-bound cancellation safepoints, Kahan accuracy modes, `sync` JS export annotation.
+
+**Data processing**
+- **SO23** PD4 join column-collision suffixes; PD5 `over(...)` scope on the generic engine; PD6 the exact `~`-binding spec for verbs/`on:`/`over`; PD7 relational `join()` vs string `join()` naming; PD16 window-in-for-clause form (proposed, unconfirmed).
+- **SO24** PD12 sub-items: `on error` resume semantics (abort vs skip-record), handler scoping over multiple forced streams, interaction with cleanup.
+- **SO25** Deferred group-by vocabulary: `having`-style filter, post-group `let`, extended aggregates, full/right/semi/anti joins, as-of join, pivot/melt.
+
+**Sys funcs and surface**
+- **SO26** RF6 mutator convention: updated-owner vs unit; and `splice`'s public result (owner / unit / removed members).
+- **SO27** Whether debug logging inside `fn` is a permitted non-observable effect — the purity boundary's one undefined edge; best pre-decided before users ask. [Features §3.6]
+- **SO28** Effect polymorphism (pure-iff-argument-pure HOFs) — dodged by convention; Flix-style Boolean effect polymorphism is the recorded minimal fix.
+- **SO29** File write/append syntax (C6a: `into`/`onto` candidates); string interpolation syntax (note the `$` collision with quote splices); a set type; `assert`/`expect` unification.
+- **SO30** Empty JSON keys (`{"": 1}` currently corrupts on round-trip) — map keys from data need a defined answer given solid symbols.
+- **SO31** The `<file>` element shape (name/size/mime, content as child) — pin with file-I/O spec.
+- **SO32** Match extensions: pipe-context shorthand, string-pattern capture binding in arms, range patterns.
+- **SO33** A10 residue: the aspirational generics text, `as` assertion semantics, and open-vs-closed map matching in assignment position — document or delete.
+- **SO34** `emit()` vs `send()` — two event vocabularies coexist; state the boundary explicitly.
+
+## Appendix C — Decision-Record Index
+
+| Section | Records | Where argued |
 |---|---|---|
-| §2 value domain, `""`, solid types | C1, C1.6a, C2 | `Lambda_Semantics_Formal.md` |
-| §3 truthiness | C2, C17 (tag-decidability invariant) | ibid. |
-| §4 poison symmetry, interior-vs-ingress | C16, C17 | `Lambda_Semantics_Formal2.md` |
-| §4.1–4.3 integers, literals, lattice | C3 (flex arm historical), C16 | `Lambda_Semantics_Formal.md`; C16 in `Lambda_Semantics_Formal2.md` |
-| §4.4 decimal tiers | C13 | `Lambda_Semantics_Formal2.md` |
-| §4.5–4.6 float↔decimal, printing | C8.5a, C16 (int printing/poison) | ibid. |
-| §4.7 division and modulo | A2, C14b (historical), C14c, C16 | ibid. |
-| §5 equality | C8, C8.5, C8.6, C8.6-R, C8.7 | ibid. |
-| §6 total order | C11 | ibid. |
-| §7 absence, errors, indexing, aggregation | C5, C5.3, C14, C15 | ibid. |
-| §8 in/at | C5.3a | ibid. |
-| §9 mutability, covariance | C4, C4.2a, C12 | both |
-| §10 operators | C6, C10 | `Lambda_Semantics_Formal2.md` |
-| §11 patterns | C7 | ibid. |
-| §11.4 type enforcement | TE-1–TE-16, B1–B13, enforcement §10 | `Lambda_Design_Type_Enforcement.md` |
-| §12 metaprogramming | C9, C9a | ibid. |
+| S1 principles | C1–C17 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
+| S2 value domain | C1, C1.6a, C2, C8.6-R | `Lambda_Semantics_Formal.md` |
+| S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
+| S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
+| S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only) |
+| S6 ordering | C11, C11.4, C11.5 | `Lambda_Semantics_Formal2.md` |
+| S7 absence/errors | C5, C5.3, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md` |
+| S8 membership | C5.3a; §8.0–8.3 records | `Lambda_Semantics_Formal2.md` |
+| S9 mutability | C4, C4.2a/b/c, C4.3, C12; CW16–CW20 | `Lambda_Semantics_Formal.md`, `Lambda_Design_Runtime_COW.md` |
+| S10 operators | C6, C6.2–C6.4, C10 | `Lambda_Semantics_Formal2.md` |
+| S11 types | C7, C8.5c; TE-1–TE-18 | ibid.; `Lambda_Design_Type_Enforcement.md` |
+| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md` |
+| S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
+| S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |
+| S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |
 
-The decision records preserve the full deliberations — including every
-alternative that lost and the arguments that did not persuade. This
-specification is their distillation; when in doubt, the record governs the
-history and this document governs the language.
+The decision records preserve the full deliberations — every alternative that
+lost and the arguments that did not persuade. This specification is their
+distillation: the record governs the history; this document governs the
+language.

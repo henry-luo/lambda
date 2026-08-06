@@ -1,7 +1,12 @@
 # Lambda Data Processing — The Relational Layer (group by · join · window · DataFrame)
 
+> **Ledger renumbered 2026-08-06:** the decision series `D1–D16` is now
+> **`PD1–PD16`** (same numbers, `PD` prefix), here and in every
+> cross-referencing doc, to free the bare `D` series for
+> `doc/Lambda_Formal_Design.md`. Older sessions/notes citing `D#` mean `PD#`.
+
 **Status:** design proposal — for discussion
-**Date:** 2026-07-07 (updated 2026-07-10: syntax decisions D13–D15 — `~.field` column refs, `over(...)` as new grammar, verb surface generic over row-oriented data)
+**Date:** 2026-07-07 (updated 2026-07-10: syntax decisions PD13–PD15 — `~.field` column refs, `over(...)` as new grammar, verb surface generic over row-oriented data)
 **Context:** follows the data-processing gap audit (2026-07-07 session) on top of the six-language feature comparison (`Lambda_Semantics_Features.md` Parts 2–3). The audit's conclusion: Lambda is a document-processing language with strong numerics; it is **thin precisely at the relational/columnar layer** — grouped aggregation, joins, window functions, and the tabular type that hosts them. This proposal covers that layer as one coherent design. It **absorbs** `Lambda_Design_DataFrame.md` (columnar frame over `ArrayNum`) as its substrate and extends it with the missing relational operations.
 
 **Scope corrections from the audit** (things Lambda already has, contrary to first impressions):
@@ -43,7 +48,7 @@
 
 **Missing — what this proposal adds:** `group by` (any form), relational join (any form), window/rolling functions (any form), pivot/melt, the DataFrame type itself (proposal exists, unimplemented).
 
-**Known correctness prerequisite:** `ArrayNum ==` is currently representation-sensitive rather than value-equality (open task from Typed Array 4). Grouping and join keys hash/compare by value equality (C8) — the engines below must be built on honest value equality, and numeric keys must obey the C2 numeric-tower rules (`1 == 1.0` → same group). **Fixing/specifying key equality is a gating work item, not a footnote** (see D8).
+**Known correctness prerequisite:** `ArrayNum ==` is currently representation-sensitive rather than value-equality (open task from Typed Array 4). Grouping and join keys hash/compare by value equality (C8) — the engines below must be built on honest value equality, and numeric keys must obey the C2 numeric-tower rules (`1 == 1.0` → same group). **Fixing/specifying key equality is a gating work item, not a footnote** (see PD8).
 
 ---
 
@@ -52,9 +57,9 @@
 Lambda has two query surfaces, and both matter:
 
 - **The for-comprehension** (row view) — the XQuery/FLWOR heritage. Works over *any* sequence: arrays of maps, **element children**, ranges. This is the document-native surface: `group by` over parsed XML/HTML/JSON must work without converting anything to a frame.
-- **The pipe + verbs** (column view) — the dplyr/Polars shape: `df |> where(...) |> group(...) |> agg(...)`. **The verb surface is not frame-only (D15):** verbs dispatch on the piped operand — a DataFrame takes the columnar engine; any row-oriented sequence (array of maps, element children, RDB rows, parsed JSON rows) takes the generic row engine. Same verbs, same semantics, either operand.
+- **The pipe + verbs** (column view) — the dplyr/Polars shape: `df |> where(...) |> group(...) |> agg(...)`. **The verb surface is not frame-only (PD15):** verbs dispatch on the piped operand — a DataFrame takes the columnar engine; any row-oriented sequence (array of maps, element children, RDB rows, parsed JSON rows) takes the generic row engine. Same verbs, same semantics, either operand.
 
-**Column references (D13):** inside verb arguments, `~` is the current row of the piped operand — the *existing* pipe current-item reference, extended into verb-argument scope: `group(~.ticker)`, `agg(total: sum(~.amount))`. No new `.field` syntax (the DataFrame doc's leading-dot §5.2 is superseded — it would have been a third field-reference mechanism alongside `~.field` and `that`-clause implicit fields, with known parse-collision risk). `~.field` resolves identically against a map row and a frame column, which is what lets one surface serve both operand kinds. Possible later ergonomics (bare identifiers via the implicit-field rule, symbol column names for dynamic selection) are compatible extensions, not v1.
+**Column references (PD13):** inside verb arguments, `~` is the current row of the piped operand — the *existing* pipe current-item reference, extended into verb-argument scope: `group(~.ticker)`, `agg(total: sum(~.amount))`. No new `.field` syntax (the DataFrame doc's leading-dot §5.2 is superseded — it would have been a third field-reference mechanism alongside `~.field` and `that`-clause implicit fields, with known parse-collision risk). `~.field` resolves identically against a map row and a frame column, which is what lets one surface serve both operand kinds. Possible later ergonomics (bare identifiers via the implicit-field rule, symbol column names for dynamic selection) are compatible extensions, not v1.
 
 **Rule: the two surfaces have identical semantics and are tested against each other.** The generic row engine (works on any sequence, row-at-a-time, hash-based) and the columnar frame engine (vectorized, `ArrayNum`-backed) are two implementations of one specified behavior — the Rosetta test suite runs every query both ways and diffs the results. This keeps the document world and the table world from drifting apart, which is Lambda's distinctive claim: *one relational algebra over both documents and tables*.
 
@@ -79,10 +84,10 @@ for (x in sales group by (x.region, x.year) into g)
 
 - `group by KEY_EXPR into g` — `g` is a group value: `g.key` (the key), and `g` itself iterates the members (a list). `into g` is mandatory (no implicit rebinding of the loop variable — explicit beats magic).
 - Clause ordering: `group by` sits after `where`, before `order by`/`limit`/`offset` (which then apply to *groups*): filter rows → group → order/limit groups. An inner `where` on members is just a nested comprehension over `g`.
-- Key equality/hash = **C8 value equality** with C2 numeric-tower coherence (`1` and `1.0` land in one group). Composite keys are list/map values — C8 already defines their equality. Grouping by `null` is allowed (nulls form one group, R/SQL-style — decide vs. drop, see D2).
+- Key equality/hash = **C8 value equality** with C2 numeric-tower coherence (`1` and `1.0` land in one group). Composite keys are list/map values — C8 already defines their equality. Grouping by `null` is allowed (nulls form one group, R/SQL-style — decide vs. drop, see PD2).
 - Works over any sequence — element children included: `for (p in doc? [para] group by p.style into g) ...`.
 
-### 4.2 Verb surface (generic — D15; columnar fast path from `Lambda_Design_DataFrame.md`, semantics pinned here)
+### 4.2 Verb surface (generic — PD15; columnar fast path from `Lambda_Design_DataFrame.md`, semantics pinned here)
 
 ```lambda
 df |> group(~.city) |> agg(n: count(), avg_age: avg(~.age), oldest: max(~.age))
@@ -121,7 +126,7 @@ for (o in orders, c? in customers on o.cust_id == c.id)
 ```
 
 - Comma-joined sources with `on COND` — `COND` restricted to a conjunction of equality tests between the two sources' expressions (what a hash join can execute). Non-equi conditions belong in a following `where` (documented; the compiler rejects non-equi `on` with a clear error rather than silently going O(n·m)).
-- `c?` marks the *optional* (null-padded) side — reads as "maybe a c": `left` join when on the second source. Full outer = both marked. (Syntax to confirm — D3; alternative is keywords `left join`/`outer join`, closer to SQL but heavier in a comprehension.)
+- `c?` marks the *optional* (null-padded) side — reads as "maybe a c": `left` join when on the second source. Full outer = both marked. (Syntax to confirm — PD3; alternative is keywords `left join`/`outer join`, closer to SQL but heavier in a comprehension.)
 - Without `on`, comma sources remain what they are today: nested iteration (cross product) — unchanged, backward compatible.
 
 ### 5.2 Verb surface
@@ -132,18 +137,18 @@ join(a, b, on: (~.cust_id, ~.id))             // (left-key, right-key) pair — 
 join(a, b, on: ~.id, how: 'left')             // 'inner' | 'left' | 'right' | 'full' | 'semi' | 'anti' | 'cross'
 ```
 
-- Column-name collisions: non-key common columns get suffixes (`name`, `name_b`) with an explicit `suffix:` option — pandas/Polars convention (D4).
+- Column-name collisions: non-key common columns get suffixes (`name`, `name_b`) with an explicit `suffix:` option — pandas/Polars convention (PD4).
 - **As-of join** (`asof_join(a, b, on: ~.time, by: ~.ticker)` — nearest-earlier match, the kdb+/Polars time-series workhorse) is Phase W2 of the window track (§6.4), since it shares the sorted-partition machinery.
 
 ### 5.3 Engine
 
-Classic hash join: build on the smaller side (hash of key values, C8-consistent), probe from the larger; null keys never match (SQL semantics — D2 pairs this with the group-by null decision). Semi/anti fall out of the probe. The frame path gathers matched row indices then materializes columns vectorized; the generic path emits rows. Join output row order: probe-side order, stable (documented — determinism matters under C1-family reproducibility expectations).
+Classic hash join: build on the smaller side (hash of key values, C8-consistent), probe from the larger; null keys never match (SQL semantics — PD2 pairs this with the group-by null decision). Semi/anti fall out of the probe. The frame path gathers matched row indices then materializes columns vectorized; the generic path emits rows. Join output row order: probe-side order, stable (documented — determinism matters under C1-family reproducibility expectations).
 
 ---
 
 ## 6. Window and rolling functions
 
-### 6.1 Surface — expression-level, explicit `over(...)` — **new grammar (D14)**
+### 6.1 Surface — expression-level, explicit `over(...)` — **new grammar (PD14)**
 
 Window functions live in expressions (inside `with`/`agg`/comprehension bodies), carrying their partition/order explicitly — SQL's design, minus the implicit-frame footguns; no hidden state from a grouped context is *required* (though a grouped operand supplies a default partition):
 
@@ -160,9 +165,9 @@ df |> with(
 df |> group(~.ticker) |> with(avg_7d: rolling(avg, ~.close, 7) over(order: ~.date))
 ```
 
-**`over` is a genuinely new grammar construct (D14, user-confirmed 2026-07-10):** a postfix clause on a call expression — `CALL over(part: EXPR, order: EXPR)` — added to `grammar.js`, with named-argument body reusing the existing `named_argument` rule. `part:` and `order:` expressions resolve `~` as the current row, same rule as verb arguments (one scoping rule everywhere — D6). Both are optional: no `part:` = one whole-input partition; no `order:` = the operand's current row order. `over(...)` is only legal on the window functions of §6.2 — the AST builder rejects it elsewhere (it is a window spec, not a general combinator).
+**`over` is a genuinely new grammar construct (PD14, user-confirmed 2026-07-10):** a postfix clause on a call expression — `CALL over(part: EXPR, order: EXPR)` — added to `grammar.js`, with named-argument body reusing the existing `named_argument` rule. `part:` and `order:` expressions resolve `~` as the current row, same rule as verb arguments (one scoping rule everywhere — PD6). Both are optional: no `part:` = one whole-input partition; no `order:` = the operand's current row order. `over(...)` is only legal on the window functions of §6.2 — the AST builder rejects it elsewhere (it is a window spec, not a general combinator).
 
-### 6.1b For-clause form — window functions as body expressions (proposed — D16)
+### 6.1b For-clause form — window functions as body expressions (proposed — PD16)
 
 Per the §3 parity rule, windows also work on the row surface — as **expressions in the for body**, not a new clause. The loop variable plays the role `~` plays in verbs (the comprehension already names its row):
 
@@ -194,7 +199,7 @@ All null-aware (validity bitmap); rolling windows shorter than `n` yield null by
 
 ### 6.3 Engine
 
-Per partition: sort by the `order` key (reuse `order by` machinery), then a single forward pass. Offset/ranking/cumulative are trivially one-pass; rolling aggregates use prefix sums (sum/avg) or a monotonic deque (min/max). Columnar path runs per-partition over `ArrayNum` slices — SIMD-friendly. The generic (non-frame) path supports the same functions inside for-comprehension bodies over any sequence, with §6.1b's universe/binding/materialization semantics (D5 scopes how much of `over(...)` the row engine carries in v1; D16 pins the form).
+Per partition: sort by the `order` key (reuse `order by` machinery), then a single forward pass. Offset/ranking/cumulative are trivially one-pass; rolling aggregates use prefix sums (sum/avg) or a monotonic deque (min/max). Columnar path runs per-partition over `ArrayNum` slices — SIMD-friendly. The generic (non-frame) path supports the same functions inside for-comprehension bodies over any sequence, with §6.1b's universe/binding/materialization semantics (PD5 scopes how much of `over(...)` the row engine carries in v1; PD16 pins the form).
 
 ### 6.4 Phasing within this track
 
@@ -210,7 +215,7 @@ Per partition: sort by the `order` key (reuse `order by` machinery), then a sing
 1. **Phase 3 (operations) is superseded by §4–§6 here** — `group`/`agg`, `join` (all kinds), and windows land with full semantics shared with the for-clause surface, not as frame-only sketches.
 2. **Adds pivot/reshape to the verb set** (the always-forgotten tidying half): `pivot_longer(df, cols, names_to, values_to)` / `pivot_wider(df, names_from, values_from)` — dplyr/tidyr naming, straightforward on columnar storage. Phase: after group/agg (wider is group+spread; longer is a column unstack).
 3. **Phase 6 (Arrow C Data Interface / Parquet) moves out** to the deferred columnar-I/O proposal (§1). The Arrow-shaped column *layout* is unchanged — it costs nothing now and keeps the door open.
-4. **Its §5.2 leading-dot `.field` syntax is superseded (D13):** column references are `~.field` — the existing pipe current-item reference extended into verb-argument scope. Inside verbs, `on:`, and `over(...)`, `~` binds to the current row of the operand in pipe scope — one scoping rule everywhere (D6). This also retires the DataFrame doc's `.field` parse-collision risk and its `df.{name, age}` / `agg{...}` sketches in favor of existing call/named-argument grammar.
+4. **Its §5.2 leading-dot `.field` syntax is superseded (PD13):** column references are `~.field` — the existing pipe current-item reference extended into verb-argument scope. Inside verbs, `on:`, and `over(...)`, `~` binds to the current row of the operand in pipe scope — one scoping rule everywhere (PD6). This also retires the DataFrame doc's `.field` parse-collision risk and its `df.{name, age}` / `agg{...}` sketches in favor of existing call/named-argument grammar.
 
 The DataFrame's open questions (string-column materialization, no row index) carry over unchanged; its `.field` transpiler-scoping question becomes the `~`-in-verb-scope transpiler change (same load-bearing work, no new grammar).
 
@@ -228,7 +233,7 @@ The audit identified lazy/streaming execution as the remaining structural piece 
 
 **Decision (user-confirmed): the hybrid — (a) entered via a source constructor.**
 
-### 8.2 Surface: `input()` is eager, `stream()` is lazy (D9)
+### 8.2 Surface: `input()` is eager, `stream()` is lazy (PD9)
 
 ```lambda
 let data = input("big.json")      // eager: parse + materialize, today's semantics
@@ -241,7 +246,7 @@ var s    = stream("big.json")     // lazy: a stream value over the same source s
 - **Execution shape, stated plainly:** an **eager** chain runs *step by step* — each verb fully materializes its result before the next verb runs (batch-per-stage; not CLI-pipe concurrent streaming). A **stream** chain builds the entire plan first and runs it *in one go* at the forcing point (with §8.5 fusion/pushdown; concurrent pipelined staging arrives via §8.6/K22–K23). Which mode a chain gets is carried by the data, never by the operator.
 - Plan construction never performs I/O and never errors; all work and all errors happen at the forcing point.
 
-### 8.3 Two stream kinds: value-backed vs live-I/O (D10)
+### 8.3 Two stream kinds: value-backed vs live-I/O (PD10)
 
 | | Value-backed stream | Live-I/O stream |
 |---|---|---|
@@ -252,7 +257,7 @@ var s    = stream("big.json")     // lazy: a stream value over the same source s
 
 The `pn` confinement of live-I/O streams is the same effect discipline as everything else in the language: live streaming *is* I/O, I/O is `pn`, and such sources fail in many ways (network, permissions, truncation, encoding) — exactly the errors §8.4 routes.
 
-### 8.4 Error handling: `T^E` at the forcing point + `on error` handler (D12)
+### 8.4 Error handling: `T^E` at the forcing point + `on error` handler (PD12)
 
 Forcing a stream surfaces failures as error values per J3/`T^E` — never mid-pipeline exceptions. For streaming `pn`s, an **`on error` handler** intercepts stream faults at the procedure boundary, reusing the view/edit template event-handler form (`grammar.js` `event_handler`: `on name(param) { body }`, `pn` body semantics):
 
@@ -268,7 +273,7 @@ on error(e) {
 ```
 
 - Without a handler, the error propagates as an ordinary `T^E` return from the forcing call (`^`-propagation applies as usual). The handler is interception, not a new error channel.
-- **To be specified before implementation (D12 sub-items):** resume semantics — is `on error` abort-only (the whole forcing fails after the handler runs), or can it *skip* a bad record and continue (per-record recovery is what long-running ingestion actually needs)? Handler scoping when one `pn` forces multiple streams; interaction with `defer`/`with`-style cleanup (features doc §3.1) — these belong in one design note with the resource-cleanup construct, since a failed stream must also release its source.
+- **To be specified before implementation (PD12 sub-items):** resume semantics — is `on error` abort-only (the whole forcing fails after the handler runs), or can it *skip* a bad record and continue (per-record recovery is what long-running ingestion actually needs)? Handler scoping when one `pn` forces multiple streams; interaction with `defer`/`with`-style cleanup (features doc §3.1) — these belong in one design note with the resource-cleanup construct, since a failed stream must also release its source.
 
 ### 8.5 The optimizer's license
 
@@ -277,7 +282,7 @@ on error(e) {
 ### 8.6 Concurrency integration (see `Lambda_Design_Concurrency.md` §11, K21–K26)
 
 With the concurrency design settled (v3: `start` + tasks + child processes + mailboxes), streams and concurrency compose **at forcing time** — specified in the concurrency doc's §11:
-- **Mailbox streams (K21):** `stream(handle)` as source / `send_to(h)` as sink; the K20e message contract (all messages, per-sender FIFO, termination last with `T^E`) *is* this doc's D12 end-of-stream contract — the two designs converged independently on one contract.
+- **Mailbox streams (K21):** `stream(handle)` as source / `send_to(h)` as sink; the K20e message contract (all messages, per-sender FIFO, termination last with `T^E`) *is* this doc's PD12 end-of-stream contract — the two designs converged independently on one contract.
 - **Ordered-by-default parallel `fn` segments (K22):** Stage-A fork-join applies to pure stages invisibly; re-sequencing preserves stream order (K19's sibling policy).
 - **`pn` stages are sequential anchors (K23):** no silent pipelining across effects; explicit `start`-based pipelines cover effectful parallelism.
 - **Resource-into-`start` = ownership escape (K25):** extends R3 of the cleanup ledger — a stage task owns the source it consumes; cancellation runs its cleanup.
@@ -291,11 +296,11 @@ With the concurrency design settled (v3: `start` + tasks + child processes + mai
 | Phase | Contents | Gate |
 |---|---|---|
 | **P0** | Key-equality foundation: canonical value hash consistent with C8/C2; fix/spec `ArrayNum ==` value-equality (open task) | equality/hash property tests |
-| **P1** | `group by ... into` for-clause (generic row engine, hash-partition) + aggregate vocabulary; `group`/`agg` **verbs on the same row engine** (D15 — verbs work on arrays-of-maps/elements before any frame exists), incl. the `~`-in-verb-scope transpiler change (D13) | Rosetta suite v1 (for-clause side); baseline green |
-| **P2** | For-clause `on` equi-join (+ `?` optional side); relational `join()` verb (generic row engine); naming resolved vs string-`join` (D7) | join semantics suite |
+| **P1** | `group by ... into` for-clause (generic row engine, hash-partition) + aggregate vocabulary; `group`/`agg` **verbs on the same row engine** (PD15 — verbs work on arrays-of-maps/elements before any frame exists), incl. the `~`-in-verb-scope transpiler change (PD13) | Rosetta suite v1 (for-clause side); baseline green |
+| **P2** | For-clause `on` equi-join (+ `?` optional side); relational `join()` verb (generic row engine); naming resolved vs string-`join` (PD7) | join semantics suite |
 | **P3** | DataFrame Phases 1–2 (`Lambda_Design_DataFrame.md`: type, columns, NA bitmap) | its Phase-1/2 tests |
 | **P4** | Frame verbs: `where`/`select`/`with`/`sort`/`group`/`agg`/`join` on the columnar engine | **Rosetta cross-check: every query runs on both engines, results diffed** |
-| **P5** | Windows W1 (offset/rank/cumulative/rolling-n) on both surfaces, incl. the `over(...)` grammar construct (D14: grammar.js + ts-enum regeneration) | window suite |
+| **P5** | Windows W1 (offset/rank/cumulative/rolling-n) on both surfaces, incl. the `over(...)` grammar construct (PD14: grammar.js + ts-enum regeneration) | window suite |
 | **P6** | Pivot longer/wider; CSV/TSV/SQL I/O (DataFrame Phases 4–5) | round-trip tests |
 | **P7** | Windows W2: time-range rolling + as-of join | time-series suite |
 
@@ -305,28 +310,28 @@ P1–P2 are pure language-level wins (no DataFrame needed — they work on array
 
 ## 10. Decisions to confirm (D) — proposed, awaiting user confirmation
 
-- **D1** — `group by KEY into g` (LINQ-explicit), group value = iterable with `.key`; clause order `where → group by → order by/limit` (groups). §4.1.
-- **D2** — Null keys: nulls form one group in `group by` (R/SQL-GROUP-BY-style); null join keys never match (SQL-style). Asymmetry is intentional and documented — confirm.
-- **D3** — Left-join marker: `c?` optional-source syntax vs `left join` keywords. Proposal: `c?`. §5.1.
-- **D4** — Join collision handling: suffix convention + `suffix:` option. §5.2.
-- **D5** — v1 scope of `over(...)` on the generic (non-frame) engine: full parity, or frame-only for W1 with generic parity in W2?
-- **D16** — For-clause window form (§6.1b): body-expression semantics — universe = post-`where`/`group by`/`order by` tuple stream, innermost-comprehension binding, materialization consequence. Proposed; pairs with D5's scope question.
-- **D6** — One `~`-scoping rule across verbs, `on:`, `over(...)`: `~` = current row of the operand in pipe scope. §7.4. *(mechanism confirmed via D13; exact binding spec still to write)*
-- **D7** — Naming: relational `join()` vs existing string `join(list, sep)` — overload by arity/types, or rename one (e.g. string side becomes `str.join`)? Breaking-change surface, needs a call.
-- **D8** — P0 (canonical value hash + `ArrayNum` value-equality fix) gates P1; confirm it may land as an engine change under the semantics ledger (C8) without new syntax.
+- **PD1** — `group by KEY into g` (LINQ-explicit), group value = iterable with `.key`; clause order `where → group by → order by/limit` (groups). §4.1.
+- **PD2** — Null keys: nulls form one group in `group by` (R/SQL-GROUP-BY-style); null join keys never match (SQL-style). Asymmetry is intentional and documented — confirm.
+- **PD3** — Left-join marker: `c?` optional-source syntax vs `left join` keywords. Proposal: `c?`. §5.1.
+- **PD4** — Join collision handling: suffix convention + `suffix:` option. §5.2.
+- **PD5** — v1 scope of `over(...)` on the generic (non-frame) engine: full parity, or frame-only for W1 with generic parity in W2?
+- **PD16** — For-clause window form (§6.1b): body-expression semantics — universe = post-`where`/`group by`/`order by` tuple stream, innermost-comprehension binding, materialization consequence. Proposed; pairs with PD5's scope question.
+- **PD6** — One `~`-scoping rule across verbs, `on:`, `over(...)`: `~` = current row of the operand in pipe scope. §7.4. *(mechanism confirmed via PD13; exact binding spec still to write)*
+- **PD7** — Naming: relational `join()` vs existing string `join(list, sep)` — overload by arity/types, or rename one (e.g. string side becomes `str.join`)? Breaking-change surface, needs a call.
+- **PD8** — P0 (canonical value hash + `ArrayNum` value-equality fix) gates P1; confirm it may land as an engine change under the semantics ledger (C8) without new syntax.
 
 **Confirmed (2026-07-07) — the lazy-execution set:**
 
-- **D9 ✓** — `input()` eager / `stream()` lazy: symmetric source pair, same source specifiers; `stream(x)` over in-memory values also legal. §8.2. *(user-confirmed)*
-- **D10 ✓** — Hybrid lazy model: laziness carried by the stream value through **unchanged** `|>`/`for` (dispatch, not new operator semantics); terminal ops force; plan-build never errors or does I/O. Value-backed streams are values (re-forcible); live-I/O streams are one-shot resources, **`pn`-only**. §8.2–8.3. *(user-confirmed)*
-- **D11 ✓** — `fn` stages fusible/reorderable/pushable (compiler-verified purity); `pn` stages are plan barriers. §8.5. *(user-confirmed by adopting the hybrid)*
-- **D12 ✓ (direction)** — Stream faults handled via `on error(e) { ... }` on the enclosing `pn`, reusing the view/edit event-handler form; without a handler, normal `T^E` propagation. **Sub-items to spec:** abort-only vs skip-and-continue resume, multi-stream scoping, interaction with the future `defer`/`with` cleanup construct. §8.4. *(user-confirmed pattern; details open)*
+- **PD9 ✓** — `input()` eager / `stream()` lazy: symmetric source pair, same source specifiers; `stream(x)` over in-memory values also legal. §8.2. *(user-confirmed)*
+- **PD10 ✓** — Hybrid lazy model: laziness carried by the stream value through **unchanged** `|>`/`for` (dispatch, not new operator semantics); terminal ops force; plan-build never errors or does I/O. Value-backed streams are values (re-forcible); live-I/O streams are one-shot resources, **`pn`-only**. §8.2–8.3. *(user-confirmed)*
+- **PD11 ✓** — `fn` stages fusible/reorderable/pushable (compiler-verified purity); `pn` stages are plan barriers. §8.5. *(user-confirmed by adopting the hybrid)*
+- **PD12 ✓ (direction)** — Stream faults handled via `on error(e) { ... }` on the enclosing `pn`, reusing the view/edit event-handler form; without a handler, normal `T^E` propagation. **Sub-items to spec:** abort-only vs skip-and-continue resume, multi-stream scoping, interaction with the future `defer`/`with` cleanup construct. §8.4. *(user-confirmed pattern; details open)*
 
 **Confirmed (2026-07-10) — the syntax set:**
 
-- **D13 ✓** — Column references in verb arguments are **`~.field`** (the existing pipe current-item reference, extended into verb-argument scope); the DataFrame doc's leading-dot `.field` is **not** adopted. Verb bodies use existing named-argument call grammar (`agg(n: count(), total: sum(~.amount))`), not `agg{...}`. Improvements later if needed (bare identifiers via the implicit-field rule, symbol names for dynamic column selection) are compatible extensions. §3, §4.2. *(user-confirmed)*
-- **D14 ✓** — `over(part: EXPR, order: EXPR)` lands as a **new postfix grammar construct** on window-function calls (grammar.js work; named-argument body). Both parts optional: partition defaults to the grouping key on a grouped operand (else whole input); order defaults to current row order. §6.1. *(user-confirmed)*
-- **D15 ✓** — The verb surface is **generic over row-oriented data**, not frame-only: verbs dispatch on the piped operand — DataFrame → columnar engine; arrays of maps, element children, RDB rows, JSON rows → the generic row engine. Same names, same semantics, Rosetta-tested (this is §3's rule made structural). Eager chains execute step-by-step per stage; stream chains plan-then-force (D9/D10 unchanged). §3, §4.2. *(user-confirmed)*
+- **PD13 ✓** — Column references in verb arguments are **`~.field`** (the existing pipe current-item reference, extended into verb-argument scope); the DataFrame doc's leading-dot `.field` is **not** adopted. Verb bodies use existing named-argument call grammar (`agg(n: count(), total: sum(~.amount))`), not `agg{...}`. Improvements later if needed (bare identifiers via the implicit-field rule, symbol names for dynamic column selection) are compatible extensions. §3, §4.2. *(user-confirmed)*
+- **PD14 ✓** — `over(part: EXPR, order: EXPR)` lands as a **new postfix grammar construct** on window-function calls (grammar.js work; named-argument body). Both parts optional: partition defaults to the grouping key on a grouped operand (else whole input); order defaults to current row order. §6.1. *(user-confirmed)*
+- **PD15 ✓** — The verb surface is **generic over row-oriented data**, not frame-only: verbs dispatch on the piped operand — DataFrame → columnar engine; arrays of maps, element children, RDB rows, JSON rows → the generic row engine. Same names, same semantics, Rosetta-tested (this is §3's rule made structural). Eager chains execute step-by-step per stage; stream chains plan-then-force (PD9/PD10 unchanged). §3, §4.2. *(user-confirmed)*
 
 ---
 
@@ -336,6 +341,6 @@ P1–P2 are pure language-level wins (no DataFrame needed — they work on array
 |---|---|
 | `Lambda_Design_DataFrame.md` | absorbed; Phase 3 superseded by §4–6, Phase 6 deferred out, pivot added |
 | `Lambda_IO_RDB.md` | unchanged; RDB stays the lazy row gateway; SQL write-back arrives via DataFrame Phase 5 |
-| `Lambda_Semantics_Features.md` | this implements Part 3's `group by` row and the data-frame verb steal; the streaming row's direction is now decided here (§8, D9–D12) |
+| `Lambda_Semantics_Features.md` | this implements Part 3's `group by` row and the data-frame verb steal; the streaming row's direction is now decided here (§8, PD9–PD12) |
 | `Lambda_Design_Concurrency.md` | streams × concurrency integration in its §11 (K21–K26, see §8.6); internal parallel-`fn` (Stage A, K15) accelerates the columnar engine; K5 flat sharing pairs with columnar buffers across isolates |
 | Future: columnar/binary I/O proposal | Arrow C Data Interface, Parquet/Feather — deferred from here and from DataFrame Phase 6 |

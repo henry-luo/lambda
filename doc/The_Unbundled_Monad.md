@@ -2,7 +2,7 @@
 
 **Status:** design-philosophy note — descriptive, not normative (the normative semantics live in `Lambda_Formal_Semantics.md`)
 **Date:** 2026-07-08
-**Context:** written after the 2026-07 design campaign (polyglot runtime J-ledger; concurrency K1–K30; resource cleanup R1–R5; data processing D1–D12) — a campaign that turned out, without ever framing itself this way, to be a stress test of the `fn`/`pn` split. This note records what that split *is* in the taxonomy of effect systems, what it deliberately is not, and why every design built on it this cycle came out smaller than its peers.
+**Context:** written after the 2026-07 design campaign (polyglot runtime J-ledger; concurrency K1–K30; resource cleanup R1–R5; data processing PD1–PD12) — a campaign that turned out, without ever framing itself this way, to be a stress test of the `fn`/`pn` split. This note records what that split *is* in the taxonomy of effect systems, what it deliberately is not, and why every design built on it this cycle came out smaller than its peers.
 
 ---
 
@@ -16,7 +16,7 @@ The honest precedents are not Haskell. They are **D's `pure`**, **Fortran's `PUR
 |---|---|---|
 | Colorless async | `await` legality *is* the purity bit — no `async` color needed anywhere | K1, K2-R |
 | Deterministic parallelism | `fn` is parallel-safe *by construction*, statically — no other scripting language can claim this | K9, K15 Stage A |
-| Stream optimization | fusion/pushdown/reorder is *provable* (Polars/DuckDB must trust their UDFs; Lambda verifies) | D11 |
+| Stream optimization | fusion/pushdown/reorder is *provable* (Polars/DuckDB must trust their UDFs; Lambda verifies) | PD11 |
 | Pipeline segmentation | parallel-safe vs. order-anchored stages computed by the type system | K23 |
 | Reduction legality | which reductions may parallelize is decidable | K19 |
 | Runtime simplicity | `fn` call trees are suspension-free regions — no safepoints, no reentrancy caution in pure code | §4.2 (concurrency doc) |
@@ -40,7 +40,7 @@ The strongest structural observation about Lambda — arrived at by accretion of
 | Effect gating | `IO a` | the `fn`/`pn` bit |
 | Error channel | `Either` / `ExceptT` | `T^E` return types + `^` propagation — checked errors, in the type, as values |
 | Sequencing | `>>=` / do-notation | statements |
-| Laziness | pervasive lazy evaluation | `stream()` values — opt-in, carried by the data (D9/D10) |
+| Laziness | pervasive lazy evaluation | `stream()` values — opt-in, carried by the data (PD9/PD10) |
 | Resource bracket | `bracket` / `ResourceT` | scoped `open()` + block-exit auto-close + escape-by-typed-return (R1–R3) |
 | Async | `Async`, continuation libraries | colorless `pn` + `start` — state machines the compiler hides (K2-R, K12) |
 | Structured concurrency | libraries (async/ki) | task handles as scoped resources — K30, *derived from* the resource ledger |
@@ -56,7 +56,7 @@ Two mitigations, honestly weighed. First, **streams-as-plans recover reification
 
 ## 5. Effect-TS: the validation from the opposite direction
 
-TypeScript's Effect (`Effect<R, E, A>`) is the most instructive modern comparison because it is **the same feature list, built from the opposite direction**: typed error channel, structured concurrency with fibers and scopes, interruption, `acquireRelease` resource safety, streams. Point for point, that is `T^E`, K30, K30c, the R-ledger, and D9/K21 — rebuilt as a *library* inside a language that won't host them.
+TypeScript's Effect (`Effect<R, E, A>`) is the most instructive modern comparison because it is **the same feature list, built from the opposite direction**: typed error channel, structured concurrency with fibers and scopes, interruption, `acquireRelease` resource safety, streams. Point for point, that is `T^E`, K30, K30c, the R-ledger, and PD9/K21 — rebuilt as a *library* inside a language that won't host them.
 
 The price of the library route is visible from orbit: three-parameter generic gymnastics; a wrapper-world color far more invasive than any `async` keyword (every function returns `Effect<...>`; the ecosystem splits into Effect-world and host-world); and runtime machinery for what a compiler could check. Lambda ships each guarantee as language semantics behind one bit of annotation. Effect-TS's existence and popularity is the strongest available evidence that **the demand for these guarantees in scripting-adjacent languages is real** — and its ergonomics are the strongest available evidence for paying the language-level cost instead.
 
@@ -96,4 +96,4 @@ Haskell proved purity-tracking's value and overpaid in granularity. Effect-TS pr
 
 ---
 
-**References:** `Lambda_Formal_Semantics.md` (C1–C12, the value-semantics substrate) · `Lambda_Func.md`, `Lambda_Error_Handling.md` (the `fn`/`pn` and `T^E` surfaces) · `../vibe/Lambda_Design_Concurrency.md` (K1–K30; §2.6 prior-art survey; §10 the v3 surface) · `../vibe/Lambda_Semantics_Features.md` §3.5 (R1–R5 resource ledger) · `../vibe/Lambda_Design_Data_Processing.md` §8 (streams D9–D12).
+**References:** `Lambda_Formal_Semantics.md` (C1–C12, the value-semantics substrate) · `Lambda_Func.md`, `Lambda_Error_Handling.md` (the `fn`/`pn` and `T^E` surfaces) · `../vibe/Lambda_Design_Concurrency.md` (K1–K30; §2.6 prior-art survey; §10 the v3 surface) · `../vibe/Lambda_Semantics_Features.md` §3.5 (R1–R5 resource ledger) · `../vibe/Lambda_Design_Data_Processing.md` §8 (streams PD9–PD12).

@@ -518,7 +518,7 @@ Both languages' async decomposes into five layers; **three unify, two must not**
 
 Notes that make the split principled: Lambda has *more* split points (suspension flows through calls) but *cheaper* calls (the Kotlin `COROUTINE_SUSPENDED` trick); Lambda's resumption is *simpler* (no abrupt-completion injection — errors are values in a slot, `^` does the rest), so exception-region bookkeeping in the shared skeleton is an optional feature only the JS driver requests. **Interop dividend:** once both park as "heap frame + `resume(state, value)`," the §4.6 membrane is glue — a promise reaction re-enqueues a Lambda frame at macrotask position; a Lambda handle completion resolves a Promise. And Stage B applies to both languages' frames for free.
 
-**Sequencing (protect what's green):** build the Lambda transform in `transpile-mir` *following* Phase 6's pattern as an independent second implementation; extract the common core only after two working clients exist, gated on the JS suites (1931 editor tests, node baseline). Extraction driven by two concrete users, not anticipation. **Third-client bonus:** the same resumable-function machinery is what Lambda generators / lazy stream producers (D9–D12) would need — strengthening the eventual extraction case.
+**Sequencing (protect what's green):** build the Lambda transform in `transpile-mir` *following* Phase 6's pattern as an independent second implementation; extract the common core only after two working clients exist, gated on the JS suites (1931 editor tests, node baseline). Extraction driven by two concrete users, not anticipation. **Third-client bonus:** the same resumable-function machinery is what Lambda generators / lazy stream producers (PD9–PD12) would need — strengthening the eventual extraction case.
 
 ### 10.8 Open items
 
@@ -610,22 +610,22 @@ Notes that make the split principled: Lambda has *more* split points (suspension
 
 ## 11. Streams × concurrency (added 2026-07-08, ledger K21–K26)
 
-How the v3 concurrency model carries the lazy-stream design (`Lambda_Design_Data_Processing.md` §8, D9–D12; its §8.6 cross-references back here). Conclusion first: **the pieces compose with almost no friction, because each side was designed with properties the other needs** — and the five genuinely new decisions are small and recorded below.
+How the v3 concurrency model carries the lazy-stream design (`Lambda_Design_Data_Processing.md` §8, PD9–PD12; its §8.6 cross-references back here). Conclusion first: **the pieces compose with almost no friction, because each side was designed with properties the other needs** — and the five genuinely new decisions are small and recorded below.
 
 *Follow-on (2026-07-14): `Lambda_Design_Pipeline.md` (ledger PL1–PL11) extends this section to three pipeline kinds — text (a framing preset over the data pipeline), data (this design, unchanged), and binary (re-chunking license, flat sub-binaries, byte-metric queues, transducer stages, raw-byte process spawn) — with WHATWG byte-stream conformance and the Node shim split per K27/K28.*
 
 ### 11.1 Why the pieces click — four enablers and one convergence
 
-1. **Laziness supplies the plan** (D9/D10): a stream is a *recorded pipeline*, not running code — the executor is free to choose sequential or concurrent execution at forcing time, invisibly.
-2. **The `fn`/`pn` split pre-computes what's safe**: `fn` stages are parallelizable/fusible by *verified* purity (the optimizer's license, D11); `pn` stages are ordered barriers. Pipeline segmentation into parallel-safe and order-anchored sections falls out of the type system.
+1. **Laziness supplies the plan** (PD9/PD10): a stream is a *recorded pipeline*, not running code — the executor is free to choose sequential or concurrent execution at forcing time, invisibly.
+2. **The `fn`/`pn` split pre-computes what's safe**: `fn` stages are parallelizable/fusible by *verified* purity (the optimizer's license, PD11); `pn` stages are ordered barriers. Pipeline segmentation into parallel-safe and order-anchored sections falls out of the type system.
 3. **K13 + value semantics make items transferable**: an Item crossing between stage tasks has no shared-mutable-state hazard, by construction.
 4. **K19 keeps parallel results deterministic** at the terminals (reductions).
 
-**The convergence:** K20e — "receivers get all messages, per-sender FIFO, then termination carrying the final `T^E`" — is *exactly* D12's stream requirement ("all the messages + a proper end-of-stream signal"), decided independently in the mailbox discussion. The messaging contract and the stream contract are the same contract. That identity is what makes §11.2 an adapter rather than a subsystem.
+**The convergence:** K20e — "receivers get all messages, per-sender FIFO, then termination carrying the final `T^E`" — is *exactly* PD12's stream requirement ("all the messages + a proper end-of-stream signal"), decided independently in the mailbox discussion. The messaging contract and the stream contract are the same contract. That identity is what makes §11.2 an adapter rather than a subsystem.
 
 ### 11.2 Mailboxes pipe: handles as stream sources and sinks (K21)
 
-A task or process handle is a natural **stream source**: its messages are the elements; K20e handle-completion is the end-of-stream; a failed task surfaces as `T^E` at the forcing point (D12's error path, unified):
+A task or process handle is a natural **stream source**: its messages are the elements; K20e handle-completion is the end-of-stream; a failed task surfaces as `T^E` at the forcing point (PD12's error path, unified):
 
 ```lambda
 pn main() {
@@ -634,7 +634,7 @@ pn main() {
 }                                                  // end-of-stream = p's handle completing
 ```
 
-- **Source:** `stream(h)` — lazy stream of the handle's messages until completion. In the D10 taxonomy this is cleanly a **live-I/O stream** (one-shot, `pn`-only); no new category.
+- **Source:** `stream(h)` — lazy stream of the handle's messages until completion. In the PD10 taxonomy this is cleanly a **live-I/O stream** (one-shot, `pn`-only); no new category.
 - **Sink:** a `send_to(h)` terminal forwards each result as a message — making any pipeline a producer for another task.
 - **Cross-process for free:** messages already ride Mark over the pipe (K5), so `start process(...)` + `stream(p)` composes distributed pipeline segments with zero extra machinery.
 - **Push-pull reconciliation:** file-backed `stream()` sources are pull; mailbox sources are push-fed — and the **bounded mailbox is itself the reconciling buffer**: the producer runs ahead only to capacity, the consumer pulls at its pace, backpressure emerges from boundedness (K20d). No new mechanism.
@@ -655,11 +655,11 @@ pn main() {
 
 | This section | Composes with |
 |---|---|
-| K21 mailbox streams | K20e (the contract identity) · D10 taxonomy (live-I/O kind) · D12 (`on error` + `T^E` at forcing) · K5/K18 (Mark over pipe) |
-| K22 ordering | K19 (fixed-order philosophy) · D11 (`fn` fusion license) |
+| K21 mailbox streams | K20e (the contract identity) · PD10 taxonomy (live-I/O kind) · PD12 (`on error` + `T^E` at forcing) · K5/K18 (Mark over pipe) |
+| K22 ordering | K19 (fixed-order philosophy) · PD11 (`fn` fusion license) |
 | K23 fn-only auto-parallel | K15 Stage A (the machinery) · K1 (`fn` never suspends) · governing principle 3 (nondeterminism confined to `pn`) |
 | K24 internal blocking send | K20d (user surface unchanged) |
-| K25 resource escape | R3/R2 (`Lambda_Semantics_Features.md` §3.5) · D12 (stream source release on failure) |
+| K25 resource escape | R3/R2 (`Lambda_Semantics_Features.md` §3.5) · PD12 (stream source release on failure) |
 | K26 pipeline scope | O1/O2 (now prerequisites) · R-ledger cleanup adjacency · O2 cancellation semantics |
 
 Open after this section: nothing new — K21–K26 resolve into existing carried items (O1/O2 gain urgency; O4/O6/O7/O10 unchanged).
@@ -670,7 +670,7 @@ Open after this section: nothing new — K21–K26 resolve into existing carried
 
 | | Model | Payload | Pipeline is a… | Backpressure | Parallelism | Errors | Early termination |
 |---|---|---|---|---|---|---|---|
-| **Lambda (D9–12, K21–26)** | pull, plan-based | typed Items | **re-forcible value** (plan) | bounded mailboxes/queues | `fn` segments auto (Stage A); explicit tasks/processes | `T^E` at forcing + `on error` | pipeline = task scope (K26) |
+| **Lambda (PD9–12, K21–26)** | pull, plan-based | typed Items | **re-forcible value** (plan) | bounded mailboxes/queues | `fn` segments auto (Stage A); explicit tasks/processes | `T^E` at forcing + `on error` | pipeline = task scope (K26) |
 | **Node streams (legacy)** | push w/ pull accommodation, event-driven | bytes first, objectMode bolted on | live wired objects | `highWaterMark` + `write()→false` + `'drain'` | none | `'error'` events; un-propagated through `pipe()` (→ `pipeline()` retrofit) | `destroy()`, premature-close footguns |
 | **WHATWG Web Streams** | **pull, promise-based, credit (`desiredSize`)** | any JS value | wired objects, locked | built-in queuing strategies | none | promise rejection | `cancel()` / `AbortSignal` |
 | **Nushell** | pull (Rust iterators) | structured values | live iterators | implicit via pull | externals = OS processes | `LabeledError` | drop the iterator |
@@ -683,7 +683,7 @@ Lessons absorbed (and where):
 - **Unix** got two things right in 1973 that successors lost: the bounded kernel buffer (backpressure by blocking = K24) and **SIGPIPE** (early termination propagating upstream — K26 is its structured descendant). Its failures — untyped bytes, `pipefail` defaulting off — are Lambda's payload and error models inverted.
 - **jq**: the practical subset of its everything-is-a-generator semantics is covered by for-comprehensions; its `--stream` mode carries an implementation note for P8 — **`stream("big.json")` requires the parser itself to be incremental**, not just the pipeline.
 - **Nushell**: the typed-pipes cousin, but its pipeline is live iterators — no plan value, no re-forcing, no optimization.
-- **Java Streams**: the closest *API-shape* precedent (lazy source → fusible ops → forcing terminal; parallel opt-in; encounter order kept) — mainstream validation of the D9/K22 shape. Lambda is stronger where it counts: Java's parallel reduce *trusts* combiner associativity (silently varying results if wrong); Lambda **verifies** purity and **pins** order (K19/K22). No row in the table offers deterministic-under-parallelism as a guarantee; that cell is Lambda's alone.
+- **Java Streams**: the closest *API-shape* precedent (lazy source → fusible ops → forcing terminal; parallel opt-in; encounter order kept) — mainstream validation of the PD9/K22 shape. Lambda is stronger where it counts: Java's parallel reduce *trusts* combiner associativity (silently varying results if wrong); Lambda **verifies** purity and **pins** order (K19/K22). No row in the table offers deterministic-under-parallelism as a guarantee; that cell is Lambda's alone.
 - **GenStage/Akka Streams**: the closest *architecture* precedent to §11 — demand-driven stages as actors ≅ mailbox streams; Akka's blueprint/materialization split ≅ plan-value/forcing (their "materialized value" ≅ the handle). Industrial-scale proof of the K21 shape.
 
 **Lambda's distinctive combination** (no single row has all four): pipeline-as-value (re-forcible, optimizable) + *verified*-pure fusion and parallelism + deterministic-by-spec results + errors as `T^E` values with ordered end-of-stream. The accepted trade: no push-based hot sources at the surface — the bounded mailbox absorbs push at the edge (K21), the right call for a data language.

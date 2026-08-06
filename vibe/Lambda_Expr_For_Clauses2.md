@@ -215,7 +215,7 @@ Per repo rules: every new `.ls` test gets its expected-result `.txt`; `make test
 - **FC10 ✓** — group element tag = fixed symbol `'group'`. §2.1 *(user-confirmed)*
 - **FC11 ✓** — two-phase construction: Phase 1 materializes a real `Element` (S1); Phase 2 implements **`VElmt` as a separate virtual type from `VMap`** — parallel to the `Map`/`Element` separation — and switches groups to zero-copy views (S5). §4 *(user-confirmed)*
 
-**Deferred (remain open in `Lambda_Design_Data_Processing.md`):** DataFrame type, pipe-verb surface (`group()`/`agg()`/`join()` and `~.field` verb scoping), window functions (`over(...)`, D14/D16), aggregate vocabulary, `having`-style group filter, post-group `let`, full/right/semi/anti joins, as-of join, pivot/melt, lazy streams (P8). (`VElmt` is **not** deferred — it is committed as Phase 2 / S5 per FC11; it additionally serves the Jube native-module projection track and the columnar work.)
+**Deferred (remain open in `Lambda_Design_Data_Processing.md`):** DataFrame type, pipe-verb surface (`group()`/`agg()`/`join()` and `~.field` verb scoping), window functions (`over(...)`, PD14/PD16), aggregate vocabulary, `having`-style group filter, post-group `let`, full/right/semi/anti joins, as-of join, pivot/melt, lazy streams (P8). (`VElmt` is **not** deferred — it is committed as Phase 2 / S5 per FC11; it additionally serves the Jube native-module projection track and the columnar work.)
 
 ---
 
