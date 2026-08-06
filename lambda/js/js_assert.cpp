@@ -710,24 +710,47 @@ static Item js_assert_throw_invalid_fn_arg(Item actual) {
     return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE, msg);
 }
 
-// helper: throw with user message or auto-generated message and props
-static Item throw_assert_msg_or_auto(Item message, const char* default_msg,
-                                     Item actual, Item expected, const char* op_str) {
+typedef enum {
+    ASSERT_MESSAGE_AUTO = 0,
+    ASSERT_MESSAGE_USER,
+    ASSERT_MESSAGE_EARLY_RETURN,
+} AssertMessageKind;
+
+static AssertMessageKind js_assert_prepare_message(Item message, Item actual,
+                                                    Item expected, Item* formatted,
+                                                    Item* early_result) {
     if (js_assert_is_symbol_value(message)) {
         // Symbol messages cannot be coerced; Node reports the bad message argument before creating AssertionError.
-        return js_assert_throw_invalid_message_arg(message);
+        *early_result = js_assert_throw_invalid_message_arg(message);
+        return ASSERT_MESSAGE_EARLY_RETURN;
     }
     if (get_type_id(message) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(message))) {
         // Node treats an Error supplied as the user message as the thrown value itself.
         extern void js_throw_value(Item error);
         js_throw_value(message);
-        return make_js_undefined();
+        *early_result = make_js_undefined();
+        return ASSERT_MESSAGE_EARLY_RETURN;
     }
     bool has_user_message = false;
-    Item formatted = js_assert_resolve_user_message(message, actual, expected, &has_user_message);
-    if (has_user_message) {
-        extern int js_check_exception(void);
-        if (js_check_exception()) return make_js_undefined();
+    *formatted = js_assert_resolve_user_message(message, actual, expected, &has_user_message);
+    if (!has_user_message) return ASSERT_MESSAGE_AUTO;
+    extern int js_check_exception(void);
+    if (js_check_exception()) {
+        *early_result = make_js_undefined();
+        return ASSERT_MESSAGE_EARLY_RETURN;
+    }
+    return ASSERT_MESSAGE_USER;
+}
+
+// helper: throw with user message or auto-generated message and props
+static Item throw_assert_msg_or_auto(Item message, const char* default_msg,
+                                     Item actual, Item expected, const char* op_str) {
+    Item formatted = ItemNull;
+    Item early_result = ItemNull;
+    AssertMessageKind message_kind = js_assert_prepare_message(
+        message, actual, expected, &formatted, &early_result);
+    if (message_kind == ASSERT_MESSAGE_EARLY_RETURN) return early_result;
+    if (message_kind == ASSERT_MESSAGE_USER) {
         String* s = get_type_id(formatted) == LMD_TYPE_STRING ? it2s(formatted) : NULL;
         char buf[512];
         int len = s && (int)s->len < 500 ? (int)s->len : 500;
@@ -740,21 +763,12 @@ static Item throw_assert_msg_or_auto(Item message, const char* default_msg,
 
 static Item throw_assert_msg_or_auto_item(Item message, Item default_msg,
                                           Item actual, Item expected, const char* op_str) {
-    if (js_assert_is_symbol_value(message)) {
-        // Symbol messages cannot be coerced; Node reports the bad message argument before creating AssertionError.
-        return js_assert_throw_invalid_message_arg(message);
-    }
-    if (get_type_id(message) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(message))) {
-        // Node treats an Error supplied as the user message as the thrown value itself.
-        extern void js_throw_value(Item error);
-        js_throw_value(message);
-        return make_js_undefined();
-    }
-    bool has_user_message = false;
-    Item formatted = js_assert_resolve_user_message(message, actual, expected, &has_user_message);
-    if (has_user_message) {
-        extern int js_check_exception(void);
-        if (js_check_exception()) return make_js_undefined();
+    Item formatted = ItemNull;
+    Item early_result = ItemNull;
+    AssertMessageKind message_kind = js_assert_prepare_message(
+        message, actual, expected, &formatted, &early_result);
+    if (message_kind == ASSERT_MESSAGE_EARLY_RETURN) return early_result;
+    if (message_kind == ASSERT_MESSAGE_USER) {
         return throw_assertion_error_full_item(formatted, actual, expected, op_str, false);
     }
     return throw_assertion_error_full_item(default_msg, actual, expected, op_str, true);
@@ -1415,6 +1429,22 @@ static bool js_assert_lcs_should_take_actual(Item actual, Item expected,
     return true;
 }
 
+static void js_assert_build_lcs_score(Item actual, Item expected,
+                                      int64_t actual_len, int64_t expected_len,
+                                      int score[65][65]) {
+    memset(score, 0, sizeof(int) * 65 * 65);
+    for (int64_t i = actual_len - 1; i >= 0; i--) {
+        for (int64_t j = expected_len - 1; j >= 0; j--) {
+            if (js_assert_deep_values_same(js_array_get_int(actual, i), js_array_get_int(expected, j))) {
+                score[i][j] = score[i + 1][j + 1] + 1;
+            } else {
+                score[i][j] = score[i + 1][j] > score[i][j + 1] ?
+                    score[i + 1][j] : score[i][j + 1];
+            }
+        }
+    }
+}
+
 static void js_assert_append_structural_diff(StrBuf* sb, Item actual, Item expected,
                                              int indent, bool trailing_comma,
                                              int depth_left);
@@ -1428,17 +1458,7 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
     int64_t max_len = actual_len > expected_len ? actual_len : expected_len;
     if (actual_len <= 64 && expected_len <= 64) {
         int score[65][65];
-        memset(score, 0, sizeof(score));
-        for (int64_t i = actual_len - 1; i >= 0; i--) {
-            for (int64_t j = expected_len - 1; j >= 0; j--) {
-                if (js_assert_deep_values_same(js_array_get_int(actual, i), js_array_get_int(expected, j))) {
-                    score[i][j] = score[i + 1][j + 1] + 1;
-                } else {
-                    score[i][j] = score[i + 1][j] > score[i][j + 1] ?
-                        score[i + 1][j] : score[i][j + 1];
-                }
-            }
-        }
+        js_assert_build_lcs_score(actual, expected, actual_len, expected_len, score);
         int64_t i = 0;
         int64_t j = 0;
         while (i < actual_len || j < expected_len) {
@@ -1540,17 +1560,7 @@ static void js_assert_append_array_diff_contents(StrBuf* sb, Item actual, Item e
     int64_t actual_len = js_array_length(actual);
     int64_t expected_len = js_array_length(expected);
     int score[65][65];
-    memset(score, 0, sizeof(score));
-    for (int64_t i = actual_len - 1; i >= 0; i--) {
-        for (int64_t j = expected_len - 1; j >= 0; j--) {
-            if (js_assert_deep_values_same(js_array_get_int(actual, i), js_array_get_int(expected, j))) {
-                score[i][j] = score[i + 1][j + 1] + 1;
-            } else {
-                score[i][j] = score[i + 1][j] > score[i][j + 1] ?
-                    score[i + 1][j] : score[i][j + 1];
-            }
-        }
-    }
+    js_assert_build_lcs_score(actual, expected, actual_len, expected_len, score);
     int64_t i = 0;
     int64_t j = 0;
     while (i < actual_len || j < expected_len) {
@@ -5121,6 +5131,15 @@ static Item js_assert_rejects_on_rejected(Item env_item, Item reason) {
     return make_js_undefined();
 }
 
+static bool js_assert_normalize_async_input(Item* promise) {
+    extern Item js_promise_resolve(Item value);
+    if (!js_assert_is_async_assertion_input(*promise)) return false;
+    if (!js_assert_is_native_promise(*promise)) {
+        *promise = js_promise_resolve(*promise);
+    }
+    return true;
+}
+
 // assert.rejects(asyncFnOrPromise[, error[, message]])
 extern "C" Item js_assert_rejects(Item asyncFnOrPromise, Item error_expected, Item message) {
     extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
@@ -5143,19 +5162,13 @@ extern "C" Item js_assert_rejects(Item asyncFnOrPromise, Item error_expected, It
             }
             return js_promise_resolve(make_js_undefined());
         }
-        if (!js_assert_is_async_assertion_input(promise)) {
+        if (!js_assert_normalize_async_input(&promise)) {
             return js_assert_reject_with_error(js_assert_make_invalid_return_error(promise));
-        }
-        if (!js_assert_is_native_promise(promise)) {
-            promise = js_promise_resolve(promise);
         }
     } else {
         promise = asyncFnOrPromise;
-        if (!js_assert_is_async_assertion_input(promise)) {
+        if (!js_assert_normalize_async_input(&promise)) {
             return js_assert_reject_with_error(js_assert_make_invalid_arg_type_error(asyncFnOrPromise));
-        }
-        if (!js_assert_is_native_promise(promise)) {
-            promise = js_promise_resolve(promise);
         }
     }
 
@@ -5204,19 +5217,13 @@ extern "C" Item js_assert_doesNotReject(Item asyncFnOrPromise, Item error_expect
         if (js_check_exception()) {
             return js_assert_reject_with_error(js_clear_exception());
         }
-        if (!js_assert_is_async_assertion_input(promise)) {
+        if (!js_assert_normalize_async_input(&promise)) {
             return js_assert_reject_with_error(js_assert_make_invalid_return_error(promise));
-        }
-        if (!js_assert_is_native_promise(promise)) {
-            promise = js_promise_resolve(promise);
         }
     } else {
         promise = asyncFnOrPromise;
-        if (!js_assert_is_async_assertion_input(promise)) {
+        if (!js_assert_normalize_async_input(&promise)) {
             return js_assert_reject_with_error(js_assert_make_invalid_arg_type_error(asyncFnOrPromise));
-        }
-        if (!js_assert_is_native_promise(promise)) {
-            promise = js_promise_resolve(promise);
         }
     }
 
@@ -5972,6 +5979,18 @@ static Item js_build_test_context(void) {
     return t;
 }
 
+static void js_node_test_resolve_options(Item options_or_fn, Item fn,
+        Item* options_out, Item* callback_out) {
+    *options_out = make_js_undefined();
+    *callback_out = make_js_undefined();
+    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+        *callback_out = fn;
+        *options_out = options_or_fn;
+    } else if (get_type_id(options_or_fn) == LMD_TYPE_FUNC) {
+        *callback_out = options_or_fn;
+    }
+}
+
 // test(name, fn) / test(name, options, fn) — run fn synchronously
 extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     extern int js_check_exception(void);
@@ -5980,14 +5999,9 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     extern bool js_is_truthy(Item value);
 
     // Check for skip/todo option in options object
-    Item options = make_js_undefined();
-    Item callback = make_js_undefined();
-    if (get_type_id(fn) == LMD_TYPE_FUNC) {
-        callback = fn;
-        options = options_or_fn;
-    } else if (get_type_id(options_or_fn) == LMD_TYPE_FUNC) {
-        callback = options_or_fn;
-    }
+    Item options;
+    Item callback;
+    js_node_test_resolve_options(options_or_fn, fn, &options, &callback);
 
     // If options has skip: true or skip is a string, skip the test
     if (get_type_id(options) == LMD_TYPE_MAP) {
@@ -6092,14 +6106,9 @@ extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
     extern void js_throw_value(Item error);
     extern bool js_is_truthy(Item value);
 
-    Item options = make_js_undefined();
-    Item callback = make_js_undefined();
-    if (get_type_id(fn) == LMD_TYPE_FUNC) {
-        callback = fn;
-        options = options_or_fn;
-    } else if (get_type_id(options_or_fn) == LMD_TYPE_FUNC) {
-        callback = options_or_fn;
-    }
+    Item options;
+    Item callback;
+    js_node_test_resolve_options(options_or_fn, fn, &options, &callback);
 
     if (get_type_id(options) == LMD_TYPE_MAP) {
         Item skip_val = js_property_get(options, assert_make_string("skip"));

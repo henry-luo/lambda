@@ -1432,6 +1432,13 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
     };
     SyntheticEntry synthetic[JS_REGEX_MAX_FILTERS];
     int synthetic_count = 0;
+    auto shift_synthetic_positions = [&](size_t pivot, int delta) {
+        for (int s = 0; s < synthetic_count; s++) {
+            if (synthetic[s].position > pivot) {
+                synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
+            }
+        }
+    };
 
     // Process from right to left to keep indices valid
     for (int a = assert_count - 1; a >= 0; a--) {
@@ -1448,11 +1455,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 if (quantifier_len > 0 && !quantifier_requires_assertion) {
                     result.erase(info.start_pos, old_len);
                     int delta = -(int)old_len;
-                    for (int s = 0; s < synthetic_count; s++) {
-                        if (synthetic[s].position > info.start_pos) {
-                            synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
-                        }
-                    }
+                    shift_synthetic_positions(info.start_pos, delta);
                     break;
                 }
                 if (count_capture_groups(info.inner) == 0 &&
@@ -1476,11 +1479,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                         size_t syn_pos = info.start_pos;
                         result.replace(info.start_pos, old_len, replacement);
                         int delta = (int)replacement.size() - (int)old_len;
-                        for (int s = 0; s < synthetic_count; s++) {
-                            if (synthetic[s].position > syn_pos) {
-                                synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
-                            }
-                        }
+                        shift_synthetic_positions(syn_pos, delta);
 
                         int fi = out->filter_count;
                         JsRegexFilter& f = out->filters[out->filter_count++];
@@ -1502,11 +1501,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 result.replace(info.start_pos, old_len, replacement);
                 int delta = (int)replacement.size() - (int)old_len;
                 // Adjust previously recorded synthetic positions (they're at higher positions)
-                for (int s = 0; s < synthetic_count; s++) {
-                    if (synthetic[s].position > syn_pos) {
-                        synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
-                    }
-                }
+                shift_synthetic_positions(syn_pos, delta);
 
                 int fi = -1;
                 if (info.is_trailing || !pattern_has_backref) {
@@ -1545,11 +1540,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                     result.erase(info.start_pos, old_len);
                     int delta = -(int)old_len;
 
-                    for (int s = 0; s < synthetic_count; s++) {
-                        if (synthetic[s].position > info.start_pos) {
-                            synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
-                        }
-                    }
+                    shift_synthetic_positions(info.start_pos, delta);
                     break;
                 }
                 // Check if inner content is just a backreference \N
@@ -1563,11 +1554,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                     result.erase(info.start_pos, old_len);
                     int delta = -(int)old_len;
 
-                    for (int s = 0; s < synthetic_count; s++) {
-                        if (synthetic[s].position > info.start_pos) {
-                            synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
-                        }
-                    }
+                    shift_synthetic_positions(info.start_pos, delta);
                     // Mark any ASSERT_BACKREF entries inside this lookahead range as consumed
                     // by setting their start_pos to SIZE_MAX so they'll be skipped
                     for (int k = 0; k < assert_count; k++) {
@@ -1595,11 +1582,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 size_t syn_pos = info.start_pos;
                 result.replace(info.start_pos, old_len, replacement);
                 int delta = (int)replacement.size() - (int)old_len;
-                for (int s = 0; s < synthetic_count; s++) {
-                    if (synthetic[s].position > syn_pos) {
-                        synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
-                    }
-                }
+                shift_synthetic_positions(syn_pos, delta);
 
                 // Create the rejection pattern
                 re2::RE2::Options reject_opts = lam::re2_glue_default_options();
@@ -1649,11 +1632,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 if (!lb_re) {
                     result.erase(info.start_pos, old_len);
                     int delta = -(int)old_len;
-                    for (int s = 0; s < synthetic_count; s++) {
-                        if (synthetic[s].position > info.start_pos) {
-                            synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
-                        }
-                    }
+                    shift_synthetic_positions(info.start_pos, delta);
                     break;
                 }
 
@@ -1670,11 +1649,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 size_t syn_pos = info.start_pos;
                 result.replace(info.start_pos, old_len, replacement);
                 int delta = (int)replacement.size() - (int)old_len;
-                for (int s = 0; s < synthetic_count; s++) {
-                    if (synthetic[s].position > syn_pos) {
-                        synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
-                    }
-                }
+                shift_synthetic_positions(syn_pos, delta);
 
                 int fi = out->filter_count;
                 JsRegexFilter& f = out->filters[out->filter_count++];
@@ -1698,11 +1673,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 size_t old_len = info.end_pos - info.start_pos;
                 result.replace(info.start_pos, old_len, replacement);
                 int delta = (int)replacement.size() - (int)old_len;
-                for (int s = 0; s < synthetic_count; s++) {
-                    if (synthetic[s].position > syn_pos) {
-                        synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
-                    }
-                }
+                shift_synthetic_positions(syn_pos, delta);
 
                 int fi = out->filter_count;
                 JsRegexFilter& f = out->filters[out->filter_count++];

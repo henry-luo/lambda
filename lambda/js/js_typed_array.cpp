@@ -1589,22 +1589,26 @@ static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
     }
 }
 
-extern "C" Item js_arraybuffer_new(int byte_length) {
-    if (byte_length < 0) byte_length = 0;
-    JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
-    if (!ab) return ItemError;
-
+static Item js_arraybuffer_wrap_item(JsArrayBuffer* ab) {
+    if (!ab) return (Item){.item = ITEM_NULL};
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_ARRAYBUFFER;
     m->type = js_arraybuffer_shared(ab) ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
     m->data = ab;
     m->data_cap = 0;
-
     RootFrame roots(1);
     Rooted<Item> result_root(roots, (Item){.map = m});
     js_arraybuffer_link_prototype(result_root.get(), js_arraybuffer_shared(ab));
     return result_root.get();
+}
+
+extern "C" Item js_arraybuffer_new(int byte_length) {
+    if (byte_length < 0) byte_length = 0;
+    JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
+    if (!ab) return ItemError;
+
+    return js_arraybuffer_wrap_item(ab);
 }
 
 // ArrayBuffer constructor from JS: new ArrayBuffer(length)
@@ -1670,17 +1674,7 @@ extern "C" JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val) {
 
 // Wrap an existing JsArrayBuffer* in a Map Item (for .buffer property access)
 extern "C" Item js_arraybuffer_wrap(JsArrayBuffer* ab) {
-    if (!ab) return (Item){.item = ITEM_NULL};
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    m->type_id = LMD_TYPE_MAP;
-    m->map_kind = MAP_KIND_ARRAYBUFFER;
-    m->type = js_arraybuffer_shared(ab) ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
-    m->data = ab;
-    m->data_cap = 0;
-    RootFrame roots(1);
-    Rooted<Item> result_root(roots, (Item){.map = m});
-    js_arraybuffer_link_prototype(result_root.get(), js_arraybuffer_shared(ab));
-    return result_root.get();
+    return js_arraybuffer_wrap_item(ab);
 }
 
 extern "C" int js_arraybuffer_byte_length(Item val) {

@@ -144,28 +144,28 @@ static void format_radical(StringBuf* sb, const ElementReader& elem, int depth) 
     stringbuf_append_str(sb, "}");
 }
 
+static void format_two_arg_command(StringBuf* sb, ItemReader cmd,
+        const char* fallback, ItemReader first, ItemReader second, int depth) {
+    if (!cmd.isNull() && cmd.isString()) {
+        stringbuf_append_str(sb, cmd.asString()->chars);
+    } else {
+        stringbuf_append_str(sb, fallback);
+    }
+    stringbuf_append_str(sb, "{");
+    if (!first.isNull()) format_item(sb, first, depth + 1);
+    stringbuf_append_str(sb, "}");
+    stringbuf_append_str(sb, "{");
+    if (!second.isNull()) format_item(sb, second, depth + 1);
+    stringbuf_append_str(sb, "}");
+}
+
 // Format `fraction` element: \frac{numer}{denom} (or its cmd variant like \dfrac, \tfrac)
 static void format_fraction(StringBuf* sb, const ElementReader& elem, int depth) {
     ItemReader cmd = elem.get_attr("cmd");
     ItemReader numer = elem.get_attr("numer");
     ItemReader denom = elem.get_attr("denom");
 
-    // emit the command name (e.g., \frac, \dfrac, \tfrac)
-    if (!cmd.isNull() && cmd.isString()) {
-        const char* c = cmd.asString()->chars;
-        // cmd already includes backslash from the converter
-        stringbuf_append_str(sb, c);
-    } else {
-        stringbuf_append_str(sb, "\\frac");
-    }
-
-    stringbuf_append_str(sb, "{");
-    if (!numer.isNull()) format_item(sb, numer, depth + 1);
-    stringbuf_append_str(sb, "}");
-
-    stringbuf_append_str(sb, "{");
-    if (!denom.isNull()) format_item(sb, denom, depth + 1);
-    stringbuf_append_str(sb, "}");
+    format_two_arg_command(sb, cmd, "\\frac", numer, denom, depth);
 }
 
 // Format `frac_like` element (merged grammar): the first child is typically
@@ -255,19 +255,7 @@ static void format_binomial(StringBuf* sb, const ElementReader& elem, int depth)
     ItemReader top = elem.get_attr("top");
     ItemReader bottom = elem.get_attr("bottom");
 
-    if (!cmd.isNull() && cmd.isString()) {
-        stringbuf_append_str(sb, cmd.asString()->chars);
-    } else {
-        stringbuf_append_str(sb, "\\binom");
-    }
-
-    stringbuf_append_str(sb, "{");
-    if (!top.isNull()) format_item(sb, top, depth + 1);
-    stringbuf_append_str(sb, "}");
-
-    stringbuf_append_str(sb, "{");
-    if (!bottom.isNull()) format_item(sb, bottom, depth + 1);
-    stringbuf_append_str(sb, "}");
+    format_two_arg_command(sb, cmd, "\\binom", top, bottom, depth);
 }
 
 // Format `command` element: \name or \name{arg}
@@ -500,25 +488,28 @@ static void format_overunder_command(StringBuf* sb, const ElementReader& elem, i
     stringbuf_append_str(sb, "}");
 }
 
-// Format `extensible_arrow`: \xrightarrow[below]{above}
-static void format_extensible_arrow(StringBuf* sb, const ElementReader& elem, int depth) {
+static void format_command_with_optional_bracket(StringBuf* sb,
+                                                 const ElementReader& elem,
+                                                 int depth,
+                                                 const char* option_attr,
+                                                 const char* content_attr) {
     ItemReader cmd = elem.get_attr("cmd");
-    ItemReader below = elem.get_attr("below");
-    ItemReader above = elem.get_attr("above");
-
-    if (!cmd.isNull() && cmd.isString()) {
-        stringbuf_append_str(sb, cmd.asString()->chars);
-    }
-
-    if (!below.isNull()) {
+    ItemReader option = elem.get_attr(option_attr);
+    ItemReader content = elem.get_attr(content_attr);
+    if (!cmd.isNull() && cmd.isString()) stringbuf_append_str(sb, cmd.asString()->chars);
+    if (!option.isNull()) {
         stringbuf_append_str(sb, "[");
-        format_item(sb, below, depth + 1);
+        format_item(sb, option, depth + 1);
         stringbuf_append_str(sb, "]");
     }
-
     stringbuf_append_str(sb, "{");
-    if (!above.isNull()) format_item(sb, above, depth + 1);
+    if (!content.isNull()) format_item(sb, content, depth + 1);
     stringbuf_append_str(sb, "}");
+}
+
+// Format `extensible_arrow`: \xrightarrow[below]{above}
+static void format_extensible_arrow(StringBuf* sb, const ElementReader& elem, int depth) {
+    format_command_with_optional_bracket(sb, elem, depth, "below", "above");
 }
 
 // Format `sized_delimiter`: \big(, \Big|, etc.
@@ -558,23 +549,7 @@ static void format_color_command(StringBuf* sb, const ElementReader& elem, int d
 
 // Format `box_command`: \boxed{content}
 static void format_box_command(StringBuf* sb, const ElementReader& elem, int depth) {
-    ItemReader cmd = elem.get_attr("cmd");
-    ItemReader options = elem.get_attr("options");
-    ItemReader content = elem.get_attr("content");
-
-    if (!cmd.isNull() && cmd.isString()) {
-        stringbuf_append_str(sb, cmd.asString()->chars);
-    }
-
-    if (!options.isNull()) {
-        stringbuf_append_str(sb, "[");
-        format_item(sb, options, depth + 1);
-        stringbuf_append_str(sb, "]");
-    }
-
-    stringbuf_append_str(sb, "{");
-    if (!content.isNull()) format_item(sb, content, depth + 1);
-    stringbuf_append_str(sb, "}");
+    format_command_with_optional_bracket(sb, elem, depth, "options", "content");
 }
 
 // Format `phantom_command`: \phantom{content}

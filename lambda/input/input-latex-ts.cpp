@@ -174,6 +174,20 @@ static Item convert_text_node(InputContext& ctx, TSNode node, const char* source
 static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source);
 static String* extract_text(InputContext& ctx, TSNode node, const char* source);
 
+static size_t latex_find_unescaped_dollar(const char* text, size_t len, size_t start) {
+    for (size_t i = start; i < len; i++) {
+        if (text[i] != '$') continue;
+        size_t backslash_count = 0;
+        size_t j = i;
+        while (j > 0 && text[j - 1] == '\\') {
+            backslash_count++;
+            j--;
+        }
+        if ((backslash_count & 1) == 0) return i;
+    }
+    return len;
+}
+
 // ============================================================================
 // Math AST Conversion (tree-sitter-latex-math)
 // ============================================================================
@@ -1274,6 +1288,30 @@ static bool should_skip_comment_and_space(TSNode parent, uint32_t child_index) {
     return should_skip;
 }
 
+static void append_latex_children(InputContext& ctx, TSNode node, const char* source,
+        ElementBuilder& builder, bool skip_document_markers, bool skip_brackets) {
+    uint32_t child_count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        if (should_skip_comment_and_space(node, i)) {
+            i++;
+            continue;
+        }
+        TSNode child = ts_node_child(node, i);
+        const char* child_type = ts_node_type(child);
+        if (skip_document_markers &&
+            (strcmp(child_type, "begin_document") == 0 ||
+             strcmp(child_type, "end_document") == 0)) {
+            continue;
+        }
+        if (skip_brackets && (strcmp(child_type, "[") == 0 ||
+                              strcmp(child_type, "]") == 0)) {
+            continue;
+        }
+        Item child_item = convert_latex_node(ctx, child, source);
+        if (child_item.item != ITEM_NULL) builder.child(child_item);
+    }
+}
+
 // Extract text from a tree-sitter node
 static String* extract_text(InputContext& ctx, TSNode node, const char* source) {
     uint32_t start = ts_node_start_byte(node);
@@ -1648,38 +1686,15 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
 
                 size_t i = 0;
                 while (i < len) {
-                    // Find next $ that's not escaped
-                    while (i < len) {
-                        if (text[i] == '$') {
-                            // Check if escaped: preceded by odd number of backslashes
-                            size_t backslash_count = 0;
-                            size_t j = i;
-                            while (j > 0 && text[j-1] == '\\') {
-                                backslash_count++;
-                                j--;
-                            }
-                            if (backslash_count % 2 == 0) break;  // Not escaped
-                        }
-                        i++;
-                    }
+                    // Find next opening delimiter that is not escaped.
+                    i = latex_find_unescaped_dollar(text, len, i);
                     if (i >= len) break;
 
                     size_t math_start = i;
                     i++;  // Skip opening $
 
-                    // Find closing $ (not escaped)
-                    while (i < len) {
-                        if (text[i] == '$') {
-                            size_t backslash_count = 0;
-                            size_t j = i;
-                            while (j > 0 && text[j-1] == '\\') {
-                                backslash_count++;
-                                j--;
-                            }
-                            if (backslash_count % 2 == 0) break;  // Not escaped
-                        }
-                        i++;
-                    }
+                    // Find the closing delimiter using the same escape rule.
+                    i = latex_find_unescaped_dollar(text, len, i);
                     if (i >= len) break;
 
                     size_t math_end = i + 1;  // Include closing $
@@ -1995,28 +2010,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
             if (strcmp(node_type, "document") == 0) {
                 MarkBuilder& builder = ctx.builder;
                 ElementBuilder doc_builder = builder.element("document");
-
-                uint32_t child_count = ts_node_child_count(node);
-                for (uint32_t i = 0; i < child_count; i++) {
-                    if (should_skip_comment_and_space(node, i)) {
-                        i++;
-                        continue;
-                    }
-
-                    TSNode child = ts_node_child(node, i);
-                    const char* child_type = ts_node_type(child);
-
-                    // Skip begin_document and end_document nodes
-                    if (strcmp(child_type, "begin_document") == 0 ||
-                        strcmp(child_type, "end_document") == 0) {
-                        continue;
-                    }
-
-                    Item child_item = convert_latex_node(ctx, child, source);
-                    if (child_item.item != ITEM_NULL) {
-                        doc_builder.child(child_item);
-                    }
-                }
+                append_latex_children(ctx, node, source, doc_builder, true, false);
 
                 return doc_builder.final();
             }
@@ -2374,29 +2368,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 {
                     MarkBuilder& builder = ctx.builder;
                     ElementBuilder elem_builder = builder.element(node_type);
-
-                    uint32_t child_count = ts_node_child_count(node);
-                    for (uint32_t i = 0; i < child_count; i++) {
-                        // LaTeX comment handling
-                        if (should_skip_comment_and_space(node, i)) {
-                            i++;  // Skip both comment and following space
-                            continue;
-                        }
-
-                        TSNode child = ts_node_child(node, i);
-                        const char* child_type = ts_node_type(child);
-
-                        // Skip bracket delimiters for brack_group
-                        if (strcmp(child_type, "[") == 0 || strcmp(child_type, "]") == 0) {
-                            continue;
-                        }
-
-                        Item child_item = convert_latex_node(ctx, child, source);
-                        // Skip NULL items and empty string sentinels
-                        if (child_item.item != ITEM_NULL) {
-                            elem_builder.child(child_item);
-                        }
-                    }
+                    append_latex_children(ctx, node, source, elem_builder, false, true);
 
                     return elem_builder.final();
                 }

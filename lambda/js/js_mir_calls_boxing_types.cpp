@@ -1,4 +1,48 @@
 #include "js_mir_internal.hpp"
+
+static MIR_reg_t jm_normalize_numeric_result(JsMirTranspiler* mt, MIR_reg_t result,
+        TypeId target_type, TypeId result_type, bool native_result) {
+    if (native_result) {
+        if (target_type == LMD_TYPE_FLOAT)
+            return jm_ensure_native_float(mt, result, result_type);
+        return jm_ensure_native_int(mt, result, result_type);
+    }
+    if (target_type == LMD_TYPE_FLOAT) return jm_emit_unbox_float(mt, result);
+    MIR_reg_t as_dbl = jm_emit_unbox_float(mt, result);
+    return jm_emit_double_to_int(mt, as_dbl);
+}
+
+bool jm_is_native_binary_expression(JsMirTranspiler* mt, JsBinaryNode* bin) {
+    if (!bin) return false;
+    TypeId lt = jm_get_effective_type(mt, bin->left);
+    TypeId rt = jm_get_effective_type(mt, bin->right);
+    bool both_numeric = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
+        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+    return both_numeric && bin->op != JS_OP_EXP &&
+        bin->op != JS_OP_AND && bin->op != JS_OP_OR;
+}
+
+bool jm_is_native_unary_expression(JsMirTranspiler* mt, JsUnaryNode* un) {
+    if (!un || !un->operand) return false;
+    TypeId op_type = jm_get_effective_type(mt, un->operand);
+    bool op_numeric = op_type == LMD_TYPE_INT || op_type == LMD_TYPE_FLOAT;
+    switch (un->op) {
+    case JS_OP_MINUS: case JS_OP_SUB:
+        return op_numeric;
+    case JS_OP_INCREMENT: case JS_OP_DECREMENT:
+        if (un->operand->node_type != JS_AST_NODE_IDENTIFIER) return false;
+        {
+            JsIdentifierNode* uid = (JsIdentifierNode*)un->operand;
+            const char* uvname = jm_format_name("_js_%.*s",
+                (int)uid->name->len, uid->name->chars);
+            JsMirVarEntry* uvar = jm_find_var(mt, uvname);
+            return uvar && (uvar->type_id == LMD_TYPE_INT ||
+                uvar->type_id == LMD_TYPE_FLOAT) && !uvar->from_env;
+        }
+    default:
+        return false;
+    }
+}
 #include "js_exec_profile.h"
 #include "../../lib/lambda_alloca.h"
 
@@ -1631,73 +1675,30 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
     // Must check specifically whether the native path is actually taken.
     if (expr && expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
         JsBinaryNode* bin = (JsBinaryNode*)expr;
-        TypeId lt = jm_get_effective_type(mt, bin->left);
-        TypeId rt = jm_get_effective_type(mt, bin->right);
-        bool left_num  = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
-        bool right_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
-        bool both_numeric = left_num && right_num;
         // Determine if the native path is actually taken
-        bool native_binary = both_numeric &&
-            bin->op != JS_OP_EXP && bin->op != JS_OP_AND && bin->op != JS_OP_OR;
+        bool native_binary = jm_is_native_binary_expression(mt, bin);
         // Comparisons return native 0/1 only when BOTH sides are typed numeric.
         // With one untyped side, the comparison falls through to boxed runtime
         // and returns a boxed boolean Item, not a native value.
         MIR_reg_t result = jm_transpile_expression(mt, expr);
         if (native_binary) {
             // Native path was taken: result is native int or double
-            if (target_type == LMD_TYPE_FLOAT)
-                return jm_ensure_native_float(mt, result, expr_type);
-            else
-                return jm_ensure_native_int(mt, result, expr_type);
+            return jm_normalize_numeric_result(mt, result, target_type, expr_type, true);
         }
         // Boxed path was taken: result is boxed Item, need to unbox
-        if (target_type == LMD_TYPE_FLOAT)
-            return jm_emit_unbox_float(mt, result);
-        else {
-            // Use it2d + D2I for robust int extraction (handles INT, FLOAT, etc.)
-            MIR_reg_t as_dbl = jm_emit_unbox_float(mt, result);
-            return jm_emit_double_to_int(mt, as_dbl);
-        }
+        return jm_normalize_numeric_result(mt, result, target_type, expr_type, false);
     }
 
     if (expr && expr->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
         JsUnaryNode* un = (JsUnaryNode*)expr;
         // Check if unary op takes the native path
-        bool native_unary = false;
-        if (un->operand) {
-            TypeId op_type = jm_get_effective_type(mt, un->operand);
-            bool op_numeric = (op_type == LMD_TYPE_INT || op_type == LMD_TYPE_FLOAT);
-            switch (un->op) {
-            case JS_OP_MINUS: case JS_OP_SUB:
-                native_unary = op_numeric;
-                break;
-            case JS_OP_INCREMENT: case JS_OP_DECREMENT:
-                // Only native if operand is a typed identifier
-                if (un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
-                    JsIdentifierNode* uid = (JsIdentifierNode*)un->operand;
-                    const char* uvname = jm_format_name("_js_%.*s", (int)uid->name->len, uid->name->chars);
-                    JsMirVarEntry* uvar = jm_find_var(mt, uvname);
-                    native_unary = uvar && (uvar->type_id == LMD_TYPE_INT || uvar->type_id == LMD_TYPE_FLOAT) && !uvar->from_env;
-                }
-                break;
-            default:
-                break;
-            }
-        }
+        bool native_unary = jm_is_native_unary_expression(mt, un);
         MIR_reg_t result = jm_transpile_expression(mt, expr);
         if (native_unary) {
-            if (target_type == LMD_TYPE_FLOAT)
-                return jm_ensure_native_float(mt, result, expr_type);
-            else
-                return jm_ensure_native_int(mt, result, expr_type);
+            return jm_normalize_numeric_result(mt, result, target_type, expr_type, true);
         }
         // Boxed result: unbox
-        if (target_type == LMD_TYPE_FLOAT)
-            return jm_emit_unbox_float(mt, result);
-        else {
-            MIR_reg_t as_dbl = jm_emit_unbox_float(mt, result);
-            return jm_emit_double_to_int(mt, as_dbl);
-        }
+        return jm_normalize_numeric_result(mt, result, target_type, expr_type, false);
     }
 
     if (expr && expr->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {

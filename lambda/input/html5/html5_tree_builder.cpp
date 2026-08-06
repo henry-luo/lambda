@@ -62,6 +62,22 @@ static void html5_close_list_item_scope(Html5Parser* parser,
     }
 }
 
+static void html5_pop_until_tag(Html5Parser* parser, const char* target_tag) {
+    while (parser->open_elements->length > 0) {
+        Element* popped = html5_pop_element(parser);
+        const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+        if (strcmp(popped_tag, target_tag) == 0) break;
+    }
+}
+
+static void html5_pop_until_cell(Html5Parser* parser) {
+    while (parser->open_elements->length > 0) {
+        Element* popped = html5_pop_element(parser);
+        const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+        if (strcmp(popped_tag, "td") == 0 || strcmp(popped_tag, "th") == 0) break;
+    }
+}
+
 static bool html5_handle_comment_or_doctype(Html5Parser* parser, Html5Token* token,
                                             const char* mode, bool ignore_doctype) {
     if (token->type == HTML5_TOKEN_COMMENT) {
@@ -1370,11 +1386,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             if (html5_has_element_in_scope(parser, "button")) {
                 log_debug("html5: <button> auto-closing existing <button> in scope");
                 html5_generate_implied_end_tags(parser);
-                while (parser->open_elements->length > 0) {
-                    Element* popped = html5_pop_element(parser);
-                    const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
-                    if (strcmp(popped_tag, "button") == 0) break;
-                }
+                html5_pop_until_tag(parser, "button");
             }
             html5_reconstruct_active_formatting_elements(parser);
             html5_insert_html_element(parser, token);
@@ -1747,12 +1759,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                 return;
             }
             html5_generate_implied_end_tags_except(parser, "li");
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                if (strcmp(((TypeElmt*)popped->type)->name.str, "li") == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, "li");
             return;
         }
 
@@ -1763,13 +1770,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                 return;
             }
             html5_generate_implied_end_tags_except(parser, tag);
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
-                if (strcmp(popped_tag, tag) == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, tag);
             return;
         }
 
@@ -1780,12 +1781,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                 return;
             }
             html5_generate_implied_end_tags(parser);
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                if (strcmp(((TypeElmt*)popped->type)->name.str, tag) == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, tag);
             return;
         }
 
@@ -1812,12 +1808,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             // Generate implied end tags (this closes <p> etc.)
             html5_generate_implied_end_tags(parser);
             // Pop until the matching element
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                if (strcmp(((TypeElmt*)popped->type)->name.str, tag) == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, tag);
             return;
         }
 
@@ -1830,12 +1821,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                 return;
             }
             html5_generate_implied_end_tags(parser);
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                if (strcmp(((TypeElmt*)popped->type)->name.str, tag) == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, tag);
             // Clear active formatting elements to the last marker
             html5_clear_active_formatting_to_marker(parser);
             return;
@@ -2183,13 +2169,7 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
                 return;  // ignore
             }
             // pop until table
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
-                if (strcmp(popped_tag, "table") == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, "table");
             html5_reset_insertion_mode(parser);
             html5_process_token(parser, token);  // reprocess
             return;
@@ -2238,13 +2218,7 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
                 return;
             }
             // pop until table
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
-                if (strcmp(popped_tag, "table") == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, "table");
             html5_reset_insertion_mode(parser);
             return;
         }
@@ -2472,13 +2446,7 @@ static void html5_process_in_cell_mode(Html5Parser* parser, Html5Token* token) {
                 log_error("html5: current node is not %s", tag);
             }
             // pop until td/th
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
-                if (strcmp(popped_tag, tag) == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, tag);
             html5_clear_active_formatting_to_marker(parser);
             parser->mode = HTML5_MODE_IN_ROW;
             return;
@@ -2597,13 +2565,7 @@ static void html5_process_in_select_mode(Html5Parser* parser, Html5Token* token)
         if (strcmp(tag, "select") == 0) {
             log_error("html5: nested <select> - closing current select");
             // Pop until <select>
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
-                if (strcmp(popped_tag, "select") == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, "select");
             html5_reset_insertion_mode(parser);
             return;
         }
@@ -2617,13 +2579,7 @@ static void html5_process_in_select_mode(Html5Parser* parser, Html5Token* token)
                 return;
             }
             // Pop until <select>
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
-                if (strcmp(popped_tag, "select") == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, "select");
             html5_reset_insertion_mode(parser);
             html5_process_token(parser, token);
             return;
@@ -2702,13 +2658,7 @@ static void html5_process_in_select_mode(Html5Parser* parser, Html5Token* token)
                 return;
             }
             // Pop until <select>
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
-                if (strcmp(popped_tag, "select") == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, "select");
             html5_reset_insertion_mode(parser);
             return;
         }
@@ -2749,11 +2699,7 @@ static void html5_process_in_select_in_table_mode(Html5Parser* parser, Html5Toke
 
     log_error("html5: table token in select-in-table mode; closing select");
     if (!html5_has_element_in_select_scope(parser, "select")) return;
-    while (parser->open_elements->length > 0) {
-        Element* popped = html5_pop_element(parser);
-        const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
-        if (strcmp(popped_tag, "select") == 0) break;
-    }
+    html5_pop_until_tag(parser, "select");
     html5_reset_insertion_mode(parser);
     html5_process_token(parser, token);
 }
@@ -2763,13 +2709,7 @@ void html5_close_cell(Html5Parser* parser) {
     html5_generate_implied_end_tags(parser);
 
     // pop until td or th
-    while (parser->open_elements->length > 0) {
-        Element* popped = html5_pop_element(parser);
-        const char* tag = ((TypeElmt*)popped->type)->name.str;
-        if (strcmp(tag, "td") == 0 || strcmp(tag, "th") == 0) {
-            break;
-        }
-    }
+    html5_pop_until_cell(parser);
     html5_clear_active_formatting_to_marker(parser);
     parser->mode = HTML5_MODE_IN_ROW;
 }
@@ -2818,20 +2758,21 @@ void html5_reset_insertion_mode(Html5Parser* parser) {
     parser->mode = HTML5_MODE_IN_BODY;
 }
 
+static void html5_insert_whitespace_token(Html5Parser* parser, Html5Token* token) {
+    if (!token->data || token->data->len == 0) return;
+    for (size_t i = 0; i < token->data->len; i++) {
+        char c = token->data->chars[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r') {
+            html5_insert_character(parser, c);
+        }
+    }
+}
+
 // IN_FRAMESET mode handler - for frameset content
 static void html5_process_in_frameset_mode(Html5Parser* parser, Html5Token* token) {
     // Handle character tokens (whitespace only)
     if (token->type == HTML5_TOKEN_CHARACTER) {
-        // Insert whitespace characters
-        if (token->data != nullptr && token->data->len > 0) {
-            // Filter to whitespace only
-            for (size_t i = 0; i < token->data->len; i++) {
-                char c = token->data->chars[i];
-                if (c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r') {
-                    html5_insert_character(parser, c);
-                }
-            }
-        }
+        html5_insert_whitespace_token(parser, token);
         return;
     }
 
@@ -2916,15 +2857,7 @@ static void html5_process_in_frameset_mode(Html5Parser* parser, Html5Token* toke
 static void html5_process_in_after_frameset_mode(Html5Parser* parser, Html5Token* token) {
     // Handle character tokens (whitespace only)
     if (token->type == HTML5_TOKEN_CHARACTER) {
-        // Insert whitespace characters
-        if (token->data != nullptr && token->data->len > 0) {
-            for (size_t i = 0; i < token->data->len; i++) {
-                char c = token->data->chars[i];
-                if (c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r') {
-                    html5_insert_character(parser, c);
-                }
-            }
-        }
+        html5_insert_whitespace_token(parser, token);
         return;
     }
 
@@ -2983,12 +2916,7 @@ static void html5_process_in_caption_mode(Html5Parser* parser, Html5Token* token
             }
             html5_generate_implied_end_tags(parser);
             // Pop until caption
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                if (strcmp(((TypeElmt*)popped->type)->name.str, "caption") == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, "caption");
             html5_clear_active_formatting_to_marker(parser);
             parser->mode = HTML5_MODE_IN_TABLE;
             return;
@@ -3001,12 +2929,7 @@ static void html5_process_in_caption_mode(Html5Parser* parser, Html5Token* token
                 return;
             }
             html5_generate_implied_end_tags(parser);
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                if (strcmp(((TypeElmt*)popped->type)->name.str, "caption") == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, "caption");
             html5_clear_active_formatting_to_marker(parser);
             parser->mode = HTML5_MODE_IN_TABLE;
             html5_process_token(parser, token);  // reprocess
@@ -3040,12 +2963,7 @@ static void html5_process_in_caption_mode(Html5Parser* parser, Html5Token* token
                 return;
             }
             html5_generate_implied_end_tags(parser);
-            while (parser->open_elements->length > 0) {
-                Element* popped = html5_pop_element(parser);
-                if (strcmp(((TypeElmt*)popped->type)->name.str, "caption") == 0) {
-                    break;
-                }
-            }
+            html5_pop_until_tag(parser, "caption");
             html5_clear_active_formatting_to_marker(parser);
             parser->mode = HTML5_MODE_IN_TABLE;
             html5_process_token(parser, token);  // reprocess

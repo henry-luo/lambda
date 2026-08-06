@@ -41,6 +41,23 @@ static Type* make_base_type(Pool* pool, TypeId tid) {
     return t;
 }
 
+static Type* ts_resolve_type_list(TsTranspiler* tp, TsTypeNode** types, int type_count,
+                                  Operator op) {
+    Pool* pool = tp->ast_pool;
+    if (type_count == 0) return make_base_type(pool, LMD_TYPE_ANY);
+    Type* result = ts_resolve_type(tp, types[0]);
+    for (int i = 1; i < type_count; i++) {
+        Type* right = ts_resolve_type(tp, types[i]);
+        TypeBinary* tb = (TypeBinary*)alloc_type(pool, LMD_TYPE_TYPE, sizeof(TypeBinary));
+        tb->kind = TYPE_KIND_BINARY;
+        tb->op = op;
+        tb->left = result;
+        tb->right = right;
+        result = (Type*)tb;
+    }
+    return result;
+}
+
 Type* ts_resolve_type(TsTranspiler* tp, TsTypeNode* node) {
     if (!node) return make_base_type(tp->ast_pool, LMD_TYPE_ANY);
     if (node->resolved_type) return node->resolved_type;
@@ -57,41 +74,16 @@ Type* ts_resolve_type(TsTranspiler* tp, TsTypeNode* node) {
 
     case TS_AST_NODE_UNION_TYPE: {
         TsUnionTypeNode* un = (TsUnionTypeNode*)node;
-        if (un->type_count == 0) {
-            node->resolved_type = make_base_type(pool, LMD_TYPE_ANY);
-            return node->resolved_type;
-        }
         // build left-associative TypeBinary chain: A | B | C → (A | B) | C
-        Type* result = ts_resolve_type(tp, un->types[0]);
-        for (int i = 1; i < un->type_count; i++) {
-            Type* right = ts_resolve_type(tp, un->types[i]);
-            TypeBinary* tb = (TypeBinary*)alloc_type(pool, LMD_TYPE_TYPE, sizeof(TypeBinary));
-            tb->kind = TYPE_KIND_BINARY;
-            tb->op = OPERATOR_UNION;
-            tb->left = result;
-            tb->right = right;
-            result = (Type*)tb;
-        }
+        Type* result = ts_resolve_type_list(tp, un->types, un->type_count, OPERATOR_UNION);
         node->resolved_type = result;
         return result;
     }
 
     case TS_AST_NODE_INTERSECTION_TYPE: {
         TsIntersectionTypeNode* in_node = (TsIntersectionTypeNode*)node;
-        if (in_node->type_count == 0) {
-            node->resolved_type = make_base_type(pool, LMD_TYPE_ANY);
-            return node->resolved_type;
-        }
-        Type* result = ts_resolve_type(tp, in_node->types[0]);
-        for (int i = 1; i < in_node->type_count; i++) {
-            Type* right = ts_resolve_type(tp, in_node->types[i]);
-            TypeBinary* tb = (TypeBinary*)alloc_type(pool, LMD_TYPE_TYPE, sizeof(TypeBinary));
-            tb->kind = TYPE_KIND_BINARY;
-            tb->op = OPERATOR_INTERSECT;
-            tb->left = result;
-            tb->right = right;
-            result = (Type*)tb;
-        }
+        Type* result = ts_resolve_type_list(tp, in_node->types, in_node->type_count,
+                                            OPERATOR_INTERSECT);
         node->resolved_type = result;
         return result;
     }

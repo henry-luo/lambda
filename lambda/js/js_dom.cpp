@@ -3081,20 +3081,27 @@ static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
     return ItemNull;
 }
 
-extern "C" Item js_dom_owner_document_for_node(void* node_ptr) {
-    DomNode* node = (DomNode*)node_ptr;
-    DomNode* p = node;
-    while (p && !p->is_element()) p = p->parent;
-    if (p) {
-        DomDocument* od = p->as_element()->doc;
-        if (od && od != _js_current_document) {
-            // ownerDocument must preserve cached foreign-document wrapper identity
-            // while Radiant owns the property dispatch table.
-            Item w = lookup_foreign_doc_wrapper(od);
-            if (w.item != ITEM_NULL) return w;
+static Item js_dom_owner_document_from_node(DomNode* node) {
+    DomNode* element_node = node;
+    while (element_node && !element_node->is_element()) element_node = element_node->parent;
+    if (element_node) {
+        DomDocument* owner = element_node->as_element()->doc;
+        if (owner && owner != _js_current_document) {
+            Item wrapper = lookup_foreign_doc_wrapper(owner);
+            if (wrapper.item != ITEM_NULL) return wrapper;
         }
     }
     return js_get_document_object_value();
+}
+
+static Item js_dom_parent_element_or_null(DomNode* node) {
+    DomNode* parent = node ? node->parent : nullptr;
+    if (parent && parent->is_element()) return js_dom_wrap_element(parent->as_element());
+    return ItemNull;
+}
+
+extern "C" Item js_dom_owner_document_for_node(void* node_ptr) {
+    return js_dom_owner_document_from_node((DomNode*)node_ptr);
 }
 
 // Build a minimal HTML document tree:
@@ -8221,9 +8228,7 @@ extern "C" void js_dom_select_set_length_bridge(void* dom_elem, Item value) {
     js_dom_mutation_notify();
 }
 
-extern "C" void js_dom_set_option_selected_dirty(void* dom_elem, bool selected) {
-    DomElement* elem = (DomElement*)dom_elem;
-    if (!elem) return;
+static void js_dom_apply_option_selected(DomElement* elem, bool selected) {
     _set_selectedness(elem, selected);
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item != ITEM_NULL) {
@@ -8240,6 +8245,12 @@ extern "C" void js_dom_set_option_selected_dirty(void* dom_elem, bool selected) 
         _select_ask_for_reset(sel);
     }
     _select_refresh_cached_selected_options(sel);
+}
+
+extern "C" void js_dom_set_option_selected_dirty(void* dom_elem, bool selected) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return;
+    js_dom_apply_option_selected(elem, selected);
 }
 
 extern "C" void js_dom_set_option_text_bridge(void* dom_elem, const char* value) {
@@ -9080,6 +9091,25 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     return radiant_dom_get_property(elem_item, prop_name);
 }
 
+static Item js_dom_collect_child_nodes(DomElement* elem, bool elements_only) {
+    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->items = nullptr;
+    arr->length = 0;
+    arr->capacity = 0;
+    DomNode* child = js_dom_first_script_visible_child(elem);
+    while (child) {
+        if (child->is_element()) {
+            array_push(arr, js_dom_wrap_element(child->as_element()));
+        } else if (!elements_only) {
+            // text and comment nodes share the DOM wrapper path.
+            array_push(arr, js_dom_wrap_element((DomElement*)(void*)child));
+        }
+        child = js_dom_next_script_visible_sibling(child);
+    }
+    return (Item){.array = arr};
+}
+
 extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // Range / Selection wrappers also live under the DOM resource carrier and route here.
 
@@ -9143,11 +9173,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = s2it(heap_create_name("#text"))};
         }
         if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
-            DomNode* parent = text_node->parent;
-            if (parent && parent->is_element()) {
-                return js_dom_wrap_element(parent->as_element());
-            }
-            return ItemNull;
+            return js_dom_parent_element_or_null((DomNode*)text_node);
         }
         if (strcmp(prop, "isConnected") == 0) {
             return (Item){.item = b2it(js_dom_node_is_connected((DomNode*)text_node) ? 1 : 0)};
@@ -9173,17 +9199,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return ItemNull;
         }
         if (strcmp(prop, "ownerDocument") == 0) {
-            // Walk up to find an element parent and use its doc.
-            DomNode* p = text_node->parent;
-            while (p && !p->is_element()) p = p->parent;
-            if (p) {
-                DomDocument* od = p->as_element()->doc;
-                if (od && od != _js_current_document) {
-                    Item w = lookup_foreign_doc_wrapper(od);
-                    if (w.item != ITEM_NULL) return w;
-                }
-            }
-            return js_get_document_object_value();
+            return js_dom_owner_document_from_node(text_node->parent);
         }
         if (strcmp(prop, "replaceData") == 0) {
             return js_bind_function(js_new_function((void*)js_text_replace_data_method, 3),
@@ -9231,11 +9247,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it((int64_t)comment_node->length)};
         }
         if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
-            DomNode* parent = comment_node->parent;
-            if (parent && parent->is_element()) {
-                return js_dom_wrap_element(parent->as_element());
-            }
-            return ItemNull;
+            return js_dom_parent_element_or_null((DomNode*)comment_node);
         }
         if (strcmp(prop, "isConnected") == 0) {
             return (Item){.item = b2it(js_dom_node_is_connected((DomNode*)comment_node) ? 1 : 0)};
@@ -9250,16 +9262,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return ItemNull;
         }
         if (strcmp(prop, "ownerDocument") == 0) {
-            DomNode* p = comment_node->parent;
-            while (p && !p->is_element()) p = p->parent;
-            if (p) {
-                DomDocument* od = p->as_element()->doc;
-                if (od && od != _js_current_document) {
-                    Item w = lookup_foreign_doc_wrapper(od);
-                    if (w.item != ITEM_NULL) return w;
-                }
-            }
-            return js_get_document_object_value();
+            return js_dom_owner_document_from_node(comment_node->parent);
         }
         Item expando_value = ItemNull;
         if (expando_get_property(node, prop_name, &expando_value)) return expando_value;
@@ -9437,37 +9440,17 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // children (array of child DOM elements only)
     if (strcmp(prop, "children") == 0) {
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        DomNode* child = js_dom_first_script_visible_child(elem);
-        while (child) {
-            if (child->is_element()) {
-                array_push(arr, js_dom_wrap_element(child->as_element()));
-            }
-            child = js_dom_next_script_visible_sibling(child);
-        }
-        return (Item){.array = arr};
+        return js_dom_collect_child_nodes(elem, true);
     }
 
     // parentElement
     if (strcmp(prop, "parentElement") == 0) {
-        DomNode* parent = (DomNode*)elem->parent;
-        if (parent && parent->is_element()) {
-            return js_dom_wrap_element(parent->as_element());
-        }
-        return ItemNull;
+        return js_dom_parent_element_or_null((DomNode*)elem);
     }
 
     // parentNode (includes text nodes — returns any parent)
     if (strcmp(prop, "parentNode") == 0) {
-        DomNode* parent = (DomNode*)elem->parent;
-        if (parent && parent->is_element()) {
-            return js_dom_wrap_element(parent->as_element());
-        }
-        return ItemNull;
+        return js_dom_parent_element_or_null((DomNode*)elem);
     }
 
     // isConnected — true iff the shadow-inclusive root is the Document.
@@ -9595,22 +9578,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // childNodes (all children including text nodes)
     if (strcmp(prop, "childNodes") == 0) {
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        DomNode* child = js_dom_first_script_visible_child(elem);
-        while (child) {
-            if (child->is_element()) {
-                array_push(arr, js_dom_wrap_element(child->as_element()));
-            } else {
-                // wrap text/comment nodes
-                array_push(arr, js_dom_wrap_element((DomElement*)(void*)child));
-            }
-            child = js_dom_next_script_visible_sibling(child);
-        }
-        return (Item){.array = arr};
+        return js_dom_collect_child_nodes(elem, false);
     }
 
     // children (array of child DOM elements only)
@@ -10988,23 +10956,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     if (_is_tag(elem, "option")) {
         if (strcmp(prop, "selected") == 0) {
             bool selected = js_is_truthy(value);
-            _set_selectedness(elem, selected);
-            // Mark the option's dirty selectedness flag.
-            Item exp = expando_get_or_create_map((DomNode*)elem);
-            if (exp.item != ITEM_NULL) {
-                js_property_set(exp,
-                    (Item){.item = s2it(heap_create_name("__optDirty"))},
-                    (Item){.item = b2it(true)});
-            }
-            // The option explicitly being selected wins for non-multiple
-            // selects; do not let a later selected option in tree order undo it.
-            DomElement* sel = _option_owner_select(elem);
-            if (sel && selected && !sel->has_attribute("multiple")) {
-                _select_select_only_option(sel, elem);
-            } else if (sel) {
-                _select_ask_for_reset(sel);
-            }
-            _select_refresh_cached_selected_options(sel);
+            js_dom_apply_option_selected(elem, selected);
             return value;
         }
         // option.defaultSelected setter — reflects `selected` attribute.

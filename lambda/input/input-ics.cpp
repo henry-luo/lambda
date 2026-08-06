@@ -164,6 +164,53 @@ static Map* parse_duration(InputContext& ctx, const char* value) {
     return dur_map;
 }
 
+// helper: add the normalized component field while preserving parsed date/duration values
+static void store_component_special_property(InputContext& ctx, MarkBuilder& builder,
+                                             Map* component, const char* property_name,
+                                             const char* property_value, Item fallback) {
+    const char* key_name = NULL;
+    Map* parsed = NULL;
+    if (strcmp(property_name, "SUMMARY") == 0) key_name = "summary";
+    else if (strcmp(property_name, "DESCRIPTION") == 0) key_name = "description";
+    else if (strcmp(property_name, "DTSTART") == 0) {
+        key_name = "start_time";
+        parsed = parse_datetime(ctx, property_value);
+    }
+    else if (strcmp(property_name, "DTEND") == 0) {
+        key_name = "end_time";
+        parsed = parse_datetime(ctx, property_value);
+    }
+    else if (strcmp(property_name, "DURATION") == 0) {
+        key_name = "duration";
+        parsed = parse_duration(ctx, property_value);
+    }
+    else if (strcmp(property_name, "LOCATION") == 0) key_name = "location";
+    else if (strcmp(property_name, "STATUS") == 0) key_name = "status";
+    else if (strcmp(property_name, "PRIORITY") == 0) key_name = "priority";
+    else if (strcmp(property_name, "ORGANIZER") == 0) key_name = "organizer";
+    else if (strcmp(property_name, "ATTENDEE") == 0) key_name = "attendee";
+    else if (strcmp(property_name, "UID") == 0) key_name = "uid";
+
+    if (!key_name) return;
+    Item value = parsed ? (Item){.item = (uint64_t)parsed} : fallback;
+    String* key = builder.createName(key_name);
+    ctx.builder.putToMap(lam::gc_borrow(component), key, value);
+}
+
+// helper: add the normalized calendar field for top-level calendar properties
+static void store_calendar_special_property(InputContext& ctx, MarkBuilder& builder,
+                                            Map* calendar, const char* property_name,
+                                            Item value) {
+    const char* key_name = NULL;
+    if (strcmp(property_name, "VERSION") == 0) key_name = "version";
+    else if (strcmp(property_name, "PRODID") == 0) key_name = "product_id";
+    else if (strcmp(property_name, "CALSCALE") == 0) key_name = "calendar_scale";
+    else if (strcmp(property_name, "METHOD") == 0) key_name = "method";
+    if (!key_name) return;
+    String* key = builder.createName(key_name);
+    ctx.builder.putToMap(lam::gc_borrow(calendar), key, value);
+}
+
 // Main iCalendar parsing function
 void parse_ics(Input* input, const char* ics_string) {
     if (!ics_string || !input) {
@@ -302,91 +349,13 @@ void parse_ics(Input* input, const char* ics_string) {
         if (current_component && current_component_props) {
             // We're inside a component, store in component properties
             ctx.builder.putToMap(lam::gc_borrow(current_component_props), property_name, prop_value);
-
-            // Handle common component properties with special processing
-            if (strcmp(property_name->chars, "SUMMARY") == 0) {
-                String* summary_key = builder.createName("summary");
-                ctx.builder.putToMap(lam::gc_borrow(current_component), summary_key, prop_value);
-            }
-            else if (strcmp(property_name->chars, "DESCRIPTION") == 0) {
-                String* desc_key = builder.createName("description");
-                ctx.builder.putToMap(lam::gc_borrow(current_component), desc_key, prop_value);
-            }
-            else if (strcmp(property_name->chars, "DTSTART") == 0) {
-                String* start_key = builder.createName("start_time");
-                Map* dt_struct = parse_datetime(ctx, property_value->chars);
-                if (dt_struct) {
-                    Item dt_value = {.item = (uint64_t)dt_struct};
-                    ctx.builder.putToMap(lam::gc_borrow(current_component), start_key, dt_value);
-                } else {
-                    ctx.builder.putToMap(lam::gc_borrow(current_component), start_key, prop_value);
-                }
-            }
-            else if (strcmp(property_name->chars, "DTEND") == 0) {
-                String* end_key = builder.createName("end_time");
-                Map* dt_struct = parse_datetime(ctx, property_value->chars);
-                if (dt_struct) {
-                    Item dt_value = {.item = (uint64_t)dt_struct};
-                    ctx.builder.putToMap(lam::gc_borrow(current_component), end_key, dt_value);
-                } else {
-                    ctx.builder.putToMap(lam::gc_borrow(current_component), end_key, prop_value);
-                }
-            }
-            else if (strcmp(property_name->chars, "DURATION") == 0) {
-                String* duration_key = builder.createName("duration");
-                Map* dur_struct = parse_duration(ctx, property_value->chars);
-                if (dur_struct) {
-                    Item dur_value = {.item = (uint64_t)dur_struct};
-                    ctx.builder.putToMap(lam::gc_borrow(current_component), duration_key, dur_value);
-                } else {
-                    ctx.builder.putToMap(lam::gc_borrow(current_component), duration_key, prop_value);
-                }
-            }
-            else if (strcmp(property_name->chars, "LOCATION") == 0) {
-                String* location_key = builder.createName("location");
-                ctx.builder.putToMap(lam::gc_borrow(current_component), location_key, prop_value);
-            }
-            else if (strcmp(property_name->chars, "STATUS") == 0) {
-                String* status_key = builder.createName("status");
-                ctx.builder.putToMap(lam::gc_borrow(current_component), status_key, prop_value);
-            }
-            else if (strcmp(property_name->chars, "PRIORITY") == 0) {
-                String* priority_key = builder.createName("priority");
-                ctx.builder.putToMap(lam::gc_borrow(current_component), priority_key, prop_value);
-            }
-            else if (strcmp(property_name->chars, "ORGANIZER") == 0) {
-                String* organizer_key = builder.createName("organizer");
-                ctx.builder.putToMap(lam::gc_borrow(current_component), organizer_key, prop_value);
-            }
-            else if (strcmp(property_name->chars, "ATTENDEE") == 0) {
-                String* attendee_key = builder.createName("attendee");
-                ctx.builder.putToMap(lam::gc_borrow(current_component), attendee_key, prop_value);
-            }
-            else if (strcmp(property_name->chars, "UID") == 0) {
-                String* uid_key = builder.createName("uid");
-                ctx.builder.putToMap(lam::gc_borrow(current_component), uid_key, prop_value);
-            }
+            store_component_special_property(ctx, builder, current_component,
+                                             property_name->chars, property_value->chars, prop_value);
         } else {
             // Calendar-level property
             ctx.builder.putToMap(lam::gc_borrow(properties_map), property_name, prop_value);
-
-            // Handle common calendar properties with special processing
-            if (strcmp(property_name->chars, "VERSION") == 0) {
-                String* version_key = builder.createName("version");
-                ctx.builder.putToMap(lam::gc_borrow(calendar_map), version_key, prop_value);
-            }
-            else if (strcmp(property_name->chars, "PRODID") == 0) {
-                String* prodid_key = builder.createName("product_id");
-                ctx.builder.putToMap(lam::gc_borrow(calendar_map), prodid_key, prop_value);
-            }
-            else if (strcmp(property_name->chars, "CALSCALE") == 0) {
-                String* scale_key = builder.createName("calendar_scale");
-                ctx.builder.putToMap(lam::gc_borrow(calendar_map), scale_key, prop_value);
-            }
-            else if (strcmp(property_name->chars, "METHOD") == 0) {
-                String* method_key = builder.createName("method");
-                ctx.builder.putToMap(lam::gc_borrow(calendar_map), method_key, prop_value);
-            }
+            store_calendar_special_property(ctx, builder, calendar_map,
+                                            property_name->chars, prop_value);
         }
     }
 

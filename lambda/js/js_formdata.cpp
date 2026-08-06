@@ -214,6 +214,20 @@ static bool fd_is_blob(Item v) {
     return cls == JS_CLASS_BLOB || cls == JS_CLASS_FILE;
 }
 
+static Item fd_prepare_value(Item value_item, Item filename_item) {
+    Item value = fd_coerce_value(value_item);
+    if (js_check_exception()) return ItemNull;
+    // Blob values become Files when a filename is supplied, or use "blob" by default.
+    if (fd_is_blob(value)) {
+        bool is_file = (js_class_id(value) == JS_CLASS_FILE);
+        bool has_filename = (get_type_id(filename_item) != LMD_TYPE_UNDEFINED);
+        if (has_filename || !is_file) {
+            value = fd_blob_to_file(value, filename_item);
+        }
+    }
+    return value;
+}
+
 static Item js_fd_append(Item name_item, Item value_item, Item filename_item) {
     Item this_fd = js_get_this();
     Item entries = fd_get_entries(this_fd);
@@ -228,17 +242,8 @@ static Item js_fd_append(Item name_item, Item value_item, Item filename_item) {
     const char* name_cs = fn_to_cstr(name_item);
     if (!name_cs) name_cs = "undefined";
 
-    Item value = fd_coerce_value(value_item);
+    Item value = fd_prepare_value(value_item, filename_item);
     if (js_check_exception()) return ItemNull;
-    // Per spec: if value is Blob (not File) and no filename, set filename to "blob".
-    // If value is Blob/File and filename was provided, convert to File with that name.
-    if (fd_is_blob(value)) {
-        bool is_file = (js_class_id(value) == JS_CLASS_FILE);
-        bool has_filename = (get_type_id(filename_item) != LMD_TYPE_UNDEFINED);
-        if (has_filename || !is_file) {
-            value = fd_blob_to_file(value, filename_item);
-        }
-    }
 
     Item pair = js_array_new(0);
     js_array_push(pair, make_str(name_cs));
@@ -349,15 +354,8 @@ static Item js_fd_set(Item name_item, Item value_item, Item filename_item) {
 
     const char* name_cs = fn_to_cstr(name_item);
     if (!name_cs) name_cs = "undefined";
-    Item value = fd_coerce_value(value_item);
+    Item value = fd_prepare_value(value_item, filename_item);
     if (js_check_exception()) return ItemNull;
-    if (fd_is_blob(value)) {
-        bool is_file = (js_class_id(value) == JS_CLASS_FILE);
-        bool has_filename = (get_type_id(filename_item) != LMD_TYPE_UNDEFINED);
-        if (has_filename || !is_file) {
-            value = fd_blob_to_file(value, filename_item);
-        }
-    }
 
     // Find first occurrence
     int64_t first_idx = -1;

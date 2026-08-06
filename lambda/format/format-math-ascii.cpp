@@ -226,33 +226,23 @@ static int64_t find_matching_paren(const ElementReader& elem, int64_t start, int
 }
 
 
-// Format `operator` element: value attr contains the operator text
-static void format_operator(StringBuf* sb, const ElementReader& elem) {
+static void format_math_value(StringBuf* sb, const ElementReader& elem) {
     ItemReader val = elem.get_attr("value");
     if (!val.isNull() && val.isString()) {
         const char* v = val.asString()->chars;
-        // Check if it's a LaTeX command
         const char* ascii = cmd_to_ascii(v);
-        if (ascii) {
-            stringbuf_append_str(sb, ascii);
-        } else {
-            stringbuf_append_str(sb, v);
-        }
+        stringbuf_append_str(sb, ascii ? ascii : v);
     }
+}
+
+// Format `operator` element: value attr contains the operator text
+static void format_operator(StringBuf* sb, const ElementReader& elem) {
+    format_math_value(sb, elem);
 }
 
 // Format `relation` element: value attr contains the relation operator
 static void format_relation(StringBuf* sb, const ElementReader& elem) {
-    ItemReader val = elem.get_attr("value");
-    if (!val.isNull() && val.isString()) {
-        const char* v = val.asString()->chars;
-        const char* ascii = cmd_to_ascii(v);
-        if (ascii) {
-            stringbuf_append_str(sb, ascii);
-        } else {
-            stringbuf_append_str(sb, v);
-        }
-    }
+    format_math_value(sb, elem);
 }
 
 // Format `subsup` element: base^sup_sub

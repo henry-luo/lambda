@@ -179,33 +179,7 @@ static const char* try_parse_complete_tag(const char* start) {
         while (is_attribute_name_char(*p)) p++;
 
         p = skip_ws(p);
-
-        // Check for attribute value
-        if (*p == '=') {
-            p++;
-            p = skip_ws(p);
-
-            if (*p == '"') {
-                // Double-quoted value
-                p++;
-                while (*p && *p != '"') p++;
-                if (*p != '"') return nullptr;
-                p++;
-            } else if (*p == '\'') {
-                // Single-quoted value
-                p++;
-                while (*p && *p != '\'') p++;
-                if (*p != '\'') return nullptr;
-                p++;
-            } else {
-                // Unquoted value - allowed characters
-                while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
-                       *p != '"' && *p != '\'' && *p != '=' && *p != '<' &&
-                       *p != '>' && *p != '`') {
-                    p++;
-                }
-            }
-        }
+        if (!parse_html_attribute_value(&p, false, false)) return nullptr;
         // After parsing an attribute, need whitespace before next attribute
         need_whitespace = true;
     }

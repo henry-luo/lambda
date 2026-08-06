@@ -32,6 +32,18 @@ static void list_pooled_append(List* list, Item item) {
     }
 }
 
+// helper: build the single-item list used by each type mismatch hint
+static List* single_type_suggestion(Pool* pool, const char* text) {
+    size_t len = strlen(text);
+    String* str = (String*)pool_calloc(pool, sizeof(String) + len + 1);
+    str->len = len;
+    memcpy(str->chars, text, len);
+    str->chars[len] = '\0';
+    List* suggestions = list_pooled_with_capacity(pool, 2);
+    list_pooled_append(suggestions, (Item){.item = s2it(str)});
+    return suggestions;
+}
+
 /**
  * Calculate Levenshtein distance (edit distance) between two strings
  * Used for typo detection and field name suggestions
@@ -188,46 +200,24 @@ List* generate_type_suggestions(TypeId actual_type, Type* expected_type, Pool* p
 
     List* suggestions = nullptr;
 
-    // helper to create string from literal
-    auto create_suggestion_string = [](const char* text, Pool* p) -> String* {
-        size_t len = strlen(text);
-        String* str = (String*)pool_calloc(p, sizeof(String) + len + 1);
-        str->len = len;
-        memcpy(str->chars, text, len);
-        str->chars[len] = '\0';
-        return str;
-    };
-
     // type-specific suggestions (fully pool-allocated to avoid heap leaks)
     if (expected_type->type_id == LMD_TYPE_STRING && actual_type == LMD_TYPE_INT) {
-        suggestions = list_pooled_with_capacity(pool, 2);
-        String* s = create_suggestion_string("Try wrapping the value in quotes: \"42\"", pool);
-        list_pooled_append(suggestions, (Item){.item = s2it(s)});
+        suggestions = single_type_suggestion(pool, "Try wrapping the value in quotes: \"42\"");
     }
     else if (expected_type->type_id == LMD_TYPE_INT && actual_type == LMD_TYPE_FLOAT) {
-        suggestions = list_pooled_with_capacity(pool, 2);
-        String* s = create_suggestion_string("Remove decimal part or use integer value", pool);
-        list_pooled_append(suggestions, (Item){.item = s2it(s)});
+        suggestions = single_type_suggestion(pool, "Remove decimal part or use integer value");
     }
     else if (expected_type->type_id == LMD_TYPE_INT && actual_type == LMD_TYPE_STRING) {
-        suggestions = list_pooled_with_capacity(pool, 2);
-        String* s = create_suggestion_string("Try removing quotes: 42 instead of \"42\"", pool);
-        list_pooled_append(suggestions, (Item){.item = s2it(s)});
+        suggestions = single_type_suggestion(pool, "Try removing quotes: 42 instead of \"42\"");
     }
     else if (expected_type->type_id == LMD_TYPE_BOOL && actual_type == LMD_TYPE_STRING) {
-        suggestions = list_pooled_with_capacity(pool, 2);
-        String* s = create_suggestion_string("Use boolean value: true or false (without quotes)", pool);
-        list_pooled_append(suggestions, (Item){.item = s2it(s)});
+        suggestions = single_type_suggestion(pool, "Use boolean value: true or false (without quotes)");
     }
     else if (expected_type->type_id == LMD_TYPE_ARRAY && actual_type != LMD_TYPE_ARRAY) {
-        suggestions = list_pooled_with_capacity(pool, 2);
-        String* s = create_suggestion_string("Wrap value in array brackets: [value]", pool);
-        list_pooled_append(suggestions, (Item){.item = s2it(s)});
+        suggestions = single_type_suggestion(pool, "Wrap value in array brackets: [value]");
     }
     else if (expected_type->type_id == LMD_TYPE_MAP && actual_type != LMD_TYPE_MAP) {
-        suggestions = list_pooled_with_capacity(pool, 2);
-        String* s = create_suggestion_string("Use map syntax: {key: value}", pool);
-        list_pooled_append(suggestions, (Item){.item = s2it(s)});
+        suggestions = single_type_suggestion(pool, "Use map syntax: {key: value}");
     }
 
     return suggestions;

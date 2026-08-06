@@ -147,6 +147,7 @@ bool has_typed_params(AstFuncNode* fn_node);
 ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
 bool has_fixed_shape(TypeMap* map_type);
 bool is_direct_access_type(TypeId type_id);
+bool static_literal_item_from_type(Type* type, Item* out);
 TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
 int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
                         ArrayNumElemType* elem_type_out, bool disqualify_assign = false);

@@ -17,6 +17,7 @@ namespace lambda {
 namespace markup {
 
 typedef Item (*InlineItemParser)(MarkupParser*, const char**);
+typedef Item (*EmphasisParser)(MarkupParser*, const char**, const char*);
 
 static bool try_parse_inline_item(MarkupParser* parser, Element* span, StringBuf* sb,
                                   const char** pos, InlineItemParser parse) {
@@ -60,6 +61,52 @@ static void parse_code_span_item(MarkupParser* parser, Element* span,
         stringbuf_append_char(sb, '`');
     }
     *pos = backtick_start + opening_count;
+}
+
+static void parse_emphasis_item(MarkupParser* parser, Element* span, StringBuf* sb,
+        const char** pos, const char* text_copy, EmphasisParser parse,
+        bool copy_advanced_failure) {
+    char* saved_buffer = nullptr;
+    size_t saved_length = sb->length;
+    if (saved_length > 0) {
+        saved_buffer = (char*)mem_alloc(saved_length + 1, MEM_CAT_INPUT_MARKUP);
+        if (saved_buffer) {
+            memcpy(saved_buffer, sb->str->chars, saved_length);
+            saved_buffer[saved_length] = '\0';
+        }
+    }
+
+    const char* try_pos = *pos;
+    Item inline_item = parse(parser, &try_pos, text_copy);
+    if (inline_item.item != ITEM_ERROR && inline_item.item != ITEM_UNDEFINED) {
+        if (saved_buffer && saved_length > 0) {
+            String* text_content = parser->builder.createString(saved_buffer, saved_length);
+            Item text_item = {.item = s2it(text_content)};
+            list_push((List*)span, text_item);
+            increment_element_content_length(span);
+        }
+        list_push((List*)span, inline_item);
+        increment_element_content_length(span);
+        *pos = try_pos;
+        stringbuf_reset(sb);
+    } else {
+        stringbuf_reset(sb);
+        if (saved_buffer && saved_length > 0) {
+            for (size_t i = 0; i < saved_length; i++) {
+                stringbuf_append_char(sb, saved_buffer[i]);
+            }
+        }
+        if (copy_advanced_failure && try_pos > *pos) {
+            while (*pos < try_pos) {
+                stringbuf_append_char(sb, **pos);
+                (*pos)++;
+            }
+        } else {
+            stringbuf_append_char(sb, **pos);
+            (*pos)++;
+        }
+    }
+    if (saved_buffer) mem_free(saved_buffer);
 }
 
 /**
@@ -299,110 +346,15 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 }
             }
 
-            // Save current buffer before trying emphasis parsing
-            // This is critical because parse_emphasis may call parse_inline_spans
-            // recursively, which resets the shared buffer
-            char* saved_buffer = nullptr;
-            size_t saved_length = sb->length;
-            if (saved_length > 0) {
-                saved_buffer = (char*)mem_alloc(saved_length + 1, MEM_CAT_INPUT_MARKUP);
-                if (saved_buffer) {
-                    memcpy(saved_buffer, sb->str->chars, saved_length);
-                    saved_buffer[saved_length] = '\0';
-                }
-            }
-
-            // Try to parse emphasis
-            const char* try_pos = pos;
-            Item inline_item = parse_emphasis(parser, &try_pos, text_copy);
-
-            if (inline_item.item != ITEM_ERROR && inline_item.item != ITEM_UNDEFINED) {
-                // Success - flush saved buffer first, then add emphasis element
-                if (saved_buffer && saved_length > 0) {
-                    String* text_content = parser->builder.createString(saved_buffer, saved_length);
-                    Item text_item = {.item = s2it(text_content)};
-                    list_push((List*)span, text_item);
-                    increment_element_content_length(span);
-                }
-                list_push((List*)span, inline_item);
-                increment_element_content_length(span);
-                pos = try_pos;  // Advance past the emphasis
-                stringbuf_reset(sb);  // Reset buffer for subsequent text
-                if (saved_buffer) mem_free(saved_buffer);
-            } else {
-                // Emphasis parsing failed - restore saved buffer and treat markers as text
-                // Restore the buffer contents that may have been clobbered
-                stringbuf_reset(sb);
-                if (saved_buffer && saved_length > 0) {
-                    for (size_t i = 0; i < saved_length; i++) {
-                        stringbuf_append_char(sb, saved_buffer[i]);
-                    }
-                }
-                if (saved_buffer) mem_free(saved_buffer);
-
-                // Check if parse_emphasis advanced the position (e.g., for runs that can't open)
-                // In that case, add all the skipped characters to the buffer
-                if (try_pos > pos) {
-                    // Add the entire run as plain text
-                    while (pos < try_pos) {
-                        stringbuf_append_char(sb, *pos);
-                        pos++;
-                    }
-                } else {
-                    // Treat ONLY ONE marker as plain text
-                    // This allows remaining markers to be tried as openers
-                    // (needed for cases like **foo* where * should match with second *)
-                    stringbuf_append_char(sb, *pos);
-                    pos++;
-                }
-            }
+            parse_emphasis_item(parser, span, sb, &pos, text_copy,
+                parse_emphasis, true);
             continue;
         }
 
         // Check for Org-mode emphasis markers (/ = ~ +)
         if (format == Format::ORG && (*pos == '/' || *pos == '=' || *pos == '~' || *pos == '+')) {
-            // Save current buffer before trying emphasis parsing
-            char* saved_buffer = nullptr;
-            size_t saved_length = sb->length;
-            if (saved_length > 0) {
-                saved_buffer = (char*)mem_alloc(saved_length + 1, MEM_CAT_INPUT_MARKUP);
-                if (saved_buffer) {
-                    memcpy(saved_buffer, sb->str->chars, saved_length);
-                    saved_buffer[saved_length] = '\0';
-                }
-            }
-
-            // Try to parse Org emphasis
-            const char* try_pos = pos;
-            Item inline_item = parse_org_emphasis(parser, &try_pos, text_copy);
-
-            if (inline_item.item != ITEM_ERROR && inline_item.item != ITEM_UNDEFINED) {
-                // Success - flush saved buffer first, then add emphasis element
-                if (saved_buffer && saved_length > 0) {
-                    String* text_content = parser->builder.createString(saved_buffer, saved_length);
-                    Item text_item = {.item = s2it(text_content)};
-                    list_push((List*)span, text_item);
-                    increment_element_content_length(span);
-                }
-                list_push((List*)span, inline_item);
-                increment_element_content_length(span);
-                pos = try_pos;  // Advance past the emphasis
-                stringbuf_reset(sb);  // Reset buffer for subsequent text
-                if (saved_buffer) mem_free(saved_buffer);
-            } else {
-                // Emphasis parsing failed - restore saved buffer
-                stringbuf_reset(sb);
-                if (saved_buffer && saved_length > 0) {
-                    for (size_t i = 0; i < saved_length; i++) {
-                        stringbuf_append_char(sb, saved_buffer[i]);
-                    }
-                }
-                if (saved_buffer) mem_free(saved_buffer);
-
-                // Treat marker as plain text
-                stringbuf_append_char(sb, *pos);
-                pos++;
-            }
+            parse_emphasis_item(parser, span, sb, &pos, text_copy,
+                parse_org_emphasis, false);
             continue;
         }
 

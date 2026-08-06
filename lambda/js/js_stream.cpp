@@ -534,23 +534,7 @@ static bool js_item_is_true(Item item) {
 }
 
 static bool js_stream_item_to_int64(Item value, int64_t* out) {
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT) {
-        if (out) *out = it2i(value);
-        return true;
-    }
-    if (type == LMD_TYPE_FLOAT) {
-        double number = it2d(value);
-        // Public stream sizes are JS Numbers; after migration integral values arrive boxed as FLOAT.
-        if (!isfinite(number) || number != floor(number) ||
-            number < -9223372036854775808.0 ||
-            number > 9223372036854775807.0) {
-            return false;
-        }
-        if (out) *out = (int64_t)number;
-        return true;
-    }
-    return false;
+    return js_item_to_integral_int64(value, out, false);
 }
 
 static Item js_readable_pipe_on_drain(Item env_item) {

@@ -307,6 +307,8 @@ MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt);
+bool jm_is_native_binary_expression(JsMirTranspiler* mt, JsBinaryNode* bin);
+bool jm_is_native_unary_expression(JsMirTranspiler* mt, JsUnaryNode* un);
 MIR_reg_t jm_box_int_const(JsMirTranspiler* mt, int64_t value);
 void jm_arguments_writeback_param(JsMirTranspiler* mt, int param_index, MIR_reg_t val_reg);
 MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val);
@@ -339,6 +341,13 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
     const JsMirClassMethodInstallPolicy* policy);
 void jm_emit_class_constructor_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     JsClassEntry* ce, bool set_home_class);
+void jm_emit_class_self_extends_check(JsMirTranspiler* mt, JsClassEntry* ce,
+    String* class_name);
+MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
+    JsAstNode* heritage, JsClassEntry* static_superclass, MIR_reg_t proto_obj,
+    MIR_reg_t checked_heritage_val, bool* heritage_is_null_out);
+void jm_emit_class_length_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+    JsClassEntry* ce);
 void jm_emit_begin_lexical_this_rebind(JsMirTranspiler* mt, MIR_reg_t value,
     JsMirLexicalThisRebind* state, bool restore_binding);
 void jm_emit_end_lexical_this_rebind(JsMirTranspiler* mt,

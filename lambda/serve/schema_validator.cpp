@@ -48,18 +48,23 @@ static JsonType detect_type(const char* p) {
     return JSON_NULL;
 }
 
+// helper: skip a quoted JSON string, including escaped characters
+static const char* skip_json_string(const char* p) {
+    if (*p == '"') p++;
+    while (*p && *p != '"') {
+        if (*p == '\\') p++;
+        p++;
+    }
+    if (*p == '"') p++;
+    return p;
+}
+
 // skip a JSON value and return pointer past it
 static const char* skip_value(const char* p) {
     p = skip_ws(p);
     switch (*p) {
         case '"': {
-            p++;
-            while (*p && *p != '"') {
-                if (*p == '\\') p++;
-                p++;
-            }
-            if (*p == '"') p++;
-            return p;
+            return skip_json_string(p);
         }
         case '{': {
             p++;
@@ -67,7 +72,7 @@ static const char* skip_value(const char* p) {
             while (*p && depth > 0) {
                 if (*p == '{') depth++;
                 else if (*p == '}') depth--;
-                else if (*p == '"') { p++; while (*p && *p != '"') { if (*p == '\\') p++; p++; } }
+                else if (*p == '"') p = skip_json_string(p);
                 p++;
             }
             return p;
@@ -78,7 +83,7 @@ static const char* skip_value(const char* p) {
             while (*p && depth > 0) {
                 if (*p == '[') depth++;
                 else if (*p == ']') depth--;
-                else if (*p == '"') { p++; while (*p && *p != '"') { if (*p == '\\') p++; p++; } }
+                else if (*p == '"') p = skip_json_string(p);
                 p++;
             }
             return p;

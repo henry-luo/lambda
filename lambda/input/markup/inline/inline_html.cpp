@@ -235,38 +235,7 @@ static const char* try_parse_html_tag(const char* start) {
 
         while (is_attribute_name_char(*p)) p++;
 
-        // Check for optional '=' (attribute value specification)
-        // CommonMark: "An attribute value specification consists of optional whitespace,
-        // a `=` character, optional whitespace, and an attribute value."
-        // So we only skip whitespace if we're about to see '='
-        const char* maybe_eq = skip_whitespace(p);
-
-        // Check for attribute value
-        if (*maybe_eq == '=') {
-            p = maybe_eq + 1;  // skip the '='
-            p = skip_whitespace(p);
-
-            if (*p == '"') {
-                // Double-quoted value
-                p++;
-                while (*p && *p != '"') p++;
-                if (*p != '"') return nullptr;
-                p++;
-            } else if (*p == '\'') {
-                // Single-quoted value
-                p++;
-                while (*p && *p != '\'') p++;
-                if (*p != '\'') return nullptr;
-                p++;
-            } else {
-                // Unquoted value - allowed characters
-                while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
-                       *p != '"' && *p != '\'' && *p != '=' && *p != '<' &&
-                       *p != '>' && *p != '`') {
-                    p++;
-                }
-            }
-        }
+        if (!parse_html_attribute_value(&p, true, true)) return nullptr;
         // If no '=', this is a boolean attribute - don't consume whitespace
         // p stays at after_name, loop will find whitespace before next attribute
         // Loop will check for whitespace before next attribute

@@ -59,15 +59,7 @@ static void js_child_process_emit_or_queue_cluster_online(Item obj);
 // Helpers
 // =============================================================================
 
-static const char* item_to_cstr(Item value, char* buf, int buf_size) {
-    if (get_type_id(value) != LMD_TYPE_STRING) return NULL;
-    String* s = it2s(value);
-    int len = (int)s->len;
-    if (len >= buf_size) len = buf_size - 1;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
-    return buf;
-}
+#define item_to_cstr js_item_to_cstr
 
 static bool is_undefined_item(Item item) {
     return item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED;
@@ -2006,6 +1998,22 @@ static int spawn_dup_stdio_handle_fd(Item handle_item) {
 #endif
 }
 
+static bool js_spawn_validate_send_args(Item send_handle, Item options, Item callback, Item* error) {
+    if (!is_nullish_item(callback) && !is_callable(callback)) {
+        *error = js_throw_invalid_arg_type("callback", "function", callback);
+        return false;
+    }
+    if (!is_undefined_item(options) && !is_callable(options) && !is_object_item(options)) {
+        *error = js_throw_invalid_arg_type("options", "object", options);
+        return false;
+    }
+    if (!is_nullish_item(send_handle) && !is_callable(send_handle) && !is_object_item(send_handle)) {
+        *error = js_throw_type_error_code("ERR_INVALID_HANDLE_TYPE", "This handle type cannot be sent");
+        return false;
+    }
+    return true;
+}
+
 static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle, Item options, Item callback) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     JsSpawnProcess* sp = env ? (JsSpawnProcess*)(uintptr_t)env[0].item : NULL;
@@ -2016,14 +2024,9 @@ static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle
     else if (is_callable(options)) cb = options;
     else if (is_callable(send_handle)) cb = send_handle;
 
-    if (!is_nullish_item(callback) && !is_callable(callback)) {
-        return js_throw_invalid_arg_type("callback", "function", callback);
-    }
-    if (!is_undefined_item(options) && !is_callable(options) && !is_object_item(options)) {
-        return js_throw_invalid_arg_type("options", "object", options);
-    }
-    if (!is_nullish_item(send_handle) && !is_callable(send_handle) && !is_object_item(send_handle)) {
-        return js_throw_type_error_code("ERR_INVALID_HANDLE_TYPE", "This handle type cannot be sent");
+    Item validation_error = ItemNull;
+    if (!js_spawn_validate_send_args(send_handle, options, callback, &validation_error)) {
+        return validation_error;
     }
 
     Item connected = js_property_get(self, make_string_item("connected"));
@@ -2072,14 +2075,9 @@ extern "C" Item js_spawn_send(Item message, Item send_handle, Item options, Item
     else if (is_callable(options)) cb = options;
     else if (is_callable(send_handle)) cb = send_handle;
 
-    if (!is_nullish_item(callback) && !is_callable(callback)) {
-        return js_throw_invalid_arg_type("callback", "function", callback);
-    }
-    if (!is_undefined_item(options) && !is_callable(options) && !is_object_item(options)) {
-        return js_throw_invalid_arg_type("options", "object", options);
-    }
-    if (!is_nullish_item(send_handle) && !is_callable(send_handle) && !is_object_item(send_handle)) {
-        return js_throw_type_error_code("ERR_INVALID_HANDLE_TYPE", "This handle type cannot be sent");
+    Item validation_error = ItemNull;
+    if (!js_spawn_validate_send_args(send_handle, options, callback, &validation_error)) {
+        return validation_error;
     }
 
     Item connected = js_property_get(self, make_string_item("connected"));

@@ -108,6 +108,58 @@ bool is_direct_access_type(TypeId type_id) {
     }
 }
 
+bool static_literal_item_from_type(Type* type, Item* out) {
+    if (!type || !out) return false;
+    switch (type->type_id) {
+    case LMD_TYPE_NULL:
+        *out = ItemNull;
+        return true;
+    case LMD_TYPE_INT64: {
+        TypeInt64* value = (TypeInt64*)type;
+        out->item = l2it(&value->int64_val);
+        return true;
+    }
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64: {
+        TypeFloat* value = (TypeFloat*)type;
+        *out = lambda_float_ptr_to_item(&value->double_val);
+        return true;
+    }
+    case LMD_TYPE_DECIMAL: {
+        TypeDecimal* value = (TypeDecimal*)type;
+        out->item = c2it(value->decimal);
+        return true;
+    }
+    case LMD_TYPE_STRING: {
+        TypeString* value = (TypeString*)type;
+        out->item = s2it(value->string);
+        return true;
+    }
+    case LMD_TYPE_SYMBOL: {
+        TypeString* value = (TypeString*)type;
+        out->item = y2it((Symbol*)value->string);
+        return true;
+    }
+    case LMD_TYPE_BINARY: {
+        TypeBinaryConst* value = (TypeBinaryConst*)type;
+        out->item = x2it(value->binary);
+        return true;
+    }
+    case LMD_TYPE_NUM_SIZED: {
+        TypeNumSized* value = (TypeNumSized*)type;
+        out->item = NUM_SIZED_PACK(value->num_type, value->raw_bits);
+        return true;
+    }
+    case LMD_TYPE_UINT64: {
+        TypeUint64* value = (TypeUint64*)type;
+        out->item = u2it(&value->uint64_val);
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
 TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type) {
     Type* t = field->type;
     if (unwrap_type_type && t && t->type_id == LMD_TYPE_TYPE) {

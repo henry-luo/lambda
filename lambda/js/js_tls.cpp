@@ -2658,18 +2658,7 @@ static Item js_tls_server_address(void) {
     JsTlsServer* srv = (JsTlsServer*)(uintptr_t)it2i(handle_item);
     if (!srv) return ItemNull;
 
-    char address[128];
-    int family = 0;
-    int port = 0;
-    if (js_node_tcp_handle_address(&srv->tcp, address, sizeof(address),
-            &port, &family) != 0) return ItemNull;
-
-    Item result = js_new_object();
-    js_property_set(result, make_string_item("address"), make_string_item(address));
-    js_property_set(result, make_string_item("family"),
-        make_string_item(family == 6 ? "IPv6" : "IPv4"));
-    js_property_set(result, make_string_item("port"), (Item){.item = i2it(port)});
-    return result;
+    return js_node_tcp_server_address(&srv->tcp);
 }
 
 static JsTlsServer* tls_server_from_object(Item self) {

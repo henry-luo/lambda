@@ -1,4 +1,5 @@
 #include "js_network_service.h"
+#include "js_runtime.h"
 
 #include "js_event_loop.h"
 #include "../jube/jube_registry.h"
@@ -134,7 +135,7 @@ int js_node_stream_tcp_bind(void* session, uint32_t resource_id, const char* add
 }
 
 int js_node_tcp_handle_address(uv_tcp_t* handle, char* address, size_t address_size,
-        int* out_port, int* out_family) {
+                               int* out_port, int* out_family) {
     if (address && address_size > 0) address[0] = '\0';
     if (out_port) *out_port = 0;
     if (out_family) *out_family = 0;
@@ -158,6 +159,21 @@ int js_node_tcp_handle_address(uv_tcp_t* handle, char* address, size_t address_s
         return 0;
     }
     return UV_EAFNOSUPPORT;
+}
+
+Item js_node_tcp_server_address(uv_tcp_t* handle) {
+    char address[128];
+    int family = 0;
+    int port = 0;
+    if (js_node_tcp_handle_address(handle, address, sizeof(address), &port, &family) != 0) {
+        return ItemNull;
+    }
+    Item result = js_new_object();
+    js_property_set(result, make_string_item("address"), make_string_item(address));
+    js_property_set(result, make_string_item("family"),
+        make_string_item(family == 6 ? "IPv6" : "IPv4"));
+    js_property_set(result, make_string_item("port"), (Item){.item = i2it(port)});
+    return result;
 }
 
 int js_node_stream_tcp_address(void* session, uint32_t resource_id, char* address,

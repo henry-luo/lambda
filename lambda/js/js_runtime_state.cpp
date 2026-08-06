@@ -665,6 +665,32 @@ static int js_eval_source_display_column(String* source) {
     return pos + 1;
 }
 
+struct JsErrorTextParts {
+    const char* name;
+    int name_len;
+    const char* message;
+    int message_len;
+};
+
+static JsErrorTextParts js_error_text_parts(Item error_name, Item message) {
+    JsErrorTextParts parts = {"Error", 5, "", 0};
+    if (get_type_id(error_name) == LMD_TYPE_STRING) {
+        String* ns = it2s(error_name);
+        if (ns) {
+            parts.name = ns->chars;
+            parts.name_len = (int)ns->len;
+        }
+    }
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* ms = it2s(message);
+        if (ms) {
+            parts.message = ms->chars;
+            parts.message_len = (int)ms->len;
+        }
+    }
+    return parts;
+}
+
 static Item js_eval_source_stack_string(Item error_name, Item message) {
     Item filename_item = ItemNull;
     Item source_item = ItemNull;
@@ -686,18 +712,11 @@ static Item js_eval_source_stack_string(Item error_name, Item message) {
     int display_col = js_eval_source_display_column(source) + (int)column_offset;
     if (display_col < 1) display_col = 1;
 
-    const char* name_str = "Error";
-    int name_len = 5;
-    if (get_type_id(error_name) == LMD_TYPE_STRING) {
-        String* ns = it2s(error_name);
-        if (ns) { name_str = ns->chars; name_len = (int)ns->len; }
-    }
-    const char* msg_str = "";
-    int msg_len = 0;
-    if (get_type_id(message) == LMD_TYPE_STRING) {
-        String* ms = it2s(message);
-        if (ms) { msg_str = ms->chars; msg_len = (int)ms->len; }
-    }
+    JsErrorTextParts text = js_error_text_parts(error_name, message);
+    const char* name_str = text.name;
+    int name_len = text.name_len;
+    const char* msg_str = text.message;
+    int msg_len = text.message_len;
 
     if (compact_stack) {
         int total = name_len + msg_len + (int)filename->len + 64;
@@ -1330,24 +1349,11 @@ extern "C" Item js_new_aggregate_error(Item errors, Item message) {
 }
 
 static Item js_error_default_stack_string(Item error_name, Item message) {
-    const char* name_str = "Error";
-    int name_len = 5;
-    if (get_type_id(error_name) == LMD_TYPE_STRING) {
-        String* ns = it2s(error_name);
-        if (ns) {
-            name_str = ns->chars;
-            name_len = (int)ns->len;
-        }
-    }
-    const char* msg_str = "";
-    int msg_len = 0;
-    if (get_type_id(message) == LMD_TYPE_STRING) {
-        String* ms = it2s(message);
-        if (ms) {
-            msg_str = ms->chars;
-            msg_len = (int)ms->len;
-        }
-    }
+    JsErrorTextParts text = js_error_text_parts(error_name, message);
+    const char* name_str = text.name;
+    int name_len = text.name_len;
+    const char* msg_str = text.message;
+    int msg_len = text.message_len;
     char buf[512];
     int len = msg_len > 0
         ? snprintf(buf, sizeof(buf), "%.*s: %.*s", name_len, name_str, msg_len, msg_str)

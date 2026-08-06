@@ -115,6 +115,17 @@ static Map* parse_address(InputContext& ctx, const char* value) {
     return addr_map;
 }
 
+typedef Map* (*VcfStructuredParser)(InputContext&, const char*);
+
+static void store_vcf_structured_property(InputContext& ctx, Map* contact_map,
+        const char* value, const char* field_name, VcfStructuredParser parser) {
+    Map* parsed = parser(ctx, value);
+    if (!parsed) return;
+    String* key = ctx.builder.createName(field_name);
+    Item parsed_item = {.map = parsed};
+    ctx.builder.putToMap(lam::gc_borrow(contact_map), key, parsed_item);
+}
+
 // Main vCard parsing function
 void parse_vcf(Input* input, const char* vcf_string) {
     if (!vcf_string || !input) return;
@@ -206,14 +217,8 @@ void parse_vcf(Input* input, const char* vcf_string) {
             ctx.builder.putToMap(lam::gc_borrow(contact_map), fn_key, fn_value);
         }
         else if (strcmp(property_name->chars, "n") == 0) {
-            // Structured Name
-            Map* name_struct = parse_structured_name(ctx, property_value->chars);
-            if (name_struct) {
-                String* name_key = builder.createName("name");
-                // containers are direct typed pointers; high-byte tagging corrupts Map* addresses.
-                Item name_value = {.map = name_struct};
-                ctx.builder.putToMap(lam::gc_borrow(contact_map), name_key, name_value);
-            }
+            store_vcf_structured_property(ctx, contact_map, property_value->chars,
+                "name", parse_structured_name);
         }
         else if (strcmp(property_name->chars, "email") == 0) {
             // Email - store as top-level field
@@ -228,14 +233,8 @@ void parse_vcf(Input* input, const char* vcf_string) {
             ctx.builder.putToMap(lam::gc_borrow(contact_map), phone_key, phone_value);
         }
         else if (strcmp(property_name->chars, "adr") == 0) {
-            // Address
-            Map* addr_struct = parse_address(ctx, property_value->chars);
-            if (addr_struct) {
-                String* addr_key = builder.createName("address");
-                // containers are direct typed pointers; high-byte tagging corrupts Map* addresses.
-                Item addr_value = {.map = addr_struct};
-                ctx.builder.putToMap(lam::gc_borrow(contact_map), addr_key, addr_value);
-            }
+            store_vcf_structured_property(ctx, contact_map, property_value->chars,
+                "address", parse_address);
         }
         else if (strcmp(property_name->chars, "org") == 0) {
             // Organization - store as top-level field

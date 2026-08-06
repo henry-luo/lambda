@@ -19,17 +19,6 @@
 namespace lambda {
 namespace markup {
 
-// CommonMark escapable punctuation characters
-static bool is_escapable_char(char c) {
-    return c == '!' || c == '"' || c == '#' || c == '$' || c == '%' ||
-           c == '&' || c == '\'' || c == '(' || c == ')' || c == '*' ||
-           c == '+' || c == ',' || c == '-' || c == '.' || c == '/' ||
-           c == ':' || c == ';' || c == '<' || c == '=' || c == '>' ||
-           c == '?' || c == '@' || c == '[' || c == '\\' || c == ']' ||
-           c == '^' || c == '_' || c == '`' || c == '{' || c == '|' ||
-           c == '}' || c == '~';
-}
-
 /**
  * unescape_string - Process backslash escapes and entity references in a string
  *
@@ -45,7 +34,7 @@ static char* unescape_string(const char* start, size_t len) {
     const char* end = start + len;
 
     while (pos < end) {
-        if (*pos == '\\' && pos + 1 < end && is_escapable_char(*(pos + 1))) {
+        if (*pos == '\\' && pos + 1 < end && is_escapable(*(pos + 1))) {
             // Backslash escape - skip backslash, copy escaped char
             pos++;
             *out++ = *pos++;

@@ -107,6 +107,26 @@ static inline void advance_n(YamlParser* p, int n) {
     for (int i = 0; i < n; i++) advance(p);
 }
 
+static void yaml_fold_quoted_line(YamlParser* p, StrBuf* sb, size_t min_len) {
+    yaml_rtrim_line_space(sb, min_len);
+    advance(p);
+    int empty_lines = 0;
+    while (!at_end(p)) {
+        while (!at_end(p) && (peek(p) == ' ' || peek(p) == '\t')) advance(p);
+        if (!at_end(p) && peek(p) == '\n') {
+            empty_lines++;
+            advance(p);
+        } else {
+            break;
+        }
+    }
+    if (empty_lines > 0) {
+        for (int i = 0; i < empty_lines; i++) strbuf_append_char(sb, '\n');
+    } else {
+        strbuf_append_char(sb, ' ');
+    }
+}
+
 static inline YamlCursor save_cursor(YamlParser* p) {
     return {p->pos, p->line, p->col};
 }
@@ -147,6 +167,27 @@ static void skip_spaces_and_comments(YamlParser* p) {
     // YAML block parsing needs the following newline to remain visible to callers.
     skip_line_whitespace_and_comment_markers(&current, "#", nullptr);
     advance_n(p, (int)(current - (p->src + p->pos)));
+}
+
+static bool yaml_parse_simple_block_value(YamlParser* p, char first, int scalar_indent,
+                                          Item* result) {
+    if (first == '[') {
+        *result = parse_flow_sequence(p);
+        skip_spaces_and_comments(p);
+        if (!at_end(p) && peek(p) == '\n') advance(p);
+        return true;
+    }
+    if (first == '{') {
+        *result = parse_flow_mapping(p);
+        skip_spaces_and_comments(p);
+        if (!at_end(p) && peek(p) == '\n') advance(p);
+        return true;
+    }
+    if (first == '|' || first == '>') {
+        *result = parse_block_scalar(p, scalar_indent);
+        return true;
+    }
+    return false;
 }
 
 static bool skip_blank_lines(YamlParser* p) {
@@ -473,25 +514,7 @@ static Item parse_double_quoted(YamlParser* p) {
         } else if (peek(p) == '\n') {
             // line folding in double-quoted: trim trailing LITERAL whitespace only
             // do not trim past safe_length (escape-produced characters)
-            {
-                yaml_rtrim_line_space(sb, safe_length);
-            }
-            advance(p);
-            int empty_lines = 0;
-            while (!at_end(p)) {
-                while (!at_end(p) && (peek(p) == ' ' || peek(p) == '\t')) advance(p);
-                if (!at_end(p) && peek(p) == '\n') {
-                    empty_lines++;
-                    advance(p);
-                } else {
-                    break;
-                }
-            }
-            if (empty_lines > 0) {
-                for (int i = 0; i < empty_lines; i++) strbuf_append_char(sb, '\n');
-            } else {
-                strbuf_append_char(sb, ' ');
-            }
+            yaml_fold_quoted_line(p, sb, safe_length);
             safe_length = 0; // reset after fold
         } else {
             strbuf_append_char(sb, peek(p));
@@ -528,25 +551,7 @@ static Item parse_single_quoted(YamlParser* p) {
             }
         } else if (peek(p) == '\n') {
             // line folding
-            {
-                yaml_rtrim_line_space(sb);
-            }
-            advance(p);
-            int empty_lines = 0;
-            while (!at_end(p)) {
-                while (!at_end(p) && (peek(p) == ' ' || peek(p) == '\t')) advance(p);
-                if (!at_end(p) && peek(p) == '\n') {
-                    empty_lines++;
-                    advance(p);
-                } else {
-                    break;
-                }
-            }
-            if (empty_lines > 0) {
-                for (int i = 0; i < empty_lines; i++) strbuf_append_char(sb, '\n');
-            } else {
-                strbuf_append_char(sb, ' ');
-            }
+            yaml_fold_quoted_line(p, sb, 0);
         } else {
             strbuf_append_char(sb, peek(p));
             advance(p);
@@ -1732,16 +1737,7 @@ static Item parse_block_node(YamlParser* p, int min_indent) {
     char first = peek(p);
     Item result;
 
-    if (first == '[') {
-        result = parse_flow_sequence(p);
-        skip_spaces_and_comments(p);
-        if (!at_end(p) && peek(p) == '\n') advance(p);
-    } else if (first == '{') {
-        result = parse_flow_mapping(p);
-        skip_spaces_and_comments(p);
-        if (!at_end(p) && peek(p) == '\n') advance(p);
-    } else if (first == '|' || first == '>') {
-        result = parse_block_scalar(p, indent);
+    if (yaml_parse_simple_block_value(p, first, indent, &result)) {
     } else if (first == '"') {
         result = parse_double_quoted(p);
         skip_spaces(p);
@@ -2018,16 +2014,7 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
     char first = peek(p);
     Item result;
 
-    if (first == '[') {
-        result = parse_flow_sequence(p);
-        skip_spaces_and_comments(p);
-        if (!at_end(p) && peek(p) == '\n') advance(p);
-    } else if (first == '{') {
-        result = parse_flow_mapping(p);
-        skip_spaces_and_comments(p);
-        if (!at_end(p) && peek(p) == '\n') advance(p);
-    } else if (first == '|' || first == '>') {
-        result = parse_block_scalar(p, parent_indent);
+    if (yaml_parse_simple_block_value(p, first, parent_indent, &result)) {
     } else if (first == '"') {
         result = parse_double_quoted(p);
         skip_spaces(p);

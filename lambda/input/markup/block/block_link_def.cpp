@@ -17,21 +17,6 @@ namespace lambda {
 namespace markup {
 
 /**
- * is_escapable_char - Check if a character is escapable in CommonMark
- *
- * Only ASCII punctuation characters can be backslash-escaped.
- */
-static inline bool is_escapable_char(char c) {
-    return c == '!' || c == '"' || c == '#' || c == '$' || c == '%' ||
-           c == '&' || c == '\'' || c == '(' || c == ')' || c == '*' ||
-           c == '+' || c == ',' || c == '-' || c == '.' || c == '/' ||
-           c == ':' || c == ';' || c == '<' || c == '=' || c == '>' ||
-           c == '?' || c == '@' || c == '[' || c == '\\' || c == ']' ||
-           c == '^' || c == '_' || c == '`' || c == '{' || c == '|' ||
-           c == '}' || c == '~';
-}
-
-/**
  * is_link_definition_start - Check if a line might start a link definition
  *
  * Quick check for [label... pattern. Full parsing done in parse_link_definition.
@@ -294,7 +279,7 @@ label_done:
             while (*p && *p != close_char && *p != '\n' && *p != '\r') {
                 if (*p == '\\' && *(p+1)) {
                     // Only escapable characters (ASCII punctuation) consume the backslash
-                    if (is_escapable_char(*(p+1))) {
+                    if (is_escapable(*(p+1))) {
                         // Include just the escaped character
                         stringbuf_append_char(title_buf, *(p+1));
                         p += 2;
