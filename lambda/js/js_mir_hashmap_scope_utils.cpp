@@ -59,15 +59,8 @@ const char* jm_format_name(const char* format, ...) {
 }
 
 // ============================================================================
-// Hashmap helpers
+// Scope helpers
 // ============================================================================
-
-int js_var_scope_cmp(const void *a, const void *b, void *udata) {
-    return em_var_scope_cmp(a, b, udata);
-}
-uint64_t js_var_scope_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    return em_var_scope_hash(item, seed0, seed1);
-}
 
 static bool jm_stack_ensure_slot(ArrayList* stack, int index) {
     if (!stack || index < 0) return false;
@@ -86,10 +79,6 @@ bool jm_var_scope_set(JsMirTranspiler* mt, int depth, struct hashmap* scope) {
     if (!mt || !mt->var_scopes || !jm_stack_ensure_slot(mt->var_scopes, depth)) return false;
     arraylist_set(mt->var_scopes, depth, scope);
     return true;
-}
-
-int jm_var_scope_length(JsMirTranspiler* mt) {
-    return mt && mt->var_scopes ? mt->var_scopes->length : 0;
 }
 
 JsLoopLabels* jm_loop_label_at(JsMirTranspiler* mt, int index) {

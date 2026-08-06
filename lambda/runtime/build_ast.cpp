@@ -1515,16 +1515,6 @@ static void check_declaration_static_boundary(Transpiler* tp, AstNamedNode* decl
 void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_scope,
                                  NameScope* global_scope, FnCapture** captures);
 
-// Check if a scope is an ancestor of another scope
-bool is_ancestor_scope(NameScope* ancestor, NameScope* descendant) {
-    NameScope* scope = descendant;
-    while (scope) {
-        if (scope == ancestor) return true;
-        scope = scope->parent;
-    }
-    return false;
-}
-
 // Check if a name entry is defined in a scope or any of its descendant scopes (local to function)
 // This includes variables declared in while blocks, if blocks, for loops, etc.
 bool is_local_to_scope(NameEntry* entry, NameScope* fn_scope) {

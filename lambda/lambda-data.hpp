@@ -527,15 +527,6 @@ static inline int typemap_hash_recommended_capacity(int64_t expected_fields) {
     return capacity;
 }
 
-static inline void typemap_hash_clear(TypeMap* tm) {
-    if (!tm) return;
-    memset(tm->field_index, 0, sizeof(tm->field_index));
-    if (tm->field_index_dynamic && tm->field_capacity > 0) {
-        memset(tm->field_index_dynamic, 0, (size_t)tm->field_capacity * sizeof(ShapeEntry*));
-    }
-    tm->field_count = 0;
-}
-
 static inline void typemap_hash_prepare(TypeMap* tm, Pool* pool, int64_t expected_fields) {
     if (!tm) return;
     tm->field_index_dynamic = NULL;
@@ -597,10 +588,6 @@ static inline bool typemap_shape_entries_equal(ShapeEntry* left, ShapeEntry* rig
     return typemap_shape_name_equals_hash(left, right->name->str,
         (int)right->name->length,
         typemap_name_hash(right->name->str, (int)right->name->length));
-}
-
-static inline bool typemap_shape_name_equals(ShapeEntry* e, const char* key, int key_len) {
-    return typemap_shape_name_equals_hash(e, key, key_len, typemap_name_hash(key, key_len));
 }
 
 // Canonical shape-chain lookup. Keeps last-writer-wins semantics for duplicate
@@ -929,10 +916,6 @@ static inline bool type_is_any_without_error(const Type* type) {
 
 static inline bool type_is_any_without_null(const Type* type) {
     return type == &TYPE_ANY_NO_NULL || type == &TYPE_ANY_NO_ERROR_OR_NULL;
-}
-
-static inline bool type_is_any_without_error_or_null(const Type* type) {
-    return type == &TYPE_ANY_NO_ERROR_OR_NULL;
 }
 
 static inline const char* type_contract_display_name(const Type* type) {

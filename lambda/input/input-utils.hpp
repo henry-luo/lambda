@@ -58,12 +58,6 @@ static inline void skip_to_newline_raw(const char** p) {
     }
 }
 
-static inline void skip_to_newline_with_tracker(const char** p, SourceTracker* tracker) {
-    const char* start = *p;
-    skip_to_newline_raw(p);
-    if (tracker) tracker->advance((size_t)(*p - start));
-}
-
 static inline void input_skip_to_eol(SourceTracker& tracker) {
     while (!tracker.atEnd() && tracker.current() != '\n') {
         tracker.advance();

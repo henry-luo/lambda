@@ -301,20 +301,6 @@ static inline LambdaNumericKind lambda_numeric_kind_from_sized_type(NumSizedType
     }
 }
 
-static inline NumSizedType lambda_numeric_kind_to_sized_type(LambdaNumericKind kind) {
-    switch (kind) {
-    case LAMBDA_NUM_I8: return NUM_INT8;
-    case LAMBDA_NUM_I16: return NUM_INT16;
-    case LAMBDA_NUM_I32: return NUM_INT32;
-    case LAMBDA_NUM_U8: return NUM_UINT8;
-    case LAMBDA_NUM_U16: return NUM_UINT16;
-    case LAMBDA_NUM_U32: return NUM_UINT32;
-    case LAMBDA_NUM_F16: return NUM_FLOAT16;
-    case LAMBDA_NUM_F32: return NUM_FLOAT32;
-    default: return NUM_INT8;
-    }
-}
-
 static inline LambdaNumericKind lambda_numeric_kind_from_elem_type(
         ArrayNumElemType elem_type) {
     switch (elem_type) {

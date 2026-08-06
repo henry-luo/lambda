@@ -711,14 +711,6 @@ void jm_emit_class_ctor_shape_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, J
         "js_set_class_ctor_shape_metadata");
 }
 
-// Helper: emit js_set_formal_length if formal_length differs from param_count
-void jm_emit_formal_length(JsMirTranspiler* mt, MIR_reg_t fn_reg, int formal_length) {
-    if (formal_length < 0) return; // -1 = same as param_count, no correction needed
-    jm_call_void_2(mt, "js_set_formal_length",
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, formal_length));
-}
-
 // v12: Build a compile-time stack trace string from the lexical function chain.
 // Walks from current function up through parent_index to build:
 //   "Error\n    at FuncName1\n    at FuncName2\n..."
