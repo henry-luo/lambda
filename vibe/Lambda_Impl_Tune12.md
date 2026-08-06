@@ -36,13 +36,16 @@ Lambda-owned MIR Direct emitter/runtime; no vendored MIR or frozen C2MIR code wa
 
 - `make build-test`: passed.
 - Focused MIR/GC/item/error suites: **13/13**, **28/28**, **28/28**, and **101/101**.
-- `make test-lambda-baseline`: **3,590/3,590** passed, including the new dynamic-index fixture.
-- `make test262-baseline`: exit 0, **40,260/40,261** fully passed in the direct batch run, **0
-  failures**, **0 regressions**; one batch-unstable test was recovered by the harness's isolated
-  retry. The later standard snapshot run completed **40,261/40,261** with zero retry. Both results
-  are infrastructure-clean with no semantic failure or regression.
-- Final release binary hash after the closeout build:
-  `766db1ae96a52dc2f2cb248b5e459701bc7162d0e7d35f7a6b603f0393cfb276`.
+- The retained core gates before the final return-carrier correction included
+  `make test-lambda-baseline`: **3,590/3,590** passed, including the new dynamic-index
+  fixture. After the correction, `make build-test` compiled with zero errors; the focused MIR
+  emission and forced-GC checks for the affected lane fixture passed **1/1** each, and the new
+  nested-call regression fixture passed directly on the clean release binary.
+- The required Result22 Test262 gate completed **40,261/40,261** fully passed with **0 failures**,
+  **0 non-fully-passing tests**, and **0 regressions** before timing; the run completed with zero
+  retries.
+- Result22 archived release binary hash:
+  `2c24d6f22dfcf3e7048570cf27484f5a0b0daac0c633a4a2920ff12c6d826cbf`.
 - Archived Result21 hash:
   `45284f9c107ccf73feec210983ba32df3e4ab0db8d25ed49b2a6804d428fcc63`.
 
@@ -63,13 +66,21 @@ The static MIR report records candidate/archive module totals of 691/804 instruc
 `collatz`, 504/595 for `array1`, 1,943/2,018 for `quicksort`, and 1,356/1,509 for `matmul`.
 Those are audit signals only; the timing table is the acceptance evidence.
 
-The fixed-core Result22 artifacts are [`benchmark_results_v22.json`](../test/benchmark/benchmark_results_v22.json)
-and [`Overall_Result22.md`](../test/benchmark/Overall_Result22.md). They cover ten rows, including
-the three restored typed rows, with three runs per variant and no missing timings; the release
-profile-marker check passed. A full 56-row attempt was stopped when the pre-existing typed
-`crypto_sha1` port exposed an invalid negative-to-unsigned cast. The port was corrected at that
-fixture boundary, and the valid fixed-core population was rerun; the runtime's normative unsigned
-range rejection was preserved.
+The complete Result22 artifacts are [`benchmark_results_v22.json`](../test/benchmark/benchmark_results_v22.json),
+[`benchmark_results_v22_c2mir.json`](../test/benchmark/benchmark_results_v22_c2mir.json), and
+[`Overall_Result22.md`](../test/benchmark/Overall_Result22.md). The standard run covers all 56
+canonical rows with three runs each for MIR untyped, MIR typed, LambdaJS, QuickJS, and Node.js;
+MIR, MIR typed, LambdaJS, and Node.js have 56/56 timings, while QuickJS has six recorded
+`exit_1` cells. The separately measured C2MIR pass covers 44/56 rows, with the remaining twelve
+left as explicit `missing_port` cells. C2MIR uses `lambda/mir/c2m`, MIR commit
+`99c65079038f3ba9242ef646f308c266cfd7a8e5`, and tool SHA-256
+`25bad0d7eeeae440559d1fab44ac55a642a6919cdb8c1fb36fbf6eb74b71a4fb`; AC power was connected
+with low-power mode off. The initial full run exposed two independent correctness issues: the
+typed SHA fixture's invalid negative-to-`u32` conversion and a compiler return-carrier proof that
+advertised boxed `int(...)` results as raw `i64` lanes across local calls. The fixture boundary was
+corrected, the compiler proof now consults actual system/local return carriers, and the focused
+regression `test/lambda/proc/proc_native_return_carrier.ls` passes. The normative unsigned range
+rejection remains unchanged.
 
 ### Conditional-track decision
 
@@ -472,10 +483,14 @@ The classification model remains:
 - runtime semantic defect;
 - true performance timeout.
 
-The broader snapshot attempt also found `jetstream/crypto_sha1`'s typed port was relying on a
-negative signed-to-`u32` cast. The typed fixture now normalizes signed 32-bit words before the
-conversion, matching the existing unsigned boundary contract; this was a fixture correction, not
-a runtime relaxation.
+The broader snapshot attempt found `jetstream/crypto_sha1`'s typed port was relying on a negative
+signed-to-`u32` cast. The typed fixture now normalizes signed 32-bit words before the conversion,
+matching the existing unsigned boundary contract; this was a fixture correction, not a runtime
+relaxation. It also exposed a MIR Direct carrier bug: `mir_expr_proves_native_return_lane()` used
+the semantic return type of a local/system call as if it proved the physical lane, so a boxed
+`int(...)` result could reach a typed `i64` parameter as Item bits. The proof now requires the
+registry's C return lane or the callee's registered native return contract, and the regression
+fixture pins the nested-call boundary.
 
 Correctness fixes land before tuning those rows. Add a root-cause comment at each fix point and a
 focused regression. Do not mark Tune12 complete with a typed crash hidden as a missing timing.
@@ -1003,9 +1018,9 @@ independent mechanism.
 
 - [x] Run all correctness and baseline gates.
 - [x] Run fixed-population Result21/candidate comparisons.
-- [x] Run the release benchmark population used for the Tune12 closeout and capture
-  `test/benchmark/benchmark_results_v22.json` plus `Overall_Result22.md`; the report records the
-  conditional tracks as deferred rather than fabricating their measurements.
+- [x] Run the complete release benchmark population used for the Tune12 closeout and capture
+  `test/benchmark/benchmark_results_v22.json`, the C2MIR sidecar, and `Overall_Result22.md`; the
+  report records the conditional tracks as deferred rather than fabricating their measurements.
 - [x] Record retained/rejected experiments and final hashes in this ledger.
 
 ---
@@ -1154,8 +1169,8 @@ Tune12 is complete only when:
 - admitted array capabilities preserve COW, `var` write-back, views, and precise GC;
 - redundant boundaries are removed only from explicit semantic facts;
 - focused, forced-GC, Lambda baseline, and Test262 gates pass;
-- a clean release fixed-core Result22 is captured, with the fixed-population Result21 A/B evidence
-  and the recorded Result18/C2MIR snapshot comparisons preserved;
+- a clean release full-population Result22 is captured, with the fixed-population Result21 A/B
+  evidence and the recorded Result18/C2MIR snapshot comparisons preserved;
 - this document contains the final implementation ledger, retained measurements, hashes, and any
   deliberately deferred work.
 
