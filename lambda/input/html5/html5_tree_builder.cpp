@@ -17,6 +17,27 @@ static bool html5_is_heading_tag(const char* tag) {
            strcmp(tag, "h5") == 0 || strcmp(tag, "h6") == 0;
 }
 
+static bool html5_is_head_content_tag(const char* tag) {
+    static const char* head_tags[] = {
+        "base", "basefont", "bgsound", "link", "meta", "noframes",
+        "script", "style", "template", "title", nullptr
+    };
+    for (const char** candidate = head_tags; *candidate; candidate++) {
+        if (strcmp(tag, *candidate) == 0) return true;
+    }
+    return false;
+}
+
+static bool html5_has_template_on_stack(Html5Parser* parser) {
+    if (!parser || !parser->open_elements) return false;
+    for (int i = 0; i < (int)parser->open_elements->length; i++) {
+        Element* element = (Element*)parser->open_elements->items[i].element;
+        const char* tag = ((TypeElmt*)element->type)->name.str;
+        if (strcmp(tag, "template") == 0) return true;
+    }
+    return false;
+}
+
 static bool html5_is_list_scope_stop_tag(const char* tag) {
     static const char* stop_tags[] = {
         "applet", "area", "article", "aside", "base", "basefont", "bgsound",
@@ -1013,13 +1034,8 @@ void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
-        // Per spec: base, basefont, bgsound, link, meta, noframes, script, style, template, title
-        // should be processed using in-head rules, with head temporarily pushed
-        if (strcmp(tag, "base") == 0 || strcmp(tag, "basefont") == 0 ||
-            strcmp(tag, "bgsound") == 0 || strcmp(tag, "link") == 0 ||
-            strcmp(tag, "meta") == 0 || strcmp(tag, "noframes") == 0 ||
-            strcmp(tag, "script") == 0 || strcmp(tag, "style") == 0 ||
-            strcmp(tag, "template") == 0 || strcmp(tag, "title") == 0) {
+        // Per spec, these elements are processed using in-head rules after </head>.
+        if (html5_is_head_content_tag(tag)) {
             log_error("html5: processing head element %s after </head>", tag);
             // Push head element back on stack
             if (parser->head_element) {
@@ -1190,15 +1206,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         if (strcmp(tag, "html") == 0) {
             // Per WHATWG spec: if there's a template on the stack, ignore
             // Otherwise, merge attributes from token onto the html element
-            bool has_template = false;
-            for (size_t i = 0; i < (size_t)parser->open_elements->length; i++) {
-                Element* el = (Element*)parser->open_elements->items[i].element;
-                const char* el_tag = ((TypeElmt*)el->type)->name.str;
-                if (strcmp(el_tag, "template") == 0) {
-                    has_template = true;
-                    break;
-                }
-            }
+            bool has_template = html5_has_template_on_stack(parser);
             if (!has_template && parser->open_elements->length > 0) {
                 // Find html element (should be first)
                 Element* html_el = (Element*)parser->open_elements->items[0].element;
@@ -1228,15 +1236,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             // Per WHATWG spec: if there's a template on the stack, ignore
             // If only one element on stack, or second element isn't body, ignore
             // Otherwise, merge attributes from token onto the body element
-            bool has_template = false;
-            for (size_t i = 0; i < (size_t)parser->open_elements->length; i++) {
-                Element* el = (Element*)parser->open_elements->items[i].element;
-                const char* el_tag = ((TypeElmt*)el->type)->name.str;
-                if (strcmp(el_tag, "template") == 0) {
-                    has_template = true;
-                    break;
-                }
-            }
+            bool has_template = html5_has_template_on_stack(parser);
             if (!has_template && parser->open_elements->length >= 2) {
                 // Body element should be second in stack (after html)
                 Element* body_el = (Element*)parser->open_elements->items[1].element;
@@ -1273,13 +1273,8 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
-        // Per WHATWG 12.2.6.4.7: base, basefont, bgsound, link, meta, noframes,
-        // script, style, template, title - process using "in head" rules
-        if (strcmp(tag, "base") == 0 || strcmp(tag, "basefont") == 0 ||
-            strcmp(tag, "bgsound") == 0 || strcmp(tag, "link") == 0 ||
-            strcmp(tag, "meta") == 0 || strcmp(tag, "noframes") == 0 ||
-            strcmp(tag, "script") == 0 || strcmp(tag, "style") == 0 ||
-            strcmp(tag, "template") == 0 || strcmp(tag, "title") == 0) {
+        // Per WHATWG 12.2.6.4.7, head-content elements use in-head rules.
+        if (html5_is_head_content_tag(tag)) {
             html5_process_in_head_mode(parser, token);
             return;
         }
@@ -1418,12 +1413,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         // If form pointer is set and no template on stack, ignore.
         // Otherwise close p, insert element, set form pointer.
         if (strcmp(tag, "form") == 0) {
-            bool has_template = false;
-            for (int i = 0; i < (int)parser->open_elements->length; i++) {
-                Element* elem = (Element*)parser->open_elements->items[i].element;
-                const char* tname = ((TypeElmt*)elem->type)->name.str;
-                if (strcmp(tname, "template") == 0) { has_template = true; break; }
-            }
+            bool has_template = html5_has_template_on_stack(parser);
             if (!has_template && parser->form_element != nullptr) {
                 log_debug("html5: ignoring <form> - form pointer already set");
                 return;
@@ -1829,12 +1819,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
 
         // WHATWG §13.2.6.4.7: </form> end tag
         if (strcmp(tag, "form") == 0) {
-            bool has_template = false;
-            for (int i = 0; i < (int)parser->open_elements->length; i++) {
-                Element* elem = (Element*)parser->open_elements->items[i].element;
-                const char* tname = ((TypeElmt*)elem->type)->name.str;
-                if (strcmp(tname, "template") == 0) { has_template = true; break; }
-            }
+            bool has_template = html5_has_template_on_stack(parser);
             if (!has_template) {
                 // Save and clear form element pointer
                 Element* node = parser->form_element;
@@ -2181,12 +2166,7 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
         if (strcmp(tag, "form") == 0) {
             log_debug("html5: <form> in table mode");
             // If there is a template element on the stack, or form pointer is set, ignore
-            bool has_template = false;
-            for (int i = 0; i < (int)parser->open_elements->length; i++) {
-                Element* elem = (Element*)parser->open_elements->items[i].element;
-                const char* tname = ((TypeElmt*)elem->type)->name.str;
-                if (strcmp(tname, "template") == 0) { has_template = true; break; }
-            }
+            bool has_template = html5_has_template_on_stack(parser);
             if (has_template || parser->form_element != nullptr) {
                 return;  // ignore the token
             }

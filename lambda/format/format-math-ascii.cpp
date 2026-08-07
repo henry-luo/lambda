@@ -245,6 +245,27 @@ static void format_relation(StringBuf* sb, const ElementReader& elem) {
     format_math_value(sb, elem);
 }
 
+static void format_ascii_script_part(StringBuf* sb, const ItemReader& script,
+                                     int depth, const char* paren_separator) {
+    if (script.isNull()) return;
+    if (!script.isElement()) {
+        format_item(sb, script, depth + 1);
+        return;
+    }
+
+    ElementReader script_elem = script.asElement();
+    const char* tag = script_elem.tagName();
+    if (tag && strcmp(tag, "group") == 0) {
+        stringbuf_append_str(sb, "(");
+        format_children(sb, script_elem, depth + 1, " ");
+        stringbuf_append_str(sb, ")");
+    } else if (tag && strcmp(tag, "paren_script") == 0) {
+        format_children(sb, script_elem, depth + 1, paren_separator);
+    } else {
+        format_item(sb, script, depth + 1);
+    }
+}
+
 // Format `subsup` element: base^sup_sub
 static void format_subsup(StringBuf* sb, const ElementReader& elem, int depth) {
     ItemReader base = elem.get_attr("base");
@@ -259,44 +280,13 @@ static void format_subsup(StringBuf* sb, const ElementReader& elem, int depth) {
     // Emit subscript
     if (!sub.isNull()) {
         stringbuf_append_str(sb, "_");
-        if (sub.isElement()) {
-            ElementReader sub_elem = sub.asElement();
-            const char* tag = sub_elem.tagName();
-            if (tag && strcmp(tag, "group") == 0) {
-                // Group: wrap in parens, emit inner content
-                stringbuf_append_str(sb, "(");
-                format_children(sb, sub_elem, depth + 1, " ");
-                stringbuf_append_str(sb, ")");
-            } else if (tag && strcmp(tag, "paren_script") == 0) {
-                // paren_script already has ( and ) as children — emit directly
-                format_children(sb, sub_elem, depth + 1, " ");
-            } else {
-                format_item(sb, sub, depth + 1);
-            }
-        } else {
-            format_item(sb, sub, depth + 1);
-        }
+        format_ascii_script_part(sb, sub, depth, " ");
     }
 
     // Emit superscript
     if (!sup.isNull()) {
         stringbuf_append_str(sb, "^");
-        if (sup.isElement()) {
-            ElementReader sup_elem = sup.asElement();
-            const char* tag = sup_elem.tagName();
-            if (tag && strcmp(tag, "group") == 0) {
-                stringbuf_append_str(sb, "(");
-                format_children(sb, sup_elem, depth + 1, " ");
-                stringbuf_append_str(sb, ")");
-            } else if (tag && strcmp(tag, "paren_script") == 0) {
-                // paren_script already has ( and ) as children — emit directly
-                format_children(sb, sup_elem, depth + 1, " ");
-            } else {
-                format_item(sb, sup, depth + 1);
-            }
-        } else {
-            format_item(sb, sup, depth + 1);
-        }
+        format_ascii_script_part(sb, sup, depth, " ");
     }
 }
 
@@ -704,42 +694,12 @@ static void format_children_range(StringBuf* sb, const ElementReader& elem,
 
                     if (!sub.isNull()) {
                         stringbuf_append_str(sb, "_");
-                        if (sub.isElement()) {
-                            ElementReader sub_elem = sub.asElement();
-                            const char* stag = sub_elem.tagName();
-                            if (stag && strcmp(stag, "paren_script") == 0) {
-                                // paren_script children already include ( and )
-                                format_children(sb, sub_elem, depth + 1, "");
-                            } else if (stag && strcmp(stag, "group") == 0) {
-                                stringbuf_append_str(sb, "(");
-                                format_children(sb, sub_elem, depth + 1, " ");
-                                stringbuf_append_str(sb, ")");
-                            } else {
-                                format_item(sb, sub, depth + 1);
-                            }
-                        } else {
-                            format_item(sb, sub, depth + 1);
-                        }
+                        format_ascii_script_part(sb, sub, depth, "");
                     }
 
                     if (!sup.isNull()) {
                         stringbuf_append_str(sb, "^");
-                        if (sup.isElement()) {
-                            ElementReader sup_elem = sup.asElement();
-                            const char* stag = sup_elem.tagName();
-                            if (stag && strcmp(stag, "paren_script") == 0) {
-                                // paren_script children already include ( and )
-                                format_children(sb, sup_elem, depth + 1, "");
-                            } else if (stag && strcmp(stag, "group") == 0) {
-                                stringbuf_append_str(sb, "(");
-                                format_children(sb, sup_elem, depth + 1, " ");
-                                stringbuf_append_str(sb, ")");
-                            } else {
-                                format_item(sb, sup, depth + 1);
-                            }
-                        } else {
-                            format_item(sb, sup, depth + 1);
-                        }
+                        format_ascii_script_part(sb, sup, depth, "");
                     }
 
                     i = subsup_idx + 1; // skip past subsup

@@ -4350,14 +4350,20 @@ extern "C" Item js_parseFloat(Item str_item) {
     return push_d(val);
 }
 
-extern "C" Item js_isNaN(Item value) {
-    // ES spec: ToNumber(Symbol) throws TypeError
+static bool js_prepare_number_predicate(Item value, Item* number) {
+    // ES numeric predicates reject Symbols before invoking ToNumber.
     if (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
         js_throw_type_error("Cannot convert a Symbol value to a number");
-        return ItemNull;
+        return false;
     }
-    Item num = js_to_number(value);
-    if (js_check_exception()) return ItemNull;
+    *number = js_to_number(value);
+    return !js_check_exception();
+}
+
+extern "C" Item js_isNaN(Item value) {
+    // ES spec: ToNumber(Symbol) throws TypeError
+    Item num;
+    if (!js_prepare_number_predicate(value, &num)) return ItemNull;
     TypeId type = get_type_id(num);
     if (type == LMD_TYPE_FLOAT) {
         double d = it2d(num);
@@ -4368,12 +4374,8 @@ extern "C" Item js_isNaN(Item value) {
 
 extern "C" Item js_isFinite(Item value) {
     // ES spec: ToNumber(Symbol) throws TypeError
-    if (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
-        js_throw_type_error("Cannot convert a Symbol value to a number");
-        return ItemNull;
-    }
-    Item num = js_to_number(value);
-    if (js_check_exception()) return ItemNull;
+    Item num;
+    if (!js_prepare_number_predicate(value, &num)) return ItemNull;
     TypeId type = get_type_id(num);
     if (type == LMD_TYPE_FLOAT) {
         double d = it2d(num);
@@ -15165,9 +15167,8 @@ static void js_message_port_schedule_message_error(Item target, Item data) {
     js_setTimeout(callback, (Item){.item = i2it(0)});
 }
 
-static Item js_message_port_add_listener(Item event, Item handler) {
-    Item self = js_get_this();
-    const char* key = js_message_port_listener_key(event);
+static Item js_message_port_add_listener_for_key(Item self, const char* key,
+                                                  Item handler) {
     if (!key || get_type_id(handler) != LMD_TYPE_FUNC) {
         return self;
     }
@@ -15180,19 +15181,14 @@ static Item js_message_port_add_listener(Item event, Item handler) {
     return self;
 }
 
+static Item js_message_port_add_listener(Item event, Item handler) {
+    return js_message_port_add_listener_for_key(
+        js_get_this(), js_message_port_listener_key(event), handler);
+}
+
 static Item js_message_port_add_event_listener(Item event, Item handler) {
-    Item self = js_get_this();
-    const char* key = js_message_port_event_listener_key(event);
-    if (!key || get_type_id(handler) != LMD_TYPE_FUNC) {
-        return self;
-    }
-    Item listeners = js_property_get(self, make_string_item(key));
-    if (get_type_id(listeners) != LMD_TYPE_ARRAY) {
-        listeners = js_array_new(0);
-        js_property_set(self, make_string_item(key), listeners);
-    }
-    js_array_push(listeners, handler);
-    return self;
+    return js_message_port_add_listener_for_key(
+        js_get_this(), js_message_port_event_listener_key(event), handler);
 }
 
 static Item js_message_port_once_wrapper(Item env_item, Item arg1) {
@@ -16060,13 +16056,8 @@ extern "C" int64_t js_capture_with_binding(Item key) {
     return 0;
 }
 
-extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict) {
-    if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
-        return 0;
-    }
-    Item scope_obj = js_last_with_binding_scope;
-    js_last_with_binding_valid = false;
-    if (!js_with_scope_is_object(scope_obj)) return 0;
+static int64_t js_set_with_binding_resolved(Item scope_obj, Item key, Item value,
+                                            int64_t strict) {
     if (it2b(js_in(key, scope_obj))) {
         if (js_check_exception()) return 1;
         js_property_set(scope_obj, key, value);
@@ -16081,22 +16072,21 @@ extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64
     return 1;
 }
 
+extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict) {
+    if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
+        return 0;
+    }
+    Item scope_obj = js_last_with_binding_scope;
+    js_last_with_binding_valid = false;
+    if (!js_with_scope_is_object(scope_obj)) return 0;
+    return js_set_with_binding_resolved(scope_obj, key, value, strict);
+}
+
 extern "C" int64_t js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict) {
     // `var x = rhs` in a with statement resolves x before evaluating rhs.
     // Store through that saved base even if rhs deletes or shadows the property.
     if (!js_with_scope_is_object(scope_obj)) return 0;
-    if (it2b(js_in(key, scope_obj))) {
-        if (js_check_exception()) return 1;
-        js_property_set(scope_obj, key, value);
-        return 1;
-    }
-    if (js_check_exception()) return 1;
-    if (strict) {
-        js_throw_binding_reference_error(key);
-        return 1;
-    }
-    js_property_set(scope_obj, key, value);
-    return 1;
+    return js_set_with_binding_resolved(scope_obj, key, value, strict);
 }
 
 extern "C" int64_t js_global_lexical_binding_exists(Item key);

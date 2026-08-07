@@ -500,6 +500,64 @@ static void html5_commit_attribute(Html5Parser* parser) {
     html5_clear_temp_buffer(parser);
 }
 
+static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
+                                            int* out_len, bool in_attribute);
+static void html5_save_last_start_tag(Html5Parser* parser, const char* name, size_t len);
+
+// helper: emit the current tag and retain its name for raw-text end-tag matching
+static Html5Token* html5_emit_current_tag(Html5Parser* parser) {
+    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+    Html5Token* token = parser->current_token;
+    parser->current_token = nullptr;
+    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
+        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
+    }
+    return token;
+}
+
+// helper: update numeric character-reference state for one digit
+static void html5_accumulate_numeric_digit(uint32_t* codepoint, bool* overflowed,
+                                            uint32_t digit, uint32_t base) {
+    if (*overflowed) return;
+    if (*codepoint > (0x10FFFF / base)) {
+        *overflowed = true;
+        return;
+    }
+    *codepoint = *codepoint * base + digit;
+    if (*codepoint > 0x10FFFF) *overflowed = true;
+}
+
+// helper: append decoded character-reference bytes or the literal ampersand
+static void html5_append_char_reference_or_literal(Html5Parser* parser, char c,
+                                                    bool in_attribute) {
+    char decoded[8];
+    int decoded_len = 0;
+    if (html5_try_decode_char_reference(parser, decoded, &decoded_len, in_attribute)) {
+        for (int i = 0; i < decoded_len; i++) {
+            html5_append_to_temp_buffer(parser, decoded[i]);
+        }
+    } else {
+        html5_append_to_temp_buffer(parser, c);
+    }
+}
+
+// helper: recover an invalid RCDATA/RAWTEXT end tag as literal text
+static Html5Token* html5_emit_end_tag_as_text(Html5Parser* parser,
+                                                Html5TokenizerState state) {
+    parser->current_token = nullptr;
+    if (!html5_is_eof(parser)) {
+        html5_reconsume(parser);
+    }
+    html5_switch_tokenizer_state(parser, state);
+    size_t len = 2 + parser->temp_buffer_len;
+    char* text = (char*)arena_alloc(parser->arena, len + 1);
+    text[0] = '<';
+    text[1] = '/';
+    memcpy(text + 2, parser->temp_buffer, parser->temp_buffer_len);
+    text[len] = '\0';
+    return html5_token_create_character_string(parser->pool, parser->arena, text, len);
+}
+
 // helper: save the last start tag name (for RCDATA/RAWTEXT end tag matching)
 static void html5_save_last_start_tag(Html5Parser* parser, const char* name, size_t len) {
     // Allocate or reuse buffer
@@ -633,37 +691,22 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
             if (is_hex) {
                 if (c >= '0' && c <= '9') {
                     if (!overflowed) {
-                        uint32_t digit = c - '0';
-                        if (codepoint > (0x10FFFF / 16)) {
-                            overflowed = true;
-                        } else {
-                            codepoint = codepoint * 16 + digit;
-                            if (codepoint > 0x10FFFF) overflowed = true;
-                        }
+                        html5_accumulate_numeric_digit(&codepoint, &overflowed,
+                            c - '0', 16);
                     }
                     digits++;
                     parser->pos++;
                 } else if (c >= 'a' && c <= 'f') {
                     if (!overflowed) {
-                        uint32_t digit = c - 'a' + 10;
-                        if (codepoint > (0x10FFFF / 16)) {
-                            overflowed = true;
-                        } else {
-                            codepoint = codepoint * 16 + digit;
-                            if (codepoint > 0x10FFFF) overflowed = true;
-                        }
+                        html5_accumulate_numeric_digit(&codepoint, &overflowed,
+                            c - 'a' + 10, 16);
                     }
                     digits++;
                     parser->pos++;
                 } else if (c >= 'A' && c <= 'F') {
                     if (!overflowed) {
-                        uint32_t digit = c - 'A' + 10;
-                        if (codepoint > (0x10FFFF / 16)) {
-                            overflowed = true;
-                        } else {
-                            codepoint = codepoint * 16 + digit;
-                            if (codepoint > 0x10FFFF) overflowed = true;
-                        }
+                        html5_accumulate_numeric_digit(&codepoint, &overflowed,
+                            c - 'A' + 10, 16);
                     }
                     digits++;
                     parser->pos++;
@@ -797,15 +840,7 @@ static Html5Token* html5_handle_quoted_attribute_value(Html5Parser* parser, char
     if (c == quote) {
         html5_switch_tokenizer_state(parser, HTML5_TOK_AFTER_ATTRIBUTE_VALUE_QUOTED);
     } else if (c == '&') {
-        char decoded[8];
-        int decoded_len = 0;
-        if (html5_try_decode_char_reference(parser, decoded, &decoded_len, true)) {
-            for (int i = 0; i < decoded_len; i++) {
-                html5_append_to_temp_buffer(parser, decoded[i]);
-            }
-        } else {
-            html5_append_to_temp_buffer(parser, c);
-        }
+        html5_append_char_reference_or_literal(parser, c, true);
     } else if (c == '\0') {
         if (html5_is_eof(parser)) {
             log_error("html5: eof in attribute value");
@@ -1114,20 +1149,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     // Not a valid end tag name character
                     rcdata_emit_as_text:
                     // Emit '</' + temp_buffer contents as text
-                    parser->current_token = nullptr;
-                    // Only reconsume if not at EOF - at EOF there's nothing to reconsume
-                    if (!html5_is_eof(parser)) {
-                        html5_reconsume(parser);
-                    }
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
-                    // Build the string "</" + temp_buffer
-                    size_t len = 2 + parser->temp_buffer_len;
-                    char* text = (char*)arena_alloc(parser->arena, len + 1);
-                    text[0] = '<';
-                    text[1] = '/';
-                    memcpy(text + 2, parser->temp_buffer, parser->temp_buffer_len);
-                    text[len] = '\0';
-                    return html5_token_create_character_string(parser->pool, parser->arena, text, len);
+                    return html5_emit_end_tag_as_text(parser, HTML5_TOK_RCDATA);
                 }
                 break;
             }
@@ -1203,19 +1225,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_append_to_temp_buffer(parser, c);
                 } else {
                     rawtext_emit_as_text:
-                    parser->current_token = nullptr;
-                    // Only reconsume if not at EOF - at EOF there's nothing to reconsume
-                    if (!html5_is_eof(parser)) {
-                        html5_reconsume(parser);
-                    }
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT);
-                    size_t len = 2 + parser->temp_buffer_len;
-                    char* text = (char*)arena_alloc(parser->arena, len + 1);
-                    text[0] = '<';
-                    text[1] = '/';
-                    memcpy(text + 2, parser->temp_buffer, parser->temp_buffer_len);
-                    text[len] = '\0';
-                    return html5_token_create_character_string(parser->pool, parser->arena, text, len);
+                    return html5_emit_end_tag_as_text(parser, HTML5_TOK_RAWTEXT);
                 }
                 break;
             }
@@ -1307,14 +1317,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_SELF_CLOSING_START_TAG);
                 } else if (c == '>') {
                     parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
-                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
-                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
-                    }
-                    return token;
+                    return html5_emit_current_tag(parser);
                 } else if (c >= 'A' && c <= 'Z') {
                     // convert uppercase to lowercase
                     html5_append_to_temp_buffer(parser, c + 0x20);
@@ -1405,14 +1408,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c == '>') {
                     // commit value-less attribute and emit tag
                     html5_commit_attribute(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
-                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
-                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
-                    }
-                    return token;
+                    return html5_emit_current_tag(parser);
                 } else if (c == '\0' && html5_is_eof(parser)) {
                     // EOF in tag - emit eof token (tag is dropped per spec)
                     log_error("html5: eof in tag");
@@ -1440,14 +1436,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c == '>') {
                     log_error("html5: missing attribute value");
                     html5_commit_attribute(parser);  // commit empty value
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
-                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
-                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
-                    }
-                    return token;
+                    return html5_emit_current_tag(parser);
                 } else if (c == '\0' && html5_is_eof(parser)) {
                     // EOF in tag
                     log_error("html5: eof in tag");
@@ -1480,26 +1469,11 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
                 } else if (c == '&') {
                     // character reference in attribute value
-                    char decoded[8];
-                    int decoded_len = 0;
-                    if (html5_try_decode_char_reference(parser, decoded, &decoded_len, true)) {
-                        for (int i = 0; i < decoded_len; i++) {
-                            html5_append_to_temp_buffer(parser, decoded[i]);
-                        }
-                    } else {
-                        html5_append_to_temp_buffer(parser, c);
-                    }
+                    html5_append_char_reference_or_literal(parser, c, true);
                 } else if (c == '>') {
                     // commit and emit tag
                     html5_commit_attribute(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
-                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
-                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
-                    }
-                    return token;
+                    return html5_emit_current_tag(parser);
                 } else if (c == '\0') {
                     if (html5_is_eof(parser)) {
                         log_error("html5: eof in attribute value");
@@ -1527,14 +1501,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c == '/') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_SELF_CLOSING_START_TAG);
                 } else if (c == '>') {
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
-                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
-                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
-                    }
-                    return token;
+                    return html5_emit_current_tag(parser);
                 } else if (html5_is_eof(parser)) {
                     log_error("html5: eof after attribute value");
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
@@ -1550,14 +1517,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
             case HTML5_TOK_SELF_CLOSING_START_TAG: {
                 if (c == '>') {
                     parser->current_token->self_closing = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
-                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
-                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
-                    }
-                    return token;
+                    return html5_emit_current_tag(parser);
                 } else if (html5_is_eof(parser)) {
                     log_error("html5: eof in tag");
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);

@@ -469,15 +469,19 @@ static void format_genfrac(StringBuf* sb, const ElementReader& elem, int depth) 
     }
 }
 
+static void append_latex_command(StringBuf* sb, const ItemReader& command) {
+    if (!command.isNull() && command.isString()) {
+        stringbuf_append_str(sb, command.asString()->chars);
+    }
+}
+
 // Format `overunder_command`: \overset{annotation}{base}, \underset, \stackrel
 static void format_overunder_command(StringBuf* sb, const ElementReader& elem, int depth) {
     ItemReader cmd = elem.get_attr("cmd");
     ItemReader annotation = elem.get_attr("annotation");
     ItemReader base = elem.get_attr("base");
 
-    if (!cmd.isNull() && cmd.isString()) {
-        stringbuf_append_str(sb, cmd.asString()->chars);
-    }
+    append_latex_command(sb, cmd);
 
     stringbuf_append_str(sb, "{");
     if (!annotation.isNull()) format_item(sb, annotation, depth + 1);
@@ -532,9 +536,7 @@ static void format_color_command(StringBuf* sb, const ElementReader& elem, int d
     ItemReader color = elem.get_attr("color");
     ItemReader content = elem.get_attr("content");
 
-    if (!cmd.isNull() && cmd.isString()) {
-        stringbuf_append_str(sb, cmd.asString()->chars);
-    }
+    append_latex_command(sb, cmd);
 
     stringbuf_append_str(sb, "{");
     if (!color.isNull()) format_item(sb, color, depth + 1);
