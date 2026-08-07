@@ -238,13 +238,13 @@
       "description": "Typed numeric-array load guards plus the Tune13 in-place procedure-parameter write guard and checked representation fallback. v5 re-baseline: native int values use the i64 lane and each arithmetic site admits its result to the int53 band. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument.",
       "budgets": {
         "default": {
-          "module_insns": 1093,
+          "module_insns": 1106,
           "functions": {
             "_guarded_load_#": {
-              "insns": 77
+              "insns": 81
             },
             "_guarded_store_#": {
-              "insns": 151
+              "insns": 157
             }
           },
           "frames": [

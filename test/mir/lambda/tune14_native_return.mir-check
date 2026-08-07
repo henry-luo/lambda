@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "Tune14 A3 publishes a native recursive success return for a closed immutable result while retaining the boxed arithmetic path for a mutable accumulator.",
+  "checks": [
+    {
+      "in_func": "_tune14_recursive_#",
+      "expect": [
+        ":\tfunc\ti64,",
+        "add\t{{r}}"
+      ],
+      "forbid": [
+        "call\tfn_add_p, fn_add",
+        "call\tlambda_item_adopt_scalar_home_p, lambda_item_adopt_scalar_home",
+        "call\tlambda_restore_number_frame_top_p, lambda_restore_number_frame_top"
+      ]
+    },
+    {
+      "in_func": "_tune14_mutable_#",
+      "expect": [
+        "call\tfn_add_p, fn_add"
+      ]
+    }
+  ]
+}

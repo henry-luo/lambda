@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "description": "Tune15 B3 keeps a conforming fixed-shape scalar record write on the direct packed-field path.",
+  "checks": [
+    {
+      "in_func": "_tune15_record_#",
+      "expect": [
+        "call\t_tune15_record_step_"
+      ],
+      "forbid": [
+        "lambda_map_set_checked",
+        "lambda_map_set_checked_inplace",
+        "call\tfn_map_set_p, fn_map_set",
+        "call\tfn_member_p, fn_member"
+      ]
+    },
+    {
+      "in_func": "_tune15_record_step_#",
+      "expect": [
+        "mov\t{{r}}, i64:({{r}})",
+        "add\t{{r}}, {{r}}, {{r}}"
+      ],
+      "forbid": [
+        "lambda_map_set_checked",
+        "lambda_map_set_checked_inplace",
+        "call\tfn_map_set_p, fn_map_set",
+        "call\tfn_member_p, fn_member"
+      ]
+    }
+  ]
+}

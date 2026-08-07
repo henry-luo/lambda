@@ -6373,6 +6373,18 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
     }
 }
 
+static bool is_syntactic_spread_key(TSNode key_node) {
+    if (ts_node_is_null(key_node)) return false;
+    TSSymbol symbol = ts_node_symbol(key_node);
+    if (symbol == anon_sym_STAR) return true;
+    if (symbol != sym_attr_name) return false;
+
+    TSNode child = ts_node_named_child(key_node, 0);
+    if (!ts_node_is_null(child)) return is_syntactic_spread_key(child);
+    child = ts_node_child(key_node, 0);
+    return is_syntactic_spread_key(child);
+}
+
 AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
     log_debug("build_key_expr");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, pair_node, sizeof(AstNamedNode));
@@ -7680,7 +7692,12 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         bool is_spread = false;
         if (symbol == SYM_MAP_ITEM) {
             AstNamedNode* key_expr = build_key_expr(tp, child);
-            if (key_expr->name && key_expr->name->len == 1 && key_expr->name->chars[0] == '*') {
+            TSNode key_node = ts_node_child_by_field_id(child, FIELD_NAME);
+            // A quoted `'*'` is an ordinary map key; only the grammar's
+            // anonymous `*` token denotes a spread. Confusing the two leaves
+            // an array value in a nameless shape slot and crashes later map
+            // construction (S2.3.1, D2.1.1).
+            if (is_syntactic_spread_key(key_node)) {
                 // spread: *:expr — extract the value expression
                 item = key_expr->as;
                 is_spread = true;
@@ -7881,7 +7898,8 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
             bool is_spread = false;
             if (symbol == SYM_ATTR) {
                 AstNamedNode* key_expr = build_key_expr(tp, child);
-                if (key_expr->name && key_expr->name->len == 1 && key_expr->name->chars[0] == '*') {
+                TSNode key_node = ts_node_child_by_field_id(child, FIELD_NAME);
+                if (is_syntactic_spread_key(key_node)) {
                     // spread: *:expr — extract value expression
                     item = key_expr->as;
                     is_spread = true;

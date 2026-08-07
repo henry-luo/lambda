@@ -1787,6 +1787,18 @@ a silently successful-looking result (B).
   losing SIMD and the typed-array path with no source-level signal. Emit a note when a container
   is boxed solely because of unproven fallibility.
 
+#### Promoted to the formal design (2026-08-07)
+
+TE-17's lane purity is now a normative design invariant: **DI20 — Native lanes are
+error-free**, anchored in **§D2.8** of [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md)
+(v1.5.0). D2.8.1 carries the representation argument and the two rejected escape hatches
+(in-band sentinel, sidecar); D2.8.2 carries I2 plus the fault-regime exclusion; D2.8.3 carries
+this decision and TE-18's dominance, and states that the `may_defect` split (D6.1.3) is a
+*prerequisite* for lane routing. The semantics side was already written — S7.8.1 (acceptance)
+and S7.7.2/S7.7.3 (dominance) — and is unchanged; D2.8 is the representational counterpart, the
+error analogue of DI5 (null sentinels) and DI8 (ArrayNum null-freedom). Cite `DI20`/`D2.8.x`
+rather than TE-17 for the lane rule from here on; TE-17 remains the record of the deliberation.
+
 #### Open
 
 - Whether the `T | error` demotion should be *transitive through containers* (does

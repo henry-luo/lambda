@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Tune15 F1 keeps a closed integer arithmetic tree native through the float boundary.",
+  "checks": [
+    {
+      "in_func": "_tune15_integer_tree_#",
+      "expect": [
+        "mulo\t{{r}}, {{r}}, {{r}}",
+        "ddiv\t{{r}}, {{r}}, {{r}}"
+      ],
+      "forbid": [
+        "call\tfn_add_p, fn_add",
+        "call\tfn_mul_p, fn_mul",
+        "call\tfn_div_p, fn_div"
+      ]
+    }
+  ]
+}
