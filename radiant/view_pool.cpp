@@ -826,6 +826,9 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
         prop->align_content = ALIGN_STRETCH;  // CSS spec default for multi-line flex
         prop->row_gap = 0;  prop->column_gap = 0;
         prop->row_gap_is_percent = false;  prop->column_gap_is_percent = false;
+        // Writing-mode resolves independently of display order; preserve the
+        // block axis already resolved before flex properties allocate this prop.
+        prop->writing_mode = block->blk ? block->block()->writing_mode : WM_HORIZONTAL_TB;
         block->embed->flex = prop;
     }
 }
@@ -2136,7 +2139,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
         // Flex/grid items are blockified, while standalone legacy inline grid/flex
         // values keep their inline outer display in CSSOM serialization.
         display = (display_outer_is_inline && !display_is_blockified_flex_item) ? "inline-grid" : "grid";
-    } else if (block->display.inner == CSS_VALUE_FLEX || (block->embed && block->embedp()->flex)) {
+    } else if (block->display.inner == CSS_VALUE_FLEX) {
         // Flex/grid items are blockified, while standalone legacy inline grid/flex
         // values keep their inline outer display in CSSOM serialization.
         display = (display_outer_is_inline && !display_is_blockified_flex_item) ? "inline-flex" : "flex";
@@ -2220,7 +2223,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     }
 
     // Add flex container properties if available
-    if (block->embed && block->embedp()->flex) {
+    if (block->display.inner == CSS_VALUE_FLEX && block->embed && block->embedp()->flex) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "\"flex_container\": {\n");
 
@@ -2274,7 +2277,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     // Flexbox properties
     // Get actual flex-wrap value from the block
     const char* flex_wrap_str = "nowrap";  // default
-    if (block->embed && block->embedp()->flex) {
+    if (block->display.inner == CSS_VALUE_FLEX && block->embed && block->embedp()->flex) {
         switch (block->embedp()->flex->wrap) {
             case WRAP_WRAP:
                 flex_wrap_str = "wrap";

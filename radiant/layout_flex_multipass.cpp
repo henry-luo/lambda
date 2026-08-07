@@ -176,6 +176,59 @@ static void flex_normalize_direct_br_boxes(ViewBlock* flex_container) {
     }
 }
 
+static void flex_normalize_break_item_boxes(LayoutContext* lycon,
+                                            ViewBlock* flex_container) {
+    if (!lycon || !flex_container || !lycon->ui_context) return;
+
+    FlexContainerLayout* flex = lycon->flex_container;
+    if (!flex) return;
+    bool main_axis_horizontal = is_main_axis_horizontal(flex);
+
+    for (DomNode* child = flex_container->first_child; child; child = child->next_sibling) {
+        if (!flex_child_is_br(child)) continue;
+        ViewElement* br = lam::view_as_element(child);
+        if (!br || br->view_type == RDT_VIEW_NONE) continue;
+
+        FontBox saved_font = lycon->font;
+        if (br->font) setup_font(lycon->ui_context, &lycon->font, br->font);
+        float break_height = layout_br_line_box_extent(
+            lycon, lycon->font.font_handle);
+        lycon->font = saved_font;
+        if (break_height <= 0.0f) continue;
+
+        // A blockified <br> has zero inline extent, but its generated line box
+        // remains observable even though it contributes no flex main size.
+        bool vertical_writing = flex->writing_mode == WM_VERTICAL_LR ||
+            flex->writing_mode == WM_VERTICAL_RL;
+        if (vertical_writing) {
+            // Flex item axes are already physical here; publish the vertical
+            // break as a block-axis line box instead of leaving it horizontal.
+            br->width = break_height;
+            br->height = 0.0f;
+        } else {
+            br->width = 0.0f;
+            br->height = break_height;
+        }
+        if (vertical_writing && main_axis_horizontal) {
+            DomNode* next = child->next_sibling;
+            while (next && !next->is_element()) next = next->next_sibling;
+            ViewElement* next_view = next ? lam::view_as_element(next) : nullptr;
+            if (next_view && next_view->view_type != RDT_VIEW_NONE) {
+                br->x = flex->writing_mode == WM_VERTICAL_RL
+                    ? next_view->x + next_view->width - break_height / 2.0f
+                    : next_view->x - break_height / 2.0f;
+            }
+        } else if (!main_axis_horizontal) {
+            DomNode* next = child->next_sibling;
+            while (next && !next->is_element()) next = next->next_sibling;
+            ViewElement* next_view = next ? lam::view_as_element(next) : nullptr;
+            if (next_view && next_view->view_type != RDT_VIEW_NONE) {
+                br->y = next_view->y - break_height / 2.0f;
+            }
+        }
+    }
+}
+
 static float flex_border_box_height_constraint(ViewBlock* block, float css_height) {
     if (!block || css_height < 0.0f) return css_height;
     if (layout_uses_border_box(block)) {
@@ -2632,6 +2685,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             }
         }
     }
+
+    flex_normalize_break_item_boxes(lycon, flex_container);
 
     log_info("FINAL FLEX CONTENT LAYOUT END: container=%p", flex_container);
     if (original_heights) {

@@ -37,6 +37,49 @@ static void emit_expr(const char* source, AstNode* node);
 static void emit_top_level(const char* source, AstNode* child);
 static void emit_object_fields(const char* source, AstObjectTypeNode* obj_type);
 
+struct EmitParseState {
+    char* source;
+    TSParser* parser;
+    TSTree* tree;
+    Input* input;
+};
+
+static bool emit_prepare_parse(const char* script_path, EmitParseState* state) {
+    memset(state, 0, sizeof(*state));
+    state->source = read_text_file(script_path);
+    if (!state->source) {
+        fprintf(stderr, "Error: Cannot read '%s'\n", script_path);
+        return false;
+    }
+    state->parser = lambda_parser();
+    state->tree = lambda_parse_source(state->parser, state->source);
+    if (!state->tree) {
+        fprintf(stderr, "Error: Failed to parse '%s'\n", script_path);
+        mem_free(state->source);
+        ts_parser_delete(state->parser);
+        return false;
+    }
+    TSNode root = ts_tree_root_node(state->tree);
+    if (ts_node_has_error(root)) {
+        fprintf(stderr, "Error: Syntax errors in '%s'\n", script_path);
+        ts_tree_delete(state->tree);
+        mem_free(state->source);
+        ts_parser_delete(state->parser);
+        return false;
+    }
+    Pool* pool = pool_create();
+    state->input = Input::create(pool, nullptr);
+    if (!state->input) {
+        fprintf(stderr, "Error: Failed to allocate memory\n");
+        pool_destroy(pool);
+        ts_tree_delete(state->tree);
+        mem_free(state->source);
+        ts_parser_delete(state->parser);
+        return false;
+    }
+    return true;
+}
+
 // get source text for a TSNode
 static inline const char* node_src(const char* source, TSNode node, int* out_len) {
     uint32_t start = ts_node_start_byte(node);
@@ -118,25 +161,28 @@ static const char* redex_type_name(TypeId type_id) {
     }
 }
 
+static bool emit_concrete_type_expr(const char* source, AstNode* node) {
+    if (!node->type || node->type->type_id != LMD_TYPE_TYPE) return false;
+    TypeType* tt = (TypeType*)node->type;
+    if (!tt->type) return false;
+    int slen;
+    const char* source_text = node_src(source, node->node, &slen);
+    if (slen == 4 && strncmp(source_text, "list", 4) == 0) {
+        printf("list-type");
+        return true;
+    }
+    const char* rname = redex_type_name(tt->type->type_id);
+    if (rname) printf("%s", rname);
+    else printf("%s-type", type_info[tt->type->type_id].name);
+    return true;
+}
+
 // emit type expression for is-type / as-type operations
 static void emit_type_expr(const char* source, AstNode* node) {
     if (!node) { printf("any-type"); return; }
     if (node->node_type == AST_NODE_TYPE) {
         // base type: get the type name from the type_id
-        if (node->type && node->type->type_id == LMD_TYPE_TYPE) {
-            TypeType* tt = (TypeType*)node->type;
-            if (tt->type) {
-                // check source text to distinguish list vs array (both map to LMD_TYPE_ARRAY)
-                int slen; const char* ssrc = node_src(source, node->node, &slen);
-                if (slen == 4 && strncmp(ssrc, "list", 4) == 0) {
-                    printf("list-type"); return;
-                }
-                const char* rname = redex_type_name(tt->type->type_id);
-                if (rname) { printf("%s", rname); return; }
-                printf("%s-type", type_info[tt->type->type_id].name);
-                return;
-            }
-        }
+        if (emit_concrete_type_expr(source, node)) return;
         // fallback: use source text with -type suffix
         int len; const char* src = node_src(source, node->node, &len);
         printf("%.*s-type", len, src);
@@ -196,21 +242,7 @@ static void emit_type_expr(const char* source, AstNode* node) {
     }
     else if (node->node_type == AST_NODE_PRIMARY) {
         // primary node used as type in is-type expression
-        if (node->type && node->type->type_id == LMD_TYPE_TYPE) {
-            // built-in type keyword (string, int, bool, etc.)
-            TypeType* tt = (TypeType*)node->type;
-            if (tt->type) {
-                // check source to distinguish list vs array
-                int slen; const char* ssrc = node_src(source, node->node, &slen);
-                if (slen == 4 && strncmp(ssrc, "list", 4) == 0) {
-                    printf("list-type"); return;
-                }
-                const char* rname = redex_type_name(tt->type->type_id);
-                if (rname) { printf("%s", rname); return; }
-                printf("%s-type", type_info[tt->type->type_id].name);
-                return;
-            }
-        }
+        if (emit_concrete_type_expr(source, node)) return;
         // not a type — emit as value expression
         emit_expr(source, node);
     }
@@ -1945,45 +1977,17 @@ static bool is_procedural_script(AstScript* script) {
 
 // entry point: parse file and emit s-expressions to stdout
 int emit_sexpr_file(const char* script_path) {
-    // read source
-    char* source = read_text_file(script_path);
-    if (!source) {
-        fprintf(stderr, "Error: Cannot read '%s'\n", script_path);
-        return 1;
-    }
-
-    // create parser and parse
-    TSParser* parser = lambda_parser();
-    TSTree* tree = lambda_parse_source(parser, source);
-    if (!tree) {
-        fprintf(stderr, "Error: Failed to parse '%s'\n", script_path);
-        mem_free(source);
-        ts_parser_delete(parser);
-        return 1;
-    }
-
+    EmitParseState parse;
+    if (!emit_prepare_parse(script_path, &parse)) return 1;
+    char* source = parse.source;
+    TSParser* parser = parse.parser;
+    TSTree* tree = parse.tree;
+    Input* input_base = parse.input;
     TSNode root = ts_tree_root_node(tree);
-    if (ts_node_has_error(root)) {
-        fprintf(stderr, "Error: Syntax errors in '%s'\n", script_path);
-        ts_tree_delete(tree);
-        mem_free(source);
-        ts_parser_delete(parser);
-        return 1;
-    }
 
     // check for imports in source (require runtime, which we don't set up)
     if (strstr(source, "\nimport ") || strncmp(source, "import ", 7) == 0) {
         fprintf(stderr, "Error: '%s' contains imports (not supported by --emit-sexpr)\n", script_path);
-        ts_tree_delete(tree);
-        mem_free(source);
-        ts_parser_delete(parser);
-        return 1;
-    }
-
-    // setup minimal Transpiler for AST building
-    Input* input_base = Input::create(pool_create(), nullptr);
-    if (!input_base) {
-        fprintf(stderr, "Error: Failed to allocate memory\n");
         ts_tree_delete(tree);
         mem_free(source);
         ts_parser_delete(parser);
@@ -2570,38 +2574,13 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
 }
 
 int emit_ast_dump_file(const char* script_path) {
-    char* source = read_text_file(script_path);
-    if (!source) {
-        fprintf(stderr, "Error: Cannot read '%s'\n", script_path);
-        return 1;
-    }
-
-    TSParser* parser = lambda_parser();
-    TSTree* tree = lambda_parse_source(parser, source);
-    if (!tree) {
-        fprintf(stderr, "Error: Failed to parse '%s'\n", script_path);
-        mem_free(source);
-        ts_parser_delete(parser);
-        return 1;
-    }
-
+    EmitParseState parse;
+    if (!emit_prepare_parse(script_path, &parse)) return 1;
+    char* source = parse.source;
+    TSParser* parser = parse.parser;
+    TSTree* tree = parse.tree;
+    Input* input_base = parse.input;
     TSNode root = ts_tree_root_node(tree);
-    if (ts_node_has_error(root)) {
-        fprintf(stderr, "Error: Syntax errors in '%s'\n", script_path);
-        ts_tree_delete(tree);
-        mem_free(source);
-        ts_parser_delete(parser);
-        return 1;
-    }
-
-    Input* input_base = Input::create(pool_create(), nullptr);
-    if (!input_base) {
-        fprintf(stderr, "Error: Failed to allocate memory\n");
-        ts_tree_delete(tree);
-        mem_free(source);
-        ts_parser_delete(parser);
-        return 1;
-    }
 
     Runtime runtime;
     runtime_init(&runtime);

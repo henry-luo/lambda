@@ -17,6 +17,18 @@ static char js_decode_escape_char(char c);
 static String* js_decode_identifier_name(JsTranspiler* tp, const char* source,
     int source_len);
 
+// helper: assign the common initializer/type state for JS and TS declarations
+static void js_build_declarator_initializer(JsTranspiler* tp,
+        JsVariableDeclaratorNode* declarator, TSNode value_node) {
+    if (!ts_node_is_null(value_node)) {
+        declarator->init = build_js_expression(tp, value_node);
+        declarator->type = declarator->init ? declarator->init->type : &TYPE_ANY;
+    } else {
+        declarator->init = NULL;
+        declarator->type = &TYPE_NULL;
+    }
+}
+
 static StrView js_predeclare_node_source(JsTranspiler* tp, TSNode node) {
     StrView source;
     source.str = tp->source + ts_node_start_byte(node);
@@ -1845,17 +1857,7 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
                 has_initializer = true;
                 break;
             }
-            if (has_initializer) {
-                declarator->init = build_js_expression(tp, init_node);
-                if (declarator->init) {
-                    declarator->type = declarator->init->type;
-                } else {
-                    declarator->type = &TYPE_ANY;
-                }
-            } else {
-                declarator->init = NULL;
-                declarator->type = &TYPE_NULL; // undefined
-            }
+            js_build_declarator_initializer(tp, declarator, init_node);
 
             // Register bindings after the initializer so later references see
             // destructuring aliases instead of retaining a same-named outer
@@ -4725,17 +4727,7 @@ static JsAstNode* build_ts_variable_decl_u(JsTranspiler* tp, TSNode var_node) {
         }
 
         TSNode value_node = ts_node_child_by_field_name(declarator_node, "value", 5);
-        if (!ts_node_is_null(value_node)) {
-            declarator->init = build_js_expression(tp, value_node);
-            if (declarator->init) {
-                declarator->type = declarator->init->type;
-            } else {
-                declarator->type = &TYPE_ANY;
-            }
-        } else {
-            declarator->init = NULL;
-            declarator->type = &TYPE_NULL;
-        }
+        js_build_declarator_initializer(tp, declarator, value_node);
 
         if (declarator->id && declarator->id->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* id = (JsIdentifierNode*)declarator->id;

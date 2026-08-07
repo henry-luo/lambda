@@ -1513,60 +1513,38 @@ Item array_end(Array* arr) {
     return {.array = arr};
 }
 
+static bool array_push_spread_array_items(Array* arr, Item item, bool require_spreadable) {
+    if (get_type_id(item) != LMD_TYPE_ARRAY || !item.array ||
+            (require_spreadable && !item.array->is_spreadable)) return false;
+    RootFrame roots(2);
+    Rooted<Array*> rooted_array(roots, arr);
+    Rooted<Item> rooted_source(roots, item);
+    for (int i = 0; i < rooted_source.get().array->length; i++) {
+        Array* inner = rooted_source.get().array;
+        array_push(rooted_array.get(), inner->items[i]);
+    }
+    return true;
+}
+
+static bool array_push_spread_array_num_items(Array* arr, Item item, bool require_spreadable) {
+    if (get_type_id(item) != LMD_TYPE_ARRAY_NUM || !item.array_num ||
+            (require_spreadable && !item.array_num->is_spreadable)) return false;
+    RootFrame roots(2);
+    Rooted<Array*> rooted_array(roots, arr);
+    Rooted<Item> rooted_source(roots, item);
+    for (int64_t i = 0; i < rooted_source.get().array_num->length; i++) {
+        Item value = array_num_get(rooted_source.get().array_num, i);
+        array_push(rooted_array.get(), value);
+    }
+    return true;
+}
+
 // push item to array, spreading if the item is a spreadable array
 // skips spreadable nulls (from empty for-expressions)
 void array_push_spread(Array* arr, Item item) {
-    TypeId type_id = get_type_id(item);
-    // skip spreadable null (empty for-expression result)
-    if (item.item == ITEM_NULL_SPREADABLE) {
-        return;
-    }
-    if (type_id == LMD_TYPE_ARRAY) {
-        Array* inner = item.array;
-        if (inner && inner->is_spreadable) {
-            RootFrame roots(2);
-            Rooted<Array*> rooted_array(roots, arr);
-            Rooted<Item> rooted_source(roots, item);
-            for (int i = 0; i < inner->length; i++) {
-                arr = rooted_array.get();
-                inner = rooted_source.get().array;
-                array_push(arr, inner->items[i]);
-            }
-            return;
-        }
-    }
-    // check if this is a spreadable list
-    if (type_id == LMD_TYPE_ARRAY) {
-        List* inner = item.array;
-        if (inner && inner->is_spreadable) {
-            RootFrame roots(2);
-            Rooted<Array*> rooted_array(roots, arr);
-            Rooted<Item> rooted_source(roots, item);
-            for (int i = 0; i < inner->length; i++) {
-                arr = rooted_array.get();
-                inner = rooted_source.get().array;
-                array_push(arr, inner->items[i]);
-            }
-            return;
-        }
-    }
-    // check if this is a spreadable ArrayNum
-    if (type_id == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* inner = item.array_num;
-        if (inner && inner->is_spreadable) {
-            RootFrame roots(2);
-            Rooted<Array*> rooted_array(roots, arr);
-            Rooted<Item> rooted_source(roots, item);
-            for (int64_t i = 0; i < inner->length; i++) {
-                inner = rooted_source.get().array_num;
-                Item value = array_num_get(inner, i);
-                arr = rooted_array.get();
-                array_push(arr, value);
-            }
-            return;
-        }
-    }
-    // not spreadable, push as-is
+    if (item.item == ITEM_NULL_SPREADABLE) return;
+    if (array_push_spread_array_items(arr, item, true) ||
+            array_push_spread_array_num_items(arr, item, true)) return;
     array_push(arr, item);
 }
 
@@ -1574,37 +1552,8 @@ void array_push_spread(Array* arr, Item item) {
 // used for pipe expression results in array literals: [a, pipe_expr | ~, b]
 void array_push_spread_all(Array* arr, Item item) {
     if (item.item == ITEM_NULL_SPREADABLE) return;
-    TypeId type_id = get_type_id(item);
-    if (type_id == LMD_TYPE_ARRAY) {
-        Array* inner = item.array;
-        if (inner) {
-            RootFrame roots(2);
-            Rooted<Array*> rooted_array(roots, arr);
-            Rooted<Item> rooted_source(roots, item);
-            for (int i = 0; i < inner->length; i++) {
-                arr = rooted_array.get();
-                inner = rooted_source.get().array;
-                array_push(arr, inner->items[i]);
-            }
-            return;
-        }
-    }
-    if (type_id == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* inner = item.array_num;
-        if (inner) {
-            RootFrame roots(2);
-            Rooted<Array*> rooted_array(roots, arr);
-            Rooted<Item> rooted_source(roots, item);
-            for (int64_t i = 0; i < inner->length; i++) {
-                inner = rooted_source.get().array_num;
-                Item value = array_num_get(inner, i);
-                arr = rooted_array.get();
-                array_push(arr, value);
-            }
-            return;
-        }
-    }
-    // non-array types are pushed as single items (maps, elements, scalars, etc.)
+    if (array_push_spread_array_items(arr, item, false) ||
+            array_push_spread_array_num_items(arr, item, false)) return;
     array_push(arr, item);
 }
 

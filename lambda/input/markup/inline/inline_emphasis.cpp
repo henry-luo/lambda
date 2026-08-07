@@ -22,17 +22,6 @@ extern "C" {
 namespace lambda {
 namespace markup {
 
-// Helper: Create element from parser
-static inline Element* create_element(MarkupParser* parser, const char* tag) {
-    return parser->builder.element(tag).final().element;
-}
-
-// Helper: Increment element content length
-static inline void increment_element_content_length(Element* elem) {
-    TypeElmt* elmt_type = (TypeElmt*)elem->type;
-    elmt_type->content_length++;
-}
-
 /**
  * is_ascii_punct - Check if character is ASCII punctuation
  */

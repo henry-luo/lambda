@@ -170,7 +170,12 @@ static void grid_store_inline_baseline(LayoutContext* lycon,
                 radiant::compute_element_first_baseline(lycon, item, true);
         }
         if (item_baseline >= 0.0f) {
-            float grid_baseline = item->y + item_baseline;
+            float vertical_baseline = layout_vertical_item_baseline_from_border_edges(
+                grid_container, static_cast<View*>(item));
+            float grid_baseline = vertical_baseline >= 0.0f
+                // Grid baseline caches are consumed from the border-box origin.
+                ? layout_block_start_content_offset(grid_container) + vertical_baseline
+                : item->y + item_baseline;
             if (prefer_last) {
                 // The last set comes from an item ending in the block-end-most row;
                 // using the first-row cache ignores baseline-source:last.
@@ -407,8 +412,6 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // This is needed for align-items: center/end to work correctly
     align_grid_items(lycon->grid_container);
 
-    grid_store_inline_baselines(lycon, lycon->grid_container, grid_container);
-
     // Apply relative positioning offsets (position:relative + top/left/bottom/right)
     // Must be done AFTER final alignment so offsets are relative to the aligned position
     {
@@ -609,6 +612,22 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             grid_container->width = container_width;
         }
     }
+
+    WritingMode grid_writing_mode = layout_block_writing_mode(grid_container);
+    if (grid_writing_mode == WM_VERTICAL_LR || grid_writing_mode == WM_VERTICAL_RL) {
+        float logical_width = grid_container->width;
+        float logical_height = grid_container->height;
+        // Grid rows and columns are logical block/inline tracks; the grid
+        // implementation stores them in horizontal/vertical surrogate axes.
+        grid_container->width = logical_height;
+        grid_container->height = logical_width;
+        BoxMetrics grid_box = layout_box_metrics(grid_container);
+        grid_container->content_width = max(grid_container->width - grid_box.pad_border_h, 0.0f);
+        grid_container->content_height = max(grid_container->height - grid_box.pad_border_v, 0.0f);
+        layout_publish_vertical_children(grid_container, grid_writing_mode, true);
+    }
+
+    grid_store_inline_baselines(lycon, lycon->grid_container, grid_container);
 
     // ========================================================================
     // PASS 4: Absolute Positioned Children

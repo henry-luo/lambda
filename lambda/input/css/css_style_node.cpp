@@ -896,7 +896,7 @@ bool style_tree_remove_declaration(StyleTree* style_tree, CssDeclaration* declar
     return false;
 }
 
-bool style_tree_remove_inline_declarations(StyleTree* style_tree) {
+static bool style_tree_remove_declarations_by_inline(StyleTree* style_tree, bool remove_inline) {
     if (!style_tree) return false;
 
     bool removed_any = false;
@@ -913,23 +913,23 @@ bool style_tree_remove_inline_declarations(StyleTree* style_tree) {
             StyleNode* node = (StyleNode*)avl_node->declaration;
             if (!node) break;
 
-            CssDeclaration* inline_decl = NULL;
-            if (node->winning_decl && node->winning_decl->specificity.inline_style) {
-                inline_decl = node->winning_decl;
+            CssDeclaration* matching_decl = NULL;
+            if (node->winning_decl && node->winning_decl->specificity.inline_style == remove_inline) {
+                matching_decl = node->winning_decl;
             } else {
                 WeakDeclaration* weak = node->weak_list;
                 while (weak) {
-                    if (weak->declaration && weak->declaration->specificity.inline_style) {
-                        inline_decl = weak->declaration;
+                    if (weak->declaration && weak->declaration->specificity.inline_style == remove_inline) {
+                        matching_decl = weak->declaration;
                         break;
                     }
                     weak = weak->next;
                 }
             }
 
-            if (!inline_decl) break;
+            if (!matching_decl) break;
 
-            if (style_tree_remove_declaration(style_tree, inline_decl)) {
+            if (style_tree_remove_declaration(style_tree, matching_decl)) {
                 if (style_tree->declaration_count > 0) {
                     style_tree->declaration_count--;
                 }
@@ -955,63 +955,12 @@ bool style_tree_remove_inline_declarations(StyleTree* style_tree) {
     return removed_any;
 }
 
+bool style_tree_remove_inline_declarations(StyleTree* style_tree) {
+    return style_tree_remove_declarations_by_inline(style_tree, true);
+}
+
 bool style_tree_remove_non_inline_declarations(StyleTree* style_tree) {
-    if (!style_tree) return false;
-
-    bool removed_any = false;
-
-    for (int property_code = CSS_PROPERTY_DISPLAY; property_code < CSS_PROPERTY_COUNT; property_code++) {
-        bool property_changed = true;
-
-        while (property_changed) {
-            property_changed = false;
-
-            AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
-            if (!avl_node) break;
-
-            StyleNode* node = (StyleNode*)avl_node->declaration;
-            if (!node) break;
-
-            CssDeclaration* stylesheet_decl = NULL;
-            if (node->winning_decl && !node->winning_decl->specificity.inline_style) {
-                stylesheet_decl = node->winning_decl;
-            } else {
-                WeakDeclaration* weak = node->weak_list;
-                while (weak) {
-                    if (weak->declaration && !weak->declaration->specificity.inline_style) {
-                        stylesheet_decl = weak->declaration;
-                        break;
-                    }
-                    weak = weak->next;
-                }
-            }
-
-            if (!stylesheet_decl) break;
-
-            if (style_tree_remove_declaration(style_tree, stylesheet_decl)) {
-                if (style_tree->declaration_count > 0) {
-                    style_tree->declaration_count--;
-                }
-                removed_any = true;
-                property_changed = true;
-            }
-        }
-
-        AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
-        if (avl_node) {
-            StyleNode* node = (StyleNode*)avl_node->declaration;
-            if (node && !node->winning_decl && !node->weak_list) {
-                style_node_destroy(node);
-                avl_tree_remove(style_tree->tree, property_code);
-            }
-        }
-    }
-
-    if (removed_any) {
-        style_tree_invalidate_computed_values(style_tree);
-    }
-
-    return removed_any;
+    return style_tree_remove_declarations_by_inline(style_tree, false);
 }
 
 // ============================================================================

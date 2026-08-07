@@ -9,6 +9,7 @@
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
+#include "js_network_service.h"
 #include "js_class.h"
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
@@ -2657,28 +2658,7 @@ static Item js_tls_server_address(void) {
     JsTlsServer* srv = (JsTlsServer*)(uintptr_t)it2i(handle_item);
     if (!srv) return ItemNull;
 
-    struct sockaddr_storage addr;
-    int addrlen = sizeof(addr);
-    int r = uv_tcp_getsockname(&srv->tcp, (struct sockaddr*)&addr, &addrlen);
-    if (r != 0) return ItemNull;
-
-    Item result = js_new_object();
-    if (addr.ss_family == AF_INET) {
-        struct sockaddr_in* a4 = (struct sockaddr_in*)&addr;
-        char ip[64];
-        uv_ip4_name(a4, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
-    } else if (addr.ss_family == AF_INET6) {
-        struct sockaddr_in6* a6 = (struct sockaddr_in6*)&addr;
-        char ip[128];
-        uv_ip6_name(a6, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
-    }
-    return result;
+    return js_node_tcp_server_address(&srv->tcp);
 }
 
 static JsTlsServer* tls_server_from_object(Item self) {

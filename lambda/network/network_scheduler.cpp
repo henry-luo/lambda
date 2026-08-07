@@ -183,29 +183,34 @@ static void scheduler_curl_multi_complete(void* request_data, bool success, void
     scheduled_task_free(task);
 }
 
+static ScheduledTask* scheduler_take_task(NetworkScheduler* scheduler) {
+    if (!scheduler) return NULL;
+
+    pthread_mutex_lock(&scheduler->mutex);
+    ScheduledTask* task = NULL;
+    while (!scheduler->stop_workers) {
+        task = pop_dispatchable_locked(scheduler);
+        if (task) {
+            mark_task_active_locked(scheduler, task);
+            break;
+        }
+        pthread_cond_wait(&scheduler->cond, &scheduler->mutex);
+    }
+    if (scheduler->stop_workers && !task) {
+        pthread_mutex_unlock(&scheduler->mutex);
+        return NULL;
+    }
+    pthread_mutex_unlock(&scheduler->mutex);
+    return task;
+}
+
 static void* scheduler_worker_main(void* arg) {
     NetworkScheduler* scheduler = (NetworkScheduler*)arg;
     if (!scheduler) return NULL;
 
     while (true) {
-        pthread_mutex_lock(&scheduler->mutex);
-
-        ScheduledTask* task = NULL;
-        while (!scheduler->stop_workers) {
-            task = pop_dispatchable_locked(scheduler);
-            if (task) {
-                mark_task_active_locked(scheduler, task);
-                break;
-            }
-            pthread_cond_wait(&scheduler->cond, &scheduler->mutex);
-        }
-
-        if (scheduler->stop_workers && !task) {
-            pthread_mutex_unlock(&scheduler->mutex);
-            break;
-        }
-
-        pthread_mutex_unlock(&scheduler->mutex);
+        ScheduledTask* task = scheduler_take_task(scheduler);
+        if (!task) break;
 
         if (task->completion_fn) {
             bool success = network_download_resource((NetworkResource*)task->task_data);
@@ -227,24 +232,8 @@ static void* scheduler_multi_dispatcher_main(void* arg) {
     if (!scheduler) return NULL;
 
     while (true) {
-        pthread_mutex_lock(&scheduler->mutex);
-
-        ScheduledTask* task = NULL;
-        while (!scheduler->stop_workers) {
-            task = pop_dispatchable_locked(scheduler);
-            if (task) {
-                mark_task_active_locked(scheduler, task);
-                break;
-            }
-            pthread_cond_wait(&scheduler->cond, &scheduler->mutex);
-        }
-
-        if (scheduler->stop_workers && !task) {
-            pthread_mutex_unlock(&scheduler->mutex);
-            break;
-        }
-
-        pthread_mutex_unlock(&scheduler->mutex);
+        ScheduledTask* task = scheduler_take_task(scheduler);
+        if (!task) break;
 
         bool submitted = false;
         if (task->completion_fn && scheduler->curl_multi_backend) {
@@ -430,13 +419,13 @@ void network_scheduler_destroy(NetworkScheduler* scheduler) {
     mem_free(scheduler);
 }
 
-bool network_scheduler_submit(NetworkScheduler* scheduler,
-                              TaskFunction task_fn,
-                              void* task_data,
-                              const char* url,
-                              ResourcePriority priority) {
-    if (!scheduler || !task_fn) return false;
-
+static bool scheduler_enqueue_task(NetworkScheduler* scheduler,
+                                   void* task_data,
+                                   TaskFunction task_fn,
+                                   TaskCompletionFunction completion_fn,
+                                   const char* url,
+                                   ResourcePriority priority,
+                                   const char* failure_message) {
     if (priority < PRIORITY_CRITICAL || priority > PRIORITY_LOW) {
         priority = PRIORITY_NORMAL;
     }
@@ -446,6 +435,7 @@ bool network_scheduler_submit(NetworkScheduler* scheduler,
 
     task->scheduler = scheduler;
     task->task_fn = task_fn;
+    task->completion_fn = completion_fn;
     task->task_data = task_data;
     task->priority = priority;
     task->origin = scheduler_origin_from_url(url);
@@ -469,10 +459,21 @@ bool network_scheduler_submit(NetworkScheduler* scheduler,
     pthread_mutex_unlock(&scheduler->mutex);
 
     if (!ok) {
-        log_error("network-scheduler: submit failed for priority %d", priority);
+        log_error("%s for priority %d", failure_message, priority);
         scheduled_task_free(task);
     }
     return ok;
+}
+
+bool network_scheduler_submit(NetworkScheduler* scheduler,
+                              TaskFunction task_fn,
+                              void* task_data,
+                              const char* url,
+                              ResourcePriority priority) {
+    if (!scheduler || !task_fn) return false;
+
+    return scheduler_enqueue_task(scheduler, task_data, task_fn, NULL, url,
+                                  priority, "network-scheduler: submit failed");
 }
 
 bool network_scheduler_submit_download(NetworkScheduler* scheduler,
@@ -482,42 +483,8 @@ bool network_scheduler_submit_download(NetworkScheduler* scheduler,
                                        ResourcePriority priority) {
     if (!scheduler || !resource || !completion_fn) return false;
 
-    if (priority < PRIORITY_CRITICAL || priority > PRIORITY_LOW) {
-        priority = PRIORITY_NORMAL;
-    }
-
-    ScheduledTask* task = (ScheduledTask*)mem_calloc(1, sizeof(ScheduledTask), MEM_CAT_NETWORK);
-    if (!task) return false;
-
-    task->scheduler = scheduler;
-    task->task_data = resource;
-    task->completion_fn = completion_fn;
-    task->priority = priority;
-    task->origin = scheduler_origin_from_url(url);
-    if (!task->origin) {
-        scheduled_task_free(task);
-        return false;
-    }
-
-    pthread_mutex_lock(&scheduler->mutex);
-    if (scheduler->shutdown_flag) {
-        pthread_mutex_unlock(&scheduler->mutex);
-        scheduled_task_free(task);
-        return false;
-    }
-
-    bool ok = arraylist_append(scheduler->queues[priority], task) != 0;
-    if (ok) {
-        scheduler->queued_count++;
-        pthread_cond_broadcast(&scheduler->cond);
-    }
-    pthread_mutex_unlock(&scheduler->mutex);
-
-    if (!ok) {
-        log_error("network-scheduler: submit download failed for priority %d", priority);
-        scheduled_task_free(task);
-    }
-    return ok;
+    return scheduler_enqueue_task(scheduler, resource, NULL, completion_fn, url,
+                                  priority, "network-scheduler: submit download failed");
 }
 
 bool network_scheduler_cancel(NetworkScheduler* scheduler, void* task_data) {

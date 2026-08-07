@@ -182,6 +182,24 @@ static bool arg_is_at_splat(BashAstNode* node);
 static int arg_is_default_at_or_star(BashAstNode* node);
 static MIR_op_t bm_emit_int_literal(BashMirTranspiler* mt, int64_t value);
 static MIR_op_t bm_emit_get_var(BashMirTranspiler* mt, const char* name);
+static void bm_emit_errexit_check(BashMirTranspiler* mt);
+
+static void bm_transpile_function_definitions(BashMirTranspiler* mt, BashAstNode* body) {
+    for (BashAstNode* stmt = body; stmt; stmt = stmt->next) {
+        if (stmt->node_type == BASH_AST_NODE_FUNCTION_DEF) {
+            bm_transpile_function_def(mt, (BashFunctionDefNode*)stmt);
+        }
+    }
+}
+
+static void bm_transpile_program_body(BashMirTranspiler* mt, BashAstNode* body) {
+    for (BashAstNode* stmt = body; stmt; stmt = stmt->next) {
+        bm_transpile_statement(mt, stmt);
+        if (stmt->node_type != BASH_AST_NODE_LIST) {
+            bm_emit_errexit_check(mt);
+        }
+    }
+}
 
 // emit errexit check: call bash_check_errexit(), if true, exit scope
 static void bm_emit_errexit_check(BashMirTranspiler* mt) {
@@ -771,6 +789,48 @@ static MIR_op_t bm_emit_int_literal(BashMirTranspiler* mt, int64_t value) {
 // Statement transpilation
 // ============================================================================
 
+struct BashRedirectInfo {
+    bool has_stdout;
+    bool has_stdin;
+    bool has_herestring;
+    bool has_heredoc;
+    bool has_stderr;
+    bool has_stderr_to_stdout;
+    BashRedirectNode* stdout_redirect;
+    BashRedirectNode* stdin_redirect;
+    BashRedirectNode* herestring_redirect;
+    BashRedirectNode* heredoc_redirect;
+    BashRedirectNode* stderr_redirect;
+};
+
+static void bm_collect_redirects(BashAstNode* redirects, BashRedirectInfo* info) {
+    memset(info, 0, sizeof(*info));
+    for (BashAstNode* redir = redirects; redir; redir = redir->next) {
+        if (redir->node_type != BASH_AST_NODE_REDIRECT) continue;
+        BashRedirectNode* r = (BashRedirectNode*)redir;
+        if ((r->fd == 1 || r->fd == -1) &&
+                (r->mode == BASH_REDIR_WRITE || r->mode == BASH_REDIR_APPEND)) {
+            info->has_stdout = true;
+            info->stdout_redirect = r;
+        } else if (r->fd == 0 && r->mode == BASH_REDIR_READ) {
+            info->has_stdin = true;
+            info->stdin_redirect = r;
+        } else if (r->mode == BASH_REDIR_HERESTRING) {
+            info->has_herestring = true;
+            info->herestring_redirect = r;
+        } else if (r->mode == BASH_REDIR_HEREDOC) {
+            info->has_heredoc = true;
+            info->heredoc_redirect = r;
+        } else if (r->fd == 2 &&
+                (r->mode == BASH_REDIR_WRITE || r->mode == BASH_REDIR_APPEND)) {
+            info->has_stderr = true;
+            info->stderr_redirect = r;
+        } else if (r->mode == BASH_REDIR_DUP && r->fd == 2) {
+            info->has_stderr_to_stdout = true;
+        }
+    }
+}
+
 static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
     if (!node) return;
 
@@ -781,39 +841,15 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
     case BASH_AST_NODE_COMMAND: {
         BashCommandNode* cmd = (BashCommandNode*)node;
         if (cmd->redirects) {
-            // analyze redirects to determine what wrapping we need
-            bool has_stdout_redir = false;
-            bool has_stdin_redir = false;
-            bool has_stderr_redir = false;
-            bool has_stderr_to_stdout = false;
-            BashRedirectNode* stdout_redir = NULL;
-            BashRedirectNode* stdin_redir = NULL;
-            BashRedirectNode* stderr_redir = NULL;
-
-            BashAstNode* redir = cmd->redirects;
-            while (redir) {
-                if (redir->node_type == BASH_AST_NODE_REDIRECT) {
-                    BashRedirectNode* r = (BashRedirectNode*)redir;
-                    if ((r->fd == 1 || r->fd == -1) &&
-                        (r->mode == BASH_REDIR_WRITE || r->mode == BASH_REDIR_APPEND)) {
-                        has_stdout_redir = true;
-                        stdout_redir = r;
-                    } else if (r->fd == 0 && r->mode == BASH_REDIR_READ) {
-                        has_stdin_redir = true;
-                        stdin_redir = r;
-                    } else if (r->fd == 2 &&
-                               (r->mode == BASH_REDIR_WRITE || r->mode == BASH_REDIR_APPEND)) {
-                        has_stderr_redir = true;
-                        stderr_redir = r;
-                    } else if (r->mode == BASH_REDIR_DUP) {
-                        // 2>&1: merge stderr into stdout
-                        if (r->fd == 2) {
-                            has_stderr_to_stdout = true;
-                        }
-                    }
-                }
-                redir = redir->next;
-            }
+            BashRedirectInfo redirect_info;
+            bm_collect_redirects(cmd->redirects, &redirect_info);
+            bool has_stdout_redir = redirect_info.has_stdout;
+            bool has_stdin_redir = redirect_info.has_stdin;
+            bool has_stderr_redir = redirect_info.has_stderr;
+            bool has_stderr_to_stdout = redirect_info.has_stderr_to_stdout;
+            BashRedirectNode* stdout_redir = redirect_info.stdout_redirect;
+            BashRedirectNode* stdin_redir = redirect_info.stdin_redirect;
+            BashRedirectNode* stderr_redir = redirect_info.stderr_redirect;
 
             // push I/O state for scoped redirections
             bool needs_io_scope = has_stderr_redir || has_stderr_to_stdout;
@@ -877,45 +913,19 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
     case BASH_AST_NODE_REDIRECTED: {
         // redirected wrapper: a pipeline/subshell/compound with outer file redirects
         BashRedirectedNode* red = (BashRedirectedNode*)node;
-        bool has_stdout_redir = false;
-        bool has_stdin_redir = false;
-        bool has_herestring_redir = false;
-        bool has_heredoc_redir = false;
-        bool has_stderr_redir = false;
-        bool has_stderr_to_stdout = false;
-        BashRedirectNode* stdout_redir = NULL;
-        BashRedirectNode* stdin_redir = NULL;
-        BashRedirectNode* herestring_redir = NULL;
-        BashRedirectNode* heredoc_redir = NULL;
-        BashRedirectNode* stderr_redir = NULL;
-
-        BashAstNode* redir = red->redirects;
-        while (redir) {
-            if (redir->node_type == BASH_AST_NODE_REDIRECT) {
-                BashRedirectNode* r = (BashRedirectNode*)redir;
-                if ((r->fd == 1 || r->fd == -1) &&
-                    (r->mode == BASH_REDIR_WRITE || r->mode == BASH_REDIR_APPEND)) {
-                    has_stdout_redir = true;
-                    stdout_redir = r;
-                } else if (r->fd == 0 && r->mode == BASH_REDIR_READ) {
-                    has_stdin_redir = true;
-                    stdin_redir = r;
-                } else if (r->mode == BASH_REDIR_HERESTRING) {
-                    has_herestring_redir = true;
-                    herestring_redir = r;
-                } else if (r->mode == BASH_REDIR_HEREDOC) {
-                    has_heredoc_redir = true;
-                    heredoc_redir = r;
-                } else if (r->fd == 2 &&
-                           (r->mode == BASH_REDIR_WRITE || r->mode == BASH_REDIR_APPEND)) {
-                    has_stderr_redir = true;
-                    stderr_redir = r;
-                } else if (r->mode == BASH_REDIR_DUP && r->fd == 2) {
-                    has_stderr_to_stdout = true;
-                }
-            }
-            redir = redir->next;
-        }
+        BashRedirectInfo redirect_info;
+        bm_collect_redirects(red->redirects, &redirect_info);
+        bool has_stdout_redir = redirect_info.has_stdout;
+        bool has_stdin_redir = redirect_info.has_stdin;
+        bool has_herestring_redir = redirect_info.has_herestring;
+        bool has_heredoc_redir = redirect_info.has_heredoc;
+        bool has_stderr_redir = redirect_info.has_stderr;
+        bool has_stderr_to_stdout = redirect_info.has_stderr_to_stdout;
+        BashRedirectNode* stdout_redir = redirect_info.stdout_redirect;
+        BashRedirectNode* stdin_redir = redirect_info.stdin_redirect;
+        BashRedirectNode* herestring_redir = redirect_info.herestring_redirect;
+        BashRedirectNode* heredoc_redir = redirect_info.heredoc_redirect;
+        BashRedirectNode* stderr_redir = redirect_info.stderr_redirect;
 
         // push I/O state for scoped redirections
         bool needs_io_scope = has_stderr_redir || has_stderr_to_stdout;
@@ -4583,6 +4593,22 @@ static const char* preprocess_case_keyword(const char* src, size_t src_len, StrB
 static MIR_context_t bash_source_ctx_list[BASH_SOURCE_CTX_MAX];
 static int bash_source_ctx_count = 0;
 
+static void bm_cleanup_dynamic_source(BashTranspiler* tp, BashMirTranspiler* mt,
+                                       TSTree* tree, TSParser* parser,
+                                       StrBuf* preproc_buf, StrBuf* dd_buf,
+                                       char* source_text) {
+    hashmap_free(mt->vars);
+    hashmap_free(mt->em.import_cache);
+    hashmap_free(mt->user_funcs);
+    mem_free(mt);
+    ts_tree_delete(tree);
+    ts_parser_delete(parser);
+    bash_transpiler_destroy(tp);
+    if (preproc_buf) strbuf_free(preproc_buf);
+    if (dd_buf) strbuf_free(dd_buf);
+    mem_free(source_text);
+}
+
 extern "C" Item bash_source_file(Item filename) {
     String* s = it2s(filename);
     if (!s || s->len == 0) {
@@ -4700,12 +4726,7 @@ extern "C" Item bash_source_file(Item filename) {
     // Pass 1: function definitions
     BashProgramNode* program = (BashProgramNode*)ast;
     BashAstNode* stmt = program->body;
-    while (stmt) {
-        if (stmt->node_type == BASH_AST_NODE_FUNCTION_DEF) {
-            bm_transpile_function_def(mt, (BashFunctionDefNode*)stmt);
-        }
-        stmt = stmt->next;
-    }
+    bm_transpile_function_definitions(mt, stmt);
 
     // Pass 2: main body
     MIR_type_t ret_type = MIR_T_I64;
@@ -4713,14 +4734,7 @@ extern "C" Item bash_source_file(Item filename) {
     mt->em.func = mt->em.func_item->u.func;
     mt->result_reg = bm_new_temp(mt);
 
-    stmt = program->body;
-    while (stmt) {
-        bm_transpile_statement(mt, stmt);
-        if (stmt->node_type != BASH_AST_NODE_LIST) {
-            bm_emit_errexit_check(mt);
-        }
-        stmt = stmt->next;
-    }
+    bm_transpile_program_body(mt, program->body);
 
     MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
     MIR_append_insn(mt->em.ctx, mt->em.func_item,
@@ -4780,16 +4794,7 @@ extern "C" Item bash_source_file(Item filename) {
     }
 
     // cleanup everything except ctx
-    hashmap_free(mt->vars);
-    hashmap_free(mt->em.import_cache);
-    hashmap_free(mt->user_funcs);
-    mem_free(mt);
-    ts_tree_delete(tree);
-    ts_parser_delete(parser);
-    bash_transpiler_destroy(tp);
-    if (preproc_buf) strbuf_free(preproc_buf);
-    if (dd_buf) strbuf_free(dd_buf);
-    mem_free(source_text); // from read_text_file (lib)
+    bm_cleanup_dynamic_source(tp, mt, tree, parser, preproc_buf, dd_buf, source_text);
 
     return result;
 }
@@ -4970,12 +4975,7 @@ extern "C" Item bash_eval_string(Item code) {
     // Pass 1: function defs
     BashProgramNode* program = (BashProgramNode*)ast;
     BashAstNode* stmt = program->body;
-    while (stmt) {
-        if (stmt->node_type == BASH_AST_NODE_FUNCTION_DEF) {
-            bm_transpile_function_def(mt, (BashFunctionDefNode*)stmt);
-        }
-        stmt = stmt->next;
-    }
+    bm_transpile_function_definitions(mt, stmt);
 
     // Pass 2: main body
     char func_name[48];
@@ -4985,14 +4985,7 @@ extern "C" Item bash_eval_string(Item code) {
     mt->em.func = mt->em.func_item->u.func;
     mt->result_reg = bm_new_temp(mt);
 
-    stmt = program->body;
-    while (stmt) {
-        bm_transpile_statement(mt, stmt);
-        if (stmt->node_type != BASH_AST_NODE_LIST) {
-            bm_emit_errexit_check(mt);
-        }
-        stmt = stmt->next;
-    }
+    bm_transpile_program_body(mt, program->body);
 
     MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
     MIR_append_insn(mt->em.ctx, mt->em.func_item,
@@ -5041,16 +5034,7 @@ extern "C" Item bash_eval_string(Item code) {
         MIR_finish(ctx);
     }
 
-    hashmap_free(mt->vars);
-    hashmap_free(mt->em.import_cache);
-    hashmap_free(mt->user_funcs);
-    mem_free(mt);
-    ts_tree_delete(tree);
-    ts_parser_delete(parser);
-    bash_transpiler_destroy(tp);
-    if (preproc_buf) strbuf_free(preproc_buf);
-    if (dd_buf) strbuf_free(dd_buf);
-    mem_free(source_text);
+    bm_cleanup_dynamic_source(tp, mt, tree, parser, preproc_buf, dd_buf, source_text);
 
     return result;
 }
@@ -6072,12 +6056,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     // === Pass 1: Compile all function definitions first ===
     BashProgramNode* program = (BashProgramNode*)ast;
     BashAstNode* stmt = program->body;
-    while (stmt) {
-        if (stmt->node_type == BASH_AST_NODE_FUNCTION_DEF) {
-            bm_transpile_function_def(mt, (BashFunctionDefNode*)stmt);
-        }
-        stmt = stmt->next;
-    }
+    bm_transpile_function_definitions(mt, stmt);
 
     // === Pass 2: Compile bash_main (function defs become no-ops) ===
     MIR_type_t ret_type = MIR_T_I64;
@@ -6091,14 +6070,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     bm_emit_call_void_1(mt, "bash_push_funcname",
         bm_emit_string_literal(mt, "main", 4));
 
-    stmt = program->body;
-    while (stmt) {
-        bm_transpile_statement(mt, stmt);
-        if (stmt->node_type != BASH_AST_NODE_LIST) {
-            bm_emit_errexit_check(mt);
-        }
-        stmt = stmt->next;
-    }
+    bm_transpile_program_body(mt, program->body);
 
     // run EXIT trap before returning from main script
     bm_emit_call_void_0(mt, "bash_trap_run_exit");

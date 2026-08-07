@@ -1374,36 +1374,56 @@ extern "C" Item js_atomics_operation(int op, Item typed_array, Item index_item, 
 
 #undef JS_ATOMICS_APPLY_OPERATION
 
-extern "C" Item js_atomics_wait(Item typed_array, Item index_item, Item expected, Item timeout) {
-    JsTypedArray* ta = js_validate_atomic_typed_array(typed_array, true, true);
-    if (!ta) return ItemNull;
-    int index = 0;
-    if (!js_atomics_validate_index(ta, index_item, &index)) return ItemNull;
+typedef struct JsAtomicsWaitInputs {
+    JsTypedArray* ta;
+    int index;
+    uint64_t expected_bits;
+    double timeout_number;
+    bool has_timeout;
+    bool equal;
+    Item error;
+} JsAtomicsWaitInputs;
 
-    uint64_t expected_bits = 0;
-    if (!js_atomics_to_element_bits(ta->element_type, expected, &expected_bits, NULL)) return ItemNull;
-    double timeout_number = INFINITY;
-    bool has_timeout = false;
+static bool js_atomics_prepare_wait(Item typed_array, Item index_item, Item expected,
+        Item timeout, JsAtomicsWaitInputs* inputs) {
+    inputs->error = ItemNull;
+    inputs->ta = js_validate_atomic_typed_array(typed_array, true, true);
+    if (!inputs->ta) return false;
+    if (!js_atomics_validate_index(inputs->ta, index_item, &inputs->index)) return false;
+    inputs->expected_bits = 0;
+    if (!js_atomics_to_element_bits(inputs->ta->element_type, expected,
+            &inputs->expected_bits, NULL)) return false;
+
+    inputs->timeout_number = INFINITY;
+    inputs->has_timeout = false;
     if (get_type_id(timeout) != LMD_TYPE_UNDEFINED) {
-        js_dataview_to_number_value(timeout, &timeout_number);
-        if (js_check_exception()) return ItemNull;
-        if (std::isnan(timeout_number)) timeout_number = INFINITY;
-        else if (timeout_number < 0.0) timeout_number = 0.0;
-        else timeout_number = std::trunc(timeout_number);
-        has_timeout = std::isfinite(timeout_number);
+        js_dataview_to_number_value(timeout, &inputs->timeout_number);
+        if (js_check_exception()) return false;
+        if (std::isnan(inputs->timeout_number)) inputs->timeout_number = INFINITY;
+        else if (inputs->timeout_number < 0.0) inputs->timeout_number = 0.0;
+        else inputs->timeout_number = std::trunc(inputs->timeout_number);
+        inputs->has_timeout = std::isfinite(inputs->timeout_number);
     }
 
-    void* data = js_typed_array_current_data(ta);
-    if (!data) return js_throw_range_error("Invalid atomic access index");
-    bool equal = false;
-    if (ta->element_type == JS_TYPED_INT32) {
-        int32_t current = __atomic_load_n(((int32_t*)data) + index, __ATOMIC_SEQ_CST);
-        equal = current == (int32_t)expected_bits;
-    } else {
-        int64_t current = __atomic_load_n(((int64_t*)data) + index, __ATOMIC_SEQ_CST);
-        equal = current == (int64_t)expected_bits;
+    void* data = js_typed_array_current_data(inputs->ta);
+    if (!data) {
+        inputs->error = js_throw_range_error("Invalid atomic access index");
+        return false;
     }
-    if (!equal) return js_atomics_wait_result("not-equal", 9);
+    if (inputs->ta->element_type == JS_TYPED_INT32) {
+        int32_t current = __atomic_load_n(((int32_t*)data) + inputs->index, __ATOMIC_SEQ_CST);
+        inputs->equal = current == (int32_t)inputs->expected_bits;
+    } else {
+        int64_t current = __atomic_load_n(((int64_t*)data) + inputs->index, __ATOMIC_SEQ_CST);
+        inputs->equal = current == (int64_t)inputs->expected_bits;
+    }
+    return true;
+}
+
+extern "C" Item js_atomics_wait(Item typed_array, Item index_item, Item expected, Item timeout) {
+    JsAtomicsWaitInputs inputs;
+    if (!js_atomics_prepare_wait(typed_array, index_item, expected, timeout, &inputs)) return inputs.error;
+    if (!inputs.equal) return js_atomics_wait_result("not-equal", 9);
 
     if (!js_atomics_host_can_suspend()) {
         return js_throw_type_error("Atomics.wait cannot suspend on this agent");
@@ -1413,14 +1433,15 @@ extern "C" Item js_atomics_wait(Item typed_array, Item index_item, Item expected
     if (agent_slot < 0) {
         return js_atomics_wait_result("timed-out", 9);
     }
-    if (has_timeout && timeout_number <= 0.0) {
+    if (inputs.has_timeout && inputs.timeout_number <= 0.0) {
         return js_atomics_wait_result("timed-out", 9);
     }
 
-    int waiter_id = js_atomics_record_waiter(ta->buffer, index, agent_slot, timeout_number, has_timeout, ItemNull);
+    int waiter_id = js_atomics_record_waiter(inputs.ta->buffer, inputs.index, agent_slot,
+        inputs.timeout_number, inputs.has_timeout, ItemNull);
     if (waiter_id == 0) return js_throw_type_error("Atomics.wait waiter capacity exceeded");
-    if (has_timeout && timeout_number <= 200.0) {
-        js_atomics_virtual_now_ms += timeout_number;
+    if (inputs.has_timeout && inputs.timeout_number <= 200.0) {
+        js_atomics_virtual_now_ms += inputs.timeout_number;
         js_atomics_resolve_due_waiters();
         return js_atomics_wait_result("timed-out", 9);
     }
@@ -1428,53 +1449,26 @@ extern "C" Item js_atomics_wait(Item typed_array, Item index_item, Item expected
 }
 
 extern "C" Item js_atomics_wait_async(Item typed_array, Item index_item, Item expected, Item timeout) {
-    JsTypedArray* ta = js_validate_atomic_typed_array(typed_array, true, true);
-    if (!ta) return ItemNull;
-    int index = 0;
-    if (!js_atomics_validate_index(ta, index_item, &index)) return ItemNull;
-
-    uint64_t expected_bits = 0;
-    if (!js_atomics_to_element_bits(ta->element_type, expected, &expected_bits, NULL)) return ItemNull;
-
-    double timeout_number = INFINITY;
-    bool has_timeout = false;
-    if (get_type_id(timeout) != LMD_TYPE_UNDEFINED) {
-        js_dataview_to_number_value(timeout, &timeout_number);
-        if (js_check_exception()) return ItemNull;
-        if (std::isnan(timeout_number)) timeout_number = INFINITY;
-        else if (timeout_number < 0.0) timeout_number = 0.0;
-        else timeout_number = std::trunc(timeout_number);
-        has_timeout = std::isfinite(timeout_number);
-    }
-
-    void* data = js_typed_array_current_data(ta);
-    if (!data) return js_throw_range_error("Invalid atomic access index");
-
-    bool equal = false;
-    if (ta->element_type == JS_TYPED_INT32) {
-        int32_t current = __atomic_load_n(((int32_t*)data) + index, __ATOMIC_SEQ_CST);
-        equal = current == (int32_t)expected_bits;
-    } else {
-        int64_t current = __atomic_load_n(((int64_t*)data) + index, __ATOMIC_SEQ_CST);
-        equal = current == (int64_t)expected_bits;
-    }
-    if (!equal) return js_atomics_wait_async_result(false, js_atomics_wait_result("not-equal", 9));
-    if (has_timeout && timeout_number <= 0.0) {
+    JsAtomicsWaitInputs inputs;
+    if (!js_atomics_prepare_wait(typed_array, index_item, expected, timeout, &inputs)) return inputs.error;
+    if (!inputs.equal) return js_atomics_wait_async_result(false, js_atomics_wait_result("not-equal", 9));
+    if (inputs.has_timeout && inputs.timeout_number <= 0.0) {
         return js_atomics_wait_async_result(false, js_atomics_wait_result("timed-out", 9));
     }
 
     int agent_slot = js_262_agent_current_slot_for_atomics();
     if (agent_slot >= 0) {
-        int waiter_id = js_atomics_record_waiter(ta->buffer, index, agent_slot, timeout_number, has_timeout, ItemNull);
+        int waiter_id = js_atomics_record_waiter(inputs.ta->buffer, inputs.index, agent_slot,
+            inputs.timeout_number, inputs.has_timeout, ItemNull);
         if (waiter_id == 0) return js_throw_type_error("Atomics.waitAsync waiter capacity exceeded");
         // Test262 agents run on a virtual clock. Match the synchronous
         // Atomics.wait fast path for short finite waits so no-spurious-wakeup
         // probes observe the requested lapse without paying real wall time.
-        if (has_timeout && timeout_number <= 200.0) {
-            js_atomics_virtual_now_ms += timeout_number;
+        if (inputs.has_timeout && inputs.timeout_number <= 200.0) {
+            js_atomics_virtual_now_ms += inputs.timeout_number;
             js_atomics_resolve_due_waiters();
         }
-        Item report_status = has_timeout ? js_atomics_wait_result("timed-out", 9) : js_atomics_wait_result("ok", 2);
+        Item report_status = inputs.has_timeout ? js_atomics_wait_result("timed-out", 9) : js_atomics_wait_result("ok", 2);
         return js_atomics_wait_async_result(true, report_status);
     }
 
@@ -1482,10 +1476,13 @@ extern "C" Item js_atomics_wait_async(Item typed_array, Item index_item, Item ex
     if (js_check_exception()) return ItemNull;
     if (get_type_id(promise) != LMD_TYPE_MAP) return ItemNull;
 
-    int waiter_id = js_atomics_record_waiter(ta->buffer, index, agent_slot, timeout_number, has_timeout, promise);
+    int waiter_id = js_atomics_record_waiter(inputs.ta->buffer, inputs.index, agent_slot,
+        inputs.timeout_number, inputs.has_timeout, promise);
     if (waiter_id == 0) return js_throw_type_error("Atomics.waitAsync waiter capacity exceeded");
 
-    if (has_timeout && timeout_number <= 200.0) js_atomics_schedule_timeout_waiter(waiter_id, timeout_number);
+    if (inputs.has_timeout && inputs.timeout_number <= 200.0) {
+        js_atomics_schedule_timeout_waiter(waiter_id, inputs.timeout_number);
+    }
     return js_atomics_wait_async_result(true, promise);
 }
 
@@ -1592,22 +1589,26 @@ static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
     }
 }
 
-extern "C" Item js_arraybuffer_new(int byte_length) {
-    if (byte_length < 0) byte_length = 0;
-    JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
-    if (!ab) return ItemError;
-
+static Item js_arraybuffer_wrap_item(JsArrayBuffer* ab) {
+    if (!ab) return (Item){.item = ITEM_NULL};
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_ARRAYBUFFER;
     m->type = js_arraybuffer_shared(ab) ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
     m->data = ab;
     m->data_cap = 0;
-
     RootFrame roots(1);
     Rooted<Item> result_root(roots, (Item){.map = m});
     js_arraybuffer_link_prototype(result_root.get(), js_arraybuffer_shared(ab));
     return result_root.get();
+}
+
+extern "C" Item js_arraybuffer_new(int byte_length) {
+    if (byte_length < 0) byte_length = 0;
+    JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
+    if (!ab) return ItemError;
+
+    return js_arraybuffer_wrap_item(ab);
 }
 
 // ArrayBuffer constructor from JS: new ArrayBuffer(length)
@@ -1673,17 +1674,7 @@ extern "C" JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val) {
 
 // Wrap an existing JsArrayBuffer* in a Map Item (for .buffer property access)
 extern "C" Item js_arraybuffer_wrap(JsArrayBuffer* ab) {
-    if (!ab) return (Item){.item = ITEM_NULL};
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    m->type_id = LMD_TYPE_MAP;
-    m->map_kind = MAP_KIND_ARRAYBUFFER;
-    m->type = js_arraybuffer_shared(ab) ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
-    m->data = ab;
-    m->data_cap = 0;
-    RootFrame roots(1);
-    Rooted<Item> result_root(roots, (Item){.map = m});
-    js_arraybuffer_link_prototype(result_root.get(), js_arraybuffer_shared(ab));
-    return result_root.get();
+    return js_arraybuffer_wrap_item(ab);
 }
 
 extern "C" int js_arraybuffer_byte_length(Item val) {
@@ -2772,6 +2763,29 @@ extern "C" void* js_typed_array_current_data_ptr(Item ta_item) {
     JsTypedArray* ta = js_get_typed_array_ptr(m);
     js_typed_array_refresh_arraynum_view(ta);
     return js_typed_array_current_data(ta);
+}
+
+extern "C" bool js_item_bytes(Item item, const char** data, int* len) {
+    if (!data || !len) return false;
+    *data = NULL;
+    *len = 0;
+    if (get_type_id(item) == LMD_TYPE_STRING) {
+        String* s = it2s(item);
+        if (!s) return false;
+        *data = s->chars;
+        *len = (int)s->len;
+        return true;
+    }
+    if (js_is_typed_array(item)) {
+        if (js_typed_array_is_out_of_bounds_item(item)) return false;
+        int byte_len = js_typed_array_byte_length(item);
+        void* ptr = js_typed_array_current_data_ptr(item);
+        if (byte_len > 0 && !ptr) return false;
+        *data = (const char*)ptr;
+        *len = byte_len;
+        return true;
+    }
+    return false;
 }
 
 extern "C" void* js_typed_array_prepare_write_ptr(Item ta_item) {

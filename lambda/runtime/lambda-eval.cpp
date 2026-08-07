@@ -119,6 +119,19 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
 // Runtime Error Helper
 // =============================================================================
 
+static LambdaError* create_runtime_error(LambdaErrorCode code, const char* message) {
+    if (!context) return NULL;
+    SourceLocation loc = {0};
+    if (context->current_file) loc.file = context->current_file;
+    LambdaError* error = err_create(code, message, &loc);
+    if (!error) {
+        if (lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, code)) return NULL;
+        (void)lambda_recovery_publish_fault_item((Context*)context,
+            LAMBDA_FAULT_OUT_OF_MEMORY, code);
+    }
+    return error;
+}
+
 /**
  * Set a runtime error in the current evaluation context.
  * Captures a stack trace using native frame pointer walking.
@@ -132,21 +145,8 @@ static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     vsnprintf(message, sizeof(message), format, args);
     va_end(args);
 
-    // create error with current source location
-    SourceLocation loc = {0};
-    if (context->current_file) {
-        loc.file = context->current_file;
-    }
-
-    LambdaError* error = err_create(code, message, &loc);
-    if (!error) {
-        // A rich diagnostic must not allocate a second error when memory is
-        // already exhausted; an armed C14 frame owns the static OOM landing.
-        if (lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, code)) return;
-        (void)lambda_recovery_publish_fault_item((Context*)context,
-            LAMBDA_FAULT_OUT_OF_MEMORY, code);
-        return;
-    }
+    LambdaError* error = create_runtime_error(code, message);
+    if (!error) return;
 
     // capture native stack trace via FP walking
     error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
@@ -181,18 +181,8 @@ static void set_input_parse_error(const char* function_name, Input* input,
 extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* message) {
     if (!context) return;
 
-    SourceLocation loc = {0};
-    if (context->current_file) {
-        loc.file = context->current_file;
-    }
-
-    LambdaError* error = err_create(code, message, &loc);
-    if (!error) {
-        if (lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, code)) return;
-        (void)lambda_recovery_publish_fault_item((Context*)context,
-            LAMBDA_FAULT_OUT_OF_MEMORY, code);
-        return;
-    }
+    LambdaError* error = create_runtime_error(code, message);
+    if (!error) return;
     // Skip stack trace capture - may be called in low-stack conditions
 
     if (context->last_error) {
@@ -3318,6 +3308,25 @@ String& STR_TRUE  = reinterpret_cast<String&>(_str_true);
 String& STR_FALSE = reinterpret_cast<String&>(_str_false);
 String& STR_ERROR = reinterpret_cast<String&>(_str_error);
 
+static int fn_datetime_append_suffix(DateTime* dt, char* buf, size_t buf_size,
+        int len) {
+    if (dt->millisecond > 0) {
+        len += snprintf(buf + len, buf_size - (size_t)len, ".%03d", dt->millisecond);
+    }
+    if (DATETIME_HAS_TIMEZONE(dt)) {
+        int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
+        if (tz_offset == 0) {
+            len += snprintf(buf + len, buf_size - (size_t)len, "z");
+        } else {
+            int hours = abs(tz_offset) / 60;
+            int minutes = abs(tz_offset) % 60;
+            len += snprintf(buf + len, buf_size - (size_t)len, "%+03d:%02d",
+                tz_offset >= 0 ? hours : -hours, minutes);
+        }
+    }
+    return len + snprintf(buf + len, buf_size - (size_t)len, "'");
+}
+
 String* fn_string(Item itm) {
     TypeId type_id = get_type_id(itm);
     switch (type_id) {
@@ -3379,25 +3388,7 @@ String* fn_string(Item itm) {
                     len = snprintf(buf, sizeof(buf), "t'%02d:%02d:%02d",
                         dt->hour, dt->minute, dt->second);
 
-                    // Add milliseconds if non-zero
-                    if (dt->millisecond > 0) {
-                        len += snprintf(buf + len, sizeof(buf) - len, ".%03d", dt->millisecond);
-                    }
-
-                    // Add timezone - use 'z' for UTC (+00:00)
-                    if (DATETIME_HAS_TIMEZONE(dt)) {
-                        int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
-                        if (tz_offset == 0) {
-                            len += snprintf(buf + len, sizeof(buf) - len, "z");
-                        } else {
-                            int hours = abs(tz_offset) / 60;
-                            int minutes = abs(tz_offset) % 60;
-                            len += snprintf(buf + len, sizeof(buf) - len, "%+03d:%02d",
-                                tz_offset >= 0 ? hours : -hours, minutes);
-                        }
-                    }
-
-                    len += snprintf(buf + len, sizeof(buf) - len, "'");
+                    len = fn_datetime_append_suffix(dt, buf, sizeof(buf), len);
                     break;
                 }
 
@@ -3408,25 +3399,7 @@ String* fn_string(Item itm) {
                         DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
                         dt->hour, dt->minute, dt->second);
 
-                    // Add milliseconds if non-zero
-                    if (dt->millisecond > 0) {
-                        len += snprintf(buf + len, sizeof(buf) - len, ".%03d", dt->millisecond);
-                    }
-
-                    // Add timezone - use 'z' for UTC (+00:00)
-                    if (DATETIME_HAS_TIMEZONE(dt)) {
-                        int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
-                        if (tz_offset == 0) {
-                            len += snprintf(buf + len, sizeof(buf) - len, "z");
-                        } else {
-                            int hours = abs(tz_offset) / 60;
-                            int minutes = abs(tz_offset) % 60;
-                            len += snprintf(buf + len, sizeof(buf) - len, "%+03d:%02d",
-                                tz_offset >= 0 ? hours : -hours, minutes);
-                        }
-                    }
-
-                    len += snprintf(buf + len, sizeof(buf) - len, "'");
+                    len = fn_datetime_append_suffix(dt, buf, sizeof(buf), len);
                     break;
                 }
             }
@@ -4992,76 +4965,74 @@ Bool fn_ends_with(Item str_item, Item suffix_item) {
 
 // index_of raw search helper — -1 is retained only for C/JS adapters.
 // The public Lambda wrapper below converts absence to null.
-int64_t fn_index_of_raw(Item str_item, Item sub_item) {
+static int64_t fn_index_of_raw_impl(Item str_item, Item sub_item, bool reverse) {
     // This raw helper keeps the C-family -1 ABI for foreign adapters. Lambda's
     // public wrapper maps its broad-input no-answer result to null.
     if (get_type_id(str_item) == LMD_TYPE_ERROR || get_type_id(sub_item) == LMD_TYPE_ERROR) {
         return -1;
     }
     TypeId coll_type = get_type_id(str_item);
-
-    // --- List/Array: find first matching element ---
     if (coll_type == LMD_TYPE_ARRAY) {
         List* list = str_item.array;
         if (!list) return -1;
-        for (int64_t i = 0; i < list->length; i++) {
-            if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) {
-                return i;
+        if (!reverse) {
+            for (int64_t i = 0; i < list->length; i++) {
+                if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) return i;
+            }
+        } else {
+            for (int64_t i = list->length - 1; i >= 0; i--) {
+                if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) return i;
             }
         }
         return -1;
     }
     if (coll_type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = str_item.array_num;
-        return array_num_find_equal(arr, sub_item, false);
+        return array_num_find_equal(str_item.array_num, sub_item, reverse);
     }
 
-    // --- String/Symbol: substring search ---
     TypeId sub_type = get_type_id(sub_item);
-
-    if ((!is_text_type_id(coll_type)) ||
-        (!is_text_type_id(sub_type))) {
-        log_debug("fn_index_of: arguments must be strings/symbols or first arg must be a list");
+    if (!is_text_type_id(coll_type) || !is_text_type_id(sub_type)) {
+        log_debug("fn_%sindex_of: arguments must be strings/symbols or first arg must be a list",
+            reverse ? "last_" : "");
         return -1;
     }
-
     const char* str_chars = str_item.get_chars();
     uint32_t str_len = str_item.get_len();
     const char* sub_chars = sub_item.get_chars();
     uint32_t sub_len = sub_item.get_len();
+    if (!str_chars || !sub_chars) return -1;
 
-    if (!str_chars || !sub_chars) {
-        return -1;
-    }
-
-    if (sub_len == 0) {
-        return 0;  // empty substring is at position 0
-    }
-
-    if (str_len < sub_len) {
-        return -1;
-    }
-
-    // byte-based search, then convert byte offset to char offset
     bool is_ascii = false;
     if (coll_type == LMD_TYPE_STRING) {
         String* str = str_item.get_safe_string();
-        if (!str) {
-            return -1;
-        }
+        if (!str) return -1;
         is_ascii = str->is_ascii != 0;
     } else {
         is_ascii = str_is_ascii(str_chars, str_len);
     }
-    for (size_t i = 0; i <= str_len - sub_len; i++) {
-        if (memcmp(str_chars + i, sub_chars, sub_len) == 0) {
-            // convert byte offset to character offset
-            int64_t char_index = is_ascii ? (int64_t)i : (int64_t)str_utf8_count(str_chars, i);
-            return char_index;
+    if (sub_len == 0) {
+        if (!reverse) return 0;
+        return is_ascii ? (int64_t)str_len : (int64_t)str_utf8_count(str_chars, str_len);
+    }
+    if (str_len < sub_len) return -1;
+
+    if (!reverse) {
+        for (size_t i = 0; i <= str_len - sub_len; i++) {
+            if (memcmp(str_chars + i, sub_chars, sub_len) == 0)
+                return is_ascii ? (int64_t)i : (int64_t)str_utf8_count(str_chars, i);
+        }
+    } else {
+        for (size_t i = str_len - sub_len + 1; i > 0; i--) {
+            size_t pos = i - 1;
+            if (memcmp(str_chars + pos, sub_chars, sub_len) == 0)
+                return is_ascii ? (int64_t)pos : (int64_t)str_utf8_count(str_chars, pos);
         }
     }
-
     return -1;
+}
+
+int64_t fn_index_of_raw(Item str_item, Item sub_item) {
+    return fn_index_of_raw_impl(str_item, sub_item, false);
 }
 
 // Lambda's public search result uses null for absence. Keep the raw -1 helper
@@ -5079,88 +5050,7 @@ Item fn_index_of(Item str_item, Item sub_item) {
 // last_index_of raw search helper — -1 is retained only for C/JS adapters.
 // The public Lambda wrapper below converts absence to null.
 int64_t fn_last_index_of_raw(Item str_item, Item sub_item) {
-    // This raw helper keeps the C-family -1 ABI for foreign adapters. Lambda's
-    // public wrapper maps its broad-input no-answer result to null.
-    if (get_type_id(str_item) == LMD_TYPE_ERROR || get_type_id(sub_item) == LMD_TYPE_ERROR) {
-        return -1;
-    }
-    TypeId coll_type = get_type_id(str_item);
-
-    // --- List/Array: find last matching element ---
-    if (coll_type == LMD_TYPE_ARRAY) {
-        List* list = str_item.array;
-        if (!list) return -1;
-        for (int64_t i = list->length - 1; i >= 0; i--) {
-            if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) {
-                return i;
-            }
-        }
-        return -1;
-    }
-    if (coll_type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = str_item.array_num;
-        return array_num_find_equal(arr, sub_item, true);
-    }
-
-    // --- String/Symbol: substring search from end ---
-    TypeId sub_type = get_type_id(sub_item);
-
-    if ((!is_text_type_id(coll_type)) ||
-        (!is_text_type_id(sub_type))) {
-        log_debug("fn_last_index_of: arguments must be strings/symbols or first arg must be a list");
-        return -1;
-    }
-
-    const char* str_chars = str_item.get_chars();
-    uint32_t str_len = str_item.get_len();
-    const char* sub_chars = sub_item.get_chars();
-    uint32_t sub_len = sub_item.get_len();
-
-    if (!str_chars || !sub_chars) {
-        return -1;
-    }
-
-    if (sub_len == 0) {
-        // empty substring is at the end
-        bool is_ascii = false;
-        if (coll_type == LMD_TYPE_STRING) {
-            String* str = str_item.get_safe_string();
-            if (!str) {
-                return -1;
-            }
-            is_ascii = str->is_ascii != 0;
-        } else {
-            is_ascii = str_is_ascii(str_chars, str_len);
-        }
-        int64_t char_len = is_ascii ? (int64_t)str_len : (int64_t)str_utf8_count(str_chars, str_len);
-        return char_len;
-    }
-
-    if (str_len < sub_len) {
-        return -1;
-    }
-
-    // search from end to beginning
-    bool is_ascii = false;
-    if (coll_type == LMD_TYPE_STRING) {
-        String* str = str_item.get_safe_string();
-        if (!str) {
-            return -1;
-        }
-        is_ascii = str->is_ascii != 0;
-    } else {
-        is_ascii = str_is_ascii(str_chars, str_len);
-    }
-    for (size_t i = str_len - sub_len + 1; i > 0; i--) {
-        size_t pos = i - 1;
-        if (memcmp(str_chars + pos, sub_chars, sub_len) == 0) {
-            // convert byte offset to character offset
-            int64_t char_index = is_ascii ? (int64_t)pos : (int64_t)str_utf8_count(str_chars, pos);
-            return char_index;
-        }
-    }
-
-    return -1;
+    return fn_index_of_raw_impl(str_item, sub_item, true);
 }
 
 Item fn_last_index_of(Item str_item, Item sub_item) {

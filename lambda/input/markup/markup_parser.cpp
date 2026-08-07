@@ -476,19 +476,6 @@ void MarkupParser::noteUnresolvedReference(const char* ref_type, const char* ref
 // ============================================================================
 
 /**
- * is_escapable_char - Check if character can be backslash-escaped per CommonMark
- */
-static bool is_escapable_char(char c) {
-    return c == '!' || c == '"' || c == '#' || c == '$' || c == '%' ||
-           c == '&' || c == '\'' || c == '(' || c == ')' || c == '*' ||
-           c == '+' || c == ',' || c == '-' || c == '.' || c == '/' ||
-           c == ':' || c == ';' || c == '<' || c == '=' || c == '>' ||
-           c == '?' || c == '@' || c == '[' || c == '\\' || c == ']' ||
-           c == '^' || c == '_' || c == '`' || c == '{' || c == '|' ||
-           c == '}' || c == '~';
-}
-
-/**
  * unescape_to_buffer - Process backslash escapes and entity references in a string into a buffer
  *
  * Copies the input string to the output buffer, processing backslash escapes
@@ -502,7 +489,7 @@ static void unescape_to_buffer(const char* src, size_t src_len, char* dst, size_
     const char* end = src + src_len;
 
     while (pos < end && out_pos < dst_size - 1) {
-        if (*pos == '\\' && pos + 1 < end && is_escapable_char(*(pos + 1))) {
+        if (*pos == '\\' && pos + 1 < end && is_escapable(*(pos + 1))) {
             // skip the backslash, copy the escaped character
             pos++;
             dst[out_pos++] = *pos++;

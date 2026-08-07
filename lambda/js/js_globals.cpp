@@ -19,6 +19,7 @@
 #include "js_class.h"
 #include "js_coerce.h"
 #include "js_runtime_state.hpp"
+#include "js_runtime_internal.hpp"
 #include "js_function.hpp"
 #include "js_builtin_catalog.hpp"
 #include "js_state_guards.h"
@@ -901,80 +902,6 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
 static bool js_is_symbol_item(Item item);
 extern "C" bool js_typed_array_is_out_of_bounds_item(Item ta_item);
 
-static bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero) {
-    if (is_negative_zero) *is_negative_zero = false;
-    TypeId key_type = get_type_id(key);
-    if (key_type == LMD_TYPE_INT) {
-        int64_t iv = it2i(key);
-        if (iv <= -(int64_t)JS_SYMBOL_BASE) return false;
-        if (numeric_index) *numeric_index = (double)iv;
-        return true;
-    }
-    if (key_type == LMD_TYPE_FLOAT) {
-        if (numeric_index) *numeric_index = it2d(key);
-        return true;
-    }
-    if (key_type != LMD_TYPE_STRING) return false;
-    String* str = it2s(key);
-    // Symbols retain their private NamePool identity even when their display
-    // text looks numeric; TypedArray indexed operations must not consume them.
-    if (str && property_key_requires_identity(str)) return false;
-    if (!str || str->len == 0 || str->len >= 128) return false;
-    const char* chars = str->chars;
-    int len = (int)str->len;
-    if (len == 2 && chars[0] == '-' && chars[1] == '0') {
-        if (numeric_index) *numeric_index = -0.0;
-        if (is_negative_zero) *is_negative_zero = true;
-        return true;
-    }
-    if (len == 3 && strncmp(chars, "NaN", 3) == 0) {
-        if (numeric_index) *numeric_index = NAN;
-        return true;
-    }
-    if (len == 8 && strncmp(chars, "Infinity", 8) == 0) {
-        if (numeric_index) *numeric_index = INFINITY;
-        return true;
-    }
-    if (len == 9 && strncmp(chars, "-Infinity", 9) == 0) {
-        if (numeric_index) *numeric_index = -INFINITY;
-        return true;
-    }
-    char buf[128];
-    memcpy(buf, chars, len);
-    buf[len] = '\0';
-    char* endptr = NULL;
-    double value = strtod(buf, &endptr);
-    if (!endptr || *endptr != '\0') return false;
-    char canon[128];
-    if (value == 0.0) {
-        snprintf(canon, sizeof(canon), "0");
-    } else if (isnan(value)) {
-        snprintf(canon, sizeof(canon), "NaN");
-    } else if (isinf(value)) {
-        snprintf(canon, sizeof(canon), value > 0 ? "Infinity" : "-Infinity");
-    } else if (fabs(value) >= 0.000001 && fabs(value) < 1000000000000000000000.0) {
-        snprintf(canon, sizeof(canon), "%.15f", value);
-        int canon_len = (int)strlen(canon);
-        while (canon_len > 0 && canon[canon_len - 1] == '0') canon[--canon_len] = '\0';
-        if (canon_len > 0 && canon[canon_len - 1] == '.') canon[--canon_len] = '\0';
-    } else {
-        snprintf(canon, sizeof(canon), "%.15g", value);
-    }
-    if ((int)strlen(canon) != len || strncmp(canon, chars, len) != 0) return false;
-    if (numeric_index) *numeric_index = value;
-    return true;
-}
-
-static bool js_ta_numeric_index_valid(Item object, double numeric_index, bool is_negative_zero) {
-    if (is_negative_zero || !isfinite(numeric_index)) return false;
-    double int_part = floor(numeric_index);
-    if (int_part != numeric_index || numeric_index < 0) return false;
-    if (js_typed_array_is_out_of_bounds_item(object)) return false;
-    int64_t idx64 = (int64_t)numeric_index;
-    int len = js_typed_array_length(object);
-    return idx64 >= 0 && idx64 < len;
-}
-
 static bool js_ta_numeric_index_to_int(double numeric_index, bool is_negative_zero, int* out_index) {
     if (is_negative_zero || !isfinite(numeric_index)) return false;
     double int_part = floor(numeric_index);
@@ -996,7 +923,7 @@ static bool js_ta_define_own_numeric_index(Item obj, Item key, Item desc, bool* 
     if (!js_descriptor_from_object(desc, &pd)) return false;
 
     int idx = -1;
-    if (!js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero) ||
+    if (!js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero, NULL) ||
         !js_ta_numeric_index_to_int(numeric_index, is_negative_zero, &idx)) {
         return false;
     }
@@ -1074,7 +1001,7 @@ static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item*
         double numeric_index = 0;
         bool is_negative_zero = false;
         if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
-            bool valid_index = js_ta_numeric_index_valid(object, numeric_index, is_negative_zero);
+            bool valid_index = js_ta_numeric_index_valid(object, numeric_index, is_negative_zero, NULL);
             *out_result = (Item){.item = b2it(valid_index)};
             return true;
         }
@@ -1127,7 +1054,7 @@ static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) 
         double numeric_index = 0;
         bool is_negative_zero = false;
         if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
-            bool valid_index = js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero);
+            bool valid_index = js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero, NULL);
             if (valid_index && js_strict_mode) {
                 *out_result = js_throw_type_error("Cannot delete property of TypedArray");
             } else {
@@ -1221,7 +1148,7 @@ static bool js_try_exotic_own_property_descriptor(Item obj, Item name,
         bool is_negative_zero = false;
         if (js_ta_key_canonical_numeric(name, &numeric_index, &is_negative_zero)) {
             int idx = 0;
-            if (!js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero) ||
+            if (!js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero, NULL) ||
                 !js_ta_numeric_index_to_int(numeric_index, is_negative_zero, &idx)) {
                 *out_result = make_js_undefined();
                 return true;
@@ -2257,6 +2184,66 @@ static bool js_process_cache_is_empty(Item value) {
 //   33=setUTCHours, 34=setUTCMinutes, 35=setUTCSeconds, 36=setUTCMilliseconds
 // 40=getDay, 41=getUTCDay, 42=getTimezoneOffset, 43=valueOf, 44=toJSON,
 // 45=toUTCString, 46=toDateString, 47=toTimeString
+static void js_date_apply_setter_components(struct tm* tm, int method_id,
+        double v0, double v1, double v2, double v3,
+        Item arg1, Item arg2, Item arg3, int* old_millis) {
+    // local and UTC Date setters use one field mapping; only the time-zone
+    // conversion around this mapping differs.
+    int setter_id = method_id >= 30 ? method_id - 9 : method_id;
+    switch (setter_id) {
+        case 21:
+            tm->tm_year = (int)v0 - 1900;
+            if (arg1.item != ItemError.item) tm->tm_mon = (int)v1;
+            if (arg2.item != ItemError.item) tm->tm_mday = (int)v2;
+            break;
+        case 22:
+            tm->tm_mon = (int)v0;
+            if (arg1.item != ItemError.item) tm->tm_mday = (int)v1;
+            break;
+        case 23:
+            tm->tm_mday = (int)v0;
+            break;
+        case 24:
+            tm->tm_hour = (int)v0;
+            if (arg1.item != ItemError.item) tm->tm_min = (int)v1;
+            if (arg2.item != ItemError.item) tm->tm_sec = (int)v2;
+            if (arg3.item != ItemError.item) *old_millis = (int)v3;
+            break;
+        case 25:
+            tm->tm_min = (int)v0;
+            if (arg1.item != ItemError.item) tm->tm_sec = (int)v1;
+            if (arg2.item != ItemError.item) *old_millis = (int)v2;
+            break;
+        case 26:
+            tm->tm_sec = (int)v0;
+            if (arg1.item != ItemError.item) *old_millis = (int)v1;
+            break;
+        case 27:
+            *old_millis = (int)v0;
+            break;
+    }
+}
+
+static double js_date_make_local_setter_ms(struct tm* tm, int old_millis) {
+    tm->tm_isdst = -1;
+    int new_year = tm->tm_year + 1900;
+    int new_month = tm->tm_mon;
+    int new_day = tm->tm_mday;
+    int new_hour = tm->tm_hour;
+    int new_minute = tm->tm_min;
+    int new_second = tm->tm_sec;
+    double local_ms = js_date_mktime_ms_or_fallback(tm, old_millis,
+        new_year, new_month, new_day, new_hour, new_minute, new_second);
+    time_t local_secs = js_date_seconds_from_ms(local_ms);
+    struct tm local_tm;
+    localtime_r(&local_secs, &local_tm);
+    int offset_min = -(int)(get_tm_gmtoff(&local_tm) / 60);
+    double day_value = js_date_make_day_double((double)new_year, (double)new_month, (double)new_day);
+    double time_value = js_date_make_time_double((double)new_hour, (double)new_minute,
+        (double)new_second, (double)old_millis);
+    return js_date_make_date_double(day_value, time_value) + (double)offset_min * 60000.0;
+}
+
 extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg1, Item arg2, Item arg3) {
     if (method_id == 43 && get_type_id(date_obj) == LMD_TYPE_STRING) {
         return date_obj;
@@ -2330,23 +2317,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
             if (base_was_nan) gmtime_r(&base_secs, &tm);
             else js_date_localtime_minute(base_ms, &tm);
             tm.tm_year = iy - 1900;
-            tm.tm_isdst = -1;
-            int new_year = tm.tm_year + 1900;
-            int new_month = tm.tm_mon;
-            int new_day = tm.tm_mday;
-            int new_hour = tm.tm_hour;
-            int new_minute = tm.tm_min;
-            int new_second = tm.tm_sec;
-            double local_ms = js_date_mktime_ms_or_fallback(&tm, old_millis,
-                new_year, new_month, new_day, new_hour, new_minute, new_second);
-            time_t local_secs = js_date_seconds_from_ms(local_ms);
-            struct tm local_tm;
-            localtime_r(&local_secs, &local_tm);
-            int offset_min = -(int)(get_tm_gmtoff(&local_tm) / 60);
-            double day_value = js_date_make_day_double((double)new_year, (double)new_month, (double)new_day);
-            double time_value = js_date_make_time_double((double)new_hour, (double)new_minute,
-                (double)new_second, (double)old_millis);
-            double new_ms = js_date_make_date_double(day_value, time_value) + (double)offset_min * 60000.0;
+            double new_ms = js_date_make_local_setter_ms(&tm, old_millis);
             return store_ms(new_ms);
         }
         // NaN (Invalid Date) handling
@@ -2484,55 +2455,9 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
                 gmtime_r(&local_secs, &tm);
             }
 
-            switch (method_id) {
-                case 21: // setFullYear(year [, month, date])
-                    tm.tm_year = (int)v0 - 1900;
-                    if (is_present(arg1)) tm.tm_mon = (int)v1;
-                    if (is_present(arg2)) tm.tm_mday = (int)v2;
-                    break;
-                case 22: // setMonth(month [, date])
-                    tm.tm_mon = (int)v0;
-                    if (is_present(arg1)) tm.tm_mday = (int)v1;
-                    break;
-                case 23: // setDate(date)
-                    tm.tm_mday = (int)v0;
-                    break;
-                case 24: // setHours(hour [, min, sec, ms])
-                    tm.tm_hour = (int)v0;
-                    if (is_present(arg1)) tm.tm_min = (int)v1;
-                    if (is_present(arg2)) tm.tm_sec = (int)v2;
-                    if (is_present(arg3)) old_millis = (int)v3;
-                    break;
-                case 25: // setMinutes(min [, sec, ms])
-                    tm.tm_min = (int)v0;
-                    if (is_present(arg1)) tm.tm_sec = (int)v1;
-                    if (is_present(arg2)) old_millis = (int)v2;
-                    break;
-                case 26: // setSeconds(sec [, ms])
-                    tm.tm_sec = (int)v0;
-                    if (is_present(arg1)) old_millis = (int)v1;
-                    break;
-                case 27: // setMilliseconds(ms)
-                    old_millis = (int)v0;
-                    break;
-            }
-            tm.tm_isdst = -1;
-            int new_year = tm.tm_year + 1900;
-            int new_month = tm.tm_mon;
-            int new_day = tm.tm_mday;
-            int new_hour = tm.tm_hour;
-            int new_minute = tm.tm_min;
-            int new_second = tm.tm_sec;
-            double local_ms = js_date_mktime_ms_or_fallback(&tm, old_millis,
-                new_year, new_month, new_day, new_hour, new_minute, new_second);
-            time_t local_secs = js_date_seconds_from_ms(local_ms);
-            struct tm local_tm;
-            localtime_r(&local_secs, &local_tm);
-            int offset_min = -(int)(get_tm_gmtoff(&local_tm) / 60);
-            double day_value = js_date_make_day_double((double)new_year, (double)new_month, (double)new_day);
-            double time_value = js_date_make_time_double((double)new_hour, (double)new_minute,
-                (double)new_second, (double)old_millis);
-            double new_ms = js_date_make_date_double(day_value, time_value) + (double)offset_min * 60000.0;
+            js_date_apply_setter_components(&tm, method_id, v0, v1, v2, v3,
+                arg1, arg2, arg3, &old_millis);
+            double new_ms = js_date_make_local_setter_ms(&tm, old_millis);
             return store_ms(new_ms);
         }
 
@@ -2543,38 +2468,8 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
             struct tm utc;
             gmtime_r(&secs, &utc);
 
-            switch (method_id) {
-                case 30: // setUTCFullYear(year [, month, date])
-                    utc.tm_year = (int)v0 - 1900;
-                    if (is_present(arg1)) utc.tm_mon = (int)v1;
-                    if (is_present(arg2)) utc.tm_mday = (int)v2;
-                    break;
-                case 31: // setUTCMonth(month [, date])
-                    utc.tm_mon = (int)v0;
-                    if (is_present(arg1)) utc.tm_mday = (int)v1;
-                    break;
-                case 32: // setUTCDate(date)
-                    utc.tm_mday = (int)v0;
-                    break;
-                case 33: // setUTCHours(hour [, min, sec, ms])
-                    utc.tm_hour = (int)v0;
-                    if (is_present(arg1)) utc.tm_min = (int)v1;
-                    if (is_present(arg2)) utc.tm_sec = (int)v2;
-                    if (is_present(arg3)) old_millis = (int)v3;
-                    break;
-                case 34: // setUTCMinutes(min [, sec, ms])
-                    utc.tm_min = (int)v0;
-                    if (is_present(arg1)) utc.tm_sec = (int)v1;
-                    if (is_present(arg2)) old_millis = (int)v2;
-                    break;
-                case 35: // setUTCSeconds(sec [, ms])
-                    utc.tm_sec = (int)v0;
-                    if (is_present(arg1)) old_millis = (int)v1;
-                    break;
-                case 36: // setUTCMilliseconds(ms)
-                    old_millis = (int)v0;
-                    break;
-            }
+            js_date_apply_setter_components(&utc, method_id, v0, v1, v2, v3,
+                arg1, arg2, arg3, &old_millis);
             time_t new_secs = timegm(&utc);
             double new_ms = new_secs == (time_t)-1
                 ? js_date_make_utc_ms_from_parts(utc.tm_year + 1900, utc.tm_mon, utc.tm_mday,
@@ -4455,14 +4350,20 @@ extern "C" Item js_parseFloat(Item str_item) {
     return push_d(val);
 }
 
-extern "C" Item js_isNaN(Item value) {
-    // ES spec: ToNumber(Symbol) throws TypeError
+static bool js_prepare_number_predicate(Item value, Item* number) {
+    // ES numeric predicates reject Symbols before invoking ToNumber.
     if (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
         js_throw_type_error("Cannot convert a Symbol value to a number");
-        return ItemNull;
+        return false;
     }
-    Item num = js_to_number(value);
-    if (js_check_exception()) return ItemNull;
+    *number = js_to_number(value);
+    return !js_check_exception();
+}
+
+extern "C" Item js_isNaN(Item value) {
+    // ES spec: ToNumber(Symbol) throws TypeError
+    Item num;
+    if (!js_prepare_number_predicate(value, &num)) return ItemNull;
     TypeId type = get_type_id(num);
     if (type == LMD_TYPE_FLOAT) {
         double d = it2d(num);
@@ -4473,12 +4374,8 @@ extern "C" Item js_isNaN(Item value) {
 
 extern "C" Item js_isFinite(Item value) {
     // ES spec: ToNumber(Symbol) throws TypeError
-    if (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
-        js_throw_type_error("Cannot convert a Symbol value to a number");
-        return ItemNull;
-    }
-    Item num = js_to_number(value);
-    if (js_check_exception()) return ItemNull;
+    Item num;
+    if (!js_prepare_number_predicate(value, &num)) return ItemNull;
     TypeId type = get_type_id(num);
     if (type == LMD_TYPE_FLOAT) {
         double d = it2d(num);
@@ -5100,7 +4997,7 @@ extern "C" Item js_string_charCodeAt(Item str_item, Item index_item) {
 }
 
 static int encode_charcode_utf8(char* buf, int code);
-static int encode_charcode_full_utf8(char* buf, int code);
+static int encode_codepoint_utf8(char* buf, int code);
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out);
 static Item js_uri_make_four_byte_string_from_cp(uint32_t cp);
 extern "C" Item js_decodeURIComponent(Item str_item);
@@ -5214,8 +5111,7 @@ static int js_from_char_code_to_uint16(Item code_item) {
     return ((int)mod) & 0xFFFF;
 }
 
-extern "C" Item js_string_fromCharCode(Item code_item) {
-    int code = js_from_char_code_to_uint16(code_item);
+static Item js_string_from_char_code_uint16(int code) {
     char buf[5]; // max 4 bytes for UTF-8 + null
     int len = 0;
     if (code < 128) {
@@ -5240,32 +5136,15 @@ extern "C" Item js_string_fromCharCode(Item code_item) {
     return result;
 }
 
+extern "C" Item js_string_fromCharCode(Item code_item) {
+    int code = js_from_char_code_to_uint16(code_item);
+    return js_string_from_char_code_uint16(code);
+}
+
 extern "C" Item js_string_fromCharCode_int(int64_t code_value) {
     int64_t mod = code_value % 65536;
     if (mod < 0) mod += 65536;
-    int code = (int)mod;
-    char buf[5];
-    int len = 0;
-    if (code < 128) {
-        buf[0] = (char)code;
-        len = 1;
-    } else if (code < 0x800) {
-        buf[0] = (char)(0xC0 | (code >> 6));
-        buf[1] = (char)(0x80 | (code & 0x3F));
-        len = 2;
-    } else {
-        buf[0] = (char)(0xE0 | (code >> 12));
-        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (code & 0x3F));
-        len = 3;
-    }
-    buf[len] = '\0';
-
-    Item result = js_make_small_string(buf, len, code < 128);
-    g_last_from_char_code_string = result;
-    g_last_from_char_code_cp = code;
-    g_last_from_char_code_epoch = js_get_heap_epoch();
-    return result;
+    return js_string_from_char_code_uint16((int)mod);
 }
 
 extern "C" int64_t js_string_last_fromCharCode_cp(Item str_item) {
@@ -5289,7 +5168,7 @@ extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
             g_uri_last_four_byte_epoch == js_get_heap_epoch()) {
             return g_uri_last_four_byte_string;
         }
-        pos += encode_charcode_full_utf8(buf + pos, cp);
+        pos += encode_codepoint_utf8(buf + pos, (int)cp);
     } else {
         pos += encode_charcode_utf8(buf + pos, first);
         pos += encode_charcode_utf8(buf + pos, second);
@@ -5342,29 +5221,7 @@ static int encode_charcode_utf8(char* buf, int code) {
     }
 }
 
-// encode a full Unicode codepoint (up to U+10FFFF) to UTF-8
-static int encode_charcode_full_utf8(char* buf, int code) {
-    if (code < 0 || code > 0x10FFFF) return 0;
-    if (code < 0x80) {
-        buf[0] = (char)code;
-        return 1;
-    } else if (code < 0x800) {
-        buf[0] = (char)(0xC0 | (code >> 6));
-        buf[1] = (char)(0x80 | (code & 0x3F));
-        return 2;
-    } else if (code < 0x10000) {
-        buf[0] = (char)(0xE0 | (code >> 12));
-        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (code & 0x3F));
-        return 3;
-    } else {
-        buf[0] = (char)(0xF0 | (code >> 18));
-        buf[1] = (char)(0x80 | ((code >> 12) & 0x3F));
-        buf[2] = (char)(0x80 | ((code >> 6) & 0x3F));
-        buf[3] = (char)(0x80 | (code & 0x3F));
-        return 4;
-    }
-}
+static int encode_codepoint_utf8(char* buf, int code);
 
 // Multi-argument String.fromCharCode: js_string_fromCharCode_array(Item arr)
 // Takes a Lambda Array or TypedArray of code points and returns a concatenated string
@@ -5386,7 +5243,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
                 int lo = js_from_char_code_to_uint16(lo_item);
                 uint32_t cp = utf16_decode_pair((uint16_t)code, (uint16_t)lo);
                 if (cp != 0) {
-                    pos += encode_charcode_full_utf8(buf + pos, cp);
+                    pos += encode_codepoint_utf8(buf + pos, (int)cp);
                     i++; // skip the low surrogate
                     continue;
                 }
@@ -5414,7 +5271,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
             int lo = js_from_char_code_to_uint16(arr->items[i + 1]);
             uint32_t cp = utf16_decode_pair((uint16_t)code, (uint16_t)lo);
             if (cp != 0) {
-                pos += encode_charcode_full_utf8(buf + pos, cp);
+                pos += encode_codepoint_utf8(buf + pos, (int)cp);
                 i++; // skip the low surrogate
                 continue;
             }
@@ -5792,27 +5649,36 @@ static int* js_console_count_slot(const char* label, int label_len) {
     return &js_console_count_map[0]; // fallback
 }
 
-extern "C" Item js_console_count_fn(Item label_item) {
-    const char* label = "default";
-    int label_len = 7;
-    char buf[256];
-    char label_buf[128];
-    TypeId lt = get_type_id(label_item);
-    if (lt == LMD_TYPE_STRING) {
+static void js_console_resolve_label(Item label_item, bool coerce, char* label_buf,
+        int label_buf_len, const char** label, int* label_len) {
+    *label = "default";
+    *label_len = 7;
+    TypeId type = get_type_id(label_item);
+    if (type == LMD_TYPE_STRING) {
         String* s = it2s(label_item);
-        if (s && s->len > 0) { label = s->chars; label_len = (int)s->len; }
-    } else if (lt != LMD_TYPE_UNDEFINED) {
-        // convert non-string, non-undefined to string
-        Item str = js_to_string(label_item);
-        String* s = it2s(str);
         if (s && s->len > 0) {
-            int copy = (int)s->len < (int)sizeof(label_buf) - 1 ? (int)s->len : (int)sizeof(label_buf) - 1;
+            *label = s->chars;
+            *label_len = (int)s->len;
+        }
+    } else if (coerce && type != LMD_TYPE_UNDEFINED) {
+        Item string_item = js_to_string(label_item);
+        String* s = it2s(string_item);
+        if (s && s->len > 0) {
+            int copy = (int)s->len < label_buf_len - 1 ? (int)s->len : label_buf_len - 1;
             memcpy(label_buf, s->chars, copy);
             label_buf[copy] = '\0';
-            label = label_buf;
-            label_len = copy;
+            *label = label_buf;
+            *label_len = copy;
         }
     }
+}
+
+extern "C" Item js_console_count_fn(Item label_item) {
+    char buf[256];
+    char label_buf[128];
+    const char* label;
+    int label_len;
+    js_console_resolve_label(label_item, true, label_buf, (int)sizeof(label_buf), &label, &label_len);
     int* slot = js_console_count_slot(label, label_len);
     (*slot)++;
     int n = snprintf(buf, sizeof(buf), "%.*s: %d\n", label_len, label, *slot);
@@ -5821,24 +5687,10 @@ extern "C" Item js_console_count_fn(Item label_item) {
 }
 
 extern "C" Item js_console_countReset_fn(Item label_item) {
-    const char* label = "default";
-    int label_len = 7;
     char label_buf[128];
-    TypeId lt = get_type_id(label_item);
-    if (lt == LMD_TYPE_STRING) {
-        String* s = it2s(label_item);
-        if (s && s->len > 0) { label = s->chars; label_len = (int)s->len; }
-    } else if (lt != LMD_TYPE_UNDEFINED) {
-        Item str = js_to_string(label_item);
-        String* s = it2s(str);
-        if (s && s->len > 0) {
-            int copy = (int)s->len < (int)sizeof(label_buf) - 1 ? (int)s->len : (int)sizeof(label_buf) - 1;
-            memcpy(label_buf, s->chars, copy);
-            label_buf[copy] = '\0';
-            label = label_buf;
-            label_len = copy;
-        }
-    }
+    const char* label;
+    int label_len;
+    js_console_resolve_label(label_item, true, label_buf, (int)sizeof(label_buf), &label, &label_len);
     int* slot = js_console_count_slot(label, label_len);
     *slot = 0;
     return (Item){.item = ITEM_JS_UNDEFINED};
@@ -5854,12 +5706,10 @@ static int js_console_timer_find(uint32_t h) {
 }
 
 extern "C" Item js_console_time_fn(Item label_item) {
-    const char* label = "default";
-    int label_len = 7;
-    if (get_type_id(label_item) == LMD_TYPE_STRING) {
-        String* s = it2s(label_item);
-        if (s && s->len > 0) { label = s->chars; label_len = (int)s->len; }
-    }
+    const char* label;
+    int label_len;
+    char label_buf[1];
+    js_console_resolve_label(label_item, false, label_buf, 1, &label, &label_len);
     uint32_t h = 0;
     for (int i = 0; i < label_len; i++) h = h * 31 + (uint8_t)label[i];
     int idx = js_console_timer_find(h);
@@ -5876,12 +5726,10 @@ extern "C" Item js_console_time_fn(Item label_item) {
 }
 
 extern "C" Item js_console_timeEnd_fn(Item label_item) {
-    const char* label = "default";
-    int label_len = 7;
-    if (get_type_id(label_item) == LMD_TYPE_STRING) {
-        String* s = it2s(label_item);
-        if (s && s->len > 0) { label = s->chars; label_len = (int)s->len; }
-    }
+    const char* label;
+    int label_len;
+    char label_buf[1];
+    js_console_resolve_label(label_item, false, label_buf, 1, &label, &label_len);
     uint32_t h = 0;
     for (int i = 0; i < label_len; i++) h = h * 31 + (uint8_t)label[i];
     int idx = js_console_timer_find(h);
@@ -7082,6 +6930,43 @@ static bool js_func_has_own_prototype(Item func_item) {
     return true;
 }
 
+static bool js_validate_resizable_buffer_args(Item* args, int argc, bool shared) {
+    Item length_arg = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+    double byte_len = 0;
+    TypeId length_type = get_type_id(length_arg);
+    if (length_type != LMD_TYPE_UNDEFINED && length_type != LMD_TYPE_NULL) {
+        Item number = js_to_number(length_arg);
+        if (js_check_exception()) return false;
+        TypeId number_type = get_type_id(number);
+        byte_len = (number_type == LMD_TYPE_FLOAT) ? it2d(number) : (double)it2i(number);
+        if (byte_len != byte_len) byte_len = 0;
+        byte_len = trunc(byte_len);
+        if (byte_len < 0 || byte_len > 9007199254740991.0) {
+            js_throw_range_error(shared ? "Invalid shared array buffer length" :
+                "Invalid array buffer length");
+            return false;
+        }
+    }
+    Item options = (argc > 1) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+    if (get_type_id(options) != LMD_TYPE_MAP) return true;
+    Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength", 13))};
+    Item max_item = js_property_get(options, max_key);
+    if (js_check_exception()) return false;
+    if (get_type_id(max_item) == LMD_TYPE_UNDEFINED) return true;
+    Item max_number = js_to_number(max_item);
+    if (js_check_exception()) return false;
+    TypeId max_type = get_type_id(max_number);
+    double max_len = (max_type == LMD_TYPE_FLOAT) ? it2d(max_number) : (double)it2i(max_number);
+    if (max_len != max_len) max_len = 0;
+    max_len = trunc(max_len);
+    if (max_len < 0 || max_len > 9007199254740991.0 || max_len < byte_len) {
+        js_throw_range_error(shared ? "Invalid shared array buffer maxByteLength" :
+            "Invalid array buffer maxByteLength");
+        return false;
+    }
+    return true;
+}
+
 extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_target) {
     // Validate target is a constructor
     if (!js_func_is_constructor(target)) {
@@ -7198,74 +7083,12 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
             // below. Required for
             // built-ins/ArrayBuffer/options-maxbytelength-compared-before-object-creation.js
             if (nl == 11 && strncmp(n, "ArrayBuffer", 11) == 0) {
-                Item length_arg = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
-                double byte_len = 0;
-                TypeId lt = get_type_id(length_arg);
-                if (lt != LMD_TYPE_UNDEFINED && lt != LMD_TYPE_NULL) {
-                    Item num = js_to_number(length_arg);
-                    if (js_check_exception()) return ItemNull;
-                    TypeId nnt = get_type_id(num);
-                    byte_len = (nnt == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
-                    if (byte_len != byte_len) byte_len = 0;
-                    byte_len = trunc(byte_len);
-                    if (byte_len < 0 || byte_len > 9007199254740991.0) {
-                        return js_throw_range_error("Invalid array buffer length");
-                    }
-                }
-                Item options = (argc > 1) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-                if (get_type_id(options) == LMD_TYPE_MAP) {
-                    Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength", 13))};
-                    Item max_item = js_property_get(options, max_key);
-                    if (js_check_exception()) return ItemNull;
-                    TypeId mt = get_type_id(max_item);
-                    if (mt != LMD_TYPE_UNDEFINED) {
-                        Item max_num = js_to_number(max_item);
-                        if (js_check_exception()) return ItemNull;
-                        TypeId mnt = get_type_id(max_num);
-                        double max_len = (mnt == LMD_TYPE_FLOAT) ? it2d(max_num) : (double)it2i(max_num);
-                        if (max_len != max_len) max_len = 0;
-                        max_len = trunc(max_len);
-                        if (max_len < 0 || max_len > 9007199254740991.0 || max_len < byte_len) {
-                            return js_throw_range_error("Invalid array buffer maxByteLength");
-                        }
-                    }
-                }
+                if (!js_validate_resizable_buffer_args(args, argc, false)) return ItemNull;
             }
             // SharedArrayBuffer validates byteLength and maxByteLength before
             // OrdinaryCreateFromConstructor reads NewTarget.prototype.
             if (nl == 17 && strncmp(n, "SharedArrayBuffer", 17) == 0) {
-                Item length_arg = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
-                double byte_len = 0;
-                TypeId lt = get_type_id(length_arg);
-                if (lt != LMD_TYPE_UNDEFINED && lt != LMD_TYPE_NULL) {
-                    Item num = js_to_number(length_arg);
-                    if (js_check_exception()) return ItemNull;
-                    TypeId nt = get_type_id(num);
-                    byte_len = (nt == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
-                    if (byte_len != byte_len) byte_len = 0;
-                    byte_len = trunc(byte_len);
-                    if (byte_len < 0 || byte_len > 9007199254740991.0) {
-                        return js_throw_range_error("Invalid shared array buffer length");
-                    }
-                }
-                Item options = (argc > 1) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-                if (get_type_id(options) == LMD_TYPE_MAP) {
-                    Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength", 13))};
-                    Item max_item = js_property_get(options, max_key);
-                    if (js_check_exception()) return ItemNull;
-                    TypeId mt = get_type_id(max_item);
-                    if (mt != LMD_TYPE_UNDEFINED) {
-                        Item max_num = js_to_number(max_item);
-                        if (js_check_exception()) return ItemNull;
-                        TypeId mnt = get_type_id(max_num);
-                        double max_len = (mnt == LMD_TYPE_FLOAT) ? it2d(max_num) : (double)it2i(max_num);
-                        if (max_len != max_len) max_len = 0;
-                        max_len = trunc(max_len);
-                        if (max_len < 0 || max_len > 9007199254740991.0 || max_len < byte_len) {
-                            return js_throw_range_error("Invalid shared array buffer maxByteLength");
-                        }
-                    }
-                }
+                if (!js_validate_resizable_buffer_args(args, argc, true)) return ItemNull;
             }
         }
     }
@@ -7634,14 +7457,14 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
                 if (js_check_exception()) return ItemNull;
                 return (Item){.item = b2it(true)};
             }
-            bool target_valid_index = js_ta_numeric_index_valid(target, numeric_index, is_negative_zero);
+            bool target_valid_index = js_ta_numeric_index_valid(target, numeric_index, is_negative_zero, NULL);
             if (!target_valid_index) return (Item){.item = b2it(true)};
             TypeId rt = get_type_id(receiver);
             bool recv_is_obj = (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY ||
                                 rt == LMD_TYPE_FUNC || rt == LMD_TYPE_ELEMENT);
             if (!recv_is_obj) return (Item){.item = b2it(false)};
             if (rt == LMD_TYPE_MAP && receiver.map && receiver.map->map_kind == MAP_KIND_TYPED_ARRAY) {
-                bool receiver_valid_index = js_ta_numeric_index_valid(receiver, numeric_index, is_negative_zero);
+                bool receiver_valid_index = js_ta_numeric_index_valid(receiver, numeric_index, is_negative_zero, NULL);
                 if (!receiver_valid_index) return (Item){.item = b2it(false)};
                 js_property_set(receiver, key, value);
                 if (js_check_exception()) return ItemNull;
@@ -8837,6 +8660,28 @@ static Item js_defprop_get_internal_state(Item obj, const char* key, int keylen,
 // Object.defineProperty — define a property on an object
 // =============================================================================
 
+static bool js_string_exotic_index_in_range(Item obj, String* key) {
+    if (!key || key->len == 0 || key->len > 18) return false;
+    bool all_digits = true;
+    int64_t index = 0;
+    for (int i = 0; i < (int)key->len; i++) {
+        if (key->chars[i] < '0' || key->chars[i] > '9') {
+            all_digits = false;
+            break;
+        }
+        index = index * 10 + (key->chars[i] - '0');
+    }
+    if (!all_digits || (key->len > 1 && key->chars[0] == '0')) return false;
+    bool primitive_found = false;
+    Item primitive = js_map_get_fast_ext(obj.map, "__primitiveValue__", 18, &primitive_found);
+    if (!primitive_found || get_type_id(primitive) != LMD_TYPE_STRING) return false;
+    String* primitive_string = it2s(primitive);
+    int64_t length = primitive_string
+        ? js_utf16_len(primitive_string->chars, (int)primitive_string->len,
+            (bool)primitive_string->is_ascii) : 0;
+    return index >= 0 && index < length;
+}
+
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) {
     // Proxy [[DefineOwnProperty]] trap
     if (js_is_proxy(obj)) {
@@ -8873,26 +8718,9 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
             if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
                 is_string_exotic_key = true;
                 current_enumerable = false;
-            } else if (sk && sk->len > 0 && sk->len <= 18) {
-                bool all_digits = true;
-                int64_t idx = 0;
-                for (int i = 0; i < (int)sk->len; i++) {
-                    if (sk->chars[i] < '0' || sk->chars[i] > '9') {
-                        all_digits = false;
-                        break;
-                    }
-                    idx = idx * 10 + (sk->chars[i] - '0');
-                }
-                if (all_digits && (sk->len == 1 || sk->chars[0] != '0')) {
-                    bool pv_found = false;
-                    Item pv = js_map_get_fast_ext(obj.map, "__primitiveValue__", 18, &pv_found);
-                    if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
-                        String* pv_s = it2s(pv);
-                        int64_t slen = pv_s ? js_utf16_len(pv_s->chars, (int)pv_s->len, (bool)pv_s->is_ascii) : 0;
-                        is_string_exotic_key = idx >= 0 && idx < slen;
-                        current_enumerable = true;
-                    }
-                }
+            } else if (js_string_exotic_index_in_range(obj, sk)) {
+                is_string_exotic_key = true;
+                current_enumerable = true;
             }
             if (is_string_exotic_key) {
                 bool reject = false;
@@ -9151,6 +8979,23 @@ extern "C" Item js_alert(Item msg) {
 // =============================================================================
 
 // Object.getOwnPropertyNames — includes non-enumerable own properties
+static bool js_get_string_wrapper_primitive(Map* map, String** primitive) {
+    bool own_value = false;
+    Item value = js_map_get_fast_ext(map, "__primitiveValue__", 18, &own_value);
+    if (!own_value || get_type_id(value) != LMD_TYPE_STRING) return false;
+    *primitive = it2s(value);
+    return *primitive != NULL;
+}
+
+static void js_append_string_wrapper_indices(Item result, String* primitive) {
+    int length = primitive ? (int)primitive->len : 0;
+    for (int i = 0; i < length; i++) {
+        char buf[16];
+        int len = snprintf(buf, sizeof(buf), "%d", i);
+        js_array_push(result, (Item){.item = s2it(heap_create_name(buf, len))});
+    }
+}
+
 extern "C" Item js_object_get_own_property_names(Item object) {
     RootFrame roots(2);
     Rooted<Item> object_root(roots, object);
@@ -9304,17 +9149,11 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     // v25: String wrapper objects — character indices + "length"
     {
         if (js_class_id((Item){.map = m}) == JS_CLASS_STRING) {
-                bool own_pv = false;
-                Item pv = js_map_get_fast_ext(m, "__primitiveValue__", 18, &own_pv);
-                if (own_pv && get_type_id(pv) == LMD_TYPE_STRING) {
-                    String* pv_s = it2s(pv);
-                    int slen = pv_s ? (int)pv_s->len : 0;
+                String* pv_s = NULL;
+                if (js_get_string_wrapper_primitive(m, &pv_s)) {
+                    int slen = (int)pv_s->len;
                     Item result = js_array_new(0);
-                    for (int i = 0; i < slen; i++) {
-                        char buf[16];
-                        int blen = snprintf(buf, sizeof(buf), "%d", i);
-                        js_array_push(result, (Item){.item = s2it(heap_create_name(buf, blen))});
-                    }
+                    js_append_string_wrapper_indices(result, pv_s);
                     // J39-7: also include any extra own properties added after construction.
                     // Per ES §10.4.3.4 [[OwnPropertyKeys]] of String exotic: integer-index
                     // properties up to length come first, then other own properties (which
@@ -9650,6 +9489,8 @@ static void js_collect_own_symbol_keys_from_map(Item result, Map* m) {
     }
 }
 
+extern "C" Item js_typed_array_enumerable_custom_keys(Item object);
+
 extern "C" Item js_object_keys(Item object) {
     // Proxy [[OwnKeys]] trap — returns enumerable string keys
     if (js_is_proxy(object)) {
@@ -9721,23 +9562,11 @@ extern "C" Item js_object_keys(Item object) {
             int blen = snprintf(buf, sizeof(buf), "%d", i);
             js_array_push(result, (Item){.item = s2it(heap_create_name(buf, blen))});
         }
-        Map* m = object.map;
-        TypeMap* tm = (TypeMap*)m->type;
-        ShapeEntry* e = tm ? tm->shape : NULL;
-        while (e) {
-            const char* s = e->name->str;
-            int slen = (int)e->name->length;
-            if (!js_is_engine_internal_enumeration_key(s, slen)) {
-                JsShapeSlotStatus status = js_own_shape_slot_status(object, s, slen, NULL, NULL);
-                if ((status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) &&
-                    js_props_query_enumerable(m, e, s, slen)) {
-                    int64_t num_idx = js_parse_array_index(s, slen);
-                    if (num_idx < 0 || num_idx >= ta_len) {
-                        js_array_push(result, (Item){.item = s2it(heap_create_name(s, slen))});
-                    }
-                }
+        Item custom_keys = js_typed_array_enumerable_custom_keys(object);
+        if (get_type_id(custom_keys) == LMD_TYPE_ARRAY && custom_keys.array) {
+            for (int i = 0; i < custom_keys.array->length; i++) {
+                js_array_push(result, custom_keys.array->items[i]);
             }
-            e = e->next;
         }
         return result;
     }
@@ -9878,17 +9707,11 @@ extern "C" Item js_object_keys(Item object) {
     // v25: String wrapper objects — enumerate character indices then non-internal properties
     {
         if (js_class_id((Item){.map = m}) == JS_CLASS_STRING) {
-                bool own_pv = false;
-                Item pv = js_map_get_fast_ext(m, "__primitiveValue__", 18, &own_pv);
-                if (own_pv && get_type_id(pv) == LMD_TYPE_STRING) {
-                    String* pv_s = it2s(pv);
-                    int slen = pv_s ? (int)pv_s->len : 0;
+                String* pv_s = NULL;
+                if (js_get_string_wrapper_primitive(m, &pv_s)) {
+                    int slen = (int)pv_s->len;
                     Item result = js_array_new(0);
-                    for (int i = 0; i < slen; i++) {
-                        char buf[16];
-                        int blen = snprintf(buf, sizeof(buf), "%d", i);
-                        js_array_push(result, (Item){.item = s2it(heap_create_name(buf, blen))});
-                    }
+                    js_append_string_wrapper_indices(result, pv_s);
                     TypeMap* stm = (TypeMap*)m->type;
                     ShapeEntry* se = stm ? stm->shape : NULL;
                     while (se) {
@@ -10435,6 +10258,35 @@ extern "C" Item js_number_property(Item prop_name) {
 // Object.values — return array of property values
 // =============================================================================
 
+static Item js_object_collect_enumerable_own(Item object, bool entries) {
+    // ES §7.3.22 snapshots keys, then re-checks each descriptor before reading it.
+    Item keys = js_reflect_own_keys(object);
+    if (js_check_exception()) return js_array_new(0);
+    int len = (int)js_array_length(keys);
+    Item result = js_array_new(0);
+    for (int i = 0; i < len; i++) {
+        Item key = js_array_get(keys, (Item){.item = i2it(i)});
+        if (js_key_is_symbol_c(key)) continue;
+        Item desc = js_object_get_own_property_descriptor(object, key);
+        if (js_check_exception()) return result;
+        if (get_type_id(desc) != LMD_TYPE_MAP) continue;
+        bool en_found = false;
+        Item en = js_map_get_fast_ext(desc.map, "enumerable", 10, &en_found);
+        if (!en_found || !js_is_truthy(en)) continue;
+        Item val = js_property_access(object, key);
+        if (js_check_exception()) return result;
+        if (!entries) {
+            js_array_push(result, val);
+        } else {
+            Item pair = js_array_new(2);
+            js_array_set(pair, (Item){.item = i2it(0)}, key);
+            js_array_set(pair, (Item){.item = i2it(1)}, val);
+            js_array_push(result, pair);
+        }
+    }
+    return result;
+}
+
 extern "C" Item js_object_values(Item object) {
     TypeId type = get_type_id(object);
     if (type == LMD_TYPE_NULL || object.item == ITEM_JS_UNDEFINED) {
@@ -10452,26 +10304,7 @@ extern "C" Item js_object_values(Item object) {
     }
     if (type != LMD_TYPE_MAP) return js_array_new(0);
 
-    // ES §7.3.22 EnumerableOwnPropertyNames: snapshot OwnKeys, then for each key
-    // re-check enumerable via [[GetOwnProperty]] before reading the value.
-    Item keys = js_reflect_own_keys(object);
-    if (js_check_exception()) return js_array_new(0);
-    int len = (int)js_array_length(keys);
-    Item result = js_array_new(0);
-    for (int i = 0; i < len; i++) {
-        Item key = js_array_get(keys, (Item){.item = i2it(i)});
-        if (js_key_is_symbol_c(key)) continue;
-        Item desc = js_object_get_own_property_descriptor(object, key);
-        if (js_check_exception()) return result;
-        if (get_type_id(desc) != LMD_TYPE_MAP) continue;
-        bool en_found = false;
-        Item en = js_map_get_fast_ext(desc.map, "enumerable", 10, &en_found);
-        if (!en_found || !js_is_truthy(en)) continue;
-        Item val = js_property_access(object, key);
-        if (js_check_exception()) return result;
-        js_array_push(result, val);
-    }
-    return result;
+    return js_object_collect_enumerable_own(object, false);
 }
 
 // =============================================================================
@@ -10500,29 +10333,7 @@ extern "C" Item js_object_entries(Item object) {
     }
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_FUNC) return js_array_new(0);
 
-    // ES §7.3.22 EnumerableOwnPropertyNames: snapshot OwnKeys, re-check
-    // enumerable via [[GetOwnProperty]] for each key before reading value.
-    Item keys = js_reflect_own_keys(object);
-    if (js_check_exception()) return js_array_new(0);
-    int len = (int)js_array_length(keys);
-    Item result = js_array_new(0);
-    for (int i = 0; i < len; i++) {
-        Item key = js_array_get(keys, (Item){.item = i2it(i)});
-        if (js_key_is_symbol_c(key)) continue;
-        Item desc = js_object_get_own_property_descriptor(object, key);
-        if (js_check_exception()) return result;
-        if (get_type_id(desc) != LMD_TYPE_MAP) continue;
-        bool en_found = false;
-        Item en = js_map_get_fast_ext(desc.map, "enumerable", 10, &en_found);
-        if (!en_found || !js_is_truthy(en)) continue;
-        Item val = js_property_access(object, key);
-        if (js_check_exception()) return result;
-        Item pair = js_array_new(2);
-        js_array_set(pair, (Item){.item = i2it(0)}, key);
-        js_array_set(pair, (Item){.item = i2it(1)}, val);
-        js_array_push(result, pair);
-    }
-    return result;
+    return js_object_collect_enumerable_own(object, true);
 }
 
 // =============================================================================
@@ -10702,24 +10513,31 @@ extern "C" Item js_object_is(Item left, Item right) {
 }
 
 #if JS_TEST262_FAST_PATHS
-extern "C" Item js_test262_decimal_to_percent_hex_string(Item n_item) {
-    uint32_t n = 0;
-    TypeId n_type = get_type_id(n_item);
-    if (n_type == LMD_TYPE_INT) {
-        n = (uint32_t)it2i(n_item);
-    } else if (n_type == LMD_TYPE_INT64) {
-        n = (uint32_t)it2l(n_item);
+static bool js_test262_item_to_uint32(Item item, uint32_t* out) {
+    uint32_t value = 0;
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT) {
+        value = (uint32_t)it2i(item);
+    } else if (type == LMD_TYPE_INT64) {
+        value = (uint32_t)it2l(item);
     } else {
-        Item num_item = js_to_number(n_item);
-        if (js_check_exception()) return ItemNull;
+        Item num_item = js_to_number(item);
+        if (js_check_exception()) return false;
         double d = js_get_number(num_item);
         if (!isnan(d) && !isinf(d) && d != 0.0) {
             double integral = d < 0 ? ceil(d) : floor(d);
             double mod = fmod(integral, 4294967296.0);
             if (mod < 0) mod += 4294967296.0;
-            n = (uint32_t)mod;
+            value = (uint32_t)mod;
         }
     }
+    *out = value;
+    return true;
+}
+
+extern "C" Item js_test262_decimal_to_percent_hex_string(Item n_item) {
+    uint32_t n = 0;
+    if (!js_test262_item_to_uint32(n_item, &n)) return ItemNull;
     static Item cached[256];
     static uint64_t cached_epoch = 0;
     uint64_t epoch = js_get_heap_epoch();
@@ -10791,22 +10609,7 @@ extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
     if (!left) left = heap_create_name("", 0);
 
     uint32_t n = 0;
-    TypeId n_type = get_type_id(n_item);
-    if (n_type == LMD_TYPE_INT) {
-        n = (uint32_t)it2i(n_item);
-    } else if (n_type == LMD_TYPE_INT64) {
-        n = (uint32_t)it2l(n_item);
-    } else {
-        Item num_item = js_to_number(n_item);
-        if (js_check_exception()) return ItemNull;
-        double d = js_get_number(num_item);
-        if (!isnan(d) && !isinf(d) && d != 0.0) {
-            double integral = d < 0 ? ceil(d) : floor(d);
-            double mod = fmod(integral, 4294967296.0);
-            if (mod < 0) mod += 4294967296.0;
-            n = (uint32_t)mod;
-        }
-    }
+    if (!js_test262_item_to_uint32(n_item, &n)) return ItemNull;
 
     uint32_t byte = n & 0xFF;
     int64_t left_len = left->len;
@@ -11134,6 +10937,44 @@ static Item assert_format_array(Item arr) {
     return result;
 }
 
+static Item js_test262_error_with_message(const char* prefix, Item message) {
+    String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
+    int prefix_len = (int)strlen(prefix);
+    int total = prefix_len + (ms ? (int)ms->len : 0);
+    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
+    memcpy(buf, prefix, (size_t)prefix_len);
+    if (ms) memcpy(buf + prefix_len, ms->chars, ms->len);
+    buf[total] = '\0';
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    Item err_msg = (Item){.item = s2it(heap_create_name(buf, total))};
+    mem_free(buf);
+    return js_new_error_with_name(err_name, err_msg);
+}
+
+static Item js_test262_error_with_values(Item left, const char* between,
+        Item right, const char* suffix, Item message) {
+    String* ls = it2s(left);
+    String* rs = it2s(right);
+    String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
+    int total = (int)strlen(between) + (int)strlen(suffix) +
+        (ls ? (int)ls->len : 0) + (rs ? (int)rs->len : 0) +
+        (ms ? (int)ms->len : 0);
+    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
+    int pos = 0;
+    if (ls) { memcpy(buf + pos, ls->chars, ls->len); pos += (int)ls->len; }
+    int len = (int)strlen(between);
+    memcpy(buf + pos, between, (size_t)len); pos += len;
+    if (rs) { memcpy(buf + pos, rs->chars, rs->len); pos += (int)rs->len; }
+    len = (int)strlen(suffix);
+    memcpy(buf + pos, suffix, (size_t)len); pos += len;
+    if (ms) { memcpy(buf + pos, ms->chars, ms->len); pos += (int)ms->len; }
+    buf[pos] = '\0';
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    Item err_msg = (Item){.item = s2it(heap_create_name(buf, pos))};
+    mem_free(buf);
+    return js_new_error_with_name(err_name, err_msg);
+}
+
 // assert.compareArray(actual, expected, message): throws on mismatch
 extern "C" void js_assert_compare_array(Item actual, Item expected, Item message) {
     extern Item js_new_error_with_name(Item type_name, Item message);
@@ -11142,33 +10983,15 @@ extern "C" void js_assert_compare_array(Item actual, Item expected, Item message
     // null checks
     TypeId at = get_type_id(actual);
     if (at == LMD_TYPE_NULL || at == LMD_TYPE_UNDEFINED) {
-        const char* msg_prefix = "Actual argument shouldn't be nullish. ";
-        String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
-        int total = (int)strlen(msg_prefix) + (ms ? (int)ms->len : 0);
-        char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
-        memcpy(buf, msg_prefix, strlen(msg_prefix));
-        if (ms) memcpy(buf + strlen(msg_prefix), ms->chars, ms->len);
-        buf[total] = '\0';
-        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
-        Item err_msg = (Item){.item = s2it(heap_create_name(buf, total))};
-        mem_free(buf);
-        js_throw_value(js_new_error_with_name(err_name, err_msg));
+        js_throw_value(js_test262_error_with_message(
+            "Actual argument shouldn't be nullish. ", message));
         return;
     }
 
     TypeId et = get_type_id(expected);
     if (et == LMD_TYPE_NULL || et == LMD_TYPE_UNDEFINED) {
-        const char* msg_prefix = "Expected argument shouldn't be nullish. ";
-        String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
-        int total = (int)strlen(msg_prefix) + (ms ? (int)ms->len : 0);
-        char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
-        memcpy(buf, msg_prefix, strlen(msg_prefix));
-        if (ms) memcpy(buf + strlen(msg_prefix), ms->chars, ms->len);
-        buf[total] = '\0';
-        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
-        Item err_msg = (Item){.item = s2it(heap_create_name(buf, total))};
-        mem_free(buf);
-        js_throw_value(js_new_error_with_name(err_name, err_msg));
+        js_throw_value(js_test262_error_with_message(
+            "Expected argument shouldn't be nullish. ", message));
         return;
     }
 
@@ -11178,30 +11001,8 @@ extern "C" void js_assert_compare_array(Item actual, Item expected, Item message
     // build error message: "Actual [...] and expected [...] should have the same contents. <message>"
     Item a_fmt = assert_format_array(actual);
     Item e_fmt = assert_format_array(expected);
-    String* as = it2s(a_fmt);
-    String* es = it2s(e_fmt);
-    String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
-
-    const char* p1 = "Actual ";
-    const char* p2 = " and expected ";
-    const char* p3 = " should have the same contents. ";
-    int total = (int)strlen(p1) + (as ? (int)as->len : 0) + (int)strlen(p2) +
-                (es ? (int)es->len : 0) + (int)strlen(p3) + (ms ? (int)ms->len : 0);
-    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
-    int pos = 0;
-    int l;
-    l = (int)strlen(p1); memcpy(buf + pos, p1, l); pos += l;
-    if (as) { memcpy(buf + pos, as->chars, as->len); pos += (int)as->len; }
-    l = (int)strlen(p2); memcpy(buf + pos, p2, l); pos += l;
-    if (es) { memcpy(buf + pos, es->chars, es->len); pos += (int)es->len; }
-    l = (int)strlen(p3); memcpy(buf + pos, p3, l); pos += l;
-    if (ms) { memcpy(buf + pos, ms->chars, ms->len); pos += (int)ms->len; }
-    buf[pos] = '\0';
-
-    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
-    Item err_msg = (Item){.item = s2it(heap_create_name(buf, pos))};
-    mem_free(buf);
-    js_throw_value(js_new_error_with_name(err_name, err_msg));
+    js_throw_value(js_test262_error_with_values(a_fmt, " and expected ", e_fmt,
+        " should have the same contents. ", message));
 }
 
 // =============================================================================
@@ -11458,30 +11259,8 @@ extern "C" void js_assert_deep_equal(Item actual, Item expected, Item message) {
     // build error message
     Item a_str = js_to_string_val(actual);
     Item e_str = js_to_string_val(expected);
-    String* as = it2s(a_str);
-    String* es = it2s(e_str);
-    String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
-
-    const char* p1 = "Expected ";
-    const char* p2 = " to be structurally equal to ";
-    const char* p3 = ". ";
-    int total = (int)strlen(p1) + (as ? (int)as->len : 0) + (int)strlen(p2) +
-                (es ? (int)es->len : 0) + (int)strlen(p3) + (ms ? (int)ms->len : 0);
-    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
-    int pos = 0;
-    int l;
-    l = (int)strlen(p1); memcpy(buf + pos, p1, l); pos += l;
-    if (as) { memcpy(buf + pos, as->chars, as->len); pos += (int)as->len; }
-    l = (int)strlen(p2); memcpy(buf + pos, p2, l); pos += l;
-    if (es) { memcpy(buf + pos, es->chars, es->len); pos += (int)es->len; }
-    l = (int)strlen(p3); memcpy(buf + pos, p3, l); pos += l;
-    if (ms) { memcpy(buf + pos, ms->chars, ms->len); pos += (int)ms->len; }
-    buf[pos] = '\0';
-
-    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
-    Item err_msg = (Item){.item = s2it(heap_create_name(buf, pos))};
-    mem_free(buf);
-    js_throw_value(js_new_error_with_name(err_name, err_msg));
+    js_throw_value(js_test262_error_with_values(a_str,
+        " to be structurally equal to ", e_str, ". ", message));
 }
 
 // =============================================================================
@@ -12183,21 +11962,30 @@ static Item js_object_test_proxy_integrity(Item obj, bool frozen) {
     return (Item){.item = b2it(true)};
 }
 
-extern "C" Item js_object_is_frozen(Item obj) {
+static Item js_object_test_integrity(Item obj, bool frozen) {
     // ES6: non-objects are frozen
     TypeId ot = get_type_id(obj);
     if (ot != LMD_TYPE_MAP && ot != LMD_TYPE_ARRAY && ot != LMD_TYPE_FUNC && ot != LMD_TYPE_ELEMENT)
         return (Item){.item = b2it(true)};
-    if (js_is_proxy(obj)) return js_object_test_proxy_integrity(obj, true);
+    if (js_is_proxy(obj)) return js_object_test_proxy_integrity(obj, frozen);
     // For arrays and functions, check via marker system
     if (ot == LMD_TYPE_ARRAY || ot == LMD_TYPE_FUNC) {
         bool found = false;
+        if (!frozen) {
+            Item sv = js_defprop_get_internal_state(obj, "__sealed__", 10, &found);
+            if (found && js_is_truthy(sv)) return (Item){.item = b2it(true)};
+        }
         Item fv = js_defprop_get_internal_state(obj, "__frozen__", 10, &found);
         if (found && js_is_truthy(fv)) return (Item){.item = b2it(true)};
         return (Item){.item = b2it(false)};
     }
     if (ot != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
-    // fast path: explicitly frozen
+    // fast path: explicitly sealed or frozen
+    bool sk_found = false;
+    if (!frozen) {
+        Item sv = js_map_get_fast_ext(obj.map, "__sealed__", 10, &sk_found);
+        if (sk_found && js_is_truthy(sv)) return (Item){.item = b2it(true)};
+    }
     bool fk_found = false;
     Item fv = js_map_get_fast_ext(obj.map, "__frozen__", 10, &fk_found);
     if (fk_found && js_is_truthy(fv)) return (Item){.item = b2it(true)};
@@ -12205,7 +11993,7 @@ extern "C" Item js_object_is_frozen(Item obj) {
     bool ne_found = false;
     Item nev = js_map_get_fast_ext(obj.map, "__non_extensible__", 17, &ne_found);
     if (!ne_found || !js_is_truthy(nev)) return (Item){.item = b2it(false)};
-    // check all own properties are non-configurable and non-writable (or accessor)
+    // check all own properties are non-configurable and, when frozen, non-writable (or accessor)
     Map* m = obj.map;
     if (!m || !m->type) return (Item){.item = b2it(true)}; // no shape = no properties
     TypeMap* tm = (TypeMap*)m->type;
@@ -12218,17 +12006,23 @@ extern "C" Item js_object_is_frozen(Item obj) {
             // Stage A3.4: shape-flag-first via helper (falls back to legacy markers).
             // check non-configurable
             if (js_props_query_configurable(m, e, n, nlen)) return (Item){.item = b2it(false)};
-            // accessor properties don't need to be non-writable per ES spec
-            bool is_accessor = jspd_is_accessor(e);
-            // Phase-5D: legacy __get_/__set_ fallback probe removed.
-            // Accessors are detected via IS_ACCESSOR shape flag on the bare-name entry.
-            if (!is_accessor) {
-                if (js_props_query_writable(m, e, n, nlen)) return (Item){.item = b2it(false)};
+            if (frozen) {
+                // accessor properties don't need to be non-writable per ES spec
+                bool is_accessor = jspd_is_accessor(e);
+                // Phase-5D: legacy __get_/__set_ fallback probe removed.
+                // Accessors are detected via IS_ACCESSOR shape flag on the bare-name entry.
+                if (!is_accessor) {
+                    if (js_props_query_writable(m, e, n, nlen)) return (Item){.item = b2it(false)};
+                }
             }
         }
         e = e->next;
     }
     return (Item){.item = b2it(true)};
+}
+
+extern "C" Item js_object_is_frozen(Item obj) {
+    return js_object_test_integrity(obj, true);
 }
 
 // =============================================================================
@@ -12263,48 +12057,7 @@ extern "C" Item js_object_seal(Item obj) {
 }
 
 extern "C" Item js_object_is_sealed(Item obj) {
-    // ES6: non-objects are sealed
-    TypeId ot = get_type_id(obj);
-    if (ot != LMD_TYPE_MAP && ot != LMD_TYPE_ARRAY && ot != LMD_TYPE_FUNC && ot != LMD_TYPE_ELEMENT)
-        return (Item){.item = b2it(true)};
-    if (js_is_proxy(obj)) return js_object_test_proxy_integrity(obj, false);
-    // For arrays and functions, check via marker system
-    if (ot == LMD_TYPE_ARRAY || ot == LMD_TYPE_FUNC) {
-        bool found = false;
-        Item sv = js_defprop_get_internal_state(obj, "__sealed__", 10, &found);
-        if (found && js_is_truthy(sv)) return (Item){.item = b2it(true)};
-        Item fv = js_defprop_get_internal_state(obj, "__frozen__", 10, &found);
-        if (found && js_is_truthy(fv)) return (Item){.item = b2it(true)};
-        return (Item){.item = b2it(false)};
-    }
-    if (ot != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
-    // fast path: explicitly sealed or frozen
-    bool sk_found = false;
-    Item sv = js_map_get_fast_ext(obj.map, "__sealed__", 10, &sk_found);
-    if (sk_found && js_is_truthy(sv)) return (Item){.item = b2it(true)};
-    bool fk_found = false;
-    Item fv = js_map_get_fast_ext(obj.map, "__frozen__", 10, &fk_found);
-    if (fk_found && js_is_truthy(fv)) return (Item){.item = b2it(true)};
-    // must be non-extensible
-    bool ne_found = false;
-    Item nev = js_map_get_fast_ext(obj.map, "__non_extensible__", 17, &ne_found);
-    if (!ne_found || !js_is_truthy(nev)) return (Item){.item = b2it(false)};
-    // check all own properties are non-configurable
-    Map* m = obj.map;
-    if (!m || !m->type) return (Item){.item = b2it(true)}; // no shape = no properties
-    TypeMap* tm = (TypeMap*)m->type;
-    ShapeEntry* e = tm->shape;
-    while (e) {
-        if (e->name) {
-            const char* n = e->name->str;
-            int nlen = (int)e->name->length;
-            if (nlen >= 2 && n[0] == '_' && n[1] == '_') { e = e->next; continue; }
-            // Stage A3.4: shape-flag-first via helper (falls back to legacy markers).
-            if (js_props_query_configurable(m, e, n, nlen)) return (Item){.item = b2it(false)};
-        }
-        e = e->next;
-    }
-    return (Item){.item = b2it(true)};
+    return js_object_test_integrity(obj, false);
 }
 
 // =============================================================================
@@ -13816,25 +13569,8 @@ static bool js_delete_string_exotic_property(Item obj, Item key, Item* out_resul
     bool reject = false;
     if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
         reject = true;
-    } else if (sk && sk->len > 0 && sk->len <= 18) {
-        bool all_digits = true;
-        int64_t idx = 0;
-        for (int i = 0; i < (int)sk->len; i++) {
-            if (sk->chars[i] < '0' || sk->chars[i] > '9') {
-                all_digits = false;
-                break;
-            }
-            idx = idx * 10 + (sk->chars[i] - '0');
-        }
-        if (all_digits && (sk->len == 1 || sk->chars[0] != '0')) {
-            bool pv_found = false;
-            Item pv = js_map_get_fast_ext(obj.map, "__primitiveValue__", 18, &pv_found);
-            if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
-                String* pv_s = it2s(pv);
-                int64_t slen = pv_s ? js_utf16_len(pv_s->chars, (int)pv_s->len, (bool)pv_s->is_ascii) : 0;
-                reject = idx >= 0 && idx < slen;
-            }
-        }
+    } else if (js_string_exotic_index_in_range(obj, sk)) {
+        reject = true;
     }
     if (reject) {
         if (js_strict_mode) js_throw_type_error("Cannot delete non-configurable property");
@@ -15431,9 +15167,8 @@ static void js_message_port_schedule_message_error(Item target, Item data) {
     js_setTimeout(callback, (Item){.item = i2it(0)});
 }
 
-static Item js_message_port_add_listener(Item event, Item handler) {
-    Item self = js_get_this();
-    const char* key = js_message_port_listener_key(event);
+static Item js_message_port_add_listener_for_key(Item self, const char* key,
+                                                  Item handler) {
     if (!key || get_type_id(handler) != LMD_TYPE_FUNC) {
         return self;
     }
@@ -15446,19 +15181,14 @@ static Item js_message_port_add_listener(Item event, Item handler) {
     return self;
 }
 
+static Item js_message_port_add_listener(Item event, Item handler) {
+    return js_message_port_add_listener_for_key(
+        js_get_this(), js_message_port_listener_key(event), handler);
+}
+
 static Item js_message_port_add_event_listener(Item event, Item handler) {
-    Item self = js_get_this();
-    const char* key = js_message_port_event_listener_key(event);
-    if (!key || get_type_id(handler) != LMD_TYPE_FUNC) {
-        return self;
-    }
-    Item listeners = js_property_get(self, make_string_item(key));
-    if (get_type_id(listeners) != LMD_TYPE_ARRAY) {
-        listeners = js_array_new(0);
-        js_property_set(self, make_string_item(key), listeners);
-    }
-    js_array_push(listeners, handler);
-    return self;
+    return js_message_port_add_listener_for_key(
+        js_get_this(), js_message_port_event_listener_key(event), handler);
 }
 
 static Item js_message_port_once_wrapper(Item env_item, Item arg1) {
@@ -16326,13 +16056,8 @@ extern "C" int64_t js_capture_with_binding(Item key) {
     return 0;
 }
 
-extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict) {
-    if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
-        return 0;
-    }
-    Item scope_obj = js_last_with_binding_scope;
-    js_last_with_binding_valid = false;
-    if (!js_with_scope_is_object(scope_obj)) return 0;
+static int64_t js_set_with_binding_resolved(Item scope_obj, Item key, Item value,
+                                            int64_t strict) {
     if (it2b(js_in(key, scope_obj))) {
         if (js_check_exception()) return 1;
         js_property_set(scope_obj, key, value);
@@ -16347,22 +16072,21 @@ extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64
     return 1;
 }
 
+extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict) {
+    if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
+        return 0;
+    }
+    Item scope_obj = js_last_with_binding_scope;
+    js_last_with_binding_valid = false;
+    if (!js_with_scope_is_object(scope_obj)) return 0;
+    return js_set_with_binding_resolved(scope_obj, key, value, strict);
+}
+
 extern "C" int64_t js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict) {
     // `var x = rhs` in a with statement resolves x before evaluating rhs.
     // Store through that saved base even if rhs deletes or shadows the property.
     if (!js_with_scope_is_object(scope_obj)) return 0;
-    if (it2b(js_in(key, scope_obj))) {
-        if (js_check_exception()) return 1;
-        js_property_set(scope_obj, key, value);
-        return 1;
-    }
-    if (js_check_exception()) return 1;
-    if (strict) {
-        js_throw_binding_reference_error(key);
-        return 1;
-    }
-    js_property_set(scope_obj, key, value);
-    return 1;
+    return js_set_with_binding_resolved(scope_obj, key, value, strict);
 }
 
 extern "C" int64_t js_global_lexical_binding_exists(Item key);

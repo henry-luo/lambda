@@ -88,54 +88,65 @@ static bool map_key_is_array_index_name(String* key) {
     return true;
 }
 
-static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
-    if (!field_ptr) return false;
+static bool store_common_field_value(void* field_ptr, TypeId type_id, Item value) {
     switch (type_id) {
     case LMD_TYPE_NULL:
     case LMD_TYPE_UNDEFINED:
-        // null/undefined value doesn't need to store anything - just mark the slot
         *(bool*)field_ptr = false;
-        break;
+        return true;
     case LMD_TYPE_BOOL:
         *(bool*)field_ptr = value.bool_val;
-        break;
-    case LMD_TYPE_INT: {
-        // Input-built maps share runtime maps' int64 lane; mixing a double
-        // writer with the lane reader makes even finite fields decode as inf.
+        return true;
+    case LMD_TYPE_INT:
         *(int64_t*)field_ptr = lambda_int_item_to_lane(value.item);
-        break;
-    }
+        return true;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
-        break;
+        return true;
     case LMD_TYPE_UINT64:
         *(uint64_t*)field_ptr = value.get_uint64();
-        break;
+        return true;
     case LMD_TYPE_NUM_SIZED:
-        // A plain shaped field keeps the packed Item so the i8/u32 subtype
-        // survives later validation or nullable-lane conversion.
         *(Item*)field_ptr = value;
-        break;
+        return true;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = value.get_double();
-        break;
+        return true;
     case LMD_TYPE_DTIME:
         *(DateTime**)field_ptr = value.get_datetime_ptr();
-        break;
+        return true;
     case LMD_TYPE_DECIMAL:
         *(Decimal**)field_ptr = value.get_decimal();
-        break;
+        return true;
     case LMD_TYPE_STRING:
         *(String**)field_ptr = value.get_safe_string();
-        break;
+        return true;
     case LMD_TYPE_SYMBOL:
         *(Symbol**)field_ptr = value.get_safe_symbol();
-        break;
+        return true;
     case LMD_TYPE_BINARY:
         *(Binary**)field_ptr = value.get_safe_binary();
-        break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
+        return true;
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_MAP:
+    case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT:
+        *(Container**)field_ptr = value.container;
+        return true;
+    case LMD_TYPE_PATH:
+        *(Path**)field_ptr = value.path;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
+    if (!field_ptr) return false;
+    if (store_common_field_value(field_ptr, type_id, value)) return true;
+    switch (type_id) {
+    case LMD_TYPE_RANGE:
         *(Container**)field_ptr = value.container;
         break;
     case LMD_TYPE_VMAP:
@@ -148,9 +159,6 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
         break;
     case LMD_TYPE_TYPE:
         *(Type**)field_ptr = value.type;
-        break;
-    case LMD_TYPE_PATH:
-        *(Path**)field_ptr = value.path;
         break;
     case LMD_TYPE_ANY: {
         Item item = value;
@@ -620,52 +628,8 @@ bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
 
 extern TypeElmt EmptyElmt;
 static void elmt_store_value(void* field_ptr, TypeId type_id, Item value) {
+    if (store_common_field_value(field_ptr, type_id, value)) return;
     switch (type_id) {
-    case LMD_TYPE_NULL:
-    case LMD_TYPE_UNDEFINED:
-        *(bool*)field_ptr = false;
-        break;
-    case LMD_TYPE_BOOL:
-        *(bool*)field_ptr = value.bool_val;
-        break;
-    case LMD_TYPE_INT:
-        // Input-built shapes share the runtime int64 lane representation.
-        *(int64_t*)field_ptr = lambda_int_item_to_lane(value.item);
-        break;
-    case LMD_TYPE_INT64:
-        *(int64_t*)field_ptr = value.get_int64();
-        break;
-    case LMD_TYPE_UINT64:
-        *(uint64_t*)field_ptr = value.get_uint64();
-        break;
-    case LMD_TYPE_NUM_SIZED:
-        *(Item*)field_ptr = value;
-        break;
-    case LMD_TYPE_FLOAT:
-        *(double*)field_ptr = value.get_double();
-        break;
-    case LMD_TYPE_DTIME:
-        *(DateTime**)field_ptr = value.get_datetime_ptr();
-        break;
-    case LMD_TYPE_DECIMAL:
-        *(Decimal**)field_ptr = value.get_decimal();
-        break;
-    case LMD_TYPE_STRING:
-        *(String**)field_ptr = value.get_safe_string();
-        break;
-    case LMD_TYPE_SYMBOL:
-        *(Symbol**)field_ptr = value.get_safe_symbol();
-        break;
-    case LMD_TYPE_BINARY:
-        *(Binary**)field_ptr = value.get_safe_binary();
-        break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
-        *(void**)field_ptr = value.container;
-        break;
-    case LMD_TYPE_PATH:
-        *(Path**)field_ptr = value.path;
-        break;
     default:
         log_debug("elmt_store_value: unknown type %d", type_id);
     }

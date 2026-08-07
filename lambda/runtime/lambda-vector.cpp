@@ -1514,12 +1514,12 @@ Item fn_math_cumprod(Item item) {
     return vector_cumulative_model(item, 2);
 }
 
-// argmin(vec) - index of minimum element
-Item fn_argmin(Item item) {
+static Item vector_arg_extreme(Item item, bool find_min, const char* name) {
     GUARD_ERROR1(item);
     int64_t len = vector_length(item);
     if (len < 0) {
-        log_error("argmin: expected a collection, got type: %s", get_type_name(get_type_id(item)));
+        log_error("%s: expected a collection, got type: %s", name,
+            get_type_name(get_type_id(item)));
         return ItemError;
     }
     if (len == 0) {
@@ -1527,63 +1527,39 @@ Item fn_argmin(Item item) {
         return ItemNull;
     }
 
-    int64_t min_idx = 0;
-    Item min_item = vector_get(item, 0);
+    int64_t extreme_idx = 0;
+    Item extreme_item = vector_get(item, 0);
     for (int64_t i = 1; i < len; i++) {
         Item candidate = vector_get(item, i);
-        LambdaNumericComparison comparison = lambda_numeric_compare(candidate, min_item);
+        LambdaNumericComparison comparison = lambda_numeric_compare(candidate, extreme_item);
         if (!comparison.valid) return ItemError;
         LambdaNumericRuntimePart candidate_part;
-        LambdaNumericRuntimePart min_part;
+        LambdaNumericRuntimePart extreme_part;
         bool candidate_simple = lambda_numeric_runtime_part(candidate, &candidate_part);
-        bool min_simple = lambda_numeric_runtime_part(min_item, &min_part);
+        bool extreme_simple = lambda_numeric_runtime_part(extreme_item, &extreme_part);
         bool candidate_nan = candidate_simple && candidate_part.kind == LAMBDA_NUM_PART_FLOAT &&
             isnan(candidate_part.float_value);
-        bool min_nan = min_simple && min_part.kind == LAMBDA_NUM_PART_FLOAT &&
-            isnan(min_part.float_value);
-        if (!candidate_nan && (min_nan || (!comparison.unordered && comparison.order < 0))) {
-            min_item = candidate;
-            min_idx = i;
+        bool extreme_nan = extreme_simple && extreme_part.kind == LAMBDA_NUM_PART_FLOAT &&
+            isnan(extreme_part.float_value);
+        int wanted_order = find_min ? -1 : 1;
+        if (!candidate_nan && (extreme_nan ||
+                (!comparison.unordered && comparison.order == wanted_order))) {
+            extreme_item = candidate;
+            extreme_idx = i;
         }
     }
 
-    return { .item = i2it(min_idx) };
+    return { .item = i2it(extreme_idx) };
+}
+
+// argmin(vec) - index of minimum element
+Item fn_argmin(Item item) {
+    return vector_arg_extreme(item, true, "argmin");
 }
 
 // argmax(vec) - index of maximum element
 Item fn_argmax(Item item) {
-    GUARD_ERROR1(item);
-    int64_t len = vector_length(item);
-    if (len < 0) {
-        log_error("argmax: expected a collection, got type: %s", get_type_name(get_type_id(item)));
-        return ItemError;
-    }
-    if (len == 0) {
-        // an empty selection has no candidate; keep it admissive as scalar absence
-        return ItemNull;
-    }
-
-    int64_t max_idx = 0;
-    Item max_item = vector_get(item, 0);
-    for (int64_t i = 1; i < len; i++) {
-        Item candidate = vector_get(item, i);
-        LambdaNumericComparison comparison = lambda_numeric_compare(candidate, max_item);
-        if (!comparison.valid) return ItemError;
-        LambdaNumericRuntimePart candidate_part;
-        LambdaNumericRuntimePart max_part;
-        bool candidate_simple = lambda_numeric_runtime_part(candidate, &candidate_part);
-        bool max_simple = lambda_numeric_runtime_part(max_item, &max_part);
-        bool candidate_nan = candidate_simple && candidate_part.kind == LAMBDA_NUM_PART_FLOAT &&
-            isnan(candidate_part.float_value);
-        bool max_nan = max_simple && max_part.kind == LAMBDA_NUM_PART_FLOAT &&
-            isnan(max_part.float_value);
-        if (!candidate_nan && (max_nan || (!comparison.unordered && comparison.order > 0))) {
-            max_item = candidate;
-            max_idx = i;
-        }
-    }
-
-    return { .item = i2it(max_idx) };
+    return vector_arg_extreme(item, false, "argmax");
 }
 
 // fill(n, value) - create vector of n copies of value
@@ -1933,26 +1909,22 @@ static Item index_to_item(int64_t index) {
     return { .item = i2it((int)index) };
 }
 
-// fn_pipe_map: apply transform function to each element of a collection
-// For arrays/lists/ranges: ~# is index, ~ is value
-// For maps: ~# is key (as string), ~ is value
-Item fn_pipe_map(Item collection, PipeMapFn transform) {
+static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
     TypeId type = get_type_id(collection);
 
-    // scalar case: apply transform directly
+    // scalar case: map returns the transformed value; where returns the source
     if (type != LMD_TYPE_ARRAY &&
         type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
         type != LMD_TYPE_ARRAY_NUM && type != LMD_TYPE_ELEMENT &&
         type != LMD_TYPE_OBJECT) {
-        return transform(collection, ItemNull);
+        Item transformed = transform(collection, ItemNull);
+        return !filter ? transformed : (is_truthy(transformed) ? collection : ItemNull);
     }
 
-    // map/object case: iterate over key-value pairs
     if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) {
         Map* mp = collection.map;
         List* result = list();
 
-        // use item_keys to get the list of keys
         SymbolKeyList* keys = item_keys(collection);
         if (keys) {
             int64_t key_count = symbol_key_list_len(keys);
@@ -1961,76 +1933,8 @@ Item fn_pipe_map(Item collection, PipeMapFn transform) {
                 Item key_item = { .item = y2it(key_sym) };
                 Item value = map_get(mp, key_item);
                 Item transformed = transform(value, key_item);
-                list_push(result, transformed);
-            }
-            symbol_key_list_free(keys);
-        }
-        result->is_content = 1;
-        return { .array = result };
-    }
-
-    // element case: iterate over children (content items, not attributes)
-    if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = collection.element;
-        List* result = list();
-
-        // element content starts at items[0] (attributes are in separate data struct)
-        for (int64_t i = 0; i < elem->length; i++) {
-            Item child = elem->items[i];
-            Item idx = index_to_item(i);
-            Item transformed = transform(child, idx);
-            list_push(result, transformed);
-        }
-        result->is_content = 1;
-        return { .array = result };
-    }
-
-    // collection case: iterate with index
-    int64_t len = vector_length(collection);
-    if (len < 0) return ItemError;
-
-    List* result = list();
-    for (int64_t i = 0; i < len; i++) {
-        Item elem = vector_get(collection, i);
-        Item idx = index_to_item(i);
-        Item transformed = transform(elem, idx);
-        list_push(result, transformed);
-    }
-    result->is_content = 1;
-    return { .array = result };
-}
-
-// fn_pipe_where: filter elements where predicate is truthy
-Item fn_pipe_where(Item collection, PipeMapFn predicate) {
-    TypeId type = get_type_id(collection);
-
-    // scalar case: return collection if truthy, else null
-    if (type != LMD_TYPE_ARRAY &&
-        type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
-        type != LMD_TYPE_ARRAY_NUM && type != LMD_TYPE_ELEMENT &&
-        type != LMD_TYPE_OBJECT) {
-        Item result = predicate(collection, ItemNull);
-        if (is_truthy(result)) {
-            return collection;
-        }
-        return ItemNull;
-    }
-
-    // map/object case: filter key-value pairs (return list of values that pass predicate)
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) {
-        Map* mp = collection.map;
-        List* result = list();
-
-        SymbolKeyList* keys = item_keys(collection);
-        if (keys) {
-            int64_t key_count = symbol_key_list_len(keys);
-            for (int64_t i = 0; i < key_count; i++) {
-                Symbol* key_sym = symbol_key_list_at(keys, i);
-                Item key_item = { .item = y2it(key_sym) };
-                Item value = map_get(mp, key_item);
-                Item pred_result = predicate(value, key_item);
-                if (is_truthy(pred_result)) {
-                    list_push(result, value);
+                if (!filter || is_truthy(transformed)) {
+                    list_push(result, filter ? value : transformed);
                 }
             }
             symbol_key_list_free(keys);
@@ -2039,7 +1943,6 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
         return { .array = result };
     }
 
-    // element case: filter children (content items, not attributes)
     if (type == LMD_TYPE_ELEMENT) {
         Element* elem = collection.element;
         List* result = list();
@@ -2047,16 +1950,15 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
         for (int64_t i = 0; i < elem->length; i++) {
             Item child = elem->items[i];
             Item idx = index_to_item(i);
-            Item pred_result = predicate(child, idx);
-            if (is_truthy(pred_result)) {
-                list_push(result, child);
+            Item transformed = transform(child, idx);
+            if (!filter || is_truthy(transformed)) {
+                list_push(result, filter ? child : transformed);
             }
         }
         result->is_content = 1;
         return { .array = result };
     }
 
-    // collection case
     int64_t len = vector_length(collection);
     if (len < 0) return ItemError;
 
@@ -2064,13 +1966,25 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
     for (int64_t i = 0; i < len; i++) {
         Item elem = vector_get(collection, i);
         Item idx = index_to_item(i);
-        Item pred_result = predicate(elem, idx);
-        if (is_truthy(pred_result)) {
-            list_push(result, elem);
+        Item transformed = transform(elem, idx);
+        if (!filter || is_truthy(transformed)) {
+            list_push(result, filter ? elem : transformed);
         }
     }
     result->is_content = 1;
     return { .array = result };
+}
+
+// fn_pipe_map: apply transform function to each element of a collection
+// For arrays/lists/ranges: ~# is index, ~ is value
+// For maps: ~# is key (as string), ~ is value
+Item fn_pipe_map(Item collection, PipeMapFn transform) {
+    return fn_pipe_collect(collection, transform, false);
+}
+
+// fn_pipe_where: filter elements where predicate is truthy
+Item fn_pipe_where(Item collection, PipeMapFn predicate) {
+    return fn_pipe_collect(collection, predicate, true);
 }
 
 // fn_pipe_call: pass collection as first argument to a function

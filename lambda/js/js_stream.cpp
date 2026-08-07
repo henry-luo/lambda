@@ -534,23 +534,7 @@ static bool js_item_is_true(Item item) {
 }
 
 static bool js_stream_item_to_int64(Item value, int64_t* out) {
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT) {
-        if (out) *out = it2i(value);
-        return true;
-    }
-    if (type == LMD_TYPE_FLOAT) {
-        double number = it2d(value);
-        // Public stream sizes are JS Numbers; after migration integral values arrive boxed as FLOAT.
-        if (!isfinite(number) || number != floor(number) ||
-            number < -9223372036854775808.0 ||
-            number > 9223372036854775807.0) {
-            return false;
-        }
-        if (out) *out = (int64_t)number;
-        return true;
-    }
-    return false;
+    return js_item_to_integral_int64(value, out, false);
 }
 
 static Item js_readable_pipe_on_drain(Item env_item) {
@@ -1389,6 +1373,26 @@ static Item js_stream_make_write_request(Item chunk, Item encoding, Item callbac
     return request;
 }
 
+static void js_stream_finish_write_cycle(Item self, Item state,
+        bool need_drain, bool has_error, Item err) {
+    if (has_error) {
+        js_property_set(self, make_string_item("__writable_end_pending__"), js_bool_item(false));
+        js_stream_call_writable_end_callbacks(self, err);
+    }
+    if (!has_error && need_drain &&
+        !js_state_get_bool(state, "ended") &&
+        !js_item_is_true(js_property_get(self, make_string_item("__transform_end_pending__"))) &&
+        !js_item_is_true(js_property_get(self, key_destroyed)) &&
+        !js_item_is_true(js_property_get(self, key_finish_emitted))) {
+        js_stream_emit_or_schedule_drain(self);
+    }
+    if (!has_error) {
+        js_stream_flush_pending_writes(self);
+        js_writable_maybe_finish_deferred(self);
+        js_transform_maybe_finish_deferred(self);
+    }
+}
+
 static void js_stream_buffer_write_request(Item self, Item chunk, Item encoding, Item callback) {
     Item pending = js_property_get(self, make_string_item("_pendingWrites"));
     if (get_type_id(pending) != LMD_TYPE_ARRAY) {
@@ -1420,23 +1424,7 @@ static Item js_stream_after_write(Item self, Item callback, Item err) {
             js_call_function(callback, self, NULL, 0);
         }
     }
-    if (has_error) {
-        js_property_set(self, make_string_item("__writable_end_pending__"), js_bool_item(false));
-        js_stream_call_writable_end_callbacks(self, err);
-    }
-
-    if (!has_error && need_drain &&
-        !js_state_get_bool(state, "ended") &&
-        !js_item_is_true(js_property_get(self, make_string_item("__transform_end_pending__"))) &&
-        !js_item_is_true(js_property_get(self, key_destroyed)) &&
-        !js_item_is_true(js_property_get(self, key_finish_emitted))) {
-        js_stream_emit_or_schedule_drain(self);
-    }
-    if (!has_error) {
-        js_stream_flush_pending_writes(self);
-        js_writable_maybe_finish_deferred(self);
-        js_transform_maybe_finish_deferred(self);
-    }
+    js_stream_finish_write_cycle(self, state, need_drain, has_error, err);
     return make_js_undefined();
 }
 
@@ -1526,23 +1514,7 @@ static Item js_stream_after_writev(Item self, Item pending, Item err) {
             }
         }
     }
-    if (has_error) {
-        js_property_set(self, make_string_item("__writable_end_pending__"), js_bool_item(false));
-        js_stream_call_writable_end_callbacks(self, err);
-    }
-
-    if (!has_error && need_drain &&
-        !js_state_get_bool(state, "ended") &&
-        !js_item_is_true(js_property_get(self, make_string_item("__transform_end_pending__"))) &&
-        !js_item_is_true(js_property_get(self, key_destroyed)) &&
-        !js_item_is_true(js_property_get(self, key_finish_emitted))) {
-        js_stream_emit_or_schedule_drain(self);
-    }
-    if (!has_error) {
-        js_stream_flush_pending_writes(self);
-        js_writable_maybe_finish_deferred(self);
-        js_transform_maybe_finish_deferred(self);
-    }
+    js_stream_finish_write_cycle(self, state, need_drain, has_error, err);
     return make_js_undefined();
 }
 
@@ -7151,11 +7123,8 @@ extern "C" Item js_writable_new(Item opts) {
 // Duplex stream (Readable + Writable)
 // =============================================================================
 
-extern "C" Item js_duplex_new(Item opts) {
-    ensure_keys();
-    Item obj = js_stream_create_instance(stream_duplex_prototype);
-
-    js_class_stamp(obj, JS_CLASS_DUPLEX);
+static void js_stream_init_duplex_like(Item obj, JsClass class_id, bool transform) {
+    js_class_stamp(obj, class_id);
     js_property_set(obj, key_readable, js_bool_item(true));
     js_property_set(obj, key_writable, js_bool_item(true));
     js_property_set(obj, key_readable_side_enabled, js_bool_item(true));
@@ -7191,7 +7160,6 @@ extern "C" Item js_duplex_new(Item opts) {
     js_stream_init_readable_options(obj);
     js_stream_init_writable_options(obj);
 
-    // Readable methods
     js_property_set(obj, key_on, js_new_function((void*)js_stream_inst_on, 2));
     js_property_set(obj, make_string_item("once"), js_new_function((void*)js_stream_inst_once, 2));
     Item off_fn = js_new_function((void*)js_stream_inst_off, 2);
@@ -7211,9 +7179,10 @@ extern "C" Item js_duplex_new(Item opts) {
     js_property_set(obj, make_string_item("pause"), js_new_function((void*)js_readable_inst_pause, 0));
     js_property_set(obj, make_string_item("isPaused"), js_new_function((void*)js_readable_inst_isPaused, 0));
 
-    // Writable methods
-    js_property_set(obj, key_write, js_new_function((void*)js_writable_inst_write, 3));
-    js_property_set(obj, key_end, js_new_function((void*)js_writable_inst_end, 2));
+    void* write_fn = transform ? (void*)js_transform_inst_write : (void*)js_writable_inst_write;
+    void* end_fn = transform ? (void*)js_transform_inst_end : (void*)js_writable_inst_end;
+    js_property_set(obj, key_write, js_new_function(write_fn, 3));
+    js_property_set(obj, key_end, js_new_function(end_fn, 2));
     js_property_set(obj, key_destroy, js_new_function((void*)js_stream_inst_destroy, 2));
     js_property_set(obj, make_string_item("_undestroy"), js_new_function((void*)js_stream_inst_undestroy, 0));
     js_property_set(obj, make_string_item("cork"), js_new_function((void*)js_writable_inst_cork, 0));
@@ -7222,6 +7191,12 @@ extern "C" Item js_duplex_new(Item opts) {
     js_property_set(obj, make_string_item("setDefaultEncoding"), js_new_function((void*)js_stream_inst_setDefaultEncoding, 1));
     js_stream_install_async_iterator(obj);
     js_stream_install_readable_helpers(obj);
+}
+
+extern "C" Item js_duplex_new(Item opts) {
+    ensure_keys();
+    Item obj = js_stream_create_instance(stream_duplex_prototype);
+    js_stream_init_duplex_like(obj, JS_CLASS_DUPLEX, false);
 
     if (!propagate_stream_options(obj, opts)) return ItemNull;
     js_stream_call_construct(obj);
@@ -7843,74 +7818,7 @@ extern "C" Item js_transform_end(Item self, Item chunk, Item callback) {
 extern "C" Item js_transform_new(Item opts) {
     ensure_keys();
     Item obj = js_stream_create_instance(stream_transform_prototype);
-
-    js_class_stamp(obj, JS_CLASS_TRANSFORM);
-    js_property_set(obj, key_readable, js_bool_item(true));
-    js_property_set(obj, key_writable, js_bool_item(true));
-    js_property_set(obj, key_readable_side_enabled, js_bool_item(true));
-    js_property_set(obj, key_writable_side_enabled, js_bool_item(true));
-    js_stream_set_flowing(obj, false);
-    js_property_set(obj, key_ended, js_bool_item(false));
-    js_property_set(obj, key_finished, js_bool_item(false));
-    js_property_set(obj, key_destroyed, js_bool_item(false));
-    js_property_set(obj, make_string_item("destroyed"), js_bool_item(false));
-    js_property_set(obj, make_string_item("errored"), ItemNull);
-    js_property_set(obj, make_string_item("readableAborted"), js_bool_item(false));
-    js_property_set(obj, make_string_item("writableAborted"), js_bool_item(false));
-    js_property_set(obj, key_finish_emitted, js_bool_item(false));
-    js_property_set(obj, key_end_pending, js_bool_item(false));
-    js_property_set(obj, key_end_emitted, js_bool_item(false));
-    js_property_set(obj, key_reading, js_bool_item(false));
-    js_property_set(obj, key_paused, js_bool_item(false));
-    js_property_set(obj, key_close_emitted, js_bool_item(false));
-    js_property_set(obj, key_closed, js_bool_item(false));
-    js_property_set(obj, key_auto_destroy, js_bool_item(true));
-    js_property_set(obj, make_string_item("allowHalfOpen"), js_bool_item(true));
-    js_property_set(obj, key_readable_state, js_create_readable_state());
-    js_property_set(obj, key_writable_state, js_create_writable_state(obj));
-    js_stream_set_writable_corked(obj, 0);
-    js_stream_set_buffered_request_count(obj, 0);
-    js_stream_define_bool(obj, "readableEnded", false);
-    js_stream_define_bool(obj, "writableEnded", false);
-    js_stream_define_bool(obj, "writableFinished", false);
-    js_stream_set_readable_buffer(obj, js_array_new(0));
-    Item listeners = js_new_object();
-    js_property_set(obj, key_listeners, listeners);
-    js_property_set(obj, make_string_item("_events"), js_new_object());
-    js_stream_init_readable_options(obj);
-    js_stream_init_writable_options(obj);
-
-    // Readable methods
-    js_property_set(obj, key_on, js_new_function((void*)js_stream_inst_on, 2));
-    js_property_set(obj, make_string_item("once"), js_new_function((void*)js_stream_inst_once, 2));
-    Item off_fn = js_new_function((void*)js_stream_inst_off, 2);
-    js_property_set(obj, make_string_item("off"), off_fn);
-    js_property_set(obj, make_string_item("removeListener"), off_fn);
-    js_property_set(obj, make_string_item("removeAllListeners"), js_new_function((void*)js_stream_inst_removeAllListeners, 1));
-    js_property_set(obj, key_emit, js_new_function((void*)js_stream_inst_emit, 2));
-    js_property_set(obj, make_string_item("eventNames"), js_new_function((void*)js_stream_inst_eventNames, 0));
-    js_property_set(obj, make_string_item("listeners"), js_new_function((void*)js_stream_inst_listeners, 1));
-    js_property_set(obj, make_string_item("listenerCount"), js_new_function((void*)js_stream_inst_listenerCount, 2));
-    js_property_set(obj, key_push, js_new_function((void*)js_readable_inst_push, 2));
-    js_property_set(obj, make_string_item("unshift"), js_new_function((void*)js_readable_inst_unshift, 2));
-    js_property_set(obj, key_read, js_new_function((void*)js_readable_inst_read, 1));
-    js_property_set(obj, key_pipe, js_new_function((void*)js_readable_inst_pipe, 1));
-    js_property_set(obj, make_string_item("unpipe"), js_new_function((void*)js_readable_inst_unpipe, 1));
-    js_property_set(obj, make_string_item("resume"), js_new_function((void*)js_readable_inst_resume, 0));
-    js_property_set(obj, make_string_item("pause"), js_new_function((void*)js_readable_inst_pause, 0));
-    js_property_set(obj, make_string_item("isPaused"), js_new_function((void*)js_readable_inst_isPaused, 0));
-
-    // Writable methods using transform
-    js_property_set(obj, key_write, js_new_function((void*)js_transform_inst_write, 3));
-    js_property_set(obj, key_end, js_new_function((void*)js_transform_inst_end, 2));
-    js_property_set(obj, key_destroy, js_new_function((void*)js_stream_inst_destroy, 2));
-    js_property_set(obj, make_string_item("_undestroy"), js_new_function((void*)js_stream_inst_undestroy, 0));
-    js_property_set(obj, make_string_item("cork"), js_new_function((void*)js_writable_inst_cork, 0));
-    js_property_set(obj, make_string_item("uncork"), js_new_function((void*)js_writable_inst_uncork, 0));
-    js_property_set(obj, make_string_item("setEncoding"), js_new_function((void*)js_stream_inst_setEncoding, 1));
-    js_property_set(obj, make_string_item("setDefaultEncoding"), js_new_function((void*)js_stream_inst_setDefaultEncoding, 1));
-    js_stream_install_async_iterator(obj);
-    js_stream_install_readable_helpers(obj);
+    js_stream_init_duplex_like(obj, JS_CLASS_TRANSFORM, true);
 
     if (!propagate_stream_options(obj, opts)) return ItemNull;
     js_stream_call_construct(obj);

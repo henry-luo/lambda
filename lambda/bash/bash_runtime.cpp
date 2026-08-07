@@ -1731,16 +1731,33 @@ extern "C" Item bash_expand_tilde(Item word) {
 
 // Tilde expansion in assignment value: expands ~, ~/path, ~user, ~+, ~- after each : delimiter
 // Used when assigning to variables where the value starts with ~ or contains :~ sequences
-extern "C" Item bash_expand_tilde_assign(Item word) {
+static const char* bash_tilde_segment_end(const char* p, bool stop_at_slash) {
+    for (const char* q = p; *q; q++) {
+        if (*q == ':' || (stop_at_slash && *q == '/')) return q;
+    }
+    return NULL;
+}
+
+static const char* bash_tilde_trigger(const char* p, bool include_equals) {
+    for (const char* q = p; *q; q++) {
+        if ((include_equals && *q == '=') || *q == ':') {
+            if (*(q + 1) == '~') return q;
+        }
+    }
+    return NULL;
+}
+
+static Item bash_expand_tilde_assign_impl(Item word, bool include_equals, bool allow_leading) {
     // expand tilde in assignment values: ~ at start and after : separators
     const char* w = bash_item_to_cstr(word);
     if (!w || !*w) return word;
 
-    // check if any tilde expansion needed: starts with ~ or contains :~
-    bool needs_expand = (w[0] == '~');
-    if (!needs_expand) {
-        for (int i = 0; w[i]; i++) {
-            if (w[i] == ':' && w[i+1] == '~') { needs_expand = true; break; }
+    bool needs_expand = false;
+    for (int i = 0; w[i]; i++) {
+        if (w[i] == '~' && ((allow_leading && i == 0) ||
+                (include_equals && w[i - 1] == '=') || w[i - 1] == ':')) {
+            needs_expand = true;
+            break;
         }
     }
     if (!needs_expand) return word;
@@ -1750,7 +1767,7 @@ extern "C" Item bash_expand_tilde_assign(Item word) {
     while (*p) {
         if (*p == '~') {
             // expand this tilde segment: ~ up to next : or end
-            const char* seg_end = strchr(p, ':');
+            const char* seg_end = bash_tilde_segment_end(p, include_equals);
             int seg_len = seg_end ? (int)(seg_end - p) : (int)strlen(p);
             char seg[1024];
             if (seg_len >= 1023) seg_len = 1022;
@@ -1764,11 +1781,8 @@ extern "C" Item bash_expand_tilde_assign(Item word) {
 
             p += seg_len;
         } else {
-            // copy up to next :~ or end
-            const char* trigger = NULL;
-            for (const char* q = p; *q; q++) {
-                if (*q == ':' && *(q+1) == '~') { trigger = q; break; }
-            }
+            // copy up to the next tilde trigger or end
+            const char* trigger = bash_tilde_trigger(p, include_equals);
             if (trigger) {
                 // copy up to and including the colon
                 strbuf_append_str_n(sb, p, (int)(trigger - p) + 1);
@@ -1786,58 +1800,15 @@ extern "C" Item bash_expand_tilde_assign(Item word) {
     return (Item){.item = s2it(result)};
 }
 
+extern "C" Item bash_expand_tilde_assign(Item word) {
+    return bash_expand_tilde_assign_impl(word, false, true);
+}
+
 // tilde-assign expansion for command arguments: NAME=~/value or NAME=~:~/value
 // handles =~ and :~ triggers (not applied in POSIX mode)
 extern "C" Item bash_expand_tilde_assign_arg(Item word) {
     if (bash_get_posix_mode()) return word;
-    const char* w = bash_item_to_cstr(word);
-    if (!w || !*w) return word;
-
-    // check if any tilde expansion needed: contains =~ or :~
-    bool needs_expand = false;
-    for (int i = 0; w[i]; i++) {
-        if ((w[i] == '=' || w[i] == ':') && w[i+1] == '~') { needs_expand = true; break; }
-    }
-    if (!needs_expand) return word;
-
-    StrBuf* sb = strbuf_new_cap((int)strlen(w) * 2);
-    const char* p = w;
-    while (*p) {
-        if (*p == '~') {
-            const char* seg_end = NULL;
-            for (const char* q = p; *q; q++) {
-                if (*q == ':' || *q == '/') { seg_end = q; break; }
-            }
-            int seg_len = seg_end ? (int)(seg_end - p) : (int)strlen(p);
-            char seg[1024];
-            if (seg_len >= 1023) seg_len = 1022;
-            memcpy(seg, p, seg_len);
-            seg[seg_len] = '\0';
-
-            Item seg_item = (Item){.item = s2it(heap_create_name(seg, seg_len))};
-            Item expanded = bash_expand_tilde(seg_item);
-            const char* exp_str = bash_item_to_cstr(expanded);
-            strbuf_append_str(sb, exp_str ? exp_str : seg);
-
-            p += seg_len;
-        } else {
-            const char* trigger = NULL;
-            for (const char* q = p; *q; q++) {
-                if ((*q == '=' || *q == ':') && *(q+1) == '~') { trigger = q; break; }
-            }
-            if (trigger) {
-                strbuf_append_str_n(sb, p, (int)(trigger - p) + 1);
-                p = trigger + 1;
-            } else {
-                strbuf_append_str(sb, p);
-                p += strlen(p);
-            }
-        }
-    }
-
-    String* result = heap_create_name(sb->str, sb->length);
-    strbuf_free(sb);
-    return (Item){.item = s2it(result)};
+    return bash_expand_tilde_assign_impl(word, true, false);
 }
 
 // ============================================================================
@@ -2173,14 +2144,16 @@ static bool bash_glob_match(const char* str, const char* pat) {
     return *str == 0;
 }
 
-extern "C" Item bash_string_trim_prefix(Item str, Item pattern, bool greedy) {
+static Item bash_string_trim_match(Item str, Item pattern, bool prefix, bool greedy) {
     String* s = it2s(bash_to_string(str));
     String* p = it2s(bash_to_string(pattern));
     if (!s || !p) return str;
 
-    if (greedy) {
-        // ${var##pat}: longest prefix match
-        for (int i = s->len; i >= 0; i--) {
+    if (prefix) {
+        int start = greedy ? (int)s->len : 0;
+        int end = greedy ? -1 : (int)s->len + 1;
+        int step = greedy ? -1 : 1;
+        for (int i = start; i != end; i += step) {
             char saved = s->chars[i];
             s->chars[i] = '\0';
             if (bash_glob_match(s->chars, p->chars)) {
@@ -2189,42 +2162,26 @@ extern "C" Item bash_string_trim_prefix(Item str, Item pattern, bool greedy) {
             }
             s->chars[i] = saved;
         }
+    }
     } else {
-        // ${var#pat}: shortest prefix match
-        for (int i = 0; i <= (int)s->len; i++) {
-            char saved = s->chars[i];
-            s->chars[i] = '\0';
-            if (bash_glob_match(s->chars, p->chars)) {
-                s->chars[i] = saved;
-                return (Item){.item = s2it(heap_create_name(s->chars + i, s->len - i))};
+        int start = greedy ? 0 : (int)s->len;
+        int end = greedy ? (int)s->len + 1 : -1;
+        int step = greedy ? 1 : -1;
+        for (int i = start; i != end; i += step) {
+            if (bash_glob_match(s->chars + i, p->chars)) {
+                return (Item){.item = s2it(heap_create_name(s->chars, i))};
             }
-            s->chars[i] = saved;
         }
     }
     return str;
 }
 
-extern "C" Item bash_string_trim_suffix(Item str, Item pattern, bool greedy) {
-    String* s = it2s(bash_to_string(str));
-    String* p = it2s(bash_to_string(pattern));
-    if (!s || !p) return str;
+extern "C" Item bash_string_trim_prefix(Item str, Item pattern, bool greedy) {
+    return bash_string_trim_match(str, pattern, true, greedy);
+}
 
-    if (greedy) {
-        // ${var%%pat}: longest suffix match
-        for (int i = 0; i <= (int)s->len; i++) {
-            if (bash_glob_match(s->chars + i, p->chars)) {
-                return (Item){.item = s2it(heap_create_name(s->chars, i))};
-            }
-        }
-    } else {
-        // ${var%pat}: shortest suffix match
-        for (int i = s->len; i >= 0; i--) {
-            if (bash_glob_match(s->chars + i, p->chars)) {
-                return (Item){.item = s2it(heap_create_name(s->chars, i))};
-            }
-        }
-    }
-    return str;
+extern "C" Item bash_string_trim_suffix(Item str, Item pattern, bool greedy) {
+    return bash_string_trim_match(str, pattern, false, greedy);
 }
 
 extern "C" Item bash_string_replace(Item str, Item pattern, Item replacement, bool all) {
@@ -2258,7 +2215,7 @@ extern "C" Item bash_string_replace(Item str, Item pattern, Item replacement, bo
     return (Item){.item = s2it(result)};
 }
 
-extern "C" Item bash_string_upper(Item str, bool all) {
+static Item bash_string_change_case(Item str, bool all, bool upper) {
     String* s = it2s(bash_to_string(str));
     if (!s || s->len == 0) return str;
 
@@ -2266,7 +2223,11 @@ extern "C" Item bash_string_upper(Item str, bool all) {
     for (int i = 0; i < (int)s->len; i++) {
         char c = s->chars[i];
         if (all || i == 0) {
-            if (c >= 'a' && c <= 'z') c -= 32;
+            if (upper) {
+                if (c >= 'a' && c <= 'z') c -= 32;
+            } else if (c >= 'A' && c <= 'Z') {
+                c += 32;
+            }
         }
         strbuf_append_char(sb, c);
     }
@@ -2275,21 +2236,12 @@ extern "C" Item bash_string_upper(Item str, bool all) {
     return (Item){.item = s2it(result)};
 }
 
-extern "C" Item bash_string_lower(Item str, bool all) {
-    String* s = it2s(bash_to_string(str));
-    if (!s || s->len == 0) return str;
+extern "C" Item bash_string_upper(Item str, bool all) {
+    return bash_string_change_case(str, all, true);
+}
 
-    StrBuf* sb = strbuf_new_cap(s->len + 1);
-    for (int i = 0; i < (int)s->len; i++) {
-        char c = s->chars[i];
-        if (all || i == 0) {
-            if (c >= 'A' && c <= 'Z') c += 32;
-        }
-        strbuf_append_char(sb, c);
-    }
-    String* result = heap_create_name(sb->str, sb->length);
-    strbuf_free(sb);
-    return (Item){.item = s2it(result)};
+extern "C" Item bash_string_lower(Item str, bool all) {
+    return bash_string_change_case(str, all, false);
 }
 
 // ============================================================================
@@ -2817,7 +2769,7 @@ extern "C" Item bash_get_pipestatus_count_item(void) {
 
 #include <fcntl.h>
 
-extern "C" Item bash_redirect_write(Item filename, Item content) {
+static Item bash_redirect_write_mode(Item filename, Item content, bool append) {
     Item fn_str = bash_to_string(filename);
     String* fn = it2s(fn_str);
     if (!fn || fn->len == 0) {
@@ -2831,9 +2783,9 @@ extern "C" Item bash_redirect_write(Item filename, Item content) {
         return (Item){.item = i2it(0)};
     }
 
-    int fd = open(fn->chars, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int fd = open(fn->chars, O_WRONLY | O_CREAT | (append ? O_APPEND : O_TRUNC), 0644);
     if (fd < 0) {
-        log_error("bash: cannot open '%s' for writing", fn->chars);
+        log_error("bash: cannot open '%s' for %s", fn->chars, append ? "appending" : "writing");
         bash_last_exit_code = 1;
         return (Item){.item = i2it(1)};
     }
@@ -2848,34 +2800,12 @@ extern "C" Item bash_redirect_write(Item filename, Item content) {
     return (Item){.item = i2it(0)};
 }
 
+extern "C" Item bash_redirect_write(Item filename, Item content) {
+    return bash_redirect_write_mode(filename, content, false);
+}
+
 extern "C" Item bash_redirect_append(Item filename, Item content) {
-    Item fn_str = bash_to_string(filename);
-    String* fn = it2s(fn_str);
-    if (!fn || fn->len == 0) {
-        bash_last_exit_code = 1;
-        return (Item){.item = i2it(1)};
-    }
-
-    if (fn->len == 9 && memcmp(fn->chars, "/dev/null", 9) == 0) {
-        bash_last_exit_code = 0;
-        return (Item){.item = i2it(0)};
-    }
-
-    int fd = open(fn->chars, O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (fd < 0) {
-        log_error("bash: cannot open '%s' for appending", fn->chars);
-        bash_last_exit_code = 1;
-        return (Item){.item = i2it(1)};
-    }
-
-    Item c_str = bash_to_string(content);
-    String* c = it2s(c_str);
-    if (c && c->len > 0) {
-        write(fd, c->chars, c->len);
-    }
-    close(fd);
-    bash_last_exit_code = 0;
-    return (Item){.item = i2it(0)};
+    return bash_redirect_write_mode(filename, content, true);
 }
 
 extern "C" Item bash_redirect_read(Item filename) {

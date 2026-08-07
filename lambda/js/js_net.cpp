@@ -73,27 +73,7 @@ static double net_number_value(Item value) {
 }
 
 static bool net_item_to_integral_int64(Item value, int64_t* out) {
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT) {
-        if (out) *out = it2i(value);
-        return true;
-    }
-    if (type == LMD_TYPE_INT64) {
-        if (out) *out = it2l(value);
-        return true;
-    }
-    if (type == LMD_TYPE_FLOAT) {
-        double number = it2d(value);
-        // JS option numbers are float-backed after the Number migration; host knobs still require integers.
-        if (!isfinite(number) || number != floor(number) ||
-            number < -9223372036854775808.0 ||
-            number > 9223372036854775807.0) {
-            return false;
-        }
-        if (out) *out = (int64_t)number;
-        return true;
-    }
-    return false;
+    return js_item_to_integral_int64(value, out, true);
 }
 
 // =============================================================================
@@ -488,8 +468,9 @@ static void socket_update_state_properties(JsSocket* sock) {
                     make_string_item(ready_state));
 }
 
-static void socket_set_address_properties(Item obj, const char* prefix,
-                                          const struct sockaddr_storage* addr) {
+static void net_set_endpoint_properties(Item obj, const char* prefix,
+                                        const struct sockaddr_storage* addr,
+                                        bool family_before_port) {
     if (!obj.item || !addr) return;
 
     char address[INET6_ADDRSTRLEN];
@@ -514,10 +495,17 @@ static void socket_set_address_properties(Item obj, const char* prefix,
     char key[32];
     snprintf(key, sizeof(key), "%sAddress", prefix);
     js_property_set(obj, make_string_item(key), make_string_item(address));
-    snprintf(key, sizeof(key), "%sFamily", prefix);
-    js_property_set(obj, make_string_item(key), make_string_item(family));
-    snprintf(key, sizeof(key), "%sPort", prefix);
-    js_property_set(obj, make_string_item(key), (Item){.item = i2it(port)});
+    if (family_before_port) {
+        snprintf(key, sizeof(key), "%sFamily", prefix);
+        js_property_set(obj, make_string_item(key), make_string_item(family));
+        snprintf(key, sizeof(key), "%sPort", prefix);
+        js_property_set(obj, make_string_item(key), (Item){.item = i2it(port)});
+    } else {
+        snprintf(key, sizeof(key), "%sPort", prefix);
+        js_property_set(obj, make_string_item(key), (Item){.item = i2it(port)});
+        snprintf(key, sizeof(key), "%sFamily", prefix);
+        js_property_set(obj, make_string_item(key), make_string_item(family));
+    }
 }
 
 static void socket_update_address_properties(JsSocket* sock) {
@@ -526,12 +514,12 @@ static void socket_update_address_properties(JsSocket* sock) {
     struct sockaddr_storage addr;
     int addrlen = sizeof(addr);
     if (uv_tcp_getsockname(&sock->tcp, (struct sockaddr*)&addr, &addrlen) == 0) {
-        socket_set_address_properties(sock->js_object, "local", &addr);
+        net_set_endpoint_properties(sock->js_object, "local", &addr, true);
     }
 
     addrlen = sizeof(addr);
     if (uv_tcp_getpeername(&sock->tcp, (struct sockaddr*)&addr, &addrlen) == 0) {
-        socket_set_address_properties(sock->js_object, "remote", &addr);
+        net_set_endpoint_properties(sock->js_object, "remote", &addr, true);
     }
 }
 
@@ -1405,6 +1393,22 @@ extern "C" Item js_socket_resetAndDestroy(Item error_item) {
     return self;
 }
 
+static void socket_close_handle_cb(uv_handle_t* handle) {
+    JsSocket* s = (JsSocket*)handle->data;
+    if (!s) return;
+    bool notify_ipc_parent = s->ipc_received_socket;
+    net_active_remove(&s->active_resource_id);
+    js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
+    if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
+    socket_emit_close(s->js_object, false);
+    socket_note_closed(s);
+    if (s->connect_pending) {
+        s->free_after_connect_pending = true;
+    } else {
+        mem_free(s);
+    }
+}
+
 static void socket_close_now(JsSocket* sock) {
     if (!sock) return;
     if (socket_delegate_close_to_tls(sock, make_undefined_item())) return;
@@ -1418,22 +1422,7 @@ static void socket_close_now(JsSocket* sock) {
         socket_update_writable(sock, false);
         js_property_set(sock->js_object, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
         socket_update_state_properties(sock);
-        uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* handle) {
-            JsSocket* s = (JsSocket*)handle->data;
-            if (s) {
-                bool notify_ipc_parent = s->ipc_received_socket;
-                net_active_remove(&s->active_resource_id);
-                js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
-                if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
-                socket_emit_close(s->js_object, false);
-                socket_note_closed(s);
-                if (s->connect_pending) {
-                    s->free_after_connect_pending = true;
-                } else {
-                    mem_free(s);
-                }
-            }
-        });
+        uv_close((uv_handle_t*)&sock->tcp, socket_close_handle_cb);
     }
 }
 
@@ -1450,39 +1439,9 @@ static void socket_close_reset_now(JsSocket* sock) {
         socket_update_writable(sock, false);
         js_property_set(sock->js_object, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
         socket_update_state_properties(sock);
-        int r = uv_tcp_close_reset(&sock->tcp, [](uv_handle_t* handle) {
-            JsSocket* s = (JsSocket*)handle->data;
-            if (s) {
-                bool notify_ipc_parent = s->ipc_received_socket;
-                net_active_remove(&s->active_resource_id);
-                js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
-                if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
-                socket_emit_close(s->js_object, false);
-                socket_note_closed(s);
-                if (s->connect_pending) {
-                    s->free_after_connect_pending = true;
-                } else {
-                    mem_free(s);
-                }
-            }
-        });
+        int r = uv_tcp_close_reset(&sock->tcp, socket_close_handle_cb);
         if (r != 0 && !uv_is_closing((uv_handle_t*)&sock->tcp)) {
-            uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* handle) {
-                JsSocket* s = (JsSocket*)handle->data;
-                if (s) {
-                    bool notify_ipc_parent = s->ipc_received_socket;
-                    net_active_remove(&s->active_resource_id);
-                    js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
-                    if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
-                    socket_emit_close(s->js_object, false);
-                    socket_note_closed(s);
-                    if (s->connect_pending) {
-                        s->free_after_connect_pending = true;
-                    } else {
-                        mem_free(s);
-                    }
-                }
-            });
+            uv_close((uv_handle_t*)&sock->tcp, socket_close_handle_cb);
         }
     }
 }
@@ -1924,6 +1883,26 @@ static Item js_socket_pause(void) {
     return self;
 }
 
+static Item socket_make_address_result(const struct sockaddr_storage* addr) {
+    Item result = js_new_object();
+    if (addr->ss_family == AF_INET) {
+        const struct sockaddr_in* a4 = (const struct sockaddr_in*)addr;
+        char ip[64];
+        uv_ip4_name(a4, ip, sizeof(ip));
+        js_property_set(result, make_string_item("address"), make_string_item(ip));
+        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
+        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
+    } else if (addr->ss_family == AF_INET6) {
+        const struct sockaddr_in6* a6 = (const struct sockaddr_in6*)addr;
+        char ip[128];
+        uv_ip6_name(a6, ip, sizeof(ip));
+        js_property_set(result, make_string_item("address"), make_string_item(ip));
+        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
+        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
+    }
+    return result;
+}
+
 // Socket.address() — return local address info
 static Item js_socket_address(void) {
     Item self = js_get_this();
@@ -1935,23 +1914,7 @@ static Item js_socket_address(void) {
     int r = uv_tcp_getsockname(&sock->tcp, (struct sockaddr*)&addr, &addrlen);
     if (r != 0) return ItemNull;
 
-    Item result = js_new_object();
-    if (addr.ss_family == AF_INET) {
-        struct sockaddr_in* a4 = (struct sockaddr_in*)&addr;
-        char ip[64];
-        uv_ip4_name(a4, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
-    } else if (addr.ss_family == AF_INET6) {
-        struct sockaddr_in6* a6 = (struct sockaddr_in6*)&addr;
-        char ip[128];
-        uv_ip6_name(a6, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
-    }
-    return result;
+    return socket_make_address_result(&addr);
 }
 
 extern "C" Item js_net_createServer(Item rest_args);
@@ -2588,23 +2551,7 @@ static Item js_bound_socket_address(void) {
     int r = uv_tcp_getsockname(&bound->tcp, (struct sockaddr*)&addr, &addrlen);
     if (r != 0) return ItemNull;
 
-    Item result = js_new_object();
-    if (addr.ss_family == AF_INET) {
-        struct sockaddr_in* a4 = (struct sockaddr_in*)&addr;
-        char ip[64];
-        uv_ip4_name(a4, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
-    } else if (addr.ss_family == AF_INET6) {
-        struct sockaddr_in6* a6 = (struct sockaddr_in6*)&addr;
-        char ip[128];
-        uv_ip6_name(a6, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
-    }
-    return result;
+    return socket_make_address_result(&addr);
 }
 
 static Item js_bound_socket_fd(void) {
@@ -4306,35 +4253,6 @@ static int server_max_connections(JsServer* srv) {
     return -1;
 }
 
-static void drop_set_endpoint(Item obj, const char* prefix, const struct sockaddr_storage* addr) {
-    if (!obj.item || !addr) return;
-    char address[INET6_ADDRSTRLEN];
-    const char* family = NULL;
-    int port = 0;
-    address[0] = '\0';
-    if (addr->ss_family == AF_INET) {
-        const struct sockaddr_in* a4 = (const struct sockaddr_in*)addr;
-        uv_ip4_name(a4, address, sizeof(address));
-        family = "IPv4";
-        port = ntohs(a4->sin_port);
-    } else if (addr->ss_family == AF_INET6) {
-        const struct sockaddr_in6* a6 = (const struct sockaddr_in6*)addr;
-        uv_ip6_name(a6, address, sizeof(address));
-        family = "IPv6";
-        port = ntohs(a6->sin6_port);
-    } else {
-        return;
-    }
-
-    char key[32];
-    snprintf(key, sizeof(key), "%sAddress", prefix);
-    js_property_set(obj, make_string_item(key), make_string_item(address));
-    snprintf(key, sizeof(key), "%sPort", prefix);
-    js_property_set(obj, make_string_item(key), (Item){.item = i2it(port)});
-    snprintf(key, sizeof(key), "%sFamily", prefix);
-    js_property_set(obj, make_string_item(key), make_string_item(family));
-}
-
 static Item server_make_drop_data(JsSocket* client) {
     Item data = js_new_object();
     if (!client) return data;
@@ -4342,11 +4260,11 @@ static Item server_make_drop_data(JsSocket* client) {
     struct sockaddr_storage addr;
     int addrlen = sizeof(addr);
     if (uv_tcp_getsockname(&client->tcp, (struct sockaddr*)&addr, &addrlen) == 0) {
-        drop_set_endpoint(data, "local", &addr);
+        net_set_endpoint_properties(data, "local", &addr, false);
     }
     addrlen = sizeof(addr);
     if (uv_tcp_getpeername(&client->tcp, (struct sockaddr*)&addr, &addrlen) == 0) {
-        drop_set_endpoint(data, "remote", &addr);
+        net_set_endpoint_properties(data, "remote", &addr, false);
     }
     return data;
 }
@@ -4779,6 +4697,32 @@ static bool server_configure_listen_signal(Item self, Item signal, bool* out_abo
     return true;
 }
 
+static bool server_listen_on_fd(Item self, JsServer* srv, Item callback, uv_os_sock_t fd,
+        bool close_fd_on_open_error) {
+    int open_r = uv_tcp_open(&srv->tcp, (uv_os_sock_t)fd);
+    if (open_r != 0) {
+#ifndef _WIN32
+        if (close_fd_on_open_error) close((int)fd);
+#endif
+        Item err = make_uv_error(open_r, "listen", NULL, -1);
+        server_schedule_error(self, err);
+        server_close_after_listen_error(srv);
+        return false;
+    }
+    int listen_r = uv_listen((uv_stream_t*)&srv->tcp, 128, server_connection_cb);
+    if (listen_r != 0) {
+        Item err = make_uv_error(listen_r, "listen", NULL, -1);
+        server_schedule_error(self, err);
+        server_close_after_listen_error(srv);
+        return false;
+    }
+    srv->active_resource_id = net_active_add(self, "TCPServerWrap");
+    server_update_connection_key(self, srv, 0);
+    js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
+    server_schedule_listening(self, srv, callback);
+    return true;
+}
+
 // server.listen(port, [host], [callback])
 extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) {
     Item self = js_get_this();
@@ -4855,27 +4799,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
             server_schedule_error(self, err);
             return self;
         }
-        int open_r = uv_tcp_open(&srv->tcp, (uv_os_sock_t)fd);
-        if (open_r != 0) {
-#ifndef _WIN32
-            close(fd);
-#endif
-            Item err = make_uv_error(open_r, "listen", NULL, -1);
-            server_schedule_error(self, err);
-            server_close_after_listen_error(srv);
-            return self;
-        }
-        int listen_r = uv_listen((uv_stream_t*)&srv->tcp, 128, server_connection_cb);
-        if (listen_r != 0) {
-            Item err = make_uv_error(listen_r, "listen", NULL, -1);
-            server_schedule_error(self, err);
-            server_close_after_listen_error(srv);
-            return self;
-        }
-        srv->active_resource_id = net_active_add(self, "TCPServerWrap");
-        server_update_connection_key(self, srv, 0);
-        js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
-        server_schedule_listening(self, srv, callback);
+        server_listen_on_fd(self, srv, callback, fd, true);
         return self;
     }
 
@@ -4906,24 +4830,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
                     "The argument 'options' must have the property \"port\" or \"path\". Received an instance of Object");
                 return self;
             }
-            int open_r = uv_tcp_open(&srv->tcp, (uv_os_sock_t)fd_value);
-            if (open_r != 0) {
-                Item err = make_uv_error(open_r, "listen", NULL, -1);
-                server_schedule_error(self, err);
-                server_close_after_listen_error(srv);
-                return self;
-            }
-            int listen_r = uv_listen((uv_stream_t*)&srv->tcp, 128, server_connection_cb);
-            if (listen_r != 0) {
-                Item err = make_uv_error(listen_r, "listen", NULL, -1);
-                server_schedule_error(self, err);
-                server_close_after_listen_error(srv);
-                return self;
-            }
-            srv->active_resource_id = net_active_add(self, "TCPServerWrap");
-            server_update_connection_key(self, srv, 0);
-            js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
-            server_schedule_listening(self, srv, callback);
+            server_listen_on_fd(self, srv, callback, (uv_os_sock_t)fd_value, false);
             return self;
         }
         if (!has_port && !has_path) {
@@ -5060,28 +4967,7 @@ static Item js_server_address(void) {
     JsServer* srv = (JsServer*)(uintptr_t)it2i(handle_item);
     if (!srv) return ItemNull;
 
-    struct sockaddr_storage addr;
-    int addrlen = sizeof(addr);
-    int r = uv_tcp_getsockname(&srv->tcp, (struct sockaddr*)&addr, &addrlen);
-    if (r != 0) return ItemNull;
-
-    Item result = js_new_object();
-    if (addr.ss_family == AF_INET) {
-        struct sockaddr_in* a4 = (struct sockaddr_in*)&addr;
-        char ip[64];
-        uv_ip4_name(a4, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
-    } else if (addr.ss_family == AF_INET6) {
-        struct sockaddr_in6* a6 = (struct sockaddr_in6*)&addr;
-        char ip[128];
-        uv_ip6_name(a6, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
-    }
-    return result;
+    return js_node_tcp_server_address(&srv->tcp);
 }
 
 static JsServer* server_from_object(Item self) {

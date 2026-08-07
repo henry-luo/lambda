@@ -53,6 +53,7 @@
 #include "js/js_runtime.h"           // v16: js_check_exception for exit code
 #include "js/js_dom.h"               // JS DOM document/session bridge
 #include "js/js_transpiler.hpp"      // JsPreambleState for js-test-batch
+#include "js/js_exec_profile.h"      // profile flush on the batch _exit path
 #include "js/js_runtime_state.hpp"
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
 #ifdef LAMBDA_BASH
@@ -4491,6 +4492,9 @@ int main(int argc, char *argv[]) {
             // siglongjmp with an allocator lock held, so terminal destruction
             // must not re-enter allocator-backed realm cleanup after results.
             js_batch_execution_mode = 0;
+            // _exit skips atexit and runtime_cleanup: flush the JS exec
+            // profile explicitly or a profiled batch run records nothing.
+            js_exec_profile_dump();
 #ifndef _WIN32
             _exit(0);
 #else

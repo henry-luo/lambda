@@ -522,10 +522,8 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
             // Check if item has orthogonal writing mode
             bool is_orthogonal = false;
-            if (item->embed && item->embedp()->flex) {
-                WritingMode wm = item->embedp()->flex->writing_mode;
-                is_orthogonal = (wm == WM_VERTICAL_LR || wm == WM_VERTICAL_RL);
-            }
+            WritingMode wm = layout_block_writing_mode(item);
+            is_orthogonal = wm == WM_VERTICAL_LR || wm == WM_VERTICAL_RL;
             if (!is_orthogonal) continue;
 
             // Get definite row height from template definitions.

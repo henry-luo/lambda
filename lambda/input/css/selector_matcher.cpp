@@ -1081,22 +1081,24 @@ bool selector_matcher_has_preceding_sibling(SelectorMatcher* matcher,
 // CSS4 Advanced Selectors
 // ============================================================================
 
+static bool selector_matcher_match_list(SelectorMatcher* matcher,
+                                         CssSelector** selectors,
+                                         int count,
+                                         DomElement* element,
+                                         bool want_match) {
+    if (!matcher || !selectors || count <= 0 || !element) return false;
+    for (int i = 0; i < count; i++) {
+        bool matched = selector_matcher_matches(matcher, selectors[i], element, NULL);
+        if (matched == want_match) return want_match;
+    }
+    return !want_match;
+}
+
 bool selector_matcher_matches_is(SelectorMatcher* matcher,
                                  CssSelector** selectors,
                                  int count,
                                  DomElement* element) {
-    if (!matcher || !selectors || count <= 0 || !element) {
-        return false;
-    }
-
-    // Match if ANY selector matches
-    for (int i = 0; i < count; i++) {
-        if (selector_matcher_matches(matcher, selectors[i], element, NULL)) {
-            return true;
-        }
-    }
-
-    return false;
+    return selector_matcher_match_list(matcher, selectors, count, element, true);
 }
 
 bool selector_matcher_matches_where(SelectorMatcher* matcher,
@@ -1115,14 +1117,9 @@ bool selector_matcher_matches_not(SelectorMatcher* matcher,
         return false;
     }
 
-    // Match if NONE of the selectors match
-    for (int i = 0; i < count; i++) {
-        if (selector_matcher_matches(matcher, selectors[i], element, NULL)) {
-            return false;
-        }
-    }
-
-    return true;
+    // :not() accepts the element only when none of its argument selectors match;
+    // passing want_match=false to the positive-list helper reverses that result.
+    return !selector_matcher_match_list(matcher, selectors, count, element, true);
 }
 
 bool selector_matcher_matches_has(SelectorMatcher* matcher,

@@ -213,105 +213,6 @@ static int buffer_utf8_codepoint_count(const char* str, int len) {
     return count;
 }
 
-static int buffer_utf8_encoded_len(const char* chars, int byte_len) {
-    int out_len = 0;
-    for (int i = 0; i < byte_len; ) {
-        unsigned char lead = (unsigned char)chars[i];
-        int cp_len = 1;
-        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
-        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
-        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
-
-        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
-            unsigned char second = (unsigned char)chars[i + 1];
-            bool high = second >= 0xA0 && second <= 0xAF;
-            bool low = second >= 0xB0 && second <= 0xBF;
-            if (high) {
-                int next = i + 3;
-                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
-                    unsigned char next_second = (unsigned char)chars[next + 1];
-                    if (next_second >= 0xB0 && next_second <= 0xBF) {
-                        out_len += 4;
-                        i += 6;
-                        continue;
-                    }
-                }
-                out_len += 3;
-                i += 3;
-                continue;
-            }
-            if (low) {
-                out_len += 3;
-                i += 3;
-                continue;
-            }
-        }
-
-        out_len += cp_len;
-        i += cp_len;
-    }
-    return out_len;
-}
-
-static uint16_t buffer_decode_wtf8_unit(const char* chars, int pos) {
-    unsigned char b0 = (unsigned char)chars[pos];
-    unsigned char b1 = (unsigned char)chars[pos + 1];
-    unsigned char b2 = (unsigned char)chars[pos + 2];
-    return (uint16_t)(((uint16_t)(b0 & 0x0F) << 12) |
-                      ((uint16_t)(b1 & 0x3F) << 6) |
-                      (uint16_t)(b2 & 0x3F));
-}
-
-static void buffer_write_replacement(uint8_t* out, int* pos) {
-    out[(*pos)++] = 0xEF;
-    out[(*pos)++] = 0xBF;
-    out[(*pos)++] = 0xBD;
-}
-
-static void buffer_write_utf8_encoded(const char* chars, int byte_len, uint8_t* out) {
-    int out_pos = 0;
-    for (int i = 0; i < byte_len; ) {
-        unsigned char lead = (unsigned char)chars[i];
-        int cp_len = 1;
-        if (lead >= 0xF0 && i + 4 <= byte_len) cp_len = 4;
-        else if (lead >= 0xE0 && i + 3 <= byte_len) cp_len = 3;
-        else if (lead >= 0xC0 && i + 2 <= byte_len) cp_len = 2;
-
-        if (cp_len == 3 && lead == 0xED && i + 2 < byte_len) {
-            unsigned char second = (unsigned char)chars[i + 1];
-            bool high = second >= 0xA0 && second <= 0xAF;
-            bool low = second >= 0xB0 && second <= 0xBF;
-            if (high) {
-                int next = i + 3;
-                if (next + 2 < byte_len && (unsigned char)chars[next] == 0xED) {
-                    unsigned char next_second = (unsigned char)chars[next + 1];
-                    if (next_second >= 0xB0 && next_second <= 0xBF) {
-                        uint16_t hi = buffer_decode_wtf8_unit(chars, i);
-                        uint16_t lo = buffer_decode_wtf8_unit(chars, next);
-                        uint32_t cp = utf16_decode_pair(hi, lo);
-                        char encoded[4];
-                        size_t n = utf8_encode(cp, encoded);
-                        for (size_t j = 0; j < n; j++) out[out_pos++] = (uint8_t)encoded[j];
-                        i += 6;
-                        continue;
-                    }
-                }
-                buffer_write_replacement(out, &out_pos);
-                i += 3;
-                continue;
-            }
-            if (low) {
-                buffer_write_replacement(out, &out_pos);
-                i += 3;
-                continue;
-            }
-        }
-
-        for (int j = 0; j < cp_len; j++) out[out_pos++] = (uint8_t)chars[i + j];
-        i += cp_len;
-    }
-}
-
 // Helper: format "Received type <type> (<value>)" suffix for ERR_INVALID_ARG_TYPE errors
 static int format_received_suffix(char* buf, int buf_size, Item value) {
     TypeId tid = get_type_id(value);
@@ -355,26 +256,36 @@ static int format_received_suffix(char* buf, int buf_size, Item value) {
 }
 
 // ─── Buffer.alloc(size, fill?, encoding?) ───────────────────────────────────
-extern "C" Item js_buffer_alloc(Item size_item, Item fill_item) {
+static bool buffer_parse_allocation_size(Item size_item, int64_t* out_size) {
     int64_t size = 0;
     TypeId tid = get_type_id(size_item);
-    if (tid == LMD_TYPE_INT) size = it2i(size_item);
-    else if (tid == LMD_TYPE_FLOAT) {
+    if (tid == LMD_TYPE_INT) {
+        size = it2i(size_item);
+    } else if (tid == LMD_TYPE_FLOAT) {
         double d = it2d(size_item);
         if (d != d || d < 0 || d > JS_BUFFER_MAX_LENGTH) {
-            return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+            js_throw_range_error_code("ERR_OUT_OF_RANGE",
                 "The value of \"size\" is out of range.");
+            return false;
         }
         size = (int64_t)d;
-    }
-    else {
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+    } else {
+        js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"size\" argument must be of type number.");
+        return false;
     }
     if (size < 0 || size > JS_BUFFER_MAX_LENGTH) {
-        return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+        js_throw_range_error_code("ERR_OUT_OF_RANGE",
             "The value of \"size\" is out of range.");
+        return false;
     }
+    *out_size = size;
+    return true;
+}
+
+extern "C" Item js_buffer_alloc(Item size_item, Item fill_item) {
+    int64_t size = 0;
+    if (!buffer_parse_allocation_size(size_item, &size)) return ItemNull;
     Item buf = create_buffer((int)size);
     // alloc zero-fills by default via typed_array_new
 
@@ -638,12 +549,12 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
             if (bdata && s->len > 0) memcpy(bdata, s->chars, (size_t)buf_byte_len);
             return buf;
         }
-        int byte_len = buffer_utf8_encoded_len(s->chars, (int)s->len);
+        int byte_len = utf8_wtf8_encoded_len(s->chars, (int)s->len);
         Item buf = create_buffer(byte_len);
         int buf_byte_len = 0;
         uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
         if (bdata && byte_len > 0) {
-            buffer_write_utf8_encoded(s->chars, (int)s->len, bdata);
+            utf8_wtf8_encode(s->chars, (int)s->len, bdata);
         }
         return buf;
     }
@@ -1110,7 +1021,7 @@ extern "C" Item js_buffer_byteLength(Item str_item, Item enc_item) {
             return (Item){.item = i2it(utf8_codepoint_count(s->chars, (int)s->len) * 2)};
         }
         // utf8 (default, or unrecognized encoding)
-        return (Item){.item = i2it((int64_t)buffer_utf8_encoded_len(s->chars, (int)s->len))};
+        return (Item){.item = i2it((int64_t)utf8_wtf8_encoded_len(s->chars, (int)s->len))};
     }
     if (js_is_typed_array(str_item)) {
         int blen = 0;
@@ -1666,6 +1577,88 @@ static bool is_ucs2_enc(const char* enc) {
            strcmp(enc, "utf16le") == 0 || strcmp(enc, "utf-16le") == 0;
 }
 
+static bool buffer_prepare_search_needle(Item value, Item enc_item, char* enc,
+        size_t enc_size, uint8_t* enc_buf, int enc_buf_size,
+        const uint8_t** needle, int* needle_len, Item* error_result) {
+    *needle = NULL;
+    *needle_len = 0;
+    *error_result = (Item){.item = ITEM_NULL};
+    strcpy(enc, "utf8");
+    if (normalize_encoding(enc_item, enc, enc_size) && !is_known_encoding(enc)) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc);
+        *error_result = js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
+        return false;
+    }
+    if (get_type_id(value) == LMD_TYPE_STRING) {
+        String* s = it2s(value);
+        if (strcmp(enc, "utf8") == 0 || strcmp(enc, "utf-8") == 0) {
+            *needle = (const uint8_t*)s->chars;
+            *needle_len = (int)s->len;
+        } else {
+            *needle_len = encode_string_bytes(s->chars, (int)s->len, enc,
+                enc_buf, enc_buf_size);
+            *needle = enc_buf;
+        }
+    } else if (js_is_typed_array(value)) {
+        int value_len = 0;
+        *needle = buffer_data(value, &value_len);
+        *needle_len = value_len;
+    }
+    return true;
+}
+
+static int buffer_find_byte(const uint8_t* data, int first, int last,
+                            int step, uint8_t needle) {
+    if (step > 0) {
+        for (int i = first; i <= last; i += step) {
+            if (data[i] == needle) return i;
+        }
+    } else {
+        for (int i = first; i >= last; i += step) {
+            if (data[i] == needle) return i;
+        }
+    }
+    return -1;
+}
+
+static int buffer_find_needle(const uint8_t* data, int blen,
+        const uint8_t* needle, int needle_len, int offset, bool reverse,
+        bool ucs2) {
+    if (ucs2) {
+        int h_chars = blen / 2;
+        int n_chars = needle_len / 2;
+        if (n_chars == 0) return -1;
+        int bound = offset / 2;
+        const uint16_t* h16 = (const uint16_t*)data;
+        const uint16_t* n16 = (const uint16_t*)needle;
+        if (!reverse) {
+            for (int i = bound; i <= h_chars - n_chars; i++) {
+                if (memcmp(h16 + i, n16, n_chars * 2) == 0) return i * 2;
+            }
+        } else {
+            if (bound > h_chars - n_chars) bound = h_chars - n_chars;
+            for (int i = bound; i >= 0; i--) {
+                if (memcmp(h16 + i, n16, n_chars * 2) == 0) return i * 2;
+            }
+        }
+        return -1;
+    }
+    if (needle_len == 0) return reverse ? (offset < blen ? offset : blen) : offset;
+    if (!reverse) {
+        for (int i = offset; i <= blen - needle_len; i++) {
+            if (memcmp(data + i, needle, needle_len) == 0) return i;
+        }
+    } else {
+        int limit = offset;
+        if (limit > blen - needle_len) limit = blen - needle_len;
+        for (int i = limit; i >= 0; i--) {
+            if (memcmp(data + i, needle, needle_len) == 0) return i;
+        }
+    }
+    return -1;
+}
+
 extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item enc_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
@@ -1696,66 +1689,25 @@ extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item e
         int byte_val;
         if (vtid == LMD_TYPE_INT) byte_val = (int)(it2i(value) & 0xFF);
         else byte_val = (int)((int64_t)it2d(value) & 0xFF);
-        for (int i = start; i < blen; i++) {
-            if (data[i] == byte_val) return (Item){.item = i2it(i)};
-        }
-        return (Item){.item = i2it(-1)};
-    }
-
-    // resolve encoding
-    char enc[32] = "utf8";
-    if (normalize_encoding(enc_item, enc, sizeof(enc)) && !is_known_encoding(enc)) {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc);
-        return js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
+        int found = buffer_find_byte(data, start, blen - 1, 1, (uint8_t)byte_val);
+        return (Item){.item = i2it(found)};
     }
 
     // search for string value
+    char enc[32];
+    Item search_error;
     const uint8_t* needle = NULL;
     int needle_len = 0;
     uint8_t enc_buf[4096]; // stack buffer for encoded needle
-
-    if (vtid == LMD_TYPE_STRING) {
-        String* s = it2s(value);
-        if (strcmp(enc, "utf8") == 0 || strcmp(enc, "utf-8") == 0) {
-            needle = (const uint8_t*)s->chars;
-            needle_len = (int)s->len;
-        } else {
-            needle_len = encode_string_bytes(s->chars, (int)s->len, enc,
-                                             enc_buf, (int)sizeof(enc_buf));
-            needle = enc_buf;
-        }
-    } else if (js_is_typed_array(value)) {
-        int vlen = 0;
-        needle = buffer_data(value, &vlen);
-        needle_len = vlen;
+    if (!buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
+            enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error)) {
+        return search_error;
     }
     if (!needle) return (Item){.item = i2it(-1)};
 
-    // UCS-2 mode: search in uint16_t units
-    if (is_ucs2_enc(enc)) {
-        int h_chars = blen / 2;
-        int n_chars = needle_len / 2;
-        if (n_chars == 0) return (Item){.item = i2it(-1)};
-        int start_char = start / 2;
-        const uint16_t* h16 = (const uint16_t*)data;
-        const uint16_t* n16 = (const uint16_t*)needle;
-        for (int i = start_char; i <= h_chars - n_chars; i++) {
-            if (memcmp(h16 + i, n16, n_chars * 2) == 0)
-                return (Item){.item = i2it(i * 2)};
-        }
-        return (Item){.item = i2it(-1)};
-    }
-
-    if (needle_len > 0) {
-        for (int i = start; i <= blen - needle_len; i++) {
-            if (memcmp(data + i, needle, needle_len) == 0)
-                return (Item){.item = i2it(i)};
-        }
-        return (Item){.item = i2it(-1)};
-    }
-    // empty needle: return byteOffset clamped to length
-    return (Item){.item = i2it(start)};
+    int found = buffer_find_needle(data, blen, needle, needle_len, start, false,
+        is_ucs2_enc(enc));
+    return (Item){.item = i2it(found)};
 }
 
 // ─── buf.slice(start?, end?) — returns a new Buffer ─────────────────────────
@@ -1797,24 +1749,7 @@ extern "C" Item js_buffer_fill(Item buf, Item value) {
 // ─── Buffer.allocUnsafe(size) ───────────────────────────────────────────────
 extern "C" Item js_buffer_allocUnsafe(Item size_item) {
     int64_t size = 0;
-    TypeId tid = get_type_id(size_item);
-    if (tid == LMD_TYPE_INT) size = it2i(size_item);
-    else if (tid == LMD_TYPE_FLOAT) {
-        double d = it2d(size_item);
-        if (d != d || d < 0 || d > JS_BUFFER_MAX_LENGTH) {
-            return js_throw_range_error_code("ERR_OUT_OF_RANGE",
-                "The value of \"size\" is out of range.");
-        }
-        size = (int64_t)d;
-    }
-    else {
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-            "The \"size\" argument must be of type number.");
-    }
-    if (size < 0 || size > JS_BUFFER_MAX_LENGTH) {
-        return js_throw_range_error_code("ERR_OUT_OF_RANGE",
-            "The value of \"size\" is out of range.");
-    }
+    if (!buffer_parse_allocation_size(size_item, &size)) return ItemNull;
     return create_buffer((int)size); // no zero-fill guarantee
 }
 
@@ -1847,73 +1782,25 @@ extern "C" Item js_buffer_lastIndexOf(Item buf, Item value, Item offset_item, It
     if (get_type_id(value) == LMD_TYPE_INT) {
         int byte_val = (int)(it2i(value) & 0xFF);
         int limit = (end < blen - 1) ? end : blen - 1;
-        for (int i = limit; i >= 0; i--) {
-            if (data[i] == byte_val) return (Item){.item = i2it(i)};
-        }
-        return (Item){.item = i2it(-1)};
-    }
-
-    // resolve encoding
-    char enc[32] = "utf8";
-    if (normalize_encoding(enc_item, enc, sizeof(enc)) && !is_known_encoding(enc)) {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc);
-        return js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
+        int found = buffer_find_byte(data, limit, 0, -1, (uint8_t)byte_val);
+        return (Item){.item = i2it(found)};
     }
 
     // search for string or buffer value
+    char enc[32];
+    Item search_error;
     const uint8_t* needle = NULL;
     int needle_len = 0;
     uint8_t enc_buf[4096];
-
-    if (get_type_id(value) == LMD_TYPE_STRING) {
-        String* s = it2s(value);
-        if (strcmp(enc, "utf8") == 0 || strcmp(enc, "utf-8") == 0) {
-            needle = (const uint8_t*)s->chars;
-            needle_len = (int)s->len;
-        } else {
-            needle_len = encode_string_bytes(s->chars, (int)s->len, enc,
-                                             enc_buf, (int)sizeof(enc_buf));
-            needle = enc_buf;
-        }
-    } else if (js_is_typed_array(value)) {
-        int vlen = 0;
-        needle = buffer_data(value, &vlen);
-        needle_len = vlen;
+    if (!buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
+            enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error)) {
+        return search_error;
     }
     if (!needle) return (Item){.item = i2it(-1)};
 
-    // UCS-2 mode: search in uint16_t units (reverse)
-    if (is_ucs2_enc(enc)) {
-        int h_chars = blen / 2;
-        int n_chars = needle_len / 2;
-        if (n_chars == 0) return (Item){.item = i2it(-1)};
-        int end_char = end / 2;
-        const uint16_t* h16 = (const uint16_t*)data;
-        const uint16_t* n16 = (const uint16_t*)needle;
-        int limit = end_char;
-        if (limit > h_chars - n_chars) limit = h_chars - n_chars;
-        for (int i = limit; i >= 0; i--) {
-            if (memcmp(h16 + i, n16, n_chars * 2) == 0)
-                return (Item){.item = i2it(i * 2)};
-        }
-        return (Item){.item = i2it(-1)};
-    }
-
-    if (needle_len > 0) {
-        int limit = end;
-        if (limit > blen - needle_len) limit = blen - needle_len;
-        for (int i = limit; i >= 0; i--) {
-            if (memcmp(data + i, needle, needle_len) == 0)
-                return (Item){.item = i2it(i)};
-        }
-        return (Item){.item = i2it(-1)};
-    }
-    if (needle && needle_len == 0) {
-        return (Item){.item = i2it(end < blen ? end : blen)};
-    }
-
-    return (Item){.item = i2it(-1)};
+    int found = buffer_find_needle(data, blen, needle, needle_len, end, true,
+        is_ucs2_enc(enc));
+    return (Item){.item = i2it(found)};
 }
 
 // ─── Offset validation helper for read/write methods ────────────────────────
@@ -2009,395 +1896,186 @@ static bool validate_write_value(Item value_item, int64_t* out_val, int64_t min_
 }
 
 // ─── Endian-aware read methods ──────────────────────────────────────────────
+static Item js_buffer_read_fixed_integer(Item buf, Item offset_item, int byte_len,
+        bool little_endian, bool signed_value) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    if (!data) return make_js_undefined();
+    Item err;
+    int off = validate_rw_offset(offset_item, blen, byte_len, "offset", &err);
+    if (off < 0) return err;
+    uint64_t value = 0;
+    if (little_endian) {
+        for (int i = byte_len - 1; i >= 0; i--) value = (value << 8) | data[off + i];
+    } else {
+        for (int i = 0; i < byte_len; i++) value = (value << 8) | data[off + i];
+    }
+    if (signed_value && (value & ((uint64_t)1 << (byte_len * 8 - 1)))) {
+        value |= ~(((uint64_t)1 << (byte_len * 8)) - 1);
+    }
+    return (Item){.item = i2it((int64_t)value)};
+}
+
 extern "C" Item js_buffer_readUInt8(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 1, "offset", &err);
-    if (off < 0) return err;
-    return (Item){.item = i2it((int64_t)data[off])};
+    return js_buffer_read_fixed_integer(buf, offset_item, 1, false, false);
 }
-
 extern "C" Item js_buffer_readUInt16BE(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
-    if (off < 0) return err;
-    uint16_t v = ((uint16_t)data[off] << 8) | data[off + 1];
-    return (Item){.item = i2it((int64_t)v)};
+    return js_buffer_read_fixed_integer(buf, offset_item, 2, false, false);
 }
-
 extern "C" Item js_buffer_readUInt16LE(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
-    if (off < 0) return err;
-    uint16_t v = data[off] | ((uint16_t)data[off + 1] << 8);
-    return (Item){.item = i2it((int64_t)v)};
+    return js_buffer_read_fixed_integer(buf, offset_item, 2, true, false);
 }
-
 extern "C" Item js_buffer_readUInt32BE(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
-    if (off < 0) return err;
-    uint32_t v = ((uint32_t)data[off] << 24) | ((uint32_t)data[off + 1] << 16) |
-                 ((uint32_t)data[off + 2] << 8) | data[off + 3];
-    return (Item){.item = i2it((int64_t)v)};
+    return js_buffer_read_fixed_integer(buf, offset_item, 4, false, false);
 }
-
 extern "C" Item js_buffer_readUInt32LE(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
-    if (off < 0) return err;
-    uint32_t v = data[off] | ((uint32_t)data[off + 1] << 8) |
-                 ((uint32_t)data[off + 2] << 16) | ((uint32_t)data[off + 3] << 24);
-    return (Item){.item = i2it((int64_t)v)};
+    return js_buffer_read_fixed_integer(buf, offset_item, 4, true, false);
 }
-
 extern "C" Item js_buffer_readInt8(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 1, "offset", &err);
-    if (off < 0) return err;
-    return (Item){.item = i2it((int64_t)(int8_t)data[off])};
+    return js_buffer_read_fixed_integer(buf, offset_item, 1, false, true);
 }
-
 extern "C" Item js_buffer_readInt16BE(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
-    if (off < 0) return err;
-    int16_t v = (int16_t)(((uint16_t)data[off] << 8) | data[off + 1]);
-    return (Item){.item = i2it((int64_t)v)};
+    return js_buffer_read_fixed_integer(buf, offset_item, 2, false, true);
 }
-
 extern "C" Item js_buffer_readInt16LE(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
-    if (off < 0) return err;
-    int16_t v = (int16_t)(data[off] | ((uint16_t)data[off + 1] << 8));
-    return (Item){.item = i2it((int64_t)v)};
+    return js_buffer_read_fixed_integer(buf, offset_item, 2, true, true);
 }
-
 extern "C" Item js_buffer_readInt32BE(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
-    if (off < 0) return err;
-    int32_t v = (int32_t)(((uint32_t)data[off] << 24) | ((uint32_t)data[off + 1] << 16) |
-                           ((uint32_t)data[off + 2] << 8) | data[off + 3]);
-    return (Item){.item = i2it((int64_t)v)};
+    return js_buffer_read_fixed_integer(buf, offset_item, 4, false, true);
+}
+extern "C" Item js_buffer_readInt32LE(Item buf, Item offset_item) {
+    return js_buffer_read_fixed_integer(buf, offset_item, 4, true, true);
 }
 
-extern "C" Item js_buffer_readInt32LE(Item buf, Item offset_item) {
+static Item js_buffer_read_float(Item buf, Item offset_item, int byte_len, bool little_endian) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
     if (!data) return make_js_undefined();
     Item err;
-    int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
+    int off = validate_rw_offset(offset_item, blen, byte_len, "offset", &err);
     if (off < 0) return err;
-    int32_t v = (int32_t)(data[off] | ((uint32_t)data[off + 1] << 8) |
-                           ((uint32_t)data[off + 2] << 16) | ((uint32_t)data[off + 3] << 24));
-    return (Item){.item = i2it((int64_t)v)};
+    uint64_t bits = 0;
+    if (little_endian) {
+        for (int i = byte_len - 1; i >= 0; i--) bits = (bits << 8) | data[off + i];
+    } else {
+        for (int i = 0; i < byte_len; i++) bits = (bits << 8) | data[off + i];
+    }
+    if (byte_len == 4) {
+        uint32_t float_bits = (uint32_t)bits;
+        float value;
+        memcpy(&value, &float_bits, sizeof(float));
+        return js_make_number((double)value);
+    }
+    double value;
+    memcpy(&value, &bits, sizeof(double));
+    return js_make_number(value);
 }
 
 extern "C" Item js_buffer_readFloatBE(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
-    if (off < 0) return err;
-    uint32_t bits = ((uint32_t)data[off] << 24) | ((uint32_t)data[off + 1] << 16) |
-                    ((uint32_t)data[off + 2] << 8) | data[off + 3];
-    float f;
-    memcpy(&f, &bits, sizeof(float));
-    return js_make_number((double)f);
+    return js_buffer_read_float(buf, offset_item, 4, false);
 }
-
 extern "C" Item js_buffer_readFloatLE(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
-    if (off < 0) return err;
-    uint32_t bits = data[off] | ((uint32_t)data[off + 1] << 8) |
-                    ((uint32_t)data[off + 2] << 16) | ((uint32_t)data[off + 3] << 24);
-    float f;
-    memcpy(&f, &bits, sizeof(float));
-    return js_make_number((double)f);
+    return js_buffer_read_float(buf, offset_item, 4, true);
 }
-
 extern "C" Item js_buffer_readDoubleBE(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 8, "offset", &err);
-    if (off < 0) return err;
-    uint64_t bits = 0;
-    for (int i = 0; i < 8; i++) bits = (bits << 8) | data[off + i];
-    double d;
-    memcpy(&d, &bits, sizeof(double));
-    return js_make_number(d);
+    return js_buffer_read_float(buf, offset_item, 8, false);
 }
-
 extern "C" Item js_buffer_readDoubleLE(Item buf, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data) return make_js_undefined();
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 8, "offset", &err);
-    if (off < 0) return err;
-    double d;
-    memcpy(&d, data + off, sizeof(double));
-    return js_make_number(d);
+    return js_buffer_read_float(buf, offset_item, 8, true);
 }
 
 // ─── Endian-aware write methods ──────────────────────────────────────────────
+static Item js_buffer_write_fixed_integer(Item buf, Item value_item, Item offset_item,
+        int byte_len, bool little_endian, int64_t min_value, int64_t max_value) {
+    int blen = 0;
+    uint8_t* data = buffer_data_write(buf, &blen);
+    if (!data) return (Item){.item = i2it(byte_len)};
+    Item err;
+    int off = validate_rw_offset(offset_item, blen, byte_len, "offset", &err);
+    if (off < 0) return err;
+    int64_t v = 0;
+    if (!validate_write_value(value_item, &v, min_value, max_value, byte_len)) return make_js_undefined();
+    uint64_t bits = (uint64_t)v;
+    for (int i = 0; i < byte_len; i++) {
+        int write_index = little_endian ? i : byte_len - 1 - i;
+        data[off + write_index] = (uint8_t)(bits & 0xFF);
+        bits >>= 8;
+    }
+    return (Item){.item = i2it(off + byte_len)};
+}
+
 extern "C" Item js_buffer_writeUInt8(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(1)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 1, "offset", &err);
-    if (off < 0) return err;
-    int64_t v = 0;
-    if (!validate_write_value(value_item, &v, 0, 255, 1)) return make_js_undefined();
-    data[off] = (uint8_t)(v & 0xFF);
-    return (Item){.item = i2it(off + 1)};
+    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 1, true, 0, 255);
 }
-
 extern "C" Item js_buffer_writeUInt16BE(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(2)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
-    if (off < 0) return err;
-    int64_t v = 0;
-    if (!validate_write_value(value_item, &v, 0, 65535, 2)) return make_js_undefined();
-    data[off] = (uint8_t)((v >> 8) & 0xFF);
-    data[off + 1] = (uint8_t)(v & 0xFF);
-    return (Item){.item = i2it(off + 2)};
+    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 2, false, 0, 65535);
 }
-
 extern "C" Item js_buffer_writeUInt16LE(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(2)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
-    if (off < 0) return err;
-    int64_t v = 0;
-    if (!validate_write_value(value_item, &v, 0, 65535, 2)) return make_js_undefined();
-    data[off] = (uint8_t)(v & 0xFF);
-    data[off + 1] = (uint8_t)((v >> 8) & 0xFF);
-    return (Item){.item = i2it(off + 2)};
+    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 2, true, 0, 65535);
 }
-
 extern "C" Item js_buffer_writeUInt32BE(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(4)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
-    if (off < 0) return err;
-    int64_t v = 0;
-    if (!validate_write_value(value_item, &v, 0, 4294967295LL, 4)) return make_js_undefined();
-    data[off]     = (uint8_t)((v >> 24) & 0xFF);
-    data[off + 1] = (uint8_t)((v >> 16) & 0xFF);
-    data[off + 2] = (uint8_t)((v >> 8) & 0xFF);
-    data[off + 3] = (uint8_t)(v & 0xFF);
-    return (Item){.item = i2it(off + 4)};
+    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 4, false, 0, 4294967295LL);
 }
-
 extern "C" Item js_buffer_writeUInt32LE(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(4)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
-    if (off < 0) return err;
-    int64_t v = 0;
-    if (!validate_write_value(value_item, &v, 0, 4294967295LL, 4)) return make_js_undefined();
-    data[off]     = (uint8_t)(v & 0xFF);
-    data[off + 1] = (uint8_t)((v >> 8) & 0xFF);
-    data[off + 2] = (uint8_t)((v >> 16) & 0xFF);
-    data[off + 3] = (uint8_t)((v >> 24) & 0xFF);
-    return (Item){.item = i2it(off + 4)};
+    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 4, true, 0, 4294967295LL);
 }
 
 // ─── Signed Integer Write Methods ────────────────────────────────────────────
-
 extern "C" Item js_buffer_writeInt8(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(1)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 1, "offset", &err);
-    if (off < 0) return err;
-    int64_t v = 0;
-    if (!validate_write_value(value_item, &v, -128, 127, 1)) return make_js_undefined();
-    data[off] = (uint8_t)(v & 0xFF);
-    return (Item){.item = i2it(off + 1)};
+    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 1, true, -128, 127);
 }
-
 extern "C" Item js_buffer_writeInt16BE(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(2)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
-    if (off < 0) return err;
-    int64_t v = 0;
-    if (!validate_write_value(value_item, &v, -32768, 32767, 2)) return make_js_undefined();
-    data[off]     = (uint8_t)((v >> 8) & 0xFF);
-    data[off + 1] = (uint8_t)(v & 0xFF);
-    return (Item){.item = i2it(off + 2)};
+    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 2, false, -32768, 32767);
 }
-
 extern "C" Item js_buffer_writeInt16LE(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(2)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
-    if (off < 0) return err;
-    int64_t v = 0;
-    if (!validate_write_value(value_item, &v, -32768, 32767, 2)) return make_js_undefined();
-    data[off]     = (uint8_t)(v & 0xFF);
-    data[off + 1] = (uint8_t)((v >> 8) & 0xFF);
-    return (Item){.item = i2it(off + 2)};
+    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 2, true, -32768, 32767);
 }
-
 extern "C" Item js_buffer_writeInt32BE(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(4)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
-    if (off < 0) return err;
-    int64_t v = 0;
-    if (!validate_write_value(value_item, &v, -2147483648LL, 2147483647LL, 4)) return make_js_undefined();
-    data[off]     = (uint8_t)((v >> 24) & 0xFF);
-    data[off + 1] = (uint8_t)((v >> 16) & 0xFF);
-    data[off + 2] = (uint8_t)((v >> 8) & 0xFF);
-    data[off + 3] = (uint8_t)(v & 0xFF);
-    return (Item){.item = i2it(off + 4)};
+    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 4, false, -2147483648LL, 2147483647LL);
 }
-
 extern "C" Item js_buffer_writeInt32LE(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(4)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
-    if (off < 0) return err;
-    int64_t v = 0;
-    if (!validate_write_value(value_item, &v, -2147483648LL, 2147483647LL, 4)) return make_js_undefined();
-    data[off]     = (uint8_t)(v & 0xFF);
-    data[off + 1] = (uint8_t)((v >> 8) & 0xFF);
-    data[off + 2] = (uint8_t)((v >> 16) & 0xFF);
-    data[off + 3] = (uint8_t)((v >> 24) & 0xFF);
-    return (Item){.item = i2it(off + 4)};
+    return js_buffer_write_fixed_integer(buf, value_item, offset_item, 4, true, -2147483648LL, 2147483647LL);
 }
 
 // ─── Float/Double Write Methods ──────────────────────────────────────────────
+static Item js_buffer_write_float(Item buf, Item value_item, Item offset_item,
+        int byte_len, bool little_endian) {
+    int blen = 0;
+    uint8_t* data = buffer_data_write(buf, &blen);
+    if (!data) return (Item){.item = i2it(byte_len)};
+    Item err;
+    int off = validate_rw_offset(offset_item, blen, byte_len, "offset", &err);
+    if (off < 0) return err;
+    double value = 0;
+    if (get_type_id(value_item) == LMD_TYPE_FLOAT) value = it2d(value_item);
+    else if (get_type_id(value_item) == LMD_TYPE_INT) value = (double)it2i(value_item);
+    uint64_t bits = 0;
+    if (byte_len == 4) {
+        float narrowed = (float)value;
+        uint32_t float_bits;
+        memcpy(&float_bits, &narrowed, sizeof(float));
+        bits = float_bits;
+    } else {
+        memcpy(&bits, &value, sizeof(double));
+    }
+    for (int i = 0; i < byte_len; i++) {
+        int write_index = little_endian ? i : byte_len - 1 - i;
+        data[off + write_index] = (uint8_t)((bits >> (i * 8)) & 0xFF);
+    }
+    return (Item){.item = i2it(off + byte_len)};
+}
 
 extern "C" Item js_buffer_writeFloatBE(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(4)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
-    if (off < 0) return err;
-    float val = 0;
-    if (get_type_id(value_item) == LMD_TYPE_FLOAT) val = (float)it2d(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_INT) val = (float)it2i(value_item);
-    uint32_t bits;
-    memcpy(&bits, &val, 4);
-    data[off]     = (uint8_t)((bits >> 24) & 0xFF);
-    data[off + 1] = (uint8_t)((bits >> 16) & 0xFF);
-    data[off + 2] = (uint8_t)((bits >> 8) & 0xFF);
-    data[off + 3] = (uint8_t)(bits & 0xFF);
-    return (Item){.item = i2it(off + 4)};
+    return js_buffer_write_float(buf, value_item, offset_item, 4, false);
 }
-
 extern "C" Item js_buffer_writeFloatLE(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(4)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
-    if (off < 0) return err;
-    float val = 0;
-    if (get_type_id(value_item) == LMD_TYPE_FLOAT) val = (float)it2d(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_INT) val = (float)it2i(value_item);
-    uint32_t bits;
-    memcpy(&bits, &val, 4);
-    data[off]     = (uint8_t)(bits & 0xFF);
-    data[off + 1] = (uint8_t)((bits >> 8) & 0xFF);
-    data[off + 2] = (uint8_t)((bits >> 16) & 0xFF);
-    data[off + 3] = (uint8_t)((bits >> 24) & 0xFF);
-    return (Item){.item = i2it(off + 4)};
+    return js_buffer_write_float(buf, value_item, offset_item, 4, true);
 }
-
 extern "C" Item js_buffer_writeDoubleBE(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(8)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 8, "offset", &err);
-    if (off < 0) return err;
-    double val = 0;
-    if (get_type_id(value_item) == LMD_TYPE_FLOAT) val = it2d(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_INT) val = (double)it2i(value_item);
-    uint64_t bits;
-    memcpy(&bits, &val, 8);
-    for (int j = 7; j >= 0; j--) {
-        data[off + (7 - j)] = (uint8_t)((bits >> (j * 8)) & 0xFF);
-    }
-    return (Item){.item = i2it(off + 8)};
+    return js_buffer_write_float(buf, value_item, offset_item, 8, false);
 }
-
 extern "C" Item js_buffer_writeDoubleLE(Item buf, Item value_item, Item offset_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data) return (Item){.item = i2it(8)};
-    Item err;
-    int off = validate_rw_offset(offset_item, blen, 8, "offset", &err);
-    if (off < 0) return err;
-    double val = 0;
-    if (get_type_id(value_item) == LMD_TYPE_FLOAT) val = it2d(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_INT) val = (double)it2i(value_item);
-    uint64_t bits;
-    memcpy(&bits, &val, 8);
-    for (int j = 0; j < 8; j++) {
-        data[off + j] = (uint8_t)((bits >> (j * 8)) & 0xFF);
-    }
-    return (Item){.item = i2it(off + 8)};
+    return js_buffer_write_float(buf, value_item, offset_item, 8, true);
 }
 
 // ─── toJSON ──────────────────────────────────────────────────────────────────
@@ -2417,47 +2095,25 @@ extern "C" Item js_buffer_toJSON(Item buf) {
     return result;
 }
 
-// ─── swap16 / swap32 ─────────────────────────────────────────────────────────
+// ─── byte-order swap methods ────────────────────────────────────────────────
 
-extern "C" Item js_buffer_swap16(Item buf) {
+static Item js_buffer_swap_words(Item buf, int word_len) {
     int blen = 0;
     uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data || blen % 2 != 0) return buf;
-    for (int i = 0; i < blen; i += 2) {
-        uint8_t tmp = data[i];
-        data[i] = data[i + 1];
-        data[i + 1] = tmp;
-    }
-    return buf;
-}
-
-extern "C" Item js_buffer_swap32(Item buf) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data || blen % 4 != 0) return buf;
-    for (int i = 0; i < blen; i += 4) {
-        uint8_t t0 = data[i], t1 = data[i + 1];
-        data[i] = data[i + 3];
-        data[i + 1] = data[i + 2];
-        data[i + 2] = t1;
-        data[i + 3] = t0;
-    }
-    return buf;
-}
-
-extern "C" Item js_buffer_swap64(Item buf) {
-    int blen = 0;
-    uint8_t* data = buffer_data_write(buf, &blen);
-    if (!data || blen % 8 != 0) return buf;
-    for (int i = 0; i < blen; i += 8) {
-        for (int j = 0; j < 4; j++) {
+    if (!data || blen % word_len != 0) return buf;
+    for (int i = 0; i < blen; i += word_len) {
+        for (int j = 0; j < word_len / 2; j++) {
             uint8_t tmp = data[i + j];
-            data[i + j] = data[i + 7 - j];
-            data[i + 7 - j] = tmp;
+            data[i + j] = data[i + word_len - 1 - j];
+            data[i + word_len - 1 - j] = tmp;
         }
     }
     return buf;
 }
+
+extern "C" Item js_buffer_swap16(Item buf) { return js_buffer_swap_words(buf, 2); }
+extern "C" Item js_buffer_swap32(Item buf) { return js_buffer_swap_words(buf, 4); }
+extern "C" Item js_buffer_swap64(Item buf) { return js_buffer_swap_words(buf, 8); }
 
 // ─── Helpers & statics ──────────────────────────────────────────────────────
 

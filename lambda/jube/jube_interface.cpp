@@ -728,6 +728,9 @@ int jube_member_descriptor(Item receiver, Item key, Item* out) {
     return 1;
 }
 
+static void jube_append_expando_keys(const JubeHostAPI* host, Item keys, Item expando,
+                                     Rooted<Item>* expando_keys, Rooted<Item>* name);
+
 int jube_member_own_keys(Item receiver, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
@@ -753,19 +756,8 @@ int jube_member_own_keys(Item receiver, Item* out) {
     }
     if (rooted_receiver.get().vmap->host_data) {
         rooted_expando.set(jube_expando_object(rooted_receiver.get(), false));
-        if (get_type_id(rooted_expando.get()) == LMD_TYPE_MAP) {
-            rooted_expando_keys.set(host->script->reflect_own_keys(rooted_expando.get()));
-            if (get_type_id(rooted_expando_keys.get()) == LMD_TYPE_ARRAY &&
-                    rooted_expando_keys.get().array) {
-                for (int64_t i = 0; i < rooted_expando_keys.get().array->length; i++) {
-                    // array_push may compact the source data buffer; reload it
-                    // through the exact root before reading the next key.
-                    Array* arr = rooted_expando_keys.get().array;
-                    rooted_name.set(arr->items[i]);
-                    host->value->array_push(rooted_keys.get(), rooted_name.get());
-                }
-            }
-        }
+        jube_append_expando_keys(host, rooted_keys.get(), rooted_expando.get(),
+            &rooted_expando_keys, &rooted_name);
     }
     *out = rooted_keys.get();
     return 1;
@@ -781,6 +773,19 @@ static bool jube_array_has_string_key(Item keys, const char* chars) {
         if (str && str->len == len && memcmp(str->chars, chars, len) == 0) return true;
     }
     return false;
+}
+
+static void jube_append_expando_keys(const JubeHostAPI* host, Item keys, Item expando,
+                                     Rooted<Item>* expando_keys, Rooted<Item>* name) {
+    if (get_type_id(expando) != LMD_TYPE_MAP) return;
+    expando_keys->set(host->script->reflect_own_keys(expando));
+    if (get_type_id(expando_keys->get()) != LMD_TYPE_ARRAY || !expando_keys->get().array) return;
+    for (int64_t i = 0; i < expando_keys->get().array->length; i++) {
+        // reload the source array through its root because array_push may collect.
+        Array* arr = expando_keys->get().array;
+        name->set(arr->items[i]);
+        host->value->array_push(keys, name->get());
+    }
 }
 
 int jube_member_projection_keys(Item receiver, Item* out) {
@@ -806,18 +811,8 @@ int jube_member_projection_keys(Item receiver, Item* out) {
     }
     if (rooted_receiver.get().vmap->host_data) {
         rooted_expando.set(jube_expando_object(rooted_receiver.get(), false));
-        if (get_type_id(rooted_expando.get()) == LMD_TYPE_MAP) {
-            rooted_expando_keys.set(host->script->reflect_own_keys(rooted_expando.get()));
-            if (get_type_id(rooted_expando_keys.get()) == LMD_TYPE_ARRAY &&
-                    rooted_expando_keys.get().array) {
-                for (int64_t i = 0; i < rooted_expando_keys.get().array->length; i++) {
-                    // keep the copied key exact while array_push may collect.
-                    Array* arr = rooted_expando_keys.get().array;
-                    rooted_name.set(arr->items[i]);
-                    host->value->array_push(rooted_keys.get(), rooted_name.get());
-                }
-            }
-        }
+        jube_append_expando_keys(host, rooted_keys.get(), rooted_expando.get(),
+            &rooted_expando_keys, &rooted_name);
     }
     *out = rooted_keys.get();
     return 1;
