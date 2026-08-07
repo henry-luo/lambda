@@ -17,7 +17,7 @@ DEFAULT_JSON = "test/benchmark/benchmark_results_v3.json"
 DEFAULT_ENGINES = "mir,lambdajs,quickjs,nodejs"
 NODE_ENGINE = "nodejs"
 
-SUITE_ORDER = ["r7rs", "awfy", "beng", "kostya", "larceny", "jetstream"]
+SUITE_ORDER = ["r7rs", "awfy", "beng", "kostya", "larceny", "jetstream", "text"]
 SUITE_LABELS = {
     "r7rs": "R7RS",
     "awfy": "AWFY",
@@ -25,6 +25,7 @@ SUITE_LABELS = {
     "kostya": "KOSTYA",
     "larceny": "LARCENY",
     "jetstream": "JetStream",
+    "text": "Text",
 }
 ENGINE_LABELS = {
     "mir": "MIR (untyped)",

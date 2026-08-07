@@ -83,6 +83,11 @@ SUITES = {
     "jetstream": [
         ("hashmap", "hash-map: PASS"),
     ],
+    "text": [
+        ("fast_diff", "fast_diff: CHECKSUM:748544"),
+        ("microdiff", "microdiff: CHECKSUM:3278848"),
+        ("hyphen", "hyphen: CHECKSUM:731008"),
+    ],
 }
 
 

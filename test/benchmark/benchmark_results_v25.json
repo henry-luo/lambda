@@ -2,20 +2,23 @@
   "_metadata": {
     "schema_version": 2,
     "mode": "time",
-    "started_at": "2026-08-07T12:05:23",
-    "command": "test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v25.json --fresh --typed",
+    "started_at": "2026-08-07T14:32:57",
+    "command": "test/benchmark/run_benchmarks.py --suite text --typed --engines mir,c2mir,lambdajs,quickjs,nodejs --runs 3 --timeout 180 --cooldown 0 --results-output test/benchmark/benchmark_results_v25.json",
     "engines": [
       "mir",
+      "c2mir",
       "lambdajs",
       "quickjs",
       "nodejs"
     ],
     "runs": 3,
     "timeout_s": 180,
-    "suite_cooldown_seconds": 10,
+    "suite_cooldown_seconds": 0,
     "results_output": "test/benchmark/benchmark_results_v25.json",
-    "fresh": true,
-    "suite_filters": [],
+    "fresh": false,
+    "suite_filters": [
+      "text"
+    ],
     "bench_filters": [],
     "canonical_duplicate_suites": {
       "mandelbrot": "awfy",
@@ -51,17 +54,16 @@
         "eval": 0.0
       },
       "wall_duration_s": 169.00392154099973,
-      "command": "./test/test_js_test262_gtest.exe --baseline-only --batch-only --run-async --async-list=test/js262/test262_baseline.txt --gtest_brief=1",
       "gate": true
     },
-    "lambda_commit": "812ddaef0bd9fe53ed463da5b5a3984184bc9828",
+    "lambda_commit": "2c78c51cb6d95d9525e9780ddb7396403a7d698c",
     "node_version": "v22.13.0",
     "python_version": "Python 3.14.6",
     "quickjs_version": "2025-09-13",
     "profile_check": "passed",
-    "log_dir": "temp/benchmark_v25",
+    "log_dir": "temp/benchmark_v25_text",
     "typed_variants": true,
-    "finished_at": "2026-08-07T12:14:42"
+    "finished_at": "2026-08-07T14:33:25"
   },
   "r7rs": {
     "fib": {
@@ -2425,6 +2427,155 @@
       "lambdajs": 1134.195,
       "quickjs": null,
       "nodejs": 20.144
+    }
+  },
+  "text": {
+    "fast_diff": {
+      "category": "text-diff",
+      "mir": 1387.26,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 572.381,
+      "c2mir": 13.170166,
+      "lambdajs": 2291.266,
+      "quickjs": 621.969,
+      "nodejs": 39.93
+    },
+    "microdiff": {
+      "category": "data-diff",
+      "mir": 1.03,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 0.993,
+      "c2mir": 0.019043,
+      "lambdajs": 1459.751,
+      "quickjs": 111.896,
+      "nodejs": 16.472
+    },
+    "hyphen": {
+      "category": "hyphenation",
+      "mir": 2.677,
+      "_status": {
+        "mir": "ok",
+        "mir_typed": "ok",
+        "c2mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "mir_typed": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "c2mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "mir_typed": 4.384,
+      "c2mir": 0.09082,
+      "lambdajs": 312.332,
+      "quickjs": 52.262,
+      "nodejs": 6.508
     }
   }
 }

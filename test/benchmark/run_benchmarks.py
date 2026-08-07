@@ -169,12 +169,12 @@ LARCENY = [
     ("ray",        "numeric",    "test/benchmark/larceny/ray.ls",       "test/benchmark/larceny/ray.js",        "test/benchmark/larceny/python/ray.py"),
 ]
 
-# LJS-only library workloads. These are opt-in through `-s text` because they
-# have no Lambda/Python ports and are intended to measure the embedded JS APIs.
+# Text-library workloads are opt-in through `-s text`. Each has a Lambda port
+# (plus a typed variant) and a native C2MIR reference alongside the JS fixture.
 TEXT = [
-    ("fast_diff", "text-diff", None, "test/benchmark/text/fast_diff.js", None),
-    ("microdiff", "data-diff", None, "test/benchmark/text/microdiff.js", None),
-    ("hyphen", "hyphenation", None, "test/benchmark/text/hyphen.js", None),
+    ("fast_diff", "text-diff", "test/benchmark/text/fast_diff.ls", "test/benchmark/text/fast_diff.js", None),
+    ("microdiff", "data-diff", "test/benchmark/text/microdiff.ls", "test/benchmark/text/microdiff.js", None),
+    ("hyphen", "hyphenation", "test/benchmark/text/hyphen.ls", "test/benchmark/text/hyphen.js", None),
 ]
 
 JETSTREAM_LS = [
