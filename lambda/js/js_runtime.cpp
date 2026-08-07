@@ -20832,7 +20832,10 @@ static bool js_typed_array_parse_from_index(Item value, int length, bool reverse
     if (d != d) d = 0;
     d = d >= 0 ? floor(d) : ceil(d);
     if (reverse) {
-        if (d == -INFINITY) *out = -1;
+        // Preserve the negative sentinel so the caller's relative-index
+        // adjustment cannot turn -Infinity into the final element; the
+        // specification requires no candidate for -Infinity.
+        if (d == -INFINITY) *out = INT_MIN;
         else if (d == INFINITY || d > (double)(length - 1)) *out = length - 1;
         else if (d < (double)INT_MIN) *out = INT_MIN;
         else *out = (int)d;
