@@ -16,32 +16,6 @@
 namespace lambda {
 namespace markup {
 
-// Helper: Create element from parser
-static inline Element* create_element(MarkupParser* parser, const char* tag) {
-    return parser->builder.element(tag).final().element;
-}
-
-// Helper: Create string from parser
-static inline String* create_string(MarkupParser* parser, const char* text) {
-    return parser->builder.createString(text);
-}
-
-// Helper: Increment element content length
-static inline void increment_element_content_length(Element* elem) {
-    TypeElmt* elmt_type = (TypeElmt*)elem->type;
-    elmt_type->content_length++;
-}
-
-// Helper: Add attribute to element
-static inline void add_attribute_to_element(MarkupParser* parser, Element* elem,
-                                            const char* key, const char* val) {
-    String* k = parser->builder.createString(key);
-    String* v = parser->builder.createString(val);
-    if (k && v) {
-        parser->builder.putToElement(lam::gc_borrow(elem), k, Item{.item = s2it(v)});
-    }
-}
-
 /**
  * parse_wiki_link - Parse MediaWiki internal links
  *

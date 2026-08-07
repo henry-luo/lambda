@@ -734,8 +734,16 @@ class PremakeGenerator:
             for target in self.config.get('targets', [])
         )
 
-        def add_release_link_options():
-            # Platform-specific linker flags for dead code stripping
+        def add_release_link_options(strip_locals=True):
+            # strip_locals=False is for release_profile: stripping local symbols
+            # makes static functions unresolvable in a sampled profile (they
+            # symbolicate as bare "???" addresses), which defeats the whole
+            # point of a configuration that exists to profile optimized code.
+            # Code generation is identical either way -- only the symbol table
+            # kept in the binary differs.
+            strip_all_option = ['            "-Wl,--strip-all",'] if strip_locals else [
+                '            -- local symbols deliberately kept for profiling',
+            ]
             if self.use_macos_config:
                 self.premake_content.extend([
                     '        -- macOS: strip dead code and symbols with ThinLTO',
@@ -746,7 +754,12 @@ class PremakeGenerator:
                     '            -- Keep executable definitions in the dynamic symbol table; this',
                     '            -- changes link visibility only, never an evaluator/JIT hot path.',
                     '            "-Wl,-export_dynamic",',
+                ] + ([
                     '            "-Wl,-x",  -- Strip local symbols',
+                ] if strip_locals else [
+                    '            -- local symbols deliberately kept: profilers need them to',
+                    '            -- name static functions in sampled stacks',
+                ]) + [
                     '        }',
                 ])
             elif self.use_linux_config:
@@ -761,7 +774,7 @@ class PremakeGenerator:
                             '            "-flto=thin",',
                             '            "-fuse-ld=lld",',
                             '            "-Wl,--gc-sections",',
-                            '            "-Wl,--strip-all",',
+                        ] + strip_all_option + [
                             '        }',
                         ])
                     else:
@@ -770,7 +783,7 @@ class PremakeGenerator:
                             '        linkoptions {',
                             '            "-flto",',
                             '            "-Wl,--gc-sections",',
-                            '            "-Wl,--strip-all",',
+                        ] + strip_all_option + [
                             '        }',
                         ])
                 else:
@@ -779,7 +792,7 @@ class PremakeGenerator:
                         '        linkoptions {',
                         '            "-flto",',
                         '            "-Wl,--gc-sections",',
-                        '            "-Wl,--strip-all",',
+                    ] + strip_all_option + [
                         '        }',
                     ])
             elif self.use_windows_config:
@@ -788,7 +801,9 @@ class PremakeGenerator:
                     '        linkoptions {',
                     '            "-flto",',
                     '            "-Wl,--gc-sections",',
-                    '            "-s",  -- Strip symbols',
+                ] + (['            "-s",  -- Strip symbols'] if strip_locals else [
+                    '            -- symbols deliberately kept for profiling',
+                ]) + [
                     '            "-Wl,--stack,8388608",  -- 8 MB stack (match debug config)',
                     '            "-Wl,--subsystem,console",',
                     '            "-static-libgcc",',
@@ -843,7 +858,9 @@ class PremakeGenerator:
             f'            {native_isa_flag},',
             '        }',
         ])
-        add_release_link_options()
+        # release_profile keeps local symbols: a sampled profile cannot name
+        # static functions without them, and profiling is this config's purpose.
+        add_release_link_options(strip_locals=False)
 
         self.premake_content.extend([
             '    ',

@@ -1714,6 +1714,9 @@ void line_reset(LayoutContext* lycon) {
         // following line whose content area still intersects its block-size.
         if (lycon->block.direction == CSS_VALUE_RTL) {
             lycon->line.effective_right -= lycon->block.initial_letter_exclusion_width;
+            // RTL alignment must use the shortened line box; otherwise start alignment
+            // treats this in-flow initial exclusion as if the full container were available.
+            lycon->line.has_float_intrusion = true;
         } else {
             // Preserve the initial's static edge after an earlier float recedes,
             // while a later float can still extend the combined exclusion farther.
@@ -2157,6 +2160,7 @@ void line_break(LayoutContext* lycon) {
 
     // horizontal text alignment
     line_align(lycon);
+    place_rtl_initial_letter_line(lycon);
 
     // CSS Text 3 §4.1.3: RTL hanging space text rect adjustment.
     // In RTL, trailing whitespace hangs past the inline-end (left edge).
@@ -2337,6 +2341,14 @@ void line_break(LayoutContext* lycon) {
         max(lycon->line.max_top_height, lycon->line.max_bottom_height));
     if (max_tb > used_line_height) {
         used_line_height = max_tb;
+    }
+
+    // CSS Writing Modes uses the physical inline-level box width as the
+    // block-axis extent of a vertical line; the horizontal path tracks height.
+    ViewElement* line_parent_view = lycon->view ? lycon->view->parent_view() : nullptr;
+    ViewBlock* line_parent = layout_nearest_block_ancestor(line_parent_view);
+    if (layout_block_inline_axis_is_vertical(line_parent)) {
+        used_line_height = max(used_line_height, lycon->line.max_atomic_inline_height);
     }
 
     lycon->block.advance_y += used_line_height;

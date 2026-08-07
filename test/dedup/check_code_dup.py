@@ -58,7 +58,19 @@ def load_config(path):
     for section in ("file_exclusions", "block_exclusions"):
         if not isinstance(config.get(section), list):
             raise ConfigError("%s must contain a %s list" % (path, section))
+    policy = config.get("duplicate_policy")
+    if not isinstance(policy, dict):
+        raise ConfigError("%s must contain a duplicate_policy object" % path)
+    minimum_span = policy.get("minimum_source_span_lines")
+    if type(minimum_span) is not int or minimum_span < 2:
+        raise ConfigError(
+            "%s duplicate_policy.minimum_source_span_lines must be at least 2" % path
+        )
     return config
+
+
+def minimum_source_span_lines(config):
+    return config["duplicate_policy"]["minimum_source_span_lines"]
 
 
 def load_baselines(path):
@@ -225,6 +237,20 @@ def block_file_set(block):
     return tuple(sorted({location["file"] for location in block}))
 
 
+def block_source_span_lines(block):
+    return max(
+        location["end"] - location["start"] + 1
+        for location in block
+    )
+
+
+def filter_substantive_blocks(blocks, minimum_span_lines):
+    return [
+        block for block in blocks
+        if block_source_span_lines(block) >= minimum_span_lines
+    ]
+
+
 def merge_intervals(intervals):
     merged = []
     for start, end in sorted(intervals):
@@ -388,14 +414,21 @@ def print_full_locations(blocks):
 
 
 def print_report(metrics, blocks, excluded_counts, modules, file_exclusion_count,
-                 baseline, full):
+                 baseline, full, reviewed_block_count=None, minimum_span_lines=None):
     print("Filtered Lizard duplicate report")
     print("Modules: %s" % ", ".join(modules))
     print()
     print("Summary")
     print("-------")
     print("Raw Lizard duplicate blocks: %d" % metrics["raw_block_count"])
-    print("Remaining duplicate blocks: %d" % metrics["remaining_block_count"])
+    if reviewed_block_count is not None:
+        print("Reviewed duplicate blocks after exclusions: %d" % reviewed_block_count)
+        ignored = reviewed_block_count - metrics["remaining_block_count"]
+        print(
+            "Ignored short token-window blocks (< %d source lines): %d"
+            % (minimum_span_lines, ignored)
+        )
+    print("Remaining substantive duplicate blocks: %d" % metrics["remaining_block_count"])
     print("First-party clone families: %d" % metrics["family_count"])
     print("Same-file clone families: %d" % metrics["same_file_family_count"])
     print("Cross-file clone families: %d" % metrics["cross_file_family_count"])
@@ -524,8 +557,10 @@ def main():
         else:
             excluded_counts[rule["id"]] = excluded_counts.get(rule["id"], 0) + 1
 
-    families = cluster_duplicate_families(remaining)
-    metrics = duplicate_metrics(len(blocks), remaining, families)
+    span_lines = minimum_source_span_lines(config)
+    substantive = filter_substantive_blocks(remaining, span_lines)
+    families = cluster_duplicate_families(substantive)
+    metrics = duplicate_metrics(len(blocks), substantive, families)
     baseline = baselines.get("+".join(selected_modules))
     print_report(
         metrics,
@@ -535,6 +570,8 @@ def main():
         len(file_exclusions),
         baseline,
         args.full,
+        reviewed_block_count=len(remaining),
+        minimum_span_lines=span_lines,
     )
     return 1 if baseline is not None and ratchet_failures(metrics, baseline) else 0
 

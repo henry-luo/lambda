@@ -1,5 +1,9 @@
 {
   "version": 1,
+  "duplicate_policy": {
+    "minimum_source_span_lines": 11,
+    "reason": "Lizard's fixed token-window detector can split one logical clone into many two-to-ten-line windows; only spans of at least eleven source lines are substantive review families, while raw and post-exclusion counts remain diagnostic."
+  },
   "file_exclusions": [
     {
       "pattern": "lambda/tree-sitter*",
@@ -977,6 +981,71 @@
           "start": "// hsl() and hsla() functions",
           "end": "static Color get_current_color("
         }
+      ]
+    },
+    {
+      "id": "declarative_lambda_enum_declarations",
+      "modules": ["lambda"],
+      "reason": "These regions contain only enum declarations for independent CSS, HTML, JS, AST, Bash, and TypeScript domains. Lizard normalizes their sequential members to the same token shape, but merging the declarations would change public numeric identities or couple unrelated APIs.",
+      "allow_within_region": true,
+      "regions": [
+        {"file": "lambda/input/css/css_value.hpp", "start": "typedef enum CssEnumGroup {", "end": "} CssEnumGroup;"},
+        {"file": "lambda/input/css/css_value.hpp", "start": "typedef enum CssEnum : int16_t {", "end": "} CssEnum;"},
+        {"file": "lambda/input/css/css_style.hpp", "start": "typedef enum CssUnit {", "end": "} CssUnit;"},
+        {"file": "lambda/input/css/css_style.hpp", "start": "typedef enum CssColorType {", "end": "} CssColorType;"},
+        {"file": "lambda/input/css/css_style.hpp", "start": "typedef enum CssValueType : uint8_t {", "end": "} CssValueType;"},
+        {"file": "lambda/input/css/css_style.hpp", "start": "typedef enum CssPropertyCode {", "end": "} CssPropertyCode;"},
+        {"file": "lambda/input/css/css_style.hpp", "start": "typedef enum CssOrigin {", "end": "} CssOrigin;"},
+        {"file": "lambda/input/css/css_style.hpp", "start": "typedef enum CssRuleType {", "end": "} CssRuleType;"},
+        {"file": "lambda/input/css/css_style.hpp", "start": "typedef enum PropertyValueType {", "end": "} PropertyValueType;"},
+        {"file": "lambda/input/css/css_style.hpp", "start": "typedef enum PropertyInheritance {", "end": "} PropertyInheritance;"},
+        {"file": "lambda/input/css/css_parser.hpp", "start": "typedef enum CssTokenType {", "end": "} CssTokenType;"},
+        {"file": "lambda/input/css/css_parser.hpp", "start": "typedef enum CssHashType {", "end": "} CssHashType;"},
+        {"file": "lambda/input/css/css_parser.hpp", "start": "typedef enum CssSelectorType {", "end": "} CssSelectorType;"},
+        {"file": "lambda/input/css/css_parser.hpp", "start": "typedef enum CssCombinator {", "end": "} CssCombinator;"},
+        {"file": "lambda/input/css/css_parser.hpp", "start": "typedef enum CssCalcOperator {", "end": "} CssCalcOperator;"},
+        {"file": "lambda/input/css/css_parser.hpp", "start": "typedef enum CssMediaTokenType {", "end": "} CssMediaTokenType;"},
+        {"file": "lambda/input/html5/html5_tokenizer.h", "start": "enum Html5TokenizerState {", "end": "};"},
+        {"file": "lambda/input/html5/html5_parser.h", "start": "typedef enum Html5ErrorType {", "end": "} Html5ErrorType;"},
+        {"file": "lambda/input/html5/html5_parser.h", "start": "enum Html5InsertionMode {", "end": "};"},
+        {"file": "lambda/js/js_builtin_catalog.hpp", "start": "enum JsConstructorId {", "end": "};"},
+        {"file": "lambda/js/js_builtin_catalog.hpp", "start": "enum JsBuiltinOwner {", "end": "};"},
+        {"file": "lambda/js/js_builtin_catalog.hpp", "start": "enum JsBuiltinDispatchGroup {", "end": "};"},
+        {"file": "lambda/js/js_builtin_catalog.hpp", "start": "enum JsBuiltinMirLoweringKind {", "end": "};"},
+        {"file": "lambda/js/js_builtin_catalog.hpp", "start": "enum JsBuiltinPropertyKind {", "end": "};"},
+        {"file": "lambda/js/js_builtin_catalog.hpp", "start": "enum JsBuiltinId {", "end": "};"},
+        {"file": "lambda/js/js_builtin_catalog.hpp", "start": "enum JsBuiltinGlobalKind {", "end": "};"},
+        {"file": "lambda/js/js_builtin_catalog.hpp", "start": "enum JsBuiltinGlobalId {", "end": "};"},
+        {"file": "lambda/js/js_class.h", "start": "enum JsClass : uint8_t {", "end": "};"},
+        {"file": "lambda/js/js_exec_profile.h", "start": "typedef enum JsExecProfileEvent {", "end": "} JsExecProfileEvent;"},
+        {"file": "lambda/js/js_exec_profile.h", "start": "typedef enum JsLoadICProfileReason {", "end": "} JsLoadICProfileReason;"},
+        {"file": "lambda/js/js_exec_profile.h", "start": "typedef enum JsStoreICProfileReason {", "end": "} JsStoreICProfileReason;"},
+        {"file": "lambda/format/format-math-latex.cpp", "start": "enum MathLatexSlot {", "end": "};"},
+        {"file": "lambda/lambda.h", "start": "enum EnumTypeId {", "end": "};"},
+        {"file": "lambda/lambda.h", "start": "enum EnumNumSizedType {", "end": "};"},
+        {"file": "lambda/lambda.h", "start": "enum EnumArrayNumElemType {", "end": "};"},
+        {"file": "lambda/lambda.h", "start": "typedef enum {", "end": "} BoolEnum;"},
+        {"file": "lambda/lambda.h", "start": "typedef enum SysFunc {", "end": "} SysFunc;"},
+        {"file": "lambda/lambda.h", "start": "enum BinaryFlags {", "end": "};"},
+        {"file": "lambda/lambda.h", "start": "enum MapKind {", "end": "};"},
+        {"file": "lambda/lambda.h", "start": "enum ContainerCowState {", "end": "};"},
+        {"file": "lambda/lambda.h", "start": "typedef enum LaneStorageKind {", "end": "} LaneStorageKind;"},
+        {"file": "lambda/lambda.h", "start": "typedef enum ArrayNumBackingKind {", "end": "} ArrayNumBackingKind;"},
+        {"file": "lambda/runtime/lambda-number.hpp", "start": "typedef enum LambdaNumericKind {", "end": "} LambdaNumericKind;"},
+        {"file": "lambda/runtime/lambda-number.hpp", "start": "typedef enum LambdaNumericOpFamily {", "end": "} LambdaNumericOpFamily;"},
+        {"file": "lambda/runtime/lambda-number.hpp", "start": "typedef enum LambdaNumericOverflow {", "end": "} LambdaNumericOverflow;"},
+        {"file": "lambda/runtime/ast-core.hpp", "start": "typedef enum AstNodeType : uint16_t {", "end": "} AstNodeType;"},
+        {"file": "lambda/runtime/ast-core.hpp", "start": "typedef enum Operator {", "end": "} Operator;"},
+        {"file": "lambda/runtime/ast-core.hpp", "start": "typedef enum AstLiteralType {", "end": "} AstLiteralType;"},
+        {"file": "lambda/runtime/ast-core.hpp", "start": "typedef enum ScopeKind {", "end": "} ScopeKind;"},
+        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashAstNodeType {", "end": "} BashAstNodeType;"},
+        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashOperator {", "end": "} BashOperator;"},
+        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashTestOp {", "end": "} BashTestOp;"},
+        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashExpansionType {", "end": "} BashExpansionType;"},
+        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashListOp {", "end": "} BashListOp;"},
+        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashRedirectMode {", "end": "} BashRedirectMode;"},
+        {"file": "lambda/bash/bash_ast.hpp", "start": "typedef enum BashVarAttrFlags {", "end": "} BashVarAttrFlags;"},
+        {"file": "lambda/ts/ts_ast.hpp", "start": "typedef enum TsAstNodeType {", "end": "} TsAstNodeType;"}
       ]
     }
   ]

@@ -80,6 +80,16 @@ uint32_t utf16_decode_pair(uint16_t high, uint16_t low);
  */
 int utf16_encode(uint32_t codepoint, uint16_t utf16[2]);
 
+/**
+ * Count bytes needed to encode Lambda's WTF-8 string representation as UTF-8.
+ * Lone UTF-16 surrogate units are replaced with U+FFFD; valid surrogate pairs
+ * are combined before encoding.
+ */
+int utf8_wtf8_encoded_len(const char* chars, int byte_len);
+
+/** Encode a WTF-8 string as well-formed UTF-8 into an existing output buffer. */
+void utf8_wtf8_encode(const char* chars, int byte_len, uint8_t* out);
+
 /* ── Codepoint Classification ─────────────────────────────────────── */
 
 /** True if cp is a UTF-16 surrogate (0xD800–0xDFFF). */

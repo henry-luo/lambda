@@ -38,6 +38,19 @@ extern __thread EvalContext* context;
 #define JS_UTIL_FUNC_FLAG_GENERATOR 1
 #define JS_UTIL_FUNC_FLAG_ASYNC 128
 
+// helper: append a string Item without repeating the bounded-copy logic
+static void js_util_append_string(char* buf, int* pos, int capacity, Item value) {
+    if (get_type_id(value) != LMD_TYPE_STRING) return;
+    String* str = it2s(value);
+    if (!str) return;
+    int count = (int)str->len;
+    if (*pos + count >= capacity) count = capacity - 1 - *pos;
+    if (count > 0) {
+        memcpy(buf + *pos, str->chars, count);
+        *pos += count;
+    }
+}
+
 // Helper: make JS undefined
 // =============================================================================
 // util.format(...args) — simplified printf-style formatting
@@ -72,13 +85,7 @@ extern "C" Item js_util_format(Item args_item) {
                 continue;
             }
             Item str = js_util_inspect(val, make_js_undefined());
-            if (get_type_id(str) == LMD_TYPE_STRING) {
-                String* s = it2s(str);
-                int clen = (int)s->len;
-                if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-                memcpy(buf + pos, s->chars, clen);
-                pos += clen;
-            }
+            js_util_append_string(buf, &pos, sizeof(buf), str);
         }
         buf[pos] = '\0';
         return make_string_item(buf, pos);
@@ -115,22 +122,10 @@ extern "C" Item js_util_format(Item args_item) {
                     TypeId at = get_type_id(arg);
                     if (at == LMD_TYPE_INT && it2i(arg) <= -(int64_t)JS_SYMBOL_BASE) {
                         Item sym_str = js_symbol_to_string(arg);
-                        if (get_type_id(sym_str) == LMD_TYPE_STRING) {
-                            String* s = it2s(sym_str);
-                            int clen = (int)s->len;
-                            if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-                            memcpy(buf + pos, s->chars, clen);
-                            pos += clen;
-                        }
+                        js_util_append_string(buf, &pos, sizeof(buf), sym_str);
                     } else {
                         Item str = js_to_string(arg);
-                        if (get_type_id(str) == LMD_TYPE_STRING) {
-                            String* s = it2s(str);
-                            int clen = (int)s->len;
-                            if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-                            memcpy(buf + pos, s->chars, clen);
-                            pos += clen;
-                        }
+                        js_util_append_string(buf, &pos, sizeof(buf), str);
                     }
                     arg_idx++;
                     break;
@@ -237,11 +232,7 @@ extern "C" Item js_util_format(Item args_item) {
                 case 'j': {
                     Item str = js_json_stringify(arg);
                     if (get_type_id(str) == LMD_TYPE_STRING) {
-                        String* s = it2s(str);
-                        int clen = (int)s->len;
-                        if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-                        memcpy(buf + pos, s->chars, clen);
-                        pos += clen;
+                        js_util_append_string(buf, &pos, sizeof(buf), str);
                     } else {
                         // JSON.stringify returns undefined for Symbol, functions, etc.
                         const char* undef = "undefined";
@@ -254,13 +245,7 @@ extern "C" Item js_util_format(Item args_item) {
                 case 'o':
                 case 'O': {
                     Item str = js_json_stringify(arg);
-                    if (get_type_id(str) == LMD_TYPE_STRING) {
-                        String* s = it2s(str);
-                        int clen = (int)s->len;
-                        if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-                        memcpy(buf + pos, s->chars, clen);
-                        pos += clen;
-                    }
+                    js_util_append_string(buf, &pos, sizeof(buf), str);
                     arg_idx++;
                     break;
                 }
@@ -289,13 +274,7 @@ extern "C" Item js_util_format(Item args_item) {
         } else {
             str = js_util_inspect(extra, make_js_undefined());
         }
-        if (get_type_id(str) == LMD_TYPE_STRING) {
-            String* s = it2s(str);
-            int clen = (int)s->len;
-            if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-            memcpy(buf + pos, s->chars, clen);
-            pos += clen;
-        }
+        js_util_append_string(buf, &pos, sizeof(buf), str);
     }
 
     buf[pos] = '\0';

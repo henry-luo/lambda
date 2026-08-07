@@ -629,29 +629,26 @@ char* apply_predictor(const char* data, size_t data_len, size_t* out_len,
 /**
  * Decompress FlateDecode with predictor support
  */
-char* flate_decode_with_predictor(const char* compressed_data, size_t compressed_len, 
-                                   size_t* out_len, const PDFDecodeParams* params) {
-    // first, decompress
-    size_t decompressed_len = 0;
-    char* decompressed = flate_decode(compressed_data, compressed_len, &decompressed_len);
-    if (!decompressed) {
-        return NULL;
-    }
-    
-    // apply predictor if needed
+static char* apply_predictor_to_decoded(char* decompressed, size_t decompressed_len,
+                                        size_t* out_len, const PDFDecodeParams* params) {
+    if (!decompressed) return NULL;
     if (params && params->predictor > 1) {
         size_t final_len = 0;
         char* final_data = apply_predictor(decompressed, decompressed_len, &final_len, params);
         mem_free(decompressed);
-        if (!final_data) {
-            return NULL;
-        }
+        if (!final_data) return NULL;
         *out_len = final_len;
         return final_data;
     }
-    
     *out_len = decompressed_len;
     return decompressed;
+}
+
+char* flate_decode_with_predictor(const char* compressed_data, size_t compressed_len, 
+                                   size_t* out_len, const PDFDecodeParams* params) {
+    size_t decompressed_len = 0;
+    char* decompressed = flate_decode(compressed_data, compressed_len, &decompressed_len);
+    return apply_predictor_to_decoded(decompressed, decompressed_len, out_len, params);
 }
 
 /**
@@ -659,28 +656,10 @@ char* flate_decode_with_predictor(const char* compressed_data, size_t compressed
  */
 char* lzw_decode_with_predictor(const char* compressed_data, size_t compressed_len,
                                  size_t* out_len, const PDFDecodeParams* params) {
-    // first, decompress
     int early_change = params ? params->early_change : 1;
     size_t decompressed_len = 0;
     char* decompressed = lzw_decode(compressed_data, compressed_len, &decompressed_len, early_change);
-    if (!decompressed) {
-        return NULL;
-    }
-    
-    // apply predictor if needed
-    if (params && params->predictor > 1) {
-        size_t final_len = 0;
-        char* final_data = apply_predictor(decompressed, decompressed_len, &final_len, params);
-        mem_free(decompressed);
-        if (!final_data) {
-            return NULL;
-        }
-        *out_len = final_len;
-        return final_data;
-    }
-    
-    *out_len = decompressed_len;
-    return decompressed;
+    return apply_predictor_to_decoded(decompressed, decompressed_len, out_len, params);
 }
 
 /**

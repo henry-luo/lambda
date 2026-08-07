@@ -26,6 +26,39 @@ extern Item parse_inline_spans(MarkupParser* parser, const char* text);
 // Forward declaration for HTML block parsing
 extern Item parse_html_block(MarkupParser* parser, const char* line);
 
+static Item parse_list_block_item(MarkupParser* parser, const char* content_line) {
+    BlockType block_type = detect_block_type(parser, content_line);
+    Item block_item = {.item = ITEM_UNDEFINED};
+    switch (block_type) {
+        case BlockType::HEADER:
+            block_item = parse_header(parser, content_line);
+            break;
+        case BlockType::CODE_BLOCK:
+            block_item = parse_code_block(parser, content_line);
+            break;
+        case BlockType::QUOTE:
+            block_item = parse_blockquote(parser, content_line);
+            break;
+        case BlockType::LIST_ITEM:
+            block_item = parse_list_item(parser, content_line);
+            break;
+        case BlockType::DIVIDER:
+            block_item = parse_divider(parser);
+            break;
+        case BlockType::TABLE:
+            block_item = parse_table_row(parser, content_line);
+            break;
+        case BlockType::RAW_HTML:
+            block_item = parse_html_block(parser, content_line);
+            break;
+        case BlockType::PARAGRAPH:
+        default:
+            block_item = parse_paragraph(parser, content_line);
+            break;
+    }
+    return block_item;
+}
+
 /**
  * get_list_indentation - Count leading whitespace as indentation level
  */
@@ -683,37 +716,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
         }
 
         // Detect block type of the stripped content
-        BlockType block_type = detect_block_type(parser, content_line);
-
-        Item block_item = {.item = ITEM_UNDEFINED};
-
-        switch (block_type) {
-            case BlockType::HEADER:
-                block_item = parse_header(parser, content_line);
-                break;
-            case BlockType::CODE_BLOCK:
-                block_item = parse_code_block(parser, content_line);
-                break;
-            case BlockType::QUOTE:
-                block_item = parse_blockquote(parser, content_line);
-                break;
-            case BlockType::LIST_ITEM:
-                block_item = parse_list_item(parser, content_line);
-                break;
-            case BlockType::DIVIDER:
-                block_item = parse_divider(parser);
-                break;
-            case BlockType::TABLE:
-                block_item = parse_table_row(parser, content_line);
-                break;
-            case BlockType::RAW_HTML:
-                block_item = parse_html_block(parser, content_line);
-                break;
-            case BlockType::PARAGRAPH:
-            default:
-                block_item = parse_paragraph(parser, content_line);
-                break;
-        }
+        Item block_item = parse_list_block_item(parser, content_line);
 
         if (block_item.item != ITEM_ERROR && block_item.item != ITEM_UNDEFINED) {
             list_push((List*)content_container, block_item);
@@ -1151,36 +1154,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                             parser->current_line = saved;
                         }
 
-                        BlockType block_type = detect_block_type(parser, content_line);
-                        Item block_item = {.item = ITEM_UNDEFINED};
-
-                        switch (block_type) {
-                            case BlockType::HEADER:
-                                block_item = parse_header(parser, content_line);
-                                break;
-                            case BlockType::CODE_BLOCK:
-                                block_item = parse_code_block(parser, content_line);
-                                break;
-                            case BlockType::QUOTE:
-                                block_item = parse_blockquote(parser, content_line);
-                                break;
-                            case BlockType::LIST_ITEM:
-                                block_item = parse_list_item(parser, content_line);
-                                break;
-                            case BlockType::DIVIDER:
-                                block_item = parse_divider(parser);
-                                break;
-                            case BlockType::TABLE:
-                                block_item = parse_table_row(parser, content_line);
-                                break;
-                            case BlockType::RAW_HTML:
-                                block_item = parse_html_block(parser, content_line);
-                                break;
-                            case BlockType::PARAGRAPH:
-                            default:
-                                block_item = parse_paragraph(parser, content_line);
-                                break;
-                        }
+                        Item block_item = parse_list_block_item(parser, content_line);
 
                         if (block_item.item != ITEM_ERROR && block_item.item != ITEM_UNDEFINED) {
                             // Check if we had a blank line between this and the previous direct block

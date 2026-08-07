@@ -804,6 +804,29 @@ static void append_octal_escape(char* out, size_t* pos, unsigned char c) {
     out[(*pos)++] = (char)('0' + (c & 7));
 }
 
+static void advance_literal_state(unsigned char c, bool* in_literal, bool* escaped,
+                                   int* literal_depth) {
+    if (*in_literal) {
+        if (*escaped) {
+            *escaped = false;
+        } else if (c == '\\') {
+            *escaped = true;
+        } else if (c == '(') {
+            (*literal_depth)++;
+        } else if (c == ')') {
+            (*literal_depth)--;
+            if (*literal_depth <= 0) {
+                *in_literal = false;
+                *literal_depth = 0;
+            }
+        }
+    } else if (c == '(') {
+        *in_literal = true;
+        *literal_depth = 1;
+        *escaped = false;
+    }
+}
+
 static String* content_bytes_to_token_text(Input* input, String* src) {
     if (!input || !src) return nullptr;
     size_t out_len = 0;
@@ -819,25 +842,7 @@ static String* content_bytes_to_token_text(Input* input, String* src) {
         } else {
             out_len++;
         }
-        if (in_literal) {
-            if (escaped) {
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == '(') {
-                literal_depth++;
-            } else if (c == ')') {
-                literal_depth--;
-                if (literal_depth <= 0) {
-                    in_literal = false;
-                    literal_depth = 0;
-                }
-            }
-        } else if (c == '(') {
-            in_literal = true;
-            literal_depth = 1;
-            escaped = false;
-        }
+        advance_literal_state(c, &in_literal, &escaped, &literal_depth);
     }
     if (!changed) return src;
     String* out = (String*)pool_calloc(input->pool, sizeof(String) + out_len + 1);
@@ -853,25 +858,7 @@ static String* content_bytes_to_token_text(Input* input, String* src) {
         } else {
             out->chars[j++] = (char)c;
         }
-        if (in_literal) {
-            if (escaped) {
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == '(') {
-                literal_depth++;
-            } else if (c == ')') {
-                literal_depth--;
-                if (literal_depth <= 0) {
-                    in_literal = false;
-                    literal_depth = 0;
-                }
-            }
-        } else if (c == '(') {
-            in_literal = true;
-            literal_depth = 1;
-            escaped = false;
-        }
+        advance_literal_state(c, &in_literal, &escaped, &literal_depth);
     }
     out->chars[j] = '\0';
     out->len = (uint32_t)out_len;

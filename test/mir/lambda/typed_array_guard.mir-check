@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Typed numeric-array loads use the guarded direct ArrayNum data lane. A proven float procedure parameter validates the physical array header before reading or writing in place, preserving the caller-visible procedure ABI without generic item_at dispatch.",
+      "description": "Typed numeric-array loads use the guarded direct ArrayNum data lane. A proven float procedure parameter validates the physical array header before reading, while the value-parameter store keeps the checked COW setter rather than claiming borrowed-var ownership.",
   "checks": [
     {
       "in_func": "_guarded_load_#",
@@ -26,7 +26,7 @@
       "expect_seq": [
         { "pattern": "call\tensure_typed_array_p, ensure_typed_array" },
         { "pattern": "call\tlambda_module_const_at_p" },
-        { "pattern": "call\tlambda_array_set_checked_inplace_p, lambda_array_set_checked_inplace" }
+        { "pattern": "call\tlambda_array_set_checked_lane_p, lambda_array_set_checked_lane" }
       ]
     },
     {

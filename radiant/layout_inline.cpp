@@ -1489,15 +1489,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             br_view->x = lycon->line.advance_x - lycon->line.trailing_space_width;
         }
         br_view->width = 0;
-        // The <br> element's bounding box height is the font content area (cell height),
-        // not the CSS line-height. The line-height is used by line_break() to advance
-        // the block cursor, but the element's own reported height matches the font metrics.
-        // Chrome's reported <br> height varies by context (0 in some cases, font-height
-        // in others). The exact rule is not fully understood, so we use font cell height
-        // consistently.
         struct FontHandle* br_fh = lycon->font.font_handle;
         float br_font_height = br_fh ? font_get_cell_height(br_fh) : lycon->block.line_height;
-        br_view->height = br_font_height;
+        // A vertical writing-mode maps the forced break's logical line-box
+        // extent to physical width; using the glyph cell height shortens the
+        // observable break rect even though the generated line box is larger.
+        ViewBlock* br_parent = layout_nearest_block_ancestor(br_view->parent_view());
+        bool vertical_parent = br_parent && layout_block_inline_axis_is_vertical(br_parent);
+        br_view->height = vertical_parent
+            ? layout_br_line_box_extent(lycon, br_fh) : br_font_height;
         // CSS 2.1 §10.8.1: <br> participates in the current line before forcing
         // the break. Its zero-width inline box is baseline-aligned with earlier
         // content on the line, including replaced elements.
@@ -1505,19 +1505,38 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         br_view->y = lycon->block.advance_y + (br_line_height - br_font_height) / 2.0f;
         bool collapse_br_rect = quirks_br_after_nested_inline_text(lycon, elmt);
         float collapsed_br_y = lycon->block.advance_y + lycon->line.max_ascender;
+        bool was_line_clamped = lycon->block.line_clamped;
+        if (was_line_clamped && lycon->block.line_clamp_advance_y >= 0.0f) {
+            // A forced break after the clamp boundary is part of the clipped
+            // line, not a new line box; retain the boundary and discard its
+            // pending line so block finalization cannot advance again.
+            br_view->y = lycon->block.line_clamp_advance_y - br_line_height +
+                (br_line_height - br_font_height) / 2.0f;
+            log_debug("BR_CLAMP_PROBE early x=%.1f y=%.1f boundary=%.1f last_base=%.1f max_asc=%.1f max_desc=%.1f line_h=%.1f font_h=%.1f",
+                br_view->x, br_view->y, lycon->block.line_clamp_advance_y,
+                lycon->block.line_clamp_last_line_ascender,
+                lycon->block.line_clamp_last_line_max_ascender,
+                lycon->block.line_clamp_last_line_max_descender,
+                br_line_height, br_font_height);
+            line_reset(lycon);
+            return;
+        }
         // CSS Text 3 §7.2: text-align-last applies to lines immediately before
         // a forced line break. <br> is a forced break per CSS Text 3 §4.1.
-        bool was_line_clamped = lycon->block.line_clamped;
         lycon->line.is_last_line = true;
         line_break(lycon);
         lycon->line.is_last_line = false;
+        log_debug("BR_CLAMP_PROBE normal x=%.1f y=%.1f line=%d boundary=%.1f",
+            br_view->x, br_view->y, lycon->block.line_number,
+            lycon->block.line_clamp_advance_y);
         if (collapse_br_rect) {
             // A quirks block without a root strut exposes this break as a
             // caret-position box; the descendant line still advances normally.
             br_view->y = collapsed_br_y;
             br_view->height = 0.0f;
         }
-        if (!was_line_clamped && lycon->block.line_clamped && lycon->font.font_handle) {
+        if (!vertical_parent && !was_line_clamped &&
+            lycon->block.line_clamped && lycon->font.font_handle) {
             GlyphInfo ellipsis = font_get_glyph(lycon->font.font_handle, 0x2026); // U+2026
             br_view->width = ellipsis.id != 0 ? ellipsis.advance_x : lycon->font.current_font_size * 0.5f;
         }

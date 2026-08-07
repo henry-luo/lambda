@@ -10,6 +10,33 @@ using namespace lambda;
 
 static Item parse_value(InputContext& ctx, const char **json, int depth = 0);
 
+static bool json_recover_to_separator(InputContext& ctx, const char** json,
+        char closing, bool skip_after_comma) {
+    while (**json && **json != ',' && **json != closing) {
+        (*json)++;
+        ctx.tracker.advance(1);
+    }
+    if (**json == ',') {
+        (*json)++;
+        ctx.tracker.advance(1);
+        if (skip_after_comma) skip_whitespace(json);
+        return true;
+    }
+    return false;
+}
+
+static void json_consume_comma_or_recover(InputContext& ctx, const char** json,
+        char closing, const char* expected_message) {
+    if (**json != ',') {
+        ctx.addError(ctx.tracker.location(), "%s", expected_message);
+        json_recover_to_separator(ctx, json, closing, false);
+        return;
+    }
+    (*json)++;
+    ctx.tracker.advance(1);
+    skip_whitespace(json);
+}
+
 static String* parse_string(InputContext& ctx, const char **json) {
     SourceTracker& tracker = ctx.tracker;
 
@@ -120,23 +147,7 @@ static Item parse_array(InputContext& ctx, const char **json, int depth) {
             break;
         }
 
-        if (**json != ',') {
-            ctx.addError(tracker.location(), "Expected ',' or ']' in array");
-            // Error recovery: skip to next comma or closing bracket
-            while (**json && **json != ',' && **json != ']') {
-                (*json)++;
-                tracker.advance(1);
-            }
-            if (**json == ',') {
-                (*json)++;
-                tracker.advance(1);
-            }
-            continue;
-        }
-
-        (*json)++;
-        tracker.advance(1);
-        skip_whitespace(json);
+        json_consume_comma_or_recover(ctx, json, ']', "Expected ',' or ']' in array");
     }
 
     return arr_builder.final();
@@ -175,16 +186,7 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
         String* key = key_str ? ctx.builder.createName(key_str->chars, key_str->len) : nullptr;
         if (!key) {
             // Error recovery: skip to next comma or closing brace
-            while (**json && **json != ',' && **json != '}') {
-                (*json)++;
-                tracker.advance(1);
-            }
-            if (**json == ',') {
-                (*json)++;
-                tracker.advance(1);
-                skip_whitespace(json);
-                continue;
-            }
+            if (json_recover_to_separator(ctx, json, '}', true)) continue;
             break;
         }
 
@@ -192,16 +194,7 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
         if (**json != ':') {
             ctx.addError(tracker.location(), "Expected ':' after object key");
             // Error recovery: skip to next comma or closing brace
-            while (**json && **json != ',' && **json != '}') {
-                (*json)++;
-                tracker.advance(1);
-            }
-            if (**json == ',') {
-                (*json)++;
-                tracker.advance(1);
-                skip_whitespace(json);
-                continue;
-            }
+            if (json_recover_to_separator(ctx, json, '}', true)) continue;
             break;
         }
 
@@ -222,23 +215,7 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
             break;
         }
 
-        if (**json != ',') {
-            ctx.addError(tracker.location(), "Expected ',' or '}' in object");
-            // Error recovery: skip to next comma or closing brace
-            while (**json && **json != ',' && **json != '}') {
-                (*json)++;
-                tracker.advance(1);
-            }
-            if (**json == ',') {
-                (*json)++;
-                tracker.advance(1);
-            }
-            continue;
-        }
-
-        (*json)++;
-        tracker.advance(1);
-        skip_whitespace(json);
+        json_consume_comma_or_recover(ctx, json, '}', "Expected ',' or '}' in object");
     }
 
     return map_builder.final();

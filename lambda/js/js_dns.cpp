@@ -276,7 +276,7 @@ static void dns_scheduled_timer_cb(uv_timer_t* timer) {
     uv_close((uv_handle_t*)timer, dns_scheduled_close_cb);
 }
 
-static Item dns_lookup_emit_scheduled(Item env_item) {
+static Item dns_emit_scheduled_common(Item env_item, int success_arg_count) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
 
@@ -284,9 +284,6 @@ static Item dns_lookup_emit_scheduled(Item env_item) {
     Item resolve = env[1];
     Item reject = env[2];
     Item error = env[3];
-    Item callback_value = env[4];
-    Item callback_family = env[5];
-    Item promise_value = env[6];
 
     if (!is_nullish_item(error)) {
         if (is_callable(callback)) {
@@ -302,87 +299,44 @@ static Item dns_lookup_emit_scheduled(Item env_item) {
     }
 
     if (is_callable(callback)) {
-        Item args[3] = { ItemNull, callback_value, callback_family };
-        js_call_function(callback, make_js_undefined(), args, 3);
+        int argc = success_arg_count == 3 ? 3 : 2;
+        Item args[3] = { ItemNull, env[4], argc == 3 ? env[5] : ItemNull };
+        js_call_function(callback, make_js_undefined(), args, argc);
     }
     if (is_callable(resolve)) {
-        Item args[1] = { promise_value };
+        Item args[1] = { success_arg_count == 3 ? env[6] : env[4] };
         js_call_function(resolve, make_js_undefined(), args, 1);
     }
     js_microtask_flush();
     return make_js_undefined();
+}
+
+static Item dns_lookup_emit_scheduled(Item env_item) {
+    return dns_emit_scheduled_common(env_item, 3);
 }
 
 static Item dns_resolve_emit_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-
-    Item callback = env[0];
-    Item resolve = env[1];
-    Item reject = env[2];
-    Item error = env[3];
-    Item value = env[4];
-
-    if (!is_nullish_item(error)) {
-        if (is_callable(callback)) {
-            Item args[1] = { error };
-            js_call_function(callback, make_js_undefined(), args, 1);
-        }
-        if (is_callable(reject)) {
-            Item args[1] = { error };
-            js_call_function(reject, make_js_undefined(), args, 1);
-        }
-        js_microtask_flush();
-        return make_js_undefined();
-    }
-
-    if (is_callable(callback)) {
-        Item args[2] = { ItemNull, value };
-        js_call_function(callback, make_js_undefined(), args, 2);
-    }
-    if (is_callable(resolve)) {
-        Item args[1] = { value };
-        js_call_function(resolve, make_js_undefined(), args, 1);
-    }
-    js_microtask_flush();
-    return make_js_undefined();
+    return dns_emit_scheduled_common(env_item, 2);
 }
 
 static Item dns_lookup_service_emit_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    return dns_emit_scheduled_common(env_item, 3);
+}
 
-    Item callback = env[0];
-    Item resolve = env[1];
-    Item reject = env[2];
-    Item error = env[3];
-    Item hostname = env[4];
-    Item service = env[5];
-    Item promise_value = env[6];
-
-    if (!is_nullish_item(error)) {
-        if (is_callable(callback)) {
-            Item args[1] = { error };
-            js_call_function(callback, make_js_undefined(), args, 1);
+static void dns_enqueue_scheduled(Item fn) {
+    uv_loop_t* loop = lambda_uv_loop();
+    if (loop) {
+        DnsScheduledReq* sr = (DnsScheduledReq*)mem_calloc(1, sizeof(DnsScheduledReq), MEM_CAT_JS_RUNTIME);
+        sr->callback = fn;
+        if (uv_timer_init(loop, &sr->timer) == 0) {
+            sr->timer.data = sr;
+            if (uv_timer_start(&sr->timer, dns_scheduled_timer_cb, 0, 0) == 0) return;
+            uv_close((uv_handle_t*)&sr->timer, dns_scheduled_close_cb);
+        } else {
+            mem_free(sr);
         }
-        if (is_callable(reject)) {
-            Item args[1] = { error };
-            js_call_function(reject, make_js_undefined(), args, 1);
-        }
-        js_microtask_flush();
-        return make_js_undefined();
     }
-
-    if (is_callable(callback)) {
-        Item args[3] = { ItemNull, hostname, service };
-        js_call_function(callback, make_js_undefined(), args, 3);
-    }
-    if (is_callable(resolve)) {
-        Item args[1] = { promise_value };
-        js_call_function(resolve, make_js_undefined(), args, 1);
-    }
-    js_microtask_flush();
-    return make_js_undefined();
+    js_next_tick_enqueue(fn);
 }
 
 static void dns_lookup_schedule(Item callback, Item resolve, Item reject,
@@ -398,22 +352,7 @@ static void dns_lookup_schedule(Item callback, Item resolve, Item reject,
     env[6] = promise_value;
     Item fn = js_new_closure((void*)dns_lookup_emit_scheduled, 0, env, 7);
 
-    uv_loop_t* loop = lambda_uv_loop();
-    if (loop) {
-        DnsScheduledReq* sr = (DnsScheduledReq*)mem_calloc(1, sizeof(DnsScheduledReq), MEM_CAT_JS_RUNTIME);
-        sr->callback = fn;
-        if (uv_timer_init(loop, &sr->timer) == 0) {
-            sr->timer.data = sr;
-            if (uv_timer_start(&sr->timer, dns_scheduled_timer_cb, 0, 0) == 0) {
-                return;
-            }
-            uv_close((uv_handle_t*)&sr->timer, dns_scheduled_close_cb);
-        } else {
-            mem_free(sr);
-        }
-    }
-
-    js_next_tick_enqueue(fn);
+    dns_enqueue_scheduled(fn);
 }
 
 static void dns_resolve_schedule(Item callback, Item resolve, Item reject,
@@ -426,22 +365,7 @@ static void dns_resolve_schedule(Item callback, Item resolve, Item reject,
     env[4] = value;
     Item fn = js_new_closure((void*)dns_resolve_emit_scheduled, 0, env, 5);
 
-    uv_loop_t* loop = lambda_uv_loop();
-    if (loop) {
-        DnsScheduledReq* sr = (DnsScheduledReq*)mem_calloc(1, sizeof(DnsScheduledReq), MEM_CAT_JS_RUNTIME);
-        sr->callback = fn;
-        if (uv_timer_init(loop, &sr->timer) == 0) {
-            sr->timer.data = sr;
-            if (uv_timer_start(&sr->timer, dns_scheduled_timer_cb, 0, 0) == 0) {
-                return;
-            }
-            uv_close((uv_handle_t*)&sr->timer, dns_scheduled_close_cb);
-        } else {
-            mem_free(sr);
-        }
-    }
-
-    js_next_tick_enqueue(fn);
+    dns_enqueue_scheduled(fn);
 }
 
 static void dns_lookup_service_schedule(Item callback, Item resolve, Item reject,
@@ -457,22 +381,7 @@ static void dns_lookup_service_schedule(Item callback, Item resolve, Item reject
     env[6] = promise_value;
     Item fn = js_new_closure((void*)dns_lookup_service_emit_scheduled, 0, env, 7);
 
-    uv_loop_t* loop = lambda_uv_loop();
-    if (loop) {
-        DnsScheduledReq* sr = (DnsScheduledReq*)mem_calloc(1, sizeof(DnsScheduledReq), MEM_CAT_JS_RUNTIME);
-        sr->callback = fn;
-        if (uv_timer_init(loop, &sr->timer) == 0) {
-            sr->timer.data = sr;
-            if (uv_timer_start(&sr->timer, dns_scheduled_timer_cb, 0, 0) == 0) {
-                return;
-            }
-            uv_close((uv_handle_t*)&sr->timer, dns_scheduled_close_cb);
-        } else {
-            mem_free(sr);
-        }
-    }
-
-    js_next_tick_enqueue(fn);
+    dns_enqueue_scheduled(fn);
 }
 
 static Item dns_promise_reject_later(Item error) {

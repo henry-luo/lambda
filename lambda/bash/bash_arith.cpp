@@ -257,33 +257,34 @@ static long long arith_postfix(ArithParser* p) {
 // Unary: (- | + | ~ | ! | ++ | --) unary
 // ============================================================================
 
+static bool arith_parse_prefix_update(ArithParser* p, long long delta,
+        const char* error_message, long long* result) {
+    int name_start, name_len;
+    int saved = p->pos;
+    if (!arith_parse_varname(p, &name_start, &name_len)) {
+        p->pos = saved;
+        arith_error(p, error_message);
+        return false;
+    }
+    long long value = arith_get_var(p->src + name_start, name_len) + delta;
+    arith_set_var(p->src + name_start, name_len, value);
+    *result = value;
+    return true;
+}
+
 static long long arith_unary(ArithParser* p) {
     if (p->error) return 0;
     arith_skip_spaces(p);
 
     // prefix ++ and --
     if (arith_match2(p, '+', '+')) {
-        int name_start, name_len;
-        int saved = p->pos;
-        if (arith_parse_varname(p, &name_start, &name_len)) {
-            long long val = arith_get_var(p->src + name_start, name_len) + 1;
-            arith_set_var(p->src + name_start, name_len, val);
-            return val; // prefix: return new value
-        }
-        p->pos = saved;
-        arith_error(p, "++ requires variable operand");
+        long long value = 0;
+        if (arith_parse_prefix_update(p, 1, "++ requires variable operand", &value)) return value;
         return 0;
     }
     if (arith_match2(p, '-', '-')) {
-        int name_start, name_len;
-        int saved = p->pos;
-        if (arith_parse_varname(p, &name_start, &name_len)) {
-            long long val = arith_get_var(p->src + name_start, name_len) - 1;
-            arith_set_var(p->src + name_start, name_len, val);
-            return val;
-        }
-        p->pos = saved;
-        arith_error(p, "-- requires variable operand");
+        long long value = 0;
+        if (arith_parse_prefix_update(p, -1, "-- requires variable operand", &value)) return value;
         return 0;
     }
 

@@ -185,63 +185,33 @@ struct TsTypeParser {
         return left;
     }
 
-    // ================================================================
-    // union_type = intersection_type ('|' intersection_type)*
-    // ================================================================
-    TsTypeNode* parse_union_type() {
-        // handle leading |
-        if (check_char('|')) { advance_one(); skip_ws(); }
+    TsTypeNode* parse_composite_type(bool is_union) {
+        // Union and intersection parsing differ only in delimiter, child parser, and node shape.
+        char delimiter = is_union ? '|' : '&';
+        if (check_char(delimiter)) { advance_one(); skip_ws(); }
 
-        TsTypeNode* first = parse_intersection_type();
+        TsTypeNode* first = is_union ? parse_intersection_type() : parse_unary_type();
         if (!first) return nullptr;
-
-        if (!check_char('|')) return first;
-
-        // collect all union members
-        TsTypeNode* members[64];
-        int count = 0;
-        members[count++] = first;
-
-        while (check_char('|') && count < 64) {
-            advance_one(); // consume '|'
-            TsTypeNode* next = parse_intersection_type();
-            if (next) members[count++] = next;
-        }
-
-        if (count == 1) return first;
-
-        TsUnionTypeNode* un = (TsUnionTypeNode*)alloc_node(
-            TS_AST_NODE_UNION_TYPE, sizeof(TsUnionTypeNode));
-        un->types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * count);
-        un->type_count = count;
-        memcpy(un->types, members, sizeof(TsTypeNode*) * count);
-        return (TsTypeNode*)un;
-    }
-
-    // ================================================================
-    // intersection_type = unary_type ('&' unary_type)*
-    // ================================================================
-    TsTypeNode* parse_intersection_type() {
-        // handle leading &
-        if (check_char('&')) { advance_one(); skip_ws(); }
-
-        TsTypeNode* first = parse_unary_type();
-        if (!first) return nullptr;
-
-        if (!check_char('&')) return first;
+        if (!check_char(delimiter)) return first;
 
         TsTypeNode* members[64];
         int count = 0;
         members[count++] = first;
-
-        while (check_char('&') && count < 64) {
-            advance_one(); // consume '&'
-            TsTypeNode* next = parse_unary_type();
+        while (check_char(delimiter) && count < 64) {
+            advance_one();
+            TsTypeNode* next = is_union ? parse_intersection_type() : parse_unary_type();
             if (next) members[count++] = next;
         }
-
         if (count == 1) return first;
 
+        if (is_union) {
+            TsUnionTypeNode* un = (TsUnionTypeNode*)alloc_node(
+                TS_AST_NODE_UNION_TYPE, sizeof(TsUnionTypeNode));
+            un->types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * count);
+            un->type_count = count;
+            memcpy(un->types, members, sizeof(TsTypeNode*) * count);
+            return (TsTypeNode*)un;
+        }
         TsIntersectionTypeNode* in_node = (TsIntersectionTypeNode*)alloc_node(
             TS_AST_NODE_INTERSECTION_TYPE, sizeof(TsIntersectionTypeNode));
         in_node->types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * count);
@@ -249,6 +219,16 @@ struct TsTypeParser {
         memcpy(in_node->types, members, sizeof(TsTypeNode*) * count);
         return (TsTypeNode*)in_node;
     }
+
+    // ================================================================
+    // union_type = intersection_type ('|' intersection_type)*
+    // ================================================================
+    TsTypeNode* parse_union_type() { return parse_composite_type(true); }
+
+    // ================================================================
+    // intersection_type = unary_type ('&' unary_type)*
+    // ================================================================
+    TsTypeNode* parse_intersection_type() { return parse_composite_type(false); }
 
     // ================================================================
     // unary_type = 'keyof' unary_type | 'typeof' typeof_expr

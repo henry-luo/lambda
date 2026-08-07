@@ -17,6 +17,34 @@
 namespace lambda {
 namespace markup {
 
+// Keep the small element-building operations in one place so every inline
+// parser updates the same Lambda container bookkeeping and attribute shape.
+static inline Element* create_element(MarkupParser* parser, const char* tag) {
+    return parser->builder.element(tag).final().element;
+}
+
+static inline String* create_string(MarkupParser* parser, const char* text) {
+    return parser->builder.createString(text);
+}
+
+static inline Symbol* create_symbol(MarkupParser* parser, const char* text) {
+    return parser->builder.createSymbol(text);
+}
+
+static inline void increment_element_content_length(Element* elem) {
+    TypeElmt* elmt_type = (TypeElmt*)elem->type;
+    elmt_type->content_length++;
+}
+
+static inline void add_attribute_to_element(MarkupParser* parser, Element* elem,
+                                            const char* key, const char* val) {
+    String* k = parser->builder.createString(key);
+    String* v = parser->builder.createString(val);
+    if (k && v) {
+        parser->builder.putToElement(lam::gc_borrow(elem), k, Item{.item = s2it(v)});
+    }
+}
+
 // ============================================================================
 // Forward Declarations (defined in markup_parser.hpp)
 // ============================================================================

@@ -976,20 +976,10 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         }
         break;
     }
-    case AST_NODE_FOR_EXPR: {
-        log_debug("[for expr:%s]", type_name);
-        AstNode *loop = ((AstForNode*)node)->loop;
-        while (loop) {
-            print_label(indent + 1, "loop:");
-            print_ast_node(script, loop, indent + 1);
-            loop = loop->next;
-        }
-        print_label(indent + 1, "then:");
-        print_ast_node(script, ((AstForNode*)node)->then, indent + 1);
-        break;
-    }
+    case AST_NODE_FOR_EXPR:
     case AST_NODE_FOR_STAM: {
-        log_debug("[for stam:%s]", type_name);
+        log_debug("[for %s:%s]",
+            node->node_type == AST_NODE_FOR_EXPR ? "expr" : "stam", type_name);
         AstNode *loop = ((AstForNode*)node)->loop;
         while (loop) {
             print_label(indent + 1, "loop:");

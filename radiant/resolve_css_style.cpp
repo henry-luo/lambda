@@ -1461,7 +1461,7 @@ static bool css_content_visibility_value_is_hidden(const CssValue* value) {
         value->data.keyword == CSS_VALUE_HIDDEN;
 }
 
-bool layout_element_inline_axis_is_vertical(DomElement* element) {
+WritingMode layout_element_writing_mode(DomElement* element) {
     for (DomNode* node = element; node; node = node->parent) {
         if (!node->is_element()) continue;
         DomElement* ancestor = node->as_element();
@@ -1473,12 +1473,25 @@ bool layout_element_inline_axis_is_vertical(DomElement* element) {
             continue;
         }
         CssEnum writing_mode = declaration->value->data.keyword;
-        if (writing_mode == CSS_VALUE_VERTICAL_LR || writing_mode == CSS_VALUE_VERTICAL_RL) {
-            return true;
-        }
-        if (writing_mode == CSS_VALUE_HORIZONTAL_TB) return false;
+        if (writing_mode == CSS_VALUE_VERTICAL_LR) return WM_VERTICAL_LR;
+        if (writing_mode == CSS_VALUE_VERTICAL_RL) return WM_VERTICAL_RL;
+        if (writing_mode == CSS_VALUE_HORIZONTAL_TB) return WM_HORIZONTAL_TB;
     }
-    return false;
+    return WM_HORIZONTAL_TB;
+}
+
+bool layout_element_inline_axis_is_vertical(DomElement* element) {
+    WritingMode mode = layout_element_writing_mode(element);
+    return mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL;
+}
+
+bool layout_inline_element_is_orthogonal(DomElement* element) {
+    if (!element || !element->parent || !element->parent->is_element()) return false;
+    WritingMode element_mode = layout_element_writing_mode(element);
+    WritingMode parent_mode = layout_element_writing_mode(element->parent->as_element());
+    bool element_vertical = element_mode == WM_VERTICAL_LR || element_mode == WM_VERTICAL_RL;
+    bool parent_vertical = parent_mode == WM_VERTICAL_LR || parent_mode == WM_VERTICAL_RL;
+    return element_vertical != parent_vertical;
 }
 
 static CssDeclaration* layout_select_physical_size_alias(DomElement* element,
@@ -2950,7 +2963,16 @@ DisplayValue resolve_display_value(void* child) {
                             log_debug("[CSS] matched custom layout display: layout(%s)", custom_layout_name);
                             return needs_blockify ? blockify_display(display) : display;
                         }
-                        if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                        if (decl->value && decl->value->type == CSS_VALUE_TYPE_CUSTOM &&
+                            decl->value->data.custom_property.name &&
+                            strcmp(decl->value->data.custom_property.name, "-webkit-inline-box") == 0) {
+                            // legacy WebKit inline boxes resolve to an inline-level box;
+                            // treating the unknown vendor value as block changes its
+                            // shrink-to-fit and baseline participation before layout.
+                            display.outer = CSS_VALUE_INLINE_BLOCK;
+                            display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
+                            return needs_blockify ? blockify_display(display) : display;
+                        } else if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                             CssEnum keyword = decl->value->data.keyword;
                             log_debug("[CSS] display keyword value = %d (FLEX=%d, BLOCK=%d, GRID=%d)", keyword, CSS_VALUE_FLEX, CSS_VALUE_BLOCK, CSS_VALUE_GRID);
                             // Map keyword to display values
@@ -9990,17 +10012,23 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
 
         case CSS_PROPERTY_WRITING_MODE: {
             if (!block) break;
-            alloc_flex_prop(lycon, block);
+            BlockProp* block_prop = ensure_span_block(lycon, block);
+            if (!block_prop) break;
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
+                WritingMode mode = WM_HORIZONTAL_TB;
                 if (val == CSS_VALUE_VERTICAL_LR) {
-                    block->embedp()->flex->writing_mode = WM_VERTICAL_LR;
+                    mode = WM_VERTICAL_LR;
                 } else if (val == CSS_VALUE_VERTICAL_RL) {
-                    block->embedp()->flex->writing_mode = WM_VERTICAL_RL;
-                } else {
-                    block->embedp()->flex->writing_mode = WM_HORIZONTAL_TB;
+                    mode = WM_VERTICAL_RL;
                 }
-                log_debug("[CSS] writing-mode: %d", block->embedp()->flex->writing_mode);
+                block_prop->writing_mode = mode;
+                // Flex layout still consumes its own axis field, but ordinary
+                // blocks must not acquire FlexProp merely to store writing-mode.
+                if (block->embed && block->embedp()->flex) {
+                    block->embedp()->flex->writing_mode = mode;
+                }
+                log_debug("[CSS] writing-mode: %d", mode);
             }
             break;
         }

@@ -1287,11 +1287,108 @@ float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cu
         table_row_baseline_callback);
 }
 
+static bool table_find_last_row_axis(View* parent, float cumulative_x,
+                                     float* row_axis, float* row_extent) {
+    if (!parent || !row_axis || !row_extent || !parent->is_element()) return false;
+
+    bool found = false;
+    DomNode* last_child = lam::view_require_element(parent)->last_child;
+    for (View* child = static_cast<View*>(last_child); child;
+         child = static_cast<View*>(child->prev_sibling)) {
+        float child_axis = cumulative_x + child->x;
+        if (child->view_type == RDT_VIEW_TABLE_ROW) {
+            *row_axis = child_axis;
+            *row_extent = child->width;
+            found = true;
+        }
+        if (child->is_element() &&
+            table_find_last_row_axis(child, child_axis, row_axis, row_extent)) {
+            found = true;
+        }
+    }
+    return found;
+}
+
+static float table_last_baseline_for_vertical_writing(ViewTable* table) {
+    if (!table || !layout_block_inline_axis_is_vertical(table)) return -1.0f;
+
+    float row_axis = 0.0f;
+    float row_extent = 0.0f;
+    if (!table_find_last_row_axis(table, 0.0f, &row_axis, &row_extent)) {
+        return -1.0f;
+    }
+
+    // CSS Writing Modes uses the central baseline in vertical typographic
+    // mode; the row's block-axis extent therefore contributes half its width.
+    float central_axis = row_axis + row_extent / 2.0f;
+    float block_start_border = 0.0f;
+    if (table->bound && table->boundary()->border) {
+        block_start_border = layout_block_writing_mode(table) == WM_VERTICAL_RL
+            ? table->boundary()->border->width.right
+            : table->boundary()->border->width.left;
+    }
+    if (layout_block_writing_mode(table) == WM_VERTICAL_RL) {
+        // The table's internal block coordinates are still in logical
+        // vertical-rl order here; the final descendant mirror is published
+        // after baseline collection, so use the logical last-row coordinate.
+        return central_axis + block_start_border;
+    }
+    return table->width - central_axis - block_start_border;
+}
+
+float find_last_baseline_recursive(LayoutContext* lycon, View* parent,
+                                   float cumulative_x, bool use_normal_lh) {
+    (void)use_normal_lh;
+    if (!parent || !parent->is_element()) return -1.0f;
+
+    if (parent->view_type == RDT_VIEW_TABLE) {
+        return cumulative_x + table_last_baseline_for_vertical_writing(
+            lam::view_require<RDT_VIEW_TABLE>(parent));
+    }
+
+    DomNode* last_child = lam::view_require_element(parent)->last_child;
+    for (View* child = static_cast<View*>(last_child); child;
+         child = static_cast<View*>(child->prev_sibling)) {
+        float child_axis = cumulative_x + child->x;
+        if (child->view_type == RDT_VIEW_TABLE) {
+            float table_baseline = table_last_baseline_for_vertical_writing(
+                lam::view_require<RDT_VIEW_TABLE>(child));
+            if (table_baseline >= 0.0f) return child_axis + table_baseline;
+        }
+        if (child->is_element()) {
+            float descendant_baseline = find_last_baseline_recursive(
+                lycon, child, child_axis, use_normal_lh);
+            if (descendant_baseline >= 0.0f) return descendant_baseline;
+        }
+    }
+    (void)lycon;
+    return -1.0f;
+}
+
 // Find the baseline of a table cell (distance from cell's border-box top to first text baseline)
 // CSS 2.1 §17.5.4: If no line box and no in-flow table row, the baseline is the
 // bottom of the content edge of the cell box.
-static float find_cell_baseline(LayoutContext* lycon, ViewTableCell* tcell) {
+static float find_cell_baseline(LayoutContext* lycon, ViewTableCell* tcell,
+                                bool use_vertical_dominant_baseline = true) {
+    // CSS 2.1 §17.5.4: atomic-only line boxes still establish the cell's first
+    // baseline; the recursive view walk does not expose those line fragments.
     float baseline = find_first_baseline_recursive(lycon, static_cast<View*>(tcell), 0);
+    if (baseline < 0.0f && tcell->blk &&
+        tcell->block()->first_line_baseline > 0.0f) {
+        baseline = tcell->block()->first_line_baseline;
+    }
+    if (use_vertical_dominant_baseline && baseline >= 0.0f && tcell->blk &&
+        layout_block_inline_axis_is_vertical(tcell)) {
+        float line_extent = tcell->block()->first_line_max_ascender +
+            tcell->block()->first_line_max_descender;
+        if (line_extent > 0.0f) {
+            // CSS Writing Modes uses the central baseline in vertical
+            // typographic mode; the stored line baseline is the line's
+            // over-edge offset, so recenter it within that first line box.
+            baseline = baseline - tcell->block()->first_line_max_ascender +
+                line_extent / 2.0f;
+        }
+    }
     if (baseline < 0) {
         // No text found. Check if the cell has non-replaced inline children
         // that create a line box with a strut.
@@ -1347,7 +1444,11 @@ static float find_table_row_baseline(LayoutContext* lycon, ViewTableRow* trow) {
     float row_baseline = -1.0f;
     for_each_table_row_cell(trow, [&](ViewTableCell* tcell) {
         if (!tcell->td) return;
-        float cell_baseline = tcell->y + find_cell_baseline(lycon, tcell);
+        // The table-root baseline remains the row's table-coordinate baseline;
+        // central-baseline conversion applies when aligning cell contents in
+        // the vertical row-sharing group, not when exporting that baseline.
+        float cell_baseline = tcell->y +
+            find_cell_baseline(lycon, tcell, false);
         if (cell_baseline > row_baseline) {
             row_baseline = cell_baseline;
         }
@@ -4132,6 +4233,27 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
             if (valign_decl && valign_decl->value && valign_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                 table_cell_apply_vertical_align_keyword(
                     cell, valign_decl->value->data.keyword, false);
+            } else if (!valign_decl) {
+                // vertical-align is inherited; without the row declaration the
+                // HTML td default of middle incorrectly centers smaller cells.
+                for (DomNode* ancestor = cellNode->parent; ancestor;
+                     ancestor = ancestor->parent) {
+                    if (!ancestor->is_element()) continue;
+                    DomElement* ancestor_element = ancestor->as_element();
+                    CssDeclaration* inherited_decl = ancestor_element->specified_style
+                        ? style_tree_get_declaration(
+                            ancestor_element->specified_style,
+                            CSS_PROPERTY_VERTICAL_ALIGN)
+                        : nullptr;
+                    if (!inherited_decl || !inherited_decl->value ||
+                        inherited_decl->value->type != CSS_VALUE_TYPE_KEYWORD) {
+                        continue;
+                    }
+                    if (table_cell_apply_vertical_align_keyword(
+                            cell, inherited_decl->value->data.keyword, false)) {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -5787,12 +5909,9 @@ static TableHeightSectionSummary table_collect_height_section_summary(ViewTable*
 
 static float table_explicit_height_row_start_y(ViewTable* table, float table_border_top,
                                                float table_padding_top,
-                                               ViewBlock* caption,
-                                               float caption_height) {
+                                               float top_caption_height) {
     float y_accum = table_border_top + table_padding_top;
-    if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
-        y_accum += caption_height;
-    }
+    y_accum += top_caption_height;
     if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
         y_accum += table->tb->border_spacing_v;
     }
@@ -5851,6 +5970,28 @@ static float table_caption_height_with_margins(ViewBlock* caption) {
     return caption->height + margin_v;
 }
 
+static bool table_caption_is_bottom(ViewBlock* caption) {
+    if (!caption) return false;
+    for (ViewElement* current = caption; current; current = current->parent_view()) {
+        if (!current->is_element()) continue;
+        DomElement* element = current->as_element();
+        CssDeclaration* declaration = element && element->specified_style
+            ? style_tree_get_declaration(element->specified_style, CSS_PROPERTY_CAPTION_SIDE)
+            : nullptr;
+        if (!declaration || !declaration->value ||
+            declaration->value->type != CSS_VALUE_TYPE_KEYWORD) continue;
+
+        CssEnum keyword = declaration->value->data.keyword;
+        if (keyword == CSS_VALUE_BOTTOM) return true;
+        if (keyword == CSS_VALUE_TOP || keyword == CSS_VALUE_INITIAL) return false;
+        // caption-side is inherited; inherit/unset/revert continue at the table.
+        if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET ||
+            keyword == CSS_VALUE_REVERT) continue;
+        return false;
+    }
+    return false;
+}
+
 template <typename Fn>
 static void for_each_table_caption(ArrayList* captions, Fn fn) {
     if (!captions) return;
@@ -5861,19 +6002,31 @@ static void for_each_table_caption(ArrayList* captions, Fn fn) {
 
 struct TableCaptionCollection {
     ArrayList* captions;
+    ArrayList* top_captions;
+    ArrayList* bottom_captions;
     ViewBlock* first_caption;
+    float top_height;
+    float bottom_height;
     float total_height;
 };
 
 static TableCaptionCollection table_collect_captions(ViewTable* table) {
-    TableCaptionCollection result = {arraylist_new(4), nullptr, 0.0f};
+    TableCaptionCollection result = {
+        arraylist_new(4), arraylist_new(4), arraylist_new(4), nullptr,
+        0.0f, 0.0f, 0.0f
+    };
     for_each_direct_table_block(table, [&](ViewBlock* child) {
         if (!table_view_is_caption(child)) return;
         arraylist_append(result.captions, child);
         if (!result.first_caption) result.first_caption = child;
+        bool is_bottom = table_caption_is_bottom(child);
+        arraylist_append(is_bottom ? result.bottom_captions : result.top_captions, child);
         if (child->height > 0.0f) {
             float margin_v = table_caption_positive_vertical_margin(child);
-            result.total_height += table_caption_height_with_margins(child);
+            float caption_height = table_caption_height_with_margins(child);
+            result.total_height += caption_height;
+            if (is_bottom) result.bottom_height += caption_height;
+            else result.top_height += caption_height;
             log_debug("Caption height calculation: height(content+padding+border)=%.1f, margin_v=%.1f, total_so_far=%.1f",
                       child->height, margin_v, result.total_height);
         }
@@ -5952,6 +6105,128 @@ static float table_position_caption_stack(LayoutContext* lycon,
     return total_height;
 }
 
+static float table_caption_stack_block_extent(ArrayList* captions) {
+    float extent = 0.0f;
+    for_each_table_caption(captions, [&](ViewBlock* caption, int) {
+        if (caption) extent += caption->width;
+    });
+    return extent;
+}
+
+static void table_swap_vertical_descendants(View* view) {
+    if (!view) return;
+    DomNode* first_child = view->is_element()
+        ? view->as_element()->first_child : nullptr;
+    for (View* child = static_cast<View*>(first_child); child;
+         child = static_cast<View*>(child->next_sibling)) {
+        float logical_x = child->x;
+        float logical_y = child->y;
+        float logical_width = child->width;
+        float logical_height = child->height;
+        child->x = logical_y;
+        child->y = logical_x;
+        child->width = logical_height;
+        child->height = logical_width;
+        table_swap_vertical_descendants(child);
+    }
+}
+
+static void table_mirror_vertical_descendants(View* view,
+                                              float mirror_origin,
+                                              float mirror_extent) {
+    if (!view) return;
+    view->x = mirror_origin + mirror_extent -
+        (view->x - mirror_origin) - view->width;
+    DomNode* first_child = view->is_element()
+        ? view->as_element()->first_child : nullptr;
+    for (View* child = static_cast<View*>(first_child); child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (child->view_type) {
+            table_mirror_vertical_descendants(child, 0.0f, view->width);
+        }
+    }
+}
+
+static void table_publish_vertical_geometry(ViewTable* table) {
+    if (!table || !layout_block_inline_axis_is_vertical(table)) return;
+
+    TableCaptionCollection captions = table_collect_captions(table);
+    float logical_width = table->width;
+    float logical_height = table->height;
+    float top_caption_extent = table_caption_stack_block_extent(captions.top_captions);
+    float bottom_caption_extent = table_caption_stack_block_extent(captions.bottom_captions);
+    float physical_width = logical_height + top_caption_extent + bottom_caption_extent;
+    float physical_height = logical_width;
+    bool vertical_rl = layout_block_writing_mode(table) == WM_VERTICAL_RL;
+    float grid_origin = 0.0f;
+    float grid_end = 0.0f;
+    bool have_grid_bounds = false;
+
+    for_each_direct_table_block(table, [&](ViewBlock* child) {
+        if (table_view_is_caption(child)) {
+            float caption_width = child->width;
+            float margin_top = table_caption_positive_margin_top(child);
+            float margin_bottom = table_caption_positive_margin_bottom(child);
+            child->height = max(
+                logical_width - margin_top - margin_bottom, 0.0f);
+            child->y = margin_top;
+            bool is_bottom = table_caption_is_bottom(child);
+            if ((is_bottom && !vertical_rl) || (!is_bottom && vertical_rl)) {
+                child->x = physical_width - caption_width -
+                    table_caption_positive_margin_right(child);
+            } else {
+                child->x = table_caption_positive_margin_left(child);
+            }
+            table_swap_vertical_descendants(child);
+            return;
+        }
+
+        float logical_x = child->x;
+        float logical_y = child->y;
+        float logical_width = child->width;
+        float logical_height = child->height;
+        child->x = logical_y;
+        child->y = logical_x;
+        child->width = logical_height;
+        child->height = logical_width;
+        table_swap_vertical_descendants(child);
+        child->x += top_caption_extent;
+        if (!have_grid_bounds || child->x < grid_origin) {
+            grid_origin = child->x;
+        }
+        if (!have_grid_bounds || child->x + child->width > grid_end) {
+            grid_end = child->x + child->width;
+        }
+        have_grid_bounds = true;
+    });
+
+    if (vertical_rl && have_grid_bounds) {
+        // CSS Writing Modes reverses block progression in vertical-rl; the
+        // table rows and every descendant must share that physical mapping.
+        for_each_direct_table_block(table, [&](ViewBlock* child) {
+            if (!table_view_is_caption(child)) {
+                table_mirror_vertical_descendants(
+                    child, grid_origin, grid_end - grid_origin);
+            }
+        });
+    }
+
+    table->width = physical_width;
+    table->height = physical_height;
+    table->content_width = physical_width;
+    table->content_height = physical_height;
+    table->width = max(table->width, 0.0f);
+    table->height = max(table->height, 0.0f);
+    layout_normalize_vertical_breaks(table);
+    // CSS Writing Modes maps table rows to the block axis and columns to the
+    // inline axis; publish this before block finalization so table internals
+    // cannot be mistaken for a horizontal flow child extent.
+    log_debug("%s vertical table geometry: logical=%.1fx%.1f physical=%.1fx%.1f captions=%.1f/%.1f mode=%s",
+              table->source_loc(), logical_width, logical_height,
+              table->width, table->height, top_caption_extent,
+              bottom_caption_extent, vertical_rl ? "rl" : "lr");
+}
+
 static float table_measure_caption_width_contribution(LayoutContext* lycon,
                                                       ViewTable* table,
                                                       ViewBlock* caption) {
@@ -6010,9 +6285,9 @@ static void table_recalculate_row_y_positions(ViewTable* table, TableMetadata* m
 
 static void table_recalculate_explicit_height_row_y_positions(
     ViewTable* table, TableMetadata* meta, float table_border_top,
-    float table_padding_top, ViewBlock* caption, float caption_height) {
+    float table_padding_top, float top_caption_height) {
     float y_accum = table_explicit_height_row_start_y(
-        table, table_border_top, table_padding_top, caption, caption_height);
+        table, table_border_top, table_padding_top, top_caption_height);
     table_recalculate_row_y_positions(table, meta, y_accum);
 }
 
@@ -6419,6 +6694,15 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     FontBox saved_font = lycon->font;
     View* saved_view = lycon->view;
 
+    // table cells use a dedicated content pass instead of finalize_block_flow;
+    // clear inherited baseline state so this cell owns the line set it records.
+    lycon->block.first_line_ascender = 0.0f;
+    lycon->block.last_line_ascender = 0.0f;
+    lycon->block.first_line_max_ascender = 0.0f;
+    lycon->block.first_line_max_descender = 0.0f;
+    lycon->block.last_line_max_ascender = 0.0f;
+    lycon->block.last_line_max_descender = 0.0f;
+
     // CRITICAL: Set up the cell's font before laying out content
     // This ensures text uses the cell's font-size (e.g., 14px) instead of parent's (e.g., 16px)
     if (tcell->font) {
@@ -6689,6 +6973,18 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
         line_break(lycon);
     } else {
         line_align(lycon);
+    }
+    if (tcell->blk) {
+        tcell->block_mut()->first_line_baseline = lycon->block.first_line_ascender;
+        tcell->block_mut()->last_line_baseline = lycon->block.last_line_ascender;
+        tcell->block_mut()->first_line_max_ascender =
+            lycon->block.first_line_max_ascender;
+        tcell->block_mut()->first_line_max_descender =
+            lycon->block.first_line_max_descender;
+        tcell->block_mut()->last_line_max_ascender =
+            lycon->block.last_line_max_ascender;
+        tcell->block_mut()->last_line_max_descender =
+            lycon->block.last_line_max_descender;
     }
     cell->content_height = lycon->block.advance_y - content_start_y;
     if (cell->content_height < 0.0f) cell->content_height = 0.0f;
@@ -7575,9 +7871,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // CSS 2.1 §17.4: A table may have multiple captions; all are rendered.
     TableCaptionCollection caption_collection = table_collect_captions(table);
     ArrayList* captions = caption_collection.captions;
+    ArrayList* top_captions = caption_collection.top_captions;
+    ArrayList* bottom_captions = caption_collection.bottom_captions;
     ViewBlock* caption = caption_collection.first_caption;  // first caption (for backward-compat checks)
+    float top_caption_height = caption_collection.top_height;
+    float bottom_caption_height = caption_collection.bottom_height;
     float caption_height = caption_collection.total_height;
-    log_debug("Found %d caption(s), total caption_height=%.1f", captions->length, caption_height);
+    log_debug("Found %d caption(s), top=%.1f, bottom=%.1f, total=%.1f",
+              captions->length, top_caption_height, bottom_caption_height, caption_height);
 
     // Step 1: Analyze table structure (Phase 3 optimization)
     // Single-pass analysis counts columns/rows AND assigns cell indices
@@ -7615,9 +7916,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Add fixed horizontal margins to the table wrapper width without affecting caption width.
             table_width += table_caption_positive_horizontal_margin(caption);
 
-            // Position caption: margin-left determines x offset within table wrapper
+            // CSS Tables: captions with different sides form separate stacks.
             float cap_y = 0;
-            for_each_table_caption(captions, [&](ViewBlock* cap, int ci) {
+            for_each_table_caption(top_captions, [&](ViewBlock* cap, int ci) {
                 table_position_caption_with_margins(cap, cap_y);
                 cap->width = caption_box_width;
                 cap_y += table_caption_height_with_margins(cap);
@@ -7637,6 +7938,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     if (table_box.padding.bottom > 0) grid_height += table_box.padding.bottom;
                 }
             }
+            cap_y = grid_height;
+            for_each_table_caption(bottom_captions, [&](ViewBlock* cap, int ci) {
+                table_position_caption_with_margins(cap, cap_y);
+                cap->width = caption_box_width;
+                cap_y += table_caption_height_with_margins(cap);
+            });
             float total_height = caption_height + grid_height;
 
             // Table wrapper width accommodates caption's margin-box
@@ -8174,18 +8481,18 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     float min_table_width = min_table_content_width + border_spacing_total;
     float pref_table_width = pref_table_content_width + border_spacing_total;
-    if (caption) {
+    for_each_table_caption(captions, [&](ViewBlock* table_caption, int ci) {
         float caption_width_contribution =
-            table_measure_caption_width_contribution(lycon, table, caption);
+            table_measure_caption_width_contribution(lycon, table, table_caption);
         if (caption_width_contribution > pref_table_width) {
-            log_debug("Caption wider than table content: caption=%dpx > table=%dpx",
-                     caption_width_contribution, pref_table_width);
+            log_debug("Caption %d wider than table content: caption=%.1fpx > table=%.1fpx",
+                     ci, caption_width_contribution, pref_table_width);
             pref_table_width = caption_width_contribution;
         }
         if (caption_width_contribution > min_table_width) {
             min_table_width = caption_width_contribution;
         }
-    }
+    });
 
     log_debug("Table content: min=%.1fpx, preferred=%.1fpx", min_table_content_width, pref_table_content_width);
     log_debug("Table total (with spacing): min=%.1fpx, preferred=%.1fpx", min_table_width, pref_table_width);
@@ -8380,10 +8687,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // Start Y position - only include caption height if caption is at top
-    float current_y = 0;
-    if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
-        current_y = caption_height;
-    }
+    float current_y = top_caption_height;
 
     // Add table border (content starts inside the border)
     float table_border_top = 0;
@@ -8438,11 +8742,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
     float wrapper_content_width = table_width + table_border_h;
 
-    // Position caption at top if caption-side is top (default)
-    if (captions->length > 0 && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
-        caption_height = table_position_caption_stack(
-            lycon, table, captions, 0.0f, table_width, wrapper_content_width,
+    // CSS Tables: position only captions whose own caption-side is top.
+    if (top_captions->length > 0) {
+        top_caption_height = table_position_caption_stack(
+            lycon, table, top_captions, 0.0f, table_width, wrapper_content_width,
             TABLE_CAPTION_WIDTH_REFERENCE_ADJUSTED_CAP, TABLE_CAPTION_STACK_TOP);
+        caption_height = top_caption_height;
 
         // Update current_y with total caption height
         current_y = caption_height + table_border_top + table_padding_top;
@@ -8865,7 +9170,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
 
                 table_recalculate_explicit_height_row_y_positions(
-                    table, meta, table_border_top, table_padding_top, caption, caption_height);
+                    table, meta, table_border_top, table_padding_top, top_caption_height);
             } else if (extra_for_body > 0 && body_row_count == 0 && meta->row_count > 0) {
                 // CSS Tables 3: no tbody rows exist — distribute extra height to all
                 // rows in header/footer groups (thead/tfoot receive the space).
@@ -8890,7 +9195,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             eligible_height_total, "Non-body", "   ");
                     }
                     table_recalculate_explicit_height_row_y_positions(
-                        table, meta, table_border_top, table_padding_top, caption, caption_height);
+                        table, meta, table_border_top, table_padding_top, top_caption_height);
                 } else {
                     log_debug("%s No eligible non-body rows for height distribution", table->source_loc());
                 }
@@ -8941,12 +9246,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // Position captions at bottom if caption-side is bottom (CSS 2.1 Section 17.4.1)
-    if (captions->length > 0 && table->tb->caption_side == TableProp::CAPTION_SIDE_BOTTOM) {
+    if (bottom_captions->length > 0) {
         float total_bottom_caption_height = table_position_caption_stack(
-            lycon, table, captions, final_table_height, table_width, wrapper_content_width,
+            lycon, table, bottom_captions, final_table_height, table_width, wrapper_content_width,
             TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER, TABLE_CAPTION_STACK_BOTTOM);
         final_table_height += total_bottom_caption_height;
-        caption_height = total_bottom_caption_height;
         log_debug("%s Total bottom caption height: %.1f", table->source_loc(), total_bottom_caption_height);
     }
 
@@ -9539,6 +9843,7 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
 
     // Step 2: Calculate layout
     table_auto_layout(lycon, table);
+    table_publish_vertical_geometry(table);
     log_debug("%s Table layout calculated: %dx%d", tableNode->source_loc(), table->width, table->height);
 
     // Step 3: Update layout context for proper block integration
@@ -9584,5 +9889,16 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
             table_apply_positioned_layout(lycon, child);
         }
     });
+
+    // CSS Inline 3 baseline-source:first: block parents need the table's first
+    // row baseline; otherwise an inline-block containing a table falls back to
+    // its bottom border edge.
+    if (table->blk) {
+        float first_baseline = find_first_baseline_recursive(
+            lycon, static_cast<View*>(table), 0.0f, true);
+        if (first_baseline >= 0.0f) {
+            table->block_mut()->first_line_baseline = first_baseline;
+        }
+    }
 
 }

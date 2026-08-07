@@ -267,6 +267,11 @@ struct MirTranspiler {
     // Used by transpile_return() to emit unboxed return values in procs.
     TypeId native_return_tid;
     Type* current_return_type;
+    // Candidate lane while the prepass proves every exit of an unannotated
+    // procedure. A self-recursive call may use the candidate inductive fact;
+    // calls to any other open function remain rejected.
+    AstFuncNode* native_return_analysis_fn;
+    TypeId native_return_analysis_tid;
     // The native body epilogue must follow the carrier actually emitted by
     // content lowering; a post-scope AST type probe cannot see boxed locals.
     bool native_body_result_is_raw;
@@ -476,6 +481,33 @@ static bool mir_param_is_declared(AstFuncNode* fn_node, int index) {
 static bool mir_param_is_inferred_specialization(AstFuncNode* fn_node, int index) {
     FnParamTypeInfo* info = mir_param_info_at(fn_node, index);
     return info && (info->flags & FN_PARAM_FLAG_INFERRED_SPECIALIZATION) != 0;
+}
+
+// Native direct calls can carry a typed ArrayNum as its raw pointer instead of
+// re-validating the already-proved Item at every callee entry. Borrowed var
+// arrays use the same witness only after the caller-side COW admission has
+// detached a shared root (D3.3.1, D3.3.3).
+static Type* mir_array_occurrence_element(Type* type);
+
+static uint64_t mir_typed_array_witness_mask(AstFuncNode* fn_node) {
+    uint64_t mask = 0;
+    for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
+        AstNamedNode* param = mir_param_at(fn_node, i);
+        if (!param || mir_param_type_at(fn_node, i) != LMD_TYPE_ARRAY_NUM) continue;
+        mask |= (uint64_t)1 << i;
+    }
+    return mask;
+}
+
+static TypeId mir_typed_array_element_type(AstNamedNode* param) {
+    if (!param || !param->type || param->type->kind != TYPE_KIND_PARAM) {
+        return LMD_TYPE_INT;
+    }
+    TypeParam* type_param = (TypeParam*)param->type;
+    Type* full = type_param->full_type ? type_param->full_type :
+        type_param->contract_type;
+    Type* element = mir_array_occurrence_element(full);
+    return element ? element->type_id : LMD_TYPE_INT;
 }
 
 static void mir_store_param_types(MirTranspiler* mt, AstFuncNode* fn_node,
@@ -1040,6 +1072,33 @@ static void emit_label(MirTranspiler* mt, MIR_label_t label) {
     em_emit_label(&mt->em, label);
 }
 
+struct MirIndexedLoopFrame {
+    MIR_reg_t index;
+    MIR_label_t loop;
+    MIR_label_t continue_label;
+    MIR_label_t end;
+};
+
+static MirIndexedLoopFrame mir_begin_indexed_loop(MirTranspiler* mt, const char* index_name) {
+    MirIndexedLoopFrame frame = {};
+    frame.index = new_reg(mt, index_name, MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, frame.index),
+        MIR_new_int_op(mt->ctx, 0)));
+    frame.loop = new_label(mt);
+    frame.continue_label = new_label(mt);
+    frame.end = new_label(mt);
+    if (mt->loop_depth < 31) {
+        mt->loop_stack[mt->loop_depth].continue_label = frame.continue_label;
+        mt->loop_stack[mt->loop_depth].break_label = frame.end;
+        mt->loop_stack[mt->loop_depth].task_scope_base = mt->in_async_proc
+            ? em_call_0(&mt->em, "lambda_task_scope_current", MIR_T_P, false) : 0;
+        mt->loop_stack[mt->loop_depth].nonnegative_counter = NULL;
+        mt->loop_stack[mt->loop_depth].nonnegative_upper_bound = NULL;
+        mt->loop_depth++;
+    }
+    return frame;
+}
+
 // emit a register holding the boxed null Item. Used as the "value" of statements that
 // produce no result (e.g. an index-assignment `arr[i] = v`) so callers that consume the
 // result — a function return, a for-loop body push, `let x = (arr[i] = v)` — never see
@@ -1059,6 +1118,19 @@ static MIR_reg_t emit_null_item_reg(MirTranspiler* mt) {
 #define emit_call_5(mt, fn, ret, ...) em_call_5(&(mt)->em, fn, ret, __VA_ARGS__, false)
 #define emit_call_8(mt, fn, ret, ...) em_call_8(&(mt)->em, fn, ret, __VA_ARGS__, false)
 #define emit_call_void_1(mt, fn, ...) em_call_void_1(&(mt)->em, fn, __VA_ARGS__, false)
+
+static void emit_mir_function_abi_markers(MirTranspiler* mt, MIR_reg_t fn_obj,
+        bool uses_wrapper, bool is_proc) {
+    if (!uses_wrapper) return;
+    emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
+        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+    emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
+        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+    emit_call_void_1(mt,
+        is_proc ? "lambda_function_mark_lambda_boxed_procedure"
+                : "lambda_function_mark_lambda_boxed_function",
+        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+}
 #define emit_call_void_2(mt, fn, ...) em_call_void_2(&(mt)->em, fn, __VA_ARGS__, false)
 #define emit_call_void_3(mt, fn, ...) em_call_void_3(&(mt)->em, fn, __VA_ARGS__, false)
 #define emit_call_void_4(mt, fn, ...) em_call_void_4(&(mt)->em, fn, __VA_ARGS__, false)
@@ -1226,6 +1298,14 @@ static void emit_number_frame_enter(MirTranspiler* mt) {
 
 static void emit_number_frame_exit(MirTranspiler* mt) {
     if (!mt->em.frame.number_active) return;
+    if (mt->em.frame.scalar_home_count == 0 &&
+            mt->em.frame.fixed_number_slots == 0 &&
+            mt->em.frame.scalar_home_fixup_count == 0) {
+        // no scalar call or fixed scratch slot can move the watermark, so a
+        // native-only body must not pay the empty frame epilogue (D5.2).
+        mt->em.frame.number_active = false;
+        return;
+    }
     em_store_frame_top(&mt->em, mt->em.frame.runtime,
         offsetof(Context, side_number_top), mt->em.frame.number_base);
 }
@@ -1591,11 +1671,12 @@ static StrView mir_semantic_name_cstr(MirTranspiler* mt, const char* name) {
                                              : (StrView){NULL, 0});
 }
 
-static void set_var(MirTranspiler* mt, StrView name, MIR_reg_t reg,
-                    MIR_type_t mir_type, TypeId type_id) {
+static void mir_store_var_entry(MirTranspiler* mt, StrView name, MIR_reg_t reg,
+        MIR_type_t mir_type, TypeId type_id, bool is_state_var,
+        const char* state_name_ptr) {
     VarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
-    entry.name = mir_persist_semantic_name(mt, name).str;
+    entry.name = name.str;
     entry.var.reg = reg;
     entry.var.root_slot = -1;
     entry.var.async_slot = -1;
@@ -1604,13 +1685,20 @@ static void set_var(MirTranspiler* mt, StrView name, MIR_reg_t reg,
     entry.var.elem_type = LMD_TYPE_ANY;
     entry.var.num_type = NUM_INT8;
     entry.var.env_offset = -1;  // not a captured variable by default
-    entry.var.is_state_var = false;
+    entry.var.is_state_var = is_state_var;
+    entry.var.state_name_ptr = state_name_ptr;
     if (mt->in_async_proc) entry.var.async_slot = mt->async_next_slot++;
     if (entry.var.async_slot < 0 && should_gc_root_var(mir_type, type_id)) {
         entry.var.root_slot = create_binding_gc_root_slot(mt, reg);
     }
     async_store_var(mt, &entry.var);
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+}
+
+static void set_var(MirTranspiler* mt, StrView name, MIR_reg_t reg,
+                    MIR_type_t mir_type, TypeId type_id) {
+    mir_store_var_entry(mt, mir_persist_semantic_name(mt, name), reg,
+        mir_type, type_id, false, NULL);
 }
 
 static void set_var(MirTranspiler* mt, const char* name, MIR_reg_t reg, MIR_type_t mir_type, TypeId type_id) {
@@ -1661,25 +1749,8 @@ static void lambda_after_may_gc_call(void* owner) {
 static void set_state_var(MirTranspiler* mt, const char* name, MIR_reg_t reg,
                           MIR_type_t mir_type, TypeId type_id,
                           const char* interned_name_ptr) {
-    VarScopeEntry entry;
-    memset(&entry, 0, sizeof(entry));
-    entry.name = mir_semantic_name_cstr(mt, name).str;
-    entry.var.reg = reg;
-    entry.var.root_slot = -1;
-    entry.var.async_slot = -1;
-    entry.var.mir_type = mir_type;
-    entry.var.type_id = type_id;
-    entry.var.elem_type = LMD_TYPE_ANY;
-    entry.var.num_type = NUM_INT8;
-    entry.var.env_offset = -1;
-    entry.var.is_state_var = true;
-    entry.var.state_name_ptr = interned_name_ptr;
-    if (mt->in_async_proc) entry.var.async_slot = mt->async_next_slot++;
-    if (entry.var.async_slot < 0 && should_gc_root_var(mir_type, type_id)) {
-        entry.var.root_slot = create_binding_gc_root_slot(mt, reg);
-    }
-    async_store_var(mt, &entry.var);
-    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+    mir_store_var_entry(mt, mir_semantic_name_cstr(mt, name), reg,
+        mir_type, type_id, true, interned_name_ptr);
 }
 
 static MirVarEntry* find_var(MirTranspiler* mt, StrView name) {
@@ -2013,20 +2084,18 @@ static bool lambda_lookup_import_metadata(const char* name,
 // Variadic call helpers for map_fill, elmt_fill, list_fill
 // ============================================================================
 
-// Emit a variadic call: fn_name(mandatory_arg, vararg1, vararg2, ...)
-// mandatory_args + varargs are passed as ops. proto is created with vararg flag.
-static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, int nres,
-    MIR_type_t mandatory_type, MIR_op_t mandatory_op,
+// Emit a variadic call with a fixed prefix followed by the variable arguments.
+static MIR_reg_t emit_vararg_call_common(MirTranspiler* mt, const char* fn_name,
+    MIR_type_t ret_type, int nres, int n_mandatory,
+    MIR_var_t* mandatory_vars, MIR_op_t* mandatory_ops,
     int n_varargs, MIR_op_t* vararg_ops) {
     // Create unique vararg proto name per call site
     char proto_name[160];
     snprintf(proto_name, sizeof(proto_name), "%s_vp%d", fn_name, mt->em.label_counter++);
 
-    // Mandatory arg
-    MIR_var_t mandatory_var = {mandatory_type, "m", 0};
     MIR_type_t res_types[1] = { ret_type };
-    MIR_item_t proto = MIR_new_vararg_proto_arr(mt->ctx, proto_name, nres, res_types, 1, &mandatory_var);
+    MIR_item_t proto = MIR_new_vararg_proto_arr(mt->ctx, proto_name, nres,
+        res_types, n_mandatory, mandatory_vars);
 
     // Import
     MirImportCacheEntry key;
@@ -2047,8 +2116,8 @@ static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
         hashmap_set(mt->em.import_cache, &new_entry);
     }
 
-    // Build call: proto, import, [result], mandatory, varargs...
-    int nops = (nres > 0 ? 3 : 2) + 1 + n_varargs; // +1 for mandatory arg
+    // Build call: proto, import, [result], mandatory prefix, varargs...
+    int nops = (nres > 0 ? 3 : 2) + n_mandatory + n_varargs;
     MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
     int oi = 0;
     ops[oi++] = MIR_new_ref_op(mt->ctx, proto);
@@ -2058,7 +2127,9 @@ static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
         result = new_reg(mt, fn_name, ret_type);
         ops[oi++] = MIR_new_reg_op(mt->ctx, result);
     }
-    ops[oi++] = mandatory_op;
+    for (int i = 0; i < n_mandatory; i++) {
+        ops[oi++] = mandatory_ops[i];
+    }
     for (int i = 0; i < n_varargs; i++) {
         ops[oi++] = vararg_ops[i];
     }
@@ -2071,57 +2142,57 @@ static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
     return result;
 }
 
+// Emit a variadic call: fn_name(mandatory_arg, vararg1, vararg2, ...).
+static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
+    MIR_type_t ret_type, int nres,
+    MIR_type_t mandatory_type, MIR_op_t mandatory_op,
+    int n_varargs, MIR_op_t* vararg_ops) {
+    MIR_var_t mandatory_vars[1] = {{mandatory_type, "m", 0}};
+    MIR_op_t mandatory_ops[1] = {mandatory_op};
+    return emit_vararg_call_common(mt, fn_name, ret_type, nres, 1,
+        mandatory_vars, mandatory_ops, n_varargs, vararg_ops);
+}
+
 // Emit vararg call with 2 mandatory args (for list_fill: List*, int count, ...)
 static MIR_reg_t emit_vararg_call_2(MirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, int nres,
     MIR_type_t m1_type, MIR_op_t m1_op,
     MIR_type_t m2_type, MIR_op_t m2_op,
     int n_varargs, MIR_op_t* vararg_ops) {
-    char proto_name[160];
-    snprintf(proto_name, sizeof(proto_name), "%s_vp%d", fn_name, mt->em.label_counter++);
-
     MIR_var_t mandatory_vars[2] = {{m1_type, "m1", 0}, {m2_type, "m2", 0}};
-    MIR_type_t res_types[1] = { ret_type };
-    MIR_item_t proto = MIR_new_vararg_proto_arr(mt->ctx, proto_name, nres, res_types, 2, mandatory_vars);
+    MIR_op_t mandatory_ops[2] = {m1_op, m2_op};
+    return emit_vararg_call_common(mt, fn_name, ret_type, nres, 2,
+        mandatory_vars, mandatory_ops, n_varargs, vararg_ops);
+}
 
-    MirImportCacheEntry key;
-    memset(&key, 0, sizeof(key));
-    key.name = mir_em_persist_cstr(&mt->em, fn_name).str;
-    MirImportCacheEntry* found = (MirImportCacheEntry*)hashmap_get(mt->em.import_cache, &key);
-    MIR_item_t imp;
-    if (found) {
-        imp = found->entry.import;
-    } else {
-        imp = MIR_new_import(mt->ctx, fn_name);
-        MirImportCacheEntry new_entry;
-        memset(&new_entry, 0, sizeof(new_entry));
-        new_entry.name = mir_em_persist_cstr(&mt->em, fn_name).str;
-        new_entry.entry.import = imp;
-        new_entry.entry.proto = proto;
-        hashmap_set(mt->em.import_cache, &new_entry);
+static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
+
+static MIR_reg_t emit_variadic_args(MirTranspiler* mt, AstNode** resolved_args,
+        int expected_params, int arg_count) {
+    int extra_count = arg_count - expected_params;
+    if (extra_count < 0) extra_count = 0;
+    if (extra_count == 0) {
+        MIR_reg_t vargs_reg = new_reg(mt, "vargs", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, vargs_reg),
+            MIR_new_int_op(mt->ctx, 0)));
+        return vargs_reg;
     }
 
-    int nops = (nres > 0 ? 3 : 2) + 2 + n_varargs; // +2 for m1 and m2
-    MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
-    int oi = 0;
-    ops[oi++] = MIR_new_ref_op(mt->ctx, proto);
-    ops[oi++] = MIR_new_ref_op(mt->ctx, imp);
-    MIR_reg_t result = 0;
-    if (nres > 0) {
-        result = new_reg(mt, fn_name, ret_type);
-        ops[oi++] = MIR_new_reg_op(mt->ctx, result);
+    MIR_reg_t vargs_reg = emit_call_0(mt, "list", MIR_T_I64);
+    int vargs_root = create_gc_root_slot(mt, vargs_reg);
+    for (int i = expected_params; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
+        if (resolved_args[i]) {
+            MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
+            int val_root = create_gc_root_slot(mt, val);
+            val = load_gc_root_slot(mt, val_root, "varg_val");
+            vargs_reg = load_gc_root_slot(mt, vargs_root, "vargs_live");
+            emit_call_void_2(mt, "list_push",
+                MIR_T_P, MIR_new_reg_op(mt->ctx, vargs_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+        }
     }
-    ops[oi++] = m1_op;
-    ops[oi++] = m2_op;
-    for (int i = 0; i < n_varargs; i++) {
-        ops[oi++] = vararg_ops[i];
-    }
-
-    // list_fill copies wide values into the list's scalar tail before return;
-    // the source activation homes remain borrowed call arguments.
-    em_emit_destination_owned_call(&mt->em, fn_name,
-        MIR_new_insn_arr(mt->ctx, MIR_CALL, oi, ops));
-    return result;
+    return load_gc_root_slot(mt, vargs_root, "vargs_live");
 }
 
 // ============================================================================
@@ -3162,6 +3233,8 @@ static void emit_capture_writeback(MirTranspiler* mt, AstFuncNode* fn_node,
 }
 
 static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
+static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
+        AstNode* node, TypeId expected);
 
 // All dynamic-to-annotated crossings go through this one boxed boundary before
 // any caller emits a native unbox or a typed map/array store. The helper keeps
@@ -3190,11 +3263,18 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
 // build_ast.cpp; asking it here rather than re-deriving it is what keeps
 // emission and diagnosis from drifting apart.
 static TypeId get_effective_type(MirTranspiler* mt, AstNode* node);
+static TypeId mir_native_arithmetic_operand_type(MirTranspiler* mt,
+        AstNode* node);
 static bool mir_expr_proven_nonnull_under_dense_guard(MirTranspiler* mt,
         AstNode* node);
 
 static bool mir_expr_may_be_null(MirTranspiler* mt, AstNode* node) {
     if (!node) return false;
+    // A dense typed-array guard proves every participating index is in-bounds;
+    // the guarded load therefore cannot take its null lane. Preserve that
+    // proof through arithmetic instead of rebuilding nullable Items per cell
+    // (S4.1, D3.2.1).
+    if (mir_expr_proven_nonnull_under_dense_guard(mt, node)) return false;
     // `any` admits null semantically, but an inferred native specialization
     // has already selected a concrete carrier for it. Treating that erased AST
     // type as an optional lane injected null guards into every unannotated int
@@ -3269,6 +3349,19 @@ static bool mir_boundary_is_lane_identity(MirTranspiler* mt, AstNode* source_nod
 static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, Type* target) {
     if (!source_node || !source_node->type || !target) return false;
     if (lambda_boundary_is_redundant(source_node->type, target)) return true;
+    Type* expected = mir_unwrap_decl_type(target);
+    TypeId expected_tid = expected ? expected->type_id : LMD_TYPE_ANY;
+    if (expected && expected->kind == TYPE_KIND_SIMPLE &&
+            (expected_tid == LMD_TYPE_INT || expected_tid == LMD_TYPE_FLOAT) &&
+            !lambda_type_accepts_null(expected) &&
+            !mir_expr_may_be_null(mt, source_node) &&
+            mir_expr_proves_native_return_lane(mt, source_node, expected_tid)) {
+        // A native arithmetic result or guarded typed-array load already owns
+        // the declared scalar lane. Its AST type may be widened to `any` by
+        // the boxed fallback join, but re-admitting that proven lane would
+        // recreate the hot per-element boundary (S4.1, D2.4, D3.2.1).
+        return true;
+    }
     AstNode* primary = mir_unwrap_primary(source_node);
     if (primary && primary->node_type == AST_NODE_IDENT &&
             mir_unwrap_decl_type(target)->type_id == LMD_TYPE_MAP) {
@@ -4118,20 +4211,11 @@ static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* 
         AstPrimaryNode* pri = (AstPrimaryNode*)node;
         if (pri->expr) return static_const_item_from_node(mt, pri->expr, out);
         if (!node->type || !node->type->is_literal) return false;
+        if (static_literal_item_from_type(node->type, out)) return true;
         switch (node->type->type_id) {
-        case LMD_TYPE_NULL: *out = ItemNull; return true;
         case LMD_TYPE_BOOL: out->item = b2it(parse_bool_literal(mt->source, node->node)); return true;
         case LMD_TYPE_INT: out->item = i2it(parse_int_literal(mt->source, node->node)); return true;
-        case LMD_TYPE_INT64: { TypeInt64* t = (TypeInt64*)node->type; out->item = l2it(&t->int64_val); return true; }
-        case LMD_TYPE_FLOAT: { TypeFloat* t = (TypeFloat*)node->type; *out = lambda_float_ptr_to_item(&t->double_val); return true; }
-        case LMD_TYPE_FLOAT64: { TypeFloat* t = (TypeFloat*)node->type; *out = lambda_float_ptr_to_item(&t->double_val); return true; }
         case LMD_TYPE_DTIME: return false;
-        case LMD_TYPE_DECIMAL: { TypeDecimal* t = (TypeDecimal*)node->type; out->item = c2it(t->decimal); return true; }
-        case LMD_TYPE_STRING: { TypeString* t = (TypeString*)node->type; out->item = s2it(t->string); return true; }
-        case LMD_TYPE_SYMBOL: { TypeString* t = (TypeString*)node->type; out->item = y2it((Symbol*)t->string); return true; }
-        case LMD_TYPE_BINARY: { TypeBinaryConst* t = (TypeBinaryConst*)node->type; out->item = x2it(t->binary); return true; }
-        case LMD_TYPE_NUM_SIZED: { TypeNumSized* t = (TypeNumSized*)node->type; out->item = NUM_SIZED_PACK(t->num_type, t->raw_bits); return true; }
-        case LMD_TYPE_UINT64: { TypeUint64* t = (TypeUint64*)node->type; out->item = u2it(&t->uint64_val); return true; }
         // A complex literal must be heap-allocated and therefore cannot be embedded
         // in an Input-backed static collection constant.
         case LMD_TYPE_COMPLEX: return false;
@@ -4162,10 +4246,97 @@ static bool emit_static_collection_const(MirTranspiler* mt, AstNode* node, MIR_r
 // ============================================================================
 
 static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node);
+
+static MIR_reg_t emit_closure_capture_env(MirTranspiler* mt,
+        FnCapture* captures, int cap_count, const char* closure_name) {
+    MIR_reg_t env_reg = emit_call_2(mt, "heap_calloc", MIR_T_P,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(cap_count * 16)),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+    int cap_idx = 0;
+    for (FnCapture* cap = captures; cap; cap = cap->next) {
+        char cap_name[128];
+        snprintf(cap_name, sizeof(cap_name), "%s", cap->name);
+        MIR_reg_t cap_val = 0;
+        MirVarEntry* var = find_var(mt, cap_name);
+        if (var) {
+            cap_val = emit_box(mt, var->reg, var->type_id);
+        } else {
+            GlobalVarEntry* gvar = find_global_var(mt, cap_name);
+            if (gvar) {
+                cap_val = emit_box(mt, load_global_var(mt, gvar), gvar->type_id);
+            } else {
+                log_error("mir: closure capture '%s' not found in scope", cap_name);
+                cap_val = new_reg(mt, "capnull", MIR_T_I64);
+                uint64_t null_val = (uint64_t)LMD_TYPE_NULL << 56;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, cap_val),
+                    MIR_new_int_op(mt->ctx, (int64_t)null_val)));
+            }
+        }
+        emit_call_void_4(mt, "owned_item_slot_store",
+            MIR_T_P, MIR_new_reg_op(mt->ctx, env_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_idx),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, cap_val));
+        if (closure_name) {
+            log_debug("mir: closure '%s' - captured '%s' at env offset %d",
+                closure_name, cap_name, cap_idx * 8);
+        }
+        cap_idx++;
+    }
+    return env_reg;
+}
+
+static void mir_resolve_call_args(AstNode* arg_list, AstFuncNode* fn_node,
+        int arg_count, AstNode** resolved_args) {
+    bool has_named_args = false;
+    AstNode* arg = arg_list;
+    while (arg) {
+        if (arg->node_type == AST_NODE_NAMED_ARG) has_named_args = true;
+        arg = arg->next;
+    }
+
+    if (has_named_args && fn_node) {
+        int positional_idx = 0;
+        arg = arg_list;
+        while (arg) {
+            if (arg->node_type == AST_NODE_NAMED_ARG) {
+                AstNamedNode* named_arg = (AstNamedNode*)arg;
+                int param_idx = 0;
+                AstNamedNode* param = fn_node->param;
+                while (param) {
+                    if (param->name && named_arg->name &&
+                        param->name->len == named_arg->name->len &&
+                        memcmp(param->name->chars, named_arg->name->chars, param->name->len) == 0) {
+                        if (param_idx < LAMBDA_MAX_FUNCTION_ARGS) resolved_args[param_idx] = named_arg->as;
+                        break;
+                    }
+                    param_idx++;
+                    param = (AstNamedNode*)((AstNode*)param)->next;
+                }
+            } else {
+                while (positional_idx < LAMBDA_MAX_FUNCTION_ARGS && resolved_args[positional_idx]) positional_idx++;
+                if (positional_idx < LAMBDA_MAX_FUNCTION_ARGS) resolved_args[positional_idx++] = arg;
+            }
+            arg = arg->next;
+        }
+    } else {
+        arg = arg_list;
+        for (int i = 0; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
+            resolved_args[i] = arg;
+            arg = arg->next;
+        }
+    }
+}
+
+static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
+        TypeId native_consumer_tid);
 static MIR_reg_t transpile_expr_with_map_contract(MirTranspiler* mt,
         AstNode* value, Type* target, bool* constructed);
 static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
 static bool mir_is_native_int_arith(MirTranspiler* mt, AstNode* node);
+static TypeId mir_direct_native_return_type(MirTranspiler* mt,
+        AstCallNode* call);
 static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
         AstNode* node, TypeId expected);
 static bool mir_assignment_has_native_int_lane(
@@ -4673,53 +4844,11 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     MIR_new_ref_op(mt->ctx, func_item)));
 
                 if (fn_node->captures) {
-                    // Closure: allocate and populate env
                     int cap_count = 0;
                     FnCapture* cap = fn_node->captures;
                     while (cap) { cap_count++; cap = cap->next; }
-
-                    MIR_reg_t env_reg = emit_call_2(mt, "heap_calloc", MIR_T_P,
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(cap_count * 16)),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-
-                    int cap_idx = 0;
-                    cap = fn_node->captures;
-                    while (cap) {
-                        char cap_name[128];
-                        snprintf(cap_name, sizeof(cap_name), "%s", cap->name);
-
-                        MIR_reg_t cap_val = 0;
-                        MirVarEntry* cvar = find_var(mt, cap_name);
-                        if (cvar) {
-                            cap_val = emit_box(mt, cvar->reg, cvar->type_id);
-                        } else {
-                            GlobalVarEntry* gvar = find_global_var(mt, cap_name);
-                            if (gvar) {
-                                // load_global_var preserves the variable's native MIR
-                                // representation (for example String*). Captured slots
-                                // always store Items, or a later closure read treats a raw
-                                // pointer as a tagged value and dereferences it as storage.
-                                cap_val = emit_box(mt, load_global_var(mt, gvar),
-                                    gvar->type_id);
-                            } else {
-                                log_error("mir: closure capture '%s' not found in scope", cap_name);
-                                cap_val = new_reg(mt, "capnull", MIR_T_I64);
-                                uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-                                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                    MIR_new_reg_op(mt->ctx, cap_val),
-                                    MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-                            }
-                        }
-
-                        emit_call_void_4(mt, "owned_item_slot_store",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, env_reg),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_idx),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cap_val));
-
-                        cap_idx++;
-                        cap = cap->next;
-                    }
+                    MIR_reg_t env_reg = emit_closure_capture_env(mt,
+                        fn_node->captures, cap_count, NULL);
 
                     // Create closure: to_closure_named(fn_ptr, arity, env, name)
                     const char* closure_name = fn_node->name ? fn_node->name->chars : nullptr;
@@ -4750,17 +4879,8 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
                         MIR_new_int_op(mt->ctx, cap_count)));
-                    if (uses_wrapper) {
-                        emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                        emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                        emit_call_void_1(mt,
-                            fn_node->node_type == AST_NODE_PROC
-                                ? "lambda_function_mark_lambda_boxed_procedure"
-                                : "lambda_function_mark_lambda_boxed_function",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    }
+                    emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
+                        fn_node->node_type == AST_NODE_PROC);
                     mir_attach_function_type(mt, fn_obj, fn_node);
 
                     return fn_obj;
@@ -4779,17 +4899,8 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                             MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
                             MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
                     }
-                    if (uses_wrapper) {
-                        emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                        emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                        emit_call_void_1(mt,
-                            fn_node->node_type == AST_NODE_PROC
-                                ? "lambda_function_mark_lambda_boxed_procedure"
-                                : "lambda_function_mark_lambda_boxed_function",
-                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    }
+                    emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
+                        fn_node->node_type == AST_NODE_PROC);
                     mir_attach_function_type(mt, fn_obj, fn_node);
 
                     strbuf_free(nm_buf);
@@ -4918,6 +5029,119 @@ static bool mir_bitwise_binary_decision(AstCallNode* call,
     return true;
 }
 
+static bool mir_bitwise_u32_path(AstCallNode* call) {
+    if (!call || !call->function || call->function->node_type != AST_NODE_SYS_FUNC) {
+        return false;
+    }
+    AstSysFuncNode* sys = (AstSysFuncNode*)call->function;
+    if (!sys->fn_info) return false;
+    AstNode* first = call->argument;
+    AstNode* second = first ? first->next : NULL;
+    if (!first || !second || second->next) return false;
+    LambdaNumericKind first_kind = lambda_numeric_kind_from_type(first->type);
+    LambdaNumericKind second_kind = lambda_numeric_kind_from_type(second->type);
+    bool first_is_u32 = first_kind == LAMBDA_NUM_U32;
+    bool first_is_int = first_kind == LAMBDA_NUM_INT;
+    bool count_is_integral = second_kind == LAMBDA_NUM_INT ||
+        second_kind == LAMBDA_NUM_U32;
+    if (!count_is_integral) return false;
+    if (sys->fn_info->fn == SYSFUNC_USHR) return first_is_u32 || first_is_int;
+    if (!first_is_u32) return false;
+    LambdaNumericDecision decision = lambda_numeric_classify(
+        sys->fn_info->fn == SYSFUNC_BAND || sys->fn_info->fn == SYSFUNC_BOR ||
+            sys->fn_info->fn == SYSFUNC_BXOR ? LAMBDA_NUM_OP_BITWISE :
+            LAMBDA_NUM_OP_SHIFT, first_kind, second_kind);
+    return decision.valid && decision.result == LAMBDA_NUM_U32;
+}
+
+static MIR_reg_t mir_emit_u32_bitwise(MirTranspiler* mt, AstCallNode* call) {
+    AstSysFuncNode* sys = (AstSysFuncNode*)call->function;
+    AstNode* first = call->argument;
+    AstNode* second = first->next;
+    LambdaNumericKind second_kind = lambda_numeric_kind_from_type(second->type);
+    MIR_reg_t left_item = transpile_expr(mt, first);
+    MIR_reg_t left = new_reg(mt, "u32_l", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+        MIR_new_reg_op(mt->ctx, left), MIR_new_reg_op(mt->ctx, left_item),
+        MIR_new_int_op(mt->ctx, (int64_t)UINT32_MAX)));
+    MIR_reg_t right_item = transpile_expr(mt, second);
+    MIR_reg_t right = right_item;
+    if (second_kind == LAMBDA_NUM_U32) {
+        right = new_reg(mt, "u32_r", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, right), MIR_new_reg_op(mt->ctx, right_item),
+            MIR_new_int_op(mt->ctx, (int64_t)UINT32_MAX)));
+    }
+
+    MIR_insn_code_t op = (MIR_insn_code_t)0;
+    if (sys->fn_info->fn == SYSFUNC_BAND) op = MIR_AND;
+    else if (sys->fn_info->fn == SYSFUNC_BOR) op = MIR_OR;
+    else if (sys->fn_info->fn == SYSFUNC_BXOR) op = MIR_XOR;
+    else if (sys->fn_info->fn == SYSFUNC_SHL) op = MIR_LSH;
+    else op = MIR_URSH;
+
+    MIR_reg_t raw = new_reg(mt, "u32_raw", MIR_T_I64);
+    MIR_reg_t result = new_reg(mt, "u32_result", MIR_T_I64);
+    MIR_reg_t out = new_reg(mt, "u32_out", MIR_T_I64);
+    MIR_label_t l_error = new_label(mt);
+    MIR_label_t l_zero = new_label(mt);
+    MIR_label_t l_compute = new_label(mt);
+    MIR_label_t l_end = new_label(mt);
+    bool is_shift = sys->fn_info->fn == SYSFUNC_SHL ||
+        sys->fn_info->fn == SYSFUNC_SHR || sys->fn_info->fn == SYSFUNC_USHR;
+    if (is_shift && second_kind == LAMBDA_NUM_INT) {
+        MIR_reg_t negative = new_reg(mt, "u32_shift_neg", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS,
+            MIR_new_reg_op(mt->ctx, negative), MIR_new_reg_op(mt->ctx, right),
+            MIR_new_int_op(mt->ctx, 0)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+            MIR_new_label_op(mt->ctx, l_error), MIR_new_reg_op(mt->ctx, negative)));
+    }
+    if (is_shift) {
+        MIR_reg_t exhausted = new_reg(mt, "u32_shift_exhausted", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES,
+            MIR_new_reg_op(mt->ctx, exhausted), MIR_new_reg_op(mt->ctx, right),
+            MIR_new_int_op(mt->ctx, 32)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+            MIR_new_label_op(mt->ctx, l_zero), MIR_new_reg_op(mt->ctx, exhausted)));
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, l_compute)));
+    emit_label(mt, l_error);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, out), MIR_new_int_op(mt->ctx,
+            (int64_t)((uint64_t)LMD_TYPE_ERROR << 56))));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, l_end)));
+    emit_label(mt, l_zero);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, 0)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, l_compute)));
+    emit_label(mt, l_compute);
+    if (is_shift) {
+        MIR_reg_t computed = new_reg(mt, "u32_shift", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, op,
+            MIR_new_reg_op(mt->ctx, computed), MIR_new_reg_op(mt->ctx, left),
+            MIR_new_reg_op(mt->ctx, right)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, raw), MIR_new_reg_op(mt->ctx, computed),
+            MIR_new_int_op(mt->ctx, (int64_t)UINT32_MAX)));
+    } else {
+        emit_insn(mt, MIR_new_insn(mt->ctx, op,
+            MIR_new_reg_op(mt->ctx, raw), MIR_new_reg_op(mt->ctx, left),
+            MIR_new_reg_op(mt->ctx, right)));
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
+        MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)(((uint64_t)LMD_TYPE_NUM_SIZED << 56) |
+            ((uint64_t)NUM_UINT32 << 48))), MIR_new_reg_op(mt->ctx, raw)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, out), MIR_new_reg_op(mt->ctx, result)));
+    emit_label(mt, l_end);
+    return out;
+}
+
 static bool mir_binary_numeric_decision(
         AstBinaryNode* binary, LambdaNumericDecision* decision);
 
@@ -5016,6 +5240,14 @@ static TypeId mir_direct_native_return_type(MirTranspiler* mt,
     write_fn_name(name, fn, ident->entry ? ident->entry->import : NULL);
     NativeFuncInfo* native = find_native_func_info(mt, name->str);
     TypeId result = native && native->has_native ? native->return_type : LMD_TYPE_ANY;
+    if (result == LMD_TYPE_ANY && mt->native_return_analysis_fn == fn &&
+            mt->native_return_analysis_tid != LMD_TYPE_ANY) {
+        TypeFunc* signature = fn->type && fn->type->type_id == LMD_TYPE_FUNC
+            ? (TypeFunc*)fn->type : NULL;
+        if (!signature || !signature->can_raise) {
+            result = mt->native_return_analysis_tid;
+        }
+    }
     strbuf_free(name);
     return result;
 }
@@ -5057,6 +5289,20 @@ static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
                         return LMD_TYPE_ANY;
                     }
                 }
+            }
+        }
+        // During the native-return prepass, parameter bindings have not been
+        // installed in the MIR variable table yet. Recover the element lane
+        // from the declared array contract so a read such as `piles[0]` does
+        // not make an otherwise closed recursive procedure appear boxed.
+        AstNode* binding = ident->entry ? ident->entry->node : NULL;
+        if (binding && binding->node_type == AST_NODE_PARAM) {
+            Type* contract = mir_named_contract((AstNamedNode*)binding);
+            Type* element = mir_array_occurrence_element(contract);
+            if (element && (element->type_id == LMD_TYPE_FLOAT ||
+                    element->type_id == LMD_TYPE_BOOL ||
+                    is_integer_type_id(element->type_id))) {
+                return element->type_id;
             }
         }
     }
@@ -5135,6 +5381,31 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
                 // Keep it boxed until ^ or ^err handles that channel.
                 return LMD_TYPE_ANY;
             }
+            if (info && !call->propagate && call->argument &&
+                    !call->argument->next &&
+                    !mir_expr_may_be_null(mt, call->argument)) {
+                TypeId argument_tid = mir_native_arithmetic_operand_type(mt,
+                    call->argument);
+                // These scalar conversions have a carrier-preserving fast
+                // emitter below. Publish the same result witness here so a
+                // surrounding binding does not immediately box the raw lane
+                // back into an Item (S4.5.3, D2.2.2).
+                if (info->fn == SYSFUNC_INT &&
+                        (argument_tid == LMD_TYPE_INT ||
+                         argument_tid == LMD_TYPE_FLOAT)) {
+                    return LMD_TYPE_INT;
+                }
+                if (info->fn == SYSFUNC_FLOAT &&
+                        (argument_tid == LMD_TYPE_INT ||
+                         argument_tid == LMD_TYPE_FLOAT)) {
+                    return LMD_TYPE_FLOAT;
+                }
+                if (info->fn == SYSFUNC_TRUNC &&
+                        (argument_tid == LMD_TYPE_INT ||
+                         argument_tid == LMD_TYPE_FLOAT)) {
+                    return argument_tid;
+                }
+            }
         }
         TypeFunc* direct_signature = direct_callee && direct_callee->type &&
             direct_callee->type->type_id == LMD_TYPE_FUNC
@@ -5154,6 +5425,21 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             // boxed procedure ABI must remain boxed here; inferring a raw lane
             // from the declaration makes callers reinterpret an Item as data.
             return LMD_TYPE_ANY;
+        }
+        // The call AST can lose its proc signature while the resolved local
+        // entry still has a native ABI. Keep that ABI visible to the call
+        // emitter; otherwise it boxes the raw recursive result before the
+        // arithmetic consumer gets a chance to use it.
+        TypeId direct_native_return = mir_direct_native_return_type(mt, call);
+        if (direct_native_return == LMD_TYPE_INT ||
+                direct_native_return == LMD_TYPE_FLOAT) {
+            return direct_native_return;
+        }
+        if (mir_bitwise_u32_path(call)) {
+            // U32 bitwise and shift results are packed NUM_SIZED Items even
+            // though the arithmetic itself stays in a raw MIR lane. Preserve
+            // that carrier so the next consumer does not unbox it as int.
+            return LMD_TYPE_NUM_SIZED;
         }
         LambdaNumericDecision bitwise_decision;
         bool native_int_path = false;
@@ -5616,6 +5902,30 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
     return tid;
 }
 
+// A direct recursive proc can have a native MIR contract before its call AST
+// receives the inferred scalar type. Use the established call ABI as an
+// operand witness so arithmetic consumes that raw lane instead of handing it
+// to fn_add/fn_sub as a boxed Item (D3.3.1, D3.3.2).
+static TypeId mir_native_arithmetic_operand_type(MirTranspiler* mt,
+        AstNode* node) {
+    TypeId tid = get_effective_type(mt, node);
+    if (tid != LMD_TYPE_ANY) return tid;
+    AstNode* primary = mir_unwrap_primary(node);
+    if (primary && primary->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)primary;
+        if (!call->propagate && mir_direct_call_has_parameter_error_guard(call)) {
+            // The direct-call emitter joins a guarded native success with an
+            // ItemError. That result is boxed by contract and cannot feed a
+            // raw arithmetic lane without losing the error channel.
+            return LMD_TYPE_ANY;
+        }
+        TypeId native = mir_direct_native_return_type(mt,
+            call);
+        if (native == LMD_TYPE_INT || native == LMD_TYPE_FLOAT) return native;
+    }
+    return tid;
+}
+
 static bool mir_binary_numeric_decision(
         AstBinaryNode* binary, LambdaNumericDecision* decision) {
     if (!binary || !decision) return false;
@@ -5871,6 +6181,10 @@ static MIR_type_t sysfunc_c_ret_mir_type(TypeId c_ret_tid) {
 }
 
 static bool mir_is_native_int_arith(MirTranspiler* mt, AstNode* node) {
+    // A parenthesized native producer has the same lane contract as its
+    // underlying binary node; inspect that producer before deciding whether
+    // the consumer may reopen it (S4.5.3, D2.2.2).
+    node = mir_unwrap_primary(node);
     if (!node || node->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* bi = (AstBinaryNode*)node;
     if (bi->op != OPERATOR_ADD && bi->op != OPERATOR_SUB &&
@@ -5878,8 +6192,8 @@ static bool mir_is_native_int_arith(MirTranspiler* mt, AstNode* node) {
             bi->op != OPERATOR_MOD) {
         return false;
     }
-    if (get_effective_type(mt, bi->left) != LMD_TYPE_INT ||
-            get_effective_type(mt, bi->right) != LMD_TYPE_INT) {
+    if (mir_native_arithmetic_operand_type(mt, bi->left) != LMD_TYPE_INT ||
+            mir_native_arithmetic_operand_type(mt, bi->right) != LMD_TYPE_INT) {
         return false;
     }
     if (mir_binary_is_exact_u32_result(bi)) return false;
@@ -5887,13 +6201,54 @@ static bool mir_is_native_int_arith(MirTranspiler* mt, AstNode* node) {
         !mir_matches_compact_loop_add(mt, bi);
 }
 
+// A native scalar consumer may prove an entire closed integer tree without
+// publishing that tree as the ordinary expression type. This is deliberately
+// narrower than recursive type inference: only integer arithmetic nodes are
+// reopened, and every node still uses the checked IntLane slow arm, preserving
+// arbitrary-integer overflow semantics at the next float boundary (S4.5.3,
+// D2.2.2).
+static bool mir_is_native_int_tree(MirTranspiler* mt, AstNode* node);
+
+static bool mir_native_int_tree_operand(MirTranspiler* mt, AstNode* node) {
+    return mir_native_arithmetic_operand_type(mt, node) == LMD_TYPE_INT ||
+        mir_is_native_int_tree(mt, node);
+}
+
+static bool mir_is_native_int_tree(MirTranspiler* mt, AstNode* node) {
+    node = mir_unwrap_primary(node);
+    if (!node) return false;
+    if (mir_native_arithmetic_operand_type(mt, node) == LMD_TYPE_INT) return true;
+    if (node->node_type != AST_NODE_BINARY) return false;
+    AstBinaryNode* bi = (AstBinaryNode*)node;
+    if (bi->op != OPERATOR_ADD && bi->op != OPERATOR_SUB &&
+            bi->op != OPERATOR_MUL && bi->op != OPERATOR_IDIV &&
+            bi->op != OPERATOR_MOD) {
+        return false;
+    }
+    if (mir_binary_is_exact_u32_result(bi) ||
+            mir_matches_compact_loop_sub(mt, bi) ||
+            mir_matches_compact_loop_add(mt, bi)) {
+        return false;
+    }
+    return mir_native_int_tree_operand(mt, bi->left) &&
+        mir_native_int_tree_operand(mt, bi->right);
+}
+
 // Native consumers must reopen an exact integer arithmetic node in its lane.
 // The ordinary expression ABI boxes that same node, so treating its I64 Item
 // as a lane would feed tag bits into the next arithmetic or comparison.
 static MIR_reg_t transpile_native_int_expr(MirTranspiler* mt, AstNode* node) {
     AstNode* primary = mir_unwrap_primary(node);
+    if (primary && primary->node_type == AST_NODE_CALL_EXPR &&
+            mir_direct_native_return_type(mt, (AstCallNode*)primary) ==
+                LMD_TYPE_INT) {
+        // A direct recursive call may be routed through a boxed slow entry for
+        // its arguments, but this consumer still needs the callee's scalar
+        // result unboxed before the enclosing native add/sub/mul (D3.3.1).
+        return transpile_call_raw(mt, (AstCallNode*)primary, LMD_TYPE_INT);
+    }
     if (primary && primary->node_type == AST_NODE_BINARY &&
-            mir_is_native_int_arith(mt, primary)) {
+            mir_is_native_int_tree(mt, primary)) {
         return transpile_binary_out(mt, (AstBinaryNode*)primary, true);
     }
     return transpile_expr(mt, node);
@@ -6059,48 +6414,27 @@ static LaneReg emit_int_lane_divmod(MirTranspiler* mt, Operator op,
 }
 
 static MIR_reg_t mir_sanitize_native_index(MirTranspiler* mt,
-        MirNativeIndexValue index) {
-    MIR_reg_t result = new_reg(mt, "idx_value", MIR_T_I64);
-    MIR_reg_t lo_ok = new_reg(mt, "idx_lo", MIR_T_I64);
-    MIR_reg_t hi_ok = new_reg(mt, "idx_hi", MIR_T_I64);
-    MIR_reg_t in_band = new_reg(mt, "idx_band", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE,
-        MIR_new_reg_op(mt->ctx, lo_ok), MIR_new_reg_op(mt->ctx, index.value),
-        MIR_new_int_op(mt->ctx, INT53_MIN)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LE,
-        MIR_new_reg_op(mt->ctx, hi_ok), MIR_new_reg_op(mt->ctx, index.value),
-        MIR_new_int_op(mt->ctx, INT53_MAX)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, in_band), MIR_new_reg_op(mt->ctx, lo_ok),
-        MIR_new_reg_op(mt->ctx, hi_ok)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, index.valid), MIR_new_reg_op(mt->ctx, index.valid),
-        MIR_new_reg_op(mt->ctx, in_band)));
-    MIR_label_t l_invalid = new_label(mt);
-    MIR_label_t l_done = new_label(mt);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
-        MIR_new_label_op(mt->ctx, l_invalid), MIR_new_reg_op(mt->ctx, index.valid)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, index.value)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, l_done)));
-    emit_label(mt, l_invalid);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, INT64_MAX)));
-    emit_label(mt, l_done);
-    return result;
-}
-
-static MIR_reg_t mir_sanitize_native_index_nonnegative(MirTranspiler* mt,
-        MirNativeIndexValue index) {
+        MirNativeIndexValue index, bool nonnegative) {
     MIR_reg_t result = new_reg(mt, "idx_value", MIR_T_I64);
     MIR_reg_t hi_ok = new_reg(mt, "idx_hi", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LE,
         MIR_new_reg_op(mt->ctx, hi_ok), MIR_new_reg_op(mt->ctx, index.value),
         MIR_new_int_op(mt->ctx, INT53_MAX)));
+    MIR_reg_t valid = hi_ok;
+    if (!nonnegative) {
+        MIR_reg_t lo_ok = new_reg(mt, "idx_lo", MIR_T_I64);
+        MIR_reg_t in_band = new_reg(mt, "idx_band", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE,
+            MIR_new_reg_op(mt->ctx, lo_ok), MIR_new_reg_op(mt->ctx, index.value),
+            MIR_new_int_op(mt->ctx, INT53_MIN)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, in_band), MIR_new_reg_op(mt->ctx, lo_ok),
+            MIR_new_reg_op(mt->ctx, hi_ok)));
+        valid = in_band;
+    }
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
         MIR_new_reg_op(mt->ctx, index.valid), MIR_new_reg_op(mt->ctx, index.valid),
-        MIR_new_reg_op(mt->ctx, hi_ok)));
+        MIR_new_reg_op(mt->ctx, valid)));
     MIR_label_t l_invalid = new_label(mt);
     MIR_label_t l_done = new_label(mt);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
@@ -6324,8 +6658,22 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
     // e.g., `1 + f(n-1)` — the call is NOT tail because addition follows.
     mt->in_tail_position = false;
 
-    TypeId left_tid = get_effective_type(mt, bi->left);
-    TypeId right_tid = get_effective_type(mt, bi->right);
+    TypeId left_tid = mir_native_arithmetic_operand_type(mt, bi->left);
+    TypeId right_tid = mir_native_arithmetic_operand_type(mt, bi->right);
+    // Keep flex-int expressions boxed at ordinary boundaries, but reopen a
+    // closed integer tree when this arithmetic node is itself the checked
+    // native consumer. This removes the redundant Item round-trip in numeric
+    // float formulas such as spectralnorm's matrix denominator (S4.5.3).
+    bool native_int_consumer = bi->op == OPERATOR_ADD ||
+        bi->op == OPERATOR_SUB || bi->op == OPERATOR_MUL ||
+        bi->op == OPERATOR_DIV || bi->op == OPERATOR_IDIV ||
+        bi->op == OPERATOR_MOD;
+    if (native_int_consumer && mir_is_native_int_tree(mt, bi->left)) {
+        left_tid = LMD_TYPE_INT;
+    }
+    if (native_int_consumer && mir_is_native_int_tree(mt, bi->right)) {
+        right_tid = LMD_TYPE_INT;
+    }
 
     if ((bi->op == OPERATOR_EQ || bi->op == OPERATOR_NE) &&
         !mir_expr_may_be_null(mt, bi->left) && !mir_expr_may_be_null(mt, bi->right) &&
@@ -6457,8 +6805,18 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
 
     // Arithmetic ops with native types
     if (both_int || both_float || int_float) {
-        MIR_reg_t left = transpile_expr(mt, bi->left);
-        MIR_reg_t right = transpile_expr(mt, bi->right);
+        // A flex-int subexpression is semantically boxed at an ordinary
+        // expression boundary, but this float-domain consumer has already
+        // proved its raw lane. Re-enter through the native producer or the
+        // integer Item would be reinterpreted as a double (S4.5.3, D2.2.2).
+        MIR_reg_t left = left_tid == LMD_TYPE_INT &&
+                mir_is_native_int_tree(mt, bi->left)
+            ? transpile_native_int_expr(mt, bi->left)
+            : transpile_expr(mt, bi->left);
+        MIR_reg_t right = right_tid == LMD_TYPE_INT &&
+                mir_is_native_int_tree(mt, bi->right)
+            ? transpile_native_int_expr(mt, bi->right)
+            : transpile_expr(mt, bi->right);
         bool left_nullable = mir_expr_may_be_null(mt, bi->left);
         bool right_nullable = mir_expr_may_be_null(mt, bi->right);
 
@@ -7682,6 +8040,65 @@ static MIR_reg_t mir_finalize_for_output(MirTranspiler* mt, AstForNode* for_node
     return final_reg;
 }
 
+static void mir_emit_for_let_clause(MirTranspiler* mt, AstForNode* for_node) {
+    if (!for_node->let_clause) return;
+    AstNode* lc = for_node->let_clause;
+    while (lc) {
+        AstNamedNode* let_node = (AstNamedNode*)lc;
+        if (let_node->as) {
+            MIR_reg_t val = transpile_expr(mt, let_node->as);
+            char lc_name[128];
+            snprintf(lc_name, sizeof(lc_name), "%.*s",
+                (int)let_node->name->len, let_node->name->chars);
+            TypeId lc_tid = get_effective_type(mt, let_node->as);
+            MIR_type_t lc_mtype = type_to_mir(lc_tid);
+            set_var(mt, lc_name, val, lc_mtype, lc_tid);
+        }
+        lc = lc->next;
+    }
+}
+
+static void mir_emit_for_where_clause(MirTranspiler* mt, AstForNode* for_node,
+        MIR_label_t continue_label) {
+    if (!for_node->where) return;
+    MIR_reg_t where_val = transpile_expr(mt, for_node->where);
+    TypeId where_tid = get_effective_type(mt, for_node->where);
+    MIR_reg_t where_test = where_val;
+    if (where_tid != LMD_TYPE_BOOL) {
+        MIR_reg_t boxw = emit_box(mt, where_val, where_tid);
+        where_test = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxw)));
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, continue_label),
+        MIR_new_reg_op(mt->ctx, where_test)));
+}
+
+static void mir_emit_for_body_and_order(MirTranspiler* mt, AstForNode* for_node,
+        MIR_reg_t output, MIR_reg_t keys_arr, bool result_demanded) {
+    MIR_reg_t body_result = transpile_expr(mt, for_node->then);
+    if (result_demanded) {
+        TypeId body_tid = get_effective_type(mt, for_node->then);
+        MIR_reg_t boxed_result = body_result ? emit_box(mt, body_result, body_tid)
+            : emit_null_item_reg(mt);
+        emit_call_void_2(mt, "array_push_spread", MIR_T_P,
+            MIR_new_reg_op(mt->ctx, output),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_result));
+    }
+
+    if (for_node->order) {
+        AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
+        MIR_reg_t key_val = transpile_expr(mt, first_spec->expr);
+        if (result_demanded) {
+            TypeId key_tid = get_effective_type(mt, first_spec->expr);
+            MIR_reg_t boxed_key = emit_box(mt, key_val, key_tid);
+            emit_call_void_2(mt, "array_push", MIR_T_P,
+                MIR_new_reg_op(mt->ctx, keys_arr),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
+        }
+    }
+}
+
 static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node,
         AstLoopNode* first, bool result_demanded) {
     if (!mir_validate_join_sources(first)) {
@@ -7767,21 +8184,11 @@ static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node,
 
     MIR_reg_t final_stream_item = emit_box_container(mt, tuples);
     MIR_reg_t final_len = emit_machine_len(mt, final_stream_item);
-    MIR_reg_t idx = new_reg(mt, "joutidx", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, idx),
-        MIR_new_int_op(mt->ctx, 0)));
-    MIR_label_t l_loop = new_label(mt);
-    MIR_label_t l_continue = new_label(mt);
-    MIR_label_t l_end = new_label(mt);
-    if (mt->loop_depth < 31) {
-        mt->loop_stack[mt->loop_depth].continue_label = l_continue;
-        mt->loop_stack[mt->loop_depth].break_label = l_end;
-        mt->loop_stack[mt->loop_depth].task_scope_base = mt->in_async_proc
-            ? emit_call_0(mt, "lambda_task_scope_current", MIR_T_P) : 0;
-        mt->loop_stack[mt->loop_depth].nonnegative_counter = NULL;
-        mt->loop_stack[mt->loop_depth].nonnegative_upper_bound = NULL;
-        mt->loop_depth++;
-    }
+    MirIndexedLoopFrame loop_frame = mir_begin_indexed_loop(mt, "joutidx");
+    MIR_reg_t idx = loop_frame.index;
+    MIR_label_t l_loop = loop_frame.loop;
+    MIR_label_t l_continue = loop_frame.continue_label;
+    MIR_label_t l_end = loop_frame.end;
 
     emit_label(mt, l_loop);
     MIR_reg_t cmp = new_reg(mt, "joutcmp", MIR_T_I64);
@@ -7794,54 +8201,9 @@ static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
     mir_join_bind_tuple_vars(mt, first, NULL, tuple_item);
 
-    if (for_node->let_clause) {
-        AstNode* lc = for_node->let_clause;
-        while (lc) {
-            AstNamedNode* let_node = (AstNamedNode*)lc;
-            if (let_node->as) {
-                MIR_reg_t val = transpile_expr(mt, let_node->as);
-                char lc_name[128];
-                snprintf(lc_name, sizeof(lc_name), "%.*s", (int)let_node->name->len, let_node->name->chars);
-                TypeId lc_tid = get_effective_type(mt, let_node->as);
-                MIR_type_t lc_mtype = type_to_mir(lc_tid);
-                set_var(mt, lc_name, val, lc_mtype, lc_tid);
-            }
-            lc = lc->next;
-        }
-    }
-
-    if (for_node->where) {
-        MIR_reg_t where_val = transpile_expr(mt, for_node->where);
-        TypeId where_tid = get_effective_type(mt, for_node->where);
-        MIR_reg_t where_test = where_val;
-        if (where_tid != LMD_TYPE_BOOL) {
-            MIR_reg_t boxw = emit_box(mt, where_val, where_tid);
-            where_test = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxw)));
-        }
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_continue),
-            MIR_new_reg_op(mt->ctx, where_test)));
-    }
-
-    MIR_reg_t body_result = transpile_expr(mt, for_node->then);
-    if (result_demanded) {
-        TypeId body_tid = get_effective_type(mt, for_node->then);
-        MIR_reg_t boxed_result = body_result ? emit_box(mt, body_result, body_tid)
-            : emit_null_item_reg(mt);
-        emit_call_void_2(mt, "array_push_spread", MIR_T_P, MIR_new_reg_op(mt->ctx, output),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_result));
-    }
-
-    if (has_order) {
-        AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-        MIR_reg_t key_val = transpile_expr(mt, first_spec->expr);
-        TypeId key_tid = get_effective_type(mt, first_spec->expr);
-        if (result_demanded) {
-            MIR_reg_t boxed_key = emit_box(mt, key_val, key_tid);
-            emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, keys_arr),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
-        }
-    }
+    mir_emit_for_let_clause(mt, for_node);
+    mir_emit_for_where_clause(mt, for_node, l_continue);
+    mir_emit_for_body_and_order(mt, for_node, output, keys_arr, result_demanded);
 
     emit_label(mt, l_continue);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, idx),
@@ -8096,47 +8458,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
             return emit_null_item_reg(mt);
         }
 
-        MIR_reg_t final_reg;
-        if (has_order) {
-            AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-            emit_call_void_3(mt, "fn_sort_by_keys",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, output),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, keys_arr),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, first_spec->descending ? 1 : 0));
-        }
-        if (has_order && (has_offset || has_limit)) {
-            if (has_offset) {
-                MIR_reg_t off_raw = emit_machine_count(mt, for_node->offset);
-                emit_call_void_2(mt, "array_drop_inplace", MIR_T_P, MIR_new_reg_op(mt->ctx, output),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, off_raw));
-            }
-            if (has_limit) {
-                MIR_reg_t lim_raw = emit_machine_count(mt, for_node->limit);
-                emit_call_void_2(mt, for_node->limit_from_end ? "array_limit_last_inplace" : "array_limit_inplace",
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, output),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, lim_raw));
-            }
-            final_reg = emit_call_1(mt, "array_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, output));
-        } else if (has_offset || has_limit) {
-            MIR_reg_t cur_result = emit_box_container(mt, output);
-            if (has_offset) {
-                MIR_reg_t off_val = transpile_expr(mt, for_node->offset);
-                TypeId off_tid = get_effective_type(mt, for_node->offset);
-                cur_result = emit_call_2(mt, "fn_drop", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_result),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box(mt, off_val, off_tid)));
-            }
-            if (has_limit) {
-                MIR_reg_t lim_val = transpile_expr(mt, for_node->limit);
-                TypeId lim_tid = get_effective_type(mt, for_node->limit);
-                cur_result = emit_call_2(mt, for_node->limit_from_end ? "fn_take_last" : "fn_take", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_result),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box(mt, lim_val, lim_tid)));
-            }
-            final_reg = cur_result;
-        } else {
-            final_reg = emit_call_1(mt, "array_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, output));
-        }
+        MIR_reg_t final_reg = mir_finalize_for_output(mt, for_node, output, keys_arr);
         pop_scope(mt);
         return final_reg;
     }
@@ -8226,25 +8548,12 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
         keys_arr = emit_call_0(mt, "array_plain", MIR_T_P);
     }
 
-    // Index counter
-    MIR_reg_t idx = new_reg(mt, "idx", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, idx),
-        MIR_new_int_op(mt->ctx, 0)));
-
-    MIR_label_t l_loop = new_label(mt);
-    MIR_label_t l_continue = new_label(mt);
-    MIR_label_t l_end = new_label(mt);
-
-    // Push loop labels for break/continue
-    if (mt->loop_depth < 31) {
-        mt->loop_stack[mt->loop_depth].continue_label = l_continue;
-        mt->loop_stack[mt->loop_depth].break_label = l_end;
-        mt->loop_stack[mt->loop_depth].task_scope_base = mt->in_async_proc
-            ? emit_call_0(mt, "lambda_task_scope_current", MIR_T_P) : 0;
-        mt->loop_stack[mt->loop_depth].nonnegative_counter = NULL;
-        mt->loop_stack[mt->loop_depth].nonnegative_upper_bound = NULL;
-        mt->loop_depth++;
-    }
+    // Index counter and break/continue labels
+    MirIndexedLoopFrame loop_frame = mir_begin_indexed_loop(mt, "idx");
+    MIR_reg_t idx = loop_frame.index;
+    MIR_label_t l_loop = loop_frame.loop;
+    MIR_label_t l_continue = loop_frame.continue_label;
+    MIR_label_t l_end = loop_frame.end;
 
     emit_label(mt, l_loop);
     // Exit when idx >= len
@@ -8397,69 +8706,9 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
     MIR_label_t innermost_continue = (nested_count > 0)
         ? nested_loops[nested_count - 1].ncont : l_continue;
 
-    // Process let clauses (additional variable bindings)
-    if (for_node->let_clause) {
-        AstNode* lc = for_node->let_clause;
-        while (lc) {
-            AstNamedNode* let_node = (AstNamedNode*)lc;
-            if (let_node->as) {
-                MIR_reg_t val = transpile_expr(mt, let_node->as);
-                char lc_name[128];
-                snprintf(lc_name, sizeof(lc_name), "%.*s", (int)let_node->name->len, let_node->name->chars);
-                // for-let values may be boxed by numeric overflow-safe helpers;
-                // track the emitted representation so later uses do not unbox the wrong shape.
-                TypeId lc_tid = get_effective_type(mt, let_node->as);
-                MIR_type_t lc_mtype = type_to_mir(lc_tid);
-                set_var(mt, lc_name, val, lc_mtype, lc_tid);
-            }
-            lc = lc->next;
-        }
-    }
-
-    // Where clause — skip to innermost continue on failure
-    if (for_node->where) {
-        MIR_reg_t where_val = transpile_expr(mt, for_node->where);
-        TypeId where_tid = get_effective_type(mt, for_node->where);
-        MIR_reg_t where_test = where_val;
-        if (where_tid != LMD_TYPE_BOOL) {
-            MIR_reg_t boxw = emit_box(mt, where_val, where_tid);
-            where_test = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxw)));
-        }
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, innermost_continue),
-            MIR_new_reg_op(mt->ctx, where_test)));
-    }
-
-    // Body expression
-    MIR_reg_t body_result = transpile_expr(mt, for_node->then);
-    TypeId body_tid = get_effective_type(mt, for_node->then);
-    if (result_demanded) {
-        // A pure-statement body returns no register; only the value-producing
-        // path needs a null placeholder for spread collection.
-        MIR_reg_t boxed_result;
-        if (body_result == 0) {
-            boxed_result = new_reg(mt, "for_void_null", MIR_T_I64);
-            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, boxed_result),
-                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-        } else {
-            boxed_result = emit_box(mt, body_result, body_tid);
-        }
-        emit_call_void_2(mt, "array_push_spread", MIR_T_P, MIR_new_reg_op(mt->ctx, output),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_result));
-    }
-
-    // If order by is present, also push the sort key value
-    if (has_order) {
-        AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-        MIR_reg_t key_val = transpile_expr(mt, first_spec->expr);
-        if (result_demanded) {
-            TypeId key_tid = get_effective_type(mt, first_spec->expr);
-            MIR_reg_t boxed_key = emit_box(mt, key_val, key_tid);
-            emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, keys_arr),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
-        }
-    }
+    mir_emit_for_let_clause(mt, for_node);
+    mir_emit_for_where_clause(mt, for_node, innermost_continue);
+    mir_emit_for_body_and_order(mt, for_node, output, keys_arr, result_demanded);
 
     // Close nested loops (in reverse order, innermost first)
     for (int ni = nested_count - 1; ni >= 0; ni--) {
@@ -8488,62 +8737,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
         return emit_null_item_reg(mt);
     }
 
-    // Post-processing: ORDER BY, then OFFSET, then LIMIT
-    MIR_reg_t final_reg;
-
-    if (has_order) {
-        // Sort arr_out in-place by the collected keys, with ascending/descending flag
-        AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-        int64_t desc_flag = first_spec->descending ? 1 : 0;
-        emit_call_void_3(mt, "fn_sort_by_keys",
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, output),  // cast Array* to Item
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, keys_arr), // cast Array* to Item
-            MIR_T_I64, MIR_new_int_op(mt->ctx, desc_flag));
-    }
-
-    if (has_order && (has_offset || has_limit)) {
-        // When order by + offset/limit, apply them in-place on arr_out
-        if (has_offset) {
-            MIR_reg_t off_raw = emit_machine_count(mt, for_node->offset);
-            emit_call_void_2(mt, "array_drop_inplace",
-                MIR_T_P, MIR_new_reg_op(mt->ctx, output),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, off_raw));
-        }
-        if (has_limit) {
-            MIR_reg_t lim_raw = emit_machine_count(mt, for_node->limit);
-            emit_call_void_2(mt, for_node->limit_from_end
-                    ? "array_limit_last_inplace"
-                    : "array_limit_inplace",
-                MIR_T_P, MIR_new_reg_op(mt->ctx, output),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, lim_raw));
-        }
-        // Finalize via array_end
-        final_reg = emit_call_1(mt, "array_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, output));
-    } else if (has_offset || has_limit) {
-        // Without order by, use fn_drop/fn_take which return spreadable results
-
-        MIR_reg_t cur_result = emit_box_container(mt, output); // cast Array* → Item
-        if (has_offset) {
-            MIR_reg_t off_val = transpile_expr(mt, for_node->offset);
-            TypeId off_tid = get_effective_type(mt, for_node->offset);
-            MIR_reg_t off_boxed = emit_box(mt, off_val, off_tid);
-            cur_result = emit_call_2(mt, "fn_drop", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_result),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, off_boxed));
-        }
-        if (has_limit) {
-            MIR_reg_t lim_val = transpile_expr(mt, for_node->limit);
-            TypeId lim_tid = get_effective_type(mt, for_node->limit);
-            MIR_reg_t lim_boxed = emit_box(mt, lim_val, lim_tid);
-            cur_result = emit_call_2(mt, for_node->limit_from_end ? "fn_take_last" : "fn_take", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_result),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, lim_boxed));
-        }
-        final_reg = cur_result;
-    } else {
-        // No post-processing — just finalize via array_end
-        final_reg = emit_call_1(mt, "array_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, output));
-    }
+    MIR_reg_t final_reg = mir_finalize_for_output(mt, for_node, output, keys_arr);
 
     if (mt->loop_depth > 0) mt->loop_depth--;
     pop_scope(mt);
@@ -9620,7 +9814,10 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         AstPrimaryNode* pri = (AstPrimaryNode*)rhs;
                         if (pri->expr) rhs = pri->expr; else break;
                     }
-                    if (var_tid == LMD_TYPE_ANY && rhs && rhs->node_type == AST_NODE_CALL_EXPR) {
+                    if (!has_type_annotation &&
+                            (var_tid == LMD_TYPE_ANY || var_tid == LMD_TYPE_ARRAY ||
+                             var_tid == LMD_TYPE_ARRAY_NUM) &&
+                            rhs && rhs->node_type == AST_NODE_CALL_EXPR) {
                         AstCallNode* call = (AstCallNode*)rhs;
                         if (call->function && call->function->node_type == AST_NODE_SYS_FUNC) {
                             AstSysFuncNode* sys = (AstSysFuncNode*)call->function;
@@ -9826,6 +10023,22 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // contract disappear merely because the body was broad.
                     declared_var->elem_type = typed_array_element_type->type_id;
                     declared_var->elem_type_guarded = true;
+                }
+                if (declared_var && (var_tid == LMD_TYPE_ARRAY_NUM ||
+                        var_tid == LMD_TYPE_ARRAY) &&
+                        declared_var->elem_type == LMD_TYPE_ANY) {
+                    // Alias declarations such as `tmp = prev` carry the
+                    // source row's proven storage contract even when the
+                    // initializer crossed the COW binding ABI as an Item.
+                    AstNode* source = mir_unwrap_primary(asn->as);
+                    if (source && source->node_type == AST_NODE_IDENT) {
+                        MirVarEntry* source_var = mir_direct_root_binding(mt, source);
+                        if (source_var && source_var->elem_type != LMD_TYPE_ANY) {
+                            declared_var->elem_type = source_var->elem_type;
+                            declared_var->elem_type_guarded =
+                                source_var->elem_type_guarded;
+                        }
+                    }
                 }
                 if (declared_var && var_tid == LMD_TYPE_INT &&
                         mir_is_zero_int_literal(mt, asn->as)) {
@@ -10489,6 +10702,24 @@ static void transpile_proc_side_effect(MirTranspiler* mt, AstNode* item) {
     }
 }
 
+static bool transpile_content_decl_or_side_effect(MirTranspiler* mt,
+        AstNode* item) {
+    if (is_declaration_node(item->node_type)) {
+        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM ||
+            item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
+            transpile_let_stam(mt, (AstLetNode*)item);
+        } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
+            transpile_expr(mt, item); // emit method registration
+        }
+        return true;
+    }
+    if (is_side_effect_stam(item->node_type)) {
+        transpile_proc_side_effect(mt, item);
+        return true;
+    }
+    return false;
+}
+
 static MIR_reg_t transpile_task_scope_leave(
     MirTranspiler* mt, MIR_reg_t scope, MIR_reg_t block_result, bool error_exit) {
     if (!mt->in_async_proc || !scope) return block_result;
@@ -10588,15 +10819,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
         MIR_reg_t result = 0;
         AstNode* item = list_node->item;
         while (item) {
-            if (is_declaration_node(item->node_type)) {
-                if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM ||
-                    item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
-                    transpile_let_stam(mt, (AstLetNode*)item);
-                } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
-                    transpile_expr(mt, item); // emit method registration
-                }
-            } else if (is_side_effect_stam(item->node_type)) {
-                transpile_proc_side_effect(mt, item);
+            if (transpile_content_decl_or_side_effect(mt, item)) {
             } else if (is_proc_flow_side_effect_node(item, last_value)) {
                 if (item->node_type == AST_NODE_FOR_STAM) {
                     transpile_for(mt, (AstForNode*)item, false);
@@ -10631,16 +10854,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
         MIR_reg_t result = 0;
         AstNode* item = list_node->item;
         while (item) {
-            if (is_declaration_node(item->node_type)) {
-                if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM ||
-                    item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
-                    transpile_let_stam(mt, (AstLetNode*)item);
-                } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
-                    transpile_expr(mt, item); // emit method registration
-                }
-                // Func defs handled in module-level pre-pass
-            } else if (is_side_effect_stam(item->node_type)) {
-                transpile_proc_side_effect(mt, item); // execute for side effects
+            if (transpile_content_decl_or_side_effect(mt, item)) {
             } else if (is_proc_flow_side_effect_node(item, last_value)) {
                 if (item->node_type == AST_NODE_FOR_STAM) {
                     transpile_for(mt, (AstForNode*)item, false);
@@ -10673,15 +10887,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
         push_scope(mt);
         AstNode* item = list_node->item;
         while (item) {
-            if (is_declaration_node(item->node_type)) {
-                if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM ||
-                    item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
-                    transpile_let_stam(mt, (AstLetNode*)item);
-                } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
-                    transpile_expr(mt, item); // emit method registration
-                }
-            } else if (is_side_effect_stam(item->node_type)) {
-                transpile_proc_side_effect(mt, item);
+            if (transpile_content_decl_or_side_effect(mt, item)) {
             } else if (is_proc_flow_side_effect_node(item, last_value)) {
                 if (item->node_type == AST_NODE_FOR_STAM) {
                     transpile_for(mt, (AstForNode*)item, false);
@@ -12338,6 +12544,80 @@ static MIR_reg_t emit_tracked_generic_float_array_load(MirTranspiler* mt,
         dense_inbounds);
 }
 
+static MIR_reg_t emit_generic_array_index_load(MirTranspiler* mt,
+        AstFieldNode* field_node, MIR_reg_t idx_native) {
+    Type* obj_type = field_node->object ? field_node->object->type : nullptr;
+    bool nested_int = false;
+    bool nested_bool = false;
+    TypeId tracked_elem_type = mir_tracked_array_element_type(mt, field_node->object);
+    if (obj_type && obj_type->type_id == LMD_TYPE_ARRAY) {
+        TypeArray* arr_type = (TypeArray*)obj_type;
+        nested_int = arr_type->nested && arr_type->nested->type_id == LMD_TYPE_INT;
+        nested_bool = arr_type->nested && arr_type->nested->type_id == LMD_TYPE_BOOL;
+    }
+    if (!nested_bool) nested_bool = tracked_elem_type == LMD_TYPE_BOOL;
+
+    if (tracked_elem_type == LMD_TYPE_FLOAT) {
+        return emit_tracked_generic_float_array_load(mt, field_node, idx_native);
+    }
+
+    if (nested_int) {
+        bool safe_native_int = false;
+        AstNode* obj_unwrapped = field_node->object;
+        while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
+            obj_unwrapped = ((AstPrimaryNode*)obj_unwrapped)->expr;
+        if (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_IDENT) {
+            AstIdentNode* obj_ident = (AstIdentNode*)obj_unwrapped;
+            char oname[128];
+            snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len,
+                obj_ident->name->chars);
+            MirVarEntry* ov = find_var(mt, oname);
+            // mutable bindings need an explicit INT witness before decoding the lane.
+            if (!ov || ov->elem_type == LMD_TYPE_INT) safe_native_int = true;
+        }
+
+        MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
+        MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+        MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
+        MirIndexLoadPolicy policy = {
+            MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_I64, 8,
+            safe_native_int ? MIR_INDEX_RESULT_NATIVE_INT_FROM_DOUBLE
+                            : MIR_INDEX_RESULT_BOXED_INT_FROM_DOUBLE,
+            MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY_NUM,
+            MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_ITEM_AT,
+        };
+        MIR_reg_t indexed = emit_checked_index_load(mt, arr_ptr, boxed_obj,
+            idx_native, policy, mir_index_expr_nonnegative(mt, field_node->field),
+            mir_typed_array_cache_for_object(mt, field_node->object));
+        if (!safe_native_int && get_effective_type(mt, (AstNode*)field_node) ==
+                LMD_TYPE_INT) {
+            // the fallback is boxed when the mutable array witness is unknown.
+            return emit_unbox(mt, indexed, LMD_TYPE_INT);
+        }
+        return indexed;
+    }
+
+    if (nested_bool) {
+        MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
+        MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+        MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
+        MirIndexLoadPolicy policy = {
+            MIR_INDEX_STORAGE_BOXED_ITEMS, MIR_T_I64, 8,
+            MIR_INDEX_RESULT_NATIVE_BOOL, MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY,
+            MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_ITEM_AT,
+        };
+        return emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native, policy,
+            mir_index_expr_nonnegative(mt, field_node->field),
+            mir_typed_array_cache_for_object(mt, field_node->object));
+    }
+
+    MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+    return emit_call_2(mt, "item_at", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx,
+            emit_machine_index(mt, idx_native, LMD_TYPE_INT)));
+}
+
 // ============================================================================
 // M1.3: native-int index expressions
 //
@@ -12485,8 +12765,8 @@ static MIR_reg_t emit_index_value(MirTranspiler* mt, AstNode* field, bool use_na
         // otherwise direct path.
         MirNativeIndexValue index = mir_emit_native_index_expr(mt, native_node);
         return mir_index_expr_nonnegative(mt, native_node)
-            ? mir_sanitize_native_index_nonnegative(mt, index)
-            : mir_sanitize_native_index(mt, index);
+            ? mir_sanitize_native_index(mt, index, true)
+            : mir_sanitize_native_index(mt, index, false);
     }
     // Returns the index in INT's native lane -- the double -- whatever lane the
     // expression itself was typed in. A subscript is semantically an int, but
@@ -12508,6 +12788,38 @@ static MIR_reg_t emit_index_value(MirTranspiler* mt, AstNode* field, bool use_na
         return emit_unbox(mt, value, LMD_TYPE_INT);
     }
     return value;
+}
+
+static MIR_reg_t emit_boxed_index_call(MirTranspiler* mt, AstFieldNode* field_node) {
+    MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+    MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
+    return emit_call_2(mt, "fn_index", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+}
+
+static MIR_reg_t emit_array_num_index_load(MirTranspiler* mt, AstFieldNode* field_node,
+        TypeId idx_tid, bool idx_use_native, bool elem_guarded,
+        MirIndexLoadPolicy policy) {
+    bool dense_index = mt->typed_array_inbounds_guard &&
+        mir_expr_proven_nonnull_under_dense_guard(mt, (AstNode*)field_node);
+    MIR_reg_t idx_native;
+    if (idx_tid == LMD_TYPE_ANY) {
+        MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
+        idx_native = emit_unbox(mt, boxed_idx, LMD_TYPE_INT);
+    } else if (dense_index) {
+        idx_native = mir_emit_dense_index_expr(mt, field_node->field);
+    } else {
+        idx_native = emit_index_value(mt, field_node->field, idx_use_native);
+    }
+    MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
+    MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
+    MIR_reg_t boxed_obj = elem_guarded ? emit_box_container(mt, obj_item) : (MIR_reg_t)0;
+    if (elem_guarded) policy.guard_kind = MIR_INDEX_GUARD_ELEM_TYPE;
+    return emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native, policy,
+        mir_index_expr_nonnegative(mt, field_node->field),
+        mir_typed_array_cache_for_object(mt, field_node->object),
+        dense_index);
 }
 
 // Runtime representation check for declaration-derived typed element access:
@@ -12543,6 +12855,37 @@ static void emit_array_num_elem_guard(MirTranspiler* mt, MIR_reg_t arr_ptr,
         MIR_new_reg_op(mt->ctx, elem_byte), MIR_new_int_op(mt->ctx, expected_elem)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_bail),
         MIR_new_reg_op(mt->ctx, elem_ok)));
+}
+
+static void emit_array_num_bounds_check(MirTranspiler* mt, MIR_reg_t arr_ptr,
+        MIR_reg_t idx_int, MIR_label_t oob_label) {
+    MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
+    MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
+        MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 0)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, oob_label),
+        MIR_new_reg_op(mt->ctx, neg_check)));
+    MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
+        MIR_new_reg_op(mt->ctx, idx_int), MIR_new_reg_op(mt->ctx, arr_len)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, oob_label),
+        MIR_new_reg_op(mt->ctx, ge_check)));
+}
+
+static MIR_reg_t emit_array_num_element_address(MirTranspiler* mt,
+        MIR_reg_t arr_ptr, MIR_reg_t idx_int) {
+    MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
+    MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
+        MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 3)));
+    MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
+        MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+    return elem_addr;
 }
 
 static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
@@ -12631,11 +12974,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         }
     }
     if (is_type_index) {
-        MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
-        MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
-        return emit_call_2(mt, "fn_index", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+        return emit_boxed_index_call(mt, field_node);
     }
 
     bool is_range_index = false;
@@ -12645,22 +12984,14 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     }
     if (is_range_index) {
         // range indexes are slices; never coerce the range pointer through integer fast paths.
-        MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
-        MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
-        return emit_call_2(mt, "fn_index", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+        return emit_boxed_index_call(mt, field_node);
     }
 
     // Boolean mask index: arr[mask] — when the index is a typed array, defer to
     // fn_index which routes ELEM_BOOL masks to the gather path. (Int fast paths
     // below would otherwise try to unbox the array as a scalar index.)
     if (idx_tid == LMD_TYPE_ARRAY_NUM) {
-        MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
-        MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
-        return emit_call_2(mt, "fn_index", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+        return emit_boxed_index_call(mt, field_node);
     }
 
     if (!idx_use_native &&
@@ -12668,11 +12999,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         // Flexible-int arithmetic is boxed as semantic `integer`. Runtime index
         // dispatch accepts it, then scalar element loads must be restored to the
         // native representation promised by get_effective_type().
-        MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
-        MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
-        MIR_reg_t result = emit_call_2(mt, "fn_index", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+        MIR_reg_t result = emit_boxed_index_call(mt, field_node);
         TypeId result_tid = get_effective_type(mt, (AstNode*)field_node);
         if (mir_is_native_scalar_value_type(result_tid)) {
             return emit_unbox(mt, result, result_tid);
@@ -12682,11 +13009,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
     if (!is_integer_type_id(idx_tid) && idx_tid != LMD_TYPE_ANY) {
         // range/string/type indexes have runtime semantics in fn_index; numeric fast paths corrupt them.
-        MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
-        MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
-        return emit_call_2(mt, "fn_index", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+        return emit_boxed_index_call(mt, field_node);
     }
 
     // Extract elem_type for ARRAY_NUM objects (used by fast paths below)
@@ -12718,11 +13041,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         // the boxed runtime read and decode only when the enclosing AST has a
         // matching scalar result contract. This keeps an unknown Item from
         // being re-boxed as an integer while preserving typed callers.
-        MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
-        MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
-        MIR_reg_t result = emit_call_2(mt, "fn_index", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+        MIR_reg_t result = emit_boxed_index_call(mt, field_node);
         TypeId result_tid = get_effective_type(mt, (AstNode*)field_node);
         if (mir_is_native_scalar_value_type(result_tid)) {
             return emit_unbox(mt, result, result_tid);
@@ -12737,20 +13056,6 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     if (obj_tid == LMD_TYPE_ARRAY_NUM &&
         is_integer_type_id(obj_elem_type) &&
         (is_integer_type_id(idx_tid) || idx_tid == LMD_TYPE_ANY)) {
-        bool dense_index = mt->typed_array_inbounds_guard &&
-            mir_expr_proven_nonnull_under_dense_guard(mt, (AstNode*)field_node);
-        MIR_reg_t idx_native;
-        if (idx_tid == LMD_TYPE_ANY) {
-            MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
-            idx_native = emit_unbox(mt, boxed_idx, LMD_TYPE_INT);
-        } else if (dense_index) {
-            idx_native = mir_emit_dense_index_expr(mt, field_node->field);
-        } else {
-            idx_native = emit_index_value(mt, field_node->field, idx_use_native);
-        }
-        MIR_reg_t obj_item = transpile_expr(mt, field_node->object);  // tagged container Item
-        MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);       // strip tag → raw ArrayNum*
-        MIR_reg_t boxed_obj = obj_elem_guarded ? emit_box_container(mt, obj_item) : (MIR_reg_t)0;
         MirIndexLoadPolicy policy = {
             // v5: ELEM_INT and ELEM_INT64 are BOTH i64 storage again.
             MIR_INDEX_STORAGE_ARRAY_NUM,
@@ -12762,30 +13067,14 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             obj_elem_guarded ? MIR_INDEX_SLOW_ITEM_AT : MIR_INDEX_SLOW_NONE,
             (uint8_t)(obj_elem_type == LMD_TYPE_INT64 ? ELEM_INT64 : ELEM_INT),
         };
-        return emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native, policy,
-            mir_index_expr_nonnegative(mt, field_node->field),
-            mir_typed_array_cache_for_object(mt, field_node->object),
-            dense_index);
+        return emit_array_num_index_load(mt, field_node, idx_tid, idx_use_native,
+            obj_elem_guarded, policy);
     }
 
     // Full-width unsigned arrays are destination-owned, but element reads use
     // the same raw-register representation as uint64 locals and parameters.
     if (obj_tid == LMD_TYPE_ARRAY_NUM && obj_elem_type == LMD_TYPE_UINT64 &&
         (is_integer_type_id(idx_tid) || idx_tid == LMD_TYPE_ANY)) {
-        bool dense_index = mt->typed_array_inbounds_guard &&
-            mir_expr_proven_nonnull_under_dense_guard(mt, (AstNode*)field_node);
-        MIR_reg_t idx_native;
-        if (idx_tid == LMD_TYPE_ANY) {
-            MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
-            idx_native = emit_unbox(mt, boxed_idx, LMD_TYPE_INT);
-        } else if (dense_index) {
-            idx_native = mir_emit_dense_index_expr(mt, field_node->field);
-        } else {
-            idx_native = emit_index_value(mt, field_node->field, idx_use_native);
-        }
-        MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
-        MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
-        MIR_reg_t boxed_obj = obj_elem_guarded ? emit_box_container(mt, obj_item) : (MIR_reg_t)0;
         MirIndexLoadPolicy policy = {
             MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_U64, 8,
             MIR_INDEX_RESULT_NATIVE_UINT64,
@@ -12794,10 +13083,8 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             obj_elem_guarded ? MIR_INDEX_SLOW_ITEM_AT : MIR_INDEX_SLOW_NONE,
             (uint8_t)ELEM_UINT64,
         };
-        return emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native, policy,
-            mir_index_expr_nonnegative(mt, field_node->field),
-            mir_typed_array_cache_for_object(mt, field_node->object),
-            dense_index);
+        return emit_array_num_index_load(mt, field_node, idx_tid, idx_use_native,
+            obj_elem_guarded, policy);
     }
 
     // ======================================================================
@@ -12810,20 +13097,6 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     if (obj_tid == LMD_TYPE_ARRAY_NUM &&
         obj_elem_type == LMD_TYPE_FLOAT &&
         (is_integer_type_id(idx_tid) || idx_tid == LMD_TYPE_ANY)) {
-        bool dense_index = mt->typed_array_inbounds_guard &&
-            mir_expr_proven_nonnull_under_dense_guard(mt, (AstNode*)field_node);
-        MIR_reg_t idx_native;
-        if (idx_tid == LMD_TYPE_ANY) {
-            MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
-            idx_native = emit_unbox(mt, boxed_idx, LMD_TYPE_INT);
-        } else if (dense_index) {
-            idx_native = mir_emit_dense_index_expr(mt, field_node->field);
-        } else {
-            idx_native = emit_index_value(mt, field_node->field, idx_use_native);
-        }
-        MIR_reg_t obj_item = transpile_expr(mt, field_node->object);  // tagged container Item
-        MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);       // strip tag → raw ArrayFloat*
-        MIR_reg_t boxed_obj = obj_elem_guarded ? emit_box_container(mt, obj_item) : (MIR_reg_t)0;
         MirIndexLoadPolicy policy = {
             MIR_INDEX_STORAGE_ARRAY_FLOAT, MIR_T_D, 8,
             MIR_INDEX_RESULT_NATIVE_FLOAT,
@@ -12832,115 +13105,16 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             obj_elem_guarded ? MIR_INDEX_SLOW_ITEM_AT : MIR_INDEX_SLOW_NONE,
             (uint8_t)ELEM_FLOAT64,
         };
-        return emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native, policy,
-            mir_index_expr_nonnegative(mt, field_node->field),
-            mir_typed_array_cache_for_object(mt, field_node->object),
-            dense_index);
+        return emit_array_num_index_load(mt, field_node, idx_tid, idx_use_native,
+            obj_elem_guarded, policy);
     }
 
     // ======================================================================
-    // FAST PATH 1b: ARRAY type + INT index — compile-time typed inline read
-    // The compile-time type is generic ARRAY, but when the AST records a
-    // nested element type (e.g., nested=INT for [0,4,2,...]), we know the
-    // runtime object is a typed array created by transpile_array.
-    // Runtime type check needed because fn_array_set may convert ArrayInt
-    // to generic Array in-place (e.g., arr[1] = 3.14 on an int array).
-    // P4-3.2: nested_int now returns NATIVE INT (matching get_effective_type).
+    // FAST PATH 1b: ARRAY type + INT index — compile-time typed inline read.
     // ======================================================================
     if (obj_tid == LMD_TYPE_ARRAY && is_integer_type_id(idx_tid)) {
-        // Check if AST nested type suggests this was originally an int array
-        Type* obj_type = field_node->object ? field_node->object->type : nullptr;
-        bool nested_int = false;
-        bool nested_bool = false;
-        TypeId tracked_elem_type = mir_tracked_array_element_type(mt, field_node->object);
-        if (obj_type && obj_type->type_id == LMD_TYPE_ARRAY) {
-            TypeArray* arr_type = (TypeArray*)obj_type;
-            nested_int = arr_type->nested && arr_type->nested->type_id == LMD_TYPE_INT;
-            nested_bool = arr_type->nested && arr_type->nested->type_id == LMD_TYPE_BOOL;
-        }
-
-        // P4-3.1: Check MirVarEntry elem_type (from fill() narrowing), unwrap PRIMARY
-        if (!nested_bool) {
-            nested_bool = tracked_elem_type == LMD_TYPE_BOOL;
-        }
-
-        if (tracked_elem_type == LMD_TYPE_FLOAT) {
-            MIR_reg_t idx_native = emit_index_value(mt, field_node->field, idx_use_native);
-            return emit_tracked_generic_float_array_load(mt, field_node, idx_native);
-        }
-
-        if (nested_int) {
-            // P4-3.2: Likely ArrayInt — inline read with runtime type check.
-            // Return type depends on whether elem_type is provably INT:
-            //   safe_native_int=true  → NATIVE INT (matching get_effective_type=INT)
-            //   safe_native_int=false → BOXED Item (AST nested can be wrong after mutation)
-            bool safe_native_int = false;
-            {
-                AstNode* obj_unwrapped = field_node->object;
-                while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
-                    obj_unwrapped = ((AstPrimaryNode*)obj_unwrapped)->expr;
-                if (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_IDENT) {
-                    AstIdentNode* obj_ident = (AstIdentNode*)obj_unwrapped;
-                    char oname[128];
-                    snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
-                    MirVarEntry* ov = find_var(mt, oname);
-                    // A module/static literal has no local witness, but its
-                    // immutable Item representation is still safe to decode;
-                    // mutable bindings require an explicit INT witness.
-                    if (!ov || ov->elem_type == LMD_TYPE_INT) safe_native_int = true;
-                }
-            }
-            MIR_reg_t idx_native = emit_index_value(mt, field_node->field, idx_use_native);
-            MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
-            MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
-
-            MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
-            MirIndexLoadPolicy policy = {
-                MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_I64, 8,   // v5: int lane storage
-                safe_native_int ? MIR_INDEX_RESULT_NATIVE_INT_FROM_DOUBLE
-                                : MIR_INDEX_RESULT_BOXED_INT_FROM_DOUBLE,
-                MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY_NUM,
-                MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_ITEM_AT,
-            };
-            MIR_reg_t indexed = emit_checked_index_load(mt, arr_ptr, boxed_obj,
-                idx_native, policy, mir_index_expr_nonnegative(mt, field_node->field),
-                mir_typed_array_cache_for_object(mt, field_node->object));
-            if (!safe_native_int && get_effective_type(mt, (AstNode*)field_node) ==
-                    LMD_TYPE_INT) {
-                // The guarded fallback returns a boxed Item when the generic
-                // array's element witness is not trusted. The AST still
-                // advertises int, so restore the lane here; otherwise the
-                // caller's normal int boxing pass boxes the Item bits as a
-                // second integer and turns an indexed value into infinity.
-                return emit_unbox(mt, indexed, LMD_TYPE_INT);
-            }
-            return indexed;
-
-        } else if (nested_bool) {
-            // ==============================================================
-            // P4-3.1: Bool arrays store boxed Items, so the common load keeps
-            // the generic-array guard and extracts the native low-bit result.
-            MIR_reg_t idx_native = emit_index_value(mt, field_node->field, idx_use_native);
-            MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
-            MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
-            MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
-            MirIndexLoadPolicy policy = {
-                MIR_INDEX_STORAGE_BOXED_ITEMS, MIR_T_I64, 8,
-                MIR_INDEX_RESULT_NATIVE_BOOL, MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY,
-                MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_ITEM_AT,
-            };
-            return emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native, policy,
-                mir_index_expr_nonnegative(mt, field_node->field),
-                mir_typed_array_cache_for_object(mt, field_node->object));
-
-        } else {
-            // Generic ARRAY — use item_at(boxed_obj, native_idx) to skip index dispatch
-            MIR_reg_t idx_native = emit_index_value(mt, field_node->field, idx_use_native);
-            MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
-            return emit_call_2(mt, "item_at", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_machine_index(mt, idx_native, LMD_TYPE_INT)));
-        }
+        MIR_reg_t idx_native = emit_index_value(mt, field_node->field, idx_use_native);
+        return emit_generic_array_index_load(mt, field_node, idx_native);
     }
 
     // ======================================================================
@@ -12952,92 +13126,9 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     // Otherwise: item_at(boxed_obj, idx). Returns BOXED Item.
     // ======================================================================
     if (obj_tid == LMD_TYPE_ARRAY && idx_tid == LMD_TYPE_ANY) {
-        Type* obj_type = field_node->object ? field_node->object->type : nullptr;
-        bool nested_int = false;
-        bool nested_bool = false;
-        TypeId tracked_elem_type = mir_tracked_array_element_type(mt, field_node->object);
-        if (obj_type && obj_type->type_id == LMD_TYPE_ARRAY) {
-            TypeArray* arr_type = (TypeArray*)obj_type;
-            nested_int = arr_type->nested && arr_type->nested->type_id == LMD_TYPE_INT;
-            nested_bool = arr_type->nested && arr_type->nested->type_id == LMD_TYPE_BOOL;
-        }
-
-        // P4-3.1: Check MirVarEntry elem_type (from fill() narrowing), unwrap PRIMARY
-        if (!nested_bool) {
-            nested_bool = tracked_elem_type == LMD_TYPE_BOOL;
-        }
-
         MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
         MIR_reg_t idx_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);  // it2i
-
-        if (tracked_elem_type == LMD_TYPE_FLOAT) {
-            return emit_tracked_generic_float_array_load(mt, field_node, idx_native);
-        }
-
-        if (nested_int) {
-            // P4-3.2: Likely ArrayInt — inline read with runtime type check.
-            // Return NATIVE INT only when elem_type proven (safe_native_int);
-            // otherwise return BOXED Item (AST nested may be wrong after mutation).
-            bool safe_native_int = false;
-            {
-                AstNode* obj_unwrapped = field_node->object;
-                while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
-                    obj_unwrapped = ((AstPrimaryNode*)obj_unwrapped)->expr;
-                if (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_IDENT) {
-                    AstIdentNode* obj_ident = (AstIdentNode*)obj_unwrapped;
-                    char oname[128];
-                    snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
-                    MirVarEntry* ov = find_var(mt, oname);
-                    if (!ov || ov->elem_type == LMD_TYPE_INT) safe_native_int = true;
-                }
-            }
-            MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
-            MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
-
-            MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
-            MirIndexLoadPolicy policy = {
-                MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_I64, 8,   // v5: int lane storage
-                safe_native_int ? MIR_INDEX_RESULT_NATIVE_INT_FROM_DOUBLE
-                                : MIR_INDEX_RESULT_BOXED_INT_FROM_DOUBLE,
-                MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY_NUM,
-                MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_ITEM_AT,
-            };
-            MIR_reg_t indexed = emit_checked_index_load(mt, arr_ptr, boxed_obj,
-                idx_native, policy,
-                mir_index_expr_nonnegative(mt, field_node->field),
-                mir_typed_array_cache_for_object(mt, field_node->object));
-            if (!safe_native_int && get_effective_type(mt, (AstNode*)field_node) ==
-                    LMD_TYPE_INT) {
-                // The guarded fallback returns an Item for an unproven generic
-                // array lane. Decode it before the caller's normal int boxing;
-                // otherwise the Item tag is reinterpreted as integer payload.
-                return emit_unbox(mt, indexed, LMD_TYPE_INT);
-            }
-            return indexed;
-
-        } else if (nested_bool) {
-            // ==============================================================
-            // P4-3.1: ANY indexes are unboxed above; preserve the same boxed
-            // storage, runtime guard, native-bool, and ItemNull policies.
-            MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
-            MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
-            MIR_reg_t boxed_obj = emit_box_container(mt, obj_item);
-            MirIndexLoadPolicy policy = {
-                MIR_INDEX_STORAGE_BOXED_ITEMS, MIR_T_I64, 8,
-                MIR_INDEX_RESULT_NATIVE_BOOL, MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY,
-                MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_ITEM_AT,
-            };
-            return emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native, policy,
-                mir_index_expr_nonnegative(mt, field_node->field),
-                mir_typed_array_cache_for_object(mt, field_node->object));
-
-        } else {
-            // Generic ARRAY, ANY index — item_at(boxed_obj, it2i(field))
-            MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
-            return emit_call_2(mt, "item_at", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_machine_index(mt, idx_native, LMD_TYPE_INT)));
-        }
+        return emit_generic_array_index_load(mt, field_node, idx_native);
     }
 
     // ======================================================================
@@ -13160,7 +13251,8 @@ static bool mir_call_may_suspend(AstCallNode* call_node) {
     return callee->analysis && callee->analysis->may_await;
 }
 
-static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
+static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
+        TypeId native_consumer_tid) {
     AstNode* fn_expr = call_node->function;
 
     if (call_node->is_proc_method) {
@@ -13425,10 +13517,68 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             TypeId a1_tid = get_effective_type(mt, arg);
             if (a1_tid == LMD_TYPE_STRING) {
                 MIR_reg_t a1 = emit_text_pointer_lane(mt, transpile_expr(mt, arg), a1_tid);
-                MIR_reg_t boxed = emit_call_1(mt, "fn_ord_str_item", MIR_T_I64,
+                // The raw ordinal helper already has the complete string
+                // decoding semantics; convert its documented -1 absence
+                // sentinel to IntLane's null carrier here instead of building
+                // and immediately unboxing an Item for every character.
+                MIR_reg_t raw = emit_call_1(mt, "fn_ord_str", MIR_T_I64,
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
-                emit_return_if_item_error(mt, boxed);
-                return emit_unbox(mt, boxed, LMD_TYPE_INT);
+                MIR_reg_t result = new_reg(mt, "ord_lane", MIR_T_I64);
+                MIR_label_t l_value = new_label(mt);
+                MIR_label_t l_done = new_label(mt);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                    MIR_new_label_op(mt->ctx, l_value),
+                    MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, -1)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, INT_LANE_NULL)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, l_done)));
+                emit_label(mt, l_value);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, raw)));
+                emit_label(mt, l_done);
+                return result;
+            }
+        }
+
+        // ==== Native numeric conversions on proved scalar lanes ====
+        // The public helpers return Items for dynamic/vector inputs, but a
+        // concrete scalar already owns the exact carrier that the conversion
+        // needs. Keep the checked generic path for every other type; these
+        // arms remove only the redundant Item round-trip (S4.5.3, D2.2.2).
+        if (arg_count == 1 && info->fn == SYSFUNC_INT) {
+            arg = call_node->argument;
+            TypeId arg_tid = get_effective_type(mt, arg);
+            if (arg_tid == LMD_TYPE_INT) {
+                // int() consumes the native lane. Reopen nested exact int
+                // arithmetic instead of feeding its ordinary boxed Item to
+                // the conversion (S4.5.3, D2.2.2).
+                return transpile_native_int_expr(mt, arg);
+            }
+            if (arg_tid == LMD_TYPE_FLOAT) {
+                return emit_double_to_int_lane(mt, transpile_expr(mt, arg)).r;
+            }
+        }
+        if (arg_count == 1 && info->fn == SYSFUNC_FLOAT) {
+            arg = call_node->argument;
+            TypeId arg_tid = get_effective_type(mt, arg);
+            if (arg_tid == LMD_TYPE_FLOAT) return transpile_expr(mt, arg);
+            if (arg_tid == LMD_TYPE_INT) {
+                return emit_int_lane_to_double(mt,
+                    emit_int_native_lane_typed(mt,
+                        transpile_native_int_expr(mt, arg), arg_tid));
+            }
+        }
+        if (arg_count == 1 && info->fn == SYSFUNC_TRUNC) {
+            arg = call_node->argument;
+            TypeId arg_tid = get_effective_type(mt, arg);
+            if (arg_tid == LMD_TYPE_INT) return transpile_native_int_expr(mt, arg);
+            if (arg_tid == LMD_TYPE_FLOAT && info->native_c_name &&
+                    info->native_func_ptr) {
+                MIR_reg_t value = transpile_expr(mt, arg);
+                return emit_call_1(mt, info->native_c_name, MIR_T_D,
+                    MIR_T_D, MIR_new_reg_op(mt->ctx, value));
             }
         }
 
@@ -13436,7 +13586,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
         // band/bor/bxor → MIR_AND/MIR_OR/MIR_XOR (single instruction, no function call)
         // shl/shr → guarded: negative count is error; b >= 64 yields 0
         // bnot → MIR_XOR with -1 (equivalent to ~a)
-        if (info->fn == SYSFUNC_USHR) {
+        if (info->fn == SYSFUNC_USHR && !mir_bitwise_u32_path(call_node)) {
             arg = call_node->argument;
             MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
             arg = arg->next;
@@ -13450,13 +13600,14 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
         }
         if (info->fn == SYSFUNC_BAND || info->fn == SYSFUNC_BOR ||
             info->fn == SYSFUNC_BXOR || info->fn == SYSFUNC_SHL ||
-            info->fn == SYSFUNC_SHR) {
+            info->fn == SYSFUNC_SHR || info->fn == SYSFUNC_USHR) {
             arg = call_node->argument;
+            bool native_u32_path = mir_bitwise_u32_path(call_node);
             LambdaNumericDecision decision;
             bool native_int_path = false;
             bool classified = mir_bitwise_binary_decision(call_node,
                 &decision, &native_int_path);
-            if (!native_int_path) {
+            if (!native_int_path && !native_u32_path) {
                 // Full/sized lanes and bigint results need the shared runtime
                 // classifier; MIR register width alone cannot encode the domain.
                 const char* boxed_fn = NULL;
@@ -13483,6 +13634,14 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                             ? LMD_TYPE_UINT64 : LMD_TYPE_INT64);
                 }
                 return boxed_result;
+            }
+
+            if (native_u32_path) {
+                // Sized u32 arithmetic already has a self-describing Item
+                // contract. Keep its 32-bit mask and tag in one emitter so
+                // crypto callers never round-trip each operation through the
+                // boxed numeric helpers (S4.1, D2.4).
+                return mir_emit_u32_bitwise(mt, call_node);
             }
 
             MIR_reg_t a1 = transpile_expr(mt, arg);
@@ -13877,46 +14036,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             int arg_count = 0;
             while (arg) { arg_count++; arg = arg->next; }
 
-            // Build resolved_args with named arg reordering if needed
             AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-            bool has_named_args = false;
-            arg = call_node->argument;
-            while (arg) {
-                if (arg->node_type == AST_NODE_NAMED_ARG) has_named_args = true;
-                arg = arg->next;
-            }
-
-            if (has_named_args) {
-                int positional_idx = 0;
-                arg = call_node->argument;
-                while (arg) {
-                    if (arg->node_type == AST_NODE_NAMED_ARG) {
-                        AstNamedNode* named_arg = (AstNamedNode*)arg;
-                        int param_idx = 0;
-                        AstNamedNode* param = fn_node->param;
-                        while (param) {
-                            if (param->name && named_arg->name &&
-                                param->name->len == named_arg->name->len &&
-                                memcmp(param->name->chars, named_arg->name->chars, param->name->len) == 0) {
-                                if (param_idx < LAMBDA_MAX_FUNCTION_ARGS) resolved_args[param_idx] = named_arg->as;
-                                break;
-                            }
-                            param_idx++;
-                            param = (AstNamedNode*)((AstNode*)param)->next;
-                        }
-                    } else {
-                        while (positional_idx < LAMBDA_MAX_FUNCTION_ARGS && resolved_args[positional_idx]) positional_idx++;
-                        if (positional_idx < LAMBDA_MAX_FUNCTION_ARGS) resolved_args[positional_idx++] = arg;
-                    }
-                    arg = arg->next;
-                }
-            } else {
-                arg = call_node->argument;
-                for (int i = 0; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
-                    resolved_args[i] = arg;
-                    arg = arg->next;
-                }
-            }
+            mir_resolve_call_args(call_node->argument, fn_node, arg_count, resolved_args);
 
             // Get expected param count
             int expected_params = arg_count;
@@ -13951,30 +14072,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             // Handle variadic args
             bool call_is_variadic = call_fn_type && call_fn_type->is_variadic;
             if (call_is_variadic && ai < LAMBDA_MAX_FUNCTION_ARGS) {
-                int extra_count = arg_count - expected_params;
-                if (extra_count < 0) extra_count = 0;
-                MIR_reg_t vargs_reg;
-                if (extra_count == 0) {
-                    vargs_reg = new_reg(mt, "vargs", MIR_T_I64);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, vargs_reg),
-                        MIR_new_int_op(mt->ctx, 0)));
-                } else {
-                    vargs_reg = emit_call_0(mt, "list", MIR_T_I64);
-                    int vargs_root = create_gc_root_slot(mt, vargs_reg);
-                    for (int i = expected_params; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
-                        if (resolved_args[i]) {
-                            MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
-                            int val_root = create_gc_root_slot(mt, val);
-                            val = load_gc_root_slot(mt, val_root, "varg_val");
-                            vargs_reg = load_gc_root_slot(mt, vargs_root, "vargs_live");
-                            emit_call_void_2(mt, "list_push",
-                                MIR_T_P, MIR_new_reg_op(mt->ctx, vargs_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-                        }
-                    }
-                    vargs_reg = load_gc_root_slot(mt, vargs_root, "vargs_live");
-                }
+                MIR_reg_t vargs_reg = emit_variadic_args(mt, resolved_args,
+                    expected_params, arg_count);
                 arg_ops[ai] = MIR_new_reg_op(mt->ctx, vargs_reg);
                 arg_root_slots[ai] = create_gc_root_slot(mt, vargs_reg);
                 arg_vars[ai] = {MIR_T_P, "va", 0};
@@ -14264,12 +14363,9 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             }
             bool call_is_variadic = call_fn_type && call_fn_type->is_variadic;
 
-            // Check if any arguments are named
-            bool has_named_args = false;
             AstNode* arg = call_node->argument;
             int arg_count = 0;
             while (arg) {
-                if (arg->node_type == AST_NODE_NAMED_ARG) has_named_args = true;
                 arg_count++;
                 arg = arg->next;
             }
@@ -14277,44 +14373,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             // and the function is NOT variadic (variadic funcs collect extras into vargs)
             if (expected_params == 0 && !call_is_variadic) expected_params = arg_count;
 
-            // Build resolved_args array: maps each parameter position to its argument expression
             AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-
-            if (has_named_args && fn_def) {
-                // Reorder: named args go to their param positions, positional fill sequentially
-                int positional_idx = 0;
-                arg = call_node->argument;
-                while (arg) {
-                    if (arg->node_type == AST_NODE_NAMED_ARG) {
-                        AstNamedNode* named_arg = (AstNamedNode*)arg;
-                        // Find param index by name
-                        int param_idx = 0;
-                        AstNamedNode* param = fn_def->param;
-                        while (param) {
-                            if (param->name && named_arg->name &&
-                                param->name->len == named_arg->name->len &&
-                                memcmp(param->name->chars, named_arg->name->chars, param->name->len) == 0) {
-                                if (param_idx < LAMBDA_MAX_FUNCTION_ARGS) resolved_args[param_idx] = named_arg->as;
-                                break;
-                            }
-                            param_idx++;
-                            param = (AstNamedNode*)((AstNode*)param)->next;
-                        }
-                    } else {
-                        // Skip positional slots already filled by named args
-                        while (positional_idx < LAMBDA_MAX_FUNCTION_ARGS && resolved_args[positional_idx]) positional_idx++;
-                        if (positional_idx < LAMBDA_MAX_FUNCTION_ARGS) resolved_args[positional_idx++] = arg;
-                    }
-                    arg = arg->next;
-                }
-            } else {
-                // Simple positional: fill in order
-                arg = call_node->argument;
-                for (int i = 0; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
-                    resolved_args[i] = arg;
-                    arg = arg->next;
-                }
-            }
+            mir_resolve_call_args(call_node->argument, fn_def, arg_count, resolved_args);
 
             // Phase 4: Check if target function has a native version for optimized calling
             NativeFuncInfo* call_nfi = fn_mangled ? find_native_func_info(mt, fn_mangled) : nullptr;
@@ -14350,6 +14410,19 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     TypeId declared_argument_tid = resolved_args[i] &&
                         resolved_args[i]->type
                         ? mir_decl_type_id(resolved_args[i]->type) : LMD_TYPE_ANY;
+                    bool typed_array_witness_param =
+                        mir_typed_array_witness_mask(call_nfi->fn_node) &
+                        ((uint64_t)1 << i);
+                    // A raw typed-array edge is valid only after the caller has
+                    // proved the packed representation. Let the public wrapper
+                    // perform the conversion for open or missing arguments;
+                    // otherwise an Item would be consumed as an ArrayNum
+                    // pointer by the native body (D3.3.1, D3.3.3).
+                    if (typed_array_witness_param &&
+                            (!resolved_args[i] || argument_tid != LMD_TYPE_ARRAY_NUM)) {
+                        routed_to_boxed_entry = true;
+                        break;
+                    }
                     bool declared_semantic_match =
                         mir_param_is_declared(call_nfi->fn_node, i) &&
                         (declared_argument_tid == mir_native_param_type(call_nfi, i) ||
@@ -14398,6 +14471,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             MIR_op_t arg_ops[LAMBDA_MAX_FUNCTION_ARGS];
             MIR_var_t arg_vars[LAMBDA_MAX_FUNCTION_ARGS];
             int arg_root_slots[LAMBDA_MAX_FUNCTION_ARGS];
+            bool typed_array_witness_args[LAMBDA_MAX_FUNCTION_ARGS] = {false};
+            uint64_t array_witness_mask = 0;
             for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) arg_root_slots[i] = -1;
             int ai = 0;
             AstNamedNode* param_iter = fn_def ? fn_def->param : NULL;
@@ -14415,7 +14490,34 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 bool short_circuit_error = resolved_args[i] &&
                     mir_param_short_circuits_item_error(type_param) &&
                     mir_argument_may_return_item_error(resolved_args[i]);
-                if (native_call && i < call_nfi->param_count &&
+                bool typed_array_witness_param = native_call &&
+                    i < call_nfi->param_count &&
+                    (mir_typed_array_witness_mask(call_nfi->fn_node) &
+                        ((uint64_t)1 << i)) != 0 && resolved_args[i] &&
+                    get_effective_type(mt, resolved_args[i]) == LMD_TYPE_ARRAY_NUM;
+                if (typed_array_witness_param) {
+                    // Keep the Item rooted until all arguments have been
+                    // evaluated, then strip its tag at the call boundary.
+                    // The witness bit tells the raw body that this physical
+                    // I64 is already an ArrayNum pointer (D3.3.1, D3.3.3).
+                    TypeParam* witness_param = type_param &&
+                        type_param->is_var_param ? type_param : NULL;
+                    MirVarEntry* witness_root = witness_param
+                        ? mir_direct_root_binding(mt, resolved_args[i]) : NULL;
+                    if (witness_root && witness_root->cow_marked &&
+                            mir_root_may_need_cow(witness_root)) {
+                        // A var callee writes through the raw pointer. Detach
+                        // the caller-owned root before publishing that pointer
+                        // so the direct edge preserves value semantics.
+                        mir_prepare_cow_root(mt, witness_root);
+                    }
+                    MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
+                    arg_root_slots[i] = create_gc_root_slot(mt, val);
+                    arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
+                    arg_vars[i] = {MIR_T_I64, "array", 0};
+                    typed_array_witness_args[i] = true;
+                    array_witness_mask |= (uint64_t)1 << i;
+                } else if (native_call && i < call_nfi->param_count &&
                     (!parameter_contract || !lambda_type_accepts_error(parameter_contract)) &&
                     mir_native_func_param_uses_lane(call_nfi, i)) {
                     // Phase 4: Native param — pass native value directly (skip boxing)
@@ -14648,35 +14750,23 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             }
             ai = expected_params;
 
+            uint64_t callee_array_witness_mask = native_call && call_nfi
+                ? mir_typed_array_witness_mask(call_nfi->fn_node) : 0;
+            if (callee_array_witness_mask && ai < LAMBDA_MAX_FUNCTION_ARGS) {
+                // The mask is an ABI witness, not a semantic value.  Keep it
+                // separate from the user arguments so each raw array lane can
+                // retain the normal boxed fallback when its bit is clear.
+                arg_ops[ai] = MIR_new_int_op(mt->ctx,
+                    (int64_t)array_witness_mask);
+                arg_vars[ai] = {MIR_T_I64, "array_witness", 0};
+                arg_root_slots[ai] = -1;
+                ai++;
+            }
+
             // Handle variadic arguments: collect extra args into a List*
             if (call_is_variadic && ai < LAMBDA_MAX_FUNCTION_ARGS) {
-                int extra_count = arg_count - expected_params;
-                if (extra_count < 0) extra_count = 0;
-
-                MIR_reg_t vargs_reg;
-                if (extra_count == 0) {
-                    // No variadic args: pass null pointer
-                    vargs_reg = new_reg(mt, "vargs", MIR_T_I64);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, vargs_reg),
-                        MIR_new_int_op(mt->ctx, 0)));
-                } else {
-                    // Create list and push extra args
-                    vargs_reg = emit_call_0(mt, "list", MIR_T_I64);
-                    int vargs_root = create_gc_root_slot(mt, vargs_reg);
-                    for (int i = expected_params; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
-                        if (resolved_args[i]) {
-                            MIR_reg_t val = transpile_box_item(mt, resolved_args[i]);
-                            int val_root = create_gc_root_slot(mt, val);
-                            val = load_gc_root_slot(mt, val_root, "varg_val");
-                            vargs_reg = load_gc_root_slot(mt, vargs_root, "vargs_live");
-                            emit_call_void_2(mt, "list_push",
-                                MIR_T_P, MIR_new_reg_op(mt->ctx, vargs_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-                        }
-                    }
-                    vargs_reg = load_gc_root_slot(mt, vargs_root, "vargs_live");
-                }
+                MIR_reg_t vargs_reg = emit_variadic_args(mt, resolved_args,
+                    expected_params, arg_count);
                 arg_ops[ai] = MIR_new_reg_op(mt->ctx, vargs_reg);
                 arg_root_slots[ai] = create_gc_root_slot(mt, vargs_reg);
                 arg_vars[ai] = {MIR_T_P, "va", 0};
@@ -14708,9 +14798,17 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             MIR_op_t call_ops[LAMBDA_MAX_FUNCTION_ARGS];
             for (int i = 0; i < ai; i++) {
                 call_types[i] = arg_vars[i].type;
-                call_ops[i] = arg_root_slots[i] >= 0
-                    ? MIR_new_reg_op(mt->ctx, load_gc_root_slot(mt,
-                        arg_root_slots[i], "call_arg")) : arg_ops[i];
+                if (typed_array_witness_args[i]) {
+                    MIR_reg_t boxed = load_gc_root_slot(mt, arg_root_slots[i],
+                        "call_array_item");
+                    MIR_reg_t raw = emit_unbox_container(mt, boxed);
+                    call_types[i] = MIR_T_I64;
+                    call_ops[i] = MIR_new_reg_op(mt->ctx, raw);
+                } else {
+                    call_ops[i] = arg_root_slots[i] >= 0
+                        ? MIR_new_reg_op(mt->ctx, load_gc_root_slot(mt,
+                            arg_root_slots[i], "call_arg")) : arg_ops[i];
+                }
             }
 
             int direct_capture_count = 0;
@@ -14809,6 +14907,15 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             // may execute arbitrary source semantics, so it must remain Item.
             TypeId call_tid = routed_to_inferred_slow_body ? LMD_TYPE_ANY
                 : get_effective_type(mt, (AstNode*)call_node);
+            if (native_consumer_tid != LMD_TYPE_ANY &&
+                    (call_native_return ||
+                     mir_direct_native_return_type(mt, call_node) ==
+                         native_consumer_tid)) {
+                // The surrounding native arithmetic has already proved this
+                // call's result carrier. Override a conservative slow-entry
+                // type join so the raw result is not boxed before consumption.
+                call_tid = native_consumer_tid;
+            }
             bool value_function_scalar_return = call_nfi && fn_def &&
                 fn_def->node_type != AST_NODE_PROC &&
                 mir_is_native_scalar_value_type(get_effective_type(mt,
@@ -15056,12 +15163,12 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
 
 static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
     bool split = mt->in_async_proc && mir_call_may_suspend(call_node);
-    if (!split) return transpile_call_raw(mt, call_node);
+    if (!split) return transpile_call_raw(mt, call_node, LMD_TYPE_ANY);
     int state = ++mt->async_next_state;
     if (state > mt->async_state_count || !mt->async_state_labels) {
         log_error("concurrency MIR: await-state count mismatch at state %d/%d",
             state, mt->async_state_count);
-        return transpile_call_raw(mt, call_node);
+        return transpile_call_raw(mt, call_node, LMD_TYPE_ANY);
     }
 
     int saved_call_state = mt->async_call_state;
@@ -15074,7 +15181,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
     mt->async_call_target = call_node;
     bool saved_async_call = mt->emitting_async_call;
     mt->emitting_async_call = true;
-    MIR_reg_t result = transpile_call_raw(mt, call_node);
+    MIR_reg_t result = transpile_call_raw(mt, call_node, LMD_TYPE_ANY);
     mt->emitting_async_call = saved_async_call;
     int spill_count = mt->async_call_spill_count;
     bool resume_emitted = mt->async_call_resume_emitted;
@@ -15775,6 +15882,26 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
         // treat them as compatible for direct move. This prevents re-boxing
         // when e.g. len() (INT64) result participates in INT arithmetic.
         bool same_int_family = is_integer_type_id(var_tid) && is_integer_type_id(val_tid);
+        if ((var_tid == LMD_TYPE_ARRAY_NUM || var_tid == LMD_TYPE_ARRAY) &&
+                assign_value && assign_value->node_type == AST_NODE_IDENT) {
+            // Re-establish a row's element witness only from another binding
+            // that still owns the same contract. An unknown or widened source
+            // deliberately clears it so a later load keeps its runtime guard.
+            MirVarEntry* source_var = mir_direct_root_binding(mt, assign_value);
+            if (source_var && source_var->elem_type != LMD_TYPE_ANY) {
+                var->elem_type = source_var->elem_type;
+                var->elem_type_guarded = source_var->elem_type_guarded;
+            } else {
+                var->elem_type = LMD_TYPE_ANY;
+                var->elem_type_guarded = false;
+            }
+        } else if (var_tid == LMD_TYPE_ARRAY_NUM || var_tid == LMD_TYPE_ARRAY) {
+            // Calls, literals, and computed aliases have no surviving storage
+            // witness at this point; force later indexing through its checked
+            // representation path rather than reusing the old row lane.
+            var->elem_type = LMD_TYPE_ANY;
+            var->elem_type_guarded = false;
+        }
         if (var_tid == LMD_TYPE_NUM_SIZED && var->num_type == NUM_UINT32 &&
                 assign->value && assign->value->node_type == AST_NODE_BINARY &&
                 mir_binary_is_exact_u32_result((AstBinaryNode*)assign->value)) {
@@ -15795,6 +15922,27 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
             MIR_reg_t raw = emit_unbox(mt, coerced, LMD_TYPE_UINT64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, var->reg),
                 MIR_new_reg_op(mt->ctx, raw)));
+        } else if ((var_tid == LMD_TYPE_ARRAY_NUM || var_tid == LMD_TYPE_ARRAY) &&
+                   val_tid == LMD_TYPE_ANY && assign_value &&
+                   assign_value->node_type == AST_NODE_IDENT) {
+            MirVarEntry* source_var = mir_direct_root_binding(mt, assign_value);
+            if (source_var && (source_var->type_id == LMD_TYPE_ARRAY_NUM ||
+                    source_var->type_id == LMD_TYPE_ARRAY)) {
+                // cow_bind_var returns the same tagged container carrier. Keep
+                // the target's array type instead of widening it to ANY, so a
+                // same-contract row swap can retain its element witness.
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, val)));
+            } else {
+                MIR_reg_t boxed = emit_box(mt, val, val_tid);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, boxed)));
+                var->type_id = LMD_TYPE_ANY;
+                var->elem_type = LMD_TYPE_ANY;
+                var->elem_type_guarded = false;
+            }
         } else if (var_tid == val_tid || same_int_family ||
             (var_tid == LMD_TYPE_ANY && val_tid == LMD_TYPE_ANY)) {
             // Same type (or INT/INT64 compatible): direct move.
@@ -16218,6 +16366,34 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
 
     // Boxed/unknown expressions already produce Item registers.
     if (tid == LMD_TYPE_ANY || tid == LMD_TYPE_ERROR || tid == LMD_TYPE_NULL) {
+        if (node->node_type == AST_NODE_BINARY) {
+            AstBinaryNode* unknown_binary = (AstBinaryNode*)node;
+            int unknown_op = unknown_binary->op;
+            bool unknown_is_cmp = (unknown_op >= OPERATOR_EQ &&
+                unknown_op <= OPERATOR_GE) ||
+                is_elementwise_comparison_op(unknown_op);
+            if (unknown_is_cmp && !comparison_vectorizes(unknown_op,
+                    mir_native_arithmetic_operand_type(mt, unknown_binary->left),
+                    mir_native_arithmetic_operand_type(mt, unknown_binary->right)) &&
+                    !is_elementwise_comparison_op(unknown_op)) {
+                TypeId unknown_left = mir_native_arithmetic_operand_type(mt,
+                    unknown_binary->left);
+                TypeId unknown_right = mir_native_arithmetic_operand_type(mt,
+                    unknown_binary->right);
+                // Native comparisons publish a bool lane even when type
+                // inference widened their result to ANY; box that lane before
+                // the unknown-carrier fast return (S4.1.2, D2.2.2).
+                if (unknown_op == OPERATOR_EQ || unknown_op == OPERATOR_NE ||
+                        (is_native_numeric_type_id(unknown_left) &&
+                         is_native_numeric_type_id(unknown_right))) {
+                    return emit_box_bool(mt, val);
+                }
+            }
+            if (unknown_op == OPERATOR_IS || unknown_op == OPERATOR_IS_NAN ||
+                    unknown_op == OPERATOR_IN || unknown_op == OPERATOR_AT) {
+                return emit_box_bool(mt, val);
+            }
+        }
         if (MIR_reg_type(mt->ctx, val, mt->em.func) == MIR_T_D) {
             // An unknown numeric expression may still be emitted in the
             // double lane. Returning those raw IEEE bits as an Item makes
@@ -16239,8 +16415,12 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // everything else goes through boxed runtime and returns an already-boxed Item.
     if (node->node_type == AST_NODE_BINARY) {
         AstBinaryNode* bi = (AstBinaryNode*)node;
-        TypeId lt = get_effective_type(mt, bi->left);
-        TypeId rt = get_effective_type(mt, bi->right);
+        // Reuse the same operand witness as transpile_binary_out. A numeric
+        // comparison can have an ANY result in the AST while still emitting
+        // a native bool lane; consulting only the semantic result type then
+        // leaks 0/1 into a boxed collection (S4.1.2, D2.2.2).
+        TypeId lt = mir_native_arithmetic_operand_type(mt, bi->left);
+        TypeId rt = mir_native_arithmetic_operand_type(mt, bi->right);
         bool both_int = (lt == LMD_TYPE_INT) && (rt == LMD_TYPE_INT);
         bool both_float = (lt == LMD_TYPE_FLOAT) && (rt == LMD_TYPE_FLOAT);
         bool int_float = (lt == LMD_TYPE_INT && rt == LMD_TYPE_FLOAT) ||
@@ -16558,18 +16738,43 @@ static MIR_reg_t transpile_const_type(MirTranspiler* mt, int type_index) {
 // A declaration-derived raw store must not turn a failed representation guard
 // into an unchecked generic write. Re-enter the same transactional boundary as
 // the non-native path, then publish its replacement root before later reads.
+static MIR_reg_t emit_checked_array_store(MirTranspiler* mt, const char* checked_set,
+        MIR_reg_t owner, MIR_reg_t index, MIR_reg_t value, Type* expected,
+        const char* boundary, const LaneStorageDesc* lane_hint) {
+    if (!lane_hint) {
+        return emit_call_5(mt, checked_set, MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, index),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+            MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)expected),
+            MIR_T_P, MIR_new_reg_op(mt->ctx,
+                emit_load_string_literal(mt, boundary)));
+    }
+    const char* lane_set = strcmp(checked_set, "lambda_array_set_checked_inplace") == 0
+        ? "lambda_array_set_checked_inplace_lane" : "lambda_array_set_checked_lane";
+    return emit_call_8(mt, lane_set, MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, index),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)expected),
+        MIR_T_P, MIR_new_reg_op(mt->ctx, emit_load_string_literal(mt, boundary)),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)lane_hint->kind),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)lane_hint->nullable),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)lane_hint->byte_size));
+}
+
 static MIR_reg_t emit_typed_array_store_fallback(MirTranspiler* mt,
         MIR_reg_t owner, TypeId owner_tid, MIR_reg_t index, MIR_reg_t value,
         MirVarEntry* root) {
     const char* checked_set = (root->is_var_param || root->is_proc_param)
         ? "lambda_array_set_checked_inplace" : "lambda_array_set_checked";
-    MIR_reg_t replacement = emit_call_5(mt, checked_set, MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, index),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
-        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)root->full_type),
-        MIR_T_P, MIR_new_reg_op(mt->ctx,
-            emit_load_string_literal(mt, "typed array representation fallback")));
+    Type* element_contract = mir_array_occurrence_element(root->full_type);
+    LaneStorageDesc lane_desc = {};
+    bool has_lane_contract = element_contract &&
+        lambda_type_lane_storage_desc(element_contract, &lane_desc);
+    MIR_reg_t replacement = emit_checked_array_store(mt, checked_set, owner, index, value,
+        root->full_type, "typed array representation fallback",
+        has_lane_contract ? &lane_desc : NULL);
     emit_return_if_item_error(mt, replacement);
     // A successful checked write preserves this non-nullable typed-array root.
     // Keep the raw pointer carrier in sync with the replacement returned by COW.
@@ -16582,6 +16787,25 @@ static MIR_reg_t emit_typed_array_store_fallback(MirTranspiler* mt,
     root->cow_children_may_be_shared = true;
     update_gc_root_slot(mt, root);
     return replacement;
+}
+
+static void emit_array_num_store_fallback(MirTranspiler* mt,
+        MIR_reg_t obj, TypeId obj_tid, MIR_reg_t arr_ptr, MIR_reg_t index,
+        MIR_reg_t boxed_value, MirVarEntry* root, bool guarded,
+        MIR_reg_t result_reg) {
+    MIR_reg_t result;
+    if (guarded && root && root->full_type) {
+        result = emit_typed_array_store_fallback(mt, obj, obj_tid, index,
+            boxed_value, root);
+    } else {
+        result = emit_call_3(mt, "fn_array_set", MIR_T_I64,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, index),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_value));
+    }
+    // keep the branch result in one register so an OOB error reaches T^ propagation
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg),
+        MIR_new_reg_op(mt->ctx, result)));
 }
 
 static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
@@ -16748,8 +16972,9 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 bool index_is_integral = is_integer_type_id(index_type) ||
                     mir_index_expr_is_native_int(mt, ca->key);
                 LaneStorageDesc lane_desc = {};
-                bool nullable_native_lane = element_contract &&
-                    lambda_type_lane_storage_desc(element_contract, &lane_desc) &&
+                bool has_lane_contract = element_contract &&
+                    lambda_type_lane_storage_desc(element_contract, &lane_desc);
+                bool nullable_native_lane = has_lane_contract &&
                     (lane_desc.kind == LANE_STORAGE_POINTER || (lane_desc.nullable &&
                     (lane_desc.kind == LANE_STORAGE_INT || lane_desc.kind == LANE_STORAGE_BOOL ||
                      lane_desc.kind == LANE_STORAGE_FLOAT64 || lane_desc.kind == LANE_STORAGE_ITEM ||
@@ -16780,13 +17005,10 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                     MIR_reg_t owner = emit_box(mt, typed_root->reg, typed_root->type_id);
                     const char* checked_set = writes_through_caller
                         ? "lambda_array_set_checked_inplace" : "lambda_array_set_checked";
-                    MIR_reg_t replacement = emit_call_5(mt, checked_set, MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, index),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
-                        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)typed_root->full_type),
-                        MIR_T_P, MIR_new_reg_op(mt->ctx,
-                            emit_load_string_literal(mt, "typed array element assignment")));
+                    MIR_reg_t replacement = emit_checked_array_store(mt, checked_set, owner,
+                        index, value, typed_root->full_type,
+                        "typed array element assignment",
+                        has_lane_contract ? &lane_desc : NULL);
                     emit_return_if_item_error(mt, replacement);
                     // Descriptor-backed lanes can rebuild ArrayNum into a general Array.
                     // Keep the replacement's container tag instead of treating
@@ -17023,21 +17245,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             }
 
             // Bounds check
-            MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-            MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-                MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 0)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                MIR_new_reg_op(mt->ctx, neg_check)));
-
-            MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-                MIR_new_reg_op(mt->ctx, idx_int), MIR_new_reg_op(mt->ctx, arr_len)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                MIR_new_reg_op(mt->ctx, ge_check)));
+            emit_array_num_bounds_check(mt, arr_ptr, idx_int, l_oob);
 
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
 
@@ -17045,19 +17253,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             emit_label(mt, l_oob);
             {
                 MIR_reg_t boxed_val = emit_box_int(mt, val_native);
-                MIR_reg_t call_result;
-                if (assign_elem_guarded && assign_obj_var && assign_obj_var->full_type) {
-                    call_result = emit_typed_array_store_fallback(mt, obj, obj_tid,
-                        idx_int, boxed_val, assign_obj_var);
-                } else {
-                    call_result = emit_call_3(mt, "fn_array_set", MIR_T_I64,
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_int),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
-                }
-                // assignment status is a real MIR value; branch-local C++ register selection loses OOB errors.
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, assign_result),
-                    MIR_new_reg_op(mt->ctx, call_result)));
+                emit_array_num_store_fallback(mt, obj, obj_tid, arr_ptr, idx_int,
+                    boxed_val, assign_obj_var, assign_elem_guarded, assign_result);
             }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
@@ -17066,17 +17263,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             // that D1 needed is gone.
             emit_label(mt, l_ok);
             {
-                MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-                MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-                    MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 3)));
-
-                MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+                MIR_reg_t elem_addr = emit_array_num_element_address(mt, arr_ptr, idx_int);
 
                 // The element lane is fixed by the array's storage, not by the
                 // value's static type, so the value is coerced into the int
@@ -17148,33 +17335,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_slow),
                     MIR_new_reg_op(mt->ctx, is_raw_int)));
 
-                MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-                MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-                    MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 0)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                    MIR_new_reg_op(mt->ctx, neg_check)));
-
-                MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-                    MIR_new_reg_op(mt->ctx, idx_int), MIR_new_reg_op(mt->ctx, arr_len)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                    MIR_new_reg_op(mt->ctx, ge_check)));
-
-                MIR_reg_t items_ptr = new_reg(mt, "itms", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-                MIR_reg_t byte_off = new_reg(mt, "boff", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-                    MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 3)));
-
-                MIR_reg_t elem_addr = new_reg(mt, "eadr", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+                emit_array_num_bounds_check(mt, arr_ptr, idx_int, l_oob);
+                MIR_reg_t elem_addr = emit_array_num_element_address(mt, arr_ptr, idx_int);
 
                 // The guard above admits only ELEM_INT64, a machine-word
                 // array, so an `int` value leaves its double lane here.
@@ -17243,21 +17405,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 MIR_new_reg_op(mt->ctx, fview)));
 
             // Bounds check
-            MIR_reg_t arr_len = new_reg(mt, "aflen", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
-
-            MIR_reg_t neg_check = new_reg(mt, "negc", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),
-                MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 0)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                MIR_new_reg_op(mt->ctx, neg_check)));
-
-            MIR_reg_t ge_check = new_reg(mt, "gec", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES, MIR_new_reg_op(mt->ctx, ge_check),
-                MIR_new_reg_op(mt->ctx, idx_int), MIR_new_reg_op(mt->ctx, arr_len)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-                MIR_new_reg_op(mt->ctx, ge_check)));
+            emit_array_num_bounds_check(mt, arr_ptr, idx_int, l_oob);
 
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
 
@@ -17265,36 +17413,15 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             emit_label(mt, l_oob);
             {
                 MIR_reg_t boxed_val = emit_box(mt, val_native, LMD_TYPE_FLOAT);
-                MIR_reg_t call_result;
-                if (assign_elem_guarded && assign_obj_var && assign_obj_var->full_type) {
-                    call_result = emit_typed_array_store_fallback(mt, obj, obj_tid,
-                        idx_int, boxed_val, assign_obj_var);
-                } else {
-                    call_result = emit_call_3(mt, "fn_array_set", MIR_T_I64,
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_int),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
-                }
-                // assignment status is a real MIR value; branch-local C++ register selection loses OOB errors.
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, assign_result),
-                    MIR_new_reg_op(mt->ctx, call_result)));
+                emit_array_num_store_fallback(mt, obj, obj_tid, arr_ptr, idx_int,
+                    boxed_val, assign_obj_var, assign_elem_guarded, assign_result);
             }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
             // In bounds: direct store items[idx] = double_val
             emit_label(mt, l_ok);
             {
-                MIR_reg_t items_ptr = new_reg(mt, "fitms", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, items_ptr),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, arr_ptr, 0, 1)));
-
-                MIR_reg_t byte_off = new_reg(mt, "fboff", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, byte_off),
-                    MIR_new_reg_op(mt->ctx, idx_int), MIR_new_int_op(mt->ctx, 3)));
-
-                MIR_reg_t elem_addr = new_reg(mt, "feadr", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, elem_addr),
-                    MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_off)));
+                MIR_reg_t elem_addr = emit_array_num_element_address(mt, arr_ptr, idx_int);
 
                 // Store native double directly
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
@@ -17364,7 +17491,12 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 mir_unwrap_decl_type(cow_root->full_type)->type_id == LMD_TYPE_MAP) {
             TypeMap* typed_map = (TypeMap*)mir_unwrap_decl_type(cow_root->full_type);
             AstNode* direct_object = mir_unwrap_primary(ca->object);
-            if (!cow_root->cow_marked && !cow_root->cow_children_may_be_shared &&
+            // The caller-side var admission detaches a marked root before this
+            // body starts. A direct scalar field write does not traverse a
+            // child pointer, so the retained child-sharing bit is relevant
+            // only to nested COW paths, not to this fixed-shape slot (D3.2.2,
+            // D8.3.2–D8.3.3).
+            if (!cow_root->cow_marked &&
                     typed_map->is_trusted_contract && has_fixed_shape(typed_map) &&
                     ca->key->node_type == AST_NODE_IDENT &&
                     direct_object && direct_object->node_type == AST_NODE_IDENT) {
@@ -17380,6 +17512,14 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                     ca->value->type->kind == TYPE_KIND_SIMPLE &&
                     ca->value->type->type_id == storage_type &&
                     get_effective_type(mt, ca->value) == storage_type;
+                // A native arithmetic producer may publish ANY because its
+                // overflow arm is an Item, while the successful scalar lane
+                // still satisfies this field contract. The direct writer
+                // already decodes that admitted lane; requiring the stale AST
+                // TypeId here routed every `state.moves + 1` through the
+                // validator and COW setter (D3.2.2, D8.3.2–D8.3.3).
+                bool proven_direct_lane = field_contract &&
+                    mir_expr_proves_native_return_lane(mt, ca->value, storage_type);
                 // A stable annotated root plus an exact scalar field proof is
                 // already the checked-map invariant. Keep dynamic values and
                 // shared roots on the transactional setter path.
@@ -17387,7 +17527,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                         !mir_argument_may_return_item_error(ca->value) &&
                         !mir_expr_may_be_null(mt, ca->value) &&
                         field_contract &&
-                        (exact_direct_lane ||
+                        (exact_direct_lane || proven_direct_lane ||
                          mir_boundary_is_redundant(mt, ca->value, field_contract))) {
                     emit_mir_direct_field_write(mt, ca->object, field, ca->value, true);
                     MIR_reg_t direct_result = new_reg(mt, "direct_map_store", MIR_T_I64);
@@ -18055,56 +18195,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 FnCapture* cap = fn_node->captures;
                 while (cap) { cap_count++; cap = cap->next; }
 
-                // Each capture owns one Item slot and one raw scalar tail slot.
-                MIR_reg_t env_reg = emit_call_2(mt, "heap_calloc", MIR_T_P,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(cap_count * 16)),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-
-                // Populate env with captured variable values
-                int cap_idx = 0;
-                cap = fn_node->captures;
-                while (cap) {
-                    char cap_name[128];
-                    snprintf(cap_name, sizeof(cap_name), "%s", cap->name);
-
-                    // Look up the captured variable value
-                    MIR_reg_t cap_val = 0;
-                    MirVarEntry* var = find_var(mt, cap_name);
-                    if (var) {
-                        // Box the variable value if needed
-                        cap_val = emit_box(mt, var->reg, var->type_id);
-                    } else {
-                        GlobalVarEntry* gvar = find_global_var(mt, cap_name);
-                        if (gvar) {
-                            // Closure environments own Items. A module global can
-                            // be native (such as String*), so box it before the
-                            // slot store rather than later reading that pointer as
-                            // though it were an Item payload.
-                            cap_val = emit_box(mt, load_global_var(mt, gvar),
-                                gvar->type_id);
-                        } else {
-                            // Variable not found - use null
-                            log_error("mir: closure capture '%s' not found in scope", cap_name);
-                            cap_val = new_reg(mt, "capnull", MIR_T_I64);
-                            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-                            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, cap_val),
-                                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-                        }
-                    }
-
-                    emit_call_void_4(mt, "owned_item_slot_store",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, env_reg),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, cap_idx),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cap_val));
-
-                    log_debug("mir: closure '%s' - captured '%s' at env offset %d",
-                        name_buf->str, cap_name, cap_idx * 8);
-
-                    cap_idx++;
-                    cap = cap->next;
-                }
+                MIR_reg_t env_reg = emit_closure_capture_env(mt,
+                    fn_node->captures, cap_count, name_buf->str);
 
                 // Get closure name for stack traces
                 const char* closure_name = fn_node->name ? fn_node->name->chars : nullptr;
@@ -18137,17 +18229,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
                     MIR_new_int_op(mt->ctx, cap_count)));
-                if (uses_wrapper) {
-                    emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    emit_call_void_1(mt,
-                        fn_node->node_type == AST_NODE_PROC
-                            ? "lambda_function_mark_lambda_boxed_procedure"
-                            : "lambda_function_mark_lambda_boxed_function",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                }
+                emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
+                    fn_node->node_type == AST_NODE_PROC);
                 mir_attach_function_type(mt, fn_obj, fn_node);
 
                 return fn_obj;
@@ -18166,17 +18249,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
                 }
-                if (uses_wrapper) {
-                    emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                    emit_call_void_1(mt,
-                        fn_node->node_type == AST_NODE_PROC
-                            ? "lambda_function_mark_lambda_boxed_procedure"
-                            : "lambda_function_mark_lambda_boxed_function",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-                }
+                emit_mir_function_abi_markers(mt, fn_obj, uses_wrapper,
+                    fn_node->node_type == AST_NODE_PROC);
                 mir_attach_function_type(mt, fn_obj, fn_node);
 
                 strbuf_free(name_buf);
@@ -18749,6 +18823,9 @@ static bool function_body_may_check_boundary(AstFuncNode* fn_node) {
     return false;
 }
 
+static TypeId infer_proc_native_return_lane(MirTranspiler* mt,
+        AstFuncNode* fn_node);
+
 static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
         AstNode* node, TypeId expected) {
     // A literal is represented by a primary node without an inner expression.
@@ -18777,6 +18854,11 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
                 ((TypeFunc*)target->type)->can_raise;
         }
         if (can_raise) return false;
+        if (!call->propagate && mir_direct_call_has_parameter_error_guard(call)) {
+            // A guarded native call publishes a boxed success/error join, so
+            // it cannot prove a raw return lane for this function body.
+            return false;
+        }
 
         if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
             SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
@@ -18817,6 +18899,13 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
             }
         }
         if (binding && binding->node_type == AST_NODE_ASSIGN) {
+            if (ident->entry && ident->entry->is_mutable) {
+                // A mutable binding can be rebound by an assignment after its
+                // initializer. Its declaration lane alone is not a proof for
+                // the final return value, so keep this path on the boxed ABI
+                // until mutation-aware lane tracking exists (D3.3.1).
+                return false;
+            }
             AstNode* initializer = ((AstNamedNode*)binding)->as;
             return mir_expr_proves_native_return_lane(mt, initializer, expected);
         }
@@ -18856,9 +18945,21 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
         // The consumer reopens integer arithmetic through transpile_binary_out;
         // the proof must use that same lowering predicate or a boxed Item can
         // cross this raw-store boundary as an untagged lane.
-        return mir_is_native_int_arith(mt, binary) &&
-            mir_expr_proves_native_return_lane(mt, binary->left, LMD_TYPE_INT) &&
-            mir_expr_proves_native_return_lane(mt, binary->right, LMD_TYPE_INT);
+        bool left_native = mir_expr_proves_native_return_lane(mt, binary->left,
+            LMD_TYPE_INT);
+        bool right_native = mir_expr_proves_native_return_lane(mt, binary->right,
+            LMD_TYPE_INT);
+        // During the prepass a self-recursive call has the candidate return
+        // fact but no NativeFuncInfo yet, so get_effective_type still reports
+        // ANY and the normal arithmetic predicate cannot see the eventual
+        // lane. The same operand proof is sufficient for this closed int
+        // candidate; emission rechecks the ordinary predicate after the raw
+        // NativeFuncInfo is published (D3.3.1, D8.3.3).
+        return left_native && right_native &&
+            (mir_is_native_int_arith(mt, binary) ||
+             (binary->op == OPERATOR_ADD || binary->op == OPERATOR_SUB ||
+              binary->op == OPERATOR_MUL || binary->op == OPERATOR_IDIV ||
+              binary->op == OPERATOR_MOD));
     }
     if (expected == LMD_TYPE_FLOAT) {
         bool left_numeric = left_tid == LMD_TYPE_INT || left_tid == LMD_TYPE_FLOAT ||
@@ -18872,7 +18973,138 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
     return false;
 }
 
+// Prove an unannotated procedural result from all explicit success exits. The
+// top-level tail-return requirement deliberately rejects implicit fallthrough;
+// recursive calls are admitted only through the candidate lane installed by
+// infer_proc_native_return_lane, so an open call cannot become raw by shape
+// coincidence (D3.3.1, D3.3.2).
+static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
+        TypeId expected, int* return_count) {
+    while (node) {
+        AstNode* current = mir_unwrap_primary(node);
+        if (!current) {
+            node = node->next;
+            continue;
+        }
+        switch (current->node_type) {
+        case AST_NODE_RETURN_STAM: {
+            AstReturnNode* ret = (AstReturnNode*)current;
+            if (expected == LMD_TYPE_ANY) {
+                if (ret->value) (*return_count)++;
+                break;
+            }
+            bool value_proven = ret->value &&
+                mir_expr_proves_native_return_lane(mt, ret->value, expected);
+            if (!value_proven) return false;
+            (*return_count)++;
+            break;
+        }
+        case AST_NODE_RAISE_STAM:
+            return false;
+        case AST_NODE_FUNC:
+        case AST_NODE_PROC:
+        case AST_NODE_FUNC_EXPR:
+            // Nested functions have an independent return carrier.
+            break;
+        case AST_NODE_IF_EXPR: {
+            AstIfNode* branch = (AstIfNode*)current;
+            if (branch->then && !mir_proc_return_values_prove(mt,
+                    branch->then, expected, return_count)) return false;
+            if (branch->otherwise && !mir_proc_return_values_prove(mt,
+                    branch->otherwise, expected, return_count)) return false;
+            break;
+        }
+        case AST_NODE_WHILE_STAM: {
+            AstWhileNode* loop = (AstWhileNode*)current;
+            if (loop->body && !mir_proc_return_values_prove(mt,
+                    loop->body, expected, return_count)) return false;
+            break;
+        }
+        case AST_NODE_FOR_EXPR:
+        case AST_NODE_FOR_STAM: {
+            AstForNode* loop = (AstForNode*)current;
+            if (loop->then && !mir_proc_return_values_prove(mt,
+                    loop->then, expected, return_count)) return false;
+            break;
+        }
+        case AST_NODE_MATCH_EXPR: {
+            AstMatchNode* match = (AstMatchNode*)current;
+            for (AstMatchArm* arm = match->first_arm; arm;
+                    arm = (AstMatchArm*)arm->next) {
+                if (arm->body && !mir_proc_return_values_prove(mt,
+                        arm->body, expected, return_count)) return false;
+            }
+            break;
+        }
+        case AST_NODE_CONTENT:
+        case AST_NODE_LIST: {
+            AstListNode* list = (AstListNode*)current;
+            if (list->item && !mir_proc_return_values_prove(mt,
+                    list->item, expected, return_count)) return false;
+            break;
+        }
+        default:
+            break;
+        }
+        node = node->next;
+    }
+    return true;
+}
+
+static bool mir_proc_has_value_return(MirTranspiler* mt, AstFuncNode* fn_node) {
+    if (!fn_node) return false;
+    AstNode* body = mir_unwrap_primary(fn_node->body);
+    int return_count = 0;
+    mir_proc_return_values_prove(mt, body, LMD_TYPE_ANY, &return_count);
+    return return_count > 0;
+}
+
+static TypeId infer_proc_native_return_lane(MirTranspiler* mt,
+        AstFuncNode* fn_node) {
+    if (!mt || !fn_node || ((AstNode*)fn_node)->node_type != AST_NODE_PROC) {
+        return LMD_TYPE_ANY;
+    }
+    TypeFunc* signature = fn_node->type && fn_node->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)fn_node->type : NULL;
+    if (signature && signature->can_raise) return LMD_TYPE_ANY;
+    AstNode* body = mir_unwrap_primary(fn_node->body);
+    AstNode* tail = function_body_result_expr(fn_node);
+    AstNode* terminal = body;
+    if (terminal && (terminal->node_type == AST_NODE_LIST ||
+            terminal->node_type == AST_NODE_CONTENT)) {
+        terminal = ((AstListNode*)terminal)->item;
+        while (terminal && terminal->next) terminal = terminal->next;
+        terminal = mir_unwrap_primary(terminal);
+    }
+    if (!body || !tail || !terminal ||
+            terminal->node_type != AST_NODE_RETURN_STAM) {
+        return LMD_TYPE_ANY;
+    }
+
+    const TypeId candidates[] = {LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL};
+    for (int i = 0; i < 3; i++) {
+        AstFuncNode* saved_fn = mt->native_return_analysis_fn;
+        TypeId saved_tid = mt->native_return_analysis_tid;
+        mt->native_return_analysis_fn = fn_node;
+        mt->native_return_analysis_tid = candidates[i];
+        int return_count = 0;
+        bool proven = mir_proc_return_values_prove(mt, body, candidates[i],
+            &return_count);
+        mt->native_return_analysis_fn = saved_fn;
+        mt->native_return_analysis_tid = saved_tid;
+        if (proven && return_count > 0) return candidates[i];
+    }
+    return LMD_TYPE_ANY;
+}
+
 static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
+    if (fn_node && ((AstNode*)fn_node)->node_type == AST_NODE_PROC &&
+            infer_proc_native_return_lane(mt, fn_node) != LMD_TYPE_ANY) {
+        // The same whole-function proof owns its typed local declarations:
+        // recursive success calls are admitted as native before the generic
+        // declaration scan sees their stale AST ANY type.
+        return false;
+    }
     // An interior checked boundary can produce a return the native ABI cannot
     // carry, independently of what the tail expression proves.
     if (function_body_may_check_boundary(fn_node)) return true;
@@ -18959,6 +19191,11 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
         }
     }
 
+    if (is_proc) {
+        TypeId proc_return = infer_proc_native_return_lane(mt, fn_node);
+        if (proc_return != LMD_TYPE_ANY) return proc_return;
+    }
+
     // 2. For fn (not pn): Check the body expression's type (fn body IS the return value)
     // Procs have multiple return paths via explicit `return` statements,
     // so body type inference is unreliable — only declared types are used.
@@ -18984,7 +19221,15 @@ static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
     // a checked boundary. Its inferred result type is not a raw ABI promise;
     // preserve the boxed Item dynamically so a wide scalar is never returned
     // as untagged bits after the task's number frame has been restored.
-    if (is_proc) return MIR_SCALAR_RETURN_DYNAMIC;
+    if (is_proc) {
+        if (!mir_proc_has_value_return(mt, fn_node)) {
+            // A procedure with no value exit returns a plain ItemNull carrier;
+            // reserving a number home for it only taxes every side-effecting
+            // call (D5.2, D5.3).
+            return MIR_SCALAR_RETURN_NONE;
+        }
+        return MIR_SCALAR_RETURN_DYNAMIC;
+    }
     TypeId return_type = LMD_TYPE_ANY;
     if (fn_as_node->type && fn_as_node->type->type_id == LMD_TYPE_FUNC) {
         TypeFunc* ft = (TypeFunc*)fn_as_node->type;
@@ -19072,8 +19317,12 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
         body->param_count = native_info->param_count;
         for (int i = 0; i < native_info->param_count; i++) {
             TypeId param_type = mir_native_param_type(native_info, i);
+            bool typed_array_witness =
+                (mir_typed_array_witness_mask(native_info->fn_node) &
+                    ((uint64_t)1 << i)) != 0;
             body->params[i] = {param_type,
-                mir_native_func_param_uses_lane(native_info, i)
+                typed_array_witness ? VALUE_REP_RAW_GC_POINTER
+                    : mir_native_func_param_uses_lane(native_info, i)
                     ? lambda_value_rep(param_type) : VALUE_REP_ITEM,
                 0};
         }
@@ -19197,7 +19446,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
 
     // The wrapper preserves hidden env/self/vargs parameters but exposes boxed
     // Items for every user parameter plus a mandatory caller-owned result home.
-    enum { WRAPPER_PARAM_CAPACITY = LAMBDA_MAX_FUNCTION_ARGS + 4 };
+    enum { WRAPPER_PARAM_CAPACITY = LAMBDA_MAX_FUNCTION_ARGS + 5 };
     MIR_var_t params[WRAPPER_PARAM_CAPACITY];
     char* param_name_copies[WRAPPER_PARAM_CAPACITY];
     int param_count = 0;
@@ -19277,6 +19526,9 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     // body shares these bindings, so it must see the same defaults and checked
     // declared values as the raw call would have received.
     MIR_reg_t prepared_params[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    MIR_reg_t raw_array_params[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    uint64_t wrapper_array_witness_mask = nfi
+        ? mir_typed_array_witness_mask(nfi->fn_node) : 0;
     bool has_slow_body = nfi && nfi->needs_boxed_slow_body;
     MIR_reg_t inferred_guard = 0;
     MIR_label_t slow_body_label = NULL;
@@ -19355,6 +19607,19 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         // guard, or slow body observes this parameter.
         set_var(mt, parameter_name, preg, MIR_T_I64, LMD_TYPE_ANY);
 
+        if (wrapper_array_witness_mask & ((uint64_t)1 << user_index)) {
+            // The public wrapper is the one place that must validate a boxed
+            // typed array before the raw body receives its pointer. Keep the
+            // Item in prepared_params for the inferred slow body, and retain
+            // the validated pointer separately for the native edge (D3.3.1,
+            // D3.3.3).
+            TypeId element_tid = mir_typed_array_element_type(param);
+            raw_array_params[user_index] = emit_call_2(mt, "ensure_typed_array",
+                MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, preg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)element_tid));
+            emit_return_item_error_if_zero(mt, raw_array_params[user_index]);
+        }
+
         prepared_params[user_index] = preg;
         if (has_slow_body && user_index < nfi->param_count &&
                 mir_param_is_inferred_specialization(nfi->fn_node, user_index)) {
@@ -19377,7 +19642,11 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     }
     for (int i = 0; i < user_index; i++) {
         MIR_reg_t prepared = prepared_params[i];
-        if (nfi && i < nfi->param_count &&
+        if (wrapper_array_witness_mask & ((uint64_t)1 << i)) {
+            call_args[call_arg_count] = MIR_new_reg_op(mt->ctx,
+                raw_array_params[i]);
+            call_vars[call_arg_count] = {MIR_T_I64, "array", 0};
+        } else if (nfi && i < nfi->param_count &&
                 mir_native_func_param_uses_lane(nfi, i)) {
             TypeId param_type = mir_native_param_type(nfi, i);
             MIR_reg_t unboxed = emit_unbox_contract_lane(mt, prepared, param_type,
@@ -19389,6 +19658,11 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
             call_vars[call_arg_count] = {MIR_T_I64, "p", 0};
         }
         call_arg_count++;
+    }
+    if (wrapper_array_witness_mask && call_arg_count < WRAPPER_PARAM_CAPACITY) {
+        call_args[call_arg_count] = MIR_new_int_op(mt->ctx,
+            (int64_t)wrapper_array_witness_mask);
+        call_vars[call_arg_count++] = {MIR_T_I64, "array_witness", 0};
     }
     if (is_variadic) {
         MIR_reg_t boxed_vargs = MIR_reg(mt->ctx, "_vargs", wrapper_func);
@@ -19618,7 +19892,9 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // ===== Build MIR parameter list =====
     // For native version: use resolved native MIR types for params
     // For boxed version (non-native): all params are MIR_T_I64 (Item)
-    enum { RAW_FUNCTION_PARAM_CAPACITY = LAMBDA_MAX_FUNCTION_ARGS + 4 };
+    uint64_t raw_array_witness_mask = generate_native
+        ? mir_typed_array_witness_mask(fn_node) : 0;
+    enum { RAW_FUNCTION_PARAM_CAPACITY = LAMBDA_MAX_FUNCTION_ARGS + 5 };
     MIR_var_t params[RAW_FUNCTION_PARAM_CAPACITY];
     int param_count = 0;
 
@@ -19648,12 +19924,20 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
         MIR_type_t mir_ptype = MIR_T_I64;  // default: boxed Item
         if (generate_native && pi_build < user_param_count) {
-            mir_ptype = type_to_mir(resolved_param_types[pi_build]);
+            mir_ptype = (raw_array_witness_mask & ((uint64_t)1 << pi_build))
+                ? MIR_T_I64 : type_to_mir(resolved_param_types[pi_build]);
         }
         params[param_count] = {mir_ptype, raw_strdup(pname), 0}; // RAWALLOC_OK: MIR manages param name lifetime
         param_count++;
         pi_build++;
         param = (AstNamedNode*)param->next;
+    }
+
+    if (raw_array_witness_mask && param_count < RAW_FUNCTION_PARAM_CAPACITY - 1) {
+        // The witness is a trailing scalar mask so raw bodies can distinguish
+        // an already-unboxed ArrayNum pointer from the boxed fallback Item.
+        params[param_count] = {MIR_T_I64, raw_strdup("_array_witness"), 0};
+        param_count++;
     }
 
     if (region_producer && param_count < RAW_FUNCTION_PARAM_CAPACITY - 1) {
@@ -19671,17 +19955,20 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // P4-3.3: Use native return type when inferred (INT/BOOL → I64, FLOAT → D)
     MIR_type_t ret_type = MIR_T_I64;
     bool native_return = false;
+    NativeFuncInfo* nfi_ret = generate_native
+        ? find_native_func_info(mt, name_buf->str) : NULL;
     if (generate_native) {
-        NativeFuncInfo* nfi_ret = find_native_func_info(mt, name_buf->str);
         if (nfi_ret && nfi_ret->return_type != LMD_TYPE_ANY) {
             ret_type = nfi_ret->return_mir;
             native_return = true;
         }
     }
 
+    bool has_value_return = !is_proc_fn ||
+        mir_proc_has_value_return(mt, fn_node);
     int return_lane_kind = native_return
         ? ((fn_type && fn_type->can_raise) ? RETURN_LANE_ERROR : RETURN_LANE_NONE)
-        : RETURN_LANE_SCALAR;
+        : has_value_return ? RETURN_LANE_SCALAR : RETURN_LANE_NONE;
     MirScalarReturnMode body_scalar_mode = return_lane_kind == RETURN_LANE_ERROR
         ? MIR_SCALAR_RETURN_DYNAMIC
         : return_lane_kind == RETURN_LANE_SCALAR
@@ -19781,6 +20068,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     for (int i = 0; i < param_count; i++) raw_free(param_name_copies[i]);
 
     MIR_reg_t runtime_fn = MIR_reg(mt->ctx, "runtime", func);
+    MIR_reg_t array_witness = raw_array_witness_mask
+        ? MIR_reg(mt->ctx, "_array_witness", func) : 0;
     emit_load_module_consts(mt);
 
     // Load this module's type_list from per-module BSS _mod_type_list_ptr. Used by
@@ -20060,11 +20349,47 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         log_debug("mir: param '%s' type_id=%d has_annotation=%d native=%d", pname, tid,
             param->type ? param->type->type_id : -1, generate_native);
 
-        if (generate_native && mir_param_uses_native_lane(fn_node, pi)) {
+        bool raw_typed_array_param = generate_native &&
+            (raw_array_witness_mask & ((uint64_t)1 << pi)) != 0;
+        if (generate_native && (mir_param_uses_native_lane(fn_node, pi) ||
+                raw_typed_array_param)) {
             // Phase 4 native version: param arrives as native type, no unboxing needed.
             // Register directly with the native MIR type.
-            MIR_type_t mtype = type_to_mir(tid);
-            set_var(mt, pname, preg, mtype, tid);
+            MIR_reg_t bound = preg;
+            if (raw_typed_array_param) {
+                // Direct native edges carry a raw ArrayNum pointer only when
+                // the matching witness bit is set. The boxed fallback remains
+                // available for wrapper/default paths (D3.3.1, D3.3.3).
+                MIR_reg_t witness_bit = new_reg(mt, "array_witness_bit", MIR_T_I64);
+                MIR_reg_t selected_array = new_reg(mt, "array_bound", MIR_T_I64);
+                MIR_label_t raw_label = new_label(mt);
+                MIR_label_t array_done = new_label(mt);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                    MIR_new_reg_op(mt->ctx, witness_bit),
+                    MIR_new_reg_op(mt->ctx, array_witness),
+                    MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)1 << pi))));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, raw_label),
+                    MIR_new_reg_op(mt->ctx, witness_bit)));
+                MIR_reg_t ensured_array = emit_call_2(mt, "ensure_typed_array", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, preg),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx,
+                        (int64_t)mir_typed_array_element_type(param)));
+                emit_return_item_error_if_zero(mt, ensured_array);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, selected_array),
+                    MIR_new_reg_op(mt->ctx, ensured_array)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, array_done)));
+                emit_label(mt, raw_label);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, selected_array),
+                    MIR_new_reg_op(mt->ctx, preg)));
+                emit_label(mt, array_done);
+                bound = selected_array;
+            }
+            MIR_type_t mtype = raw_typed_array_param ? MIR_T_I64 : type_to_mir(tid);
+            set_var(mt, pname, bound, mtype, tid);
             MirVarEntry* native_param = find_var(mt, pname);
             if (native_param &&
                     !mir_param_is_inferred_specialization(fn_node, pi)) {
@@ -20073,12 +20398,23 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 native_param->full_type = mir_param_contract_at(fn_node, pi);
             }
             if (native_param && tid == LMD_TYPE_ARRAY_NUM && param->type &&
-                    param->type->kind == TYPE_KIND_PARAM &&
-                    !((TypeParam*)param->type)->is_var_param) {
-                // The native wrapper has already admitted value typed-array
-                // parameters, so their raw payload descriptor is stable for
-                // this body. Borrowed var arrays deliberately stay uncached.
-                mir_cache_typed_array_layout(mt, native_param);
+                    param->type->kind == TYPE_KIND_PARAM) {
+                // The native caller or wrapper has admitted the typed-array
+                // representation before this raw body starts. Value params
+                // can cache the descriptor; var params retain the live guard
+                // because their body may mutate the borrowed root.
+                native_param->elem_type = mir_typed_array_element_type(param);
+                native_param->elem_type_guarded = true;
+                if (!((TypeParam*)param->type)->is_var_param) {
+                    mir_cache_typed_array_layout(mt, native_param);
+                } else {
+                    // Preserve the borrowed-write metadata on the witness
+                    // path; fixed-pointer representation must not erase the
+                    // caller-visible var ownership contract.
+                    native_param->is_proc_param = is_proc_fn;
+                    native_param->is_var_param = true;
+                    native_param->cow_children_may_be_shared = true;
+                }
             }
             log_debug("mir: native param '%s' registered directly, mir_type=%d", pname, mtype);
         } else if (!generate_native && param_has_declared_contract &&
@@ -20565,6 +20901,27 @@ static bool mir_store_may_change_elem_type(TypeId elem, AstNode* value) {
         return true;
     }
     TypeId vt = value && value->type ? value->type->type_id : LMD_TYPE_ANY;
+    if (value_node && value_node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)value_node;
+        AstNode* callee = mir_unwrap_primary(call->function);
+        if (callee && callee->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident = (AstIdentNode*)callee;
+            AstNode* target = ident->entry ? ident->entry->node : NULL;
+            if (target && (target->node_type == AST_NODE_FUNC ||
+                    target->node_type == AST_NODE_PROC ||
+                    target->node_type == AST_NODE_FUNC_EXPR) && target->type &&
+                    target->type->type_id == LMD_TYPE_FUNC) {
+                TypeFunc* signature = (TypeFunc*)target->type;
+                if (!signature->can_raise && signature->returned &&
+                        signature->returned->type_id == elem) {
+                    // A declared scalar procedure result is the same lane as
+                    // the destination array; its stale call-node ANY type must
+                    // not erase the proven row contract (D3.3.3).
+                    return false;
+                }
+            }
+        }
+    }
     // NULL is how the AST spells "no type resolved yet", not the null value
     if (vt == LMD_TYPE_ANY || vt == LMD_TYPE_NULL || vt == LMD_TYPE_ERROR) {
         // Generic Arrays retain their container tag after a mixed write, so a
@@ -20604,7 +20961,13 @@ static bool has_elem_type_invalidation(const char* var_name, AstNode* node, Type
             if (target && target->len > 0 &&
                 strncmp(var_name, target->chars, target->len) == 0 &&
                 var_name[target->len] == '\0') {
-                return true;
+                // A rebind is checked in emission order. The assignment
+                // emitter transfers a live source witness or clears it before
+                // any later load, so whole-body invalidation would erase the
+                // `prev`/`curr`/`tmp` rotation proof prematurely (D2.6, D3.3.3).
+                (void)safe_elem;
+                node = node->next;
+                continue;
             }
         }
 
@@ -20992,10 +21355,12 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                     name_buf->str);
                 bool native_return = fwd_nfi &&
                     fwd_nfi->return_type != LMD_TYPE_ANY;
+                bool has_value_return = !is_proc ||
+                    mir_proc_has_value_return(mt, fn_node);
                 int lane_kind = native_return
                     ? ((ft && ft->can_raise)
                         ? RETURN_LANE_ERROR : RETURN_LANE_NONE)
-                    : RETURN_LANE_SCALAR;
+                    : has_value_return ? RETURN_LANE_SCALAR : RETURN_LANE_NONE;
                 MirScalarReturnMode scalar_mode = lane_kind == RETURN_LANE_ERROR
                     ? MIR_SCALAR_RETURN_DYNAMIC
                     : lane_kind == RETURN_LANE_SCALAR
@@ -21444,6 +21809,43 @@ static void prepass_compile_patterns(MirTranspiler* mt, AstNode* node) {
 // Compiles a view/edit body as a MIR function: Item _view_N(Item model) -> Item
 // ============================================================================
 
+static void emit_view_function_runtime_state(MirTranspiler* mt, MIR_reg_t runtime_reg,
+                                             MIR_type_t ret_type) {
+    MIR_reg_t mod_tl_bss_addr = new_reg(mt, "mod_tl_bss", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mod_tl_bss_addr),
+        MIR_new_ref_op(mt->ctx, mt->type_list_bss)));
+    mt->type_list_reg = new_reg(mt, "type_list", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->type_list_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, mod_tl_bss_addr, 0, 1)));
+
+    MIR_reg_t heap_reg = new_reg(mt, "heap_ptr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, heap_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 64, runtime_reg, 0, 1)));
+    mt->gc_reg = new_reg(mt, "gc_ptr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->gc_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, heap_reg, 0, 1)));
+
+    mt->em.frame.runtime = runtime_reg;
+    mt->em.frame.return_type = ret_type;
+}
+
+static void restore_view_function_state(MirTranspiler* mt, MIR_item_t saved_func_item,
+                                        MIR_func_t saved_func, MIR_reg_t saved_consts_reg,
+                                        MIR_reg_t saved_gc_reg, MIR_reg_t saved_tl_reg,
+                                        MirFrameState saved_frame, bool saved_in_user_func,
+                                        AstNode* saved_func_body, bool saved_block_returned) {
+    mt->em.func_item = saved_func_item;
+    mt->em.func = saved_func;
+    mt->module_state_reg = 0;
+    mt->consts_reg = saved_consts_reg;
+    mt->gc_reg = saved_gc_reg;
+    mt->type_list_reg = saved_tl_reg;
+    em_frame_restore(&mt->em, saved_frame);
+    mt->in_user_func = saved_in_user_func;
+    mt->func_body = saved_func_body;
+    mt->block_returned = saved_block_returned;
+}
+
 static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     // generate unique function name
     char name_buf[64];
@@ -21485,24 +21887,7 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
 
     emit_load_module_consts(mt);
 
-    // load type_list from per-module BSS
-    MIR_reg_t mod_tl_bss_addr = new_reg(mt, "mod_tl_bss", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mod_tl_bss_addr),
-        MIR_new_ref_op(mt->ctx, mt->type_list_bss)));
-    mt->type_list_reg = new_reg(mt, "type_list", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->type_list_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, mod_tl_bss_addr, 0, 1)));
-
-    // load gc heap pointer
-    MIR_reg_t heap_reg = new_reg(mt, "heap_ptr", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, heap_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 64, runtime_reg, 0, 1)));
-    mt->gc_reg = new_reg(mt, "gc_ptr", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->gc_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, heap_reg, 0, 1)));
-
-    mt->em.frame.runtime = runtime_reg;
-    mt->em.frame.return_type = ret_type;
+    emit_view_function_runtime_state(mt, runtime_reg, ret_type);
     emit_jit_root_frame_enter(mt);
     begin_function_epilogue(mt, ret_type);
     mt->em.frame.plan.debug_name = name_buf;
@@ -21588,16 +21973,9 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     mt->view_template_ref = saved_view_template_ref;
 
     // restore outer function context
-    mt->em.func_item = saved_func_item;
-    mt->em.func = saved_func;
-    mt->module_state_reg = 0;
-    mt->consts_reg = saved_consts_reg;
-    mt->gc_reg = saved_gc_reg;
-    mt->type_list_reg = saved_tl_reg;
-    em_frame_restore(&mt->em, saved_frame);
-    mt->in_user_func = saved_in_user_func;
-    mt->func_body = saved_func_body;
-    mt->block_returned = saved_block_returned;
+    restore_view_function_state(mt, saved_func_item, saved_func, saved_consts_reg,
+        saved_gc_reg, saved_tl_reg, saved_frame, saved_in_user_func,
+        saved_func_body, saved_block_returned);
 }
 
 // ============================================================================
@@ -21661,24 +22039,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
 
     emit_load_module_consts(mt);
 
-    // load type_list from per-module BSS
-    MIR_reg_t mod_tl_bss_addr = new_reg(mt, "mod_tl_bss", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mod_tl_bss_addr),
-        MIR_new_ref_op(mt->ctx, mt->type_list_bss)));
-    mt->type_list_reg = new_reg(mt, "type_list", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->type_list_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, mod_tl_bss_addr, 0, 1)));
-
-    // load gc heap pointer
-    MIR_reg_t heap_reg = new_reg(mt, "heap_ptr", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, heap_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 64, runtime_reg, 0, 1)));
-    mt->gc_reg = new_reg(mt, "gc_ptr", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->gc_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, heap_reg, 0, 1)));
-
-    mt->em.frame.runtime = runtime_reg;
-    mt->em.frame.return_type = ret_type;
+    emit_view_function_runtime_state(mt, runtime_reg, ret_type);
     emit_jit_root_frame_enter(mt);
     begin_function_epilogue(mt, ret_type);
     mt->em.frame.plan.debug_name = handler_name;
@@ -21770,17 +22131,10 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     mt->view_is_edit = saved_view_is_edit;
     mt->view_model_reg = saved_view_model_reg;
     mt->view_template_ref = saved_view_template_ref;
-    mt->em.func_item = saved_func_item;
-    mt->em.func = saved_func;
-    mt->module_state_reg = 0;
-    mt->consts_reg = saved_consts_reg;
-    mt->gc_reg = saved_gc_reg;
-    mt->type_list_reg = saved_tl_reg;
-    em_frame_restore(&mt->em, saved_frame);
-    mt->in_user_func = saved_in_user_func;
+    restore_view_function_state(mt, saved_func_item, saved_func, saved_consts_reg,
+        saved_gc_reg, saved_tl_reg, saved_frame, saved_in_user_func,
+        saved_func_body, saved_block_returned);
     mt->in_proc = saved_in_proc;
-    mt->func_body = saved_func_body;
-    mt->block_returned = saved_block_returned;
 }
 
 // ============================================================================

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Tune15 B1.3 preserves the packed integer witness inferred from an unannotated fill(n, int) binding.",
+  "checks": [
+    {
+      "in_func": "_tune15_fill_witness_#",
+      "expect": [
+        "call\tfn_fill_p, fn_fill",
+        "mul\t{{r}}, {{r}}, 8",
+        "mov\t{{r}}, i64:({{r}})"
+      ],
+      "forbid": [
+        "call\tfn_index_p, fn_index",
+        "call\titem_at_p, item_at"
+      ]
+    }
+  ]
+}

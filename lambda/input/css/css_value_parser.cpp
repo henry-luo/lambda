@@ -1037,170 +1037,72 @@ CssValue* css_parse_math_function(CssPropertyValueParser* parser,
     (void)op_type;
 
     return value;
-}CssValue* css_parse_rgb_function(CssPropertyValueParser* parser,
-                                        const CssToken* tokens,
-                                        int token_count) {
+}
+
+static CssValue* css_parse_default_color_function(CssPropertyValueParser* parser,
+                                                   const CssToken* tokens,
+                                                   int token_count,
+                                                   CssColorType color_type,
+                                                   bool rgba,
+                                                   double component1,
+                                                   double component2,
+                                                   double component3) {
     if (!parser || !tokens || token_count < 3) return NULL;
 
-    // Parse RGB values - supports both new and legacy syntax
-    // rgb(255 128 0) or rgb(255, 128, 0) or rgb(100% 50% 0%) etc.
     CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
     if (!value) return NULL;
-
     value->type = CSS_VALUE_TYPE_COLOR;
-    value->data.color.type = CSS_COLOR_RGB;
-
-    // For now, create a default red color - full implementation would parse tokens
-    value->data.color.data.rgba.r = 255;
-    value->data.color.data.rgba.g = 0;
-    value->data.color.data.rgba.b = 0;
-    value->data.color.data.rgba.a = 255;
-
+    value->data.color.type = color_type;
+    if (rgba) {
+        value->data.color.data.rgba.r = (uint8_t)component1;
+        value->data.color.data.rgba.g = (uint8_t)component2;
+        value->data.color.data.rgba.b = (uint8_t)component3;
+        value->data.color.data.rgba.a = 255;
+    } else {
+        value->data.color.data.components = (CssColorComponents*)pool_alloc(
+            parser->pool, sizeof(CssColorComponents));
+        if (!value->data.color.data.components) return NULL;
+        value->data.color.data.components->component1 = component1;
+        value->data.color.data.components->component2 = component2;
+        value->data.color.data.components->component3 = component3;
+        value->data.color.data.components->component4 = 1.0;
+    }
     return value;
 }
 
-CssValue* css_parse_hsl_function(CssPropertyValueParser* parser,
-                                        const CssToken* tokens,
-                                        int token_count) {
-    if (!parser || !tokens || token_count < 3) return NULL;
-
-    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
-    if (!value) return NULL;
-
-    value->type = CSS_VALUE_TYPE_COLOR;
-    value->data.color.type = CSS_COLOR_HSL;
-
-    // Allocate color components
-    value->data.color.data.components = (CssColorComponents*)pool_alloc(parser->pool, sizeof(CssColorComponents));
-    if (!value->data.color.data.components) return NULL;
-
-    // Default to red hue - full implementation would parse tokens
-    value->data.color.data.components->component1 = 0.0;   // h: Red hue
-    value->data.color.data.components->component2 = 1.0;   // s: Full saturation
-    value->data.color.data.components->component3 = 0.5;   // l: 50% lightness
-    value->data.color.data.components->component4 = 1.0;   // a: Full opacity
-
-    return value;
+CssValue* css_parse_rgb_function(CssPropertyValueParser* parser, const CssToken* tokens, int token_count) {
+    return css_parse_default_color_function(parser, tokens, token_count,
+                                             CSS_COLOR_RGB, true, 255.0, 0.0, 0.0);
 }
 
-CssValue* css_parse_hwb_function(CssPropertyValueParser* parser,
-                                        const CssToken* tokens,
-                                        int token_count) {
-    if (!parser || !tokens || token_count < 3) return NULL;
-
-    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
-    if (!value) return NULL;
-
-    value->type = CSS_VALUE_TYPE_COLOR;
-    value->data.color.type = CSS_COLOR_HWB;
-
-    // Allocate color components
-    value->data.color.data.components = (CssColorComponents*)pool_alloc(parser->pool, sizeof(CssColorComponents));
-    if (!value->data.color.data.components) return NULL;
-
-    // Default HWB values - full implementation would parse tokens
-    value->data.color.data.components->component1 = 0.0;   // h: Red hue
-    value->data.color.data.components->component2 = 0.0;   // w: No whiteness
-    value->data.color.data.components->component3 = 0.0;   // b: No blackness
-    value->data.color.data.components->component4 = 1.0;   // a: Full opacity
-
-    return value;
+CssValue* css_parse_hsl_function(CssPropertyValueParser* parser, const CssToken* tokens, int token_count) {
+    return css_parse_default_color_function(parser, tokens, token_count,
+                                             CSS_COLOR_HSL, false, 0.0, 1.0, 0.5);
 }
 
-CssValue* css_parse_lab_function(CssPropertyValueParser* parser,
-                                        const CssToken* tokens,
-                                        int token_count) {
-    if (!parser || !tokens || token_count < 3) return NULL;
-
-    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
-    if (!value) return NULL;
-
-    value->type = CSS_VALUE_TYPE_COLOR;
-    value->data.color.type = CSS_COLOR_LAB;
-
-    // Allocate color components
-    value->data.color.data.components = (CssColorComponents*)pool_alloc(parser->pool, sizeof(CssColorComponents));
-    if (!value->data.color.data.components) return NULL;
-
-    // Default LAB values - full implementation would parse tokens
-    value->data.color.data.components->component1 = 50.0;   // l: 50% lightness
-    value->data.color.data.components->component2 = 0.0;    // a: No red/green component
-    value->data.color.data.components->component3 = 0.0;    // b: No yellow/blue component
-    value->data.color.data.components->component4 = 1.0;    // alpha: Full opacity
-
-    return value;
+CssValue* css_parse_hwb_function(CssPropertyValueParser* parser, const CssToken* tokens, int token_count) {
+    return css_parse_default_color_function(parser, tokens, token_count,
+                                             CSS_COLOR_HWB, false, 0.0, 0.0, 0.0);
 }
 
-CssValue* css_parse_lch_function(CssPropertyValueParser* parser,
-                                        const CssToken* tokens,
-                                        int token_count) {
-    if (!parser || !tokens || token_count < 3) return NULL;
-
-    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
-    if (!value) return NULL;
-
-    value->type = CSS_VALUE_TYPE_COLOR;
-    value->data.color.type = CSS_COLOR_LCH;
-
-    // Allocate color components
-    value->data.color.data.components = (CssColorComponents*)pool_alloc(parser->pool, sizeof(CssColorComponents));
-    if (!value->data.color.data.components) return NULL;
-
-    // Default LCH values - full implementation would parse tokens
-    value->data.color.data.components->component1 = 50.0;   // l: 50% lightness
-    value->data.color.data.components->component2 = 0.0;    // c: No chroma
-    value->data.color.data.components->component3 = 0.0;    // h: Red hue
-    value->data.color.data.components->component4 = 1.0;    // a: Full opacity
-
-    return value;
+CssValue* css_parse_lab_function(CssPropertyValueParser* parser, const CssToken* tokens, int token_count) {
+    return css_parse_default_color_function(parser, tokens, token_count,
+                                             CSS_COLOR_LAB, false, 50.0, 0.0, 0.0);
 }
 
-CssValue* css_parse_oklab_function(CssPropertyValueParser* parser,
-                                          const CssToken* tokens,
-                                          int token_count) {
-    if (!parser || !tokens || token_count < 3) return NULL;
-
-    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
-    if (!value) return NULL;
-
-    value->type = CSS_VALUE_TYPE_COLOR;
-    value->data.color.type = CSS_COLOR_OKLAB;
-
-    // Allocate color components
-    value->data.color.data.components = (CssColorComponents*)pool_alloc(parser->pool, sizeof(CssColorComponents));
-    if (!value->data.color.data.components) return NULL;
-
-    // Default OKLAB values - full implementation would parse tokens
-    value->data.color.data.components->component1 = 0.5;    // l: 50% lightness
-    value->data.color.data.components->component2 = 0.0;    // a: No red/green component
-    value->data.color.data.components->component3 = 0.0;    // b: No yellow/blue component
-    value->data.color.data.components->component4 = 1.0;    // alpha: Full opacity
-
-    return value;
+CssValue* css_parse_lch_function(CssPropertyValueParser* parser, const CssToken* tokens, int token_count) {
+    return css_parse_default_color_function(parser, tokens, token_count,
+                                             CSS_COLOR_LCH, false, 50.0, 0.0, 0.0);
 }
 
-CssValue* css_parse_oklch_function(CssPropertyValueParser* parser,
-                                          const CssToken* tokens,
-                                          int token_count) {
-    if (!parser || !tokens || token_count < 3) return NULL;
+CssValue* css_parse_oklab_function(CssPropertyValueParser* parser, const CssToken* tokens, int token_count) {
+    return css_parse_default_color_function(parser, tokens, token_count,
+                                             CSS_COLOR_OKLAB, false, 0.5, 0.0, 0.0);
+}
 
-    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
-    if (!value) return NULL;
-
-    value->type = CSS_VALUE_TYPE_COLOR;
-    value->data.color.type = CSS_COLOR_OKLCH;
-
-    // Allocate color components
-    value->data.color.data.components = (CssColorComponents*)pool_alloc(parser->pool, sizeof(CssColorComponents));
-    if (!value->data.color.data.components) return NULL;
-
-    // Default OKLCH values - full implementation would parse tokens
-    value->data.color.data.components->component1 = 0.5;    // l: 50% lightness
-    value->data.color.data.components->component2 = 0.0;    // c: No chroma
-    value->data.color.data.components->component3 = 0.0;    // h: Red hue
-    value->data.color.data.components->component4 = 1.0;    // a: Full opacity
-
-    return value;
+CssValue* css_parse_oklch_function(CssPropertyValueParser* parser, const CssToken* tokens, int token_count) {
+    return css_parse_default_color_function(parser, tokens, token_count,
+                                             CSS_COLOR_OKLCH, false, 0.5, 0.0, 0.0);
 }
 
 // ============================================================================

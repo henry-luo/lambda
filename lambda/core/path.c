@@ -652,6 +652,8 @@ extern Pool* path_get_pool(void);
 // In C, DateTime is uint64_t (packed bit field), so we declare return type as uint64_t*
 extern uint64_t* datetime_from_unix(Pool* pool, int64_t unix_timestamp);
 
+static void path_apply_stat_metadata(Path* path, Pool* pool, FileStat fs);
+
 /**
  * Check if the leaf segment of a path is a wildcard (* or **).
  */
@@ -679,18 +681,7 @@ void path_load_metadata(Path* path) {
     path_to_os_path(path, path_buf);
     
     FileStat fs = file_stat(path_buf->str);
-    if (fs.exists) {
-        PathMeta* meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
-        if (meta) {
-            meta->size = fs.size;
-            meta->modified = *datetime_from_unix(pool, (int64_t)fs.modified);
-            meta->flags = 0;
-            if (fs.is_dir) meta->flags |= PATH_META_IS_DIR;
-            if (fs.is_symlink) meta->flags |= PATH_META_IS_LINK;
-            meta->mode = (fs.mode >> 6) & 0x07;  // owner permissions only
-            path->meta = meta;
-        }
-    }
+    path_apply_stat_metadata(path, pool, fs);
     
     path->flags |= PATH_FLAG_META_LOADED;
     strbuf_free(path_buf);
@@ -700,6 +691,20 @@ void path_load_metadata(Path* path) {
 static Item resolve_directory_children(Path* parent_path, const char* dir_path);
 static Item resolve_file_content(Path* path, const char* file_path);
 static Item expand_wildcard(Path* base_path, const char* dir_path, bool recursive);
+
+static void path_apply_stat_metadata(Path* path, Pool* pool, FileStat fs) {
+    if (!path || !pool || !fs.exists) return;
+    PathMeta* meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
+    if (!meta) return;
+    meta->size = fs.size;
+    meta->modified = *datetime_from_unix(pool, (int64_t)fs.modified);
+    meta->flags = 0;
+    if (fs.is_dir) meta->flags |= PATH_META_IS_DIR;
+    if (fs.is_symlink) meta->flags |= PATH_META_IS_LINK;
+    meta->mode = (fs.mode >> 6) & 0x07;
+    path->meta = meta;
+    path->flags |= PATH_FLAG_META_LOADED;
+}
 
 // Extern declaration for heap_strcpy (defined in lambda-mem.cpp)
 extern String* heap_strcpy(const char* src, int64_t len);
@@ -830,19 +835,7 @@ static Item resolve_directory_children(Path* parent_path, const char* dir_path) 
         snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->name);
         
         FileStat fs = file_stat(full_path);
-        if (fs.exists) {
-            PathMeta* meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
-            if (meta) {
-                meta->size = fs.size;
-                meta->modified = *datetime_from_unix(pool, (int64_t)fs.modified);
-                meta->flags = 0;
-                if (fs.is_dir) meta->flags |= PATH_META_IS_DIR;
-                if (fs.is_symlink) meta->flags |= PATH_META_IS_LINK;
-                meta->mode = (fs.mode >> 6) & 0x07;
-                child_path->meta = meta;
-                child_path->flags |= PATH_FLAG_META_LOADED;
-            }
-        }
+        path_apply_stat_metadata(child_path, pool, fs);
         
         // Add child path to list (cast Path* to uint64_t since Item is uint64_t in C)
         list_push(children, (Item)(uint64_t)child_path);
@@ -932,18 +925,7 @@ static void expand_wildcard_recursive(Path* base, const char* dir_path,
             continue;
         }
         
-        // Load metadata
-        PathMeta* meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
-        if (meta) {
-            meta->size = fs.size;
-            meta->modified = *datetime_from_unix(pool, (int64_t)fs.modified);
-            meta->flags = 0;
-            if (fs.is_dir) meta->flags |= PATH_META_IS_DIR;
-            if (fs.is_symlink) meta->flags |= PATH_META_IS_LINK;
-            meta->mode = (fs.mode >> 6) & 0x07;
-            child->meta = meta;
-            child->flags |= PATH_FLAG_META_LOADED;
-        }
+        path_apply_stat_metadata(child, pool, fs);
         
         // Add to matches (cast Path* to uint64_t since Item is uint64_t in C)
         list_push(matches, (Item)(uint64_t)child);

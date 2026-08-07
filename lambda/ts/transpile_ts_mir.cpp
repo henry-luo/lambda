@@ -690,6 +690,23 @@ static JsAstNode* ts_lower_class_with_decorators(TsTranspiler* tp,
 // Strip type-only nodes from AST before passing to JS transpiler
 // ============================================================================
 
+static void ts_append_lowered_nodes(TsTranspiler* tp, JsAstNode* node,
+        JsAstNode** first, JsAstNode** last) {
+    node = ts_lower_expr_tree(tp, node);
+    JsAstNode* tail = node;
+    while (tail->next) {
+        tail->next = ts_lower_expr_tree(tp, tail->next);
+        tail = tail->next;
+    }
+    if (!*first) {
+        *first = node;
+        *last = tail;
+    } else {
+        (*last)->next = node;
+        *last = tail;
+    }
+}
+
 static JsAstNode* ts_strip_type_only_nodes(TsTranspiler* tp, JsAstNode* body) {
     JsAstNode* first = NULL;
     JsAstNode* last = NULL;
@@ -736,18 +753,8 @@ static JsAstNode* ts_strip_type_only_nodes(TsTranspiler* tp, JsAstNode* body) {
         if (nt == (int)TS_AST_NODE_NAMESPACE_DECLARATION) {
             TsNamespaceDeclarationNode* ns = (TsNamespaceDeclarationNode*)node;
             node = ts_lower_namespace_to_js(tp, ns);
-            // lower TS expressions inside the generated IIFE body
-            node = ts_lower_expr_tree(tp, node);
-            // ts_lower_namespace_to_js returns linked nodes (var + call)
-            // find the tail
-            JsAstNode* tail = node;
-            while (tail->next) {
-                tail->next = ts_lower_expr_tree(tp, tail->next);
-                tail = tail->next;
-            }
-            // splice: add all linked nodes
-            if (!first) { first = node; last = tail; }
-            else { last->next = node; last = tail; }
+            // lower and splice the generated linked nodes
+            ts_append_lowered_nodes(tp, node, &first, &last);
             deco_count = 0;
             node = next;
             continue;
@@ -757,15 +764,8 @@ static JsAstNode* ts_strip_type_only_nodes(TsTranspiler* tp, JsAstNode* body) {
         if (deco_count > 0 && (nt == JS_AST_NODE_CLASS_DECLARATION ||
                                 nt == JS_AST_NODE_CLASS_EXPRESSION)) {
             node = ts_lower_class_with_decorators(tp, decorators, deco_count, node);
-            // lower TS expressions inside the desugared output
-            node = ts_lower_expr_tree(tp, node);
-            JsAstNode* tail = node;
-            while (tail->next) {
-                tail->next = ts_lower_expr_tree(tp, tail->next);
-                tail = tail->next;
-            }
-            if (!first) { first = node; last = tail; }
-            else { last->next = node; last = tail; }
+            // lower and splice the desugared linked nodes
+            ts_append_lowered_nodes(tp, node, &first, &last);
             deco_count = 0;
             node = next;
             continue;

@@ -2,6 +2,7 @@
 #define LAMBDA_JS_HOST_HOOKS_H
 
 #include "../lambda-data.hpp"
+#include "../jube/jube.h"
 
 // Host hooks invert optional Node-leaf back-calls. An absent hook is a
 // deliberate no-op so minimal profiles remain independent of Node modules.
@@ -18,5 +19,12 @@ void js_host_hooks_set_cluster_online_hook(JsHostClusterOnlineHook hook);
 void js_host_hooks_emit_cluster_online(Item child);
 void js_host_hooks_set_console_format_hook(JsHostConsoleFormatHook hook);
 Item js_host_hooks_format_console(Item args);
+
+// Shared JS runtime predicates and Unicode helpers live in js_runtime.cpp so
+// global builtins and runtime dispatch use one implementation of each rule.
+const JubeTypeDef* js_host_object_type(Item object);
+bool js_host_object_prototype(Item object, Item* out);
+bool js_is_arguments_exotic_array(Item value);
+int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii);
 
 #endif

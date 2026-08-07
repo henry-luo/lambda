@@ -26,55 +26,35 @@ static void html5_update_line_count(Html5Parser* parser) {
 // FAST TEXT SCANNING - Batch ASCII Processing
 // ============================================================================
 
-// Scan a run of ASCII text characters that don't need special handling.
-// Returns the number of bytes that can be consumed as a single text token.
-// Stops at: '<', '&', '\0', EOF, or non-ASCII bytes (>= 0x80 for UTF-8)
-static size_t html5_scan_text_run(Html5Parser* parser) {
+static size_t html5_scan_run(Html5Parser* parser, bool stop_ampersand) {
     const char* start = parser->html + parser->pos;
     const char* end = parser->html + parser->length;
     const char* p = start;
 
     while (p < end) {
         unsigned char c = (unsigned char)*p;
-        // Stop at delimiters or non-ASCII (UTF-8 continuation)
-        if (c == '<' || c == '&' || c == '\0' || c >= 0x80) {
+        if (c == '<' || (stop_ampersand && c == '&') || c == '\0' || c >= 0x80) {
             break;
         }
         p++;
     }
     return p - start;
+}
+
+// Scan a run of ASCII text characters that don't need special handling.
+// Stops at: '<', '&', '\0', EOF, or non-ASCII bytes (>= 0x80 for UTF-8).
+static size_t html5_scan_text_run(Html5Parser* parser) {
+    return html5_scan_run(parser, true);
 }
 
 // Scan RCDATA text (stops at '<' and '&' only, allows NULL with error)
 static size_t html5_scan_rcdata_run(Html5Parser* parser) {
-    const char* start = parser->html + parser->pos;
-    const char* end = parser->html + parser->length;
-    const char* p = start;
-
-    while (p < end) {
-        unsigned char c = (unsigned char)*p;
-        if (c == '<' || c == '&' || c == '\0' || c >= 0x80) {
-            break;
-        }
-        p++;
-    }
-    return p - start;
+    return html5_scan_run(parser, true);
 }
 
 // Scan RAWTEXT (stops at '<' only)
 static size_t html5_scan_rawtext_run(Html5Parser* parser) {
-    const char* start = parser->html + parser->pos;
-    const char* end = parser->html + parser->length;
-    const char* p = start;
-
-    while (p < end) {
-        unsigned char c = (unsigned char)*p;
-        if (c == '<' || c == '\0' || c >= 0x80) {
-            break;
-        }
-        p++;
-    }
-    return p - start;
+    return html5_scan_run(parser, false);
 }
 
 // ============================================================================
@@ -520,6 +500,64 @@ static void html5_commit_attribute(Html5Parser* parser) {
     html5_clear_temp_buffer(parser);
 }
 
+static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
+                                            int* out_len, bool in_attribute);
+static void html5_save_last_start_tag(Html5Parser* parser, const char* name, size_t len);
+
+// helper: emit the current tag and retain its name for raw-text end-tag matching
+static Html5Token* html5_emit_current_tag(Html5Parser* parser) {
+    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+    Html5Token* token = parser->current_token;
+    parser->current_token = nullptr;
+    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
+        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
+    }
+    return token;
+}
+
+// helper: update numeric character-reference state for one digit
+static void html5_accumulate_numeric_digit(uint32_t* codepoint, bool* overflowed,
+                                            uint32_t digit, uint32_t base) {
+    if (*overflowed) return;
+    if (*codepoint > (0x10FFFF / base)) {
+        *overflowed = true;
+        return;
+    }
+    *codepoint = *codepoint * base + digit;
+    if (*codepoint > 0x10FFFF) *overflowed = true;
+}
+
+// helper: append decoded character-reference bytes or the literal ampersand
+static void html5_append_char_reference_or_literal(Html5Parser* parser, char c,
+                                                    bool in_attribute) {
+    char decoded[8];
+    int decoded_len = 0;
+    if (html5_try_decode_char_reference(parser, decoded, &decoded_len, in_attribute)) {
+        for (int i = 0; i < decoded_len; i++) {
+            html5_append_to_temp_buffer(parser, decoded[i]);
+        }
+    } else {
+        html5_append_to_temp_buffer(parser, c);
+    }
+}
+
+// helper: recover an invalid RCDATA/RAWTEXT end tag as literal text
+static Html5Token* html5_emit_end_tag_as_text(Html5Parser* parser,
+                                                Html5TokenizerState state) {
+    parser->current_token = nullptr;
+    if (!html5_is_eof(parser)) {
+        html5_reconsume(parser);
+    }
+    html5_switch_tokenizer_state(parser, state);
+    size_t len = 2 + parser->temp_buffer_len;
+    char* text = (char*)arena_alloc(parser->arena, len + 1);
+    text[0] = '<';
+    text[1] = '/';
+    memcpy(text + 2, parser->temp_buffer, parser->temp_buffer_len);
+    text[len] = '\0';
+    return html5_token_create_character_string(parser->pool, parser->arena, text, len);
+}
+
 // helper: save the last start tag name (for RCDATA/RAWTEXT end tag matching)
 static void html5_save_last_start_tag(Html5Parser* parser, const char* name, size_t len) {
     // Allocate or reuse buffer
@@ -653,37 +691,22 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
             if (is_hex) {
                 if (c >= '0' && c <= '9') {
                     if (!overflowed) {
-                        uint32_t digit = c - '0';
-                        if (codepoint > (0x10FFFF / 16)) {
-                            overflowed = true;
-                        } else {
-                            codepoint = codepoint * 16 + digit;
-                            if (codepoint > 0x10FFFF) overflowed = true;
-                        }
+                        html5_accumulate_numeric_digit(&codepoint, &overflowed,
+                            c - '0', 16);
                     }
                     digits++;
                     parser->pos++;
                 } else if (c >= 'a' && c <= 'f') {
                     if (!overflowed) {
-                        uint32_t digit = c - 'a' + 10;
-                        if (codepoint > (0x10FFFF / 16)) {
-                            overflowed = true;
-                        } else {
-                            codepoint = codepoint * 16 + digit;
-                            if (codepoint > 0x10FFFF) overflowed = true;
-                        }
+                        html5_accumulate_numeric_digit(&codepoint, &overflowed,
+                            c - 'a' + 10, 16);
                     }
                     digits++;
                     parser->pos++;
                 } else if (c >= 'A' && c <= 'F') {
                     if (!overflowed) {
-                        uint32_t digit = c - 'A' + 10;
-                        if (codepoint > (0x10FFFF / 16)) {
-                            overflowed = true;
-                        } else {
-                            codepoint = codepoint * 16 + digit;
-                            if (codepoint > 0x10FFFF) overflowed = true;
-                        }
+                        html5_accumulate_numeric_digit(&codepoint, &overflowed,
+                            c - 'A' + 10, 16);
                     }
                     digits++;
                     parser->pos++;
@@ -812,6 +835,174 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
     return 0;
 }
 
+// Keep quoted attribute states identical so entity decoding and EOF recovery cannot drift.
+static Html5Token* html5_handle_quoted_attribute_value(Html5Parser* parser, char c, char quote) {
+    if (c == quote) {
+        html5_switch_tokenizer_state(parser, HTML5_TOK_AFTER_ATTRIBUTE_VALUE_QUOTED);
+    } else if (c == '&') {
+        html5_append_char_reference_or_literal(parser, c, true);
+    } else if (c == '\0') {
+        if (html5_is_eof(parser)) {
+            log_error("html5: eof in attribute value");
+            html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+            return html5_token_create_eof(parser->pool, parser->arena);
+        }
+        log_error("html5: unexpected null in attribute value");
+        html5_append_replacement_to_temp_buffer(parser);
+    } else {
+        html5_append_to_temp_buffer(parser, c);
+    }
+    return nullptr;
+}
+
+// Public and system identifiers share the same quoted-state recovery rules.
+static Html5Token* html5_handle_quoted_doctype_identifier(Html5Parser* parser, char c,
+                                                           char quote, bool is_public) {
+    Html5TokenizerState after_state = is_public
+        ? HTML5_TOK_AFTER_DOCTYPE_PUBLIC_IDENTIFIER
+        : HTML5_TOK_AFTER_DOCTYPE_SYSTEM_IDENTIFIER;
+    const char* identifier_name = is_public ? "public" : "system";
+
+    if (c == quote) {
+        String* identifier = html5_create_string_from_temp_buffer(parser);
+        if (is_public) {
+            parser->current_token->public_identifier = identifier;
+        } else {
+            parser->current_token->system_identifier = identifier;
+        }
+        html5_switch_tokenizer_state(parser, after_state);
+    } else if (c == '\0') {
+        if (html5_is_eof(parser)) {
+            log_error("html5: eof in doctype");
+            parser->current_token->force_quirks = true;
+            String* identifier = html5_create_string_from_temp_buffer(parser);
+            if (is_public) {
+                parser->current_token->public_identifier = identifier;
+            } else {
+                parser->current_token->system_identifier = identifier;
+            }
+            html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+            Html5Token* token = parser->current_token;
+            parser->current_token = nullptr;
+            return token;
+        }
+        log_error("html5: unexpected null in doctype %s identifier", identifier_name);
+        html5_append_replacement_to_temp_buffer(parser);
+    } else if (c == '>') {
+        log_error("html5: abrupt doctype %s identifier", identifier_name);
+        parser->current_token->force_quirks = true;
+        String* identifier = html5_create_string_from_temp_buffer(parser);
+        if (is_public) {
+            parser->current_token->public_identifier = identifier;
+        } else {
+            parser->current_token->system_identifier = identifier;
+        }
+        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+        Html5Token* token = parser->current_token;
+        parser->current_token = nullptr;
+        return token;
+    } else {
+        html5_append_to_temp_buffer(parser, c);
+    }
+    return nullptr;
+}
+
+static Html5Token* html5_handle_before_doctype_identifier(Html5Parser* parser, char c,
+                                                           bool is_public, bool after_keyword) {
+    Html5TokenizerState before_state = is_public
+        ? HTML5_TOK_BEFORE_DOCTYPE_PUBLIC_IDENTIFIER
+        : HTML5_TOK_BEFORE_DOCTYPE_SYSTEM_IDENTIFIER;
+    Html5TokenizerState double_state = is_public
+        ? HTML5_TOK_DOCTYPE_PUBLIC_IDENTIFIER_DOUBLE_QUOTED
+        : HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED;
+    Html5TokenizerState single_state = is_public
+        ? HTML5_TOK_DOCTYPE_PUBLIC_IDENTIFIER_SINGLE_QUOTED
+        : HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED;
+    const char* identifier_name = is_public ? "public" : "system";
+
+    if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
+        if (after_keyword) html5_switch_tokenizer_state(parser, before_state);
+    } else if (c == '"' || c == '\'') {
+        if (after_keyword) {
+            log_error("html5: missing whitespace after doctype %s keyword", identifier_name);
+        }
+        html5_clear_temp_buffer(parser);
+        html5_switch_tokenizer_state(parser, c == '"' ? double_state : single_state);
+    } else if (c == '>') {
+        log_error("html5: missing doctype %s identifier", identifier_name);
+        parser->current_token->force_quirks = true;
+        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+        Html5Token* token = parser->current_token;
+        parser->current_token = nullptr;
+        return token;
+    } else if (html5_is_eof(parser)) {
+        log_error("html5: eof in doctype");
+        parser->current_token->force_quirks = true;
+        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+        Html5Token* token = parser->current_token;
+        parser->current_token = nullptr;
+        return token;
+    } else {
+        log_error("html5: missing quote before doctype %s identifier", identifier_name);
+        parser->current_token->force_quirks = true;
+        html5_reconsume(parser);
+        html5_switch_tokenizer_state(parser, HTML5_TOK_BOGUS_DOCTYPE_STATE);
+    }
+    return nullptr;
+}
+
+static Html5Token* html5_handle_doctype_public_system_boundary(Html5Parser* parser,
+        char c, bool after_public_identifier) {
+    if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
+        if (after_public_identifier) {
+            html5_switch_tokenizer_state(parser,
+                HTML5_TOK_BETWEEN_DOCTYPE_PUBLIC_AND_SYSTEM_IDENTIFIERS);
+        }
+    } else if (c == '>') {
+        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+        Html5Token* token = parser->current_token;
+        parser->current_token = nullptr;
+        return token;
+    } else if (c == '"' || c == '\'') {
+        if (after_public_identifier) {
+            log_error("html5: missing whitespace between doctype public and system identifiers");
+        }
+        html5_clear_temp_buffer(parser);
+        html5_switch_tokenizer_state(parser, c == '"'
+            ? HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED
+            : HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED);
+    } else if (html5_is_eof(parser)) {
+        log_error("html5: eof in doctype");
+        parser->current_token->force_quirks = true;
+        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+        Html5Token* token = parser->current_token;
+        parser->current_token = nullptr;
+        return token;
+    } else {
+        log_error("html5: missing quote before doctype system identifier");
+        parser->current_token->force_quirks = true;
+        html5_reconsume(parser);
+        html5_switch_tokenizer_state(parser, HTML5_TOK_BOGUS_DOCTYPE_STATE);
+    }
+    return nullptr;
+}
+
+static Html5Token* html5_finish_comment(Html5Parser* parser, const char* error) {
+    if (error) log_error("html5: %s", error);
+    parser->current_token->data = html5_create_string_from_temp_buffer(parser);
+    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+    Html5Token* token = parser->current_token;
+    parser->current_token = nullptr;
+    return token;
+}
+
+static Html5Token* html5_emit_null_character(Html5Parser* parser, const char* error) {
+    if (html5_is_eof(parser)) return html5_token_create_eof(parser->pool, parser->arena);
+    log_error("html5: %s", error);
+    return html5_token_create_character_string(parser->pool, parser->arena,
+        HTML5_REPLACEMENT_CHAR_UTF8, 3);
+}
+
 // main tokenizer function - returns next token
 Html5Token* html5_tokenize_next(Html5Parser* parser) {
     while (true) {
@@ -862,13 +1053,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c == '<') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_TAG_OPEN);
                 } else if (c == '\0') {
-                    if (html5_is_eof(parser)) {
-                        return html5_token_create_eof(parser->pool, parser->arena);
-                    } else {
-                        // parse error: unexpected null
-                        log_error("html5: unexpected null character in data state");
-                        return html5_token_create_character_string(parser->pool, parser->arena, HTML5_REPLACEMENT_CHAR_UTF8, 3);
-                    }
+                    return html5_emit_null_character(parser, "unexpected null character in data state");
                 } else {
                     // Single character (non-ASCII or after batch scan)
                     return html5_token_create_character(parser->pool, parser->arena, c);
@@ -891,12 +1076,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c == '<') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA_LESS_THAN_SIGN);
                 } else if (c == '\0') {
-                    if (html5_is_eof(parser)) {
-                        return html5_token_create_eof(parser->pool, parser->arena);
-                    } else {
-                        log_error("html5: unexpected null in RCDATA");
-                        return html5_token_create_character_string(parser->pool, parser->arena, HTML5_REPLACEMENT_CHAR_UTF8, 3);
-                    }
+                    return html5_emit_null_character(parser, "unexpected null in RCDATA");
                 } else {
                     return html5_token_create_character(parser->pool, parser->arena, c);
                 }
@@ -969,20 +1149,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     // Not a valid end tag name character
                     rcdata_emit_as_text:
                     // Emit '</' + temp_buffer contents as text
-                    parser->current_token = nullptr;
-                    // Only reconsume if not at EOF - at EOF there's nothing to reconsume
-                    if (!html5_is_eof(parser)) {
-                        html5_reconsume(parser);
-                    }
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
-                    // Build the string "</" + temp_buffer
-                    size_t len = 2 + parser->temp_buffer_len;
-                    char* text = (char*)arena_alloc(parser->arena, len + 1);
-                    text[0] = '<';
-                    text[1] = '/';
-                    memcpy(text + 2, parser->temp_buffer, parser->temp_buffer_len);
-                    text[len] = '\0';
-                    return html5_token_create_character_string(parser->pool, parser->arena, text, len);
+                    return html5_emit_end_tag_as_text(parser, HTML5_TOK_RCDATA);
                 }
                 break;
             }
@@ -993,12 +1160,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 if (c == '<') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT_LESS_THAN_SIGN);
                 } else if (c == '\0') {
-                    if (html5_is_eof(parser)) {
-                        return html5_token_create_eof(parser->pool, parser->arena);
-                    } else {
-                        log_error("html5: unexpected null in RAWTEXT");
-                        return html5_token_create_character_string(parser->pool, parser->arena, HTML5_REPLACEMENT_CHAR_UTF8, 3);
-                    }
+                    return html5_emit_null_character(parser, "unexpected null in RAWTEXT");
                 } else {
                     return html5_token_create_character(parser->pool, parser->arena, c);
                 }
@@ -1063,19 +1225,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_append_to_temp_buffer(parser, c);
                 } else {
                     rawtext_emit_as_text:
-                    parser->current_token = nullptr;
-                    // Only reconsume if not at EOF - at EOF there's nothing to reconsume
-                    if (!html5_is_eof(parser)) {
-                        html5_reconsume(parser);
-                    }
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT);
-                    size_t len = 2 + parser->temp_buffer_len;
-                    char* text = (char*)arena_alloc(parser->arena, len + 1);
-                    text[0] = '<';
-                    text[1] = '/';
-                    memcpy(text + 2, parser->temp_buffer, parser->temp_buffer_len);
-                    text[len] = '\0';
-                    return html5_token_create_character_string(parser->pool, parser->arena, text, len);
+                    return html5_emit_end_tag_as_text(parser, HTML5_TOK_RAWTEXT);
                 }
                 break;
             }
@@ -1084,12 +1234,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 // PLAINTEXT state - everything is literal text, no end tag recognized
                 // Per WHATWG: keep emitting characters until EOF
                 if (c == '\0') {
-                    if (html5_is_eof(parser)) {
-                        return html5_token_create_eof(parser->pool, parser->arena);
-                    } else {
-                        log_error("html5: unexpected null in PLAINTEXT");
-                        return html5_token_create_character_string(parser->pool, parser->arena, HTML5_REPLACEMENT_CHAR_UTF8, 3);
-                    }
+                    return html5_emit_null_character(parser, "unexpected null in PLAINTEXT");
                 } else {
                     return html5_token_create_character(parser->pool, parser->arena, c);
                 }
@@ -1172,14 +1317,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_SELF_CLOSING_START_TAG);
                 } else if (c == '>') {
                     parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
-                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
-                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
-                    }
-                    return token;
+                    return html5_emit_current_tag(parser);
                 } else if (c >= 'A' && c <= 'Z') {
                     // convert uppercase to lowercase
                     html5_append_to_temp_buffer(parser, c + 0x20);
@@ -1270,14 +1408,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c == '>') {
                     // commit value-less attribute and emit tag
                     html5_commit_attribute(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
-                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
-                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
-                    }
-                    return token;
+                    return html5_emit_current_tag(parser);
                 } else if (c == '\0' && html5_is_eof(parser)) {
                     // EOF in tag - emit eof token (tag is dropped per spec)
                     log_error("html5: eof in tag");
@@ -1305,14 +1436,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c == '>') {
                     log_error("html5: missing attribute value");
                     html5_commit_attribute(parser);  // commit empty value
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
-                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
-                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
-                    }
-                    return token;
+                    return html5_emit_current_tag(parser);
                 } else if (c == '\0' && html5_is_eof(parser)) {
                     // EOF in tag
                     log_error("html5: eof in tag");
@@ -1327,60 +1451,14 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
             }
 
             case HTML5_TOK_ATTRIBUTE_VALUE_DOUBLE_QUOTED: {
-                if (c == '"') {
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_AFTER_ATTRIBUTE_VALUE_QUOTED);
-                } else if (c == '&') {
-                    // character reference in attribute value
-                    char decoded[8];
-                    int decoded_len = 0;
-                    if (html5_try_decode_char_reference(parser, decoded, &decoded_len, true)) {
-                        for (int i = 0; i < decoded_len; i++) {
-                            html5_append_to_temp_buffer(parser, decoded[i]);
-                        }
-                    } else {
-                        html5_append_to_temp_buffer(parser, c);
-                    }
-                } else if (c == '\0') {
-                    if (html5_is_eof(parser)) {
-                        log_error("html5: eof in attribute value");
-                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                        return html5_token_create_eof(parser->pool, parser->arena);
-                    } else {
-                        log_error("html5: unexpected null in attribute value");
-                        html5_append_replacement_to_temp_buffer(parser);
-                    }
-                } else {
-                    html5_append_to_temp_buffer(parser, c);
-                }
+                Html5Token* token = html5_handle_quoted_attribute_value(parser, c, '"');
+                if (token != nullptr) return token;
                 break;
             }
 
             case HTML5_TOK_ATTRIBUTE_VALUE_SINGLE_QUOTED: {
-                if (c == '\'') {
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_AFTER_ATTRIBUTE_VALUE_QUOTED);
-                } else if (c == '&') {
-                    // character reference in attribute value
-                    char decoded[8];
-                    int decoded_len = 0;
-                    if (html5_try_decode_char_reference(parser, decoded, &decoded_len, true)) {
-                        for (int i = 0; i < decoded_len; i++) {
-                            html5_append_to_temp_buffer(parser, decoded[i]);
-                        }
-                    } else {
-                        html5_append_to_temp_buffer(parser, c);
-                    }
-                } else if (c == '\0') {
-                    if (html5_is_eof(parser)) {
-                        log_error("html5: eof in attribute value");
-                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                        return html5_token_create_eof(parser->pool, parser->arena);
-                    } else {
-                        log_error("html5: unexpected null in attribute value");
-                        html5_append_replacement_to_temp_buffer(parser);
-                    }
-                } else {
-                    html5_append_to_temp_buffer(parser, c);
-                }
+                Html5Token* token = html5_handle_quoted_attribute_value(parser, c, '\'');
+                if (token != nullptr) return token;
                 break;
             }
 
@@ -1391,26 +1469,11 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
                 } else if (c == '&') {
                     // character reference in attribute value
-                    char decoded[8];
-                    int decoded_len = 0;
-                    if (html5_try_decode_char_reference(parser, decoded, &decoded_len, true)) {
-                        for (int i = 0; i < decoded_len; i++) {
-                            html5_append_to_temp_buffer(parser, decoded[i]);
-                        }
-                    } else {
-                        html5_append_to_temp_buffer(parser, c);
-                    }
+                    html5_append_char_reference_or_literal(parser, c, true);
                 } else if (c == '>') {
                     // commit and emit tag
                     html5_commit_attribute(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
-                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
-                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
-                    }
-                    return token;
+                    return html5_emit_current_tag(parser);
                 } else if (c == '\0') {
                     if (html5_is_eof(parser)) {
                         log_error("html5: eof in attribute value");
@@ -1438,14 +1501,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c == '/') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_SELF_CLOSING_START_TAG);
                 } else if (c == '>') {
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
-                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
-                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
-                    }
-                    return token;
+                    return html5_emit_current_tag(parser);
                 } else if (html5_is_eof(parser)) {
                     log_error("html5: eof after attribute value");
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
@@ -1461,14 +1517,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
             case HTML5_TOK_SELF_CLOSING_START_TAG: {
                 if (c == '>') {
                     parser->current_token->self_closing = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
-                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
-                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
-                    }
-                    return token;
+                    return html5_emit_current_tag(parser);
                 } else if (html5_is_eof(parser)) {
                     log_error("html5: eof in tag");
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
@@ -1520,12 +1569,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 if (c == '-') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_COMMENT_START_DASH);
                 } else if (c == '>') {
-                    log_error("html5: abrupt closing of empty comment");
-                    parser->current_token->data = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    return html5_finish_comment(parser, "abrupt closing of empty comment");
                 } else {
                     html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_COMMENT);
@@ -1537,19 +1581,9 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 if (c == '-') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_COMMENT_END);
                 } else if (c == '>') {
-                    log_error("html5: abrupt closing of empty comment");
-                    parser->current_token->data = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    return html5_finish_comment(parser, "abrupt closing of empty comment");
                 } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in comment");
-                    parser->current_token->data = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    return html5_finish_comment(parser, "eof in comment");
                 } else {
                     html5_append_to_temp_buffer(parser, '-');
                     html5_reconsume(parser);
@@ -1566,12 +1600,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_COMMENT_END_DASH);
                 } else if (c == '\0') {
                     if (html5_is_eof(parser)) {
-                        log_error("html5: eof in comment");
-                        parser->current_token->data = html5_create_string_from_temp_buffer(parser);
-                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                        Html5Token* token = parser->current_token;
-                        parser->current_token = nullptr;
-                        return token;
+                        return html5_finish_comment(parser, "eof in comment");
                     } else {
                         log_error("html5: unexpected null in comment");
                         html5_append_replacement_to_temp_buffer(parser);
@@ -1631,12 +1660,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 if (c == '-') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_COMMENT_END);
                 } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in comment");
-                    parser->current_token->data = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    return html5_finish_comment(parser, "eof in comment");
                 } else {
                     html5_append_to_temp_buffer(parser, '-');
                     html5_reconsume(parser);
@@ -1647,22 +1671,13 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
 
             case HTML5_TOK_COMMENT_END: {
                 if (c == '>') {
-                    parser->current_token->data = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    return html5_finish_comment(parser, nullptr);
                 } else if (c == '!') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_COMMENT_END_BANG);
                 } else if (c == '-') {
                     html5_append_to_temp_buffer(parser, '-');
                 } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in comment");
-                    parser->current_token->data = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    return html5_finish_comment(parser, "eof in comment");
                 } else {
                     html5_append_to_temp_buffer(parser, '-');
                     html5_append_to_temp_buffer(parser, '-');
@@ -1679,19 +1694,9 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_append_to_temp_buffer(parser, '!');
                     html5_switch_tokenizer_state(parser, HTML5_TOK_COMMENT_END_DASH);
                 } else if (c == '>') {
-                    log_error("html5: incorrectly closed comment");
-                    parser->current_token->data = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    return html5_finish_comment(parser, "incorrectly closed comment");
                 } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in comment");
-                    parser->current_token->data = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    return html5_finish_comment(parser, "eof in comment");
                 } else {
                     html5_append_to_temp_buffer(parser, '-');
                     html5_append_to_temp_buffer(parser, '-');
@@ -1704,17 +1709,9 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
 
             case HTML5_TOK_BOGUS_COMMENT: {
                 if (c == '>') {
-                    parser->current_token->data = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    return html5_finish_comment(parser, nullptr);
                 } else if (c == '\0' && html5_is_eof(parser)) {
-                    parser->current_token->data = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    return html5_finish_comment(parser, nullptr);
                 } else if (c == '\0') {
                     html5_append_replacement_to_temp_buffer(parser);
                 } else {
@@ -1856,320 +1853,64 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
             }
 
             case HTML5_TOK_AFTER_DOCTYPE_PUBLIC_KEYWORD: {
-                if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_DOCTYPE_PUBLIC_IDENTIFIER);
-                } else if (c == '"') {
-                    log_error("html5: missing whitespace after doctype public keyword");
-                    html5_clear_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_PUBLIC_IDENTIFIER_DOUBLE_QUOTED);
-                } else if (c == '\'') {
-                    log_error("html5: missing whitespace after doctype public keyword");
-                    html5_clear_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_PUBLIC_IDENTIFIER_SINGLE_QUOTED);
-                } else if (c == '>') {
-                    log_error("html5: missing doctype public identifier");
-                    parser->current_token->force_quirks = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in doctype");
-                    parser->current_token->force_quirks = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else {
-                    log_error("html5: missing quote before doctype public identifier");
-                    parser->current_token->force_quirks = true;
-                    html5_reconsume(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_BOGUS_DOCTYPE_STATE);
-                }
+                Html5Token* token = html5_handle_before_doctype_identifier(parser, c, true, true);
+                if (token != nullptr) return token;
                 break;
             }
 
             case HTML5_TOK_BEFORE_DOCTYPE_PUBLIC_IDENTIFIER: {
-                if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
-                    // ignore whitespace
-                } else if (c == '"') {
-                    html5_clear_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_PUBLIC_IDENTIFIER_DOUBLE_QUOTED);
-                } else if (c == '\'') {
-                    html5_clear_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_PUBLIC_IDENTIFIER_SINGLE_QUOTED);
-                } else if (c == '>') {
-                    log_error("html5: missing doctype public identifier");
-                    parser->current_token->force_quirks = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in doctype");
-                    parser->current_token->force_quirks = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else {
-                    log_error("html5: missing quote before doctype public identifier");
-                    parser->current_token->force_quirks = true;
-                    html5_reconsume(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_BOGUS_DOCTYPE_STATE);
-                }
+                Html5Token* token = html5_handle_before_doctype_identifier(parser, c, true, false);
+                if (token != nullptr) return token;
                 break;
             }
 
             case HTML5_TOK_DOCTYPE_PUBLIC_IDENTIFIER_DOUBLE_QUOTED: {
-                if (c == '"') {
-                    parser->current_token->public_identifier = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_AFTER_DOCTYPE_PUBLIC_IDENTIFIER);
-                } else if (c == '\0') {
-                    if (html5_is_eof(parser)) {
-                        log_error("html5: eof in doctype");
-                        parser->current_token->force_quirks = true;
-                        parser->current_token->public_identifier = html5_create_string_from_temp_buffer(parser);
-                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                        Html5Token* token = parser->current_token;
-                        parser->current_token = nullptr;
-                        return token;
-                    } else {
-                        log_error("html5: unexpected null in doctype public identifier");
-                        html5_append_replacement_to_temp_buffer(parser);
-                    }
-                } else if (c == '>') {
-                    log_error("html5: abrupt doctype public identifier");
-                    parser->current_token->force_quirks = true;
-                    parser->current_token->public_identifier = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else {
-                    html5_append_to_temp_buffer(parser, c);
-                }
+                Html5Token* token = html5_handle_quoted_doctype_identifier(parser, c, '"', true);
+                if (token != nullptr) return token;
                 break;
             }
 
             case HTML5_TOK_DOCTYPE_PUBLIC_IDENTIFIER_SINGLE_QUOTED: {
-                if (c == '\'') {
-                    parser->current_token->public_identifier = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_AFTER_DOCTYPE_PUBLIC_IDENTIFIER);
-                } else if (c == '\0') {
-                    if (html5_is_eof(parser)) {
-                        log_error("html5: eof in doctype");
-                        parser->current_token->force_quirks = true;
-                        parser->current_token->public_identifier = html5_create_string_from_temp_buffer(parser);
-                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                        Html5Token* token = parser->current_token;
-                        parser->current_token = nullptr;
-                        return token;
-                    } else {
-                        log_error("html5: unexpected null in doctype public identifier");
-                        html5_append_replacement_to_temp_buffer(parser);
-                    }
-                } else if (c == '>') {
-                    log_error("html5: abrupt doctype public identifier");
-                    parser->current_token->force_quirks = true;
-                    parser->current_token->public_identifier = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else {
-                    html5_append_to_temp_buffer(parser, c);
-                }
+                Html5Token* token = html5_handle_quoted_doctype_identifier(parser, c, '\'', true);
+                if (token != nullptr) return token;
                 break;
             }
 
             case HTML5_TOK_AFTER_DOCTYPE_PUBLIC_IDENTIFIER: {
-                if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_BETWEEN_DOCTYPE_PUBLIC_AND_SYSTEM_IDENTIFIERS);
-                } else if (c == '>') {
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else if (c == '"') {
-                    log_error("html5: missing whitespace between doctype public and system identifiers");
-                    html5_clear_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED);
-                } else if (c == '\'') {
-                    log_error("html5: missing whitespace between doctype public and system identifiers");
-                    html5_clear_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED);
-                } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in doctype");
-                    parser->current_token->force_quirks = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else {
-                    log_error("html5: missing quote before doctype system identifier");
-                    parser->current_token->force_quirks = true;
-                    html5_reconsume(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_BOGUS_DOCTYPE_STATE);
-                }
+                Html5Token* token =
+                    html5_handle_doctype_public_system_boundary(parser, c, true);
+                if (token != nullptr) return token;
                 break;
             }
 
             case HTML5_TOK_BETWEEN_DOCTYPE_PUBLIC_AND_SYSTEM_IDENTIFIERS: {
-                if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
-                    // ignore whitespace
-                } else if (c == '>') {
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else if (c == '"') {
-                    html5_clear_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED);
-                } else if (c == '\'') {
-                    html5_clear_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED);
-                } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in doctype");
-                    parser->current_token->force_quirks = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else {
-                    log_error("html5: missing quote before doctype system identifier");
-                    parser->current_token->force_quirks = true;
-                    html5_reconsume(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_BOGUS_DOCTYPE_STATE);
-                }
+                Html5Token* token =
+                    html5_handle_doctype_public_system_boundary(parser, c, false);
+                if (token != nullptr) return token;
                 break;
             }
 
             case HTML5_TOK_AFTER_DOCTYPE_SYSTEM_KEYWORD: {
-                if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_DOCTYPE_SYSTEM_IDENTIFIER);
-                } else if (c == '"') {
-                    log_error("html5: missing whitespace after doctype system keyword");
-                    html5_clear_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED);
-                } else if (c == '\'') {
-                    log_error("html5: missing whitespace after doctype system keyword");
-                    html5_clear_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED);
-                } else if (c == '>') {
-                    log_error("html5: missing doctype system identifier");
-                    parser->current_token->force_quirks = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in doctype");
-                    parser->current_token->force_quirks = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else {
-                    log_error("html5: missing quote before doctype system identifier");
-                    parser->current_token->force_quirks = true;
-                    html5_reconsume(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_BOGUS_DOCTYPE_STATE);
-                }
+                Html5Token* token = html5_handle_before_doctype_identifier(parser, c, false, true);
+                if (token != nullptr) return token;
                 break;
             }
 
             case HTML5_TOK_BEFORE_DOCTYPE_SYSTEM_IDENTIFIER: {
-                if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
-                    // ignore whitespace
-                } else if (c == '"') {
-                    html5_clear_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED);
-                } else if (c == '\'') {
-                    html5_clear_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED);
-                } else if (c == '>') {
-                    log_error("html5: missing doctype system identifier");
-                    parser->current_token->force_quirks = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in doctype");
-                    parser->current_token->force_quirks = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else {
-                    log_error("html5: missing quote before doctype system identifier");
-                    parser->current_token->force_quirks = true;
-                    html5_reconsume(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_BOGUS_DOCTYPE_STATE);
-                }
+                Html5Token* token = html5_handle_before_doctype_identifier(parser, c, false, false);
+                if (token != nullptr) return token;
                 break;
             }
 
             case HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED: {
-                if (c == '"') {
-                    parser->current_token->system_identifier = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_AFTER_DOCTYPE_SYSTEM_IDENTIFIER);
-                } else if (c == '\0') {
-                    if (html5_is_eof(parser)) {
-                        log_error("html5: eof in doctype");
-                        parser->current_token->force_quirks = true;
-                        parser->current_token->system_identifier = html5_create_string_from_temp_buffer(parser);
-                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                        Html5Token* token = parser->current_token;
-                        parser->current_token = nullptr;
-                        return token;
-                    } else {
-                        log_error("html5: unexpected null in doctype system identifier");
-                        html5_append_replacement_to_temp_buffer(parser);
-                    }
-                } else if (c == '>') {
-                    log_error("html5: abrupt doctype system identifier");
-                    parser->current_token->force_quirks = true;
-                    parser->current_token->system_identifier = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else {
-                    html5_append_to_temp_buffer(parser, c);
-                }
+                Html5Token* token = html5_handle_quoted_doctype_identifier(parser, c, '"', false);
+                if (token != nullptr) return token;
                 break;
             }
 
             case HTML5_TOK_DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED: {
-                if (c == '\'') {
-                    parser->current_token->system_identifier = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_AFTER_DOCTYPE_SYSTEM_IDENTIFIER);
-                } else if (c == '\0') {
-                    if (html5_is_eof(parser)) {
-                        log_error("html5: eof in doctype");
-                        parser->current_token->force_quirks = true;
-                        parser->current_token->system_identifier = html5_create_string_from_temp_buffer(parser);
-                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                        Html5Token* token = parser->current_token;
-                        parser->current_token = nullptr;
-                        return token;
-                    } else {
-                        log_error("html5: unexpected null in doctype system identifier");
-                        html5_append_replacement_to_temp_buffer(parser);
-                    }
-                } else if (c == '>') {
-                    log_error("html5: abrupt doctype system identifier");
-                    parser->current_token->force_quirks = true;
-                    parser->current_token->system_identifier = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else {
-                    html5_append_to_temp_buffer(parser, c);
-                }
+                Html5Token* token = html5_handle_quoted_doctype_identifier(parser, c, '\'', false);
+                if (token != nullptr) return token;
                 break;
             }
 

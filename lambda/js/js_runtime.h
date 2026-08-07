@@ -11,6 +11,7 @@ extern "C" {
 #endif
 
 #include "../lambda.h"
+#include "../core/name_identity.h"
 #include <string.h>
 
 static inline bool js_map_kind_uses_default_object_to_primitive(uint8_t map_kind) {
@@ -29,6 +30,39 @@ Item js_undefined(void);
 Item make_js_undefined(void);
 Item js_make_string_len(const char* str, int len);
 Item js_make_string(const char* str);
+
+const char* js_item_to_cstr(Item value, char* buf, int buf_size);
+bool js_item_to_integral_int64(Item value, int64_t* out, bool allow_int64);
+
+static inline int js_utf8_next_codepoint(const char* s, int len, int* index) {
+    unsigned char c = (unsigned char)s[*index];
+    if (c < 0x80) {
+        (*index)++;
+        return c;
+    }
+    if ((c & 0xE0) == 0xC0 && *index + 1 < len) {
+        int cp = ((c & 0x1F) << 6) | ((unsigned char)s[*index + 1] & 0x3F);
+        *index += 2;
+        return cp;
+    }
+    if ((c & 0xF0) == 0xE0 && *index + 2 < len) {
+        int cp = ((c & 0x0F) << 12) |
+                 (((unsigned char)s[*index + 1] & 0x3F) << 6) |
+                 ((unsigned char)s[*index + 2] & 0x3F);
+        *index += 3;
+        return cp;
+    }
+    if ((c & 0xF8) == 0xF0 && *index + 3 < len) {
+        int cp = ((c & 0x07) << 18) |
+                 (((unsigned char)s[*index + 1] & 0x3F) << 12) |
+                 (((unsigned char)s[*index + 2] & 0x3F) << 6) |
+                 ((unsigned char)s[*index + 3] & 0x3F);
+        *index += 4;
+        return cp;
+    }
+    (*index)++;
+    return c;
+}
 // Converts a well-known Symbol numeric ID to its generated realm-local ref.
 // Internal runtime code uses this instead of diagnostic "__sym_N" spellings.
 Item js_well_known_symbol_key(int64_t symbol_id);
@@ -192,8 +226,11 @@ Item js_private_field_define(Item object, Item private_key, Item value);
 Item js_create_data_property(Item object, Item key, Item value);
 Item js_property_access(Item object, Item key);
 Item js_property_access_named_ic(Item object, const char* name, int64_t name_len, JsLoadIC* ic);
+Item js_property_access_key_ic(Item object, PropertyKeyRef key, JsLoadIC* ic);
 Item js_property_set_named_ic(Item object, const char* name, int64_t name_len, Item value,
     int64_t strict, JsStoreIC* ic);
+Item js_property_set_key_ic(Item object, PropertyKeyRef key, Item value, int64_t strict,
+    JsStoreIC* ic);
 
 // =============================================================================
 // Array Functions

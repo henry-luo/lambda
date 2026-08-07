@@ -120,6 +120,44 @@ static int atomic_rename(const char* temp_path, const char* final_path) {
     return file_rename(temp_path, final_path);
 }
 
+static bool write_raw_bytes(const char* file_path, const char* mode, bool atomic,
+                            const void* data, size_t data_len) {
+    StrBuf* temp_path_buf = NULL;
+    const char* write_path = file_path;
+    if (atomic) {
+        temp_path_buf = strbuf_new();
+        generate_temp_path(file_path, temp_path_buf);
+        write_path = temp_path_buf->str;
+    }
+
+    FILE* f = fopen(write_path, mode);
+    if (!f) {
+        log_error("pn_output_internal: failed to open file %s: %s", write_path, strerror(errno));
+        if (temp_path_buf) strbuf_free(temp_path_buf);
+        return false;
+    }
+
+    size_t written = fwrite(data, 1, data_len, f);
+    fclose(f);
+    if (written != data_len) {
+        log_error("pn_output_internal: failed to write to file %s", write_path);
+        if (atomic) file_delete(write_path);
+        if (temp_path_buf) strbuf_free(temp_path_buf);
+        return false;
+    }
+
+    if (atomic) {
+        if (atomic_rename(write_path, file_path) != 0) {
+            log_error("pn_output_internal: atomic rename failed: %s -> %s", write_path, file_path);
+            file_delete(write_path);
+            strbuf_free(temp_path_buf);
+            return false;
+        }
+        strbuf_free(temp_path_buf);
+    }
+    return true;
+}
+
 // Unified output implementation
 // source: data to output
 // target_item: file path (String, Symbol, or Path)
@@ -200,49 +238,13 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
             return item_to_ri(ItemError);
         }
 
-        // determine actual write path (temp file for atomic writes)
-        StrBuf* temp_path_buf = NULL;
-        const char* write_path = file_path;
-        if (atomic) {
-            temp_path_buf = strbuf_new();
-            generate_temp_path(file_path, temp_path_buf);
-            write_path = temp_path_buf->str;
-        }
-
-        FILE* f = fopen(write_path, mode);
-        if (!f) {
-            log_error("pn_output_internal: failed to open file %s: %s", write_path, strerror(errno));
-            if (temp_path_buf) strbuf_free(temp_path_buf);
+        if (!write_raw_bytes(file_path, mode, atomic, str->chars, str->len)) {
             strbuf_free(path_buf);
             return item_to_ri(ItemError);
         }
-
-        size_t written = fwrite(str->chars, 1, str->len, f);
-        fclose(f);
-
-        if (written != (size_t)str->len) {
-            log_error("pn_output_internal: failed to write to file %s", write_path);
-            if (atomic) file_delete(write_path);  // clean up temp file on error
-            if (temp_path_buf) strbuf_free(temp_path_buf);
-            strbuf_free(path_buf);
-            return item_to_ri(ItemError);
-        }
-
-        // atomic: rename temp file to final path
-        if (atomic) {
-            if (atomic_rename(write_path, file_path) != 0) {
-                log_error("pn_output_internal: atomic rename failed: %s -> %s", write_path, file_path);
-                file_delete(write_path);  // clean up temp file
-                strbuf_free(temp_path_buf);
-                strbuf_free(path_buf);
-                return item_to_ri(ItemError);
-            }
-            strbuf_free(temp_path_buf);
-        }
-
-        log_debug("pn_output_internal: wrote %zu bytes (text) to %s", written, file_path);
+        log_debug("pn_output_internal: wrote %zu bytes (text) to %s", (size_t)str->len, file_path);
         strbuf_free(path_buf);
-        return ri_ok({.item = i2it((int64_t)written)});
+        return ri_ok({.item = i2it((int64_t)str->len)});
     }
 
     // binary source: output as raw binary data (ignore format)
@@ -256,50 +258,15 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
             return item_to_ri(ItemError);
         }
 
-        // determine actual write path (temp file for atomic writes)
-        StrBuf* temp_path_buf = NULL;
-        const char* write_path = file_path;
-        if (atomic) {
-            temp_path_buf = strbuf_new();
-            generate_temp_path(file_path, temp_path_buf);
-            write_path = temp_path_buf->str;
-        }
-
-        FILE* f = fopen(write_path, mode_binary);
-        if (!f) {
-            log_error("pn_output_internal: failed to open file %s: %s", write_path, strerror(errno));
-            if (temp_path_buf) strbuf_free(temp_path_buf);
-            strbuf_free(path_buf);
-            return item_to_ri(ItemError);
-        }
-
         size_t bin_len = binary_length(bin);
-        size_t written = fwrite(binary_data(bin), 1, bin_len, f);
-        fclose(f);
-
-        if (written != bin_len) {
-            log_error("pn_output_internal: failed to write to file %s", write_path);
-            if (atomic) file_delete(write_path);  // clean up temp file on error
-            if (temp_path_buf) strbuf_free(temp_path_buf);
+        if (!write_raw_bytes(file_path, mode_binary, atomic, binary_data(bin), bin_len)) {
             strbuf_free(path_buf);
             return item_to_ri(ItemError);
         }
 
-        // atomic: rename temp file to final path
-        if (atomic) {
-            if (atomic_rename(write_path, file_path) != 0) {
-                log_error("pn_output_internal: atomic rename failed: %s -> %s", write_path, file_path);
-                file_delete(write_path);  // clean up temp file
-                strbuf_free(temp_path_buf);
-                strbuf_free(path_buf);
-                return item_to_ri(ItemError);
-            }
-            strbuf_free(temp_path_buf);
-        }
-
-        log_debug("pn_output_internal: wrote %zu bytes (binary) to %s", written, file_path);
+        log_debug("pn_output_internal: wrote %zu bytes (binary) to %s", bin_len, file_path);
         strbuf_free(path_buf);
-        return ri_ok({.item = i2it((int64_t)written)});
+        return ri_ok({.item = i2it((int64_t)bin_len)});
     }
 
     // determine format for structured data

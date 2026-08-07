@@ -76,6 +76,11 @@ typedef struct gc_object_zone {
     // Per-size-class slab chains
     gc_object_slab_t* slabs[GC_NUM_SIZE_CLASSES];
 
+    // Each class has at most one partially fresh slab: new slabs are prepended
+    // only after the existing chain is full. Keeping that cursor avoids the
+    // quadratic full-chain walk on allocation-heavy workloads.
+    gc_object_slab_t* fresh_slabs[GC_NUM_SIZE_CLASSES];
+
     // Underlying memory pool for slab allocation
     Pool* pool;
 

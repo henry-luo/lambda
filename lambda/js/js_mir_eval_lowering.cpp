@@ -1048,6 +1048,37 @@ static bool js_eval_at_line_terminator(const char* source, size_t len, size_t po
     return false;
 }
 
+// helper: skip a JavaScript string or comment while source scanners share the same lexical rules
+static bool js_eval_skip_string_or_comment(const char* source, size_t len, size_t* pos) {
+    size_t p = *pos;
+    char ch = source[p];
+    if (ch == '\'' || ch == '"' || ch == '`') {
+        char quote = ch;
+        p++;
+        while (p < len) {
+            if (source[p] == '\\' && p + 1 < len) { p += 2; continue; }
+            if (source[p] == quote) { p++; break; }
+            p++;
+        }
+        *pos = p;
+        return true;
+    }
+    if (ch == '/' && p + 1 < len && source[p + 1] == '/') {
+        p += 2;
+        while (p < len && !js_eval_at_line_terminator(source, len, p, NULL)) p++;
+        *pos = p;
+        return true;
+    }
+    if (ch == '/' && p + 1 < len && source[p + 1] == '*') {
+        p += 2;
+        while (p + 1 < len && !(source[p] == '*' && source[p + 1] == '/')) p++;
+        if (p + 1 < len) p += 2;
+        *pos = p;
+        return true;
+    }
+    return false;
+}
+
 static size_t js_eval_skip_space_and_comments(const char* source, size_t len, size_t pos) {
     while (pos < len) {
         char ch = source[pos];
@@ -1072,26 +1103,8 @@ static size_t js_eval_skip_space_and_comments(const char* source, size_t len, si
 
 static bool js_source_contains_import_meta(const char* source, size_t len) {
     for (size_t pos = 0; pos < len; pos++) {
-        char ch = source[pos];
-        if (ch == '\'' || ch == '"' || ch == '`') {
-            char quote = ch;
-            pos++;
-            while (pos < len) {
-                if (source[pos] == '\\' && pos + 1 < len) { pos += 2; continue; }
-                if (source[pos] == quote) break;
-                pos++;
-            }
-            continue;
-        }
-        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
-            pos += 2;
-            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
-            continue;
-        }
-        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
-            pos += 2;
-            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
-            if (pos + 1 < len) pos++;
+        if (js_eval_skip_string_or_comment(source, len, &pos)) {
+            if (pos > 0) pos--;
             continue;
         }
         if (js_eval_at_word(source, len, pos, "import", 6)) {
@@ -1121,28 +1134,11 @@ static bool js_dynamic_function_param_has_invalid_html_close_comment(const char*
     if (!source || len < 3) return false;
 
     for (size_t pos = 0; pos < len; pos++) {
+        if (js_eval_skip_string_or_comment(source, len, &pos)) {
+            if (pos > 0) pos--;
+            continue;
+        }
         char ch = source[pos];
-        if (ch == '\'' || ch == '"' || ch == '`') {
-            char quote = ch;
-            pos++;
-            while (pos < len) {
-                if (source[pos] == '\\' && pos + 1 < len) { pos += 2; continue; }
-                if (source[pos] == quote) break;
-                pos++;
-            }
-            continue;
-        }
-        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
-            pos += 2;
-            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
-            continue;
-        }
-        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
-            pos += 2;
-            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
-            if (pos + 1 < len) pos++;
-            continue;
-        }
         if (ch == '-' && pos + 2 < len && source[pos + 1] == '-' && source[pos + 2] == '>') {
             if (!js_dynamic_function_param_has_line_terminator_before(source, pos)) return true;
             pos += 2;
@@ -1340,28 +1336,8 @@ static bool js_eval_source_assigns_immutable_binding(String* code_str) {
     size_t len = code_str->len;
     size_t pos = 0;
     while (pos < len) {
+        if (js_eval_skip_string_or_comment(source, len, &pos)) continue;
         char ch = source[pos];
-        if (ch == '\'' || ch == '"' || ch == '`') {
-            char quote = ch;
-            pos++;
-            while (pos < len && source[pos] != quote) {
-                if (source[pos] == '\\' && pos + 1 < len) pos++;
-                pos++;
-            }
-            if (pos < len) pos++;
-            continue;
-        }
-        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
-            pos += 2;
-            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
-            continue;
-        }
-        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
-            pos += 2;
-            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
-            if (pos + 1 < len) pos += 2;
-            continue;
-        }
         if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$')) {
             pos++;
             continue;
@@ -1387,28 +1363,8 @@ static bool js_eval_strict_assigns_restricted_name(String* code_str) {
     size_t len = code_str->len;
     size_t pos = 0;
     while (pos < len) {
+        if (js_eval_skip_string_or_comment(source, len, &pos)) continue;
         char ch = source[pos];
-        if (ch == '\'' || ch == '"' || ch == '`') {
-            char quote = ch;
-            pos++;
-            while (pos < len && source[pos] != quote) {
-                if (source[pos] == '\\' && pos + 1 < len) pos++;
-                pos++;
-            }
-            if (pos < len) pos++;
-            continue;
-        }
-        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
-            pos += 2;
-            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
-            continue;
-        }
-        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
-            pos += 2;
-            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
-            if (pos + 1 < len) pos += 2;
-            continue;
-        }
         size_t name_len = 0;
         if (js_eval_at_word(source, len, pos, "arguments", 9)) name_len = 9;
         else if (js_eval_at_word(source, len, pos, "eval", 4)) name_len = 4;

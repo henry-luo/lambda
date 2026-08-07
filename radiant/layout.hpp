@@ -203,6 +203,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width);
 
 bool layout_element_inline_axis_is_vertical(DomElement* element);
+WritingMode layout_element_writing_mode(DomElement* element);
+bool layout_inline_element_is_orthogonal(DomElement* element);
 CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
                                                             bool horizontal);
 CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* element,
@@ -2204,7 +2206,34 @@ bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal);
 bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal);
 bool layout_block_has_automatic_height(ViewBlock* block);
 WritingMode layout_block_writing_mode(ViewBlock* block);
+void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
+                                      bool swap_dimensions);
+void layout_normalize_vertical_breaks(ViewBlock* block);
 bool layout_block_inline_axis_is_vertical(ViewBlock* block);
+inline float layout_block_start_content_offset(ViewBlock* block) {
+    if (!block) return 0.0f;
+    BoxMetrics box = layout_box_metrics(block);
+    WritingMode mode = layout_block_writing_mode(block);
+    if (mode == WM_VERTICAL_RL) return box.border.right + box.padding.right;
+    if (mode == WM_VERTICAL_LR) return box.border.left + box.padding.left;
+    return box.border.top + box.padding.top;
+}
+inline float layout_vertical_item_baseline_from_border_edges(ViewBlock* container,
+                                                             View* item) {
+    if (!container || !item) return -1.0f;
+    WritingMode mode = layout_block_writing_mode(container);
+    if (mode != WM_VERTICAL_RL && mode != WM_VERTICAL_LR) return -1.0f;
+    BoxMetrics box = layout_box_metrics(container);
+    float block_start_border = mode == WM_VERTICAL_RL
+        ? box.border.right : box.border.left;
+    float item_center = item->x + item->width / 2.0f;
+    // Vertical baselines are lines along the inline axis; synthesize their
+    // position from flex/grid item border edges instead of horizontal y metrics.
+    return mode == WM_VERTICAL_RL
+        ? container->width - block_start_border - item_center
+        : item_center - block_start_border;
+}
+float layout_inline_atomic_extent(LayoutContext* lycon, ViewBlock* block);
 bool layout_block_has_size_containment_in_axis(ViewBlock* block, bool horizontal);
 float layout_block_empty_content_size_in_axis(ViewBlock* block, bool horizontal);
 float layout_block_stable_scrollbar_gutter(ViewBlock* block, bool horizontal);
@@ -2227,6 +2256,7 @@ struct ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt);
 void table_auto_layout(LayoutContext* lycon, struct ViewTable* table);
 void adjust_table_text_positions_final(struct ViewTable* table);
 float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh = false);
+float find_last_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_x, bool use_normal_lh = false);
 void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row,
     float table_abs_x, float cell_border, float cell_padding);
 void adjust_cell_text_positions_final(struct ViewBlock* cell, float text_abs_x);
@@ -2483,8 +2513,11 @@ const char* map_lambda_font_family_keyword(const char* keyword);
 
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);
+void place_rtl_initial_letter_line(LayoutContext* lycon);
+void adjust_text_bounds(ViewText* text);
 View* layout_inline_fragment_root(View* view);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
+DomElement* find_fieldset_rendered_legend(ViewBlock* fieldset);
 void layout_block(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_text(LayoutContext* lycon, DomNode* text_node);
 void layout_inline(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
@@ -2613,6 +2646,7 @@ TypoMetrics get_os2_typo_metrics(struct FontHandle* handle);
 // Calculate normal line height following Chrome's algorithm
 // Delegates to font_calc_normal_line_height() from lib/font/
 float calc_normal_line_height(struct FontHandle* handle);
+float layout_br_line_box_extent(LayoutContext* lycon, struct FontHandle* handle);
 bool layout_quirky_container_ignores_child_margin_bottom(
     LayoutContext* lycon, ViewBlock* container, ViewBlock* child);
 CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,

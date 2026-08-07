@@ -420,50 +420,39 @@ extern "C" void js_env_rehome_scalars(Item* env) {
     }
 }
 
-// v20: Mark a function as a generator (generator prototype has no constructor)
-extern "C" void js_mark_generator_func(Item fn_item) {
+static void js_mark_function_flags(Item fn_item, uint32_t flags) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_GENERATOR;
+    fn->flags |= flags;
     js_function_call_lane_recompute(fn);
+}
+
+// v20: Mark a function as a generator (generator prototype has no constructor)
+extern "C" void js_mark_generator_func(Item fn_item) {
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_GENERATOR);
 }
 
 // Mark a function as an async generator function (sets both GENERATOR and ASYNC_GEN flags)
 extern "C" void js_mark_async_generator_func(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN;
-    js_function_call_lane_recompute(fn);
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN);
 }
 
 // Mark a function as an async (non-generator) function — affects [[Prototype]]/.constructor
 extern "C" void js_mark_async_func(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_ASYNC;
-    js_function_call_lane_recompute(fn);
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_ASYNC);
 }
 
 extern "C" void js_mark_derived_constructor_func(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_DERIVED_CTOR;
-    js_function_call_lane_recompute(fn);
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_DERIVED_CTOR);
 }
 
 // Mark a function as an arrow function (non-constructable)
 extern "C" void js_mark_arrow_func(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_ARROW;
-    js_function_call_lane_recompute(fn);
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_ARROW);
 }
 
 extern "C" void js_mark_method_func(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_METHOD;
-    js_function_call_lane_recompute(fn);
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_METHOD);
 }
 
 extern "C" void js_mark_eval_initializer_func_if_active(Item fn_item) {
@@ -476,10 +465,7 @@ extern "C" void js_mark_eval_initializer_func_if_active(Item fn_item) {
 
 // Mark a function as strict mode (ES spec [[Strict]] internal slot)
 extern "C" void js_mark_strict_func(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_STRICT;
-    js_function_call_lane_recompute(fn);
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_STRICT);
 }
 
 extern "C" void js_finalize_function(Item fn_item, Item name_item,
