@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-07
 - **Platform:** Darwin arm64
-- **Lambda commit:** `2c78c51cb6d95d9525e9780ddb7396403a7d698c`
+- **Lambda commit:** `acb46fb4d52e20985d9b51358ee472b7ec3ed06f`
 - **Lambda build:** archived release binary `test/benchmark/exe/lambda-v25-812ddaef0b` (21,185,816 bytes)
 - **Instrumentation check:** passed
 - **Test262 baseline:** 40,261 / 40,261 passed in 167.90s (harness time; required pre-benchmark gate)
@@ -30,8 +30,8 @@ C2MIR and Go are native statically typed ports of the same workloads, present as
 | KOSTYA | 7 | 7 | 7 | 0 | 7 | 7 | 7 | 3.63x | 2.50x | --- | 16.0x | 11.9x |
 | LARCENY | 11 | 11 | 11 | 0 | 11 | 11 | 11 | 3.28x | 1.98x | --- | 14.0x | 13.1x |
 | JetStream | 6 | 6 | 6 | 0 | 6 | 4 | 6 | 11.1x | 7.05x | --- | 68.3x | 12.6x |
-| Text | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0.18x | 0.16x | 0.01x | 63.2x | 9.56x |
-| **Overall** | 59 | 59 | 59 | 3 | 59 | 53 | 59 | 2.14x | 1.21x | 0.01x | 16.0x | 7.30x |
+| Text | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0.96x | 0.84x | 0.02x | 62.7x | 9.52x |
+| **Overall** | 59 | 59 | 59 | 3 | 59 | 53 | 59 | 2.32x | 1.32x | 0.02x | 16.0x | 7.30x |
 
 > The benchmark runner keeps one canonical row for each known duplicate workload, so no reporting deduplication is required.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -42,15 +42,15 @@ C2MIR and Go are native statically typed ports of the same workloads, present as
 
 How far MIR (typed) is from the same workload written in a statically typed language. These columns are a reference bound, not another Lambda execution path: they say what is still on the table, and C2MIR is the sharper of the two because it shares MIR's code generator, so a gap there is attributable to Lambda's front end rather than to the backend.
 
-- **MIR (typed) / C2MIR geomean:** 12.3x over 3 of 59 rows
+- **MIR (typed) / C2MIR geomean:** 50.3x over 3 of 59 rows
 
 **Widest gaps vs C2MIR**
 
 | Benchmark | MIR (typed) | C2MIR | MIR (typed)/C2MIR |
 |---|---:|---:|---:|
-| text/hyphen | 3.94 | 0.088 | 44.7x |
-| text/fast_diff | 539.9 | 12.8 | 42.2x |
-| text/microdiff | 0.007 | 0.007 | 0.99x |
+| text/microdiff | 0.979 | 0.016 | 60.8x |
+| text/hyphen | 4.29 | 0.088 | 48.8x |
+| text/fast_diff | 557.1 | 13.0 | 42.8x |
 
 ---
 
@@ -70,7 +70,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | jetstream/crypto_sha1 | 1.86s | 9.38 | 199x |
 | beng/spectralnorm | 297.6 | 2.62 | 114x |
 | awfy/nbody | 575.7 | 5.86 | 98.3x |
-| text/microdiff | 1.43s | 16.0 | 89.2x |
+| text/microdiff | 1.44s | 16.1 | 89.0x |
 | awfy/deltablue | 970.2 | 12.3 | 79.2x |
 
 ### LambdaJS Faster Than Node.js
@@ -171,6 +171,6 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 
 | Benchmark | Category | MIR (untyped) (ms) | MIR (typed) (ms) | C2MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR (untyped)/Node | MIR (typed)/Node | C2MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| fast_diff | text-diff | 1.31s | 539.9 | 12.8 | 2.23s | 605.0 | 38.5 | 34.2x | 14.0x | 0.33x | 58.0x | 15.7x |
-| microdiff | data-diff | 0.007 | 0.007 | 0.007 | 1.43s | 108.1 | 16.0 | 0.000x | 0.000x | 0.000x | 89.2x | 6.76x |
-| hyphen | hyphenation | 2.65 | 3.94 | 0.088 | 306.4 | 51.5 | 6.27 | 0.42x | 0.63x | 0.01x | 48.9x | 8.21x |
+| fast_diff | text-diff | 1.37s | 557.1 | 13.0 | 2.23s | 610.2 | 39.1 | 35.0x | 14.3x | 0.33x | 57.1x | 15.6x |
+| microdiff | data-diff | 0.982 | 0.979 | 0.016 | 1.44s | 109.7 | 16.1 | 0.06x | 0.06x | 0.001x | 89.0x | 6.80x |
+| hyphen | hyphenation | 2.64 | 4.29 | 0.088 | 307.5 | 51.5 | 6.33 | 0.42x | 0.68x | 0.01x | 48.6x | 8.13x |
