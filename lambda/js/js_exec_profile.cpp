@@ -42,6 +42,11 @@ typedef struct JsExecProfileMirCall {
 typedef struct JsExecProfileHelperCall {
     char name[192];
     uint64_t calls;
+    // emitted call sites: the counter slot is handed out exactly once per
+    // emitted call, so this is an exact site count. The older
+    // note_mir_call tally shares its 1024-slot table with per-function direct
+    // call names and silently saturates, which made it useless for helpers.
+    uint64_t sites;
 } JsExecProfileHelperCall;
 
 typedef struct JsExecProfileShapeGuardSite {
@@ -256,6 +261,7 @@ uint64_t* js_exec_profile_helper_call_counter(const char* fn_name) {
     if (mode <= 0 || !fn_name || !fn_name[0]) return NULL;
     for (int i = 0; i < g_js_exec_profile_helper_call_count; i++) {
         if (strcmp(g_js_exec_profile_helper_calls[i].name, fn_name) == 0) {
+            g_js_exec_profile_helper_calls[i].sites++;
             return &g_js_exec_profile_helper_calls[i].calls;
         }
     }
@@ -269,6 +275,7 @@ uint64_t* js_exec_profile_helper_call_counter(const char* fn_name) {
     snprintf(g_js_exec_profile_helper_calls[index].name,
         sizeof(g_js_exec_profile_helper_calls[index].name), "%s", fn_name);
     g_js_exec_profile_helper_calls[index].calls = 0;
+    g_js_exec_profile_helper_calls[index].sites = 1;
     return &g_js_exec_profile_helper_calls[index].calls;
 }
 
@@ -615,11 +622,13 @@ void js_exec_profile_dump(void) {
     }
     if (g_js_exec_profile_helper_call_count > 0) {
         strbuf_append_str(buf, "\n# JS runtime helper dynamic calls from JIT code\n");
-        strbuf_append_str(buf, "runtime_helper\tcalls\n");
+        strbuf_append_str(buf, "runtime_helper\tcalls\temitted_sites\n");
         for (int i = 0; i < g_js_exec_profile_helper_call_count; i++) {
             strbuf_append_str(buf, g_js_exec_profile_helper_calls[i].name);
             strbuf_append_char(buf, '\t');
             strbuf_append_uint64(buf, g_js_exec_profile_helper_calls[i].calls);
+            strbuf_append_char(buf, '\t');
+            strbuf_append_uint64(buf, g_js_exec_profile_helper_calls[i].sites);
             strbuf_append_char(buf, '\n');
         }
     }
