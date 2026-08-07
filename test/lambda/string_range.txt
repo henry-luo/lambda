@@ -1,0 +1,33 @@
+'===== STRING RANGE TESTS ====='
+'Test 1: Materialization'
+1
+5
+2
+"a"
+3
+"e"
+4
+"abcde"
+'Test 2: Membership and range matching'
+5
+true
+6
+false
+7
+true
+8
+false
+9
+"letter"
+10
+"other"
+'Test 3: Unicode codepoint bounds'
+11
+["α", "β", "γ"]
+12
+true
+'Test 4: Refuse invalid bounds'
+13
+error
+14
+error

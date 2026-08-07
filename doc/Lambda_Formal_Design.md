@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.5.0 (2026-08-07)
+**Spec version:** 1.6.0 (2026-08-07)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -343,12 +343,15 @@ that carries them.
 
 ### D3.1 First-class type values
 
-- **D3.1.1*** A type value is a `Type*` graph node under one compact
-  TypeId (`LMD_TYPE_TYPE`), discriminated by `Type.kind`
-  (simple/unary/binary/constrained) — composite and constrained types
-  share the tag rather than spending tag-budget entries (D2.1.4). The
-  `Type*` graph is the **semantic authority** for every contract the
-  compiler carries (D2.4.1); a TypeId alone is never a contract.
+- **D3.1.1v2*** A type value is a `Type*` graph node under one compact
+  TypeId (`LMD_TYPE_TYPE`), discriminated by `Type.kind` (simple, unary,
+  binary, pattern, constrained, range, or parameter). Composite, pattern,
+  range, and constrained types share the tag rather than spending tag-budget
+  entries (D2.1.4). A range kind carries static bounds for inclusive
+  membership while preserving the value's storage domain; a pattern kind
+  carries its domain tag and compiled content matcher. The `Type*` graph is
+  the **semantic authority** for every contract the compiler carries
+  (D2.4.1); a TypeId alone is never a contract.
   [Lane §1, lambda-data.hpp]
 - **D3.1.2** Types compose as values (`|` union, `?`, `[]`, constraints)
   and compare **representationally** — normalized forms, not semantic

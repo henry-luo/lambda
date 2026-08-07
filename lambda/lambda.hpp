@@ -20,6 +20,7 @@ enum TypeKind {
     TYPE_KIND_BINARY,       // TypeBinary: union, intersection, exclude
     TYPE_KIND_PATTERN,      // TypePattern: compiled regex pattern
     TYPE_KIND_CONSTRAINED,  // TypeConstrained: type with where constraint
+    TYPE_KIND_RANGE,        // TypeRange: value-level range membership contract
     // TypeParam keeps a compact carrier Type prefix plus its full source
     // contract. Mark it so identifier typing can safely recover that contract.
     TYPE_KIND_PARAM,
@@ -370,6 +371,7 @@ struct Range : Container {
     int64_t start;  // inclusive start
     int64_t end;    // inclusive end
     int64_t length;
+    bool is_char;    // true when bounds are Unicode codepoints materializing as strings
 };
 
 struct List : Container {

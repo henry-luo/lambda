@@ -1,0 +1,1 @@
+pattern bodies are content-only; use \\symbol(...) for the symbol domain and string literals for content

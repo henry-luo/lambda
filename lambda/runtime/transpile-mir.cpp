@@ -7028,8 +7028,9 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
     if (bi->op == OPERATOR_TO) {
         MIR_reg_t boxl = transpile_box_item(mt, bi->left);
         MIR_reg_t boxr = transpile_box_item(mt, bi->right);
-        // fn_to(start, end) returns Range* (a container pointer)
-        return emit_call_2(mt, "fn_to", MIR_T_P,
+        // fn_to returns a boxed range or ItemError so invalid string bounds do
+        // not become an untagged null pointer at the next expression boundary.
+        return emit_call_2(mt, "fn_to", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
     }
@@ -9658,15 +9659,23 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 bool map_contract_constructed = false;
                 Type* declaration_map_contract = asn->declared_type
                     ? mir_unwrap_decl_type(asn->declared_type) : NULL;
-                TypeId predicted_expr_tid = get_effective_type(mt, asn->as);
-                AstNode* native_initializer = mir_unwrap_primary(asn->as);
-                bool native_int_initializer = predicted_expr_tid == LMD_TYPE_INT &&
-                    native_initializer && native_initializer->node_type == AST_NODE_BINARY &&
-                    mir_is_native_int_arith(mt, native_initializer);
-                MIR_reg_t val = native_int_initializer
-                    ? transpile_binary_out(mt, (AstBinaryNode*)native_initializer, true)
-                    : transpile_expr_with_map_contract(mt, asn->as,
-                        declaration_map_contract, &map_contract_constructed);
+                TypeId predicted_expr_tid;
+                MIR_reg_t val;
+                if (asn->is_type_definition) {
+                    // A type declaration names a Type* contract; evaluating its literal RHS as a data initializer stores the string payload in a native lane and loses the type value at the next identifier read.
+                    val = mir_emit_declared_type_value(mt, asn->type);
+                    predicted_expr_tid = LMD_TYPE_TYPE;
+                } else {
+                    predicted_expr_tid = get_effective_type(mt, asn->as);
+                    AstNode* native_initializer = mir_unwrap_primary(asn->as);
+                    bool native_int_initializer = predicted_expr_tid == LMD_TYPE_INT &&
+                        native_initializer && native_initializer->node_type == AST_NODE_BINARY &&
+                        mir_is_native_int_arith(mt, native_initializer);
+                    val = native_int_initializer
+                        ? transpile_binary_out(mt, (AstBinaryNode*)native_initializer, true)
+                        : transpile_expr_with_map_contract(mt, asn->as,
+                            declaration_map_contract, &map_contract_constructed);
+                }
                 mt->preserve_proc_if_result = saved_preserve_proc_if_result;
                 char name_buf[128];
                 snprintf(name_buf, sizeof(name_buf), "%.*s", (int)asn->name->len, asn->name->chars);
@@ -9685,12 +9694,17 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                      declared_lane_desc.kind == LANE_STORAGE_BOOL ||
                      declared_lane_desc.kind == LANE_STORAGE_FLOAT64 ||
                      declared_lane_desc.kind == LANE_STORAGE_POINTER);
+                bool declared_range_contract = declared_value_type &&
+                    declared_value_type->type_id == LMD_TYPE_RANGE &&
+                    declared_value_type->kind == TYPE_KIND_RANGE;
                 // Use the variable's declared type if available, otherwise the expression type.
                 // But if the expression is boxed ANY (e.g. captured variable), the declared
                 // type from AST is stale — use ANY to match the actual runtime value.
                 // Also: when declared type is ANY (untyped var) but expression type is concrete,
                 // prefer the expression type so type narrowing propagates through assignments.
-                TypeId var_tid = declared_nullable_scalar_lane
+                TypeId var_tid = declared_range_contract
+                    ? expr_tid
+                    : declared_nullable_scalar_lane
                     ? declared_lane_desc.base_contract->type_id
                     : (declared_value_type ? declared_value_type->type_id : expr_tid);
                 if (declared_value_type && declared_value_type->type_id == LMD_TYPE_TYPE &&
@@ -9755,6 +9769,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                      // statically or truncated by a D2I; it is now neither.
                      boundary_numeric_admission_is_dynamic(expr_tid,
                          declared_value_type->type_id) ||
+                     declared_range_contract ||
                      (declared_value_type->type_id == LMD_TYPE_MAP &&
                       expr_tid == LMD_TYPE_MAP &&
                       asn->as && asn->as->type != declared_value_type) ||
@@ -16731,6 +16746,49 @@ static MIR_reg_t transpile_const_type(MirTranspiler* mt, int type_index) {
         MIR_T_P, MIR_new_reg_op(mt->ctx, emit_load_module_type_list(mt)));
 }
 
+static MIR_reg_t transpile_pattern_island(MirTranspiler* mt,
+        AstPatternIslandNode* island) {
+    auto pattern_error_item = [mt]() {
+        MIR_reg_t error = new_reg(mt, "pattern_error", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, error),
+            MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)LMD_TYPE_ERROR << 56))));
+        return error;
+    };
+    TypePattern* pattern_type = (TypePattern*)island->type;
+    if (!pattern_type) {
+        log_error("mir: pattern island has no TypePattern payload");
+        return pattern_error_item();
+    }
+
+    if (pattern_type->re2 == nullptr && island->pattern != nullptr) {
+        const char* error_msg = nullptr;
+        TypePattern* compiled = compile_pattern_ast(mt->script_pool, island->pattern,
+            island->is_symbol, &error_msg);
+        if (!compiled) {
+            log_error("mir: failed to compile inline pattern: %s",
+                error_msg ? error_msg : "unknown error");
+            return pattern_error_item();
+        }
+        pattern_type->re2 = compiled->re2;
+        pattern_type->source = compiled->source;
+        pattern_type->regex_source = compiled->regex_source;
+        pattern_type->re2_unanchored = nullptr;
+        arraylist_append(mt->type_list, pattern_type);
+        pattern_type->pattern_index = mt->type_list->length - 1;
+        island->pattern_index = pattern_type->pattern_index;
+        log_debug("mir: compiled inline %s pattern, index=%d",
+            island->is_symbol ? "symbol" : "string", island->pattern_index);
+    }
+
+    if (pattern_type->pattern_index < 0) {
+        log_error("mir: inline pattern has no compiled type index");
+        return pattern_error_item();
+    }
+    return emit_call_2(mt, "const_pattern_with_tl", MIR_T_P,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, pattern_type->pattern_index),
+        MIR_T_P, MIR_new_reg_op(mt->ctx, emit_load_module_type_list(mt)));
+}
+
 // ============================================================================
 // Main expression dispatcher
 // ============================================================================
@@ -17967,6 +18025,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
     }
     case AST_NODE_TYPE:
         return transpile_base_type(mt, (AstTypeNode*)node);
+    case AST_NODE_PATTERN_ISLAND:
+        return transpile_pattern_island(mt, (AstPatternIslandNode*)node);
     case AST_NODE_KEY_EXPR: {
         // Key expression - transpile the value part
         AstNamedNode* key = (AstNamedNode*)node;
@@ -21747,6 +21807,7 @@ static void prepass_compile_patterns(MirTranspiler* mt, AstNode* node) {
             AstPatternDefNode* pattern_def = (AstPatternDefNode*)node;
             TypePattern* pattern_type = (TypePattern*)pattern_def->type;
 
+
             // compile pattern to regex if not already compiled
             if (pattern_type->re2 == nullptr && pattern_def->as != nullptr) {
                 const char* error_msg = nullptr;
@@ -21756,6 +21817,7 @@ static void prepass_compile_patterns(MirTranspiler* mt, AstNode* node) {
                     // copy compiled info to existing type
                     pattern_type->re2 = compiled->re2;
                     pattern_type->source = compiled->source;
+                    pattern_type->regex_source = compiled->regex_source;
                     // add to type_list for runtime access via const_pattern()
                     arraylist_append(mt->type_list, pattern_type);
                     pattern_type->pattern_index = mt->type_list->length - 1;

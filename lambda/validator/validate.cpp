@@ -144,7 +144,19 @@ ValidationResult* validate_against_primitive_type(SchemaValidator* validator, Co
     ValidationResult* result = create_validation_result(validator->get_pool());
 
     if (type->type_id == item.type_id()) {
-        result->valid = true;
+        if (type->is_literal &&
+                (type->type_id == LMD_TYPE_STRING || type->type_id == LMD_TYPE_SYMBOL)) {
+            TypeString* literal_type = (TypeString*)type;
+            Item literal = {.item = 0};
+            literal.item = type->type_id == LMD_TYPE_STRING
+                ? s2it(literal_type->string)
+                : y2it((Symbol*)literal_type->string);
+            // Literal-union members are value singletons; a primitive TypeId check alone would admit every string/symbol into the union.
+            Item actual = {.item = item.item};
+            result->valid = array_pattern_literal_matches(actual, literal);
+        } else {
+            result->valid = true;
+        }
     } else {
         result->valid = false;
         add_type_mismatch_error_ex(result, validator, type, item);
@@ -602,6 +614,7 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
 
     switch (type->type_id) {
         case LMD_TYPE_STRING:
+        case LMD_TYPE_SYMBOL:
         case LMD_TYPE_INT:
         case LMD_TYPE_FLOAT:
         case LMD_TYPE_BOOL:

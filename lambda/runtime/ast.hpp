@@ -110,6 +110,10 @@ extern "C" {
 
 // String/Symbol Pattern symbols
 #define SYM_PATTERN_CHAR_CLASS sym_pattern_char_class
+#define SYM_PATTERN_ISLAND sym_pattern_island
+#define SYM_PATTERN_OCCURRENCE_TYPE sym_pattern_occurrence_type
+#define SYM_PATTERN_NEGATION_TYPE sym_pattern_negation_type
+#define SYM_PATTERN_UNARY_TYPE sym_pattern_unary_type
 // SYM_PATTERN_ANY removed — merged into SYM_PATTERN_CHAR_CLASS
 #define SYM_OCCURRENCE_COUNT sym_occurrence_count
 // Unified type/pattern symbols
@@ -148,6 +152,7 @@ extern "C" {
 #define FIELD_OP field_op
 #define FIELD_FIELD field_field
 #define FIELD_BODY field_body
+#define FIELD_TAG field_tag
 #define FIELD_DECLARE field_declare
 #define FIELD_FUNCTION field_function
 #define FIELD_ARGUMENT field_argument
@@ -336,6 +341,13 @@ typedef struct AstElementNode : AstMapNode {
 typedef struct AstPatternDefNode : AstNamedNode {
     bool is_symbol;     // true for symbol pattern, false for string pattern
 } AstPatternDefNode;
+
+// Inline delimited pattern type, including the domain tag carried by its opener.
+typedef struct AstPatternIslandNode : AstNode {
+    AstNode* pattern;   // parsed content-language AST
+    bool is_symbol;     // true only for the tagged \\symbol(...) opener
+    int pattern_index;  // module-local compiled TypePattern index
+} AstPatternIslandNode;
 
 // Pattern range node ("a" to "z")
 typedef struct AstPatternRangeNode : AstNode {

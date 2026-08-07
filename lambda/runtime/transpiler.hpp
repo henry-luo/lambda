@@ -7,6 +7,9 @@
 
 #include "ast.hpp"
 
+// Shared range materialization helper for runtime sequence consumers.
+Item fn_chr(Item codepoint);
+
 typedef struct LambdaRegion LambdaRegion;
 typedef struct LambdaRegionBlock LambdaRegionBlock;
 

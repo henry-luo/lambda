@@ -366,9 +366,9 @@ Functions for string manipulation. `replace`, `split`, and `find` accept either 
 String patterns are defined in the type system (see [Lambda_Type.md](Lambda_Type.md) § String Patterns) and can be used as arguments to string functions:
 
 ```lambda
-string digits = \d+              // one or more digits
-string ws = \s+                  // one or more whitespace chars
-string word = \w+                // word characters
+type digits = \(d+)              // one or more digits
+type ws = \(s+)                  // one or more whitespace chars
+type word = \(w+)                // word characters
 ```
 
 String-valued system functions use `""` for a successful result with no
@@ -419,13 +419,13 @@ Replace all occurrences of a pattern or substring in a string. Returns a new str
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `replace(str, pattern, repl)` | Replace all pattern matches | `replace("a1b2", \d, "X")` | `"aXbX"` |
+| `replace(str, pattern, repl)` | Replace all pattern matches | `replace("a1b2", \(d), "X")` | `"aXbX"` |
 | `replace(str, string, repl)` | Replace all substring matches | `replace("abc", "b", "X")` | `"aXc"` |
 
 ```lambda
-string digit = \d
-string digits = \d+
-string ws = \s+
+type digit = \(d)
+type digits = \(d+)
+type ws = \(s+)
 
 replace("a1b2c3", digit, "X")         // "aXbXcX"
 replace("a1b22c333", digits, "N")     // "aNbNcN"
@@ -441,14 +441,14 @@ Split a string by pattern or substring. Returns an array of substrings.
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `split(str, pattern)` | Split by pattern | `split("a1b2", \d)` | `["a", "b", ""]` |
+| `split(str, pattern)` | Split by pattern | `split("a1b2", \(d))` | `["a", "b", ""]` |
 | `split(str, string)` | Split by substring | `split("a,b,c", ",")` | `["a", "b", "c"]` |
-| `split(str, sep, true)` | Split, keep delimiters | `split("a1b2", \d, true)` | `["a","1","b","2",""]` |
+| `split(str, sep, true)` | Split, keep delimiters | `split("a1b2", \(d), true)` | `["a","1","b","2",""]` |
 
 ```lambda
-string digit = \d
-string digits = \d+
-string ws = \s+
+type digit = \(d)
+type digits = \(d+)
+type ws = \(s+)
 
 split("a1b2c3", digit)                // ["a", "b", "c", ""]
 split("hello   world", ws)            // ["hello", "world"]
@@ -479,7 +479,7 @@ Find all occurrences of a pattern or substring. Returns a list of match maps `{v
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `find(str, pattern)` | Find all pattern matches | `find("a1b22", \d+)` | `[{value:"1",index:1}, ...]` |
+| `find(str, pattern)` | Find all pattern matches | `find("a1b22", \(d+))` | `[{value:"1",index:1}, ...]` |
 | `find(str, string)` | Find all substring matches | `find("abab", "ab")` | `[{value:"ab",index:0}, ...]` |
 
 Each match is a map with:
@@ -487,8 +487,8 @@ Each match is a map with:
 - `index` — the start position (0-based) in the source string
 
 ```lambda
-string digits = \d+
-string words = \w+
+type digits = \(d+)
+type words = \(w+)
 
 find("a1b22c333", digits)
 // [{value: "1", index: 1}, {value: "22", index: 3}, {value: "333", index: 6}]

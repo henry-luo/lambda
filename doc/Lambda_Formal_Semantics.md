@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 1.1.1 (2026-08-06)
+**Spec version:** 1.2.0 (2026-08-07)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -877,6 +877,24 @@ construct; `let` is final.* [C4]
   (TypeScript's reading — forced by compositionality at n = 1) and enforced
   with a teaching message; `int[]` is the homogeneous-array spelling, with a
   lint on bare `[T]` in annotation position only.* [C7]
+- **S11.1.2** String structural patterns are delimited islands: `\( ... )`
+  denotes a string-domain pattern and `\symbol( ... )` denotes a
+  symbol-domain pattern. Inside an island, quoted literals are strings, `d`,
+  `w`, `s`, `a`, `.`, and `...` are the reserved pattern atoms, whitespace is
+  concatenation, and the existing union, grouping, occurrence, negation, and
+  `to` rules apply. A pattern's tag is part of its type value: matching checks
+  the value domain before content, so a string never satisfies a symbol
+  pattern or vice versa. A literal-only island is representationally identical
+  to the corresponding ordinary literal union; named structural patterns may
+  be reused as content inside either tagged domain. [S10.1.1, D3.1.1v2, D3.1.2]
+- **S11.1.3** A range type `X to Y` denotes inclusive membership in the
+  consecutive values between its bounds. Integer ranges admit exact integer
+  values; string ranges require single Unicode-codepoint strings and admit
+  only single-codepoint strings in the inclusive codepoint interval. Range
+  bounds of mixed domains or strings containing more than one codepoint are
+  errors, not coercions. The same membership rule applies in annotations,
+  match arms, and value expressions; indexing or iteration materializes each
+  character-range member as a one-codepoint string. [S7.1.1, S11.2.1]
 
 ### S11.2 Match
 

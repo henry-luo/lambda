@@ -183,8 +183,8 @@ if (x > 0) "positive" else "negative"
 if x > 0 { compute(x) } else "default"   // block form, expr else
 
 // String patterns (see Lambda_Type.md § String Patterns)
-string digits = \d+
-string email = \w+ "@" \w+ "." \a[2,6]
+type digits = \(d+)
+type email = \(w+ "@" w+ "." a[2,6])
 "123" is digits                  // true (full-match)
 match input {
     case digits: "number"

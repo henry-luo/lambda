@@ -372,8 +372,8 @@ match value {
 }
 
 // String pattern arms (full-match semantics)
-string digits = \d+
-string alpha = \a+
+type digits = \(d+)
+type alpha = \(a+)
 match input {
     case digits: "number"     // case named pattern
     case alpha: "word"
@@ -494,10 +494,10 @@ Define named patterns for string validation and matching. Uses regex-like syntax
 
 **Definition:**
 ```lambda
-string digits = \d+                    // one or more digits
-string email = \w+ "@" \w+ "." \a[2,6] // email-like
-string ws = \s+                        // whitespace
-symbol keyword = 'if' | 'else' | 'for' // symbol pattern
+type digits = \(d+)                    // one or more digits
+type email = \(w+ "@" w+ "." a[2,6]) // email-like
+type ws = \(s+)                        // whitespace
+type keyword = 'if' | 'else' | 'for'  // symbol literal union
 ```
 
 **Type check (`is`) — full-match semantics:**
@@ -507,7 +507,7 @@ symbol keyword = 'if' | 'else' | 'for' // symbol pattern
 "123" is digits               // true
 ```
 
-**Character classes:** `\d` digit, `\w` word, `\s` whitespace, `\a` alpha, `\.` any char, `...` any string
+**Character classes inside `\(...)`:** `d` digit, `w` word, `s` whitespace, `a` alpha, `.` any char, `...` any string
 
 **Quantifiers:** `?` optional, `+` one or more, `*` zero or more, `[n]` exactly n, `[n,m]` range
 
@@ -545,9 +545,9 @@ range(0, 10, 2)        // [0, 2, 4, 6, 8]
 
 All three accept both plain strings and named patterns as the second argument:
 ```lambda
-string digit = \d
-string digits = \d+
-string ws = \s+
+type digit = \(d)
+type digits = \(d+)
+type ws = \(s+)
 
 // replace(str, pattern_or_string, replacement)
 replace("a1b2c3", digit, "X")      // "aXbXcX"

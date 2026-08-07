@@ -2410,7 +2410,7 @@ extern "C" {
     Item fn_math_quantile_skip_null(Item a, Item p, bool skip_null);
     Item fn_reduce(Item collection, Item func);
 
-    Range* fn_to(Item a, Item b);
+    Item fn_to(Item a, Item b);
 
     // pipe operations
     typedef Item (*PipeMapFn)(Item item, Item index);

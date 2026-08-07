@@ -691,10 +691,10 @@ In string patterns, `!` negates character classes:
 
 ```lambda
 // Any character except a digit
-string NotDigit = !\d
+type NotDigit = \(!d)
 
 // Any character except whitespace
-string NotSpace = !\s
+type NotSpace = \(!s)
 ```
 
 ### Constrained Types (`that`)
@@ -810,59 +810,65 @@ type User2 {
 
 ## String Patterns
 
-String patterns define named validation rules for string and symbol values, using a regex-like syntax integrated into the type system.
+String patterns are delimited type values. `\(...)` creates a string-domain
+pattern; `\symbol(...)` creates a symbol-domain pattern. The delimiter carries
+the domain, while the interior describes content. Full-match operations (`is`
+and `match`) check both domain and content.
 
 ### Pattern Definition Syntax
 
 ```lambda
-// String pattern: defines a pattern type for strings
-string PatternName = pattern_expression
+// Structural string pattern
+type PatternName = \(pattern_expression)
 
-// Symbol pattern: defines a pattern type for symbols
-symbol PatternName = pattern_expression
+// Structural symbol pattern
+type SymbolPatternName = \symbol(pattern_expression)
 ```
+
+Literal-only patterns do not need a delimiter: `type Greeting = "hi" | "hey"`
+is the same type representation as `type Greeting = \("hi" | "hey")`.
 
 ### Literal Patterns
 
 ```lambda
 // Exact string match
-string Hello = "hello"
+type Hello = \("hello")
 
 // Alternatives with union operator
-string Greeting = "hello" | "hi" | "hey"
+type Greeting = "hello" | "hi" | "hey"
 
 // HTTP methods
-string HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH"
+type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH"
 ```
 
 ### Character Classes
 
 ```lambda
 // Built-in character classes
-\d    // digit [0-9]
-\w    // word character [a-zA-Z0-9_]
-\s    // whitespace
-\a    // alphabetic [a-zA-Z]
+d    // digit [0-9]
+w    // word character [a-zA-Z0-9_]
+s    // whitespace
+a    // alphabetic [a-zA-Z]
 
 // Any single character
-\.
+.
 
-// Any characters (zero or more) - shorthand for \.*
+// Any characters (zero or more)
 ...
 
 // Examples
-string Digit = \d                    // single digit
-string Word = \w+                    // one or more word characters
-string Anything = ...                // any string
+type Digit = \(d)                    // single digit
+type Word = \(w+)                    // one or more word characters
+type Anything = \(...)                // any string
 ```
 
 ### Character Ranges
 
 ```lambda
 // Range with 'to' keyword (like regex [a-z])
-string LowerLetter = "a" to "z"
-string UpperLetter = "A" to "Z"
-string HexDigit = "0" to "9" | "a" to "f" | "A" to "F"
+type LowerLetter = \("a" to "z")
+type UpperLetter = \("A" to "Z")
+type HexDigit = \("0" to "9" | "a" to "f" | "A" to "F")
 ```
 
 ### Occurrence Modifiers
@@ -881,60 +887,65 @@ string HexDigit = "0" to "9" | "a" to "f" | "A" to "F"
 [n, m]  // between n and m occurrences (inclusive)
 
 // Examples
-string OptionalPrefix = "pre"? \w+           // optional "pre" prefix
-string Identifier = \a \w*                    // letter followed by word chars
-string ThreeDigits = \d[3]                    // exactly 3 digits
-string Phone = \d[3] "-" \d[3] "-" \d[4]      // 555-123-4567
-string ZipCode = \d[5] ("-" \d[4])?           // 12345 or 12345-6789
+type OptionalPrefix = \("pre"? w+)           // optional "pre" prefix
+type Identifier = \(a w*)                    // letter followed by word chars
+type ThreeDigits = \(d[3])                    // exactly 3 digits
+type Phone = \(d[3] "-" d[3] "-" d[4])      // 555-123-4567
+type ZipCode = \(d[5] ("-" d[4])?)           // 12345 or 12345-6789
 ```
 
 ### Pattern Composition
 
 ```lambda
 // Sequence: patterns concatenate
-string FullName = \a+ " " \a+                 // first space last
+type FullName = \(a+ " " a+)                 // first space last
 
 // Union: match either pattern
-string YesNo = "yes" | "no"
+type YesNo = "yes" | "no"
 
 // Intersection: must match both patterns
-string AlphaNum = \a & \w                     // alpha that is also word char
+type AlphaNum = \(a & w)                     // alpha that is also word char
 
 // Negation: exclude pattern
-string NotDigit = !\d                         // any char except digit
+type NotDigit = \(!d)                         // any non-digit character
 ```
 
 ### Complex Pattern Examples
 
 ```lambda
 // Email-like pattern
-string Email = \w+ "@" \w+ "." \a[2, 6]
+type Email = \(w+ "@" w+ "." a[2, 6])
 
 // URL path segment
-string PathSegment = ("/" \w+)+
+type PathSegment = \(("/" w+)+)
 
 // Version string: v1.2.3
-string Version = "v" \d+ "." \d+ "." \d+
+type Version = \("v" d+ "." d+ "." d+)
 
 // Hex color: #RGB or #RRGGBB
-string HexDigit = "0" to "9" | "a" to "f" | "A" to "F"
-string HexColor = "#" (HexDigit[3] | HexDigit[6])
+type HexDigit = \("0" to "9" | "a" to "f" | "A" to "F")
+type HexColor = \("#" (HexDigit[3] | HexDigit[6]))
 
 // Date format: YYYY-MM-DD
-string DatePattern = \d[4] "-" \d[2] "-" \d[2]
+type DatePattern = \(d[4] "-" d[2] "-" d[2])
 
 // Username: 3-20 chars, starts with letter
-string Username = \a \w[2, 19]
+type Username = \(a w[2, 19])
 ```
 
 ### Symbol Patterns
 
-Symbol patterns work identically but define patterns for symbol values:
+Symbol patterns use the same content language but match symbols only:
 
 ```lambda
-// Symbol pattern for identifiers
-symbol Keyword = 'if' | 'else' | 'for' | 'while'
+type Keyword = 'if' | 'else' | 'for' | 'while'  // literal symbol union
+type SymbolIdentifier = \symbol(a w*)
+type SymbolDigits = \symbol(d+)
 ```
+
+Named string patterns can be reused as content inside a symbol pattern. A
+symbol pattern is a domain error for `find`, `replace`, and `split`, which
+operate on strings.
 
 ### Using Patterns as Types
 
@@ -958,8 +969,8 @@ let method: HttpMethod = "GET"
 Named string patterns can be used as `match` arms. Each arm uses **full-match** semantics — the entire string must match the pattern:
 
 ```lambda
-string digits = \d+
-string alpha = \a+
+type digits = \(d+)
+type alpha = \(a+)
 
 fn classify(s) => match s {
     case digits: "number"         // "123" → "number"
@@ -968,7 +979,7 @@ fn classify(s) => match s {
 }
 
 // Mix literal and pattern arms
-string num = \d+
+type num = \(d+)
 fn tag(s) => match s {
     case "hello": "greeting"      // literal match checked first
     case num: "number"
@@ -981,8 +992,8 @@ fn tag(s) => match s {
 Named patterns can be passed to `find()`, `replace()`, and `split()` as the match argument. These functions use **partial/search** semantics (find matches *within* the string), unlike `is` and `match` which require full-string matches.
 
 ```lambda
-string digits = \d+
-string ws = \s+
+type digits = \(d+)
+type ws = \(s+)
 
 // find(str, pattern) → [{value, index}, ...]
 find("a1b22c333", digits)
