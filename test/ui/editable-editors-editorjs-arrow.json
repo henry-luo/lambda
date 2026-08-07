@@ -11,10 +11,8 @@
     {"type": "click", "target": {"selector": ".ce-paragraph", "index": 0, "offset_x": 3, "offset_y": 8}},
     {"type": "key_press", "key": "End"},
     {"type": "key_press", "key": "Right"},
-    {"type": "wait", "ms": 20},
     {"type": "assert_text", "target": {"selector": "#selection"}, "equals": "next:0"},
     {"type": "key_press", "key": "Left"},
-    {"type": "wait", "ms": 20},
     {"type": "assert_text", "target": {"selector": "#selection"}, "equals": "seed:4"}
   ]
 }

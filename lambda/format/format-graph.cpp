@@ -84,6 +84,7 @@ static const GraphSyntax* get_graph_syntax(const char* flavor) {
 static void format_graph_element_with_syn(StringBuf* sb, const ElementReader& element, const char* flavor, const GraphSyntax* syn);
 static void format_graph_node(StringBuf* sb, const ElementReader& node, const char* flavor, const GraphSyntax* syn);
 static void format_graph_edge(StringBuf* sb, const ElementReader& edge, const char* flavor, const GraphSyntax* syn);
+static void format_graph_dot_edge_statement(StringBuf* sb, const ElementReader& edge, const char* flavor, const GraphSyntax* syn);
 static void format_graph_cluster(StringBuf* sb, const ElementReader& cluster, const char* flavor, const GraphSyntax* syn);
 static void format_graph_children(StringBuf* sb, const ElementReader& element, const char* flavor, const GraphSyntax* syn);
 
@@ -93,6 +94,24 @@ static const char* get_element_attribute(const ElementReader& elem, const char* 
     if (attr.isString()) {
         String* str = attr.asString();
         return str ? str->chars : nullptr;
+    }
+    return nullptr;
+}
+
+static const char* get_graph_property(const ElementReader& owner, const char* name) {
+    auto children = owner.childElements();
+    ElementReader properties;
+    while (children.next(&properties)) {
+        if (!properties.hasTag("properties")) continue;
+        auto entries = properties.childElements();
+        ElementReader property;
+        while (entries.next(&property)) {
+            if (!property.hasTag("property")) continue;
+            const char* property_name = get_element_attribute(property, "name");
+            if (property_name && strcmp(property_name, name) == 0) {
+                return get_element_attribute(property, "value");
+            }
+        }
     }
     return nullptr;
 }
@@ -342,6 +361,7 @@ static void format_graph_children(StringBuf* sb, const ElementReader& element, c
             if (!tag) continue;
             if      (strcmp(tag, "node")    == 0) format_graph_node(sb, child, flavor, syn);
             else if (strcmp(tag, "edge")    == 0) format_graph_edge(sb, child, flavor, syn);
+            else if (strcmp(tag, "dot-edge-statement") == 0) format_graph_dot_edge_statement(sb, child, flavor, syn);
             else if (strcmp(tag, "cluster") == 0) format_graph_cluster(sb, child, flavor, syn);
         }
     }
@@ -397,6 +417,33 @@ static void format_graph_edge(StringBuf* sb, const ElementReader& edge, const ch
         stringbuf_append_str(sb, syn->edge_label_close);
     }
     stringbuf_append_str(sb, syn->stmt_end);
+}
+
+static void format_graph_dot_edge_statement(StringBuf* sb, const ElementReader& edge,
+                                            const char* flavor, const GraphSyntax* syn) {
+    // DOT source IR keeps chained endpoints as children, so generic graph
+    // formatters must expand each adjacent pair instead of looking for from/to.
+    const char* label = get_graph_property(edge, "label");
+    const char* previous_id = nullptr;
+    auto endpoints = edge.childElements();
+    ElementReader endpoint;
+    while (endpoints.next(&endpoint)) {
+        if (!endpoint.hasTag("dot-endpoint")) continue;
+        const char* current_id = get_element_attribute(endpoint, "id");
+        if (previous_id && current_id) {
+            if (syn->node_needs_indent) stringbuf_append_str(sb, syn->node_indent);
+            format_graph_string(sb, previous_id, flavor);
+            stringbuf_append_str(sb, syn->edge_arrow);
+            format_graph_string(sb, current_id, flavor);
+            if (label) {
+                stringbuf_append_str(sb, syn->edge_label_sep);
+                format_graph_string(sb, label, flavor);
+                stringbuf_append_str(sb, syn->edge_label_close);
+            }
+            stringbuf_append_str(sb, syn->stmt_end);
+        }
+        previous_id = current_id;
+    }
 }
 
 static void format_graph_cluster(StringBuf* sb, const ElementReader& cluster, const char* flavor, const GraphSyntax* syn) {

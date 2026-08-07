@@ -2,6 +2,7 @@
 #include <string>
 #include <memory>
 #include <chrono>
+#include <cinttypes>
 
 #include "../../lambda/input/css/css_style.hpp"
 #include "../../lambda/input/css/css_style_node.hpp"
@@ -857,8 +858,9 @@ TEST_F(StyleTreeTest, PerformanceStressTest) {
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
-    printf("Applied %d declarations to %d properties in %lld ms\n",
-           property_count * declarations_per_property, property_count, duration.count());    // Verify tree state
+    printf("Applied %d declarations to %d properties in %" PRIdMAX " ms\n",
+           property_count * declarations_per_property, property_count,
+           static_cast<intmax_t>(duration.count()));    // Verify tree state
     EXPECT_EQ(avl_tree_size(style_tree->tree), property_count);
     EXPECT_EQ(style_tree->declaration_count, property_count * declarations_per_property);
 
@@ -874,7 +876,8 @@ TEST_F(StyleTreeTest, PerformanceStressTest) {
     end = std::chrono::high_resolution_clock::now();
     auto duration_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
-    printf("Looked up %d properties in %lld microseconds\n", property_count, duration_microseconds.count());
+    printf("Looked up %d properties in %" PRIdMAX " microseconds\n", property_count,
+           static_cast<intmax_t>(duration_microseconds.count()));
 
     // Should complete within reasonable time
     EXPECT_LT(duration_microseconds.count(), 10000); // 10ms for 1000 lookups

@@ -16,6 +16,8 @@
 #include "../lambda/core/lambda-decimal.hpp"
 #include "../lambda/core/name_pool.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lib/mem_factory.h"
+#include "../lib/mempool.h"
 #include "../lib/uv_loop.h"
 #include "../lib/url.h"
 
@@ -492,6 +494,7 @@ typedef struct SharedModuleStressWorker {
     SharedModuleStressGate* gate;
     SharedModuleStressMode mode;
     EvalContext eval;
+    Pool* setup_pool;
     ArrayList* import_cone;
     ArrayList* visited_scripts;
     uint64_t evaluations;
@@ -589,8 +592,16 @@ static bool shared_module_stress_init_worker(SharedModuleStressWorker* worker) {
     lambda_stack_init();
     worker->eval.stack_limit = _lambda_stack_limit;
     if (!lambda_side_stack_bind()) return false;
-    worker->eval.pool = worker->cases[0].script->pool;
-    worker->eval.name_pool = name_pool_create(worker->eval.pool, NULL);
+    // Compiled scripts share their AST pool; allocating per-thread runtime
+    // names from it races the pool allocator during concurrent setup.
+    worker->setup_pool = mem_pool_create(NULL, MEM_ROLE_AST, "concurrency.worker");
+    if (!worker->setup_pool) {
+        worker->failure = "worker setup pool";
+        return false;
+    }
+    worker->eval.pool = worker->setup_pool;
+    worker->eval.runtime = &shared_module_stress_runtime;
+    worker->eval.name_pool = name_pool_create(worker->setup_pool, NULL);
     heap_init();
     if (!worker->eval.heap) return false;
     worker->eval.pool = worker->eval.heap->pool;
@@ -675,6 +686,10 @@ static void shared_module_stress_destroy_worker(SharedModuleStressWorker* worker
         name_pool_release(worker->eval.name_pool);
         worker->eval.name_pool = NULL;
     }
+    if (worker->setup_pool) {
+        pool_destroy(worker->setup_pool);
+        worker->setup_pool = NULL;
+    }
     if (worker->eval.heap) heap_destroy();
     if (worker->eval.cwd) {
         url_destroy(worker->eval.cwd);
@@ -720,8 +735,8 @@ static void* shared_module_stress_worker_main(void* arg) {
         while (worker->mode == SHARED_MODULE_STRESS_HOT_LOOP &&
                 shared_module_stress_now_ms() < deadline) {
             state = state * 6364136223846793005ULL + 1442695040888963407ULL;
-            SharedModuleStressCase* test_case =
-                &worker->cases[(int)((state >> 32) % (uint64_t)worker->case_count)];
+            SharedModuleStressCase* test_case = &worker->cases[
+                (int)((state >> 32) % (uint64_t)worker->case_count)];
             if (!shared_module_stress_execute_case(worker, test_case, NULL)) {
                 worker->failure = test_case->name;
                 break;

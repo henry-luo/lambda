@@ -434,6 +434,8 @@ endef
 # EXTRA_FLAGS: extra flags/vars appended to the sub-make (e.g. -s CFLAGS="-w")
 # MAKE_TARGET: actual make target when it differs from LABEL (e.g. 'all' to build
 #              every project while logging under a friendly label)
+# The error-path location check below uses POSIX case because recipes run under
+# /bin/sh on Linux rather than Bash.
 define run_make_with_error_summary
 	@echo "🔨 Building '$(1)' (config: $(if $(2),$(2),debug_native)) — full clang log: temp/build_$(1).log"
 	@mkdir -p temp && BUILD_LOG="temp/build_$(1).log" && \
@@ -468,11 +470,10 @@ define run_make_with_error_summary
 				rel_path=$$(echo "$$file_info" | cut -d: -f1); \
 				line_no=$$(echo "$$file_info" | cut -d: -f2); \
 				col_no=$$(echo "$$file_info" | cut -d: -f3); \
-				if [[ "$$rel_path" == ../* ]]; then \
-					abs_path="$$(cd build/premake && realpath "$$rel_path" 2>/dev/null || echo "$$(pwd)/$$rel_path")"; \
-				else \
-					abs_path="$$(pwd)/build/premake/$$rel_path"; \
-				fi; \
+				case "$$rel_path" in \
+					../*) abs_path="$$(cd build/premake && realpath "$$rel_path" 2>/dev/null || echo "$$(pwd)/$$rel_path")" ;; \
+					*) abs_path="$$(pwd)/build/premake/$$rel_path" ;; \
+				esac; \
 				if [ -n "$$col_no" ] && [ "$$col_no" != "" ]; then \
 					location="$$line_no:$$col_no"; \
 				else \
@@ -3162,10 +3163,13 @@ build-input-baseline: build-lambda-data
 # The Lambda baseline includes JS cases that require the external Node Jube
 # modules. Build them here because the focused lane intentionally does not use
 # the aggregate build-test target that normally supplies these DSOs.
+# debug and release share lambda.exe; remove it before a release host rebuild
+# so make cannot mistake an ASan debug binary for an up-to-date release host.
 build-lambda-baseline: build-input-baseline build-node-core build-node-fs
 	@echo "Building the Lambda baseline runtime and native test executables..."
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
+		rm -f lambda.exe; \
 		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)"; \
 	else \
 		echo "Rebuilding lambda.exe in debug mode (incremental)..."; \
@@ -3194,9 +3198,11 @@ build-test: build-lambda-data generate-tree-sitter-python-parser
 	@rm -f .lambda_build_backup.exe
 	@$(MAKE) --no-print-directory TEST_BUILD_QUIET=$(TEST_BUILD_QUIET) generate-premake
 	@out=$$(cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE) 2>&1) || { printf '%s\n' "$$out"; exit 1; }
-	@# If last build was release, rebuild lambda.exe incrementally in release mode
+# If last build was release, rebuild lambda.exe incrementally in release mode.
+# debug and release share lambda.exe; force a relink before copying the host.
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental) — log: temp/build_tests_lambda.log"; \
+		rm -f lambda.exe; \
 		mkdir -p temp; \
 		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" > temp/build_tests_lambda.log 2>&1 || { echo "❌ release lambda rebuild failed (see temp/build_tests_lambda.log):"; tail -20 temp/build_tests_lambda.log; exit 1; }; \
 		cp -p lambda.exe .lambda_build_backup.exe; \

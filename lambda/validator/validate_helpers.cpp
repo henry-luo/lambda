@@ -168,7 +168,6 @@ void merge_errors(
             copied_error->actual = error->actual;
         }
         add_validation_error(dest, copied_error);
-        dest->error_count++;
         error = error->next;
     }
 }
