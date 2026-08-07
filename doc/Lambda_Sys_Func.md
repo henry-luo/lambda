@@ -359,16 +359,26 @@ ushr(18446744073709551615u64, 64) // 0u64
 
 ## String Functions
 
-Functions for string manipulation. `replace`, `split`, and `find` accept either a plain string or a **named string pattern** as the match argument.
+Functions for string manipulation. `replace`, `split`, and `find` accept either a plain string or a **string pattern** as the match argument.
 
 ### String Pattern Recap
 
-String patterns are defined in the type system (see [Lambda_Type.md](Lambda_Type.md) § String Patterns) and can be used as arguments to string functions:
+String patterns are defined in the type system (see [Lambda_Type.md](Lambda_Type.md) § String Patterns) and can be used as arguments to string functions, either named or written inline:
 
 ```lambda
 type digits = \(d+)              // one or more digits
 type ws = \(s+)                  // one or more whitespace chars
 type word = \(w+)                // word characters
+
+find("a1b22", digits)            // named
+find("a1b22", \(d+))             // inline — same result
+```
+
+These functions operate on strings, so a **symbol-domain pattern**
+(`\symbol(...)`) is a domain error rather than a content match:
+
+```lambda
+find("abc", \symbol(a+))         // error: symbol-domain patterns cannot search strings
 ```
 
 String-valued system functions use `""` for a successful result with no

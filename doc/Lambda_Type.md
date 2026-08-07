@@ -126,7 +126,7 @@ string      // UTF-8 string
 symbol      // Interned symbol
 binary      // Binary data
 datetime    // Date and time
-range       // Integer range (e.g. 1 to 10)
+range       // Integer or character range (e.g. 1 to 10, "a" to "z")
 path        // File path or URL
 
 // Sized numeric type literals
@@ -144,7 +144,7 @@ error       // Error type
 number      // Union: all numeric value types and sized-storage types
 ```
 
-`any \ error` is the non-error top type. Channel-agnostic error discharge
+`any ! error` is the non-error top type. Channel-agnostic error discharge
 produces this refinement when the source success type was `any`:
 
 ```lambda
@@ -157,7 +157,7 @@ let clean = expression_returning_any() ^ { default }
 
 The schema validator historically spells its catch-all *valid data* pattern as
 `any`; in validation position that pattern intentionally means
-`any \ error`. Core language `any` itself remains the true top type.
+`any ! error`. Core language `any` itself remains the true top type.
 
 ### Type Examples
 
@@ -204,16 +204,37 @@ represented exactly by the target type. All sized numerics also match `number`:
 
 ### Range Types
 
-Ranges represent a contiguous sequence of integer values with inclusive start and end bounds.
+Ranges represent a contiguous sequence of consecutive values with inclusive start and end bounds. Bounds are either **exact integers** or **single-codepoint strings** (a character range).
 
 ```lambda
 // Range type keyword
 range              // Any range value
 
-// Range literal type (specific bounds)
+// Integer range literal type (specific bounds)
 1 to 10            // Range from 1 to 10 inclusive
 0 to 255           // Byte range
 -100 to 100        // Negative to positive
+
+// Character range literal type
+"a" to "z"         // Lowercase letters
+"0" to "9"         // Digit characters
+"α" to "ω"         // Any Unicode codepoint interval
+```
+
+Range bounds of mixed domains, or strings longer than one codepoint, are errors rather than coercions:
+
+```lambda
+"ab" to "z"        // error — bounds must be single-codepoint strings
+1 to "z"           // error — mixed domains
+```
+
+The `to` form is deliberately overloaded, denoting the same set of consecutive values everywhere it appears; only the compilation differs. In value position it is shorthand for the sequence, in type position it is an inclusive membership test, and inside a string pattern it compiles to a character class:
+
+```lambda
+"a" to "e"                  // value:   ["a", "b", "c", "d", "e"]
+"m" is ("a" to "z")         // type:    true  (membership)
+"aa" is ("a" to "z")        // false — only single characters are members
+type Hex = \("0" to "9")    // pattern: character class [0-9]
 ```
 
 #### Range Type in Annotations
@@ -608,6 +629,13 @@ fn process(value: int | string | null) => {
 
 The exclusion operator `!` subtracts one type from another — `T1 ! T2` matches values that match `T1` but **not** `T2`:
 
+> **Not yet supported:** the binary `!` (exclusion) and `&` (intersection)
+> type operators are unimplemented in the current runtime — `42 is (any !
+> null)` returns `false` rather than `true`. This is tracked as open issue
+> `SO9` in [Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md). Prefix
+> negation (`!T`, see [Negation Types](#negation-types) below) does work and
+> is the supported spelling for "not `T`" today.
+
 ```lambda
 // any except null (non-nullable any)
 any ! null
@@ -828,6 +856,28 @@ type SymbolPatternName = \symbol(pattern_expression)
 Literal-only patterns do not need a delimiter: `type Greeting = "hi" | "hey"`
 is the same type representation as `type Greeting = \("hi" | "hey")`.
 
+#### Inline Patterns
+
+A pattern is an ordinary type value, so it does not have to be named. The
+delimited form can appear anywhere a type can — in `is` checks, annotations,
+and `match` arms:
+
+```lambda
+"abc" is \(a+)                       // true
+'foo' is \symbol(a w*)               // true
+
+fn f(x: \(d+)) => "got " ++ x        // parameter annotation
+let code: \(a[3]) = "abc"            // let annotation
+
+match s {
+    case \(d+): "number"             // inline arm
+    default: "other"
+}
+```
+
+Name a pattern when it is reused or when the name documents intent; inline it
+when it is used once.
+
 ### Literal Patterns
 
 ```lambda
@@ -860,6 +910,27 @@ a    // alphabetic [a-zA-Z]
 type Digit = \(d)                    // single digit
 type Word = \(w+)                    // one or more word characters
 type Anything = \(...)                // any string
+```
+
+#### Reserved Class Names
+
+The letters `d`, `w`, `s`, and `a` are **reserved as character classes inside
+`\(...)` only**. Outside a pattern island they are ordinary identifiers, so a
+type or variable may still be called `d`; it simply cannot be referenced from
+inside a pattern:
+
+```lambda
+type d = "binding"       // fine — ordinary type alias
+type bad = \(d)          // error: pattern class 'd' is reserved inside
+                         // pattern islands; rename the surrounding binding
+```
+
+To match one of these letters **literally**, quote it — quoted text inside a
+pattern is always literal content:
+
+```lambda
+type DVar = \("d" w+)    // matches "dx", "d_1" — a literal 'd', then word chars
+type Digits = \(d+)      // matches "42" — the digit class
 ```
 
 ### Character Ranges
@@ -903,12 +974,15 @@ type FullName = \(a+ " " a+)                 // first space last
 // Union: match either pattern
 type YesNo = "yes" | "no"
 
-// Intersection: must match both patterns
-type AlphaNum = \(a & w)                     // alpha that is also word char
-
-// Negation: exclude pattern
+// Negation: exclude a character class
 type NotDigit = \(!d)                         // any non-digit character
 ```
+
+> **Not yet supported:** pattern intersection (`\(a & w)`) does not compile.
+> The binary `&` and `!` type operators are unimplemented in the current
+> runtime (see the `SO9` open issue in
+> [Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md)); prefix negation
+> `!` inside a pattern, shown above, does work.
 
 ### Complex Pattern Examples
 
@@ -943,9 +1017,43 @@ type SymbolIdentifier = \symbol(a w*)
 type SymbolDigits = \symbol(d+)
 ```
 
-Named string patterns can be reused as content inside a symbol pattern. A
-symbol pattern is a domain error for `find`, `replace`, and `split`, which
-operate on strings.
+**The tag selects the domain; the interior only describes content.** Matching
+checks the domain first, so a string never satisfies a symbol pattern and a
+symbol never satisfies a string pattern:
+
+```lambda
+type Ident = \(a w*)                  // string domain
+type SymIdent = \symbol(a w*)         // symbol domain
+
+'foo' is SymIdent                     // true
+"foo" is SymIdent                     // false — string value, symbol pattern
+'foo' is Ident                        // false — symbol value, string pattern
+```
+
+Because the interior is domain-free, a named pattern can be **reused as
+content in either domain** — define the shape once:
+
+```lambda
+type Ident = \(a w*)
+type SymIdent = \symbol(Ident)        // same shape, symbol domain
+```
+
+Quoted literals inside a pattern body are always **string content**, whatever
+the tag. A symbol literal in a pattern body is an error, since the domain
+belongs to the tag:
+
+```lambda
+type bad = \('abc')      // error: pattern bodies are content-only; use
+                         // \symbol(...) for the symbol domain and string
+                         // literals for content
+type good = \symbol("abc")   // the symbol 'abc'
+```
+
+Symbol enumerations need no pattern at all — a bare literal union is the
+idiomatic spelling, as with `Keyword` above.
+
+`find`, `replace`, and `split` operate on strings, so passing a symbol-domain
+pattern to them is a domain error.
 
 ### Using Patterns as Types
 
@@ -1009,6 +1117,7 @@ split("a1b2c3", digits, true)         // ["a", "1", "b", "2", "c", "3", ""]  —
 ```
 
 All three functions also accept plain strings as the match argument (see [Lambda_Sys_Func.md](Lambda_Sys_Func.md) § String Functions).
+
 
 ---
 

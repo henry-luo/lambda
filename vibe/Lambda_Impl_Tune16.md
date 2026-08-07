@@ -53,15 +53,46 @@ where the landed mechanism **exists but has nothing to key on — because the so
 safely carry the annotation** (§3). Tune16 is therefore an *engagement* round whose first
 phase is compiler-side annotation repair, not new machinery.
 
-### 1.3 Regressions inside the Tune15 window
+### 1.3 Regressions inside the Tune15 window — ROOT-CAUSED (2026-08-07)
 
-- **raytrace3d typed 159.3 → 261.9 (+64%)**, untyped 306.9 → 361.2 (+18%). The Result25
-  JetStream loop-count fix changed only the JS engines' work, not Lambda's, so this is a
-  genuine binary regression between `83a7099e4e` and `812ddaef0b`. **Bisect before any
-  Tune16 slice merges.** (Note §3: this file's records are annotation-hostile — the COW
-  value-root defect D-b — so it is unusually sensitive to guard/COW-path changes.)
-- pnpoly typed 62.8 → 69.7 (+11%); quicksort typed 5.86 → 6.48 (+11%); cd untyped
-  894 → 974 (+9%); splay typed 205.7 → 221.3 (+8%).
+**raytrace3d typed 159.3 → 261.9 (+64%): caused by `a6aabd467 tune15 impl`, mechanism
+confirmed = witness-demotion to the boxed wrapper.** Bisect evidence: a build at
+`903b737d3` (the commit immediately before tune15 impl) reproduces v24 exactly —
+`map_admit_calls` 362,688 and ~167 ms — while v25 measures **631,736 admissions (+74%)**
+and 234 ms on the identical script (`COW_EXEC_PROFILE=1`, counters in
+`temp/prof16/cow_*.tsv`). MIR dumps from both archived binaries
+(`LAMBDA_MIR_DUMP_PATH`, `temp/prof16/raytrace_v2{4,5}.mir`) show the chain:
+
+1. B2.2's typed-array witness pass-through added an `i64:_array_witness` parameter to
+   the raw fast entries of `triangle_intersect` and `scene_intersect`.
+2. Call sites whose `float[]` argument witness is not statically provable no longer
+   satisfy the raw-entry contract and **silently demote to the boxed `_b_` wrapper**:
+   v24 had raw calls on all edges (triangle 3 raw/0 boxed, scene 2/0); v25 flipped the
+   per-pixel `render_scene → scene_intersect` edge and the per-shadow-ray
+   `scene_intersect → triangle_intersect` edge — the two hottest edges — to boxed
+   (2/1 and 1/1). The demoting arguments are the untyped `vec3()` vector locals the
+   §3 audit flags (D-a workaround).
+3. The boxed wrapper re-admits **every** declared parameter per call, so each demoted
+   call pays a full `lambda_map_contract_relation` walk on its Triangle/Scene record
+   params. Top leaf in both profiles, 319 → 446 samples; static `lambda_type_check`
+   site count is unchanged (159 in both dumps) — the regression is pure edge routing,
+   not new check emission.
+
+Aggravator (pre-existing, now the dominant cost): `map_admit_exact_shape_hits` is **0**
+in both versions — all 631k admissions conclude `MAP_CONTRACT_STORAGE_COMPATIBLE` after
+a full shape walk, and the relation is never memoized. See C4.1/C3 fixes.
+
+**Secondary regressions:**
+- raytrace3d **untyped** +18% (295 → 328): mostly the dedup commits (the `903b737d3`
+  build already measures ~320 ms), small tune15 residue; different mechanism (untyped
+  code never enters map admission). Unattributed beyond commit range; lower priority.
+- pnpoly typed +11%: same pre-existing `lambda_numeric_boundary_admit` family (623 vs
+  688 leaf samples); v25 adds `it2d`/`lambda_type_lane_storage_desc` leaves — a modest
+  widening of the F1 residue, not a new mechanism.
+- splay typed +8%: map admissions identical (71,995 both) — not admission-related;
+  likely alloc/GC cadence noise; re-measure after C1/C3.
+- quicksort typed +11%, cd untyped +9%: not yet root-caused; fold into C4.1's
+  verification sweep.
 
 ### 1.4 The ≤5% annotation-bar ledger (9 rows in v25)
 
@@ -91,6 +122,36 @@ pnpoly 35x, quicksort 32x, bounce 31x, queens 28x, levenshtein 24x, nbody 20x.
 Cross-check against §3 verdicts: of the ten worst typed/Node rows, **seven are UNDER-TYPED
 sources** (sha1, cd's tree layer, brainfuck, raytrace3d, splay, gcbench, deltablue-awfy).
 The typed column's tail is substantially measuring untyped code.
+
+### 1.6 Long-window check: rows slower than Result18 (2026-07-29, pre-enforcement)
+
+Against R18 (commit `e406aa9b87`, the last report before the type-enforcement round),
+**21 untyped and 19 typed rows are >5% slower in v25** despite both headline geomeans
+improving (untyped 2.55x→2.32x, typed 1.87x→1.32x). Worst offenders:
+
+- Typed: quicksort +201% (source also changed `arr: int[]` → `var arr: int[]`),
+  raytrace3d +197%, pnpoly +161%, list +94%, splay +80%, richards +66%, deltablue +56%,
+  crypto_sha1 +55%, nqueens +51%, binarytrees +46%, brainfuck +43%, ray +41%, base64 +36%,
+  cd +30%, json_gen +21%, havlak +20%, fasta +15%, knucleotide +10%, cube3d +6%.
+- Untyped (sources unchanged unless noted): hashmap +119%, raytrace3d +103% (source
+  tweaked), crypto_sha1 +72%, richards +66%, deltablue +62%, list +57%, cd +43%,
+  json +42% (source tweaked), ack +25%, havlak +21%, permute +18%, deriv +18%,
+  towers +16%, pnpoly +13%, navier_stokes +12%, gcbench +9%, json_gen/base64 +8%,
+  sieve/fasta/primes +5–6%.
+
+Attribution: the step lands almost entirely in the **R18→R20 window** — the
+type-enforcement round (first-bad commit `274625d56` per the 2026-08-01 bisect:
+unconditional `emit_checked_boundary` + ANY downgrade). Trace: hashmap untyped
+76→159 ms and richards untyped 1.45s→2.62s at R20, flat since. Tune13–15 recovered the
+*typed* column net-positive but left specific shapes above the R18 line — precisely the
+C-track families: checked stores (quicksort/brainfuck/matmul → C1), boundary admission
+(pnpoly/sha1 → C2/F1), record validation+COW (richards/deltablue/splay/cd/havlak/list/
+json → C3), and the Tune15 demotion (raytrace3d → C4.1). The clean "untyped left behind"
+specimen is hashmap: untyped +119% while typed is now *faster* than R18 (−12%) — the
+enforcement-era cost was tuned out of the typed lane only (C7's case in miniature).
+Caveat: R18 is not a pure like-for-like baseline — enforcement is semantics-bearing
+(TE-15/17/18 correctness), so part of the delta is bought correctness, and ~30 sources
+took small annotation edits in the window.
 
 ## 2. Attribution: what the deltas prove
 
@@ -295,16 +356,27 @@ ShapeEntry-walk fallbacks on deltablue/splay/richards/gcbench — the count, not
 is the acceptance evidence. Targets: deltablue −40%, splay typed ≤ untyped, richards ≤3x
 Node, gcbench −30%.
 
-### C4 — nbody/raytrace3d call census + the raytrace3d bisect
+### C4 — Fix witness demotion (raytrace3d, root-caused) + nbody call census
 
-1. **Bisect raytrace3d +64% across the Tune15 slices first** (§1.3) — it merges before
-   anything else does.
-2. After C0.C re-types awfy/nbody2 (inner-loop floats, return types): re-dump `advance()`
+1. **Fix the §1.3 demotion defect** (bisected and mechanism-confirmed; no further bisect
+   needed). Invariant: **adding a witness parameter to a raw entry must never make a
+   previously-raw edge take the boxed wrapper.** When the caller cannot statically prove
+   the array witness, emit a caller-side `ensure_typed_array` once and still call the
+   raw entry — the fallback must cost no more than the pre-witness arrangement
+   [D3.3.1–D3.3.3; DF9 entry-equivalence]. Add a `mir-check` guard asserting
+   raw-vs-boxed edge counts for the raytrace3d shape [D8.6.2].
+   Acceptance: raytrace3d typed ≤159 ms; `map_admit_calls` back to ≤362,688.
+2. **Memoize the map-contract relation** (pairs with C3): raytrace3d does 362k–631k
+   `lambda_map_contract_relation` walks per run with `map_admit_exact_shape_hits` = 0 —
+   every walk re-proves the same (candidate TypeMap, expected TypeMap) pair. Cache the
+   relation on the TypeMap pair (or stamp the candidate on first admission). This is
+   pure win even at the v24 baseline, where the walk is already raytrace3d's top leaf.
+3. After C0.C re-types awfy/nbody2 (inner-loop floats, return types): re-dump `advance()`
    and classify every residual call (ensure residue? adopt/restore? boxed element access?),
    then extend the corresponding landed mechanism (B2.2 native edges, witness
    pass-through) until the loop body is call-free. Only a call category with *no* landed
    mechanism justifies new codegen work [D3.3.1–D3.3.3].
-Targets: nbody 20x → ≤5x C2MIR; raytrace3d back to ≤159 ms, then onward with C0.A.2.
+Targets: nbody 20x → ≤5x C2MIR; raytrace3d ≤159 ms then onward with C0.A.2 and C4.2.
 
 ### C5 — String round (Text suite + base64 + levenshtein)
 

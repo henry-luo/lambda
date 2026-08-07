@@ -185,7 +185,9 @@ if x > 0 { compute(x) } else "default"   // block form, expr else
 // String patterns (see Lambda_Type.md § String Patterns)
 type digits = \(d+)
 type email = \(w+ "@" w+ "." a[2,6])
+type ident = \symbol(a w*)       // \symbol(...) matches symbols, \(...) strings
 "123" is digits                  // true (full-match)
+"12x" is \(d+)                   // false — patterns work inline too
 match input {
     case digits: "number"
     default: "other"
