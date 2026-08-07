@@ -1113,7 +1113,13 @@ bool selector_matcher_matches_not(SelectorMatcher* matcher,
                                   CssSelector** selectors,
                                   int count,
                                   DomElement* element) {
-    return selector_matcher_match_list(matcher, selectors, count, element, false);
+    if (!matcher || !selectors || count <= 0 || !element) {
+        return false;
+    }
+
+    // :not() accepts the element only when none of its argument selectors match;
+    // passing want_match=false to the positive-list helper reverses that result.
+    return !selector_matcher_match_list(matcher, selectors, count, element, true);
 }
 
 bool selector_matcher_matches_has(SelectorMatcher* matcher,
