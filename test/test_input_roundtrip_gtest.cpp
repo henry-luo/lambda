@@ -378,7 +378,7 @@ TEST_F(JsonTests, SimpleJsonRoundtrip) {
 }
 
 // Test empty string handling in JSON
-// Per Lambda design: empty strings ("") map to null, empty keys ("") map to "''"
+// Empty string values and empty JSON keys must survive a valid JSON roundtrip.
 TEST_F(JsonTests, JsonEmptyStringHandling) {
     printf("\n=== Testing JSON empty string handling ===\n");
 
@@ -422,12 +422,13 @@ TEST_F(JsonTests, JsonEmptyStringHandling) {
 
     // Verify:
     // 1. Empty string value should be preserved as empty string
-    // 2. Empty key "" should become "''"
+    // 2. Empty JSON keys remain quoted empty keys so the formatted output is valid JSON.
     EXPECT_TRUE(strstr(formatted_json->chars, "\"empty_value\":\"\"") != nullptr ||
                 strstr(formatted_json->chars, "\"empty_value\": \"\"") != nullptr)
         << "Empty string value should be preserved as empty string";
-    EXPECT_TRUE(strstr(formatted_json->chars, "\"''\":") != nullptr)
-        << "Empty key should be transformed to \"''\"";
+    EXPECT_TRUE(strstr(formatted_json->chars, "\"\":\"empty_key_value\"") != nullptr ||
+                strstr(formatted_json->chars, "\"\": \"empty_key_value\"") != nullptr)
+        << "Empty key should remain a quoted empty JSON key";
 
     printf("JSON empty string handling test completed\n");
     return;

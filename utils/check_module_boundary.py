@@ -14,7 +14,10 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parent.parent
-RT_DSO = ROOT / "build/lib/liblambda-boundary-rt.dylib"
+# the boundary target follows the host shared-library suffix; hard-coding the
+# macOS suffix made the Linux linker gate stop after successfully linking.
+RT_SUFFIX = ".dylib" if sys.platform == "darwin" else ".dll" if sys.platform.startswith("win") else ".so"
+RT_DSO = ROOT / "build/lib" / f"liblambda-boundary-rt{RT_SUFFIX}"
 RT_BASELINE = ROOT / "utils/static_module_rt_class_f_baseline.txt"
 
 CLASS_F_SYMBOL = re.compile(

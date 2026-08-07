@@ -13,10 +13,11 @@ type Contact = {
 type Employee = {
     firstName: string,
     lastName: string,
-    contacts: [Contact]
+    // [] is the homogeneous-array form; bare [Contact] is a one-item tuple.
+    contacts: Contact[]
 }
 
 type Company = {
     name: string,
-    employees: [Employee]
+    employees: Employee[]
 }

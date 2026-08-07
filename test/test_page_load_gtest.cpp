@@ -593,6 +593,10 @@ TEST_P(PageLoadTest, LoadWithoutCrash) {
     }
 }
 
+// Linux workspace checkouts may omit the optional layout fixture tree; an
+// empty discovery result is therefore a valid no-fixture configuration.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(PageLoadTest);
+
 INSTANTIATE_TEST_SUITE_P(
     PageLoad,
     PageLoadTest,

@@ -22,4 +22,4 @@ console.log('string decoder registry builtin:', moduleApi.isBuiltin('string_deco
 var os = require('node:os');
 console.log('os registry builtin:', moduleApi.isBuiltin('os') &&
     moduleApi.builtinModules.indexOf('os') >= 0);
-console.log('os namespace:', os.platform() + ':' + os.constants.signals.SIGINT);
+console.log('os namespace:', os.platform() === process.platform && os.constants.signals.SIGINT === 2);

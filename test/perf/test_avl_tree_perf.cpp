@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <chrono>
+#include <cinttypes>
 #include <random>
 #include <set>
 #include "../../lib/avl_tree.h"
@@ -92,7 +93,8 @@ TEST_F(AvlTreePerfTest, RandomOperations_Small) {
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     
-    printf("Performed %d random operations in %lld microseconds\n", count, duration.count());
+    printf("Performed %d random operations in %" PRIdMAX " microseconds\n", count,
+           static_cast<intmax_t>(duration.count()));
     verify_basic_structure();
 }
 
@@ -140,7 +142,8 @@ TEST_F(AvlTreePerfTest, RandomOperations_Medium) {
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     
-    printf("Performed %d random operations in %lld microseconds\n", count, duration.count());
+    printf("Performed %d random operations in %" PRIdMAX " microseconds\n", count,
+           static_cast<intmax_t>(duration.count()));
     verify_basic_structure();
 }
 
@@ -188,7 +191,8 @@ TEST_F(AvlTreePerfTest, RandomOperations_Large) {
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     
-    printf("Performed %d random operations in %lld microseconds\n", count, duration.count());
+    printf("Performed %d random operations in %" PRIdMAX " microseconds\n", count,
+           static_cast<intmax_t>(duration.count()));
     verify_basic_structure();
 }
 
@@ -209,7 +213,8 @@ TEST_F(AvlTreePerfTest, BulkInsert_Performance) {
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     
-    printf("Bulk inserted %d nodes in %lld microseconds\n", count, duration.count());
+    printf("Bulk inserted %d nodes in %" PRIdMAX " microseconds\n", count,
+           static_cast<intmax_t>(duration.count()));
     EXPECT_EQ(avl_tree_size(tree), count);
     verify_basic_structure();
 }
@@ -233,5 +238,6 @@ TEST_F(AvlTreePerfTest, BulkSearch_Performance) {
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     
-    printf("Bulk searched %d nodes in %lld microseconds\n", count, duration.count());
+    printf("Bulk searched %d nodes in %" PRIdMAX " microseconds\n", count,
+           static_cast<intmax_t>(duration.count()));
 }

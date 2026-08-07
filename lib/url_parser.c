@@ -725,7 +725,10 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
         // Split into segments
         char* temp_segments[128];
         int temp_count = 0;
-        char* token = strtok(base_copy, "/");
+        // URL resolution runs on worker threads; strtok's process-global cursor
+        // lets concurrent relative paths splice tokens into one another.
+        char* saveptr = NULL;
+        char* token = strtok_r(base_copy, "/", &saveptr);
         while (token && temp_count < 127) {
             temp_segments[temp_count] = mem_alloc(strlen(token) + 1, MEM_CAT_TEMP);
             if (temp_segments[temp_count]) {
@@ -733,7 +736,7 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
                 str_copy(temp_segments[temp_count], token_len + 1, token, token_len);
                 temp_count++;
             }
-            token = strtok(NULL, "/");
+            token = strtok_r(NULL, "/", &saveptr);
         }
 
         // Copy segments: if directory, keep all; if file, exclude last (RFC 3986)
@@ -754,7 +757,8 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
     strncpy(path_copy, relative_path, sizeof(path_copy) - 1);
     path_copy[sizeof(path_copy) - 1] = '\0';
 
-    char* token = strtok(path_copy, "/");
+    char* path_saveptr = NULL;
+    char* token = strtok_r(path_copy, "/", &path_saveptr);
     while (token && segment_count < 127) {
         if (strcmp(token, ".") == 0) {
             // Current directory - skip (RFC 3986)
@@ -774,7 +778,7 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
                 segment_count++;
             }
         }
-        token = strtok(NULL, "/");
+        token = strtok_r(NULL, "/", &path_saveptr);
     }
 
     // Rebuild path from segments

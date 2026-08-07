@@ -295,7 +295,8 @@ TEST(LambdaNumericClassifier, SizedLaneAndSemanticDomainAnchors) {
 
     decision = lambda_numeric_classify(
         LAMBDA_NUM_OP_ADD, LAMBDA_NUM_I64, LAMBDA_NUM_FLOAT);
-    EXPECT_EQ(decision.result, LAMBDA_NUM_DECIMAL);
+    // S4.4.4: bounded fixed-width integers meet binary float in float.
+    EXPECT_EQ(decision.result, LAMBDA_NUM_FLOAT);
 
     decision = lambda_numeric_classify(
         LAMBDA_NUM_OP_SHIFT, LAMBDA_NUM_U8, LAMBDA_NUM_INT);
@@ -330,7 +331,9 @@ TEST(LambdaNumericClassifier, DivisionIsSelectedFromCompleteDomains) {
 
     decision = lambda_numeric_classify(
         LAMBDA_NUM_OP_IDIV, LAMBDA_NUM_FLOAT, LAMBDA_NUM_INT);
-    EXPECT_FALSE(decision.valid);
+    // S4.5.3: div remains in the joined operand domain and is total.
+    EXPECT_TRUE(decision.valid);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_FLOAT);
 }
 
 TEST(LambdaNumericClassifier, ArithmeticFamiliesCoverEveryPairSymmetrically) {
@@ -387,8 +390,21 @@ TEST(LambdaNumericClassifier, EverySizedIntegerPairHasTheSpecifiedLane) {
                 LambdaNumericDecision decision = lambda_numeric_classify(
                     integral_families[family], sized[left], sized[right]);
                 ASSERT_TRUE(decision.valid);
-                EXPECT_EQ(decision.result, expected[left][right]);
-                EXPECT_EQ(decision.overflow, LAMBDA_NUM_OVERFLOW_SIZED_WRAP);
+                if (integral_families[family] == LAMBDA_NUM_OP_IDIV ||
+                        integral_families[family] == LAMBDA_NUM_OP_MOD) {
+                    // S4.5.3: sized operands enter their non-sized domains
+                    // before div/mod, so compact lanes become int and i64/u64
+                    // pairs become integer.
+                    bool has_integer_domain = left == 3 || left == 7 ||
+                                               right == 3 || right == 7;
+                    EXPECT_EQ(decision.result, has_integer_domain ?
+                        LAMBDA_NUM_INTEGER : LAMBDA_NUM_INT);
+                    EXPECT_EQ(decision.overflow, has_integer_domain ?
+                        LAMBDA_NUM_OVERFLOW_EXACT : LAMBDA_NUM_OVERFLOW_IEEE);
+                } else {
+                    EXPECT_EQ(decision.result, expected[left][right]);
+                    EXPECT_EQ(decision.overflow, LAMBDA_NUM_OVERFLOW_SIZED_WRAP);
+                }
             }
         }
     }
