@@ -52,6 +52,9 @@ extern "C" const char* js_dom_input_type_lower(void* dom_elem);
 extern "C" const char* js_dom_tag_name_raw(void* dom_elem);
 extern "C" bool js_dom_is_disabled(void* dom_elem);
 extern "C" bool js_dom_is_connected(void* dom_elem);
+extern "C" void* js_dom_popover_target_for_button(void* button);
+extern "C" int js_dom_popover_target_action(void* button);
+extern "C" bool js_dom_activate_popover(void* popover, int action);
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
 extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
 extern "C" Item js_dom_check_validity_bridge(Item elem_item);
@@ -227,26 +230,12 @@ static void report_exception_to_window_onerror(Item err, const char* type) {
     (void)type;
 }
 
-static DomElement* js_dom_find_element_by_id(DomNode* node, const char* id) {
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            const char* elem_id = elem->get_attribute("id");
-            if (elem_id && strcmp(elem_id, id) == 0) return elem;
-            DomElement* found = js_dom_find_element_by_id(elem->first_child, id);
-            if (found) return found;
-        }
-        node = node->next_sibling;
-    }
-    return nullptr;
-}
-
 static DomElement* js_dom_find_form_owner(DomElement* control) {
     if (!control) return nullptr;
     const char* form_id = control->get_attribute("form");
     if (form_id && *form_id) {
         DomDocument* doc = control->doc;
-        if (doc && doc->root) return js_dom_find_element_by_id((DomNode*)doc->root, form_id);
+        if (doc && doc->root) return js_dom_find_element_by_id(doc->root, form_id);
         return nullptr;
     }
 
@@ -2440,6 +2429,8 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     // wpt: "disabled checkbox should still be checked when clicked").
     // ------------------------------------------------------------------
     void* act_target = nullptr;        // DomElement* target of activation, NULL if none
+    void* popover_target = nullptr;    // DomElement* target of popover activation
+    int popover_action = 0;
     int act_kind = 0;                  // 1 = checkbox/radio toggle, 2 = submit
     bool act_old_checked = false;
     bool act_disabled = false;         // disabled at pre-activation time
@@ -2490,6 +2481,10 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
                             act_target = el; act_kind = 3;
                         }
                     }
+                }
+                if (tag && strcasecmp(tag, "button") == 0) {
+                    popover_target = js_dom_popover_target_for_button(el);
+                    popover_action = js_dom_popover_target_action(el);
                 }
             }
         }
@@ -2703,6 +2698,9 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
                 js_dom_element_method(form_item, m, nullptr, 0);
             }
         }
+    }
+    if (popover_target && !prevented && !act_disabled) {
+        js_dom_activate_popover(popover_target, popover_action);
     }
 
     log_debug("js_dom_dispatch_event: dispatched '%s' on %p (prevented=%d)",

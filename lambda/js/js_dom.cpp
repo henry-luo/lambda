@@ -145,7 +145,7 @@ static Item js_dom_svg_get_animated_class_name(DomElement* elem);
 static Item js_dom_svg_create_transform(void);
 static Item js_dom_svg_create_transform_from_matrix(Item matrix);
 static RdtMatrix js_dom_svg_transform_from_element(DomElement* elem);
-static DomElement* dom_find_by_id(DomElement* root, const char* id);
+DomElement* js_dom_find_element_by_id(DomElement* root, const char* id);
 
 static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation);
@@ -4606,19 +4606,52 @@ static CssDeclaration* js_match_custom_property(DomElement* elem, const char* pr
 // Helper: find element by ID (tree walk)
 // ============================================================================
 
-static DomElement* dom_find_by_id(DomElement* root, const char* id) {
+DomElement* js_dom_find_element_by_id(DomElement* root, const char* id) {
     if (!root || !id) return nullptr;
     if (root->id && strcmp(root->id, id) == 0) return root;
 
     DomNode* child = root->first_child;
     while (child) {
         if (child->is_element()) {
-            DomElement* found = dom_find_by_id(child->as_element(), id);
+            DomElement* found = js_dom_find_element_by_id(child->as_element(), id);
             if (found) return found;
         }
         child = child->next_sibling;
     }
     return nullptr;
+}
+
+extern "C" void* js_dom_popover_target_for_button(void* button_ptr) {
+    DomElement* button = (DomElement*)button_ptr;
+    if (!button || !button->doc || !button->tag_name ||
+        strcasecmp(button->tag_name, "button") != 0) {
+        return nullptr;
+    }
+    const char* target_id = button->get_attribute("popovertarget");
+    if (!target_id || !*target_id || !button->doc->root) return nullptr;
+    DomElement* target = js_dom_find_element_by_id(button->doc->root, target_id);
+    return target && target->has_attribute("popover") ? target : nullptr;
+}
+
+extern "C" int js_dom_popover_target_action(void* button_ptr) {
+    DomElement* button = (DomElement*)button_ptr;
+    const char* action = button ? button->get_attribute("popovertargetaction") : nullptr;
+    if (!action || strcasecmp(action, "toggle") == 0) return 0;
+    if (strcasecmp(action, "show") == 0) return 1;
+    if (strcasecmp(action, "hide") == 0) return 2;
+    return 0;
+}
+
+extern "C" bool js_dom_activate_popover(void* popover_ptr, int action) {
+    DomElement* popover = (DomElement*)popover_ptr;
+    if (!popover || !popover->has_attribute("popover")) return false;
+
+    bool was_open = popover->is_popover_open();
+    bool should_open = action == 1 ? true : action == 2 ? false : !was_open;
+    if (was_open == should_open) return false;
+    popover->set_popover_open(should_open);
+    js_dom_notify_mutation(DOM_JS_MUTATION_STYLE, popover, popover->parent);
+    return true;
 }
 
 static const char* js_dom_normalize_contenteditable(const char* value) {
@@ -4651,7 +4684,7 @@ static DomElement* js_dom_form_owner(DomElement* elem) {
     if (form_id && *form_id) {
         DomDocument* doc = elem->doc ? elem->doc : _js_current_document;
         DomElement* root = doc ? doc->root : nullptr;
-        return dom_find_by_id(root, form_id);
+        return js_dom_find_element_by_id(root, form_id);
     }
     DomNode* p = elem->parent;
     while (p) {
@@ -6065,7 +6098,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         if (argc < 1) return ItemNull;
         const char* id = fn_to_cstr(args[0]);
         if (!id) return ItemNull;
-        DomElement* found = dom_find_by_id(root, id);
+        DomElement* found = js_dom_find_element_by_id(root, id);
         return found ? js_dom_wrap_element(found) : ItemNull;
     }
 
@@ -8468,7 +8501,7 @@ static void _run_form_reset(DomElement* form_elem) {
                         const char* fa = ce->get_attribute("form");
                         DomElement* owner = nullptr;
                         if (fa && *fa) {
-                            owner = doc_root ? dom_find_by_id(doc_root, fa) : nullptr;
+                            owner = doc_root ? js_dom_find_element_by_id(doc_root, fa) : nullptr;
                         } else {
                             owner = nearest_form;
                         }
@@ -8506,7 +8539,7 @@ static void _run_form_reset(DomElement* form_elem) {
                         if (is_ctrl) {
                             const char* fa = ce->get_attribute("form");
                             if (fa && *fa) {
-                                DomElement* owner = dom_find_by_id(doc_root, fa);
+                                DomElement* owner = js_dom_find_element_by_id(doc_root, fa);
                                 if (owner == form_elem) _reset_form_control(ce);
                             }
                         }
@@ -12938,7 +12971,7 @@ static DomElement* js_dom_svg_use_reference(DomElement* elem) {
     const char* href = elem->get_attribute("href");
     if (!href) href = elem->get_attribute("xlink:href");
     if (!href || href[0] != '#' || !href[1]) return nullptr;
-    return dom_find_by_id(elem->doc->root, href + 1);
+    return js_dom_find_element_by_id(elem->doc->root, href + 1);
 }
 
 static JsDomSvgShapeHit js_dom_svg_reference_hit_viewport_point(DomElement* reference,
@@ -15253,7 +15286,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         if (argc < 1) return ItemNull;
         const char* id = fn_to_cstr(args[0]);
         if (!id) return ItemNull;
-        DomElement* found = dom_find_by_id(elem, id);
+        DomElement* found = js_dom_find_element_by_id(elem, id);
         return found ? js_dom_wrap_element(found) : ItemNull;
     }
 

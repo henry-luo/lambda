@@ -1276,6 +1276,7 @@ static float calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, V
 // no line box and no in-flow table row, the baseline is the bottom of the content edge."
 // Returns distance from the view's top to the first text baseline, or -1 if none found.
 static float find_table_row_baseline(LayoutContext* lycon, ViewTableRow* trow);
+static float table_last_baseline_for_writing(LayoutContext* lycon, ViewTable* table);
 
 static float table_row_baseline_callback(LayoutContext* lycon, View* row) {
     return find_table_row_baseline(lycon, lam::view_require<RDT_VIEW_TABLE_ROW>(row));
@@ -1330,10 +1331,42 @@ static float table_last_baseline_for_vertical_writing(ViewTable* table) {
     if (layout_block_writing_mode(table) == WM_VERTICAL_RL) {
         // The table's internal block coordinates are still in logical
         // vertical-rl order here; the final descendant mirror is published
-        // after baseline collection, so use the logical last-row coordinate.
-        return central_axis + block_start_border;
+        // after baseline collection, so use the border-box-relative row center.
+        // Adding the block-start border again double-counts it in vertical-rl.
+        return central_axis;
     }
     return table->width - central_axis - block_start_border;
+}
+
+static float table_last_baseline_for_horizontal_writing(
+    LayoutContext* lycon, View* parent, float cumulative_y) {
+    if (!parent || !parent->is_element()) return -1.0f;
+
+    DomNode* last_child = lam::view_require_element(parent)->last_child;
+    for (View* child = static_cast<View*>(last_child); child;
+         child = static_cast<View*>(child->prev_sibling)) {
+        float child_y = cumulative_y + child->y;
+        if (child->view_type == RDT_VIEW_TABLE_ROW) {
+            float row_baseline = find_table_row_baseline(
+                lycon, lam::view_require<RDT_VIEW_TABLE_ROW>(child));
+            if (row_baseline >= 0.0f) return child_y + row_baseline;
+        }
+        if (child->is_element()) {
+            float descendant_baseline = table_last_baseline_for_horizontal_writing(
+                lycon, child, child_y);
+            if (descendant_baseline >= 0.0f) return descendant_baseline;
+        }
+    }
+    return -1.0f;
+}
+
+static float table_last_baseline_for_writing(LayoutContext* lycon, ViewTable* table) {
+    if (!table) return -1.0f;
+    if (layout_block_inline_axis_is_vertical(table)) {
+        return table_last_baseline_for_vertical_writing(table);
+    }
+    return table_last_baseline_for_horizontal_writing(
+        lycon, static_cast<View*>(table), 0.0f);
 }
 
 float find_last_baseline_recursive(LayoutContext* lycon, View* parent,
@@ -1342,8 +1375,8 @@ float find_last_baseline_recursive(LayoutContext* lycon, View* parent,
     if (!parent || !parent->is_element()) return -1.0f;
 
     if (parent->view_type == RDT_VIEW_TABLE) {
-        return cumulative_x + table_last_baseline_for_vertical_writing(
-            lam::view_require<RDT_VIEW_TABLE>(parent));
+        return cumulative_x + table_last_baseline_for_writing(
+            lycon, lam::view_require<RDT_VIEW_TABLE>(parent));
     }
 
     DomNode* last_child = lam::view_require_element(parent)->last_child;
@@ -1351,8 +1384,8 @@ float find_last_baseline_recursive(LayoutContext* lycon, View* parent,
          child = static_cast<View*>(child->prev_sibling)) {
         float child_axis = cumulative_x + child->x;
         if (child->view_type == RDT_VIEW_TABLE) {
-            float table_baseline = table_last_baseline_for_vertical_writing(
-                lam::view_require<RDT_VIEW_TABLE>(child));
+            float table_baseline = table_last_baseline_for_writing(
+                lycon, lam::view_require<RDT_VIEW_TABLE>(child));
             if (table_baseline >= 0.0f) return child_axis + table_baseline;
         }
         if (child->is_element()) {
@@ -1363,6 +1396,23 @@ float find_last_baseline_recursive(LayoutContext* lycon, View* parent,
     }
     (void)lycon;
     return -1.0f;
+}
+
+float layout_table_baseline_for_source(LayoutContext* lycon, ViewBlock* table,
+                                       bool prefer_last) {
+    if (!table) return -1.0f;
+    if (table->blk) {
+        float cached = radiant::layout_select_cached_baseline(
+            table, table->block()->first_line_baseline,
+            table->block()->last_line_baseline, false, -1.0f);
+        if (cached >= 0.0f) return cached;
+    }
+    // The second vertical-align pass can move table rows; use the baseline
+    // captured during table layout so baseline-source:last is not recomputed
+    // from coordinates that this same pass has already mutated.
+    return prefer_last
+        ? find_last_baseline_recursive(lycon, static_cast<View*>(table), 0.0f, true)
+        : find_first_baseline_recursive(lycon, static_cast<View*>(table), 0.0f, true);
 }
 
 // Find the baseline of a table cell (distance from cell's border-box top to first text baseline)
@@ -9939,6 +9989,11 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
             lycon, static_cast<View*>(table), 0.0f, true);
         if (first_baseline >= 0.0f) {
             table->block_mut()->first_line_baseline = first_baseline;
+        }
+        float last_baseline = find_last_baseline_recursive(
+            lycon, static_cast<View*>(table), 0.0f, true);
+        if (last_baseline >= 0.0f) {
+            table->block_mut()->last_line_baseline = last_baseline;
         }
     }
 

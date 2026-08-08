@@ -2924,6 +2924,12 @@ DisplayValue resolve_display_value(void* child) {
             return none_display;
         }
 
+        // closed popovers are removed from layout by the HTML UA rule, before author display resolution.
+        if (dom_elem && dom_elem->has_attribute("popover") && !dom_elem->is_popover_open()) {
+            DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
+            return none_display;
+        }
+
         // HTML spec §4.11.1: Non-summary children of closed <details> are hidden.
         // This must be checked here (not just in layout_flow_node) to cover all
         // layout paths including flex and grid when CSS overrides display.
@@ -5350,6 +5356,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_TEXT_TRANSFORM,
         CSS_PROPERTY_TEXT_INDENT,
         CSS_PROPERTY_TEXT_SPACING_TRIM,
+        CSS_PROPERTY_DOMINANT_BASELINE,
         CSS_PROPERTY_LETTER_SPACING,
         CSS_PROPERTY_WORD_SPACING,
         CSS_PROPERTY_WHITE_SPACE,
@@ -7593,6 +7600,18 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                  value->data.keyword == CSS_VALUE_FIRST ||
                  value->data.keyword == CSS_VALUE_LAST)) {
                 block->blk->baseline_source = value->data.keyword;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_DOMINANT_BASELINE: {
+            if (!block) break;
+            ensure_span_block(lycon, block);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                // CSS Inline 3 defines dominant-baseline as inherited; retain
+                // the specified keyword so each inline context can select its
+                // corresponding font baseline during line layout.
+                block->blk->dominant_baseline = value->data.keyword;
             }
             break;
         }

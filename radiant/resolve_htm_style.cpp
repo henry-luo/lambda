@@ -740,6 +740,32 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     // boundary/font defaults without asserting on their current view tag.
     ViewBlock* block = lam::unsafe_view_block_api_span(span);
     float em_size = 0;  NameId elmt_name = elmt->tag();
+    if (elmt->is_element()) {
+        DomElement* dom_elem = elmt->as_element();
+        if (dom_elem->has_attribute("popover") && dom_elem->is_popover_open()) {
+            // open popovers use the HTML UA rule: fixed, inset:0, fit-content, and centered auto margins.
+            block->ensure_position(lycon);
+            block->position->position = CSS_VALUE_FIXED;
+            block->position->top = block->position->right =
+                block->position->bottom = block->position->left = 0.0f;
+            block->position->has_top = block->position->has_right =
+                block->position->has_bottom = block->position->has_left = true;
+            ensure_html_boundary_prop(lycon, block);
+            block->boundary_mut()->margin.top_type = block->boundary_mut()->margin.right_type =
+                block->boundary_mut()->margin.bottom_type = block->boundary_mut()->margin.left_type = CSS_VALUE_AUTO;
+            block->boundary_mut()->padding.top = block->boundary_mut()->padding.right =
+                block->boundary_mut()->padding.bottom = block->boundary_mut()->padding.left =
+                lycon->font.style->font_size * 0.25f;
+            block->boundary_mut()->padding.top_specificity = block->boundary_mut()->padding.right_specificity =
+                block->boundary_mut()->padding.bottom_specificity = block->boundary_mut()->padding.left_specificity = -1;
+            apply_html_uniform_border_base(lycon, block, 3.0f, CSS_VALUE_SOLID, true);
+            block->ensure_block(lycon);
+            block->blk->given_width = block->blk->given_height = -1.0f;
+            block->blk->given_width_type = block->blk->given_height_type = CSS_VALUE_FIT_CONTENT;
+            block->ensure_scroll(lycon);
+            block->scroller->overflow_x = block->scroller->overflow_y = CSS_VALUE_AUTO;
+        }
+    }
     switch (elmt_name) {
     case MARKUP_NAME_BODY: {
         ensure_html_boundary_prop(lycon, block);
@@ -1506,15 +1532,27 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = 0.75 * lycon->font.style->font_size;
         block->boundary_mut()->padding.top_specificity = block->boundary_mut()->padding.bottom_specificity =
             block->boundary_mut()->padding.left_specificity = block->boundary_mut()->padding.right_specificity = -1;
-        block->boundary_mut()->margin.left = block->boundary_mut()->margin.right = 2;
-        block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity =
+        // HTML Rendering §15.3.12 defines the UA margin as margin-inline;
+        // physical left/right is the wrong axis for vertical fieldsets.
+        if (layout_element_inline_axis_is_vertical(block->as_element())) {
+            block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = 2;
+            block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity = -1;
+        } else {
+            block->boundary_mut()->margin.left = block->boundary_mut()->margin.right = 2;
             block->boundary_mut()->margin.left_specificity = block->boundary_mut()->margin.right_specificity = -1;
+        }
         break;
     case MARKUP_NAME_LEGEND:
-        // legend: padding (CSS logical pixels)
+        // HTML Rendering §15.3.12 defines this as padding-inline; storing it
+        // on physical left/right makes vertical legends wider instead of taller.
         ensure_html_boundary_prop(lycon, block);
-        block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = 2;
-        block->boundary_mut()->padding.left_specificity = block->boundary_mut()->padding.right_specificity = -1;
+        if (layout_element_inline_axis_is_vertical(block->as_element())) {
+            block->boundary_mut()->padding.top = block->boundary_mut()->padding.bottom = 2;
+            block->boundary_mut()->padding.top_specificity = block->boundary_mut()->padding.bottom_specificity = -1;
+        } else {
+            block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = 2;
+            block->boundary_mut()->padding.left_specificity = block->boundary_mut()->padding.right_specificity = -1;
+        }
         break;
     case MARKUP_NAME_BUTTON: {
         // button: centered text, some padding, inline-block display with flow inner

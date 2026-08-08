@@ -739,7 +739,12 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
             float font_descender = font && font->descender > 0.0f
                 ? font->descender : 0.0f;
             float content_height = font_ascender + font_descender;
-            float first_baseline = border_top + pad_top + font_ascender +
+            // A vertical control's baseline axis is its logical block axis; the
+            // horizontal surrogate's ascent can exceed that extent when the
+            // specified font is taller than the control.
+            float baseline_ascender = layout_block_inline_axis_is_vertical(block)
+                ? min(font_ascender, block->content_width) : font_ascender;
+            float first_baseline = border_top + pad_top + baseline_ascender +
                 (line_height - content_height) * 0.5f;
             int visual_lines = textarea_visual_line_count(
                 lycon, font, form->current_value ? form->current_value : form->value,
@@ -749,6 +754,8 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
 
             // CSS Box Alignment clamps a scroll container's line baseline to
             // its block-end border edge when editable content overflows.
+            form->last_text_baseline_overflow = max(
+                last_baseline - block->height, 0.0f);
             form->first_text_baseline = min(first_baseline, block->height);
             form->last_text_baseline = min(last_baseline, block->height);
         }
