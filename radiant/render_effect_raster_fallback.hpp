@@ -89,7 +89,7 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
         image_surface_destroy(surface);
         return false;
     }
-    Arena* temp_arena = mem_arena_create(NULL, temp_pool, MEM_ROLE_RENDER, "render.effect.arena");
+    Arena* temp_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.effect.arena");
     if (!temp_arena) {
         mem_pool_destroy(temp_pool);
         image_surface_destroy(surface);

@@ -56,7 +56,7 @@ protected:
         custom_layout_registry_clear();
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
-        arena = arena_create_default(pool);
+        arena = arena_create_default();
         ASSERT_NE(arena, nullptr);
         doc.document_pool = pool;
         doc.node_arena = arena;

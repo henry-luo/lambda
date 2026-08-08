@@ -48,7 +48,23 @@ struct MemContext {
     uint32_t     doc_id;        // document this context represents (0 = none)
     bool         enabled;
     bool         is_root;
+    struct MemReclaimerEntry* reclaimers;
 };
+
+#define MEM_CONTEXT_MAX_RECLAIMERS 32
+
+typedef struct MemReclaimerEntry {
+    MemPressureCallback callback;
+    void* user_data;
+    uint64_t categories;
+    uint32_t handle;
+    bool active;
+} MemReclaimerEntry;
+
+typedef struct MemReclaimerCall {
+    MemPressureCallback callback;
+    void* user_data;
+} MemReclaimerCall;
 
 // Document URL registry entry.
 typedef struct MemDocEntry {
@@ -67,6 +83,7 @@ static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 static MemContext*     g_root = NULL;
 static uint32_t        g_next_id = 1;
 static uint64_t        g_birth = 0;
+static uint32_t        g_next_reclaimer_handle = 1;
 
 // Thread-local guard: nonzero while THIS thread is inside cascade teardown.
 // During teardown the lock is held and the cascade frees nodes itself, so the
@@ -175,6 +192,8 @@ static void destroy_ctx_locked(MemContext* ctx, bool free_self) {
     }
     ctx->head = NULL;
     ctx->live_count = 0;
+    free(ctx->reclaimers);
+    ctx->reclaimers = NULL;
 
     if (free_self && !ctx->is_root) {
         detach_from_parent_locked(ctx);
@@ -243,6 +262,115 @@ void mem_context_shutdown(void) {
     g_next_id = 1;
     g_birth = 0;
     UNLOCK();
+}
+
+// ============================================================================
+// Memory-pressure coordination
+// ============================================================================
+
+uint32_t mem_context_register_reclaimer(MemContext* ctx,
+                                        MemPressureCallback callback,
+                                        void* user_data,
+                                        uint64_t categories) {
+    if (!callback) return 0;
+    if (!ctx) ctx = mem_context_root();
+    LOCK();
+    if (!ctx || !ctx->enabled) {
+        UNLOCK();
+        return 0;
+    }
+    if (!ctx->reclaimers) {
+        ctx->reclaimers = (MemReclaimerEntry*)calloc(
+            MEM_CONTEXT_MAX_RECLAIMERS, sizeof(MemReclaimerEntry));
+        if (!ctx->reclaimers) {
+            UNLOCK();
+            return 0;
+        }
+    }
+    for (uint32_t i = 0; i < MEM_CONTEXT_MAX_RECLAIMERS; i++) {
+        MemReclaimerEntry* entry = &ctx->reclaimers[i];
+        if (!entry->active) {
+            entry->callback = callback;
+            entry->user_data = user_data;
+            entry->categories = categories;
+            entry->handle = g_next_reclaimer_handle++;
+            if (g_next_reclaimer_handle == 0) g_next_reclaimer_handle = 1;
+            entry->active = true;
+            uint32_t handle = entry->handle;
+            UNLOCK();
+            return handle;
+        }
+    }
+    UNLOCK();
+    log_error("MEMCTX-RECLAIM: reclaimer capacity exhausted");
+    return 0;
+}
+
+void mem_context_unregister_reclaimer(uint32_t handle) {
+    if (handle == 0) return;
+    LOCK();
+    // Reclaimers are bounded per context; walk the context tree while the
+    // registry is locked so unregister cannot race a context destruction.
+    MemContext* stack[MEM_CONTEXT_MAX_RECLAIMERS];
+    uint32_t stack_count = 0;
+    if (g_root) stack[stack_count++] = g_root;
+    while (stack_count > 0) {
+        MemContext* ctx = stack[--stack_count];
+        if (ctx->reclaimers) {
+            for (uint32_t i = 0; i < MEM_CONTEXT_MAX_RECLAIMERS; i++) {
+                MemReclaimerEntry* entry = &ctx->reclaimers[i];
+                if (entry->active && entry->handle == handle) {
+                    entry->active = false;
+                    entry->callback = NULL;
+                    entry->user_data = NULL;
+                    UNLOCK();
+                    return;
+                }
+            }
+        }
+        for (MemContext* child = ctx->children; child; child = child->sibling_next) {
+            if (stack_count < MEM_CONTEXT_MAX_RECLAIMERS) {
+                stack[stack_count++] = child;
+            }
+        }
+    }
+    UNLOCK();
+}
+
+size_t mem_context_request_reclaim(MemContext* ctx,
+                                   MemPressureLevel level,
+                                   size_t target_bytes) {
+    if (!ctx) ctx = mem_context_root();
+    if (!ctx || level == MEM_PRESSURE_NONE) return 0;
+
+    MemReclaimerCall calls[MEM_CONTEXT_MAX_RECLAIMERS];
+    uint32_t call_count = 0;
+    LOCK();
+    if (ctx->reclaimers) {
+        for (uint32_t i = 0; i < MEM_CONTEXT_MAX_RECLAIMERS; i++) {
+            MemReclaimerEntry* entry = &ctx->reclaimers[i];
+            if (entry->active && entry->callback &&
+                call_count < MEM_CONTEXT_MAX_RECLAIMERS) {
+                calls[call_count].callback = entry->callback;
+                calls[call_count].user_data = entry->user_data;
+                call_count++;
+            }
+        }
+    }
+    UNLOCK();
+
+    size_t freed = 0;
+    for (uint32_t i = 0; i < call_count; i++) {
+        size_t remaining = target_bytes > freed ? target_bytes - freed : 0;
+        size_t released = calls[i].callback(level, remaining, calls[i].user_data);
+        if (released > SIZE_MAX - freed) {
+            freed = SIZE_MAX;
+            break;
+        }
+        freed += released;
+        if (target_bytes != 0 && freed >= target_bytes) break;
+    }
+    return freed;
 }
 
 // ============================================================================
@@ -761,6 +889,7 @@ const char* mem_kind_name(MemKind k) {
         case MEM_KIND_SHAPEPOOL: return "shapepool";
         case MEM_KIND_JIT:       return "jit";
         case MEM_KIND_CACHE:     return "cache";
+        case MEM_KIND_VM_REGION: return "vm_region";
         case MEM_KIND_CONTEXT:   return "context";
         default:                 return "unknown";
     }

@@ -155,9 +155,6 @@ static void js_exec_watchdog_disarm(void) {
 }
 #endif  // !_WIN32
 
-// Pool/cache from the most recent JS execution.
-// Destroyed by script_runner_cleanup_heap() in per-file cleanup (after layout).
-static Pool* s_js_reuse_pool = nullptr;
 static LruCache* s_script_source_cache = nullptr;
 static JsMirCache* s_js_mir_cache = nullptr;
 static bool s_retain_js_state = true;
@@ -186,10 +183,6 @@ static void script_runner_cleanup_source_cache() {
 
 extern "C" void script_runner_cleanup_heap() {
     jm_cleanup_deferred_mir();
-    if (s_js_reuse_pool) {
-        mem_pool_destroy(s_js_reuse_pool);
-        s_js_reuse_pool = nullptr;
-    }
     script_runner_cleanup_source_cache();
 }
 
@@ -2319,14 +2312,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     }
     runtime->dom_doc = (void*)dom_doc;
     runtime->dom_ui_context = dom_doc->js.host_ui_context;
-    // create fresh tracked mmap pool for this JS execution
-    runtime->reuse_pool = mem_pool_create_mmap((MemContext*)dom_doc->services.mem_ctx,
-                                               MEM_ROLE_RUNTIME_HEAP,
-                                               "script.js.reuse");
     Context* saved_input_context = input_context;
     EvalContext* document_context = runtime_get_eval_context(runtime);
     if (!document_context) {
-        if (runtime->reuse_pool) pool_destroy(runtime->reuse_pool);
         mem_free(runtime);
         script_task_collection_free(&script_tasks);
         script_runner_cleanup_source_cache();
@@ -2344,7 +2332,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
             mem_free(runtime->eval_context);
             runtime->eval_context = nullptr;
         }
-        if (runtime->reuse_pool) pool_destroy(runtime->reuse_pool);
         mem_free(runtime);
         script_task_collection_free(&script_tasks);
         script_runner_cleanup_source_cache();
@@ -2507,9 +2494,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // functions (clicked(), toggle(), setFontFamily(), etc.) can be invoked
     // at event time without re-compilation.
     if (preamble && preamble->mir_ctx) {
-        // MIR setup consumes runtime->reuse_pool into the fresh heap. Restore the
-        // owner pointer so document cleanup can release that per-document pool.
-        if (!runtime->reuse_pool && runtime->heap) runtime->reuse_pool = runtime->heap->pool;
         dom_doc->js.preamble_state = preamble;
         dom_doc->js.mir_ctx = preamble->mir_ctx;
         dom_doc->js.runtime = runtime;
@@ -2735,7 +2719,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     }
 
     // Create a transient collection used only during compile/install.
-    Pool* handlers_pool = mem_pool_create_mmap((MemContext*)dom_doc->services.mem_ctx,
+    Pool* handlers_pool = mem_pool_create((MemContext*)dom_doc->services.mem_ctx,
                                                MEM_ROLE_TEMP,
                                                "script.inline_handlers");
     InlineHandlerInstallCollection* handlers =
@@ -2778,7 +2762,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     handler_compile_ctx->heap = runtime->heap;
     handler_compile_ctx->name_pool = runtime->name_pool;
     handler_compile_ctx->type_list = runtime->type_list;
-    handler_compile_ctx->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
+    handler_compile_ctx->pool = runtime->heap->pool;
     if (!eval_context_thread_initialize(handler_compile_ctx) ||
             (handler_compile_ctx->js_state &&
              !js_runtime_state_thread_initialize(handler_compile_ctx))) {
@@ -2898,7 +2882,6 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
         Heap* heap = runtime->heap;
         if (heap->gc) {
             heap_finalize_gc_objects(heap->gc);
-            heap->gc->pool = nullptr; // prevent gc_heap_destroy from destroying pool
             gc_heap_destroy(heap->gc);
             // pool is destroyed separately below
         }
@@ -2909,12 +2892,6 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (runtime->type_list) {
         arraylist_free(runtime->type_list);
         runtime->type_list = nullptr;
-    }
-
-    // Destroy retained mmap pool (native code pages, etc.)
-    if (runtime->reuse_pool) {
-        pool_destroy(runtime->reuse_pool);
-        runtime->reuse_pool = nullptr;
     }
 
     runtime->name_pool = nullptr;

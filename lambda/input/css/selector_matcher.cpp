@@ -186,6 +186,56 @@ SelectorEntry* selector_matcher_get_entry(SelectorMatcher* matcher, CssSimpleSel
 // Primary Matching Functions
 // ============================================================================
 
+static bool selector_matcher_matches_complex_at(SelectorMatcher* matcher,
+                                                CssSelector* selector,
+                                                int compound_index,
+                                                DomElement* element) {
+    if (!matcher || !selector || compound_index < 0 || !element) return false;
+    if (!selector_matcher_matches_compound(
+            matcher, selector->compound_selectors[compound_index], element)) {
+        return false;
+    }
+    if (compound_index == 0) return true;
+
+    CssCombinator combinator = selector->combinators[compound_index - 1];
+    switch (combinator) {
+        case CSS_COMBINATOR_DESCENDANT: {
+            // A descendant combinator may need to skip a matching ancestor so
+            // that an earlier child/sibling combinator can still be satisfied.
+            for (DomElement* ancestor = static_cast<DomElement*>(element->parent);
+                 ancestor; ancestor = static_cast<DomElement*>(ancestor->parent)) {
+                if (selector_matcher_matches_complex_at(
+                        matcher, selector, compound_index - 1, ancestor)) return true;
+            }
+            return false;
+        }
+        case CSS_COMBINATOR_CHILD: {
+            DomElement* parent = element->parent
+                ? static_cast<DomElement*>(element->parent) : nullptr;
+            return parent && selector_matcher_matches_complex_at(
+                matcher, selector, compound_index - 1, parent);
+        }
+        case CSS_COMBINATOR_NEXT_SIBLING: {
+            DomNode* sibling = element->prev_sibling;
+            while (sibling && !sibling->is_element()) sibling = sibling->prev_sibling;
+            return sibling && selector_matcher_matches_complex_at(
+                matcher, selector, compound_index - 1,
+                static_cast<DomElement*>(sibling));
+        }
+        case CSS_COMBINATOR_SUBSEQUENT_SIBLING: {
+            for (DomNode* sibling = element->prev_sibling; sibling;
+                 sibling = sibling->prev_sibling) {
+                if (sibling->is_element() && selector_matcher_matches_complex_at(
+                        matcher, selector, compound_index - 1,
+                        static_cast<DomElement*>(sibling))) return true;
+            }
+            return false;
+        }
+        default:
+            return false;
+    }
+}
+
 bool selector_matcher_matches(SelectorMatcher* matcher,
                               CssSelector* selector,
                               DomElement* element,
@@ -230,80 +280,12 @@ bool selector_matcher_matches(SelectorMatcher* matcher,
             local_result.specificity = selector->specificity;
         }
     } else {
-        // Complex case: multiple compound selectors with combinators
-        // We need to match the rightmost selector to the element,
-        // then verify the combinators working backwards
-
-        CssCompoundSelector* rightmost = selector->compound_selectors[selector->compound_selector_count - 1];
-
-        if (!selector_matcher_matches_compound(matcher, rightmost, element)) {
-            if (result) *result = local_result;
-            return false;
-        }
-
-        // Now verify combinators from right to left
-        DomElement* current_element = element;
-        bool all_match = true;
-
-        for (int i = selector->compound_selector_count - 2; i >= 0; i--) {
-            CssCombinator combinator = selector->combinators[i];
-            CssCompoundSelector* left = selector->compound_selectors[i];
-
-            bool combinator_matches = false;
-
-            switch (combinator) {
-                case CSS_COMBINATOR_DESCENDANT: {
-                    DomElement* matched_ancestor = nullptr;
-                    combinator_matches = selector_matcher_has_ancestor(matcher, left, current_element, &matched_ancestor);
-                    if (combinator_matches && matched_ancestor) {
-                        current_element = matched_ancestor;
-                    }
-                    break;
-                }
-
-                case CSS_COMBINATOR_CHILD:
-                    combinator_matches = selector_matcher_has_parent(matcher, left, current_element);
-                    if (combinator_matches && current_element->parent) {
-                        current_element = static_cast<DomElement*>(current_element->parent);
-                    }
-                    break;
-
-                case CSS_COMBINATOR_NEXT_SIBLING:
-                    combinator_matches = selector_matcher_has_prev_sibling(matcher, left, current_element);
-                    if (combinator_matches) {
-                        // Find previous element sibling (skip text nodes)
-                        DomNode* prev_node = current_element->prev_sibling;
-                        while (prev_node && !prev_node->is_element()) {
-                            prev_node = prev_node->prev_sibling;
-                        }
-                        if (prev_node) {
-                            current_element = static_cast<DomElement*>(prev_node);
-                        }
-                    }
-                    break;
-
-                case CSS_COMBINATOR_SUBSEQUENT_SIBLING: {
-                    DomElement* matched_sibling = nullptr;
-                    combinator_matches = selector_matcher_has_preceding_sibling(matcher, left, current_element, &matched_sibling);
-                    if (combinator_matches && matched_sibling) {
-                        current_element = matched_sibling;
-                    }
-                    break;
-                }
-
-                default:
-                    combinator_matches = false;
-                    break;
-            }
-
-            if (!combinator_matches) {
-                all_match = false;
-                break;
-            }
-        }
-
-        local_result.matches = all_match;
-        if (all_match) {
+        // Complex selectors require backtracking across descendant relationships;
+        // the nearest matching ancestor is not always the one satisfying the
+        // next child or sibling combinator.
+        local_result.matches = selector_matcher_matches_complex_at(
+            matcher, selector, selector->compound_selector_count - 1, element);
+        if (local_result.matches) {
             local_result.specificity = selector->specificity;
         }
     }

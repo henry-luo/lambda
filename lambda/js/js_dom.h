@@ -105,7 +105,13 @@ bool js_dom_focus_editing_host_for_automation(void* dom_elem);
 #ifdef __cplusplus
 struct DomElement;
 void js_dom_register_named_elements(DomElement* root);
+DomElement* js_dom_find_element_by_id(DomElement* root, const char* id);
 #endif
+
+/** Resolve and activate a popover target from a button activation. */
+void* js_dom_popover_target_for_button(void* button);
+int js_dom_popover_target_action(void* button);
+bool js_dom_activate_popover(void* popover, int action);
 
 // =============================================================================
 // DOM Wrapping / Unwrapping

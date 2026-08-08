@@ -20,7 +20,7 @@ protected:
 
     void SetUp() override {
         pool = pool_create();
-        arena = arena_create_default(pool);
+        arena = arena_create_default();
         dl_init(&dl, arena);
     }
 
@@ -645,7 +645,7 @@ protected:
 
     void SetUp() override {
         pool = pool_create();
-        arena = arena_create_default(pool);
+        arena = arena_create_default();
         paint_list_init(&pl, arena);
         dl_init(&lowered, arena);
         dl_init(&direct, arena);

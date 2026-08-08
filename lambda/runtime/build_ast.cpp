@@ -749,6 +749,50 @@ static Type* function_call_result_type(Transpiler* tp, TypeFunc* function) {
     return lambda_type_union_normalized(tp->pool, success, error);
 }
 
+static size_t type_clone_size(const Type* source) {
+    if (!source) return sizeof(Type);
+    switch (source->type_id) {
+    case LMD_TYPE_INT64: return sizeof(TypeInt64);
+    case LMD_TYPE_UINT64: return sizeof(TypeUint64);
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64: return sizeof(TypeFloat);
+    case LMD_TYPE_COMPLEX: return sizeof(TypeComplex);
+    case LMD_TYPE_DECIMAL: return sizeof(TypeDecimal);
+    case LMD_TYPE_DTIME: return sizeof(TypeDateTime);
+    case LMD_TYPE_SYMBOL:
+    case LMD_TYPE_STRING: return sizeof(TypeString);
+    case LMD_TYPE_BINARY: return sizeof(TypeBinaryConst);
+    case LMD_TYPE_NUM_SIZED: return sizeof(TypeNumSized);
+    case LMD_TYPE_FUNC: return sizeof(TypeFunc);
+    case LMD_TYPE_RANGE: return sizeof(TypeRange);
+    default: break;
+    }
+    if (source->type_id == LMD_TYPE_TYPE) {
+        switch (source->kind) {
+        case TYPE_KIND_UNARY: return sizeof(TypeUnary);
+        case TYPE_KIND_BINARY: return sizeof(TypeBinary);
+        case TYPE_KIND_CONSTRAINED: return sizeof(TypeConstrained);
+        case TYPE_KIND_RANGE: return sizeof(TypeRange);
+        case TYPE_KIND_PATTERN: return sizeof(TypePattern);
+        default: return sizeof(TypeType);
+        }
+    }
+    if (source->kind == TYPE_KIND_PARAM) return sizeof(TypeParam);
+    return sizeof(Type);
+}
+
+static Type* clone_type_without_const(Transpiler* tp, Type* source) {
+    if (!source) return &TYPE_ANY;
+    size_t size = type_clone_size(source);
+    Type* clone = alloc_type(tp->pool, source->type_id, size);
+    // Preserve the concrete type wrapper: cloning only the Type prefix leaves
+    // TypeType/union metadata outside the allocation and contract inspection
+    // then reads past the block. The old allocator's size classes hid this.
+    memcpy(clone, source, size);
+    clone->is_const = 0;
+    return clone;
+}
+
 static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
         AstNode* first_arg) {
     Type* success = info && info->success_type ? info->success_type :
@@ -3058,8 +3102,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                 ast_node->type = &TYPE_ANY;
             }
             if (ast_node->type && ast_node->type->is_const) {
-                // replicate the type to remove is_const flag - todo: fast path for const fn
-                ast_node->type = alloc_type(tp->pool, ast_node->type->type_id, sizeof(Type));
+                ast_node->type = clone_type_without_const(tp, ast_node->type);
             }
         }
         else {
@@ -4417,8 +4460,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_IDENT) {
         ast_node->expr = build_identifier(tp, child);
         if (ast_node->expr->type->is_const) {
-            // replicate the type to remove is_const flag - todo: fast path for const ident
-            ast_node->type = alloc_type(tp->pool, ast_node->expr->type->type_id, sizeof(Type));
+            ast_node->type = clone_type_without_const(tp, ast_node->expr->type);
         }
         else {
             ast_node->type = ast_node->expr->type;
@@ -4813,6 +4855,47 @@ static bool known_numeric_array_type(Type* type) {
     TypeArray* array_type = (TypeArray*)type;
     return array_type->nested &&
         lambda_numeric_kind_from_type(array_type->nested) != LAMBDA_NUM_INVALID;
+}
+
+static Type* known_array_element_type(Type* type) {
+    if (!type) return NULL;
+    if (type->type_id == LMD_TYPE_ARRAY || type->type_id == LMD_TYPE_ARRAY_NUM) {
+        return ((TypeArray*)type)->nested;
+    }
+    return type;
+}
+
+static Type* binary_array_result_element_type(AstBinaryNode* ast_node) {
+    if (!ast_node) return &TYPE_ANY;
+    if (is_elementwise_comparison_op(ast_node->op)) return &TYPE_BOOL;
+
+    LambdaNumericOpFamily family;
+    switch (ast_node->op) {
+    case OPERATOR_ADD: family = LAMBDA_NUM_OP_ADD; break;
+    case OPERATOR_SUB: family = LAMBDA_NUM_OP_SUB; break;
+    case OPERATOR_MUL: family = LAMBDA_NUM_OP_MUL; break;
+    case OPERATOR_DIV: family = LAMBDA_NUM_OP_TRUE_DIV; break;
+    case OPERATOR_IDIV: family = LAMBDA_NUM_OP_IDIV; break;
+    case OPERATOR_MOD: family = LAMBDA_NUM_OP_MOD; break;
+    default: return &TYPE_ANY;
+    }
+
+    Type* left = known_array_element_type(ast_node->left ? ast_node->left->type : NULL);
+    Type* right = known_array_element_type(ast_node->right ? ast_node->right->type : NULL);
+    LambdaNumericDecision decision = lambda_numeric_classify(family,
+        lambda_numeric_kind_from_type(left), lambda_numeric_kind_from_type(right));
+    return decision.valid ? lambda_numeric_type_from_kind(decision.result) : &TYPE_ANY;
+}
+
+static Type* alloc_array_num_result_type(Transpiler* tp, AstBinaryNode* ast_node) {
+    TypeArray* type = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY_NUM,
+        sizeof(TypeArray));
+    // ArrayNum carries its runtime element lane; preserving that witness keeps
+    // later indexing native and prevents a typed result from being treated as
+    // a bare Type allocation (the exact allocator exposed the stale layout).
+    type->nested = binary_array_result_element_type(ast_node);
+    type->type_index = -1;
+    return (Type*)type;
 }
 
 static void normalize_is_array_type_rhs(Transpiler* tp, AstBinaryNode* ast_node) {
@@ -5311,7 +5394,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     } else if (complete_numeric_type) {
         ast_node->type = complete_numeric_type;
     } else if (type_id == LMD_TYPE_ARRAY_NUM) {
-        ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+        ast_node->type = alloc_array_num_result_type(tp, ast_node);
     } else if (type_id >= LMD_TYPE_CONTAINER) {
         // reuse existing type from the branch that determined the type_id
         // to preserve full struct layout (TypeMap, TypeArray, etc.)

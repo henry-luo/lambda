@@ -3,6 +3,25 @@
 #include <cstring>
 #include <cstdio>
 
+struct ReclaimFixture {
+    void* ptr;
+    size_t bytes;
+};
+
+static size_t release_reclaim_fixture(MemPressureLevel level,
+                                      size_t target_bytes,
+                                      void* user_data) {
+    (void)level;
+    (void)target_bytes;
+    ReclaimFixture* fixture = (ReclaimFixture*)user_data;
+    if (!fixture || !fixture->ptr) return 0;
+    mem_free(fixture->ptr);
+    fixture->ptr = nullptr;
+    size_t released = fixture->bytes;
+    fixture->bytes = 0;
+    return released;
+}
+
 // Test fixture for memory tracker tests
 class MemtrackTest : public ::testing::Test {
 protected:
@@ -50,6 +69,43 @@ TEST_F(MemtrackTest, NoLeakWhenFreed) {
     EXPECT_EQ(stats.current_bytes, 0);
     EXPECT_EQ(stats.total_allocs, 1);
     EXPECT_EQ(stats.total_frees, 1);
+}
+
+TEST_F(MemtrackTest, ZeroAndOverflowRequestsFailWithoutAccounting) {
+    EXPECT_EQ(mem_alloc(0, MEM_CAT_TEMP), nullptr);
+    EXPECT_EQ(mem_calloc(0, 16, MEM_CAT_TEMP), nullptr);
+    EXPECT_EQ(mem_calloc(2, static_cast<size_t>(-1), MEM_CAT_TEMP), nullptr);
+
+    MemtrackStats stats;
+    memtrack_get_stats(&stats);
+    EXPECT_EQ(stats.current_count, 0u);
+    EXPECT_EQ(stats.current_bytes, 0u);
+}
+
+TEST_F(MemtrackTest, FaultedReallocPreservesOriginalAllocation) {
+    char* buffer = (char*)mem_alloc(8, MEM_CAT_TEMP);
+    ASSERT_NE(buffer, nullptr);
+    memcpy(buffer, "stable", 7);
+
+    memtrack_fault_inject(0);
+    EXPECT_EQ(mem_realloc(buffer, 128, MEM_CAT_TEMP), nullptr);
+    memtrack_fault_clear();
+    EXPECT_STREQ(buffer, "stable");
+    mem_free(buffer);
+}
+
+TEST_F(MemtrackTest, LegacyPressureRegistrationUsesMemContextCoordinator) {
+    ReclaimFixture fixture = {};
+    fixture.ptr = mem_alloc(64, MEM_CAT_CACHE_OTHER);
+    fixture.bytes = 64;
+    ASSERT_NE(fixture.ptr, nullptr);
+
+    uint32_t handle = memtrack_register_pressure_callback(
+        release_reclaim_fixture, &fixture, 0);
+    ASSERT_NE(handle, 0u);
+    EXPECT_GE(memtrack_request_free(64), 64u);
+    EXPECT_EQ(fixture.ptr, nullptr);
+    memtrack_unregister_pressure_callback(handle);
 }
 
 // ============================================================================
@@ -487,7 +543,7 @@ TEST_F(MemtrackStatsTest, ArenaLifecycleTracking) {
 
     EXPECT_EQ(memtrack_get_arena_count(), 0);
 
-    Arena* arena = memtrack_arena_create(pool, MEM_CAT_LAYOUT);
+    Arena* arena = memtrack_arena_create(MEM_CAT_LAYOUT);
     ASSERT_NE(arena, nullptr);
     EXPECT_EQ(memtrack_get_arena_count(), 1);
 

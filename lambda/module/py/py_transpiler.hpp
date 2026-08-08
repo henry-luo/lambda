@@ -35,7 +35,7 @@ static const PyScopeType PY_SCOPE_COMPREHENSION = (PyScopeType)1001;
 // Python transpiler context
 typedef struct PyTranspiler {
     // core transpiler components
-    Pool* ast_pool;                 // AST backing pool (for arena chunks)
+    Pool* ast_pool;                 // AST owner group for selectively freed metadata
     Arena* ast_arena;               // AST bump allocator (O(1) alloc, bulk free)
     NamePool* name_pool;            // string interning pool
     const char* source;             // Python source code

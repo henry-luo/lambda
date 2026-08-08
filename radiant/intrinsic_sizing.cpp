@@ -5079,6 +5079,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // Track inline-level content separately
     float inline_min_sum = 0.0f;  // Sum of the current unbreakable inline run
     float inline_max_sum = 0.0f;  // Sum of max-content widths for inline children
+    float vertical_block_axis_max = 0.0f;
+    float vertical_text_block_axis_max = 0.0f;
+    bool element_inline_axis_is_vertical = layout_element_inline_axis_is_vertical(element);
     bool has_inline_content = false;
     bool inline_run_ends_with_collapsible_space = false;
     float first_inline_child_min = -1.0f;  // First inline child's min-content (for text-indent)
@@ -5626,6 +5629,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
 
+                if (element_inline_axis_is_vertical) {
+                    // CSS Writing Modes maps a vertical inline container's
+                    // physical width to its block axis; preserve the measured
+                    // glyph advance when the inherited font context is still
+                    // provisional during the recursive intrinsic query.
+                    vertical_text_block_axis_max = max(vertical_text_block_axis_max,
+                        text_widths.max_content);
+                }
+
                 // white-space: nowrap/pre prevents line breaks, so min-content = max-content
                 if (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE) {
                     child_sizes.min_content = child_sizes.max_content;
@@ -5697,6 +5709,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             child_is_float = intrinsic_element_is_float(child_elem);
             is_inline = !child_is_float && (is_inline_level_element(child_elem) ||
                 (is_inline_level_element(element) && node_is_table_cell_like(child)));
+
+            if (is_inline && element_inline_axis_is_vertical) {
+                // Orthogonal inline descendants contribute their physical
+                // block-axis max-content size to this line box; summing it
+                // follows the horizontal surrogate instead of writing-mode.
+                vertical_block_axis_max = max(vertical_block_axis_max,
+                    child_sizes.max_content);
+            }
 
             log_debug("  child %s: min=%.1f, max=%.1f, is_inline=%d",
                       child_elem->node_name(), child_sizes.min_content, child_sizes.max_content, is_inline);
@@ -6181,13 +6201,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
-    if (has_inline_content && layout_block_inline_axis_is_vertical(view_block)) {
+    if (has_inline_content && element_inline_axis_is_vertical) {
         float block_axis_line_extent = intrinsic_element_line_height(
             lycon, element, view_block);
         // In vertical writing, line-height is the line box's physical block
         // extent; text glyph width alone would under-measure shrink-to-fit floats.
-        sizes.min_content = max(sizes.min_content, block_axis_line_extent);
-        sizes.max_content = max(sizes.max_content, block_axis_line_extent);
+        float block_axis_extent = max(block_axis_line_extent, vertical_block_axis_max);
+        sizes.min_content = max(sizes.min_content, block_axis_extent);
+        sizes.max_content = max(sizes.max_content, block_axis_extent);
     }
 
     // CSS Generated Content §2: ::before/::after pseudo-elements generate boxes that
@@ -6278,11 +6299,35 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 inline_min_sum = fmaxf(first_line_min, nonfirst_inline_min_max);
             }
         }
-        sizes.min_content = max(sizes.min_content, inline_min_sum);
-        // CSS 2.1 §9.5 + CSS Sizing 3 §4: At max-content (infinite width),
-        // floats and inline content share the same line. The total width needed
-        // is the sum of float widths + inline content width.
-        sizes.max_content = max(sizes.max_content, inline_max_sum + float_width_alongside_inline);
+        if (element_inline_axis_is_vertical) {
+            // CSS Writing Modes maps this container's physical width to the
+            // block axis, so its inline line is sized by the widest item.
+            float block_axis_extent = max(
+                intrinsic_element_line_height(lycon, element, view_block),
+                max(vertical_block_axis_max, vertical_text_block_axis_max));
+            if (layout_element_css_writing_mode(element) == CSS_VALUE_SIDEWAYS_RL &&
+                vertical_block_axis_max > 0.0f) {
+                float sideways_ascender = 0.0f;
+                float sideways_descender = 0.0f;
+                if (lycon->font.font_handle) {
+                    // sideways-rl maps the font's cross-axis content area into
+                    // the inline box; the descender therefore contributes to
+                    // the physical block extent alongside the child box.
+                    font_get_content_area_split(lycon->font.font_handle,
+                        &sideways_ascender, &sideways_descender);
+                }
+                block_axis_extent = max(block_axis_extent,
+                    vertical_block_axis_max + sideways_descender);
+            }
+            sizes.min_content = max(sizes.min_content, block_axis_extent);
+            sizes.max_content = max(sizes.max_content, block_axis_extent);
+        } else {
+            sizes.min_content = max(sizes.min_content, inline_min_sum);
+            // CSS 2.1 §9.5 + CSS Sizing 3 §4: At max-content (infinite width),
+            // floats and inline content share the same line. The total width needed
+            // is the sum of float widths + inline content width.
+            sizes.max_content = max(sizes.max_content, inline_max_sum + float_width_alongside_inline);
+        }
         // For min-content, floats stack vertically so inline content gets full width
         // (float_width not added to inline_min_sum)
 
@@ -6320,13 +6365,27 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             : multicol->column_gap;
         if (gap < 0.0f) gap = 0.0f;
         float total_gap = gap * (intrinsic_column_count - 1);
-        float column_floor = multicol->column_width;
-        float column_min = max(sizes.min_content, column_floor);
-        float column_max = max(sizes.max_content, column_floor);
-        // Auto column-count resolves to one column for this intrinsic query; the
-        // fixed column width is still a floor even when content is hidden.
-        sizes.min_content = column_min * intrinsic_column_count + total_gap;
-        sizes.max_content = column_max * intrinsic_column_count + total_gap;
+        if (layout_block_inline_axis_is_vertical(view_block) &&
+            multicol->column_height <= 0.0f &&
+            multicol->fill == COLUMN_FILL_BALANCE) {
+            // In vertical writing, columns advance along the inline axis; the
+            // physical width is the balanced block-axis extent of one column,
+            // not the horizontal sum of all column tracks.
+            float block_extent = multicol_intrinsic_vertical_block_extent(
+                lycon, view_block, element);
+            if (block_extent > 0.0f) {
+                sizes.min_content = max(sizes.min_content, block_extent);
+                sizes.max_content = max(sizes.max_content, block_extent);
+            }
+        } else {
+            float column_floor = multicol->column_width;
+            float column_min = max(sizes.min_content, column_floor);
+            float column_max = max(sizes.max_content, column_floor);
+            // Auto column-count resolves to one column for this intrinsic query; the
+            // fixed column width is still a floor even when content is hidden.
+            sizes.min_content = column_min * intrinsic_column_count + total_gap;
+            sizes.max_content = column_max * intrinsic_column_count + total_gap;
+        }
     }
 
     // Add padding and border

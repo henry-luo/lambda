@@ -180,7 +180,7 @@ static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
 struct DomDocument {
     // Lambda integration
     Input* input;                // Lambda Input context for MarkEditor operations
-    Pool* document_pool;         // Document-owned objects and backing for node_arena
+    Pool* document_pool;         // Document-owned selectively released objects
     Arena* node_arena;           // Stable DOM nodes and registered node-owned payloads
     DomDocumentServices services;
 
@@ -446,6 +446,7 @@ struct DomElementExt {
     float ruby_column_inline_advance;
     float ruby_column_start_overhang;
     bool has_simple_ruby_column_geometry;
+    bool popover_open;
 };
 
 /**
@@ -814,6 +815,11 @@ struct DomElement : DomNode {
         return tag_name ? well_known_name_id({tag_name, strlen(tag_name)}) : NAME_ID_NONE;
     }
     void set_tag_name_id(NameId value) { ensure_ext()->name_id = value; }
+    bool is_popover_open() const { return ext && ext->popover_open; }
+    void set_popover_open(bool value) {
+        DomElementExt* data = ensure_ext();
+        if (data) data->popover_open = value;
+    }
     void reset_view_ext() {
         if (!ext) return;
         // Doc-pooled storage outlives view results, so every relayout must drop

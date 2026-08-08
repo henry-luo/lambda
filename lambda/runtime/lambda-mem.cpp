@@ -2,6 +2,7 @@
 #include <limits.h>
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/str.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/hashmap.h"
@@ -416,7 +417,7 @@ extern "C" String* get_ascii_char_string(unsigned char ch) {
 
 static void heap_finish_init(void) {
     // register the stable result root and all GC callbacks after the allocator
-    // has selected the heap backing pool.
+    // has initialized the heap's VM-owned extents.
     context->heap->result_root = context->result.item;
     gc_register_root(context->heap->gc, &context->heap->result_root);
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
@@ -437,17 +438,17 @@ static void heap_finish_init(void) {
 void heap_init() {
     log_debug("heap init: %p", context);
     context->heap = (Heap*)mem_calloc(1, sizeof(Heap), MEM_CAT_EVAL);
+    if (!context->heap) return;
+    context->heap->pool = mem_pool_create(NULL, MEM_ROLE_RUNTIME_HEAP,
+                                          "eval.runtime.pool");
     context->heap->gc = mem_gc_heap_create(NULL, MEM_ROLE_RUNTIME_HEAP, "eval.heap");
-    context->heap->pool = context->heap->gc->pool;  // alias for compatibility
-
-    heap_finish_init();
-}
-
-void heap_init_with_pool(Pool* pool) {
-    log_debug("heap init with pool: %p (pool=%p)", context, pool);
-    context->heap = (Heap*)mem_calloc(1, sizeof(Heap), MEM_CAT_EVAL);
-    context->heap->gc = mem_gc_heap_create_with_pool(NULL, pool, MEM_ROLE_RUNTIME_HEAP, "eval.heap");
-    context->heap->pool = context->heap->gc->pool;
+    if (!context->heap->pool || !context->heap->gc) {
+        if (context->heap->gc) gc_heap_destroy(context->heap->gc);
+        if (context->heap->pool) mem_pool_destroy(context->heap->pool);
+        mem_free(context->heap);
+        context->heap = NULL;
+        return;
+    }
 
     heap_finish_init();
 }
@@ -1096,16 +1097,19 @@ extern "C" void heap_finalize_gc_objects(gc_heap_t *gc) {
 void heap_destroy() {
     if (context->heap) {
         // Runtime item cleanup may neuter owning Array objects, so it must run
-        // while the GC heap pool that contains those owners is still alive.
+        // while the runtime owner group and GC extents are still alive.
         js_array_runtime_items_cleanup_all();
         if (context->heap->gc) {
             // finalize all GC-managed objects: free sub-allocations (items[], data, mpd_t, closure_env)
             // that were malloc'd/calloc'd separately from the pool
             heap_finalize_gc_objects(context->heap->gc);
-            gc_heap_destroy(context->heap->gc);  // pool_destroy frees all pool memory
+            gc_heap_destroy(context->heap->gc);
         }
         lambda_region_destroy_caches(context->heap);
-        context->heap->pool = NULL;
+        if (context->heap->pool) {
+            mem_pool_destroy(context->heap->pool);
+            context->heap->pool = NULL;
+        }
         mem_free(context->heap);
     }
 }
@@ -1119,6 +1123,10 @@ void heap_discard_unfinalized() {
     if (gc) {
         gc->external_destroy = NULL;
         gc_heap_destroy(gc);
+    }
+    if (context->heap->pool) {
+        mem_pool_destroy(context->heap->pool);
+        context->heap->pool = NULL;
     }
     // The Heap record itself is mem_alloc-owned. Do not re-enter that allocator
     // after siglongjmp; it is a tiny process-lifetime recovery leak.

@@ -9,6 +9,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include "mem_context.h"
 
 /**
  * Lambda Memory Tracker
@@ -160,23 +161,6 @@ typedef struct MemtrackStats {
 // ============================================================================
 // Memory Pressure Management
 // ============================================================================
-
-typedef enum MemPressureLevel {
-    MEM_PRESSURE_NONE = 0,      // Normal operation
-    MEM_PRESSURE_LOW,           // Start considering eviction
-    MEM_PRESSURE_MEDIUM,        // Evict non-essential caches
-    MEM_PRESSURE_HIGH,          // Aggressive eviction
-    MEM_PRESSURE_CRITICAL,      // Emergency - evict everything possible
-} MemPressureLevel;
-
-/**
- * Memory pressure callback
- * @param level Current pressure level
- * @param target_bytes Suggested bytes to free (0 = free as much as possible)
- * @param user_data User context
- * @return Bytes actually freed
- */
-typedef size_t (*MemPressureCallback)(MemPressureLevel level, size_t target_bytes, void* user_data);
 
 // ============================================================================
 // Initialization / Shutdown
@@ -455,6 +439,12 @@ void memtrack_free_snapshot(uint32_t snapshot_handle);
  */
 void memtrack_thread_enable(bool enable);
 
+// Deterministic, thread-scoped allocation-failure controls used by allocator
+// regression tests and VM fault-injection tests. They are inert until armed.
+void memtrack_fault_inject(size_t successful_allocations_before_failure);
+void memtrack_fault_clear(void);
+bool memtrack_fault_should_fail(void);
+
 // ============================================================================
 // Memory Walking API (requires TypeMeta)
 // ============================================================================
@@ -541,6 +531,10 @@ Pool* memtrack_pool_create(MemCategory category);
  * Allocate from tracked pool
  */
 void* memtrack_pool_alloc(Pool* pool, size_t size);
+void* memtrack_pool_calloc(Pool* pool, size_t size);
+void* memtrack_pool_realloc(Pool* pool, void* ptr, size_t size);
+void  memtrack_pool_free(Pool* pool, void* ptr);
+void  memtrack_pool_reset(Pool* pool);
 
 /**
  * Destroy tracked pool (updates stats)
@@ -550,7 +544,7 @@ void memtrack_pool_destroy(Pool* pool);
 /**
  * Create a tracked arena
  */
-Arena* memtrack_arena_create(Pool* pool, MemCategory category);
+Arena* memtrack_arena_create(MemCategory category);
 
 /**
  * Allocate from tracked arena

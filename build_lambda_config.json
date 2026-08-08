@@ -77,7 +77,6 @@
     "lambda/tree-sitter-lambda/bindings/c",
     "lambda/tree-sitter-typescript/bindings/c",
     "lambda/tree-sitter-javascript/bindings/c",
-    "mac-deps/rpmalloc-install/include",
     "lib/font/woff2/include",
     "mac-deps/thorvg/src/bindings/capi"
   ],
@@ -447,7 +446,6 @@
         "png",
         "turbojpeg",
         "gif",
-        "rpmalloc",
         "pthread"
       ],
       "defines": [
@@ -551,7 +549,6 @@
         "mbedx509",
         "mbedcrypto",
         "zlib",
-        "rpmalloc",
         "re2",
         "libuv",
         "pthread",
@@ -668,7 +665,6 @@
         "re2",
         "mpdec",
         "libuv",
-        "rpmalloc",
         "pthread"
       ],
       "defines": [
@@ -703,7 +699,6 @@
         "lambda-lib",
         "mpdec",
         "utf8proc",
-        "rpmalloc",
         "pthread"
       ],
       "defines": [
@@ -802,7 +797,6 @@
         "mbedcrypto",
         "zlib",
         "libuv",
-        "rpmalloc",
         "pthread",
         "png",
         "turbojpeg",
@@ -842,7 +836,6 @@
         "tree-sitter",
         "tree-sitter-lambda",
         "mpdec",
-        "rpmalloc",
         "pthread"
       ],
       "defines": [
@@ -873,7 +866,6 @@
         "glfw",
         "png",
         "turbojpeg",
-      "rpmalloc",
       "pthread"
     ],
     "linux": {
@@ -1065,8 +1057,7 @@
         "lambda/mir",
         "build_temp/re2-noabsl",
         "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "mac-deps/rpmalloc-install/include"
+        "lambda/tree-sitter-lambda/bindings/c"
       ],
       "exclude_libraries": [
         "glfw",
@@ -1147,12 +1138,6 @@
           "name": "utf8proc",
           "include": "win-native-deps/include",
           "lib": "win-native-deps/lib/libutf8proc.a",
-          "link": "static"
-        },
-        {
-          "name": "rpmalloc",
-          "include": "win-native-deps/include/rpmalloc",
-          "lib": "win-native-deps/lib/librpmalloc.a",
           "link": "static"
         },
         {
@@ -1620,13 +1605,6 @@
           "link": "static"
         },
         {
-          "name": "rpmalloc",
-          "description": "Memory pool allocator",
-          "include": "/usr/local/include",
-          "lib": "temp/rpmalloc_linux/librpmalloc.a",
-          "link": "static"
-        },
-        {
           "name": "pthread",
           "include": "",
           "lib": "-lpthread",
@@ -1916,13 +1894,6 @@
           "include": null,
           "lib": "-framework WebKit",
           "link": "dynamic"
-        },
-        {
-          "name": "rpmalloc",
-          "description": "High-performance memory allocator (rpmalloc with first-class heaps, no malloc override)",
-          "include": "mac-deps/rpmalloc-install/include",
-          "lib": "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
-          "link": "static"
         }
       ]
     }
@@ -1943,8 +1914,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_rdb_gtest.exe",
             "icon": "🗄️"
@@ -1957,8 +1927,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_rdb_query_gtest.exe",
             "icon": "🔍"
@@ -2024,8 +1993,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "macos": {
               "libraries": [
@@ -2058,8 +2026,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_stringbuf_gtest.exe",
             "icon": "🧵"
@@ -2072,8 +2039,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_strview_gtest.exe",
             "icon": "👀"
@@ -2086,8 +2052,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_num_stack_gtest.exe",
             "icon": "🔢"
@@ -2100,8 +2065,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_datetime_gtest.exe",
             "icon": "📅"
@@ -2112,8 +2076,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/lru_cache.c",
@@ -2131,8 +2094,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_binsearch_gtest.exe",
             "icon": "🔍"
@@ -2143,8 +2105,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_hash_gtest.exe",
             "icon": "#️⃣"
@@ -2155,8 +2116,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_hex_gtest.exe",
             "icon": "🔢"
@@ -2167,8 +2127,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_endian_gtest.exe",
             "icon": "🔀"
@@ -2179,8 +2138,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_uuid_gtest.exe",
             "icon": "🆔"
@@ -2191,8 +2149,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_color_gtest.exe",
             "icon": "🎨"
@@ -2205,8 +2162,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_base64_gtest.exe",
             "icon": "🅱️"
@@ -2217,8 +2173,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_time_util_gtest.exe",
             "icon": "⏱️"
@@ -2229,8 +2184,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_atomic_gtest.exe",
             "icon": "⚛️"
@@ -2242,11 +2196,11 @@
             "libraries": [
               "gtest",
               "gtest_main",
-              "rpmalloc",
               "pthread"
             ],
             "additional_sources": [
               "lib/byte_storage.c",
+              "lib/mem_context.c",
               "lib/memtrack.c",
               "lib/hashmap.c",
               "lib/arena.c",
@@ -2264,8 +2218,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/hashmap_helpers.c",
@@ -2280,8 +2233,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/thread_pool.c",
@@ -2298,8 +2250,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_math_utils_gtest.exe",
             "icon": "➗"
@@ -2310,8 +2261,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_sort_gtest.exe",
             "icon": "📊"
@@ -2322,8 +2272,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/arraylist.c"
@@ -2340,7 +2289,6 @@
             "libraries": [
               "gtest",
               "gtest_main",
-              "rpmalloc",
               "CoreFoundation",
               "CoreGraphics",
               "CoreText"
@@ -2373,8 +2321,7 @@
             "name": "Font Context Tests",
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/font/font_context_glyph_cache.c",
@@ -2398,7 +2345,6 @@
             "libraries": [
               "gtest",
               "gtest_main",
-              "rpmalloc",
               "zlib",
               "brotlidec",
               "brotlicommon"
@@ -2411,6 +2357,7 @@
               "lib/font/woff2/table_tags.cpp",
               "lib/font/woff2/variable_length.cpp",
               "lib/arena.c",
+              "lib/mem_context.c",
               "lib/memtrack.c",
               "lib/mempool.c",
               "lib/log.c",
@@ -2431,8 +2378,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_url_gtest.exe",
             "icon": "🔗"
@@ -2445,8 +2391,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_url_extra_gtest.exe",
             "icon": "🌐"
@@ -2460,8 +2405,7 @@
             "libraries": [
               "gtest",
               "gtest_main",
-              "utf8proc",
-              "rpmalloc"
+              "utf8proc"
             ],
             "binary": "test_cmdedit_gtest.exe",
             "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -DUTF8PROC_STATIC",
@@ -2474,8 +2418,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/mempool.c",
@@ -2492,10 +2435,10 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
+              "lib/mem_context.c",
               "lib/memtrack.c",
               "lib/hashmap.c",
               "lib/arena.c",
@@ -2515,8 +2458,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_own_tagged.exe",
             "icon": "🧩"
@@ -2534,8 +2476,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_span_gtest.exe",
             "icon": "🧩"
@@ -2555,8 +2496,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_checked_alloc_gtest.exe",
             "icon": "🧩"
@@ -2569,8 +2509,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_recursion_guard_gtest.exe",
             "icon": "🧩"
@@ -2581,11 +2520,11 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lambda/module/npm/semver.cpp",
+              "lib/mem_context.c",
               "lib/memtrack.c",
               "lib/hashmap.c",
               "lib/arena.c",
@@ -2603,8 +2542,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/avl_tree.c",
@@ -2624,8 +2562,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_arena_gtest.exe",
             "icon": "🏟️"
@@ -2636,8 +2573,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/scratch_arena.c",
@@ -2656,8 +2592,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/mem_context.c",
@@ -2674,8 +2609,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/mem_factory.c",
@@ -2691,6 +2625,28 @@
             "icon": "🏭"
           },
           {
+            "source": "lib/test_mem_vm_gtest.cpp",
+            "name": "Memory VM Region Tests",
+            "dependencies": [],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "lib/mem_vm.c",
+              "lib/mem_context.c",
+              "lib/memtrack.c",
+              "lib/hashmap.c",
+              "lib/arena.c",
+              "lib/mempool.c",
+              "lib/log.c",
+              "lib/str.c",
+              "lib/utf.c"
+            ],
+            "binary": "test_mem_vm_gtest.exe",
+            "icon": "🧭"
+          },
+          {
             "source": "lib/test_shell_gtest.cpp",
             "name": "Shell Module Tests",
             "dependencies": [
@@ -2698,8 +2654,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_shell_gtest.exe",
             "icon": "🐚"
@@ -2712,8 +2667,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/file.c"
@@ -2727,8 +2681,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/avl_tree.c",
@@ -2752,8 +2705,7 @@
               "uv",
               "mbedtls",
               "mbedx509",
-              "mbedcrypto",
-              "rpmalloc"
+              "mbedcrypto"
             ],
             "additional_sources": [
               "lambda/serve/serve_types.cpp",
@@ -2775,6 +2727,7 @@
               "lambda/serve/tls_handler.cpp",
               "lambda/serve/worker_pool.cpp",
               "lambda/serve/language_backend.cpp",
+              "lib/mem_context.c",
               "lib/memtrack.c",
               "lib/hashmap.c",
               "lib/log.c"
@@ -2791,8 +2744,7 @@
             "libraries": [
               "gtest",
               "gtest_main",
-              "uv",
-              "rpmalloc"
+              "uv"
             ],
             "additional_sources": [
               "lambda/serve/serve_types.cpp",
@@ -2802,6 +2754,7 @@
               "lambda/serve/http_request.cpp",
               "lambda/serve/http_response.cpp",
               "lambda/serve/schema_validator.cpp",
+              "lib/mem_context.c",
               "lib/memtrack.c",
               "lib/hashmap.c",
               "lib/log.c"
@@ -2825,8 +2778,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "radiant/display_list_bounds.cpp",
@@ -2846,8 +2798,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "radiant/display_list_bounds.cpp",
@@ -2874,8 +2825,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "radiant/layout_custom.cpp",
@@ -2893,8 +2843,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "radiant/view_reuse.cpp"
@@ -2910,8 +2859,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_pdf_writer_gtest.exe",
             "icon": "📄"
@@ -2924,8 +2872,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "radiant/animation.cpp"
@@ -2941,8 +2888,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lambda/input/css/dom_node.cpp",
@@ -2980,8 +2926,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "radiant/animation.cpp",
@@ -3005,7 +2950,6 @@
             "libraries": [
               "gtest",
               "gtest_main",
-              "rpmalloc",
               "gif",
               "png",
               "turbojpeg",
@@ -3028,8 +2972,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "radiant/rdt_video_stub.cpp"
@@ -3058,7 +3001,6 @@
             "libraries": [
               "gtest",
               "gtest_main",
-              "rpmalloc",
               "ThorVG",
               "png",
               "turbojpeg",
@@ -3282,8 +3224,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_mark_builder_gtest.exe",
             "icon": "🏗️"
@@ -3296,8 +3237,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/test_utils.c",
@@ -3314,8 +3254,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/test_utils.c",
@@ -3332,8 +3271,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lambda/runtime/edit_bridge.cpp",
@@ -3351,8 +3289,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/test_utils.c",
@@ -3369,8 +3306,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/test_utils.c",
@@ -3387,8 +3323,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_path_gtest.exe",
             "icon": "📂"
@@ -3401,8 +3336,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_mark_reader_gtest.exe",
             "icon": "📖"
@@ -3415,8 +3349,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_error_tracking.exe",
             "icon": "🛡️"
@@ -3429,8 +3362,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_math_ascii_gtest.exe",
             "icon": "🔤"
@@ -3443,8 +3375,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_markup_roundtrip_gtest.exe",
             "icon": "📝"
@@ -3457,8 +3388,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/test_utils.c",
@@ -3475,8 +3405,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_markup_modular_gtest.exe",
             "icon": "🧩"
@@ -3489,8 +3418,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_entity_emoji_gtest.exe",
             "icon": "🌐"
@@ -3503,8 +3431,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_input_roundtrip_gtest.exe",
             "icon": "🔄"
@@ -3517,8 +3444,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_input_rdb_gtest.exe",
             "icon": "🗄️"
@@ -3531,8 +3457,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_input_pdf_gtest.exe",
             "icon": "📕"
@@ -3546,7 +3471,6 @@
             "libraries": [
               "gtest",
               "gtest_main",
-              "rpmalloc",
               "gif",
               "png",
               "turbojpeg",
@@ -3566,8 +3490,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_yaml_suite_gtest.exe",
             "icon": "📜"
@@ -3580,8 +3503,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_wpt_html_parser_gtest.exe",
             "icon": "🌐"
@@ -3594,8 +3516,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_markdown_gtest.exe",
             "icon": "📝"
@@ -3608,8 +3529,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_html_roundtrip_gtest.exe",
             "icon": "🌐"
@@ -3622,8 +3542,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/test_utils.c",
@@ -3640,8 +3559,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_html_negative_gtest.exe",
             "icon": "🚨"
@@ -3654,8 +3572,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lambda/input/css/dom_node.cpp",
@@ -3676,8 +3593,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lambda/input/css/dom_node.cpp",
@@ -3704,8 +3620,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "radiant/browsing_session.cpp"
@@ -3721,8 +3636,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "radiant/clipboard.cpp"
@@ -3738,8 +3652,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lambda/input/css/dom_node.cpp",
@@ -3786,8 +3699,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_graph_parser_gtest.exe",
             "icon": "📊"
@@ -3800,8 +3712,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_graph_mermaid_gtest.exe",
             "icon": "📈"
@@ -3814,8 +3725,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_parser_robustness_gtest.exe",
             "icon": "🛡️"
@@ -3829,8 +3739,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/test_utils.c",
@@ -3848,8 +3757,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/test_utils.c",
@@ -3867,8 +3775,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/test_utils.c",
@@ -3886,8 +3793,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_enhanced_errors.exe",
             "icon": "✨"
@@ -3901,8 +3807,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_validation_options.exe",
             "icon": "⚙️"
@@ -3916,8 +3821,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_format_validation.exe",
             "icon": "🌐"
@@ -3931,8 +3835,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_validator_integration.exe",
             "icon": "🧪"
@@ -3946,8 +3849,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_type_references_simple.exe",
             "icon": "🔗"
@@ -3960,8 +3862,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_graph_formatter_gtest.exe",
             "icon": "🎨"
@@ -3974,8 +3875,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/test_utils.c",
@@ -3992,8 +3892,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_jsx_roundtrip_new_gtest.exe",
             "icon": "🔢"
@@ -4017,8 +3916,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/avl_tree.c",
@@ -4033,6 +3931,7 @@
               "lambda/input/css/css_value_parser.cpp",
               "lambda/input/css/css_value.cpp",
               "lib/mempool.c",
+              "lib/mem_context.c",
               "lib/memtrack.c",
               "lib/arena.c",
               "lib/str.c",
@@ -4048,8 +3947,7 @@
             "dependencies": [],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/avl_tree.c",
@@ -4063,6 +3961,7 @@
               "lambda/input/css/css_value_parser.cpp",
               "lambda/input/css/css_value.cpp",
               "lib/mempool.c",
+              "lib/mem_context.c",
               "lib/memtrack.c",
               "lib/arena.c",
               "lib/string.c",
@@ -4082,8 +3981,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/avl_tree.c",
@@ -4110,8 +4008,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/avl_tree.c",
@@ -4138,8 +4035,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/avl_tree.c",
@@ -4163,8 +4059,7 @@
             "name": "CSS Shorthand Temp Decl Helper Tests",
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_css_temp_decl_gtest.exe",
             "icon": "🧩"
@@ -4177,8 +4072,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lambda/input/css/dom_node.cpp",
@@ -4200,8 +4094,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_css_tokenizer_gtest.exe",
             "icon": "🎨"
@@ -4214,8 +4107,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_css_tokenizer_unit.exe",
             "icon": "🎨"
@@ -4228,8 +4120,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lambda/input/css/css_font_face.cpp",
@@ -4246,8 +4137,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_css_engine_unit.exe",
             "icon": "🎨"
@@ -4260,8 +4150,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_css_engine_negative.exe",
             "icon": "🎨"
@@ -4274,8 +4163,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_css_formatter_unit.exe",
             "icon": "🎨"
@@ -4288,8 +4176,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_css_roundtrip_unit.exe",
             "icon": "🎨"
@@ -4302,8 +4189,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_compound_descendant_selectors.exe",
             "icon": "🎨"
@@ -4316,8 +4202,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_selector_groups.exe",
             "icon": "🎨"
@@ -4330,8 +4215,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_css_parser_gtest.exe",
             "icon": "🎨"
@@ -4344,8 +4228,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_css_integration_gtest.exe",
             "icon": "🎨"
@@ -4358,8 +4241,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_css_files_safe_gtest.exe",
             "icon": "🎨"
@@ -4372,8 +4254,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_css_frameworks_gtest.exe",
             "icon": "🎨"
@@ -4386,8 +4267,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_css_to_mark_gtest.exe",
             "icon": "🎨"
@@ -4451,8 +4331,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "additional_sources": [
               "lib/test_utils.c",
@@ -4470,8 +4349,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_validator_path_reporting.exe",
             "disabled": false,
@@ -4522,7 +4400,6 @@
             "libraries": [
               "gtest",
               "gtest_main",
-              "rpmalloc",
               "libuv"
             ],
             "macos": {
@@ -4613,8 +4490,7 @@
             "binary": "test_item_repr_gtest.exe",
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "macos": {
               "libraries": [
@@ -4646,8 +4522,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_lambda_typed.exe",
             "icon": "🧩"
@@ -4674,8 +4549,7 @@
             "binary": "test_binary_storage_gtest.exe",
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "icon": "🧱"
           },
@@ -4690,8 +4564,7 @@
             "libraries": [
               "gtest",
               "gtest_main",
-              "tree-sitter",
-              "rpmalloc"
+              "tree-sitter"
             ],
             "macos": {
               "libraries": [
@@ -4763,8 +4636,7 @@
             "binary": "test_js_bt_regex_gtest.exe",
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "icon": "🔁"
           },
@@ -4864,8 +4736,7 @@
             ],
             "libraries": [
               "gtest",
-              "gtest_main",
-              "rpmalloc"
+              "gtest_main"
             ],
             "binary": "test_math_gtest.exe",
             "icon": "🔢"
@@ -4902,8 +4773,7 @@
               "zlib",
               "pthread",
               "CoreFoundation",
-              "SystemConfiguration",
-              "rpmalloc"
+              "SystemConfiguration"
             ],
             "linux": {
               "exclude_libraries": [

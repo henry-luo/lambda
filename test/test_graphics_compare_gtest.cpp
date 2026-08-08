@@ -355,7 +355,7 @@ protected:
         
         // Convert using Lambda pipeline
         Pool* doc_pool = pool_create();
-        Arena* doc_arena = arena_create_default(doc_pool);
+        Arena* doc_arena = arena_create_default();
         
         tex::TexDocumentModel* doc = tex::doc_model_from_string(
             latex_content.c_str(), latex_content.size(), doc_arena, nullptr);
@@ -428,7 +428,7 @@ protected:
         std::string latex_content = read_file(tex_path);
         
         Pool* doc_pool = pool_create();
-        Arena* doc_arena = arena_create_default(doc_pool);
+        Arena* doc_arena = arena_create_default();
         
         tex::TexDocumentModel* doc = tex::doc_model_from_string(
             latex_content.c_str(), latex_content.size(), doc_arena, nullptr);
@@ -542,7 +542,7 @@ TEST_F(GraphicsCompareTest, ManualTest_Picture) {
     
     // Convert
     Pool* pool = pool_create();
-    Arena* arena = arena_create_default(pool);
+    Arena* arena = arena_create_default();
     
     tex::TexDocumentModel* doc = tex::doc_model_from_string(
         latex.c_str(), latex.size(), arena, nullptr);
@@ -599,7 +599,7 @@ TEST_F(GraphicsCompareTest, StructuralAnalysis) {
         std::string latex = read_file(tex_path);
         
         Pool* pool = pool_create();
-        Arena* arena = arena_create_default(pool);
+        Arena* arena = arena_create_default();
         
         tex::TexDocumentModel* doc = tex::doc_model_from_string(
             latex.c_str(), latex.size(), arena, nullptr);

@@ -14,6 +14,7 @@
 #include "arraylist.h"
 #include "mempool.h"
 #include "arena.h"
+#include "mem_factory.h"
 #include "log.h"
 #include <string.h>
 #include <math.h>
@@ -133,8 +134,8 @@ struct HPDF_Page_Rec {
 // Document structure
 struct HPDF_Doc_Rec {
     // Memory management
-    Pool* pool;                 // memory pool (owns the arena)
-    Arena* arena;               // arena allocator for all allocations
+    Pool* pool;                 // individually releasable document allocations
+    Arena* arena;               // direct region owner for bulk document storage
     
     // Object management
     int next_obj_id;
@@ -290,10 +291,10 @@ static const char* find_base14_font(const char* name) {
 
 HPDF_Doc HPDF_New(HPDF_ErrorHandler error_fn, void* user_data) {
     // create pool and arena first
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "pdf.document.pool");
     if (!pool) return NULL;
     
-    Arena* arena = arena_create_default(pool);
+    Arena* arena = arena_create_default();
     if (!arena) {
         pool_destroy(pool);
         return NULL;

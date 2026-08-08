@@ -926,7 +926,7 @@ void ViewTree::init() {
     }
     else {
         view_tree_canonical_init(this);
-        scratch_arena = mem_arena_create(NULL, prop_pool, MEM_ROLE_LAYOUT, "view_tree.scratch_arena");
+        scratch_arena = mem_arena_create(NULL, MEM_ROLE_LAYOUT, "view_tree.scratch_arena");
         free_text_rects = nullptr;
         if (layout_generation == 0) layout_generation = 1;
         log_debug("view pool initialized");
@@ -1467,12 +1467,42 @@ static void append_text_rect_layout(ViewText* text, StrBuf* buf, int indent,
     strbuf_append_str(buf, "}");
 }
 
+static void append_text_fragment_json(ViewText* text, StrBuf* buf, int indent,
+                                      TextRect* rect, TextRect* previous_rect,
+                                      bool include_text_info) {
+    append_text_object_header(buf, indent);
+
+    unsigned char* text_data = text->text_data();
+    if (text_data && rect->length > 0) {
+        char content[2048];
+        int length = rect->length < 2048 ? rect->length : 2047;
+        memcpy(content, (char*)(text_data + rect->start_index), length);
+        content[length] = '\0';
+        append_json_string(buf, content);
+    } else {
+        append_json_string(buf, "[empty]");
+    }
+    strbuf_append_str(buf, ",\n");
+
+    if (include_text_info) {
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "\"text_info\": {\n");
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"start_index\": %d,\n", rect->start_index);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"length\": %d\n", rect->length);
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "},\n");
+    }
+
+    append_text_rect_layout(text, buf, indent, rect, previous_rect);
+}
+
 static void print_text_rects_json(ViewText* text, StrBuf* buf, int indent,
                                   bool include_text_info) {
     TextRect* rect = text->rect;
     TextRect* previous_emitted_rect = NULL;
     bool first_emitted = true;
-    unsigned char* text_data = text->text_data();
 
     while (rect) {
         if (text_rect_is_collapsed_whitespace(text, rect)) {
@@ -1482,39 +1512,53 @@ static void print_text_rects_json(ViewText* text, StrBuf* buf, int indent,
         if (!first_emitted) strbuf_append_str(buf, ",\n");
         first_emitted = false;
 
-        append_text_object_header(buf, indent);
-
-        if (text_data && rect->length > 0) {
-            char content[2048];
-            int length = rect->length < 2048 ? rect->length : 2047;
-            if (length > 0) {
-                memcpy(content, (char*)(text_data + rect->start_index), length);
-                content[length] = '\0';
-                append_json_string(buf, content);
-            } else {
-                append_json_string(buf, "[empty]");
-            }
-        } else {
-            append_json_string(buf, "[empty]");
-        }
-        strbuf_append_str(buf, ",\n");
-
-        if (include_text_info) {
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "\"text_info\": {\n");
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_format(buf, "\"start_index\": %d,\n", rect->start_index);
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_format(buf, "\"length\": %d\n", rect->length);
-            strbuf_append_char_n(buf, ' ', indent + 2);
-            strbuf_append_str(buf, "},\n");
-        }
-
-        append_text_rect_layout(text, buf, indent, rect, previous_emitted_rect);
+        append_text_fragment_json(text, buf, indent, rect,
+                                  previous_emitted_rect, include_text_info);
 
         previous_emitted_rect = rect;
         rect = rect->next;
     }
+}
+
+static void print_sideways_initial_fragments(ViewText* text, TextRect* rect,
+                                             int offset, int end, StrBuf* buf,
+                                             int indent, bool* first_child) {
+    if (!text || !rect || !first_child || offset >= end) return;
+    unsigned char* data = text->text_data();
+    if (!data) return;
+
+    uint32_t codepoint = 0;
+    int bytes = str_utf8_decode(reinterpret_cast<const char*>(data + offset),
+                                static_cast<size_t>(end - offset), &codepoint);
+    if (bytes <= 0 || offset + bytes > end) bytes = 1;
+    print_sideways_initial_fragments(text, rect, offset + bytes, end,
+                                     buf, indent, first_child);
+
+    if (!*first_child) strbuf_append_str(buf, ",\n");
+    TextRect fragment = *rect;
+    fragment.start_index = offset;
+    fragment.length = bytes;
+    append_text_fragment_json(text, buf, indent, &fragment, NULL, true);
+    *first_child = false;
+}
+
+static bool sideways_initial_letter_continuation(View* first_letter,
+                                                 ViewText** continuation) {
+    if (!first_letter || !continuation || first_letter->view_type == RDT_VIEW_NONE) {
+        return false;
+    }
+    ViewBlock* block = layout_nearest_block_ancestor(first_letter->parent_view());
+    if (!block || !block->is_element() ||
+        layout_element_css_writing_mode(block->as_element()) != CSS_VALUE_SIDEWAYS_LR) {
+        return false;
+    }
+    View* next = static_cast<View*>(first_letter->next_sibling);
+    if (!next || next->view_type != RDT_VIEW_TEXT) return false;
+    ViewText* text = lam::view_require_text(next);
+    if (!text->rect || text->rect->next || text->rect->length <= 1 ||
+        !text_has_visible_rect(text)) return false;
+    *continuation = text;
+    return true;
 }
 
 static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent) {
@@ -1985,6 +2029,25 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
         if (tag && strcmp(tag, "::first-letter") == 0) {
             log_debug("JSON: Unwrapping ::first-letter pseudo-element, outputting children directly");
             View* fl_child = (lam::view_require_element(child))->first_child;
+            ViewText* sideways_continuation = nullptr;
+            bool reorder_sideways_initial = sideways_initial_letter_continuation(
+                child, &sideways_continuation);
+            if (reorder_sideways_initial && fl_child &&
+                fl_child->view_type == RDT_VIEW_TEXT) {
+                // sideways-lr exposes the continuation fragments in visual
+                // order, before the initial-letter fragment, in Range geometry.
+                print_sideways_initial_fragments(
+                    sideways_continuation, sideways_continuation->rect,
+                    sideways_continuation->rect->start_index,
+                    sideways_continuation->rect->start_index +
+                        sideways_continuation->rect->length,
+                    buf, indent, first_child);
+                if (!*first_child) strbuf_append_str(buf, ",\n");
+                *first_child = false;
+                print_combined_text_json(lam::view_require_text(fl_child), buf, indent);
+                child = sideways_continuation->next();
+                continue;
+            }
             while (fl_child) {
                 if (fl_child->view_type == RDT_VIEW_TEXT) {
                     if (!text_has_visible_rect(lam::view_require_text(fl_child))) {

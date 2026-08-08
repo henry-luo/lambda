@@ -294,7 +294,7 @@ struct FontContext {
     FontContextConfig config;
 
     // destruction flag: when true, pool_free calls are skipped in font_handle_release
-    // because pool_destroy (rpmalloc_heap_free_all) will free all pool memory in bulk
+    // because pool_destroy will free all grouped owner memory in bulk
     bool            destroying;
 };
 

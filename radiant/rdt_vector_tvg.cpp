@@ -2332,6 +2332,10 @@ void rdt_engine_term(void) {
     if (g_vector_cache_owner.context && g_vector_cache_owner.registry_node) {
         // The cache registry is the single vector-engine owner; cascading its
         // context releases every cache before ThorVG itself is terminated.
+        // Release cached pictures before entering context teardown: their
+        // private Pools are root-owned, and teardown suppresses unregister
+        // hooks, which would otherwise leave freed pool nodes in the root list.
+        vector_cache_destroy(&g_vector_cache_owner);
         mem_context_destroy(g_vector_cache_owner.context);
     } else {
         vector_cache_destroy(&g_vector_cache_owner);

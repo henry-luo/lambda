@@ -11,8 +11,6 @@ extern "C" {
     #include "../lib/stringbuf.h"
     #include "../lib/strview.h"
     #include "../lib/log.h"
-    void rpmalloc_initialize();
-    void rpmalloc_finalize();
 }
 
 // NOTE: These tests were written for the old Lexbor-based HTML parser which would

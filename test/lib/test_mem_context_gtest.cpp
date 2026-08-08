@@ -68,6 +68,36 @@ TEST_F(MemContextTest, CreateSubContextInheritsDoc) {
     mem_context_destroy(child);
 }
 
+struct ReclaimProbe {
+    MemContext* context;
+    size_t calls;
+};
+
+static size_t count_context_reclaim(MemPressureLevel level,
+                                    size_t target_bytes, void* user_data) {
+    (void)level;
+    (void)target_bytes;
+    ReclaimProbe* probe = (ReclaimProbe*)user_data;
+    if (probe) {
+        // This query would deadlock if callbacks ran under the registry lock.
+        (void)mem_context_live_count(probe->context);
+        probe->calls++;
+    }
+    return 17;
+}
+
+TEST_F(MemContextTest, ReclaimerRunsOutsideRegistryLock) {
+    MemContext* root = mem_context_root();
+    ReclaimProbe probe = {root, 0};
+    uint32_t handle = mem_context_register_reclaimer(
+        root, count_context_reclaim, &probe, 0);
+    ASSERT_NE(handle, 0u);
+    EXPECT_EQ(mem_context_request_reclaim(root, MEM_PRESSURE_MEDIUM, 17u), 17u);
+    EXPECT_EQ(probe.calls, 1u);
+    mem_context_unregister_reclaimer(handle);
+    EXPECT_EQ(mem_context_request_reclaim(root, MEM_PRESSURE_MEDIUM, 17u), 0u);
+}
+
 // ============================================================================
 // Node registration
 // ============================================================================

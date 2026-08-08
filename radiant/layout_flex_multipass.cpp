@@ -1494,10 +1494,20 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         // logical inline rectangles at the formatting-context boundary.
         layout_map_vertical_writing_text_geometry(
             static_cast<View*>(flex_item->first_child), flex_item_writing_mode,
-            flex_item->width, lycon->block.line_height,
+            flex_item->width,
+            layout_content_height_from_border_box(flex_item, flex_item->height),
+            lycon->block.line_height,
+            lycon->line.has_clamped_baseline_tail
+                ? lycon->line.clamped_baseline_tail : 0.0f,
             surrogate_inline_origin, physical_inline_origin,
             surrogate_block_origin, physical_block_origin,
-            center_button_block_axis);
+            center_button_block_axis,
+            flex_item->block()->dominant_baseline == CSS_VALUE_AUTO ||
+            flex_item->block()->dominant_baseline == CSS_VALUE_CENTRAL,
+            flex_item->is_element() &&
+            layout_element_css_writing_mode(flex_item->as_element()) ==
+                CSS_VALUE_SIDEWAYS_LR &&
+            flex_item->block()->direction == CSS_VALUE_LTR);
     }
 
     // Flex items bypass finalize_block_flow, so retain both line baseline sets.

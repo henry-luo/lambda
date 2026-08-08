@@ -68,7 +68,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     pump_ctx->heap = runtime->heap;
     pump_ctx->name_pool = runtime->name_pool;
     pump_ctx->type_list = runtime->type_list;
-    pump_ctx->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
+    pump_ctx->pool = runtime->heap->pool;
 
     Context* saved_input_ctx = input_context;
     // Promise and timer callbacks allocate during the host pump just like event

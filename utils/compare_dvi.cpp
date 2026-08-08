@@ -24,8 +24,8 @@ int main(int argc, char* argv[]) {
 
     // Create arenas
     Pool* pool = pool_create();
-    Arena* arena1 = arena_create_default(pool);
-    Arena* arena2 = arena_create_default(pool);
+    Arena* arena1 = arena_create_default();
+    Arena* arena2 = arena_create_default();
 
     // Parse both files
     DVIParser ref_parser(arena1);

@@ -1,32 +1,63 @@
 # Memory Context — Central Allocator Factory & Introspection
 
 **Scope**: Lambda + Radiant memory management (continuation of [Memory_Pooling.md](./Memory_Pooling.md))
-**Status**: Proposal
-**Date**: 2026-06-03
+**Status**: Implementation record — allocator retirement and Stage 2 foundation complete
+**Date**: 2026-08-08
 
-> **Staging.** This proposal is delivered in two stages:
+> **Staging.** This design was delivered in two stages:
 > - **Stage 1 (§1–§14)** — the Memory Context as a central allocator **factory** that owns lifecycle and provides introspection (snapshots, leak/ordering enforcement).
-> - **Stage 2 (§15)** — a centralized **page/chunk allocation** layer that turns the context into the system's memory-pressure coordinator: allocators that hit OOM ask the context to reclaim memory (drop caches, compact arenas, force GC) and retry, with per-thread back-pressure policy (park / fail / abort).
+> - **Stage 2 (§15)** — a centralized **VM region allocation** layer that turns the context into the system's memory-pressure coordinator: allocators that hit OOM ask the context to reclaim memory and retry, with per-thread back-pressure policy (park / fail / abort).
 >
 > Stage 2 builds directly on Stage 1: it needs the owned graph, role tags, and per-node size accounting to make cost-based reclamation decisions.
 
+## Current implementation record
+
+The retirement implementation is complete for the approved scope. This record
+supersedes the older migration tables, diagrams, and API snippets below; those
+sections remain historical rationale and are not current interface contracts.
+
+- `memtrack` is the sole checked system-allocation substrate. The existing
+  `memtrack_pool_*` family is the grouped-owner surface; no parallel tracked
+  allocator was introduced.
+- `Pool` is a memtrack owner group. The obsolete mmap/bulk compatibility mode
+  and its `*_mmap` constructors are removed.
+- `Arena` owns its direct memtrack blocks and no longer accepts or stores a
+  backing `Pool*`. Its factory constructors are `mem_arena_create(ctx, role,
+  label)` and `mem_arena_create_sized(ctx, initial, max, role, label)`.
+- GC object slabs, data blocks, bump extents, and large objects are owned by
+  `MemVmRegion`/memtrack records. The runtime keeps a separate owner group for
+  non-GC semantic allocations; GC itself has no Pool backing.
+- `MemContext` is the single pressure/reclaim coordinator. Legacy pressure
+  registration delegates to it, and reclaim callbacks run outside the registry
+  lock. VM regions retry reserve/commit once through that coordinator.
+- The checked suites currently pass: MemContext 14, memtrack 27, VM 3,
+  mempool 40, Arena 91, Scratch 22, GC 67, and the complete test target
+  builds successfully.
+
+Final acceptance on 2026-08-08 also passed the Lambda input/runtime baseline
+(3,661/3,661), JS (327/327), page-load (105/105), Test262 baseline
+(40,261/40,261), extended, DOM-node, release-build, lint, and source audits.
+The validator DSO runner still has the unrelated pre-existing `_ItemNull`
+link failure; broad UI/WPT fixture failures are likewise outside this
+allocator migration.
+
 ---
 
-## Stage 1 — Implementation Status (2026-06-03)
+## Stage 1 — Implementation Status (2026-08-08)
 
 **Stage 1 is implemented and verified across the engine.** At-a-glance:
 
 | Area | Status | Notes |
 |------|--------|-------|
-| **Core registry** (`lib/mem_context.{h,c}`) | ✅ | Contexts (root + sub-contexts), single global-mutex thread safety (**TSan-clean**), node registry, `child_count` edges, cascade teardown, **doc URL registry**, flat-POD snapshot + JSON + `MEMCTX-LEAK` report, `mem_unregister_subtree`. Tests: `test_mem_context_gtest` (13). |
-| **Factory wrappers** | ✅ | lib-level (`lib/mem_factory.{h,c}`): `mem_pool_create[_mmap]`, `mem_arena_create[_sized]`, `mem_scratch_init`, `mem_nursery_create`. runtime-level (`lambda/mem_factory_rt.{h,cpp}`): `mem_gc_heap_create[_with_pool]`, `mem_name_pool_create`, `mem_shape_pool_create`. Each underlying type has a `mem_node` field + release hook (auto-unregister on destroy; **ref-count-aware** for name/shape; **subtree-unregister** for pool/arena). Tests: `test_mem_factory_gtest` (9). |
-| **Call-site migration** | ✅ | **Zero raw `pool_create` in application code** (40 files via factory); all `scratch_init` (6), `gc_nursery_create` (16), and lambda/radiant `arena_create*` (15) routed through the factory. Deferred: lib-level arenas (`font_context.c` glyph arena, `pdf_writer.c`, `memtrack.c`) — would break standalone lib tests that compile them without `mem_factory`. |
+| **Core registry** (`lib/mem_context.{h,c}`) | ✅ | Contexts (root + sub-contexts), single global-mutex thread safety, node registry, `child_count` edges, cascade teardown, doc URL registry, flat-POD snapshot + JSON + `MEMCTX-LEAK` report, and subtree unregister. Tests: `test_mem_context_gtest` (14). |
+| **Factory wrappers** | ✅ | `mem_pool_create`, direct-block `mem_arena_create[_sized]`, `mem_scratch_init`, `mem_nursery_create`, and runtime GC/name/shape wrappers. Pool ownership is grouped through `memtrack_pool_*`; GC and Arena no longer use a backing Pool. |
+| **Call-site migration** | ✅ | Application and library call sites use factory-created owner groups, direct Arenas, or the GC/VM layer. Obsolete mmap-pool and `*_with_pool` compatibility APIs are removed. |
 | **Per-document attribution** | ✅ | `Input::create` + `dom_document_create` register the doc URL and build a per-document sub-context; the input's arena/name-pool/shape-pool, the DOM pool/arena, the **view-tree pool/arena**, and the **layout scratch** are grouped under it. `--mem-dump` groups memory by source URL (e.g. each parsed `.csv`). |
 | **Per-document reclamation** | ✅ where valid | Radiant `DomDocument` is reclaimed per-document via `free_document()` + release hooks (`layout --mem-dump` exits with an empty dump). lambda `input()` data is **GC-coupled** (Items flow into the script graph) → per-document free is unsafe; the shared `global_pool` is correct, and the context provides **attribution** there, not reclamation. |
 | **Consumers** | ✅ (partial) | `--mem-dump[=PATH]` CLI flag → JSON snapshot + leak report at exit (in `lambda/main.cpp`); documented in `doc/Lambda_CLI.md` + `--help`. `--mem-top` live TUI: pending. |
-| **Verification** | ✅ | Unit: `test_mem_context_gtest` 13/13 + `test_mem_factory_gtest` 9/9 (TSan-clean). Baselines every batch: Lambda **2941/2942** (the 1 fail, `dom_jquery_lib`, is pre-existing/unrelated), Radiant **~5670/5670 exit 0**. Live `--mem-dump` verified on script / convert / layout (no UAF). |
+| **Verification** | ✅ | Focused suites pass: MemContext 14/14, memtrack 27/27, VM 3/3, mempool 40/40, Arena 91/91, Scratch 22/22, GC 67/67, plus font, concurrency, representation, and factory suites. Full baseline and release checks are the final acceptance gate. |
 
-**Optional Stage-1 remainders:** per-call reclamation for short-lived `convert`/`validate`/npm input flows (need a dedicated per-call pool to bypass the shared `global_pool`); the deferred lib-level arenas; a `make check-no-raw-alloc` grep gate; renaming raw primitives to `*_raw`; and the `--mem-top` TUI. **Stage 2** (centralized page-allocation + OOM reclamation, §15) is not started.
+**Optional Stage-1 remainders:** per-call reclamation for short-lived `convert`/`validate`/npm input flows (need a dedicated per-call owner group to bypass the shared `global_pool`); the `--mem-top` TUI; and a source gate for unauthorized raw allocator creation. **Stage 2** (§15) is the active implementation track: `memtrack` is the sole system-allocation substrate, and `MemVmRegion` is the page-aligned portability layer below allocator owners.
 
 > Key engineering decisions along the way: (1) a **nullable release hook** keeps `mempool`/`arena`/etc. decoupled from `mem_context` (lib-only tests link with a NULL hook); (2) a thread-local **teardown guard** prevents the hook re-entering the lock during cascade; (3) **`mem_unregister_subtree`** fixes a dangling-node UAF when a backing pool is bulk-destroyed (caught only by `--mem-dump`, not baselines); (4) per-document **attribution vs reclamation** is split deliberately because input data lifetime is GC-coupled.
 
@@ -68,9 +99,17 @@
 
 ---
 
+## Historical Stage 1/2 design notes
+
+The sections below preserve the original reasoning and migration record. They
+are historical; the implementation record above and the current headers are
+the interface authority. In particular, examples mentioning rpmalloc,
+`pool_create_mmap`, Arena backing pools, or `*_with_pool` APIs describe the
+pre-retirement design and must not be copied into new code.
+
 ## 1. Motivation
 
-Today the codebase has **three independent allocator families** — `Pool` (rpmalloc / mmap, `lib/mempool.c`), `Arena` (bump, `lib/arena.c`), `ScratchArena` (LIFO scratch, `lib/scratch_arena.c`) — plus the **GC heap** (`gc_heap` under `Heap`, `lambda/transpiler.hpp`) and the **GC nursery** (`gc_nursery`, `lib/gc/gc_nursery.h`). Each is created *ad hoc* by directly calling `pool_create()` / `arena_create_default()` / etc. at ~40 scattered call sites (see [Memory_Pooling.md §3–§4](./Memory_Pooling.md)). Nothing owns the set; nothing knows:
+Today the codebase has **three allocator ownership shapes** — grouped variable-size ownership, ordinary regions, and scratch regions — plus the **GC heap** and **GC nursery**. The migration consolidates their system allocation below hardened `memtrack` and the VM region layer. `MemContext` owns allocator identity and lifecycle; the hot allocation paths do not acquire its registry lock. Nothing outside the graph may create an unregistered owner; nothing knows:
 
 - How many pools/arenas/heaps are live right now
 - How much memory each holds, and what it's for
@@ -79,7 +118,7 @@ Today the codebase has **three independent allocator families** — `Pool` (rpma
 
 This makes leak detection, profiling, and lifecycle correctness all manual and error-prone — e.g. the Arena-before-Pool-drain ordering hazard ([Memory_Pooling.md §I2](./Memory_Pooling.md)) is real and currently only documented in prose.
 
-**Proposal**: introduce a `MemContext` that is the **single factory through which every allocator is created and destroyed**. Direct calls to `pool_create`/`arena_create`/`scratch_init`/`heap_init`/`gc_nursery_create` become internal (or are removed); all call sites route through `mem_pool_create(ctx, role, label)`, `mem_arena_create(ctx, backing, role, label)`, etc. Because the context *owns* every allocator, it can:
+**Design**: `MemContext` is the **single factory through which every allocator is created and destroyed**. Direct legacy constructors become internal compatibility entry points during migration; application call sites route through the context and the existing `memtrack_pool_*` group surface. Because the context *owns* every allocator, it can:
 
 - guarantee a **single rooted graph** by construction (an allocator cannot exist outside it),
 - record kind/role/label/parent at the moment of creation (no separate annotation step),
@@ -102,8 +141,8 @@ This is the difference from a pure observer: allocators are not just *registered
 - **Multiple consumers**: JSON dump, in-memory query, live `top` view.
 
 ### Non-Goals
-- Not replacing the allocator *implementations*. The factory wraps `lib/mempool.c` / `lib/arena.c` / `lib/scratch_arena.c` — it does not change their bump/rpmalloc internals or the established Pool→Arena→Scratch layering ([Memory_Pooling.md §1](./Memory_Pooling.md)).
-- Not intercepting per-allocation calls. `pool_alloc`/`arena_alloc` stay lock-free and unchanged; the factory governs allocator *lifecycle*, not every byte.
+- Not creating a second checked-allocation or pressure framework. Direct allocations and grouped ownership improve the existing `memtrack` API in place.
+- Not putting the `MemContext` registry mutex on per-allocation paths. Ownership registration and teardown remain centralized; allocation metadata is local to the memtrack owner group.
 - Not a new GC. It manages *allocators*, not individual objects (object-level walking is opt-in and bounded — [§9.4](#94-deep-vs-shallow-snapshots)).
 
 ---
@@ -217,7 +256,7 @@ MemContext (root)
 // lib/mem_context.h
 
 typedef enum MemKind {
-    MEM_KIND_POOL = 1,     // lib/mempool.c  (rpmalloc or mmap)
+    MEM_KIND_POOL = 1,     // lib/mempool.c  (memtrack owner group)
     MEM_KIND_ARENA,        // lib/arena.c
     MEM_KIND_SCRATCH,      // lib/scratch_arena.c
     MEM_KIND_HEAP,         // gc_heap (Lambda runtime objects)
@@ -756,44 +795,50 @@ Other runtimes never give up on the first failure. The JVM runs a full GC (and c
 **Where it sits** — Stage 2 inserts a thin choke point *below* the allocators and *above* the OS:
 
 ```
-   Pool / Arena / Heap / Nursery               (Stage 1 — factory-owned)
+   memtrack groups / Arena / GC / Nursery      (factory-owned)
             │  needs a new page/chunk/block
             ▼
-   mem_page_alloc(ctx, size, requester_node)    ← Stage 2 choke point
+   MemVmRegion reserve/commit(ctx, owner, role)  ← Stage 2 choke point
             │
-            ├─ try OS path (mmap / rpmalloc span / malloc)
+            ├─ try OS VM path (mmap / VirtualAlloc)
             │     success → return page
             │     failure → reclamation loop (drop caches → compact → GC) → retry
             │                 still failing → thread disposition (park / fail / abort)
             ▼
-        OS / mmap / rpmalloc
+        OS virtual memory
 ```
 
-Per-object `pool_alloc`/`arena_alloc` are unaffected — only the rarer *backing* growth calls touch this path.
+Per-object allocations remain off the `MemContext` registry lock; only backing
+growth and region lifecycle touch this path.
 
-### 15.2 The Page/Chunk Choke Point
+### 15.2 The VM Region Choke Point
 
-A single entry point that allocators call to obtain backing memory, replacing their direct `mmap`/`rpmalloc_heap_alloc`/`malloc` chunk calls:
+A single opaque region API replaces direct VM growth calls. The region object
+is allocated through hardened `memtrack` metadata before the OS mapping is
+attempted, so failed mappings cannot leak owner metadata. Region release
+belongs to the owning allocator; the context does not infer ownership from
+pointer ranges:
 
 ```c
-// lib/mem_context.h  (Stage 2)
+// lib/mem_vm.h
 
-typedef enum MemPageSource {
-    MEM_PAGE_MMAP = 1,     // mmap span (mmap pools, large arena chunks)
-    MEM_PAGE_RPMALLOC,     // rpmalloc heap span
-    MEM_PAGE_MALLOC,       // system malloc (small metadata)
-} MemPageSource;
+typedef struct MemVmRegion MemVmRegion;
 
-// Obtain a backing page/chunk. On OS failure, runs reclamation and retries.
-// requester is the MemNode of the allocator asking (for cost attribution &
-// to avoid asking an allocator to compact itself mid-grow).
-void* mem_page_alloc(MemContext* ctx, size_t size,
-                     MemPageSource src, MemNode* requester);
-
-void  mem_page_free(MemContext* ctx, void* page, size_t size, MemPageSource src);
+size_t mem_vm_page_size(void);
+MemVmRegion* mem_vm_region_reserve(MemContext* context, MemNode* owner,
+                                   MemRole role, size_t size, size_t alignment);
+bool mem_vm_region_commit(MemVmRegion* region, size_t offset, size_t size);
+bool mem_vm_region_decommit(MemVmRegion* region, size_t offset, size_t size);
+void mem_vm_region_release(MemVmRegion* region);
+void* mem_vm_region_base(const MemVmRegion* region);
 ```
 
-This is the natural successor to the existing `mmap_pool_grow` ([Memory_Pooling.md §P1](./Memory_Pooling.md)) and the arena chunk-allocation call (`arena_create*` chunks come from `pool_alloc` today). Each gets rewritten to call `mem_page_alloc`. Because Stage 1 already routes creation through the factory, every allocator already carries the `MemNode*` needed for the `requester` argument.
+This is the successor to direct `mmap` growth and GC backing allocation. Each
+consumer records exact reserved and committed byte ranges in its region.
+`MemContext` may run its configured retry/reclamation policy around reserve or
+commit failure, but the VM layer does not own that policy and does not call
+back into the registry while releasing a region. `MemVmRegion` is not a
+second allocator and does not expose general-purpose `malloc` semantics.
 
 ### 15.3 Reclaimer Registry & Cost Model
 

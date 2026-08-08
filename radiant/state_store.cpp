@@ -856,7 +856,7 @@ bool DocState::init(Pool* backing_pool, StateUpdateMode update_mode) {
     editing_behavior = EDITING_BEHAVIOR_MAC;
 
     // Create dedicated arena for state allocations
-    arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.arena");
+    arena = mem_arena_create(NULL, MEM_ROLE_VIEW, "state.arena");
     if (!arena) {
         log_error("radiant_state_create: failed to create arena");
         destroy();
@@ -894,10 +894,10 @@ bool DocState::init(Pool* backing_pool, StateUpdateMode update_mode) {
     }
 
     // Initialize dirty tracker arena
-    dirty_tracker.arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.dirty");
+    dirty_tracker.arena = mem_arena_create(NULL, MEM_ROLE_VIEW, "state.dirty");
 
     // Initialize reflow scheduler arena
-    reflow_scheduler.arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.reflow");
+    reflow_scheduler.arena = mem_arena_create(NULL, MEM_ROLE_VIEW, "state.reflow");
 
     // Initialize animation scheduler
     animation_scheduler = animation_scheduler_create(pool);
@@ -961,7 +961,7 @@ bool StateStore::init(DomDocument* owner_document) {
 
     document = owner_document;
     pool = owner_document->document_pool;
-    arena = mem_arena_create(NULL, owner_document->document_pool, MEM_ROLE_VIEW, "state.store");
+    arena = mem_arena_create(NULL, MEM_ROLE_VIEW, "state.store");
     if (!arena) {
         log_error("state_store_create: failed to create StateStore arena");
         destroy();

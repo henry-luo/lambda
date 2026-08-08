@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Mac native compilation dependency setup script
-# Enhanced with intelligent dependency detection to skip rebuilding ThorVG and rpmalloc
+# Enhanced with intelligent dependency detection to skip rebuilding ThorVG
 # when they're already properly downloaded, built, and verified
 set -e
 
@@ -52,13 +52,6 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     if [ -d "mac-deps/curl-8.10.1" ]; then
         cd mac-deps/curl-8.10.1
         make clean 2>/dev/null || true
-        cd - > /dev/null
-    fi
-
-    # Clean rpmalloc build files
-    if [ -d "mac-deps/rpmalloc-src" ]; then
-        cd mac-deps/rpmalloc-src
-        rm -f *.o *.a 2>/dev/null || true
         cd - > /dev/null
     fi
 
@@ -299,90 +292,6 @@ cleanup_intermediate_files() {
 # MIR is no longer set up here: the source is vendored in-tree at lambda/mir
 # (upstream + patches/mir-*.patch already applied) and built by `make build-mir`,
 # which the main build targets depend on. See lambda/mir/VENDOR.md.
-
-# Function to build rpmalloc for Mac
-build_rpmalloc_for_mac() {
-    echo "Building rpmalloc for Mac..."
-    cd "$SCRIPT_DIR"
-
-    # Enhanced check if already built in mac-deps with proper verification
-    if [ -f "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" ] && [ -f "mac-deps/rpmalloc-install/include/rpmalloc/rpmalloc.h" ]; then
-        # Verify the library has the expected symbols
-        if nm "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" 2>/dev/null | grep -q "rpmalloc_initialize"; then
-            echo "✅ rpmalloc already built and verified"
-            return 0
-        else
-            echo "rpmalloc found but missing expected symbols, rebuilding..."
-            # Clean the incomplete installation
-            rm -rf mac-deps/rpmalloc-install 2>/dev/null || true
-        fi
-    fi
-
-    # Create mac-deps directory if it doesn't exist
-    mkdir -p mac-deps
-
-    # Check if source exists, if not clone it
-    if [ ! -d "mac-deps/rpmalloc-src" ]; then
-        echo "Cloning rpmalloc repository..."
-        cd mac-deps
-        git clone https://github.com/mjansson/rpmalloc.git rpmalloc-src || {
-            echo "Warning: Could not clone rpmalloc repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    else
-        echo "rpmalloc source already downloaded"
-    fi
-
-    cd mac-deps/rpmalloc-src
-
-    # Clean any previous builds
-    rm -f *.o *.a 2>/dev/null || true
-    rm -rf ../rpmalloc-install 2>/dev/null || true
-
-    # Create install directories
-    mkdir -p ../rpmalloc-install/lib
-    mkdir -p ../rpmalloc-install/include/rpmalloc
-
-    # Build rpmalloc with ENABLE_OVERRIDE=0 (no malloc override)
-    # This allows us to use rpmalloc only for explicit pool allocations
-    echo "Compiling rpmalloc with ENABLE_OVERRIDE=0..."
-    if gcc -c -O2 \
-        -DRPMALLOC_FIRST_CLASS_HEAPS=1 \
-        -DENABLE_OVERRIDE=0 \
-        -I. \
-        rpmalloc/rpmalloc.c \
-        -o rpmalloc_no_override.o; then
-
-        echo "Creating static library..."
-        if ar rcs librpmalloc_no_override.a rpmalloc_no_override.o; then
-            # Install the library and headers
-            echo "Installing rpmalloc to mac-deps..."
-            cp librpmalloc_no_override.a ../rpmalloc-install/lib/
-            cp rpmalloc/rpmalloc.h ../rpmalloc-install/include/rpmalloc/
-
-            # Verify the library has expected symbols
-            if nm "../rpmalloc-install/lib/librpmalloc_no_override.a" | grep -q "rpmalloc_initialize"; then
-                echo "✅ rpmalloc built successfully"
-                echo "   - rpmalloc_initialize: ✓ Available"
-                echo "   - rpmalloc_heap_acquire: ✓ Available"
-                echo "   - rpmalloc_heap_alloc: ✓ Available"
-                echo "   - ENABLE_OVERRIDE=0: ✓ No malloc override"
-                cd - > /dev/null
-                return 0
-            else
-                echo "❌ Required functions not found in built library"
-                cd - > /dev/null
-                return 1
-            fi
-        fi
-    fi
-
-    echo "❌ rpmalloc build failed"
-    cd - > /dev/null
-    return 1
-}
 
 # Function to build ThorVG v1.0-pre34 for Mac
 build_thorvg_v1_0_pre34_for_mac() {
@@ -1097,33 +1006,6 @@ else
     fi
 fi
 
-# Build rpmalloc for Mac (Lambda dependency)
-echo "Setting up rpmalloc..."
-
-# Enhanced check for rpmalloc - verify both library and headers exist and are functional
-if [ -f "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" ] && [ -f "mac-deps/rpmalloc-install/include/rpmalloc/rpmalloc.h" ]; then
-    # Verify the required functions are available in the built library
-    if nm "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" 2>/dev/null | grep -q "rpmalloc_initialize"; then
-        echo "✅ rpmalloc already available and verified"
-    else
-        echo "rpmalloc library found but required functions missing, rebuilding..."
-        if ! build_rpmalloc_for_mac; then
-            echo "❌ rpmalloc build failed - required for Lambda memory pool"
-            exit 1
-        else
-            echo "✅ rpmalloc built successfully"
-        fi
-    fi
-else
-    echo "rpmalloc not found or incomplete, building..."
-    if ! build_rpmalloc_for_mac; then
-        echo "❌ rpmalloc build failed - required for Lambda memory pool"
-        exit 1
-    else
-        echo "✅ rpmalloc built successfully"
-    fi
-fi
-
 # Build nghttp2 for Mac (Lambda dependency)
 echo "Setting up nghttp2..."
 if [ -f "mac-deps/nghttp2/lib/libnghttp2.a" ]; then
@@ -1358,7 +1240,6 @@ else
 fi
 
 echo "- MIR: vendored at lambda/mir (built by 'make build-mir')"
-echo "- rpmalloc: $([ -f "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- ThorVG: $([ -f "mac-deps/thorvg/build-mac/src/libthorvg.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Google Test: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"

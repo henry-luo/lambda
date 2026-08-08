@@ -442,7 +442,7 @@ class PremakeGenerator:
         # Add global flags from configuration
         global_flags = self.config.get('flags', [])
         for flag in global_flags:
-            if flag.startswith('D'):  # Define flags like DRPMALLOC_FIRST_CLASS_HEAPS=1
+            if flag.startswith('D'):  # Define preprocessor flags
                 build_opts.append(f'-{flag}')
             elif flag not in ['pedantic', 'fdiagnostics-color=auto', 'fms-extensions']:  # Avoid duplicates
                 build_opts.append(f'-{flag}')
@@ -1445,19 +1445,12 @@ class PremakeGenerator:
                 static_libs = []
                 frameworks = []
                 dynamic_libs = []
-                # Libraries that need to come after internal deps
-                late_binding_lib_names = ['rpmalloc']
-
                 for dep in external_deps:
                     if dep in self.external_libraries:
                         lib_info = self._external_library_for_target(lib, dep)
 
                         # Skip libraries with link type "none"
                         if lib_info.get('link') == 'none':
-                            continue
-
-                        # Skip late-binding libraries here - they're added after links block
-                        if self.use_windows_config and dep in late_binding_lib_names:
                             continue
 
                         lib_path = lib_info['lib']
@@ -1581,13 +1574,6 @@ class PremakeGenerator:
                     if link_type == 'executable' and not self.use_macos_config:
                         for static_link_name in static_link_names:
                             self.premake_content.append(f'        "{static_link_name}",')
-                    # Add late-binding static libraries (must come after internal deps)
-                    if self.use_windows_config:
-                        late_binding_lib_names = ['rpmalloc']
-                        for dep_name in late_binding_lib_names:
-                            if dep_name in external_deps and dep_name in self.external_libraries:
-                                # Use :static modifier to link static library by name
-                                self.premake_content.append(f'        "{dep_name}:static",')
                     self.premake_content.extend([
                         '    }',
                         '    '
@@ -1891,7 +1877,7 @@ class PremakeGenerator:
                 # For SharedLib (link: dynamic) we must resolve external symbols
                 # at link time — that means feeding the actual .a/.dylib paths to
                 # the linker rather than `-l<name>`, because deps like
-                # `librpmalloc_no_override.a` and `build_temp/utf8proc/build/...`
+                # `build_temp/utf8proc/build/...`
                 # don't live in any standard libdir. For static archives, the
                 # plain `links { "<name>" }` form is fine: symbols get deferred
                 # to the final exe link, where lambda-data or the test
@@ -2432,14 +2418,6 @@ class PremakeGenerator:
                 '        "build/lib",',
             ])
         elif self.use_linux_config:
-            rpmalloc = self.external_libraries.get('rpmalloc')
-            rpmalloc_lib = rpmalloc.get('lib', '') if rpmalloc else ''
-            rpmalloc_dir = os.path.dirname(rpmalloc_lib) if rpmalloc_lib else ''
-            if rpmalloc_dir:
-                # test targets use the late-bound rpmalloc name; put the
-                # configured archive directory ahead of system copies so all
-                # Linux binaries use the same patched allocator ABI.
-                self.premake_content.append(f'        "{rpmalloc_dir}",')
             # Native Linux paths
             self.premake_content.extend([
                 '        "/usr/local/lib",',
@@ -2652,7 +2630,7 @@ class PremakeGenerator:
                             external_static_libs.append(lib_path)
                         # On Linux/Windows, static libs need to come after internal libs in link order
                         # because internal libraries can have unresolved symbols that these libs provide
-                        elif (self.use_linux_config or self.use_windows_config) and lib_name in ['rpmalloc', 'utf8proc']:
+                        elif (self.use_linux_config or self.use_windows_config) and lib_name == 'utf8proc':
                             late_static_libs.append((lib_name, lib_path))
                         else:
                             external_static_libs.append(lib_path)
@@ -2669,10 +2647,7 @@ class PremakeGenerator:
                 self.premake_content.pop()  # Remove the empty line
 
                 for lib_name, lib_path in late_static_libs:
-                    if lib_name == 'rpmalloc':
-                        # Use :librpmalloc.a syntax (libdir already set up)
-                        self.premake_content.append('        ":librpmalloc.a",')
-                    elif lib_name == 'utf8proc':
+                    if lib_name == 'utf8proc':
                         # Use :libutf8proc.a syntax (path in libdir /usr/lib/aarch64-linux-gnu)
                         self.premake_content.append('        ":libutf8proc.a",')
                     else:
@@ -2903,13 +2878,6 @@ class PremakeGenerator:
             # Add system libraries that libedit depends on (Linux only)
             if not self.use_windows_config:
                 self.premake_content.append('        "ncurses",')
-
-            # Add rpmalloc for Linux (must come after shared libraries that depend on it)
-            # Added INSIDE the links block so it comes AFTER the shared library in link order
-            if self.use_linux_config:
-                if 'rpmalloc' in self.external_libraries:
-                    # Use :librpmalloc.a to link static library (libdir already set)
-                    self.premake_content.append('        ":librpmalloc.a",')
 
             self.premake_content.extend([
                 '    }',

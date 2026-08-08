@@ -2190,7 +2190,6 @@ typedef struct TileJob {
 typedef struct WorkerState {
     RdtVector vec;              // thread-local ThorVG canvas
     ScratchArena scratch;       // thread-local scratch allocator
-    Pool* pool;                 // thread-local memory pool (backing for arena)
     Arena* arena;               // thread-local arena (backing for scratch)
     bool initialized;
 

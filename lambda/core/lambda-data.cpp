@@ -1206,9 +1206,11 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             *is_found = true;
             TypeId type_id = shape_entry_storage_type_id(field);
             void* field_ptr = map_field_ptr(map_data, field);
-            log_debug("_map_get_const: key='%s' semantic_type=%d storage_type=%d byte_offset=%d field_ptr=%p raw_8bytes=0x%016lx map_type=%p map_data=%p",
+            // map fields are packed by their storage width; an 8-byte debug
+            // peek here crossed bool/narrow scalar fields under exact sizing.
+            log_debug("_map_get_const: key='%s' semantic_type=%d storage_type=%d byte_offset=%d field_ptr=%p map_type=%p map_data=%p",
                 key, field->type->type_id, type_id, field->byte_offset, field_ptr,
-                *(uint64_t*)field_ptr, map_type, map_data);
+                map_type, map_data);
             Item result = map_shape_field_to_item(map_data, field);
             return *(ConstItem*)&result;
         }

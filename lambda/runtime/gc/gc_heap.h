@@ -24,13 +24,14 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
-#include "../../../lib/mempool.h"
+#include "../../../lib/mem_context.h"
+#include "../../../lib/mem_vm.h"
 #include "gc_object_zone.h"
 #include "gc_data_zone.h"
 
 // GC header flags
 #define GC_FLAG_FREED    0x01   // object has been freed / returned to free list
-#define GC_FLAG_LARGE    0x08   // large object allocated via malloc (not pool)
+#define GC_FLAG_LARGE    0x08   // large object allocated directly via memtrack
 #define GC_FLAG_BUMP     0x10   // object allocated from bump block, not object zone
 
 // Debug/stress fill used after a dead object's external payloads are finalized.
@@ -119,7 +120,7 @@ int  gc_native_seen_seen_or_add(gc_native_seen_t* seen, void* ptr);
 #define GC_ROOT_SLOTS_INITIAL 256
 
 // Root range: contiguous array of Items to scan as GC roots.
-// Used for JS closure environment arrays (pool-allocated, invisible to GC).
+// Used for JS closure environment arrays (memtrack-owned, invisible to GC).
 typedef struct gc_root_range {
     uint64_t* base;
     int count;
@@ -140,9 +141,8 @@ typedef struct gc_weak_slot {
  * the sorted array it replaced paid O(n) per insert and per remove (an O(n^2)
  * cliff on any workload allocating many >GC_LARGE_OBJECT_THRESHOLD objects).
  *
- * The table is malloc-backed like the objects it tracks: the GC allocator must
- * not key its own bookkeeping off a structure allocating through the pools it
- * manages.
+ * The table is memtrack-backed like the objects it tracks: GC bookkeeping must
+ * not depend on a region it manages or on a separate compatibility allocator.
  */
 typedef struct gc_large_set {
     gc_header_t** slots;   // slot holds the header; key is (header + 1); NULL = empty
@@ -172,9 +172,7 @@ typedef struct gc_tune_stats {
  *   - object_zone: non-moving size-class allocator for object structs
  *   - data_zone:   bump-pointer allocator for variable-size data buffers
  *   - tenured_data: data zone for long-lived data that survived collection
- *   - pool: rpmalloc pool for large object fallback and bulk cleanup
  *
- * Hot-path allocation uses a bump-pointer region (bump_cursor/bump_end)
  * for fast sequential allocation. Objects are still linked into all_objects
  * for GC sweep. Dead objects go to the object_zone free lists for reuse.
  */
@@ -182,6 +180,7 @@ typedef struct gc_tune_stats {
 // Bump block metadata for tracking allocated bump regions
 typedef struct gc_bump_block {
     uint8_t* base;                  // block memory start
+    MemVmRegion* region;            // owning VM extent
     size_t size;                    // block size in bytes
     struct gc_bump_block* next;     // next (older) block in chain
     // Allocation-start bitmap: one bit per GC_BUMP_GRANULE bytes, set when a
@@ -203,7 +202,7 @@ typedef struct gc_bump_block {
 #define GC_BUMP_BLOCK_MAX_SIZE      (64 * 1024 * 1024)   // 64 MB cap
 
 typedef struct gc_heap {
-    Pool* pool;                     // underlying rpmalloc memory pool
+    MemContext* vm_context;         // context used by VM-owned GC extents
     gc_header_t* all_objects;       // linked list head (most recent allocation first)
     gc_large_set_t large_objects;   // malloc-backed objects, keyed by exact user pointer
     uint8_t* bump_cursor;           // bump-pointer allocation cursor (hot path)
@@ -242,7 +241,7 @@ typedef struct gc_heap {
     size_t bytes_collected;         // total bytes reclaimed across all collections
 
     // Root ranges: dynamically growing array of (base, count) pairs.
-    // Each range is a pool-allocated Item[] array (e.g., JS closure envs).
+    // Each range is a memtrack-allocated Item[] array (e.g., JS closure envs).
     gc_root_range_t* root_ranges;
     int root_range_count;
     int root_range_capacity;
@@ -295,23 +294,14 @@ typedef struct gc_heap {
 gc_tune_stats_t gc_heap_get_tune_stats(const gc_heap_t* gc);
 
 /**
- * Create a new GC heap with its own memory pool.
+ * Create a new GC heap with VM-owned zones and direct memtrack metadata.
  * @return new GCHeap, or NULL on failure
  */
 gc_heap_t* gc_heap_create(void);
 
 /**
- * Create a new GC heap reusing an existing memory pool.
- * The pool should have been reset (pool_reset) before reuse.
- * Ownership of the pool transfers to the gc_heap.
- * @param pool existing pool to reuse (must not be NULL)
- * @return new GCHeap, or NULL on failure
- */
-gc_heap_t* gc_heap_create_with_pool(Pool* pool);
-
-/**
  * Destroy the GC heap and all its allocations.
- * Calls pool_destroy to bulk-free all pool-allocated memory.
+ * Releases VM extents and direct metadata.
  * @param gc heap to destroy
  */
 void gc_heap_destroy(gc_heap_t* gc);
@@ -325,7 +315,7 @@ void gc_heap_set_node_release_hook(void (*fn)(void* node));
 /**
  * Allocate memory from the GC heap with a prepended GCHeader.
  * Uses the object zone (size-class free list) for objects up to 384 bytes.
- * Falls back to pool_alloc for larger objects.
+ * Falls back to direct memtrack allocation for larger objects.
  * @param gc     heap to allocate from
  * @param size   user data size in bytes
  * @param type_tag TypeId for tracking (e.g., LMD_TYPE_STRING, LMD_TYPE_ARRAY)
@@ -442,7 +432,7 @@ void gc_unregister_weak(gc_heap_t* gc, uint64_t* slot);
 
 /**
  * Register a contiguous range of Items as GC roots.
- * Used for JS closure environment arrays that are pool-allocated.
+ * Used for JS closure environment arrays that are memtrack-allocated.
  * @param gc    heap to register with
  * @param base  pointer to first Item in the range
  * @param count number of Items in the range

@@ -202,7 +202,7 @@ protected:
         pool = pool_create();
         memset(&doc, 0, sizeof(doc));
         doc.document_pool = pool;
-        doc.node_arena = arena_create_default(pool);
+        doc.node_arena = arena_create_default();
     }
     void TearDown() override {
         if (doc.node_arena) arena_destroy(doc.node_arena);
@@ -328,7 +328,7 @@ protected:
         scheduler = animation_scheduler_create(pool);
         memset(&doc, 0, sizeof(doc));
         doc.document_pool = pool;
-        doc.node_arena = arena_create_default(pool);
+        doc.node_arena = arena_create_default();
     }
     void TearDown() override {
         animation_scheduler_destroy(scheduler);
