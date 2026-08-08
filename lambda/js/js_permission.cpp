@@ -444,8 +444,7 @@ extern "C" Item js_permission_make_net_error(const char* syscall, const char* re
 
 extern "C" Item js_permission_throw_fs_error(const char* permission, const char* resource, const char* message) {
     Item err = js_permission_make_fs_error(permission, resource, message);
-    js_throw_value(err);
-    return ItemNull;
+    return js_throw_value(err);
 }
 
 extern "C" Item js_permission_check_fs_read(const char* path) {

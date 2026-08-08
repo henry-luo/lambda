@@ -6,10 +6,10 @@ flowchart TD
     TEST --> DONE{"== JS_ITER_DONE_SENTINEL?"}
     DONE -->|yes| ENDLBL["l_end"]
     DONE -->|no| BIND["fresh per-iteration binding, assign loop var, TDZ exit"]
-    BIND --> BODY["body (catch_label = l_iter_exc)"]
+    BIND --> BODY["body (catch_label = l_iter_error)"]
     BODY --> UPD["l_update: jump l_test"]
     UPD --> TEST
-    BODY -.->|"throw"| EXC["l_iter_exc: save exc, js_iterator_close, rethrow"]
+    BODY -.->|"throw"| EXC["l_iter_error: save exc, js_iterator_close, rethrow"]
     BODY -.->|"break"| BRK["l_break: js_iterator_close"]
     BODY -.->|"return"| RET["l_forit_ret: js_iterator_close, propagate return"]
     BRK --> ENDLBL

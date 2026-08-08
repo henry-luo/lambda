@@ -87,13 +87,15 @@ MIR_reg_t jm_call_1_or_inline(JsMirTranspiler* mt, const char* fn_name,
             MIR_new_reg_op(mt->ctx, value),
             MIR_new_mem_op(mt->ctx, MIR_T_I64,
                 (MIR_disp_t)a1.u.i * (MIR_disp_t)sizeof(Item), vars, 0, 1)));
-        return value;
+        return jm_publish_call_result(mt, value);
     }
-    return em_call_1(&mt->em, fn_name, ret_type, a1t, a1, true);
+    MIR_reg_t result = em_call_1(&mt->em, fn_name, ret_type, a1t, a1, true);
+    return jm_publish_call_result(mt, result);
 }
 
 void jm_call_void_2_or_inline(JsMirTranspiler* mt, const char* fn_name,
         MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2) {
+    if (mt) mt->last_call_result_reg = 0;
     if (mt && mt->em.frame.runtime &&
             jm_is_compiler_proven_module_slot(fn_name, a1t, a1) &&
             strcmp(fn_name, "js_set_module_var") == 0) {
@@ -149,14 +151,18 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
     }
     // A direct compiled call receives the caller's context register.  This is
     // immutable activation input, not a load from a shared runtime cell.
+    // A discarded expression still has to transport an ERROR Item: the merged
+    // lane makes the callee's returned Item the only exception signal, so
+    // suppressing the normal result also suppresses throws from direct calls.
+    (void)discard_result;
     MirCallOptions options = {{MIR_FRAME_REF_NONE, 0},
-        discard_result ? 0u : FN_RETURN_HOME_NORMAL, false, true};
+        FN_RETURN_HOME_NORMAL, false, true};
     FnVariantAnalysis* body = fn_analysis_variant(&callee->analysis,
         FN_ENTRY_BOXED_BODY);
     MIR_reg_t result = em_call_direct(&mt->em, callee->body_name,
         callee->body_func_item, body, arg_count, types, ops,
         &options).normal.reg;
-    return result;
+    return jm_publish_call_result(mt, result);
 }
 
 MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
@@ -251,6 +257,7 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
     MIR_reg_t result = em_call_direct(&mt->em, callee->name,
         callee->native_func_item, native, arg_count, types, ops,
         &options).normal.reg;
+    mt->last_call_result_reg = 0;
     return result;
 }
 
@@ -481,6 +488,7 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
     bool is_getter, bool is_setter) {
     key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+    jm_emit_error_lane_propagate_check(mt);
     int64_t prefix_kind = is_getter ? 1 : (is_setter ? 2 : 0);
     jm_call_void_3(mt, "js_set_function_name_from_property_key_if_anonymous",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
@@ -499,12 +507,14 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, is_set));
+        jm_emit_error_lane_propagate_check(mt);
     } else {
         jm_call_void_0(mt, "js_private_field_init_begin");
         jm_call_3(mt, "js_create_data_property", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+        jm_emit_error_lane_propagate_check(mt);
         jm_call_void_0(mt, "js_private_field_init_end");
         jm_call_void_2(mt, "js_mark_private_method_non_writable",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
@@ -1609,11 +1619,11 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         if (var && jm_is_native_type(var->type_id)) {
             if (var->tdz_active) {
                 MIR_reg_t boxed = jm_box_native(mt, var->reg, var->type_id);
-                jm_call_void_3(mt, "js_check_tdz",
+                jm_call_3(mt, "js_check_tdz", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
-                jm_emit_exc_propagate_check(mt);
+                jm_emit_error_lane_propagate_check(mt);
             }
             if (target_type == LMD_TYPE_FLOAT)
                 return jm_ensure_native_float(mt, var->reg, var->type_id);
@@ -1633,11 +1643,11 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                 boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
                 if (mc->var_kind == JS_VAR_LET || mc->var_kind == JS_VAR_CONST) {
-                    jm_call_void_3(mt, "js_check_tdz",
+                    jm_call_3(mt, "js_check_tdz", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
-                    jm_emit_exc_propagate_check(mt);
+                    jm_emit_error_lane_propagate_check(mt);
                 }
             } else if (mc && mc->const_type == MCONST_INT) {
                 // constant int: emit directly as native

@@ -135,7 +135,6 @@ static char* node_querystring_percent_decode(const char* text, size_t length,
 #define js_new_function(ARG_FUNCTION, ARG_COUNT) node_querystring_host->script->new_function(ARG_FUNCTION, ARG_COUNT)
 #define js_object_keys(ARG_OBJECT) node_querystring_host->script->object_keys(ARG_OBJECT)
 #define js_call_function(ARG_FUNCTION, ARG_THIS, ARG_ARGS, ARG_COUNT) node_querystring_host->script->call_function(ARG_FUNCTION, ARG_THIS, ARG_ARGS, ARG_COUNT)
-#define js_check_exception() node_querystring_host->script->check_exception()
 #define js_to_string(ARG_VALUE) node_querystring_host->script->to_string(ARG_VALUE)
 #define js_throw_type_error(ARG_MESSAGE) node_querystring_throw_type_error(ARG_MESSAGE)
 #define make_js_undefined() node_querystring_undefined()
@@ -345,10 +344,10 @@ static Item node_querystring_decode_component(Item decoder, const char* text, si
         *temporary_root = decoded.item;
         // Node falls back to the internal decoder when a custom decoder
         // throws, keeping malformed query strings parseable.
-        if (!node_querystring_host->script->check_exception() &&
+        if (!item_is_error(decoded) &&
                 get_type_id(decoded) == LMD_TYPE_STRING) return decoded;
-        if (node_querystring_host->script->check_exception()) {
-            node_querystring_host->script->clear_exception();
+        if (item_is_error(decoded)) {
+            (void)node_querystring_host->script->error_lane_payload(decoded);
         }
     }
 
@@ -699,7 +698,7 @@ static char* node_querystring_encode_value(Item value, Item encoder) {
         js_call_function(node_querystring_root_value(encoder_root), node_querystring_undefined(),
             &argument, 1) : js_qs_escape(argument);
     *encoded_root = encoded_item.item;
-    if (node_querystring_host->script->check_exception()) {
+    if (item_is_error(encoded_item)) {
         node_querystring_host->node->roots->root_frame_end(&frame);
         return NULL;
     }
@@ -958,7 +957,7 @@ int node_querystring_init(const JubeHostAPI* host) {
             !host->script->new_function || !host->script->to_string ||
             !host->script->call_function || !host->script->object_keys ||
             !host->script->object_create || !host->script->is_truthy ||
-            !host->script->throw_uri_error_code || !host->script->clear_exception ||
+            !host->script->throw_uri_error_code || !host->script->error_lane_payload ||
             !host->node->binary ||
             !host->node->binary->buffer_from_bytes) return -1;
     node_querystring_host = host;

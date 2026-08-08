@@ -46,15 +46,15 @@ static inline bool js_coerce_is_bigint(Item value) {
     return dec && dec->unlimited == DECIMAL_BIGINT;
 }
 
-static bool js_proxy_has_get_trap(Item value) {
+static Item js_proxy_has_get_trap(Item value) {
     JsProxyData* pd = js_get_proxy_data(value);
-    if (!pd) return true;
+    if (!pd) return (Item){.item = b2it(true)};
     Item handler = (Item){.item = pd->handler};
     Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
-    Item trap = js_property_get(handler, get_key);
-    if (js_check_exception()) return true;
+    JS_ASSIGN_OR_RETURN(trap, js_property_get(handler, get_key));
     TypeId trap_type = get_type_id(trap);
-    return trap.item != ItemNull.item && trap_type != LMD_TYPE_UNDEFINED && trap_type != LMD_TYPE_NULL;
+    return (Item){.item = b2it(trap.item != ItemNull.item &&
+        trap_type != LMD_TYPE_UNDEFINED && trap_type != LMD_TYPE_NULL)};
 }
 
 static bool js_is_class_constructor_map_for_coerce(Item value) {
@@ -98,8 +98,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     }
 
     // Step 2: @@toPrimitive lookup (prototype-chain walk via js_property_get).
-    Item to_prim = js_property_get(value, k_sym_to_primitive());
-    if (js_check_exception()) return ItemNull;
+    JS_ASSIGN_OR_RETURN(to_prim, js_property_get(value, k_sym_to_primitive()));
     TypeId tp_type = get_type_id(to_prim);
     bool tp_present = (to_prim.item != ItemNull.item &&
                        tp_type != LMD_TYPE_UNDEFINED &&
@@ -107,8 +106,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
 
     if (tp_present && tp_type != LMD_TYPE_FUNC) {
         // ES §7.1.1 step 2.b.i: callable check.
-        js_throw_type_error("@@toPrimitive is not a function");
-        return ItemNull;
+        return js_throw_type_error("@@toPrimitive is not a function");
     }
 
     if (tp_present) {
@@ -117,11 +115,9 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
         // same hint string).
         Item hint_item = (Item){.item = s2it(heap_create_name(hint_str))};
         Item args[1] = { hint_item };
-        Item result = js_call_function(to_prim, value, args, 1);
-        if (js_check_exception()) return ItemNull;
+        JS_ASSIGN_OR_RETURN(result, js_call_function(to_prim, value, args, 1));
         if (result_is_object(get_type_id(result))) {
-            js_throw_type_error("Cannot convert object to primitive value");
-            return ItemNull;
+            return js_throw_type_error("Cannot convert object to primitive value");
         }
         return result;
     }
@@ -140,21 +136,23 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
             js_map_get_fast_ext(value.map, "valueOf", 7, &has_vo);
             js_map_get_fast_ext(value.map, "toString", 8, &has_ts);
             if (!has_vo && !has_ts) {
-                js_throw_type_error("Cannot convert object to primitive value");
-                return ItemNull;
+                return js_throw_type_error("Cannot convert object to primitive value");
             }
         }
     }
 
-    if (vt == LMD_TYPE_MAP && js_is_proxy(value) && !js_proxy_has_get_trap(value)) {
+    if (vt == LMD_TYPE_MAP && js_is_proxy(value)) {
+        JS_ASSIGN_OR_RETURN(has_get_trap, js_proxy_has_get_trap(value));
+        if (!it2b(has_get_trap)) {
         Item target = js_proxy_get_target(value);
         if (js_is_callable_proxy_target_for_coerce(target)) {
-            Item fn = js_lookup_builtin_method(LMD_TYPE_FUNC, "toString", 8);
-            if (fn.item != ItemNull.item && get_type_id(fn) == LMD_TYPE_FUNC) {
-                Item result = js_call_function(fn, value, NULL, 0);
-                if (js_check_exception()) return ItemNull;
+                Item fn = js_lookup_builtin_method(LMD_TYPE_FUNC, "toString", 8);
+                if (fn.item != ItemNull.item && get_type_id(fn) == LMD_TYPE_FUNC) {
+                    Item result = js_call_function(fn, value, NULL, 0);
+                if (item_is_error(result)) return result;
                 if (!result_is_object(get_type_id(result))) return result;
             }
+        }
         }
     }
 
@@ -171,11 +169,9 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     }
 
     for (int i = 0; i < 2; i++) {
-        Item fn = js_property_get(value, method_keys[i]);
-        if (js_check_exception()) return ItemNull;
+        JS_ASSIGN_OR_RETURN(fn, js_property_get(value, method_keys[i]));
         if (fn.item == ItemNull.item || get_type_id(fn) != LMD_TYPE_FUNC) continue;
-        Item result = js_call_function(fn, value, NULL, 0);
-        if (js_check_exception()) return ItemNull;
+        JS_ASSIGN_OR_RETURN(result, js_call_function(fn, value, NULL, 0));
         if (!result_is_object(get_type_id(result))) {
             return result;
         }
@@ -189,6 +185,5 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
         js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
         return (Item){.item = s2it(heap_create_name("[object Object]"))};
     }
-    js_throw_type_error("Cannot convert object to primitive value");
-    return ItemNull;
+    return js_throw_type_error("Cannot convert object to primitive value");
 }

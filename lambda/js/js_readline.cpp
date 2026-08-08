@@ -29,7 +29,6 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
 extern "C" void js_enqueue_promise_job(Item job);
 extern "C" int64_t js_key_is_symbol_c(Item key);
 extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest);
-extern "C" int js_check_exception(void);
 extern "C" Item js_promise_with_resolvers(void);
 extern "C" Item js_throw_error_with_code(const char* code, const char* message);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
@@ -817,9 +816,9 @@ static bool readline_emit_keypress(Item rl, char c) {
     js_array_push(args, ch);
     js_array_push(args, key);
     readline_set(rl, "__synth_keypress__", (Item){.item = ITEM_TRUE});
-    js_ee_emit(input, make_string_item("keypress"), args);
+    Item emit_result = js_ee_emit(input, make_string_item("keypress"), args);
     readline_set(rl, "__synth_keypress__", (Item){.item = ITEM_FALSE});
-    return !js_check_exception();
+    return !item_is_error(emit_result);
 }
 
 static void readline_append_chars(char* buf, int buf_size, int* pos, const char* chars, int len) {

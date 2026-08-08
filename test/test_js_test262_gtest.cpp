@@ -4843,6 +4843,8 @@ int main(int argc, char** argv) {
                 // regressions retry without their special preamble and thousands
                 // of retry results become infrastructure noise instead of signal.
                 p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
+                if (p.is_raw) p.native_harness = true;
+                if (p.is_module) p.native_harness = false;
                 retry_indices.push_back(retry_prepared.size());
                 retry_prepared.push_back(std::move(p));
             }

@@ -923,6 +923,11 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                         if (vdecl->id->node_type == JS_AST_NODE_IDENTIFIER) {
                             check_identifier_reserved(ctx, vdecl->id);
                         } else {
+                            // Binding patterns carry identifiers in nested
+                            // property/value nodes; expression walking only
+                            // validates private references and therefore used
+                            // to miss strict `eval`/`arguments` declarations.
+                            check_binding_pattern_reserved(ctx, vdecl->id);
                             walk_expression(ctx, vdecl->id);
                         }
                     }

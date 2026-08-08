@@ -71,6 +71,7 @@ extern Item js_make_number(double value);
 #define microtask_head (js_runtime_state.event_loop.microtask_head)
 #define microtask_tail (js_runtime_state.event_loop.microtask_tail)
 #define microtask_count (js_runtime_state.event_loop.microtask_count)
+#define microtask_running (js_runtime_state.event_loop.microtask_running)
 #define raf_callback_ring (js_runtime_state.event_loop.raf_callback)
 #define raf_id_ring (js_runtime_state.event_loop.raf_id)
 #define raf_head (js_runtime_state.event_loop.raf_head)
@@ -176,7 +177,11 @@ extern "C" int js_microtask_pending_count(void) {
     return next_tick_count + microtask_count;
 }
 
-static void js_run_queued_callback(Item cb, Item resource, Item als_context, Item domain) {
+extern "C" bool js_microtask_is_running(void) {
+    return js_active_runtime_state && microtask_running;
+}
+
+static Item js_run_queued_callback(Item cb, Item resource, Item als_context, Item domain) {
     RootFrame roots(6);
     // Queue pop clears the persistent slots before context setup can allocate;
     // keep the dequeued callback graph exact-rooted for the entire invocation.
@@ -186,16 +191,22 @@ static void js_run_queued_callback(Item cb, Item resource, Item als_context, Ite
     Rooted<Item> domain_root(roots, domain);
     Rooted<Item> previous_resource_root(roots, ItemNull);
     Rooted<Item> previous_domain_root(roots, ItemNull);
-    if (get_type_id(callback_root.get()) != LMD_TYPE_FUNC) return;
+    if (get_type_id(callback_root.get()) != LMD_TYPE_FUNC) return make_js_undefined();
 
     previous_resource_root.set(js_async_hooks_enter_resource(resource_root.get()));
     previous_domain_root.set(js_domain_set_stack(domain_root.get()));
-    js_als_context_call(als_root.get(), callback_root.get(), ItemNull, ItemNull, 0);
+    Item result = js_als_context_call(als_root.get(), callback_root.get(), ItemNull, ItemNull, 0);
     js_domain_restore_stack(previous_domain_root.get());
     js_async_hooks_restore_resource(previous_resource_root.get());
+    return result;
 }
 
 extern "C" void js_microtask_flush(void) {
+    (void)js_microtask_flush_result();
+}
+
+extern "C" Item js_microtask_flush_result(void) {
+    Item first_error = ItemNull;
     int safety = 0;
     while ((next_tick_count > 0 || microtask_count > 0) &&
            safety < TASK_FLUSH_SAFETY_LIMIT) {
@@ -204,7 +215,11 @@ extern "C" void js_microtask_flush(void) {
             Item als_context = ItemNull;
             Item domain = ItemNull;
             Item cb = next_tick_pop(&resource, &als_context, &domain);
-            js_run_queued_callback(cb, resource, als_context, domain);
+            bool previous_running = microtask_running;
+            microtask_running = true;
+            Item result = js_run_queued_callback(cb, resource, als_context, domain);
+            microtask_running = previous_running;
+            if (item_is_error(result) && !item_is_error(first_error)) first_error = result;
             safety++;
         }
         while (microtask_count > 0 && safety < TASK_FLUSH_SAFETY_LIMIT) {
@@ -212,7 +227,11 @@ extern "C" void js_microtask_flush(void) {
             Item als_context = ItemNull;
             Item domain = ItemNull;
             Item cb = microtask_pop(&resource, &als_context, &domain);
-            js_run_queued_callback(cb, resource, als_context, domain);
+            bool previous_running = microtask_running;
+            microtask_running = true;
+            Item result = js_run_queued_callback(cb, resource, als_context, domain);
+            microtask_running = previous_running;
+            if (item_is_error(result) && !item_is_error(first_error)) first_error = result;
             safety++;
         }
     }
@@ -220,6 +239,7 @@ extern "C" void js_microtask_flush(void) {
         log_error("event_loop: nextTick/microtask flush exceeded safety limit");
     }
     js_promise_flush_unhandled_checks();
+    return first_error;
 }
 
 static bool raf_push(Item cb, int64_t id) {
@@ -579,6 +599,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
     timer_progress_generation++;
     bool close_after_fire = th && !th->is_interval;
+    Item callback_result = ItemNull;
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
         Item previous_resource = js_async_hooks_enter_resource(th->async_resource);
@@ -586,14 +607,14 @@ static void timer_fire_cb(uv_timer_t *handle) {
         if (get_type_id(th->callback) == LMD_TYPE_FUNC) {
             if (th->extra_count > 0) {
                 if (th->extra_count == 1) {
-                    js_als_context_call(th->als_context, th->callback, ItemNull,
+                    callback_result = js_als_context_call(th->als_context, th->callback, ItemNull,
                                         th->extra_args[0], 1);
                 } else {
-                    js_als_context_call_args(th->als_context, th->callback, ItemNull,
+                    callback_result = js_als_context_call_args(th->als_context, th->callback, ItemNull,
                                              th->extra_args, th->extra_count);
                 }
             } else {
-                js_als_context_call(th->als_context, th->callback, ItemNull, ItemNull, 0);
+                callback_result = js_als_context_call(th->als_context, th->callback, ItemNull, ItemNull, 0);
             }
         }
         js_domain_restore_stack(previous_domain);
@@ -602,7 +623,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
     } else {
         log_error("event_loop: timer fired without captured JS runtime");
     }
-    if (th && th->is_interval && js_check_exception() && !th->closing) {
+    if (th && th->is_interval && item_is_error(callback_result) && !th->closing) {
         // An interval callback that throws before its clearInterval call can
         // otherwise re-enter forever and starve the drain watchdog.
         timer_mark_object_destroyed(th);
@@ -1133,50 +1154,66 @@ static Item make_abort_error(Item signal) {
 
 // helper: check if signal is aborted, validate options types
 // returns 0=ok, 1=already aborted (reject_out set), -1=type error thrown
-static int check_timer_options(Item options, Item* reject_out) {
+static Item check_timer_options(Item options, Item* reject_out, int* result_code) {
     extern Item js_promise_reject(Item reason);
     extern Item js_throw_type_error_code(const char*, const char*);
+    if (result_code) *result_code = 0;
+    auto reject_reason = [reject_out](Item reason) -> int {
+        if (item_is_error(reason)) reason = js_error_lane_payload(reason);
+        *reject_out = js_promise_reject(reason);
+        return -1;
+    };
 
     if (get_type_id(options) == LMD_TYPE_UNDEFINED || get_type_id(options) == LMD_TYPE_NULL) {
-        return 0; // no options
+        return js_status_ok(); // no options
     }
     TypeId opt_type = get_type_id(options);
     if (opt_type != LMD_TYPE_MAP && opt_type != LMD_TYPE_OBJECT) {
         // options must be an object if provided (non-nullish)
-        *reject_out = js_promise_reject(
-            js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-                "The \"options\" argument must be of type object."));
-        return -1;
+        if (result_code) *result_code = reject_reason(js_throw_type_error_code(
+            "ERR_INVALID_ARG_TYPE", "The \"options\" argument must be of type object."));
+        return js_status_ok();
     }
     // validate signal if present
     Item signal = js_property_get(options, (Item){.item = s2it(heap_create_name("signal", 6))});
+    if (item_is_error(signal)) {
+        if (result_code) *result_code = reject_reason(signal);
+        return js_status_ok();
+    }
     if (get_type_id(signal) != LMD_TYPE_UNDEFINED && get_type_id(signal) != LMD_TYPE_NULL) {
         // signal must be an AbortSignal (object with 'aborted' property)
         TypeId sig_type = get_type_id(signal);
         if (sig_type != LMD_TYPE_MAP && sig_type != LMD_TYPE_OBJECT) {
-            *reject_out = js_promise_reject(
-                js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-                    "The \"options.signal\" property must be an instance of AbortSignal."));
-            return -1;
+            if (result_code) *result_code = reject_reason(js_throw_type_error_code(
+                "ERR_INVALID_ARG_TYPE", "The \"options.signal\" property must be an instance of AbortSignal."));
+            return js_status_ok();
         }
         // check if already aborted
         Item aborted = js_property_get(signal, (Item){.item = s2it(heap_create_name("aborted", 7))});
+        if (item_is_error(aborted)) {
+            if (result_code) *result_code = reject_reason(aborted);
+            return js_status_ok();
+        }
         if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
             *reject_out = js_promise_reject(make_abort_error(signal));
-            return 1;
+            if (result_code) *result_code = 1;
+            return js_status_ok();
         }
     }
     // validate ref if present
     Item ref = js_property_get(options, (Item){.item = s2it(heap_create_name("ref", 3))});
+    if (item_is_error(ref)) {
+        if (result_code) *result_code = reject_reason(ref);
+        return js_status_ok();
+    }
     if (get_type_id(ref) != LMD_TYPE_UNDEFINED && get_type_id(ref) != LMD_TYPE_NULL) {
         if (get_type_id(ref) != LMD_TYPE_BOOL) {
-            *reject_out = js_promise_reject(
-                js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-                    "The \"options.ref\" property must be of type boolean."));
-            return -1;
+            if (result_code) *result_code = reject_reason(js_throw_type_error_code(
+                "ERR_INVALID_ARG_TYPE", "The \"options.ref\" property must be of type boolean."));
+            return js_status_ok();
         }
     }
-    return 0;
+    return js_status_ok();
 }
 
 extern "C" void js_mock_scheduler_enable(void) {
@@ -1222,7 +1259,8 @@ static Item js_mock_scheduler_wait(Item delay, Item options) {
     extern Item js_promise_reject(Item reason);
 
     Item reject_out = ItemNull;
-    int opt_rc = check_timer_options(options, &reject_out);
+    int opt_rc = 0;
+    JS_ASSIGN_OR_RETURN(options_status, check_timer_options(options, &reject_out, &opt_rc));
     if (opt_rc != 0) return reject_out;
 
     Item resolvers = js_promise_with_resolvers();
@@ -1272,7 +1310,8 @@ static Item js_set_promise_timer(Item delay, Item value, Item options,
 
     // check options for signal before creating timer
     Item reject_out = ItemNull;
-    int opt_rc = check_timer_options(options, &reject_out);
+    int opt_rc = 0;
+    JS_ASSIGN_OR_RETURN(options_status, check_timer_options(options, &reject_out, &opt_rc));
     if (opt_rc != 0) return reject_out;
 
     Item resolvers = js_promise_with_resolvers();

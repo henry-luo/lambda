@@ -8550,7 +8550,12 @@ test("alt fail", function() { return !!Joi.alternatives().try(Joi.string(), Joi.
 
 // === Date ===
 test("date iso", function() { return !Joi.date().validate("2024-01-15").error; });
-test("date timestamp", function() { return !Joi.date().timestamp().validate(Date.now()).error; });
+test("date timestamp", function() {
+  var dateSchema = Joi.date().timestamp();
+  var dateValue = Date.now();
+  var dateResult = dateSchema.validate(dateValue);
+  return !dateResult.error;
+});
 
 // === Any ===
 test("any valid", function() { return !Joi.any().validate("anything").error; });

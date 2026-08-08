@@ -41,8 +41,6 @@ extern Item js_array_new(int length);
 extern Item js_array_push(Item array, Item value);
 extern Item js_get_document_object_value();
 extern "C" Item js_get_global_this();
-extern "C" int js_check_exception(void);
-extern Item js_clear_exception(void);
 extern Item js_make_number(double d);
 
 // Form-control IDL helpers from js_dom.cpp — used by HTMLElement click
@@ -190,8 +188,8 @@ static Item event_exception_message(Item err) {
     } else if (get_type_id(err) != LMD_TYPE_STRING) {
         msg = js_to_string(err);
     }
-    if (js_check_exception()) {
-        (void)js_clear_exception();
+    if (item_is_error(msg)) {
+        (void)js_error_lane_payload(msg);
         msg = (Item){.item = s2it(heap_create_name("<error while formatting exception>"))};
     }
     return msg;
@@ -224,8 +222,8 @@ static void report_exception_to_window_onerror(Item err, const char* type) {
     if (get_type_id(onerr) != LMD_TYPE_FUNC) return;
     Item msg = event_exception_message(err);
     Item args[5] = { msg, ItemNull, (Item){.item = b2it(false)}, (Item){.item = b2it(false)}, err };
-    js_call_function(onerr, global, args, 5);
-    if (js_check_exception()) (void)js_clear_exception();
+    Item onerror_result = js_call_function(onerr, global, args, 5);
+    if (item_is_error(onerror_result)) (void)js_error_lane_payload(onerror_result);
     (void)type;
 }
 
@@ -277,34 +275,34 @@ static bool js_dom_is_submit_button(DomElement* elem) {
 static Item js_dom_throw_named_error(const char* name, const char* message) {
     Item error_name = (Item){.item = s2it(heap_create_name(name ? name : "Error"))};
     Item error_message = (Item){.item = s2it(heap_create_name(message ? message : ""))};
-    js_throw_value(js_new_error_with_name(error_name, error_message));
-    return make_js_undefined();
+    return js_throw_value(js_new_error_with_name(error_name, error_message));
 }
 
-static DomElement* js_dom_resolve_request_submitter(DomElement* form,
-                                                    Item submitter_item,
-                                                    bool* has_submitter) {
+static Item js_dom_resolve_request_submitter(DomElement* form,
+                                             Item submitter_item,
+                                             bool* has_submitter,
+                                             DomElement** out_submitter) {
     if (has_submitter) *has_submitter = false;
+    if (out_submitter) *out_submitter = nullptr;
     TypeId st = get_type_id(submitter_item);
     if (submitter_item.item == 0 || st == LMD_TYPE_UNDEFINED) {
-        return nullptr;
+        return make_js_undefined();
     }
 
     if (has_submitter) *has_submitter = true;
     DomNode* node = (DomNode*)js_dom_unwrap_element(submitter_item);
     DomElement* submitter = (node && node->is_element()) ? node->as_element() : nullptr;
     if (!js_dom_is_submit_button(submitter)) {
-        js_throw_type_error("requestSubmit submitter must be a submit button");
-        return nullptr;
+        return js_throw_type_error("requestSubmit submitter must be a submit button");
     }
 
     DomElement* owner = js_dom_find_form_owner(submitter);
     if (owner != form) {
-        js_dom_throw_named_error("NotFoundError",
+        return js_dom_throw_named_error("NotFoundError",
             "requestSubmit submitter is not owned by this form");
-        return nullptr;
     }
-    return submitter;
+    if (out_submitter) *out_submitter = submitter;
+    return make_js_undefined();
 }
 
 static bool js_dom_should_validate_submit(DomElement* form, DomElement* submitter) {
@@ -334,8 +332,10 @@ extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter
     }
 
     bool has_submitter = false;
-    DomElement* submitter = js_dom_resolve_request_submitter(form, submitter_item, &has_submitter);
-    if (js_check_exception()) return make_js_undefined();
+    DomElement* submitter = nullptr;
+    Item submitter_result = js_dom_resolve_request_submitter(form, submitter_item,
+        &has_submitter, &submitter);
+    if (item_is_error(submitter_result)) return submitter_result;
     if (has_submitter && !submitter) return make_js_undefined();
 
     if (js_dom_should_validate_submit(form, submitter)) {
@@ -828,7 +828,7 @@ static EventListener* nl_find_snapshot_listener(NodeListeners* nl,
 // Parse options argument
 // ============================================================================
 
-static void parse_listener_options(Item opts, bool* capture, bool* once,
+static Item parse_listener_options(Item opts, bool* capture, bool* once,
                                     bool* passive, bool* has_passive,
                                     Item* signal_out) {
     *capture = false;
@@ -839,7 +839,7 @@ static void parse_listener_options(Item opts, bool* capture, bool* once,
 
     if (opts.item == 0 || get_type_id(opts) == LMD_TYPE_NULL ||
         get_type_id(opts) == LMD_TYPE_UNDEFINED) {
-        return;
+        return ItemNull;
     }
 
     // boolean argument = useCapture. Per WebIDL, anything that is not a
@@ -847,7 +847,7 @@ static void parse_listener_options(Item opts, bool* capture, bool* once,
     TypeId tid = get_type_id(opts);
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_OBJECT) {
         *capture = js_is_truthy(opts);
-        return;
+        return ItemNull;
     }
 
     // options object: {capture, once, passive, signal}
@@ -878,14 +878,14 @@ static void parse_listener_options(Item opts, bool* capture, bool* once,
                 Item m = (Item){.item = s2it(heap_create_name(
                     "Failed to execute 'addEventListener' on 'EventTarget': "
                     "member signal is not of type 'AbortSignal'."))};
-                js_throw_value(js_new_error_with_name(n, m));
-                return;
+                return js_throw_value(js_new_error_with_name(n, m));
             }
             if (st == LMD_TYPE_MAP || st == LMD_TYPE_OBJECT) {
                 *signal_out = signal_val;
             }
         }
     }
+    return ItemNull;
 }
 
 // returns true if signal_item is an already-aborted AbortSignal
@@ -915,8 +915,9 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
     // effects (used by feature-detection code) fire.
     bool capture = false, once = false, passive = false, has_passive = false;
     Item signal = ItemNull;
-    parse_listener_options(opts_item, &capture, &once, &passive, &has_passive, &signal);
-    if (js_check_exception()) return;
+    Item options_result = parse_listener_options(opts_item, &capture, &once, &passive,
+        &has_passive, &signal);
+    if (item_is_error(options_result)) return;
 
     // Per spec: addEventListener with null/undefined callback is a no-op.
     TypeId cb_tid = get_type_id(cb_item);
@@ -1249,8 +1250,7 @@ extern "C" Item js_event_init_event(Item type_arg, Item b_arg, Item c_arg) {
         Item m = (Item){.item = s2it(heap_create_name(
             "Failed to execute 'initEvent' on 'Event': "
             "1 argument required, but only 0 present."))};
-        js_throw_value(js_new_error_with_name(n, m));
-        return make_js_undefined();
+        return js_throw_value(js_new_error_with_name(n, m));
     }
     Item ev = js_get_this();
     if (get_type_id(ev) != LMD_TYPE_MAP) return make_js_undefined();
@@ -1628,8 +1628,7 @@ static Item build_ui_event(const char* type, Item init, const char* class_name) 
             Item n = (Item){.item = s2it(heap_create_name("TypeError"))};
             Item m = (Item){.item = s2it(heap_create_name(
                 "Failed to construct event: view member is not of type Window."))};
-            js_throw_value(js_new_error_with_name(n, m));
-            return make_js_undefined();
+            return js_throw_value(js_new_error_with_name(n, m));
         }
         event_set_item(ev, "view", view);
     } else {
@@ -1645,15 +1644,13 @@ extern "C" Item js_ctor_ui_event_fn(Item type_arg, Item init_arg) {
 }
 
 extern "C" Item js_ctor_focus_event_fn(Item type_arg, Item init_arg) {
-    Item ev = build_ui_event(fn_to_cstr(type_arg), init_arg, "FocusEvent");
-    if (js_check_exception()) return make_js_undefined();
+    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, "FocusEvent"));
     event_set_item(ev, "relatedTarget", init_item(init_arg, "relatedTarget"));
     return ev;
 }
 
 extern "C" Item js_ctor_mouse_event_fn(Item type_arg, Item init_arg) {
-    Item ev = build_ui_event(fn_to_cstr(type_arg), init_arg, "MouseEvent");
-    if (js_check_exception()) return make_js_undefined();
+    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, "MouseEvent"));
     stamp_modifiers(ev, init_arg);
     event_set_int(ev, "screenX", init_int(init_arg, "screenX", 0));
     event_set_int(ev, "screenY", init_int(init_arg, "screenY", 0));
@@ -1676,8 +1673,7 @@ extern "C" Item js_ctor_mouse_event_fn(Item type_arg, Item init_arg) {
 }
 
 extern "C" Item js_ctor_wheel_event_fn(Item type_arg, Item init_arg) {
-    Item ev = js_ctor_mouse_event_fn(type_arg, init_arg);
-    if (js_check_exception()) return make_js_undefined();
+    JS_ASSIGN_OR_RETURN(ev, js_ctor_mouse_event_fn(type_arg, init_arg));
     stamp_class(ev, "WheelEvent");
     event_set_double(ev, "deltaX", init_double(init_arg, "deltaX", 0.0));
     event_set_double(ev, "deltaY", init_double(init_arg, "deltaY", 0.0));
@@ -1690,8 +1686,7 @@ extern "C" Item js_ctor_wheel_event_fn(Item type_arg, Item init_arg) {
 }
 
 extern "C" Item js_ctor_keyboard_event_fn(Item type_arg, Item init_arg) {
-    Item ev = build_ui_event(fn_to_cstr(type_arg), init_arg, "KeyboardEvent");
-    if (js_check_exception()) return make_js_undefined();
+    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, "KeyboardEvent"));
     stamp_modifiers(ev, init_arg);
     event_set_str(ev, "key",  init_str(init_arg, "key", ""));
     event_set_str(ev, "code", init_str(init_arg, "code", ""));
@@ -1711,8 +1706,7 @@ extern "C" Item js_ctor_keyboard_event_fn(Item type_arg, Item init_arg) {
 }
 
 extern "C" Item js_ctor_composition_event_fn(Item type_arg, Item init_arg) {
-    Item ev = build_ui_event(fn_to_cstr(type_arg), init_arg, "CompositionEvent");
-    if (js_check_exception()) return make_js_undefined();
+    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, "CompositionEvent"));
     event_set_str(ev, "data", init_str(init_arg, "data", ""));
     return ev;
 }
@@ -1780,10 +1774,10 @@ static bool js_input_event_is_static_range(Item range) {
     return js_class_id(range) == JS_CLASS_STATIC_RANGE;
 }
 
-static void js_input_event_throw_dom_exception(const char* name, const char* message) {
+static Item js_input_event_throw_dom_exception(const char* name, const char* message) {
     Item err_name = (Item){.item = s2it(heap_create_name(name ? name : "InvalidStateError"))};
     Item err_msg = (Item){.item = s2it(heap_create_name(message ? message : ""))};
-    js_throw_value(js_new_error_with_name(err_name, err_msg));
+    return js_throw_value(js_new_error_with_name(err_name, err_msg));
 }
 
 static Item js_input_event_live_target_ranges(Item target_ranges) {
@@ -1816,12 +1810,10 @@ static Item js_input_event_live_target_ranges(Item target_ranges) {
             end_container,
             init_int(range, "endOffset", 0),
             &exc);
-        if (live_range.item == ItemNull.item || js_check_exception()) {
-            if (!js_check_exception()) {
-                js_input_event_throw_dom_exception(exc ? exc : "InvalidStateError",
-                    "Invalid InputEvent targetRanges boundary");
-            }
-            return ranges;
+        if (item_is_error(live_range)) return live_range;
+        if (live_range.item == ItemNull.item) {
+            return js_input_event_throw_dom_exception(exc ? exc : "InvalidStateError",
+                "Invalid InputEvent targetRanges boundary");
         }
         js_array_push(ranges, live_range);
     }
@@ -1829,21 +1821,18 @@ static Item js_input_event_live_target_ranges(Item target_ranges) {
 }
 
 extern "C" Item js_ctor_input_event_fn(Item type_arg, Item init_arg) {
-    Item ev = build_ui_event(fn_to_cstr(type_arg), init_arg, "InputEvent");
-    if (js_check_exception()) return make_js_undefined();
+    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, "InputEvent"));
     event_set_item(ev, "data", init_nullable_str_item(init_arg, "data"));
     event_set_str(ev, "inputType", init_str(init_arg, "inputType", ""));
     event_set_bool(ev, "isComposing", init_bool(init_arg, "isComposing", false));
     event_set_item(ev, "dataTransfer", init_item(init_arg, "dataTransfer"));
-    Item target_ranges = js_input_event_live_target_ranges(init_item(init_arg, "targetRanges"));
-    if (js_check_exception()) return make_js_undefined();
+    JS_ASSIGN_OR_RETURN(target_ranges, js_input_event_live_target_ranges(init_item(init_arg, "targetRanges")));
     js_input_event_install_target_ranges(ev, target_ranges);
     return ev;
 }
 
 extern "C" Item js_ctor_pointer_event_fn(Item type_arg, Item init_arg) {
-    Item ev = js_ctor_mouse_event_fn(type_arg, init_arg);
-    if (js_check_exception()) return make_js_undefined();
+    JS_ASSIGN_OR_RETURN(ev, js_ctor_mouse_event_fn(type_arg, init_arg));
     stamp_class(ev, "PointerEvent");
     event_set_int(ev, "pointerId", init_int(init_arg, "pointerId", 0));
     event_set_double(ev, "width",  init_double(init_arg, "width", 1.0));
@@ -2265,9 +2254,9 @@ static void fire_idl_handler(Item target, const char* type, Item event) {
 
     Item args[1] = { event };
     Item result = js_call_function(handler, target, args, 1);
-    if (js_check_exception()) {
+    if (item_is_error(result)) {
         // Event callback exceptions are reported but never abort dispatch.
-        Item err = js_clear_exception();
+        Item err = js_error_lane_payload(result);
         log_event_exception_detail("event handler", type, err);
         report_exception_to_window_onerror(err, type);
         return;
@@ -2395,9 +2384,9 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
 
         // call the callback with event as argument; isolate exceptions per spec
         Item args[1] = { event };
-        js_call_function(callback, this_for_call, args, 1);
-        if (js_check_exception()) {
-            Item err = js_clear_exception();
+        Item result = js_call_function(callback, this_for_call, args, 1);
+        if (item_is_error(result)) {
+            Item err = js_error_lane_payload(result);
             log_event_exception_detail("event listener", type, err);
             report_exception_to_window_onerror(err, type);
         }
@@ -2427,8 +2416,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
         Item m = (Item){.item = s2it(heap_create_name(
             "Failed to execute 'dispatchEvent' on 'EventTarget': "
             "parameter 1 is not of type 'Event'."))};
-        js_throw_value(js_new_error_with_name(n, m));
-        return (Item){.item = ITEM_FALSE};
+        return js_throw_value(js_new_error_with_name(n, m));
     }
     // get event type
     Item type_key = (Item){.item = s2it(heap_create_name("type"))};
@@ -2513,8 +2501,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
         Item m = (Item){.item = s2it(heap_create_name(
             "Failed to execute 'dispatchEvent' on 'EventTarget': "
             "The event is already being dispatched."))};
-        js_throw_value(js_new_error_with_name(n, m));
-        return (Item){.item = ITEM_FALSE};
+        return js_throw_value(js_new_error_with_name(n, m));
     }
 
     // set target / srcElement (per DOM spec, dispatch sets target to the

@@ -3446,10 +3446,11 @@ void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body) {
 static void jm_emit_evalscript_global_decl_check_name(JsMirTranspiler* mt, String* name, bool is_func) {
     if (!name || name->len <= 0) return;
     MIR_reg_t key_reg = jm_box_string_literal(mt, name->chars, (int)name->len);
-    jm_call_void_1(mt,
+    jm_call_1(mt,
         is_func ? "js_evalscript_check_global_function_decl" : "js_evalscript_check_global_var_decl",
+        MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-    jm_emit_exc_propagate_check(mt);
+    jm_emit_error_lane_propagate_check(mt);
 }
 
 static void jm_emit_evalscript_global_decl_check_prefixed(JsMirTranspiler* mt, const char* name) {
@@ -3457,17 +3458,17 @@ static void jm_emit_evalscript_global_decl_check_prefixed(JsMirTranspiler* mt, c
     if (strncmp(name, "_js_", 4) == 0) name += 4;
     if (!name[0]) return;
     MIR_reg_t key_reg = jm_box_string_literal(mt, name, (int)strlen(name));
-    jm_call_void_1(mt, "js_evalscript_check_global_var_decl",
+    jm_call_1(mt, "js_evalscript_check_global_var_decl", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-    jm_emit_exc_propagate_check(mt);
+    jm_emit_error_lane_propagate_check(mt);
 }
 
 static void jm_emit_evalscript_global_lex_decl_check_name(JsMirTranspiler* mt, String* name) {
     if (!name || name->len <= 0) return;
     MIR_reg_t key_reg = jm_box_string_literal(mt, name->chars, (int)name->len);
-    jm_call_void_1(mt, "js_evalscript_check_global_lex_decl",
+    jm_call_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-    jm_emit_exc_propagate_check(mt);
+    jm_emit_error_lane_propagate_check(mt);
 }
 
 static void jm_emit_evalscript_global_lex_decl_precheck(JsMirTranspiler* mt, JsAstNode* node) {
@@ -3497,9 +3498,9 @@ static void jm_emit_evalscript_global_lex_decl_precheck(JsMirTranspiler* mt, JsA
                 const char* name = entry->name;
                 if (strncmp(name, "_js_", 4) == 0) name += 4;
                 MIR_reg_t key_reg = jm_box_string_literal(mt, name, (int)strlen(name));
-                jm_call_void_1(mt, "js_evalscript_check_global_lex_decl",
+                jm_call_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-                jm_emit_exc_propagate_check(mt);
+                jm_emit_error_lane_propagate_check(mt);
             }
             hashmap_free(names);
         }
@@ -6383,7 +6384,9 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     mt->last_closure_env_reg = 0;
     mt->last_closure_capture_count = 0;
     mt->in_main = true;
-    mt->func_except_label = 0;  // reset for js_main
+    mt->func_error_lane_label = 0;  // reset for js_main
+    mt->last_call_result_reg = 0;
+    mt->func_error_lane_value_reg = 0;
 
     jm_begin_function_frame(mt, main_ret, true, MIR_SCALAR_RETURN_DYNAMIC,
         MIR_reg(mt->ctx, "ctx", main_func));
@@ -6453,9 +6456,9 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     // Global lexical declarations are checked during script
                     // declaration instantiation and tracked separately from
                     // globalThis properties for later evalScript collision checks.
-                    jm_call_void_1(mt, "js_evalscript_check_global_lex_decl",
+                    jm_call_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-                    jm_emit_exc_propagate_check(mt);
+                    jm_emit_error_lane_propagate_check(mt);
                     MIR_reg_t undef_lex = jm_new_reg(mt, "global_lex_undef", MIR_T_I64);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, undef_lex),
@@ -7068,9 +7071,14 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     (int)strlen(mt->filename));
                 // Pass through P5 publish so pending-Promise awaits chain as
                 // before (settled/non-Promise values fall through to js_await_sync).
-                jm_call_2(mt, "js_p5_module_await", MIR_T_I64,
+                MIR_reg_t p7d_await_result = jm_call_2(mt, "js_p5_module_await", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, p7d_spec_split),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg_val));
+                (void)p7d_await_result;
+                // A rejected settled promise becomes an ERROR lane at the
+                // synchronous await boundary; route it before the split marks
+                // the module as pending, or the failed evaluation is erased.
+                jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
                 // Flip body_state and mark post-await as pending so the AEO
                 // drain at depth-0 knows to fire this module's continuation.
                 jm_call_void_2(mt, "js_module_set_body_state",
@@ -7155,7 +7163,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
         // top-level exception propagation: if any statement causes an
         // uncaught exception, stop executing further statements
-        jm_emit_exc_propagate_check(mt);
+        jm_emit_error_lane_propagate_check(mt);
 
         // Js57 P4 reverted in P6: the post-await body-break broke any nested
         // module that emits exports after a top-level await (e.g. fixtures
@@ -7276,11 +7284,12 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, result)));
     }
 
-    // Exception landing pad for js_main: return null if exception is pending
-    if (mt->func_except_label) {
-        jm_emit_label(mt, mt->func_except_label);
+    // Main error exit returns the routed D8.4.3 ERROR Item unchanged.
+    if (mt->func_error_lane_label) {
+        jm_emit_label(mt, mt->func_error_lane_label);
+        MIR_reg_t exc_ret = jm_emit_error_lane_return(mt);
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-            MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+            MIR_new_reg_op(mt->ctx, exc_ret)));
     }
 
     jm_pop_scope(mt);
@@ -7811,7 +7820,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     }
     context->runtime = runtime;
     extern int js_dynamic_import_suppress_module_drain;
-    extern int js_check_exception(void);
     // Js57 P4 (Track B3): bump depth at the very start so jm_load_imports
     // nested calls see depth >= 2 while the outermost transpile sits at 1;
     // the matching exit at the end of the function drains continuations only
@@ -7915,6 +7923,21 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     jm_load_imports(runtime, js_ast, filename);
     jm_log_module_phase_progress(filename, "imports-end");
 
+    RootFrame import_error_roots(1);
+    Rooted<Item> imported_error(import_error_roots,
+        js_module_get_evaluation_error(p7d_self_spec_item));
+    if (get_type_id(imported_error.get()) != LMD_TYPE_NULL) {
+        // A static dependency that failed evaluation rejects this module
+        // before its body runs; compiling the importer would otherwise turn
+        // the failed graph into a successful empty namespace.
+        log_debug("js-mir: module '%s' dependency evaluation failed",
+            filename ? filename : "<module>");
+        jm_clear_active_js_transpile(tp, NULL, NULL);
+        js_transpiler_destroy(tp);
+        js_tla_exit_module();
+        return js_throw_value(imported_error.get());
+    }
+
     MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-mir: module: MIR context init failed for '%s'", filename);
@@ -8017,7 +8040,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         jm_log_module_phase_progress(filename, "execute-begin");
         namespace_obj = js_main((Context*)context);
         jm_log_module_phase_progress(filename, "execute-end");
-        module_body_threw = js_check_exception() != 0;
+        module_body_threw = item_is_error(namespace_obj);
     }
     // Microtasks retain their function owner context, while module-vars and
     // namespace remain dynamically scoped around this drain.
@@ -8037,9 +8060,19 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         // Module body exceptions must remain pending so require() callers can
         // catch them; continuing here made top-level throws print and then
         // return a cached placeholder namespace.
+        js_module_record_evaluation_error(spec_item, namespace_obj);
         log_debug("js-mir: module '%s' body threw during evaluation", filename ? filename : "<module>");
         jm_finish_module_transpile(tp, mt, ctx);
-        return ItemNull;
+        return namespace_obj;
+    }
+
+    Item module_evaluation_error = js_module_get_evaluation_error(spec_item);
+    if (get_type_id(module_evaluation_error) != LMD_TYPE_NULL) {
+        // A deferred TLA continuation can reject after js_main initially
+        // returned its namespace; expose that cached rejection to the module
+        // importer instead of reporting a successful namespace.
+        jm_finish_module_transpile(tp, mt, ctx);
+        return js_throw_value(module_evaluation_error);
     }
 
     // Register the module with its resolved path as key. In normal execution
@@ -8061,6 +8094,14 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
 // ============================================================================
 // Pre-scan AST for imports and recursively load all imported modules
 // ============================================================================
+
+static void jm_propagate_import_evaluation_error(Item parent_specifier,
+        Item dependency_specifier) {
+    Item error = js_module_get_evaluation_error(dependency_specifier);
+    if (get_type_id(error) != LMD_TYPE_NULL) {
+        js_module_record_evaluation_error(parent_specifier, error);
+    }
+}
 
 void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
     if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return;
@@ -8104,6 +8145,7 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
                     if (filename) {
                         String* cur_str_c = heap_create_name(filename, strlen(filename));
                         Item cur_item_c = (Item){.item = s2it(cur_str_c)};
+                        jm_propagate_import_evaluation_error(cur_item_c, spec_item);
                         extern void js_module_inherit_awaited_target(Item, Item);
                         js_module_inherit_awaited_target(cur_item_c, spec_item);
                         // Js57 P7d-B: cached dep — if it still hasn't finished
@@ -8157,6 +8199,7 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
                 if (filename) {
                     String* cur_str = heap_create_name(filename, strlen(filename));
                     Item cur_item = (Item){.item = s2it(cur_str)};
+                    jm_propagate_import_evaluation_error(cur_item, spec_item);
                     extern void js_module_inherit_awaited_target(Item, Item);
                     js_module_inherit_awaited_target(cur_item, spec_item);
                     // Js57 P7d-B: freshly-loaded dep — if it has TLA or

@@ -140,18 +140,18 @@ static bool item_to_bool(Item v) {
     return true;
 }
 
-static void throw_dom_exception(const char* name, const char* msg) {
+static Item throw_dom_exception(const char* name, const char* msg) {
     Item n = make_str(name ? name : "Error");
     Item m = make_str(msg ? msg : "");
-    js_throw_value(js_new_error_with_name(n, m));
+    return js_throw_value(js_new_error_with_name(n, m));
 }
 
 // Translate dom_range exception strings (e.g. "InvalidNodeTypeError",
 // "IndexSizeError", "WrongDocumentError", "HierarchyRequestError",
 // "InvalidStateError") into a JS DOMException-like throw.
-static void throw_from_dom_exc(const char* exc, const char* fallback_msg) {
-    throw_dom_exception(exc ? exc : "InvalidStateError",
-                        fallback_msg ? fallback_msg : "");
+static Item throw_from_dom_exc(const char* exc, const char* fallback_msg) {
+    return throw_dom_exception(exc ? exc : "InvalidStateError",
+                               fallback_msg ? fallback_msg : "");
 }
 
 // ============================================================================
@@ -407,11 +407,10 @@ extern "C" Item js_range_set_start(Item self_v, Item node_arg_v, Item offset_arg
     DomRange* r = range_from(self_v);
     if (!r) return make_undef();
     DomNode* n = node_arg(node_arg_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
     if (!dom_range_set_start(r, n, (uint32_t)item_to_int(offset_arg_v), &exc)) {
-        throw_from_dom_exc(exc, "Range.setStart failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Range.setStart failed");
     }
     range_sync_props(self_v, r);
     return make_undef();
@@ -421,11 +420,10 @@ extern "C" Item js_range_set_end(Item self_v, Item node_arg_v, Item offset_arg_v
     DomRange* r = range_from(self_v);
     if (!r) return make_undef();
     DomNode* n = node_arg(node_arg_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
     if (!dom_range_set_end(r, n, (uint32_t)item_to_int(offset_arg_v), &exc)) {
-        throw_from_dom_exc(exc, "Range.setEnd failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Range.setEnd failed");
     }
     range_sync_props(self_v, r);
     return make_undef();
@@ -434,11 +432,10 @@ extern "C" Item js_range_set_end(Item self_v, Item node_arg_v, Item offset_arg_v
 extern "C" Item js_range_set_start_before(Item self_v, Item node_v) {
     DomRange* r = range_from(self_v); if (!r) return make_undef();
     DomNode* n = node_arg(node_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
     if (!dom_range_set_start_before(r, n, &exc)) {
-        throw_from_dom_exc(exc, "Range.setStartBefore failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Range.setStartBefore failed");
     }
     range_sync_props(self_v, r);
     return make_undef();
@@ -447,11 +444,10 @@ extern "C" Item js_range_set_start_before(Item self_v, Item node_v) {
 extern "C" Item js_range_set_start_after(Item self_v, Item node_v) {
     DomRange* r = range_from(self_v); if (!r) return make_undef();
     DomNode* n = node_arg(node_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
     if (!dom_range_set_start_after(r, n, &exc)) {
-        throw_from_dom_exc(exc, "Range.setStartAfter failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Range.setStartAfter failed");
     }
     range_sync_props(self_v, r);
     return make_undef();
@@ -460,11 +456,10 @@ extern "C" Item js_range_set_start_after(Item self_v, Item node_v) {
 extern "C" Item js_range_set_end_before(Item self_v, Item node_v) {
     DomRange* r = range_from(self_v); if (!r) return make_undef();
     DomNode* n = node_arg(node_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
     if (!dom_range_set_end_before(r, n, &exc)) {
-        throw_from_dom_exc(exc, "Range.setEndBefore failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Range.setEndBefore failed");
     }
     range_sync_props(self_v, r);
     return make_undef();
@@ -473,11 +468,10 @@ extern "C" Item js_range_set_end_before(Item self_v, Item node_v) {
 extern "C" Item js_range_set_end_after(Item self_v, Item node_v) {
     DomRange* r = range_from(self_v); if (!r) return make_undef();
     DomNode* n = node_arg(node_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
     if (!dom_range_set_end_after(r, n, &exc)) {
-        throw_from_dom_exc(exc, "Range.setEndAfter failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Range.setEndAfter failed");
     }
     range_sync_props(self_v, r);
     return make_undef();
@@ -498,11 +492,10 @@ extern "C" Item js_range_collapse(Item self_v, Item to_start_v) {
 extern "C" Item js_range_select_node(Item self_v, Item node_v) {
     DomRange* r = range_from(self_v); if (!r) return make_undef();
     DomNode* n = node_arg(node_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
     if (!dom_range_select_node(r, n, &exc)) {
-        throw_from_dom_exc(exc, "Range.selectNode failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Range.selectNode failed");
     }
     range_sync_props(self_v, r);
     return make_undef();
@@ -511,11 +504,10 @@ extern "C" Item js_range_select_node(Item self_v, Item node_v) {
 extern "C" Item js_range_select_node_contents(Item self_v, Item node_v) {
     DomRange* r = range_from(self_v); if (!r) return make_undef();
     DomNode* n = node_arg(node_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
     if (!dom_range_select_node_contents(r, n, &exc)) {
-        throw_from_dom_exc(exc, "Range.selectNodeContents failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Range.selectNodeContents failed");
     }
     range_sync_props(self_v, r);
     return make_undef();
@@ -532,21 +524,21 @@ extern "C" Item js_range_compare_boundary_points(Item self_v, Item how_v, Item o
     DomRange* r = range_from(self_v); if (!r) return make_int(0);
     int how = item_to_int(how_v);
     DomRange* other = range_from(other_v);
-    if (!other) { throw_dom_exception("TypeError", "argument is not a Range"); return make_int(0); }
+    if (!other) return throw_dom_exception("TypeError", "argument is not a Range");
     const char* exc = nullptr;
     int result = dom_range_compare_boundary_points(
         r, (DomRangeCompareHow)how, other, &exc);
-    if (exc) { throw_from_dom_exc(exc, "compareBoundaryPoints failed"); return make_int(0); }
+    if (exc) return throw_from_dom_exc(exc, "compareBoundaryPoints failed");
     return make_int(result);
 }
 
 extern "C" Item js_range_compare_point(Item self_v, Item node_v, Item offset_v) {
     DomRange* r = range_from(self_v); if (!r) return make_int(0);
     DomNode* n = node_arg(node_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_int(0); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
     int result = dom_range_compare_point(r, n, (uint32_t)item_to_int(offset_v), &exc);
-    if (exc) { throw_from_dom_exc(exc, "comparePoint failed"); return make_int(0); }
+    if (exc) return throw_from_dom_exc(exc, "comparePoint failed");
     return make_int(result);
 }
 
@@ -657,7 +649,7 @@ extern "C" Item js_range_delete_contents(Item self_v) {
     DomRange* r = range_from(self_v); if (!r) return make_undef();
     const char* exc = nullptr;
     if (!dom_range_delete_contents(r, &exc)) {
-        throw_from_dom_exc(exc, "deleteContents failed");
+        return throw_from_dom_exc(exc, "deleteContents failed");
     }
     return make_undef();
 }
@@ -666,7 +658,7 @@ extern "C" Item js_range_extract_contents(Item self_v) {
     DomRange* r = range_from(self_v); if (!r) return ItemNull;
     const char* exc = nullptr;
     DomElement* frag = dom_range_extract_contents(r, &exc);
-    if (exc && !frag) { throw_from_dom_exc(exc, "extractContents failed"); return ItemNull; }
+    if (exc && !frag) return throw_from_dom_exc(exc, "extractContents failed");
     return frag ? js_dom_wrap_element(frag) : ItemNull;
 }
 
@@ -674,17 +666,17 @@ extern "C" Item js_range_clone_contents(Item self_v) {
     DomRange* r = range_from(self_v); if (!r) return ItemNull;
     const char* exc = nullptr;
     DomElement* frag = dom_range_clone_contents(r, &exc);
-    if (exc && !frag) { throw_from_dom_exc(exc, "cloneContents failed"); return ItemNull; }
+    if (exc && !frag) return throw_from_dom_exc(exc, "cloneContents failed");
     return frag ? js_dom_wrap_element(frag) : ItemNull;
 }
 
 extern "C" Item js_range_insert_node(Item self_v, Item node_v) {
     DomRange* r = range_from(self_v); if (!r) return make_undef();
     DomNode* n = node_arg(node_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
     if (!dom_range_insert_node(r, n, &exc)) {
-        throw_from_dom_exc(exc, "insertNode failed");
+        return throw_from_dom_exc(exc, "insertNode failed");
     }
     return make_undef();
 }
@@ -692,10 +684,10 @@ extern "C" Item js_range_insert_node(Item self_v, Item node_v) {
 extern "C" Item js_range_surround_contents(Item self_v, Item node_v) {
     DomRange* r = range_from(self_v); if (!r) return make_undef();
     DomNode* n = node_arg(node_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     const char* exc = nullptr;
     if (!dom_range_surround_contents(r, n, &exc)) {
-        throw_from_dom_exc(exc, "surroundContents failed");
+        return throw_from_dom_exc(exc, "surroundContents failed");
     }
     return make_undef();
 }
@@ -778,9 +770,8 @@ extern "C" Item js_selection_get_range_at(Item self_v, Item index_v) {
     const char* exc = nullptr;
     DomRange* r = dom_selection_get_range_at(s, (uint32_t)item_to_int(index_v), &exc);
     if (!r) {
-        throw_from_dom_exc(exc ? exc : "IndexSizeError",
-                           "Selection.getRangeAt: bad index");
-        return ItemNull;
+        return throw_from_dom_exc(exc ? exc : "IndexSizeError",
+                                  "Selection.getRangeAt: bad index");
     }
     return js_object_for_range(r);
 }
@@ -788,7 +779,7 @@ extern "C" Item js_selection_get_range_at(Item self_v, Item index_v) {
 extern "C" Item js_selection_add_range(Item self_v, Item range_v) {
     DomSelection* s = selection_from(self_v); if (!s) return make_undef();
     DomRange* r = range_from(range_v);
-    if (!r) { throw_dom_exception("TypeError", "argument is not a Range"); return make_undef(); }
+    if (!r) return throw_dom_exception("TypeError", "argument is not a Range");
     // Per spec: if range's root is not the document associated with this,
     // return (do nothing). The WPT tests assert rangeCount is unchanged.
     if (!node_in_active_document(r->start.node, s) ||
@@ -797,8 +788,7 @@ extern "C" Item js_selection_add_range(Item self_v, Item range_v) {
     }
     const char* exc = nullptr;
     if (!state_store_add_selection_range(s->state, r, &exc)) {
-        throw_from_dom_exc(exc, "Selection.addRange failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Selection.addRange failed");
     }
     selection_sync_props(self_v, s);
     return make_undef();
@@ -807,7 +797,7 @@ extern "C" Item js_selection_add_range(Item self_v, Item range_v) {
 extern "C" Item js_selection_remove_range(Item self_v, Item range_v) {
     DomSelection* s = selection_from(self_v); if (!s) return make_undef();
     DomRange* r = range_from(range_v);
-    if (!r) { throw_dom_exception("NotFoundError", "range not in selection"); return make_undef(); }
+    if (!r) return throw_dom_exception("NotFoundError", "range not in selection");
     // Per WHATWG: throw NotFoundError if the range isn't in the selection.
     bool in_sel = false;
     uint32_t rc = dom_selection_range_count(s);
@@ -815,11 +805,10 @@ extern "C" Item js_selection_remove_range(Item self_v, Item range_v) {
         const char* exc = nullptr;
         if (dom_selection_get_range_at(s, i, &exc) == r) { in_sel = true; break; }
     }
-    if (!in_sel) { throw_dom_exception("NotFoundError", "range not in selection"); return make_undef(); }
+    if (!in_sel) return throw_dom_exception("NotFoundError", "range not in selection");
     const char* exc = nullptr;
     if (!state_store_remove_selection_range(s->state, r, &exc)) {
-        throw_from_dom_exc(exc, "Selection.removeRange failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Selection.removeRange failed");
     }
     selection_sync_props(self_v, s);
     return make_undef();
@@ -829,8 +818,7 @@ extern "C" Item js_selection_remove_all_ranges(Item self_v) {
     DomSelection* s = selection_from(self_v); if (!s) return make_undef();
     const char* exc = nullptr;
     if (!selection_state_clear(s, &exc)) {
-        throw_from_dom_exc(exc, "removeAllRanges failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "removeAllRanges failed");
     }
     selection_sync_props(self_v, s);
     return make_undef();
@@ -840,8 +828,7 @@ extern "C" Item js_selection_empty(Item self_v) {
     DomSelection* s = selection_from(self_v); if (!s) return make_undef();
     const char* exc = nullptr;
     if (!selection_state_clear(s, &exc)) {
-        throw_from_dom_exc(exc, "empty failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "empty failed");
     }
     selection_sync_props(self_v, s);
     return make_undef();
@@ -854,25 +841,22 @@ extern "C" Item js_selection_collapse(Item self_v, Item node_v, Item offset_v) {
     if (!n && get_type_id(node_v) == LMD_TYPE_NULL) {
         const char* exc = nullptr;
         if (!selection_state_clear(s, &exc)) {
-            throw_from_dom_exc(exc, "Selection.collapse(null) failed");
-            return make_undef();
+            return throw_from_dom_exc(exc, "Selection.collapse(null) failed");
         }
         selection_sync_props(self_v, s);
         return make_undef();
     }
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     // Per spec: throw InvalidNodeTypeError if node is a DocumentType.
     if (n->node_type == DOM_NODE_DOCTYPE) {
-        throw_dom_exception("InvalidNodeTypeError",
-                            "Selection.collapse: node must not be a DocumentType");
-        return make_undef();
+        return throw_dom_exception("InvalidNodeTypeError",
+                                   "Selection.collapse: node must not be a DocumentType");
     }
     // Per spec: offset bounds check happens BEFORE the document-root check.
     uint32_t off = (uint32_t)item_to_int(offset_v);
     if (off > dom_node_boundary_length(n)) {
-        throw_dom_exception("IndexSizeError",
-                            "Selection.collapse: offset is out of bounds");
-        return make_undef();
+        return throw_dom_exception("IndexSizeError",
+                                   "Selection.collapse: offset is out of bounds");
     }
     // Per spec: if node's root is not the document associated with this,
     // abort (no-op — the selection is unchanged, no range is added).
@@ -882,8 +866,7 @@ extern "C" Item js_selection_collapse(Item self_v, Item node_v, Item offset_v) {
     const char* exc = nullptr;
     DomBoundary caret = { n, off };
     if (!selection_state_set(s, &caret, &caret, &exc)) {
-        throw_from_dom_exc(exc, "Selection.collapse failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Selection.collapse failed");
     }
     extern void js_dom_focus_if_editing_host_for_selection(void* dom_node);
     js_dom_focus_if_editing_host_for_selection((void*)n);
@@ -909,14 +892,12 @@ extern "C" Item js_selection_collapse_to_start(Item self_v) {
         return make_undef();
     }
     if (s->range_count == 0 || !s->ranges[0]) {
-        throw_from_dom_exc("InvalidStateError", "collapseToStart failed");
-        return make_undef();
+        return throw_from_dom_exc("InvalidStateError", "collapseToStart failed");
     }
     DomBoundary start = s->ranges[0]->start;
     const char* exc = nullptr;
     if (!selection_state_set(s, &start, &start, &exc)) {
-        throw_from_dom_exc(exc, "collapseToStart failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "collapseToStart failed");
     }
     selection_sync_props(self_v, s);
     return make_undef();
@@ -936,14 +917,12 @@ extern "C" Item js_selection_collapse_to_end(Item self_v) {
         return make_undef();
     }
     if (s->range_count == 0 || !s->ranges[0]) {
-        throw_from_dom_exc("InvalidStateError", "collapseToEnd failed");
-        return make_undef();
+        return throw_from_dom_exc("InvalidStateError", "collapseToEnd failed");
     }
     DomBoundary end = s->ranges[0]->end;
     const char* exc = nullptr;
     if (!selection_state_set(s, &end, &end, &exc)) {
-        throw_from_dom_exc(exc, "collapseToEnd failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "collapseToEnd failed");
     }
     selection_sync_props(self_v, s);
     return make_undef();
@@ -955,11 +934,11 @@ extern "C" Item js_selection_extend(Item self_v, Item node_v, Item offset_v) {
     TypeId node_type = get_type_id(node_v);
     if (!n) {
         if (node_type == LMD_TYPE_UNDEFINED) {
-            throw_dom_exception("TypeError",
-                                "Failed to execute 'extend' on 'Selection': 1 argument required, but only 0 present.");
+            return throw_dom_exception("TypeError",
+                                       "Failed to execute 'extend' on 'Selection': 1 argument required, but only 0 present.");
         } else {
-            throw_dom_exception("TypeError",
-                                "Failed to execute 'extend' on 'Selection': parameter 1 is not of type 'Node'.");
+            return throw_dom_exception("TypeError",
+                                       "Failed to execute 'extend' on 'Selection': parameter 1 is not of type 'Node'.");
         }
         return make_undef();
     }
@@ -968,13 +947,11 @@ extern "C" Item js_selection_extend(Item self_v, Item node_v, Item offset_v) {
         return make_undef();
     }
     if (s->range_count == 0 || !s->ranges[0]) {
-        throw_from_dom_exc("InvalidStateError", "Selection.extend failed");
-        return make_undef();
+        return throw_from_dom_exc("InvalidStateError", "Selection.extend failed");
     }
     if (n->node_type == DOM_NODE_DOCTYPE) {
-        throw_dom_exception("InvalidNodeTypeError",
-                            "Selection.extend: node must not be a DocumentType");
-        return make_undef();
+        return throw_dom_exception("InvalidNodeTypeError",
+                                   "Selection.extend: node must not be a DocumentType");
     }
     uint32_t off = (uint32_t)item_to_int(offset_v);
     uint32_t node_len = dom_node_boundary_length(n);
@@ -983,8 +960,7 @@ extern "C" Item js_selection_extend(Item self_v, Item node_v, Item offset_v) {
         snprintf(msg, sizeof(msg),
                  "Failed to execute 'extend' on 'Selection': The offset %u is larger than the node's length (%u).",
                  off, node_len);
-        throw_dom_exception("IndexSizeError", msg);
-        return make_undef();
+        return throw_dom_exception("IndexSizeError", msg);
     }
     const char* exc = nullptr;
     DomBoundary anchor = dom_selection_anchor_boundary(s);
@@ -997,8 +973,7 @@ extern "C" Item js_selection_extend(Item self_v, Item node_v, Item offset_v) {
         ok = selection_state_set(s, &anchor, &focus, &exc);
     }
     if (!ok) {
-        throw_from_dom_exc(exc, "Selection.extend failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Selection.extend failed");
     }
     selection_sync_props(self_v, s);
     return make_undef();
@@ -1013,45 +988,40 @@ extern "C" Item js_selection_set_base_and_extent(Item self_v, Item anchor_node_v
     TypeId tf = get_type_id(focus_off_v);
     if (ta == LMD_TYPE_UNDEFINED || tf == LMD_TYPE_UNDEFINED ||
         get_type_id(focus_node_v) == LMD_TYPE_UNDEFINED) {
-        throw_dom_exception("TypeError", "setBaseAndExtent: 4 arguments required");
-        return make_undef();
+        return throw_dom_exception("TypeError", "setBaseAndExtent: 4 arguments required");
     }
     DomNode* an = node_arg(anchor_node_v);
     DomNode* fn = node_arg(focus_node_v);
     if (!an && get_type_id(anchor_node_v) == LMD_TYPE_NULL) {
         const char* exc = nullptr;
         if (!selection_state_clear(s, &exc)) {
-            throw_from_dom_exc(exc, "setBaseAndExtent clear failed");
-            return make_undef();
+            return throw_from_dom_exc(exc, "setBaseAndExtent clear failed");
         }
         selection_sync_props(self_v, s);
         return make_undef();
     }
     if ((an && an->node_type == DOM_NODE_DOCTYPE) ||
         (fn && fn->node_type == DOM_NODE_DOCTYPE)) {
-        throw_dom_exception("InvalidNodeTypeError",
-                            "setBaseAndExtent: node must not be a DocumentType");
-        return make_undef();
+        return throw_dom_exception("InvalidNodeTypeError",
+                                   "setBaseAndExtent: node must not be a DocumentType");
     }
     if (an && !fn && get_type_id(focus_node_v) == LMD_TYPE_NULL) {
         uint32_t off = selection_text_offset_from_item(an, anchor_off_v);
         const char* exc = nullptr;
         DomBoundary caret = { an, off };
         if (!selection_state_set(s, &caret, &caret, &exc)) {
-            throw_from_dom_exc(exc, "setBaseAndExtent collapse failed");
-            return make_undef();
+            return throw_from_dom_exc(exc, "setBaseAndExtent collapse failed");
         }
         selection_sync_props(self_v, s);
         return make_undef();
     }
-    if (!an || !fn) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!an || !fn) return throw_dom_exception("TypeError", "node is not a Node");
     // Per spec: if either node isn't a descendant of the document, abort
     // (selection is left empty — do not add a range).
     if (!node_in_active_document(an, s) || !node_in_active_document(fn, s)) {
         const char* exc = nullptr;
         if (!selection_state_clear(s, &exc)) {
-            throw_from_dom_exc(exc, "setBaseAndExtent clear failed");
-            return make_undef();
+            return throw_from_dom_exc(exc, "setBaseAndExtent clear failed");
         }
         selection_sync_props(self_v, s);
         return make_undef();
@@ -1066,8 +1036,7 @@ extern "C" Item js_selection_set_base_and_extent(Item self_v, Item anchor_node_v
         selection_text_offset_from_item(fn, focus_off_v)
     };
     if (!selection_state_set(s, &anchor, &focus, &exc)) {
-        throw_from_dom_exc(exc, "setBaseAndExtent failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "setBaseAndExtent failed");
     }
     extern void js_dom_focus_if_editing_host_for_selection(void* dom_node);
     js_dom_focus_if_editing_host_for_selection((void*)fn);
@@ -1078,12 +1047,11 @@ extern "C" Item js_selection_set_base_and_extent(Item self_v, Item anchor_node_v
 extern "C" Item js_selection_select_all_children(Item self_v, Item node_v) {
     DomSelection* s = selection_from(self_v); if (!s) return make_undef();
     DomNode* n = node_arg(node_v);
-    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    if (!n) return throw_dom_exception("TypeError", "node is not a Node");
     // Per spec: throw InvalidNodeTypeError if node is a DocumentType.
     if (n->node_type == DOM_NODE_DOCTYPE) {
-        throw_dom_exception("InvalidNodeTypeError",
-                            "Selection.selectAllChildren: node must not be a DocumentType");
-        return make_undef();
+        return throw_dom_exception("InvalidNodeTypeError",
+                                   "Selection.selectAllChildren: node must not be a DocumentType");
     }
     // Per spec: if node's root is not the document associated with this,
     // abort (no-op).
@@ -1100,8 +1068,7 @@ extern "C" Item js_selection_select_all_children(Item self_v, Item node_v) {
     DomBoundary start = { n, 0 };
     DomBoundary end = { n, child_count };
     if (!selection_state_set(s, &start, &end, &exc)) {
-        throw_from_dom_exc(exc, "selectAllChildren failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "selectAllChildren failed");
     }
     selection_sync_props(self_v, s);
     return make_undef();
@@ -1111,9 +1078,8 @@ extern "C" Item js_selection_contains_node(Item self_v, Item node_v, Item allow_
     DomSelection* s = selection_from(self_v); if (!s) return make_bool(false);
     DomNode* n = node_arg(node_v);
     if (!n) {
-        throw_dom_exception("TypeError",
-                            "Failed to execute 'containsNode' on 'Selection': parameter 1 is not of type 'Node'.");
-        return make_undef();
+        return throw_dom_exception("TypeError",
+                                   "Failed to execute 'containsNode' on 'Selection': parameter 1 is not of type 'Node'.");
     }
     bool partial = false;
     TypeId t = get_type_id(allow_partial_v);
@@ -1125,8 +1091,7 @@ extern "C" Item js_selection_delete_from_document(Item self_v) {
     DomSelection* s = selection_from(self_v); if (!s) return make_undef();
     const char* exc = nullptr;
     if (!state_store_delete_selection_from_document(s->state, &exc)) {
-        throw_from_dom_exc(exc, "deleteFromDocument failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "deleteFromDocument failed");
     }
     selection_sync_props(self_v, s);
     return make_undef();
@@ -1165,8 +1130,7 @@ extern "C" Item js_selection_modify(Item self_v, Item alter_v, Item dir_v, Item 
     const char* gran  = fn_to_cstr(gran_v);
     const char* exc = nullptr;
     if (!state_store_modify_selection(s->state, alter, dir, gran, &exc)) {
-        throw_from_dom_exc(exc, "Selection.modify failed");
-        return make_undef();
+        return throw_from_dom_exc(exc, "Selection.modify failed");
     }
     selection_sync_props(self_v, s);
     return make_undef();

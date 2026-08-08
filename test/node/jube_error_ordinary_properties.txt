@@ -1,0 +1,6 @@
+ERR_CARRIER 42
+true
+ERR_CARRIER true true true
+2 code detail
+true
+undefined false

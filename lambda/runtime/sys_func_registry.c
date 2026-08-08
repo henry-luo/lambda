@@ -52,7 +52,7 @@ extern Item js_create_data_property(Item obj, Item name, Item value);
 extern bool js_for_in_key_is_live(Item object, Item key);
 extern Item js_get_async_iterator(Item iterable);
 extern Item js_async_iterator_step_result(Item iterator);
-extern int64_t js_iterator_result_done(Item result);
+extern Item js_iterator_result_done(Item result);
 extern Item js_iterator_result_value(Item result);
 extern int64_t js_shape_slot_guard(Item object, const char* name, int64_t name_len, int64_t byte_offset);
 #ifdef LAMBDA_JS_EXEC_PROFILE
@@ -68,8 +68,8 @@ extern void js_profile_property_set_site(const char* label);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
-extern void js_check_class_heritage_constructor(Item superclass);
-extern void js_check_class_prototype_parent(Item prototype);
+extern Item js_check_class_heritage_constructor(Item superclass);
+extern Item js_check_class_prototype_parent(Item prototype);
 // super() for native parent constructors: merges returned object's own props onto `this`
 extern Item js_super_call_native(Item callee, Item this_val, Item* args, int argc);
 extern Item js_super_apply_native(Item callee, Item this_val, Item args_array);
@@ -214,7 +214,7 @@ extern Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item, 
 // after they made 8 decodeURI/decodeURIComponent tests batch-unstable.
 extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
 extern Item js_test262_concat_percent_hex(Item left_item, Item n_item);
-extern void js_validate_native_function_source(Item source_item);
+extern Item js_validate_native_function_source(Item source_item);
 // Phase 8C: Image() constructor (defined in js_dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 
@@ -1120,31 +1120,32 @@ extern Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 extern void js_set_strict_mode(int64_t strict);
 
 // with-statement scope support (js_globals.cpp)
-extern void js_with_push(Item obj);
+extern Item js_with_push(Item obj);
 extern void js_with_pop(void);
 extern int js_with_save_depth(void);
 extern void js_with_restore_depth(int depth);
 extern int64_t js_with_depth_active(void);
 extern Item js_get_with_binding_or_fallback(Item key, Item fallback);
+extern Item js_get_with_binding_or_fallback_strict(Item key, Item fallback);
 extern Item js_get_last_with_binding_base_or_undefined(Item key);
-extern int64_t js_probe_with_binding(Item key);
-extern int64_t js_capture_with_binding(Item key);
-extern int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
-extern int64_t js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
+extern Item js_probe_with_binding(Item key);
+extern Item js_capture_with_binding(Item key);
+extern Item js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
+extern Item js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
 extern Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
 extern int64_t js_global_binding_exists(Item key);
 // Tune8 §2.2: js_set_global_property absorbs js_set_global_property_strict
 // (strict is now an explicit constant operand).
-extern void js_set_global_property(Item key, Item value, int64_t strict);
-extern void js_set_global_var_property_fast(Item key, Item value);
-extern void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
+extern Item js_set_global_property(Item key, Item value, int64_t strict);
+extern Item js_set_global_var_property_fast(Item key, Item value);
+extern Item js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
 extern void js_register_global_var_module_binding(Item key, int64_t index);
 extern void js_init_module_vars_undefined_bulk(const int* indices, const Item* keys,
     int count, int define_global_var_properties);
 extern void js_mark_private_method_non_writable(Item object, Item name);
 extern void js_set_method_home_from_target(Item target, Item fn_item);
 extern void js_refresh_prototype_method_homes(Item prototype, Item class_item);
-extern void js_init_class_instance_fields(Item callee, Item object);
+extern Item js_init_class_instance_fields(Item callee, Item object);
 extern void js_set_class_instance_field_metadata_bulk(Item class_item,
     const char** field_names, const int* field_lens, const uint8_t* field_kinds,
     int count);
@@ -1154,7 +1155,8 @@ extern Item js_private_key_for_class(Item class_item, Item source_name);
 extern Item js_private_key_for_current_class(Item source_name);
 extern Item js_private_home_class_enter(Item class_item);
 extern void js_private_home_class_leave(Item previous_class);
-extern void js_private_brand_add(Item object, Item private_key, Item callee);
+extern Item js_private_home_class_leave_result(Item previous_class, Item result);
+extern Item js_private_brand_add(Item object, Item private_key, Item callee);
 extern Item js_private_field_define(Item object, Item private_key, Item value);
 extern void js_set_private_class_index(Item class_item, int index);
 extern void js_set_class_ctor_shape_metadata(Item class_item, const char** prop_names, const int* prop_lens, int count);
@@ -1166,10 +1168,10 @@ extern void js_define_global_property_v(int64_t kind, Item key, Item value);
 extern void js_global_lexical_declare(Item key, Item value, int64_t immutable);
 extern int64_t js_global_lexical_binding_exists(Item key);
 extern Item js_global_lexical_get_or_fallback(Item key, Item fallback);
-extern int64_t js_global_lexical_set_if_exists(Item key, Item value);
-extern void js_evalscript_check_global_var_decl(Item key);
-extern void js_evalscript_check_global_function_decl(Item key);
-extern void js_evalscript_check_global_lex_decl(Item key);
+extern Item js_global_lexical_set_if_exists(Item key, Item value);
+extern Item js_evalscript_check_global_var_decl(Item key);
+extern Item js_evalscript_check_global_function_decl(Item key);
+extern Item js_evalscript_check_global_lex_decl(Item key);
 extern void js_eval_env_push_frame(void);
 extern void js_eval_global_lexical_push_frame(void);
 extern void js_eval_env_bind(Item key, Item value);
@@ -1188,7 +1190,7 @@ extern void js_eval_private_bind(Item unscoped_key, Item scoped_key);
 extern Item js_eval_private_resolve(Item unscoped_key);
 extern Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
 extern void js_eval_local_export_var(Item key, Item value);
-extern void js_check_unresolved_capture(Item value, const char* name, int64_t len);
+extern Item js_check_unresolved_capture(Item value, const char* name, int64_t len);
 extern Item js_resolve_unresolved_binding(Item value, const char* name, int64_t len, int64_t in_typeof);
 extern int64_t js_262_eval_script_is_active(void);
 
@@ -1222,8 +1224,8 @@ extern void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
 extern void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 extern void js_set_class_name(Item cls_item, Item name_item);
 extern void js_set_default_constructor_property(Item proto_item, Item cls_item);
-extern void js_prepare_class_prototype_property(Item cls_item);
-extern void js_check_class_static_field_key(Item key_item);
+extern Item js_prepare_class_prototype_property(Item cls_item);
+extern Item js_check_class_static_field_key(Item key_item);
 extern void js_mark_non_configurable(Item object, Item name);
 extern Item js_to_property_key(Item key);
 extern Item js_delete_property_strict(Item obj, Item key);
@@ -1252,15 +1254,15 @@ extern int64_t js_loose_eq_raw(Item left, Item right);
 extern int64_t js_discard_value(Item value);
 
 // native test262 harness functions for batch performance
-extern void js_assert_same_value(Item actual, Item expected, Item message);
-extern void js_assert_not_same_value(Item actual, Item unexpected, Item message);
-extern void js_assert_compare_array(Item actual, Item expected, Item message);
-extern void js_assert_deep_equal(Item actual, Item expected, Item message);
+extern Item js_assert_same_value(Item actual, Item expected, Item message);
+extern Item js_assert_not_same_value(Item actual, Item unexpected, Item message);
+extern Item js_assert_compare_array(Item actual, Item expected, Item message);
+extern Item js_assert_deep_equal(Item actual, Item expected, Item message);
 extern Item js_compare_array(Item a, Item b);
-extern void js_verify_property(Item obj, Item name, Item desc, Item options);
-extern void js_assert_throws(Item expected_ctor, Item func, Item message);
-extern void js_assert_base(Item must_be_true, Item message);
-extern void js_donotevaluate(void);
+extern Item js_verify_property(Item obj, Item name, Item desc, Item options);
+extern Item js_assert_throws(Item expected_ctor, Item func, Item message);
+extern Item js_assert_base(Item must_be_true, Item message);
+extern Item js_donotevaluate(void);
 extern Item js_is_constructor(Item fn);
 extern Item js_decimal_to_percent_hex_string(Item n);
 extern Item js_test262_build_string(Item args);
@@ -2101,40 +2103,23 @@ JitImport jit_runtime_imports[] = {
     {"js_console_log", FPTR(js_console_log)},
     // exception handling
     {"js_throw_value", FPTR(js_throw_value),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_NON_GC_SCALAR, 0,
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM, 0,
       0, JIT_EXCEPTION_SETS, 0}},
-    // Exception polling is a thread-local flag read with no allocation.
-    {"js_check_exception", FPTR(js_check_exception),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,
+    {"js_error_lane_payload", FPTR(js_error_lane_payload),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES, 0}},
-    {"js_debug_assert_exception_clear", FPTR(js_debug_assert_exception_clear),
-     // Debug failures log before aborting; logging is not a NO_GC operation.
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,
-      JIT_IMPORT_NUMBER_STACK_PRESERVES,
-      JIT_EXCEPTION_PRESERVES, 0}},
-    {"js_debug_assert_exception_set", FPTR(js_debug_assert_exception_set),
-     // Keep the debug assertion on the conservative path for the same reason.
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,
-      JIT_IMPORT_NUMBER_STACK_PRESERVES,
-      JIT_EXCEPTION_PRESERVES, 0}},
-    {"js_clear_exception", FPTR(js_clear_exception),
-     // Re-materializing a wide scalar can grow the side-number stack, so this
-     // import must publish a JIT safepoint before the returned Item is used.
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
-      // The returned Item comes from the exception slots, so catch bindings
-      // must treat wide scalars like Number.MIN_VALUE as already stable.
-      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
-      JIT_EXCEPTION_CLEARS, 0}},
     {"js_require_object_coercible", FPTR(js_require_object_coercible)},
     // Tune8 §2.3: js_throw_syntax_error / _reference_error replaced by
     // js_throw_named_error(kind, msg). C wrappers in js_runtime.cpp preserve
     // direct-call semantics for js_globals.cpp.
     {"js_throw_named_error", FPTR(js_throw_named_error),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_NON_GC_SCALAR,
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
       0, JIT_EXCEPTION_SETS, 0}},
+    {"js_new_error_with_name", FPTR(js_new_error_with_name)},
     {"js_new_error_with_stack", FPTR(js_new_error_with_stack)},
     {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
     {"js_new_aggregate_error", FPTR(js_new_aggregate_error)},
@@ -2368,7 +2353,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_global_property", FPTR(js_get_global_property)},
     {"js_get_global_property_strict", FPTR(js_get_global_property_strict)},
     {"js_get_global_property_reference", FPTR(js_get_global_property_reference)},
-    {"js_get_global_builtin_fn", FPTR(js_get_global_builtin_fn)},
+    {"js_get_global_builtin_fn_by_id", FPTR(js_get_global_builtin_fn_by_id)},
     {"js_with_push", FPTR(js_with_push)},
     {"js_with_pop", FPTR(js_with_pop)},
     {"js_with_save_depth", FPTR(js_with_save_depth),
@@ -2381,6 +2366,7 @@ JitImport jit_runtime_imports[] = {
       JIT_EXCEPTION_PRESERVES,
       JIT_ARG_EFFECT(0, JIT_ARG_BORROWED)}},
     {"js_get_with_binding_or_fallback", FPTR(js_get_with_binding_or_fallback)},
+    {"js_get_with_binding_or_fallback_strict", FPTR(js_get_with_binding_or_fallback_strict)},
     {"js_get_last_with_binding_base_or_undefined", FPTR(js_get_last_with_binding_base_or_undefined)},
     {"js_probe_with_binding", FPTR(js_probe_with_binding)},
     {"js_capture_with_binding", FPTR(js_capture_with_binding)},
@@ -2400,6 +2386,7 @@ JitImport jit_runtime_imports[] = {
     {"js_private_key_for_current_class", FPTR(js_private_key_for_current_class)},
     {"js_private_home_class_enter", FPTR(js_private_home_class_enter)},
     {"js_private_home_class_leave", FPTR(js_private_home_class_leave)},
+    {"js_private_home_class_leave_result", FPTR(js_private_home_class_leave_result)},
     {"js_private_brand_add", FPTR(js_private_brand_add)},
     {"js_private_field_define", FPTR(js_private_field_define)},
     {"js_set_private_class_index", FPTR(js_set_private_class_index)},
@@ -2452,6 +2439,9 @@ JitImport jit_runtime_imports[] = {
     {"js_gen_yield_delegate_result", FPTR(js_gen_yield_delegate_result)},
     {"js_gen_is_return_signal", FPTR(js_gen_is_return_signal)},
     {"js_gen_return_signal_value", FPTR(js_gen_return_signal_value)},
+    {"js_gen_throw_signal", FPTR(js_gen_throw_signal)},
+    {"js_gen_is_throw_signal", FPTR(js_gen_is_throw_signal)},
+    {"js_gen_throw_signal_value", FPTR(js_gen_throw_signal_value)},
     {"js_iterable_to_array", FPTR(js_iterable_to_array)},
     // v29: Lazy iterator protocol for for-of
     {"js_get_iterator", FPTR(js_get_iterator)},
@@ -3306,9 +3296,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_int_lane_add_slow", "lambda_int_lane_sub_slow", "lambda_int_lane_mul_slow",
         "lambda_int_lane_divmod_slow",
         "js_is_truthy", "js_is_nullish",
-        // Only the flag read is an audited NO_GC helper. Debug assertions can
-        // log on failure and exception extraction can allocate a number home.
-        "js_check_exception",
+        "js_error_lane_payload",
         "js_set_this", "js_get_new_target",
         "js_set_direct_new_target", "js_set_function_source",
         "js_mark_strict_func", "js_finalize_function", "js_set_module_var",

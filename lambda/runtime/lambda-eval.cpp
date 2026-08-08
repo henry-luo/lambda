@@ -149,7 +149,7 @@ static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     if (!error) return;
 
     // capture native stack trace via FP walking
-    error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+    error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
 
     // store in context
     if (context->last_error) {
@@ -213,7 +213,7 @@ Item fn_error(Item message) {
         }
         LambdaError* error = err_create_heap(ERR_USER_ERROR, msg, &loc);
         if (error) {
-            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
             return err2it(error);
         }
     }
@@ -900,7 +900,7 @@ static Item function_argument_count_check(Function* fn, int actual, const char* 
         if (context->current_file) loc.file = context->current_file;
         LambdaError* error = err_create_heap(ERR_ARGUMENT_COUNT_MISMATCH, message, &loc);
         if (error) {
-            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
             return err2it(error);
         }
     }
@@ -920,7 +920,7 @@ static Item unsupported_dynamic_abi_error(Function* fn, int required_abi_args,
         if (context->current_file) loc.file = context->current_file;
         LambdaError* error = err_create_heap(ERR_UNSUPPORTED_DYNAMIC_ABI, message, &loc);
         if (error) {
-            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
             return err2it(error);
         }
     }
@@ -1209,7 +1209,7 @@ static Item lambda_dynamic_call_error(LambdaErrorCode code, const char* caller,
         if (context->current_file) loc.file = context->current_file;
         LambdaError* error = err_create_heap(code, message, &loc);
         if (error) {
-            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
             return err2it(error);
         }
     }
@@ -1978,7 +1978,7 @@ static Item lambda_type_error_with_validation(Item actual, Type* expected,
         if (context->current_file) loc.file = context->current_file;
         LambdaError* error = err_create_heap(ERR_TYPE_MISMATCH, message, &loc);
         if (error) {
-            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
             return err2it(error);
         }
     }

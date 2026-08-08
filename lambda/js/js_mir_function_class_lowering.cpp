@@ -16,9 +16,9 @@ MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
     MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
-    jm_call_void_1(mt, "js_check_class_prototype_parent",
+    jm_call_1(mt, "js_check_class_prototype_parent", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
-    jm_emit_exc_propagate_check(mt);
+    jm_emit_error_lane_propagate_check(mt);
     jm_call_void_2(mt, "js_set_prototype",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
@@ -72,6 +72,16 @@ static MIR_reg_t jm_emit_module_const_or_null(JsMirTranspiler* mt, const char* n
     return jm_emit_null(mt);
 }
 
+static MIR_reg_t jm_emit_async_rejected_value(JsMirTranspiler* mt,
+        MIR_reg_t error_lane) {
+    // Promise rejection observes the original thrown JavaScript value; the
+    // Lambda ERROR carrier must be unwrapped at this async boundary.
+    MIR_reg_t error = jm_call_1(mt, "js_error_lane_payload", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, error_lane));
+    return jm_call_1(mt, "js_promise_reject", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, error));
+}
+
 static void jm_emit_default_parameter(JsMirTranspiler* mt, JsFunctionNode* fn,
         JsAstNode* param_node, MIR_reg_t param_reg);
 
@@ -94,12 +104,14 @@ static void jm_validate_destructured_params(JsMirTranspiler* mt,
                         MIR_new_label_op(mt->ctx, skip),
                         MIR_new_reg_op(mt->ctx, preg),
                         MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
-                    jm_call_void_1(mt, "js_require_object_coercible",
+                    jm_call_1(mt, "js_require_object_coercible", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
+                    jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
                     jm_emit_label(mt, skip);
                 } else {
-                    jm_call_void_1(mt, "js_require_object_coercible",
+                    jm_call_1(mt, "js_require_object_coercible", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
+                    jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
                 }
             }
             param = param->next;
@@ -238,6 +250,11 @@ static MIR_reg_t jm_emit_computed_method_key(JsMirTranspiler* mt,
         }
         if (function_spill >= 0) jm_gen_spill_load(mt, function_item, function_spill);
     }
+    // Class definition evaluates ToPropertyKey before creating the method; otherwise
+    // an abrupt key conversion can be observed only after the method allocation.
+    method_key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, method_key));
+    jm_emit_error_lane_propagate_check(mt);
     return method_key;
 }
 
@@ -325,10 +342,11 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
     if (policy->mode == JS_MIR_CLASS_METHOD_OWN_STATIC && method->name &&
         jm_is_private_name(method->name) &&
         !jm_private_static_method_brand_seen(policy->owner_class, policy->method_index)) {
-        jm_call_void_3(mt, "js_private_brand_add",
+        jm_call_3(mt, "js_private_brand_add", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, policy->destination),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, method_key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, policy->destination));
+        jm_emit_error_lane_propagate_check(mt);
     }
     return true;
 }
@@ -701,10 +719,10 @@ static bool jm_capture_is_nfe_binding(JsMirTranspiler* mt, JsFuncCollected* fc, 
 static MIR_reg_t jm_transpile_default_param_value(JsMirTranspiler* mt, JsFunctionNode* fn, JsAstNode* expr) {
     if (jm_default_param_has_conflicting_direct_eval(fn, expr)) {
         MIR_reg_t msg = jm_box_string_literal(mt, "Invalid direct eval var declaration in parameter initializer", 56);
-        jm_call_void_2(mt, "js_throw_named_error",
+        jm_call_2(mt, "js_throw_named_error", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, msg));
-        jm_emit_exc_propagate_check(mt);
+        jm_emit_error_lane_propagate_check(mt);
         return jm_emit_undefined(mt);
     }
     return jm_transpile_box_item(mt, expr);
@@ -961,8 +979,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_reg_t saved_tco_count = mt->tco_count_reg;
         bool saved_tail_pos = mt->in_tail_position;
         // Save exception label — must not leak from outer function into native version
-        MIR_label_t saved_except_label = mt->func_except_label;
-        JsExcTrack saved_exc_track = mt->exc_track;
+        MIR_label_t saved_error_lane_label = mt->func_error_lane_label;
+        JsErrorLaneTrack saved_error_lane_track = mt->error_lane_track;
+        MIR_reg_t saved_last_call_result = mt->last_call_result_reg;
+        MIR_reg_t saved_func_error_lane_value = mt->func_error_lane_value_reg;
 
         if (jm_has_use_strict_directive(fn)) {
             fc->is_strict = true;
@@ -981,8 +1001,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->tco_func = NULL;
         mt->in_tail_position = false;
         mt->tco_jumped = false;
-        mt->func_except_label = 0;    // reset — native func needs its own exception label
-        mt->exc_track = JS_EXC_UNKNOWN;
+        mt->func_error_lane_label = 0;    // reset — native func needs its own exception label
+        mt->error_lane_track = JS_ERROR_LANE_UNKNOWN;
+        mt->last_call_result_reg = 0;
+        mt->func_error_lane_value_reg = 0;
 
         jm_begin_function_frame(mt, native_ret_type, false,
             MIR_SCALAR_RETURN_NONE, MIR_reg(mt->ctx, "ctx", native_func));
@@ -1209,8 +1231,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     finish_native:
         // Exception landing pad for native function (return 0/0.0 on exception)
-        if (mt->func_except_label) {
-            jm_emit_label(mt, mt->func_except_label);
+        if (mt->func_error_lane_label) {
+            jm_emit_label(mt, mt->func_error_lane_label);
             MIR_reg_t exc_ret = jm_new_reg(mt, "exc_ret", native_ret_type);
             if (native_ret_type == MIR_T_D) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
@@ -1240,8 +1262,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->tco_count_reg = saved_tco_count;
         mt->in_tail_position = saved_tail_pos;
         mt->tco_jumped = false;
-        mt->func_except_label = saved_except_label;  // restore outer function's exception label
-        mt->exc_track = saved_exc_track;
+        mt->func_error_lane_label = saved_error_lane_label;  // restore outer function's error exit
+        mt->error_lane_track = saved_error_lane_track;
+        mt->last_call_result_reg = saved_last_call_result;
+        mt->func_error_lane_value_reg = saved_func_error_lane_value;
 
         log_debug("js-mir P4: generated native version %s (params: %d, ret: %s%s)",
             native_name, param_count,
@@ -1373,7 +1397,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->scope_env_reg = 0;
         mt->scope_env_slot_count = 0;
         mt->current_func_index = (int)(fc - mt->func_entries);
-        mt->func_except_label = 0;  // reset for generator state machine
+        mt->func_error_lane_label = 0;  // reset for generator state machine
         mt->eval_local_frame_reg = 0;
 
         // Set up generator state
@@ -1589,12 +1613,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
                 // Object destructuring with RequireObjectCoercible check
                 if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-                    jm_call_void_1(mt, "js_require_object_coercible",
+                    jm_call_1(mt, "js_require_object_coercible", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                    MIR_label_t skip_param_destr = jm_new_label(mt);
-                    jm_emit_exception_guard(mt, skip_param_destr);
+                    jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
                     jm_emit_object_destructure(mt, destr_pat, preg);
-                    jm_emit_label(mt, skip_param_destr);
                 }
 
                 // Array destructuring
@@ -1612,8 +1634,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // binding from body execution. js_generator_create eagerly runs state 0
         // to execute param destructuring, and the generator starts at state 1.
         {
-            // Check for pending exception from param destructuring
-            jm_emit_exception_guard(mt, mt->gen_done_label);
+            // Route an ERROR Item returned by parameter destructuring.
+            jm_emit_error_lane_guard(mt, mt->gen_done_label);
 
             jm_emit_suspend_env_save(mt);
 
@@ -1826,7 +1848,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 JsAstNode* s = blk->statements;
                 while (s) {
                     jm_transpile_statement(mt, s);
-                    jm_emit_exc_propagate_check(mt);
+                    jm_emit_error_lane_propagate_check(mt);
                     s = s->next;
                 }
             } else {
@@ -1861,9 +1883,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     gen_sm_finish:
         // Exception landing pad for generator state machine
-        if (mt->func_except_label) {
-            jm_emit_label(mt, mt->func_except_label);
-            MIR_reg_t exc_ret = jm_emit_null(mt);
+        if (mt->func_error_lane_label) {
+            jm_emit_label(mt, mt->func_error_lane_label);
+            MIR_reg_t exc_ret = jm_emit_error_lane_return(mt);
             jm_emit_eval_local_pop_if_needed(mt);
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
         }
@@ -1964,8 +1986,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             int saved_func_index_sm = mt->current_func_index;
             bool saved_in_generator = mt->in_generator;
             bool saved_in_async = mt->in_async;
-            MIR_label_t saved_except_label_sm = mt->func_except_label;
-            JsExcTrack saved_exc_track_sm = mt->exc_track;
+            MIR_label_t saved_error_lane_label_sm = mt->func_error_lane_label;
+            JsErrorLaneTrack saved_error_lane_track_sm = mt->error_lane_track;
+            MIR_reg_t saved_last_call_result_sm = mt->last_call_result_reg;
+            MIR_reg_t saved_func_error_lane_value_sm = mt->func_error_lane_value_reg;
             MIR_reg_t saved_arguments_reg_sm = mt->arguments_reg;
             JsAstNode* saved_arguments_params_sm = mt->arguments_params;
             int saved_arguments_param_scope_depth_sm = mt->arguments_param_scope_depth;
@@ -1990,8 +2014,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->scope_env_reg = 0;
             mt->scope_env_slot_count = 0;
             mt->current_func_index = (int)(fc - mt->func_entries);
-            mt->func_except_label = 0;
-            mt->exc_track = JS_EXC_UNKNOWN;
+            mt->func_error_lane_label = 0;
+            mt->error_lane_track = JS_ERROR_LANE_UNKNOWN;
+            mt->last_call_result_reg = 0;
+            mt->func_error_lane_value_reg = 0;
 
             // Set both flags: in_generator reuses gen_* infrastructure, in_async for await handling
             mt->in_generator = true;
@@ -2025,7 +2051,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
             mt->gen_done_label = jm_new_label(mt);
             MIR_label_t async_sm_catch_label = jm_new_label(mt);
-            mt->func_except_label = async_sm_catch_label;
+            mt->func_error_lane_label = async_sm_catch_label;
 
             // Emit state dispatch: switch on state
             for (int si = 0; si <= await_count; si++) {
@@ -2091,12 +2117,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
                     // Object destructuring with RequireObjectCoercible check
                     if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-                        jm_call_void_1(mt, "js_require_object_coercible",
+                        jm_call_1(mt, "js_require_object_coercible", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                        MIR_label_t skip_param_destr = jm_new_label(mt);
-                        jm_emit_exception_guard(mt, skip_param_destr);
+                        jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
                         jm_emit_object_destructure(mt, destr_pat, preg);
-                        jm_emit_label(mt, skip_param_destr);
                     }
 
                     // Array destructuring
@@ -2301,8 +2325,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 tc->inlining_finally = false;
                 tc->yield_state_only = false;
                 tc->finally_body = NULL;
-                tc->saved_exc_flag_reg = 0;
-                tc->saved_exc_val_reg = 0;
+                tc->saved_error_lane_flag_reg = 0;
+                tc->saved_error_lane_val_reg = 0;
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, tc->return_val_reg),
                     MIR_new_int_op(mt->ctx, 0)));
@@ -2318,7 +2342,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 while (s) {
                     jm_transpile_statement(mt, s);
                     // Check for exception after each statement
-                    jm_emit_exception_route(mt, JS_MIR_COMPLETION_THROW);
+                    jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
                     s = s->next;
                 }
             } else if (fn->body) {
@@ -2329,9 +2353,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, done_result)));
             }
-
-            // Pop try context
-            if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
 
             // Emit any state labels that were not emitted during body transpilation.
             // This happens when jm_count_awaits over-counts (e.g. "await using" counts
@@ -2354,12 +2375,22 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             // Catch label: exception → [error, -2] (rejected)
             jm_emit_label(mt, async_sm_catch_label);
             {
-                MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+                MIR_reg_t error_lane = jm_emit_error_lane_return(mt);
+                // Promise rejection observes the original thrown JavaScript
+                // value; the Lambda ERROR carrier is only an ABI transport
+                // across compiled frames and must not leak into .then().
+                MIR_reg_t error = jm_call_1(mt, "js_error_lane_payload", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, error_lane));
                 MIR_reg_t reject_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, error),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-2));
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, reject_result)));
             }
+
+            // Keep the implicit try context alive through its catch label so
+            // jm_emit_error_lane_return can read the routed ERROR carrier;
+            // popping it earlier falls back to a stale resume result.
+            if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
 
             jm_pop_scope(mt);
             jm_finish_function_frame(mt, sm_name);
@@ -2377,8 +2408,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->scope_env_reg = saved_scope_env_reg_sm;
             mt->scope_env_slot_count = saved_scope_env_slot_sm;
             mt->current_func_index = saved_func_index_sm;
-            mt->func_except_label = saved_except_label_sm;
-            mt->exc_track = saved_exc_track_sm;
+            mt->func_error_lane_label = saved_error_lane_label_sm;
+            mt->error_lane_track = saved_error_lane_track_sm;
+            mt->last_call_result_reg = saved_last_call_result_sm;
+            mt->func_error_lane_value_reg = saved_func_error_lane_value_sm;
             mt->in_generator = saved_in_generator;
             mt->in_async = saved_in_async;
             mt->arguments_reg = saved_arguments_reg_sm;
@@ -2506,8 +2539,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->pending_label_len = 0;
     mt->in_native_func = false;
     mt->in_main = false;
-    mt->current_fc = fc;
-    mt->func_except_label = 0;  // reset for this function
+        mt->current_fc = fc;
+        mt->func_error_lane_label = 0;  // reset for this function
+        mt->last_call_result_reg = 0;
+        mt->func_error_lane_value_reg = 0;
 
     jm_begin_function_frame(mt, ret_type, true, body_scalar_mode,
         MIR_reg(mt->ctx, "ctx", func));
@@ -2751,7 +2786,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // install_this and js_current_this still holds the caller's binding.
         // Inside a derived constructor before super() that binding is the TDZ
         // sentinel, and js_get_this throws a ReferenceError for it — clobbering
-        // any pending exception and firing even when nothing reads `this`.
+    // any returned ERROR lane and firing even when nothing reads `this`.
         // js_get_lexical_this_binding stores the sentinel instead; the state
         // machine's own reads go through js_resolve_lexical_this, which throws
         // at actual use.
@@ -2790,9 +2825,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, fn->is_async ? 1 : 0));
 
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, gen_obj)));
-        if (mt->func_except_label != 0) {
-            jm_emit_label(mt, mt->func_except_label);
-            MIR_reg_t exc_ret = jm_emit_null(mt);
+        if (mt->func_error_lane_label != 0) {
+            jm_emit_label(mt, mt->func_error_lane_label);
+            MIR_reg_t exc_ret = jm_emit_error_lane_return(mt);
             jm_emit_eval_local_pop_if_needed(mt);
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
         }
@@ -3136,70 +3171,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     destr_pat->node_type == JS_AST_NODE_SPREAD_ELEMENT)
                     destr_pat = ((JsSpreadElementNode*)destr_pat)->argument;
 
-                // For object-destructured params: function f({ a, b = 0 }) → extract a, b from preg
-                if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-                    // Throw TypeError if arg is null/undefined (RequireObjectCoercible)
-                    jm_call_void_1(mt, "js_require_object_coercible",
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                    MIR_label_t skip_param_destr = jm_new_label(mt);
-                    jm_emit_exception_guard(mt, skip_param_destr);
-
-                    JsObjectPatternNode* op = (JsObjectPatternNode*)destr_pat;
-                    log_debug("js-mir: destructuring object param %d in %s", i, fc->name);
-                    JsAstNode* prop = op->properties;
-                    while (prop) {
-                        if (prop->node_type == JS_AST_NODE_PROPERTY) {
-                            JsPropertyNode* p = (JsPropertyNode*)prop;
-                            // determine key to extract
-                            MIR_reg_t key;
-                            if (p->computed) {
-                                key = jm_transpile_box_item(mt, p->key);
-                            } else if (p->key && p->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                                JsIdentifierNode* kid = (JsIdentifierNode*)p->key;
-                                key = jm_box_string_literal(mt, kid->name->chars, kid->name->len);
-                            } else {
-                                key = jm_transpile_box_item(mt, p->key);
-                            }
-                            MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, preg),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                            // determine target variable (value of property, or key for shorthand)
-                            JsAstNode* target = p->value ? p->value : p->key;
-                            // handle default: { x = def }
-                            if (target && target->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
-                                JsAssignmentPatternNode* dp = (JsAssignmentPatternNode*)target;
-                                MIR_label_t use_val = MIR_new_label(mt->ctx);
-                                MIR_label_t done_lbl = MIR_new_label(mt->ctx);
-                                MIR_reg_t res = jm_new_reg(mt, "_dpar", MIR_T_I64);
-                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, use_val),
-                                    MIR_new_reg_op(mt->ctx, val),
-                                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
-                                MIR_reg_t def_v = jm_transpile_box_item(mt, dp->right);
-                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                    MIR_new_reg_op(mt->ctx, res), MIR_new_reg_op(mt->ctx, def_v)));
-                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done_lbl)));
-                                jm_emit(mt, use_val);
-                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                    MIR_new_reg_op(mt->ctx, res), MIR_new_reg_op(mt->ctx, val)));
-                                jm_emit(mt, done_lbl);
-                                val = res;
-                                target = dp->left;
-                            }
-                            if (target && target->node_type == JS_AST_NODE_IDENTIFIER) {
-                                JsIdentifierNode* tid = (JsIdentifierNode*)target;
-                                const char* tname = jm_format_name("_js_%.*s", (int)tid->name->len, tid->name->chars);
-                                MIR_reg_t treg = jm_find_var(mt, tname) ? jm_find_var(mt, tname)->reg
-                                                                         : jm_new_reg(mt, tname, MIR_T_I64);
-                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                    MIR_new_reg_op(mt->ctx, treg),
-                                    MIR_new_reg_op(mt->ctx, val)));
-                                jm_set_var(mt, tname, treg);
-                            }
-                        }
-                        prop = prop->next;
-                    }
-                    jm_emit_label(mt, skip_param_destr);
-                }
+                // The shared destructuring emitter below is the only parameter
+                // binding path. The former inline object walk read every getter
+                // once before the shared walk and treated an ERROR Item as a
+                // value, so abrupt GetValue completions were swallowed and the
+                // getter ran twice.
 
                 // For array-destructured params: function f([a, b]) → extract by index
                 if (destr_pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
@@ -3578,8 +3554,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 tc->inlining_finally = false;
                 tc->yield_state_only = false;
                 tc->finally_body = NULL;
-                tc->saved_exc_flag_reg = 0;
-                tc->saved_exc_val_reg = 0;
+                tc->saved_error_lane_flag_reg = 0;
+                tc->saved_error_lane_val_reg = 0;
                 // Save register refs before try context could be popped
                 async_return_val_reg = tc->return_val_reg;
                 async_has_return_reg = tc->has_return_reg;
@@ -3638,7 +3614,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         jm_transpile_statement(mt, s);
                         // Phase 5: After each statement in async body, check for exception
                         if (async_catch_label) {
-                            jm_emit_exception_route(mt, JS_MIR_COMPLETION_THROW);
+                            jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
                         }
                         s = s->next;
                     }
@@ -3653,17 +3629,16 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, val)));
                 // Emit exception propagation landing pad if any exception checks
                 // were emitted during expression transpilation (e.g. runtime calls).
-                // Without this, the BT→func_except_label branch targets an
+                // Without this, the BT→func_error_lane_label branch targets an
                 // uninserted label, causing a NULL label crash during MIR inlining.
-                if (mt->func_except_label != 0) {
-                    jm_emit_label_with_state(mt, mt->func_except_label, JS_EXC_SET);
+                if (mt->func_error_lane_label != 0) {
+                    jm_emit_label_with_state(mt, mt->func_error_lane_label, JS_ERROR_LANE_SET);
                     MIR_reg_t exc_ret;
                     if (fn->is_async) {
-                        MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
-                        exc_ret = jm_call_1(mt, "js_promise_reject", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, error));
+                        exc_ret = jm_emit_async_rejected_value(mt,
+                            jm_emit_error_lane_return(mt));
                     } else {
-                        exc_ret = jm_emit_null(mt);
+                        exc_ret = jm_emit_error_lane_return(mt);
                     }
                     jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
                 }
@@ -3671,12 +3646,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 // The try context emits bt→async_catch_label during expression
                 // transpilation, so the label must exist in the function body.
                 if (fn->is_async && async_catch_label) {
-                    if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
                     jm_emit_label(mt, async_catch_label);
                     {
-                        MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
-                        MIR_reg_t rejected = jm_call_1(mt, "js_promise_reject", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, error));
+                        // Read the routed carrier before removing the
+                        // implicit async try context; its incoming value is
+                        // owned by that context, not by last_call_result_reg.
+                        MIR_reg_t error_lane = jm_emit_error_lane_return(mt);
+                        if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+                        MIR_reg_t rejected = jm_emit_async_rejected_value(mt, error_lane);
                         jm_emit_eval_local_pop_if_needed(mt);
                         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, rejected)));
                     }
@@ -3700,11 +3677,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
             // Catch block: convert exception to Promise.reject(error)
             jm_emit_label(mt, async_catch_label);
-            if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
             {
-                MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
-                MIR_reg_t rejected = jm_call_1(mt, "js_promise_reject", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, error));
+                // Read the routed carrier before removing the implicit async
+                // try context; otherwise the primitive throw payload is lost.
+                MIR_reg_t error_lane = jm_emit_error_lane_return(mt);
+                if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+                MIR_reg_t rejected = jm_emit_async_rejected_value(mt, error_lane);
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, rejected)));
             }
 
@@ -3743,17 +3721,16 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     }
 
     // Emit exception propagation landing pad: if any call inside this function
-    // set the exception flag (outside a try block), control jumps here and we
+    // return an ERROR Item outside a try block, control jumps here and we
     // return null so the caller's exception check picks it up.
-    if (mt->func_except_label != 0) {
-        jm_emit_label(mt, mt->func_except_label);
+    if (mt->func_error_lane_label != 0) {
+        jm_emit_label(mt, mt->func_error_lane_label);
         MIR_reg_t exc_ret;
         if (fn->is_async) {
-            MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
-            exc_ret = jm_call_1(mt, "js_promise_reject", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, error));
+            exc_ret = jm_emit_async_rejected_value(mt,
+                jm_emit_error_lane_return(mt));
         } else {
-            exc_ret = jm_emit_null(mt);
+            exc_ret = jm_emit_error_lane_return(mt);
         }
         jm_emit_eval_local_pop_if_needed(mt);
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));

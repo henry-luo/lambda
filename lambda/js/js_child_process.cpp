@@ -42,7 +42,6 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" void js_next_tick_enqueue(Item callback);
 extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_json_stringify(Item value);
-extern "C" Item js_clear_exception(void);
 extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe);
 extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item);
 extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item);
@@ -556,12 +555,11 @@ static Item js_cp_exec_with_options(Item command_item, Item options_item,
     return make_js_undefined();
 }
 
-static bool validate_exec_args(Item rest_args, Item* out_command, Item* out_options, Item* out_callback) {
+static Item validate_exec_args(Item rest_args, Item* out_command, Item* out_options, Item* out_callback) {
     int64_t argc = js_array_length(rest_args);
     Item command = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
     if (get_type_id(command) != LMD_TYPE_STRING) {
-        js_throw_invalid_arg_type("command", "string", command);
-        return false;
+        return js_throw_invalid_arg_type("command", "string", command);
     }
     Item options = make_js_undefined();
     Item callback = make_js_undefined();
@@ -573,33 +571,30 @@ static bool validate_exec_args(Item rest_args, Item* out_command, Item* out_opti
         options = second;
         if (!is_nullish_item(third)) {
             if (!is_callable(third)) {
-                js_throw_invalid_arg_type("callback", "function", third);
-                return false;
+                return js_throw_invalid_arg_type("callback", "function", third);
             }
             callback = third;
         }
     } else if (!is_undefined_item(second)) {
-        js_throw_invalid_arg_type("options", "object", second);
-        return false;
+        return js_throw_invalid_arg_type("options", "object", second);
     }
     if (is_object_item(options)) {
-        Item signal = js_property_get(options, make_string_item("signal"));
+        JS_ASSIGN_OR_RETURN(signal, js_property_get(options, make_string_item("signal")));
         if (!is_nullish_item(signal) && !child_signal_is_abort_signal(signal)) {
-            js_throw_invalid_arg_type("options.signal", "AbortSignal", signal);
-            return false;
+            return js_throw_invalid_arg_type("options.signal", "AbortSignal", signal);
         }
     }
     *out_command = command;
     *out_options = options;
     *out_callback = callback;
-    return true;
+    return js_status_ok();
 }
 
 extern "C" Item js_cp_exec(Item rest_args) {
     Item command = make_js_undefined();
     Item options = make_js_undefined();
     Item callback = make_js_undefined();
-    if (!validate_exec_args(rest_args, &command, &options, &callback)) return ItemNull;
+    JS_RETURN_IF_ERROR(validate_exec_args(rest_args, &command, &options, &callback));
     return js_cp_exec_with_options(command, options, callback, 1024 * 1024);
 }
 
@@ -1380,7 +1375,7 @@ static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* 
         js_property_set(wire_message, make_string_item("__lambda_ipc_payload__"), message);
     }
     Item json = js_json_stringify(wire_message);
-    if (js_check_exception() || get_type_id(json) != LMD_TYPE_STRING) return false;
+    if (item_is_error(json) || get_type_id(json) != LMD_TYPE_STRING) return false;
     String* s = it2s(json);
     if (!s) return false;
     size_t len = s->len + 1;
@@ -1454,7 +1449,7 @@ static void spawn_ipc_send_disconnect_and_close(JsSpawnProcess* sp) {
     Item control = js_new_object();
     js_property_set(control, make_string_item("__lambda_ipc_disconnect__"), (Item){.item = ITEM_TRUE});
     Item json = js_json_stringify(control);
-    if (!js_check_exception() && get_type_id(json) == LMD_TYPE_STRING) {
+    if (!item_is_error(json) && get_type_id(json) == LMD_TYPE_STRING) {
         String* s = it2s(json);
         size_t len = s ? s->len + 1 : 0;
         SpawnWriteReq* wr = (SpawnWriteReq*)mem_calloc(1, sizeof(SpawnWriteReq), MEM_CAT_JS_RUNTIME);
@@ -1472,8 +1467,6 @@ static void spawn_ipc_send_disconnect_and_close(JsSpawnProcess* sp) {
             }
             mem_free(wr);
         }
-    } else if (js_check_exception()) {
-        js_clear_exception();
     }
     sp->ipc_pipe_active = false;
     // parent disconnect sends an internal close frame when possible; if the
@@ -1486,7 +1479,7 @@ static void spawn_ipc_handle_line(JsSpawnProcess* sp, const char* chars, int len
     if (!sp || len <= 0) return;
     Item json = make_string_item(chars, len);
     Item message = js_json_parse(json);
-    if (js_check_exception()) return;
+    if (item_is_error(message)) return;
     if (spawn_ipc_is_cluster_listening(message)) {
         // cluster readiness is carried over ChildProcess IPC but surfaces as a
         // worker 'listening' event, not as a user-visible message payload.
@@ -1578,7 +1571,7 @@ static bool spawn_write_stdin_chunk(JsSpawnProcess* sp, Item chunk, bool* out_sh
         len = js_arraybuffer_length(ab) > 0 ? (size_t)js_arraybuffer_length(ab) : 0;
     } else {
         Item str = js_to_string(chunk);
-        if (js_exception_pending || get_type_id(str) != LMD_TYPE_STRING) return false;
+        if (item_is_error(str) || get_type_id(str) != LMD_TYPE_STRING) return false;
         String* s = it2s(str);
         data = s->chars;
         len = s->len;
@@ -2201,25 +2194,23 @@ typedef struct SpawnRequest {
     Item env;
 } SpawnRequest;
 
-static bool validate_uid_gid_option(Item options, const char* name) {
-    if (!is_object_item(options)) return true;
-    Item value = js_property_get(options, make_string_item(name));
-    if (is_nullish_item(value)) return true;
+static Item validate_uid_gid_option(Item options, const char* name) {
+    if (!is_object_item(options)) return js_status_ok();
+    JS_ASSIGN_OR_RETURN(value, js_property_get(options, make_string_item(name)));
+    if (is_nullish_item(value)) return js_status_ok();
     TypeId type = get_type_id(value);
     double number = 0;
     if (type == LMD_TYPE_INT) number = (double)it2i(value);
     else if (type == LMD_TYPE_FLOAT) number = it2d(value);
     else {
-        js_throw_invalid_arg_type(name, "number", value);
-        return false;
+        return js_throw_invalid_arg_type(name, "number", value);
     }
     if (number < 0 || number > 2147483647.0) {
         char msg[256];
         snprintf(msg, sizeof(msg), "The value of \"%s\" is out of range", name);
-        js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
-        return false;
+        return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
     }
-    return true;
+    return js_status_ok();
 }
 
 static bool item_string_equals(Item item, const char* text) {
@@ -2229,30 +2220,28 @@ static bool item_string_equals(Item item, const char* text) {
     return s->len == len && memcmp(s->chars, text, len) == 0;
 }
 
-static bool throw_invalid_stdio_value(void) {
-    js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'stdio' is invalid");
-    return false;
+static Item throw_invalid_stdio_value(void) {
+    return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'stdio' is invalid");
 }
 
-static bool apply_stdio_ipc(SpawnRequest* req) {
+static Item apply_stdio_ipc(SpawnRequest* req) {
     if (req->ipc) {
-        js_throw_error_with_code("ERR_IPC_ONE_PIPE", "Child process can have only one IPC pipe");
-        return false;
+        return js_throw_error_with_code("ERR_IPC_ONE_PIPE", "Child process can have only one IPC pipe");
     }
     req->ipc = true;
     req->ipc_index = req->stdio_count;
-    return true;
+    return js_status_ok();
 }
 
-static bool apply_stdio_entry(SpawnRequest* req, int index, Item entry) {
+static Item apply_stdio_entry(SpawnRequest* req, int index, Item entry) {
     if (index < 0 || index >= CP_STDIO_MAX) return throw_invalid_stdio_value();
     if (index + 1 > req->stdio_count) req->stdio_count = index + 1;
-    if (is_nullish_item(entry)) return true;
+    if (is_nullish_item(entry)) return js_status_ok();
     if (item_string_equals(entry, "ipc")) {
-        if (!apply_stdio_ipc(req)) return false;
+        JS_RETURN_IF_ERROR(apply_stdio_ipc(req));
         req->stdio_mode[index] = CP_STDIO_IPC;
         req->ipc_index = index;
-        return true;
+        return js_status_ok();
     }
     if (item_string_equals(entry, "inherit")) {
         req->stdio_mode[index] = CP_STDIO_INHERIT;
@@ -2274,13 +2263,13 @@ static bool apply_stdio_entry(SpawnRequest* req, int index, Item entry) {
     } else {
         return throw_invalid_stdio_value();
     }
-    return true;
+    return js_status_ok();
 }
 
-static bool normalize_stdio_options(SpawnRequest* req) {
-    if (!is_object_item(req->options)) return true;
-    Item stdio = js_property_get(req->options, make_string_item("stdio"));
-    if (is_nullish_item(stdio)) return true;
+static Item normalize_stdio_options(SpawnRequest* req) {
+    if (!is_object_item(req->options)) return js_status_ok();
+    JS_ASSIGN_OR_RETURN(stdio, js_property_get(req->options, make_string_item("stdio")));
+    if (is_nullish_item(stdio)) return js_status_ok();
     if (item_string_equals(stdio, "inherit")) {
         req->stdio_mode[0] = CP_STDIO_INHERIT;
         req->stdio_mode[1] = CP_STDIO_INHERIT;
@@ -2288,19 +2277,19 @@ static bool normalize_stdio_options(SpawnRequest* req) {
         req->stdio_fd[0] = 0;
         req->stdio_fd[1] = 1;
         req->stdio_fd[2] = 2;
-        return true;
+        return js_status_ok();
     }
     if (item_string_equals(stdio, "ignore")) {
         req->stdio_mode[0] = CP_STDIO_IGNORE;
         req->stdio_mode[1] = CP_STDIO_IGNORE;
         req->stdio_mode[2] = CP_STDIO_IGNORE;
-        return true;
+        return js_status_ok();
     }
     if (item_string_equals(stdio, "pipe") || item_string_equals(stdio, "overlapped")) {
         req->stdio_mode[0] = CP_STDIO_PIPE;
         req->stdio_mode[1] = CP_STDIO_PIPE;
         req->stdio_mode[2] = CP_STDIO_PIPE;
-        return true;
+        return js_status_ok();
     }
     if (get_type_id(stdio) == LMD_TYPE_STRING) {
         return throw_invalid_stdio_value();
@@ -2310,14 +2299,14 @@ static bool normalize_stdio_options(SpawnRequest* req) {
         if (len > CP_STDIO_MAX) return throw_invalid_stdio_value();
         req->stdio_count = len > 3 ? (int)len : 3;
         for (int i = 0; i < len; i++) {
-            if (!apply_stdio_entry(req, i, js_array_get_int(stdio, i))) return false;
+            JS_RETURN_IF_ERROR(apply_stdio_entry(req, i, js_array_get_int(stdio, i)));
         }
-        return true;
+        return js_status_ok();
     }
     return throw_invalid_stdio_value();
 }
 
-static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
+static Item normalize_spawn_request(Item rest_args, SpawnRequest* req) {
     req->file[0] = '\0';
     req->args = js_array_new(0);
     req->options = make_js_undefined();
@@ -2341,13 +2330,11 @@ static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
     int64_t argc64 = js_array_length(rest_args);
     Item command_item = argc64 > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
     if (get_type_id(command_item) != LMD_TYPE_STRING) {
-        js_throw_invalid_arg_type("file", "string", command_item);
-        return false;
+        return js_throw_invalid_arg_type("file", "string", command_item);
     }
     String* cmd = it2s(command_item);
     if (cmd->len == 0) {
-        js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'file' cannot be empty");
-        return false;
+        return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'file' cannot be empty");
     }
     int cmd_len = (int)cmd->len < (int)sizeof(req->file) - 1 ? (int)cmd->len : (int)sizeof(req->file) - 1;
     memcpy(req->file, cmd->chars, (size_t)cmd_len);
@@ -2360,42 +2347,38 @@ static bool normalize_spawn_request(Item rest_args, SpawnRequest* req) {
         req->args = second;
         if (!is_undefined_item(third)) {
             if (!is_object_item(third) || third.item == ITEM_NULL) {
-                js_throw_invalid_arg_type("options", "object", third);
-                return false;
+                return js_throw_invalid_arg_type("options", "object", third);
             }
             req->options = third;
         }
     } else if (is_object_item(second)) {
         req->options = second;
         if (!is_undefined_item(third)) {
-            js_throw_invalid_arg_type("options", "object", third);
-            return false;
+            return js_throw_invalid_arg_type("options", "object", third);
         }
     } else if (is_nullish_item(second)) {
         if (!is_undefined_item(third)) {
             if (!is_object_item(third) || third.item == ITEM_NULL) {
-                js_throw_invalid_arg_type("options", "object", third);
-                return false;
+                return js_throw_invalid_arg_type("options", "object", third);
             }
             req->options = third;
         }
     } else {
-        js_throw_invalid_arg_type("args", "Array", second);
-        return false;
+        return js_throw_invalid_arg_type("args", "Array", second);
     }
 
     if (is_object_item(req->options)) {
-        if (!validate_uid_gid_option(req->options, "uid")) return false;
-        if (!validate_uid_gid_option(req->options, "gid")) return false;
-        Item shell = js_property_get(req->options, make_string_item("shell"));
+        JS_RETURN_IF_ERROR(validate_uid_gid_option(req->options, "uid"));
+        JS_RETURN_IF_ERROR(validate_uid_gid_option(req->options, "gid"));
+        JS_ASSIGN_OR_RETURN(shell, js_property_get(req->options, make_string_item("shell")));
         req->shell = get_type_id(shell) == LMD_TYPE_BOOL && it2b(shell);
-        Item detached = js_property_get(req->options, make_string_item("detached"));
+        JS_ASSIGN_OR_RETURN(detached, js_property_get(req->options, make_string_item("detached")));
         req->detached = get_type_id(detached) == LMD_TYPE_BOOL && it2b(detached);
-        Item env = js_property_get(req->options, make_string_item("env"));
+        JS_ASSIGN_OR_RETURN(env, js_property_get(req->options, make_string_item("env")));
         if (is_object_item(env)) req->env = env;
-        if (!normalize_stdio_options(req)) return false;
+        JS_RETURN_IF_ERROR(normalize_stdio_options(req));
     }
-    return true;
+    return js_status_ok();
 }
 
 static char** build_envp(Item env_item, int* out_count) {
@@ -2477,7 +2460,7 @@ static char** envp_set(char** envp, int* count, const char* key, const char* val
 
 extern "C" Item js_cp_spawn(Item rest_args) {
     SpawnRequest req;
-    if (!normalize_spawn_request(rest_args, &req)) return ItemNull;
+    JS_RETURN_IF_ERROR(normalize_spawn_request(rest_args, &req));
 
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) {
@@ -2530,13 +2513,13 @@ extern "C" Item js_cp_spawn(Item rest_args) {
             Item arg = js_array_get_int(req.args, i);
             if (get_type_id(arg) != LMD_TYPE_STRING) {
                 arg = js_to_string(arg);
-                if (js_exception_pending) {
+                if (item_is_error(arg)) {
                     for (int j = 0; j < i; j++) {
                         int free_index = (lambda_js_mode ? 2 : 1) + j;
                         if (argv[free_index]) mem_free(argv[free_index]);
                     }
                     mem_free(argv);
-                    return ItemNull;
+                    return arg;
                 }
             }
             if (get_type_id(arg) != LMD_TYPE_STRING) {
@@ -2545,8 +2528,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
                     if (argv[free_index]) mem_free(argv[free_index]);
                 }
                 mem_free(argv);
-                js_throw_invalid_arg_type("args", "string", arg);
-                return ItemNull;
+                return js_throw_invalid_arg_type("args", "string", arg);
             }
             String* s = it2s(arg);
             char* copy = (char*)mem_alloc(s->len + 1, MEM_CAT_JS_RUNTIME);
@@ -2779,27 +2761,25 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     return obj;
 }
 
-static bool copy_required_file(Item file_item, char* out, int out_size) {
+static Item copy_required_file(Item file_item, char* out, int out_size) {
     if (get_type_id(file_item) != LMD_TYPE_STRING) {
-        js_throw_invalid_arg_type("file", "string", file_item);
-        return false;
+        return js_throw_invalid_arg_type("file", "string", file_item);
     }
     String* s = it2s(file_item);
     if (s->len == 0) {
-        js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'file' cannot be empty");
-        return false;
+        return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The argument 'file' cannot be empty");
     }
     int len = (int)s->len < out_size - 1 ? (int)s->len : out_size - 1;
     memcpy(out, s->chars, (size_t)len);
     out[len] = '\0';
-    return true;
+    return js_status_ok();
 }
 
-static bool validate_execfile_args(Item rest_args) {
+static Item validate_execfile_args(Item rest_args) {
     int64_t argc = js_array_length(rest_args);
     char file_buf[4096];
     Item file = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
-    if (!copy_required_file(file, file_buf, sizeof(file_buf))) return false;
+    JS_RETURN_IF_ERROR(copy_required_file(file, file_buf, sizeof(file_buf)));
 
     Item second = argc > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
     Item third = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
@@ -2807,54 +2787,46 @@ static bool validate_execfile_args(Item rest_args) {
 
     if (get_type_id(second) == LMD_TYPE_ARRAY) {
         if (!(is_nullish_item(third) || is_object_item(third) || is_callable(third))) {
-            js_throw_invalid_arg_type("options", "object", third);
-            return false;
+            return js_throw_invalid_arg_type("options", "object", third);
         }
         if (!(is_nullish_item(fourth) || is_callable(fourth))) {
-            js_throw_invalid_arg_type("callback", "function", fourth);
-            return false;
+            return js_throw_invalid_arg_type("callback", "function", fourth);
         }
-        return true;
+        return js_status_ok();
     }
 
     if (is_object_item(second)) {
         if (!(is_nullish_item(third) || is_callable(third))) {
-            js_throw_invalid_arg_type("callback", "function", third);
-            return false;
+            return js_throw_invalid_arg_type("callback", "function", third);
         }
-        return true;
+        return js_status_ok();
     }
 
     if (is_callable(second)) {
-        return true;
+        return js_status_ok();
     }
 
     if (is_nullish_item(second)) {
         if (get_type_id(third) == LMD_TYPE_ARRAY || get_type_id(third) == LMD_TYPE_STRING) {
-            js_throw_invalid_arg_type("options", "object", third);
-            return false;
+            return js_throw_invalid_arg_type("options", "object", third);
         }
         if (is_object_item(third)) {
             if (!(is_nullish_item(fourth) || is_callable(fourth))) {
-                js_throw_invalid_arg_type("callback", "function", fourth);
-                return false;
+                return js_throw_invalid_arg_type("callback", "function", fourth);
             }
-            return true;
+            return js_status_ok();
         }
-        if (is_callable(third)) return true;
+        if (is_callable(third)) return js_status_ok();
         if (is_nullish_item(third)) {
             if (!(is_nullish_item(fourth) || is_callable(fourth))) {
-                js_throw_invalid_arg_type("callback", "function", fourth);
-                return false;
+                return js_throw_invalid_arg_type("callback", "function", fourth);
             }
-            return true;
+            return js_status_ok();
         }
-        js_throw_invalid_arg_type("options", "object", third);
-        return false;
+        return js_throw_invalid_arg_type("options", "object", third);
     }
 
-    js_throw_invalid_arg_type("args", "Array", second);
-    return false;
+    return js_throw_invalid_arg_type("args", "Array", second);
 }
 
 static size_t execfile_max_buffer_from_options(Item options) {
@@ -2872,7 +2844,7 @@ static size_t execfile_max_buffer_from_options(Item options) {
 }
 
 extern "C" Item js_cp_execFile(Item rest_args) {
-    if (!validate_execfile_args(rest_args)) return ItemNull;
+    JS_RETURN_IF_ERROR(validate_execfile_args(rest_args));
     int64_t argc = js_array_length(rest_args);
     Item file_item = js_array_get_int(rest_args, 0);
     Item args_item = make_js_undefined();
@@ -2935,38 +2907,35 @@ extern "C" Item js_cp_execFile(Item rest_args) {
     return make_child_process_object();
 }
 
-static bool validate_fork_args(Item rest_args) {
+static Item validate_fork_args(Item rest_args) {
     int64_t argc = js_array_length(rest_args);
     char file_buf[4096];
     Item file = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
-    if (!copy_required_file(file, file_buf, sizeof(file_buf))) return false;
+    JS_RETURN_IF_ERROR(copy_required_file(file, file_buf, sizeof(file_buf)));
 
     Item second = argc > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
     Item third = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
 
     if (get_type_id(second) == LMD_TYPE_ARRAY) {
         if (!(is_nullish_item(third) || is_object_item(third))) {
-            js_throw_invalid_arg_type("options", "object", third);
-            return false;
+            return js_throw_invalid_arg_type("options", "object", third);
         }
-        return true;
+        return js_status_ok();
     }
     if (is_object_item(second) || is_nullish_item(second)) {
         if (!(is_nullish_item(third) || is_object_item(third))) {
-            js_throw_invalid_arg_type("options", "object", third);
-            return false;
+            return js_throw_invalid_arg_type("options", "object", third);
         }
-        return true;
+        return js_status_ok();
     }
-    js_throw_invalid_arg_type("args", "Array", second);
-    return false;
+    return js_throw_invalid_arg_type("args", "Array", second);
 }
 
 extern "C" Item js_cp_fork(Item rest_args) {
     // Cluster invokes this host entry before it can hand the returned child to
     // the online queue, so install the optional leaf hook before spawning.
     js_host_hooks_set_cluster_online_hook(js_child_process_emit_or_queue_cluster_online);
-    if (!validate_fork_args(rest_args)) return ItemNull;
+    JS_RETURN_IF_ERROR(validate_fork_args(rest_args));
     int64_t argc = js_array_length(rest_args);
     Item module_path = js_array_get_int(rest_args, 0);
     Item fork_args = js_array_new(0);
@@ -3009,9 +2978,9 @@ extern "C" Item js_cp_fork(Item rest_args) {
 
     Item spawn_options = js_new_object();
     if (is_object_item(options)) {
-        Item env = js_property_get(options, make_string_item("env"));
+        JS_ASSIGN_OR_RETURN(env, js_property_get(options, make_string_item("env")));
         if (is_object_item(env)) js_property_set(spawn_options, make_string_item("env"), env);
-        Item detached = js_property_get(options, make_string_item("detached"));
+        JS_ASSIGN_OR_RETURN(detached, js_property_get(options, make_string_item("detached")));
         if (get_type_id(detached) == LMD_TYPE_BOOL) {
             js_property_set(spawn_options, make_string_item("detached"), detached);
         }
@@ -3020,7 +2989,7 @@ extern "C" Item js_cp_fork(Item rest_args) {
     bool copied_stdio = false;
     bool stdio_has_ipc = false;
     if (is_object_item(options)) {
-        Item opt_stdio = js_property_get(options, make_string_item("stdio"));
+        JS_ASSIGN_OR_RETURN(opt_stdio, js_property_get(options, make_string_item("stdio")));
         if (!is_nullish_item(opt_stdio)) {
             if (item_string_equals(opt_stdio, "pipe") ||
                 item_string_equals(opt_stdio, "inherit") ||
@@ -3030,8 +2999,7 @@ extern "C" Item js_cp_fork(Item rest_args) {
                 js_array_push(stdio, opt_stdio);
                 copied_stdio = true;
             } else if (get_type_id(opt_stdio) == LMD_TYPE_STRING) {
-                throw_invalid_stdio_value();
-                return ItemNull;
+                return throw_invalid_stdio_value();
             } else if (get_type_id(opt_stdio) == LMD_TYPE_ARRAY) {
                 int64_t opt_len = js_array_length(opt_stdio);
                 for (int64_t i = 0; i < opt_len; i++) {
@@ -3041,13 +3009,12 @@ extern "C" Item js_cp_fork(Item rest_args) {
                 }
                 copied_stdio = true;
             } else {
-                throw_invalid_stdio_value();
-                return ItemNull;
+                return throw_invalid_stdio_value();
             }
         }
     }
     if (!copied_stdio) {
-        Item silent = is_object_item(options) ? js_property_get(options, make_string_item("silent")) : make_js_undefined();
+        JS_ASSIGN_OR_RETURN(silent, is_object_item(options) ? js_property_get(options, make_string_item("silent")) : make_js_undefined());
         const char* default_stdio = (get_type_id(silent) == LMD_TYPE_BOOL && it2b(silent)) ? "pipe" : "ignore";
         // fork({ silent: true }) exposes child stdout/stderr; using the default
         // ignore mode hides child output and breaks detached child handshakes.
@@ -3245,7 +3212,7 @@ static int cp_spawnSync_append_args(char* full_cmd, int full_cmd_size, int pos, 
         Item arg = js_array_get_int(args_item, i);
         if (get_type_id(arg) != LMD_TYPE_STRING) {
             arg = js_to_string(arg);
-            if (js_exception_pending) return pos;
+            if (item_is_error(arg)) return pos;
         }
         if (get_type_id(arg) != LMD_TYPE_STRING) continue;
         append_shell_arg(full_cmd, full_cmd_size, &pos, arg);
@@ -3369,31 +3336,30 @@ static bool cp_sync_input_bytes(Item input, const char** data, size_t* len) {
     return false;
 }
 
-static bool cp_sync_write_input_file(Item options_item, const char* input_path) {
-    if (!is_object_item(options_item) || !input_path) return true;
-    Item input = js_property_get(options_item, make_string_item("input"));
-    if (is_nullish_item(input)) return true;
+static Item cp_sync_write_input_file(Item options_item, const char* input_path) {
+    if (!is_object_item(options_item) || !input_path) return js_status_ok();
+    JS_ASSIGN_OR_RETURN(input, js_property_get(options_item, make_string_item("input")));
+    if (is_nullish_item(input)) return js_status_ok();
     const char* data = NULL;
     size_t len = 0;
     if (!cp_sync_input_bytes(input, &data, &len)) {
-        js_throw_invalid_arg_type("options.input", "string, Buffer, TypedArray, DataView, or ArrayBuffer", input);
-        return false;
+        return js_throw_invalid_arg_type("options.input", "string, Buffer, TypedArray, DataView, or ArrayBuffer", input);
     }
     FILE* fp = fopen(input_path, "wb");
     if (!fp) {
         log_error("child_process: spawnSync: failed to open stdin temp file");
-        return false;
+        return js_throw_system_error(uv_translate_sys_error(errno), "open", input_path);
     }
     if (len > 0 && data) {
         size_t wrote = fwrite(data, 1, len, fp);
         if (wrote != len) {
             fclose(fp);
             log_error("child_process: spawnSync: failed to write stdin temp file");
-            return false;
+            return js_throw_system_error(uv_translate_sys_error(errno), "write", input_path);
         }
     }
     fclose(fp);
-    return true;
+    return js_status_ok();
 }
 
 static bool cp_sync_has_input(Item options_item) {
@@ -3402,12 +3368,12 @@ static bool cp_sync_has_input(Item options_item) {
     return !is_nullish_item(input);
 }
 
-static bool cp_sync_normalize_stdio(Item options_item, int stdio_mode[3]) {
-    if (!stdio_mode) return false;
+static Item cp_sync_normalize_stdio(Item options_item, int stdio_mode[3]) {
+    if (!stdio_mode) return js_throw_type_error("Child process stdio output is unavailable");
     stdio_mode[0] = 0;
     stdio_mode[1] = 0;
     stdio_mode[2] = 0;
-    if (!is_object_item(options_item)) return true;
+    if (!is_object_item(options_item)) return js_status_ok();
 
     SpawnRequest req;
     memset(&req, 0, sizeof(req));
@@ -3415,11 +3381,11 @@ static bool cp_sync_normalize_stdio(Item options_item, int stdio_mode[3]) {
     req.stdio_mode[0] = 0;
     req.stdio_mode[1] = 0;
     req.stdio_mode[2] = 0;
-    if (!normalize_stdio_options(&req)) return false;
+    JS_RETURN_IF_ERROR(normalize_stdio_options(&req));
     stdio_mode[0] = req.stdio_mode[0];
     stdio_mode[1] = req.stdio_mode[1];
     stdio_mode[2] = req.stdio_mode[2];
-    return true;
+    return js_status_ok();
 }
 
 static Item cp_sync_stdio_output_item(int stdio_mode, const char* data, size_t len, bool as_string) {
@@ -3631,13 +3597,14 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
     snprintf(stderr_path, sizeof(stderr_path), "%s/js_spawn_sync_%ld_%p.err", temp_dir, pid, (void*)&stderr_path);
     snprintf(stdin_path, sizeof(stdin_path), "%s/js_spawn_sync_%ld_%p.in", temp_dir, pid, (void*)&stdin_path);
     int stdio_mode[3];
-    if (!cp_sync_normalize_stdio(effective_options, stdio_mode)) {
-        return ItemNull;
-    }
+    JS_RETURN_IF_ERROR(cp_sync_normalize_stdio(effective_options, stdio_mode));
     bool has_input = cp_sync_has_input(effective_options);
-    if (has_input && !cp_sync_write_input_file(effective_options, stdin_path)) {
-        unlink(stdin_path);
-        return ItemNull;
+    if (has_input) {
+        Item input_result = cp_sync_write_input_file(effective_options, stdin_path);
+        if (item_is_error(input_result)) {
+            unlink(stdin_path);
+            return input_result;
+        }
     }
     int redir_pos = (int)strlen(full_cmd);
     if (redir_pos < (int)sizeof(full_cmd) - 1) {

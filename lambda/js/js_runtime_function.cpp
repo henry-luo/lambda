@@ -414,7 +414,8 @@ extern "C" void js_env_rehome_scalars(Item* env) {
     // tagged pointers into the active number stack are valid scalar Items;
     // decoding raw words as Items can dereference small state values as pointers.
     for (int64_t i = 0; i < count; i++) {
-        if (js_env_slot_is_side_number(env[i])) {
+        bool is_side_number = js_env_slot_is_side_number(env[i]);
+        if (is_side_number) {
             owned_item_slot_store(env, count, i, env[i]);
         }
     }
@@ -613,20 +614,22 @@ extern "C" void js_set_default_constructor_property(Item proto_item, Item cls_it
     js_attr_set_enumerable(proto_item, "constructor", 11, false);
 }
 
-extern "C" void js_prepare_class_prototype_property(Item cls_item) {
-    if (get_type_id(cls_item) != LMD_TYPE_MAP) return;
+extern "C" Item js_prepare_class_prototype_property(Item cls_item) {
+    if (get_type_id(cls_item) != LMD_TYPE_MAP) return js_status_ok();
     ShapeEntry* existing = js_find_shape_entry(cls_item, "prototype", 9);
     if (existing && !jspd_is_deleted(existing)) {
-        js_throw_type_error("Cannot redefine property: prototype");
+        return js_throw_type_error("Cannot redefine property: prototype");
     }
+    return js_status_ok();
 }
 
-extern "C" void js_check_class_static_field_key(Item key_item) {
-    if (get_type_id(key_item) != LMD_TYPE_STRING) return;
+extern "C" Item js_check_class_static_field_key(Item key_item) {
+    if (get_type_id(key_item) != LMD_TYPE_STRING) return js_status_ok();
     String* key = it2s(key_item);
     if (key && key->len == 9 && strncmp(key->chars, "prototype", 9) == 0) {
-        js_throw_type_error("Cannot redefine property: prototype");
+        return js_throw_type_error("Cannot redefine property: prototype");
     }
+    return js_status_ok();
 }
 
 // Set the source text of a JsFunction for Function.prototype.toString

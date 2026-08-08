@@ -55,9 +55,6 @@ extern __thread EvalContext* context;
 extern __thread Context* input_context;
 DomDocument* show_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height);
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
-extern "C" int js_check_exception(void);
-extern "C" Item js_clear_exception(void);
-extern "C" const char* js_get_exception_message(void);
 
 // MouseButtonEvent::mods has already been normalized by window/event_sim; JS
 // MouseEvent stamping must read RDT flags so synthetic and native inputs agree.

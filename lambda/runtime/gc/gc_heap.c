@@ -361,6 +361,7 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define MAP_KIND_ITERATOR_ 6
 #define MAP_KIND_PROXY_    9
 #define MAP_KIND_ARRAY_SPARSE_ 14
+#define MAP_KIND_ERROR_    15
 
 typedef struct GcJsArraySparseHashEntry {
     int64_t index;
@@ -867,6 +868,9 @@ int gc_is_managed(gc_heap_t* gc, void* ptr) {
     if (!gc || !ptr) return 0;
     // check object zone
     if (gc_object_zone_owns(gc->object_zone, ptr)) return 1;
+    // Large JS environments use the malloc-backed object path; omitting that
+    // ownership class made their scalar-tail rehome guard silently skip them.
+    if (gc_large_object_contains(gc, ptr)) return 1;
     // check bump-allocated object structs
     if (gc_bump_block_owns_exact(gc, ptr)) return 1;
     // check data zones

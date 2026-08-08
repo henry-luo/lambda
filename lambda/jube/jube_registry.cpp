@@ -844,13 +844,12 @@ extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" Item js_throw_type_error_code(const char* code, const char* message);
 extern "C" Item js_throw_range_error_code(const char* code, const char* message);
 extern "C" Item js_throw_uri_error_code(const char* code, const char* message);
-extern "C" void js_throw_value(Item error);
+extern "C" Item js_throw_value(Item error);
 extern "C" Item js_reflect_own_keys(Item obj);
 extern "C" Item js_object_keys(Item obj);
 extern "C" Item js_reflect_delete_property(Item obj, Item key);
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
-extern "C" int js_check_exception(void);
-extern "C" Item js_clear_exception(void);
+extern "C" Item js_error_lane_payload(Item lane);
 extern "C" void js_mark_non_writable(Item object, Item name);
 extern "C" Item js_object_freeze(Item obj);
 extern "C" bool js_is_truthy(Item value);
@@ -935,7 +934,7 @@ extern "C" void js_dom_select_set_length_bridge(void* elem, Item value);
 extern "C" void js_dom_set_option_selected_dirty(void* elem, bool selected);
 extern "C" void js_dom_set_option_text_bridge(void* elem, const char* value);
 extern "C" void js_dom_after_srcdoc_set(void* elem);
-extern "C" void js_dom_throw_contenteditable_syntax_error(void);
+extern "C" Item js_dom_throw_contenteditable_syntax_error(void);
 extern "C" Item js_dom_set_text_data_property(void* text, Item value);
 extern "C" Item js_dom_text_control_set_value_bridge(void* elem, Item value);
 extern "C" Item js_dom_text_control_set_selection_start_bridge(void* elem, Item value);
@@ -1363,7 +1362,6 @@ static const JubeHostScriptAPI jube_host_script_api = {
     js_object_keys,
     js_reflect_delete_property,
     js_call_function,
-    js_check_exception,
     js_is_truthy,
     js_get_intrinsic_prototype_for_class,
     js_make_number,
@@ -1375,7 +1373,7 @@ static const JubeHostScriptAPI jube_host_script_api = {
     js_throw_type_error_code,
     js_object_create,
     js_throw_uri_error_code,
-    js_clear_exception,
+    js_error_lane_payload,
     js_mark_non_writable,
     js_object_freeze,
     jube_host_script_current_this,
@@ -3456,8 +3454,7 @@ static Item jube_host_node_throw_network_error(void* session, int status, const 
     if (port >= 0) {
         js_property_set(error, js_make_string_len("port", 4), (Item){.item = i2it(port)});
     }
-    js_throw_value(error);
-    return error;
+    return js_throw_value(error);
 }
 
 static bool jube_host_node_network_permission_has_net(void) {

@@ -126,9 +126,8 @@ static const char* str_prop_get(Item obj, const char* key, size_t* out_len) {
 // fall through and are silently skipped (the previous shim coerced via
 // String(), but no in-scope test exercises that path).
 
-static bool blob_reject_shared_buffer_part(Item part) {
-    js_throw_invalid_arg_type("sources", "string, Blob, ArrayBuffer, TypedArray, or DataView", part);
-    return false;
+static Item blob_reject_shared_buffer_part(Item part) {
+    return js_throw_invalid_arg_type("sources", "string, Blob, ArrayBuffer, TypedArray, or DataView", part);
 }
 
 static bool blob_part_has_shared_backing(Item part) {
@@ -149,12 +148,12 @@ static bool blob_part_has_shared_backing(Item part) {
     return false;
 }
 
-static bool blob_append_part(StrBuf* sb, Item part) {
+static Item blob_append_part(StrBuf* sb, Item part) {
     TypeId tid = get_type_id(part);
     if (tid == LMD_TYPE_STRING) {
         String* s = it2s(part);
         if (s && s->len > 0) strbuf_append_str_n(sb, s->chars, s->len);
-        return true;
+        return js_status_ok();
     }
     // ArrayBuffer / TypedArray / DataView — append raw bytes verbatim.
     if (js_is_arraybuffer(part)) {
@@ -166,7 +165,7 @@ static bool blob_append_part(StrBuf* sb, Item part) {
         if (ab && data && js_arraybuffer_length(ab) > 0 && !js_arraybuffer_detached(ab)) {
             strbuf_append_str_n(sb, (const char*)data, (size_t)js_arraybuffer_length(ab));
         }
-        return true;
+        return js_status_ok();
     }
     if (js_is_typed_array(part)) {
         if (blob_part_has_shared_backing(part)) return blob_reject_shared_buffer_part(part);
@@ -175,7 +174,7 @@ static bool blob_append_part(StrBuf* sb, Item part) {
         if (data && byte_length > 0) {
             strbuf_append_str_n(sb, data, (size_t)byte_length);
         }
-        return true;
+        return js_status_ok();
     }
     if (js_is_dataview(part)) {
         if (blob_part_has_shared_backing(part)) return blob_reject_shared_buffer_part(part);
@@ -187,7 +186,7 @@ static bool blob_append_part(StrBuf* sb, Item part) {
                 (const char*)data + dv->byte_offset,
                 (size_t)dv->byte_length);
         }
-        return true;
+        return js_status_ok();
     }
     if (tid == LMD_TYPE_MAP) {
         // Blob? Pull _text.
@@ -195,11 +194,11 @@ static bool blob_append_part(StrBuf* sb, Item part) {
             size_t n = 0;
             const char* t = str_prop_get(part, "_text", &n);
             if (t && n > 0) strbuf_append_str_n(sb, t, n);
-            return true;
+            return js_status_ok();
         }
     }
     // Fallback: silently skip unsupported part types.
-    return true;
+    return js_status_ok();
 }
 
 extern "C" Item js_blob_new(Item parts, Item options) {
@@ -208,17 +207,19 @@ extern "C" Item js_blob_new(Item parts, Item options) {
         int64_t n = js_array_length(parts);
         for (int64_t i = 0; i < n; i++) {
             Item p = js_array_get_int(parts, i);
-            if (!blob_append_part(sb, p)) {
+            Item append_result = blob_append_part(sb, p);
+            if (item_is_error(append_result)) {
                 strbuf_free(sb);
-                return ItemNull;
+                return append_result;
             }
         }
     } else if (get_type_id(parts) != LMD_TYPE_NULL) {
         // Per spec the parts argument must be iterable; if it's a single string
         // we accept it as a one-element sequence (matches the shim's behavior).
-        if (!blob_append_part(sb, parts)) {
+        Item append_result = blob_append_part(sb, parts);
+        if (item_is_error(append_result)) {
             strbuf_free(sb);
-            return ItemNull;
+            return append_result;
         }
     }
 
@@ -339,20 +340,17 @@ extern "C" Item js_file_new(Item parts, Item name_item, Item options) {
 
 extern "C" Item js_clipboard_item_new(Item items, Item options) {
     if (get_type_id(items) != LMD_TYPE_MAP) {
-        js_throw_type_error("ClipboardItem requires a record of MIME types");
-        return ItemNull;
+        return js_throw_type_error("ClipboardItem requires a record of MIME types");
     }
     // Per spec: items must be a plain record. Reject Blob (and other tagged classes).
     if (js_class_id(items) != JS_CLASS_NONE) {
-        js_throw_type_error("ClipboardItem requires a record, not a Blob");
-        return ItemNull;
+        return js_throw_type_error("ClipboardItem requires a record, not a Blob");
     }
     // Iterate source map keys via js_object_keys helper.
     Item keys = js_object_keys(items);
     int64_t nk = (get_type_id(keys) == LMD_TYPE_ARRAY) ? js_array_length(keys) : 0;
     if (nk == 0) {
-        js_throw_type_error("ClipboardItem requires at least one representation");
-        return ItemNull;
+        return js_throw_type_error("ClipboardItem requires at least one representation");
     }
     Item obj = js_new_object();
     mark_class(obj, "ClipboardItem");
@@ -740,9 +738,8 @@ extern "C" Item js_dt_items_add(Item data_arg, Item type_arg) {
         js_array_push(rec_arr, record);
     } else if (get_type_id(data_arg) == LMD_TYPE_STRING) {
         if (get_type_id(type_arg) != LMD_TYPE_STRING) {
-            js_throw_type_error(
+            return js_throw_type_error(
                 "DataTransferItemList.add requires a type for strings");
-            return ItemNull;
         }
         char tbuf[256];
         if (!dt_normalize_format(type_arg, tbuf, sizeof(tbuf))) return ItemNull;
@@ -761,9 +758,8 @@ extern "C" Item js_dt_items_add(Item data_arg, Item type_arg) {
                     strncmp(ks->chars, "string", 6) == 0 &&
                     (size_t)es->len == tlen &&
                     strncmp(es->chars, tbuf, tlen) == 0) {
-                    js_throw_type_error(
+                    return js_throw_type_error(
                         "NotSupportedError: type already present");
-                    return ItemNull;
                 }
             }
         }

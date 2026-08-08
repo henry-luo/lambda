@@ -738,6 +738,7 @@ enum MapKind {
                                  // properties plus CSS-specific method dispatch.
     MAP_KIND_DESC       = 13, // regular JS/Lambda object with descriptor metadata
     MAP_KIND_ARRAY_SPARSE = 14, // array companion map plus numeric sparse hash table
+    MAP_KIND_ERROR       = 15, // resting-state LambdaError presented as a JS object
 };
 
 #define CONTAINER_FLAG_IMMORTAL (1u << 5)
@@ -1845,6 +1846,12 @@ static inline RetPath rp_err(LambdaError* error) {
 // In C++ mode, these are defined in lambda.hpp (after full Item struct definition).
 // ============================================================================
 #ifndef __cplusplus
+
+// C helpers use the same merged-lane tag test as the C++ runtime.  Keep the
+// implementation here so native host boundaries do not need the C++ Item API.
+static inline bool item_is_error(Item item) {
+    return ((uint64_t)item >> 56) == LMD_TYPE_ERROR;
+}
 
 // Wrap a legacy Item-returning function result into RetItem.
 // Error Items may be either the historical sentinel (pointer=0) or a tagged

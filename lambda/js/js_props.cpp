@@ -1,16 +1,6 @@
-// js_props.cpp — ES2020 property-model abstract operations (Stage A1)
-//
-// Migration note: this file collects the canonical kernels of the JS [[Get]]
-// / [[Set]] / [[Delete]] / [[HasProperty]] algorithms. Each call site that
-// today inlines the IS_ACCESSOR / deleted-sentinel / receiver dispatch is
-// being routed through these helpers one at a time, gated by the test262
-// baseline + the Stage B property-invariant harness.
-//
-// First migrated kernel (Stage A1.3a): `js_ordinary_get_own` — the own-property
-// lookup with IS_ACCESSOR getter dispatch. Today this exact pattern is
-// duplicated 11+ times across js_runtime.cpp; centralizing it kills the
-// "we forgot to clear IS_ACCESSOR" / "we forgot to honor the sentinel"
-// bug class.
+// js_props.cpp — ECMAScript ordinary property operations.
+// [[Get]], [[Set]], [[Delete]], and [[HasProperty]] share these kernels so
+// accessor and tombstone invariants are enforced at one boundary.
 
 #include "js_props.h"
 #include "js_runtime.h"
@@ -41,26 +31,13 @@ static inline Item js_props_undefined() {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-static inline Item js_props_accessor_result(Item value) {
-    return value;
-}
-
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
 // forward-declare here so the kernels below can build name keys.
 extern "C++" String* heap_create_name(const char* name, size_t len);
 extern void fn_map_set(Item map_item, Item key, Item value);
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
-// Stage E: debug-only invariant assertions. Compiled out under NDEBUG.
-// Three classes of invariants the property-model kernels enforce:
-//   (E1) Key well-formedness: callers must pass a non-NULL name buffer
-//        with non-negative length. Empty-string keys ARE legal in JS
-//        (`obj[""]`), so we only forbid NULL/negative-length.
-//   (E2) Sentinel exclusivity: if the slot is the deleted sentinel, the
-//        shape entry must NOT also be marked IS_ACCESSOR. The two states
-//        are mutually exclusive — IS_ACCESSOR clearance is part of delete.
-//   (E3) Accessor slot consistency: if shape says IS_ACCESSOR, the slot
-//        value must decode to a non-null JsAccessorPair*.
+// Debug-only property-storage invariants. Empty-string keys are valid.
 #ifndef NDEBUG
 #  include <cassert>
 #  define JS_PROPS_ASSERT_KEY(name, len) \
@@ -196,7 +173,8 @@ extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
             JsAccessorPair* pair = js_item_to_accessor_pair(slot);
             if (pair && pair->getter.item != ItemNull.item) {
                 Item this_val = (Receiver.item ? Receiver : object);
-                *out_value = js_props_accessor_result(js_call_function(pair->getter, this_val, NULL, 0));
+                Item getter_result = js_call_function(pair->getter, this_val, NULL, 0);
+                *out_value = getter_result;
                 return JS_OWN_READY;
             }
             // Setter-only accessor:
@@ -237,35 +215,43 @@ extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
 extern "C" JsAccessorPair* js_find_accessor_pair_inheritable_key(Item obj,
                                                                    PropertyKeyRef key);
 
-static JsSetterDispatchStatus js_dispatch_accessor_setter(Item object,
+static JsSetterDispatchResult js_setter_dispatch_result(
+        JsSetterDispatchStatus status, Item error_lane) {
+    return {status, error_lane};
+}
+
+static JsSetterDispatchResult js_dispatch_accessor_setter(Item object,
                                                           JsAccessorPair* ap,
                                                           Item value,
                                                           Item Receiver) {
-    if (!ap) return JS_SET_NOT_FOUND;
+    if (!ap) return js_setter_dispatch_result(JS_SET_NOT_FOUND, ItemNull);
 
     if (ap->setter.item != ItemNull.item &&
         get_type_id(ap->setter) == LMD_TYPE_FUNC) {
         Item args[1] = { value };
         Item this_val = (Receiver.item ? Receiver : object);
-        js_call_function(ap->setter, this_val, args, 1);
-        return JS_SET_DISPATCHED;
+        Item setter_result = js_call_function(ap->setter, this_val, args, 1);
+        if (item_is_error(setter_result)) {
+            return js_setter_dispatch_result(JS_SET_DISPATCH_ERROR, setter_result);
+        }
+        return js_setter_dispatch_result(JS_SET_DISPATCHED, ItemNull);
     }
-    return JS_SET_NO_SETTER;
+    return js_setter_dispatch_result(JS_SET_NO_SETTER, ItemNull);
 }
 
-extern "C" JsSetterDispatchStatus js_ordinary_set_via_accessor(Item object,
-                                                                const char* name,
-                                                                int name_len,
-                                                                Item value,
-                                                                Item Receiver) {
+extern "C" JsSetterDispatchResult js_ordinary_set_via_accessor(Item object,
+                                                                 const char* name,
+                                                                 int name_len,
+                                                                 Item value,
+                                                                 Item Receiver) {
     return js_dispatch_accessor_setter(object,
         js_find_accessor_pair_inheritable(object, name, name_len), value, Receiver);
 }
 
-extern "C" JsSetterDispatchStatus js_ordinary_set_via_accessor_key(Item object,
-                                                                    PropertyKeyRef key,
-                                                                    Item value,
-                                                                    Item Receiver) {
+extern "C" JsSetterDispatchResult js_ordinary_set_via_accessor_key(Item object,
+                                                                     PropertyKeyRef key,
+                                                                     Item value,
+                                                                     Item Receiver) {
     return js_dispatch_accessor_setter(object,
         js_find_accessor_pair_inheritable_key(object, key), value, Receiver);
 }
@@ -297,23 +283,14 @@ extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
     return JS_DESC_DATA;
 }
 
-// Stage A1.8: own-only HasProperty boolean kernel.
-//
-// Spec: ES §10.1.5.1 OrdinaryGetOwnProperty step "If desc is undefined,
-// return undefined". This collapses the slot+sentinel+IS_ACCESSOR detection
-// into a single boolean, used by `js_has_own_property` MAP/FUNC branches and
-// by callers that only need to know "is there an own property here?".
-//
-// Returns true iff there is an own MAP/FUNC/ARRAY companion-map slot and it is
-// not tombstoned by shape bit or a retained raw hole value. IS_ACCESSOR slots
-// count as present (the pair itself is the descriptor).
+// Own HasProperty for Map, Function, and Array companion storage.
 extern "C" bool js_ordinary_has_own(Item object, const char* name, int name_len) {
     JS_PROPS_ASSERT_KEY(name, name_len);
     JsShapeSlotStatus status = js_own_shape_slot_status(object, name, name_len, NULL, NULL);
     return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
 }
 
-// Stage A1.8b: tri-state own-slot status — see header for contract.
+// Tri-state own-slot status; see the header for the caller contract.
 extern "C" JsOwnSlotStatus js_ordinary_own_status(Item object, const char* name, int name_len) {
     JS_PROPS_ASSERT_KEY(name, name_len);
     JsShapeSlotStatus status = js_own_shape_slot_status(object, name, name_len, NULL, NULL);
@@ -322,7 +299,7 @@ extern "C" JsOwnSlotStatus js_ordinary_own_status(Item object, const char* name,
     return JS_HAS_ABSENT;
 }
 
-// Stage A1.9: own + proto-chain HasProperty (no proxy / builtin fallback).
+// Ordinary HasProperty; proxy and builtin fallbacks stay with their callers.
 extern "C" bool js_ordinary_has_property(Item object, const char* name, int name_len) {
     JS_PROPS_ASSERT_KEY(name, name_len);
     Item cur = object;
@@ -333,39 +310,6 @@ extern "C" bool js_ordinary_has_property(Item object, const char* name, int name
         depth++;
     }
     return false;
-}
-
-// Stage A1.10: OrdinaryGet — own + proto chain MAP-only kernel.
-extern "C" bool js_ordinary_get(Item object, const char* name, int name_len,
-                                 Item Receiver, Item* out_value) {
-    JS_PROPS_ASSERT_KEY(name, name_len);
-    if (!out_value) return false;
-    Item key = (Item){.item = s2it(heap_create_name(name, name_len))};
-    Item cur = object;
-    int depth = 0;
-    while (cur.item != ItemNull.item && get_type_id(cur) == LMD_TYPE_MAP && depth < 32) {
-        Item val = ItemNull;
-        JsOwnGetStatus st = js_ordinary_get_own(cur, key, Receiver, &val);
-        if (st == JS_OWN_READY) { *out_value = val; return true; }
-        // NOT_FOUND or DELETED — keep walking.
-        cur = js_get_prototype_of(cur);
-        depth++;
-    }
-    return false;
-}
-
-// Stage A1.11: OrdinarySet — inherited-setter dispatch + own data write.
-extern "C" JsSetterDispatchStatus js_ordinary_set(Item object, const char* name, int name_len,
-                                                    Item value, Item Receiver) {
-    JS_PROPS_ASSERT_KEY(name, name_len);
-    JsSetterDispatchStatus st = js_ordinary_set_via_accessor(object, name, name_len, value, Receiver);
-    if (st != JS_SET_NOT_FOUND) return st;
-    // No inherited accessor — perform own data write on Receiver.
-    Item target = (Receiver.item ? Receiver : object);
-    if (get_type_id(target) != LMD_TYPE_MAP) return JS_SET_NOT_FOUND;
-    Item key = (Item){.item = s2it(heap_create_name(name, name_len))};
-    js_property_set(target, key, value);
-    return JS_SET_DATA_WRITTEN;
 }
 
 extern "C" bool js_shape_mark_deleted_own(Item object, const char* name, int name_len,
@@ -390,7 +334,7 @@ extern "C" bool js_shape_mark_deleted_own(Item object, const char* name, int nam
     return true;
 }
 
-// Stage A1.12: OrdinaryDelete — own-property delete on LMD_TYPE_MAP.
+// Ordinary Map own-property delete.
 extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) {
     JS_PROPS_ASSERT_KEY(name, name_len);
     if (get_type_id(object) != LMD_TYPE_MAP) return true;
@@ -421,8 +365,8 @@ extern "C" JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
     if (jspd_is_accessor(e)) {
         JsAccessorPair* pair = js_item_to_accessor_pair(slot);
         if (pair && pair->getter.item != ItemNull.item) {
-            Item v = js_props_accessor_result(js_call_function(pair->getter, receiver, NULL, 0));
-            if (js_check_exception()) return JS_RESOLVE_THREW;
+            Item v = js_call_function(pair->getter, receiver, NULL, 0);
+            if (item_is_error(v)) return JS_RESOLVE_THREW;
             if (out_value) *out_value = v;
             return JS_RESOLVE_VALUE;
         }
@@ -498,6 +442,13 @@ static bool js_props_desc_from_storage_key(Item obj, Map* m,
     return js_props_desc_from_shape_slot(status, slot, se, out);
 }
 
+static bool js_props_error_standard_field(const char* name, int name_len) {
+    return (name_len == 4 && memcmp(name, "name", 4) == 0) ||
+        (name_len == 7 && memcmp(name, "message", 7) == 0) ||
+        (name_len == 5 && memcmp(name, "cause", 5) == 0) ||
+        (name_len == 5 && memcmp(name, "stack", 5) == 0);
+}
+
 extern "C" bool js_get_own_property_descriptor(Item object,
                                                 const char* name,
                                                 int name_len,
@@ -506,6 +457,22 @@ extern "C" bool js_get_own_property_descriptor(Item object,
     *out = (JsPropertyDescriptor){};
 
     TypeId t = get_type_id(object);
+    if (js_is_resting_error(object)) {
+        Item value = ItemNull;
+        if (js_props_error_standard_field(name, name_len)) {
+            if (!js_error_own_property(object, name, name_len, &value)) return false;
+            // Error's standard own fields are writable/configurable but hidden
+            // from enumeration; they bypass ordinary shape storage by design.
+            out->flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE;
+            out->flags |= JS_PD_WRITABLE;
+            out->flags2 |= 0x01u;
+            out->value = value;
+            return true;
+        }
+        Item properties = js_error_properties_map(object, false);
+        return get_type_id(properties) == LMD_TYPE_MAP &&
+            js_props_desc_from_storage(properties, properties.map, name, name_len, out);
+    }
     if (t == LMD_TYPE_MAP) {
         return js_props_desc_from_storage(object, object.map, name, name_len, out);
     }
@@ -542,6 +509,9 @@ extern "C" bool js_get_own_property_descriptor_key(Item object,
     *out = (JsPropertyDescriptor){};
 
     TypeId t = get_type_id(object);
+    if (js_is_resting_error(object)) {
+        return js_get_own_property_descriptor(object, key->chars, (int)key->len, out);
+    }
     if (t == LMD_TYPE_MAP) {
         return js_props_desc_from_storage_key(object, object.map, key, out);
     }
@@ -560,9 +530,7 @@ extern "C" bool js_get_own_property_descriptor_key(Item object,
     return false;
 }
 
-// =============================================================================
-// Stage A2.3 — descriptor parser + apply kernel
-// =============================================================================
+// Property-descriptor parser and apply kernel.
 
 extern "C" void js_func_init_property(Item fn, Item key, Item value);
 
@@ -741,20 +709,18 @@ static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item va
 static inline Item js_props_throw_type(const char* msg) {
     Item tn = js_props_str("TypeError", 9);
     Item m  = js_props_str(msg, (int)strlen(msg));
-    js_throw_value(js_new_error_with_name(tn, m));
-    return ItemNull;
+    return js_throw_value(js_new_error_with_name(tn, m));
 }
 
-extern "C" bool js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* out) {
-    if (!out) return false;
+extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* out) {
+    if (!out) return js_status_ok();
     *out = (JsPropertyDescriptor){};
 
     // Reject primitive descriptors per ES §6.2.5.5 step 1 (Type(Obj) is Object).
     TypeId dt = get_type_id(desc_obj);
     if (dt != LMD_TYPE_MAP && dt != LMD_TYPE_FUNC &&
         dt != LMD_TYPE_ARRAY && dt != LMD_TYPE_ELEMENT) {
-        js_props_throw_type("Property description must be an object");
-        return false;
+        return js_props_throw_type("Property description must be an object");
     }
 
     Item k_value     = js_props_str("value",        5);
@@ -764,60 +730,67 @@ extern "C" bool js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* o
     Item k_enum      = js_props_str("enumerable",  10);
     Item k_config    = js_props_str("configurable",12);
 
-    bool has_val   = it2b(js_in(k_value,    desc_obj));
-    bool has_wri   = it2b(js_in(k_writable, desc_obj));
-    bool has_get   = it2b(js_in(k_get,      desc_obj));
-    bool has_set   = it2b(js_in(k_set,      desc_obj));
-    bool has_enum  = it2b(js_in(k_enum,     desc_obj));
-    bool has_cfg   = it2b(js_in(k_config,   desc_obj));
+    JS_ASSIGN_OR_RETURN(has_val_item, js_in(k_value, desc_obj));
+    JS_ASSIGN_OR_RETURN(has_wri_item, js_in(k_writable, desc_obj));
+    JS_ASSIGN_OR_RETURN(has_get_item, js_in(k_get, desc_obj));
+    JS_ASSIGN_OR_RETURN(has_set_item, js_in(k_set, desc_obj));
+    JS_ASSIGN_OR_RETURN(has_enum_item, js_in(k_enum, desc_obj));
+    JS_ASSIGN_OR_RETURN(has_cfg_item, js_in(k_config, desc_obj));
+    bool has_val   = it2b(has_val_item);
+    bool has_wri   = it2b(has_wri_item);
+    bool has_get   = it2b(has_get_item);
+    bool has_set   = it2b(has_set_item);
+    bool has_enum  = it2b(has_enum_item);
+    bool has_cfg   = it2b(has_cfg_item);
 
     // ES §6.2.5.4 step 9: mixed accessor + data → TypeError.
     if ((has_get || has_set) && (has_val || has_wri)) {
-        js_props_throw_type(
+        return js_props_throw_type(
             "Invalid property descriptor. Cannot both specify accessors and a value or writable attribute");
-        return false;
     }
 
     if (has_val) {
         out->flags |= JS_PD_HAS_VALUE;
         out->value = js_property_get(desc_obj, k_value);
+        if (item_is_error(out->value)) return out->value;
     }
     if (has_wri) {
         out->flags |= JS_PD_HAS_WRITABLE;
-        if (js_is_truthy(js_property_get(desc_obj, k_writable)))
+        JS_ASSIGN_OR_RETURN(writable, js_property_get(desc_obj, k_writable));
+        if (js_is_truthy(writable))
             out->flags |= JS_PD_WRITABLE;
     }
     if (has_get) {
-        Item getter = js_property_get(desc_obj, k_get);
+        JS_ASSIGN_OR_RETURN(getter, js_property_get(desc_obj, k_get));
         TypeId gt = get_type_id(getter);
         if (gt != LMD_TYPE_FUNC && gt != LMD_TYPE_UNDEFINED) {
-            js_props_throw_type("Getter must be a function");
-            return false;
+            return js_props_throw_type("Getter must be a function");
         }
         out->flags |= JS_PD_HAS_GET;
         out->getter = (gt == LMD_TYPE_FUNC) ? getter : js_props_undefined();
     }
     if (has_set) {
-        Item setter = js_property_get(desc_obj, k_set);
+        JS_ASSIGN_OR_RETURN(setter, js_property_get(desc_obj, k_set));
         TypeId st = get_type_id(setter);
         if (st != LMD_TYPE_FUNC && st != LMD_TYPE_UNDEFINED) {
-            js_props_throw_type("Setter must be a function");
-            return false;
+            return js_props_throw_type("Setter must be a function");
         }
         out->flags |= JS_PD_HAS_SET;
         out->setter = (st == LMD_TYPE_FUNC) ? setter : js_props_undefined();
     }
     if (has_enum) {
         out->flags |= JS_PD_HAS_ENUMERABLE;
-        if (js_is_truthy(js_property_get(desc_obj, k_enum)))
+        JS_ASSIGN_OR_RETURN(enumerable, js_property_get(desc_obj, k_enum));
+        if (js_is_truthy(enumerable))
             out->flags |= JS_PD_ENUMERABLE;
     }
     if (has_cfg) {
         out->flags |= JS_PD_HAS_CONFIGURABLE;
-        if (js_is_truthy(js_property_get(desc_obj, k_config)))
+        JS_ASSIGN_OR_RETURN(configurable, js_property_get(desc_obj, k_config));
+        if (js_is_truthy(configurable))
             out->flags2 |= 0x01u;
     }
-    return true;
+    return js_status_ok();
 }
 
 static ShapeEntry* js_props_find_descriptor_shape(Item object, Item name_item,
@@ -865,15 +838,25 @@ static void js_props_clear_descriptor_accessor(Item object, Item name_item,
     }
 }
 
-static void js_define_own_property_from_descriptor_impl(Item object,
-                                                         Item name_item,
-                                                         const char* name,
-                                                         int name_len,
-                                                         const JsPropertyDescriptor* pd,
-                                                         bool is_new_property,
-                                                         bool existing_accessor) {
-    if (!pd) return;
-    if (name_len < 0 || name_len >= 240) return;
+static Item js_define_own_property_from_descriptor_impl(Item object,
+                                                        Item name_item,
+                                                        const char* name,
+                                                        int name_len,
+                                                        const JsPropertyDescriptor* pd,
+                                                        bool is_new_property,
+                                                        bool existing_accessor) {
+    if (!pd) return js_status_ok();
+    if (name_len < 0 || name_len >= 240) return js_status_ok();
+    if (js_is_resting_error(object) &&
+        !js_props_error_standard_field(name, name_len)) {
+        // Error carriers store ordinary user properties in a side Map; writing
+        // descriptor flags to the carrier's LambdaError header loses the
+        // non-configurable state needed by a later DefineProperty call.
+        Item properties = js_error_properties_map(object, true);
+        if (get_type_id(properties) != LMD_TYPE_MAP) return js_status_ok();
+        return js_define_own_property_from_descriptor_impl(properties, name_item,
+            name, name_len, pd, is_new_property, existing_accessor);
+    }
     String* name_key = it2s(name_item);
     bool identity_key = name_key && property_key_requires_identity(name_key);
 
@@ -891,8 +874,11 @@ static void js_define_own_property_from_descriptor_impl(Item object,
     // the shape entry and update JSPD_NON_* flags on it.
     bool is_data_desc = (pd->flags & JS_PD_HAS_VALUE) != 0;
     if (!is_accessor_desc && !is_data_desc) {
-        if (!it2b(js_has_own_property(object, name_item))) {
-            js_property_set(object, name_item, (Item){.item = ITEM_JS_UNDEFINED});
+        JS_ASSIGN_OR_RETURN(has_own, js_has_own_property(object, name_item));
+        if (!it2b(has_own)) {
+            Item set_result = js_property_set(object, name_item,
+                                              (Item){.item = ITEM_JS_UNDEFINED});
+            if (item_is_error(set_result)) return set_result;
         }
     }
 
@@ -953,27 +939,33 @@ static void js_define_own_property_from_descriptor_impl(Item object,
                     target = object;
                 }
                 if (pd->flags & JS_PD_HAS_GET) {
-                    js_define_accessor_partial(target, name_item, pd->getter, /*is_setter*/0, /*attrs*/0);
+                    JS_RETURN_IF_ERROR(js_define_accessor_partial(
+                        target, name_item, pd->getter, /*is_setter*/0, /*attrs*/0));
                 }
                 if (pd->flags & JS_PD_HAS_SET) {
-                    js_define_accessor_partial(target, name_item, pd->setter, /*is_setter*/1, /*attrs*/0);
+                    JS_RETURN_IF_ERROR(js_define_accessor_partial(
+                        target, name_item, pd->setter, /*is_setter*/1, /*attrs*/0));
                 }
             } else {
                 // Named-key path: IS_ACCESSOR + JsAccessorPair via chokepoint.
                 if (pd->flags & JS_PD_HAS_GET) {
-                    js_define_accessor_partial(object, name_item, pd->getter, /*is_setter*/0, /*attrs*/0);
+                    JS_RETURN_IF_ERROR(js_define_accessor_partial(
+                        object, name_item, pd->getter, /*is_setter*/0, /*attrs*/0));
                 }
                 if (pd->flags & JS_PD_HAS_SET) {
-                    js_define_accessor_partial(object, name_item, pd->setter, /*is_setter*/1, /*attrs*/0);
+                    JS_RETURN_IF_ERROR(js_define_accessor_partial(
+                        object, name_item, pd->setter, /*is_setter*/1, /*attrs*/0));
                 }
             }
         } else {
             // Install getter/setter halves via Scheme B chokepoint.
             if (pd->flags & JS_PD_HAS_GET) {
-                js_define_accessor_partial(object, name_item, pd->getter, /*is_setter*/0, /*attrs*/0);
+                JS_RETURN_IF_ERROR(js_define_accessor_partial(
+                    object, name_item, pd->getter, /*is_setter*/0, /*attrs*/0));
             }
             if (pd->flags & JS_PD_HAS_SET) {
-                js_define_accessor_partial(object, name_item, pd->setter, /*is_setter*/1, /*attrs*/0);
+                JS_RETURN_IF_ERROR(js_define_accessor_partial(
+                    object, name_item, pd->setter, /*is_setter*/1, /*attrs*/0));
             }
         }
     } else if (pd->flags & JS_PD_HAS_VALUE) {
@@ -1029,7 +1021,7 @@ static void js_define_own_property_from_descriptor_impl(Item object,
             ShapeEntry* accessor_value_se = js_props_find_descriptor_shape(
                 accessor_data_target, name_item, name, name_len);
             if (!js_props_store_raw_data_slot(accessor_data_target, accessor_value_se, pd->value)) {
-                js_property_set(accessor_data_target, name_item, pd->value);
+                JS_ASSIGN_OR_RETURN(set_result, js_property_set(accessor_data_target, name_item, pd->value));
             }
             // Clear IS_ACCESSOR only after replacing the JsAccessorPair slot.
             // Attribute probes between the two operations must continue to see
@@ -1062,7 +1054,7 @@ static void js_define_own_property_from_descriptor_impl(Item object,
             }
             js_func_init_property(object, name_item, pd->value);
         } else {
-            js_property_set(object, name_item, pd->value);
+            JS_ASSIGN_OR_RETURN(set_result, js_property_set(object, name_item, pd->value));
         }
 
         // AT-3: legacy __get_/__set_ marker cleanup retired. Post-AT-1 accessors
@@ -1111,28 +1103,29 @@ static void js_define_own_property_from_descriptor_impl(Item object,
     }
 
     js_props_fill_sparse_accessor_index(object, name, name_len, is_accessor_desc);
+    return js_status_ok();
 }
 
-extern "C" void js_define_own_property_from_descriptor(Item object,
+extern "C" Item js_define_own_property_from_descriptor(Item object,
                                                         const char* name,
                                                         int name_len,
                                                         const JsPropertyDescriptor* pd,
                                                         bool is_new_property,
                                                         bool existing_accessor) {
-    js_define_own_property_from_descriptor_impl(object,
+    return js_define_own_property_from_descriptor_impl(object,
         js_props_str(name, name_len), name, name_len, pd,
         is_new_property, existing_accessor);
 }
 
-extern "C" void js_define_own_property_from_descriptor_key(Item object,
+extern "C" Item js_define_own_property_from_descriptor_key(Item object,
                                                             PropertyKeyRef key,
                                                             const JsPropertyDescriptor* pd,
                                                             bool is_new_property,
                                                             bool existing_accessor) {
-    if (!key) return;
+    if (!key) return js_status_ok();
     // DefineProperty must retain the caller's key record; creating a string
     // from its diagnostic bytes would publish a different Symbol slot.
     Item key_item = (Item){.item = s2it(key)};
-    js_define_own_property_from_descriptor_impl(object, key_item,
+    return js_define_own_property_from_descriptor_impl(object, key_item,
         key->chars, (int)key->len, pd, is_new_property, existing_accessor);
 }

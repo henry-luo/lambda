@@ -98,7 +98,6 @@ extern "C" int64_t bigint_to_int64(Item bi);
 extern "C" char* bigint_to_cstring_radix(Item bi, int radix);
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
 extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
-extern "C" int js_check_exception(void);
 
 static bool buffer_value_is_bigint(Item value) {
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
@@ -106,20 +105,19 @@ static bool buffer_value_is_bigint(Item value) {
     return dec && dec->unlimited == DECIMAL_BIGINT;
 }
 
-static bool buffer_to_bigint_value(Item value, Item* out_bigint) {
+static Item buffer_to_bigint_value(Item value, Item* out_bigint) {
     if (buffer_value_is_bigint(value)) {
         *out_bigint = value;
-        return true;
+        return js_status_ok();
     }
 
     TypeId value_type = get_type_id(value);
     // buffer's BigInt write APIs require a BigInt value; generic ToBigInt would wrongly accept strings/booleans.
     if (value_type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
-        js_throw_type_error("Cannot convert a Symbol value to a BigInt");
+        return js_throw_type_error("Cannot convert a Symbol value to a BigInt");
     } else {
-        js_throw_type_error("Cannot convert non-BigInt value to BigInt");
+        return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
     }
-    return false;
 }
 
 static Item buffer_biguint64_item(uint64_t value) {
@@ -256,7 +254,7 @@ static int format_received_suffix(char* buf, int buf_size, Item value) {
 }
 
 // ─── Buffer.alloc(size, fill?, encoding?) ───────────────────────────────────
-static bool buffer_parse_allocation_size(Item size_item, int64_t* out_size) {
+static Item buffer_parse_allocation_size(Item size_item, int64_t* out_size) {
     int64_t size = 0;
     TypeId tid = get_type_id(size_item);
     if (tid == LMD_TYPE_INT) {
@@ -264,28 +262,25 @@ static bool buffer_parse_allocation_size(Item size_item, int64_t* out_size) {
     } else if (tid == LMD_TYPE_FLOAT) {
         double d = it2d(size_item);
         if (d != d || d < 0 || d > JS_BUFFER_MAX_LENGTH) {
-            js_throw_range_error_code("ERR_OUT_OF_RANGE",
+            return js_throw_range_error_code("ERR_OUT_OF_RANGE",
                 "The value of \"size\" is out of range.");
-            return false;
         }
         size = (int64_t)d;
     } else {
-        js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"size\" argument must be of type number.");
-        return false;
     }
     if (size < 0 || size > JS_BUFFER_MAX_LENGTH) {
-        js_throw_range_error_code("ERR_OUT_OF_RANGE",
+        return js_throw_range_error_code("ERR_OUT_OF_RANGE",
             "The value of \"size\" is out of range.");
-        return false;
     }
     *out_size = size;
-    return true;
+    return js_status_ok();
 }
 
 extern "C" Item js_buffer_alloc(Item size_item, Item fill_item) {
     int64_t size = 0;
-    if (!buffer_parse_allocation_size(size_item, &size)) return ItemNull;
+    JS_ASSIGN_OR_RETURN(validation, buffer_parse_allocation_size(size_item, &size));
     Item buf = create_buffer((int)size);
     // alloc zero-fills by default via typed_array_new
 
@@ -329,15 +324,14 @@ extern "C" Item js_buffer_construct(Item arg, Item encoding, Item length_item) {
     return js_buffer_from(arg, encoding, length_item);
 }
 
-static bool buffer_from_to_index(Item item, int undefined_default, int nan_default, int* out_index, const char* name) {
-    if (!out_index) return false;
+static Item buffer_from_to_index(Item item, int undefined_default, int nan_default, int* out_index, const char* name) {
+    if (!out_index) return js_throw_type_error("Buffer index output is unavailable");
     if (get_type_id(item) == LMD_TYPE_UNDEFINED || item.item == ITEM_JS_UNDEFINED) {
         *out_index = undefined_default;
-        return true;
+        return js_status_ok();
     }
 
-    Item num = js_to_number(item);
-    if (js_check_exception()) return false;
+    JS_ASSIGN_OR_RETURN(num, js_to_number(item));
 
     double value = 0.0;
     TypeId num_type = get_type_id(num);
@@ -350,24 +344,22 @@ static bool buffer_from_to_index(Item item, int undefined_default, int nan_defau
     } else {
         char msg[160];
         snprintf(msg, sizeof(msg), "The \"%s\" argument must be of type number.", name ? name : "offset");
-        js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
-        return false;
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
     }
 
     if (value != value) {
         *out_index = nan_default;
-        return true;
+        return js_status_ok();
     }
 
     if (value < 0.0 || value > 2147483647.0) {
         char msg[160];
         snprintf(msg, sizeof(msg), "\"%s\" is outside of buffer bounds", name ? name : "offset");
-        js_throw_range_error_code("ERR_BUFFER_OUT_OF_BOUNDS", msg);
-        return false;
+        return js_throw_range_error_code("ERR_BUFFER_OUT_OF_BOUNDS", msg);
     }
 
     *out_index = (int)value;
-    return true;
+    return js_status_ok();
 }
 
 static int buffer_number_to_int_or_default(Item item, int default_value) {
@@ -576,7 +568,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         }
 
         int byte_offset = 0;
-        if (!buffer_from_to_index(encoding, 0, 0, &byte_offset, "offset")) return ItemNull;
+        JS_ASSIGN_OR_RETURN(validation, buffer_from_to_index(encoding, 0, 0, &byte_offset, "offset"));
         int buffer_length = js_arraybuffer_length(ab);
         if (byte_offset > buffer_length) {
             return js_throw_range_error_code("ERR_BUFFER_OUT_OF_BOUNDS",
@@ -584,7 +576,8 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         }
 
         int byte_length = buffer_length - byte_offset;
-        if (!buffer_from_to_index(length_item, byte_length, 0, &byte_length, "length")) return ItemNull;
+        validation = buffer_from_to_index(length_item, byte_length, 0, &byte_length, "length");
+        if (item_is_error(validation)) return validation;
         if (byte_length > buffer_length - byte_offset) {
             return js_throw_range_error_code("ERR_BUFFER_OUT_OF_BOUNDS",
                 "\"length\" is outside of buffer bounds");
@@ -1577,7 +1570,7 @@ static bool is_ucs2_enc(const char* enc) {
            strcmp(enc, "utf16le") == 0 || strcmp(enc, "utf-16le") == 0;
 }
 
-static bool buffer_prepare_search_needle(Item value, Item enc_item, char* enc,
+static Item buffer_prepare_search_needle(Item value, Item enc_item, char* enc,
         size_t enc_size, uint8_t* enc_buf, int enc_buf_size,
         const uint8_t** needle, int* needle_len, Item* error_result) {
     *needle = NULL;
@@ -1588,7 +1581,7 @@ static bool buffer_prepare_search_needle(Item value, Item enc_item, char* enc,
         char msg[128];
         snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc);
         *error_result = js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
-        return false;
+        return *error_result;
     }
     if (get_type_id(value) == LMD_TYPE_STRING) {
         String* s = it2s(value);
@@ -1605,7 +1598,7 @@ static bool buffer_prepare_search_needle(Item value, Item enc_item, char* enc,
         *needle = buffer_data(value, &value_len);
         *needle_len = value_len;
     }
-    return true;
+    return js_status_ok();
 }
 
 static int buffer_find_byte(const uint8_t* data, int first, int last,
@@ -1699,10 +1692,9 @@ extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item e
     const uint8_t* needle = NULL;
     int needle_len = 0;
     uint8_t enc_buf[4096]; // stack buffer for encoded needle
-    if (!buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
-            enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error)) {
-        return search_error;
-    }
+    Item preparation = buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
+        enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error);
+    if (item_is_error(preparation)) return preparation;
     if (!needle) return (Item){.item = i2it(-1)};
 
     int found = buffer_find_needle(data, blen, needle, needle_len, start, false,
@@ -1749,7 +1741,7 @@ extern "C" Item js_buffer_fill(Item buf, Item value) {
 // ─── Buffer.allocUnsafe(size) ───────────────────────────────────────────────
 extern "C" Item js_buffer_allocUnsafe(Item size_item) {
     int64_t size = 0;
-    if (!buffer_parse_allocation_size(size_item, &size)) return ItemNull;
+    JS_ASSIGN_OR_RETURN(validation, buffer_parse_allocation_size(size_item, &size));
     return create_buffer((int)size); // no zero-fill guarantee
 }
 
@@ -1760,7 +1752,7 @@ extern "C" Item js_buffer_subarray(Item buf, Item start_item, Item end_item) {
 
 // ─── buf.includes(value[, byteOffset[, encoding]]) ─────────────────────────
 extern "C" Item js_buffer_includes(Item buf, Item value, Item offset_item, Item enc_item) {
-    Item idx = js_buffer_indexOf(buf, value, offset_item, enc_item);
+    JS_ASSIGN_OR_RETURN(idx, js_buffer_indexOf(buf, value, offset_item, enc_item));
     return (Item){.item = b2it(it2i(idx) >= 0)};
 }
 
@@ -1792,10 +1784,9 @@ extern "C" Item js_buffer_lastIndexOf(Item buf, Item value, Item offset_item, It
     const uint8_t* needle = NULL;
     int needle_len = 0;
     uint8_t enc_buf[4096];
-    if (!buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
-            enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error)) {
-        return search_error;
-    }
+    Item preparation = buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
+        enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error);
+    if (item_is_error(preparation)) return preparation;
     if (!needle) return (Item){.item = i2it(-1)};
 
     int found = buffer_find_needle(data, blen, needle, needle_len, end, true,
@@ -1878,7 +1869,7 @@ static int validate_rw_offset(Item offset_item, int blen, int byte_size, const c
 }
 
 // validate write value is in range [min, max]
-static bool validate_write_value(Item value_item, int64_t* out_val, int64_t min_val, int64_t max_val, int byte_size) {
+static Item validate_write_value(Item value_item, int64_t* out_val, int64_t min_val, int64_t max_val, int byte_size) {
     int64_t v = 0;
     TypeId tid = get_type_id(value_item);
     if (tid == LMD_TYPE_INT) v = it2i(value_item);
@@ -1889,10 +1880,9 @@ static bool validate_write_value(Item value_item, int64_t* out_val, int64_t min_
         snprintf(msg, sizeof(msg),
             "The value of \"value\" is out of range. It must be >= %lld and <= %lld. Received %lld",
             (long long)min_val, (long long)max_val, (long long)v);
-        js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
-        return false;
+        return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
     }
-    return true;
+    return js_status_ok();
 }
 
 // ─── Endian-aware read methods ──────────────────────────────────────────────
@@ -1994,7 +1984,7 @@ static Item js_buffer_write_fixed_integer(Item buf, Item value_item, Item offset
     int off = validate_rw_offset(offset_item, blen, byte_len, "offset", &err);
     if (off < 0) return err;
     int64_t v = 0;
-    if (!validate_write_value(value_item, &v, min_value, max_value, byte_len)) return make_js_undefined();
+    JS_ASSIGN_OR_RETURN(validation, validate_write_value(value_item, &v, min_value, max_value, byte_len));
     uint64_t bits = (uint64_t)v;
     for (int i = 0; i < byte_len; i++) {
         int write_index = little_endian ? i : byte_len - 1 - i;
@@ -2340,11 +2330,11 @@ static Item js_buffer_write_bigint64(Item buf, Item value_item, Item offset_item
     int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
     Item bigint_value;
-    if (!buffer_to_bigint_value(value_item, &bigint_value)) return ItemNull;
+    JS_ASSIGN_OR_RETURN(validation, buffer_to_bigint_value(value_item, &bigint_value));
     Item wrapped = unsigned_value ?
         js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_value) :
         js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_value);
-    if (js_check_exception()) return ItemNull;
+    if (item_is_error(wrapped)) return wrapped;
     uint64_t val = unsigned_value ? buffer_bigint_to_uint64_bits(wrapped) :
         (uint64_t)bigint_to_int64(wrapped);
     for (int i = 0; i < 8; i++) {

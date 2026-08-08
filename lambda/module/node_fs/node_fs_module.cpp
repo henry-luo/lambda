@@ -179,11 +179,9 @@ static void node_fs_call(NodeFsRequest* request, Item* args, int arg_count) {
 
 static Item node_fs_system_error(const char* syscall, int error_number) {
     if (!node_fs_host || !node_fs_host->node || !node_fs_host->node->error ||
-            !node_fs_host->node->error->throw_system_error || !node_fs_host->script ||
-            !node_fs_host->script->clear_exception) return ItemNull;
-    node_fs_host->node->error->throw_system_error(node_fs_session,
-                                                  syscall ? syscall : "open", error_number);
-    return node_fs_host->script->clear_exception();
+            !node_fs_host->node->error->throw_system_error) return ItemNull;
+    return node_fs_host->node->error->throw_system_error(node_fs_session,
+                                                        syscall ? syscall : "open", error_number);
 }
 
 static void node_fs_work(void* user) {
@@ -270,8 +268,11 @@ static bool node_fs_copy_path(Item path_item, char** out_path, bool write, bool 
     Item path_string = node_fs_host->script->to_string(node_fs_root_value(path_root));
     *path_root = path_string.item;
     size_t path_length = 0;
-    if (node_fs_host->script->check_exception() ||
+    if (item_is_error(path_string) ||
             !node_fs_copy_string(node_fs_root_value(path_root), out_path, &path_length)) {
+        if (item_is_error(path_string)) {
+            (void)node_fs_host->script->error_lane_payload(path_string);
+        }
         node_fs_host->node->roots->root_frame_end(&frame);
         return false;
     }
@@ -282,8 +283,11 @@ static bool node_fs_copy_path(Item path_item, char** out_path, bool write, bool 
     bool permitted = write ? node_fs_host->node->permission->has_fs_write(*out_path) :
                              node_fs_host->node->permission->has_fs_read(*out_path);
     if (!permitted) {
-        if (write) node_fs_host->node->permission->check_fs_write(*out_path);
-        else node_fs_host->node->permission->check_fs_read(*out_path);
+        Item permission_error = write ? node_fs_host->node->permission->check_fs_write(*out_path) :
+                                        node_fs_host->node->permission->check_fs_read(*out_path);
+        if (item_is_error(permission_error)) {
+            (void)node_fs_host->script->error_lane_payload(permission_error);
+        }
         free(*out_path);
         *out_path = NULL;
         node_fs_host->node->roots->root_frame_end(&frame);
@@ -520,8 +524,11 @@ static Item node_fs_write_file_sync(Item path_item, Item data_item, Item options
     *data_root = data_string.item;
     char* bytes = NULL;
     size_t count = 0;
-    if (node_fs_host->script->check_exception() ||
+    if (item_is_error(data_string) ||
             !node_fs_copy_string(node_fs_root_value(data_root), &bytes, &count)) {
+        if (item_is_error(data_string)) {
+            (void)node_fs_host->script->error_lane_payload(data_string);
+        }
         free(path);
         node_fs_host->node->roots->root_frame_end(&frame);
         return ItemNull;
@@ -568,9 +575,11 @@ static Item node_fs_exists_sync(Item path_item) {
     *path_root = path_item.item;
     Item path_string = node_fs_host->script->to_string(node_fs_root_value(path_root));
     *path_root = path_string.item;
-    if (node_fs_host->script->check_exception() ||
+    if (item_is_error(path_string) ||
             !node_fs_copy_string(node_fs_root_value(path_root), &path, &ignored_length)) {
-        if (node_fs_host->script->check_exception()) node_fs_host->script->clear_exception();
+        if (item_is_error(path_string)) {
+            (void)node_fs_host->script->error_lane_payload(path_string);
+        }
         node_fs_host->node->roots->root_frame_end(&frame);
         return (Item){.item = b2it(false)};
     }
@@ -659,7 +668,7 @@ static bool node_fs_options_mkdir(Item options, int* out_mode, bool* out_recursi
                                                        node_fs_root_value(recursive_key_root));
     *out_recursive = node_fs_host->script->is_truthy(recursive);
     node_fs_host->node->roots->root_frame_end(&frame);
-    return !node_fs_host->script->check_exception();
+    return true;
 }
 
 static Item node_fs_mkdir_sync(Item path_item, Item options) {
@@ -681,10 +690,12 @@ static Item node_fs_mkdir_sync(Item path_item, Item options) {
     return result;
 }
 
-static bool node_fs_encoding_is_valid(Item encoding) {
-    if (!node_fs_host || !node_fs_host->value) return false;
+static Item node_fs_encoding_is_valid(Item encoding) {
+    if (!node_fs_host || !node_fs_host->value) return ItemNull;
     int kind = node_fs_host->value->kind(encoding);
-    if (kind == JUBE_VALUE_UNDEFINED || kind == JUBE_VALUE_NULL || kind != JUBE_VALUE_STRING) return true;
+    if (kind == JUBE_VALUE_UNDEFINED || kind == JUBE_VALUE_NULL || kind != JUBE_VALUE_STRING) {
+        return node_fs_undefined();
+    }
     static const char* const valid[] = {
         "utf8", "utf-8", "buffer", "ascii", "base64", "base64url", "hex", "latin1",
         "binary", "ucs2", "ucs-2", "utf16le", "utf-16le",
@@ -693,31 +704,34 @@ static bool node_fs_encoding_is_valid(Item encoding) {
     const uint8_t* bytes = node_fs_host->value->string_bytes(encoding);
     for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); ++i) {
         size_t candidate_length = strlen(valid[i]);
-        if (length == candidate_length && bytes && memcmp(bytes, valid[i], length) == 0) return true;
+        if (length == candidate_length && bytes && memcmp(bytes, valid[i], length) == 0) {
+            return node_fs_undefined();
+        }
     }
     node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_VALUE",
                                                 "The argument 'encoding' is invalid encoding");
-    return false;
+    return node_fs_host->script->throw_type_error_code(
+        "ERR_INVALID_ARG_VALUE", "The argument 'encoding' is invalid encoding");
 }
 
-static bool node_fs_readdir_options_valid(Item options) {
-    if (!node_fs_host || !node_fs_host->value) return false;
+static Item node_fs_readdir_options_valid(Item options) {
+    if (!node_fs_host || !node_fs_host->value) return ItemNull;
     int kind = node_fs_host->value->kind(options);
     if (kind != JUBE_VALUE_OBJECT) return node_fs_encoding_is_valid(options);
     JubeRootFrame frame = {};
-    if (!node_fs_roots_begin(&frame, 2)) return false;
+    if (!node_fs_roots_begin(&frame, 2)) return ItemNull;
     uint64_t* options_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* key_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     if (!options_root || !key_root) {
         node_fs_host->node->roots->root_frame_end(&frame);
-        return false;
+        return ItemNull;
     }
     *options_root = options.item;
     Item key = node_fs_host->value->string_from_utf8_n("encoding", 8);
     *key_root = key.item;
     Item encoding = node_fs_host->value->property_get(node_fs_root_value(options_root),
                                                       node_fs_root_value(key_root));
-    bool valid = node_fs_encoding_is_valid(encoding);
+    Item valid = node_fs_encoding_is_valid(encoding);
     node_fs_host->node->roots->root_frame_end(&frame);
     return valid;
 }
@@ -741,7 +755,8 @@ static bool node_fs_readdir_append(Item array, const char* name) {
 }
 
 static Item node_fs_readdir_sync(Item path_item, Item options) {
-    if (!node_fs_readdir_options_valid(options)) return ItemNull;
+    Item validation = node_fs_readdir_options_valid(options);
+    if (item_is_error(validation)) return validation;
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, false)) return ItemNull;
     JubeRootFrame frame = {};
@@ -779,7 +794,8 @@ static Item node_fs_readdir_sync(Item path_item, Item options) {
 }
 
 static Item node_fs_realpath_sync(Item path_item, Item options) {
-    if (!node_fs_readdir_options_valid(options)) return ItemNull;
+    Item validation = node_fs_readdir_options_valid(options);
+    if (item_is_error(validation)) return validation;
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, false)) return ItemNull;
     const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
@@ -798,7 +814,8 @@ static Item node_fs_realpath_sync(Item path_item, Item options) {
 }
 
 static Item node_fs_mkdtemp_sync(Item prefix_item, Item options) {
-    if (!node_fs_readdir_options_valid(options)) return ItemNull;
+    Item validation = node_fs_readdir_options_valid(options);
+    if (item_is_error(validation)) return validation;
     char* prefix = NULL;
     if (!node_fs_copy_path(prefix_item, &prefix, true)) return ItemNull;
     const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
@@ -880,7 +897,8 @@ static Item node_fs_schedule(Item path_item, Item data_item, Item callback, Node
     *callback_root = callback.item;
     Item path_string = node_fs_host->script->to_string(node_fs_root_value(path_root));
     *path_root = path_string.item;
-    if (node_fs_host->script->check_exception()) {
+    if (item_is_error(path_string)) {
+        (void)node_fs_host->script->error_lane_payload(path_string);
         node_fs_host->node->roots->root_frame_end(&frame);
         return ItemNull;
     }
@@ -898,9 +916,12 @@ static Item node_fs_schedule(Item path_item, Item data_item, Item callback, Node
     if (mode != NODE_FS_MODE_READ) {
         Item data_string = node_fs_host->script->to_string(node_fs_root_value(data_root));
         *data_root = data_string.item;
-        if (node_fs_host->script->check_exception() ||
+        if (item_is_error(data_string) ||
                 !node_fs_copy_string(node_fs_root_value(data_root), &request->bytes,
                                      &request->byte_count)) {
+            if (item_is_error(data_string)) {
+                (void)node_fs_host->script->error_lane_payload(data_string);
+            }
             node_fs_request_destroy(request);
             node_fs_host->node->roots->root_frame_end(&frame);
             return ItemNull;
@@ -914,9 +935,9 @@ static Item node_fs_schedule(Item path_item, Item data_item, Item callback, Node
     bool permitted = mode != NODE_FS_MODE_READ ? node_fs_host->node->permission->has_fs_write(request->path) :
                              node_fs_host->node->permission->has_fs_read(request->path);
     if (!permitted) {
-        if (mode != NODE_FS_MODE_READ) node_fs_host->node->permission->check_fs_write(request->path);
-        else node_fs_host->node->permission->check_fs_read(request->path);
-        request->initial_error = node_fs_host->script->clear_exception();
+        request->initial_error = mode != NODE_FS_MODE_READ ?
+            node_fs_host->node->permission->check_fs_write(request->path) :
+            node_fs_host->node->permission->check_fs_read(request->path);
     }
     node_fs_pending_add(request);
     int submit = node_fs_host->node->async_ops->work_submit(node_fs_session, node_fs_work,
@@ -1015,8 +1036,9 @@ static Item node_fs_promise_capability(NodeFsMode mode, Item path, Item data, It
         mode != NODE_FS_MODE_READ ? 1 : 2, environment, 2);
     *callback_root = callback.item;
     Item scheduled = node_fs_schedule(path, data, node_fs_root_value(callback_root), mode);
-    if (scheduled.item == 0 || node_fs_host->script->check_exception()) {
-        Item error = node_fs_host->script->clear_exception();
+    if (scheduled.item == 0 || item_is_error(scheduled)) {
+        Item error = item_is_error(scheduled) ?
+            node_fs_host->script->error_lane_payload(scheduled) : ItemNull;
         Item reject_args[1] = {error};
         node_fs_host->script->call_function(node_fs_root_value(reject_root), node_fs_undefined(),
                                             reject_args, 1);
@@ -1108,8 +1130,8 @@ static int node_fs_filehandle_close_call(Item receiver, Item* args, int argc, It
     operation.descriptor = handle->descriptor;
     if (handle->descriptor >= 0 && !node_fs_descriptor_operation(&operation)) {
         int error_number = operation.error_number ? operation.error_number : EIO;
-        node_fs_host->node->error->throw_system_error(node_fs_session, "close", error_number);
-        Item error = node_fs_host->script->clear_exception();
+        Item error = node_fs_host->node->error->throw_system_error(node_fs_session, "close",
+                                                                    error_number);
         *out = node_fs_promise_settled(error, true);
         return 1;
     }
@@ -1122,9 +1144,9 @@ static int node_fs_filehandle_read_call(Item receiver, Item* args, int argc, Ite
     NodeFsFileHandle* handle = node_fs_filehandle_data(receiver);
     if (!handle || !out) return 0;
     if (handle->descriptor < 0) {
-        node_fs_host->node->error->throw_error_code(node_fs_session, "EBADF",
-                                                    "The FileHandle has been transferred");
-        *out = node_fs_promise_settled(node_fs_host->script->clear_exception(), true);
+        Item error = node_fs_host->node->error->throw_error_code(
+            node_fs_session, "EBADF", "The FileHandle has been transferred");
+        *out = node_fs_promise_settled(error, true);
         return 1;
     }
     Item buffer = argc > 0 ? args[0] : node_fs_undefined();
@@ -1133,8 +1155,9 @@ static int node_fs_filehandle_read_call(Item receiver, Item* args, int argc, Ite
     Item position = argc > 3 ? args[3] : node_fs_undefined();
     Item bytes_read = node_fs_read_sync_export((Item){.item = i2it((int64_t)handle->descriptor)},
                                                buffer, offset, length, position);
-    if (node_fs_host->script->check_exception()) {
-        *out = node_fs_promise_settled(node_fs_host->script->clear_exception(), true);
+    if (item_is_error(bytes_read)) {
+        *out = node_fs_promise_settled(
+            node_fs_host->script->error_lane_payload(bytes_read), true);
         return 1;
     }
     JubeRootFrame frame = {};
@@ -1171,15 +1194,15 @@ static int node_fs_filehandle_read_file_call(Item receiver, Item* args, int argc
     NodeFsFileHandle* handle = node_fs_filehandle_data(receiver);
     if (!handle || !out) return 0;
     Item options = argc > 0 ? args[0] : node_fs_undefined();
-    if (!node_fs_readdir_options_valid(options)) {
-        Item error = node_fs_host->script->clear_exception();
+    Item validation = node_fs_readdir_options_valid(options);
+    if (item_is_error(validation)) {
+        Item error = node_fs_host->script->error_lane_payload(validation);
         *out = node_fs_promise_settled(error, true);
         return 1;
     }
     if (handle->descriptor < 0) {
-        node_fs_host->node->error->throw_error_code(node_fs_session, "EBADF",
-                                                    "The FileHandle has been transferred");
-        Item error = node_fs_host->script->clear_exception();
+        Item error = node_fs_host->node->error->throw_error_code(
+            node_fs_session, "EBADF", "The FileHandle has been transferred");
         *out = node_fs_promise_settled(error, true);
         return 1;
     }
@@ -1188,16 +1211,15 @@ static int node_fs_filehandle_read_file_call(Item receiver, Item* args, int argc
     metadata.descriptor = handle->descriptor;
     if (!node_fs_metadata_operation(&metadata) || metadata.value.size > (uint64_t)INT_MAX) {
         int error_number = metadata.error_number ? metadata.error_number : EFBIG;
-        node_fs_host->node->error->throw_system_error(node_fs_session, "fstat", error_number);
-        Item error = node_fs_host->script->clear_exception();
+        Item error = node_fs_host->node->error->throw_system_error(node_fs_session, "fstat",
+                                                                    error_number);
         *out = node_fs_promise_settled(error, true);
         return 1;
     }
     size_t byte_count = (size_t)metadata.value.size;
     char* bytes = (char*)malloc(byte_count > 0 ? byte_count : 1);
     if (!bytes) {
-        node_fs_host->node->error->throw_system_error(node_fs_session, "read", ENOMEM);
-        Item error = node_fs_host->script->clear_exception();
+        Item error = node_fs_host->node->error->throw_system_error(node_fs_session, "read", ENOMEM);
         *out = node_fs_promise_settled(error, true);
         return 1;
     }
@@ -1214,8 +1236,8 @@ static int node_fs_filehandle_read_file_call(Item receiver, Item* args, int argc
     }
     if (error_number != 0) {
         free(bytes);
-        node_fs_host->node->error->throw_system_error(node_fs_session, "read", error_number);
-        Item error = node_fs_host->script->clear_exception();
+        Item error = node_fs_host->node->error->throw_system_error(node_fs_session, "read",
+                                                                    error_number);
         *out = node_fs_promise_settled(error, true);
         return 1;
     }
@@ -1546,8 +1568,8 @@ static Item node_fs_stat_callback(Item path, Item options_or_callback, Item call
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
     Item result = node_fs_stat_sync(path, options, link);
-    if (node_fs_host->script->check_exception()) {
-        Item error = node_fs_host->script->clear_exception();
+    if (item_is_error(result)) {
+        Item error = node_fs_host->script->error_lane_payload(result);
         return node_fs_stat_callback_complete(actual_callback, error, true);
     }
     return node_fs_stat_callback_complete(actual_callback, result, false);
@@ -1572,8 +1594,8 @@ static Item node_fs_fstat_export(Item descriptor, Item options_or_callback, Item
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
     Item result = node_fs_fstat_sync_export(descriptor, options);
-    if (node_fs_host->script->check_exception()) {
-        Item error = node_fs_host->script->clear_exception();
+    if (item_is_error(result)) {
+        Item error = node_fs_host->script->error_lane_payload(result);
         return node_fs_stat_callback_complete(actual_callback, error, true);
     }
     return node_fs_stat_callback_complete(actual_callback, result, false);
@@ -1581,23 +1603,23 @@ static Item node_fs_fstat_export(Item descriptor, Item options_or_callback, Item
 
 static Item node_fs_promises_stat(Item path, Item options) {
     Item result = node_fs_stat_sync(path, options, false);
-    if (node_fs_host->script->check_exception()) {
-        return node_fs_promise_settled(node_fs_host->script->clear_exception(), true);
+    if (item_is_error(result)) {
+        return node_fs_promise_settled(node_fs_host->script->error_lane_payload(result), true);
     }
     return node_fs_promise_settled(result, false);
 }
 
 static Item node_fs_promises_lstat(Item path, Item options) {
     Item result = node_fs_stat_sync(path, options, true);
-    if (node_fs_host->script->check_exception()) {
-        return node_fs_promise_settled(node_fs_host->script->clear_exception(), true);
+    if (item_is_error(result)) {
+        return node_fs_promise_settled(node_fs_host->script->error_lane_payload(result), true);
     }
     return node_fs_promise_settled(result, false);
 }
 
 static Item node_fs_promise_from_sync_result(Item result) {
-    if (node_fs_host->script->check_exception()) {
-        return node_fs_promise_settled(node_fs_host->script->clear_exception(), true);
+    if (item_is_error(result)) {
+        return node_fs_promise_settled(node_fs_host->script->error_lane_payload(result), true);
     }
     return node_fs_promise_settled(result, false);
 }
@@ -1683,9 +1705,9 @@ static Item node_fs_open_export(Item path, Item flags, Item mode_or_callback, It
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
     Item descriptor = node_fs_open_sync_export(path, flags, mode);
-    if (node_fs_host->script->check_exception()) {
+    if (item_is_error(descriptor)) {
         return node_fs_stat_callback_complete(actual_callback,
-                                              node_fs_host->script->clear_exception(), true);
+                                              node_fs_host->script->error_lane_payload(descriptor), true);
     }
     return node_fs_stat_callback_complete(actual_callback, descriptor, false);
 }
@@ -1694,9 +1716,10 @@ static Item node_fs_close_export(Item descriptor, Item callback) {
     if (node_fs_host->value->kind(callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_close_sync_export(descriptor);
-    if (node_fs_host->script->check_exception()) {
-        return node_fs_callback_error_only(callback, node_fs_host->script->clear_exception());
+    Item close_result = node_fs_close_sync_export(descriptor);
+    if (item_is_error(close_result)) {
+        return node_fs_callback_error_only(callback,
+                                           node_fs_host->script->error_lane_payload(close_result));
     }
     return node_fs_callback_error_only(callback, ItemNull);
 }
@@ -1765,8 +1788,9 @@ static Item node_fs_read_export(Item descriptor, Item buffer, Item offset, Item 
     Item result = node_fs_read_sync_export(node_fs_root_value(roots[0]), node_fs_root_value(roots[1]),
                                            node_fs_root_value(roots[2]), node_fs_root_value(roots[3]), actual_position);
     Item completed = ItemNull;
-    if (node_fs_host->script->check_exception()) {
-        completed = node_fs_callback_bytes_complete(actual_callback, node_fs_host->script->clear_exception(),
+    if (item_is_error(result)) {
+        completed = node_fs_callback_bytes_complete(actual_callback,
+                                                    node_fs_host->script->error_lane_payload(result),
                                                     ItemNull, ItemNull, true);
     } else {
         completed = node_fs_callback_bytes_complete(actual_callback, ItemNull, result,
@@ -1795,8 +1819,9 @@ static Item node_fs_write_export(Item descriptor, Item data, Item offset, Item l
     Item result = node_fs_write_sync_export(node_fs_root_value(roots[0]), node_fs_root_value(roots[1]),
                                             node_fs_root_value(roots[2]), node_fs_root_value(roots[3]), actual_position);
     Item completed = ItemNull;
-    if (node_fs_host->script->check_exception()) {
-        completed = node_fs_callback_bytes_complete(actual_callback, node_fs_host->script->clear_exception(),
+    if (item_is_error(result)) {
+        completed = node_fs_callback_bytes_complete(actual_callback,
+                                                    node_fs_host->script->error_lane_payload(result),
                                                     ItemNull, ItemNull, true);
     } else {
         completed = node_fs_callback_bytes_complete(actual_callback, ItemNull, result,
@@ -1823,8 +1848,9 @@ static Item node_fs_readv_export(Item descriptor, Item buffers, Item position, I
     }
     Item result = node_fs_readv_sync(node_fs_root_value(roots[0]), node_fs_root_value(roots[1]), actual_position);
     Item completed = ItemNull;
-    if (node_fs_host->script->check_exception()) {
-        completed = node_fs_callback_bytes_complete(actual_callback, node_fs_host->script->clear_exception(),
+    if (item_is_error(result)) {
+        completed = node_fs_callback_bytes_complete(actual_callback,
+                                                    node_fs_host->script->error_lane_payload(result),
                                                     ItemNull, ItemNull, true);
     } else {
         completed = node_fs_callback_bytes_complete(actual_callback, ItemNull, result,
@@ -1851,8 +1877,9 @@ static Item node_fs_writev_export(Item descriptor, Item buffers, Item position, 
     }
     Item result = node_fs_writev_sync(node_fs_root_value(roots[0]), node_fs_root_value(roots[1]), actual_position);
     Item completed = ItemNull;
-    if (node_fs_host->script->check_exception()) {
-        completed = node_fs_callback_bytes_complete(actual_callback, node_fs_host->script->clear_exception(),
+    if (item_is_error(result)) {
+        completed = node_fs_callback_bytes_complete(actual_callback,
+                                                    node_fs_host->script->error_lane_payload(result),
                                                     ItemNull, ItemNull, true);
     } else {
         completed = node_fs_callback_bytes_complete(actual_callback, ItemNull, result,
@@ -1862,9 +1889,10 @@ static Item node_fs_writev_export(Item descriptor, Item buffers, Item position, 
     return completed;
 }
 
-static Item node_fs_void_callback_result(Item callback) {
-    if (node_fs_host->script->check_exception()) {
-        return node_fs_callback_error_only(callback, node_fs_host->script->clear_exception());
+static Item node_fs_void_callback_result(Item callback, Item result) {
+    if (item_is_error(result)) {
+        return node_fs_callback_error_only(callback,
+                                           node_fs_host->script->error_lane_payload(result));
     }
     return node_fs_callback_error_only(callback, ItemNull);
 }
@@ -1879,24 +1907,21 @@ static Item node_fs_access_export(Item path, Item mode_or_callback, Item callbac
     if (node_fs_host->value->kind(actual_callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_access_sync(path, mode);
-    return node_fs_void_callback_result(actual_callback);
+    return node_fs_void_callback_result(actual_callback, node_fs_access_sync(path, mode));
 }
 
 static Item node_fs_chmod_export(Item path, Item mode, Item callback) {
     if (node_fs_host->value->kind(callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_chmod_sync(path, mode);
-    return node_fs_void_callback_result(callback);
+    return node_fs_void_callback_result(callback, node_fs_chmod_sync(path, mode));
 }
 
 static Item node_fs_fchmod_export(Item descriptor, Item mode, Item callback) {
     if (node_fs_host->value->kind(callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_fchmod_sync(descriptor, mode);
-    return node_fs_void_callback_result(callback);
+    return node_fs_void_callback_result(callback, node_fs_fchmod_sync(descriptor, mode));
 }
 
 static Item node_fs_copy_file_export(Item source, Item destination, Item flags_or_callback, Item callback) {
@@ -1907,8 +1932,8 @@ static Item node_fs_copy_file_export(Item source, Item destination, Item flags_o
     if (node_fs_host->value->kind(actual_callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_copy_file_sync(source, destination);
-    return node_fs_void_callback_result(actual_callback);
+    return node_fs_void_callback_result(actual_callback,
+                                        node_fs_copy_file_sync(source, destination));
 }
 
 static Item node_fs_truncate_export(Item path, Item length_or_callback, Item callback) {
@@ -1921,8 +1946,7 @@ static Item node_fs_truncate_export(Item path, Item length_or_callback, Item cal
     if (node_fs_host->value->kind(actual_callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_truncate_sync(path, length);
-    return node_fs_void_callback_result(actual_callback);
+    return node_fs_void_callback_result(actual_callback, node_fs_truncate_sync(path, length));
 }
 
 static Item node_fs_rm_export(Item path, Item options_or_callback, Item callback) {
@@ -1935,8 +1959,7 @@ static Item node_fs_rm_export(Item path, Item options_or_callback, Item callback
     if (node_fs_host->value->kind(actual_callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_rm_sync(path, options);
-    return node_fs_void_callback_result(actual_callback);
+    return node_fs_void_callback_result(actual_callback, node_fs_rm_sync(path, options));
 }
 
 static Item node_fs_realpath_export(Item path, Item options_or_callback, Item callback) {
@@ -1950,9 +1973,9 @@ static Item node_fs_realpath_export(Item path, Item options_or_callback, Item ca
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
     Item result = node_fs_realpath_sync(path, options);
-    if (node_fs_host->script->check_exception()) {
+    if (item_is_error(result)) {
         return node_fs_stat_callback_complete(actual_callback,
-                                              node_fs_host->script->clear_exception(), true);
+                                              node_fs_host->script->error_lane_payload(result), true);
     }
     return node_fs_stat_callback_complete(actual_callback, result, false);
 }
@@ -1968,9 +1991,9 @@ static Item node_fs_mkdtemp_export(Item prefix, Item options_or_callback, Item c
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
     Item result = node_fs_mkdtemp_sync(prefix, options);
-    if (node_fs_host->script->check_exception()) {
+    if (item_is_error(result)) {
         return node_fs_stat_callback_complete(actual_callback,
-                                              node_fs_host->script->clear_exception(), true);
+                                              node_fs_host->script->error_lane_payload(result), true);
     }
     return node_fs_stat_callback_complete(actual_callback, result, false);
 }
@@ -1979,8 +2002,7 @@ static Item node_fs_link_export(Item existing_path, Item new_path, Item callback
     if (node_fs_host->value->kind(callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_link_sync(existing_path, new_path);
-    return node_fs_void_callback_result(callback);
+    return node_fs_void_callback_result(callback, node_fs_link_sync(existing_path, new_path));
 }
 
 static Item node_fs_symlink_export(Item target, Item path, Item type_or_callback, Item callback) {
@@ -1991,8 +2013,7 @@ static Item node_fs_symlink_export(Item target, Item path, Item type_or_callback
     if (node_fs_host->value->kind(actual_callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_symlink_sync(target, path);
-    return node_fs_void_callback_result(actual_callback);
+    return node_fs_void_callback_result(actual_callback, node_fs_symlink_sync(target, path));
 }
 
 static Item node_fs_mkdir_export(Item path, Item options_or_callback, Item callback) {
@@ -2005,32 +2026,28 @@ static Item node_fs_mkdir_export(Item path, Item options_or_callback, Item callb
     if (node_fs_host->value->kind(actual_callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_mkdir_sync(path, options);
-    return node_fs_void_callback_result(actual_callback);
+    return node_fs_void_callback_result(actual_callback, node_fs_mkdir_sync(path, options));
 }
 
 static Item node_fs_unlink_export(Item path, Item callback) {
     if (node_fs_host->value->kind(callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_unlink_sync(path);
-    return node_fs_void_callback_result(callback);
+    return node_fs_void_callback_result(callback, node_fs_unlink_sync(path));
 }
 
 static Item node_fs_rmdir_export(Item path, Item callback) {
     if (node_fs_host->value->kind(callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_rmdir_sync(path);
-    return node_fs_void_callback_result(callback);
+    return node_fs_void_callback_result(callback, node_fs_rmdir_sync(path));
 }
 
 static Item node_fs_rename_export(Item old_path, Item new_path, Item callback) {
     if (node_fs_host->value->kind(callback) != JUBE_VALUE_FUNCTION) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
-    node_fs_rename_sync(old_path, new_path);
-    return node_fs_void_callback_result(callback);
+    return node_fs_void_callback_result(callback, node_fs_rename_sync(old_path, new_path));
 }
 
 static Item node_fs_readdir_export(Item path, Item options_or_callback, Item callback) {
@@ -2044,9 +2061,9 @@ static Item node_fs_readdir_export(Item path, Item options_or_callback, Item cal
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
     Item entries = node_fs_readdir_sync(path, options);
-    if (node_fs_host->script->check_exception()) {
+    if (item_is_error(entries)) {
         return node_fs_stat_callback_complete(actual_callback,
-                                              node_fs_host->script->clear_exception(), true);
+                                              node_fs_host->script->error_lane_payload(entries), true);
     }
     return node_fs_stat_callback_complete(actual_callback, entries, false);
 }
@@ -2190,7 +2207,10 @@ static Item node_fs_promises_open(Item path_item, Item flags_item, Item mode_ite
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, needs_write)) return ItemNull;
     if (needs_read && !node_fs_host->node->permission->has_fs_read(path)) {
-        node_fs_host->node->permission->check_fs_read(path);
+        Item permission_error = node_fs_host->node->permission->check_fs_read(path);
+        if (item_is_error(permission_error)) {
+            (void)node_fs_host->script->error_lane_payload(permission_error);
+        }
         free(path);
         return ItemNull;
     }
@@ -2204,10 +2224,9 @@ static Item node_fs_promises_open(Item path_item, Item flags_item, Item mode_ite
     bool opened = node_fs_descriptor_operation(&operation);
     free(path);
     if (!opened) {
-        node_fs_host->node->error->throw_system_error(node_fs_session,
-                                                      operation.error_syscall ? operation.error_syscall : "open",
-                                                      operation.error_number ? operation.error_number : EIO);
-        Item error = node_fs_host->script->clear_exception();
+        Item error = node_fs_host->node->error->throw_system_error(
+            node_fs_session, operation.error_syscall ? operation.error_syscall : "open",
+            operation.error_number ? operation.error_number : EIO);
         return node_fs_promise_settled(error, true);
     }
     int descriptor = operation.descriptor;
@@ -2217,8 +2236,7 @@ static Item node_fs_promises_open(Item path_item, Item flags_item, Item mode_ite
         close_operation.mode = JUBE_NODE_FILESYSTEM_DESCRIPTOR_CLOSE;
         close_operation.descriptor = descriptor;
         node_fs_descriptor_operation(&close_operation);
-        node_fs_host->node->error->throw_system_error(node_fs_session, "open", ENOMEM);
-        Item error = node_fs_host->script->clear_exception();
+        Item error = node_fs_host->node->error->throw_system_error(node_fs_session, "open", ENOMEM);
         return node_fs_promise_settled(error, true);
     }
     native->descriptor = descriptor;
@@ -2240,7 +2258,10 @@ static Item node_fs_open_sync_export(Item path_item, Item flags_item, Item mode_
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, needs_write)) return ItemNull;
     if (needs_read && !node_fs_host->node->permission->has_fs_read(path)) {
-        node_fs_host->node->permission->check_fs_read(path);
+        Item permission_error = node_fs_host->node->permission->check_fs_read(path);
+        if (item_is_error(permission_error)) {
+            (void)node_fs_host->script->error_lane_payload(permission_error);
+        }
         free(path);
         return ItemNull;
     }
@@ -2322,7 +2343,9 @@ static bool node_fs_position_arg(Item value, int64_t minimum,
     return true;
 }
 
-static NodeFsVector* node_fs_vectors_from_array(Item buffers_item, int64_t* out_count) {
+static NodeFsVector* node_fs_vectors_from_array(Item buffers_item, int64_t* out_count,
+                                                Item* out_error) {
+    if (out_error) *out_error = ItemNull;
     if (!out_count || !node_fs_host || !node_fs_host->value || !node_fs_host->script || !node_fs_host->node ||
             !node_fs_host->node->binary || !node_fs_host->value->is_array ||
             !node_fs_host->value->array_length || !node_fs_host->value->array_get ||
@@ -2331,31 +2354,36 @@ static NodeFsVector* node_fs_vectors_from_array(Item buffers_item, int64_t* out_
         return NULL;
     }
     if (!node_fs_host->value->is_array(buffers_item)) {
-        node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "buffers must be an array of typed arrays");
+        if (out_error) *out_error = node_fs_host->script->throw_type_error_code(
+            "ERR_INVALID_ARG_TYPE", "buffers must be an array of typed arrays");
         return NULL;
     }
     int64_t count = node_fs_host->value->array_length(buffers_item);
     if (count < 0 || count > 1024) {
-        node_fs_host->script->throw_type_error_code("ERR_OUT_OF_RANGE", "buffers length must not exceed 1024");
+        if (out_error) *out_error = node_fs_host->script->throw_type_error_code(
+            "ERR_OUT_OF_RANGE", "buffers length must not exceed 1024");
         return NULL;
     }
     NodeFsVector* vectors = count > 0 ? (NodeFsVector*)calloc((size_t)count, sizeof(NodeFsVector)) : NULL;
     if (count > 0 && !vectors) {
-        node_fs_host->node->error->throw_system_error(node_fs_session, "readv", ENOMEM);
+        if (out_error) *out_error = node_fs_host->node->error->throw_system_error(
+            node_fs_session, "readv", ENOMEM);
         return NULL;
     }
     for (int64_t index = 0; index < count; ++index) {
         Item buffer = node_fs_host->value->array_get(buffers_item, index);
         if (!node_fs_host->node->binary->is_typed_array(buffer)) {
             free(vectors);
-            node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "buffers must be an array of typed arrays");
+            if (out_error) *out_error = node_fs_host->script->throw_type_error_code(
+                "ERR_INVALID_ARG_TYPE", "buffers must be an array of typed arrays");
             return NULL;
         }
         int length = node_fs_host->node->binary->typed_array_length(buffer);
         uint8_t* data = node_fs_host->node->binary->typed_array_data(buffer);
         if (length < 0 || (!data && length > 0)) {
             free(vectors);
-            node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_VALUE", "buffer is detached");
+            if (out_error) *out_error = node_fs_host->script->throw_type_error_code(
+                "ERR_INVALID_ARG_VALUE", "buffer is detached");
             return NULL;
         }
         vectors[index].data = data;
@@ -2381,8 +2409,10 @@ static Item node_fs_vector_io(Item descriptor_item, Item buffers_item, Item posi
     }
     *buffers_root = buffers_item.item;
     int64_t vector_count = 0;
-    NodeFsVector* vectors = node_fs_vectors_from_array(node_fs_root_value(buffers_root), &vector_count);
-    if (!vectors && vector_count == 0 && node_fs_host->script->check_exception()) {
+    Item vector_error = ItemNull;
+    NodeFsVector* vectors = node_fs_vectors_from_array(node_fs_root_value(buffers_root), &vector_count,
+                                                       &vector_error);
+    if (!vectors && vector_count == 0 && item_is_error(vector_error)) {
         node_fs_host->node->roots->root_frame_end(&frame);
         return ItemNull;
     }
@@ -2511,17 +2541,18 @@ static void node_fs_set_method(Item namespace_item, const char* name, void* func
     node_fs_host->node->roots->root_frame_end(&frame);
 }
 
-static bool node_fs_watch_options_valid(Item options) {
-    if (!node_fs_readdir_options_valid(options)) return false;
-    if (node_fs_host->value->kind(options) != JUBE_VALUE_OBJECT) return true;
+static Item node_fs_watch_options_valid(Item options) {
+    Item encoding_result = node_fs_readdir_options_valid(options);
+    if (item_is_error(encoding_result)) return encoding_result;
+    if (node_fs_host->value->kind(options) != JUBE_VALUE_OBJECT) return node_fs_undefined();
     JubeRootFrame frame = {};
-    if (!node_fs_roots_begin(&frame, 3)) return false;
+    if (!node_fs_roots_begin(&frame, 3)) return ItemNull;
     uint64_t* options_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* key_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* ignore_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     if (!options_root || !key_root || !ignore_root) {
         node_fs_host->node->roots->root_frame_end(&frame);
-        return false;
+        return ItemNull;
     }
     *options_root = options.item;
     Item key = node_fs_host->value->string_from_utf8_n("ignore", 6);
@@ -2530,30 +2561,26 @@ static bool node_fs_watch_options_valid(Item options) {
                                                     node_fs_root_value(key_root));
     *ignore_root = ignore.item;
     int kind = node_fs_host->value->kind(node_fs_root_value(ignore_root));
-    bool valid = true;
+    Item valid = node_fs_undefined();
     if (kind == JUBE_VALUE_STRING) {
         if (node_fs_host->value->string_length(node_fs_root_value(ignore_root)) == 0) {
-            node_fs_host->script->throw_type_error_code(
+            valid = node_fs_host->script->throw_type_error_code(
                 "ERR_INVALID_ARG_VALUE", "The property 'options.ignore' is invalid. Received ''");
-            valid = false;
         }
     } else if (kind != JUBE_VALUE_UNDEFINED && kind != JUBE_VALUE_NULL) {
         if (!node_fs_host->value->is_array(node_fs_root_value(ignore_root))) {
-            node_fs_host->script->throw_type_error_code(
+            valid = node_fs_host->script->throw_type_error_code(
                 "ERR_INVALID_ARG_TYPE", "options.ignore must be a string or an array of strings");
-            valid = false;
         } else {
             int64_t length = node_fs_host->value->array_length(node_fs_root_value(ignore_root));
-            for (int64_t index = 0; valid && index < length; ++index) {
+            for (int64_t index = 0; !item_is_error(valid) && index < length; ++index) {
                 Item entry = node_fs_host->value->array_get(node_fs_root_value(ignore_root), index);
                 if (node_fs_host->value->kind(entry) != JUBE_VALUE_STRING) {
-                    node_fs_host->script->throw_type_error_code(
+                    valid = node_fs_host->script->throw_type_error_code(
                         "ERR_INVALID_ARG_TYPE", "options.ignore must be a string or an array of strings");
-                    valid = false;
                 } else if (node_fs_host->value->string_length(entry) == 0) {
-                    node_fs_host->script->throw_type_error_code(
+                    valid = node_fs_host->script->throw_type_error_code(
                         "ERR_INVALID_ARG_VALUE", "The property 'options.ignore' is invalid. Received ''");
-                    valid = false;
                 }
             }
         }
@@ -2596,8 +2623,10 @@ static Item node_fs_make_watcher(void) {
 
 static Item node_fs_watch(Item path_item, Item options_or_listener, Item listener_item) {
     (void)listener_item;
-    if (node_fs_host->value->kind(options_or_listener) != JUBE_VALUE_FUNCTION &&
-            !node_fs_watch_options_valid(options_or_listener)) return ItemNull;
+    if (node_fs_host->value->kind(options_or_listener) != JUBE_VALUE_FUNCTION) {
+        Item validation = node_fs_watch_options_valid(options_or_listener);
+        if (item_is_error(validation)) return validation;
+    }
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, false)) return ItemNull;
     free(path);
@@ -2638,7 +2667,7 @@ static Item node_fs_utimes_sync(Item path_item, Item atime_item, Item mtime_item
 
 static Item node_fs_utimes_export(Item path_item, Item atime_item, Item mtime_item, Item callback) {
     Item result = node_fs_utimes_sync(path_item, atime_item, mtime_item);
-    if (node_fs_host->script->check_exception()) return ItemNull;
+    if (item_is_error(result)) return result;
     if (node_fs_host->value->kind(callback) == JUBE_VALUE_FUNCTION) {
         Item args[1] = {ItemNull};
         node_fs_host->script->call_function(callback, ItemNull, args, 1);
@@ -2648,7 +2677,8 @@ static Item node_fs_utimes_export(Item path_item, Item atime_item, Item mtime_it
 }
 
 static Item node_fs_opendir_sync(Item path_item, Item options) {
-    if (!node_fs_readdir_options_valid(options)) return ItemNull;
+    Item validation = node_fs_readdir_options_valid(options);
+    if (item_is_error(validation)) return validation;
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, false, false)) return ItemNull;
     free(path);
@@ -2656,7 +2686,8 @@ static Item node_fs_opendir_sync(Item path_item, Item options) {
 }
 
 static Item node_fs_readlink_sync(Item path_item, Item options) {
-    if (!node_fs_readdir_options_valid(options)) return ItemNull;
+    Item validation = node_fs_readdir_options_valid(options);
+    if (item_is_error(validation)) return validation;
     char* path = NULL;
     if (!node_fs_copy_path(path_item, &path, false)) return ItemNull;
     const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
@@ -2685,9 +2716,9 @@ static Item node_fs_readlink_export(Item path, Item options_or_callback, Item ca
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
     Item result = node_fs_readlink_sync(path, options);
-    if (node_fs_host->script->check_exception()) {
+    if (item_is_error(result)) {
         return node_fs_stat_callback_complete(actual_callback,
-                                              node_fs_host->script->clear_exception(), true);
+                                              node_fs_host->script->error_lane_payload(result), true);
     }
     return node_fs_stat_callback_complete(actual_callback, result, false);
 }
@@ -2772,7 +2803,7 @@ static Item node_fs_chown_export(Item path, Item uid, Item gid, Item callback) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
     node_fs_chown_sync_export(path, uid, gid);
-    return node_fs_void_callback_result(callback);
+    return node_fs_void_callback_result(callback, node_fs_chown_sync_export(path, uid, gid));
 }
 
 static Item node_fs_lchown_export(Item path, Item uid, Item gid, Item callback) {
@@ -2780,7 +2811,7 @@ static Item node_fs_lchown_export(Item path, Item uid, Item gid, Item callback) 
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
     node_fs_lchown_sync(path, uid, gid);
-    return node_fs_void_callback_result(callback);
+    return node_fs_void_callback_result(callback, node_fs_lchown_sync(path, uid, gid));
 }
 
 static Item node_fs_fchown_export(Item descriptor, Item uid, Item gid, Item callback) {
@@ -2788,7 +2819,7 @@ static Item node_fs_fchown_export(Item descriptor, Item uid, Item gid, Item call
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
     node_fs_fchown_sync(descriptor, uid, gid);
-    return node_fs_void_callback_result(callback);
+    return node_fs_void_callback_result(callback, node_fs_fchown_sync(descriptor, uid, gid));
 }
 
 static Item node_fs_lchmod_export(Item path, Item mode, Item callback) {
@@ -2796,7 +2827,7 @@ static Item node_fs_lchmod_export(Item path, Item mode, Item callback) {
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
     node_fs_lchmod_sync(path, mode);
-    return node_fs_void_callback_result(callback);
+    return node_fs_void_callback_result(callback, node_fs_lchmod_sync(path, mode));
 }
 
 static Item node_fs_promises_chown(Item path, Item uid, Item gid) {
@@ -3032,9 +3063,9 @@ static Item node_fs_statfs_export(Item path, Item options_or_callback, Item call
         return node_fs_host->script->throw_type_error_code("ERR_INVALID_ARG_TYPE", "callback must be a function");
     }
     Item result = node_fs_statfs_sync(path, options);
-    if (node_fs_host->script->check_exception()) {
+    if (item_is_error(result)) {
         return node_fs_stat_callback_complete(actual_callback,
-                                              node_fs_host->script->clear_exception(), true);
+                                              node_fs_host->script->error_lane_payload(result), true);
     }
     return node_fs_stat_callback_complete(actual_callback, result, false);
 }
@@ -3231,7 +3262,7 @@ static int node_fs_init(const JubeHostAPI* host) {
             !host->value->string_length || !host->value->string_bytes || !host->value->native_object_new ||
             !host->value->native_object_data || !host->value->property_get || !host->value->property_set ||
             !host->script->new_function ||
-            !host->script->to_string || !host->script->clear_exception ||
+            !host->script->to_string || !host->script->error_lane_payload ||
             !host->script->get_number || !host->script->is_truthy || !host->script->object_create ||
             !host->script->bigint_to_int64_exact ||
             !host->node->runtime->current_this ||

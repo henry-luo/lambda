@@ -168,10 +168,10 @@ static Item tls_validate_material_option(Item options, const char* name,
 static Item tls_validate_material_options(Item options, bool allow_zero) {
     Item err = tls_validate_material_option(options, "key",
         "string or an instance of Buffer, TypedArray, or DataView", true, allow_zero);
-    if (js_check_exception()) return err;
+    if (item_is_error(err)) return err;
     err = tls_validate_material_option(options, "cert",
         "string or an instance of Buffer, TypedArray, or DataView", false, allow_zero);
-    if (js_check_exception()) return err;
+    if (item_is_error(err)) return err;
     err = tls_validate_material_option(options, "ca",
         "string or an instance of Buffer, TypedArray, or DataView", false, allow_zero);
     return err;
@@ -1936,8 +1936,7 @@ static Item make_tls_socket_object(JsTlsSocket* sock) {
 // =============================================================================
 
 extern "C" Item js_tls_createSecureContext(Item options_item) {
-    Item validation = tls_validate_material_options(options_item, true);
-    if (js_check_exception()) return validation;
+    JS_ASSIGN_OR_RETURN(validation, tls_validate_material_options(options_item, true));
 
     TlsConfig config = tls_config_default();
 
@@ -2782,8 +2781,7 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
         return js_new_error(make_string_item("No event loop available"));
     }
 
-    Item validation = tls_validate_material_options(options_item, false);
-    if (js_check_exception()) return validation;
+    JS_ASSIGN_OR_RETURN(validation, tls_validate_material_options(options_item, false));
 
     // extract cert/key from options
     TlsConfig config = tls_config_default();
