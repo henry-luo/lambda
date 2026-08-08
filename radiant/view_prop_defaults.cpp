@@ -10,6 +10,7 @@ static BlockProp make_block_prop_default() {
     value.align_content = CSS_VALUE__UNDEF;
     value.direction = CSS_VALUE_LTR;
     value.writing_mode = WM_HORIZONTAL_TB;
+    value.zoom = 1.0f;
     value.text_spacing_trim = CSS_VALUE_NORMAL;
     value.break_before = CSS_VALUE_AUTO;
     value.break_after = CSS_VALUE_AUTO;
@@ -24,8 +25,12 @@ static BlockProp make_block_prop_default() {
     value.box_decoration_break = CSS_VALUE_SLICE;
     value.baseline_source = CSS_VALUE_AUTO;
     value.given_width = value.given_height = -1.0f;
+    value.aspect_ratio_auto_height = false;
+    value.given_width_fit_content_limit = value.given_height_fit_content_limit = -1.0f;
+    value.given_width_fit_content_percent = value.given_height_fit_content_percent = NAN;
     value.given_width_percent = value.given_height_percent = NAN;
     value.contain_intrinsic_width = value.contain_intrinsic_height = -1.0f;
+    value.contain_intrinsic_width_auto = value.contain_intrinsic_height_auto = false;
     value.contain_size = value.contain_inline_size = value.content_visibility_hidden = false;
     value.given_min_width_percent = value.given_max_width_percent = NAN;
     value.given_min_height_percent = value.given_max_height_percent = NAN;

@@ -883,14 +883,20 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     // Check if item has explicit dimensions from CSS
     bool has_explicit_width = false, has_explicit_height = false;
     if (item->blk) {
-        if (item->block()->given_width > 0) {
+        bool width_is_percentage = layout_axis_size_is_percentage(item, true);
+        // Grid track sizing must not treat a provisional percentage resolution as
+        // an explicit width; the percentage is resolved only after the grid area exists.
+        if (!width_is_percentage && item->block()->given_width > 0) {
             float w = layout_css_size_to_border_box(
                 item->bound, layout_box_sizing(item), item->block()->given_width, true);
             w = layout_floor_border_box_width(item, w);
             *min_width = *max_width = w;
             has_explicit_width = true;
         }
-        if (item->block()->given_height > 0) {
+        bool has_intrinsic_height_constraint =
+            layout_intrinsic_min_size_keyword(item, false) != CSS_VALUE__UNDEF ||
+            layout_intrinsic_max_size_keyword(item, false) != CSS_VALUE__UNDEF;
+        if (item->block()->given_height > 0 && !has_intrinsic_height_constraint) {
             float h = layout_css_size_to_border_box(
                 item->bound, layout_box_sizing(item), item->block()->given_height, false);
             h = layout_floor_border_box_height(item, h);

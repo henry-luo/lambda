@@ -3155,13 +3155,6 @@ static bool radiant_dom_get_element_property(Item receiver, DomElement* elem,
     if (radiant_dom_get_aria_element_reflection(receiver, elem, prop, out)) {
         return true;
     }
-    if (strcmp(prop, "content") == 0 &&
-        elem->tag_name && strcasecmp(elem->tag_name, "template") == 0) {
-        // current template support exposes parsed children through the template
-        // wrapper itself; keep that compatibility shim at the module boundary.
-        *out = radiant_dom_node_item((DomNode*)elem);
-        return true;
-    }
     if (radiant_dom_is_tag(elem, "form") && strcmp(prop, "elements") == 0) {
         *out = js_dom_live_form_elements_bridge((void*)elem);
         return true;

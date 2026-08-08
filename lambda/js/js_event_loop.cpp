@@ -1997,3 +1997,21 @@ extern "C" int js_event_loop_drain(void) {
 
     return result;
 }
+
+extern "C" void js_event_loop_drain_script_turn(bool has_dom_document,
+                                                  bool drain_timers) {
+    if (js_dom_is_host_driven_loop()) {
+        js_microtask_flush();
+        return;
+    }
+
+    if (drain_timers) {
+        if (has_dom_document) js_dom_commit_headless_layout();
+        js_event_loop_drain();
+    }
+    if (has_dom_document) {
+        // headless documents have no native frame clock; flush queued rAF work
+        // before the transient script realm is torn down.
+        js_animation_frame_drain(64);
+    }
+}

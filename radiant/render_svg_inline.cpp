@@ -1024,8 +1024,10 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
     SvgViewBox vb = parse_svg_viewbox(viewbox_attr);
 
     // determine width. A viewBox provides a coordinate system and aspect ratio,
-    // but not an explicit intrinsic width/height attribute.
-    if (width_attr && *width_attr) {
+    // but not an explicit intrinsic width/height attribute. Percentage
+    // attributes are presentation hints resolved against the containing block,
+    // so they must not become natural dimensions here.
+    if (width_attr && *width_attr && !strchr(width_attr, '%')) {
         size.width = parse_svg_length(width_attr, 300);
         size.has_intrinsic_width = true;
     } else if (vb.has_viewbox && vb.width > 0) {
@@ -1033,11 +1035,18 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
     }
 
     // determine height
-    if (height_attr && *height_attr) {
+    if (height_attr && *height_attr && !strchr(height_attr, '%')) {
         size.height = parse_svg_length(height_attr, 150);
         size.has_intrinsic_height = true;
     } else if (vb.has_viewbox && vb.height > 0) {
         size.height = vb.height;
+    }
+
+    // A zero SVG viewport dimension is a degenerate natural ratio; when a
+    // valid viewBox exists, sizing must use its ratio instead of height=0.
+    if (vb.has_viewbox && vb.width > 0 && vb.height > 0 &&
+        size.has_intrinsic_height && size.height <= 0.0f) {
+        size.has_intrinsic_height = false;
     }
 
     // calculate aspect ratio

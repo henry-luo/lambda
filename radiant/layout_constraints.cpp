@@ -22,8 +22,8 @@ static bool layout_stretch_fit_block_margins_can_adjoin(ViewBlock* block, bool h
     return !block_context_establishes_bfc(parent);
 }
 
-static bool layout_stretch_fit_parent_block_edge_is_unedged(ViewBlock* block,
-                                                             bool horizontal, bool start) {
+bool layout_parent_block_edge_is_unedged(ViewBlock* block,
+                                         bool horizontal, bool start) {
     ViewElement* parent_view = block->parent_view();
     if (!parent_view || !parent_view->is_block()) return true;
     ViewBlock* parent = lam::view_require_block(parent_view);
@@ -58,10 +58,10 @@ static void layout_stretch_fit_zero_adjoining_block_margins(ViewBlock* block,
 
     // adjoining block margins are already outside an unedged non-BFC parent,
     // so stretch-fit must not subtract them a second time from the used size.
-    if (layout_stretch_fit_parent_block_edge_is_unedged(block, horizontal, true)) {
+    if (layout_parent_block_edge_is_unedged(block, horizontal, true)) {
         *start_margin = 0.0f;
     }
-    if (layout_stretch_fit_parent_block_edge_is_unedged(block, horizontal, false)) {
+    if (layout_parent_block_edge_is_unedged(block, horizontal, false)) {
         *end_margin = 0.0f;
     }
 }
@@ -74,11 +74,22 @@ float layout_stretch_fit_border_box_size(ViewBlock* block, float available_margi
     float end_margin = 0.0f;
     if (block->bound) {
         if (horizontal) {
-            if (block->boundary()->margin.left_type != CSS_VALUE_AUTO) {
-                start_margin = block->boundary()->margin.left;
+            ViewElement* parent_view = block->parent_view();
+            ViewBlock* parent = parent_view && parent_view->is_block()
+                ? lam::view_require_block(parent_view) : nullptr;
+            WritingMode parent_mode = parent
+                ? layout_block_writing_mode(parent) : WM_VERTICAL_LR;
+            CssEnum start_type = parent_mode == WM_VERTICAL_RL
+                ? block->boundary()->margin.right_type
+                : block->boundary()->margin.left_type;
+            CssEnum end_type = parent_mode == WM_VERTICAL_RL
+                ? block->boundary()->margin.left_type
+                : block->boundary()->margin.right_type;
+            if (start_type != CSS_VALUE_AUTO) {
+                start_margin = layout_vertical_flow_block_start_margin(block, parent_mode);
             }
-            if (block->boundary()->margin.right_type != CSS_VALUE_AUTO) {
-                end_margin = block->boundary()->margin.right;
+            if (end_type != CSS_VALUE_AUTO) {
+                end_margin = layout_vertical_flow_block_end_margin(block, parent_mode);
             }
         } else {
             if (block->boundary()->margin.top_type != CSS_VALUE_AUTO) {
@@ -210,13 +221,20 @@ void layout_apply_aspect_ratio_min_max_constraints(ViewBlock* block, float aspec
         ? layout_content_height_from_border_box(block, ratio_height) : ratio_height;
 }
 
-float layout_apply_min_max_border_box_axis(ViewBlock* block, float border_size, bool horizontal) {
+float layout_apply_min_max_border_box_axis(ViewBlock* block, float border_size, bool horizontal,
+                                           bool ignore_percentage_max) {
     if (!block || !block->blk) return border_size;
 
     float minimum = horizontal ? block->block()->given_min_width
                                : block->block()->given_min_height;
     float maximum = horizontal ? block->block()->given_max_width
                                : block->block()->given_max_height;
+    if (ignore_percentage_max && horizontal &&
+        !isnan(block->block()->given_max_width_percent)) {
+        // A cyclic shrink-to-fit grid cannot use the provisional percentage max;
+        // its intrinsic min-width contribution must win before the grid area exists.
+        maximum = -1.0f;
+    }
     float minimum_border = minimum >= 0.0f
         ? layout_css_size_to_border_box(block->bound, layout_box_sizing(block), minimum, horizontal)
         : -1.0f;

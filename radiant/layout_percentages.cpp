@@ -1,8 +1,43 @@
 #include "layout.hpp"
+#include "view.hpp"
 
+#include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 
 #include <math.h>
+#include <string.h>
+
+static bool layout_css_value_has_percentage_impl(const CssValue* value, bool nonzero_only) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        return !nonzero_only || fabs(value->data.percentage.value) > 0.000001;
+    }
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (layout_css_value_has_percentage_impl(
+                    value->data.list.values[i], nonzero_only)) return true;
+        }
+        return false;
+    }
+    if (value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function) return false;
+    const CssFunction* function = value->data.function;
+    if (!function->name) return false;
+    // Variables and environment values may introduce a percentage after parsing.
+    if (strcmp(function->name, "var") == 0 || strcmp(function->name, "env") == 0 ||
+        strcmp(function->name, "attr") == 0) return true;
+    for (int i = 0; i < function->arg_count; i++) {
+        if (layout_css_value_has_percentage_impl(function->args[i], nonzero_only)) return true;
+    }
+    return false;
+}
+
+bool layout_css_value_has_percentage(const CssValue* value) {
+    return layout_css_value_has_percentage_impl(value, false);
+}
+
+bool layout_css_value_has_nonzero_percentage(const CssValue* value) {
+    return layout_css_value_has_percentage_impl(value, true);
+}
 
 typedef struct LayoutPercentageSpacingCandidate {
     CssDeclaration* decl;
@@ -177,6 +212,48 @@ void layout_reresolve_percentage_box(ViewBlock* block, float inline_base) {
     layout_reresolve_percentage_spacing(block, inline_base, true);
 }
 
+static bool layout_spacing_candidate_is_percentage(
+    const LayoutPercentageSpacingCandidate& candidate) {
+    return candidate.value && candidate.value->type == CSS_VALUE_TYPE_PERCENTAGE;
+}
+
+static bool layout_element_has_percentage_spacing(ViewBlock* block) {
+    if (!block || !block->specified_style) return false;
+
+    for (int pass = 0; pass < 2; pass++) {
+        bool margin = pass != 0;
+        LayoutPercentageSpacingCandidate top = {};
+        LayoutPercentageSpacingCandidate right = {};
+        LayoutPercentageSpacingCandidate bottom = {};
+        LayoutPercentageSpacingCandidate left = {};
+        layout_collect_physical_spacing_candidates(
+            block, margin, &top, &right, &bottom, &left);
+        layout_collect_logical_spacing_candidates(
+            block, margin, &top, &right, &bottom, &left);
+        if (layout_spacing_candidate_is_percentage(top) ||
+            layout_spacing_candidate_is_percentage(right) ||
+            layout_spacing_candidate_is_percentage(bottom) ||
+            layout_spacing_candidate_is_percentage(left)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool layout_view_tree_has_percentage_spacing(View* root) {
+    if (!root) return false;
+    if (root->is_element() &&
+        layout_element_has_percentage_spacing(lam::view_as_block(root))) {
+        return true;
+    }
+    DomElement* element = root->is_element() ? root->as_element() : nullptr;
+    for (DomNode* child = element ? element->first_child : nullptr;
+         child; child = child->next_sibling) {
+        if (layout_view_tree_has_percentage_spacing((View*)child)) return true;
+    }
+    return false;
+}
+
 float layout_block_used_content_size(ViewBlock* block, bool horizontal, bool require_positive) {
     if (!block) return -1.0f;
     float border_size = horizontal ? block->width : block->height;
@@ -218,6 +295,41 @@ bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal) {
         value == CSS_VALUE_UNSET || value == CSS_VALUE_REVERT;
 }
 
+bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* containing_block) {
+    if (!containing_block || containing_block->height <= 0.0f) return false;
+
+    // A table-cell used height is established by row/table sizing even when its
+    // own CSS height is auto; percentage descendants use that content box.
+    if (containing_block->view_type == RDT_VIEW_TABLE_CELL) return true;
+
+    if (!containing_block->fi || !containing_block->parent ||
+        !containing_block->parent->is_block()) return false;
+    ViewBlock* parent_block = lam::view_as_block(containing_block->parent);
+    FlexProp* parent_flex = parent_block->embed && parent_block->embedp()->flex
+        ? parent_block->embedp()->flex : nullptr;
+    if (!parent_flex) return false;
+
+    bool parent_height_is_definite = !layout_block_has_automatic_size(parent_block, false);
+    if (!parent_height_is_definite && parent_block->blk &&
+        parent_block->block()->given_height >= 0.0f &&
+        parent_block->block()->given_height_type != CSS_VALUE_AUTO) {
+        parent_height_is_definite = true;
+    }
+    if (!parent_height_is_definite) return false;
+
+    // Flex stretch makes the cross size definite; a flex-assigned main size is
+    // likewise definite when physical height is the container's main axis.
+    if (is_main_axis_horizontal(parent_flex)) {
+        int align_type = (int)containing_block->fi->align_self != ALIGN_AUTO
+            ? containing_block->fi->align_self : parent_flex->align_items;
+        bool auto_cross_margin = containing_block->bound &&
+            (containing_block->boundary()->margin.top_type == CSS_VALUE_AUTO ||
+             containing_block->boundary()->margin.bottom_type == CSS_VALUE_AUTO);
+        return align_type == ALIGN_STRETCH && !auto_cross_margin;
+    }
+    return containing_block->fi->main_size_from_flex;
+}
+
 bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal) {
     if (!block || !block->blk) return true;
     float given_size = horizontal ? block->block()->given_width : block->block()->given_height;
@@ -228,6 +340,16 @@ bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal) {
     const CssDeclaration* specified_size = block->is_element()
         ? layout_specified_physical_size_declaration(block->as_element(), horizontal) : nullptr;
     if (specified_size && specified_size->value) {
+        if (!horizontal && specified_size->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+            // A percentage block size is automatic while its containing block is auto;
+            // treating a provisional intrinsic height as definite feeds aspect-ratio backward.
+            ViewBlock* containing_block = layout_nearest_block_ancestor(block->parent_view());
+            if (!containing_block ||
+                (layout_block_has_automatic_size(containing_block, false) &&
+                 !layout_percentage_height_basis_is_algorithmically_definite(containing_block))) {
+                return true;
+            }
+        }
         return layout_css_size_is_automatic(block, horizontal);
     }
 
@@ -239,6 +361,17 @@ bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal) {
 
 bool layout_block_has_automatic_height(ViewBlock* block) {
     return layout_block_has_automatic_size(block, false);
+}
+
+WritingMode layout_writing_mode_from_css(CssEnum writing_mode) {
+    // Sideways modes keep vertical block geometry; their distinction is typographic.
+    if (writing_mode == CSS_VALUE_VERTICAL_RL || writing_mode == CSS_VALUE_SIDEWAYS_RL) {
+        return WM_VERTICAL_RL;
+    }
+    if (writing_mode == CSS_VALUE_VERTICAL_LR || writing_mode == CSS_VALUE_SIDEWAYS_LR) {
+        return WM_VERTICAL_LR;
+    }
+    return WM_HORIZONTAL_TB;
 }
 
 WritingMode layout_block_writing_mode(ViewBlock* block) {
@@ -256,9 +389,7 @@ WritingMode layout_block_writing_mode(ViewBlock* block) {
             : nullptr;
         if (!declaration || !declaration->value ||
             declaration->value->type != CSS_VALUE_TYPE_KEYWORD) continue;
-        if (declaration->value->data.keyword == CSS_VALUE_VERTICAL_LR) return WM_VERTICAL_LR;
-        if (declaration->value->data.keyword == CSS_VALUE_VERTICAL_RL) return WM_VERTICAL_RL;
-        if (declaration->value->data.keyword == CSS_VALUE_HORIZONTAL_TB) return WM_HORIZONTAL_TB;
+        return layout_writing_mode_from_css(declaration->value->data.keyword);
     }
     return mode;
 }

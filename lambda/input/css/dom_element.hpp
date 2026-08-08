@@ -428,6 +428,11 @@ struct DomElementExt {
     void* custom_layout_paint;
     LayoutFragmentBox* layout_fragments;
     int layout_fragment_count;
+    float last_remembered_width;
+    float last_remembered_height;
+    bool has_last_remembered_width;
+    bool has_last_remembered_height;
+    void* web_animation_state;
     DomElement* shadow_host;
     DomElement* shadow_root;
     float pending_element_scroll_x;
@@ -774,6 +779,28 @@ struct DomElement : DomNode {
     void set_layout_fragment_list(LayoutFragmentBox* value) { if (value || ext) ensure_ext()->layout_fragments = value; }
     int layout_fragments_count() const { return ext ? ext->layout_fragment_count : 0; }
     int& layout_fragments_count_ref() { return ensure_ext()->layout_fragment_count; }
+    bool has_last_remembered_width() const { return ext && ext->has_last_remembered_width; }
+    bool has_last_remembered_height() const { return ext && ext->has_last_remembered_height; }
+    float last_remembered_width() const { return ext ? ext->last_remembered_width : 0.0f; }
+    float last_remembered_height() const { return ext ? ext->last_remembered_height : 0.0f; }
+    void set_last_remembered_width(float value) {
+        DomElementExt* data = ensure_ext();
+        if (data) {
+            data->last_remembered_width = value;
+            data->has_last_remembered_width = true;
+        }
+    }
+    void set_last_remembered_height(float value) {
+        DomElementExt* data = ensure_ext();
+        if (data) {
+            data->last_remembered_height = value;
+            data->has_last_remembered_height = true;
+        }
+    }
+    void* web_animation_state() const { return ext ? ext->web_animation_state : nullptr; }
+    void set_web_animation_state(void* value) {
+        if (value || ext) ensure_ext()->web_animation_state = value;
+    }
     DomElement* shadow_host_element() const { return ext ? ext->shadow_host : nullptr; }
     void set_shadow_host_element(DomElement* value) { if (value || ext) ensure_ext()->shadow_host = value; }
     DomElement* shadow_root_element() const { return ext ? ext->shadow_root : nullptr; }

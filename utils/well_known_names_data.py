@@ -95,7 +95,7 @@ pointer-events float-defer float-offset float-reference image-orientation image-
 mask-image mask-type nesting overflow-block overflow-clip-margin overflow-inline overscroll-behavior
 ruby-align ruby-position scroll-behavior scroll-margin scroll-padding scroll-snap-align
 scroll-snap-type transition-delay transition-duration transition-property transition-timing-function
-wrap-flow wrap-through line-clamp -webkit-line-clamp contain-intrinsic-inline-size contain-intrinsic-block-size scrollbar-gutter content-visibility
+wrap-flow wrap-through line-clamp -webkit-line-clamp contain-intrinsic-inline-size contain-intrinsic-block-size scrollbar-gutter content-visibility all zoom
 """.split()
 
 CSS_PROPERTY_ENTRIES = [

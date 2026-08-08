@@ -456,6 +456,17 @@ static View* inline_span_first_line_fragment_child(ViewSpan* span) {
     return first;
 }
 
+static bool inline_span_has_forced_break_view(View* view) {
+    if (!view) return false;
+    if (view->view_type == RDT_VIEW_BR) return true;
+    if (view->view_type != RDT_VIEW_INLINE) return false;
+    ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (inline_span_has_forced_break_view(child)) return true;
+    }
+    return false;
+}
+
 static bool inline_fragment_union_extends_child_bounds(ViewSpan* span) {
     if (!span || !span->has_inline_fragment_union()) return false;
     bool found_child = false;
@@ -495,7 +506,13 @@ bool inline_span_has_multiple_line_fragments(ViewSpan* span) {
     // separate vertical extent still makes the element a multi-line inline.
     if (inline_fragment_union_extends_child_bounds(span)) return true;
     // Vertical-align changes child y without changing its recorded line identity.
-    if (found_text_line) return first_line != last_line;
+    if (found_text_line) {
+        if (first_line != last_line) return true;
+        // Forced-break descendants can reset the shared line context without
+        // updating nested text line numbers; their separate <br> fragment still
+        // makes a decorated inline span span multiple line boxes.
+        if (!inline_span_has_forced_break_view(static_cast<View*>(span))) return false;
+    }
 
     float first_y = first->y;
     for (View* child = first->next(); child; child = child->next()) {
@@ -827,10 +844,53 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         }
     };
 
-    auto get_child_static_x = [&get_child_relative_offset](View* c) -> float {
+    auto text_child_uses_slice_decoration = [](View* c) -> bool {
+        if (!c || c->view_type != RDT_VIEW_TEXT || !c->parent || !c->parent->is_element()) {
+            return false;
+        }
+        DomElement* parent = c->parent->as_element();
+        CssDeclaration* declaration = parent->specified_style
+            ? style_tree_get_declaration(parent->specified_style,
+                                         CSS_PROPERTY_BOX_DECORATION_BREAK)
+            : nullptr;
+        return declaration && declaration->value &&
+            declaration->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            declaration->value->data.keyword == CSS_VALUE_SLICE;
+    };
+
+    auto text_child_has_collapsed_leading_fragment = [](View* c) -> bool {
+        if (!c || c->view_type != RDT_VIEW_TEXT) return false;
+        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(c);
+        bool saw_zero_fragment = false;
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            if (rect->width <= 0.0f && rect->height > 0.0f) {
+                saw_zero_fragment = true;
+            } else if (rect->width > 0.0f) {
+                return saw_zero_fragment;
+            }
+        }
+        return false;
+    };
+
+    auto get_child_static_x = [&get_child_relative_offset,
+                               &text_child_uses_slice_decoration,
+                               &text_child_has_collapsed_leading_fragment](View* c) -> float {
         float dx = 0.0f;
         get_child_relative_offset(c, &dx, nullptr);
         float x = c->x - dx;
+        if (text_child_uses_slice_decoration(c) &&
+            text_child_has_collapsed_leading_fragment(c)) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(c);
+            float rect_min_x = FLT_MAX;
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                if (rect->width > 0.0f && rect->x < rect_min_x) rect_min_x = rect->x;
+            }
+            if (rect_min_x < FLT_MAX) {
+                // A zero-width leading fragment can leave ViewText::x at the
+                // old origin; inline bounds must follow the visible rects.
+                x = rect_min_x - dx;
+            }
+        }
         if (ViewSpan* sp = lam::view_as<RDT_VIEW_INLINE>(c)) {
             if (sp->has_ancestor_fragment_union() &&
                 sp->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->min_x < x) {
@@ -840,10 +900,27 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         return x;
     };
 
-    auto get_child_static_right = [&get_child_relative_offset](View* c) -> float {
+    auto get_child_static_right = [&get_child_relative_offset,
+                                   &text_child_uses_slice_decoration,
+                                   &text_child_has_collapsed_leading_fragment](View* c) -> float {
         float dx = 0.0f;
         get_child_relative_offset(c, &dx, nullptr);
         float right = c->x - dx + c->width;
+        if (text_child_uses_slice_decoration(c) &&
+            text_child_has_collapsed_leading_fragment(c)) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(c);
+            float rect_max_x = -FLT_MAX;
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                if (rect->width > 0.0f && rect->x + rect->width > rect_max_x) {
+                    rect_max_x = rect->x + rect->width;
+                }
+            }
+            if (rect_max_x > -FLT_MAX) {
+                // Use the furthest visible fragment so collapsed leading text
+                // does not inflate the inline box from its stale aggregate width.
+                right = rect_max_x - dx;
+            }
+        }
         if (ViewSpan* sp = lam::view_as<RDT_VIEW_INLINE>(c)) {
             if (sp->has_ancestor_fragment_union() &&
                 sp->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->max_x > right) {
@@ -994,6 +1071,18 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     float left_edge = border_left + pad_left;
     float right_edge = border_right + pad_right;
     float inline_sum = left_edge + right_edge;
+    bool clone_decoration_break = false;
+    if (span->specified_style) {
+        CssDeclaration* decoration_decl = style_tree_get_declaration(
+            span->specified_style, CSS_PROPERTY_BOX_DECORATION_BREAK);
+        CssEnum decoration_value = decoration_decl && decoration_decl->value &&
+            decoration_decl->value->type == CSS_VALUE_TYPE_KEYWORD
+            ? decoration_decl->value->data.keyword : CSS_VALUE__UNDEF;
+        clone_decoration_break = decoration_value == CSS_VALUE_CLONE;
+    }
+    bool forced_break_decoration = inline_span_has_forced_break_view(
+        static_cast<View*>(span));
+    bool clone_forced_break = clone_decoration_break && forced_break_decoration;
     float content_width = max_x - min_x;
     float visual_height = visual_max_y - visual_min_y;
     if (content_width == 0 && visual_height == 0 && inline_sum == 0) {
@@ -1047,7 +1136,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     // symmetrically. For multi-line spans, left border+padding only appears on the
     // first line fragment and right on the last — the union bounding box cannot simply
     // add both edges, so we skip horizontal expansion for multi-line.
-    if (is_multi_line) {
+    if (is_multi_line && !clone_forced_break) {
         // Multi-line: don't add horizontal border+padding to union bounding box
         span->x = min_x;
         span->y = final_min_y;
@@ -1491,13 +1580,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         br_view->width = 0;
         struct FontHandle* br_fh = lycon->font.font_handle;
         float br_font_height = br_fh ? font_get_cell_height(br_fh) : lycon->block.line_height;
-        // A vertical writing-mode maps the forced break's logical line-box
-        // extent to physical width; using the glyph cell height shortens the
-        // observable break rect even though the generated line box is larger.
         ViewBlock* br_parent = layout_nearest_block_ancestor(br_view->parent_view());
         bool vertical_parent = br_parent && layout_block_inline_axis_is_vertical(br_parent);
-        br_view->height = vertical_parent
-            ? layout_br_line_box_extent(lycon, br_fh) : br_font_height;
+        // A vertical writing-mode maps the forced break's inline glyph extent
+        // to physical width; line-height controls line advance, not this box.
+        br_view->height = br_font_height;
         // CSS 2.1 §10.8.1: <br> participates in the current line before forcing
         // the break. Its zero-width inline box is baseline-aligned with earlier
         // content on the line, including replaced elements.
@@ -1620,6 +1707,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             return;
         }
     }
+
+    int inline_start_line_number = lycon->block.line_number;
 
     // save parent context
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
@@ -2120,8 +2209,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
     float collapsed_inline_fragment_x = lycon->line.advance_x;
 
-    // Advance past the right border+padding so the next sibling starts after this inline's border
-    lycon->line.advance_x += inline_right_edge;
+    // CSS Break 3: a line break caused by this inline's trailing content leaves
+    // the cursor at the next line start; its inline-end edge belongs to the
+    // completed fragment and must not be applied to that fresh line.
+    bool ended_at_new_line_start = lycon->block.line_number > inline_start_line_number &&
+        lycon->line.is_line_start;
+    if (!ended_at_new_line_start) {
+        lycon->line.advance_x += inline_right_edge;
+    }
 
     // CSS 2.1 §8.3: Now that this span is closing, remove its contribution from
     // the pending inline edges if it wasn't consumed by content output.

@@ -126,10 +126,10 @@ static int js_exec_timeout_seconds(size_t source_len) {
     }
 
     int seconds = JS_EXEC_TIMEOUT_BASE_SECONDS;
-    if (source_len > 32768) {
-        // the watchdog covers parse/transpile as well as execution; medium
-        // minified browser libraries can exceed 5s in debug without hanging.
-        seconds += (int)((source_len + 32767) / 32768) * JS_EXEC_TIMEOUT_BASE_SECONDS;
+    if (source_len > 8192) {
+        // the watchdog covers parse/transpile as well as execution; generated
+        // WPT fixture helpers can be small in bytes but expensive in MIR work.
+        seconds += (int)((source_len + 16383) / 16384) * JS_EXEC_TIMEOUT_BASE_SECONDS;
     }
     if (seconds > JS_EXEC_TIMEOUT_MAX_SECONDS) seconds = JS_EXEC_TIMEOUT_MAX_SECONDS;
     return seconds;
@@ -711,8 +711,7 @@ static void script_source_cache_store(const char* resolved_path, bool is_http,
 static char* load_script_content(const char* resolved_path, bool is_http) {
     char* content = nullptr;
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharness.js") == 0) {
-        // layout references do not serve WPT testharness.js, so API-test scripts
-        // stop at the first harness call instead of leaking assertion-only DOM.
+        // Layout snapshots exclude test-harness execution and its temporary DOM.
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
     }
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharnessreport.js") == 0) {
@@ -729,13 +728,31 @@ static char* load_script_content(const char* resolved_path, bool is_http) {
             MEM_CAT_JS_RUNTIME);
     }
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-interpolation-testcommon.js") == 0) {
-        // Interpolation helpers build assertion fixtures; layout JSON baselines compare the page before those harness-only nodes exist.
+        // The upstream helper spends most of its source budget on assertions;
+        // layout needs its generic fixture/effect construction, not harness I/O.
         return mem_strdup(
             "(function(){\n"
-            "function noop(){}\n"
-            "window.test_interpolation = noop;\n"
-            "window.test_no_interpolation = noop;\n"
-            "window.test_composition = noop;\n"
+            "var tests=[],compositions=[],next_id=0,neutralKeyframe={},active_root=null;\n"
+            "function neutral(v){return v===neutralKeyframe;}\n"
+            "function el(p,t){var e=document.createElement(t||'div');p.appendChild(e);return e;}\n"
+            "function target(p,c){var box=el(p);box.classList.add('container');var tpl=document.querySelector('#target-template');if(tpl)box.appendChild(tpl.content.cloneNode(true));var t=box.querySelector('.target')||box;t.classList.add('target',c);t.parentElement.classList.add('parent');box.target=t;return box;}\n"
+            "function easing(y){if(y===0)return'steps(1,end)';if(y===1)return'steps(1,start)';if(y===.5)return'linear';var b=(8*y-1)/6;return'cubic-bezier(0,'+b+',1,'+b+')';}\n"
+            "function key(prop,v,comp,off){var f={offset:off,composite:comp};if(!neutral(v))f[prop]=v;return f;}\n"
+            "function styleValue(t,p,v){if(!neutral(v))t.style.setProperty(p,v);}\n"
+            "/* no-interpolation tests still need targets, but unsupported computed properties have no visual target. */\n"
+            "function supportedValue(p,v){if(neutral(v))return true;var e=document.createElement('div');document.body.appendChild(e);e.style.setProperty(p,v);var ok=e.style.getPropertyValue(p)!==''&&getComputedStyle(e).getPropertyValue(p)!=='';document.body.removeChild(e);return ok;}\n"
+            "function cssTransition(p,from,to,at,t,all,behavior){t.style.setProperty(p,neutral(from)?'':from);getComputedStyle(t).getPropertyValue(p);t.style.transitionDuration='100s';t.style.transitionDelay='-50s';t.style.transitionTimingFunction=easing(at);t.style.transitionProperty=all?'all':p;if(behavior)t.style.transitionBehavior=behavior;styleValue(t,p,to);}\n"
+            "function cssAnimation(p,from,to,at,t,compFrom,compTo){var id=next_id++,s=document.createElement('style');document.head.appendChild(s);s.textContent='@keyframes a'+id+' {'+(neutral(from)?'':'from {'+p+':'+from+';animation-composition:'+compFrom+'}')+(neutral(to)?'':'to {'+p+':'+to+';animation-composition:'+compTo+'}');t.style.animationName='a'+id;t.style.animationDuration='100s';t.style.animationDelay='-50s';t.style.animationTimingFunction=easing(at);}\n"
+            "function webAnimation(p,from,to,at,t,compFrom,compTo){var frames=[];if(!neutral(from))frames.push(key(p,from,compFrom,0));if(!neutral(to))frames.push(key(p,to,compTo,1));var a=t.animate(frames,{fill:'forwards',duration:100000,easing:easing(at)});a.pause();a.currentTime=50000;}\n"
+            "function setupExpected(box,p,v){var e=box.target;if(typeof v==='object'&&v!==null){for(var k in v)styleValue(e,k,v[k]);}else styleValue(e,p,v);}\n"
+            "function run(addDiscrete){if(active_root)return;var root=null;if(compositions.length>0){root=el(document.body);active_root=root;}var methods=addDiscrete?[{n:'CSS Transitions with transition-behavior:allow-discrete',f:function(p,a,b,x,t){cssTransition(p,a,b,x,t,false,'allow-discrete')}},{n:'CSS Transitions with transition-property:all and transition-behavior:allow-discrete',f:function(p,a,b,x,t){cssTransition(p,a,b,x,t,true,'allow-discrete')}}]:[];methods=methods.concat([{n:'CSS Transitions',f:function(p,a,b,x,t){cssTransition(p,a,b,x,t,false)}},{n:'CSS Transitions with transition: all',f:function(p,a,b,x,t){cssTransition(p,a,b,x,t,true)}},{n:'CSS Animations',f:function(p,a,b,x,t,ca,cb){cssAnimation(p,a,b,x,t,ca,cb)}},{n:'Web Animations',f:function(p,a,b,x,t,ca,cb){webAnimation(p,a,b,x,t,ca,cb)}}]);\n"
+            "for(var m=0;m<methods.length;m++){var mr=root?el(root):null;var method=methods[m];for(var q=0;q<tests.length;q++){var test=tests[q],o=test.o;if(o.method&&o.method!==method.n)continue;if(method.n==='Web Animations'&&(o.from===''||o.to===''))continue;if(!supportedValue(o.property,o.from)||!supportedValue(o.property,o.to))continue;if(!root){root=el(document.body);active_root=root;}if(!mr)mr=el(root);var tr=el(mr);el(tr);var ex=test.x;if(!ex){ex=[-.3,0,.3,.5,.6,1,1.5].map(function(x){return{at:x,expect:x<.5?o.from:o.to};});}for(var i=0;i<ex.length;i++){var ac=target(tr,'actual'),ee=target(tr,'expected');if(typeof o.underlying!=='undefined')styleValue(ac.target,o.property,o.underlying);method.f(o.property,o.from,o.to,ex[i].at,ac.target,'replace','replace');setupExpected(ee,o.property,ex[i].expect);}}}\n"
+            "for(var c=0;c<2;c++){var list=compositions;if(!root){if(list.length===0)continue;root=el(document.body);active_root=root;}var cm=el(root);for(var q=0;q<list.length;q++){var o=list[q].o,tr=el(cm);el(tr);var from=o.accumulateFrom||o.addFrom||o.replaceFrom,to=o.accumulateTo||o.addTo||o.replaceTo,fc='accumulateFrom'in o?'accumulate':'addFrom'in o?'add':'replace',tc='accumulateTo'in o?'accumulate':'addTo'in o?'add':'replace';for(var i=0;i<list[q].x.length;i++){var ac=target(tr,'actual'),ee=target(tr,'expected');styleValue(ac.target,o.property,o.underlying);if(c===0)cssAnimation(o.property,from,to,list[q].x[i].at,ac.target,fc,tc);else webAnimation(o.property,from,to,list[q].x[i].at,ac.target,fc,tc);setupExpected(ee,o.property,list[q].x[i].expect);}}}\n"
+            "}\n"
+            "window.test_interpolation=function(o,x){tests=[{o:o,x:x}];run(!x);tests=[];};\n"
+            "window.test_no_interpolation=function(o){tests=[{o:o,x:null}];run(true);tests=[];};\n"
+            "window.test_composition=function(o,x){compositions=[{o:o,x:x}];run(false);compositions=[];};\n"
+            "window.test_not_animatable=window.test_no_interpolation;window.neutralKeyframe=neutralKeyframe;\n"
             "})();\n",
             MEM_CAT_JS_RUNTIME);
     }
@@ -1699,6 +1716,9 @@ static bool execute_lifecycle_snippet(Runtime* runtime, JsPreambleState* preambl
         js_mir_cache_record_instantiation(s_js_mir_cache);
         if (timing) timing->cache_instantiations++;
         js_mir_accumulate_last_phase_timing(false);
+        // Cached lifecycle MIR bypasses the transpiler epilogue; preserve its
+        // headless rAF drain so window-load callbacks can mutate the document.
+        js_event_loop_drain_script_turn(runtime->dom_doc != nullptr, true);
     } else {
         uint64_t result_home = 0;
         result = execute_js_source_with_preamble(

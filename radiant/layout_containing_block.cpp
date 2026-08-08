@@ -98,14 +98,14 @@ void layout_resolve_percent_size_for_child(LayoutContext* lycon, ViewBlock* chil
     float height_base = use_content_box ? cb.content_height : cb.padding_height;
     const char* context = log_context ? log_context : "child";
 
-    if (!isnan(child->block()->given_width_percent) && width_base > 0.0f) {
+    if (!isnan(child->block()->given_width_percent) && cb.has_definite_width) {
         float width = width_base * child->block()->given_width_percent / 100.0f;
         log_debug("[LAYOUT_CB] %s width %.1f%% of %.1f = %.1f (was %.1f)",
                   context, child->block()->given_width_percent, width_base, width, lycon->block.given_width);
         lycon->block.given_width = width;
         child->blk->given_width = width;
     }
-    if (!isnan(child->block()->given_height_percent) && height_base > 0.0f) {
+    if (!isnan(child->block()->given_height_percent) && cb.has_definite_height) {
         float height = height_base * child->block()->given_height_percent / 100.0f;
         log_debug("[LAYOUT_CB] %s height %.1f%% of %.1f = %.1f (was %.1f)",
                   context, child->block()->given_height_percent, height_base, height, lycon->block.given_height);

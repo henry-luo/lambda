@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "description": "Tune17 T1 emits the same native recursive int lane for inferred and declared procedures.",
+  "checks": [
+    {
+      "in_func": "_tune17_tak_inferred_#",
+      "expect": [
+        "call\t_tune17_tak_inferred_"
+      ],
+      "forbid": [
+        "lambda_type_check",
+        "call\t_tune17_tak_inferred_b_"
+      ]
+    },
+    {
+      "in_func": "_tune17_tak_declared_#",
+      "expect": [
+        "call\t_tune17_tak_declared_"
+      ],
+      "forbid": [
+        "lambda_type_check",
+        "call\t_tune17_tak_declared_b_"
+      ]
+    }
+  ]
+}

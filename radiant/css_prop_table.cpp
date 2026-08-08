@@ -436,6 +436,9 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_MIN_HEIGHT, serialize_minmax, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_MAX_WIDTH, serialize_minmax, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_MAX_HEIGHT, serialize_minmax, CSS_PROP_ACCESSOR_USED_VALUE),
+    // CSSOM support detection reads the computed aspect ratio before layout;
+    // omitting it makes valid animation values appear unsupported to WPT.
+    DECL_ROW(CSS_PROPERTY_ASPECT_RATIO),
     DIRECT_ROW(CSS_PROPERTY_BOX_SIZING, PROP_GROUP_BLOCK, BlockProp, box_sizing, CSS_PROP_VALUE_ENUM, 0),
     DERIVED_ROW(CSS_PROPERTY_MARGIN_TOP, serialize_edge, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_MARGIN_RIGHT, serialize_edge, CSS_PROP_ACCESSOR_USED_VALUE),
@@ -535,8 +538,9 @@ bool dom_ensure_computed(DomElement* element, bool needs_used_value) {
     if (!dirty) return true;
 
     // DOM3 geometry is a committed-layout snapshot. A computed-style read may
-    // serialize its current declaration, but it must not turn a style mutation
+    // refresh stylesheet declarations, but it must not turn a style mutation
     // into a synchronous layout pass merely to refresh a used value.
+    radiant_cascade_styles_for_element(element);
     return false;
 }
 

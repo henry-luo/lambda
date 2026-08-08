@@ -22587,11 +22587,17 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
             mm_err++;
         }
     }
-    // A custom map method can return a wide scalar. Route the result directly
-    // to generated code's home instead of letting the native dispatcher own it.
-    return result_home
-        ? js_call_function_into(fn, obj, args, argc, result_home)
-        : js_call_function(fn, obj, args, argc);
+    // A custom map method can return a wide scalar, but method resolution does
+    // not prove the selected closure's call ABI.
+    if (!result_home) return js_call_function(fn, obj, args, argc);
+    // The map dispatcher may resolve an arbitrary closure. Forwarding the
+    // caller's scalar home through that closure bypasses its own dynamic-call
+    // home/adoption boundary, which breaks omitted-argument closures that make
+    // nested allocating calls. Complete the call with the generic dispatcher,
+    // then copy only a surviving scalar home into the caller's destination
+    // (D2.2.2, D3.2.1, D3.3.1).
+    Item result = js_call_function(fn, obj, args, argc);
+    return lambda_item_adopt_scalar_home(result, result_home);
 }
 
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {

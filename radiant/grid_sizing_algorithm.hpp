@@ -255,7 +255,8 @@ inline void increase_sizes_for_spanning_item(
     size_t span,
     float space_to_distribute,
     IntrinsicContributionType contribution_type,
-    bool include_min_content_max_tracks = false
+    bool include_min_content_max_tracks = false,
+    bool allow_auto_minimum_beyond_fixed_max = false
 ) {
     if (space_to_distribute <= 0 || span == 0) return;
 
@@ -318,7 +319,13 @@ inline void increase_sizes_for_spanning_item(
             if (max_type == SizingFunctionType::FitContentPx ||
                 max_type == SizingFunctionType::FitContentPercent) return true;
             auto mt = track.min_track_sizing_function.type;
-            return mt == SizingFunctionType::MinContent || mt == SizingFunctionType::MaxContent;
+            // An explicit min-content item contribution can make an auto minimum
+            // authoritative even when a fixed maximum is smaller; ordinary auto
+            // minimum tracks remain capped by that maximum.
+            return (allow_auto_minimum_beyond_fixed_max &&
+                    mt == SizingFunctionType::Auto) ||
+                   mt == SizingFunctionType::MinContent ||
+                   mt == SizingFunctionType::MaxContent;
         } else {
             // Phase 2 (Maximum): only max-content MIN tracks are uncapped.
             // minmax(max-content, <percentage>) needs base_size to reach max-content
@@ -580,12 +587,22 @@ inline void resolve_intrinsic_track_sizes(
         // tracks at all. In that case, use max-content in Phase 1 so the track reaches its
         // correct size. This handles degenerate minmax(max-content, min-content) tracks
         // where the effective sizing IS max-content but Phase 2 won't fire.
-        // Under an intrinsic constraint, auto minimum tracks use the item's
-        // limited min-content contribution; otherwise they use its minimum contribution.
-        float p1_contrib = (is_min_content_constraint || is_max_content_constraint)
+        // A min-content track is sized from the item's min-content contribution;
+        // its automatic minimum may be zero when the item declares min-height:0.
+        // Using that automatic minimum here collapses the track before percentage
+        // item sizes get a definite grid area to resolve against (CSS Grid §11.5).
+        bool has_min_content_track = false;
+        size_t p1_end = grid_min_value(contrib.track_start + contrib.track_span, tracks.size());
+        for (size_t ii = contrib.track_start; ii < p1_end; ++ii) {
+            if (tracks[ii].min_track_sizing_function.type == SizingFunctionType::MinContent) {
+                has_min_content_track = true;
+                break;
+            }
+        }
+        float p1_contrib = ((!contrib.is_scroll_container && has_min_content_track) ||
+                            is_min_content_constraint || is_max_content_constraint)
             ? contrib.min_content_contribution : contrib.minimum_contribution;
         {
-            size_t p1_end = grid_min_value(contrib.track_start + contrib.track_span, tracks.size());
             bool all_max_content_min = true;
             bool any_phase2_eligible = false;
             for (size_t ii = contrib.track_start; ii < p1_end; ++ii) {
@@ -618,7 +635,10 @@ inline void resolve_intrinsic_track_sizes(
                 contrib.track_start,
                 contrib.track_span,
                 extra_space,
-                IntrinsicContributionType::Minimum
+                IntrinsicContributionType::Minimum,
+                false,
+                layout_intrinsic_min_size_keyword(contrib.item, true) == CSS_VALUE_MIN_CONTENT ||
+                layout_intrinsic_min_size_keyword(contrib.item, false) == CSS_VALUE_MIN_CONTENT
             );
         }
     }

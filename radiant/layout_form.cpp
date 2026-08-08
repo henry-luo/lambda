@@ -323,6 +323,7 @@ const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
  */
 static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
+    float zoom = layout_effective_zoom((View*)block);
 
     // Get button text from live value, value attribute, or input-type default.
     const char* text = form_button_label_text(block, form);
@@ -340,8 +341,8 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
     // Using font_size directly would give incorrect height (font_size + border + padding != 21).
     // CSS UA stylesheets size buttons to match text input height for visual consistency.
     {
-        float def_bp_v = 2 * (FormDefaults::BUTTON_PADDING_V + FormDefaults::BUTTON_BORDER);
-        float content_height = (FormDefaults::TEXT_HEIGHT - def_bp_v) * pr;
+        float def_bp_v = 2 * (FormDefaults::BUTTON_PADDING_V + FormDefaults::BUTTON_BORDER) * zoom;
+        float content_height = (FormDefaults::TEXT_HEIGHT * zoom - def_bp_v) * pr;
         if (block && block->display.inner == CSS_VALUE_FLEX &&
             font && font->font_size > 0 && lycon->ui_context) {
             FontBox temp_font;
@@ -553,7 +554,6 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     FormControlProp* form = block->form;
     FontProp* font = block->font ? block->font : lycon->font.style;
     float pr = lycon->ui_context->pixel_ratio;
-
     bool textarea_needs_baseline_set =
         form->control_type == FORM_CONTROL_TEXTAREA &&
         radiant::layout_uses_explicit_baseline_source(block);
@@ -582,6 +582,21 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
 
     case FORM_CONTROL_SELECT:
         calc_select_size(lycon, block, form, font);
+        if (block->blk &&
+            layout_block_has_automatic_size(block, true) &&
+            !layout_block_has_automatic_size(block, false) &&
+            layout_used_preferred_aspect_ratio(block) > 0.0f) {
+            // Selects are replaced controls, but their intrinsic width is installed
+            // before control layout; transfer the definite height before that metric
+            // can hide the preferred ratio, then retain the auto minimum when allowed.
+            layout_apply_preferred_ratio_to_replaced_auto_axes(lycon, block);
+            bool min_width_is_auto = block->block()->given_min_width < 0.0f ||
+                block->block()->given_min_width_type == CSS_VALUE_AUTO;
+            if (min_width_is_auto && form->intrinsic_width > block->block()->given_width) {
+                block->block_mut()->given_width = form->intrinsic_width;
+                lycon->block.given_width = form->intrinsic_width;
+            }
+        }
         break;
 
     case FORM_CONTROL_CHECKBOX:
@@ -663,6 +678,19 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
             width = layout_border_width_from_content_box(block, content_width);
             height = layout_border_height_from_content_box(block, content_height);
         }
+    }
+
+    if (width > MAX_LAYOUT_DIMENSION) {
+        // css Values 4 permits approximating an unsupported used extent; after
+        // large padding is added, keep the replaced border box representable
+        // and derive a non-negative content box from that final border box.
+        width = MAX_LAYOUT_DIMENSION;
+        content_width = layout_content_width_from_border_box(block, width);
+    }
+    if (height > MAX_LAYOUT_DIMENSION) {
+        // Preserve the border-box/content-box invariant for the block axis too.
+        height = MAX_LAYOUT_DIMENSION;
+        content_height = layout_content_height_from_border_box(block, height);
     }
     block->width = width;
     block->height = height;

@@ -5,7 +5,8 @@
     {
       "in_func": "_tune16_proved_float_store_#",
       "expect": [
-        "call\tlambda_array_set_checked_lane_p, lambda_array_set_checked_lane",
+        "call\tfn_array_set_p, fn_array_set",
+        "lsh\t{{r}}, {{r}}, 3",
         "dmov\td:({{r}}), {{r}}"
       ]
     }

@@ -2539,6 +2539,10 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
 // JSON generation for text nodes
 static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect) {
     if (!text || !rect || rect->width > 0 || rect->length <= 0) return false;
+    // A zero-font whitespace run still has a layout rect; only positive-height
+    // zero-width runs were collapsed away at an inline line edge (CSS Text 3
+    // §4.1.3), so retain the former for DOM geometry reporting.
+    if (rect->height <= 0.0f) return false;
     CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
     if (white_space != CSS_VALUE_NORMAL &&
         white_space != CSS_VALUE_NOWRAP &&

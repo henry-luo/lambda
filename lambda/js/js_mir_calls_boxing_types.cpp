@@ -183,12 +183,13 @@ MIR_reg_t jm_array_method_direct_into(JsMirTranspiler* mt, MIR_op_t array,
 
 MIR_reg_t jm_map_method_into(JsMirTranspiler* mt, MIR_op_t object,
         MIR_op_t method_name, MIR_op_t args, MIR_op_t arg_count) {
-    JsMirScalarResultHome home = jm_new_scalar_result_home(mt, "map-method");
-    if (!home.reg) return 0;
-    MIR_reg_t result = jm_call_5(mt, "js_map_method_into", MIR_T_I64,
+    // Map dispatch can resolve an arbitrary JS closure, so its result cannot
+    // promise the scalar-home ABI of a known callee. Keep this call on the
+    // boxed dynamic lane; known typed/array calls retain their explicit home
+    // contracts (D2.2.2, D3.2.1, D3.3.1).
+    return jm_call_4(mt, "js_map_method", MIR_T_I64,
         MIR_T_I64, object, MIR_T_I64, method_name, MIR_T_I64, args,
-        MIR_T_I64, arg_count, MIR_T_P, MIR_new_reg_op(mt->ctx, home.reg));
-    return jm_finish_scalar_result_home(mt, home, result);
+        MIR_T_I64, arg_count);
 }
 
 MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,

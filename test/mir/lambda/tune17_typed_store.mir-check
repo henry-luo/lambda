@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "description": "Tune17 T2 keeps declared int and bool array writes on their raw lanes with checked fallbacks.",
+  "checks": [
+    {
+      "in_func": "_tune17_typed_store_#",
+      "expect": [
+        "call\tfn_array_set_p, fn_array_set",
+        "mov\ti64:({{r}}), {{r}}",
+        "mov\tu8:({{r}}), {{r}}"
+      ]
+    }
+  ]
+}

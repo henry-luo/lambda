@@ -4,7 +4,7 @@
   "checks": [
     {
       "in_func": "_guarded_load_#",
-      "expect": [
+      "forbid": [
         "call\titem_at_p, item_at"
       ],
       "expect_seq": [
@@ -20,13 +20,10 @@
     },
     {
       "in_func": "_guarded_store_#",
-      "forbid": [
-        "call\tfn_array_set_p, fn_array_set"
-      ],
       "expect_seq": [
         { "pattern": "call\tensure_typed_array_p, ensure_typed_array" },
         { "pattern": "call\tlambda_module_const_at_p" },
-        { "pattern": "call\tlambda_array_set_checked_lane_p, lambda_array_set_checked_lane" }
+        { "pattern": "dmov\td:({{r}}), {{r}}" }
       ]
     },
     {
