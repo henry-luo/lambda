@@ -2491,6 +2491,7 @@ Item item_at(Item data, int64_t index) {
     case LMD_TYPE_RANGE: {
         Range *range = data.range;
         if (index < 0 || index >= range->length) { return ItemNull; }
+        if (range->is_char) return fn_chr((Item){.item = i2it(range->start + index)});
         int64_t value = range->start + index;
         return {.item = i2it(value)};
     }

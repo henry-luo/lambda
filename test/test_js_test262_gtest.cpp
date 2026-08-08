@@ -4808,6 +4808,9 @@ int main(int argc, char** argv) {
                 p.skip_result = T262_PASS;
                 p.is_negative = false;
                 p.is_strict = false;
+                p.is_async = false;
+                p.is_module = false;
+                p.is_raw = false;
                 p.native_harness = false;
                 // Load metadata from cache
                 auto cm_it = g_metadata_cache.find(param.test_path);
@@ -4815,14 +4818,26 @@ int main(int argc, char** argv) {
                     const CachedMeta& cm = cm_it->second;
                     p.is_negative = cm.flags & 32;
                     p.negative_type = cm.neg_type;
-                    p.is_strict = cm.flags & 8;
                     p.is_async = cm.flags & 1;
                     p.is_module = cm.flags & 2;
                     p.is_raw = cm.flags & 4;
+                    p.is_strict = cm.flags & 8;
                     p.includes = cm.includes;
                     p.features = cm.features;
-                    p.native_harness = !p.is_async && cm.native_harness;
                 }
+                // preserve all execution flags on isolated retries; dropping async
+                // here removes the per-test $DONE bridge and misclassifies a valid
+                // batch result as a runtime regression.
+                p.is_slow_test = g_slow_tests.count(p.test_name) > 0;
+                // match prepare_all_tests: release retries must not promote the
+                // cache's debug-only native-harness optimization into native mode.
+#ifndef NDEBUG
+                p.native_harness = p.is_raw || (!p.is_async &&
+                                                cm_it != g_metadata_cache.end() &&
+                                                cm_it->second.native_harness);
+#else
+                p.native_harness = p.is_raw;
+#endif
                 // Phase 4 rebuilds prepared records from all_tests, so carry the
                 // batch-local helper policy too.  Without this, helper-dependent
                 // regressions retry without their special preamble and thousands

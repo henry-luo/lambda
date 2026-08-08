@@ -1,0 +1,49 @@
+'===== STRING PATTERN SYNTAX TESTS ====='
+'Test 1: Literal and structural islands'
+1
+true
+2
+false
+3
+true
+4
+true
+5
+true
+6
+true
+7
+true
+8
+false
+9
+true
+'Test 2: Literal-union equivalence'
+10
+true
+11
+true
+12
+true
+13
+true
+'Test 3: Inline and multi-declare islands'
+14
+true
+15
+true
+16
+true
+17
+true
+'Test 4: Range overload remains available'
+18
+true
+19
+false
+20
+true
+21
+true
+22
+false

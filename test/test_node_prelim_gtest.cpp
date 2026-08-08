@@ -44,9 +44,27 @@ extern "C" {
     #define LAMBDA_EXE "./lambda.exe"
 #endif
 
+static bool node_test_requires_permission(const char* script_path) {
+    FILE* file = fopen(script_path, "r");
+    if (!file) return false;
+    char line[160];
+    bool required = fgets(line, sizeof(line), file) &&
+        strstr(line, "// @test-permission") != nullptr;
+    fclose(file);
+    return required;
+}
+
 // Helper function to execute a JavaScript file with lambda js and capture output
 static char* execute_js_script(const char* script_path) {
-    const char* args[] = {LAMBDA_EXE, "js", script_path, "--no-log", NULL};
+    const char* normal_args[] = {LAMBDA_EXE, "js", script_path, "--no-log", NULL};
+    const char* permission_args[] = {
+        LAMBDA_EXE, "js", "--permission", script_path, "--no-log", NULL
+    };
+    // Permission-marked fixtures must run in Node's permission model; keeping
+    // them out of the shared batch also prevents one policy from leaking into
+    // unrelated scripts in the same process.
+    const char** args = node_test_requires_permission(script_path)
+        ? permission_args : normal_args;
     ShellResult shell_result = shell_exec(LAMBDA_EXE, args, NULL);
     if (shell_result.exit_code != 0) {
         fprintf(stderr, "Error: lambda.exe js exited with code %d for script: %s\n",
@@ -300,7 +318,9 @@ public:
         auto all = discover_all_node_tests();
         std::vector<std::string> batch_scripts;
         for (const auto& t : all) {
-            batch_scripts.push_back(t.script_path);
+            if (!node_test_requires_permission(t.script_path.c_str())) {
+                batch_scripts.push_back(t.script_path);
+            }
         }
 
         if (!batch_scripts.empty()) {

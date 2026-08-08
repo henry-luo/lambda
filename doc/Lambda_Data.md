@@ -66,7 +66,7 @@ Lambda Script has a rich type system with both primitive and composite types:
 | `array`    | Ordered collections         | `[1, 2, 3]`                             |
 | `map`      | Key-value mappings          | `{key: "value"}`                        |
 | `element`  | Structured markup elements  | `<tag attr: value; content>`            |
-| `range`    | Numeric ranges              | `1 to 10`                               |
+| `range`    | Integer or character ranges | `1 to 10`, `"a" to "z"`                 |
 | `path`     | File paths and URLs         | `/etc.hosts`, `https.'api.example.com'` |
 | `function` | Functions                   | `(x) => x + 1`                          |
 | `type`     | Type descriptors            | `int`, `string`                         |
@@ -888,21 +888,31 @@ let rebuilt = <node *:attrs; "new content">
 
 ### Ranges
 
-Numeric sequences for iteration:
+Sequences of consecutive values for iteration. Bounds are either exact integers or single-codepoint strings:
 
 ```lambda
-// Basic ranges
+// Integer ranges
 1 to 10        // [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 0 to 5         // [0, 1, 2, 3, 4, 5]
 -2 to 2        // [-2, -1, 0, 1, 2]
 
+// Character ranges — each member is a one-character string
+"a" to "e"     // ["a", "b", "c", "d", "e"]
+"α" to "ε"     // ["α", "β", "γ", "δ", "ε"] — steps by Unicode codepoint
+
 // Range operations
 len(1 to 10)   // 10
 (1 to 5)[2]    // 3
+("a" to "e")[0]  // "a"
 
 // Range in for loops
 (for (i in 1 to 5) i * i)  // [1, 4, 9, 16, 25]
+
+// A start past the end yields an empty range
+"z" to "a"     // []
 ```
+
+Bounds must share a domain, and string bounds must be exactly one codepoint — `"ab" to "z"` and `1 to "z"` are errors, not coercions.
 
 ---
 

@@ -51,6 +51,7 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
 
 // Forward declarations for pattern building
 AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol);
+AstNode* build_pattern_island(Transpiler* tp, TSNode node);
 AstNode* build_pattern_char_class(Transpiler* tp, TSNode node);
 AstNode* build_concat_type(Transpiler* tp, TSNode node);
 AstNode* build_negation_type(Transpiler* tp, TSNode node);
@@ -1445,6 +1446,10 @@ static void check_declared_map_literal(Transpiler* tp, AstNamedNode* declaration
 static void check_declaration_static_boundary(Transpiler* tp, AstNamedNode* declaration,
         Type* expected, int line) {
     if (!declaration || !declaration->as || !expected) return;
+    if (expected->type_id == LMD_TYPE_RANGE && expected->kind == TYPE_KIND_RANGE) {
+        // Range annotations are checked by value membership at the MIR boundary, not by TypeId equality.
+        return;
+    }
     Type* actual = declaration->as->type;
     StaticBoundaryResult result = static_boundary_relation(actual, expected);
     if (result == STATIC_BOUNDARY_REJECTED) {
@@ -5768,6 +5773,10 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
         if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
             annotation_type = ((TypeType*)type_expr->type)->type;
             ast_node->declared_type = annotation_type;
+        } else if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_RANGE) {
+            // Range annotations are value-level membership predicates, so their AST carries the range directly instead of a TypeType wrapper.
+            annotation_type = type_expr->type;
+            ast_node->declared_type = annotation_type;
         } else {
             StrView type_str = ts_node_source(tp, type_node);
             record_semantic_error(tp, asn_node, ERR_UNDEFINED_TYPE,
@@ -5802,7 +5811,21 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
             AstNode* type_expr = build_expr(tp, val_node);
             ast_node->as = type_expr;
             if (type_expr && type_expr->type) {
-                ast_node->type = type_expr->type;  // Keep as TypeType* wrapper
+                Type* definition_type = type_expr->type;
+                bool literal_alias = (type_expr->type->type_id == LMD_TYPE_STRING ||
+                        type_expr->type->type_id == LMD_TYPE_SYMBOL) &&
+                    type_expr->type->is_literal;
+                bool range_alias = type_expr->type->type_id == LMD_TYPE_RANGE &&
+                    type_expr->type->kind == TYPE_KIND_RANGE;
+                if (literal_alias || range_alias) {
+                    // Literal-only and range aliases used to bypass the first-class type carrier; keep their payload under a TypeType contract so named type values remain distinguishable from data values.
+                    TypeType* literal_type = (TypeType*)alloc_type(
+                        tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+                    literal_type->type = type_expr->type;
+                    definition_type = (Type*)literal_type;
+                    arraylist_append(tp->type_list, definition_type);
+                }
+                ast_node->type = definition_type;  // Keep the declaration contract separate from the value expression.
                 // propagate declaration name to TypeMap for direct field access optimization
                 Type* inner = type_expr->type;
                 if (inner && inner->type_id == LMD_TYPE_TYPE) {
@@ -5846,7 +5869,11 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
             }
             else {
                 if (annotation_type) {
-                    ast_node->type = annotation_type;
+                    bool range_contract = annotation_type->type_id == LMD_TYPE_RANGE &&
+                        annotation_type->kind == TYPE_KIND_RANGE;
+                    // A range annotation constrains the value without changing its storage domain.
+                    ast_node->type = range_contract && ast_node->as
+                        ? ast_node->as->type : annotation_type;
                     int declaration_line = ts_node_start_point(asn_node).row + 1;
                     check_declaration_static_boundary(tp, ast_node, annotation_type, declaration_line);
 
@@ -6015,34 +6042,119 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     return build_assign_expr(tp, type_node, false);  // let expressions are not type definitions
 }
 
-// check if a CST subtree contains string-pattern-specific nodes
-static bool cst_has_pattern_nodes(TSNode node) {
-    TSSymbol sym = ts_node_symbol(node);
-    if (sym == sym_pattern_char_class || sym == sym_concat_type ||
-        sym == sym_grouped_type || sym == sym_string) {
-        return true;
-    }
-    uint32_t count = ts_node_child_count(node);
-    for (uint32_t i = 0; i < count; i++) {
-        if (cst_has_pattern_nodes(ts_node_child(node, i))) {
-            return true;
-        }
+static bool type_assign_is_pattern(TSNode type_assign) {
+    TSNode as_node = ts_node_child_by_field_id(type_assign, FIELD_AS);
+    while (!ts_node_is_null(as_node)) {
+        TSSymbol symbol = ts_node_symbol(as_node);
+        if (symbol == sym_pattern_island) return true;
+        if (symbol != sym_unary_type && symbol != sym_primary_type) return false;
+        as_node = ts_node_named_child(as_node, 0);
     }
     return false;
 }
 
+static bool pattern_is_symbol_tag(Transpiler* tp, TSNode pattern_node) {
+    while (!ts_node_is_null(pattern_node) && ts_node_symbol(pattern_node) != sym_pattern_island) {
+        TSSymbol symbol = ts_node_symbol(pattern_node);
+        if (symbol != sym_unary_type && symbol != sym_primary_type) return false;
+        pattern_node = ts_node_named_child(pattern_node, 0);
+    }
+    if (ts_node_is_null(pattern_node)) return false;
+    TSNode tag_node = ts_node_child_by_field_id(pattern_node, FIELD_TAG);
+    if (ts_node_is_null(tag_node)) return false;
+    StrView tag = ts_node_source(tp, tag_node);
+    return tag.length >= 8 && memcmp(tag.str, "\\symbol(", 8) == 0;
+}
+
+static bool pattern_ts_literal_set(Transpiler* tp, TSNode node) {
+    if (ts_node_is_null(node)) return false;
+    TSSymbol symbol = ts_node_symbol(node);
+    if (symbol == sym_string) return true;
+    if (symbol == sym_unary_type || symbol == sym_primary_type ||
+            symbol == sym_pattern_unary_type) {
+        return pattern_ts_literal_set(tp, ts_node_named_child(node, 0));
+    }
+    if (symbol == sym_grouped_type) {
+        if (!ts_node_is_null(ts_node_child_by_field_id(node, field_occurrence))) return false;
+        StrView source = ts_node_source(tp, node);
+        if (source.length > 0 && source.str[0] == '!') return false;
+        return pattern_ts_literal_set(tp, ts_node_named_child(node, 0));
+    }
+    if (symbol == sym_binary_type) {
+        TSNode operator_node = ts_node_child_by_field_id(node, FIELD_OPERATOR);
+        StrView operator_source = ts_node_source(tp, operator_node);
+        if (!strview_equal(&operator_source, "|")) return false;
+        return pattern_ts_literal_set(tp, ts_node_child_by_field_id(node, FIELD_LEFT)) &&
+            pattern_ts_literal_set(tp, ts_node_child_by_field_id(node, FIELD_RIGHT));
+    }
+    if (symbol == sym_pattern_island) {
+        TSNode tag = ts_node_child_by_field_id(node, FIELD_TAG);
+        StrView tag_source = ts_node_source(tp, tag);
+        if (tag_source.length >= 8 && memcmp(tag_source.str, "\\symbol(", 8) == 0) return false;
+        return pattern_ts_literal_set(tp, ts_node_child_by_field_id(node, FIELD_BODY));
+    }
+    return false;
+}
+
+static bool pattern_ast_literal_set(AstNode* node) {
+    if (!node) return false;
+    if (node->node_type == AST_NODE_PRIMARY) {
+        Type* type = node->type;
+        return type && type->type_id == LMD_TYPE_STRING && type->is_literal;
+    }
+    if (node->node_type == AST_NODE_BINARY_TYPE || node->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        return binary->op == OPERATOR_UNION &&
+            pattern_ast_literal_set(binary->left) && pattern_ast_literal_set(binary->right);
+    }
+    return false;
+}
+
+static bool pattern_ast_has_symbol_literal(AstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY:
+        return node->type && node->type->type_id == LMD_TYPE_SYMBOL;
+    case AST_NODE_BINARY:
+    case AST_NODE_BINARY_TYPE: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        return pattern_ast_has_symbol_literal(binary->left) ||
+            pattern_ast_has_symbol_literal(binary->right);
+    }
+    case AST_NODE_UNARY:
+    case AST_NODE_UNARY_TYPE:
+        return pattern_ast_has_symbol_literal(((AstUnaryNode*)node)->operand);
+    case AST_NODE_PATTERN_SEQ: {
+        AstNode* child = ((AstPatternSeqNode*)node)->first;
+        while (child) {
+            if (pattern_ast_has_symbol_literal(child)) return true;
+            child = child->next;
+        }
+        return false;
+    }
+    case AST_NODE_LIST_TYPE:
+    case AST_NODE_ARRAY_TYPE: {
+        AstNode* child = ((AstListNode*)node)->item;
+        while (child) {
+            if (pattern_ast_has_symbol_literal(child)) return true;
+            child = child->next;
+        }
+        return false;
+    }
+    case AST_NODE_PATTERN_ISLAND:
+        return pattern_ast_has_symbol_literal(((AstPatternIslandNode*)node)->pattern);
+    default:
+        return false;
+    }
+}
+
 AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
-    // For type_stam: detect string/symbol pattern by checking expression content
+    // A delimiter is the syntax boundary; content inspection would misclassify
+    // literal-only aliases and cannot carry the tagged symbol domain.
     bool is_string_pattern = false;
     if (symbol == SYM_TYPE_DEFINE) {
-        // check first declare's 'as' field for pattern-specific nodes
         TSNode first_declare = ts_node_child_by_field_id(let_node, FIELD_DECLARE);
-        if (!ts_node_is_null(first_declare)) {
-            TSNode as_node = ts_node_child_by_field_id(first_declare, FIELD_AS);
-            if (!ts_node_is_null(as_node)) {
-                is_string_pattern = cst_has_pattern_nodes(as_node);
-            }
-        }
+        is_string_pattern = !ts_node_is_null(first_declare) && type_assign_is_pattern(first_declare);
     }
 
     // For string/symbol pattern definitions, build pattern nodes
@@ -6056,7 +6168,10 @@ AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbo
             TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
             if (field_id == FIELD_DECLARE) {
                 TSNode child = ts_tree_cursor_current_node(&cursor);
-                AstNode* pattern = build_string_pattern(tp, child, false);
+                TSNode as_node = ts_node_child_by_field_id(child, FIELD_AS);
+                bool is_symbol = !ts_node_is_null(as_node) && pattern_is_symbol_tag(tp, as_node);
+                AstNode* pattern = (!is_symbol && pattern_ts_literal_set(tp, as_node)) ?
+                    build_assign_expr(tp, child, true) : build_string_pattern(tp, child, is_symbol);
                 if (pattern) {
                     if (prev) prev->next = pattern;
                     else first = pattern;
@@ -6066,7 +6181,11 @@ AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbo
             has_node = ts_tree_cursor_goto_next_sibling(&cursor);
         }
         ts_tree_cursor_delete(&cursor);
-        return first;
+        AstLetNode* type_stam = (AstLetNode*)alloc_ast_node(tp,
+            AST_NODE_TYPE_STAM, let_node, sizeof(AstLetNode));
+        type_stam->declare = first;
+        type_stam->type = &LIT_NULL;
+        return (AstNode*)type_stam;
     }
 
     // detect 'pub': let_stam uses choice('let','pub') so check first child symbol;
@@ -6294,6 +6413,18 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
         log_debug("unknown key type %d", symbol);
         return (StrView) { .str = NULL, .length = 0 };
     }
+}
+
+static bool is_syntactic_spread_key(TSNode key_node) {
+    if (ts_node_is_null(key_node)) return false;
+    TSSymbol symbol = ts_node_symbol(key_node);
+    if (symbol == anon_sym_STAR) return true;
+    if (symbol != sym_attr_name) return false;
+
+    TSNode child = ts_node_named_child(key_node, 0);
+    if (!ts_node_is_null(child)) return is_syntactic_spread_key(child);
+    child = ts_node_child(key_node, 0);
+    return is_syntactic_spread_key(child);
 }
 
 AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
@@ -7038,7 +7169,6 @@ AstNode* build_range_type(Transpiler* tp, TSNode type_node) {
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
         AST_NODE_BINARY, type_node, sizeof(AstBinaryNode));
     ast_node->op = OPERATOR_TO;
-    ast_node->type = &TYPE_RANGE;
 
     TSNode start_node = ts_node_child_by_field_id(type_node, FIELD_START);
     TSNode end_node = ts_node_child_by_field_id(type_node, FIELD_END);
@@ -7049,6 +7179,24 @@ AstNode* build_range_type(Transpiler* tp, TSNode type_node) {
     if (!ts_node_is_null(end_node)) {
         ast_node->right = build_expr(tp, end_node);
     }
+
+    TypeRange* range_type = (TypeRange*)alloc_type(tp->pool, LMD_TYPE_RANGE,
+        sizeof(TypeRange));
+    range_type->kind = TYPE_KIND_RANGE;
+    range_type->start = ItemNull;
+    range_type->end = ItemNull;
+    range_type->is_char = false;
+    Item start_item = ItemNull;
+    Item end_item = ItemNull;
+    if (ast_static_literal_item(tp, ast_node->left, &start_item) &&
+            ast_static_literal_item(tp, ast_node->right, &end_item)) {
+        range_type->start = start_item;
+        range_type->end = end_item;
+        range_type->is_char = get_type_id(start_item) == LMD_TYPE_STRING &&
+            get_type_id(end_item) == LMD_TYPE_STRING;
+    }
+    ast_node->type = (Type*)range_type;
+    arraylist_append(tp->type_list, (Type*)range_type);
 
     return (AstNode*)ast_node;
 }
@@ -7632,7 +7780,12 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         bool is_spread = false;
         if (symbol == SYM_MAP_ITEM) {
             AstNamedNode* key_expr = build_key_expr(tp, child);
-            if (key_expr->name && key_expr->name->len == 1 && key_expr->name->chars[0] == '*') {
+            TSNode key_node = ts_node_child_by_field_id(child, FIELD_NAME);
+            // A quoted `'*'` is an ordinary map key; only the grammar's
+            // anonymous `*` token denotes a spread. Confusing the two leaves
+            // an array value in a nameless shape slot and crashes later map
+            // construction (S2.3.1, D2.1.1).
+            if (is_syntactic_spread_key(key_node)) {
                 // spread: *:expr — extract the value expression
                 item = key_expr->as;
                 is_spread = true;
@@ -7808,7 +7961,8 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
             bool is_spread = false;
             if (symbol == SYM_ATTR) {
                 AstNamedNode* key_expr = build_key_expr(tp, child);
-                if (key_expr->name && key_expr->name->len == 1 && key_expr->name->chars[0] == '*') {
+                TSNode key_node = ts_node_child_by_field_id(child, FIELD_NAME);
+                if (is_syntactic_spread_key(key_node)) {
                     // spread: *:expr — extract value expression
                     item = key_expr->as;
                     is_spread = true;
@@ -10577,13 +10731,16 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
         }
 
         if (item) {
+            AstNode* item_tail = item;
+            while (item_tail->next) item_tail = item_tail->next;
             if (!prev_item) {
                 ast_node->item = item;
             }
             else {
                 prev_item->next = item;
             }
-            prev_item = item;
+            // Pattern multi-declarations return a linked declaration chain; preserve its tail or the next content item overwrites later patterns.
+            prev_item = item_tail;
             type->length++;
         }
         // else comment or error
@@ -10988,6 +11145,14 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_nullable_array_type(tp, expr_node);
     case SYM_RANGE_TYPE:
         return build_range_type(tp, expr_node);
+    case SYM_PATTERN_ISLAND:
+        return build_pattern_island(tp, expr_node);
+    case SYM_PATTERN_OCCURRENCE_TYPE:
+        return build_occurrence_type(tp, expr_node);
+    case SYM_PATTERN_NEGATION_TYPE:
+        return build_negation_type(tp, expr_node);
+    case SYM_PATTERN_UNARY_TYPE:
+        return build_expr(tp, ts_node_named_child(expr_node, 0));
     case SYM_CONSTRAINED_TYPE:
         return build_constrained_type(tp, expr_node);
     case sym_concat_type:
@@ -11413,7 +11578,48 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
 
 // ==================== String/Symbol Pattern Building ====================
 
-// Build pattern character class (\d, \w, \s, \a, .)
+AstNode* build_pattern_island(Transpiler* tp, TSNode node) {
+    AstPatternIslandNode* ast_node = (AstPatternIslandNode*)alloc_ast_node(
+        tp, AST_NODE_PATTERN_ISLAND, node, sizeof(AstPatternIslandNode));
+    ast_node->is_symbol = pattern_is_symbol_tag(tp, node);
+    ast_node->pattern_index = -1;
+
+    TSNode body_node = ts_node_child_by_field_id(node, FIELD_BODY);
+    if (!ts_node_is_null(body_node)) {
+        ast_node->pattern = build_expr(tp, body_node);
+    }
+    if (!ast_node->pattern) {
+        record_semantic_error(tp, node, ERR_INVALID_LITERAL,
+            "pattern island requires a non-empty pattern body");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    if (pattern_ast_has_symbol_literal(ast_node->pattern)) {
+        record_semantic_error(tp, node, ERR_INVALID_LITERAL,
+            "pattern bodies are content-only; use \\symbol(...) for the symbol domain and string literals for content");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    if (!ast_node->is_symbol && pattern_ast_literal_set(ast_node->pattern)) {
+        // Literal-only islands are ordinary literal unions; retaining that AST preserves the existing type representation and matching path.
+        return ast_node->pattern;
+    }
+
+    TypePattern* pattern_type = (TypePattern*)alloc_type_kind(
+        tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+    pattern_type->pattern_index = -1;
+    pattern_type->is_symbol = ast_node->is_symbol;
+    pattern_type->re2 = nullptr;
+    pattern_type->re2_unanchored = nullptr;
+    pattern_type->source = nullptr;
+    pattern_type->regex_source = nullptr;
+    ast_node->type = (Type*)pattern_type;
+    return (AstNode*)ast_node;
+}
+
+// Build pattern character class (d, w, s, a, ., ...)
 AstNode* build_pattern_char_class(Transpiler* tp, TSNode node) {
     log_debug("build pattern char class");
     AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
@@ -11421,8 +11627,17 @@ AstNode* build_pattern_char_class(Transpiler* tp, TSNode node) {
 
     StrView source = ts_node_source(tp, node);
 
-    if (source.length == 2 && source.str[0] == '\\') {
-        switch (source.str[1]) {
+    NameEntry* shadowed = lookup_name(tp, source);
+    if (shadowed) {
+        record_semantic_error(tp, node, ERR_SEMANTIC_ERROR,
+            "pattern class '%.*s' is reserved inside pattern islands; rename the surrounding binding",
+            (int)source.length, source.str);
+    }
+
+    if (source.length == 3 && memcmp(source.str, "...", 3) == 0) {
+        ast_node->char_class = PATTERN_ANY_STRING;
+    } else if (source.length == 1) {
+        switch (source.str[0]) {
         case 'd': ast_node->char_class = PATTERN_DIGIT; break;
         case 'w': ast_node->char_class = PATTERN_WORD; break;
         case 's': ast_node->char_class = PATTERN_SPACE; break;
@@ -11430,7 +11645,6 @@ AstNode* build_pattern_char_class(Transpiler* tp, TSNode node) {
         default: ast_node->char_class = PATTERN_ANY; break;
         }
     } else {
-        // \. for any character
         ast_node->char_class = PATTERN_ANY;
     }
 
@@ -11591,12 +11805,20 @@ AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol) {
     StrView name_view = node_name_text(tp, name_node);
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
-    // Get pattern expression — from type_assign's 'as' field (or legacy 'pattern' field)
+    // Get pattern expression from the tagged island in type_assign's 'as' field.
     TSNode pattern_node = ts_node_child_by_field_id(node, FIELD_AS);
     if (ts_node_is_null(pattern_node)) {
         pattern_node = ts_node_child_by_field_id(node, FIELD_PATTERN);
     }
     ast_node->as = build_expr(tp, pattern_node);
+    if (ast_node->as && ast_node->as->node_type == AST_NODE_PATTERN_ISLAND) {
+        AstPatternIslandNode* island = (AstPatternIslandNode*)ast_node->as;
+        bool invalid_pattern = island->type == &TYPE_ERROR;
+        ast_node->as = island->pattern;
+        if (invalid_pattern) {
+            ast_node->as = nullptr;
+        }
+    }
 
     // Type is pattern type
     TypePattern* pattern_type = (TypePattern*)alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
@@ -11604,7 +11826,8 @@ AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol) {
     pattern_type->pattern_index = -1;  // Will be set during compilation
     pattern_type->re2 = nullptr;       // Will be compiled during transpilation
     pattern_type->source = nullptr;
-    ast_node->type = (Type*)pattern_type;
+    pattern_type->regex_source = nullptr;
+    ast_node->type = ast_node->as ? (Type*)pattern_type : &TYPE_ERROR;
 
     // Register pattern name in current scope
     push_name(tp, (AstNamedNode*)ast_node, NULL);

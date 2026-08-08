@@ -49,15 +49,20 @@ VERIFIED_EXTERNAL_LEAVES = {
     "isnan",
     "k2it",
     "l2it",
+    "__builtin_memcpy",
     "lambda_float_ptr_to_item",
     "log_debug",
     "memcpy",
     "memset",
     "mpd_free",
+    "mpd_isinfinite",
     "mpd_isinteger",
+    "mpd_isnan",
     "mpd_iszero",
     "mpd_qget_ssize",
     "mpd_to_sci",
+    "setjmp",
+    "sigsetjmp",
     "strtod",
     "strcmp",
     "u2it",
@@ -237,7 +242,12 @@ def function_bodies(path: Path) -> list[FunctionBody]:
                        clean.rfind("}", 0, name_start),
                        clean.rfind("{", 0, name_start))
         prefix = clean[boundary + 1:name_start]
-        if "=" in prefix or re.search(r"\b(?:return|case|new)\b", prefix):
+        # Do not mistake equality in a preprocessor macro for an assignment
+        # preceding the function definition. The old broad `"=" in prefix`
+        # check skipped inline helpers after comparison-heavy macros, leaving
+        # their NO_GC bodies outside the transitive audit.
+        if re.search(r"(?<![=!<>])=(?!=)", prefix) or re.search(
+                r"\b(?:return|case|new)\b", prefix):
             continue
         body_end = brace_pairs.get(brace, -1)
         if body_end < 0:
@@ -247,12 +257,27 @@ def function_bodies(path: Path) -> list[FunctionBody]:
     return result
 
 
+def recovery_checkpoint_name() -> str:
+    """Return the import selected by the registry's platform conditional."""
+    return "sigsetjmp" if sys.platform.startswith(("darwin", "linux")) else "setjmp"
+
+
+def normalize_recovery_checkpoint_name(names: set[str]) -> set[str]:
+    # The registry has one source row under a platform conditional. Raw source
+    # extraction sees both branches in the text, while the compiled table has
+    # exactly one; normalize the audit view to the current build platform.
+    names.discard("setjmp")
+    names.discard("sigsetjmp")
+    names.add(recovery_checkpoint_name())
+    return names
+
+
 def extract_no_gc_names(registry: str) -> set[str]:
     pattern = re.compile(
         r'\{"([^"]+)"\s*,\s*FPTR\([^)]*\)\s*,\s*\{\s*JIT_EFFECT_NO_GC',
         re.MULTILINE,
     )
-    return set(pattern.findall(registry))
+    return normalize_recovery_checkpoint_name(set(pattern.findall(registry)))
 
 
 def extract_frozen_audit_names(registry: str) -> set[str]:
@@ -263,7 +288,9 @@ def extract_frozen_audit_names(registry: str) -> set[str]:
     )
     if not match:
         raise ValueError("frozen audited NO_GC list not found")
-    return set(re.findall(r'"([^"]+)"', match.group("body")))
+    return normalize_recovery_checkpoint_name(
+        set(re.findall(r'"([^"]+)"', match.group("body")))
+    )
 
 
 def extract_calls(body: str) -> tuple[set[str], set[str]]:

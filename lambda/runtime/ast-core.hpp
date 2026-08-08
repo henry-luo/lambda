@@ -139,6 +139,7 @@ typedef enum AstNodeType : uint16_t {
     // `^` is the current error value only while building/transpiling a
     // braced error-handler body; it is distinct from `~` current-item state.
     AST_NODE_CURRENT_ERROR = 545,
+    AST_NODE_PATTERN_ISLAND = 546,
 } AstNodeType;
 
 typedef enum Operator {

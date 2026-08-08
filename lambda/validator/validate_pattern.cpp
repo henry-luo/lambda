@@ -233,12 +233,13 @@ static ValidationResult* validate_list_occurrence(
 
             if (elem_result && !elem_result->valid) {
                 merge_errors(result, elem_result, validator);
-                return result;
             }
         }
     }
 
-    result->valid = true;
+    // Occurrence validation must retain every failing element so callers can
+    // report all indexed paths instead of silently stopping at the first one.
+    if (result->error_count == 0) result->valid = true;
     return result;
 }
 

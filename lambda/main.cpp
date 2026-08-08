@@ -527,6 +527,9 @@ static int lambda_main_finish(int ret_code) {
     // same for the LAMBDA_JS_ARRAY_STATS census (no-op unless compiled in).
     js_array_stats_dump();
     lambda_main_pre_memtrack_cleanup_once();
+    // root-registered pools must be destroyed before rpmalloc walks its global
+    // heap lists; retained view/runtime pools otherwise corrupt Linux teardown.
+    mem_context_shutdown();
     log_finish();
     MemtrackStats mem_stats = {};
     memtrack_get_stats(&mem_stats);
@@ -1891,6 +1894,9 @@ int main(int argc, char *argv[]) {
             argv[j] = argv[j + 1];
         }
         argc--;
+        // Keep argv NULL-terminated after stripping a flag; view startup passes
+        // the native vector to helpers that still use the sentinel.
+        argv[argc] = NULL;
         i--;
     }
 
@@ -1916,6 +1922,7 @@ int main(int argc, char *argv[]) {
                 argv[j] = argv[j + 1];
             }
             argc--;
+            argv[argc] = NULL;
             i--;
         }
     }

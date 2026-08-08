@@ -9,4 +9,4 @@ path aliases share namespace: true
 path win32 distinct: true
 string decoder registry builtin: true
 os registry builtin: true
-os namespace: darwin:2
+os namespace: true

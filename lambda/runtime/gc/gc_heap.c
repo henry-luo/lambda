@@ -11,6 +11,7 @@
 #include "gc_heap.h"
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
+#include "../../../lib/mem_factory.h"
 #include "../../../lib/hashmap.h"
 #include "../../lambda.h"
 #include "../../js/js_exec_profile_weak.h"
@@ -408,7 +409,10 @@ gc_heap_t* gc_heap_create(void) {
     // still-retained data-zone block under heavy JS allocation churn. Use the
     // mmap-backed bump pool for GC arenas so each retained block owns a distinct
     // virtual-memory mapping.
-    Pool* pool = pool_create_mmap();
+    // register the GC backing pool so child document allocators are detached
+    // before bulk unmapping; otherwise mem-context shutdown later walks arenas
+    // whose pool has already been released.
+    Pool* pool = mem_pool_create_mmap(NULL, MEM_ROLE_RUNTIME_HEAP, "gc.heap.pool");
     if (!pool) {
         log_error("gc_heap_create: failed to create pool");
         return NULL;

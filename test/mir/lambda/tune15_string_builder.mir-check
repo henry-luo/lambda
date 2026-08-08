@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "Tune15 B4: exclusive loop-carried string concatenation uses the builder path and freezes on read.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "call\tfn_strcat_p, fn_strcat",
+        "call\tfn_string_p, fn_string",
+        "call\tfn_string_freeze_p, fn_string_freeze"
+      ],
+      "forbid": ["call\tfn_join_p, fn_join"]
+    }
+  ]
+}

@@ -83,7 +83,9 @@ static Item vector_get(Item item, int64_t index) {
             if (array_has_native_lane(item.array)) return ItemError;
             return item.array->items[index];
         case LMD_TYPE_RANGE:
-            return { .item = i2it(item.range->start + index) };
+            return item.range->is_char
+                ? fn_chr((Item){.item = i2it(item.range->start + index)})
+                : (Item){ .item = i2it(item.range->start + index) };
         default:
             return ItemError;
     }
@@ -4417,6 +4419,10 @@ Item fn_crop(Item img, Item rrange, Item crange) {
     if (get_type_id(img) != LMD_TYPE_ARRAY_NUM) { log_error("crop: expects an image array"); return ItemError; }
     if (get_type_id(rrange) != LMD_TYPE_RANGE || get_type_id(crange) != LMD_TYPE_RANGE) {
         log_error("crop: row/col selectors must be ranges, e.g. crop(img, 0 to 9, 0 to 9)");
+        return ItemError;
+    }
+    if (rrange.range->is_char || crange.range->is_char) {
+        log_error("crop: row/col selectors must be integer ranges");
         return ItemError;
     }
     ArrayNum* in = img.array_num;

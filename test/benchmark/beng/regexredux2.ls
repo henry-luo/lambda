@@ -14,18 +14,18 @@ let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
 // (repro: temp/repro_string_return_segv.ls).
 // 9 regex patterns to count matches
 // Lambda uses ("a"|"b") instead of [ab] for character alternation
-type pat1 = "agggtaaa" | "tttaccct"
-type pat2 = ("c" | "g" | "t") "gggtaaa" | "tttaccc" ("a" | "c" | "g")
-type pat3 = "a" ("a" | "c" | "t") "ggtaaa" | "tttacc" ("a" | "g" | "t") "t"
-type pat4 = "ag" ("a" | "c" | "t") "gtaaa" | "tttac" ("a" | "g" | "t") "ct"
-type pat5 = "agg" ("a" | "c" | "t") "taaa" | "ttta" ("a" | "g" | "t") "cct"
-type pat6 = "aggg" ("a" | "c" | "g") "aaa" | "ttt" ("c" | "g" | "t") "ccct"
-type pat7 = "agggt" ("c" | "g" | "t") "aa" | "tt" ("a" | "c" | "g") "taccct"
-type pat8 = "agggta" ("c" | "g" | "t") "a" | "t" ("a" | "c" | "g") "ataccct"
-type pat9 = "agggtaa" ("c" | "g" | "t") | ("a" | "c" | "g") "aataccct"
+type pat1 = \("agggtaaa" | "tttaccct")
+type pat2 = \(("c" | "g" | "t") "gggtaaa" | "tttaccc" ("a" | "c" | "g"))
+type pat3 = \("a" ("a" | "c" | "t") "ggtaaa" | "tttacc" ("a" | "g" | "t") "t")
+type pat4 = \("ag" ("a" | "c" | "t") "gtaaa" | "tttac" ("a" | "g" | "t") "ct")
+type pat5 = \("agg" ("a" | "c" | "t") "taaa" | "ttta" ("a" | "g" | "t") "cct")
+type pat6 = \("aggg" ("a" | "c" | "g") "aaa" | "ttt" ("c" | "g" | "t") "ccct")
+type pat7 = \("agggt" ("c" | "g" | "t") "aa" | "tt" ("a" | "c" | "g") "taccct")
+type pat8 = \("agggta" ("c" | "g" | "t") "a" | "t" ("a" | "c" | "g") "ataccct")
+type pat9 = \("agggtaa" ("c" | "g" | "t") | ("a" | "c" | "g") "aataccct")
 
 // pattern to match header lines
-type header_pat = ">" \.*
+type header_pat = \(">" .*)
 
 pn main() {
     var __t0 = clock()

@@ -815,6 +815,12 @@ class PremakeGenerator:
             '            "-fvisibility=hidden",',
             '            "-fvisibility-inlines-hidden",',
         ]
+        # Clang's AArch64 driver accepts -mcpu=native but rejects the x86
+        # -march=native spelling; select the native ISA switch for the host
+        # architecture so Linux release builds remain portable across runners.
+        host_machine = platform.machine().lower()
+        native_isa_flag = '"-mcpu=native"' if self.use_linux_config and \
+            host_machine in ('aarch64', 'arm64') else '"-march=native"'
         self.premake_content.extend([
             '    filter "configurations:release"',
             '        defines { "NDEBUG", "LAMBDA_HOME_RELEASE" }',
@@ -827,10 +833,10 @@ class PremakeGenerator:
             '            "-ffunction-sections",',
             '            "-fdata-sections",',
         ] + release_visibility_options + [
-            '            -- -march=native: a build-from-source binary targets the local CPU, so the',
-            '            -- numeric kernels auto-vectorize to the widest available ISA (AVX2/AVX-512/',
-            '            -- NEON). Drop to a baseline -march if ever shipping prebuilt binaries.',
-            '            "-march=native",',
+            f'            -- {native_isa_flag}: a build-from-source binary targets the local CPU, so the',
+            '            -- numeric kernels auto-vectorize to the widest available ISA. Drop to a',
+            '            -- baseline architecture flag if ever shipping prebuilt binaries.',
+            f'            {native_isa_flag},',
             '        }',
         ])
         add_release_link_options()
@@ -849,7 +855,7 @@ class PremakeGenerator:
             '            "-ffunction-sections",',
             '            "-fdata-sections",',
         ] + release_visibility_options + [
-            '            "-march=native",',
+            f'            {native_isa_flag},',
             '        }',
         ])
         # release_profile keeps local symbols: a sampled profile cannot name
@@ -1049,6 +1055,20 @@ class PremakeGenerator:
                 libraries.append(library)
         excluded = set(platform_overrides.get('exclude_libraries', []))
         return [library for library in libraries if library not in excluded]
+
+    def _external_library_for_target(self, target: Dict[str, Any], name: str) -> Dict[str, Any]:
+        """Apply a target-local link override without changing executable linkage."""
+        library = self.external_libraries[name]
+        overrides = {}
+        if target.get('validation_source_target'):
+            overrides.update(self.config.get('validation_external_library_overrides', {}))
+        overrides.update(target.get('external_library_overrides', {}))
+        override = overrides.get(name, {})
+        if not override:
+            return library
+        resolved = dict(library)
+        resolved.update(override)
+        return resolved
 
     def _executable_external_dependencies(self, target: Dict[str, Any]) -> List[str]:
         """Return the ordered static/dynamic external closure for an executable.
@@ -1263,15 +1283,14 @@ class PremakeGenerator:
         # Add build options
         base_compiler, _ = self._get_compiler_info()
         build_opts = self._get_build_options(base_compiler)
-        # Static archives do not export a runtime ABI, but compiling their
-        # objects hidden makes an accidental public symbol visible as soon as
-        # P2 links the module-validation DSOs.  Dynamic hosted modules retain
-        # their existing explicitly reviewed visibility path.
-        if link_type == 'static':
-            for option in ('-fvisibility=hidden', '-fvisibility-inlines-hidden'):
-                if option not in build_opts:
-                    build_opts.append(option)
-        if lib.get('pic') and '-fPIC' not in build_opts:
+        # Static archives also provide host symbols to dynamically linked
+        # runtime tests; hiding them prevents the executable from satisfying
+        # the runtime DSO's intentionally deferred host imports.
+        # Linux shared objects need PIC in their own objects; relying on the
+        # final link step cannot repair text relocations in a validation DSO.
+        if ((lib.get('pic') or (self.use_linux_config and lib.get('pic_linux')) or
+             (link_type == 'dynamic' and self.use_linux_config))
+                and '-fPIC' not in build_opts):
             build_opts.append('-fPIC')
 
         # Check if this project has mixed C/C++ files
@@ -1431,7 +1450,7 @@ class PremakeGenerator:
 
                 for dep in external_deps:
                     if dep in self.external_libraries:
-                        lib_info = self.external_libraries[dep]
+                        lib_info = self._external_library_for_target(lib, dep)
 
                         # Skip libraries with link type "none"
                         if lib_info.get('link') == 'none':
@@ -1556,8 +1575,9 @@ class PremakeGenerator:
                             self.premake_content.append(f'        "{framework}.framework",')
                     for dyn_lib in dynamic_libs:
                         self.premake_content.append(f'        "{dyn_lib}",')
-                    for dep in internal_deps:
-                        self.premake_content.append(f'        "{dep}",')
+                    if not (self.use_linux_config and link_type == 'executable'):
+                        for dep in internal_deps:
+                            self.premake_content.append(f'        "{dep}",')
                     if link_type == 'executable' and not self.use_macos_config:
                         for static_link_name in static_link_names:
                             self.premake_content.append(f'        "{static_link_name}",')
@@ -1582,6 +1602,45 @@ class PremakeGenerator:
                             self.premake_content.append(f'        "{framework}.framework",')
                     for dep in internal_deps:
                         self.premake_content.append(f'        "{dep}",')
+                    self.premake_content.extend([
+                        '    }',
+                        '    '
+                    ])
+
+            if self.use_linux_config and link_type == 'executable' and internal_deps:
+                # Internal archives are linked through the explicit GNU group
+                # below; retain project ordering so Premake still builds them
+                # before the executable.
+                self.premake_content.extend([
+                    '    dependson {',
+                ])
+                for dep in internal_deps:
+                    self.premake_content.append(f'        "{dep}",')
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
+
+            if self.use_linux_config and link_type == 'executable':
+                # GNU ld scans an archive once unless it is in a group. Lambda's
+                # active runtime and Radiant provide symbols to each other, so
+                # the complete static internal closure must be rescanned.
+                linux_group_archives = []
+                for dep in internal_deps:
+                    target_name = dep[:-4] if dep.endswith('-cpp') else dep
+                    target = configured_targets.get(target_name, {})
+                    if target.get('link', 'static') != 'dynamic':
+                        linux_group_archives.append(f'../lib/lib{dep}.a')
+                if len(linux_group_archives) > 1:
+                    # Keep the complete group in one linker option. Premake
+                    # drops archive arguments that duplicate project links
+                    # when they are supplied as separate linkoptions.
+                    group_option = '-Wl,--start-group,' + ','.join(
+                        linux_group_archives) + ',--end-group'
+                    self.premake_content.extend([
+                        '    linkoptions {',
+                        f'        "{group_option}",',
+                    ])
                     self.premake_content.extend([
                         '    }',
                         '    '
@@ -2345,9 +2404,16 @@ class PremakeGenerator:
             ])
 
         # Add defines if specified
-        if defines:
+        project_defines = list(defines)
+        if self.use_linux_config:
+            # test targets compile shared C helpers too; keep glibc feature
+            # declarations enabled just as they are for the main Linux target.
+            for define in ['LINUX', '_GNU_SOURCE', 'NATIVE_LINUX_BUILD']:
+                if define not in project_defines:
+                    project_defines.append(define)
+        if project_defines:
             self.premake_content.append('    defines {')
-            for define in defines:
+            for define in project_defines:
                 self.premake_content.append(f'        "{define}",')
             self.premake_content.extend([
                 '    }',
@@ -2366,6 +2432,14 @@ class PremakeGenerator:
                 '        "build/lib",',
             ])
         elif self.use_linux_config:
+            rpmalloc = self.external_libraries.get('rpmalloc')
+            rpmalloc_lib = rpmalloc.get('lib', '') if rpmalloc else ''
+            rpmalloc_dir = os.path.dirname(rpmalloc_lib) if rpmalloc_lib else ''
+            if rpmalloc_dir:
+                # test targets use the late-bound rpmalloc name; put the
+                # configured archive directory ahead of system copies so all
+                # Linux binaries use the same patched allocator ABI.
+                self.premake_content.append(f'        "{rpmalloc_dir}",')
             # Native Linux paths
             self.premake_content.extend([
                 '        "/usr/local/lib",',
@@ -2397,6 +2471,13 @@ class PremakeGenerator:
         # full module closure here; copying only the direct target libraries leaves
         # split runtime tests without providers owned by lambda-data/lambda-lib.
         libraries = list(libraries or [])
+        dependencies = list(dependencies or [])
+        if 'lambda-runtime-full' in dependencies:
+            # runtime-full is a host-resolved DSO; validator tests need the
+            # active runtime and Radiant host layers that satisfy its imports.
+            for host_dependency in ('lambda-rt', 'radiant'):
+                if host_dependency not in dependencies:
+                    dependencies.append(host_dependency)
         configured_targets = {
             target.get('name'): target for target in self.config.get('targets', [])
             if target.get('name')
@@ -2411,16 +2492,36 @@ class PremakeGenerator:
         internal_project_links = []
 
         def add_internal_project_link(project_name: str) -> None:
-            self.premake_content.append(f'        "{project_name}",')
-            if project_name not in internal_project_links:
-                internal_project_links.append(project_name)
+            if project_name in internal_project_links:
+                return
+            if not self.use_linux_config:
+                self.premake_content.append(f'        "{project_name}",')
+            internal_project_links.append(project_name)
+
+        def internal_project_artifact(project_name: str) -> str:
+            # split test dependencies inherit the source target's link mode;
+            # dynamic runtime targets produce .so, not a nonexistent .a.
+            target_name = project_name[:-4] if project_name.endswith('-cpp') else project_name
+            target = configured_targets.get(target_name, {})
+            if target.get('link') == 'dynamic':
+                suffix = '.so' if self.use_linux_config else '.dylib'
+            else:
+                suffix = '.a'
+            if self.use_linux_config and suffix == '.a':
+                return f'../lib/lib{project_name}{suffix}'
+            return f'../lib/lib{project_name}{suffix}'
 
         # Initialize test frameworks tracking
         test_frameworks_added = []
 
         # Process dependencies first
         if dependencies:
-            for dep in dependencies:
+            # Host-resolved DSOs must precede static providers so GNU ld sees
+            # their undefined imports before deciding which archive members to extract.
+            dependency_order = sorted(
+                dependencies,
+                key=lambda dep: 0 if configured_targets.get(dep, {}).get('link') == 'dynamic' else 1)
+            for dep in dependency_order:
                 if dep == 'criterion':
                     self.premake_content.append('        "criterion",')
                 elif dep in ['lambda-runtime-full', 'lambda-data', 'lambda-rt']:
@@ -2428,10 +2529,15 @@ class PremakeGenerator:
                     if ('mir' in test_name.lower() or 'lambda' in test_name.lower() or 'math' in test_name.lower() or 'markup' in test_name.lower()) and dep == 'lambda-runtime-full':
                         # All tests only need the -cpp versions (C++ project includes all C files)
                         add_internal_project_link('lambda-runtime-full-cpp')
+                        add_internal_project_link('lambda-rt-cpp')
                         add_internal_project_link('lambda-data-cpp')
                     else:
                         # Regular tests: only need -cpp version (C++ project includes all C files)
                         add_internal_project_link(f'{dep}-cpp')
+                        if dep == 'lambda-runtime-full':
+                            # The validation DSO defers active runtime symbols
+                            # to its host; link the concrete runtime provider.
+                            add_internal_project_link('lambda-rt-cpp')
                     if dep == 'lambda-data':
                         # lambda-data consumes the lower general-purpose archive;
                         # link its concrete mixed-language project for test executables.
@@ -2632,20 +2738,20 @@ class PremakeGenerator:
                         '    '
                     ])
 
-            if self.use_linux_config and (internal_project_links or external_static_libs):
+            if self.use_linux_config and internal_project_links:
                 # Keep a complete copy of the static closure inside one GNU ld
                 # group.  The executable's archives are mutually recursive,
                 # so a single left-to-right pass is insufficient even after
                 # external providers are placed after the runtime archives.
+                group_members = [
+                    internal_project_artifact(project_name)
+                    for project_name in internal_project_links
+                ]
+                group_option = '-Wl,--start-group,' + ','.join(
+                    group_members) + ',--end-group'
                 self.premake_content.append('    linkoptions {')
-                self.premake_content.append('        "-Wl,--start-group",')
-                for project_name in internal_project_links:
-                    self.premake_content.append(
-                        f'        "../lib/lib{project_name}.a",')
-                for lib_path in external_static_libs:
-                    self.premake_content.append(f'        "{lib_path}",')
+                self.premake_content.append(f'        "{group_option}",')
                 self.premake_content.extend([
-                    '        "-Wl,--end-group",',
                     '    }',
                     '    '
                 ])
@@ -2668,6 +2774,33 @@ class PremakeGenerator:
                     '    }',
                     '    '
                 ])
+
+        if self.use_linux_config and internal_project_links:
+            # Test archives use the explicit GNU group below; retain project
+            # dependencies so their archives are built before the test.
+            self.premake_content.extend([
+                '    dependson {',
+            ])
+            for project_name in internal_project_links:
+                self.premake_content.append(f'        "{project_name}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+
+        if self.use_linux_config and any(
+                configured_targets.get(
+                    project_name[:-4] if project_name.endswith('-cpp') else project_name,
+                    {}).get('link') == 'dynamic'
+                for project_name in internal_project_links):
+            # Test DSOs live beside build/lib; embed a self-relative search path
+            # so the runner does not depend on a shell-specific LD_LIBRARY_PATH.
+            self.premake_content.extend([
+                '    linkoptions {',
+                '        "-Wl,-rpath,\'$$ORIGIN/../build/lib\'",',
+                '    }',
+                '    '
+            ])
 
         # Add external library paths for linking when lambda-runtime-full or lambda-data are used
         has_input_full_deps = any(dep in ['lambda-runtime-full', 'lambda-data'] or dep.startswith('lambda-runtime-full-') or dep.startswith('lambda-data-') for dep in dependencies)

@@ -220,14 +220,11 @@ module.exports = grammar({
     $.range_type,
     $.primary_type,
     $.unary_type,         // tight unary types 
-    $.grouped_type,
-    $.concat_type,        // in regex, concatenation has higher precedence than alternation, so concat_type is tighter than binary_type
     $.binary_type,        // alternation (|, &, !)
     $.negation_type,      // A ! B has higher precedence than A (!B)
     $._type_expr,   
     $.return_type,   
     $.fn_type,            // fn binds loosest: fn int+ means fn (int+)
-    $._string_type_expr
   ],
   [$.attr_binary_expr, $._attr_expr]
 ],
@@ -488,6 +485,7 @@ module.exports = grammar({
       $.map,
       $.element,
       $.base_type,  // includes null
+      $.pattern_island, // inline string/symbol type pattern
       $.identifier,
       $.index_expr,
       $.path_expr,   // /, ., or .. paths with optional segment
@@ -1154,8 +1152,8 @@ module.exports = grammar({
       $.array_type,
       $.map_type,
       $.element_type,
-      // string/symbol pattern atoms (unified into type system)
-      $.pattern_char_class,     // \d, \w, \s, \a, \. (any character)
+      // Delimited string/symbol patterns are self-contained type values.
+      $.pattern_island,
     ),
 
     // Occurrence applied to primary type: T?, T+, T*, T[n]
@@ -1230,42 +1228,72 @@ module.exports = grammar({
       optional(field('error', $.return_type_pattern)),
     )),
 
-    //  String/Symbol Pattern Definitions ----------------------
+    //  String/Symbol Pattern Island ----------------------------
 
-    // Character classes for pattern matching
-    pattern_char_class: _ => token(choice(
-      '\\d',  // digit [0-9]
-      '\\w',  // word [a-zA-Z0-9_]
-      '\\s',  // whitespace
-      '\\a',  // alpha [a-zA-Z]
-      '\\.',  // any character
+    // The opening tag is one token so `\\symbol (` cannot be mistaken for a
+    // tagged island with whitespace between the tag and its delimiter.
+    pattern_island: $ => seq(
+      field('tag', choice(token('\\symbol('), token('\\('))),
+      field('body', $._pattern_expr),
+      ')'
+    ),
+
+    // Character classes are reserved only inside the pattern island. Keep the
+    // spelling as a flat choice so the class namespace can grow later.
+    pattern_char_class: _ => choice(
+      '...',   // any string
+      'd',     // digit [0-9]
+      'w',     // word [a-zA-Z0-9_]
+      's',     // whitespace
+      'a',     // alpha [a-zA-Z]
+      '.',     // any character
+    ),
+
+    _pattern_primary_type: $ => choice(
+      $.range_type,
+      $._non_null_literal,
+      $.identifier,
+      $.pattern_char_class,
+    ),
+
+    pattern_occurrence_type: $ => prec.right(seq(
+      field('operand', $._pattern_primary_type),
+      field('operator', $.occurrence),
+    )),
+
+    pattern_negation_type: $ => prec.right(seq(
+      '!', field('operand', $._pattern_primary_type),
     )),
 
     grouped_type: $ => prec.right(seq(
       optional('!'),
-      '(', $._string_type_expr, ')',
+      '(', $._pattern_expr, ')',
       optional(field('occurrence', $.occurrence))
     )),
 
-    // Type concatenation (for string/symbol patterns): whitespace-separated sequence of type terms.
-    // e.g. \d[3] "-" \d[3] "-" \d[4]
-    // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
-    // Terms are unary_type (primary_type possibly with occurrence).
-    // prec(-1) so that int[2+] is not parsed as concat_type(int, [2+])
-    concat_type: $ => prec.dynamic(-1, prec.left(seq(
-      choice($.unary_type, $.grouped_type),
-      repeat1(choice($.unary_type, $.grouped_type)),
-    ))),
+    // Whitespace concatenation exists only in the island. The old dynamic
+    // precedence guard belonged to the open type grammar and is no longer
+    // needed now that ordinary `int[2+]` has no concat alternative.
+    concat_type: $ => prec.left(1, seq(
+      choice($.pattern_unary_type, $.grouped_type),
+      repeat1(choice($.pattern_unary_type, $.grouped_type)),
+    )),
 
     string_binary_type: $ => choice(
-      ...type_pattern(choice($._string_type_expr)),
+      ...type_pattern(choice($._pattern_expr)),
     ),
 
-    _string_type_expr: $ => choice(
-      $.unary_type,            // covers primary_type and occurrence_type
-      $.concat_type,           // whitespace-separated type terms (patterns)
-      alias($.string_binary_type, $.binary_type),   
-      $.grouped_type        // alternation: T | U, T & U, T ! U
+    pattern_unary_type: $ => prec.right(choice(
+      $.pattern_occurrence_type,
+      $.pattern_negation_type,
+      $._pattern_primary_type,
+    )),
+
+    _pattern_expr: $ => choice(
+      $.pattern_unary_type,
+      $.concat_type,
+      alias($.string_binary_type, $.binary_type),
+      $.grouped_type
     ),
 
     // Keep these field names aligned with occurrence_type: the AST builder
@@ -1297,10 +1325,9 @@ module.exports = grammar({
     )),
 
     type_assign: $ => seq(field('name', choice($.identifier, $.symbol)), '=', field('as', 
-      choice($._type_expr, $._string_type_expr))),
+      $._type_expr)),
 
-    // type_stam handles type aliases and string/symbol patterns.
-    // The AST builder detects pattern definitions by analyzing the type expression content.
+    // type_stam handles type aliases and delimited string/symbol patterns.
     type_stam: $ => seq(
       optional(field('pub', 'pub')),
       'type',

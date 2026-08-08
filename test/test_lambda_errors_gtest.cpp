@@ -847,6 +847,21 @@ TEST_F(NegativeScriptTest, SyntaxErrorMalformedRange) {
     ExpectErrorWithoutCrash("test/lambda/negative/test_syntax_errors.ls");
 }
 
+TEST_F(NegativeScriptTest, OldBareStringPatternSyntaxIsRejected) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_old_bare.ls",
+        "Unexpected syntax near");
+}
+
+TEST_F(NegativeScriptTest, SymbolLiteralInsidePatternReportsDomainDiagnostic) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_symbol_literal.ls",
+        "pattern bodies are content-only; use \\symbol(...) for the symbol domain");
+}
+
+TEST_F(NegativeScriptTest, PatternClassBindingCollisionReportsReservedName) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_reserved_class.ls",
+        "pattern class 'd' is reserved inside pattern islands");
+}
+
 // Type error tests
 TEST_F(NegativeScriptTest, TypeErrorFuncParam) {
     ExpectErrorWithoutCrash("test/lambda/negative/func_param_negative.ls");

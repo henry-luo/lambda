@@ -16,7 +16,7 @@ split("hello world", " ")
 split("one::two::three", "::")
 
 // ===== Pattern-aware find =====
-type digits = \d+
+type digits = \(d+)
 find("abc123def", digits)
 find("no digits here", digits)
 
@@ -24,9 +24,9 @@ find("no digits here", digits)
 replace("abc123def456", digits, "NUM")
 
 // ===== Pattern-aware split =====
-type sep = \s+
+type sep = \(s+)
 split("hello   world   test", sep)
 
 // ===== Multiple matches =====
-type word_pat = \w+
+type word_pat = \(w+)
 find("hello world", word_pat)

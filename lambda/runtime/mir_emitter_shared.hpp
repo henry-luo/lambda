@@ -379,6 +379,7 @@ struct MirFrameState {
     bool active;
     bool item_return;
     bool number_active;
+    bool number_frame_required;
     MirScalarReturnMode scalar_return_mode;
     MIR_type_t return_type;
     MIR_reg_t runtime;
@@ -847,10 +848,27 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
 static inline void em_store_frame_top(MirEmitter* em, MIR_reg_t runtime,
                                       size_t context_offset, MIR_reg_t value) {
     if (context_offset == offsetof(Context, side_number_top)) {
+        // Record the actual restore use before prologue finalization; JS
+        // lowering emits its epilogue before scalar-home coloring, so a
+        // counter inferred only from the finalized slots can miss this
+        // watermark consumer (D5.2, D5.3).
+        em->frame.number_frame_required = true;
+#ifndef NDEBUG
+        // debug keeps the checked restore because it validates that every
+        // activation home was adopted before the number extent is reclaimed
+        // (D5.2, D5.3).
         MIR_type_t types[1] = {MIR_T_P};
         MIR_op_t args[1] = {MIR_new_reg_op(em->ctx, value)};
         (void)em_call_with_args(em, "lambda_restore_number_frame_top",
             MIR_T_I64, 1, types, args, true);
+#else
+        // release only needs the already-proven watermark store; routing this
+        // balanced epilogue through C paid one call on every scalar edge.
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+            MIR_new_mem_op(em->ctx, MIR_T_I64, (MIR_disp_t)context_offset,
+                runtime, 0, 1),
+            MIR_new_reg_op(em->ctx, value)));
+#endif
         return;
     }
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
@@ -937,11 +955,98 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
                                                    MIR_reg_t item,
                                                    MIR_reg_t target_home) {
     if (mode == MIR_SCALAR_RETURN_NONE) return item;
+#ifndef NDEBUG
+    // debug keeps the helper call so its no-GC assertion and scalar-home
+    // predicate remain observable while reclaiming an activation extent
+    // (D5.2, D5.3).
     MIR_type_t types[2] = {MIR_T_I64, MIR_T_P};
     MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item),
         MIR_new_reg_op(em->ctx, target_home)};
     return em_call_with_args(em,
         "lambda_item_adopt_scalar_home", MIR_T_I64, 2, types, args, true);
+#else
+    // release only calls the adopter for the three scalar-home encodings;
+    // packed int/float Items already own their payload and can pass through
+    // without a native call on every scalar return (D5.2, D5.3).
+    MIR_reg_t item_type = em_new_reg(em, "adopt_type", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH,
+        MIR_new_reg_op(em->ctx, item_type), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, 56)));
+    MIR_reg_t is_int64 = em_new_reg(em, "adopt_i64", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+        MIR_new_reg_op(em->ctx, is_int64), MIR_new_reg_op(em->ctx, item_type),
+        MIR_new_int_op(em->ctx, LMD_TYPE_INT64)));
+    MIR_reg_t is_uint64 = em_new_reg(em, "adopt_u64", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+        MIR_new_reg_op(em->ctx, is_uint64), MIR_new_reg_op(em->ctx, item_type),
+        MIR_new_int_op(em->ctx, LMD_TYPE_UINT64)));
+    MIR_reg_t scalar_int = em_new_reg(em, "adopt_int", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
+        MIR_new_reg_op(em->ctx, scalar_int), MIR_new_reg_op(em->ctx, is_int64),
+        MIR_new_reg_op(em->ctx, is_uint64)));
+
+    MIR_label_t l_call = em_new_label(em);
+    MIR_label_t l_passthrough = em_new_label(em);
+    MIR_label_t l_done = em_new_label(em);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, l_call), MIR_new_reg_op(em->ctx, scalar_int)));
+
+    MIR_reg_t is_float = em_new_reg(em, "adopt_float", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+        MIR_new_reg_op(em->ctx, is_float), MIR_new_reg_op(em->ctx, item_type),
+        MIR_new_int_op(em->ctx, LMD_TYPE_FLOAT)));
+    MIR_reg_t is_float64 = em_new_reg(em, "adopt_float64", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+        MIR_new_reg_op(em->ctx, is_float64), MIR_new_reg_op(em->ctx, item_type),
+        MIR_new_int_op(em->ctx, LMD_TYPE_FLOAT64)));
+    MIR_reg_t scalar_float = em_new_reg(em, "adopt_float_kind", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
+        MIR_new_reg_op(em->ctx, scalar_float), MIR_new_reg_op(em->ctx, is_float),
+        MIR_new_reg_op(em->ctx, is_float64)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
+        MIR_new_label_op(em->ctx, l_passthrough),
+        MIR_new_reg_op(em->ctx, scalar_float)));
+    MIR_reg_t float_bits = em_new_reg(em, "adopt_float_bits", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, float_bits), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, (int64_t)ITEM_DBL_MASK)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, l_passthrough),
+        MIR_new_reg_op(em->ctx, float_bits)));
+    MIR_reg_t is_pos_zero = em_new_reg(em, "adopt_pos_zero", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+        MIR_new_reg_op(em->ctx, is_pos_zero), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, (int64_t)ITEM_FLOAT_P0)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, l_passthrough),
+        MIR_new_reg_op(em->ctx, is_pos_zero)));
+    MIR_reg_t is_neg_zero = em_new_reg(em, "adopt_neg_zero", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+        MIR_new_reg_op(em->ctx, is_neg_zero), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, (int64_t)ITEM_FLOAT_N0)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, l_passthrough),
+        MIR_new_reg_op(em->ctx, is_neg_zero)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+        MIR_new_label_op(em->ctx, l_call)));
+
+    MIR_reg_t result = em_new_reg(em, "adopt_result", MIR_T_I64);
+    em_emit_label(em, l_passthrough);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, item)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+        MIR_new_label_op(em->ctx, l_done)));
+    em_emit_label(em, l_call);
+    MIR_type_t types[2] = {MIR_T_I64, MIR_T_P};
+    MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item),
+        MIR_new_reg_op(em->ctx, target_home)};
+    MIR_reg_t adopted = em_call_with_args(em,
+        "lambda_item_adopt_scalar_home", MIR_T_I64, 2, types, args, true);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, adopted)));
+    em_emit_label(em, l_done);
+    return result;
+#endif
 }
 
 // Adopt a temporary boxed scalar before restoring its source number extent.
@@ -1297,7 +1402,18 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
         }
     }
 
-    if (frame->number_base) {
+    // A number base register is created before body lowering so scalar-home
+    // fixups can refer to it. Do not materialize it only when finalization
+    // proved that the body has neither a scalar home nor fixed scratch
+    // storage; the pure native lane then has no number extent to enter or
+    // restore. Scalar homes are not represented by the plan's fixed-scratch
+    // count, but still require the caller's number watermark (D5.2, D5.3).
+    // Scalar homes are colored after emission; the raw request count can be
+    // consumed by the liveness pass, so use the finalized colored count when
+    // deciding whether the saved number watermark must be materialized.
+    bool needs_number_base = frame->number_frame_required ||
+        frame->fixed_number_slots > 0 || frame->scalar_home_fixup_count > 0;
+    if (frame->number_base && needs_number_base) {
         MIR_insert_insn_before(em->ctx, em->func_item, frame->anchor,
             MIR_new_insn(em->ctx, MIR_MOV,
                 MIR_new_reg_op(em->ctx, frame->number_base),

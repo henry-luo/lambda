@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "description": "Tune15 B2.2 passes a proven packed typed array through the direct native call ABI with an explicit witness mask.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "call\t_tune15_array_consumer_"
+      ],
+      "forbid": [
+        "call\t_tune15_array_consumer_#_b"
+      ]
+    },
+    {
+      "in_func": "_tune15_array_consumer_#",
+      "expect": [
+        "and\t{{r}}, _array_witness, 1",
+        "call\tensure_typed_array_p, ensure_typed_array"
+      ]
+    }
+  ]
+}

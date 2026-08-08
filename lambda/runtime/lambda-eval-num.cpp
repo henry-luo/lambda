@@ -909,7 +909,9 @@ static Item vector_get(Item item, int64_t index) {
         case LMD_TYPE_ARRAY:
             return item.array->items[index];
         case LMD_TYPE_RANGE:
-            return { .item = i2it(item.range->start + index) };
+            return item.range->is_char
+                ? fn_chr((Item){.item = i2it(item.range->start + index)})
+                : (Item){ .item = i2it(item.range->start + index) };
         default:
             return ItemError;
     }
@@ -1417,7 +1419,9 @@ Item fn_neg(Item item) {
             } else if (t == LMD_TYPE_ARRAY) {
                 elem = item.array->items[i];
             } else {
-                elem = (Item){ .item = i2it(item.range->start + i) };
+                elem = item.range->is_char
+                    ? fn_chr((Item){.item = i2it(item.range->start + i)})
+                    : (Item){ .item = i2it(item.range->start + i) };
             }
             TypeId et = get_type_id(elem);
             if (et == LMD_TYPE_INT) {

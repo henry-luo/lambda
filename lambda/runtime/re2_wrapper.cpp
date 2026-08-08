@@ -131,6 +131,30 @@ static void compile_char_class(StrBuf* regex, PatternCharClass char_class) {
     case PATTERN_ANY:
         strbuf_append_str(regex, ".");
         break;
+    case PATTERN_ANY_STRING:
+        strbuf_append_str(regex, ".*");
+        break;
+    }
+}
+
+static bool compile_negated_char_class(StrBuf* regex, AstNode* node) {
+    if (!node || node->node_type != AST_NODE_PATTERN_CHAR_CLASS) return false;
+    AstPatternCharClassNode* cc = (AstPatternCharClassNode*)node;
+    switch (cc->char_class) {
+    case PATTERN_DIGIT:
+        strbuf_append_str(regex, "[^0-9]");
+        return true;
+    case PATTERN_WORD:
+        strbuf_append_str(regex, "[^a-zA-Z0-9_]");
+        return true;
+    case PATTERN_SPACE:
+        strbuf_append_str(regex, "[^\\s]");
+        return true;
+    case PATTERN_ALPHA:
+        strbuf_append_str(regex, "[^a-zA-Z]");
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -267,12 +291,10 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
                 convert_occurrence_to_regex(regex, &unary->op_str);
             }
         } else if (unary->op == OPERATOR_NOT) {
-            // !a -> negative lookahead (?!a)
-            // Note: This matches position, not characters. For proper negation of char class
-            // we'd need [^...] but that's context-dependent
-            strbuf_append_str(regex, "(?!");
-            compile_pattern_to_regex(regex, unary->operand);
-            strbuf_append_str(regex, ").");
+            // RE2 has no look-around; negate a character class directly so `!d` retains one-codepoint complement semantics.
+            if (!compile_negated_char_class(regex, unary->operand)) {
+                log_error("compile_pattern_to_regex: negation requires a character class");
+            }
         } else {
             log_error("compile_pattern_to_regex: unknown unary operator %d", unary->op);
         }
@@ -334,11 +356,17 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
     }
 
     case AST_NODE_IDENT: {
-        // Pattern reference - this should have been resolved during type checking
-        // For now, log an error
         AstIdentNode* ident = (AstIdentNode*)node;
-        log_error("compile_pattern_to_regex: unresolved pattern reference '%.*s'",
-            (int)ident->name->len, ident->name->chars);
+        if (ident->entry && ident->entry->node &&
+                (ident->entry->node->node_type == AST_NODE_STRING_PATTERN ||
+                 ident->entry->node->node_type == AST_NODE_SYMBOL_PATTERN)) {
+            AstPatternDefNode* definition = (AstPatternDefNode*)ident->entry->node;
+            compile_pattern_to_regex(regex, definition->as);
+        } else {
+            log_error("compile_pattern_to_regex: unresolved pattern reference '%.*s'",
+                ident->name ? (int)ident->name->len : 0,
+                ident->name ? ident->name->chars : "");
+        }
         break;
     }
 
@@ -346,6 +374,149 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
         log_error("compile_pattern_to_regex: unknown node type %d", node->node_type);
         break;
     }
+}
+
+static void render_pattern_literal(StrBuf* source, String* value) {
+    strbuf_append_char(source, '"');
+    if (value) {
+        for (size_t i = 0; i < value->len; i++) {
+            unsigned char c = (unsigned char)value->chars[i];
+            switch (c) {
+            case '\\': strbuf_append_str(source, "\\\\"); break;
+            case '"': strbuf_append_str(source, "\\\""); break;
+            case '\n': strbuf_append_str(source, "\\n"); break;
+            case '\r': strbuf_append_str(source, "\\r"); break;
+            case '\t': strbuf_append_str(source, "\\t"); break;
+            default: strbuf_append_char(source, (char)c); break;
+            }
+        }
+    }
+    strbuf_append_char(source, '"');
+}
+
+static void render_pattern_surface(StrBuf* source, AstNode* node) {
+    if (!node) return;
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY: {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (primary->type && primary->type->type_id == LMD_TYPE_STRING) {
+            render_pattern_literal(source, ((TypeString*)primary->type)->string);
+        } else {
+            render_pattern_surface(source, primary->expr);
+        }
+        break;
+    }
+    case AST_NODE_PATTERN_CHAR_CLASS: {
+        AstPatternCharClassNode* cc = (AstPatternCharClassNode*)node;
+        switch (cc->char_class) {
+        case PATTERN_DIGIT: strbuf_append_char(source, 'd'); break;
+        case PATTERN_WORD: strbuf_append_char(source, 'w'); break;
+        case PATTERN_SPACE: strbuf_append_char(source, 's'); break;
+        case PATTERN_ALPHA: strbuf_append_char(source, 'a'); break;
+        case PATTERN_ANY: strbuf_append_char(source, '.'); break;
+        case PATTERN_ANY_STRING: strbuf_append_str(source, "..."); break;
+        }
+        break;
+    }
+    case AST_NODE_PATTERN_RANGE: {
+        AstPatternRangeNode* range = (AstPatternRangeNode*)node;
+        render_pattern_surface(source, range->start);
+        strbuf_append_str(source, " to ");
+        render_pattern_surface(source, range->end);
+        break;
+    }
+    case AST_NODE_BINARY:
+    case AST_NODE_BINARY_TYPE: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        strbuf_append_char(source, '(');
+        render_pattern_surface(source, binary->left);
+        if (binary->op == OPERATOR_UNION) strbuf_append_str(source, " | ");
+        else if (binary->op == OPERATOR_INTERSECT) strbuf_append_str(source, " & ");
+        else if (binary->op == OPERATOR_EXCLUDE) strbuf_append_str(source, " ! ");
+        else if (binary->op == OPERATOR_TO) strbuf_append_str(source, " to ");
+        render_pattern_surface(source, binary->right);
+        strbuf_append_char(source, ')');
+        break;
+    }
+    case AST_NODE_UNARY:
+    case AST_NODE_UNARY_TYPE: {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op == OPERATOR_NOT) {
+            strbuf_append_char(source, '!');
+            strbuf_append_char(source, '(');
+            render_pattern_surface(source, unary->operand);
+            strbuf_append_char(source, ')');
+        } else {
+            strbuf_append_char(source, '(');
+            render_pattern_surface(source, unary->operand);
+            strbuf_append_char(source, ')');
+            if (unary->op_str.str && unary->op_str.length > 0) {
+                strbuf_append_str_n(source, unary->op_str.str, unary->op_str.length);
+            }
+        }
+        break;
+    }
+    case AST_NODE_PATTERN_SEQ: {
+        AstPatternSeqNode* sequence = (AstPatternSeqNode*)node;
+        AstNode* child = sequence->first;
+        bool first = true;
+        while (child) {
+            if (!first) strbuf_append_char(source, ' ');
+            render_pattern_surface(source, child);
+            first = false;
+            child = child->next;
+        }
+        break;
+    }
+    case AST_NODE_LIST_TYPE: {
+        AstListNode* list = (AstListNode*)node;
+        strbuf_append_char(source, '(');
+        AstNode* item = list->item;
+        bool first = true;
+        while (item) {
+            if (!first) strbuf_append_str(source, " | ");
+            render_pattern_surface(source, item);
+            first = false;
+            item = item->next;
+        }
+        strbuf_append_char(source, ')');
+        break;
+    }
+    case AST_NODE_ARRAY_TYPE: {
+        AstArrayNode* array = (AstArrayNode*)node;
+        strbuf_append_char(source, '[');
+        render_pattern_surface(source, array->item);
+        strbuf_append_char(source, ']');
+        break;
+    }
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        if (ident->name) strbuf_append_str_n(source, ident->name->chars, ident->name->len);
+        break;
+    }
+    case AST_NODE_PATTERN_ISLAND: {
+        AstPatternIslandNode* island = (AstPatternIslandNode*)node;
+        strbuf_append_str(source, island->is_symbol ? "\\symbol(" : "\\(");
+        render_pattern_surface(source, island->pattern);
+        strbuf_append_char(source, ')');
+        break;
+    }
+    default:
+        log_error("render_pattern_surface: unsupported AST node type %d", node->node_type);
+        break;
+    }
+}
+
+static String* pattern_pool_string(Pool* pool, const char* chars, size_t length) {
+    String* value = (String*)pool_calloc(pool, sizeof(String) + length + 1);
+    value->len = (uint32_t)length;
+    value->is_ascii = 1;
+    for (size_t i = 0; i < length; i++) {
+        value->chars[i] = chars[i];
+        if ((unsigned char)chars[i] >= 128) value->is_ascii = 0;
+    }
+    value->chars[length] = '\0';
+    return value;
 }
 
 // Compile Lambda pattern AST to RE2 regex
@@ -361,6 +532,11 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
     compile_pattern_to_regex(regex, pattern_ast);
     strbuf_append_str(regex, "$");  // anchor end
 
+    StrBuf* surface = strbuf_new_cap(256);
+    strbuf_append_str(surface, is_symbol ? "\\symbol(" : "\\(");
+    render_pattern_surface(surface, pattern_ast);
+    strbuf_append_char(surface, ')');
+
     log_debug("Compiled pattern regex: %s", regex->str);
 
     re2::RE2::Options options = lam::re2_glue_default_options();
@@ -371,6 +547,7 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
     if (!re2) {
         if (error_msg) *error_msg = error_buffer;
         strbuf_free(regex);
+        strbuf_free(surface);
         return nullptr;
     }
 
@@ -383,12 +560,116 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
     pattern->re2_unanchored = nullptr;
     pattern->pattern_index = -1;  // Will be set when registered
 
-    // Store source pattern for debugging
-    pattern->source = (String*)pool_calloc(pool, sizeof(String) + regex->length + 1);
-    pattern->source->len = regex->length;
-    memcpy(pattern->source->chars, regex->str, regex->length + 1);
+    // Keep the diagnostic surface separate from the anchored regex consumed by
+    // partial matching; otherwise source rendering changes break find/replace.
+    pattern->source = pattern_pool_string(pool, surface->str, surface->length);
+    pattern->regex_source = pattern_pool_string(pool, regex->str, regex->length);
 
     strbuf_free(regex);
+    strbuf_free(surface);
+    return pattern;
+}
+
+static bool append_literal_type_regex(StrBuf* regex, Type* type) {
+    if (!type) return false;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
+        type = ((TypeType*)type)->type;
+    }
+    if (!type) return false;
+    if (type->type_id == LMD_TYPE_STRING && type->is_literal) {
+        String* literal = ((TypeString*)type)->string;
+        if (!literal) return false;
+        escape_regex_literal(regex, literal);
+        return true;
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
+        TypeBinary* binary = (TypeBinary*)type;
+        if (binary->op != OPERATOR_UNION) return false;
+        strbuf_append_str(regex, "(?:");
+        if (!append_literal_type_regex(regex, binary->left)) return false;
+        strbuf_append_char(regex, '|');
+        if (!append_literal_type_regex(regex, binary->right)) return false;
+        strbuf_append_char(regex, ')');
+        return true;
+    }
+    return false;
+}
+
+static bool append_literal_type_surface(StrBuf* surface, Type* type) {
+    if (!type) return false;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
+        type = ((TypeType*)type)->type;
+    }
+    if (!type) return false;
+    if (type->type_id == LMD_TYPE_STRING && type->is_literal) {
+        String* literal = ((TypeString*)type)->string;
+        if (!literal) return false;
+        render_pattern_literal(surface, literal);
+        return true;
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
+        TypeBinary* binary = (TypeBinary*)type;
+        if (binary->op != OPERATOR_UNION) return false;
+        strbuf_append_char(surface, '(');
+        if (!append_literal_type_surface(surface, binary->left)) return false;
+        strbuf_append_str(surface, " | ");
+        if (!append_literal_type_surface(surface, binary->right)) return false;
+        strbuf_append_char(surface, ')');
+        return true;
+    }
+    return false;
+}
+
+TypePattern* compile_literal_type_pattern(Pool* pool, Type* type, bool is_symbol,
+                                          const char** error_msg) {
+    if (!pool || !type) {
+        if (error_msg) *error_msg = "null literal type";
+        return nullptr;
+    }
+
+    StrBuf* regex = strbuf_new_cap(128);
+    strbuf_append_char(regex, '^');
+    if (!append_literal_type_regex(regex, type)) {
+        if (error_msg) *error_msg = "type is not a literal string union";
+        strbuf_free(regex);
+        return nullptr;
+    }
+    strbuf_append_char(regex, '$');
+
+    StrBuf* surface = strbuf_new_cap(128);
+    strbuf_append_str(surface, is_symbol ? "\\symbol(" : "\\(");
+    if (!append_literal_type_surface(surface, type)) {
+        if (error_msg) *error_msg = "type is not a literal string union";
+        strbuf_free(regex);
+        strbuf_free(surface);
+        return nullptr;
+    }
+    strbuf_append_char(surface, ')');
+
+    re2::RE2::Options options = lam::re2_glue_default_options();
+    static char error_buffer[256];
+    re2::RE2* re2 = lam::re2_glue_compile(
+        regex->str, regex->length, options, "compile_literal_type_pattern",
+        error_msg ? error_buffer : nullptr, sizeof(error_buffer));
+    if (!re2) {
+        if (error_msg) *error_msg = error_buffer;
+        strbuf_free(regex);
+        strbuf_free(surface);
+        return nullptr;
+    }
+
+    TypePattern* pattern = (TypePattern*)pool_calloc(pool, sizeof(TypePattern));
+    pattern->type_id = LMD_TYPE_TYPE;
+    pattern->kind = TYPE_KIND_PATTERN;
+    pattern->is_symbol = is_symbol;
+    pattern->re2 = re2;
+    pattern->re2_unanchored = nullptr;
+    pattern->pattern_index = -1;
+    pattern->source = pattern_pool_string(pool, surface->str, surface->length);
+    pattern->regex_source = pattern_pool_string(pool, regex->str, regex->length);
+
+    strbuf_free(regex);
+    strbuf_free(surface);
     return pattern;
 }
 
@@ -445,14 +726,19 @@ void re2_release(re2::RE2* re) {
     lam::re2_glue_release(re);
 }
 
+static String* pattern_regex_source(TypePattern* pattern) {
+    return pattern ? (pattern->regex_source ? pattern->regex_source : pattern->source) : nullptr;
+}
+
 #ifndef SIMPLE_SCHEMA_PARSER
 static re2::RE2* pattern_get_unanchored_options(TypePattern* pattern, bool ignore_case, bool* must_release) {
     *must_release = false;
     if (!ignore_case) return pattern_get_unanchored(pattern);
-    if (!pattern || !pattern->source) return nullptr;
+    String* regex_source = pattern_regex_source(pattern);
+    if (!regex_source) return nullptr;
 
-    const char* src = pattern->source->chars;
-    size_t len = pattern->source->len;
+    const char* src = regex_source->chars;
+    size_t len = regex_source->len;
     if (len < 2 || src[0] != '^' || src[len - 1] != '$') {
         log_error("pattern_get_unanchored_options: unexpected source format: %s", src);
         return nullptr;
@@ -490,8 +776,10 @@ re2::RE2* pattern_get_unanchored(TypePattern* pattern) {
     if (pattern->re2_unanchored) return pattern->re2_unanchored;
 
     // source is "^<regex>$", strip leading ^ and trailing $
-    const char* src = pattern->source->chars;
-    size_t len = pattern->source->len;
+    String* regex_source = pattern_regex_source(pattern);
+    if (!regex_source) return nullptr;
+    const char* src = regex_source->chars;
+    size_t len = regex_source->len;
     if (len < 2 || src[0] != '^' || src[len - 1] != '$') {
         log_error("pattern_get_unanchored: unexpected source format: %s", src);
         return nullptr;

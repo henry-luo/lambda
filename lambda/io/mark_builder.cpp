@@ -337,6 +337,7 @@ Item MarkBuilder::createRange(int64_t start, int64_t end) {
     range->start = start;
     range->end = end;
     range->length = (end >= start) ? (end - start + 1) : 0;
+    range->is_char = false;
     return {.range = range};
 }
 
@@ -915,7 +916,9 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         return decimal_deep_copy(item, arena_, false);
     } else if constexpr (Tag == LMD_TYPE_RANGE) {
         Range* src_range = typed.ptr();
-        return createRange(src_range->start, src_range->end);
+        Item copied = createRange(src_range->start, src_range->end);
+        if (get_type_id(copied) == LMD_TYPE_RANGE) copied.range->is_char = src_range->is_char;
+        return copied;
     } else if constexpr (Tag == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = typed.ptr();
         size_t elem_size = sizeof(int64_t);  // 8 bytes for all elem types
