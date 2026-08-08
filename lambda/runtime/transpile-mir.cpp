@@ -13856,9 +13856,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 MIR_reg_t a1 = emit_unbox_container(mt, transpile_expr(mt, arg));
                 return emit_call_1(mt, "fn_len_a", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
-            if (is_text_type_id(arg_tid)) {
-                // Imported and boxed-body calls can retain a tagged text Item
-                // despite their string AST type; fn_len_s only accepts String*.
+            if (arg_tid == LMD_TYPE_STRING) {
+                // Symbols have a different header (the namespace pointer sits
+                // between len and chars); passing one to fn_len_s reads the
+                // String flags/char offsets and truncates its length.
                 MIR_reg_t a1 = emit_text_pointer_lane(mt, transpile_expr(mt, arg), arg_tid);
                 return emit_call_1(mt, "fn_len_s", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }

@@ -8,11 +8,13 @@ extern "C" {
 #include <stdlib.h>
 
 /**
- * Arena-based Memory Pool - rpmalloc wrapper with heap support
+ * Grouped memory ownership facade backed by the hardened memtrack substrate.
+ * The legacy Pool API remains for bulk-owner call sites while the implementation
+ * uses explicit memtrack-owned blocks.
  */
 
 /**
- * Opaque pool structure representing an rpmalloc heap
+ * Opaque grouped owner representing a set of memtrack allocations.
  */
 typedef struct Pool Pool;
 
@@ -21,14 +23,6 @@ typedef struct Pool Pool;
  * @return Pointer to new pool, or NULL on failure
  */
 Pool* pool_create(void);
-
-/**
- * Create an mmap-backed memory pool (bump allocator, no rpmalloc).
- * Allocations use mmap'd chunks. Individual frees are no-ops.
- * Use pool_reset to release all data while keeping the pool alive.
- * @return Pointer to new pool, or NULL on failure
- */
-Pool* pool_create_mmap(void);
 
 /**
  * Destroy a memory pool and free all associated memory
@@ -47,8 +41,7 @@ void pool_drain(Pool* pool);
 
 /**
  * Reset a memory pool: free all allocated data but keep the pool alive.
- * The underlying rpmalloc heap remains acquired so future allocations
- * reuse it without acquire/release cycling.
+ * The owner remains valid so future allocations can reuse the same group.
  * @param pool Pool to reset
  */
 void pool_reset(Pool* pool);
@@ -94,8 +87,7 @@ void* pool_realloc(Pool* pool, void* ptr, size_t size);
 char* pool_strdup(Pool* pool, const char* str);
 
 /**
- * Clean up mempool system (optional - called automatically at process exit)
- * This can be called to explicitly shut down rpmalloc if needed
+ * Clean up the compatibility pool layer (currently a no-op).
  */
 void mempool_cleanup(void);
 
@@ -106,7 +98,7 @@ unsigned int pool_get_id(Pool* pool);
 
 /**
  * Get diagnostic stats: cumulative bytes/count ever allocated from this pool.
- * Note: rpmalloc-backed pools do not subtract frees, so this is an upper bound.
+ * The counters include both live and cumulative allocation totals.
  */
 void pool_get_stats(Pool* pool, size_t* alloc_bytes, size_t* alloc_count);
 
@@ -117,7 +109,6 @@ typedef struct PoolStats {
     size_t cumulative_bytes;
     size_t allocation_count;
     size_t free_count;
-    int is_mmap;
 } PoolStats;
 
 /** Return the allocator-owned size of one live allocation. */
@@ -133,6 +124,9 @@ void pool_get_detailed_stats(Pool* pool, PoolStats* out);
 void* pool_get_mem_node(Pool* pool);
 void  pool_set_mem_node(Pool* pool, void* node);
 
+/** Set the memtrack category used by subsequent allocations in this pool. */
+void  pool_set_mem_category(Pool* pool, int category);
+
 /**
  * Install a hook called by pool_destroy/pool_drain to release a registered
  * pool's mem_node. Set by the allocator factory; keeps mempool decoupled from
@@ -142,15 +136,13 @@ void pool_set_node_release_hook(void (*fn)(void* node));
 
 /**
  * Get memory-context stats for this pool.
- * @param reserved    bytes reserved from the OS (mmap: sum of chunks;
- *                    rpmalloc: high-water alloc_bytes upper bound)
+ * @param reserved    bytes reserved by the owner (sum of live memtrack blocks)
  * @param in_use      best-effort live bytes (alloc_bytes)
  * @param alloc_count cumulative allocation calls
- * @param is_mmap     set to 1 if mmap-backed, 0 if rpmalloc-backed
  * Any out-param may be NULL.
  */
 void pool_get_mem_stats(Pool* pool, size_t* reserved, size_t* in_use,
-                        size_t* alloc_count, int* is_mmap);
+                        size_t* alloc_count);
 
 #ifdef __cplusplus
 }

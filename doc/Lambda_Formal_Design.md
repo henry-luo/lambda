@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.6.0 (2026-08-07)
+**Spec version:** 1.7.0 (2026-08-08)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -460,16 +460,24 @@ that carries them.
 
 ### D4.2 Memory Context
 
-- **D4.2.1** `MemContext` is a **factory that owns every allocator** — no
+- **D4.2.1v2** `MemContext` is a **factory that owns every allocator** — no
   allocator exists off-graph; parent/backing edges wire at creation;
-  cascade teardown in reverse-dependency order. It governs allocator
-  *lifecycle* only — `pool_alloc`/`arena_alloc` stay lock-free and
-  unchanged. [Memory_Context §2–§7]
-- **D4.2.2** Per-document sub-contexts key allocators to a document URL,
+  cascade teardown is in reverse-dependency order. System allocations use
+  the hardened `memtrack` substrate: direct allocations use its checked
+  `mem_alloc`/`mem_calloc`/`mem_realloc`/`mem_free` contract and residual
+  bulk ownership uses the existing `memtrack_pool_*` integration. The
+  platform VM layer is an opaque region provider below those owners. Hot
+  allocation paths do not take the `MemContext` registry lock; ownership
+  registration and teardown remain centralized. [Memory_Context §2–§7]
+- **D4.2.2v2** Per-document sub-contexts key allocators to a document URL,
   with the **attribution/reclamation split**: Radiant documents are
   reclaimable per-document; Lambda `input()` data is GC-coupled and gets
-  attribution only. Stage 2 (central page allocation, OOM escalation
-  ladder) is designed, not started.* [Memory_Context]
+  attribution only. `MemContext` is the single page-allocation failure and
+  memory-pressure coordinator. Its VM region layer reserves, commits,
+  decommits, and releases page-aligned extents; allocation failure enters
+  the context's configured retry/reclamation path before returning `NULL`.
+  Legacy `memtrack` pressure callbacks are compatibility adapters and must
+  not form a second escalation ladder. [Memory_Context §15]
 
 ### D4.3 Garbage collection
 
@@ -478,10 +486,12 @@ that carries them.
   compacts, with exactly one pointer fixup per surviving object — *fixup
   is O(survivors), not O(references)*. Copying GC and handle tables
   rejected. [GC2 §4]
-- **D4.3.2** Object zone = size-class segregated free lists; data zone =
-  bump allocator fully reset per GC; strings keep inline `chars[]` in the
-  object zone. Adaptive growth threshold (×4 under 40% freed, ×2 to 74%,
-  hold at ≥75%, capped). [GC2 §5, §12]
+- **D4.3.2v2** Object zone = size-class segregated free lists backed by
+  VM-owned extents; data zone = bump allocator fully reset per GC; strings
+  keep inline `chars[]` in the object zone. Multiple slabs may share an
+  extent, large objects use dedicated regions, and only the owning GC heap
+  releases its regions. Adaptive growth threshold (×4 under 40% freed, ×2
+  to 74%, hold at ≥75%, capped). [GC2 §5, §12]
 - **D4.3.3** Precise closure-env tracing via `closure_field_count`; VMap
   traces and finalizes through vtable callbacks that are allocation-free
   and never re-enter script. [GC2 §8, JA6]
@@ -506,11 +516,13 @@ that carries them.
 
 ### D4.5 The Radiant seam
 
-- **D4.5.1** One substrate (mempool/arena + Memory Context), **two
-  policies**: Lambda traces; Radiant uses arenas-as-regions + type-stable
-  pools + generation handles + RAII, never GC'd — *the document arena is
-  the cycle collector*. Seam contracts: **pin, gen-check, copy-as-value**.
-  [Memory_Model §7]
+- **D4.5.1v2** One system-allocation substrate (`memtrack` + VM regions,
+  owned through `MemContext`), **two policies**: Lambda traces; Radiant uses
+  arenas-as-regions + type-stable pools + generation handles + RAII, never
+  GC'd — *the document arena is the cycle collector*. Ordinary Arena owns
+  its blocks directly and exposes region lifetime; arbitrary individual free
+  is reserved for explicitly audited compatibility users. Seam contracts:
+  **pin, gen-check, copy-as-value**. [Memory_Model §7]
 
 ### D4.6 Name identity
 
@@ -1002,7 +1014,10 @@ Status of `*`-marked rulings as of 2026-08-06.
 | D3.1.1 | `Type*` kind-discrimination is code-authoritative only — no design record owns the first-class type-value representation (DO22); the type-graph de-pointering census is deferred to its own doc (CP §6 census C). |
 | D3.2.2 | Constrained-type enforcement is base-only; the `is`/`fn_is`/validator three-way divergence is open (TE-6 P5). |
 | D3.4.3 | Shape pool shipped for `Input` (contrary to its doc's stale "planning" header); the runtime/EvalContext shape pool (Shape_Pool Phase 5) is not implemented — runtime maps rebuild per transition instead of interning. |
-| D4.2.2 | Memory Context Stage 1 implemented and verified; Stage 2 (page allocation, OOM ladder) not started. |
+| D4.2.1v2 | MemContext owns allocator identity/lifecycle; hardened memtrack and the VM region provider are the normative system-allocation substrate. |
+| D4.2.2v2 | Stage 2 page allocation and the single MemContext failure coordinator are implemented as the allocator-retirement foundation. Full cost-based reclaimers remain follow-up work. |
+| D4.3.2v2 | GC size classes and data-zone policy are retained; backing storage is owned by MemVmRegion and released by the owning GC heap. |
+| D4.5.1v2 | Radiant and Lambda keep distinct policies over memtrack/VM ownership; legacy Pool/Arena backend wording is superseded. |
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
 | D4.6 | Name identity is a PROPOSAL (rev 5): W1/W2 integer schemes can start now; W4 stage 3 blocked on the MIR-cache reconciliation (NI §8). |
 | D4.7 | Const pool / MarkPack is a DRAFT (rev 4): baked-pointer census verified against emitters 2026-07-31; phases CP-P0..P4 not started. |

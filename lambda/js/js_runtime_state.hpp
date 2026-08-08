@@ -608,6 +608,9 @@ struct JsRuntimeOperationState {
     int regex_property_cache_len = 0;
     int regex_property_cache_mode = 0;
     bool regex_property_cache_result = false;
+    // RegExp instances share one fixed own-property layout.  It belongs to the
+    // active Input pool and is cleared with the other regex pool-backed caches.
+    void* regex_instance_shape = NULL;
     uint64_t next_symbol_id = 100;
     HashMap* symbol_registry = NULL;
     HashMap* symbol_description_registry = NULL;

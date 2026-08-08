@@ -7,10 +7,10 @@
 // Test suite for arena allocator using GTest
 
 TEST(ArenaTest, CreateAndDestroy) {
-    Pool* pool = pool_create_mmap();
+    Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);
 
-    Arena* arena = arena_create_default(pool);
+    Arena* arena = arena_create_default();
     ASSERT_NE(arena, nullptr);
 
     // Verify initial state
@@ -23,10 +23,10 @@ TEST(ArenaTest, CreateAndDestroy) {
 }
 
 TEST(ArenaTest, CreateWithCustomSizes) {
-    Pool* pool = pool_create_mmap();
+    Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);
 
-    Arena* arena = arena_create(pool, 8192, 32768);
+    Arena* arena = arena_create(8192, 32768);
     ASSERT_NE(arena, nullptr);
 
     EXPECT_EQ(arena_total_allocated(arena), 8192);
@@ -36,8 +36,8 @@ TEST(ArenaTest, CreateWithCustomSizes) {
 }
 
 TEST(ArenaTest, BasicAllocation) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Allocate some memory
     int* x = (int*)arena_alloc(arena, sizeof(int));
@@ -59,8 +59,8 @@ TEST(ArenaTest, BasicAllocation) {
 }
 
 TEST(ArenaTest, ManySmallAllocations) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Allocate many small items
     const int count = 1000;
@@ -85,8 +85,8 @@ TEST(ArenaTest, ManySmallAllocations) {
 }
 
 TEST(ArenaTest, AdaptiveChunkGrowth) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Allocate enough to trigger multiple chunk allocations
     // Initial: 4KB, then 8KB, 16KB, 32KB, 64KB
@@ -112,8 +112,8 @@ TEST(ArenaTest, AdaptiveChunkGrowth) {
 }
 
 TEST(ArenaTest, LargeAllocation) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Allocate something larger than default chunk
     size_t large_size = 128 * 1024;  // 128KB
@@ -128,8 +128,8 @@ TEST(ArenaTest, LargeAllocation) {
 }
 
 TEST(ArenaTest, Alignment) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Allocate with default alignment
     void* p1 = arena_alloc(arena, 1);
@@ -150,8 +150,8 @@ TEST(ArenaTest, Alignment) {
 }
 
 TEST(ArenaTest, Calloc) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     size_t size = 100;
     unsigned char* data = (unsigned char*)arena_calloc(arena, size);
@@ -167,8 +167,8 @@ TEST(ArenaTest, Calloc) {
 }
 
 TEST(ArenaTest, Strdup) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     const char* original = "Hello, World!";
     char* dup = arena_strdup(arena, original);
@@ -181,8 +181,8 @@ TEST(ArenaTest, Strdup) {
 }
 
 TEST(ArenaTest, Strndup) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     const char* original = "Hello, World!";
     char* dup = arena_strndup(arena, original, 5);
@@ -199,8 +199,8 @@ TEST(ArenaTest, Strndup) {
 }
 
 TEST(ArenaTest, Sprintf) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     char* str = arena_sprintf(arena, "Number: %d, String: %s", 42, "test");
     ASSERT_NE(str, nullptr);
@@ -211,8 +211,8 @@ TEST(ArenaTest, Sprintf) {
 }
 
 TEST(ArenaTest, Reset) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Allocate some memory
     void* p1 = arena_alloc(arena, 1000);
@@ -246,8 +246,8 @@ TEST(ArenaTest, Reset) {
 }
 
 TEST(ArenaTest, Clear) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Allocate enough to create multiple chunks
     for (int i = 0; i < 10; i++) {
@@ -271,8 +271,8 @@ TEST(ArenaTest, Clear) {
 }
 
 TEST(ArenaTest, Statistics) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     EXPECT_EQ(arena_total_allocated(arena), ARENA_INITIAL_CHUNK_SIZE);
     EXPECT_EQ(arena_total_used(arena), 0);
@@ -292,7 +292,7 @@ TEST(ArenaTest, Statistics) {
 TEST(ArenaTest, DetailedStatisticsTrackReuseAndBacking) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);
-    Arena* arena = arena_create_default(pool);
+    Arena* arena = arena_create_default();
     ASSERT_NE(arena, nullptr);
 
     void* first = arena_alloc(arena, 64);
@@ -324,8 +324,8 @@ TEST(ArenaTest, DetailedStatisticsTrackReuseAndBacking) {
 }
 
 TEST(ArenaTest, ReusePattern) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Simulate typical reuse pattern
     for (int iteration = 0; iteration < 5; iteration++) {
@@ -348,8 +348,8 @@ TEST(ArenaTest, ReusePattern) {
 }
 
 TEST(ArenaTest, NullChecks) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Test null pointer handling
     EXPECT_EQ(arena_alloc(NULL, 100), nullptr);
@@ -372,8 +372,8 @@ TEST(ArenaTest, NullChecks) {
 }
 
 TEST(ArenaTest, ZeroSizeAllocation) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     void* p = arena_alloc(arena, 0);
     EXPECT_EQ(p, nullptr);
@@ -383,8 +383,8 @@ TEST(ArenaTest, ZeroSizeAllocation) {
 }
 
 TEST(ArenaTest, StressTest) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Allocate many different sizes
     for (int i = 1; i < 1000; i++) {
@@ -407,16 +407,17 @@ TEST(ArenaTest, StressTest) {
 // Negative and Corner Case Tests
 // ============================================================================
 
-TEST(ArenaNegativeTest, CreateWithNullPool) {
-    Arena* arena = arena_create_default(NULL);
-    EXPECT_EQ(arena, nullptr);
+TEST(ArenaNegativeTest, CreateWithoutPool) {
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    arena_destroy(arena);
 }
 
 TEST(ArenaNegativeTest, CreateWithZeroSizes) {
-    Pool* pool = pool_create_mmap();
+    Pool* pool = pool_create();
 
     // Should use defaults when zero
-    Arena* arena = arena_create(pool, 0, 0);
+    Arena* arena = arena_create(0, 0);
     ASSERT_NE(arena, nullptr);
 
     // Should have default initial chunk size
@@ -427,10 +428,10 @@ TEST(ArenaNegativeTest, CreateWithZeroSizes) {
 }
 
 TEST(ArenaNegativeTest, CreateWithInvalidSizes) {
-    Pool* pool = pool_create_mmap();
+    Pool* pool = pool_create();
 
     // Initial > max: should clamp initial to max
-    Arena* arena = arena_create(pool, 64 * 1024, 16 * 1024);
+    Arena* arena = arena_create(64 * 1024, 16 * 1024);
     ASSERT_NE(arena, nullptr);
 
     EXPECT_EQ(arena_total_allocated(arena), 16 * 1024);
@@ -445,8 +446,8 @@ TEST(ArenaNegativeTest, AllocWithInvalidArena) {
 }
 
 TEST(ArenaNegativeTest, AllocZeroBytes) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     void* p = arena_alloc(arena, 0);
     EXPECT_EQ(p, nullptr);
@@ -456,8 +457,8 @@ TEST(ArenaNegativeTest, AllocZeroBytes) {
 }
 
 TEST(ArenaNegativeTest, AllocHugeSize) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Try to allocate more than SIZE_LIMIT (1GB)
     size_t huge = (size_t)2 * 1024 * 1024 * 1024;  // 2GB
@@ -469,8 +470,8 @@ TEST(ArenaNegativeTest, AllocHugeSize) {
 }
 
 TEST(ArenaNegativeTest, AllocAlignedInvalidAlignment) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Non-power-of-2 alignment
     void* p1 = arena_alloc_aligned(arena, 100, 3);
@@ -498,8 +499,8 @@ TEST(ArenaNegativeTest, StrdupWithNullArena) {
 }
 
 TEST(ArenaNegativeTest, StrdupWithNullString) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     char* p = arena_strdup(arena, NULL);
     EXPECT_EQ(p, nullptr);
@@ -514,8 +515,8 @@ TEST(ArenaNegativeTest, StrndupWithNullArena) {
 }
 
 TEST(ArenaNegativeTest, StrndupWithNullString) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     char* p = arena_strndup(arena, NULL, 4);
     EXPECT_EQ(p, nullptr);
@@ -530,8 +531,8 @@ TEST(ArenaNegativeTest, SprintfWithNullArena) {
 }
 
 TEST(ArenaNegativeTest, SprintfWithNullFormat) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     char* p = arena_sprintf(arena, NULL);
     EXPECT_EQ(p, nullptr);
@@ -563,8 +564,8 @@ TEST(ArenaNegativeTest, StatsOnNullArena) {
 }
 
 TEST(ArenaNegativeTest, DoubleDestroy) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     arena_destroy(arena);
     // Second destroy should be safe (checks validity marker)
@@ -574,8 +575,8 @@ TEST(ArenaNegativeTest, DoubleDestroy) {
 }
 
 TEST(ArenaCornerTest, SingleByteAllocation) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     unsigned char* p = (unsigned char*)arena_alloc(arena, 1);
     ASSERT_NE(p, nullptr);
@@ -590,8 +591,8 @@ TEST(ArenaCornerTest, SingleByteAllocation) {
 }
 
 TEST(ArenaCornerTest, MaxSizeSingleAllocation) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Allocate large size - account for chunk header and alignment overhead
     // SIZE_LIMIT is 1GB, leave room for ArenaChunk header (~32 bytes) and alignment (256 bytes)
@@ -607,8 +608,8 @@ TEST(ArenaCornerTest, MaxSizeSingleAllocation) {
 }
 
 TEST(ArenaCornerTest, EmptyStringOperations) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // strdup empty string
     char* s1 = arena_strdup(arena, "");
@@ -630,8 +631,8 @@ TEST(ArenaCornerTest, EmptyStringOperations) {
 }
 
 TEST(ArenaCornerTest, VeryLongString) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Create a 10KB string
     size_t len = 10 * 1024;
@@ -650,8 +651,8 @@ TEST(ArenaCornerTest, VeryLongString) {
 }
 
 TEST(ArenaCornerTest, AlignmentBoundaries) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Test various alignment powers of 2
     for (size_t align = 1; align <= 256; align *= 2) {
@@ -666,8 +667,8 @@ TEST(ArenaCornerTest, AlignmentBoundaries) {
 }
 
 TEST(ArenaCornerTest, AlternatingSmallLargeAllocs) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Alternate between small and large allocations
     for (int i = 0; i < 10; i++) {
@@ -685,8 +686,8 @@ TEST(ArenaCornerTest, AlternatingSmallLargeAllocs) {
 }
 
 TEST(ArenaCornerTest, ResetAfterClear) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Allocate to create multiple chunks
     for (int i = 0; i < 5; i++) {
@@ -710,8 +711,8 @@ TEST(ArenaCornerTest, ResetAfterClear) {
 }
 
 TEST(ArenaCornerTest, ClearAfterReset) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Allocate to create multiple chunks
     for (int i = 0; i < 5; i++) {
@@ -732,8 +733,8 @@ TEST(ArenaCornerTest, ClearAfterReset) {
 }
 
 TEST(ArenaCornerTest, MultipleResetsPreserveChunkSize) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Force growth
     for (int i = 0; i < 3; i++) {
@@ -756,10 +757,10 @@ TEST(ArenaCornerTest, MultipleResetsPreserveChunkSize) {
 }
 
 TEST(ArenaCornerTest, TinyChunkSize) {
-    Pool* pool = pool_create_mmap();
+    Pool* pool = pool_create();
 
     // Create arena with very small chunks
-    Arena* arena = arena_create(pool, 64, 256);
+    Arena* arena = arena_create(64, 256);
     ASSERT_NE(arena, nullptr);
 
     // Allocate more than one chunk
@@ -780,8 +781,8 @@ TEST(ArenaCornerTest, TinyChunkSize) {
 }
 
 TEST(ArenaCornerTest, AllocationExactlyAtChunkBoundary) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create(pool, 128, 512);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create(128, 512);
 
     // Chunk data starts 256-byte aligned, so we have full 128 bytes available
     // Fill the chunk completely
@@ -799,8 +800,8 @@ TEST(ArenaCornerTest, AllocationExactlyAtChunkBoundary) {
 }
 
 TEST(ArenaCornerTest, SprintfWithVeryLongOutput) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Create format string that produces long output
     char* result = arena_sprintf(arena, "%1000d", 42);
@@ -814,8 +815,8 @@ TEST(ArenaCornerTest, SprintfWithVeryLongOutput) {
 }
 
 TEST(ArenaCornerTest, InterleavedAllocAndString) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     for (int i = 0; i < 100; i++) {
         void* p = arena_alloc(arena, 64);
@@ -833,8 +834,8 @@ TEST(ArenaCornerTest, InterleavedAllocAndString) {
 }
 
 TEST(ArenaCornerTest, CallocActuallyZeroes) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     // Allocate and write non-zero data
     unsigned char* p1 = (unsigned char*)arena_alloc(arena, 256);
@@ -855,8 +856,8 @@ TEST(ArenaCornerTest, CallocActuallyZeroes) {
 }
 
 TEST(ArenaCornerTest, StrndupWithExactLength) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     const char* str = "Hello, World!";
     size_t len = strlen(str);
@@ -872,11 +873,11 @@ TEST(ArenaCornerTest, StrndupWithExactLength) {
 }
 
 TEST(ArenaCornerTest, RapidCreateDestroy) {
-    Pool* pool = pool_create_mmap();
+    Pool* pool = pool_create();
 
     // Create and destroy many arenas
     for (int i = 0; i < 100; i++) {
-        Arena* arena = arena_create_default(pool);
+        Arena* arena = arena_create_default();
         ASSERT_NE(arena, nullptr);
 
         // Use it a bit
@@ -889,8 +890,8 @@ TEST(ArenaCornerTest, RapidCreateDestroy) {
 }
 
 TEST(ArenaCornerTest, AllocAfterMultipleClearCycles) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
 
     for (int cycle = 0; cycle < 10; cycle++) {
         // Allocate to grow
@@ -916,8 +917,8 @@ TEST(ArenaCornerTest, AllocAfterMultipleClearCycles) {
 // ============================================================================
 
 TEST(ArenaOwnershipTest, OwnsPointerInFirstChunk) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -929,8 +930,8 @@ TEST(ArenaOwnershipTest, OwnsPointerInFirstChunk) {
 }
 
 TEST(ArenaOwnershipTest, OwnsPointerInMiddleOfChunk) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr1 = arena_alloc(arena, 64);
     void* ptr2 = arena_alloc(arena, 128);
@@ -953,8 +954,8 @@ TEST(ArenaOwnershipTest, OwnsPointerInMiddleOfChunk) {
 }
 
 TEST(ArenaOwnershipTest, OwnsPointerInSecondChunk) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Allocate large blocks to force second chunk
     void* ptr1 = arena_alloc(arena, 8192);
@@ -971,8 +972,8 @@ TEST(ArenaOwnershipTest, OwnsPointerInSecondChunk) {
 }
 
 TEST(ArenaOwnershipTest, DoesNotOwnExternalPointer) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* external = malloc(64);
     ASSERT_NE(external, nullptr);
@@ -985,8 +986,8 @@ TEST(ArenaOwnershipTest, DoesNotOwnExternalPointer) {
 }
 
 TEST(ArenaOwnershipTest, DoesNotOwnNullPointer) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     EXPECT_FALSE(arena_owns(arena, nullptr));
     
@@ -995,8 +996,8 @@ TEST(ArenaOwnershipTest, DoesNotOwnNullPointer) {
 }
 
 TEST(ArenaOwnershipTest, DoesNotOwnPointerBeforeArena) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1010,8 +1011,8 @@ TEST(ArenaOwnershipTest, DoesNotOwnPointerBeforeArena) {
 }
 
 TEST(ArenaOwnershipTest, DoesNotOwnPointerAfterArena) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1025,8 +1026,8 @@ TEST(ArenaOwnershipTest, DoesNotOwnPointerAfterArena) {
 }
 
 TEST(ArenaOwnershipTest, OwnsReturnsFalseForInvalidArena) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1042,8 +1043,8 @@ TEST(ArenaOwnershipTest, OwnsReturnsFalseForInvalidArena) {
 // ============================================================================
 
 TEST(ArenaFreeTest, FreeAddsToFreeList) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1056,8 +1057,8 @@ TEST(ArenaFreeTest, FreeAddsToFreeList) {
 }
 
 TEST(ArenaFreeTest, FreeSmallBlockIgnored) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1070,8 +1071,8 @@ TEST(ArenaFreeTest, FreeSmallBlockIgnored) {
 }
 
 TEST(ArenaFreeTest, FreeNullPointerIgnored) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Should not crash
     arena_free(arena, nullptr, 64);
@@ -1081,8 +1082,8 @@ TEST(ArenaFreeTest, FreeNullPointerIgnored) {
 }
 
 TEST(ArenaFreeTest, FreeInvalidArenaIgnored) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1099,8 +1100,8 @@ TEST(ArenaFreeTest, FreeInvalidArenaIgnored) {
 // ============================================================================
 
 TEST(ArenaReallocTest, ReallocFromNullAllocatesNew) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_realloc(arena, nullptr, 0, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1111,8 +1112,8 @@ TEST(ArenaReallocTest, ReallocFromNullAllocatesNew) {
 }
 
 TEST(ArenaReallocTest, ReallocToZeroFrees) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1125,8 +1126,8 @@ TEST(ArenaReallocTest, ReallocToZeroFrees) {
 }
 
 TEST(ArenaReallocTest, ReallocSameSizeReturnsOriginal) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1144,8 +1145,8 @@ TEST(ArenaReallocTest, ReallocSameSizeReturnsOriginal) {
 }
 
 TEST(ArenaReallocTest, ReallocShrinkReturnsOriginal) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 128);
     ASSERT_NE(ptr, nullptr);
@@ -1164,8 +1165,8 @@ TEST(ArenaReallocTest, ReallocShrinkReturnsOriginal) {
 }
 
 TEST(ArenaReallocTest, ReallocGrowAtEndExtendsInPlace) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Allocate at end of chunk
     void* ptr = arena_alloc(arena, 64);
@@ -1185,8 +1186,8 @@ TEST(ArenaReallocTest, ReallocGrowAtEndExtendsInPlace) {
 }
 
 TEST(ArenaReallocTest, ReallocGrowNotAtEndAllocatesNew) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Allocate two blocks
     void* ptr1 = arena_alloc(arena, 64);
@@ -1210,8 +1211,8 @@ TEST(ArenaReallocTest, ReallocGrowNotAtEndAllocatesNew) {
 }
 
 TEST(ArenaReallocTest, ReallocPreservesData) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1235,8 +1236,8 @@ TEST(ArenaReallocTest, ReallocPreservesData) {
 }
 
 TEST(ArenaReallocTest, ReallocInvalidArenaReturnsNull) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1253,8 +1254,8 @@ TEST(ArenaReallocTest, ReallocInvalidArenaReturnsNull) {
 // ============================================================================
 
 TEST(ArenaFreeListTest, FreeListReusesMemory) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Allocate and free a block
     void* ptr1 = arena_alloc(arena, 64);
@@ -1273,8 +1274,8 @@ TEST(ArenaFreeListTest, FreeListReusesMemory) {
 }
 
 TEST(ArenaFreeListTest, FreeListSplitsLargeBlocks) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Allocate and free a large block
     void* ptr1 = arena_alloc(arena, 256);
@@ -1296,8 +1297,8 @@ TEST(ArenaFreeListTest, FreeListSplitsLargeBlocks) {
 // ============================================================================
 
 TEST(ArenaIntegrationTest, ReallocAndOwnershipIntegration) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1318,8 +1319,8 @@ TEST(ArenaIntegrationTest, ReallocAndOwnershipIntegration) {
 }
 
 TEST(ArenaIntegrationTest, MultipleAllocationsAndReallocs) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Complex scenario with multiple operations
     void* ptr1 = arena_alloc(arena, 64);
@@ -1349,8 +1350,8 @@ TEST(ArenaIntegrationTest, MultipleAllocationsAndReallocs) {
 }
 
 TEST(ArenaIntegrationTest, LargeRealloc) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     void* ptr = arena_alloc(arena, 64);
     ASSERT_NE(ptr, nullptr);
@@ -1369,8 +1370,8 @@ TEST(ArenaIntegrationTest, LargeRealloc) {
 //==============================================================================
 
 TEST(ArenaContainerTest, ArrayArenaAllocation) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Create array from arena
     Array* arr = array_arena(arena);
@@ -1391,8 +1392,8 @@ TEST(ArenaContainerTest, ArrayArenaAllocation) {
 }
 
 TEST(ArenaContainerTest, MapArenaAllocation) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Create map from arena
     Map* map = map_arena(arena);
@@ -1411,8 +1412,8 @@ TEST(ArenaContainerTest, MapArenaAllocation) {
 }
 
 TEST(ArenaContainerTest, ElementArenaAllocation) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Create element from arena
     Element* elmt = elmt_arena(arena);
@@ -1434,8 +1435,8 @@ TEST(ArenaContainerTest, ElementArenaAllocation) {
 }
 
 TEST(ArenaContainerTest, ArrayArenaVsPoolAllocation) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Create arrays from different allocators
     Array* arena_arr = array_arena(arena);
@@ -1461,8 +1462,8 @@ TEST(ArenaContainerTest, ArrayArenaVsPoolAllocation) {
 }
 
 TEST(ArenaContainerTest, MapArenaVsPoolAllocation) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Create maps from different allocators
     Map* arena_map = map_arena(arena);
@@ -1486,8 +1487,8 @@ TEST(ArenaContainerTest, MapArenaVsPoolAllocation) {
 }
 
 TEST(ArenaContainerTest, ElementArenaVsPoolAllocation) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Create elements from different allocators
     Element* arena_elmt = elmt_arena(arena);
@@ -1511,8 +1512,8 @@ TEST(ArenaContainerTest, ElementArenaVsPoolAllocation) {
 }
 
 TEST(ArenaContainerTest, MultipleContainersInSameArena) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Create multiple containers from same arena
     Array* arr1 = array_arena(arena);
@@ -1551,9 +1552,9 @@ TEST(ArenaContainerTest, MultipleContainersInSameArena) {
 }
 
 TEST(ArenaContainerTest, ContainerAllocationAcrossArenas) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena1 = arena_create_default(pool);
-    Arena* arena2 = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena1 = arena_create_default();
+    Arena* arena2 = arena_create_default();
     
     // Create containers in different arenas
     Array* arr1 = array_arena(arena1);
@@ -1587,8 +1588,8 @@ TEST(ArenaContainerTest, NullArenaHandling) {
 
 // Test the regression bug: uninitialized memory causing crashes
 TEST(ArenaContainerRegressionTest, UninitializedMemoryBug) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Create element from arena
     Element* elmt = elmt_arena(arena);
@@ -1618,8 +1619,8 @@ TEST(ArenaContainerRegressionTest, UninitializedMemoryBug) {
 
 // Test the regression bug: uninitialized memory causing crashes
 TEST(ArenaContainerRegressionTest, MapDataInitialization) {
-    Pool* pool = pool_create_mmap();
-    Arena* arena = arena_create_default(pool);
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
     
     // Create map from arena
     Map* map = map_arena(arena);

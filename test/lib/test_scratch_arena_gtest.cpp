@@ -11,9 +11,9 @@ protected:
     Arena* arena;
 
     void SetUp() override {
-        pool = pool_create_mmap();
+        pool = pool_create();
         ASSERT_NE(pool, nullptr);
-        arena = arena_create(pool, 16 * 1024, 64 * 1024); // 16KB initial
+        arena = arena_create(16 * 1024, 64 * 1024); // 16KB initial
         ASSERT_NE(arena, nullptr);
     }
 

@@ -30,7 +30,7 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
-#include "../../../lib/mempool.h"
+#include "../../../lib/mem_vm.h"
 
 // Default data zone block size: 4 MB
 #define GC_DATA_ZONE_BLOCK_SIZE (4 * 1024 * 1024)
@@ -44,6 +44,7 @@ typedef struct gc_data_block {
     uint8_t* cursor;            // next free byte (bump pointer)
     uint8_t* limit;             // block end (base + capacity)
     struct gc_data_block* next; // next block in chain (overflow)
+    MemVmRegion* region;        // owning VM extent
 } gc_data_block_t;
 
 // Data Zone: manages variable-size data buffer allocations
@@ -51,7 +52,8 @@ typedef struct gc_data_zone {
     gc_data_block_t* head;      // first block
     gc_data_block_t* current;   // current allocation block
     size_t block_size;          // default bytes per block
-    Pool* pool;                 // underlying memory pool (for block allocation)
+    MemContext* context;        // VM allocation context
+    MemNode* owner;             // owning GC node, if registered
 
     // Statistics
     size_t total_allocated;     // total bytes allocated (user data)
@@ -59,11 +61,13 @@ typedef struct gc_data_zone {
 } gc_data_zone_t;
 
 /**
- * Create a new data zone backed by the given pool.
- * @param pool       underlying memory pool for block allocation
+ * Create a new data zone backed by VM-owned extents.
+ * @param context    memory context used for region attribution
+ * @param owner      owning GC node (may be NULL during construction)
  * @param block_size bytes per block (0 = use default GC_DATA_ZONE_BLOCK_SIZE)
  */
-gc_data_zone_t* gc_data_zone_create(Pool* pool, size_t block_size);
+gc_data_zone_t* gc_data_zone_create(MemContext* context, MemNode* owner,
+                                    size_t block_size);
 
 /**
  * Destroy the data zone. Does NOT free pool memory (pool_destroy handles that).

@@ -48,47 +48,11 @@ bool jm_is_native_unary_expression(JsMirTranspiler* mt, JsUnaryNode* un) {
 
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg);
 
-static bool jm_is_compiler_proven_module_slot(const char* fn_name,
-        MIR_type_t index_type, MIR_op_t index) {
-    return index_type == MIR_T_I64 && index.mode == MIR_OP_INT &&
-        index.u.i >= 0 &&
-        (strcmp(fn_name, "js_get_module_var") == 0 ||
-         strcmp(fn_name, "js_set_module_var") == 0);
-}
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Winvalid-offsetof"
-static MIR_reg_t jm_emit_active_module_vars(JsMirTranspiler* mt) {
-    MIR_reg_t state = em_new_reg(&mt->em, "active_js_module_state", MIR_T_I64);
-    em_emit_insn(&mt->em, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, state),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64,
-            offsetof(EvalContext, active_js_module_state),
-            mt->em.frame.runtime, 0, 1)));
-    MIR_reg_t vars = em_new_reg(&mt->em, "active_js_module_vars", MIR_T_I64);
-    em_emit_insn(&mt->em, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, vars),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64,
-            offsetof(LambdaModuleState, vars), state, 0, 1)));
-    return vars;
-}
-#pragma clang diagnostic pop
-
 MIR_reg_t jm_call_1_or_inline(JsMirTranspiler* mt, const char* fn_name,
         MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1) {
-    if (mt && mt->em.frame.runtime &&
-            jm_is_compiler_proven_module_slot(fn_name, a1t, a1) &&
-            strcmp(fn_name, "js_get_module_var") == 0) {
-        // Compiler-owned module slots always execute with the hidden context;
-        // load the shared EvalContext slab directly instead of re-entering JS.
-        MIR_reg_t vars = jm_emit_active_module_vars(mt);
-        MIR_reg_t value = em_new_reg(&mt->em, "module_var", MIR_T_I64);
-        em_emit_insn(&mt->em, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, value),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                (MIR_disp_t)a1.u.i * (MIR_disp_t)sizeof(Item), vars, 0, 1)));
-        return jm_publish_call_result(mt, value);
-    }
+    // The module-var slab can grow while a generated function is running.
+    // Resolve it in the native helper so MIR cannot retain a pointer to the
+    // retired exact allocation across a nested eval or compilation.
     MIR_reg_t result = em_call_1(&mt->em, fn_name, ret_type, a1t, a1, true);
     return jm_publish_call_result(mt, result);
 }
@@ -96,18 +60,6 @@ MIR_reg_t jm_call_1_or_inline(JsMirTranspiler* mt, const char* fn_name,
 void jm_call_void_2_or_inline(JsMirTranspiler* mt, const char* fn_name,
         MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2) {
     if (mt) mt->last_call_result_reg = 0;
-    if (mt && mt->em.frame.runtime &&
-            jm_is_compiler_proven_module_slot(fn_name, a1t, a1) &&
-            strcmp(fn_name, "js_set_module_var") == 0) {
-        // The slot is compiler-proven, so this is the same shared slab store
-        // as js_set_module_var without a native helper transition.
-        MIR_reg_t vars = jm_emit_active_module_vars(mt);
-        em_emit_insn(&mt->em, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                (MIR_disp_t)a1.u.i * (MIR_disp_t)sizeof(Item), vars, 0, 1),
-            a2));
-        return;
-    }
     em_call_void_2(&mt->em, fn_name, a1t, a1, a2t, a2, true);
 }
 

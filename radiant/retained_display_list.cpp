@@ -187,7 +187,7 @@ RetainedDisplayListCache* retained_dl_cache_create(Pool* pool) {
 bool RetainedDisplayListCache::init(Pool* owner_pool) {
     pool = owner_pool;
     // Retained fragments intentionally share this cache arena so captures survive frame scratch resets.
-    arena = mem_arena_create(NULL, owner_pool, MEM_ROLE_RENDER, "retained_dl.arena");
+    arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "retained_dl.arena");
     map = retained_dl_entry_new(128);
     if (!arena || !map) {
         destroy();

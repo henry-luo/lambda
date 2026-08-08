@@ -25,7 +25,7 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
-#include "../../../lib/mempool.h"
+#include "../../../lib/mem_vm.h"
 
 // Forward declaration — full definition in gc_heap.h
 typedef struct gc_header gc_header_t;
@@ -48,6 +48,7 @@ typedef struct gc_header gc_header_t;
 // pushed to the per-class free list for reuse.
 typedef struct gc_object_slab {
     uint8_t* base;              // slab memory start
+    MemVmRegion* region;        // owning VM extent; released with the slab
     size_t slot_size;           // bytes per slot (header + user data, aligned)
     size_t slot_count;          // total slots in this slab
     size_t next_fresh;          // next un-used slot index (sequential allocation)
@@ -81,8 +82,9 @@ typedef struct gc_object_zone {
     // quadratic full-chain walk on allocation-heavy workloads.
     gc_object_slab_t* fresh_slabs[GC_NUM_SIZE_CLASSES];
 
-    // Underlying memory pool for slab allocation
-    Pool* pool;
+    // VM ownership identity; per-allocation paths never touch MemContext's lock
+    MemContext* context;
+    MemNode* owner;
 
     // Statistics
     size_t total_slots_allocated;   // total slots ever allocated
@@ -103,9 +105,9 @@ typedef struct gc_object_zone {
 } gc_object_zone_t;
 
 /**
- * Create a new object zone backed by the given pool.
+ * Create a new object zone backed by VM-owned extents.
  */
-gc_object_zone_t* gc_object_zone_create(Pool* pool);
+gc_object_zone_t* gc_object_zone_create(MemContext* context, MemNode* owner);
 
 /**
  * Destroy the object zone. Does NOT free pool memory (pool_destroy handles that).

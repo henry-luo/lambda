@@ -13,8 +13,6 @@ extern "C" {
     #include "../lib/strview.h"
     #include "../lib/arraylist.h"
     #include "../lib/log.h"
-    void rpmalloc_initialize();
-    void rpmalloc_finalize();
 }
 #include "../lib/test_utils.h"
 

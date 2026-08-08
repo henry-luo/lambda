@@ -5324,7 +5324,7 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
 
     Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg_inline");
     if (!temp_pool) return;
-    Arena* temp_arena = mem_arena_create(NULL, temp_pool, MEM_ROLE_RENDER, "render.svg_inline.arena");
+    Arena* temp_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg_inline.arena");
     if (!temp_arena) {
         mem_pool_destroy(temp_pool);
         return;
@@ -5423,7 +5423,7 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
 
     Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg_inline");
     if (!temp_pool) return;
-    Arena* temp_arena = mem_arena_create(NULL, temp_pool, MEM_ROLE_RENDER, "render.svg_inline.arena");
+    Arena* temp_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg_inline.arena");
     if (!temp_arena) {
         mem_pool_destroy(temp_pool);
         return;

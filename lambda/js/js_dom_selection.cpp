@@ -99,7 +99,7 @@ static bool js_doc_runtime_enter_if_needed(DomDocument* doc, JsDocRuntimeScope* 
     scope->runtime_ctx->heap = runtime->heap;
     scope->runtime_ctx->name_pool = runtime->name_pool;
     scope->runtime_ctx->type_list = runtime->type_list;
-    scope->runtime_ctx->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
+    scope->runtime_ctx->pool = runtime->heap->pool;
     if (!eval_context_thread_initialize(scope->runtime_ctx)) return false;
     if (scope->runtime_ctx->js_state &&
             !js_runtime_state_thread_initialize(scope->runtime_ctx)) return false;

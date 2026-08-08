@@ -20,6 +20,7 @@
 
 #include "font_config.h"
 #include "../memtrack.h"
+#include "../mem_factory.h"
 #include "../mempool.h"
 #include "../arena.h"
 #include "../arraylist.h"
@@ -2104,8 +2105,8 @@ void font_database_print_statistics(FontDatabase* db) {
 FontDatabase* font_database_get_global() {
     if (!g_font_db_initialized) {
         // Create global pools for font database
-        Pool* global_pool = pool_create();
-        Arena* global_font_arena = arena_create(global_pool, 64 * 1024, 1024 * 1024);  // 64KB->1MB chunks
+        Pool* global_pool = mem_pool_create(NULL, MEM_ROLE_FONT, "font.global.pool");
+        Arena* global_font_arena = arena_create(64 * 1024, 1024 * 1024);  // 64KB->1MB chunks
 
         if (global_pool && global_font_arena) {
             g_global_font_db = font_database_create(global_pool, global_font_arena);

@@ -840,8 +840,7 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         }
         callback_context->heap = runtime->heap;
         callback_context->name_pool = runtime->name_pool;
-        callback_context->pool = runtime->reuse_pool
-            ? runtime->reuse_pool : runtime->heap->pool;
+        callback_context->pool = runtime->heap->pool;
         callback_context->type_info = type_info;
         // Retained callbacks borrow their Runtime-owned side stack rather
         // than fabricating an activation-local context.

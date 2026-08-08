@@ -2389,7 +2389,7 @@ typedef struct VisitedLinks {
  */
 typedef struct DocState {
     // Memory management
-    Pool* pool;                    // underlying memory pool
+    Pool* pool;                    // document owner group for state allocations
     Arena* arena;                  // dedicated arena for state allocations
     StateStore* owner_store;        // non-owning back-reference for validation/logging
     

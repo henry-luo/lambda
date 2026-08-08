@@ -26,7 +26,5 @@
 
 // ---- GC heap ----
 gc_heap_t* mem_gc_heap_create(MemContext* ctx, MemRole role, const char* label);
-gc_heap_t* mem_gc_heap_create_with_pool(MemContext* ctx, Pool* pool,
-                                        MemRole role, const char* label);
 
 #endif // MEM_FACTORY_RT_H

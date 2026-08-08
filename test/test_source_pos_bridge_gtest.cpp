@@ -312,7 +312,7 @@ protected:
 
     void SetUp() override {
         pool = tu_setup_pool();
-        arena = arena_create_default(pool);
+        arena = arena_create_default();
         // fixtures must initialize canonical document ownership after the
         // legacy pool/arena aliases were removed.
         doc_storage.document_pool = pool;

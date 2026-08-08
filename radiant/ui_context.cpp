@@ -180,10 +180,10 @@ int UiContext::init(bool next_headless) {
     FontContextConfig font_cfg = {};
     font_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "ui.font.pool");
     font_arena = font_pool
-        ? mem_arena_create(NULL, font_pool, MEM_ROLE_RENDER, "ui.font.arena")
+        ? mem_arena_create(NULL, MEM_ROLE_RENDER, "ui.font.arena")
         : NULL;
     font_glyph_arena = font_pool
-        ? mem_arena_create_sized(NULL, font_pool, 256 * 1024, 4 * 1024 * 1024,
+        ? mem_arena_create_sized(NULL, 256 * 1024, 4 * 1024 * 1024,
                                  MEM_ROLE_RENDER, "ui.font.glyph_arena")
         : NULL;
     if (!font_pool || !font_arena || !font_glyph_arena) {

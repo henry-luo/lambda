@@ -473,7 +473,7 @@ protected:
         
         // Convert using Lambda pipeline in HYBRID mode
         Pool* doc_pool = pool_create();
-        Arena* doc_arena = arena_create_default(doc_pool);
+        Arena* doc_arena = arena_create_default();
         
         tex::TexDocumentModel* doc = tex::doc_model_from_string(
             latex_content.c_str(), latex_content.size(), doc_arena, nullptr);

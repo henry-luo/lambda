@@ -1660,8 +1660,7 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
     if (!state) return false;
     View* surface_target = canonical_selection_focus_target(state);
 
-    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "event.temp");
-    Arena* temp_arena = mem_arena_create(NULL, temp_pool, MEM_ROLE_TEMP, "event.arena");
+    Arena* temp_arena = mem_arena_create(NULL, MEM_ROLE_TEMP, "event.arena");
     char* text = state_store_extract_selection_text(state, temp_arena);
     char* html = state_store_extract_selection_html(state, temp_arena);
     bool copied = false;
@@ -1686,7 +1685,6 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
                                     html ? (uint32_t)strlen(html) : 0);
     }
     arena_destroy(temp_arena);
-    mem_pool_destroy(temp_pool);
     return copied;
 }
 
@@ -2225,8 +2223,7 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                     if (!handler_ctx) return true;
                                     handler_ctx->heap = rt->heap;
                                     handler_ctx->name_pool = rt->name_pool;
-                                    handler_ctx->pool = rt->reuse_pool ?
-                                        rt->reuse_pool : rt->heap->pool;
+                                    handler_ctx->pool = rt->heap->pool;
                                     handler_ctx->type_info = type_info;
                                     // A retained handler runs on the document's eval thread;
                                     // nested dispatch must never replace that thread owner.
@@ -4712,7 +4709,7 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->handler_ctx->heap = runtime->heap;
     s->handler_ctx->name_pool = runtime->name_pool;
     s->handler_ctx->type_list = runtime->type_list;
-    s->handler_ctx->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
+    s->handler_ctx->pool = runtime->heap->pool;
     s->saved_input_ctx = input_context;
     if (!eval_context_thread_initialize(s->handler_ctx) ||
             (s->handler_ctx->js_state &&
@@ -7148,7 +7145,7 @@ struct EventDocumentScope {
         owner->heap = runtime->heap;
         owner->name_pool = runtime->name_pool;
         owner->type_list = runtime->type_list;
-        owner->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
+        owner->pool = runtime->heap->pool;
         if (!eval_context_thread_initialize(owner)) return;
         // Lambda templates initialize a JS support capsule for Jube helpers,
         // but it is not a DOM script realm. Only plain HTML documents publish

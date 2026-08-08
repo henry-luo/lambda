@@ -276,7 +276,7 @@ TEST_F(DomRetirementTest, VariableTextSizesReuseArenaBlocksAfterWarmup) {
 TEST(DomRetirementOwnerArenaTest, FatLambdaNodeReturnsToItsInputArena) {
     Pool* input_pool = pool_create();
     ASSERT_NE(input_pool, nullptr);
-    Arena* input_arena = arena_create_default(input_pool);
+    Arena* input_arena = arena_create_default();
     ASSERT_NE(input_arena, nullptr);
     Input input = {};
     input.arena = input_arena;

@@ -164,12 +164,7 @@ static void worker_init_local(Tile* tile) {
 
 void WorkerState::init(Tile* tile) {
     if (initialized) return;
-    // Initialize memory pool first — this calls ensure_rpmalloc_initialized()
-    // which must happen before any malloc/new calls on this thread (rpmalloc
-    // interposes on malloc; without per-thread init the shared fallback heap
-    // is used, which is not thread-safe).
-    pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "tile.worker");
-    arena = mem_arena_create(NULL, pool, MEM_ROLE_RENDER, "tile.arena");
+    arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "tile.arena");
     mem_scratch_init(NULL, &scratch, arena, MEM_ROLE_RENDER, "tile.scratch");
     // Now safe to create ThorVG canvas (internally uses malloc/new)
     rdt_vector_init(&vec, tile->pixels, tile->pixel_w, tile->pixel_h, tile->stride);
@@ -246,10 +241,6 @@ void WorkerState::destroy() {
     if (arena) {
         mem_arena_destroy(arena);
         arena = nullptr;
-    }
-    if (pool) {
-        mem_pool_destroy(pool);
-        pool = nullptr;
     }
     initialized = false;
 }

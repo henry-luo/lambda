@@ -180,7 +180,7 @@ static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
 struct DomDocument {
     // Lambda integration
     Input* input;                // Lambda Input context for MarkEditor operations
-    Pool* document_pool;         // Document-owned objects and backing for node_arena
+    Pool* document_pool;         // Document-owned selectively released objects
     Arena* node_arena;           // Stable DOM nodes and registered node-owned payloads
     DomDocumentServices services;
 

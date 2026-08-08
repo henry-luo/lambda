@@ -163,7 +163,7 @@ RbTranspiler* rb_transpiler_create(Runtime* runtime) {
 
     // initialize memory pools
     tp->ast_pool = mem_pool_create(NULL, MEM_ROLE_AST, "rb.ast");
-    tp->ast_arena = mem_arena_create(NULL, tp->ast_pool, MEM_ROLE_AST, "rb.ast.arena");
+    tp->ast_arena = mem_arena_create(NULL, MEM_ROLE_AST, "rb.ast.arena");
     tp->name_pool = name_pool_create(tp->ast_pool, NULL);
     tp->error_buf = NULL;
 

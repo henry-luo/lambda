@@ -699,93 +699,6 @@ build_thorvg_v1_0_pre34_for_linux() {
     return 1
 }
 
-# Function to build rpmalloc for Linux
-build_rpmalloc_for_linux() {
-    echo "Building rpmalloc for Linux..."
-
-    # Determine architecture
-    ARCH=$(uname -m)
-    if [ "$ARCH" = "aarch64" ]; then
-        LIB_DIR="$SYSTEM_PREFIX/lib/aarch64-linux-gnu"
-    else
-        LIB_DIR="$SYSTEM_PREFIX/lib/x86_64-linux-gnu"
-    fi
-
-    # Check if already installed in system location
-    if [ -f "$LIB_DIR/librpmalloc.a" ] && [ -f "$SYSTEM_PREFIX/include/rpmalloc/rpmalloc.h" ]; then
-        # Verify the library has the expected symbols
-        if nm "$LIB_DIR/librpmalloc.a" 2>/dev/null | grep -q "rpmalloc_initialize"; then
-            echo "✅ rpmalloc already installed and verified"
-            return 0
-        else
-            echo "rpmalloc found but missing expected symbols, rebuilding..."
-            sudo rm -f "$LIB_DIR/librpmalloc.a" 2>/dev/null || true
-        fi
-    fi
-
-    # Create build_temp directory if it doesn't exist
-    mkdir -p build_temp
-
-    # Check if source exists, if not clone it
-    if [ ! -d "build_temp/rpmalloc-src" ]; then
-        echo "Cloning rpmalloc repository..."
-        cd build_temp
-        git clone https://github.com/mjansson/rpmalloc.git rpmalloc-src || {
-            echo "Warning: Could not clone rpmalloc repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    else
-        echo "rpmalloc source already downloaded"
-    fi
-
-    cd build_temp/rpmalloc-src
-
-    # Clean any previous builds
-    rm -f *.o *.a 2>/dev/null || true
-
-    # Build rpmalloc with ENABLE_OVERRIDE=0 (no malloc override)
-    # This allows us to use rpmalloc only for explicit pool allocations
-    echo "Compiling rpmalloc with ENABLE_OVERRIDE=0..."
-    if gcc -c -O2 \
-        -DRPMALLOC_FIRST_CLASS_HEAPS=1 \
-        -DENABLE_OVERRIDE=0 \
-        -I. \
-        rpmalloc/rpmalloc.c \
-        -o rpmalloc.o; then
-
-        echo "Creating static library..."
-        if ar rcs librpmalloc.a rpmalloc.o; then
-            # Install the library and headers
-            echo "Installing rpmalloc to system location (requires sudo)..."
-            sudo mkdir -p "$LIB_DIR"
-            sudo mkdir -p "$SYSTEM_PREFIX/include/rpmalloc"
-            sudo cp librpmalloc.a "$LIB_DIR/"
-            sudo cp rpmalloc/rpmalloc.h "$SYSTEM_PREFIX/include/rpmalloc/"
-
-            # Verify the library has expected symbols
-            if nm "$LIB_DIR/librpmalloc.a" | grep -q "rpmalloc_initialize"; then
-                echo "✅ rpmalloc built successfully"
-                echo "   - rpmalloc_initialize: ✓ Available"
-                echo "   - rpmalloc_heap_acquire: ✓ Available"
-                echo "   - rpmalloc_heap_alloc: ✓ Available"
-                echo "   - ENABLE_OVERRIDE=0: ✓ No malloc override"
-                cd - > /dev/null
-                return 0
-            else
-                echo "❌ Required functions not found in built library"
-                cd - > /dev/null
-                return 1
-            fi
-        fi
-    fi
-
-    echo "❌ rpmalloc build failed"
-    cd - > /dev/null
-    return 1
-}
-
 # Function to build mpdecimal for Linux
 build_mpdecimal_for_linux() {
     echo "Building mpdecimal for Linux..."
@@ -1148,38 +1061,6 @@ else
 fi
 
 
-
-
-# Build rpmalloc for Linux (memory pool allocator)
-echo "Setting up rpmalloc..."
-ARCH=$(uname -m)
-if [ "$ARCH" = "aarch64" ]; then
-    RPMALLOC_LIB_DIR="$SYSTEM_PREFIX/lib/aarch64-linux-gnu"
-else
-    RPMALLOC_LIB_DIR="$SYSTEM_PREFIX/lib/x86_64-linux-gnu"
-fi
-
-if [ -f "$RPMALLOC_LIB_DIR/librpmalloc.a" ] && [ -f "$SYSTEM_PREFIX/include/rpmalloc/rpmalloc.h" ]; then
-    if nm "$RPMALLOC_LIB_DIR/librpmalloc.a" 2>/dev/null | grep -q "rpmalloc_initialize"; then
-        echo "✅ rpmalloc already available and verified"
-    else
-        echo "rpmalloc library found but missing required symbols, rebuilding..."
-        if ! build_rpmalloc_for_linux; then
-            echo "❌ rpmalloc build failed - required for Lambda memory pool"
-            exit 1
-        else
-            echo "✅ rpmalloc built successfully"
-        fi
-    fi
-else
-    echo "rpmalloc not found, building..."
-    if ! build_rpmalloc_for_linux; then
-        echo "❌ rpmalloc build failed - required for Lambda memory pool"
-        exit 1
-    else
-        echo "✅ rpmalloc built successfully"
-    fi
-fi
 
 
 # Build utf8proc for Linux

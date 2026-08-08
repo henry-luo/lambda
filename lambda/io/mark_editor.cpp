@@ -797,7 +797,7 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
     if (is_inline && old_map->data) {
         // In ui_mode, old data was arena-allocated during JIT execution
         // (via context->arena = result_arena). The MarkEditor's pool_ is a
-        // different allocator; calling pool_free here would corrupt rpmalloc.
+        // different owner; calling pool_free here would release unrelated data.
         if (!ui_mode_) {
             pool_free(pool_, old_map->data);
         }
@@ -1319,7 +1319,7 @@ Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* bu
     if (is_inline && old_elmt->data) {
         // In ui_mode, old data was arena-allocated during JIT execution
         // (via context->arena = result_arena). The MarkEditor's pool_ is a
-        // different allocator; calling pool_free here would corrupt rpmalloc.
+        // different owner; calling pool_free here would release unrelated data.
         if (!ui_mode_) {
             pool_free(pool_, old_elmt->data);
         }

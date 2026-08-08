@@ -189,7 +189,7 @@ TEST_F(MemoryPoolTest, FreeNullPointer) {
 
 TEST_F(MemoryPoolTest, LargeAllocations) {
     // Test various large allocation sizes
-    // Note: rpmalloc heap_free_all has a known hang for allocations >= ~9MB
+    // Keep the regression allocation bounded for fast cross-platform tests.
     // on macOS ARM, so we cap at 8MB to avoid the issue.
     size_t large_sizes[] = {
         1024 * 1024,      // 1MB
@@ -622,7 +622,7 @@ TEST_F(MemoryPoolTest, ReallocEdgeCases) {
     EXPECT_NE(same_ptr, nullptr) << "Realloc with same size should succeed";
     EXPECT_STREQ((char*)same_ptr, "Same size test") << "Data should be preserved with same size realloc";
 
-    // Test large realloc (capped at 8MB to avoid rpmalloc heap_free_all hang)
+    // Test large realloc with a bounded cross-platform allocation.
     void* large_ptr = pool_realloc(pool, same_ptr, 8 * 1024 * 1024); // 8MB
     EXPECT_NE(large_ptr, nullptr) << "Large realloc should succeed";
     EXPECT_EQ(strncmp((char*)large_ptr, "Same size test", 14), 0) << "Data should be preserved in large realloc";
@@ -795,7 +795,7 @@ TEST_F(MemoryPoolTest, DoubleFreeProtection) {
     pool_free(pool, ptr);
 
     // Second free - behavior depends on allocator
-    // rpmalloc may handle this gracefully or it may be undefined
+    // Invalid-owner behavior must remain deterministic across backends.
     // This test documents the expected behavior
     pool_free(pool, ptr);
     // If we get here without crashing, the allocator handled it
@@ -808,7 +808,7 @@ TEST_F(MemoryPoolTest, DoubleFreeProtection) {
 
 TEST_F(MemoryPoolTest, CorruptedPointerHandling) {
     // Test that the pool handles NULL pointer gracefully
-    // Note: With rpmalloc, freeing invalid pointers (non-NULL) causes undefined behavior
+    // Freeing invalid pointers must be rejected without dereferencing them.
     // and crashes, so we only test the safe case (NULL)
 
     // Test freeing NULL (should be safe)

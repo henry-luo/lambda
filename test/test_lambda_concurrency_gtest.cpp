@@ -102,13 +102,16 @@ class LambdaConcurrencyRuntime : public ::testing::Test {
 protected:
     EvalContext eval = {};
     Heap heap = {};
+    Pool* pool = NULL;
     LambdaScheduler* scheduler = NULL;
 
     void SetUp() override {
         concurrency_test_gc = gc_heap_create();
         ASSERT_NE(concurrency_test_gc, nullptr);
         heap.gc = concurrency_test_gc;
-        heap.pool = concurrency_test_gc->pool;
+        pool = mem_pool_create(NULL, MEM_ROLE_RUNTIME_HEAP, "test.concurrency.runtime");
+        ASSERT_NE(pool, nullptr);
+        heap.pool = pool;
         eval.heap = &heap;
         ASSERT_TRUE(eval_context_thread_initialize(&eval));
         err_set_heap_allocator(heap_calloc);
@@ -126,6 +129,8 @@ protected:
         EXPECT_TRUE(eval_context_thread_shutdown(&eval));
         gc_heap_destroy(concurrency_test_gc);
         concurrency_test_gc = NULL;
+        mem_pool_destroy(pool);
+        pool = NULL;
     }
 };
 

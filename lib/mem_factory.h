@@ -6,9 +6,8 @@
  * are owned and tracked by a MemContext (see mem_context.h, vibe/Memory_Context.md).
  *
  * Each factory call creates the underlying allocator, registers a MemNode with
- * the given role/label and the correct backing (parent) edge, and stores the
- * node on the allocator. The matching mem_*_destroy unregisters the node and
- * destroys the allocator.
+ * the given role/label, and stores the node on the allocator. The matching
+ * mem_*_destroy unregisters the node and destroys the allocator.
  *
  * Passing ctx = NULL uses the process-global root context.
  *
@@ -28,13 +27,12 @@ extern "C" {
 
 // ---- Pools ----
 Pool* mem_pool_create(MemContext* ctx, MemRole role, const char* label);
-Pool* mem_pool_create_mmap(MemContext* ctx, MemRole role, const char* label);
 // Unregister + destroy. Safe on NULL and on untracked pools.
 void  mem_pool_destroy(Pool* pool);
 
-// ---- Arenas (backing pool's node becomes the parent edge) ----
-Arena* mem_arena_create(MemContext* ctx, Pool* backing, MemRole role, const char* label);
-Arena* mem_arena_create_sized(MemContext* ctx, Pool* backing,
+// ---- Arenas (direct block owners; no backing Pool) ----
+Arena* mem_arena_create(MemContext* ctx, MemRole role, const char* label);
+Arena* mem_arena_create_sized(MemContext* ctx,
                               size_t initial_chunk_size, size_t max_chunk_size,
                               MemRole role, const char* label);
 void   mem_arena_destroy(Arena* arena);

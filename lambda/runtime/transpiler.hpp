@@ -24,7 +24,7 @@ typedef struct LambdaMapContractCacheEntry {
 } LambdaMapContractCacheEntry;
 
 typedef struct Heap {
-    Pool *pool;  // memory pool alias (points to gc->pool for compatibility)
+    Pool *pool;  // runtime owner group for non-GC semantic allocations
     struct gc_heap *gc;  // GC heap with object tracking (replaces entries ArrayList)
     uint64_t result_root;  // stable GC root slot for the current script result
     // Per-runtime caches for compiler-proven temporary-object regions.  These
@@ -37,7 +37,6 @@ typedef struct Heap {
 } Heap;
 
 void heap_init();
-void heap_init_with_pool(Pool* pool);  // reuse existing pool (batch mode)
 // Emergency recovery only: release the GC/pool generation without invoking
 // object finalizers after a signal interrupted normal runtime execution.
 void heap_discard_unfinalized();
@@ -98,10 +97,6 @@ struct Runtime {
     Heap* heap;
     NamePool* name_pool;
     ArrayList* type_list;
-
-    // Pool reuse for batch mode: when set, heap_init_with_pool() uses this
-    // pool instead of creating a new one. Set by script_runner between files.
-    Pool* reuse_pool;
 
     // Phase 5: unified DOM — when ui_mode is true, elmt()/list_push()/elmt_fill()
     // allocate fat DomElement/DomText on result_arena instead of the GC heap.

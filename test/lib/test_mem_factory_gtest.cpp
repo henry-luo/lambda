@@ -6,9 +6,8 @@
 #include "../../lib/scratch_arena.h"
 #include <string.h>
 
-// Exercises the allocator factory with REAL Pool/Arena allocators: snapshot
-// reflects real sizes, parent edges link arena -> backing pool, and cascade
-// teardown destroys real allocators.
+// Exercises the allocator factory with REAL Pool/Arena allocators: snapshots
+// reflect real sizes and cascade teardown destroys real allocators.
 class MemFactoryTest : public ::testing::Test {
 protected:
     void SetUp() override { mem_context_shutdown(); }
@@ -38,43 +37,29 @@ TEST_F(MemFactoryTest, PoolCreateDestroyRegisters) {
     EXPECT_EQ(mem_context_live_count(root), 0u);
 }
 
-TEST_F(MemFactoryTest, MmapPoolFlagged) {
-    MemContext* root = mem_context_root();
-    Pool* p = mem_pool_create_mmap(root, MEM_ROLE_TEMP, "factory.mmap");
-    ASSERT_NE(p, nullptr);
-    MemSnapshot* snap = mem_snapshot_capture(root);
-    ASSERT_NE(snap, nullptr);
-    ASSERT_EQ(snap->count, 1u);
-    EXPECT_TRUE(snap->samples[0].flags & MEM_FLAG_MMAP);
-    EXPECT_GT(snap->samples[0].bytes_reserved, 0u);  // mmap chunk reserved
-    mem_snapshot_free(snap);
-    mem_pool_destroy(p);
-}
-
-TEST_F(MemFactoryTest, ArenaParentEdgeToPool) {
+TEST_F(MemFactoryTest, ArenaIsIndependentOwner) {
     MemContext* root = mem_context_root();
     Pool* p = mem_pool_create(root, MEM_ROLE_INPUT, "pool");
-    Arena* a = mem_arena_create(root, p, MEM_ROLE_VIEW, "arena");
+    Arena* a = mem_arena_create(root, MEM_ROLE_VIEW, "arena");
     ASSERT_NE(a, nullptr);
 
-    // pool node should now have one child (the arena)
+    // The Pool argument remains a compatibility identity; Arena owns its
+    // blocks directly and is registered as a sibling under the context.
     MemNode* pool_node = (MemNode*)pool_get_mem_node(p);
-    EXPECT_EQ(mem_node_child_count(pool_node), 1u);
+    EXPECT_EQ(mem_node_child_count(pool_node), 0u);
 
     MemSnapshot* snap = mem_snapshot_capture(root);
     ASSERT_NE(snap, nullptr);
     EXPECT_EQ(snap->count, 2u);
     uint32_t pool_id = mem_node_id(pool_node);
     bool arena_linked = false;
-    uint64_t arena_backing = 0;
     uint64_t pool_direct = 0;
     uint64_t pool_live = 0;
     for (uint32_t i = 0; i < snap->count; i++) {
         if (snap->samples[i].kind == MEM_KIND_ARENA) {
-            EXPECT_EQ(snap->samples[i].parent_id, pool_id);
-            EXPECT_GT(snap->samples[i].backing_bytes, 0u);
+            EXPECT_EQ(snap->samples[i].parent_id, 0u);
+            EXPECT_EQ(snap->samples[i].backing_bytes, 0u);
             EXPECT_EQ(snap->samples[i].committed_bytes, ARENA_INITIAL_CHUNK_SIZE);
-            arena_backing = snap->samples[i].backing_bytes;
             arena_linked = true;
         } else if (snap->samples[i].id == pool_id) {
             pool_direct = snap->samples[i].direct_bytes;
@@ -82,10 +67,9 @@ TEST_F(MemFactoryTest, ArenaParentEdgeToPool) {
         }
     }
     EXPECT_TRUE(arena_linked);
-    EXPECT_EQ(pool_live, pool_direct + arena_backing);
-    EXPECT_EQ(snap->physical_total_reserved, snap->samples[0].parent_id == 0 &&
-              snap->samples[0].id == pool_id ? snap->samples[0].bytes_reserved :
-              snap->samples[1].bytes_reserved);
+    EXPECT_EQ(pool_live, pool_direct);
+    EXPECT_EQ(snap->physical_total_reserved,
+              snap->samples[0].bytes_reserved + snap->samples[1].bytes_reserved);
     mem_snapshot_free(snap);
 
     mem_arena_destroy(a);
@@ -98,7 +82,7 @@ TEST_F(MemFactoryTest, CascadeTeardownDestroysRealAllocators) {
     // free both in dependency order (arena before its backing pool).
     MemContext* doc = mem_context_create(nullptr, MEM_ROLE_INPUT, "doc");
     Pool* p = mem_pool_create(doc, MEM_ROLE_INPUT, "doc.pool");
-    Arena* a = mem_arena_create(doc, p, MEM_ROLE_VIEW, "doc.arena");
+    Arena* a = mem_arena_create(doc, MEM_ROLE_VIEW, "doc.arena");
     ASSERT_NE(a, nullptr);
     // use the arena
     void* x = arena_alloc(a, 1024);
@@ -122,7 +106,7 @@ TEST_F(MemFactoryTest, UntrackedPoolDestroyIsSafe) {
 TEST_F(MemFactoryTest, SizedArena) {
     MemContext* root = mem_context_root();
     Pool* p = mem_pool_create(root, MEM_ROLE_INPUT, "pool");
-    Arena* a = mem_arena_create_sized(root, p, 16 * 1024, 64 * 1024,
+    Arena* a = mem_arena_create_sized(root, 16 * 1024, 64 * 1024,
                                       MEM_ROLE_LAYOUT, "sized.arena");
     ASSERT_NE(a, nullptr);
     MemSnapshot* snap = mem_snapshot_capture(root);
@@ -145,7 +129,7 @@ TEST_F(MemFactoryTest, SizedArena) {
 TEST_F(MemFactoryTest, ScratchInitRegistersAndReleaseUnregisters) {
     MemContext* root = mem_context_root();
     Pool* p = mem_pool_create(root, MEM_ROLE_LAYOUT, "pool");
-    Arena* a = mem_arena_create(root, p, MEM_ROLE_LAYOUT, "arena");
+    Arena* a = mem_arena_create(root, MEM_ROLE_LAYOUT, "arena");
     ScratchArena sa;
     mem_scratch_init(root, &sa, a, MEM_ROLE_LAYOUT, "layout.scratch");
     EXPECT_NE(sa.mem_node, nullptr);

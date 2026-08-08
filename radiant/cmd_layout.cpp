@@ -6819,7 +6819,7 @@ static bool layout_single_file(
     // Cleanup: destroy view tree, document, and per-file CSS pool.
     // DomDocument and ViewTree are malloc-allocated with their own internal pools.
     // Failing to free them leaks pools/arenas across batch files, which can cause
-    // rpmalloc heap corruption that manifests as SIGTRAP in system malloc.
+    // grouped-owner corruption that manifests as SIGTRAP in system malloc.
 
     if (event_log || state_dump) {
         state_end_event_cascade(
@@ -6901,7 +6901,7 @@ static bool layout_single_file(
         js_dom_batch_reset();
         js_globals_batch_reset();
 
-        // Drain the mmap pool from JS execution (after js_batch_reset cleared globals).
+        // drain the JS owner group after js_batch_reset cleared its globals.
         script_runner_cleanup_heap();
     }
     lambda_uv_cleanup();
