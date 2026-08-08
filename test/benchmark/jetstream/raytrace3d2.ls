@@ -3,37 +3,30 @@
 // Original: Apple Inc.
 // Type annotations enable MIR JIT Phase 3 direct byte-offset field access
 
-// Type definitions — field order MUST match map literal order in constructors
-// NOTE: locals are deliberately NOT annotated with the named map types below.
-// A declared map type on a `var` here makes the local a fresh COW value root
-// instead of a borrow, so every triangle/light read in the intersect loops deep-
-// copies its map — this file did not finish in 120 s with those annotations and
-// runs in ~85 ms without them. The types stay on PARAMETERS, which are borrows
-// and are worth ~2x here. Field reads go through fn_member either way: the
-// Phase 3 direct-offset path is disabled in transpile-mir.cpp.
+// Type definitions — field order MUST match map literal order in constructors.
 type Triangle = {axis: int, normal: array, nu: float, nv: float, nd: float, eu: float, ev: float, nu1: float, nv1: float, nu2: float, nv2: float, material: array, shader: map?, reflection: float}
 type Scene = {triangles: array, lights: array, ambient: array, background: array, n_lights: int, n_triangles: int}
 type Light = {pos: array, colour: array}
 type Camera = {origin: array, d0: array, d1: array, d2: array, d3: array}
 
 // Vector operations (3-element arrays)
-pn vec3(x: float, y: float, z: float) {
+pn vec3(x: float, y: float, z: float) float[] {
     return [x, y, z]
 }
 
-pn vec_add(v1: float[], v2: float[]) {
+pn vec_add(v1: float[], v2: float[]) float[] {
     return [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]]
 }
 
-pn vec_sub(v1: float[], v2: float[]) {
+pn vec_sub(v1: float[], v2: float[]) float[] {
     return [v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]]
 }
 
-pn vec_scale(v: float[], s: float) {
+pn vec_scale(v: float[], s: float) float[] {
     return [v[0] * s, v[1] * s, v[2] * s]
 }
 
-pn vec_scalev(v1: float[], v2: float[]) {
+pn vec_scalev(v1: float[], v2: float[]) float[] {
     return [v1[0] * v2[0], v1[1] * v2[1], v1[2] * v2[2]]
 }
 
@@ -41,7 +34,7 @@ pn vec_dot(v1: float[], v2: float[]) float {
     return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]
 }
 
-pn vec_cross(v1: float[], v2: float[]) {
+pn vec_cross(v1: float[], v2: float[]) float[] {
     return [v1[1] * v2[2] - v1[2] * v2[1],
             v1[2] * v2[0] - v1[0] * v2[2],
             v1[0] * v2[1] - v1[1] * v2[0]]
@@ -51,19 +44,19 @@ pn vec_length(v: float[]) float {
     return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
 }
 
-pn vec_normalise(v: float[]) {
+pn vec_normalise(v: float[]) float[] {
     var l: float = vec_length(v)
     return [v[0] / l, v[1] / l, v[2] / l]
 }
 
-pn vec_add_inplace(v1: float[], v2: float[]) {
+pn vec_add_inplace(v1: float[], v2: float[]) float[] {
     v1[0] = v1[0] + v2[0]
     v1[1] = v1[1] + v2[1]
     v1[2] = v1[2] + v2[2]
     return v1
 }
 
-pn vec_scale_inplace(v: float[], s: float) {
+pn vec_scale_inplace(v: float[], s: float) float[] {
     v[0] = v[0] * s
     v[1] = v[1] * s
     v[2] = v[2] * s
@@ -71,14 +64,14 @@ pn vec_scale_inplace(v: float[], s: float) {
 }
 
 // Matrix: flat 12-element array (3x4)
-pn transform_matrix(m: float[], v: float[]) {
+pn transform_matrix(m: float[], v: float[]) float[] {
     var x = m[0] * v[0] + m[1] * v[1] + m[2] * v[2] + m[3]
     var y = m[4] * v[0] + m[5] * v[1] + m[6] * v[2] + m[7]
     var z = m[8] * v[0] + m[9] * v[1] + m[10] * v[2] + m[11]
     return [x, y, z]
 }
 
-pn invert_matrix(m: float[]) {
+pn invert_matrix(m: float[]) float[] {
     var temp = fill(16, 0.0)
     var tx = 0.0 - m[3]
     var ty = 0.0 - m[7]
@@ -104,7 +97,7 @@ pn invert_matrix(m: float[]) {
 }
 
 // Triangle: stored as a map with precomputed intersection data
-pn create_triangle(p1: float[], p2: float[], p3: float[]) {
+pn create_triangle(p1: float[], p2: float[], p3: float[]) Triangle {
     var edge1 = vec_sub(p3, p1)
     var edge2 = vec_sub(p2, p1)
     var normal = vec_cross(edge1, edge2)
@@ -134,7 +127,7 @@ pn create_triangle(p1: float[], p2: float[], p3: float[]) {
     var nv = normal[v] / normal[axis]
     var nd = vec_dot(normal, p1) / normal[axis]
     var det = u1 * v2 - v1 * u2
-    var tri = {axis: axis, normal: n_norm, nu: nu, nv: nv, nd: nd,
+    var tri: Triangle = {axis: axis, normal: n_norm, nu: nu, nv: nv, nd: nd,
             eu: p1[u], ev: p1[v],
             nu1: u1 / det, nv1: 0.0 - v1 / det,
             nu2: v2 / det, nv2: 0.0 - u2 / det,
@@ -170,27 +163,27 @@ pn triangle_intersect(tri: Triangle, orig: float[], dir: float[], near: float, f
 }
 
 // Scene: list of triangles, lights, ambient, background
-pn create_scene(triangles) {
-    var sc = {triangles: triangles, lights: fill(0, null),
+pn create_scene(triangles: array) Scene {
+    var sc: Scene = {triangles: triangles, lights: fill(0, null),
             ambient: [0.0, 0.0, 0.0], background: [0.8, 0.8, 1.0],
             n_lights: 0, n_triangles: len(triangles)}
     return sc
 }
 
-pn scene_add_light(scene: Scene, pos: float[], colour: float[]) {
+pn scene_add_light(scene: Scene, pos: float[], colour: float[]) any {
     var idx = scene.n_lights
     // Store as flat array: [x,y,z, r,g,b]
-    var light = {pos: pos, colour: colour}
+    var light: Light = {pos: pos, colour: colour}
     var new_lights = (scene.lights) ++ [light]
     scene.lights = new_lights
     scene.n_lights = idx + 1
 }
 
-pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far: float, depth: int) {
+pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far: float, depth: int) float[] {
     if (depth > 3) {
         return scene.background
     }
-    var closest = null
+    var closest: Triangle? = null
     var i: int = 0
     while (i < scene.n_triangles) {
         var tri = (scene.triangles)[i]
@@ -249,7 +242,7 @@ pn scene_intersect(scene: Scene, origin: float[], dir: float[], near: float, far
 }
 
 // Camera
-pn create_camera(origin: float[], lookat: float[], up: float[]) {
+pn create_camera(origin: float[], lookat: float[], up: float[]) Camera {
     var zaxis = vec_normalise(vec_sub(lookat, origin))
     var xaxis = vec_normalise(vec_cross(up, zaxis))
     var neg_z = [0.0 - zaxis[0], 0.0 - zaxis[1], 0.0 - zaxis[2]]
@@ -277,11 +270,11 @@ pn create_camera(origin: float[], lookat: float[], up: float[]) {
     d1 = transform_matrix(m, d1)
     d2 = transform_matrix(m, d2)
     d3 = transform_matrix(m, d3)
-    var cam = {origin: origin, d0: d0, d1: d1, d2: d2, d3: d3}
+    var cam: Camera = {origin: origin, d0: d0, d1: d1, d2: d2, d3: d3}
     return cam
 }
 
-pn render_scene(camera: Camera, scene: Scene, size: int) {
+pn render_scene(camera: Camera, scene: Scene, size: int) int {
     var pixel_count = 0
     var y: int = 0
     while (y < size) {
@@ -302,7 +295,7 @@ pn render_scene(camera: Camera, scene: Scene, size: int) {
     return pixel_count
 }
 
-pn raytrace_scene() {
+pn raytrace_scene() int {
     // Build scene: a cube (12 triangles) + floor (2 triangles)
     var tfl = vec3(-10.0, 10.0, -10.0)
     var tfr = vec3(10.0, 10.0, -10.0)

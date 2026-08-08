@@ -6,9 +6,7 @@
 
 pn benchmark() int {
     let size: int = 10000
-    // no int[] annotation on the local: fill(n, int) is already inferred as a
-    // packed ArrayNum, and the bracket annotation would re-tag the var as ANY
-    var arr = fill(size, 0)
+    var arr: int[] = fill(size, 0)
 
     // Fill with index values
     var i: int = 0

@@ -5,7 +5,7 @@
 
 let PI2 = 6.28318530717959
 
-pn four1(data: float[], n: int) {
+pn four1(data: float[], n: int) any {
     // Bit-reversal section
     var i: int = 0
     var j: int = 0
@@ -61,7 +61,7 @@ pn four1(data: float[], n: int) {
     }
 }
 
-pn benchmark() {
+pn benchmark() float {
     var data:float[] = fill(4096, 0.0)
     four1(data, 4096)
     var result = data[0]

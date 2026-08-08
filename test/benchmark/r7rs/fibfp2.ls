@@ -2,14 +2,14 @@
 // Fibonacci using floating-point arithmetic - fibfp(27.0) = 196418.0
 // Adapted from r7rs-benchmarks/src/fibfp.scm (scaled down for Lambda JIT)
 
-pn fibfp(n: float) {
+pn fibfp(n: float) float {
     if (n < 2.0) {
         return n
     }
     return fibfp(n - 1.0) + fibfp(n - 2.0)
 }
 
-pn benchmark() {
+pn benchmark() float {
     var result: float = fibfp(27.0)
     return result
 }

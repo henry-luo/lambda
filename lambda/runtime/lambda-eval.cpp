@@ -6763,6 +6763,12 @@ static bool runtime_array_representation_matches_contract(Item value,
     switch (desc->kind) {
     case LANE_STORAGE_INT:
         return value.array_num->get_elem_type() == ELEM_INT;
+    case LANE_STORAGE_BOOL:
+        // bool[] uses the non-nullable packed byte lane just like int[] and
+        // float[] use their legacy ArrayNum lanes. Omitting this proof sent a
+        // valid bool store through the post-write validator, which treated the
+        // still-correct ArrayNum carrier as an untyped array contract failure.
+        return value.array_num->get_elem_type() == ELEM_BOOL;
     case LANE_STORAGE_FLOAT64:
         return value.array_num->get_elem_type() == ELEM_FLOAT64;
     default:
@@ -6971,6 +6977,11 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
                 convert_specialized_to_generic(arr);
                 array_set(arr, index, value);
             }
+        } else if (etype == ELEM_BOOL) {
+            // Keep the packed boolean carrier on the checked fallback path;
+            // widening it to a generic Array made a valid bool[] parameter
+            // fail its representation proof after one mutation.
+            array_num_set_item(num_arr, index, value);
         } else {
             // ELEM_INT -- v5: an i64 LANE array. The whole int domain fits,
             // poison included, because poison rides as a lane sentinel.
@@ -7530,6 +7541,8 @@ typedef struct CowProfileCounters {
     uint64_t vmap_rejections;
     uint64_t mutable_value_calls;
     uint64_t map_admit_calls;
+    uint64_t map_admit_relation_cache_hits;
+    uint64_t map_admit_relation_cache_misses;
     uint64_t map_admit_exact_shape_hits;
     uint64_t map_admit_storage_compatible_hits;
     uint64_t map_admit_readonly_validations;
@@ -7663,6 +7676,10 @@ void cow_profile_dump(void) {
     strbuf_append_uint64(output, g_cow_profile.mutable_value_calls);
     strbuf_append_str(output, "\nmap_admit_calls\t");
     strbuf_append_uint64(output, g_cow_profile.map_admit_calls);
+    strbuf_append_str(output, "\nmap_admit_relation_cache_hits\t");
+    strbuf_append_uint64(output, g_cow_profile.map_admit_relation_cache_hits);
+    strbuf_append_str(output, "\nmap_admit_relation_cache_misses\t");
+    strbuf_append_uint64(output, g_cow_profile.map_admit_relation_cache_misses);
     strbuf_append_str(output, "\nmap_admit_exact_shape_hits\t");
     strbuf_append_uint64(output, g_cow_profile.map_admit_exact_shape_hits);
     strbuf_append_str(output, "\nmap_admit_storage_compatible_hits\t");
@@ -8787,6 +8804,32 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     return true;
 }
 
+static MapContractRelation runtime_map_contract_relation_cached(
+        const TypeMap* candidate, const TypeMap* expected) {
+    if (!candidate || !expected) return MAP_CONTRACT_INCOMPATIBLE;
+    Heap* heap = context ? context->heap : NULL;
+    if (!heap) return lambda_map_contract_relation(candidate, expected);
+
+    for (uint32_t i = 0; i < LAMBDA_MAP_CONTRACT_CACHE_CAPACITY; i++) {
+        LambdaMapContractCacheEntry* entry = &heap->map_contract_cache[i];
+        if (entry->candidate == candidate && entry->expected == expected) {
+            if (cow_profile_enabled()) {
+                g_cow_profile.map_admit_relation_cache_hits++;
+            }
+            return (MapContractRelation)entry->relation;
+        }
+    }
+
+    if (cow_profile_enabled()) g_cow_profile.map_admit_relation_cache_misses++;
+    MapContractRelation relation = lambda_map_contract_relation(candidate, expected);
+    uint32_t slot = heap->map_contract_cache_next++ %
+        LAMBDA_MAP_CONTRACT_CACHE_CAPACITY;
+    heap->map_contract_cache[slot].candidate = candidate;
+    heap->map_contract_cache[slot].expected = expected;
+    heap->map_contract_cache[slot].relation = (uint8_t)relation;
+    return relation;
+}
+
 static bool runtime_type_admit_value(Item value, Type* expected, Item* converted) {
     if (!converted) return false;
     expected = runtime_boundary_unwrap_type(expected);
@@ -8826,8 +8869,8 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
         TypeMap* expected_map = (TypeMap*)expected;
         TypeMap* candidate_map = value.map ? (TypeMap*)value.map->type : NULL;
         if (candidate_map && typemap_ptr_is_plausible(candidate_map)) {
-            MapContractRelation relation = lambda_map_contract_relation(candidate_map,
-                expected_map);
+            MapContractRelation relation = runtime_map_contract_relation_cached(
+                candidate_map, expected_map);
             if (relation == MAP_CONTRACT_EXACT_TRUSTED) {
                 if (cow_profile_enabled()) g_cow_profile.map_admit_exact_shape_hits++;
                 *converted = value;

@@ -11,15 +11,10 @@ let IC = 29573
 
 let ALU = "GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGGGAGGCCGAGGCGGGCGGATCACCTGAGGTCAGGAGTTCGAGACCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCAGCTACTCGGGAGGCTGAGGCAGGAGAATCGCTTGAACCCGGGAGGCGGAGGTTGCAGTGAGCCGAGATCGCGCCACTGCACTCCAGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA"
 
-// NOTE: locals initialised from a len() expression are left unannotated — a
-// declared `int` there currently miscompiles in the MIR JIT and corrupts later
-// string concatenation (repro: temp/repro_declared_int_len_concat.ls).
-// `string` return types are also avoided: they segfault the JIT once the result
-// spans a GC (repro: temp/repro_string_return_segv.ls).
 // repeat ALU sequence, outputting width chars per line
-pn repeat_fasta(id: string, desc: string, src: string, count: int) {
+pn repeat_fasta(id: string, desc: string, src: string, count: int) any {
     print(">" ++ id ++ " " ++ desc ++ "\n")
-    var src_len = len(src)
+    var src_len: int = len(src)
     var pos: int = 0
 
     while (count > 0) {
@@ -32,10 +27,8 @@ pn repeat_fasta(id: string, desc: string, src: string, count: int) {
         var line: string = ""
         var written: int = 0
         while (written < line_len) {
-        // chunk_len/avail derive from len(src) (int64), so they stay unannotated:
-        // a declared `int` there silently narrows an int64 in the MIR JIT
-            var chunk_len = line_len - written
-            var avail = src_len - pos
+            var chunk_len: int = line_len - written
+            var avail: int = src_len - pos
             if (chunk_len > avail) {
                 chunk_len = avail
             }
@@ -62,8 +55,8 @@ let HS_CHARS = ["a", "c", "g", "t"]
 let HS_PROBS = [0.3029549426680, 0.1979883004921, 0.1975473066391, 0.3015094502008]
 
 // build cumulative probability table
-pn make_cumulative(probs: float[]) {
-    var cum = fill(len(probs), 0.0)
+pn make_cumulative(probs: float[]) float[] {
+    var cum: float[] = fill(len(probs), 0.0)
     var total: float = 0.0
     var i: int = 0
     while (i < len(probs)) {
@@ -79,7 +72,7 @@ pn random_fasta(id: string, desc: string, chars, probs: float[],
                 count: int, var seed_arr: int[]) {
     print(">" ++ id ++ " " ++ desc ++ "\n")
     var cum = make_cumulative(probs)
-    var num_chars = len(chars)
+    var num_chars: int = len(chars)
 
     while (count > 0) {
         var line_len: int = LINE_WIDTH

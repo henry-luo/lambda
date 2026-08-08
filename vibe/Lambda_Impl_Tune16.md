@@ -1,11 +1,11 @@
 # Tune 16: Result25 Analysis, Typed-Source Audit, and the Next Typed Round
 
-- **Date:** 2026-08-07
+- **Date:** 2026-08-08
 - **Input:** `test/benchmark/Overall_Result25.md` (Lambda commit `acb46fb4d`, archived binary
   `test/benchmark/exe/lambda-v25-812ddaef0b`), `test/benchmark/Overall_Result24.md`,
   `vibe/Lambda_Impl_Tune15.md` (§8 implementation record), full typed-source audit of all
   55 `test/benchmark/*/[name]2.ls` files (§3, 2026-08-07)
-- **Status:** PROPOSAL — analysis and typed-source audit complete; no implementation started
+- **Status:** IMPLEMENTED — C0–C7 code, source repair, regression coverage, and verification gates complete; measured target status is recorded in §6
 - **Related:** `vibe/Lambda_Impl_Tune15.md`, `vibe/Lambda_Impl_Tune14 (done).md`,
   `vibe/Lambda_Tune_Typed_Vs_C2MIR.md`, `vibe/Lambda_Design_Name_Identity.md`,
   `vibe/Lambda_Design_Type_Enforcement.md`, `vibe/Lambda_Impl_Tune13.md` (R22 typed-store
@@ -155,10 +155,10 @@ took small annotation edits in the window.
 
 ## 2. Attribution: what the deltas prove
 
-No fresh profiles were taken for this proposal; the v24 `temp/prof15/` samples, the v24→v25
-row deltas, and the §3 source audit support the following. **Each C-track re-profiles the
-v25 binary before coding** (the spectralnorm delta proves the v24 attributions are
-partially stale).
+The proposal began from the v24 `temp/prof15/` samples, the v24→v25 row deltas, and the §3
+source audit. The retained implementation re-profiled the release binary before each
+performance-sensitive slice; the final measured evidence is recorded in §6 (the
+spectralnorm delta was the warning that the v24 attributions were partially stale).
 
 1. **sha1 unchanged ⇒ its ~50% admit share is not conversions.** B1.2 lowered
    `int()`/`float()` on proved operands; sha1 didn't move. Per §3 the word-schedule arrays
@@ -299,7 +299,7 @@ untyped comparison is polluted too. **No Tune16 acceptance number is trustworthy
 sources are repaired — and the sources cannot be repaired until D-a/D-b/D-e (at minimum)
 are fixed.** The compiler fixes are the perf fixes.
 
-## 4. Proposed tracks (ranked)
+## 4. Implementation tracks (proposal map, ranked)
 
 ### C0 — Annotation repair: make annotations safe, then apply them (prerequisite)
 
@@ -436,3 +436,74 @@ inference must reach the same representation** [D3.2.1]. Target: untyped/Node ge
 Round target: on repaired sources — typed/Node geo **≤1.0x**; typed/C2MIR **≤4.5x** on
 the 47-row matched set; untyped/Node **≤1.8x**; the annotation ledger cleared; D-a–D-f
 closed with tests.
+
+## 6. Implementation record (2026-08-08)
+
+Tune16 is implemented as a compiler/runtime and corpus-repair round. The implementation
+follows the normative rulings in `doc/Lambda_Formal_Semantics.md` S4.1 and S4.5.3 and
+`doc/Lambda_Formal_Design.md` D2.2.2, D2.4, D3.2.1–D3.2.2, D3.3.1–D3.3.3, D5.2–D5.3,
+D8.3.2–D8.3.3, D8.4.1, and D8.6.1–D8.6.3.
+
+### 6.1 Landed tracks
+
+- **C0:** preserved inferred packed witnesses across declared array boundaries; added the
+  packed `bool[]` byte lane; repaired string-return GC rooting, `len()`-derived int-lane
+  propagation, and the dropped sole-member-assignment case; repaired the 55 typed source
+  variants with return/record/container annotations and removed the 49 assignment dummies.
+- **C1:** added proved int/float/bool ArrayNum stores, unique/in-place publication, checked
+  fallback, post-COW cache rebinding, dense-loop bounds proofs, and heterogeneous-store
+  conflict tracking. A write-only inferred array parameter now remains boxed unless all
+  call-site and store evidence agrees.
+- **C2:** added native MIR lowering for proved integer bitwise operations, shifts, unsigned
+  32-bit operations, and the existing wrapped-int lane, with negative/oversized shift
+  guards and native-emission fixtures.
+- **C3:** re-enabled fixed-shape scalar field reads and retained the uniqueness-guarded
+  direct field-write path; typed map construction now publishes packed fields directly.
+- **C4:** fixed open typed-array caller admission so witness-bearing raw edges do not
+  silently demote to boxed wrappers; added the TypeMap relation cache and open-witness
+  `mir-check` coverage. The final raytrace profile records 362,664 relation-cache hits
+  from 362,840 admissions, with 176 misses and zero copied bytes.
+- **C5:** flattened nested loop-carried string joins, added the ASCII indexed-string
+  helper, and covered both MIR emission and GC-spanning string-return cases.
+- **C6:** added the post-annotation regression fixtures for fixed records, native bitwise
+  code, float stores, string builders, and ASCII indexing.
+- **C7:** generalized call-site element inference and reused typed-array specialization
+  for unannotated homogeneous locals and parameters, including caller write-back and
+  recursive/mutable procedure cases.
+- **Acceptance repair:** await-rejection completion now routes through `finally` when
+  present and through the function-level exceptional exit otherwise; this preserves the
+  pending-exception invariant across async-function and async-generator resumes. The
+  focused 15-case Test262 cluster that exposed the defect passes after the repair.
+
+### 6.2 Verification gates
+
+The final release/debug verification completed with:
+
+- `make test-lambda-baseline`: **3,651/3,651** — input 2,104/2,104, Lambda runtime
+  1,547/1,547, MIR emission 34/34, ratchet 15/15, forced-GC 49/49, and JS 324/324.
+- `make test262-baseline`: **40,261/40,261**, 0 failures, 0 retries, and 0 regressions;
+  the verified Test262 commit remained `673e9bacbe28590f501e2dcd817aadcc31899191`.
+- Fresh release benchmark matrix: all **56 workload rows** completed with `OK` status;
+  three-run workload medians were used for the headline ratios. A native
+  `/usr/bin/sample` snapshot was also captured for the release Richards workload.
+- Tune16 MIR fixtures: **7/7** focused fixtures pass, and the full MIR emission suite is
+  **34/34**. All newly added Lambda scripts have checked-in expected `.txt` results.
+
+### 6.3 Measured target status
+
+The implementation is complete, but the original performance aspirations are not all
+achieved by the repaired corpus. On the fresh 56-row release matrix:
+
+| Metric | Measured | Target | Status |
+|---|---:|---:|---|
+| MIR untyped / Node geomean | 2.295x | ≤1.8x | not met |
+| MIR typed / Node geomean | 1.252x | ≤1.0x | not met |
+| MIR typed / C2MIR geomean, 44 matched rows | 5.832x | ≤4.5x | not met |
+| typed rows >5% slower than untyped | 12 / 56 | 0 | not met |
+| raytrace3d typed workload | 71.9 ms median of 3 final release runs | ≤159 ms | met |
+
+The residual gap is therefore recorded rather than hidden: the largest typed/Node residues
+are nbody, crypto-sha1, cd, splay, navier-stokes, and raytrace3d, while base64 and the
+Text-family workloads remain dominated by boxed string/binary lanes. These are follow-up
+optimization targets, not unimplemented Tune16 mechanisms; C2MIR remains frozen as required
+by D8.4.1 and the repository agent rules.

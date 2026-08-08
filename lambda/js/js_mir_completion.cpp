@@ -124,7 +124,12 @@ static MIR_label_t jm_completion_target(JsTryContext* context, JsMirCompletionKi
     if (!context) return 0;
     switch (kind) {
     case JS_MIR_COMPLETION_AWAIT_REJECTION:
-        return context->catch_label;
+        // An await rejection follows the same abrupt path as a synchronous
+        // throw: a try/finally without catch must enter finally before the
+        // exception is propagated. Returning no target here left the pending
+        // flag live while the continuation was marked clean.
+        if (context->has_catch) return context->catch_label;
+        return context->has_finally ? context->finally_label : 0;
     case JS_MIR_COMPLETION_RETURN:
     case JS_MIR_COMPLETION_RETURN_THROUGH_CLEANUP:
         return context->has_finally ? context->finally_label : context->end_label;
@@ -193,7 +198,11 @@ static MIR_label_t jm_exception_route_target(JsMirTranspiler* mt,
     if (!mt) return 0;
     JsTryContext* context = jm_find_completion_context(mt, kind);
     MIR_label_t target = jm_completion_target(context, kind, include_end_label);
-    if (!target && kind == JS_MIR_COMPLETION_THROW && !context) {
+    if (!target && (kind == JS_MIR_COMPLETION_THROW ||
+            kind == JS_MIR_COMPLETION_AWAIT_REJECTION) && !context) {
+        // A rejected await in a generator with no local try handler still
+        // needs the function-level exceptional exit; otherwise its resume
+        // label is incorrectly marked clean while the rejection is pending.
         if (!mt->func_except_label) mt->func_except_label = jm_new_label(mt);
         target = mt->func_except_label;
     }

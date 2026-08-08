@@ -9,7 +9,7 @@
       "description": "Caller-donated scalar home, including the reviewed Phase 3 clean-return firewall on the raw function. v5 re-baseline: i64 int arithmetic emits an overflow-aware multiply and band admission before boxing.",
       "budgets": {
         "default": {
-          "module_insns": 208,
+          "module_insns": 212,
           "functions": {
             "_twice_#": {
               "insns": 65
@@ -47,10 +47,10 @@
       "description": "Tail-home forwarding, including the recursive body's root reservation, its reviewed Phase 3 clean-return firewall, and v5 i64 int arithmetic admission.",
       "budgets": {
         "default": {
-          "module_insns": 229,
+          "module_insns": 224,
           "functions": {
             "_accumulate_#": {
-              "insns": 119
+              "insns": 106
             },
             "main": {
               "insns": 45
@@ -60,7 +60,7 @@
             {
               "name": "_accumulate_#",
               "occurrence": 0,
-              "roots": 6,
+              "roots": 7,
               "root_stores": 0,
               "scalar_homes": 1,
               "number_scratch": 0,
@@ -172,7 +172,7 @@
       "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls.",
       "budgets": {
         "default": {
-          "module_insns": 2281
+          "module_insns": 2425
         }
       }
     },
@@ -238,19 +238,19 @@
       "description": "Typed numeric-array load guards plus the Tune13 in-place procedure-parameter write guard and checked representation fallback. v5 re-baseline: native int values use the i64 lane and each arithmetic site admits its result to the int53 band. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument.",
       "budgets": {
         "default": {
-          "module_insns": 1106,
+          "module_insns": 1177,
           "functions": {
             "_guarded_load_#": {
-              "insns": 81
+              "insns": 83
             },
             "_guarded_store_#": {
-              "insns": 157
+              "insns": 165
             }
           },
           "frames": [
             {
               "name": "_guarded_load_#",
-              "roots": 3,
+              "roots": 4,
               "root_stores": 0,
               "scalar_homes": 0,
               "number_scratch": 0,
@@ -258,7 +258,7 @@
             },
             {
               "name": "_guarded_store_#",
-              "roots": 5,
+              "roots": 7,
               "root_stores": 0,
               "scalar_homes": 1,
               "number_scratch": 0,
@@ -275,7 +275,7 @@
       "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail, v5 i64 int admission, and reviewed Phase 3 return-firewall growth. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument.",
       "budgets": {
         "default": {
-          "module_insns": 550,
+          "module_insns": 584,
           "functions": {
             "_closed_gap_#": {
               "insns": 63

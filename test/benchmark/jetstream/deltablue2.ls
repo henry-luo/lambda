@@ -5,7 +5,7 @@
 // Type annotations enable MIR JIT Phase 3 direct byte-offset field access
 
 // Type definitions — field order MUST match map literal order in constructors
-type Variable = {value: int, constraints: array, det_by: int, mark: int, walk_str: int, stay: int, name: string}
+type Variable = {value: int, constraints: array, det_by: int, mark: int, walk_str: int, stay: bool, name: string}
 type Constraint = {kind: int, strength: int, direction: int, v1: int, v2: int, scale: int, offset: int, satisfied: bool}
 type Planner = {current_mark: int, vars: array, constraints: array, nv: int, nc: int}
 
@@ -40,9 +40,9 @@ pn weakest_of(s1: int, s2: int) int {
 
 // --- Variable ---
 // { value, constraints (array of constraint indices), determined_by, mark, walk_strength, stay, name }
-pn create_variable(name: string, initial_value: int) {
+pn create_variable(name: string, initial_value: int) any {
     var v: Variable = {value: initial_value, constraints: fill(0, 0), det_by: -1,
-            mark: 0, walk_str: WEAKEST, stay: 1, name: name}
+            mark: 0, walk_str: WEAKEST, stay: true, name: name}
     return v
 }
 
@@ -55,20 +55,20 @@ let C_EDIT  = 1
 let C_EQUAL = 2
 let C_SCALE = 3
 
-pn create_constraint(kind: int, strength: int, v1: int, v2: int, scale: int, offset: int) {
+pn create_constraint(kind: int, strength: int, v1: int, v2: int, scale: int, offset: int) any {
     var c: Constraint = {kind: kind, strength: strength, direction: NONE,
             v1: v1, v2: v2, scale: scale, offset: offset, satisfied: false}
     return c
 }
 
 // Planner globals stored in a state map
-pn create_planner() {
+pn create_planner() any {
     var p: Planner = {current_mark: 0, vars: fill(0, null), constraints: fill(0, null),
             nv: 0, nc: 0}
     return p
 }
 
-pn planner_add_var(p: Planner, name: string, value: int) {
+pn planner_add_var(p: Planner, name: string, value: int) any {
     var idx = p.nv
     var v: Variable = create_variable(name, value)
     var p_vars = p.vars
@@ -77,7 +77,7 @@ pn planner_add_var(p: Planner, name: string, value: int) {
     return idx
 }
 
-pn planner_add_constraint(p: Planner, kind: int, strength: int, v1: int, v2: int, scale: int, offset: int) {
+pn planner_add_constraint(p: Planner, kind: int, strength: int, v1: int, v2: int, scale: int, offset: int) any {
     var idx = p.nc
     var c: Constraint = create_constraint(kind, strength, v1, v2, scale, offset)
     var p_constraints = p.constraints
@@ -99,7 +99,7 @@ pn planner_add_constraint(p: Planner, kind: int, strength: int, v1: int, v2: int
 }
 
 // Constraint operations
-pn constraint_input(p: Planner, ci: int) {
+pn constraint_input(p: Planner, ci: int) any {
     var c: Constraint = (p.constraints)[ci]
     // Unary (stay/edit): no input, return -1
     if (c.kind == C_STAY) { return -1 }
@@ -111,7 +111,7 @@ pn constraint_input(p: Planner, ci: int) {
     return c.v2
 }
 
-pn constraint_output(p: Planner, ci: int) {
+pn constraint_output(p: Planner, ci: int) any {
     var c: Constraint = (p.constraints)[ci]
     // Unary (stay/edit): output is always v1
     if (c.kind == C_STAY) { return c.v1 }
@@ -131,7 +131,7 @@ pn constraint_is_input(p: Planner, ci: int, vi: int) bool {
     return vi == c.v2
 }
 
-pn constraint_execute(p: Planner, ci: int) {
+pn constraint_execute(p: Planner, ci: int) any {
     var c: Constraint = (p.constraints)[ci]
     if (c.kind == C_STAY) {
         return 0
@@ -160,17 +160,17 @@ pn constraint_execute(p: Planner, ci: int) {
     return 0
 }
 
-pn constraint_recalc(p: Planner, ci: int) {
+pn constraint_recalc(p: Planner, ci: int) any {
     var out_idx = constraint_output(p, ci)
     var out_var: Variable = (p.vars)[out_idx]
     out_var.walk_str = (p.constraints)[ci].strength
     out_var.stay = (p.constraints)[ci].kind != C_EDIT
-    if (out_var.stay == 1) {
+    if (out_var.stay == true) {
         constraint_execute(p, ci)
     }
 }
 
-pn constraint_choose_method(p: Planner, ci: int, mark: int) {
+pn constraint_choose_method(p: Planner, ci: int, mark: int) any {
     var c: Constraint = (p.constraints)[ci]
     if (c.kind == C_STAY) {
         // unary: only output is v1
@@ -239,7 +239,7 @@ pn constraint_choose_method(p: Planner, ci: int, mark: int) {
     return 0
 }
 
-pn incremental_add(p: Planner, ci: int) {
+pn incremental_add(p: Planner, ci: int) any {
     p.current_mark = p.current_mark + 1
     var mark = p.current_mark
     constraint_choose_method(p, ci, mark)
@@ -266,7 +266,7 @@ pn incremental_add(p: Planner, ci: int) {
     return 0
 }
 
-pn incremental_remove(p: Planner, ci: int) {
+pn incremental_remove(p: Planner, ci: int) any {
     var c: Constraint = (p.constraints)[ci]
     if (c.satisfied == false) {
         return 0
@@ -279,12 +279,12 @@ pn incremental_remove(p: Planner, ci: int) {
     var out_var: Variable = (p.vars)[out_idx]
     out_var.det_by = -1
     out_var.walk_str = WEAKEST
-    out_var.stay = 1
+    out_var.stay = true
     return 0
 }
 
 // --- Chain test ---
-pn chain_test(n: int) {
+pn chain_test(n: int) any {
     var p: Planner = create_planner()
     // Allocate large enough arrays
     p.vars = fill(n + 10, null)
@@ -337,7 +337,7 @@ pn chain_test(n: int) {
 }
 
 // --- Projection test ---
-pn projection_test(n: int) {
+pn projection_test(n: int) any {
     var p: Planner = create_planner()
     p.vars = fill(n * 4 + 10, null)
     p.constraints = fill(n * 8 + 10, null)
@@ -380,7 +380,7 @@ pn projection_test(n: int) {
     return dst_idx
 }
 
-pn benchmark() {
+pn benchmark() any {
     chain_test(100)
     projection_test(100)
     return 0

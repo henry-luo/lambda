@@ -27,7 +27,7 @@ pn compute_hash(key: int) int {
     return h
 }
 
-pn hashmap_new(capacity: int) {
+pn hashmap_new(capacity: int) HashMap {
     var cap = DEFAULT_CAPACITY
     if (capacity > cap) {
         // round up to power of 2
@@ -49,7 +49,7 @@ pn find_free_slot(hm: HashMap) int {
     return hm.size
 }
 
-pn hashmap_put(hm: HashMap, key: int, value: int) {
+pn hashmap_put(hm: HashMap, key: int, value: int) int {
     var hash: int = compute_hash(key)
     var bucket: int = hash % hm.cap
     var hm_keys = hm.keys
@@ -83,7 +83,7 @@ pn hashmap_put(hm: HashMap, key: int, value: int) {
     return EMPTY
 }
 
-pn hashmap_rehash(hm: HashMap) {
+pn hashmap_rehash(hm: HashMap) any {
     var old_cap = hm.cap
     var new_cap = old_cap * 2
     var new_heads = fill(new_cap, EMPTY)
@@ -146,7 +146,7 @@ pn hashmap_get(hm: HashMap, key: int) int {
     return EMPTY
 }
 
-pn run() {
+pn run() bool {
     let COUNT = 90000
     var hm: HashMap = hashmap_new(COUNT * 2)
     // Pre-allocate arrays large enough

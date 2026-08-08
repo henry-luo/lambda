@@ -4,7 +4,7 @@
 // Classifies 100000 test points against a 20-vertex polygon
 // Expected: 50000 (test points are generated on a grid, half inside)
 
-pn pnpoly(xs: float[], ys: float[], n: int, testx: float, testy: float) {
+pn pnpoly(xs: float[], ys: float[], n: int, testx: float, testy: float) bool {
     var inside = false
     var j: int = n - 1
     var i: int = 0
@@ -30,14 +30,12 @@ pn pnpoly(xs: float[], ys: float[], n: int, testx: float, testy: float) {
 }
 
 pn benchmark() int {
-    // Standard Larceny polygon (20 vertices, irregular shape)
-    // float literal arrays already infer a packed ArrayNum; a float[] annotation
-    // on the local would re-tag the var as ANY and lose the direct-index path
-    var xs = [0.0, 1.0, 1.0, 0.0, 0.0,
+    // standard Larceny polygon (20 vertices, irregular shape)
+    var xs: float[] = [0.0, 1.0, 1.0, 0.0, 0.0,
               1.0, -0.5, -1.0, -1.0, -2.0,
               -2.5, -2.0, -1.5, -0.5, 0.5,
               1.0, 0.5, 0.0, -0.5, -1.0]
-    var ys = [0.0, 0.0, 1.0, 1.0, 2.0,
+    var ys: float[] = [0.0, 0.0, 1.0, 1.0, 2.0,
               3.0, 2.0, 3.0, 0.0, -0.5,
               0.5, 1.5, 2.0, 3.0, 3.0,
               2.0, 1.0, 0.5, -1.0, -1.0]

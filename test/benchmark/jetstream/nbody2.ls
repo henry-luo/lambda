@@ -11,10 +11,7 @@ let DAYS_PER_YEAR = 365.24
 // Bodies stored as SoA (struct-of-arrays) for 5 bodies:
 // 0=Sun, 1=Jupiter, 2=Saturn, 3=Uranus, 4=Neptune
 
-// The float[] annotations on the run_nbody_system locals are dropped: a float
-// literal array already infers a packed ArrayNum, and the bracket annotation
-// re-tags the var as ANY, losing the direct-index path on every body access
-pn offset_momentum(bvx: float[], bvy: float[], bvz: float[], bmass: float[]) {
+pn offset_momentum(bvx: float[], bvy: float[], bvz: float[], bmass: float[]) any {
     var px: float = 0.0
     var py: float = 0.0
     var pz: float = 0.0
@@ -64,7 +61,7 @@ pn advance(bx: float[], by: float[], bz: float[],
 
 pn energy(bx: float[], by: float[], bz: float[],
           bvx: float[], bvy: float[], bvz: float[],
-          bmass: float[]) {
+          bmass: float[]) float {
     var e: float = 0.0
     var i: int = 0
     while (i < 5) {
@@ -83,7 +80,7 @@ pn energy(bx: float[], by: float[], bz: float[],
     return e
 }
 
-pn run_nbody_system(n_steps: int) {
+pn run_nbody_system(n_steps: int) float {
     var bx = [0.0, 4.84143144246472090e+00, 8.34336671824457987e+00,
                         1.28943695621391310e+01, 1.53796971148509165e+01]
     var by = [0.0, -1.16032004402742839e+00, 4.12479856412430479e+00,
@@ -119,7 +116,7 @@ pn run_nbody_system(n_steps: int) {
     return ret
 }
 
-pn run() {
+pn run() float {
     var ret: float = 0.0
     var n: int = 3
     while (n <= 24) {

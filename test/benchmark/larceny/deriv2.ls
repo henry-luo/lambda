@@ -9,7 +9,7 @@
 // Unified shape: all nodes carry t, v, l, r (leaves set l/r to null)
 type Expr = {t: int, v: int, l: map?, r: map?}
 
-pn deriv(e: Expr) {
+pn deriv(e: Expr) any {
     if (e.t == 0) {
         var r: Expr = {t: 0, v: 0, l: null, r: null}
         return r
@@ -33,14 +33,14 @@ pn deriv(e: Expr) {
     return r
 }
 
-pn count_nodes(e: Expr) {
+pn count_nodes(e: Expr) int {
     if (e.t == 0 or e.t == 1) {
         return 1
     }
     return 1 + count_nodes(e.l) + count_nodes(e.r)
 }
 
-pn make_expr() {
+pn make_expr() Expr {
     // 3*x*x*x + 2*x*x + x + 5
     var c3: Expr = {t: 0, v: 3, l: null, r: null}
     var c2: Expr = {t: 0, v: 2, l: null, r: null}
@@ -62,7 +62,7 @@ pn make_expr() {
     return a3
 }
 
-pn benchmark() {
+pn benchmark() int {
     var result = 0
     var iter = 0
     while (iter < 5000) {

@@ -6,14 +6,9 @@
 let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
 let LINE_WIDTH = 60
 
-// NOTE: locals initialised from a len() expression are left unannotated — a
-// declared `int` there currently miscompiles in the MIR JIT and corrupts later
-// string concatenation (repro: temp/repro_declared_int_len_concat.ls).
-// `string` return types are also avoided: they segfault the JIT once the result
-// spans a GC (repro: temp/repro_string_return_segv.ls).
 // complement mapping using two-pass swap to avoid overwriting
 // handles IUPAC codes: A<->T, C<->G, M<->K, R<->Y, V<->B, H<->D, W<->W, S<->S, N<->N
-pn complement(seq: string) {
+pn complement(seq: string) string {
     var s: string = upper(seq)
     // first pass: replace one side of each pair with temp digits
     s = replace(s, "A", "1")
@@ -39,7 +34,7 @@ pn complement(seq: string) {
     return s
 }
 
-pn output_reverse_complement(header: string, seq: string) {
+pn output_reverse_complement(header: string, seq: string) any {
     print(header ++ "\n")
     var comp: string = complement(seq)
     // fn_reverse() returns text unchanged — strings are singular and not iterable in
@@ -47,15 +42,15 @@ pn output_reverse_complement(header: string, seq: string) {
     // call reverse(comp) and print the COMPLEMENT ONLY, which is not the benchmark.
     // The reversal is done explicitly here, one output line at a time, so the string
     // concatenation stays bounded by LINE_WIDTH instead of the whole sequence.
-    var total = len(comp)
+    var total: int = len(comp)
     var pos: int = 0
     while (pos < total) {
-        var end_pos = pos + LINE_WIDTH
+        var end_pos: int = pos + LINE_WIDTH
         if (end_pos > total) {
             end_pos = total
         }
         var line: string = ""
-        var k = pos
+        var k: int = pos
         while (k < end_pos) {
             line = line ++ comp[total - 1 - k]
             k = k + 1

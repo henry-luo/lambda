@@ -5,13 +5,8 @@
 
 let N = 100
 
-// NOTE: no `string` return-type annotation on format9 — a string return type on a
-// pn currently segfaults the MIR JIT when the result spans a GC
-// (repro: temp/repro_string_return_segv.ls)
 // format a float to exactly 9 decimal places
-pn format9(x: float) {
-    // neg/result stay unannotated: `neg ++ int_part` mixes a string with an int, and
-    // a declared string operand routes the concat to fn_strcat, which rejects the int
+pn format9(x: float) string {
     var neg = ""
     if (x < 0.0) {
         neg = "-"
@@ -27,10 +22,7 @@ pn format9(x: float) {
         frac_int = 0
     }
     var frac_str = string(frac_int)
-    // pad stays unannotated: `var pad: int = <expr containing len(str)>` currently
-    // miscompiles in the MIR JIT and corrupts the string concat below
-    // (repro: temp/repro_declared_int_len_concat.ls)
-    var pad = 9 - len(frac_str)
+    var pad: int = 9 - len(frac_str)
     var prefix = ""
     while (pad > 0) {
         prefix = prefix ++ "0"
@@ -45,7 +37,7 @@ pn eval_A(i: int, j: int) float {
     return 1.0 / float((i + j) * (i + j + 1) / 2 + i + 1)
 }
 
-pn mul_Av(n: int, v: float[], var av: float[]) {
+pn mul_Av(n: int, v: float[], var av: float[]) any {
     var i: int = 0
     while (i < n) {
         var s: float = 0.0
@@ -59,7 +51,7 @@ pn mul_Av(n: int, v: float[], var av: float[]) {
     }
 }
 
-pn mul_Atv(n: int, v: float[], var atv: float[]) {
+pn mul_Atv(n: int, v: float[], var atv: float[]) any {
     var i: int = 0
     while (i < n) {
         var s: float = 0.0
@@ -73,7 +65,7 @@ pn mul_Atv(n: int, v: float[], var atv: float[]) {
     }
 }
 
-pn mul_AtAv(n: int, v: float[], var out: float[]) {
+pn mul_AtAv(n: int, v: float[], var out: float[]) any {
     var tmp: float[] = fill(n, 0.0)
     mul_Av(n, v, tmp)
     mul_Atv(n, tmp, out)

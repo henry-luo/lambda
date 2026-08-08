@@ -5,9 +5,9 @@
 // Type annotations enable MIR JIT Phase 3 direct byte-offset field access
 
 // Type definitions — field order MUST match map literal order in constructors
-type Packet = {link: Packet, id: int, kind: int, a1: int, a2: array}
-type TCB = {link: TCB, id: int, priority: int, queue: Packet, state: int, fn_id: int, v1: int, v2: int, work_in: Packet, dev_in: Packet}
-type Scheduler = {queue_count: int, hold_count: int, task_list: TCB, current_tcb: TCB, current_id: int}
+type Packet = {link: map?, id: int, kind: int, a1: int, a2: array}
+type TCB = {link: map?, id: int, priority: int, queue: map?, state: int, fn_id: int, v1: int, v2: int, work_in: map?, dev_in: map?}
+type Scheduler = {queue_count: int, hold_count: int, task_list: map?, current_tcb: map?, current_id: int}
 
 // Task IDs
 let ID_IDLE      = 0
@@ -36,19 +36,22 @@ let FN_WORKER  = 1
 let FN_HANDLER = 2
 let FN_DEVICE  = 3
 
-pn create_packet(link, id: int, kind: int) {
+// the scheduler stores heterogeneous task records in map slots; keep those
+// dynamic edges boxed while retaining scalar contracts inside each record
+// (D3.3.1-D3.3.3).
+pn create_packet(link, id: int, kind: int) any {
     var data = fill(4, 0)
-    var pkt: Packet = {link: link, id: id, kind: kind, a1: 0, a2: data}
+    var pkt = {link: link, id: id, kind: kind, a1: 0, a2: data}
     return pkt
 }
 
-pn packet_add_to(packet: Packet, queue: Packet) {
+pn packet_add_to(packet, queue) any {
     packet.link = null
     if (queue == null) {
         return packet
     }
-    var next: Packet = queue
-    var peek: Packet = next.link
+    var next = queue
+    var peek = next.link
     while (peek != null) {
         next = peek
         peek = next.link
@@ -57,14 +60,14 @@ pn packet_add_to(packet: Packet, queue: Packet) {
     return queue
 }
 
-pn create_tcb(link, id: int, priority: int, queue, state: int, fn_id: int) {
-    var tcb: TCB = {link: link, id: id, priority: priority, queue: queue,
+pn create_tcb(link, id: int, priority: int, queue, state: int, fn_id: int) any {
+    var tcb = {link: link, id: id, priority: priority, queue: queue,
             state: state, fn_id: fn_id,
             v1: 0, v2: 0, work_in: null, dev_in: null}
     return tcb
 }
 
-pn tcb_is_held_or_suspended(tcb: TCB) bool {
+pn tcb_is_held_or_suspended(tcb) bool {
     if (band(tcb.state, STATE_HELD) != 0) {
         return true
     }
@@ -74,76 +77,76 @@ pn tcb_is_held_or_suspended(tcb: TCB) bool {
     return false
 }
 
-pn create_scheduler() {
-    var sched: Scheduler = {queue_count: 0, hold_count: 0,
+pn create_scheduler() any {
+    var sched = {queue_count: 0, hold_count: 0,
             task_list: null, current_tcb: null, current_id: 0}
     return sched
 }
 
-pn scheduler_add_task(sched: Scheduler, blocks, id: int, pri: int, queue, state: int, fn_id: int) {
-    var tcb: TCB = create_tcb(sched.task_list, id, pri, queue, state, fn_id)
+pn scheduler_add_task(sched, blocks, id: int, pri: int, queue, state: int, fn_id: int) any {
+    var tcb = create_tcb(sched.task_list, id, pri, queue, state, fn_id)
     sched.task_list = tcb
     blocks[id] = tcb
     sched.current_tcb = tcb
 }
 
-pn scheduler_add_idle_task(sched: Scheduler, blocks, id: int, pri: int, queue, count: int) {
+pn scheduler_add_idle_task(sched, blocks, id: int, pri: int, queue, count: int) any {
     scheduler_add_task(sched, blocks, id, pri, queue, STATE_RUNNABLE, FN_IDLE)
-    var tcb: TCB = sched.current_tcb
+    var tcb = sched.current_tcb
     tcb.v1 = 1
     tcb.v2 = count
 }
 
-pn scheduler_add_worker_task(sched: Scheduler, blocks, id: int, pri: int, queue) {
+pn scheduler_add_worker_task(sched, blocks, id: int, pri: int, queue) any {
     scheduler_add_task(sched, blocks, id, pri, queue, STATE_SUSPENDED_RUNNABLE, FN_WORKER)
-    var tcb: TCB = sched.current_tcb
+    var tcb = sched.current_tcb
     tcb.v1 = ID_HANDLER_A
     tcb.v2 = 0
 }
 
-pn scheduler_add_handler_task(sched: Scheduler, blocks, id: int, pri: int, queue) {
+pn scheduler_add_handler_task(sched, blocks, id: int, pri: int, queue) any {
     scheduler_add_task(sched, blocks, id, pri, queue, STATE_SUSPENDED_RUNNABLE, FN_HANDLER)
 }
 
-pn scheduler_add_device_task(sched: Scheduler, blocks, id: int, pri: int, queue) {
+pn scheduler_add_device_task(sched, blocks, id: int, pri: int, queue) any {
     scheduler_add_task(sched, blocks, id, pri, queue, STATE_SUSPENDED, FN_DEVICE)
 }
 
-pn scheduler_release(sched: Scheduler, blocks, id: int) {
-    var tcb: TCB = blocks[id]
+pn scheduler_release(sched, blocks, id: int) any {
+    var tcb = blocks[id]
     if (tcb == null) {
         return tcb
     }
     tcb.state = band(tcb.state, bnot(STATE_HELD))
-    var cur: TCB = sched.current_tcb
+    var cur = sched.current_tcb
     if (tcb.priority > cur.priority) {
         return tcb
     }
     return cur
 }
 
-pn scheduler_hold_current(sched: Scheduler) {
+pn scheduler_hold_current(sched) any {
     sched.hold_count = sched.hold_count + 1
-    var tcb: TCB = sched.current_tcb
+    var tcb = sched.current_tcb
     tcb.state = bor(tcb.state, STATE_HELD)
     return tcb.link
 }
 
-pn scheduler_suspend_current(sched: Scheduler) {
-    var tcb: TCB = sched.current_tcb
+pn scheduler_suspend_current(sched) any {
+    var tcb = sched.current_tcb
     tcb.state = bor(tcb.state, STATE_SUSPENDED)
     return tcb
 }
 
-pn scheduler_queue(sched: Scheduler, blocks, packet: Packet) {
-    var t: TCB = blocks[packet.id]
+pn scheduler_queue(sched, blocks, packet) any {
+    var t = blocks[packet.id]
     if (t == null) {
         return t
     }
     sched.queue_count = sched.queue_count + 1
     packet.link = null
     packet.id = sched.current_id
-    var cur: TCB = sched.current_tcb
+    var cur = sched.current_tcb
     if (t.queue == null) {
         t.queue = packet
         t.state = bor(t.state, STATE_RUNNABLE)
@@ -156,7 +159,7 @@ pn scheduler_queue(sched: Scheduler, blocks, packet: Packet) {
     return cur
 }
 
-pn run_idle(sched: Scheduler, blocks, tcb: TCB, packet) {
+pn run_idle(sched, blocks, tcb, packet) any {
     tcb.v2 = tcb.v2 - 1
     if (tcb.v2 == 0) {
         return scheduler_hold_current(sched)
@@ -170,7 +173,7 @@ pn run_idle(sched: Scheduler, blocks, tcb: TCB, packet) {
     }
 }
 
-pn run_worker(sched: Scheduler, blocks, tcb: TCB, packet: Packet) {
+pn run_worker(sched, blocks, tcb, packet) any {
     if (packet == null) {
         return scheduler_suspend_current(sched)
     }
@@ -194,7 +197,7 @@ pn run_worker(sched: Scheduler, blocks, tcb: TCB, packet: Packet) {
     return scheduler_queue(sched, blocks, packet)
 }
 
-pn run_handler(sched: Scheduler, blocks, tcb: TCB, packet: Packet) {
+pn run_handler(sched, blocks, tcb, packet) any {
     if (packet != null) {
         if (packet.kind == KIND_WORK) {
             tcb.work_in = packet_add_to(packet, tcb.work_in)
@@ -203,11 +206,11 @@ pn run_handler(sched: Scheduler, blocks, tcb: TCB, packet: Packet) {
         }
     }
     if (tcb.work_in != null) {
-        var work: Packet = tcb.work_in
+        var work = tcb.work_in
         var cnt = work.a1
         if (cnt < DATA_SIZE) {
             if (tcb.dev_in != null) {
-                var dev: Packet = tcb.dev_in
+                var dev = tcb.dev_in
                 tcb.dev_in = dev.link
                 var wa2 = work.a2
                 dev.a1 = wa2[cnt]
@@ -222,12 +225,12 @@ pn run_handler(sched: Scheduler, blocks, tcb: TCB, packet: Packet) {
     return scheduler_suspend_current(sched)
 }
 
-pn run_device(sched: Scheduler, blocks, tcb: TCB, packet: Packet) {
+pn run_device(sched, blocks, tcb, packet) any {
     if (packet == null) {
         if (tcb.dev_in == null) {
             return scheduler_suspend_current(sched)
         }
-        var v: Packet = tcb.dev_in
+        var v = tcb.dev_in
         tcb.dev_in = null
         return scheduler_queue(sched, blocks, v)
     }
@@ -235,7 +238,7 @@ pn run_device(sched: Scheduler, blocks, tcb: TCB, packet: Packet) {
     return scheduler_hold_current(sched)
 }
 
-pn run_task(sched: Scheduler, blocks, tcb: TCB, packet: Packet) {
+pn run_task(sched, blocks, tcb, packet) any {
     var fn_id = tcb.fn_id
     if (fn_id == FN_IDLE) {
         return run_idle(sched, blocks, tcb, packet)
@@ -249,15 +252,15 @@ pn run_task(sched: Scheduler, blocks, tcb: TCB, packet: Packet) {
     return run_device(sched, blocks, tcb, packet)
 }
 
-pn scheduler_schedule(sched: Scheduler, blocks) {
+pn scheduler_schedule(sched, blocks) any {
     sched.current_tcb = sched.task_list
     while (sched.current_tcb != null) {
-        var tcb: TCB = sched.current_tcb
-        if (tcb_is_held_or_suspended(tcb)) {
+        var tcb = sched.current_tcb
+        if (tcb_is_held_or_suspended(tcb) == true) {
             sched.current_tcb = tcb.link
         } else {
             sched.current_id = tcb.id
-            var packet: Packet = null
+            var packet = null
             if (tcb.state == STATE_SUSPENDED_RUNNABLE) {
                 packet = tcb.queue
                 tcb.queue = packet.link
@@ -273,7 +276,7 @@ pn scheduler_schedule(sched: Scheduler, blocks) {
 }
 
 pn run_richards() bool {
-    var sched: Scheduler = create_scheduler()
+    var sched = create_scheduler()
     var blocks = fill(6, null)
 
     scheduler_add_idle_task(sched, blocks, ID_IDLE, 0, null, COUNT)

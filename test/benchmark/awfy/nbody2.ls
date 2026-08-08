@@ -5,18 +5,18 @@ let PI = 3.141592653589793
 let SOLAR_MASS = 4.0 * PI * PI
 let DAYS_PER_YEAR = 365.24
 
-pn advance(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[], dt: float) {
+pn advance(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[], dt: float) any {
     var i: int = 0
     while (i < 5) {
         var j: int = i + 1
         while (j < 5) {
-            var dx = bx[i] - bx[j]
-            var dy = by[i] - by[j]
-            var dz = bz[i] - bz[j]
+            var dx: float = bx[i] - bx[j]
+            var dy: float = by[i] - by[j]
+            var dz: float = bz[i] - bz[j]
 
-            var d_squared = dx * dx + dy * dy + dz * dz
-            var distance = math.sqrt(d_squared)
-            var mag = dt / (d_squared * distance)
+            var d_squared: float = dx * dx + dy * dy + dz * dz
+            var distance: float = math.sqrt(d_squared)
+            var mag: float = dt / (d_squared * distance)
 
             bvx[i] = bvx[i] - dx * bmass[j] * mag
             bvy[i] = bvy[i] - dy * bmass[j] * mag
@@ -40,19 +40,19 @@ pn advance(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bv
     }
 }
 
-pn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[]) {
+pn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[]) float {
     var e = 0.0
     var i: int = 0
     while (i < 5) {
-        var ke = bvx[i] * bvx[i] + bvy[i] * bvy[i] + bvz[i] * bvz[i]
+        var ke: float = bvx[i] * bvx[i] + bvy[i] * bvy[i] + bvz[i] * bvz[i]
         e = e + 0.5 * bmass[i] * ke
 
         var j: int = i + 1
         while (j < 5) {
-            var dx = bx[i] - bx[j]
-            var dy = by[i] - by[j]
-            var dz = bz[i] - bz[j]
-            var distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+            var dx: float = bx[i] - bx[j]
+            var dy: float = by[i] - by[j]
+            var dz: float = bz[i] - bz[j]
+            var distance: float = math.sqrt(dx * dx + dy * dy + dz * dz)
             e = e - (bmass[i] * bmass[j]) / distance
             j = j + 1
         }
@@ -61,10 +61,10 @@ pn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz
     return e
 }
 
-pn offset_momentum(bvx: float[], bvy: float[], bvz: float[], bmass: float[]) {
-    var px = 0.0
-    var py = 0.0
-    var pz = 0.0
+pn offset_momentum(bvx: float[], bvy: float[], bvz: float[], bmass: float[]) any {
+    var px: float = 0.0
+    var py: float = 0.0
+    var pz: float = 0.0
     var i: int = 0
     while (i < 5) {
         px = px + bvx[i] * bmass[i]
@@ -77,7 +77,7 @@ pn offset_momentum(bvx: float[], bvy: float[], bvz: float[], bmass: float[]) {
     bvz[0] = 0.0 - (pz / SOLAR_MASS)
 }
 
-pn benchmark() {
+pn benchmark() float {
     var bx:float[] = [0.0,
         4.84143144246472090e+00,
         8.34336671824457987e+00,

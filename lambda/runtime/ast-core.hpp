@@ -628,6 +628,8 @@ typedef struct FnParamEvidence {
     // alias count or source-name width.
     ArrayList* names;
     bool used_as_container;
+    TypeId container_store_type;
+    bool container_store_conflict;
     bool compared_with_non_numeric;
     bool param_reassigned;
 } FnParamEvidence;
@@ -742,6 +744,7 @@ typedef struct FnReturnAnalysis {
 } FnReturnAnalysis;
 typedef struct FnParamTypeInfo {
     TypeId semantic_type;
+    TypeId inferred_elem_type;
     uint32_t flags;
 } FnParamTypeInfo;
 enum {

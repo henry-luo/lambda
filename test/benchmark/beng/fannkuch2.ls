@@ -8,11 +8,9 @@ let N = 7
 pn main() {
     var __t0 = clock()
     var n: int = N
-    // perm/perm1/count stay unannotated: fill(n, int) already infers a packed
-    // ArrayNum, and a bracket annotation on a local re-tags the var as ANY
-    var perm = fill(n, 0)
-    var perm1 = fill(n, 0)
-    var count = fill(n, 0)
+    var perm: int[] = fill(n, 0)
+    var perm1: int[] = fill(n, 0)
+    var count: int[] = fill(n, 0)
     var max_flips: int = 0
     var checksum: int = 0
     var perm_count: int = 0

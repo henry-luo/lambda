@@ -2474,6 +2474,20 @@ static Item item_at_empty_string() {
     return empty ? (Item){.item = s2it(empty)} : ItemError;
 }
 
+// ASCII strings use byte offsets for character indexes; keep this allocation
+// path separate so the JIT can bypass UTF-8 scanning without changing the
+// single-character-string result contract of item_at (S4.1, D2.2.2).
+static Item string_ascii_at(String* str, int64_t index) {
+    if (!str || index < 0 || (uint64_t)index >= str->len) {
+        return item_at_empty_string();
+    }
+    unsigned char ch = (unsigned char)str->chars[index];
+    String* interned = get_ascii_char_string(ch);
+    if (interned) return {.item = s2it(interned)};
+    String* result = heap_strcpy(str->chars + index, 1);
+    return result ? (Item){.item = s2it(result)} : ItemError;
+}
+
 Item item_at(Item data, int64_t index) {
     if (!data.item) { return ItemNull; }
 
@@ -2521,12 +2535,7 @@ Item item_at(Item data, int64_t index) {
                 Symbol* ch_sym = heap_create_symbol(chars + index, 1);
                 return {.item = y2it(ch_sym)};
             }
-            // return interned single-char string if available
-            unsigned char ch = (unsigned char)chars[index];
-            String* interned = get_ascii_char_string(ch);
-            if (interned) return {.item = s2it(interned)};
-            String *ch_str = heap_strcpy((char*)(chars + index), 1);
-            return {.item = s2it(ch_str)};
+            return string_ascii_at(data.get_safe_string(), index);
         }
 
         // UTF-8 path: combined bounds check + char-to-byte in a single pass
@@ -2575,6 +2584,13 @@ Item item_at(Item data, int64_t index) {
         log_error("item_at: unsupported item_at type: %d", type_id);
         return ItemNull;
     }
+}
+
+extern "C" Item fn_string_ascii_at(Item str_item, int64_t index) {
+    String* str = str_item.get_safe_string();
+    if (!str) return item_at(str_item, index);
+    if (str->is_ascii) return string_ascii_at(str, index);
+    return item_at(str_item, index);
 }
 // Get attribute by name from an Item (for map/element attribute access)
 Item item_attr(Item data, const char* key) {
@@ -2884,7 +2900,8 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         if ((element_type_id == LMD_TYPE_INT && et == ELEM_INT) ||
             (element_type_id == LMD_TYPE_FLOAT && et == ELEM_FLOAT64) ||
             (element_type_id == LMD_TYPE_INT64 && et == ELEM_INT64) ||
-            (element_type_id == LMD_TYPE_UINT64 && et == ELEM_UINT64)) {
+            (element_type_id == LMD_TYPE_UINT64 && et == ELEM_UINT64) ||
+            (element_type_id == LMD_TYPE_BOOL && et == ELEM_BOOL)) {
             return (void*)arr;
         }
     }
@@ -2935,6 +2952,16 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             ArrayNum* typed = array_num_new(ELEM_UINT64, length);
             for (int64_t i = 0; i < length; i++) {
                 ((uint64_t*)typed->data)[i] = item_to_uint64_value(array_num_get(src, i));
+            }
+            return typed;
+        }
+        else if (element_type_id == LMD_TYPE_BOOL && src->get_elem_type() == ELEM_BOOL) {
+            // bool[] is a semantic boolean contract, not numeric truthiness at
+            // a declaration boundary. Preserve the existing packed byte lane
+            // only when the source already carries boolean elements.
+            ArrayNum* typed = array_num_new(ELEM_BOOL, length);
+            for (int64_t i = 0; i < length; i++) {
+                ((uint8_t*)typed->data)[i] = ((uint8_t*)src->data)[i] ? 1 : 0;
             }
             return typed;
         }
@@ -3003,6 +3030,19 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
                     return NULL;
                 }
                 ((uint64_t*)typed->data)[i] = item_to_uint64_value(items[i]);
+            }
+            return typed;
+        }
+        else if (element_type_id == LMD_TYPE_BOOL) {
+            ArrayNum* typed = array_num_new(ELEM_BOOL, length);
+            for (int64_t i = 0; i < length; i++) {
+                TypeId elem_tid = get_type_id(items[i]);
+                if (elem_tid != LMD_TYPE_BOOL) {
+                    log_error("ensure_typed_array: element %lld has type %s, expected bool",
+                        i, get_type_name(elem_tid));
+                    return NULL;
+                }
+                ((uint8_t*)typed->data)[i] = items[i].bool_val == BOOL_TRUE ? 1 : 0;
             }
             return typed;
         }

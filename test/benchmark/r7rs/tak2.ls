@@ -2,7 +2,7 @@
 // Takeuchi function - tak(18, 12, 6) = 7
 // Adapted from r7rs-benchmarks/src/tak.scm (scaled down for Lambda JIT)
 
-pn tak(x: int, y: int, z: int) {
+pn tak(x: int, y: int, z: int) int {
     if (y >= x) {
         return z
     }
@@ -12,7 +12,7 @@ pn tak(x: int, y: int, z: int) {
     return tak(a, b, c)
 }
 
-pn benchmark() {
+pn benchmark() int {
     var result: int = tak(18, 12, 6)
     return result
 }

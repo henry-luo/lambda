@@ -3,13 +3,13 @@
 
 type PState = {count: int}
 
-pn swap(var v: int[], i: int, j: int) {
+pn swap(var v: int[], i: int, j: int) any {
     var tmp = v[i]
     v[i] = v[j]
     v[j] = tmp
 }
 
-pn permute(var state: PState, var v: int[], n: int) {
+pn permute(var state: PState, var v: int[], n: int) any {
     state.count = state.count + 1
     if (n != 0) {
         var n1: int = n - 1
@@ -24,7 +24,7 @@ pn permute(var state: PState, var v: int[], n: int) {
     }
 }
 
-pn benchmark() {
+pn benchmark() int {
     var state: PState = {count: 0}
     var v:int[] = fill(6, 0)
     permute(state, v, 6)

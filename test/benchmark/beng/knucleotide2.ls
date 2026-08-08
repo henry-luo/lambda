@@ -5,8 +5,6 @@
 
 let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
 
-// NOTE: locals initialised from a len() expression stay unannotated — len() is
-// int64, and a declared `int` would require an explicit conversion.
 // extract >THREE section from fasta input
 pn extract_three(text: string) string {
     let lines = split(text, "\n")
@@ -35,11 +33,9 @@ pn extract_three(text: string) string {
 }
 
 // count all k-mers of length k in sequence
-// k stays untyped: print_count passes len(kmer), which is int64, and an `int`
-// param rejects it
-pn count_kmers(seq: string, k) {
+pn count_kmers(seq: string, k: int) map {
     var counts = map()
-    var seq_len = len(seq)
+    var seq_len: int = len(seq)
     var i: int = 0
     while (i <= seq_len - k) {
         var kmer: string = slice(seq, i, i + k)
@@ -55,7 +51,7 @@ pn count_kmers(seq: string, k) {
 }
 
 // format float to 3 decimal places
-pn format3(x: float) {
+pn format3(x: float) string {
     var int_part: int = int(floor(x))
     var frac: float = x - float(int_part)
     var frac_f: float = floor(frac * 1000.0 + 0.5)
@@ -65,7 +61,7 @@ pn format3(x: float) {
         frac_int = 0
     }
     var frac_str: string = string(frac_int)
-    var pad = 3 - len(frac_str)
+    var pad: int = 3 - len(frac_str)
     var prefix: string = ""
     while (pad > 0) {
         prefix = prefix ++ "0"
@@ -76,12 +72,12 @@ pn format3(x: float) {
 }
 
 // sort by count descending, then alphabetically ascending
-pn sort_entries(entries) {
+pn sort_entries(entries) array {
     entries = sort(entries, (e) => (e[0]))
     return sort(entries, {by: (e) => (e[1]), dir: 'desc'})
 }
 
-pn print_frequencies(seq: string, k: int) {
+pn print_frequencies(seq: string, k: int) any {
     let counts = count_kmers(seq, k)
     var total = len(seq) - k + 1
 
@@ -103,8 +99,8 @@ pn print_frequencies(seq: string, k: int) {
 }
 
 // print count of a specific k-mer
-pn print_count(seq: string, kmer: string) {
-    let k = len(kmer)
+pn print_count(seq: string, kmer: string) any {
+    let k: int = len(kmer)
     let counts = count_kmers(seq, k)
     let count = counts[kmer]
     if (count == null) {

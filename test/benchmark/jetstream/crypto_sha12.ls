@@ -9,10 +9,6 @@ let MASK32 = 0xFFFFFFFF
 // 32-bit addition relies on u32 wraparound. Unsigned sized contracts reject
 // negative signed inputs, so normalize each signed 32-bit word before the
 // explicit conversion instead of relying on an invalid negative-to-u32 cast.
-// NOTE: locals derived from len() (slen/bin_len/x_len) stay unannotated — len() is
-// int64 and a declared `int` there miscompiles in the MIR JIT
-// (repro: temp/repro_declared_int_len_concat.ls); binb2hex also keeps no `string`
-// return type (repro: temp/repro_string_return_segv.ls)
 pn safe_add(x: int, y: int) int {
     var ux: u32 = if (x < 0) { x + 4294967296 } else { x }
     var uy: u32 = if (y < 0) { y + 4294967296 } else { y }
@@ -54,10 +50,10 @@ pn sha1_kt(t: int) int {
 }
 
 // Convert string to array of big-endian words
-pn str2binb(str: string) {
-    var slen = len(str)
-    var bin_len = shr(slen * CHRSZ, 5) + 1
-    var bin = fill(bin_len + 1, 0)
+pn str2binb(str: string) int[] {
+    var slen: int = len(str)
+    var bin_len: int = shr(slen * CHRSZ, 5) + 1
+    var bin: int[] = fill(bin_len + 1, 0)
     var mask: int = shl(1, CHRSZ) - 1
     var i: int = 0
     while (i < slen * CHRSZ) {
@@ -72,32 +68,28 @@ pn str2binb(str: string) {
 }
 
 // Core SHA-1 computation on array of big-endian words
-// input_len stays untyped: the caller passes len(s) * CHRSZ, which the compiler
-// widens to decimal, and an `int` param rejects it
-pn core_sha1(x_in: int[], input_len) {
+pn core_sha1(x_in: int[], input_len: int) int[] {
     // Copy input to mutable array with padding space
-    var x_len = len(x_in)
-    // padded_len/total_len derive from the decimal input_len and from len(x_in),
-    // so they stay unannotated
-    var padded_len = shr(input_len + 64, 9)
-    var total_len = shl(padded_len, 4) + 16 + 1
+    var x_len: int = len(x_in)
+    var padded_len: int = shr(input_len + 64, 9)
+    var total_len: int = shl(padded_len, 4) + 16 + 1
     if (total_len < x_len + 20) {
         total_len = x_len + 20
     }
-    var x = fill(total_len, 0)
+    var x: int[] = fill(total_len, 0)
     var ci: int = 0
     while (ci < x_len) {
         x[ci] = x_in[ci]
         ci = ci + 1
     }
     // Append padding bit
-    var pad_idx = shr(input_len, 5)
+    var pad_idx: int = shr(input_len, 5)
     x[pad_idx] = bor(x[pad_idx], shl(0x80, 24 - (input_len % 32)))
     // Append length
-    var len_idx = shl(padded_len, 4) + 15
+    var len_idx: int = shl(padded_len, 4) + 15
     x[len_idx] = input_len
 
-    var w = fill(80, 0)
+    var w: int[] = fill(80, 0)
     var a: int = 0x67452301
     var b: int = 0xEFCDAB89
     var c: int = 0x98BADCFE
@@ -165,7 +157,7 @@ pn hex_sha1(s: string) string {
     return binb2hex(hash)
 }
 
-pn run() {
+pn run() bool {
     var plain_text: string = "Two households, both alike in dignity,\nIn fair Verona, where we lay our scene,\nFrom ancient grudge break to new mutiny,\nWhere civil blood makes civil hands unclean.\nFrom forth the fatal loins of these two foes\nA pair of star-cross'd lovers take their life;\nWhole misadventured piteous overthrows\nDo with their death bury their parents' strife.\nThe fearful passage of their death-mark'd love,\nAnd the continuance of their parents' rage,\nWhich, but their children's end, nought could remove,\nIs now the two hours' traffic of our stage;\nThe which if you with patient ears attend,\nWhat here shall miss, our toil shall strive to mend."
 
     // Double the text 4 times (like original: for i=0..3 plainText += plainText)

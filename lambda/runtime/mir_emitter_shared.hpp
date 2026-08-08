@@ -92,6 +92,9 @@ struct VarEntry {
     // A local initialized by an exact integer zero literal can safely serve as
     // the counted accumulator of a compiler-proven positive-step loop.
     bool compact_int_known_zero;
+    // A local initialized by an exact positive integer can prove `counter - 1`
+    // nonnegative inside its monotonic forward loop.
+    bool compact_int_known_positive;
     // Exact typed-array bindings may cache their stable payload descriptor for
     // repeated native reads. The cache is installed only after the body has
     // ruled out representation-changing aliases or borrowed writes.

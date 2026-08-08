@@ -7,11 +7,6 @@ let INPUT_PATH = "test/benchmark/beng/input/fasta_1000.txt"
 
 // This benchmark is almost entirely regex/replace builtin work, so typing only
 // reaches the two string locals.
-// NOTE: locals initialised from a len() expression stay unannotated — len() is
-// int64, and a declared `int` there either hard-errors or silently narrows in the
-// MIR JIT (repro: temp/repro_declared_int_len_concat.ls). `string` return types are
-// also avoided: they segfault the JIT once the result spans a GC
-// (repro: temp/repro_string_return_segv.ls).
 // 9 regex patterns to count matches
 // Lambda uses ("a"|"b") instead of [ab] for character alternation
 type pat1 = \("agggtaaa" | "tttaccct")

@@ -2,7 +2,7 @@
 // Expected result: 10
 // Typed: map? on nullable linked-list node params, int return types
 
-pn make_list(length: int) {
+pn make_list(length: int) map? {
     if (length == 0) {
         return null
     }
@@ -30,7 +30,7 @@ pn is_shorter_than(x: map?, y: map?) int {
     return 0
 }
 
-pn tail(x: map?, y: map?, z: map?) {
+pn tail(x: map?, y: map?, z: map?) map? {
     if (is_shorter_than(y, x) == 1) {
         return tail(
             tail(x.next, y, z),

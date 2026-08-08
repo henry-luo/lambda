@@ -14,9 +14,6 @@
 // Expected: 1 (there is exactly 1 final peg position reachable = position 12)
 // But we count total solution sequences: expected = 29760
 
-// int literal arrays already infer a packed ArrayNum, so mfrom/mover/mto/stack
-// stay unannotated: a bracket annotation on a local re-tags the var as ANY.
-// board keeps boxed bools (only int/float/int64/uint64 have packed layouts).
 // Moves: each move is (from, over, to)
 // We encode as parallel arrays for from, over, to
 
@@ -27,7 +24,7 @@ pn benchmark() int {
     var mto   = [3,5,6,8,7,9,0,5,10,12,11,13,0,3,12,14,1,8,2,9,1,6,2,7,3,12,4,13,3,5,10,14,4,11,5,12]
     let num_moves: int = 36
 
-    var board = fill(15, true)
+    var board: bool[] = fill(15, true)
     board[0] = false
 
     var solutions: int = 0

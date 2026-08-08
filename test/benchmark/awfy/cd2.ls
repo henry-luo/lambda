@@ -25,23 +25,23 @@ let NC = 5
 // =====================================================
 // Helpers (typed float params → native arithmetic)
 // =====================================================
-pn safe_div(a: float, b: float) {
+pn safe_div(a: float, b: float) any {
     if (b == 0) { return 0.0 }
     var r: float = a / b
     return r
 }
 
-pn min_f(a: float, b: float) {
+pn min_f(a: float, b: float) any {
     if (a <= b) { return a }
     return b
 }
 
-pn max_f(a: float, b: float) {
+pn max_f(a: float, b: float) any {
     if (a >= b) { return a }
     return b
 }
 
-pn check_overlap(low: float, high: float) {
+pn check_overlap(low: float, high: float) any {
     if (low <= 1) {
         if (1 <= high) { return 1 }
     }
@@ -54,17 +54,17 @@ pn check_overlap(low: float, high: float) {
     return 0
 }
 
-pn get_old_or_new(old, newp) {
+pn get_old_or_new(old, newp) any {
     if (old == null) { return newp }
     return old
 }
 
-pn null16() {
+pn null16() any {
     var a = [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
     return a
 }
 
-pn null32() {
+pn null32() any {
     var a = [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
     return a
 }
@@ -80,12 +80,12 @@ type DrawCtx = {p1x: float, p1y: float, p2x: float, p2y: float, motionIdx: int}
 // =====================================================
 // 3-level indexed array: 16 x 16 x 32 = 8192 cap
 // =====================================================
-pn arr_new() {
+pn arr_new() any {
     var a: Arr = { l0: null16(), sz: 0 }
     return a
 }
 
-pn arr_get(a, idx: int) {
+pn arr_get(a, idx: int) any {
     var i2: int = int(idx % 32)
     var mid: int = shr(idx, 5)
     var i1: int = int(mid % 16)
@@ -99,7 +99,7 @@ pn arr_get(a, idx: int) {
     return r
 }
 
-pn arr_set(a, idx: int, val) {
+pn arr_set(a, idx: int, val) any {
     var i2: int = int(idx % 32)
     var mid: int = shr(idx, 5)
     var i1: int = int(mid % 16)
@@ -107,17 +107,14 @@ pn arr_set(a, idx: int, val) {
     var l0 = (a.l0)
     var c1 = l0[i0]
     if (c1 == null) {
-        var _d: int = 0
         c1 = null16()
         l0[i0] = c1
     }
     var c2 = c1[i1]
     if (c2 == null) {
-        var _d2: int = 0
         c2 = null32()
         c1[i1] = c2
     }
-    var _d3: int = 0
     c2[i2] = val
     return 0
 }
@@ -125,16 +122,16 @@ pn arr_set(a, idx: int, val) {
 // =====================================================
 // Small vector: 16x16=256
 // =====================================================
-pn vec_new() {
+pn vec_new() any {
     return []
 }
 
-pn vec_add(v, item) {
+pn vec_add(v, item) any {
     push(v, item)
     return 0
 }
 
-pn vec_at(v, idx: int) {
+pn vec_at(v, idx: int) any {
     return v[idx]
 }
 
@@ -144,17 +141,17 @@ pn vec_at(v, idx: int) {
 // Tree = map: { root, cnt, nd }
 // =====================================================
 
-pn rbt_new() {
+pn rbt_new() any {
     var nd: Arr = arr_new()
     var t: RbtTree = { root: -1, cnt: 0, nd: nd }
     return t
 }
 
-pn rbt_nd(tree, id: int) {
+pn rbt_nd(tree, id: int) any {
     return arr_get(tree.nd, id)
 }
 
-pn rbt_mk_node(tree, key: int, val) {
+pn rbt_mk_node(tree, key: int, val) any {
     var c: int = (tree.cnt)
     var n = [key, val, NIL, NIL, NIL, RED]
     var nd = (tree.nd)
@@ -164,7 +161,7 @@ pn rbt_mk_node(tree, key: int, val) {
     return c
 }
 
-pn rbt_left_rotate(tree, xId: int) {
+pn rbt_left_rotate(tree, xId: int) any {
     var xn = rbt_nd(tree, xId)
     var yId: int = xn[NR]
     var yn = rbt_nd(tree, yId)
@@ -179,18 +176,15 @@ pn rbt_left_rotate(tree, xId: int) {
     var xpId: int = xn[NP]
     yn[NP] = xpId
     if (xpId == NIL) {
-        var _d: int = 0
         tree.root = yId
     }
     if (xpId != NIL) {
         var xpn = rbt_nd(tree, xpId)
         var xplId: int = xpn[NL]
         if (xId == xplId) {
-            var _d2: int = 0
             xpn[NL] = yId
         }
         if (xId != xplId) {
-            var _d3: int = 0
             xpn[NR] = yId
         }
     }
@@ -200,7 +194,7 @@ pn rbt_left_rotate(tree, xId: int) {
     return yId
 }
 
-pn rbt_right_rotate(tree, yId: int) {
+pn rbt_right_rotate(tree, yId: int) any {
     var yn = rbt_nd(tree, yId)
     var xId: int = yn[NL]
     var xn = rbt_nd(tree, xId)
@@ -215,18 +209,15 @@ pn rbt_right_rotate(tree, yId: int) {
     var ypId: int = yn[NP]
     xn[NP] = ypId
     if (ypId == NIL) {
-        var _d: int = 0
         tree.root = xId
     }
     if (ypId != NIL) {
         var ypn = rbt_nd(tree, ypId)
         var yplId: int = ypn[NL]
         if (yId == yplId) {
-            var _d2: int = 0
             ypn[NL] = xId
         }
         if (yId != yplId) {
-            var _d3: int = 0
             ypn[NR] = xId
         }
     }
@@ -236,7 +227,7 @@ pn rbt_right_rotate(tree, yId: int) {
     return xId
 }
 
-pn rbt_put(tree, key: int, value) {
+pn rbt_put(tree, key: int, value) any {
     var yId: int = NIL
     var xId: int = (tree.root)
     while (xId != NIL) {
@@ -259,18 +250,15 @@ pn rbt_put(tree, key: int, value) {
     var zn = rbt_nd(tree, zId)
     zn[NP] = yId
     if (yId == NIL) {
-        var _d: int = 0
         tree.root = zId
     }
     if (yId != NIL) {
         var yn = rbt_nd(tree, yId)
         var yk: int = yn[NK]
         if (key < yk) {
-            var _d2: int = 0
             yn[NL] = zId
         }
         if (key >= yk) {
-            var _d3: int = 0
             yn[NR] = zId
         }
     }
@@ -366,7 +354,7 @@ pn rbt_put(tree, key: int, value) {
     return null
 }
 
-pn rbt_find_node(tree, key: int) {
+pn rbt_find_node(tree, key: int) any {
     var curId: int = (tree.root)
     while (curId != NIL) {
         var n = rbt_nd(tree, curId)
@@ -382,7 +370,7 @@ pn rbt_find_node(tree, key: int) {
     return NIL
 }
 
-pn rbt_get(tree, key: int) {
+pn rbt_get(tree, key: int) any {
     var nId: int = rbt_find_node(tree, key)
     if (nId == NIL) { return null }
     var n = rbt_nd(tree, nId)
@@ -390,7 +378,7 @@ pn rbt_get(tree, key: int) {
     return v
 }
 
-pn rbt_tree_min(tree, xId: int) {
+pn rbt_tree_min(tree, xId: int) any {
     while (xId != NIL) {
         var n = rbt_nd(tree, xId)
         var lId: int = n[NL]
@@ -400,7 +388,7 @@ pn rbt_tree_min(tree, xId: int) {
     return xId
 }
 
-pn rbt_successor(tree, xId: int) {
+pn rbt_successor(tree, xId: int) any {
     var xn = rbt_nd(tree, xId)
     var rId: int = xn[NR]
     if (rId != NIL) {
@@ -418,14 +406,14 @@ pn rbt_successor(tree, xId: int) {
     return NIL
 }
 
-pn rbt_first(tree) {
+pn rbt_first(tree) any {
     var rId: int = (tree.root)
     if (rId == NIL) { return NIL }
     var r: int = rbt_tree_min(tree, rId)
     return r
 }
 
-pn rbt_remove_fixup(tree, xId: int, xParId: int) {
+pn rbt_remove_fixup(tree, xId: int, xParId: int) any {
     var rootId: int = (tree.root)
     while (xId != rootId) {
         var xCol: int = BLACK
@@ -588,7 +576,7 @@ pn rbt_remove_fixup(tree, xId: int, xParId: int) {
     return 0
 }
 
-pn rbt_remove(tree, key: int) {
+pn rbt_remove(tree, key: int) any {
     var zId: int = rbt_find_node(tree, key)
     if (zId == NIL) { return null }
     var zn = rbt_nd(tree, zId)
@@ -618,18 +606,15 @@ pn rbt_remove(tree, key: int) {
     }
     var ypId: int = yn[NP]
     if (ypId == NIL) {
-        var _d: int = 0
         tree.root = xId
     }
     if (ypId != NIL) {
         var ypn = rbt_nd(tree, ypId)
         var yplId: int = ypn[NL]
         if (yId == yplId) {
-            var _d2: int = 0
             ypn[NL] = xId
         }
         if (yId != yplId) {
-            var _d3: int = 0
             ypn[NR] = xId
         }
     }
@@ -657,16 +642,13 @@ pn rbt_remove(tree, key: int) {
             var zpn = rbt_nd(tree, zpId)
             var zplId: int = zpn[NL]
             if (zId == zplId) {
-                var _d4: int = 0
                 zpn[NL] = yId
             }
             if (zId != zplId) {
-                var _d5: int = 0
                 zpn[NR] = yId
             }
         }
         if (zpId == NIL) {
-            var _d6: int = 0
             tree.root = yId
         }
     }
@@ -682,7 +664,7 @@ pn rbt_remove(tree, key: int) {
 // =====================================================
 // Vector2D key encoding (typed int → native arithmetic)
 // =====================================================
-pn v2d_key(x: int, y: int) {
+pn v2d_key(x: int, y: int) any {
     var kx: int = x + 1000
     var ky: int = y + 1000
     var k: int = kx * 100000 + ky
@@ -692,14 +674,14 @@ pn v2d_key(x: int, y: int) {
 // =====================================================
 // Vector3D operations
 // =====================================================
-pn v3d_new(x, y, z) {
+pn v3d_new(x, y, z) any {
     return [x, y, z]
 }
 
 // =====================================================
 // Voxel hashing (typed float → native division)
 // =====================================================
-pn voxel_hash_xy(px: float, py: float, out) {
+pn voxel_hash_xy(px: float, py: float, out) any {
     var xdiv: int = int(px / GOOD_VOXEL_SIZE)
     var ydiv: int = int(py / GOOD_VOXEL_SIZE)
     var rx: int = GOOD_VOXEL_SIZE * xdiv
@@ -714,7 +696,7 @@ pn voxel_hash_xy(px: float, py: float, out) {
 // =====================================================
 // isInVoxel check (typed float → native float arithmetic)
 // =====================================================
-pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float) {
+pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float) any {
     if (vx > MAX_X) { return 0 }
     if (vx < MIN_X) { return 0 }
     if (vy > MAX_Y) { return 0 }
@@ -782,7 +764,7 @@ pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float)
 // Recurse: draw motion into voxel map
 // ctx: DrawCtx — typed map for direct field-offset access
 // =====================================================
-pn recurse_draw(voxelMap, seenTree, vx: int, vy: int, ctx: DrawCtx) {
+pn recurse_draw(voxelMap, seenTree, vx: int, vy: int, ctx: DrawCtx) any {
     var p1x: float = (ctx.p1x)
     var p1y: float = (ctx.p1y)
     var p2x: float = (ctx.p2x)
@@ -930,9 +912,8 @@ pn fi_compute(i1x: float, i1y: float, i1z: float,
     return result
 }
 
-pn find_intersection(m1, m2) {
+pn find_intersection(m1, m2) any {
     // Extract array values → typed float params at call boundary (it2d conversion)
-    var _d: int = 0
     return fi_compute(m1[1], m1[2], m1[3], m1[4], m1[5], m1[6],
                       m2[1], m2[2], m2[3], m2[4], m2[5], m2[6])
 }
@@ -940,7 +921,7 @@ pn find_intersection(m1, m2) {
 // =====================================================
 // Motion: array [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 // =====================================================
-pn motion_new(cs: int, p1x, p1y, p1z, p2x, p2y, p2z) {
+pn motion_new(cs: int, p1x, p1y, p1z, p2x, p2y, p2z) any {
     return [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 }
 
@@ -948,7 +929,7 @@ pn motion_new(cs: int, p1x, p1y, p1z, p2x, p2y, p2z) {
 // CD Benchmark main logic
 // =====================================================
 
-pn simulate_frame(numAircraft: int, tval) {
+pn simulate_frame(numAircraft: int, tval) any {
     var frame: Vec = vec_new()
     var i: int = 0
     while (i < numAircraft) {
@@ -967,7 +948,7 @@ pn simulate_frame(numAircraft: int, tval) {
     return frame
 }
 
-pn handle_new_frame(stateTree, frame: Vec) {
+pn handle_new_frame(stateTree, frame: Vec) any {
     var motions: Vec = vec_new()
     // Use flat arr for aircraft seen set (IDs are 0-99, well within arr capacity)
     var seenArr: Arr = arr_new()
@@ -1063,7 +1044,7 @@ pn handle_new_frame(stateTree, frame: Vec) {
     return collisionCount
 }
 
-pn cd(numAircraft: int) {
+pn cd(numAircraft: int) any {
     var numFrames: int = 200
     var stateTree: RbtTree = rbt_new()
     var actualCollisions: int = 0
@@ -1078,7 +1059,7 @@ pn cd(numAircraft: int) {
     return actualCollisions
 }
 
-pn verify_result(collisions: int, numAircraft: int) {
+pn verify_result(collisions: int, numAircraft: int) any {
     if (numAircraft == 100) {
         if (collisions == 4305) { return 1 }
     }

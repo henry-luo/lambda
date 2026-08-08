@@ -13,6 +13,16 @@ Item fn_chr(Item codepoint);
 typedef struct LambdaRegion LambdaRegion;
 typedef struct LambdaRegionBlock LambdaRegionBlock;
 
+// Runtime map admissions repeat the same candidate/contract shape pair across
+// recursive calls. The entries are context-owned so a cache cannot leak a
+// TypeMap relation between independent EvalContexts (D3.2.2).
+#define LAMBDA_MAP_CONTRACT_CACHE_CAPACITY 16
+typedef struct LambdaMapContractCacheEntry {
+    const TypeMap* candidate;
+    const TypeMap* expected;
+    uint8_t relation;
+} LambdaMapContractCacheEntry;
+
 typedef struct Heap {
     Pool *pool;  // memory pool alias (points to gc->pool for compatibility)
     struct gc_heap *gc;  // GC heap with object tracking (replaces entries ArrayList)
@@ -22,6 +32,8 @@ typedef struct Heap {
     // ends, so an ordinary heap object can never retain a region pointer.
     LambdaRegion* region_free;
     LambdaRegionBlock* region_free_blocks;
+    LambdaMapContractCacheEntry map_contract_cache[LAMBDA_MAP_CONTRACT_CACHE_CAPACITY];
+    uint32_t map_contract_cache_next;
 } Heap;
 
 void heap_init();

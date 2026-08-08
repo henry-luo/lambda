@@ -11,7 +11,7 @@ pn is_vowel(ch: string) int {
         cp == 97 or cp == 101 or cp == 105 or cp == 111 or cp == 117
 }
 
-pn hyphenate(text: string) {
+pn hyphenate(text: string) string {
     var result = ""
     var i: int = 0
     var in_tag: int = 0

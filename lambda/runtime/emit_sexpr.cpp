@@ -2599,7 +2599,9 @@ int emit_ast_dump_file(const char* script_path) {
     if (!import_directory) {
         if (directory) mem_free(directory);
         runtime_cleanup(&runtime);
-        pool_destroy(input_base->pool);
+        // The AST pool is registered in the process memory context; destroying
+        // it here leaves its child arena nodes dangling for the common finish
+        // path. Let mem_context_shutdown destroy the registered allocator graph.
         ts_tree_delete(tree);
         mem_free(source);
         ts_parser_delete(parser);
@@ -2630,7 +2632,8 @@ int emit_ast_dump_file(const char* script_path) {
         arraylist_free(tp.const_list);
         mem_free(import_directory);
         runtime_cleanup(&runtime);
-        pool_destroy(tp.pool);
+        // the registered AST pool is released by mem_context_shutdown after
+        // its child arenas and shape pools have been destroyed.
         ts_tree_delete(tree);
         mem_free(source);
         ts_parser_delete(parser);
@@ -2642,7 +2645,8 @@ int emit_ast_dump_file(const char* script_path) {
         arraylist_free(tp.const_list);
         mem_free(import_directory);
         runtime_cleanup(&runtime);
-        pool_destroy(tp.pool);
+        // the registered AST pool is released by mem_context_shutdown after
+        // its child arenas and shape pools have been destroyed.
         ts_tree_delete(tree);
         mem_free(source);
         ts_parser_delete(parser);
@@ -2656,7 +2660,8 @@ int emit_ast_dump_file(const char* script_path) {
     arraylist_free(tp.const_list);
     mem_free(import_directory);
     runtime_cleanup(&runtime);
-    pool_destroy(tp.pool);
+    // the registered AST pool is released by mem_context_shutdown after its
+    // child arenas and shape pools have been destroyed.
     ts_tree_delete(tree);
     mem_free(source);
     ts_parser_delete(parser);

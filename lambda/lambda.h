@@ -2008,6 +2008,7 @@ extern "C" {
     int64_t array_int64_get_raw(ArrayNum *array, int64_t index);
     double array_float_get_value(ArrayNum *arr, int64_t index);
     Item list_get(List *list, int64_t index);
+    Item fn_string_ascii_at(Item str, int64_t index);
     Item map_get(Map* map, Item key);
     Item elmt_get(Element *elmt, Item key);
     Item object_get(Object* obj, Item key);

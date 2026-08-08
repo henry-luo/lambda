@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "Typed string indexing enters the ASCII-aware helper while preserving the runtime UTF-8 fallback.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "call\tfn_string_ascii_at_p, fn_string_ascii_at"
+      ]
+    }
+  ]
+}
