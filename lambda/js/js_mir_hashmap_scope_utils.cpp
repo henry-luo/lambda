@@ -131,6 +131,7 @@ JsTryContext* jm_try_context_push(JsMirTranspiler* mt) {
     JsTryContext* context = jm_try_context_at(mt, mt->try_ctx_depth);
     if (!context) return NULL;
     memset(context, 0, sizeof(*context));
+    context->end_label_error_lane_state = JS_ERROR_LANE_UNREACHABLE;
     mt->try_ctx_depth++;
     return context;
 }
@@ -490,11 +491,16 @@ void jm_update_gc_root_slot(JsMirTranspiler* mt, JsMirVarEntry* var) {
 
 void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
         bool item_return, MirScalarReturnMode scalar_return_mode,
-        MIR_reg_t runtime_reg) {
+        MIR_reg_t runtime_reg, bool clean_error_lane_entry) {
     if (!mt) return;
     // Function entry starts unknown because the preceding native return may
     // contain either a value or a returned ERROR Item; no ambient state exists.
     mt->error_lane_track = JS_ERROR_LANE_UNKNOWN;
+    // Frame-local result registers cannot cross a function boundary.  A clean
+    // entry used to hide this stale register until a generator resume label
+    // reopened the lane, producing MIR that referenced another function's reg.
+    mt->last_call_result_reg = 0;
+    mt->func_error_lane_value_reg = 0;
     mt->arg_stack_scope = NULL;
     mt->arg_frame_base = 0;
     mt->arg_frame_base_add = NULL;
@@ -520,6 +526,9 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     mt->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
     mt->em.frame.active = true;
     jm_emit_label(mt, mt->em.frame.anchor);
+    if (clean_error_lane_entry) {
+        jm_error_lane_set_state(mt, JS_ERROR_LANE_CLEAN);
+    }
 }
 
 static void jm_finalize_side_root_prologue(JsMirTranspiler* mt) {

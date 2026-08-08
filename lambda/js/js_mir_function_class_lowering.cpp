@@ -826,7 +826,7 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
     mt->em.func_item = wrapper_item;
     mt->em.func = wrapper_func;
     jm_begin_function_frame(mt, return_type, true, scalar_return_mode,
-        MIR_reg(mt->ctx, "ctx", wrapper_func));
+        MIR_reg(mt->ctx, "ctx", wrapper_func), true);
     mt->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
     if (needs_scalar_home) {
         mt->em.frame.incoming_scalar_home = MIR_reg(mt->ctx,
@@ -1002,12 +1002,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->in_tail_position = false;
         mt->tco_jumped = false;
         mt->func_error_lane_label = 0;    // reset — native func needs its own exception label
-        mt->error_lane_track = JS_ERROR_LANE_UNKNOWN;
-        mt->last_call_result_reg = 0;
-        mt->func_error_lane_value_reg = 0;
 
         jm_begin_function_frame(mt, native_ret_type, false,
-            MIR_SCALAR_RETURN_NONE, MIR_reg(mt->ctx, "ctx", native_func));
+            MIR_SCALAR_RETURN_NONE, MIR_reg(mt->ctx, "ctx", native_func), true);
         mt->em.frame.plan.entry_kind = FN_ENTRY_NATIVE_BODY;
         mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
         jm_push_scope(mt);
@@ -1416,7 +1413,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->gen_active_iterator_slot = gen_active_iterator_slot;
 
         jm_begin_function_frame(mt, sm_ret, true,
-            MIR_SCALAR_RETURN_DYNAMIC, MIR_reg(mt->ctx, "ctx", sm_func));
+            MIR_SCALAR_RETURN_DYNAMIC, MIR_reg(mt->ctx, "ctx", sm_func), false);
         mt->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
         jm_push_scope(mt);
         if (fc->has_direct_eval) {
@@ -2015,9 +2012,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->scope_env_slot_count = 0;
             mt->current_func_index = (int)(fc - mt->func_entries);
             mt->func_error_lane_label = 0;
-            mt->error_lane_track = JS_ERROR_LANE_UNKNOWN;
-            mt->last_call_result_reg = 0;
-            mt->func_error_lane_value_reg = 0;
 
             // Set both flags: in_generator reuses gen_* infrastructure, in_async for await handling
             mt->in_generator = true;
@@ -2035,7 +2029,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->gen_active_iterator_slot = gen_active_iterator_slot;
 
             jm_begin_function_frame(mt, sm_ret, true,
-                MIR_SCALAR_RETURN_DYNAMIC, MIR_reg(mt->ctx, "ctx", sm_func));
+                MIR_SCALAR_RETURN_DYNAMIC, MIR_reg(mt->ctx, "ctx", sm_func), false);
             mt->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
             jm_push_scope(mt);
 
@@ -2541,11 +2535,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->in_main = false;
         mt->current_fc = fc;
         mt->func_error_lane_label = 0;  // reset for this function
-        mt->last_call_result_reg = 0;
-        mt->func_error_lane_value_reg = 0;
 
     jm_begin_function_frame(mt, ret_type, true, body_scalar_mode,
-        MIR_reg(mt->ctx, "ctx", func));
+        MIR_reg(mt->ctx, "ctx", func), true);
     mt->em.frame.plan.entry_kind = FN_ENTRY_BOXED_BODY;
     mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
     if (body_needs_scalar_home) {

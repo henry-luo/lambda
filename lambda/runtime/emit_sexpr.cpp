@@ -7,6 +7,7 @@
 // or eval-proc.
 //
 #include "../../lib/memtrack.h"
+#include "../../lib/mem_factory.h"
 
 // Top-level format:
 //   (script "fn" form ...)      ; functional script
@@ -67,7 +68,10 @@ static bool emit_prepare_parse(const char* script_path, EmitParseState* state) {
         ts_parser_delete(state->parser);
         return false;
     }
-    Pool* pool = pool_create();
+    // Input::create registers arena/name/shape allocators under its backing
+    // pool.  A raw pool leaves those root nodes dangling after pool_destroy,
+    // so the factory must own the subtree until AST-dump teardown completes.
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "emit-parse.pool");
     state->input = Input::create(pool, nullptr);
     if (!state->input) {
         fprintf(stderr, "Error: Failed to allocate memory\n");

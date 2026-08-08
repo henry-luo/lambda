@@ -5608,7 +5608,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         }
 
         // Push try context
-        if (JsTryContext* tc = jm_try_context_push(mt)) {
+        JsTryContext* try_context = jm_try_context_push(mt);
+        if (try_context) {
+            JsTryContext* tc = try_context;
             tc->catch_label = catch_label;
             tc->finally_label = finally_label;
             tc->end_label = end_label;
@@ -5652,11 +5654,26 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             jm_pop_scope(mt);  // v20 TDZ: pop try block scope
         }
 
+        // Keep the end join predecessor-aware.  A direct completion already
+        // has a target edge, so synthesizing a normal edge after it makes the
+        // dead join look UNKNOWN and re-emits an unnecessary D8.4.3 tag test.
+        bool end_label_has_edge = try_context && try_context->end_label_has_edge;
+        JsErrorLaneTrack end_label_error_lane_state = end_label_has_edge ?
+            try_context->end_label_error_lane_state : JS_ERROR_LANE_UNREACHABLE;
+
         // Normal exit from try: jump to finally (or end)
         // Pop the try context so throws in catch propagate to outer handler
         if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-            MIR_new_label_op(mt->ctx, has_finally ? finally_label : end_label)));
+        JsErrorLaneTrack try_exit_state = jm_error_lane_state(mt);
+        if (try_exit_state != JS_ERROR_LANE_UNREACHABLE) {
+            if (!has_finally) {
+                end_label_has_edge = true;
+                end_label_error_lane_state = jm_error_lane_merge(
+                    end_label_error_lane_state, try_exit_state);
+            }
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, has_finally ? finally_label : end_label)));
+        }
 
         // === Catch block ===
         if (has_catch) {
@@ -5759,9 +5776,17 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // Pop catch-finally context if we pushed one
             if (pushed_catch_ctx && mt->try_ctx_depth > 0) mt->try_ctx_depth--;
 
-            // Jump to finally (or end)
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                MIR_new_label_op(mt->ctx, has_finally ? finally_label : end_label)));
+            // Jump to finally (or end) only from a real fallthrough path.
+            JsErrorLaneTrack catch_exit_state = jm_error_lane_state(mt);
+            if (catch_exit_state != JS_ERROR_LANE_UNREACHABLE) {
+                if (!has_finally) {
+                    end_label_has_edge = true;
+                    end_label_error_lane_state = jm_error_lane_merge(
+                        end_label_error_lane_state, catch_exit_state);
+                }
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, has_finally ? finally_label : end_label)));
+            }
         }
 
         // === Finally block ===
@@ -5913,31 +5938,39 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 MIR_new_reg_op(mt->ctx, has_return_reg)));
         }
 
-        // End label: check for delayed return
-        jm_emit_label(mt, end_label);
+        // End label: check for delayed return.  A try/catch with only abrupt
+        // paths has no end predecessor, so emitting its join would create dead
+        // MIR and cause the enclosing statement sweep to re-test a stale lane.
+        if (has_finally || end_label_has_edge) {
+            if (has_finally) {
+                jm_emit_label(mt, end_label);
+            } else {
+                jm_emit_label_with_state(mt, end_label, end_label_error_lane_state);
+            }
 
-        // If has_return_reg is set, issue the actual return
-        MIR_label_t no_ret_label = jm_new_label(mt);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
-            MIR_new_label_op(mt->ctx, no_ret_label),
-            MIR_new_reg_op(mt->ctx, has_return_reg)));
-        if (mt->in_generator) {
-            MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, return_val_reg),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
-            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-                MIR_new_reg_op(mt->ctx, done_result)));
-        } else {
-            MIR_reg_t native_ret = jm_native_return_reg(mt, return_val_reg);
-            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-                MIR_new_reg_op(mt->ctx, native_ret)));
-        }
-        jm_emit_label(mt, no_ret_label);
+            // If has_return_reg is set, issue the actual return
+            MIR_label_t no_ret_label = jm_new_label(mt);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                MIR_new_label_op(mt->ctx, no_ret_label),
+                MIR_new_reg_op(mt->ctx, has_return_reg)));
+            if (mt->in_generator) {
+                MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, return_val_reg),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                    MIR_new_reg_op(mt->ctx, done_result)));
+            } else {
+                MIR_reg_t native_ret = jm_native_return_reg(mt, return_val_reg);
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                    MIR_new_reg_op(mt->ctx, native_ret)));
+            }
+            jm_emit_label_with_state(mt, no_ret_label, end_label_error_lane_state);
 
-        // A routed ERROR Item (try/finally without catch, or rethrow) must
-        // continue through the enclosing handler or function exit.
-        if (!has_catch || has_finally) {
-            jm_emit_error_lane_exit(mt);
+            // A routed ERROR Item (try/finally without catch, or rethrow) must
+            // continue through the enclosing handler or function exit.
+            if (!has_catch || has_finally) {
+                jm_emit_error_lane_exit(mt);
+            }
         }
         break;
     }

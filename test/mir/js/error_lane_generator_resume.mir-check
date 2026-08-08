@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.3: a resumable generator begins without a previous frame's call-result register; its infallible implicit yield emits no ERROR-tag test.",
+  "checks": [
+    {
+      "in_func": "gen_sm_anon16_m_#",
+      "expect": [
+        "call\tjs_gen_yield_result"
+      ],
+      "forbid": [
+        "eq\t{{r}}, {{r}}, 27"
+      ]
+    }
+  ]
+}
