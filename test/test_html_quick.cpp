@@ -42,7 +42,7 @@ void print_tree(Item item, int depth) {
 
 int main() {
     Pool* pool = pool_create(1024 * 1024);
-    Arena* arena = arena_create(1024 * 1024);
+    Arena* arena = arena_create(1024 * 1024, 1024 * 1024);
 
     // Test simple HTML
     const char* html = "<p>One<p>Two";

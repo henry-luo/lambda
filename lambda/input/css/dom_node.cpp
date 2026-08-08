@@ -292,8 +292,8 @@ static bool print_style_property_callback(StyleNode* node, void* context) {
     // Format the value using the CSS formatter
     CssValue* val = (CssValue*)decl->value;
 
-    // Reuse the shared temp pool from the context (avoids ~1MB rpmalloc heap
-    // acquire/release per property — see commit re cnn_lite memory profile).
+    // Reuse the shared temp owner from the context instead of creating a
+    // separate allocation group for every property.
     if (ctx->temp_pool) {
         CssFormatter* formatter = css_formatter_create(ctx->temp_pool, CSS_FORMAT_COMPACT);
         if (formatter) {

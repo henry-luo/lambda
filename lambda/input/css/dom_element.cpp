@@ -180,7 +180,7 @@ bool DomDocument::init(Input* source_input) {
     MemContext* dctx = source_input->mem_ctx ? (MemContext*)source_input->mem_ctx : NULL;
     services.mem_ctx = dctx;
 
-    // Create pool for arena chunks
+    // Keep selectively released document records separate from the node region.
     document_pool = mem_pool_create(dctx, MEM_ROLE_NODE, "dom.document.pool");
     if (!document_pool) {
         log_error("dom_document_create: failed to create pool");
@@ -200,7 +200,7 @@ bool DomDocument::init(Input* source_input) {
     }
 
     // Create arena for all DOM node allocations
-    node_arena = mem_arena_create(dctx, document_pool, MEM_ROLE_NODE, "dom.node.arena");
+    node_arena = mem_arena_create(dctx, MEM_ROLE_NODE, "dom.node.arena");
     if (!node_arena) {
         log_error("dom_document_create: failed to create arena");
         // Factory-created DOM roots must unregister their memory-context nodes on teardown.

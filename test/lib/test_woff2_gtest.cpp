@@ -45,7 +45,7 @@ class Woff2Test : public ::testing::Test {
 protected:
     void SetUp() override {
         pool  = pool_create();
-        arena = arena_create(pool, ARENA_MEDIUM_CHUNK_SIZE, ARENA_LARGE_CHUNK_SIZE);
+        arena = arena_create(ARENA_MEDIUM_CHUNK_SIZE, ARENA_LARGE_CHUNK_SIZE);
     }
 
     void TearDown() override {

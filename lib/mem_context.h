@@ -33,7 +33,7 @@ extern "C" {
 
 // Kind of allocator a node tracks.
 typedef enum MemKind {
-    MEM_KIND_POOL = 1,     // lib/mempool.c  (rpmalloc or mmap)
+    MEM_KIND_POOL = 1,     // lib/mempool.c grouped owner facade
     MEM_KIND_ARENA,        // lib/arena.c
     MEM_KIND_SCRATCH,      // lib/scratch_arena.c
     MEM_KIND_HEAP,         // gc_heap (Lambda runtime objects)
@@ -41,6 +41,7 @@ typedef enum MemKind {
     MEM_KIND_SHAPEPOOL,    // cached shapes
     MEM_KIND_JIT,          // MIR-generated executable code (mmap'd code pages)
     MEM_KIND_CACHE,        // self-managed cache (hashmap + LRU): font / image / vector
+    MEM_KIND_VM_REGION,    // opaque platform VM extent (non-owning metadata)
     MEM_KIND_CONTEXT,      // a sub-context grouping node (synthetic)
 } MemKind;
 
@@ -70,6 +71,20 @@ typedef enum MemRole {
 typedef struct MemContext MemContext;
 typedef struct MemNode MemNode;
 
+// Memory pressure level shared by MemContext and the memtrack compatibility
+// API. Reclaimers run outside the context registry lock.
+typedef enum MemPressureLevel {
+    MEM_PRESSURE_NONE = 0,
+    MEM_PRESSURE_LOW,
+    MEM_PRESSURE_MEDIUM,
+    MEM_PRESSURE_HIGH,
+    MEM_PRESSURE_CRITICAL,
+} MemPressureLevel;
+
+typedef size_t (*MemPressureCallback)(MemPressureLevel level,
+                                      size_t target_bytes,
+                                      void* user_data);
+
 // Forward declaration so the callback typedef can reference it.
 typedef struct MemStatSample MemStatSample;
 
@@ -84,7 +99,6 @@ typedef bool (*MemStatFn)(void* allocator, MemStatSample* out);
 typedef void (*MemDestroyFn)(void* allocator);
 
 // Snapshot flags.
-#define MEM_FLAG_MMAP      0x01u   // allocator is mmap-backed
 #define MEM_FLAG_DRAINED   0x02u   // allocator drained/invalidated
 #define MEM_FLAG_LEAKED    0x04u   // outlived its owner (set by leak report)
 #define MEM_FLAG_CHILDREN  0x08u   // has live children backed by it
@@ -110,7 +124,7 @@ struct MemStatSample {
     uint64_t overhead_bytes;   // allocator/chunk headers and backing rounding
     uint64_t high_water_bytes; // peak live/active bytes
     uint64_t cumulative_bytes; // cumulative requested allocation bytes
-    uint64_t alloc_count;      // cumulative allocations (upper bound for rpmalloc)
+    uint64_t alloc_count;      // cumulative allocation calls
     uint64_t free_count;
     uint64_t reuse_hits;
     uint64_t reuse_misses;
@@ -170,6 +184,24 @@ void mem_context_set_enabled(MemContext* ctx, bool enabled);
 // shutdown (Valgrind/ASan). After this, mem_context_root() recreates a fresh
 // root. Optional.
 void mem_context_shutdown(void);
+
+// ---- Memory-pressure coordination ----
+
+// Register a non-recursive reclaimer in the context coordinator. The
+// categories mask is retained for compatibility attribution; a zero mask
+// means the reclaimer can release any category. Returns a stable handle.
+uint32_t mem_context_register_reclaimer(MemContext* ctx,
+                                        MemPressureCallback callback,
+                                        void* user_data,
+                                        uint64_t categories);
+void mem_context_unregister_reclaimer(uint32_t handle);
+
+// Ask the context coordinator to run reclaimers outside its registry lock.
+// Reclaimers must not re-enter the failing allocator or register/unregister
+// context nodes while running.
+size_t mem_context_request_reclaim(MemContext* ctx,
+                                   MemPressureLevel level,
+                                   size_t target_bytes);
 
 // ---- Node registration ----
 

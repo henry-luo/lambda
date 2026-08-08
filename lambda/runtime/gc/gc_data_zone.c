@@ -5,6 +5,8 @@
  * No individual deallocation — bulk reset after GC compaction.
  */
 #include "gc_data_zone.h"
+#define MEMTRACK_NO_LOCATION_MACROS
+#include "../../../lib/memtrack.h"
 #include "../../../lib/log.h"
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +16,7 @@ static inline size_t align_up(size_t size) {
     return (size + GC_DATA_ZONE_ALIGN - 1) & ~(GC_DATA_ZONE_ALIGN - 1);
 }
 
-// allocate a new data block from the pool
+// allocate a new data block from a VM-owned extent
 static gc_data_block_t* allocate_block(gc_data_zone_t* dz, size_t min_size) {
     size_t capacity = dz->block_size;
     if (min_size > capacity) {
@@ -22,16 +24,23 @@ static gc_data_block_t* allocate_block(gc_data_zone_t* dz, size_t min_size) {
         capacity = align_up(min_size);
     }
 
-    uint8_t* memory = (uint8_t*)pool_alloc(dz->pool, capacity);
-    if (!memory) {
-        log_error("gc_data_zone: failed to allocate block of %zu bytes", capacity);
+    MemVmRegion* region = mem_vm_region_reserve(dz->context, dz->owner,
+                                                MEM_ROLE_RUNTIME_HEAP,
+                                                capacity, mem_vm_page_size());
+    if (!region || !mem_vm_region_commit(region, 0,
+                                         mem_vm_region_reserved_bytes(region))) {
+        if (region) mem_vm_region_release(region);
+        log_error("gc_data_zone: failed to reserve/commit block of %zu bytes", capacity);
         return NULL;
     }
+    uint8_t* memory = (uint8_t*)mem_vm_region_base(region);
     memset(memory, 0, capacity);
 
-    gc_data_block_t* block = (gc_data_block_t*)calloc(1, sizeof(gc_data_block_t));
+    gc_data_block_t* block = (gc_data_block_t*)mem_calloc(1, sizeof(gc_data_block_t),
+                                                           MEM_CAT_CONTAINER);
     if (!block) {
         log_error("gc_data_zone: failed to allocate block metadata");
+        mem_vm_region_release(region);
         return NULL;
     }
 
@@ -39,6 +48,7 @@ static gc_data_block_t* allocate_block(gc_data_zone_t* dz, size_t min_size) {
     block->cursor = memory;
     block->limit = memory + capacity;
     block->next = NULL;
+    block->region = region;
 
     dz->total_blocks++;
     log_debug("gc_data_zone: allocated block %zu bytes (total blocks: %zu)",
@@ -46,20 +56,23 @@ static gc_data_block_t* allocate_block(gc_data_zone_t* dz, size_t min_size) {
     return block;
 }
 
-gc_data_zone_t* gc_data_zone_create(Pool* pool, size_t block_size) {
-    gc_data_zone_t* dz = (gc_data_zone_t*)calloc(1, sizeof(gc_data_zone_t));
+gc_data_zone_t* gc_data_zone_create(MemContext* context, MemNode* owner,
+                                    size_t block_size) {
+    gc_data_zone_t* dz = (gc_data_zone_t*)mem_calloc(1, sizeof(gc_data_zone_t),
+                                                      MEM_CAT_CONTAINER);
     if (!dz) {
         log_error("gc_data_zone_create: failed to allocate zone");
         return NULL;
     }
 
-    dz->pool = pool;
+    dz->context = context;
+    dz->owner = owner;
     dz->block_size = block_size > 0 ? block_size : GC_DATA_ZONE_BLOCK_SIZE;
 
     // allocate first block
     gc_data_block_t* first = allocate_block(dz, 0);
     if (!first) {
-        free(dz);
+        mem_free(dz);
         return NULL;
     }
 
@@ -73,16 +86,17 @@ gc_data_zone_t* gc_data_zone_create(Pool* pool, size_t block_size) {
 
 void gc_data_zone_destroy(gc_data_zone_t* dz) {
     if (!dz) return;
-    // free block metadata (block memory is pool-allocated, freed by pool_destroy)
+    // release each block's VM extent before dropping its metadata
     gc_data_block_t* block = dz->head;
     while (block) {
         gc_data_block_t* next = block->next;
-        free(block);
+        mem_vm_region_release(block->region);
+        mem_free(block);
         block = next;
     }
     log_debug("gc_data_zone_destroy: %zu blocks, %zu bytes allocated",
               dz->total_blocks, dz->total_allocated);
-    free(dz);
+    mem_free(dz);
 }
 
 void* gc_data_zone_alloc(gc_data_zone_t* dz, size_t size) {

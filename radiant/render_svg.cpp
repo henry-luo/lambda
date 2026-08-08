@@ -46,7 +46,6 @@ typedef struct {
     UiContext* ui_context;
     PaintList paint_list;
     SvgEffectRasterFallback effect_fallback;
-    Pool* page_backdrop_pool;
     Arena* page_backdrop_arena;
     DisplayList page_backdrop_dl;
     bool page_backdrop_ready;
@@ -1546,17 +1545,12 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     ctx.ui_context = uicon;
     paint_list_init(&ctx.paint_list, nullptr);
     paint_list_init(&ctx.effect_fallback.paint_list, nullptr);
-    ctx.page_backdrop_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg.backdrop");
-    if (ctx.page_backdrop_pool) {
-        ctx.page_backdrop_arena = mem_arena_create(NULL, ctx.page_backdrop_pool, MEM_ROLE_RENDER, "render.svg.backdrop.arena");
-        if (ctx.page_backdrop_arena) {
-            dl_init(&ctx.page_backdrop_dl, ctx.page_backdrop_arena);
-            ctx.page_backdrop_ready = true;
-        } else {
-            log_error("[SVG_PAINT_IR] page backdrop arena allocation failed");
-        }
+    ctx.page_backdrop_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg.backdrop.arena");
+    if (ctx.page_backdrop_arena) {
+        dl_init(&ctx.page_backdrop_dl, ctx.page_backdrop_arena);
+        ctx.page_backdrop_ready = true;
     } else {
-        log_error("[SVG_PAINT_IR] page backdrop pool allocation failed");
+        log_error("[SVG_PAINT_IR] page backdrop arena allocation failed");
     }
     paint_svg_lowering_state_init(&ctx.paint_svg_state, ctx.indent_level);
 
@@ -1644,10 +1638,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     if (ctx.page_backdrop_ready) {
         dl_destroy(&ctx.page_backdrop_dl);
     }
-    if (ctx.page_backdrop_pool) {
-        // Page backdrop display-list storage is arena-in-pool; pool teardown owns the arena chunks.
-        mem_pool_destroy(ctx.page_backdrop_pool);
-    }
+    if (ctx.page_backdrop_arena) mem_arena_destroy(ctx.page_backdrop_arena);
 
     return result;
 }

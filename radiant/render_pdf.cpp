@@ -63,7 +63,6 @@ typedef struct PdfRenderContext {
     BlockBlot block;  // Current block context for coordinate transformation
     PaintList paint_list;
     PdfEffectRasterFallback effect_fallback;
-    Pool* page_backdrop_pool;
     Arena* page_backdrop_arena;
     DisplayList page_backdrop_dl;
     bool page_backdrop_ready;
@@ -1901,23 +1900,18 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     ctx.current_y = 0;
     paint_list_init(&ctx.paint_list, nullptr);
     paint_list_init(&ctx.effect_fallback.paint_list, nullptr);
-    ctx.page_backdrop_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.pdf.backdrop");
-    if (ctx.page_backdrop_pool) {
-        ctx.page_backdrop_arena = mem_arena_create(NULL, ctx.page_backdrop_pool, MEM_ROLE_RENDER, "render.pdf.backdrop.arena");
-        if (ctx.page_backdrop_arena) {
-            dl_init(&ctx.page_backdrop_dl, ctx.page_backdrop_arena);
-            ctx.page_backdrop_ready = true;
-            Color white = {};
-            white.r = 255;
-            white.g = 255;
-            white.b = 255;
-            white.a = 255;
-            dl_fill_rect(&ctx.page_backdrop_dl, 0.0f, 0.0f, width, height, white);
-        } else {
-            log_error("[PDF_PAINT_IR] page backdrop arena allocation failed");
-        }
+    ctx.page_backdrop_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.pdf.backdrop.arena");
+    if (ctx.page_backdrop_arena) {
+        dl_init(&ctx.page_backdrop_dl, ctx.page_backdrop_arena);
+        ctx.page_backdrop_ready = true;
+        Color white = {};
+        white.r = 255;
+        white.g = 255;
+        white.b = 255;
+        white.a = 255;
+        dl_fill_rect(&ctx.page_backdrop_dl, 0.0f, 0.0f, width, height, white);
     } else {
-        log_error("[PDF_PAINT_IR] page backdrop pool allocation failed");
+        log_error("[PDF_PAINT_IR] page backdrop arena allocation failed");
     }
 
     // Initialize block context (starting at origin)
@@ -1981,10 +1975,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     if (ctx.page_backdrop_ready) {
         dl_destroy(&ctx.page_backdrop_dl);
     }
-    if (ctx.page_backdrop_pool) {
-        // Page backdrop display-list storage is arena-in-pool; pool teardown owns the arena chunks.
-        mem_pool_destroy(ctx.page_backdrop_pool);
-    }
+    if (ctx.page_backdrop_arena) mem_arena_destroy(ctx.page_backdrop_arena);
     return ctx.pdf_doc;
 }
 

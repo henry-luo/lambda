@@ -46,7 +46,7 @@ typedef struct RbScope {
 // Ruby transpiler context
 typedef struct RbTranspiler {
     // core transpiler components
-    Pool* ast_pool;                 // AST backing pool (for arena chunks)
+    Pool* ast_pool;                 // AST owner group for selectively freed metadata
     Arena* ast_arena;               // AST bump allocator (O(1) alloc, bulk free)
     NamePool* name_pool;            // string interning pool
     const char* source;             // Ruby source code

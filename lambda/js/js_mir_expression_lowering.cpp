@@ -13044,7 +13044,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         return result;
     }
     case JS_AST_NODE_REGEX: {
-        // v11: regex literal /pattern/flags → js_create_regex(pattern, len, flags, len)
+        // Static AST literals have pool-owned spelling, so their compiled form
+        // can be safely retained by the literal cache across evaluations.
         JsRegexNode* re = (JsRegexNode*)expr;
         MIR_reg_t pat_ptr = jm_new_reg(mt, "re_pat", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pat_ptr),
@@ -13052,7 +13053,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         MIR_reg_t flags_ptr = jm_new_reg(mt, "re_flags", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, flags_ptr),
             MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)re->flags)));
-        return jm_call_4(mt, "js_create_regex", MIR_T_I64,
+        return jm_call_4(mt, "js_create_regex_literal", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, pat_ptr),
             MIR_T_I64, MIR_new_int_op(mt->ctx, re->pattern_len),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, flags_ptr),

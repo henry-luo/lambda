@@ -926,7 +926,7 @@ void ViewTree::init() {
     }
     else {
         view_tree_canonical_init(this);
-        scratch_arena = mem_arena_create(NULL, prop_pool, MEM_ROLE_LAYOUT, "view_tree.scratch_arena");
+        scratch_arena = mem_arena_create(NULL, MEM_ROLE_LAYOUT, "view_tree.scratch_arena");
         free_text_rects = nullptr;
         if (layout_generation == 0) layout_generation = 1;
         log_debug("view pool initialized");

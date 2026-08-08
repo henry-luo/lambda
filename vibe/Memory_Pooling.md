@@ -1,5 +1,12 @@
 # Memory Management Survey Report
 
+> **Historical / superseded (2026-08-08).** This survey records the
+> pre-retirement Pool/Arena and rpmalloc architecture. It is retained for
+> migration rationale only. The current implementation authority is
+> [Lambda Memory Pool Redesign](./Lambda_Design_Mem_Pool.md), with the
+> normative ownership rulings in **D4.2.1v2**, **D4.2.2v2**, **D4.3.2v2**,
+> and **D4.5.1v2** of [Lambda Formal Design](../doc/Lambda_Formal_Design.md).
+
 **Scope**: Lambda + Radiant codebase  
 **Date**: 2026-04-12
 

@@ -29,9 +29,8 @@ static bool heap_stat_fn(void* a, MemStatSample* s) {
 static gc_heap_t* register_heap(MemContext* ctx, gc_heap_t* gc,
                                 MemRole role, const char* label) {
     if (!gc) return NULL;
-    MemNode* parent = gc->pool ? (MemNode*)pool_get_mem_node(gc->pool) : NULL;
     MemNode* n = mem_register(ctx ? ctx : mem_context_root(),
-                              MEM_KIND_HEAP, role, label, gc, parent,
+                              MEM_KIND_HEAP, role, label, gc, NULL,
                               heap_stat_fn, NULL);
     gc->mem_node = n;
     return gc;
@@ -40,10 +39,4 @@ static gc_heap_t* register_heap(MemContext* ctx, gc_heap_t* gc,
 gc_heap_t* mem_gc_heap_create(MemContext* ctx, MemRole role, const char* label) {
     ensure_rt_release_hooks();
     return register_heap(ctx, gc_heap_create(), role, label);
-}
-
-gc_heap_t* mem_gc_heap_create_with_pool(MemContext* ctx, Pool* pool,
-                                        MemRole role, const char* label) {
-    ensure_rt_release_hooks();
-    return register_heap(ctx, gc_heap_create_with_pool(pool), role, label);
 }

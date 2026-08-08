@@ -41,7 +41,7 @@ protected:
 
     void SetUp() override {
         log_init(NULL);
-        pool = pool_create_mmap();
+        pool = pool_create();
         // Path allocation is selected by its registered provider, so this
         // core/data test must not manufacture a runtime TLS context.
         path_test_pool = pool;

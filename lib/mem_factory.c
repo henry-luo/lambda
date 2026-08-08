@@ -34,7 +34,6 @@ static bool pool_stat_fn(void* a, MemStatSample* s) {
     s->cumulative_bytes = stats.cumulative_bytes;
     s->alloc_count = stats.allocation_count;
     s->free_count = stats.free_count;
-    if (stats.is_mmap) s->flags |= MEM_FLAG_MMAP;
     return true;
 }
 
@@ -45,17 +44,6 @@ static void pool_destroy_fn(void* a) {
 Pool* mem_pool_create(MemContext* ctx, MemRole role, const char* label) {
     ensure_release_hooks();
     Pool* p = pool_create();
-    if (!p) return NULL;
-    MemNode* n = mem_register(ctx ? ctx : mem_context_root(),
-                              MEM_KIND_POOL, role, label, p, NULL,
-                              pool_stat_fn, pool_destroy_fn);
-    pool_set_mem_node(p, n);
-    return p;
-}
-
-Pool* mem_pool_create_mmap(MemContext* ctx, MemRole role, const char* label) {
-    ensure_release_hooks();
-    Pool* p = pool_create_mmap();
     if (!p) return NULL;
     MemNode* n = mem_register(ctx ? ctx : mem_context_root(),
                               MEM_KIND_POOL, role, label, p, NULL,
@@ -80,7 +68,9 @@ static bool arena_stat_fn(void* a, MemStatSample* s) {
     arena_get_stats((Arena*)a, &stats);
     s->bytes_reserved = stats.committed_bytes;
     s->bytes_in_use = stats.active_bytes;
-    s->backing_bytes = stats.backing_bytes;
+    // Arena blocks are direct memtrack allocations; no generic Pool owns their
+    // bytes, so backing_bytes must describe a parent edge, not arena capacity.
+    s->backing_bytes = 0;
     s->direct_bytes = stats.active_bytes;
     s->committed_bytes = stats.committed_bytes;
     s->recyclable_bytes = stats.recyclable_bytes;
@@ -107,11 +97,11 @@ static void arena_destroy_fn(void* a) {
     arena_destroy((Arena*)a);
 }
 
-static Arena* register_arena(MemContext* ctx, Pool* backing, Arena* ar,
+static Arena* register_arena(MemContext* ctx, Arena* ar,
                              MemRole role, const char* label) {
     if (!ar) return NULL;
     ensure_release_hooks();
-    MemNode* parent = backing ? (MemNode*)pool_get_mem_node(backing) : NULL;
+    MemNode* parent = NULL;
     MemNode* n = mem_register(ctx ? ctx : mem_context_root(),
                               MEM_KIND_ARENA, role, label, ar, parent,
                               arena_stat_fn, arena_destroy_fn);
@@ -119,15 +109,15 @@ static Arena* register_arena(MemContext* ctx, Pool* backing, Arena* ar,
     return ar;
 }
 
-Arena* mem_arena_create(MemContext* ctx, Pool* backing, MemRole role, const char* label) {
-    return register_arena(ctx, backing, arena_create_default(backing), role, label);
+Arena* mem_arena_create(MemContext* ctx, MemRole role, const char* label) {
+    return register_arena(ctx, arena_create_default(), role, label);
 }
 
-Arena* mem_arena_create_sized(MemContext* ctx, Pool* backing,
+Arena* mem_arena_create_sized(MemContext* ctx,
                               size_t initial_chunk_size, size_t max_chunk_size,
                               MemRole role, const char* label) {
-    return register_arena(ctx, backing,
-                          arena_create(backing, initial_chunk_size, max_chunk_size),
+    return register_arena(ctx,
+                          arena_create(initial_chunk_size, max_chunk_size),
                           role, label);
 }
 

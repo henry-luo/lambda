@@ -21,7 +21,7 @@ protected:
     
     void SetUp() override {
         pool = pool_create();
-        arena = arena_create_default(pool);
+        arena = arena_create_default();
         fonts = tex::create_font_manager(arena);
     }
     

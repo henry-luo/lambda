@@ -279,12 +279,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         if (!eval_context_thread_initialize(js_context)) {
             return (Item){.item = ITEM_ERROR};
         }
-        if (runtime->reuse_pool) {
-            heap_init_with_pool(runtime->reuse_pool);
-            runtime->reuse_pool = NULL;
-        } else {
-            heap_init();
-        }
+        heap_init();
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, nullptr);
         context->type_list = arraylist_new(64);
@@ -704,12 +699,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
             log_error("js-mir: Runtime context differs from eval-thread owner");
             return ItemError;
         }
-        if (runtime->reuse_pool) {
-            heap_init_with_pool(runtime->reuse_pool);
-            runtime->reuse_pool = NULL;
-        } else {
-            heap_init();
-        }
+        heap_init();
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, nullptr);
         context->type_list = arraylist_new(64);
@@ -1453,12 +1443,7 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
         return ItemError;
     }
     if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
-    if (runtime->reuse_pool) {
-        heap_init_with_pool(runtime->reuse_pool);
-        runtime->reuse_pool = NULL;
-    } else {
-        heap_init();
-    }
+    heap_init();
     if (!context->heap) {
         preamble_state_destroy(out_state);
         js_mir_destroy_unowned_eval_context(runtime, js_context, false);

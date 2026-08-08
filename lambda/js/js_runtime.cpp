@@ -15741,6 +15741,7 @@ static JsRegexCompileCache* js_regex_compile_cache_get(bool create) {
 #define g_regex_property_cache_len (js_runtime_state.operations.regex_property_cache_len)
 #define g_regex_property_cache_mode (js_runtime_state.operations.regex_property_cache_mode)
 #define g_regex_property_cache_result (js_runtime_state.operations.regex_property_cache_result)
+#define g_regex_instance_shape (js_runtime_state.operations.regex_instance_shape)
 
 static inline uint64_t js_regex_cache_key(const char* pattern, const char* flags) {
     return (uint64_t)(uintptr_t)pattern ^ ((uint64_t)(uintptr_t)flags * 2654435761ULL);
@@ -15776,6 +15777,7 @@ void js_regex_cache_reset() {
     g_regex_property_cache_len = 0;
     g_regex_property_cache_mode = 0;
     g_regex_property_cache_result = false;
+    g_regex_instance_shape = NULL;
 }
 
 static bool js_regex_unicode_is_other_category(utf8proc_category_t cat) {
@@ -17332,65 +17334,128 @@ static void js_regex_put_fresh(Item obj, const char* key, int key_len, Item valu
     map_put(obj.map, heap_create_name(key, key_len), value, js_input);
 }
 
+static Item js_new_dynamic_regexp_object(bool* uses_cached_shape) {
+    if (uses_cached_shape) *uses_cached_shape = false;
+    TypeMap* cached_shape = (TypeMap*)g_regex_instance_shape;
+    if (cached_shape && typemap_ptr_is_plausible(cached_shape)) {
+        if (uses_cached_shape) *uses_cached_shape = true;
+        return js_new_object_with_typemap(cached_shape);
+    }
+    return js_new_object();
+}
+
+static void js_regex_publish_instance_shape(Item obj) {
+    if (g_regex_instance_shape || get_type_id(obj) != LMD_TYPE_MAP || !obj.map) return;
+    TypeMap* shape = (TypeMap*)obj.map->type;
+    if (!shape || !typemap_ptr_is_plausible(shape) || shape == &EmptyMap) return;
+    // The first instance carries the final field types, descriptors, and class
+    // stamp.  Publishing only this sealed layout prevents later instances from
+    // cloning pool-owned shape metadata while their slots are initialized.
+    shape->is_private_clone = false;
+    shape->is_shared_constructor_shape = true;
+    shape->is_transition_shared_shape = false;
+    g_regex_instance_shape = shape;
+}
+
+static void js_regex_initialize_own_property(Item obj, Item key, Item value,
+        bool uses_cached_shape) {
+    if (uses_cached_shape) {
+        // The cached RegExp shape already fixes the property descriptors.  The
+        // object is not observable until construction completes, so initialize
+        // the matching slot directly instead of treating its non-writable
+        // public descriptor as a user assignment.
+        fn_map_set(obj, key, value);
+        return;
+    }
+    js_property_set(obj, key, value);
+}
+
+static void js_regex_set_cached_property(Item obj, const char* key, int key_len,
+        Item value, bool writable, bool configurable, bool dynamic_instance,
+        bool uses_cached_shape) {
+    Item key_item = (Item){.item = s2it(heap_create_name(key, key_len))};
+    if (dynamic_instance) {
+        js_regex_initialize_own_property(obj, key_item, value, uses_cached_shape);
+    } else {
+        js_regex_put_fresh(obj, key, key_len, value);
+    }
+    if (dynamic_instance && uses_cached_shape) return;
+    // The cached-literal path used to create the visible descriptors lazily,
+    // so every eval rebuilt a private shape.  Dynamic literals share the same
+    // spec descriptors as the general RegExp constructor before publication.
+    if (dynamic_instance && !writable) js_mark_non_writable(obj, key_item);
+    js_mark_non_enumerable(obj, key_item);
+    if (!configurable) js_mark_non_configurable(obj, key_item);
+}
+
 // Build a JS RegExp Map object from a cached regex entry, reusing compiled JsRegexData.
-static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
+static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce,
+        bool dynamic_instance) {
     JsRegexData* rd = ce.rd;
     rd->unicode = ce.has_unicode;
     rd->has_indices = ce.has_indices;
     RootFrame roots(2);
     // Creating each property can allocate; keep the half-built RegExp rooted
     // until its own property map becomes the durable owner of the values.
-    Rooted<Item> regex_obj_root(roots, js_new_object());
+    bool uses_cached_shape = false;
+    Rooted<Item> regex_obj_root(roots, dynamic_instance
+        ? js_new_dynamic_regexp_object(&uses_cached_shape) : js_new_object());
     Item regex_obj = regex_obj_root.get();
-    heap_create_name(JS_REGEX_DATA_KEY);
     Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
-    js_regex_put_fresh(regex_obj, JS_REGEX_DATA_KEY, 4, rd_val);
-    Item source_key = (Item){.item = s2it(heap_create_name("source"))};
+    Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY, 4))};
+    if (dynamic_instance) {
+        js_regex_initialize_own_property(regex_obj, rd_key, rd_val, uses_cached_shape);
+    } else {
+        js_regex_put_fresh(regex_obj, JS_REGEX_DATA_KEY, 4, rd_val);
+    }
     Item source_val = (Item){.item = s2it(js_regex_escape_source(ce.source, ce.source_len))};
-    js_regex_put_fresh(regex_obj, "source", 6, source_val);
-    js_mark_non_enumerable(regex_obj, source_key);
-    Item flags_key = (Item){.item = s2it(heap_create_name("flags"))};
     Item flags_val = (Item){.item = s2it(heap_create_name(ce.canonical_flags))};
-    js_regex_put_fresh(regex_obj, "flags", 5, flags_val);
-    js_mark_non_enumerable(regex_obj, flags_key);
-    Item global_key = (Item){.item = s2it(heap_create_name("global"))};
-    js_regex_put_fresh(regex_obj, "global", 6, (Item){.item = b2it(rd->global ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_enumerable(regex_obj, global_key);
-    Item ic_key = (Item){.item = s2it(heap_create_name("ignoreCase"))};
-    js_regex_put_fresh(regex_obj, "ignoreCase", 10, (Item){.item = b2it(rd->ignore_case ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_enumerable(regex_obj, ic_key);
-    Item ml_key = (Item){.item = s2it(heap_create_name("multiline"))};
-    js_regex_put_fresh(regex_obj, "multiline", 9, (Item){.item = b2it(rd->multiline ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_enumerable(regex_obj, ml_key);
-    Item da_key = (Item){.item = s2it(heap_create_name("dotAll"))};
-    js_regex_put_fresh(regex_obj, "dotAll", 6, (Item){.item = b2it(ce.dot_all ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_enumerable(regex_obj, da_key);
-    Item uni_key = (Item){.item = s2it(heap_create_name("unicode"))};
+    js_regex_set_cached_property(regex_obj, "source", 6, source_val, false, true,
+        dynamic_instance, uses_cached_shape);
+    js_regex_set_cached_property(regex_obj, "flags", 5, flags_val, false, true,
+        dynamic_instance, uses_cached_shape);
+    js_regex_set_cached_property(regex_obj, "global", 6,
+        (Item){.item = b2it(rd->global ? BOOL_TRUE : BOOL_FALSE)}, false, true,
+        dynamic_instance, uses_cached_shape);
+    js_regex_set_cached_property(regex_obj, "ignoreCase", 10,
+        (Item){.item = b2it(rd->ignore_case ? BOOL_TRUE : BOOL_FALSE)}, false, true,
+        dynamic_instance, uses_cached_shape);
+    js_regex_set_cached_property(regex_obj, "multiline", 9,
+        (Item){.item = b2it(rd->multiline ? BOOL_TRUE : BOOL_FALSE)}, false, true,
+        dynamic_instance, uses_cached_shape);
+    js_regex_set_cached_property(regex_obj, "dotAll", 6,
+        (Item){.item = b2it(ce.dot_all ? BOOL_TRUE : BOOL_FALSE)}, false, true,
+        dynamic_instance, uses_cached_shape);
     // Per ES §22.2.5.6: .unicode is true only when the `u` flag was set.
     // /v sets .unicodeSets but NOT .unicode.
     bool js_unicode = ce.has_unicode && !ce.has_unicode_sets;
-    js_regex_put_fresh(regex_obj, "unicode", 7, (Item){.item = b2it(js_unicode ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_enumerable(regex_obj, uni_key);
-    // Js54: ES2024 unicodeSets ('v' flag) own property
-    Item uniset_key = (Item){.item = s2it(heap_create_name("unicodeSets"))};
-    js_regex_put_fresh(regex_obj, "unicodeSets", 11, (Item){.item = b2it(ce.has_unicode_sets ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_enumerable(regex_obj, uniset_key);
-    Item sticky_key = (Item){.item = s2it(heap_create_name("sticky"))};
-    js_regex_put_fresh(regex_obj, "sticky", 6, (Item){.item = b2it(rd->sticky ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_enumerable(regex_obj, sticky_key);
-    Item li_key = (Item){.item = s2it(heap_create_name("lastIndex"))};
-    js_regex_put_fresh(regex_obj, "lastIndex", 9, (Item){.item = i2it(0)});
-    // Per ES §22.2.3.1 RegExpAlloc: lastIndex is {writable:true, enumerable:false, configurable:false}
-    js_mark_non_enumerable(regex_obj, li_key);
-    js_mark_non_configurable(regex_obj, li_key);
-    js_class_stamp(regex_obj, JS_CLASS_REGEXP);
+    js_regex_set_cached_property(regex_obj, "unicode", 7,
+        (Item){.item = b2it(js_unicode ? BOOL_TRUE : BOOL_FALSE)}, false, true,
+        dynamic_instance, uses_cached_shape);
+    js_regex_set_cached_property(regex_obj, "unicodeSets", 11,
+        (Item){.item = b2it(ce.has_unicode_sets ? BOOL_TRUE : BOOL_FALSE)}, false, true,
+        dynamic_instance, uses_cached_shape);
+    js_regex_set_cached_property(regex_obj, "sticky", 6,
+        (Item){.item = b2it(rd->sticky ? BOOL_TRUE : BOOL_FALSE)}, false, true,
+        dynamic_instance, uses_cached_shape);
+    // Per ES §22.2.3.1 RegExpAlloc: lastIndex is writable, non-enumerable,
+    // and non-configurable.
+    js_regex_set_cached_property(regex_obj, "lastIndex", 9, (Item){.item = i2it(0)},
+        true, false, dynamic_instance, uses_cached_shape);
+    if (!dynamic_instance || !uses_cached_shape) js_class_stamp(regex_obj, JS_CLASS_REGEXP);
     // v90: set __proto__ so prototype chain overrides (delete/reassign Symbol.matchAll etc.) work
     Rooted<Item> regexp_proto_root(roots, js_get_regexp_prototype());
     Item regexp_proto = regexp_proto_root.get();
     if (regexp_proto.item != ItemNull.item) {
-        heap_create_name("__proto__", 9);
-        js_regex_put_fresh(regex_obj, "__proto__", 9, regexp_proto);
+        Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+        if (dynamic_instance) {
+            js_regex_initialize_own_property(regex_obj, proto_key, regexp_proto,
+                uses_cached_shape);
+        } else {
+            js_regex_put_fresh(regex_obj, "__proto__", 9, regexp_proto);
+        }
     }
+    if (dynamic_instance && !uses_cached_shape) js_regex_publish_instance_shape(regex_obj);
     return regex_obj_root.get();
 }
 
@@ -17878,7 +17943,8 @@ static void js_regex_apply_casefold_fixups(std::string& pat, bool has_unicode, b
     if (changed) pat = std::move(out);
 }
 
-extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
+static Item js_create_regex_impl(const char* pattern, int pattern_len,
+        const char* flags, int flags_len, bool cache_static_literal) {
     char* literal_buf = NULL;
     int literal_len = 0;
     int special_property_kind = js_regex_detect_simple_property_repeat(pattern, pattern_len);
@@ -17900,19 +17966,22 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             rd->has_indices = has_indices;
             JsRegexCacheEntry ce = {rd, pattern, pattern_len, canonical_flags,
                                     canonical_flags_len, false, has_indices, has_unicode, false};
-            return js_regex_build_object_from_cache(ce);
+            return js_regex_build_object_from_cache(ce, !cache_static_literal);
         }
     }
 
-    uint64_t cache_key = js_regex_cache_key(pattern, flags);
-    auto cache_it = g_regex_compile_cache.find(cache_key);
-    if (special_property_kind == 0 && cache_it != g_regex_compile_cache.end()) {
-        // Regex literals reuse the same AST-owned pattern/flags pointers every
-        // time the literal is evaluated.  If this exact literal was already
-        // compiled successfully, skip the expensive frontend validation pass.
-        auto& ce = cache_it->second;
-        if (ce.source_len == pattern_len && ce.source == pattern) {
-            return js_regex_build_object_from_cache(ce);
+    uint64_t cache_key = 0;
+    if (cache_static_literal) {
+        cache_key = js_regex_cache_key(pattern, flags);
+        auto cache_it = g_regex_compile_cache.find(cache_key);
+        if (special_property_kind == 0 && cache_it != g_regex_compile_cache.end()) {
+            // Regex literals reuse the same AST-owned pattern/flags pointers every
+            // time the literal is evaluated.  If this exact literal was already
+            // compiled successfully, skip the expensive frontend validation pass.
+            auto& ce = cache_it->second;
+            if (ce.source_len == pattern_len && ce.source == pattern) {
+                return js_regex_build_object_from_cache(ce, false);
+            }
         }
     }
 
@@ -17953,7 +18022,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         rd->literal_pattern_len = literal_len;
         static const char empty_flags[] = "";
         JsRegexCacheEntry ce = {rd, pattern, pattern_len, empty_flags, 0, false, false, false, false};
-        return js_regex_build_object_from_cache(ce);
+        return js_regex_build_object_from_cache(ce, !cache_static_literal);
     }
 
     bool has_re2_name_alias = js_regex_pattern_has_re2_name_alias(pattern, pattern_len);
@@ -17963,8 +18032,10 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
          js_regex_pattern_has_dot_atom(pattern, pattern_len));
 
     // Check permanent RE2 cache — survives pool resets, avoids recompiling huge regex literals between tests
-    uint64_t perm_key = js_regex_content_hash(pattern, pattern_len, flags, flags_len);
-    if (special_property_kind == 0 && !has_re2_name_alias && !needs_utf16_subject) {
+    uint64_t perm_key = cache_static_literal
+        ? js_regex_content_hash(pattern, pattern_len, flags, flags_len) : 0;
+    if (cache_static_literal && special_property_kind == 0 &&
+            !has_re2_name_alias && !needs_utf16_subject) {
         auto perm_it = g_re2_permanent_cache.find(perm_key);
         if (perm_it != g_re2_permanent_cache.end()) {
             auto& pe = perm_it->second;
@@ -17982,7 +18053,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 JsRegexCacheEntry ce = {rd, pattern, pattern_len, pe.canonical_flags, pe.canonical_flags_len,
                                         pe.dot_all, pe.has_indices, pe.has_unicode, pe.has_unicode_sets};
                 g_regex_compile_cache[cache_key] = ce;
-                return js_regex_build_object_from_cache(ce);
+                return js_regex_build_object_from_cache(ce, false);
             }
         }
     }
@@ -18803,75 +18874,99 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     RootFrame regex_roots(2);
     // Every following property setup can allocate. Keep the object and its
     // eventual prototype alive until the map owns the completed graph.
-    Rooted<Item> regex_obj_root(regex_roots, js_new_object());
+    bool uses_cached_shape = false;
+    Rooted<Item> regex_obj_root(regex_roots,
+        js_new_dynamic_regexp_object(&uses_cached_shape));
     Item regex_obj = regex_obj_root.get();
     // store regex data pointer as int in hidden property
     Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
     Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
-    js_property_set(regex_obj, rd_key, rd_val);
-    // create null-terminated copies for heap_create_name
-    char* src_buf = (char*)pool_calloc(js_input->pool, pattern_len + 1);
-    memcpy(src_buf, pattern, pattern_len);
-    src_buf[pattern_len] = '\0';
-    char* flg_buf = (char*)pool_calloc(js_input->pool, flags_len + 1);
+    js_regex_initialize_own_property(regex_obj, rd_key, rd_val, uses_cached_shape);
+    char canonical_flags[sizeof(compile_info.canonical_flags)];
     // v89: store flags in canonical order dgimsuy (ES spec §22.2.5.4)
     {
-        memcpy(flg_buf, compile_info.canonical_flags, compile_info.canonical_flags_len);
-        flg_buf[compile_info.canonical_flags_len] = '\0';
+        memcpy(canonical_flags, compile_info.canonical_flags, compile_info.canonical_flags_len);
+        canonical_flags[compile_info.canonical_flags_len] = '\0';
         flags_len = compile_info.canonical_flags_len;
     }
     // set visible properties — use heap_strcpy with explicit length to handle NUL bytes
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
-    Item source_val = (Item){.item = s2it(js_regex_escape_source(src_buf, pattern_len))};
-    js_property_set(regex_obj, source_key, source_val);
-    js_mark_non_writable(regex_obj, source_key);
-    js_mark_non_enumerable(regex_obj, source_key);
+    Item source_val = (Item){.item = s2it(js_regex_escape_source(pattern, pattern_len))};
+    js_regex_initialize_own_property(regex_obj, source_key, source_val, uses_cached_shape);
+    if (!uses_cached_shape) {
+        js_mark_non_writable(regex_obj, source_key);
+        js_mark_non_enumerable(regex_obj, source_key);
+    }
     Item flags_key = (Item){.item = s2it(heap_create_name("flags"))};
-    Item flags_val = (Item){.item = s2it(heap_create_name(flg_buf))};
-    js_property_set(regex_obj, flags_key, flags_val);
-    js_mark_non_writable(regex_obj, flags_key);
-    js_mark_non_enumerable(regex_obj, flags_key);
+    Item flags_val = (Item){.item = s2it(heap_create_name(canonical_flags))};
+    js_regex_initialize_own_property(regex_obj, flags_key, flags_val, uses_cached_shape);
+    if (!uses_cached_shape) {
+        js_mark_non_writable(regex_obj, flags_key);
+        js_mark_non_enumerable(regex_obj, flags_key);
+    }
     Item global_key = (Item){.item = s2it(heap_create_name("global"))};
     Item global_val = (Item){.item = b2it(global ? BOOL_TRUE : BOOL_FALSE)};
-    js_property_set(regex_obj, global_key, global_val);
-    js_mark_non_writable(regex_obj, global_key);
-    js_mark_non_enumerable(regex_obj, global_key);
+    js_regex_initialize_own_property(regex_obj, global_key, global_val, uses_cached_shape);
+    if (!uses_cached_shape) {
+        js_mark_non_writable(regex_obj, global_key);
+        js_mark_non_enumerable(regex_obj, global_key);
+    }
     // v18: expose all standard RegExp flag properties
     bool ignore_case = !opts.case_sensitive();
     bool dot_all = opts.dot_nl();
     bool has_sticky = compile_info.sticky;
     Item ic_key = (Item){.item = s2it(heap_create_name("ignoreCase"))};
-    js_property_set(regex_obj, ic_key, (Item){.item = b2it(ignore_case ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_writable(regex_obj, ic_key);
-    js_mark_non_enumerable(regex_obj, ic_key);
+    js_regex_initialize_own_property(regex_obj, ic_key,
+        (Item){.item = b2it(ignore_case ? BOOL_TRUE : BOOL_FALSE)}, uses_cached_shape);
+    if (!uses_cached_shape) {
+        js_mark_non_writable(regex_obj, ic_key);
+        js_mark_non_enumerable(regex_obj, ic_key);
+    }
     Item ml_key = (Item){.item = s2it(heap_create_name("multiline"))};
-    js_property_set(regex_obj, ml_key, (Item){.item = b2it(multiline ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_writable(regex_obj, ml_key);
-    js_mark_non_enumerable(regex_obj, ml_key);
+    js_regex_initialize_own_property(regex_obj, ml_key,
+        (Item){.item = b2it(multiline ? BOOL_TRUE : BOOL_FALSE)}, uses_cached_shape);
+    if (!uses_cached_shape) {
+        js_mark_non_writable(regex_obj, ml_key);
+        js_mark_non_enumerable(regex_obj, ml_key);
+    }
     Item da_key = (Item){.item = s2it(heap_create_name("dotAll"))};
-    js_property_set(regex_obj, da_key, (Item){.item = b2it(dot_all ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_writable(regex_obj, da_key);
-    js_mark_non_enumerable(regex_obj, da_key);
+    js_regex_initialize_own_property(regex_obj, da_key,
+        (Item){.item = b2it(dot_all ? BOOL_TRUE : BOOL_FALSE)}, uses_cached_shape);
+    if (!uses_cached_shape) {
+        js_mark_non_writable(regex_obj, da_key);
+        js_mark_non_enumerable(regex_obj, da_key);
+    }
     Item uni_key = (Item){.item = s2it(heap_create_name("unicode"))};
     // Per ES §22.2.5.6: only `u` (not `v`) sets .unicode.
-    js_property_set(regex_obj, uni_key, (Item){.item = b2it(compile_info.unicode ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_writable(regex_obj, uni_key);
-    js_mark_non_enumerable(regex_obj, uni_key);
+    js_regex_initialize_own_property(regex_obj, uni_key,
+        (Item){.item = b2it(compile_info.unicode ? BOOL_TRUE : BOOL_FALSE)}, uses_cached_shape);
+    if (!uses_cached_shape) {
+        js_mark_non_writable(regex_obj, uni_key);
+        js_mark_non_enumerable(regex_obj, uni_key);
+    }
     // Js54: ES2024 unicodeSets ('v' flag) own property
     Item uniset_key = (Item){.item = s2it(heap_create_name("unicodeSets"))};
-    js_property_set(regex_obj, uniset_key, (Item){.item = b2it(compile_info.unicode_sets ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_writable(regex_obj, uniset_key);
-    js_mark_non_enumerable(regex_obj, uniset_key);
+    js_regex_initialize_own_property(regex_obj, uniset_key,
+        (Item){.item = b2it(compile_info.unicode_sets ? BOOL_TRUE : BOOL_FALSE)}, uses_cached_shape);
+    if (!uses_cached_shape) {
+        js_mark_non_writable(regex_obj, uniset_key);
+        js_mark_non_enumerable(regex_obj, uniset_key);
+    }
     Item sticky_key = (Item){.item = s2it(heap_create_name("sticky"))};
-    js_property_set(regex_obj, sticky_key, (Item){.item = b2it(has_sticky ? BOOL_TRUE : BOOL_FALSE)});
-    js_mark_non_writable(regex_obj, sticky_key);
-    js_mark_non_enumerable(regex_obj, sticky_key);
+    js_regex_initialize_own_property(regex_obj, sticky_key,
+        (Item){.item = b2it(has_sticky ? BOOL_TRUE : BOOL_FALSE)}, uses_cached_shape);
+    if (!uses_cached_shape) {
+        js_mark_non_writable(regex_obj, sticky_key);
+        js_mark_non_enumerable(regex_obj, sticky_key);
+    }
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex"))};
-    js_property_set(regex_obj, li_key, (Item){.item = i2it(0)});
+    js_regex_initialize_own_property(regex_obj, li_key, (Item){.item = i2it(0)}, uses_cached_shape);
     // Per ES §22.2.3.1: lastIndex is {writable:true, enumerable:false, configurable:false}
-    js_mark_non_enumerable(regex_obj, li_key);
-    js_mark_non_configurable(regex_obj, li_key);
-    js_class_stamp(regex_obj, JS_CLASS_REGEXP);
+    if (!uses_cached_shape) {
+        js_mark_non_enumerable(regex_obj, li_key);
+        js_mark_non_configurable(regex_obj, li_key);
+        js_class_stamp(regex_obj, JS_CLASS_REGEXP);
+    }
     // v90: set __proto__ so prototype chain overrides work
     Rooted<Item> regexp_proto_root(regex_roots, js_get_regexp_prototype());
     Item regexp_proto = regexp_proto_root.get();
@@ -18879,26 +18974,42 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
         js_property_set(regex_obj, proto_key, regexp_proto);
     }
+    if (!uses_cached_shape) js_regex_publish_instance_shape(regex_obj);
     // Store in permanent RE2 cache if no complex wrapper — survives batch resets for cross-test reuse.
     // Wrapper metadata owns its RE2 engine, so only direct RE2 compilations
     // may enter this cache. This keeps one unambiguous native owner.
-    if (!bt && special_property_kind == 0 && !literal_fast && named_alias_count == 0 &&
+    if (cache_static_literal && !bt && special_property_kind == 0 && !literal_fast && named_alias_count == 0 &&
         !needs_utf16_subject && !wrapper) {
         re2::RE2* perm_re2 = re2; // re2 points to either wrapper->re2 or directly-compiled re2
         char* perm_flags = new char[flags_len + 1];
-        memcpy(perm_flags, flg_buf, flags_len + 1);
+        memcpy(perm_flags, canonical_flags, flags_len + 1);
         g_re2_permanent_cache[perm_key] = {perm_re2, global, !opts.case_sensitive(), multiline, sticky,
                                             dot_all, has_unicode, compile_info.unicode_sets,
                                             compile_info.has_indices, perm_flags,
                                             (int)strlen(perm_flags), pattern_len};
     }
     // Store in regex compilation cache for future reuse
-    if (special_property_kind == 0) {
-        g_regex_compile_cache[cache_key] = {rd, pattern, pattern_len, flg_buf,
-                                             (int)strlen(flg_buf), dot_all, compile_info.has_indices,
+    if (cache_static_literal && special_property_kind == 0) {
+        // Dynamic patterns commonly originate in short-lived eval strings.  Caching
+        // their raw pointers retained every RegExp in the worker and could later
+        // alias a recycled string address; only AST-owned literal spellings persist.
+        char* cached_flags = (char*)pool_calloc(js_input->pool, flags_len + 1);
+        memcpy(cached_flags, canonical_flags, flags_len + 1);
+        g_regex_compile_cache[cache_key] = {rd, pattern, pattern_len, cached_flags,
+                                             (int)strlen(cached_flags), dot_all, compile_info.has_indices,
                                              has_unicode, compile_info.unicode_sets};
     }
     return regex_obj_root.get();
+}
+
+extern "C" Item js_create_regex(const char* pattern, int pattern_len,
+        const char* flags, int flags_len) {
+    return js_create_regex_impl(pattern, pattern_len, flags, flags_len, false);
+}
+
+extern "C" Item js_create_regex_literal(const char* pattern, int pattern_len,
+        const char* flags, int flags_len) {
+    return js_create_regex_impl(pattern, pattern_len, flags, flags_len, true);
 }
 
 // Create a RegExp from a source literal string like "/pattern/flags".
@@ -22476,11 +22587,17 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
             mm_err++;
         }
     }
-    // A custom map method can return a wide scalar. Route the result directly
-    // to generated code's home instead of letting the native dispatcher own it.
-    return result_home
-        ? js_call_function_into(fn, obj, args, argc, result_home)
-        : js_call_function(fn, obj, args, argc);
+    // A custom map method can return a wide scalar, but method resolution does
+    // not prove the selected closure's call ABI.
+    if (!result_home) return js_call_function(fn, obj, args, argc);
+    // The map dispatcher may resolve an arbitrary closure. Forwarding the
+    // caller's scalar home through that closure bypasses its own dynamic-call
+    // home/adoption boundary, which breaks omitted-argument closures that make
+    // nested allocating calls. Complete the call with the generic dispatcher,
+    // then copy only a surviving scalar home into the caller's destination
+    // (D2.2.2, D3.2.1, D3.3.1).
+    Item result = js_call_function(fn, obj, args, argc);
+    return lambda_item_adopt_scalar_home(result, result_home);
 }
 
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {

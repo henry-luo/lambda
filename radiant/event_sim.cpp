@@ -100,7 +100,7 @@ static bool sim_focus_element_with_js_runtime(DomDocument* doc, View* target) {
     focus_ctx->heap = runtime->heap;
     focus_ctx->name_pool = runtime->name_pool;
     focus_ctx->type_list = runtime->type_list;
-    focus_ctx->pool = runtime->reuse_pool ? runtime->reuse_pool : runtime->heap->pool;
+    focus_ctx->pool = runtime->heap->pool;
 
     Context* saved_input_ctx = input_context;
     void* saved_doc = js_dom_get_document();
@@ -158,14 +158,10 @@ static EventSimContext* event_sim_create_context() {
     g_pending_input_turns = 0;
     EventSimContext* ctx = (EventSimContext*)mem_calloc(1, sizeof(EventSimContext), MEM_CAT_LAYOUT);
     if (!ctx) return NULL;
-    ctx->event_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "event_sim.events");
-    ctx->event_arena = ctx->event_pool
-        ? mem_arena_create(NULL, ctx->event_pool, MEM_ROLE_TEMP, "event_sim.events.arena")
-        : NULL;
-    if (!ctx->event_pool || !ctx->event_arena) {
+    ctx->event_arena = mem_arena_create(NULL, MEM_ROLE_TEMP, "event_sim.events.arena");
+    if (!ctx->event_arena) {
         log_error("event_sim: failed to create per-fixture event arena");
         if (ctx->event_arena) mem_arena_destroy(ctx->event_arena);
-        if (ctx->event_pool) mem_pool_destroy(ctx->event_pool);
         mem_free(ctx);
         return NULL;
     }
@@ -2451,7 +2447,6 @@ void event_sim_free(EventSimContext* ctx) {
     if (ctx->replay_expected_caret_stable_id) mem_free(ctx->replay_expected_caret_stable_id);
     if (ctx->result_file) fclose(ctx->result_file);
     if (ctx->event_arena) mem_arena_destroy(ctx->event_arena);
-    if (ctx->event_pool) mem_pool_destroy(ctx->event_pool);
     mem_free(ctx);
 }
 

@@ -1,489 +1,400 @@
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-#ifndef _DEFAULT_SOURCE
-#define _DEFAULT_SOURCE
-#endif
-
 #include "mempool.h"
+#define MEMTRACK_NO_LOCATION_MACROS
+#include "memtrack.h"
 #include "log.h"
-#define RPMALLOC_FIRST_CLASS_HEAPS 1
-#include <rpmalloc/rpmalloc.h>
-#include <stdio.h>
-#include <stdlib.h>  // for standard malloc/free for pool structure
-#include <string.h>  // for memcpy, strlen
-#ifdef _WIN32
-#include <windows.h>
-#include <process.h>
-// pthread stubs for Windows using SRWLOCK (zero-initializable)
-typedef SRWLOCK pthread_mutex_t;
-#define PTHREAD_MUTEX_INITIALIZER SRWLOCK_INIT
-static inline int pthread_mutex_lock(pthread_mutex_t* m)   { AcquireSRWLockExclusive(m); return 0; }
-static inline int pthread_mutex_unlock(pthread_mutex_t* m) { ReleaseSRWLockExclusive(m); return 0; }
-// mmap stubs — use VirtualAlloc on Windows
-#define PROT_READ  0
-#define PROT_WRITE 0
-#define MAP_PRIVATE   0
-#define MAP_ANONYMOUS 0
-#define MAP_FAILED ((void*)-1)
-static inline void* mmap(void* addr, size_t len, int p, int f, int fd, long off) {
-    (void)addr; (void)p; (void)f; (void)fd; (void)off;
-    void* mem = VirtualAlloc(NULL, len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    return mem ? mem : MAP_FAILED;
-}
-static inline int munmap(void* addr, size_t len) { (void)len; return VirtualFree(addr, 0, MEM_RELEASE) ? 0 : -1; }
-// execinfo stubs
-static inline int backtrace(void** arr, int max) { (void)arr; (void)max; return 0; }
-static inline char** backtrace_symbols(void** arr, int n) { (void)arr; (void)n; return NULL; }
-static inline void backtrace_symbols_fd(void** arr, int n, int fd) { (void)arr; (void)n; (void)fd; }
+
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define SIZE_LIMIT ((size_t)1024 * 1024 * 1024)
+#define POOL_VALID_MARKER 0xDEADBEEF
+#define POOL_BLOCK_MAGIC 0x50424C4Bu
+#define POOL_ALIGNMENT 16u
+
+#if defined(__GNUC__) || defined(__clang__)
+#define MEMPOOL_WEAK __attribute__((weak))
 #else
-#include <unistd.h>  // for _exit
-#include <pthread.h> // for thread-safe initialization
-#include <sys/mman.h> // for mmap/munmap
-#include <execinfo.h> // for backtrace
+#define MEMPOOL_WEAK
 #endif
 
-#ifndef MAP_ANONYMOUS
-#ifdef MAP_ANON
-#define MAP_ANONYMOUS MAP_ANON
-#endif
-#endif
+// Standalone lib tests intentionally link mempool without the tracker. The
+// weak declarations keep that test boundary valid; engine builds resolve them
+// to the hardened memtrack implementation.
+MEMPOOL_WEAK MemtrackMode memtrack_get_mode(void) {
+    return MEMTRACK_MODE_OFF;
+}
 
-#define SIZE_LIMIT (1024 * 1024 * 1024)  // 1GB limit for single allocation
+MEMPOOL_WEAK void* mem_alloc_loc(size_t size, MemCategory category, int line) {
+    (void)category;
+    (void)line;
+    return malloc(size);
+}
 
-// mmap chunk for bump-allocator pools (no rpmalloc involvement)
-typedef struct MmapChunk {
-    struct MmapChunk* next;
-    uint8_t* base;
-    size_t size;
-} MmapChunk;
+MEMPOOL_WEAK void mem_free_loc(void* ptr, int line) {
+    (void)line;
+    free(ptr);
+}
 
-#define MMAP_CHUNK_SIZE (4 * 1024 * 1024)  // 4 MB per chunk
+typedef struct PoolBlock PoolBlock;
 
-// Size header for mmap bump allocations (enables safe realloc)
-// Stored immediately before the returned pointer, 16-byte aligned
-#define MMAP_SIZE_HEADER 16
+typedef struct PoolLookupEntry {
+    void* user;
+    PoolBlock* block;
+} PoolLookupEntry;
 
-struct Pool {
-    rpmalloc_heap_t* heap;  // rpmalloc heap handle (NULL for mmap mode)
-    unsigned pool_id;       // unique pool identifier
-    unsigned valid;         // validity marker (POOL_VALID_MARKER when valid)
-    // mmap mode fields (used when heap == NULL)
-    MmapChunk* chunks;     // linked list of mmap'd regions
-    uint8_t* cursor;       // bump pointer within current chunk
-    uint8_t* limit;        // end of current chunk
-    // diagnostics: rough running totals (rpmalloc mode tracks allocs only,
-    // not frees, so this is a high-water-mark approximation).
-    size_t alloc_bytes;     // total bytes ever allocated
-    size_t alloc_count;     // total alloc calls
-    size_t live_bytes;      // allocator-owned bytes not individually freed
-    size_t high_water_live_bytes;
-    size_t free_count;
-    void* mem_node;         // MemContext registration node (NULL if untracked)
+struct PoolBlock {
+    uint32_t magic;
+    uint32_t _pad;
+    struct Pool* owner;
+    PoolBlock* prev;
+    PoolBlock* next;
+    void* base;
+    size_t requested;
+    size_t allocated;
 };
 
-#define POOL_VALID_MARKER 0xDEADBEEF
-
-// Hook to release a memory-context node when a registered pool is destroyed.
-// Installed by the allocator factory (mem_factory.c). NULL when the memory
-// context isn't linked (e.g. lib-only unit tests) — such builds never create
-// factory pools, so pool->mem_node stays NULL and the hook is never needed.
-static void (*g_pool_node_release)(void*) = NULL;
-void pool_set_node_release_hook(void (*fn)(void*)) { g_pool_node_release = fn; }
+struct Pool {
+    unsigned pool_id;
+    unsigned valid;
+    bool struct_tracked;
+    MemCategory category;
+    PoolBlock* blocks;
+    size_t alloc_bytes;
+    size_t alloc_count;
+    size_t live_bytes;
+    size_t high_water_live_bytes;
+    size_t free_count;
+    void* mem_node;
+    PoolLookupEntry* lookup;
+    size_t lookup_capacity;
+    size_t lookup_count;
+};
 
 static unsigned next_pool_id = 1;
-static int rpmalloc_initialized = 0;
-static pthread_mutex_t init_mutex = PTHREAD_MUTEX_INITIALIZER;
-static __thread int thread_initialized = 0;
+static void (*g_pool_node_release)(void*) = NULL;
 
-// ============================================================================
-// Initialize rpmalloc lazily when first needed
-static void ensure_rpmalloc_initialized(void) {
-    // Global initialization
-    if (!rpmalloc_initialized) {
-        pthread_mutex_lock(&init_mutex);
-        if (!rpmalloc_initialized) {
-            if (rpmalloc_initialize(NULL) != 0) {
-                fprintf(stderr, "ERROR: rpmalloc_initialize() failed\n");
-                pthread_mutex_unlock(&init_mutex);
-                return;
-            }
-            rpmalloc_initialized = 1;
-        }
-        pthread_mutex_unlock(&init_mutex);
+void pool_set_node_release_hook(void (*fn)(void*)) {
+    g_pool_node_release = fn;
+}
+
+static bool checked_add_size(size_t left, size_t right, size_t* out) {
+    if (right > SIZE_MAX - left) return false;
+    *out = left + right;
+    return true;
+}
+
+static size_t align_up_size(size_t value, size_t alignment) {
+    size_t remainder = value & (alignment - 1);
+    return remainder == 0 ? value : value + alignment - remainder;
+}
+
+static size_t block_header_size(void) {
+    return align_up_size(sizeof(PoolBlock), POOL_ALIGNMENT);
+}
+
+#define POOL_LOOKUP_TOMBSTONE ((void*)(uintptr_t)1)
+#define POOL_LOOKUP_INITIAL_CAPACITY 64u
+
+static size_t pool_lookup_hash(void* ptr, size_t capacity) {
+    uintptr_t value = (uintptr_t)ptr >> 4;
+    value ^= value >> 23;
+    value *= UINT64_C(0x9E3779B97F4A7C15);
+    return (size_t)value & (capacity - 1);
+}
+
+static bool pool_lookup_resize(Pool* pool, size_t new_capacity) {
+    PoolLookupEntry* entries = (PoolLookupEntry*)calloc(
+        new_capacity, sizeof(PoolLookupEntry));
+    if (!entries) return false;
+    for (size_t i = 0; i < pool->lookup_capacity; i++) {
+        PoolLookupEntry old = pool->lookup[i];
+        if (!old.user || old.user == POOL_LOOKUP_TOMBSTONE) continue;
+        size_t slot = pool_lookup_hash(old.user, new_capacity);
+        while (entries[slot].user) slot = (slot + 1) & (new_capacity - 1);
+        entries[slot] = old;
     }
+    free(pool->lookup);
+    pool->lookup = entries;
+    pool->lookup_capacity = new_capacity;
+    return true;
+}
 
-    // Thread-local initialization
-    if (!thread_initialized) {
-        rpmalloc_thread_initialize();
-        thread_initialized = 1;
+static bool pool_lookup_init(Pool* pool) {
+    return pool_lookup_resize(pool, POOL_LOOKUP_INITIAL_CAPACITY);
+}
+
+static bool pool_lookup_insert(Pool* pool, void* user, PoolBlock* block) {
+    if (!pool || !user || !block) return false;
+    if (pool->lookup_count * 2 >= pool->lookup_capacity &&
+        !pool_lookup_resize(pool, pool->lookup_capacity * 2)) {
+        return false;
+    }
+    size_t slot = pool_lookup_hash(user, pool->lookup_capacity);
+    size_t first_tombstone = SIZE_MAX;
+    for (;;) {
+        void* key = pool->lookup[slot].user;
+        if (!key) {
+            if (first_tombstone != SIZE_MAX) slot = first_tombstone;
+            pool->lookup[slot].user = user;
+            pool->lookup[slot].block = block;
+            pool->lookup_count++;
+            return true;
+        }
+        if (key == POOL_LOOKUP_TOMBSTONE) {
+            if (first_tombstone == SIZE_MAX) first_tombstone = slot;
+        } else if (key == user) {
+            return false;
+        }
+        slot = (slot + 1) & (pool->lookup_capacity - 1);
+    }
+}
+
+static PoolBlock* pool_lookup_find(Pool* pool, void* user) {
+    if (!pool || !user || !pool->lookup_capacity) return NULL;
+    size_t slot = pool_lookup_hash(user, pool->lookup_capacity);
+    for (;;) {
+        void* key = pool->lookup[slot].user;
+        if (!key) return NULL;
+        if (key != POOL_LOOKUP_TOMBSTONE && key == user) {
+            return pool->lookup[slot].block;
+        }
+        slot = (slot + 1) & (pool->lookup_capacity - 1);
+    }
+}
+
+static void pool_lookup_remove(Pool* pool, void* user) {
+    if (!pool || !user || !pool->lookup_capacity) return;
+    size_t slot = pool_lookup_hash(user, pool->lookup_capacity);
+    for (;;) {
+        void* key = pool->lookup[slot].user;
+        if (!key) return;
+        if (key != POOL_LOOKUP_TOMBSTONE && key == user) {
+            pool->lookup[slot].user = POOL_LOOKUP_TOMBSTONE;
+            pool->lookup[slot].block = NULL;
+            if (pool->lookup_count > 0) pool->lookup_count--;
+            return;
+        }
+        slot = (slot + 1) & (pool->lookup_capacity - 1);
+    }
+}
+
+static void pool_lookup_clear(Pool* pool) {
+    if (!pool || !pool->lookup) return;
+    memset(pool->lookup, 0, pool->lookup_capacity * sizeof(PoolLookupEntry));
+    pool->lookup_count = 0;
+}
+
+static Pool* pool_alloc_struct(void) {
+    bool tracked = memtrack_get_mode &&
+                   memtrack_get_mode() != MEMTRACK_MODE_OFF &&
+                   mem_alloc_loc && mem_free_loc;
+    Pool* pool = tracked
+        ? (Pool*)mem_alloc_loc(sizeof(Pool), MEM_CAT_SYSTEM, 0)
+        : (Pool*)malloc(sizeof(Pool));
+    if (!pool) return NULL;
+    memset(pool, 0, sizeof(*pool));
+    pool->struct_tracked = tracked;
+    return pool;
+}
+
+static void pool_free_struct(Pool* pool) {
+    if (!pool) return;
+    if (pool->struct_tracked) {
+        mem_free_loc(pool, 0);
+    } else {
+        free(pool);
+    }
+}
+
+static void pool_init(Pool* pool) {
+    pool->pool_id = next_pool_id++;
+    pool->valid = POOL_VALID_MARKER;
+    pool->category = MEM_CAT_SYSTEM;
+    (void)pool_lookup_init(pool);
+}
+
+static void pool_link_block(Pool* pool, PoolBlock* block) {
+    block->owner = pool;
+    block->prev = NULL;
+    block->next = pool->blocks;
+    if (pool->blocks) pool->blocks->prev = block;
+    pool->blocks = block;
+}
+
+static void pool_unlink_block(Pool* pool, PoolBlock* block) {
+    if (block->prev) block->prev->next = block->next;
+    else pool->blocks = block->next;
+    if (block->next) block->next->prev = block->prev;
+    block->prev = NULL;
+    block->next = NULL;
+}
+
+static PoolBlock* pool_find_block(Pool* pool, void* ptr) {
+    return pool_lookup_find(pool, ptr);
+}
+
+static void pool_release_block(Pool* pool, PoolBlock* block, bool count_free) {
+    if (!pool || !block) return;
+    void* user = (uint8_t*)block->base + block_header_size();
+    pool_lookup_remove(pool, user);
+    pool_unlink_block(pool, block);
+    pool->live_bytes = pool->live_bytes >= block->allocated
+        ? pool->live_bytes - block->allocated : 0;
+    if (count_free) pool->free_count++;
+    if (mem_free_loc) mem_free_loc(block->base, 0);
+    else free(block->base);
+}
+
+static void pool_release_all_blocks(Pool* pool) {
+    PoolBlock* block = pool->blocks;
+    while (block) {
+        PoolBlock* next = block->next;
+        pool_release_block(pool, block, false);
+        block = next;
+    }
+    pool->blocks = NULL;
+    pool->live_bytes = 0;
+}
+
+static void pool_release_node(Pool* pool) {
+    if (pool->mem_node && g_pool_node_release) {
+        g_pool_node_release(pool->mem_node);
+        pool->mem_node = NULL;
     }
 }
 
 Pool* pool_create(void) {
-    // Initialize rpmalloc lazily when first pool is created
-    ensure_rpmalloc_initialized();
-
-    // Allocate pool structure using standard malloc (not rpmalloc)
-    Pool* pool = (Pool*)malloc(sizeof(Pool));
-    if (!pool) {
-        return NULL;
-    }
-
-    // Acquire a fresh first-class heap for this pool
-    pool->heap = rpmalloc_heap_acquire();
-    if (!pool->heap) {
-        free(pool);
-        return NULL;
-    }
-
-    pool->pool_id = next_pool_id++;
-    pool->valid = POOL_VALID_MARKER;
-    pool->chunks = NULL;
-    pool->cursor = NULL;
-    pool->limit = NULL;
-    pool->alloc_bytes = 0;
-    pool->alloc_count = 0;
-    pool->live_bytes = 0;
-    pool->high_water_live_bytes = 0;
-    pool->free_count = 0;
-    pool->mem_node = NULL;
-
-    // Optional one-line backtrace dump on each pool creation: POOL_TRACE=1
-    static int trace_env_checked = 0;
-    static int trace_enabled = 0;
-    if (!trace_env_checked) {
-        const char* e = getenv("POOL_TRACE");
-        trace_enabled = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
-        trace_env_checked = 1;
-    }
-    if (trace_enabled) {
-        void* bt[6];
-        int n = backtrace(bt, 6);
-        char** syms = backtrace_symbols(bt, n);
-        fprintf(stderr, "[POOLTRACE] new pool=%u\n", pool->pool_id);
-        for (int i = 1; i < n; i++) {  // skip ourselves
-            fprintf(stderr, "[POOLTRACE]   %s\n", syms[i]);
-        }
-        free(syms);
-    }
-
-    return pool;
-}
-
-// ============================================================================
-// mmap-backed bump allocator pool (bypasses rpmalloc entirely)
-// ============================================================================
-
-static void mmap_pool_grow(Pool* pool, size_t min_size) {
-    size_t chunk_size = min_size < MMAP_CHUNK_SIZE ? MMAP_CHUNK_SIZE : min_size;
-    chunk_size = (chunk_size + 4095) & ~4095;  // page-align
-    void* mem = mmap(NULL, chunk_size, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (mem == MAP_FAILED) {
-        log_error("mmap_pool_grow: mmap failed for %zu bytes", chunk_size);
-        pool->cursor = NULL;
-        pool->limit = NULL;
-        return;
-    }
-    MmapChunk* chunk = (MmapChunk*)malloc(sizeof(MmapChunk));
-    if (!chunk) {
-        log_error("mmap_pool_grow: malloc failed for chunk metadata");
-        munmap(mem, chunk_size);   // don't leak the mapping we just created
-        pool->cursor = NULL;
-        pool->limit = NULL;
-        return;
-    }
-    chunk->base = (uint8_t*)mem;
-    chunk->size = chunk_size;
-    chunk->next = pool->chunks;
-    pool->chunks = chunk;
-    pool->cursor = (uint8_t*)mem;
-    pool->limit = (uint8_t*)mem + chunk_size;
-}
-
-Pool* pool_create_mmap(void) {
-    Pool* pool = (Pool*)malloc(sizeof(Pool));
+    Pool* pool = pool_alloc_struct();
     if (!pool) return NULL;
-    pool->heap = NULL;  // signals mmap mode
-    pool->pool_id = next_pool_id++;
-    pool->valid = POOL_VALID_MARKER;
-    pool->chunks = NULL;
-    pool->cursor = NULL;
-    pool->limit = NULL;
-    pool->alloc_bytes = 0;
-    pool->alloc_count = 0;
-    pool->live_bytes = 0;
-    pool->high_water_live_bytes = 0;
-    pool->free_count = 0;
-    pool->mem_node = NULL;
-    mmap_pool_grow(pool, MMAP_CHUNK_SIZE);
+    pool_init(pool);
+    if (!pool->lookup) {
+        pool_free_struct(pool);
+        return NULL;
+    }
     return pool;
-}
-
-static void mmap_pool_free_chunks(Pool* pool) {
-    MmapChunk* chunk = pool->chunks;
-    while (chunk) {
-        MmapChunk* next = chunk->next;
-        munmap(chunk->base, chunk->size);
-        free(chunk);
-        chunk = next;
-    }
-    pool->chunks = NULL;
-    pool->cursor = NULL;
-    pool->limit = NULL;
-}
-
-void pool_destroy(Pool* pool) {
-    if (!pool || pool->valid != POOL_VALID_MARKER) {
-        log_debug("pool_destroy: skipping invalid pool=%p (valid=0x%x)", (void*)pool, pool ? pool->valid : 0);
-        return;
-    }
-
-    log_debug("pool_destroy: destroying pool=%p (id=%u)", (void*)pool, pool->pool_id);
-    // unlink from the memory context if registered (factory-created pools).
-    // Done here so ANY pool_destroy path safely removes the node — no dangling
-    // node can outlive the pool, regardless of how it was created.
-    if (pool->mem_node && g_pool_node_release) {
-        g_pool_node_release(pool->mem_node);
-        pool->mem_node = NULL;
-    }
-
-    // optional diagnostic dump: POOL_STATS=1 prints lifetime alloc bytes per pool.
-    static int pool_stats_env_checked = 0;
-    static int pool_stats_enabled = 0;
-    if (!pool_stats_env_checked) {
-        const char* e = getenv("POOL_STATS");
-        pool_stats_enabled = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
-        pool_stats_env_checked = 1;
-    }
-    if (pool_stats_enabled) {
-        fprintf(stderr, "[POOLSTATS] pool=%u alloc_bytes=%zu alloc_count=%zu mode=%s\n",
-                pool->pool_id, pool->alloc_bytes, pool->alloc_count,
-                pool->heap ? "rpmalloc" : "mmap");
-    }
-
-    if (pool->heap) {
-        // rpmalloc mode
-        rpmalloc_heap_free_all(pool->heap);
-        rpmalloc_heap_release(pool->heap);
-    } else {
-        // mmap mode
-        mmap_pool_free_chunks(pool);
-    }
-
-    pool->valid = 0;
-    free(pool);
 }
 
 void pool_drain(Pool* pool) {
     if (!pool || pool->valid != POOL_VALID_MARKER) return;
-    if (pool->mem_node && g_pool_node_release) {
-        g_pool_node_release(pool->mem_node);
-        pool->mem_node = NULL;
-    }
-    if (pool->heap) {
-        rpmalloc_heap_free_all(pool->heap);
-        rpmalloc_heap_release(pool->heap);
-        pool->heap = NULL;
-    } else {
-        mmap_pool_free_chunks(pool);
-    }
+    pool_release_node(pool);
+    pool_release_all_blocks(pool);
     pool->valid = 0;
+}
+
+void pool_destroy(Pool* pool) {
+    if (!pool || pool->valid != POOL_VALID_MARKER) return;
+    log_debug("pool_destroy: destroying pool=%p (id=%u)", (void*)pool, pool->pool_id);
+    pool_drain(pool);
+    free(pool->lookup);
+    pool->lookup = NULL;
+    pool_free_struct(pool);
 }
 
 void pool_reset(Pool* pool) {
     if (!pool || pool->valid != POOL_VALID_MARKER) return;
-    if (pool->heap) {
-        rpmalloc_heap_free_all(pool->heap);
-    } else {
-        // mmap mode: munmap all chunks, allocate fresh initial chunk
-        mmap_pool_free_chunks(pool);
-        mmap_pool_grow(pool, MMAP_CHUNK_SIZE);
-    }
-    pool->live_bytes = 0;
+    pool_release_all_blocks(pool);
+    pool_lookup_clear(pool);
 }
 
-static void pool_record_allocation(Pool* pool, void* ptr, size_t requested) {
-    if (!pool || !ptr) return;
-    size_t owned = pool_allocation_size(pool, ptr);
-    pool->alloc_bytes += requested;
-    pool->alloc_count++;
-    pool->live_bytes += owned;
-    if (pool->live_bytes > pool->high_water_live_bytes) {
-        pool->high_water_live_bytes = pool->live_bytes;
-    }
+void pool_set_mem_category(Pool* pool, int category) {
+    if (!pool) return;
+    pool->category = category >= 0 && category < MEM_CAT_COUNT
+        ? (MemCategory)category : MEM_CAT_UNKNOWN;
 }
 
 void* pool_alloc(Pool* pool, size_t size) {
-    if (!pool) {
-        log_error("pool_alloc: pool is NULL");
+    if (!pool || pool->valid != POOL_VALID_MARKER || size == 0 || size > SIZE_LIMIT) {
         return NULL;
     }
-    if (pool->valid != POOL_VALID_MARKER) {
-        log_error("pool_alloc: pool invalid marker (got 0x%x, expected 0x%x)", pool->valid, POOL_VALID_MARKER);
+
+    size_t header = block_header_size();
+    size_t total = 0;
+    if (!checked_add_size(header, size, &total)) return NULL;
+
+    void* base = mem_alloc_loc ? mem_alloc_loc(total, pool->category, 0)
+                               : malloc(total);
+    if (!base) return NULL;
+    PoolBlock* block = (PoolBlock*)base;
+    block->magic = POOL_BLOCK_MAGIC;
+    block->base = base;
+    block->requested = size;
+    block->allocated = total;
+    void* user = (uint8_t*)base + header;
+    if (!pool_lookup_insert(pool, user, block)) {
+        mem_free_loc(base, 0);
         return NULL;
     }
-    if (size > SIZE_LIMIT) {
-        log_error("pool_alloc: size %zu exceeds limit", size);
-        return NULL;
+    pool_link_block(pool, block);
+
+    pool->alloc_bytes += size;
+    pool->alloc_count++;
+    pool->live_bytes += total;
+    if (pool->live_bytes > pool->high_water_live_bytes) {
+        pool->high_water_live_bytes = pool->live_bytes;
     }
-    if (pool->heap) {
-        // rpmalloc mode
-        if ((uintptr_t)pool->heap < 0x10000) {
-            log_error("pool_alloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
-            return NULL;
-        }
-        void* result = rpmalloc_heap_alloc(pool->heap, size);
-        if (!result) {
-            log_error("pool_alloc: rpmalloc_heap_alloc returned NULL (heap=%p, size=%zu)", pool->heap, size);
-        } else {
-            pool_record_allocation(pool, result, size);
-        }
-        return result;
-    }
-    // mmap mode: bump allocate (16-byte aligned) with size header
-    size = (size + 15) & ~15;
-    size_t total = MMAP_SIZE_HEADER + size;
-    if (!pool->cursor || pool->cursor + total > pool->limit) {
-        mmap_pool_grow(pool, total);
-        if (!pool->cursor) return NULL;  // mmap failed
-    }
-    // store allocation size in header
-    size_t* header = (size_t*)pool->cursor;
-    *header = size;
-    void* ptr = pool->cursor + MMAP_SIZE_HEADER;
-    pool->cursor += total;
-    pool_record_allocation(pool, ptr, size);
-    return ptr;
+    return (uint8_t*)base + header;
 }
 
 void* pool_calloc(Pool* pool, size_t size) {
-    if (!pool || pool->valid != POOL_VALID_MARKER) {
-        return NULL;
-    }
-    if (size > SIZE_LIMIT) {
-        return NULL;
-    }
-    void* result;
-    if (pool->heap) {
-        // rpmalloc mode
-        if ((uintptr_t)pool->heap < 0x10000) {
-            log_error("pool_calloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
-            return NULL;
-        }
-        result = rpmalloc_heap_calloc(pool->heap, 1, size);
-    } else {
-        // mmap mode: bump allocate (pages are pre-zeroed by mmap) with size header
-        size = (size + 15) & ~15;
-        size_t total = MMAP_SIZE_HEADER + size;
-        if (!pool->cursor || pool->cursor + total > pool->limit) {
-            mmap_pool_grow(pool, total);
-            if (!pool->cursor) return NULL;  // mmap failed
-        }
-        // store allocation size in header (pages are zeroed, so write size)
-        size_t* header = (size_t*)pool->cursor;
-        *header = size;
-        result = pool->cursor + MMAP_SIZE_HEADER;
-        pool->cursor += total;
-    }
-    if (result) pool_record_allocation(pool, result, size);
-    return result;
+    void* ptr = pool_alloc(pool, size);
+    if (ptr) memset(ptr, 0, size);
+    return ptr;
 }
 
 void pool_free(Pool* pool, void* ptr) {
-    if (!pool || pool->valid != POOL_VALID_MARKER || !ptr) {
+    if (!pool || pool->valid != POOL_VALID_MARKER || !ptr) return;
+    PoolBlock* block = pool_find_block(pool, ptr);
+    if (!block) {
+        log_error("pool_free: pointer %p is not owned by pool %u", ptr, pool->pool_id);
         return;
     }
-    if (pool->heap) {
-        size_t owned = pool_allocation_size(pool, ptr);
-        rpmalloc_heap_free(pool->heap, ptr);
-        pool->live_bytes = pool->live_bytes >= owned ? pool->live_bytes - owned : 0;
-        pool->free_count++;
-    }
-    // mmap mode: no-op (bump allocator, freed in bulk on reset/destroy)
+    pool_release_block(pool, block, true);
 }
 
 void* pool_realloc(Pool* pool, void* ptr, size_t size) {
-    if (!pool || pool->valid != POOL_VALID_MARKER) {
-        return NULL;
-    }
-    if (size > SIZE_LIMIT) {
-        return NULL;
-    }
-    if (pool->heap) {
-        // rpmalloc mode
-        if ((uintptr_t)pool->heap < 0x10000) {
-            log_error("pool_realloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
-            return NULL;
-        }
-        if (!ptr) return pool_alloc(pool, size);
-        if (size == 0) { pool_free(pool, ptr); return NULL; }
-        size_t old_owned = pool_allocation_size(pool, ptr);
-        void* result = rpmalloc_heap_realloc(pool->heap, ptr, size, 0);
-        if (result) {
-            size_t new_owned = pool_allocation_size(pool, result);
-            pool->live_bytes = pool->live_bytes >= old_owned
-                ? pool->live_bytes - old_owned + new_owned : new_owned;
-            if (pool->live_bytes > pool->high_water_live_bytes) {
-                pool->high_water_live_bytes = pool->live_bytes;
-            }
-            pool->alloc_bytes += size;
-            pool->alloc_count++;
-        }
-        return result;
-    }
-    // mmap mode: allocate new + copy using size header
+    if (!pool || pool->valid != POOL_VALID_MARKER || size > SIZE_LIMIT) return NULL;
     if (!ptr) return pool_alloc(pool, size);
-    if (size == 0) return NULL;
-    void* new_ptr = pool_alloc(pool, size);
-    if (new_ptr && ptr) {
-        // read old allocation size from embedded header
-        size_t old_size = *(size_t*)((uint8_t*)ptr - MMAP_SIZE_HEADER);
-        size_t copy_size = old_size < size ? old_size : size;
-        memcpy(new_ptr, ptr, copy_size);
+    if (size == 0) {
+        pool_free(pool, ptr);
+        return NULL;
     }
-    return new_ptr;
-}
 
-void mempool_cleanup(void) {
-    if (rpmalloc_initialized) {
-        pthread_mutex_lock(&init_mutex);
-        if (rpmalloc_initialized) {
-            // rpmalloc_finalize() finalizes the calling thread itself; doing
-            // it twice leaves the global heap list corrupted on Linux ARM64.
-            rpmalloc_finalize();
-            thread_initialized = 0;
-            rpmalloc_initialized = 0;
-        }
-        pthread_mutex_unlock(&init_mutex);
+    PoolBlock* old_block = pool_find_block(pool, ptr);
+    if (!old_block) {
+        log_error("pool_realloc: pointer %p is not owned by pool %u", ptr, pool->pool_id);
+        return NULL;
     }
+    size_t old_size = old_block->requested;
+    void* new_ptr = pool_alloc(pool, size);
+    if (!new_ptr) return NULL;
+    memcpy(new_ptr, ptr, old_size < size ? old_size : size);
+    pool_release_block(pool, old_block, true);
+    return new_ptr;
 }
 
 char* pool_strdup(Pool* pool, const char* str) {
     if (!pool || !str) return NULL;
-    
-    size_t len = strlen(str) + 1;
-    char* dup = (char*)pool_alloc(pool, len);
-    if (dup) {
-        memcpy(dup, str, len);
-    }
+    size_t len = strlen(str);
+    if (len == SIZE_MAX) return NULL;
+    char* dup = (char*)pool_alloc(pool, len + 1);
+    if (dup) memcpy(dup, str, len + 1);
     return dup;
 }
 
+void mempool_cleanup(void) {
+    // Retained as a source-compatible no-op. Pool ownership is explicit and
+    // there is no process-global allocator that needs finalization anymore.
+}
+
 unsigned int pool_get_id(Pool* pool) {
-    if (!pool) return 0;
-    return pool->pool_id;
+    return pool ? pool->pool_id : 0;
 }
 
 void pool_get_stats(Pool* pool, size_t* alloc_bytes, size_t* alloc_count) {
-    if (!pool) {
-        if (alloc_bytes) *alloc_bytes = 0;
-        if (alloc_count) *alloc_count = 0;
-        return;
-    }
-    if (alloc_bytes) *alloc_bytes = pool->alloc_bytes;
-    if (alloc_count) *alloc_count = pool->alloc_count;
+    if (alloc_bytes) *alloc_bytes = pool ? pool->alloc_bytes : 0;
+    if (alloc_count) *alloc_count = pool ? pool->alloc_count : 0;
 }
 
 void* pool_get_mem_node(Pool* pool) {
@@ -495,33 +406,21 @@ void pool_set_mem_node(Pool* pool, void* node) {
 }
 
 void pool_get_mem_stats(Pool* pool, size_t* reserved, size_t* in_use,
-                        size_t* alloc_count, int* is_mmap) {
-    size_t rsv = 0, use = 0, cnt = 0;
-    int mmap_mode = 0;
+                        size_t* alloc_count) {
+    size_t used = 0;
+    size_t count = 0;
     if (pool && pool->valid == POOL_VALID_MARKER) {
-        use = pool->live_bytes;
-        cnt = pool->alloc_count;
-        if (pool->heap) {
-            // Bundled rpmalloc has no per-first-class-heap statistics API;
-            // global/thread counters would mix unrelated pools. Use the
-            // allocator-owned high-water accounting for this pool instead.
-            rsv = pool->high_water_live_bytes;
-        } else {
-            // mmap mode: reserved is the sum of all mmap'd chunk sizes
-            mmap_mode = 1;
-            for (MmapChunk* c = pool->chunks; c; c = c->next) rsv += c->size;
-        }
+        used = pool->live_bytes;
+        count = pool->alloc_count;
     }
-    if (reserved) *reserved = rsv;
-    if (in_use) *in_use = use;
-    if (alloc_count) *alloc_count = cnt;
-    if (is_mmap) *is_mmap = mmap_mode;
+    if (reserved) *reserved = used;
+    if (in_use) *in_use = used;
+    if (alloc_count) *alloc_count = count;
 }
 
 size_t pool_allocation_size(Pool* pool, void* ptr) {
-    if (!pool || pool->valid != POOL_VALID_MARKER || !ptr) return 0;
-    if (pool->heap) return rpmalloc_usable_size(ptr);
-    return *(size_t*)((uint8_t*)ptr - MMAP_SIZE_HEADER);
+    PoolBlock* block = pool_find_block(pool, ptr);
+    return block ? block->allocated : 0;
 }
 
 void pool_get_detailed_stats(Pool* pool, PoolStats* out) {
@@ -529,7 +428,7 @@ void pool_get_detailed_stats(Pool* pool, PoolStats* out) {
     memset(out, 0, sizeof(*out));
     if (!pool || pool->valid != POOL_VALID_MARKER) return;
     pool_get_mem_stats(pool, &out->reserved_bytes, &out->live_bytes,
-                       &out->allocation_count, &out->is_mmap);
+                       &out->allocation_count);
     out->high_water_live_bytes = pool->high_water_live_bytes;
     out->cumulative_bytes = pool->alloc_bytes;
     out->free_count = pool->free_count;

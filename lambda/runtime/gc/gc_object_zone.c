@@ -6,6 +6,8 @@
  */
 #include "gc_object_zone.h"
 #include "gc_heap.h"   // for full gc_header_t definition and GC_FLAG_FREED
+#define MEMTRACK_NO_LOCATION_MACROS
+#include "../../../lib/memtrack.h"
 #include "../../../lib/log.h"
 #include <stdlib.h>
 #include <string.h>
@@ -55,15 +57,15 @@ static void register_slab_range(gc_object_zone_t* oz, uint8_t* base, size_t byte
     // grow arrays if needed (slab_ranges and range_slabs stay parallel)
     if (oz->range_count >= oz->range_capacity) {
         size_t new_cap = oz->range_capacity ? oz->range_capacity * 2 : GC_INITIAL_RANGE_CAPACITY;
-        gc_slab_range_t* new_ranges = (gc_slab_range_t*)realloc(oz->slab_ranges,
-            new_cap * sizeof(gc_slab_range_t));
+        gc_slab_range_t* new_ranges = (gc_slab_range_t*)mem_realloc(oz->slab_ranges,
+            new_cap * sizeof(gc_slab_range_t), MEM_CAT_CONTAINER);
         if (!new_ranges) {
             log_error("gc_object_zone: failed to grow slab_ranges array");
             return;
         }
         oz->slab_ranges = new_ranges;
-        gc_object_slab_t** new_slabs = (gc_object_slab_t**)realloc(oz->range_slabs,
-            new_cap * sizeof(gc_object_slab_t*));
+        gc_object_slab_t** new_slabs = (gc_object_slab_t**)mem_realloc(oz->range_slabs,
+            new_cap * sizeof(gc_object_slab_t*), MEM_CAT_CONTAINER);
         if (!new_slabs) {
             log_error("gc_object_zone: failed to grow range_slabs array");
             return;
@@ -100,28 +102,35 @@ void gc_object_zone_register_range(gc_object_zone_t* oz, uint8_t* base, size_t b
     register_slab_range(oz, base, bytes, NULL);
 }
 
-// allocate a new slab for the given size class from the pool
+// allocate a new slab for the given size class from a dedicated VM extent
 static gc_object_slab_t* allocate_slab(gc_object_zone_t* oz, int cls) {
     size_t slot_size = sizeof(gc_header_t) + SIZE_CLASSES[cls];
     size_t slot_count = SLOTS_PER_SLAB[cls];
     size_t slab_bytes = slot_size * slot_count;
 
-    // allocate slab memory from pool
-    uint8_t* memory = (uint8_t*)pool_alloc(oz->pool, slab_bytes);
-    if (!memory) {
-        log_error("gc_object_zone: failed to allocate slab of %zu bytes", slab_bytes);
+    MemVmRegion* region = mem_vm_region_reserve(oz->context, oz->owner,
+                                                MEM_ROLE_RUNTIME_HEAP,
+                                                slab_bytes, mem_vm_page_size());
+    if (!region || !mem_vm_region_commit(region, 0,
+                                         mem_vm_region_reserved_bytes(region))) {
+        if (region) mem_vm_region_release(region);
+        log_error("gc_object_zone: failed to reserve/commit slab of %zu bytes", slab_bytes);
         return NULL;
     }
+    uint8_t* memory = (uint8_t*)mem_vm_region_base(region);
     memset(memory, 0, slab_bytes);
 
     // allocate slab metadata (from C heap — small, few slabs)
-    gc_object_slab_t* slab = (gc_object_slab_t*)calloc(1, sizeof(gc_object_slab_t));
+    gc_object_slab_t* slab = (gc_object_slab_t*)mem_calloc(1, sizeof(gc_object_slab_t),
+                                                            MEM_CAT_CONTAINER);
     if (!slab) {
         log_error("gc_object_zone: failed to allocate slab metadata");
+        mem_vm_region_release(region);
         return NULL;
     }
 
     slab->base = memory;
+    slab->region = region;
     slab->slot_size = slot_size;
     slab->slot_count = slot_count;
     slab->next_fresh = 0;
@@ -149,13 +158,15 @@ static gc_object_slab_t* get_fresh_slab(gc_object_zone_t* oz, int cls) {
     return slab;
 }
 
-gc_object_zone_t* gc_object_zone_create(Pool* pool) {
-    gc_object_zone_t* oz = (gc_object_zone_t*)calloc(1, sizeof(gc_object_zone_t));
+gc_object_zone_t* gc_object_zone_create(MemContext* context, MemNode* owner) {
+    gc_object_zone_t* oz = (gc_object_zone_t*)mem_calloc(1, sizeof(gc_object_zone_t),
+                                                          MEM_CAT_CONTAINER);
     if (!oz) {
         log_error("gc_object_zone_create: failed to allocate zone");
         return NULL;
     }
-    oz->pool = pool;
+    oz->context = context;
+    oz->owner = owner;
 
     // pre-allocate one slab per size class
     for (int i = 0; i < GC_NUM_SIZE_CLASSES; i++) {
@@ -175,21 +186,22 @@ gc_object_zone_t* gc_object_zone_create(Pool* pool) {
 
 void gc_object_zone_destroy(gc_object_zone_t* oz) {
     if (!oz) return;
-    // free slab metadata (slab memory is pool-allocated, freed by pool_destroy)
+    // release each extent explicitly; GC owns these regions rather than a Pool
     for (int i = 0; i < GC_NUM_SIZE_CLASSES; i++) {
         gc_object_slab_t* slab = oz->slabs[i];
         while (slab) {
             gc_object_slab_t* next = slab->next;
-            free(slab);
+            mem_vm_region_release(slab->region);
+            mem_free(slab);
             slab = next;
         }
     }
     // free sorted range arrays
-    free(oz->slab_ranges);
-    free(oz->range_slabs);
+    mem_free(oz->slab_ranges);
+    mem_free(oz->range_slabs);
     log_debug("gc_object_zone_destroy: freed %zu slabs, %zu allocs, %zu frees",
               oz->slab_count, oz->total_slots_allocated, oz->total_slots_freed);
-    free(oz);
+    mem_free(oz);
 }
 
 void* gc_object_zone_alloc(gc_object_zone_t* oz, size_t size, uint16_t type_tag,

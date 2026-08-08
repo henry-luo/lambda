@@ -24,7 +24,7 @@ protected:
     
     void SetUp() override {
         pool = pool_create();
-        arena = arena_create_default(pool);
+        arena = arena_create_default();
         output = strbuf_new();
     }
     

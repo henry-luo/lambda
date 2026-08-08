@@ -241,7 +241,7 @@ A shared GTest helper (`test/test_mir_check_helpers.hpp`) providing:
    auto-discovers `test/mir/js/*.js` + sidecars. Both registered in
    `build_lambda_config.json` (lambda suite, `category: baseline`,
    `requires_lambda_exe: true`, `dependencies: ["lambda-lib"]`,
-   `libraries: ["gtest","gtest_main","rpmalloc"]`), run by `test/test_run.js`
+   `libraries: ["gtest","gtest_main"]`), run by `test/test_run.js`
    like every other suite.
 7. **Migrations:** port the item_repr MIR test into the harness as a fixture;
    convert the three orphaned `.transpile` fixtures (their `expect` strings

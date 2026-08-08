@@ -1,4 +1,6 @@
 #include "arena.h"
+#define MEMTRACK_NO_LOCATION_MACROS
+#include "memtrack.h"
 #include "log.h"
 #include <stdio.h>
 #include <string.h>
@@ -50,7 +52,6 @@ typedef struct ArenaChunk {
  * Arena structure - manages chunks and allocation state
  */
 struct Arena {
-    Pool* pool;                 // underlying memory pool for chunks
     ArenaChunk* current;        // current chunk being allocated from
     ArenaChunk* first;          // first chunk in list
     size_t chunk_size;          // current chunk size (grows adaptively)
@@ -61,6 +62,7 @@ struct Arena {
     unsigned alignment;         // default alignment
     unsigned chunk_count;       // number of chunks allocated
     unsigned valid;             // validity marker
+    MemCategory category;       // memtrack category for owned blocks
 
     // Free-list for memory reuse
     ArenaFreeBlock* free_lists[ARENA_FREE_LIST_BINS];  // Free-list bins
@@ -144,9 +146,9 @@ static ArenaFreeBlock* _arena_find_adjacent_block(Arena* arena, uintptr_t addr, 
 static void* _arena_alloc_from_freelist(Arena* arena, size_t size, size_t alignment);
 
 /**
- * Allocate a new chunk from the pool
+ * Allocate a new directly-owned chunk
  */
-static ArenaChunk* _arena_alloc_chunk(Pool* pool, size_t capacity) {
+static ArenaChunk* _arena_alloc_chunk(Arena* arena, size_t capacity) {
     // Check if the requested capacity is too large
     // Account for chunk header overhead in the total size check
     size_t total_size = sizeof(ArenaChunk) + capacity;
@@ -155,7 +157,7 @@ static ArenaChunk* _arena_alloc_chunk(Pool* pool, size_t capacity) {
     }
 
     // Allocate chunk header + data in one allocation
-    ArenaChunk* chunk = (ArenaChunk*)pool_alloc(pool, total_size);
+    ArenaChunk* chunk = (ArenaChunk*)mem_alloc_loc(total_size, arena->category, 0);
     if (!chunk) {
         return NULL;
     }
@@ -167,11 +169,7 @@ static ArenaChunk* _arena_alloc_chunk(Pool* pool, size_t capacity) {
     return chunk;
 }
 
-Arena* arena_create(Pool* pool, size_t initial_chunk_size, size_t max_chunk_size) {
-    if (!pool) {
-        return NULL;
-    }
-
+Arena* arena_create(size_t initial_chunk_size, size_t max_chunk_size) {
     // Validate chunk sizes
     if (initial_chunk_size == 0) {
         initial_chunk_size = ARENA_INITIAL_CHUNK_SIZE;
@@ -183,14 +181,13 @@ Arena* arena_create(Pool* pool, size_t initial_chunk_size, size_t max_chunk_size
         initial_chunk_size = max_chunk_size;
     }
 
-    // Allocate arena structure
-    Arena* arena = (Arena*)pool_alloc(pool, sizeof(Arena));
+    Arena* arena = (Arena*)mem_alloc_loc(sizeof(Arena), MEM_CAT_SYSTEM, 0);
     if (!arena) {
         return NULL;
     }
 
     // Initialize arena
-    arena->pool = pool;
+    arena->category = MEM_CAT_SYSTEM;
     arena->chunk_size = initial_chunk_size;
     arena->max_chunk_size = max_chunk_size;
     arena->initial_chunk_size = initial_chunk_size;
@@ -221,9 +218,9 @@ Arena* arena_create(Pool* pool, size_t initial_chunk_size, size_t max_chunk_size
     arena->free_bytes = 0;
 
     // Allocate first chunk
-    ArenaChunk* first_chunk = _arena_alloc_chunk(pool, initial_chunk_size);
+    ArenaChunk* first_chunk = _arena_alloc_chunk(arena, initial_chunk_size);
     if (!first_chunk) {
-        pool_free(pool, arena);
+        mem_free_loc(arena, 0);
         return NULL;
     }
 
@@ -235,8 +232,8 @@ Arena* arena_create(Pool* pool, size_t initial_chunk_size, size_t max_chunk_size
     return arena;
 }
 
-Arena* arena_create_default(Pool* pool) {
-    return arena_create(pool, ARENA_INITIAL_CHUNK_SIZE, ARENA_MAX_CHUNK_SIZE);
+Arena* arena_create_default(void) {
+    return arena_create(ARENA_INITIAL_CHUNK_SIZE, ARENA_MAX_CHUNK_SIZE);
 }
 
 void arena_destroy(Arena* arena) {
@@ -254,13 +251,13 @@ void arena_destroy(Arena* arena) {
     ArenaChunk* chunk = arena->first;
     while (chunk) {
         ArenaChunk* next = chunk->next;
-        pool_free(arena->pool, chunk);
+        mem_free_loc(chunk, 0);
         chunk = next;
     }
 
     // Mark arena as invalid and free it
     arena->valid = 0;
-    pool_free(arena->pool, arena);
+    mem_free_loc(arena, 0);
 }
 
 void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
@@ -318,7 +315,7 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
     // Allocate chunk large enough for the request
     // Add extra space for alignment padding
     size_t chunk_capacity = MAX(next_chunk_size, aligned_size + alignment);
-    ArenaChunk* new_chunk = _arena_alloc_chunk(arena->pool, chunk_capacity);
+    ArenaChunk* new_chunk = _arena_alloc_chunk(arena, chunk_capacity);
     if (!new_chunk) {
         return NULL;
     }
@@ -474,7 +471,7 @@ void arena_clear(Arena* arena) {
     ArenaChunk* chunk = arena->first->next;
     while (chunk) {
         ArenaChunk* next = chunk->next;
-        pool_free(arena->pool, chunk);
+        mem_free_loc(chunk, 0);
         chunk = next;
     }
 
@@ -532,9 +529,9 @@ void arena_get_stats(Arena* arena, ArenaStats* out) {
     memset(out, 0, sizeof(*out));
     if (!arena || arena->valid != ARENA_VALID_MARKER) return;
 
-    size_t backing = pool_allocation_size(arena->pool, arena);
+    size_t backing = sizeof(Arena);
     for (ArenaChunk* chunk = arena->first; chunk; chunk = chunk->next) {
-        backing += pool_allocation_size(arena->pool, chunk);
+        backing += sizeof(ArenaChunk) + chunk->capacity;
     }
     out->backing_bytes = backing;
     out->committed_bytes = arena->total_allocated;
@@ -600,17 +597,18 @@ bool arena_owns(Arena* arena, const void* ptr) {
     return false;
 }
 
-Pool* arena_pool(Arena* arena) {
-    if (!arena || arena->valid != ARENA_VALID_MARKER) return NULL;
-    return arena->pool;
-}
-
 void* arena_get_mem_node(Arena* arena) {
     return (arena && arena->valid == ARENA_VALID_MARKER) ? arena->mem_node : NULL;
 }
 
 void arena_set_mem_node(Arena* arena, void* node) {
     if (arena && arena->valid == ARENA_VALID_MARKER) arena->mem_node = node;
+}
+
+void arena_set_mem_category(Arena* arena, int category) {
+    if (!arena || arena->valid != ARENA_VALID_MARKER) return;
+    arena->category = category >= 0 && category < MEM_CAT_COUNT
+        ? (MemCategory)category : MEM_CAT_UNKNOWN;
 }
 
 void arena_free(Arena* arena, void* ptr, size_t size) {

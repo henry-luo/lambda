@@ -249,14 +249,14 @@ static bool map_ensure_data_capacity_for_end(Map* mp, Pool* pool,
     return true;
 }
 
-static ShapeEntry* clone_shape_chain_for_transition(Pool* pool, TypeMap* parent,
+static ShapeEntry* clone_shape_entries(Pool* pool, ShapeEntry* source,
         ShapeEntry** out_last) {
     if (out_last) *out_last = NULL;
-    if (!pool || !parent) return NULL;
+    if (!pool || !source) return NULL;
     ShapeEntry* first = NULL;
     ShapeEntry* prev = NULL;
     ShapeEntry* last = NULL;
-    for (ShapeEntry* src = parent->shape; src; src = src->next) {
+    for (ShapeEntry* src = source; src; src = src->next) {
         ShapeEntry* dst = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
         if (!dst) return NULL;
         dst->name = src->name;
@@ -276,6 +276,11 @@ static ShapeEntry* clone_shape_chain_for_transition(Pool* pool, TypeMap* parent,
     }
     if (out_last) *out_last = last;
     return first;
+}
+
+static ShapeEntry* clone_shape_chain_for_transition(Pool* pool, TypeMap* parent,
+        ShapeEntry** out_last) {
+    return clone_shape_entries(pool, parent ? parent->shape : NULL, out_last);
 }
 
 // js constructor/pre-shape caches share TypeMap instances across many Maps.
@@ -690,51 +695,15 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
 }
 
 // ========== Shape Finalization ==========
-// These functions deduplicate map/element shapes by replacing the ShapeEntry chain
-// with a pooled version from the shape_pool.
+// Map ShapeEntry records stay map-owned because JavaScript descriptor flags are
+// mutable; sharing them from the shape pool would let one map alter another.
 
 void map_finalize_shape(TypeMap* type_map, Input* input) {
-    if (!type_map->shape || type_map->length == 0) {
-        return;  // empty map, nothing to finalize
-    }
-    // collect field names and types from existing shape chain
-    size_t field_count = type_map->length;
-    const char** field_names = (const char**)pool_alloc(input->pool, field_count * sizeof(char*));
-    TypeId* field_types = (TypeId*)pool_alloc(input->pool, field_count * sizeof(TypeId));
-    if (!field_names || !field_types) { return; }
-
-    // traverse existing shape chain to collect info
-    ShapeEntry* entry = type_map->shape;
-    for (size_t i = 0; i < field_count && entry; i++) {
-        // entry->name could be null for nested map
-        field_names[i] = entry->name ? entry->name->str : nullptr;  // StrView has 'str' field, not 'chars'
-        field_types[i] = entry->type->type_id;
-        entry = entry->next;
-    }
-
-    // get or create pooled shape
-    struct ShapeEntry* pooled_shape = shape_pool_get_map_shape(
-        input->shape_pool,
-        field_names,
-        field_types,
-        field_count
-    );
-
-    if (pooled_shape) {
-        // replace the shape chain with pooled version
-        type_map->shape = pooled_shape;
-
-        // find last entry in pooled chain
-        struct ShapeEntry* last = pooled_shape;
-        while (last->next) {
-            last = last->next;
-        }
-        type_map->last = last;
-    }
-
-    // free temporary arrays (field data stays in pool)
-    pool_free(input->pool, field_names);
-    pool_free(input->pool, field_types);
+    (void)type_map;
+    (void)input;
+    // map_put already built the authoritative per-map chain and hash index;
+    // retaining it avoids mutable JS descriptor state escaping into the shared
+    // shape pool and avoids allocating a second chain for every parsed map.
 }
 
 void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
@@ -1408,9 +1377,9 @@ Input* Input::create(Pool* pool, Url* abs_url, Input* parent) {
     }
     input->pool = pool;
     // Per-document memory sub-context: registers the document URL and groups this
-    // input's arena/name-pool/shape-pool under it so snapshots attribute memory to
-    // the source document. The backing `pool` (often the shared InputManager
-    // global_pool) stays in the root context; these allocators carry the doc id.
+    // input's direct arena and semantic name/shape owners under it so snapshots
+    // attribute memory to the source document. The shared input pool stays in
+    // the root context; these allocators carry the document id.
     MemContext* dctx = NULL;
     if (abs_url && abs_url->href && abs_url->href->len > 0) {
         uint32_t parent_doc = (parent && parent->mem_ctx)
@@ -1420,7 +1389,7 @@ Input* Input::create(Pool* pool, Url* abs_url, Input* parent) {
         mem_context_set_doc_id(dctx, doc_id);
     }
     input->mem_ctx = dctx;
-    input->arena = mem_arena_create(dctx, pool, MEM_ROLE_INPUT, "input.arena");
+    input->arena = mem_arena_create(dctx, MEM_ROLE_INPUT, "input.arena");
     input->name_pool = mem_name_pool_create(dctx, pool, NULL, MEM_ROLE_INPUT, "input.name_pool");  // Initialize name pool for string interning
     input->shape_pool = mem_shape_pool_create(dctx, pool, input->arena, NULL, "input.shape_pool");  // Initialize shape pool
     input->type_list = arraylist_new(16);
@@ -1456,9 +1425,8 @@ InputManager::~InputManager() {
         for (int i = 0; i < inputs->length; i++) {
             Input* input = (Input*)inputs->data[i];
             if (input && input->mem_ctx) {
-                // destroy document-owned allocators before their backing pool;
-                // leaving the child context for process shutdown makes it walk
-                // arenas whose pool has already been released.
+                // destroy the document-owned allocator context before process
+                // shutdown can walk stale arena or semantic-owner nodes.
                 mem_context_destroy((MemContext*)input->mem_ctx);
                 input->mem_ctx = nullptr;
                 input->arena = nullptr;

@@ -942,11 +942,6 @@ pn build_input_static_paths(config, ext_libs, platform) {
         var name = lib_names[i]
         var lib = find_ext_lib(ext_libs, name)
         if (lib != null and lib.link == "static") {
-            // on Windows, skip late-binding libs (rpmalloc)
-            if (platform == "windows" and name == "rpmalloc") {
-                i = i + 1
-                continue
-            }
             var p = lib.lib or ""
             if (p != "") {
                 result = arr_push(result, make_build_path(p))
@@ -1013,16 +1008,6 @@ pn build_input_dyn_links(config, ext_libs, platform) {
             }
         }
         i = i + 1
-    }
-
-    // Windows: add late-binding libs
-    if (platform == "windows") {
-        // nghttp2 as "none" on windows, skip
-        // rpmalloc as static -> late binding
-        var rpmalloc = find_ext_lib(ext_libs, "rpmalloc")
-        if (rpmalloc != null and rpmalloc.link == "static") {
-            result = arr_push(result, "rpmalloc:static")
-        }
     }
 
     return result
@@ -1333,7 +1318,7 @@ pn build_test_link_names(test_entry, ext_libs, platform) {
         i = 0
         while (i < len(test_libs)) {
             var name = test_libs[i]
-            if (name != "rpmalloc" and name != "utf8proc" and name != "gtest" and name != "gtest_main") {
+            if (name != "utf8proc" and name != "gtest" and name != "gtest_main") {
                 var lib = find_ext_lib(ext_libs, name)
                 if (lib != null and lib.link == "dynamic") {
                     result = arr_push(result, name)
@@ -1343,13 +1328,13 @@ pn build_test_link_names(test_entry, ext_libs, platform) {
         }
     }
 
-    // On Linux/Windows, static libs (rpmalloc, utf8proc) use late-binding syntax in links
+    // On Linux/Windows, utf8proc uses late-binding syntax in links
     if (platform == "linux" or platform == "windows") {
         var test_libs2 = test_entry.libraries or []
         i = 0
         while (i < len(test_libs2)) {
             var name = test_libs2[i]
-            if (name == "rpmalloc" or name == "utf8proc") {
+            if (name == "utf8proc") {
                 var lib = find_ext_lib(ext_libs, name)
                 if (lib != null and lib.link == "static") {
                     result = arr_push(result, ":lib" ++ name ++ ".a")
@@ -1367,8 +1352,8 @@ pn build_test_lib_paths(test_entry, ext_libs, platform) {
     var i = 0
     while (i < len(test_libs)) {
         var name = test_libs[i]
-        // On Linux/Windows, rpmalloc and utf8proc are handled via late-binding in links
-        if ((platform == "linux" or platform == "windows") and (name == "rpmalloc" or name == "utf8proc")) {
+        // On Linux/Windows, utf8proc is handled via late-binding in links
+        if ((platform == "linux" or platform == "windows") and name == "utf8proc") {
             i = i + 1
             continue
         }
@@ -1545,14 +1530,6 @@ pn build_input_full_test_dyn_libs(ext_libs, platform) {
     // add ncurses (libedit dependency, not on Windows)
     if (platform != "windows") {
         result = arr_push(result, "ncurses")
-    }
-
-    // Linux: add rpmalloc inside links block (must come after shared libraries)
-    if (platform == "linux") {
-        var rpmalloc = find_ext_lib(ext_libs, "rpmalloc")
-        if (rpmalloc != null) {
-            result = arr_push(result, ":librpmalloc.a")
-        }
     }
 
     return result

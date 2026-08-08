@@ -25,7 +25,7 @@ protected:
 
     void SetUp() override {
         pool = tu_setup_pool();
-        arena = arena_create_default(pool);
+        arena = arena_create_default();
         ASSERT_NE(arena, nullptr);
 
         doc.document_pool = pool;

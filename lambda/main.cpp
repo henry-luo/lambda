@@ -527,8 +527,8 @@ static int lambda_main_finish(int ret_code) {
     // same for the LAMBDA_JS_ARRAY_STATS census (no-op unless compiled in).
     js_array_stats_dump();
     lambda_main_pre_memtrack_cleanup_once();
-    // root-registered pools must be destroyed before rpmalloc walks its global
-    // heap lists; retained view/runtime pools otherwise corrupt Linux teardown.
+    // root-registered owners must be destroyed before the context registry is
+    // released; retained view/runtime owners otherwise outlive their metadata.
     mem_context_shutdown();
     log_finish();
     MemtrackStats mem_stats = {};

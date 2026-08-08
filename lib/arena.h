@@ -8,12 +8,11 @@ extern "C" {
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include "mempool.h"
 
 /**
  * Chunk-Based Arena Allocator - Fast sequential allocation with bulk deallocation
  *
- * Built on top of the Pool system for memory management. Provides:
+ * Owns its chunks directly through the hardened memtrack substrate. Provides:
  * - O(1) bump-pointer allocation
  * - Adaptive chunk sizing (4KB -> 64KB)
  * - Zero per-allocation metadata overhead
@@ -41,7 +40,7 @@ extern "C" {
 typedef struct Arena Arena;
 
 typedef struct ArenaStats {
-    size_t backing_bytes;       // exact bytes occupied in the backing pool
+    size_t backing_bytes;       // always zero: Arena owns its blocks directly
     size_t committed_bytes;     // aggregate chunk data capacity
     size_t bump_used_bytes;     // bump extent including recyclable interior blocks
     size_t active_bytes;        // bump_used_bytes minus recyclable_bytes
@@ -65,22 +64,20 @@ typedef struct ArenaStats {
 
 /**
  * Create a new arena with custom chunk sizes
- * @param pool Underlying memory pool for chunk allocation
  * @param initial_chunk_size Starting chunk size in bytes
  * @param max_chunk_size Maximum chunk size limit in bytes
  * @return Pointer to new arena, or NULL on failure
  */
-Arena* arena_create(Pool* pool, size_t initial_chunk_size, size_t max_chunk_size);
+Arena* arena_create(size_t initial_chunk_size, size_t max_chunk_size);
 
 /**
  * Create a new arena with default settings (4KB initial, 64KB max, adaptive)
- * @param pool Underlying memory pool for chunk allocation
  * @return Pointer to new arena, or NULL on failure
  */
-Arena* arena_create_default(Pool* pool);
+Arena* arena_create_default();
 
 /**
- * Destroy an arena and free all chunks back to the pool
+ * Destroy an arena and release all directly-owned chunks
  * @param arena Arena to destroy
  */
 void arena_destroy(Arena* arena);
@@ -147,7 +144,7 @@ void arena_reset(Arena* arena);
 
 /**
  * Clear arena, freeing all chunks except the first
- * Resets the first chunk for reuse, frees all other chunks back to pool.
+ * Resets the first chunk for reuse, frees all other directly-owned chunks.
  * Chunk size is reset to initial size.
  * Use when you want to reclaim memory between uses.
  * @param arena Arena to clear
@@ -155,7 +152,7 @@ void arena_reset(Arena* arena);
 void arena_clear(Arena* arena);
 
 /**
- * Get total bytes allocated from pool (all chunks)
+ * Get total bytes allocated across all owned chunks
  * @param arena Arena to query
  * @return Total bytes allocated across all chunks
  */
@@ -201,19 +198,12 @@ uint32_t arena_active_scope_count(Arena* arena);
 bool arena_owns(Arena* arena, const void* ptr);
 
 /**
- * Get the underlying pool backing this arena
- * Useful when external APIs require Pool* but most work goes through Arena.
- * @param arena Arena to query
- * @return The backing Pool, or NULL if arena is invalid
- */
-Pool* arena_pool(Arena* arena);
-
-/**
  * Memory-context registration node accessors (opaque void* to avoid a hard
  * dependency on mem_context.h). Used by the allocator factory (mem_factory.c).
  */
 void* arena_get_mem_node(Arena* arena);
 void  arena_set_mem_node(Arena* arena, void* node);
+void  arena_set_mem_category(Arena* arena, int category);
 
 /**
  * Install a hook called by arena_destroy to release a registered arena's

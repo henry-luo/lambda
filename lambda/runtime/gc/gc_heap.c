@@ -110,7 +110,7 @@ void gc_native_seen_init(gc_native_seen_t* seen) {
 
 void gc_native_seen_dispose(gc_native_seen_t* seen) {
     if (!seen) return;
-    if (seen->data) free(seen->data);
+    if (seen->data) mem_free(seen->data);
     seen->data = NULL;
     seen->length = 0;
     seen->capacity = 0;
@@ -123,7 +123,9 @@ int gc_native_seen_seen_or_add(gc_native_seen_t* seen, void* ptr) {
     }
     if (seen->length >= seen->capacity) {
         int new_capacity = seen->capacity ? seen->capacity * 2 : 32;
-        void** new_data = (void**)realloc(seen->data, (size_t)new_capacity * sizeof(void*));
+        void** new_data = (void**)mem_realloc(seen->data,
+                                              (size_t)new_capacity * sizeof(void*),
+                                              MEM_CAT_CONTAINER);
         if (!new_data) return 1;
         seen->data = new_data;
         seen->capacity = new_capacity;
@@ -176,7 +178,9 @@ static inline void gc_large_set_insert_fresh(gc_large_set_t* set, gc_header_t* h
 
 static int gc_large_set_grow(gc_heap_t* gc, gc_large_set_t* set) {
     size_t new_cap = set->capacity ? set->capacity * 2 : GC_LARGE_SET_INITIAL;
-    gc_header_t** new_slots = (gc_header_t**)calloc(new_cap, sizeof(gc_header_t*));
+    gc_header_t** new_slots = (gc_header_t**)mem_calloc(new_cap,
+                                                         sizeof(gc_header_t*),
+                                                         MEM_CAT_CONTAINER);
     if (!new_slots) {
         log_error("gc_large_set_grow: calloc failed for %zu slots", new_cap);
         return 0;
@@ -185,7 +189,7 @@ static int gc_large_set_grow(gc_heap_t* gc, gc_large_set_t* set) {
     for (size_t i = 0; i < set->capacity; i++) {
         if (set->slots[i]) gc_large_set_insert_fresh(&rebuilt, set->slots[i], NULL);
     }
-    free(set->slots);
+    mem_free(set->slots);
     *set = rebuilt;
     gc->tune.large_rehashes++;
     return 1;
@@ -280,30 +284,40 @@ static void gc_dump_tune_stats(const gc_heap_t* gc) {
 // Bump-Pointer Block Management
 // ============================================================================
 
-// Allocate a new bump block from the pool and register its range with the
+// Allocate a new bump block from a VM extent and register its range with the
 // object zone for ownership lookup (gc_object_zone_owns binary search).
 static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
-    uint8_t* memory = (uint8_t*)pool_alloc(gc->pool, block_size);
-    if (!memory) {
-        log_error("gc_alloc_bump_block: failed to allocate %zu bytes", block_size);
+    MemVmRegion* region = mem_vm_region_reserve(gc->vm_context, NULL,
+                                                MEM_ROLE_RUNTIME_HEAP,
+                                                block_size, mem_vm_page_size());
+    if (!region || !mem_vm_region_commit(region, 0,
+                                         mem_vm_region_reserved_bytes(region))) {
+        if (region) mem_vm_region_release(region);
+        log_error("gc_alloc_bump_block: failed to reserve/commit %zu bytes", block_size);
         return NULL;
     }
-    memset(memory, 0, block_size);
+    uint8_t* memory = (uint8_t*)mem_vm_region_base(region);
+    size_t reserved = mem_vm_region_reserved_bytes(region);
+    memset(memory, 0, reserved);
 
-    gc_bump_block_t* block = (gc_bump_block_t*)calloc(1, sizeof(gc_bump_block_t));
+    gc_bump_block_t* block = (gc_bump_block_t*)mem_calloc(1, sizeof(gc_bump_block_t),
+                                                          MEM_CAT_CONTAINER);
     if (!block) {
         log_error("gc_alloc_bump_block: failed to allocate block metadata");
+        mem_vm_region_release(region);
         return NULL;
     }
     block->base = memory;
-    block->size = block_size;
+    block->region = region;
+    block->size = reserved;
     block->next = NULL;
     // Costs block_size/128 (32 KB per 4 MB block). A failed allocation is not
     // fatal: gc_bump_block_owns_exact falls back to the linear replay scan.
-    block->alloc_bits = (uint8_t*)calloc(1, GC_BUMP_BITMAP_BYTES(block_size));
+    block->alloc_bits = (uint8_t*)mem_calloc(1, GC_BUMP_BITMAP_BYTES(reserved),
+                                              MEM_CAT_CONTAINER);
     if (!block->alloc_bits) {
         log_error("gc_alloc_bump_block: no allocation bitmap for %zu byte block "
-                  "— ownership queries fall back to linear scan", block_size);
+                  "— ownership queries fall back to linear scan", reserved);
     }
 
     // Widen the bump bounds so a pointer outside every block is rejected in O(1).
@@ -403,69 +417,43 @@ static void gc_free_sparse_array_map_entries(void* map_obj) {
 // ============================================================================
 
 gc_heap_t* gc_heap_create(void) {
-    // The GC keeps object slabs/bump blocks and data-zone blocks alive
-    // independently until heap teardown or data-zone reset. rpmalloc first-class
-    // heaps can hand a later large allocation an address range that overlaps a
-    // still-retained data-zone block under heavy JS allocation churn. Use the
-    // mmap-backed bump pool for GC arenas so each retained block owns a distinct
-    // virtual-memory mapping.
-    // register the GC backing pool so child document allocators are detached
-    // before bulk unmapping; otherwise mem-context shutdown later walks arenas
-    // whose pool has already been released.
-    Pool* pool = mem_pool_create_mmap(NULL, MEM_ROLE_RUNTIME_HEAP, "gc.heap.pool");
-    if (!pool) {
-        log_error("gc_heap_create: failed to create pool");
-        return NULL;
-    }
-    gc_heap_t* gc = gc_heap_create_with_pool(pool);
-    if (!gc) {
-        pool_destroy(pool);
-    }
-    return gc;
-}
-
-gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
-    if (!pool) return NULL;
-
-    gc_heap_t* gc = (gc_heap_t*)calloc(1, sizeof(gc_heap_t));
+    gc_heap_t* gc = (gc_heap_t*)mem_calloc(1, sizeof(gc_heap_t), MEM_CAT_CONTAINER);
     if (!gc) {
         log_error("gc_heap_create: failed to allocate gc_heap");
         return NULL;
     }
-    gc->pool = pool;
+    gc->vm_context = mem_context_root();
 
     // create object zone (size-class free-list allocator)
-    gc->object_zone = gc_object_zone_create(gc->pool);
+    gc->object_zone = gc_object_zone_create(gc->vm_context, NULL);
     if (!gc->object_zone) {
         log_error("gc_heap_create: failed to create object zone");
-        gc->pool = NULL;  // caller owns the pool
-        free(gc);
+        mem_free(gc);
         return NULL;
     }
 
     // create nursery data zone (bump allocator for variable-size buffers)
-    gc->data_zone = gc_data_zone_create(gc->pool, GC_DATA_ZONE_BLOCK_SIZE);
+    gc->data_zone = gc_data_zone_create(gc->vm_context, NULL, GC_DATA_ZONE_BLOCK_SIZE);
     if (!gc->data_zone) {
         log_error("gc_heap_create: failed to create data zone");
         gc_object_zone_destroy(gc->object_zone);
-        gc->pool = NULL;  // caller owns the pool
-        free(gc);
+        mem_free(gc);
         return NULL;
     }
 
     // create tenured data zone (survivors go here during GC compaction)
-    gc->tenured_data = gc_data_zone_create(gc->pool, GC_DATA_ZONE_BLOCK_SIZE);
+    gc->tenured_data = gc_data_zone_create(gc->vm_context, NULL, GC_DATA_ZONE_BLOCK_SIZE);
     if (!gc->tenured_data) {
         log_error("gc_heap_create: failed to create tenured data zone");
         gc_data_zone_destroy(gc->data_zone);
         gc_object_zone_destroy(gc->object_zone);
-        gc->pool = NULL;  // caller owns the pool
-        free(gc);
+        mem_free(gc);
         return NULL;
     }
 
     // allocate mark stack
-    gc->mark_stack = (gc_header_t**)malloc(GC_MARK_STACK_INITIAL * sizeof(gc_header_t*));
+    gc->mark_stack = (gc_header_t**)mem_alloc(
+        GC_MARK_STACK_INITIAL * sizeof(gc_header_t*), MEM_CAT_CONTAINER);
     gc->mark_top = 0;
     gc->mark_capacity = GC_MARK_STACK_INITIAL;
 
@@ -478,7 +466,8 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
     // initialize root slot registry
     gc->root_slot_count = 0;
     gc->root_slot_capacity = GC_ROOT_SLOTS_INITIAL;
-    gc->root_slots = (uint64_t**)calloc((size_t)gc->root_slot_capacity, sizeof(uint64_t*));
+    gc->root_slots = (uint64_t**)mem_calloc(
+        (size_t)gc->root_slot_capacity, sizeof(uint64_t*), MEM_CAT_CONTAINER);
     if (!gc->root_slots) {
         log_error("gc_heap_create: failed to allocate root slots");
         gc->root_slot_capacity = 0;
@@ -554,70 +543,76 @@ void gc_heap_destroy(gc_heap_t* gc) {
 
     // free mark stack (C heap allocated)
     if (gc->mark_stack) {
-        free(gc->mark_stack);
+        mem_free(gc->mark_stack);
         gc->mark_stack = NULL;
     }
 
     // free root ranges (C heap allocated)
     if (gc->root_ranges) {
-        free(gc->root_ranges);
+        mem_free(gc->root_ranges);
         gc->root_ranges = NULL;
     }
 
 
     // free root slot table (C heap allocated)
     if (gc->root_slots) {
-        free(gc->root_slots);
+        mem_free(gc->root_slots);
         gc->root_slots = NULL;
     }
 
     if (gc->weak_slots) {
-        free(gc->weak_slots);
+        mem_free(gc->weak_slots);
         gc->weak_slots = NULL;
     }
 
     gc_dump_tune_stats(gc);
     if (gc->large_objects.slots) {
-        free(gc->large_objects.slots);
+        mem_free(gc->large_objects.slots);
         gc->large_objects.slots = NULL;
         gc->large_objects.capacity = 0;
         gc->large_objects.count = 0;
     }
 
-    // free bump block metadata (block memory is pool-allocated)
+    // Large objects are dedicated memtrack blocks, but the all_objects list
+    // also contains headers inside VM slabs/bump extents. Free the dedicated
+    // subset before releasing any extent that backs the list itself.
+    gc_header_t* obj = gc->all_objects;
+    while (obj) {
+        gc_header_t* next = obj->next;
+        if (obj->gc_flags & GC_FLAG_LARGE) {
+            mem_free(obj);
+        }
+        obj = next;
+    }
+    gc->all_objects = NULL;
+
+    // release bump VM extents before freeing their metadata
     gc_bump_block_t* block = gc->bump_blocks;
     while (block) {
         gc_bump_block_t* next = block->next;
-        free(block->alloc_bits);
-        free(block);
+        mem_vm_region_release(block->region);
+        mem_free(block->alloc_bits);
+        mem_free(block);
         block = next;
     }
     gc->bump_blocks = NULL;
     gc->bump_min_addr = NULL;
     gc->bump_max_addr = NULL;
 
-    // free zone metadata (zone memory is pool-allocated, freed by pool_destroy)
-    if (gc->object_zone) gc_object_zone_destroy(gc->object_zone);
-    if (gc->data_zone) gc_data_zone_destroy(gc->data_zone);
-    if (gc->tenured_data) gc_data_zone_destroy(gc->tenured_data);
-
-    // free remaining large objects (allocated with malloc, not pool)
-    gc_header_t* obj = gc->all_objects;
-    while (obj) {
-        gc_header_t* next = obj->next;
-        if (obj->gc_flags & GC_FLAG_LARGE) {
-            free(obj);
-        }
-        obj = next;
+    // free zone metadata and their VM-owned extents
+    if (gc->object_zone) {
+        gc_object_zone_destroy(gc->object_zone);
     }
-    gc->all_objects = NULL;
-
-    // pool_destroy bulk-frees all pool-allocated memory
-    if (gc->pool) pool_destroy(gc->pool);
+    if (gc->data_zone) {
+        gc_data_zone_destroy(gc->data_zone);
+    }
+    if (gc->tenured_data) {
+        gc_data_zone_destroy(gc->tenured_data);
+    }
 
     log_debug("gc_heap_destroy: %zu objects, %zu collections, %zu bytes collected",
               gc->object_count, gc->collections, gc->bytes_collected);
-    free(gc);
+    mem_free(gc);
 }
 
 // ============================================================================
@@ -657,7 +652,7 @@ int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site) {
 }
 
 void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
-    if (!gc || !gc->pool) {
+    if (!gc) {
         log_error("gc_heap_alloc: invalid gc_heap");
         return NULL;
     }
@@ -675,10 +670,10 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
         return ptr;
     }
 
-    // large object: use malloc to avoid address conflicts with pool allocations
-    // (the pool may be shared with other subsystems that allocate map data buffers)
+    // large objects get dedicated memtrack allocations, independent from all
+    // slab and data-zone VM extents.
     size_t total = sizeof(gc_header_t) + size;
-    gc_header_t* header = (gc_header_t*)malloc(total);
+    gc_header_t* header = (gc_header_t*)mem_alloc(total, MEM_CAT_CONTAINER);
     if (!header) {
         log_error("gc_heap_alloc: malloc failed for %zu bytes (large object)", total);
         return NULL;
@@ -695,7 +690,7 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     gc->all_objects = header;
     if (!gc_large_object_add(gc, header)) {
         gc->all_objects = header->next;
-        free(header);
+        mem_free(header);
         return NULL;
     }
     gc->total_allocated += total;
@@ -896,8 +891,8 @@ int gc_try_register_root(gc_heap_t* gc, uint64_t* slot) {
     }
     if (gc->root_slot_count >= gc->root_slot_capacity) {
         int new_cap = gc->root_slot_capacity ? gc->root_slot_capacity * 2 : GC_ROOT_SLOTS_INITIAL;
-        uint64_t** new_slots = (uint64_t**)realloc(gc->root_slots,
-            (size_t)new_cap * sizeof(uint64_t*));
+        uint64_t** new_slots = (uint64_t**)mem_realloc(
+            gc->root_slots, (size_t)new_cap * sizeof(uint64_t*), MEM_CAT_CONTAINER);
         if (!new_slots) {
             log_error("gc_register_root: realloc failed for %d slots", new_cap);
             return 0;
@@ -976,8 +971,9 @@ void gc_register_weak(gc_heap_t* gc, uint64_t* slot,
     if (gc->weak_slot_count >= gc->weak_slot_capacity) {
         int new_capacity = gc->weak_slot_capacity
             ? gc->weak_slot_capacity * 2 : GC_ROOT_SLOTS_INITIAL;
-        gc_weak_slot_t* slots = (gc_weak_slot_t*)realloc(
-            gc->weak_slots, (size_t)new_capacity * sizeof(gc_weak_slot_t));
+        gc_weak_slot_t* slots = (gc_weak_slot_t*)mem_realloc(
+            gc->weak_slots, (size_t)new_capacity * sizeof(gc_weak_slot_t),
+            MEM_CAT_CONTAINER);
         if (!slots) {
             log_error("gc_register_weak: failed to grow weak slot registry to %d",
                       new_capacity);
@@ -1014,8 +1010,8 @@ void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count) {
     }
     if (gc->root_range_count >= gc->root_range_capacity) {
         int new_cap = gc->root_range_capacity ? gc->root_range_capacity * 2 : 256;
-        gc_root_range_t* new_arr = (gc_root_range_t*)realloc(gc->root_ranges,
-            new_cap * sizeof(gc_root_range_t));
+        gc_root_range_t* new_arr = (gc_root_range_t*)mem_realloc(
+            gc->root_ranges, new_cap * sizeof(gc_root_range_t), MEM_CAT_CONTAINER);
         if (!new_arr) {
             log_error("gc_register_root_range: realloc failed for %d ranges", new_cap);
             return;
@@ -1096,8 +1092,9 @@ static void mark_stack_push(gc_heap_t* gc, gc_header_t* header) {
     if (gc->mark_top >= gc->mark_capacity) {
         // grow mark stack
         gc->mark_capacity *= 2;
-        gc->mark_stack = (gc_header_t**)realloc(gc->mark_stack,
-                                                  gc->mark_capacity * sizeof(gc_header_t*));
+        gc->mark_stack = (gc_header_t**)mem_realloc(
+            gc->mark_stack, gc->mark_capacity * sizeof(gc_header_t*),
+            MEM_CAT_CONTAINER);
         if (!gc->mark_stack) {
             log_error("gc mark stack: realloc failed");
             return;
@@ -2003,7 +2000,7 @@ static void gc_sweep(gc_heap_t* gc) {
             if (current->gc_flags & GC_FLAG_LARGE) {
                 large_owned_count++;
                 gc_large_object_remove(gc, current);
-                free(current);
+                mem_free(current);
             } else if (current->gc_flags & GC_FLAG_BUMP) {
                 bump_owned_count++;
                 // bump-block objects are reclaimed only by unlinking; block memory is pool-owned
@@ -2037,7 +2034,7 @@ static void gc_sweep(gc_heap_t* gc) {
                 large_owned_count++;
                 // large objects allocated with malloc — free directly
                 gc_large_object_remove(gc, current);
-                free(current);
+                mem_free(current);
             } else if (current->gc_flags & GC_FLAG_BUMP) {
                 bump_owned_count++;
                 // Retained bump blocks remain address-discoverable after sweep.

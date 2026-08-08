@@ -6,9 +6,7 @@
       "in_func": "_js_anon1_#_body",
       "expect_seq": [
         { "pattern": "call\tjs_new_function_mir_p" },
-        { "pattern": "mov\t{{r}}, i64:312(ctx)" },
-        { "pattern": "mov\t{{r}}, i64:({{r}})" },
-        { "pattern": "mov\ti64:16({{r}}), {{r}}" }
+        { "pattern": "call\tjs_set_module_var_p" }
       ],
       "expect": [
         ", _js_helper_"

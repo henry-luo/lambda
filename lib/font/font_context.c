@@ -16,6 +16,7 @@
 static inline int munmap(void* addr, size_t len) { (void)addr; (void)len; return 0; }
 #endif
 #include "../memtrack.h"
+#include "../mem_factory.h"
 
 #define FONT_DEFAULT_MAX_GLYPH_ARENA_BYTES ((size_t)64 * 1024 * 1024)
 
@@ -85,7 +86,7 @@ FontContext* font_context_create(FontContextConfig* config) {
     if (config && config->pool) {
         pool = config->pool;
     } else {
-        pool = pool_create();
+        pool = mem_pool_create(NULL, MEM_ROLE_FONT, "font.context.pool");
         if (!pool) {
             log_error("font_context_create: failed to create pool");
             return NULL;
@@ -99,7 +100,7 @@ FontContext* font_context_create(FontContextConfig* config) {
     if (config && config->arena) {
         arena = config->arena;
     } else {
-        arena = arena_create_default(pool);
+        arena = arena_create_default();
         if (!arena) {
             log_error("font_context_create: failed to create arena");
             if (owns_pool) pool_destroy(pool);
@@ -127,7 +128,7 @@ FontContext* font_context_create(FontContextConfig* config) {
     bool owns_glyph_arena = false;
     ctx->glyph_arena = config && config->glyph_arena
         ? config->glyph_arena
-        : arena_create(pool, 256 * 1024, 4 * 1024 * 1024);
+        : arena_create(256 * 1024, 4 * 1024 * 1024);
     owns_glyph_arena = !(config && config->glyph_arena);
     ctx->owns_glyph_arena = owns_glyph_arena;
     if (!ctx->glyph_arena) {
@@ -194,9 +195,8 @@ void font_context_destroy(FontContext* ctx) {
     log_info("font_context_destroy: tearing down");
 
     // Mark context as destroying. This tells font_handle_release to skip
-    // individual pool_free calls — pool_destroy will free all pool memory
-    // in bulk via rpmalloc_heap_free_all. Individual pool_free calls during
-    // teardown can corrupt rpmalloc's span linked lists under memory pressure.
+    // individual pool_free calls while the owner is being drained. The
+    // grouped owner releases its blocks after dependent font resources close.
     ctx->destroying = true;
 
     // clear @font-face descriptors (handles are released via face_cache cleanup)
@@ -261,14 +261,12 @@ void font_context_destroy(FontContext* ctx) {
     bool   owns_pool = ctx->owns_pool;
     bool   owns_arena = ctx->owns_arena;
 
-    // Skip pool_free(ctx) — pool_destroy will free all pool allocations in bulk.
-    // Individual pool_free calls during teardown risk rpmalloc span corruption.
+    // Skip pool_free(ctx); the grouped owner releases all remaining blocks.
 
-    // destroy owned allocators last
-    // When pool is also owned, skip arena_destroy — pool_destroy will free
-    // everything via rpmalloc_heap_free_all. Individual frees would double-free.
-    if (owns_glyph_arena && glyph_arena && !owns_pool) arena_destroy(glyph_arena);
-    if (owns_arena && arena && !owns_pool) arena_destroy(arena);
+    // Arena blocks are independent direct owners, so they must be released
+    // before the pool regardless of whether the pool itself is owned here.
+    if (owns_glyph_arena && glyph_arena) arena_destroy(glyph_arena);
+    if (owns_arena && arena) arena_destroy(arena);
     if (owns_pool  && pool)  pool_destroy(pool);
 }
 
@@ -427,8 +425,8 @@ bool font_handle_get_style(FontHandle* handle, const char** out_family,
 void font_handle_release(FontHandle* handle) {
     if (!handle) return;
     handle->ref_count--;
-    // When the owning FontContext is being destroyed, skip all pool_free calls.
-    // pool_destroy → rpmalloc_heap_free_all will free pool memory in bulk.
+    // When the owning FontContext is being destroyed, skip all pool_free calls;
+    // the grouped owner will release remaining blocks in bulk.
     bool bulk_destroy = (handle->ctx && handle->ctx->destroying);
     if (handle->ref_count <= 0 || bulk_destroy) {
         if (handle->resources_destroyed) return;

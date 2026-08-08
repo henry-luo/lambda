@@ -60,9 +60,9 @@ TEST(FontContextTest, FamilyListParserSkipsEmptyCandidatesAndUnescapesQuotes) {
 TEST(FontContextTest, GlyphArenaLimitResetReclaimsArenaChunks) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);
-    Arena* arena = arena_create_default(pool);
+    Arena* arena = arena_create_default();
     ASSERT_NE(arena, nullptr);
-    Arena* glyph_arena = arena_create(pool, 4096, 16384);
+    Arena* glyph_arena = arena_create(4096, 16384);
     ASSERT_NE(glyph_arena, nullptr);
 
     FontContextConfig cfg = {};
@@ -131,9 +131,9 @@ TEST(FontContextTest, GlyphCacheResetDropsReusedDocumentHandleEntry) {
 TEST(FontContextTest, LongSessionGlyphArenaUsePlateausAtConfiguredLimit) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);
-    Arena* arena = arena_create_default(pool);
+    Arena* arena = arena_create_default();
     ASSERT_NE(arena, nullptr);
-    Arena* glyph_arena = arena_create(pool, 4096, 16384);
+    Arena* glyph_arena = arena_create(4096, 16384);
     ASSERT_NE(glyph_arena, nullptr);
 
     FontContext ctx = {};

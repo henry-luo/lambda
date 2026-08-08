@@ -90,7 +90,7 @@ TEST(CheckedAlloc, ReallocGrowsAndPreservesOriginalOnFailure) {
 TEST(NonNullArena, ArenaNewIsNonNullAndZeroed) {
     Pool* p = pool_create();
     ASSERT_NE(p, nullptr);
-    Arena* a = arena_create_default(p);
+    Arena* a = arena_create_default();
     ASSERT_NE(a, nullptr);
 
     lam::NonNull<int> n = lam::arena_new<int>(a);

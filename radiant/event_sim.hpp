@@ -376,8 +376,7 @@ struct SimEvent {
 // Event simulation context
 struct EventSimContext {
     ArrayList* events;           // list of SimEvent*
-    Pool* event_pool;            // owns parsed SimEvent arena chunks
-    Arena* event_arena;          // per-fixture arena for SimEvent structs
+    Arena* event_arena;          // per-fixture direct owner for SimEvent structs
     int current_index;           // current event being processed
     double next_event_time;      // when to process next event
     bool is_running;             // simulation in progress
