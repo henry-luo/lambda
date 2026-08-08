@@ -18,6 +18,24 @@ typedef enum {
     IMAGE_TYPE_GIF
 } ImageType;
 
+typedef struct GifMemoryReader {
+    const unsigned char* data;
+    size_t size;
+    size_t pos;
+} GifMemoryReader;
+
+static int gif_memory_read_func(GifFileType* gif, GifByteType* buf, int size) {
+    GifMemoryReader* reader = (GifMemoryReader*)gif->UserData;
+    size_t avail = reader->size - reader->pos;
+    size_t to_read = (size_t)size;
+    if (to_read > avail) to_read = avail;
+    if (to_read > 0) {
+        memcpy(buf, reader->data + reader->pos, to_read);
+        reader->pos += to_read;
+    }
+    return (int)to_read;
+}
+
 static ImageType get_image_type(const char* filename) {
     if (!filename) return IMAGE_TYPE_UNKNOWN;
 
@@ -300,24 +318,9 @@ static unsigned char* load_jpeg(const char* filename, int* width, int* height, i
     return image_data;
 }
 
-// Load GIF image using giflib
-static unsigned char* load_gif(const char* filename, int* width, int* height, int* channels, int req_channels) {
-    (void)req_channels; // Mark as unused for compatibility
-
-    int error_code;
-    GifFileType* gif = DGifOpenFileName(filename, &error_code);
-    if (!gif) {
-        log_error("Failed to open GIF file: %s (error: %d)", filename, error_code);
-        return NULL;
-    }
-
-    // Read the entire GIF file
-    if (DGifSlurp(gif) == GIF_ERROR) {
-        log_error("Failed to read GIF file: %s (error: %d)", filename, gif->Error);
-        DGifCloseFile(gif, &error_code);
-        return NULL;
-    }
-
+// decode the first GIF frame from an already-read giflib document
+static unsigned char* decode_gif(GifFileType* gif, int* width, int* height, int* channels) {
+    if (!gif || !width || !height || !channels) return NULL;
     *width = gif->SWidth;
     *height = gif->SHeight;
     *channels = 4; // Always return RGBA
@@ -326,7 +329,6 @@ static unsigned char* load_gif(const char* filename, int* width, int* height, in
     unsigned char* image_data = mem_calloc(*width * *height * 4, 1, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate memory for GIF image data");
-        DGifCloseFile(gif, &error_code);
         return NULL;
     }
 
@@ -338,9 +340,8 @@ static unsigned char* load_gif(const char* filename, int* width, int* height, in
         // Get the color map
         ColorMapObject* color_map = desc->ColorMap ? desc->ColorMap : gif->SColorMap;
         if (!color_map) {
-            log_error("No color map found in GIF file: %s", filename);
+            log_error("No color map found in GIF image");
             mem_free(image_data);
-            DGifCloseFile(gif, &error_code);
             return NULL;
         }
 
@@ -392,7 +393,50 @@ static unsigned char* load_gif(const char* filename, int* width, int* height, in
             }
         }
     }
+    return image_data;
+}
 
+// Load GIF image using giflib
+static unsigned char* load_gif(const char* filename, int* width, int* height, int* channels, int req_channels) {
+    (void)req_channels; // Mark as unused for compatibility
+
+    int error_code;
+    GifFileType* gif = DGifOpenFileName(filename, &error_code);
+    if (!gif) {
+        log_error("Failed to open GIF file: %s (error: %d)", filename, error_code);
+        return NULL;
+    }
+
+    if (DGifSlurp(gif) == GIF_ERROR) {
+        log_error("Failed to read GIF file: %s (error: %d)", filename, gif->Error);
+        DGifCloseFile(gif, &error_code);
+        return NULL;
+    }
+
+    unsigned char* image_data = decode_gif(gif, width, height, channels);
+    DGifCloseFile(gif, &error_code);
+    return image_data;
+}
+
+static unsigned char* load_gif_from_memory(const unsigned char* data, size_t length,
+                                           int* width, int* height, int* channels) {
+    if (!data || length == 0) return NULL;
+
+    GifMemoryReader reader = { data, length, 0 };
+    int error_code;
+    GifFileType* gif = DGifOpen(&reader, gif_memory_read_func, &error_code);
+    if (!gif) {
+        log_error("Failed to open GIF image from memory (error: %d)", error_code);
+        return NULL;
+    }
+
+    if (DGifSlurp(gif) == GIF_ERROR) {
+        log_error("Failed to read GIF image from memory (error: %d)", gif->Error);
+        DGifCloseFile(gif, &error_code);
+        return NULL;
+    }
+
+    unsigned char* image_data = decode_gif(gif, width, height, channels);
     DGifCloseFile(gif, &error_code);
     return image_data;
 }
@@ -625,9 +669,9 @@ unsigned char* image_load_from_memory(const unsigned char* data, size_t length, 
             return load_jpeg_from_memory(data, length, width, height, channels);
 
         case IMAGE_TYPE_GIF:
-            // GIF from memory not yet implemented - fall through
-            log_warn("GIF loading from memory not yet implemented");
-            return NULL;
+            // Data-URI layout needs decoded pixels as well as header dimensions;
+            // use the same giflib path as file-backed images instead of falling back.
+            return load_gif_from_memory(data, length, width, height, channels);
 
         default:
             log_error("Unsupported or unrecognized image format in memory buffer");
@@ -1226,25 +1270,6 @@ static GifFrames* gif_decode_all_frames(GifFileType* gif) {
     if (prev_canvas) mem_free(prev_canvas);
 
     return result;
-}
-
-// Memory read context for giflib InputFunc callback
-typedef struct GifMemoryReader {
-    const unsigned char* data;
-    size_t size;
-    size_t pos;
-} GifMemoryReader;
-
-static int gif_memory_read_func(GifFileType* gif, GifByteType* buf, int size) {
-    GifMemoryReader* reader = (GifMemoryReader*)gif->UserData;
-    size_t avail = reader->size - reader->pos;
-    size_t to_read = (size_t)size;
-    if (to_read > avail) to_read = avail;
-    if (to_read > 0) {
-        memcpy(buf, reader->data + reader->pos, to_read);
-        reader->pos += to_read;
-    }
-    return (int)to_read;
 }
 
 GifFrames* image_gif_load(const char* filename) {

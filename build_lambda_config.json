@@ -868,6 +868,7 @@
       "lambda-rt",
       "lambda-data",
       "lambda-lib",
+      "fribidi",
       "ThorVG",
         "glfw",
         "png",
@@ -888,6 +889,9 @@
         "cairo",
         "javascriptcoregtk-4.1"
       ]
+    },
+    "windows": {
+      "exclude_libraries": ["fribidi"]
     },
     "link": "static"
   }
@@ -1570,6 +1574,13 @@
           "link": "dynamic"
         },
         {
+          "name": "fribidi",
+          "description": "Unicode Bidirectional Algorithm implementation",
+          "include": "/usr/include",
+          "lib": "-lfribidi",
+          "link": "dynamic"
+        },
+        {
           "name": "mir",
           "include": "lambda/mir",
           "lib": "lambda/mir/libmir.a",
@@ -1892,6 +1903,13 @@
           "include": null,
           "lib": "-framework Carbon",
           "link": "dynamic"
+        },
+        {
+          "name": "fribidi",
+          "description": "Unicode Bidirectional Algorithm implementation",
+          "include": "/opt/homebrew/include",
+          "lib": "/opt/homebrew/lib/libfribidi.a",
+          "link": "static"
         },
         {
           "name": "WebKit",
@@ -2968,7 +2986,10 @@
             "additional_sources": [
               "radiant/animation.cpp",
               "radiant/css_animation.cpp",
+              "radiant/css_cascade.cpp",
               "radiant/css_prop_table.cpp",
+              "lambda/input/css/css_engine.cpp",
+              "lambda/input/css/selector_matcher.cpp",
               "lambda/input/css/css_value.cpp",
               "lib/avl_tree.c"
             ],

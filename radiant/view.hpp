@@ -50,6 +50,9 @@ enum CssPropAccessorFlags : uint8_t {
 };
 
 struct CssPropAccessor;
+struct CssRule;
+struct SelectorMatcher;
+struct CssEngine;
 typedef bool (*CssPropSerializeFn)(const CssPropAccessor* accessor,
                                    DomElement* element, int pseudo_type,
                                    char* out, size_t out_size);
@@ -71,6 +74,13 @@ const CssPropAccessor* css_prop_accessor(CssPropertyCode id);
 const CssPropAccessor* css_prop_accessors(size_t* count);
 bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size);
+
+// Refresh one dynamic element's stylesheet declarations without constructing a
+// view tree; CSSOM and transition capture need the cascade, not committed layout.
+void radiant_cascade_styles_for_element(DomElement* element);
+void radiant_apply_css_rule_to_element(DomElement* element, CssRule* rule,
+                                       SelectorMatcher* matcher, Pool* pool,
+                                       CssEngine* engine);
 
 // Return a committed view's visual CSS-pixel bounds, including transforms on
 // the view and its ancestors. Geometry consumers must share this with painting
@@ -418,6 +428,7 @@ typedef struct ImageSurface {
     int encoded_height;
     int orientation;       // EXIF orientation value, 1 when absent/normal/invalid
     bool has_intrinsic_size;
+    bool has_intrinsic_aspect_ratio;
     int pitch;             // no. of bytes per row of the actual decoded pixel buffer
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit
@@ -617,6 +628,7 @@ typedef struct FlexItemProp {
     // Flags for percentage values and measurement state
     uint8_t flex_basis_is_percent : 1;
     uint8_t flex_basis_is_content : 1;
+    uint8_t flex_basis_is_stretch : 1;
     uint8_t is_margin_top_auto : 1;
     uint8_t is_margin_right_auto : 1;
     uint8_t is_margin_bottom_auto : 1;
@@ -627,6 +639,10 @@ typedef struct FlexItemProp {
     uint8_t has_explicit_width : 1;    // True if width explicitly set in CSS
     uint8_t has_explicit_height : 1;   // True if height explicitly set in CSS
     uint8_t main_size_from_flex : 1;   // True if parent flex grew/shrank this item's main-axis size
+
+    // Direct text children are represented by a pass-local anonymous flex item;
+    // this points back to the text view that receives its final geometry.
+    DomText* anonymous_text;
 } FlexItemProp;
 
 // tier-2: view-pool, rebuilt each relayout
@@ -1142,7 +1158,8 @@ typedef struct BlockProp {
     bool legacy_align_center_blocks;  // HTML align=center compatibility: center block/table descendants
     CssEnum legacy_block_align;  // HTML align compatibility for block/table descendants
     CssEnum direction;  // CSS_VALUE_LTR or CSS_VALUE_RTL (CSS 2.1 §9.2.1)
-    WritingMode writing_mode;  // CSS Writing Modes: the element's own block/inline axes
+    WritingMode writing_mode;  // CSS Writing Modes: the element’s own block/inline axes
+    float zoom;  // CSS Viewport 1: local zoom factor; effective zoom multiplies ancestors
     CssEnum text_transform;  // CSS_VALUE_NONE, CSS_VALUE_UPPERCASE, CSS_VALUE_LOWERCASE, CSS_VALUE_CAPITALIZE
     const CssValue* line_height;
     float text_indent;  // can be negative
@@ -1186,10 +1203,20 @@ typedef struct BlockProp {
     float given_width, given_height;  // CSS specified width/height values
     CssEnum given_width_type;
     CssEnum given_height_type;
+    // CSS Sizing 3 fit-content() arguments remain separate from the intrinsic keyword.
+    float given_width_fit_content_limit;
+    float given_height_fit_content_limit;
+    float given_width_fit_content_percent;
+    float given_height_fit_content_percent;
+    // aspect-ratio auto height is definite for percentage bases and margin adjacency,
+    // but final auto sizing may still grow to contain in-flow content.
+    bool aspect_ratio_auto_height;
     float given_width_percent;  // Raw percentage if width: X% (NaN if not percentage)
     float given_height_percent; // Raw percentage if height: X% (NaN if not percentage)
     float contain_intrinsic_width;
     float contain_intrinsic_height;
+    bool contain_intrinsic_width_auto;
+    bool contain_intrinsic_height_auto;
     bool contain_size;
     bool contain_inline_size;
     bool content_visibility_hidden;
@@ -1213,6 +1240,7 @@ typedef struct BlockProp {
     // Transient layout state: this float was lowered below a sunk initial letter.
     bool initial_letter_float_clearance;
     bool vertical_geometry_published; // transient: direct vertical-flow children were axis-mapped
+    bool vertical_auto_inline_size_constrained; // transient: auto height resolved from the vertical inline-size CB
     CssEnum text_overflow;  // CSS_VALUE_CLIP (default 0) | CSS_VALUE_ELLIPSIS
     int line_clamp;         // -webkit-line-clamp: max visible lines (0 = no clamp)
     bool line_clamp_inherited; // transient: this block is consuming an ancestor clamp
@@ -2284,16 +2312,25 @@ typedef enum CssAnimValueType {
     ANIM_VAL_FLOAT,         // opacity, numeric values
     ANIM_VAL_COLOR,         // color, background-color, border-*-color
     ANIM_VAL_LENGTH,        // width, height, margin-*, padding-*, top/right/bottom/left
+    ANIM_VAL_ASPECT_RATIO,  // aspect-ratio (positive ratios interpolate multiplicatively)
     ANIM_VAL_TRANSFORM,     // transform function list
 } CssAnimValueType;
 
 // Forward declaration from view.hpp
 struct TransformFunction;
 
+typedef enum CssAnimComposite {
+    CSS_ANIM_COMPOSITE_REPLACE = 0,
+    CSS_ANIM_COMPOSITE_ADD,
+    CSS_ANIM_COMPOSITE_ACCUMULATE,
+} CssAnimComposite;
+
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct CssAnimatedProp {
     CssPropertyCode property_code;
     CssAnimValueType value_type;
+    CssAnimComposite composite;
     union {
         float f;                // ANIM_VAL_FLOAT
         Color color;            // ANIM_VAL_COLOR
@@ -2301,6 +2338,10 @@ typedef struct CssAnimatedProp {
             float value;
             bool is_percent;
         } length;               // ANIM_VAL_LENGTH
+        struct {
+            float value;
+            bool is_auto;
+        } aspect_ratio;         // ANIM_VAL_ASPECT_RATIO
         TransformFunction* transform;  // ANIM_VAL_TRANSFORM (linked list)
     } value;
 } CssAnimatedProp;
@@ -2386,6 +2427,15 @@ bool css_transition_resolve_values(const CssValue* shorthand_value,
                                    CssPropertyCode* property_buffer,
                                    int property_capacity);
 
+// Shared parser entry points used by CSS animations and Web Animations so both
+// paths apply the same property-value grammar and timing-function semantics.
+bool css_animation_parse_property_value(CssPropertyCode property,
+                                        const char* value,
+                                        CssAnimatedProp* out,
+                                        Pool* pool);
+bool css_animation_parse_timing_function_text(const char* value,
+                                              TimingFunction* out);
+
 // ============================================================================
 // CSS Animation Runtime State (attached to AnimationInstance.state)
 // ============================================================================
@@ -2396,17 +2446,53 @@ typedef struct CssAnimState {
     DomElement* element;
     UiContext* ui_context;
     bool event_started;
+    bool suppress_events;
     int event_iteration;
+    CssAnimatedProp underlying[32];
+    int underlying_count;
 } CssAnimState;
+
+// Web Animations keep their timeline/effect state on the DOM element. The
+// sampled values reuse CssAnimState and are applied after cascade resolution;
+// they are deliberately not AnimationInstances because pause/currentTime do
+// not make a Web Animation a CSS animation lifecycle participant.
+typedef struct CssWebAnimationState {
+    CssWebAnimationState* next;
+    CssAnimState sample;
+    DomElement* element;
+    double duration_ms;
+    double current_time_ms;
+    TimingFunction timing;
+    bool underlying_captured;
+} CssWebAnimationState;
+
+CssWebAnimationState* css_web_animation_create(DomElement* element,
+                                                CssKeyframes* keyframes,
+                                                double duration_ms,
+                                                const TimingFunction* timing,
+                                                Pool* pool);
+void css_web_animation_set_current_time(CssWebAnimationState* state,
+                                         double current_time_ms);
+void css_web_animation_resolve(DomElement* element, LayoutContext* lycon);
 
 // ============================================================================
 // CSS Transition Runtime State
 // ============================================================================
 
-// The set of properties this vertical slice can transition. Only value types
-// that both apply_animated_value (write side) and the used-value snapshot
-// (read side) already handle are supported; others are deferred.
-#define CSS_TRANSITION_MAX_TRACKED 3   // opacity, color, background-color
+// The supported set shares the animation value application path, including
+// the six sizing longhands handled there.
+#define CSS_TRANSITION_MAX_TRACKED 10
+
+typedef struct CssTransitionValue {
+    union {
+        float f;
+        Color color;
+        struct {
+            float value;
+            bool is_auto;
+        } aspect_ratio;
+    } value;
+} CssTransitionValue;
 
 // One tracked transitionable property: its last-applied used value (the
 // snapshot) plus the currently running transition instance (if any).
@@ -2415,10 +2501,9 @@ typedef struct CssTransitionTrack {
     CssPropertyCode property_code;
     CssAnimValueType value_type;
     bool has_snapshot;              // false until the first used value is observed
-    union {
-        float f;                    // ANIM_VAL_FLOAT (opacity)
-        Color color;                // ANIM_VAL_COLOR (color, background-color)
-    } snapshot;                     // last-applied used value
+    bool has_pending_from;           // pre-change value captured before a style flush
+    CssTransitionValue snapshot;     // last-applied used value
+    CssTransitionValue pending_from; // before-change value for the next style resolution
 } CssTransitionTrack;
 
 // Persistent per-element transition state (pointed to by DomElement.transition_state).
@@ -2435,14 +2520,8 @@ typedef struct CssTransitionState {
     UiContext* ui_context;
     CssPropertyCode property_code;
     CssAnimValueType value_type;
-    union {
-        float f;
-        Color color;
-    } from;
-    union {
-        float f;
-        Color color;
-    } to;
+    CssTransitionValue from;
+    CssTransitionValue to;
 } CssTransitionState;
 
 // ============================================================================
@@ -2482,6 +2561,7 @@ void css_animation_finish(AnimationInstance* anim);
 // if animation-name references valid @keyframes. Called after resolve_css_styles.
 void css_animation_resolve(DomElement* element, LayoutContext* lycon);
 
+
 // ============================================================================
 // CSS Transition Lifecycle
 // ============================================================================
@@ -2493,11 +2573,12 @@ void css_transition_tick(AnimationInstance* anim, float t);
 void css_transition_finish(AnimationInstance* anim);
 
 // Process transition-* properties during style resolution. Reads the element's
-// newly-computed used values (opacity/color/background-color), compares them to
+// newly-computed used values, compares them to
 // the persistent per-element snapshot, and starts an ANIM_CSS_TRANSITION for each
 // property that actually changed (given a matching transition declaration).
 // Called from layout, right after resolve_css_styles + css_animation_resolve.
 void css_transition_resolve(DomElement* element, LayoutContext* lycon);
+void css_transition_capture_before_change(DomElement* element, CssPropertyCode prop_id);
 
 
 // ===== CSS temporary declarations =====
@@ -2535,6 +2616,7 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 Color color_name_to_rgb(CssEnum color_name);
 int64_t get_cascade_priority(const CssDeclaration* decl);
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
+float layout_effective_zoom(View* view);
 char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
                                const char* url);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);

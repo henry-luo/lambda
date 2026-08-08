@@ -27,10 +27,16 @@ typedef struct ImageEntry {
 
 HASHMAP_DEFINE_STRKEY(image, ImageEntry, path)
 
+static size_t resource_path_length(const char* path) {
+    if (!path) return 0;
+    const char* query = strpbrk(path, "?#");
+    return query ? (size_t)(query - path) : strlen(path);
+}
+
 static char* try_join_absolute_resource(const char* root, const char* abs_path) {
     if (!root || !abs_path || abs_path[0] != '/') return nullptr;
     size_t root_len = strlen(root);
-    size_t path_len = strlen(abs_path);
+    size_t path_len = resource_path_length(abs_path);
     char* candidate = (char*)mem_alloc(root_len + path_len + 1, MEM_CAT_RENDER);
     if (!candidate) return nullptr;
     memcpy(candidate, root, root_len);
@@ -44,12 +50,13 @@ static char* try_join_absolute_resource(const char* root, const char* abs_path) 
 static char* try_join_resource_suffix(const char* root, const char* suffix) {
     if (!root || !suffix || suffix[0] == '\0') return nullptr;
     size_t root_len = strlen(root);
-    size_t suffix_len = strlen(suffix);
+    size_t suffix_len = resource_path_length(suffix);
     char* candidate = (char*)mem_alloc(root_len + 1 + suffix_len + 1, MEM_CAT_RENDER);
     if (!candidate) return nullptr;
     memcpy(candidate, root, root_len);
     candidate[root_len] = '/';
-    memcpy(candidate + root_len + 1, suffix, suffix_len + 1);
+    memcpy(candidate + root_len + 1, suffix, suffix_len);
+    candidate[root_len + 1 + suffix_len] = '\0';
     if (file_exists(candidate)) return candidate;
     mem_free(candidate);
     return nullptr;
@@ -120,8 +127,15 @@ static char* resolve_wpt_absolute_image_path(UiContext* uicon, const char* img_u
         char* wpt_root = try_join_absolute_resource(cwd, "/ref/wpt");
         if (wpt_root) {
             char* resolved = try_join_absolute_resource(wpt_root, img_url);
+            if (!resolved) {
+                // An existing WPT root must not mask flattened /css/support fixtures.
+                const char* support_suffix = wpt_support_resource_suffix(img_url);
+                if (support_suffix != img_url) {
+                    resolved = try_join_resource_suffix(wpt_root, support_suffix);
+                }
+            }
             mem_free(wpt_root);
-            return resolved;
+            if (resolved) return resolved;
         }
 
         size_t cwd_len = strlen(cwd);
@@ -132,6 +146,14 @@ static char* resolve_wpt_absolute_image_path(UiContext* uicon, const char* img_u
         memcpy(support_root, cwd, cwd_len);
         memcpy(support_root + cwd_len, support_root_suffix, suffix_len + 1);
         char* resolved = try_join_absolute_resource(support_root, img_url);
+        if (!resolved) {
+            // Relative CLI document URLs bypass the /layout/data/ branch; apply
+            // the same WPT support flattening or valid /css/support/ images stay broken.
+            const char* support_suffix = wpt_support_resource_suffix(img_url);
+            if (support_suffix != img_url) {
+                resolved = try_join_resource_suffix(support_root, support_suffix);
+            }
+        }
         mem_free(support_root);
         return resolved;
     }
@@ -408,6 +430,7 @@ static void image_surface_apply_svg_metadata(ImageSurface* surface,
     surface->encoded_height = surface->height;
     surface->orientation = 1;
     surface->has_intrinsic_size = meta.has_width && meta.has_height;
+    surface->has_intrinsic_aspect_ratio = meta.has_ratio;
     surface->generation = 1;
 }
 
@@ -595,6 +618,11 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             const char* data_str = comma + 1;
             size_t data_str_len = strlen(data_str);
             decoded = (uint8_t*)url_decode_component(data_str, data_str_len, &decoded_len);
+            if (!decoded) {
+                // WPT and browser data URIs may contain literal '%' characters;
+                // keep the payload path available without weakening URL decoding.
+                decoded = parse_data_uri(img_url, nullptr, 0, &decoded_len);
+            }
         }
         if (!decoded || decoded_len == 0) {
             log_warn("image: data URI payload unavailable, using placeholder");

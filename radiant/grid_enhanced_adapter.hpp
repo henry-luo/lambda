@@ -1134,10 +1134,12 @@ inline void run_enhanced_track_sizing(
             resolve_intrinsic_track_sizes(row_tracks, row_contributions, grid_layout->row_gap, row_available);
         }
 
-        // Only do maximize/expand/stretch if we have definite space
+        // 11.6 also runs for an indefinite grid: finite growth limits define the
+        // max-content track size needed before cyclic item percentages resolve.
+        maximize_tracks(row_tracks, row_available, row_available);
+
+        // Expansion and stretch distribute definite free space only.
         if (row_available > 0) {
-            // 11.6 Maximize Tracks
-            maximize_tracks(row_tracks, row_available, row_available);
 
             // 11.7 Expand Flexible Tracks
             expand_flexible_tracks(row_tracks, 0.0f, row_available, row_available,

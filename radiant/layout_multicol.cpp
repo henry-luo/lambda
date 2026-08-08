@@ -264,6 +264,17 @@ static float multicol_content_box_height_limit(ViewBlock* block) {
     return limit;
 }
 
+static float multicol_specified_border_height(ViewBlock* block) {
+    if (!block || !block->blk) return 0.0f;
+
+    float specified_height = block->block()->given_height;
+    // multicol finalization receives the CSS height value, so content-box sizing
+    // must add padding and borders before the later block finalizer sees it.
+    return layout_uses_border_box(block)
+        ? specified_height
+        : layout_border_height_from_content_box(block, specified_height);
+}
+
 static float multicol_row_gap(ViewBlock* block) {
     if (!block || !block->embed) return 0;
     if (block->embedp()->grid) return block->embedp()->grid->row_gap;
@@ -307,7 +318,7 @@ static bool multicol_forces_column_break(CssEnum value) {
            value == CSS_VALUE_RIGHT;
 }
 
-static bool multicol_spanner_can_escape_child(ViewBlock* child) {
+bool multicol_spanner_can_escape_child(ViewBlock* child) {
     if (!child) return false;
     if (block_context_establishes_bfc(child)) return false;
     if (child->embed && (child->embedp()->flex || child->embedp()->grid)) return false;
@@ -322,6 +333,12 @@ static bool multicol_has_direct_spanner_child(ViewBlock* child) {
     while (descendant) {
         if (ViewBlock* descendant_block = lam::view_as_block(descendant)) {
             if (multicol_is_spanner_block(descendant_block)) {
+                return true;
+            }
+            // A nested block that preserves the parent formatting context does
+            // not shield a deeper column spanner from this multicol container.
+            if (multicol_spanner_can_escape_child(descendant_block) &&
+                multicol_has_direct_spanner_child(descendant_block)) {
                 return true;
             }
         }
@@ -1282,10 +1299,10 @@ static void multicol_project_fragmented_descendants(
                 int used_columns = MIN_INT(descendant_fragment_count, column_count);
                 int row_count = (descendant_fragment_count + column_count - 1) / column_count;
                 if (row_count < 1) row_count = 1;
-                float fragment_visual_width = column_width;
-                if (descendant_block->width > 0 && descendant_block->width < column_width) {
-                    fragment_visual_width = descendant_block->width;
-                }
+                // Fragment union bounds retain the block border box; clipping
+                // it to the fragmentainer loses overflow in DOMRect geometry.
+                float fragment_visual_width = descendant_block->width > 0.0f
+                    ? descendant_block->width : column_width;
                 float union_width = fragment_visual_width +
                     (used_columns - 1) * (column_width + column_gap);
                 float union_height = row_count * block_split_height + (row_count - 1) * row_gap;
@@ -1298,6 +1315,12 @@ static void multicol_project_fragmented_descendants(
                     row_gap, fragment_visual_width, 0.0f);
                 if (descendant_block->width < union_width) descendant_block->width = union_width;
                 descendant_block->height = union_height;
+                // CSS Multicol fragmentation propagates through the subtree;
+                // otherwise only the wrapper gets the fragment union and a
+                // nested block keeps its unfragmented DOMRect.
+                multicol_project_fragmented_descendants(
+                    lycon, descendant_block, block_split_height, column_count,
+                    column_width, column_gap, block_split_height, 0.0f);
             }
         }
 
@@ -1442,11 +1465,9 @@ static float multicol_fragmented_child_union(
     int row_count = (fragment_count + column_count - 1) / column_count;
     if (row_count < 1) row_count = 1;
 
-    float fragment_visual_width = column_width;
-    if (!(child->multicol_prop() && is_multicol_container(child)) &&
-        child->width > 0 && child->width < column_width) {
-        fragment_visual_width = child->width;
-    }
+    // Fragment union bounds retain the block border box; clipping it to the
+    // fragmentainer loses overflow in DOMRect geometry.
+    float fragment_visual_width = child->width > 0.0f ? child->width : column_width;
     float union_width = fragment_visual_width + (used_columns - 1) * (column_width + column_gap);
     float union_height = row_count * fragment_height + (row_count - 1) * row_gap;
     if (!multicol_group_wraps_rows(container)) {
@@ -1587,10 +1608,54 @@ static float multicol_split_child_around_spanners(
     ViewBlock* child,
     int column_count,
     float column_width,
-    float column_gap
+    float column_gap,
+    bool nested_wrapper = false
 ) {
     if (!container || !child || column_count <= 0 || column_width <= 0) {
         return child ? child->height : 0;
+    }
+
+    ViewBlock* nested_spanner_child = nullptr;
+    bool has_only_nested_spanner_child = true;
+    View* nested_candidate = child->first_placed_child();
+    while (nested_candidate) {
+        if (nested_candidate->node_type == DOM_NODE_TEXT &&
+            nested_candidate->view_type != RDT_VIEW_TEXT) {
+            nested_candidate = nested_candidate->next();
+            continue;
+        }
+        if (!nested_candidate->is_block()) {
+            has_only_nested_spanner_child = false;
+            break;
+        }
+        ViewBlock* nested_block = lam::view_as_block(nested_candidate);
+        if (!nested_block || multicol_is_out_of_flow(nested_block) ||
+            multicol_is_spanner_block(nested_block) ||
+            !multicol_spanner_can_escape_child(nested_block) ||
+            !multicol_has_direct_spanner_child(nested_block) ||
+            nested_spanner_child) {
+            has_only_nested_spanner_child = false;
+            break;
+        }
+        nested_spanner_child = nested_block;
+        nested_candidate = nested_candidate->next();
+    }
+    if (has_only_nested_spanner_child && nested_spanner_child) {
+        float original_child_y = child->y;
+        float original_child_height = child->height;
+        // Split through ordinary wrappers until the spanner becomes a direct
+        // child; those wrappers preserve the parent formatting context.
+        multicol_split_child_around_spanners(
+            lycon, container, nested_spanner_child,
+            column_count, column_width, column_gap, true);
+        child->x = nested_spanner_child->x;
+        child->y = nested_wrapper ? 0.0f : original_child_y + original_child_height;
+        child->width = nested_spanner_child->width;
+        child->height = nested_spanner_child->height;
+        child->content_height = nested_spanner_child->content_height;
+        // The wrapper's continuation box is empty, but its spanner still
+        // contributes the original flow extent to the containing multicol.
+        return original_child_height;
     }
 
     struct ChildInfo {
@@ -1858,7 +1923,17 @@ static float multicol_split_child_around_spanners(
     if (full_width > union_width) union_width = full_width;
     if (non_spanner_count == 0 && spanner_extent > 0) {
         multicol_project_view_subtree(static_cast<View*>(child), 0, -flow_height);
-        child->y = child_origin_y + flow_height;
+        if (nested_wrapper) {
+            for (int k = 0; k < child_count; k++) {
+                if (children[k].spans_all) {
+                    // The wrapper continuation shifts as a unit; its spanner
+                    // content remains in the spanner's own coordinate space.
+                    multicol_project_view_children(
+                        static_cast<View*>(children[k].block), 0, flow_height);
+                }
+            }
+        }
+        child->y = nested_wrapper ? 0.0f : child_origin_y + flow_height;
         child->width = column_width;
         child->height = 0;
         child->content_height = 0;
@@ -3023,7 +3098,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         // Set block height: use CSS given height if specified, otherwise balanced column height
         float total_height = final_height;
         if (block->blk && block->block_mut()->given_height >= 0) {
-            total_height = block->block()->given_height;
+            total_height = multicol_specified_border_height(block);
         } else if (block->multicol_prop()->fill == COLUMN_FILL_AUTO &&
                    multicol_content_box_height_limit(block) >= 0 &&
                    final_height > multicol_content_box_height_limit(block)) {
@@ -3279,7 +3354,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     // Set block height: use CSS given height if specified, otherwise computed
     float total_height = max_column_height;
     if (block->blk && block->block_mut()->given_height >= 0) {
-        total_height = block->block()->given_height;
+        total_height = multicol_specified_border_height(block);
     } else {
         if (block->bound) {
             total_height += layout_box_metrics(block).pad_border_v;

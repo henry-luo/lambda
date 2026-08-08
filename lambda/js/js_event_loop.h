@@ -22,6 +22,9 @@ extern "C" {
 
 void js_event_loop_init(void);
 int  js_event_loop_drain(void);
+// Complete one headless script turn, including the render checkpoint and rAFs.
+// Host-driven documents retain ownership of this cadence and only flush microtasks.
+void js_event_loop_drain_script_turn(bool has_dom_document, bool drain_timers);
 bool js_event_loop_has_refed_handles(void);
 // Bounded non-blocking pump (fires ready timers + microtasks, no watchdog wait).
 void js_event_loop_pump_nowait(void);

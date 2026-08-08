@@ -164,7 +164,17 @@ float layout_clamp_min_max_height(ViewBlock* block, float height) {
 float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_border_box) {
     if (!block || !block->blk) return width;
 
-    float constrained_width = layout_clamp_min_max_width(block, width);
+    float constrained_width = width;
+    if (width_is_border_box && !layout_uses_border_box(block)) {
+        // Convert the border-box candidate before applying content-box
+        // min/max declarations; clamping the raw border size loses the
+        // padding/border contribution at a content-box max-width.
+        float content_width = layout_content_width_from_border_box(block, width);
+        content_width = layout_clamp_min_max_width(block, content_width);
+        constrained_width = layout_border_width_from_content_box(block, content_width);
+    } else {
+        constrained_width = layout_clamp_min_max_width(block, width);
+    }
     if (width_is_border_box || layout_uses_border_box(block)) {
         BoxMetrics metrics = layout_box_metrics(block);
         if (constrained_width < metrics.pad_border_h) {
@@ -179,7 +189,16 @@ float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_bo
 float layout_apply_min_max_height(ViewBlock* block, float height, bool height_is_border_box) {
     if (!block || !block->blk) return height;
 
-    float constrained_height = layout_clamp_min_max_height(block, height);
+    float constrained_height = height;
+    if (height_is_border_box && !layout_uses_border_box(block)) {
+        // BFC float containment produces a border-box candidate; convert it
+        // before applying content-box min/max constraints or max-height is bypassed.
+        float content_height = layout_content_height_from_border_box(block, height);
+        content_height = layout_clamp_min_max_height(block, content_height);
+        constrained_height = layout_border_height_from_content_box(block, content_height);
+    } else {
+        constrained_height = layout_clamp_min_max_height(block, height);
+    }
     if (height_is_border_box || layout_uses_border_box(block)) {
         BoxMetrics metrics = layout_box_metrics(block);
         if (constrained_height < metrics.pad_border_v) {

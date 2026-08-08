@@ -203,7 +203,10 @@ static void apply_html_text_align_attribute(LayoutContext* lycon, DomNode* eleme
 static void apply_html_form_control_font(LayoutContext* lycon, ViewBlock* block) {
     // Chrome UA form controls share this Arial medium-derived override.
     FontProp* font = ensure_html_block_font(lycon, block);
-    apply_html_font_size(font, 13.3333f, false);
+    // CSS Viewport 1 zoom scales the UA font used to paint the native control;
+    // authored font-size declarations are scaled separately by CSS resolution.
+    float zoom = layout_effective_zoom((View*)block);
+    apply_html_font_size(font, 13.3333f * zoom, false);
     radiant_retain_font_family(font, lam::GcPtr<char>((char*)"Arial"));
 }
 
@@ -253,12 +256,15 @@ static void apply_html_uniform_border_style(LayoutContext* lycon, ViewBlock* blo
 
 static void apply_html_button_box_defaults(LayoutContext* lycon, ViewBlock* block) {
     ensure_html_boundary_prop(lycon, block);
-    block->boundary_mut()->padding.top = block->boundary_mut()->padding.bottom = FormDefaults::BUTTON_PADDING_V;
-    block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = FormDefaults::BUTTON_PADDING_H;
+    // Native button padding and border are UA lengths, so they must follow the
+    // same effective zoom as the control's authored used dimensions.
+    float zoom = layout_effective_zoom((View*)block);
+    block->boundary_mut()->padding.top = block->boundary_mut()->padding.bottom = FormDefaults::BUTTON_PADDING_V * zoom;
+    block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = FormDefaults::BUTTON_PADDING_H * zoom;
     block->boundary_mut()->padding.top_specificity = block->boundary_mut()->padding.bottom_specificity =
         block->boundary_mut()->padding.left_specificity = block->boundary_mut()->padding.right_specificity = -1;
     apply_html_uniform_border_style(
-        lycon, block, FormDefaults::BUTTON_BORDER, CSS_VALUE_OUTSET);
+        lycon, block, FormDefaults::BUTTON_BORDER * zoom, CSS_VALUE_OUTSET);
 }
 
 static void apply_html_width_px(LayoutContext* lycon, ViewBlock* block, float width) {
@@ -1219,6 +1225,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     case MARKUP_NAME_CODE:  case MARKUP_NAME_KBD:  case MARKUP_NAME_SAMP:  case MARKUP_NAME_TT: {
         // monospace font family
+        bool had_monospace_family = span->font && span->fontp()->family &&
+            str_ieq_const(span->fontp()->family, strlen(span->fontp()->family), "monospace");
         apply_html_span_monospace_font(lycon, span);
         // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family
         // transitions to monospace and no explicit font-size on this element,
@@ -1227,7 +1235,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // explicit font-size declaration like '12px'.
         bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
             str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
-        if (!parent_is_mono && span->fontp()->font_size > 0 && span->fontp()->font_size_from_medium) {
+        // Default-style resolution can run again after intrinsic measurement;
+        // do not scale a UA monospace size that was already established.
+        if (!had_monospace_family && !parent_is_mono &&
+            span->fontp()->font_size > 0 && span->fontp()->font_size_from_medium) {
             span->font->font_size = span->font->font_size * 13.0f / 16.0f;
         }
         break;
@@ -1476,9 +1487,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case MARKUP_NAME_CAPTION:
-        // table caption: text-align center
+        // Chromium's caption UA rule uses -webkit-center, which centers block
+        // descendants as well as inline content; preserve that semantic here.
         block->ensure_block(lycon);
         block->blk->text_align = CSS_VALUE_CENTER;
+        block->blk->legacy_align_center_blocks = true;
+        block->blk->legacy_block_align = CSS_VALUE_CENTER;
         break;
     // ========== Form elements ==========
     case MARKUP_NAME_FIELDSET:

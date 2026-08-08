@@ -173,6 +173,7 @@ static const char js_computed_style_vmap_marker = 0;
 static const char js_inline_style_vmap_marker = 0;
 static const char js_document_proxy_vmap_marker = 0;
 static const char js_foreign_doc_vmap_marker = 0;
+static const char js_web_animation_vmap_marker = 0;
 
 extern "C" const void* radiant_dom_inline_style_host_type(void);
 extern "C" const void* radiant_dom_computed_style_host_type(void);
@@ -182,6 +183,10 @@ extern "C" const void* radiant_dom_foreign_document_host_type(void);
 // Legacy style map markers are accepted only by type predicates during migration.
 static TypeMap js_computed_style_marker = {};
 static TypeMap js_inline_style_marker = {};
+
+struct JsWebAnimationHost {
+    CssWebAnimationState* state;
+};
 
 // Cached JS wrappers are owned by the active EvalContext, not this translation
 // unit. The root range is registered while a context is bound, before any
@@ -5253,6 +5258,10 @@ static bool js_dom_update_inline_style_attribute(DomElement* elem,
                                                  const char* value,
                                                  const char* priority) {
     if (!elem || !prop_name || !value) return false;
+    // CSS transitions compare the pre-change and post-change computed styles;
+    // capture the former before replacing the durable inline declaration.
+    css_transition_capture_before_change(elem,
+        css_property_code_from_name(prop_name));
     const char* old_style = dom_element_get_inline_style(elem);
     size_t old_len = old_style ? strlen(old_style) : 0;
     StrBuf* updated = strbuf_new_cap((int)(old_len + strlen(prop_name) +
@@ -8940,6 +8949,7 @@ static bool _is_int_reflected(DomElement* elem, const char* prop,
     if (!elem || !elem->tag_name || !attr_name || !default_val) return false;
     const char* tag = elem->tag_name;
     bool input = strcasecmp(tag, "input") == 0;
+    bool canvas = strcasecmp(tag, "canvas") == 0;
     bool textarea = strcasecmp(tag, "textarea") == 0;
     bool select = strcasecmp(tag, "select") == 0;
     if (strcmp(prop, "maxLength") == 0 && (input || textarea)) {
@@ -8951,10 +8961,10 @@ static bool _is_int_reflected(DomElement* elem, const char* prop,
     if (strcmp(prop, "size") == 0 && input) {
         *attr_name = "size"; *default_val = 20; return true;
     }
-    if (strcmp(prop, "width") == 0 && input) {
+    if (strcmp(prop, "width") == 0 && (input || canvas)) {
         *attr_name = "width"; *default_val = 0; return true;
     }
-    if (strcmp(prop, "height") == 0 && input) {
+    if (strcmp(prop, "height") == 0 && (input || canvas)) {
         *attr_name = "height"; *default_val = 0; return true;
     }
     if (strcmp(prop, "size") == 0 && select) {
@@ -8994,6 +9004,14 @@ static bool _is_string_reflected(DomElement* elem, const char* prop,
     }
     if (strcmp(prop, "alt") == 0 && strcasecmp(tag, "img") == 0) {
         *attr_name = "alt";
+        return true;
+    }
+    if ((strcmp(prop, "width") == 0 || strcmp(prop, "height") == 0) &&
+        strcasecmp(tag, "iframe") == 0) {
+        // HTMLIFrameElement dimensions reflect content attributes as strings;
+        // keeping this in the reflected path makes IDL writes trigger cascade
+        // invalidation instead of becoming inert JS expandos.
+        *attr_name = prop;
         return true;
     }
     return false;
@@ -9081,6 +9099,39 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     // Jube POC: keep the JS ABI stable while routing DOM policy through the
     // radiant module boundary before changing wrapper representation.
     return radiant_dom_get_property(elem_item, prop_name);
+}
+
+static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child);
+
+static Item js_dom_template_content(DomElement* template_elem) {
+    if (!template_elem || !template_elem->doc) return ItemNull;
+
+    Item content_key = js_string_key("__lambda_template_content");
+    Item cached = ItemNull;
+    if (expando_get_property((DomNode*)template_elem, content_key, &cached)) {
+        return cached;
+    }
+
+    DomElement* fragment = dom_element_create(
+        template_elem->doc, "#document-fragment", nullptr);
+    if (!fragment) return ItemNull;
+
+    // template children belong to the detached template contents, not to the
+    // rendered template element; move both DOM and backing entries together.
+    DomNode* child = template_elem->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        if (!js_dom_remove_backed_child(template_elem, child) &&
+            child->parent == (DomNode*)template_elem) {
+            ((DomNode*)template_elem)->remove_child(child);
+        }
+        ((DomNode*)fragment)->append_child(child);
+        child = next;
+    }
+
+    Item fragment_item = js_dom_wrap_element(fragment);
+    expando_set_property((DomNode*)template_elem, content_key, fragment_item);
+    return fragment_item;
 }
 
 static Item js_dom_collect_child_nodes(DomElement* elem, bool elements_only) {
@@ -9291,16 +9342,11 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = s2it(heap_create_name(tn))};
     }
 
-    // <template>.content — spec-wise a DocumentFragment separate from the
-    // template's child list; we shim it as the template element itself so
-    // querySelector / firstChild / childNodes on `.content` walk the parsed
-    // children (they already attach to the template when innerHTML is set).
-    // Sufficient for fixture-parsing tests; a caller that mutates via
-    // .content.appendChild would still see the mutation reflected in the
-    // template (a fidelity gap only visible for that specific pattern).
+    // html requires template contents to be exposed through a detached
+    // DocumentFragment, so cloning does not clone the hidden template wrapper.
     if (strcmp(prop, "content") == 0 &&
         elem->tag_name && strcasecmp(elem->tag_name, "template") == 0) {
-        return js_dom_wrap_element(elem);
+        return js_dom_template_content(elem);
     }
 
     // namespaceURI. Prefer the URI recorded by createElementNS (kept as a
@@ -16095,6 +16141,185 @@ static void _install_node_iface(Item global) {
     js_property_set(global, (Item){.item = s2it(heap_create_name("Node"))}, ctor);
 }
 
+static JsWebAnimationHost* js_web_animation_host(Item value) {
+    if (get_type_id(value) == LMD_TYPE_VMAP && value.vmap &&
+        value.vmap->host_type == (const void*)&js_web_animation_vmap_marker) {
+        return (JsWebAnimationHost*)value.vmap->host_data;
+    }
+    if (get_type_id(value) == LMD_TYPE_MAP) {
+        Item holder = js_property_get(value,
+            js_string_key("__lambda_web_animation_host"));
+        if (get_type_id(holder) == LMD_TYPE_VMAP && holder.vmap &&
+            holder.vmap->host_type == (const void*)&js_web_animation_vmap_marker) {
+            return (JsWebAnimationHost*)holder.vmap->host_data;
+        }
+    }
+    return nullptr;
+}
+
+static float js_web_animation_number(Item value, float fallback) {
+    Item numeric = js_to_number(value);
+    TypeId type = get_type_id(numeric);
+    if (type == LMD_TYPE_FLOAT) return (float)it2d(numeric);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
+        return (float)it2i(numeric);
+    }
+    return fallback;
+}
+
+static CssAnimComposite js_web_animation_composite(Item value) {
+    const char* text = fn_to_cstr(value);
+    if (text && strcasecmp(text, "add") == 0) return CSS_ANIM_COMPOSITE_ADD;
+    if (text && strcasecmp(text, "accumulate") == 0) {
+        return CSS_ANIM_COMPOSITE_ACCUMULATE;
+    }
+    return CSS_ANIM_COMPOSITE_REPLACE;
+}
+
+static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
+                                                       Item keyframes_item) {
+    if (!element || !element->doc ||
+        get_type_id(keyframes_item) != LMD_TYPE_ARRAY) return nullptr;
+
+    int count = (int)js_array_length(keyframes_item);
+    if (count <= 0) return nullptr;
+    if (count > 64) count = 64;
+
+    Pool* pool = element->doc->document_pool;
+    CssKeyframes* keyframes = (CssKeyframes*)pool_calloc(
+        pool, sizeof(CssKeyframes));
+    if (!keyframes) return nullptr;
+    keyframes->name = "web-animation";
+    keyframes->stops = (CssKeyframeStop*)pool_calloc(
+        pool, sizeof(CssKeyframeStop) * count);
+    if (!keyframes->stops) return nullptr;
+    keyframes->stop_count = count;
+
+    for (int i = 0; i < count; i++) {
+        CssKeyframeStop* stop = &keyframes->stops[i];
+        stop->offset = count > 1 ? (float)i / (float)(count - 1) : 0.0f;
+        Item frame = js_array_get_int(keyframes_item, i);
+        if (get_type_id(frame) != LMD_TYPE_MAP &&
+            get_type_id(frame) != LMD_TYPE_VMAP) continue;
+
+        Item offset = js_property_get(frame, js_string_key("offset"));
+        if (!is_js_undefined(offset) && offset.item != ITEM_NULL) {
+            float parsed_offset = js_web_animation_number(offset, stop->offset);
+            if (isfinite(parsed_offset)) stop->offset = parsed_offset;
+        }
+
+        Item names = js_object_get_own_property_names(frame);
+        if (get_type_id(names) != LMD_TYPE_ARRAY) continue;
+        int name_count = (int)js_array_length(names);
+        for (int j = 0; j < name_count; j++) {
+            const char* js_name = fn_to_cstr(js_array_get_int(names, j));
+            if (!js_name || strcmp(js_name, "offset") == 0 ||
+                strcmp(js_name, "composite") == 0) continue;
+
+            char css_name[128];
+            js_camel_to_css_prop(js_name, css_name, sizeof(css_name));
+            CssPropertyCode property = css_property_code_from_name(css_name);
+            if (property == CSS_PROPERTY_UNKNOWN || property == 0) continue;
+
+            const char* value = fn_to_cstr(js_property_get(
+                frame, js_string_key(js_name)));
+            if (!value || !value[0]) continue;
+
+            CssAnimatedProp parsed;
+            if (!css_animation_parse_property_value(property, value, &parsed,
+                                                    pool)) continue;
+            parsed.composite = js_web_animation_composite(js_property_get(
+                frame, js_string_key("composite")));
+            stop->properties = (CssAnimatedProp*)pool_calloc(
+                pool, sizeof(CssAnimatedProp));
+            if (!stop->properties) return nullptr;
+            stop->properties[0] = parsed;
+            stop->property_count = 1;
+            break;
+        }
+    }
+    return keyframes;
+}
+
+static Item js_web_animation_pause(void) {
+    // The headless runner samples currentTime explicitly; pausing only needs
+    // to prevent an implicit clock from changing that deterministic sample.
+    return ItemNull;
+}
+
+static Item js_web_animation_current_time_get(void) {
+    JsWebAnimationHost* host = js_web_animation_host(js_get_this());
+    return host && host->state ? js_make_number(host->state->current_time_ms)
+                               : ItemNull;
+}
+
+static Item js_web_animation_current_time_set(Item value) {
+    JsWebAnimationHost* host = js_web_animation_host(js_get_this());
+    if (host && host->state) {
+        Item numeric = js_to_number(value);
+        TypeId type = get_type_id(numeric);
+        double current_time = 0.0;
+        if (type == LMD_TYPE_FLOAT) current_time = it2d(numeric);
+        else if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
+            current_time = (double)it2i(numeric);
+        }
+        css_web_animation_set_current_time(host->state, current_time);
+        log_debug("web-anim: currentTime set to %.1fms", current_time);
+    }
+    return value;
+}
+
+static Item js_dom_element_animate(Item keyframes_item, Item options_item) {
+    DomElement* element = (DomElement*)js_dom_unwrap_element(js_get_this());
+    if (!element || !element->doc) return ItemNull;
+
+    CssKeyframes* keyframes = js_web_animation_parse_keyframes(
+        element, keyframes_item);
+    if (!keyframes) return ItemNull;
+
+    double duration_ms = 0.0;
+    TimingFunction timing = {};
+    timing.type = TIMING_LINEAR;
+    if (get_type_id(options_item) == LMD_TYPE_MAP ||
+        get_type_id(options_item) == LMD_TYPE_VMAP) {
+        Item duration = js_property_get(options_item, js_string_key("duration"));
+        if (!is_js_undefined(duration) && duration.item != ITEM_NULL) {
+            duration_ms = js_web_animation_number(duration, 0.0f);
+        }
+        Item easing = js_property_get(options_item, js_string_key("easing"));
+        const char* easing_text = fn_to_cstr(easing);
+        if (easing_text) {
+            css_animation_parse_timing_function_text(easing_text, &timing);
+        }
+    }
+
+    CssWebAnimationState* state = css_web_animation_create(
+        element, keyframes, duration_ms, &timing, element->doc->document_pool);
+    if (!state) return ItemNull;
+
+    JsWebAnimationHost* host = (JsWebAnimationHost*)pool_calloc(
+        element->doc->document_pool, sizeof(JsWebAnimationHost));
+    if (!host) return ItemNull;
+    host->state = state;
+
+    Item holder = vmap_new();
+    if (get_type_id(holder) != LMD_TYPE_VMAP || !holder.vmap) return ItemNull;
+    holder.vmap->host_type = (const void*)&js_web_animation_vmap_marker;
+    holder.vmap->host_data = host;
+    // A plain object keeps pause() on the normal JS method path; the private
+    // native holder supplies the DOM-owned state to currentTime accessors.
+    Item animation = js_new_object();
+    js_property_set(animation, js_string_key("__lambda_web_animation_host"),
+                    holder);
+    js_property_set(animation, js_string_key("pause"),
+                    js_new_function((void*)js_web_animation_pause, 0));
+    js_install_native_accessor(animation, js_string_key("currentTime"),
+        js_new_function((void*)js_web_animation_current_time_get, 0),
+        js_new_function((void*)js_web_animation_current_time_set, 1),
+        JSPD_NON_ENUMERABLE);
+    return animation;
+}
+
 extern "C" void js_dom_install_collection_globals(void) {
     Item global = js_get_global_this();
     _install_iface(global, "Window");
@@ -16158,6 +16383,8 @@ extern "C" void js_dom_install_collection_globals(void) {
             js_new_function((void*)js_dom_query_selector_method, 1));
         js_property_set(element_proto, js_string_key("querySelectorAll"),
             js_new_function((void*)js_dom_query_selector_all_method, 1));
+        js_property_set(element_proto, js_string_key("animate"),
+            js_new_function((void*)js_dom_element_animate, 2));
     }
     _install_iface(global, "Range");
     _install_iface(global, "Selection");

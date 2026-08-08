@@ -2371,164 +2371,10 @@ static void log_cascade_timing_summary() {
         g_property_apply_count);
 }
 
-static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorMatcher* matcher, Pool* pool, CssEngine* engine) {
-    if (!elem || !rule || !matcher || !pool) return;
-
-    // Handle media rules by evaluating the condition
-    if (rule->type == CSS_RULE_MEDIA) {
-        const char* media_condition = rule->data.conditional_rule.condition;
-#ifdef RADIANT_TRACE_MEDIA_QUERY
-        // Media query evaluation happens for every candidate rule/element pair;
-        // keep per-element trace opt-in so large tables do not stall on logging.
-        log_debug("[MediaQuery] Evaluating condition: '%s' for element <%s>",
-                  media_condition ? media_condition : "(null)", elem->tag_name ? elem->tag_name : "?");
-#endif
-        bool matches = css_evaluate_media_query(engine, media_condition);
-#ifdef RADIANT_TRACE_MEDIA_QUERY
-        log_debug("[MediaQuery] Result: %s", matches ? "MATCHES" : "does not match");
-#endif
-        if (matches) {
-            for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
-                CssRule* nested_rule = rule->data.conditional_rule.rules[i];
-                if (nested_rule) {
-                    apply_rule_to_dom_element(elem, nested_rule, matcher, pool, engine);
-                }
-            }
-        }
-        return;
-    }
-
-    // Handle @supports rules - skip for now
-    if (rule->type == CSS_RULE_SUPPORTS) return;
-
-    // Skip other at-rules (@import, @charset, @namespace, etc.)
-    if (rule->type != CSS_RULE_STYLE) return;
-
-    // Process style rule
-    CssSelector* selector = rule->data.style_rule.selector;
-    CssSelectorGroup* selector_group = rule->data.style_rule.selector_group;
-
-    // Handle selector groups (comma-separated selectors like "th, td")
-    if (selector_group && selector_group->selector_count > 0) {
-        // Try matching each selector in the group.
-        // For pseudo-element selectors (e.g., ".scope::before, .scope::after"),
-        // each matching selector may target a different pseudo-element, so we
-        // must apply the rule for each match individually rather than breaking
-        // on the first match.
-        bool any_non_pseudo_match = false;
-        CssSpecificity best_specificity = {0, 0, 0, 0, false};
-
-        for (size_t sel_idx = 0; sel_idx < selector_group->selector_count; sel_idx++) {
-            CssSelector* group_sel = selector_group->selectors[sel_idx];
-            if (!group_sel) continue;
-
-            // Calculate and cache specificity if not already done
-            if (group_sel->specificity.inline_style == 0 &&
-                group_sel->specificity.ids == 0 &&
-                group_sel->specificity.classes == 0 &&
-                group_sel->specificity.elements == 0) {
-                group_sel->specificity = selector_matcher_calculate_specificity(matcher, group_sel);
-            }
-
-            MatchResult match_result;
-            bool matched = selector_matcher_matches(matcher, group_sel, elem, &match_result);
-            g_selector_match_count++;
-
-            if (matched) {
-                g_selector_match_success++;
-                if (match_result.pseudo_element != PSEUDO_ELEMENT_NONE) {
-                    // Apply pseudo-element rule immediately — different selectors
-                    // in the group may target different pseudo-elements
-                    if (rule->data.style_rule.declaration_count > 0) {
-                        dom_element_apply_pseudo_element_rule(elem, rule,
-                            match_result.specificity, (int)match_result.pseudo_element);
-                        g_property_apply_count++;
-                    }
-                } else {
-                    // For non-pseudo matches, track best specificity and apply once
-                    if (!any_non_pseudo_match) {
-                        best_specificity = match_result.specificity;
-                    }
-                    any_non_pseudo_match = true;
-                }
-            }
-        }
-
-        if (any_non_pseudo_match && rule->data.style_rule.declaration_count > 0) {
-            dom_element_apply_rule(elem, rule, best_specificity);
-            g_property_apply_count++;
-        }
-        return;
-    }
-
-    // Handle single selector
-    if (!selector) return;
-
-    // Calculate and cache specificity
-    if (selector->specificity.inline_style == 0 &&
-        selector->specificity.ids == 0 &&
-        selector->specificity.classes == 0 &&
-        selector->specificity.elements == 0) {
-        selector->specificity = selector_matcher_calculate_specificity(matcher, selector);
-    }
-
-    // Check if selector matches
-    MatchResult match_result;
-    bool matched = selector_matcher_matches(matcher, selector, elem, &match_result);
-    g_selector_match_count++;
-
-    // DEBUG: Log .fa class selector matching on <i> elements
-    bool is_i_element = (elem->tag_name && strcmp(elem->tag_name, "i") == 0 && elem->class_count > 0);
-    if (is_i_element) {
-        bool is_fa_selector = false;
-        // Check if this is a simple .fa class selector (single compound selector with one simple selector)
-        if (selector->compound_selector_count == 1 && selector->compound_selectors[0] &&
-            selector->compound_selectors[0]->simple_selector_count == 1) {
-            CssSimpleSelector* simple = selector->compound_selectors[0]->simple_selectors[0];
-            if (simple && simple->type == CSS_SELECTOR_TYPE_CLASS && simple->value &&
-                strcmp(simple->value, "fa") == 0) {
-                is_fa_selector = true;
-            }
-        }
-        // Log .fa selector matching attempts
-        if (is_fa_selector) {
-            log_debug("[FA MATCH] Selector '.fa' vs <i class='%s %s'> -> matched=%d",
-                      elem->class_names && elem->class_count > 0 ? elem->class_names[0] : "none",
-                      elem->class_names && elem->class_count > 1 ? elem->class_names[1] : "",
-                      matched);
-            if (matched && rule->data.style_rule.declaration_count > 0) {
-                log_debug("[FA MATCH] Applying %d declarations from .fa rule",
-                          rule->data.style_rule.declaration_count);
-            }
-        }
-        // Also log ALL selectors tested on <i> elements with "fa" class
-        if (elem->class_names && elem->class_count > 0 && strcmp(elem->class_names[0], "fa") == 0) {
-            // Log first simple selector if available
-            if (selector->compound_selector_count > 0 && selector->compound_selectors[0] &&
-                selector->compound_selectors[0]->simple_selector_count > 0) {
-                CssSimpleSelector* simple = selector->compound_selectors[0]->simple_selectors[0];
-                if (simple) {
-                    const char* type_names[] = {"ELEMENT", "CLASS", "ID", "UNIVERSAL", "ATTR", "..."};
-                    int type_idx = (simple->type <= CSS_SELECTOR_TYPE_UNIVERSAL) ? simple->type : 4;
-                    log_debug("[I SELECTOR CHECK] Testing selector type=%s value='%s' on <i class='fa ...'> -> matched=%d",
-                              type_names[type_idx], simple->value ? simple->value : "(null)", matched);
-                }
-            }
-        }
-    }
-
-    if (matched) {
-        g_selector_match_success++;
-        if (rule->data.style_rule.declaration_count > 0) {
-            if (match_result.pseudo_element != PSEUDO_ELEMENT_NONE) {
-                dom_element_apply_pseudo_element_rule(elem, rule, match_result.specificity,
-                                                      (int)match_result.pseudo_element);
-            } else {
-                dom_element_apply_rule(elem, rule, match_result.specificity);
-            }
-            g_property_apply_count++;
-        }
-    }
+static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule,
+                                      SelectorMatcher* matcher, Pool* pool,
+                                      CssEngine* engine) {
+    radiant_apply_css_rule_to_element(elem, rule, matcher, pool, engine);
 }
 
 /**
@@ -6698,6 +6544,7 @@ static bool layout_single_file(
         pool_destroy(pool);
         return false;
     }
+
     load_end = std::chrono::high_resolution_clock::now();
     js_mir_end_document_phase_timing(&document_js_timing);
 

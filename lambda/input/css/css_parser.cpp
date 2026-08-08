@@ -2256,6 +2256,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             case CSS_PROPERTY_MIN_HEIGHT:
             case CSS_PROPERTY_MAX_WIDTH:
             case CSS_PROPERTY_MAX_HEIGHT:
+            case CSS_PROPERTY_ZOOM:
             // padding properties (including shorthand) cannot be negative
             case CSS_PROPERTY_PADDING:
             case CSS_PROPERTY_PADDING_TOP:
