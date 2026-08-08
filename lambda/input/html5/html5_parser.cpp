@@ -287,6 +287,56 @@ static Element* find_parent_of_element(Element* root, Element* target, int* chil
     return nullptr;
 }
 
+static Element* html5_find_last_table(Html5Parser* parser, int* table_index) {
+    *table_index = -1;
+    for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+        Element* element = (Element*)parser->open_elements->items[i].element;
+        const char* tag_name = ((TypeElmt*)element->type)->name.str;
+        if (strcmp(tag_name, "table") == 0) {
+            *table_index = i;
+            return element;
+        }
+    }
+    return nullptr;
+}
+
+// Resolve the table's DOM parent once for all foster-parented insertion paths.
+static Element* html5_find_foster_parent(Html5Parser* parser, Element* table_element,
+                                         int table_index, int* table_pos) {
+    *table_pos = -1;
+    for (int i = table_index - 1; i >= 0; i--) {
+        Element* candidate = (Element*)parser->open_elements->items[i].element;
+        for (size_t j = 0; j < (size_t)candidate->length; j++) {
+            if (candidate->items[j].element == table_element) {
+                *table_pos = (int)j;
+                return candidate;
+            }
+        }
+    }
+
+    if (parser->document != nullptr) {
+        Element* search_root = nullptr;
+        for (size_t i = 0; i < (size_t)parser->document->length; i++) {
+            TypeId type = get_type_id(parser->document->items[i]);
+            if (type == LMD_TYPE_ELEMENT) {
+                Element* child = parser->document->items[i].element;
+                const char* child_tag = ((TypeElmt*)child->type)->name.str;
+                if (strcmp(child_tag, "html") == 0) {
+                    search_root = child;
+                    break;
+                }
+            }
+        }
+        if (search_root != nullptr) {
+            Element* parent = find_parent_of_element(search_root, table_element, table_pos);
+            if (parent != nullptr) {
+                return parent;
+            }
+        }
+    }
+    return nullptr;
+}
+
 // scope checking - implements "has an element in scope" algorithms from WHATWG spec
 static bool is_scope_marker(const char* tag_name, const char** scope_list, size_t scope_len) {
     for (size_t i = 0; i < scope_len; i++) {
@@ -514,59 +564,13 @@ void html5_reconstruct_active_formatting_elements(Html5Parser* parser) {
 
         // Insert into appropriate place - check for foster parenting
         if (parser->foster_parenting) {
-            // Find the last table element in the stack
-            Element* table_element = nullptr;
             int table_index = -1;
-
-            for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
-                Element* el = (Element*)parser->open_elements->items[i].element;
-                const char* el_tag = ((TypeElmt*)el->type)->name.str;
-                if (strcmp(el_tag, "table") == 0) {
-                    table_element = el;
-                    table_index = i;
-                    break;
-                }
-            }
+            Element* table_element = html5_find_last_table(parser, &table_index);
 
             if (table_element != nullptr) {
-                // Find the table's DOM parent by searching the DOM tree
-                // First try searching the open elements stack (fast path)
-                Element* foster_parent = nullptr;
+                Element* foster_parent;
                 int table_pos = -1;
-
-                for (int i = table_index - 1; i >= 0; i--) {
-                    Element* candidate = (Element*)parser->open_elements->items[i].element;
-                    for (size_t j = 0; j < (size_t)candidate->length; j++) {
-                        if (candidate->items[j].element == table_element) {
-                            foster_parent = candidate;
-                            table_pos = (int)j;
-                            break;
-                        }
-                    }
-                    if (foster_parent != nullptr) {
-                        break;
-                    }
-                }
-
-                // If not found in open_elements, search the entire DOM tree
-                if (foster_parent == nullptr && parser->document != nullptr) {
-                    // Search from body element if it exists, otherwise from document
-                    Element* search_root = nullptr;
-                    for (size_t i = 0; i < (size_t)parser->document->length; i++) {
-                        TypeId type = get_type_id(parser->document->items[i]);
-                        if (type == LMD_TYPE_ELEMENT) {
-                            Element* child = parser->document->items[i].element;
-                            const char* child_tag = ((TypeElmt*)child->type)->name.str;
-                            if (strcmp(child_tag, "html") == 0) {
-                                search_root = child;
-                                break;
-                            }
-                        }
-                    }
-                    if (search_root != nullptr) {
-                        foster_parent = find_parent_of_element(search_root, table_element, &table_pos);
-                    }
-                }
+                foster_parent = html5_find_foster_parent(parser, table_element, table_index, &table_pos);
 
                 if (foster_parent != nullptr && table_pos >= 0) {
                     // Insert before the table
@@ -625,59 +629,13 @@ Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token) {
 
     // Check if foster parenting is enabled (inside table but outside cells)
     if (parser->foster_parenting) {
-        // Find the last table element in the stack
-        Element* table_element = nullptr;
         int table_index = -1;
-
-        for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
-            Element* el = (Element*)parser->open_elements->items[i].element;
-            const char* el_tag = ((TypeElmt*)el->type)->name.str;
-            if (strcmp(el_tag, "table") == 0) {
-                table_element = el;
-                table_index = i;
-                break;
-            }
-        }
+        Element* table_element = html5_find_last_table(parser, &table_index);
 
         if (table_element != nullptr) {
-            // Per WHATWG spec: Find the table's DOM parent
-            // First try searching backwards in the stack
-            Element* foster_parent = nullptr;
+            Element* foster_parent;
             int table_pos = -1;
-
-            for (int i = table_index - 1; i >= 0; i--) {
-                Element* candidate = (Element*)parser->open_elements->items[i].element;
-                // Check if table is a direct child of this element
-                for (size_t j = 0; j < (size_t)candidate->length; j++) {
-                    if (candidate->items[j].element == table_element) {
-                        foster_parent = candidate;
-                        table_pos = (int)j;
-                        break;
-                    }
-                }
-                if (foster_parent != nullptr) {
-                    break;
-                }
-            }
-
-            // If not found in open_elements, search the entire DOM tree
-            if (foster_parent == nullptr && parser->document != nullptr) {
-                Element* search_root = nullptr;
-                for (size_t i = 0; i < (size_t)parser->document->length; i++) {
-                    TypeId type = get_type_id(parser->document->items[i]);
-                    if (type == LMD_TYPE_ELEMENT) {
-                        Element* child = parser->document->items[i].element;
-                        const char* child_tag = ((TypeElmt*)child->type)->name.str;
-                        if (strcmp(child_tag, "html") == 0) {
-                            search_root = child;
-                            break;
-                        }
-                    }
-                }
-                if (search_root != nullptr) {
-                    foster_parent = find_parent_of_element(search_root, table_element, &table_pos);
-                }
-            }
+            foster_parent = html5_find_foster_parent(parser, table_element, table_index, &table_pos);
 
             if (foster_parent != nullptr && table_pos >= 0) {
                 const char* foster_tag = ((TypeElmt*)foster_parent->type)->name.str;
@@ -875,20 +833,9 @@ void html5_flush_foster_text(Html5Parser* parser) {
 // Per WHATWG 12.2.6.1, foster parenting inserts nodes before the table
 // rather than inside it when text/elements appear in table context
 void html5_foster_parent_character(Html5Parser* parser, char c) {
-    // Find the last table element in the stack
-    Element* table_element = nullptr;
-    Element* foster_parent = nullptr;
     int table_index = -1;
-
-    for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
-        Element* el = (Element*)parser->open_elements->items[i].element;
-        const char* el_tag = ((TypeElmt*)el->type)->name.str;
-        if (strcmp(el_tag, "table") == 0) {
-            table_element = el;
-            table_index = i;
-            break;
-        }
-    }
+    Element* table_element = html5_find_last_table(parser, &table_index);
+    Element* foster_parent = nullptr;
 
     if (table_element == nullptr || table_index == 0) {
         // No table found or table is first element - insert into body/html
@@ -914,40 +861,9 @@ void html5_foster_parent_character(Html5Parser* parser, char c) {
         return;
     }
 
-    // Find the table's actual DOM parent
-    // First try searching backwards in the open elements stack
-    for (int i = table_index - 1; i >= 0; i--) {
-        Element* candidate = (Element*)parser->open_elements->items[i].element;
-        for (size_t j = 0; j < (size_t)candidate->length; j++) {
-            if (candidate->items[j].element == table_element) {
-                foster_parent = candidate;
-                break;
-            }
-        }
-        if (foster_parent != nullptr) {
-            break;
-        }
-    }
-
-    // If not found in open_elements, search the entire DOM tree
-    if (foster_parent == nullptr && parser->document != nullptr) {
-        Element* search_root = nullptr;
-        for (size_t i = 0; i < (size_t)parser->document->length; i++) {
-            TypeId type = get_type_id(parser->document->items[i]);
-            if (type == LMD_TYPE_ELEMENT) {
-                Element* child = parser->document->items[i].element;
-                const char* child_tag = ((TypeElmt*)child->type)->name.str;
-                if (strcmp(child_tag, "html") == 0) {
-                    search_root = child;
-                    break;
-                }
-            }
-        }
-        if (search_root != nullptr) {
-            int unused_pos;
-            foster_parent = find_parent_of_element(search_root, table_element, &unused_pos);
-        }
-    }
+    // Resolve the table's actual DOM parent before buffering text.
+    int table_pos = -1;
+    foster_parent = html5_find_foster_parent(parser, table_element, table_index, &table_pos);
 
     // Fallback: use element before table in stack
     if (foster_parent == nullptr) {

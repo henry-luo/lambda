@@ -414,56 +414,46 @@ extern "C" void js_env_rehome_scalars(Item* env) {
     // tagged pointers into the active number stack are valid scalar Items;
     // decoding raw words as Items can dereference small state values as pointers.
     for (int64_t i = 0; i < count; i++) {
-        if (js_env_slot_is_side_number(env[i])) {
+        bool is_side_number = js_env_slot_is_side_number(env[i]);
+        if (is_side_number) {
             owned_item_slot_store(env, count, i, env[i]);
         }
     }
 }
 
-// v20: Mark a function as a generator (generator prototype has no constructor)
-extern "C" void js_mark_generator_func(Item fn_item) {
+static void js_mark_function_flags(Item fn_item, uint32_t flags) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_GENERATOR;
+    fn->flags |= flags;
     js_function_call_lane_recompute(fn);
+}
+
+// v20: Mark a function as a generator (generator prototype has no constructor)
+extern "C" void js_mark_generator_func(Item fn_item) {
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_GENERATOR);
 }
 
 // Mark a function as an async generator function (sets both GENERATOR and ASYNC_GEN flags)
 extern "C" void js_mark_async_generator_func(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN;
-    js_function_call_lane_recompute(fn);
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN);
 }
 
 // Mark a function as an async (non-generator) function — affects [[Prototype]]/.constructor
 extern "C" void js_mark_async_func(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_ASYNC;
-    js_function_call_lane_recompute(fn);
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_ASYNC);
 }
 
 extern "C" void js_mark_derived_constructor_func(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_DERIVED_CTOR;
-    js_function_call_lane_recompute(fn);
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_DERIVED_CTOR);
 }
 
 // Mark a function as an arrow function (non-constructable)
 extern "C" void js_mark_arrow_func(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_ARROW;
-    js_function_call_lane_recompute(fn);
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_ARROW);
 }
 
 extern "C" void js_mark_method_func(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_METHOD;
-    js_function_call_lane_recompute(fn);
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_METHOD);
 }
 
 extern "C" void js_mark_eval_initializer_func_if_active(Item fn_item) {
@@ -476,10 +466,7 @@ extern "C" void js_mark_eval_initializer_func_if_active(Item fn_item) {
 
 // Mark a function as strict mode (ES spec [[Strict]] internal slot)
 extern "C" void js_mark_strict_func(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->flags |= JS_FUNC_FLAG_STRICT;
-    js_function_call_lane_recompute(fn);
+    js_mark_function_flags(fn_item, JS_FUNC_FLAG_STRICT);
 }
 
 extern "C" void js_finalize_function(Item fn_item, Item name_item,
@@ -627,20 +614,22 @@ extern "C" void js_set_default_constructor_property(Item proto_item, Item cls_it
     js_attr_set_enumerable(proto_item, "constructor", 11, false);
 }
 
-extern "C" void js_prepare_class_prototype_property(Item cls_item) {
-    if (get_type_id(cls_item) != LMD_TYPE_MAP) return;
+extern "C" Item js_prepare_class_prototype_property(Item cls_item) {
+    if (get_type_id(cls_item) != LMD_TYPE_MAP) return js_status_ok();
     ShapeEntry* existing = js_find_shape_entry(cls_item, "prototype", 9);
     if (existing && !jspd_is_deleted(existing)) {
-        js_throw_type_error("Cannot redefine property: prototype");
+        return js_throw_type_error("Cannot redefine property: prototype");
     }
+    return js_status_ok();
 }
 
-extern "C" void js_check_class_static_field_key(Item key_item) {
-    if (get_type_id(key_item) != LMD_TYPE_STRING) return;
+extern "C" Item js_check_class_static_field_key(Item key_item) {
+    if (get_type_id(key_item) != LMD_TYPE_STRING) return js_status_ok();
     String* key = it2s(key_item);
     if (key && key->len == 9 && strncmp(key->chars, "prototype", 9) == 0) {
-        js_throw_type_error("Cannot redefine property: prototype");
+        return js_throw_type_error("Cannot redefine property: prototype");
     }
+    return js_status_ok();
 }
 
 // Set the source text of a JsFunction for Function.prototype.toString

@@ -16,6 +16,7 @@ class InputManager {
 private:
     Pool* global_pool;
     ArrayList* inputs;              // track all created inputs for cleanup
+    ArrayList* thread_pools;        // track per-thread pools for cleanup
     mpd_context_t* decimal_ctx;     // libmpdec context for decimal operations
 
     // Private constructor for singleton pattern

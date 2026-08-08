@@ -7,8 +7,21 @@
 
 #include "ast.hpp"
 
+// Shared range materialization helper for runtime sequence consumers.
+Item fn_chr(Item codepoint);
+
 typedef struct LambdaRegion LambdaRegion;
 typedef struct LambdaRegionBlock LambdaRegionBlock;
+
+// Runtime map admissions repeat the same candidate/contract shape pair across
+// recursive calls. The entries are context-owned so a cache cannot leak a
+// TypeMap relation between independent EvalContexts (D3.2.2).
+#define LAMBDA_MAP_CONTRACT_CACHE_CAPACITY 16
+typedef struct LambdaMapContractCacheEntry {
+    const TypeMap* candidate;
+    const TypeMap* expected;
+    uint8_t relation;
+} LambdaMapContractCacheEntry;
 
 typedef struct Heap {
     Pool *pool;  // memory pool alias (points to gc->pool for compatibility)
@@ -19,6 +32,8 @@ typedef struct Heap {
     // ends, so an ordinary heap object can never retain a region pointer.
     LambdaRegion* region_free;
     LambdaRegionBlock* region_free_blocks;
+    LambdaMapContractCacheEntry map_contract_cache[LAMBDA_MAP_CONTRACT_CACHE_CAPACITY];
+    uint32_t map_contract_cache_next;
 } Heap;
 
 void heap_init();
@@ -147,6 +162,7 @@ bool has_typed_params(AstFuncNode* fn_node);
 ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
 bool has_fixed_shape(TypeMap* map_type);
 bool is_direct_access_type(TypeId type_id);
+bool static_literal_item_from_type(Type* type, Item* out);
 TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type);
 int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
                         ArrayNumElemType* elem_type_out, bool disqualify_assign = false);

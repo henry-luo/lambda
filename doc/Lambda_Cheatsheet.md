@@ -26,7 +26,7 @@ f16  f32  f64            // Sized floats
 
 **Container Types:**
 ```lambda
-range, 1 to 10          // Range (inclusive both ends)
+range, 1 to 10          // Range (inclusive both ends; also "a" to "z")
 array, [123, true]      // Array of values
 map, {key: 'symbol'}    // Map
 element, <div class: bold; "text" <br>>  // Element
@@ -372,8 +372,8 @@ match value {
 }
 
 // String pattern arms (full-match semantics)
-string digits = \d+
-string alpha = \a+
+type digits = \(d+)
+type alpha = \(a+)
 match input {
     case digits: "number"     // case named pattern
     case alpha: "word"
@@ -494,10 +494,10 @@ Define named patterns for string validation and matching. Uses regex-like syntax
 
 **Definition:**
 ```lambda
-string digits = \d+                    // one or more digits
-string email = \w+ "@" \w+ "." \a[2,6] // email-like
-string ws = \s+                        // whitespace
-symbol keyword = 'if' | 'else' | 'for' // symbol pattern
+type digits = \(d+)                    // one or more digits
+type email = \(w+ "@" w+ "." a[2,6]) // email-like
+type ws = \(s+)                        // whitespace
+type keyword = 'if' | 'else' | 'for'  // symbol literal union
 ```
 
 **Type check (`is`) — full-match semantics:**
@@ -507,9 +507,25 @@ symbol keyword = 'if' | 'else' | 'for' // symbol pattern
 "123" is digits               // true
 ```
 
-**Character classes:** `\d` digit, `\w` word, `\s` whitespace, `\a` alpha, `\.` any char, `...` any string
+**Character classes inside `\(...)`:** `d` digit, `w` word, `s` whitespace, `a` alpha, `.` any char, `...` any string
+
+Reserved inside the island only — quote to match one literally: `\("d" w+)`.
 
 **Quantifiers:** `?` optional, `+` one or more, `*` zero or more, `[n]` exactly n, `[n,m]` range
+
+**Domain:** `\(...)` matches strings, `\symbol(...)` matches symbols; the tag is checked before the content, and pattern bodies always use string literals for content.
+```lambda
+type SymIdent = \symbol(a w*)
+'foo' is SymIdent             // true
+"foo" is SymIdent             // false — string value, symbol pattern
+```
+
+**Inline (unnamed) patterns** work anywhere a type does:
+```lambda
+"abc" is \(a+)                // true
+fn f(x: \(d+)) => x           // parameter annotation
+match s { case \(d+): "num" default: "other" }
+```
 
 ## System Functions
 
@@ -533,9 +549,10 @@ symbol keyword = 'if' | 'else' | 'for' // symbol pattern
 
 **Range:**
 
-`s to e` creates a range from `s` to `e` (inclusive both ends). `range(s,e,step)` creates a range with custom step (exclusive end).
+`s to e` creates a range from `s` to `e` (inclusive both ends). Bounds are exact integers or single-codepoint strings. `range(s,e,step)` creates a range with custom step (exclusive end).
 ```lambda
 1 to 5                 // [1, 2, 3, 4, 5]
+"a" to "e"             // ["a", "b", "c", "d", "e"]  — character range
 range(0, 10, 2)        // [0, 2, 4, 6, 8]
 ```
 
@@ -545,9 +562,9 @@ range(0, 10, 2)        // [0, 2, 4, 6, 8]
 
 All three accept both plain strings and named patterns as the second argument:
 ```lambda
-string digit = \d
-string digits = \d+
-string ws = \s+
+type digit = \(d)
+type digits = \(d+)
+type ws = \(s+)
 
 // replace(str, pattern_or_string, replacement)
 replace("a1b2c3", digit, "X")      // "aXbXcX"

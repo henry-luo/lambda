@@ -50,9 +50,10 @@
 #include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/css/css_engine.hpp"  // CssEngine for CSS extraction
 #include "js/js_event_loop.h"        // v14: event loop drain
-#include "js/js_runtime.h"           // v16: js_check_exception for exit code
+#include "js/js_runtime.h"           // JS result and exception-lane helpers
 #include "js/js_dom.h"               // JS DOM document/session bridge
 #include "js/js_transpiler.hpp"      // JsPreambleState for js-test-batch
+#include "js/js_exec_profile.h"      // profile flush on the batch _exit path
 #include "js/js_runtime_state.hpp"
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
 #ifdef LAMBDA_BASH
@@ -526,6 +527,9 @@ static int lambda_main_finish(int ret_code) {
     // same for the LAMBDA_JS_ARRAY_STATS census (no-op unless compiled in).
     js_array_stats_dump();
     lambda_main_pre_memtrack_cleanup_once();
+    // root-registered pools must be destroyed before rpmalloc walks its global
+    // heap lists; retained view/runtime pools otherwise corrupt Linux teardown.
+    mem_context_shutdown();
     log_finish();
     MemtrackStats mem_stats = {};
     memtrack_get_stats(&mem_stats);
@@ -1767,10 +1771,6 @@ static int node_runner_run_file(const char* exe_path, const char* file,
         }
         if (result.item == ITEM_ERROR) exit_code = 1;
         else exit_code = js_process_current_exit_code();
-        if (js_check_exception()) {
-            exit_code = 1;
-            js_clear_exception();
-        }
         mem_free(js_source);
     }
     *total += js_node_test_total_count();
@@ -1894,6 +1894,9 @@ int main(int argc, char *argv[]) {
             argv[j] = argv[j + 1];
         }
         argc--;
+        // Keep argv NULL-terminated after stripping a flag; view startup passes
+        // the native vector to helpers that still use the sentinel.
+        argv[argc] = NULL;
         i--;
     }
 
@@ -1919,6 +1922,7 @@ int main(int argc, char *argv[]) {
                 argv[j] = argv[j + 1];
             }
             argc--;
+            argv[argc] = NULL;
             i--;
         }
     }
@@ -2359,7 +2363,7 @@ int main(int argc, char *argv[]) {
                     result = ItemError;
                 }
             }
-            if (runtime.dom_doc && !js_check_exception()) {
+            if (runtime.dom_doc && !item_is_error(result)) {
                 // The document fast path executes without the CLI worker's
                 // post-script pump. Commit and drain while its UiContext is
                 // still bound so observer, timer, and transition callbacks
@@ -2404,11 +2408,11 @@ int main(int argc, char *argv[]) {
             if (result.item == ITEM_ERROR) {
                 js_had_error = true;
             }
-            if (js_check_exception()) {
+            if (item_is_error(result)) {
                 js_had_error = true;
-                const char* exc_msg = js_get_exception_message();
+                char exc_msg[1024];
+                js_error_lane_format(result, exc_msg, sizeof(exc_msg));
                 if (exc_msg[0]) fprintf(stderr, "Uncaught %s\n", exc_msg);
-                js_clear_exception();
             }
 
             mem_free(js_source);
@@ -4150,6 +4154,7 @@ int main(int argc, char *argv[]) {
             js_batch_document_init(&batch_document);
             bool has_batch_document = false;
             int result = 0;
+            Item batch_error = ItemNull;
 
             if (!inline_source) {
                 if (!file_exists(script_path)) {
@@ -4246,7 +4251,8 @@ int main(int argc, char *argv[]) {
                         alarm(0);
                         batch_timeout_active = 0;
                         mir_error_active = 0;
-                        if (res.item == ITEM_ERROR || js_check_exception()) {
+                        if (item_is_error(res)) {
+                            batch_error = res;
                             result = 1;
                         }
                     } else {
@@ -4274,7 +4280,8 @@ int main(int argc, char *argv[]) {
                         : transpile_js_to_mir_len(&runtime, js_source, js_source_len,
                                                   script_exec_path, &result_home);
                     mir_error_active = 0;
-                    if (res.item == ITEM_ERROR || js_check_exception()) {
+                    if (item_is_error(res)) {
+                        batch_error = res;
                         result = 1;
                     }
                 } else {
@@ -4291,7 +4298,8 @@ int main(int argc, char *argv[]) {
                                                         script_exec_path, &preamble, &result_home)
                 : transpile_js_to_mir_len(&runtime, js_source, js_source_len,
                                           script_exec_path, &result_home);
-            if (res.item == ITEM_ERROR || js_check_exception()) {
+            if (item_is_error(res)) {
+                batch_error = res;
                 result = 1;
             }
 #endif
@@ -4309,15 +4317,15 @@ int main(int argc, char *argv[]) {
             if (result == 0 &&
                 js_test262_global_flag_is_true("__lambda_test262_async_required") &&
                 !js_test262_global_flag_is_true("__lambda_test262_async_done")) {
-                js_throw_type_error("async test did not call $DONE");
+                batch_error = js_throw_type_error("async test did not call $DONE");
                 result = 1;
             }
 
             // Print uncaught exception to stdout for batch capture
-            if (result == 1 && js_check_exception()) {
-                const char* exc_msg = js_get_exception_message();
+            if (result == 1 && item_is_error(batch_error)) {
+                char exc_msg[1024];
+                js_error_lane_format(batch_error, exc_msg, sizeof(exc_msg));
                 if (exc_msg[0]) printf("Uncaught %s\n", exc_msg);
-                js_clear_exception();
                 fflush(stdout);
             }
 
@@ -4491,6 +4499,9 @@ int main(int argc, char *argv[]) {
             // siglongjmp with an allocator lock held, so terminal destruction
             // must not re-enter allocator-backed realm cleanup after results.
             js_batch_execution_mode = 0;
+            // _exit skips atexit and runtime_cleanup: flush the JS exec
+            // profile explicitly or a profiled batch run records nothing.
+            js_exec_profile_dump();
 #ifndef _WIN32
             _exit(0);
 #else

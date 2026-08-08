@@ -762,6 +762,7 @@ typedef enum PatternCharClass {
     PATTERN_SPACE,      // \s - whitespace
     PATTERN_ALPHA,      // \a - [a-zA-Z]
     PATTERN_ANY,        // \. - any character
+    PATTERN_ANY_STRING, // ... - any string
 } PatternCharClass;
 
 // SysFunc enum is now in lambda.h (C-compatible)
@@ -831,6 +832,12 @@ typedef struct TypeType : Type {
     Type* type;  // full type defintion
 } TypeType;
 
+typedef struct TypeRange : Type {
+    Item start;  // inclusive lower bound for range annotations
+    Item end;    // inclusive upper bound for range annotations
+    bool is_char;
+} TypeRange;
+
 // Forward declaration for RE2
 namespace re2 { class RE2; }
 
@@ -840,7 +847,8 @@ typedef struct TypePattern : Type {
     bool is_symbol;         // true for symbol pattern, false for string pattern
     re2::RE2* re2;          // compiled RE2 regex (owned, anchored ^...$)
     re2::RE2* re2_unanchored; // unanchored regex for find/replace/split (lazy, owned)
-    String* source;         // original pattern source (anchored) for error messages
+    String* source;         // canonical Lambda pattern source for diagnostics
+    String* regex_source;   // compiled anchored regex source used by partial matching
 } TypePattern;
 
 struct Pack {

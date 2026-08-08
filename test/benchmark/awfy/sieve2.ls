@@ -1,7 +1,7 @@
 // AWFY Benchmark: Sieve of Eratosthenes (Typed version)
 // Expected result: 669
 
-pn sieve(flags, sz: int) {
+pn sieve(flags: bool[], sz: int) int {
     var prime_count: int = 0
     for i in 2 to sz {
         if (flags[i - 1]) {
@@ -16,8 +16,8 @@ pn sieve(flags, sz: int) {
     return prime_count
 }
 
-pn benchmark() {
-    var flags = fill(5000, true)
+pn benchmark() any {
+    var flags: bool[] = fill(5000, true)
     return sieve(flags, 5000)
 }
 

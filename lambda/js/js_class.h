@@ -32,6 +32,7 @@
 #include <string.h>
 #include "../lambda.h"
 #include "../lambda-data.hpp"
+#include "../runtime/lambda-error.h"
 
 // JsClass — typed identity for built-in classes. Order is FROZEN once shipped
 // (the byte is stored on TypeMap; renumbering would corrupt existing maps).
@@ -492,14 +493,50 @@ static inline bool js_class_is_mouse_event_like(JsClass cls) {
         cls == JS_CLASS_POINTER_EVENT;
 }
 
+extern "C" JsClass js_error_class_id(Item obj);
+
+enum JsErrorOwnProperty : uint8_t {
+    JS_ERROR_OWN_NAME = 1u << 0,
+    JS_ERROR_OWN_MESSAGE = 1u << 1,
+    JS_ERROR_OWN_CAUSE = 1u << 2,
+    JS_ERROR_OWN_STACK = 1u << 3,
+};
+
+// JR3.2 uses the same LambdaError allocation in two Item lanes: ERROR while
+// propagating and MAP while observable JS code holds the object. The map-kind
+// marker is the discriminator because the resting lane intentionally shares
+// the ordinary container tag.
+static inline bool js_is_resting_error(Item obj) {
+    return get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
+        obj.map->map_kind == MAP_KIND_ERROR;
+}
+
+static inline LambdaError* js_error_from_value(Item obj) {
+    if (get_type_id(obj) == LMD_TYPE_ERROR) return it2err(obj);
+    if (js_is_resting_error(obj)) return (LambdaError*)obj.map;
+    return NULL;
+}
+
+static inline Item js_error_as_object(LambdaError* error) {
+    return error ? (Item){.map = (Map*)error} : ItemNull;
+}
+
+// Error's standard fields live outside the ordinary shape table. The helper
+// also consults the carrier's backing Map for arbitrary JS own properties.
+bool js_error_own_property(Item obj, const char* name, int len, Item* out);
+bool js_error_delete_own_property(Item obj, const char* name, int len);
+Item js_error_properties_map(Item obj, bool create);
+
 // Unified class-identity resolver. Class identity is carried only by the typed
 // byte stamped on the Map's TypeMap; user properties with matching names are
 // ordinary JS properties and cannot spoof built-in brands.
 static inline JsClass js_class_id(Item obj) {
     TypeId type = get_type_id(obj);
     Map* m = NULL;
-    if (type == LMD_TYPE_MAP) {
+    if (type == LMD_TYPE_MAP && !js_is_resting_error(obj)) {
         m = obj.map;
+    } else if (type == LMD_TYPE_ERROR || js_is_resting_error(obj)) {
+        return js_error_class_id(obj);
     } else if (type == LMD_TYPE_ARRAY && obj.array && js_array_has_props(obj.array)) {
         // Array-backed Web IDL collections carry their unforgeable brand on
         // the companion property map because the Array payload has no TypeMap.

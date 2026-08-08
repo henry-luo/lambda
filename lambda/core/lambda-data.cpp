@@ -379,7 +379,7 @@ bool it2b(Item itm) {
     return true;
 }
 
-int64_t it2i(Item itm) {
+static int64_t item_to_int64(Item itm, int64_t fallback) {
     TypeId type_id = get_type_id(itm);
     if (type_id == LMD_TYPE_INT) {
         return lambda_int_item_to_i64(itm);
@@ -408,10 +408,12 @@ int64_t it2i(Item itm) {
         // `integer` carrier here even when its value fits the native lane.
         return decimal_to_int64_exact(itm, &value) ? value : INT64_MAX;
     }
-    else if (type_id == LMD_TYPE_ERROR) {
-        return 0;  // error items return 0 (callers should check type before calling it2i)
-    }
-    return 0;  // unrecognized type
+    return fallback;
+}
+
+int64_t it2i(Item itm) {
+    // error and unsupported values retain the historical zero conversion.
+    return item_to_int64(itm, 0);
 }
 
 // MIR JIT workaround: opaque store functions to prevent SSA optimizer from
@@ -421,32 +423,7 @@ void _store_f64(double* dst, double val) { *dst = val; }
 
 // extract an integer Item as int64 (full precision)
 int64_t it2l(Item itm) {
-    TypeId type_id = get_type_id(itm);
-    if (type_id == LMD_TYPE_INT) {
-        return lambda_int_item_to_i64(itm);
-    }
-    else if (type_id == LMD_TYPE_INT64) {
-        return itm.get_int64();
-    }
-    else if (is_float_type_id(type_id)) {
-        return (int64_t)itm.get_double();
-    }
-    else if (type_id == LMD_TYPE_BOOL) {
-        return itm.bool_val ? 1 : 0;
-    }
-    else if (type_id == LMD_TYPE_NUM_SIZED) {
-        NumSizedType st = itm.get_num_type();
-        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) return (int64_t)itm.get_num_sized_as_double();
-        return itm.get_num_sized_as_int64();
-    }
-    else if (type_id == LMD_TYPE_UINT64) {
-        return (int64_t)itm.get_uint64();
-    }
-    else if (type_id == LMD_TYPE_DECIMAL) {
-        int64_t value = 0;
-        return decimal_to_int64_exact(itm, &value) ? value : INT64_MAX;
-    }
-    return INT64_MAX;  // error sentinel
+    return item_to_int64(itm, INT64_MAX);
 }
 
 DateTime* it2k(Item itm) {
@@ -1269,21 +1246,20 @@ ConstItem Map::get(const char* key_str) const {
     return _map_get_const((TypeMap*)this->type, this->data, (char*)key_str, &is_found, NULL);
 }
 
-bool Map::has_field(const char* field_name) const {
-    if (!this || !this->type) return false;
-
-    TypeMap* type = (TypeMap*)this->type;
-    if (!type->shape) return false;
-
-    ShapeEntry* shape = type->shape;
-    // Iterate through the shape to find the field
+static bool shape_has_name(ShapeEntry* shape, const char* name) {
+    if (!name) return false;
     while (shape) {
-        if (shape->name && strview_equal(shape->name, field_name)) {
+        if (shape->name && strview_equal(shape->name, name)) {
             return true;
         }
         shape = shape->next;
     }
     return false;
+}
+
+bool Map::has_field(const char* field_name) const {
+    if (!this || !this->type) return false;
+    return shape_has_name(((TypeMap*)this->type)->shape, field_name);
 }
 
 Element* elmt_pooled(Pool *pool) {
@@ -1333,19 +1309,7 @@ ConstItem Element::get_attr(const char* attr_name) const {
 
 bool Element::has_attr(const char* attr_name) {
     if (!this || !this->type) return false;
-
-    TypeElmt* type = (TypeElmt*)this->type;
-    if (!type->shape) return false;
-
-    ShapeEntry* shape = type->shape;
-    // Iterate through the shape to find the attribute
-    while (shape) {
-        if (shape->name && strview_equal(shape->name, attr_name)) {
-            return true;
-        }
-        shape = shape->next;
-    }
-    return false;
+    return shape_has_name(((TypeElmt*)this->type)->shape, attr_name);
 }
 
 // Phase 14: Deep structural equality for Items

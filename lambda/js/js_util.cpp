@@ -38,6 +38,19 @@ extern __thread EvalContext* context;
 #define JS_UTIL_FUNC_FLAG_GENERATOR 1
 #define JS_UTIL_FUNC_FLAG_ASYNC 128
 
+// helper: append a string Item without repeating the bounded-copy logic
+static void js_util_append_string(char* buf, int* pos, int capacity, Item value) {
+    if (get_type_id(value) != LMD_TYPE_STRING) return;
+    String* str = it2s(value);
+    if (!str) return;
+    int count = (int)str->len;
+    if (*pos + count >= capacity) count = capacity - 1 - *pos;
+    if (count > 0) {
+        memcpy(buf + *pos, str->chars, count);
+        *pos += count;
+    }
+}
+
 // Helper: make JS undefined
 // =============================================================================
 // util.format(...args) — simplified printf-style formatting
@@ -72,13 +85,7 @@ extern "C" Item js_util_format(Item args_item) {
                 continue;
             }
             Item str = js_util_inspect(val, make_js_undefined());
-            if (get_type_id(str) == LMD_TYPE_STRING) {
-                String* s = it2s(str);
-                int clen = (int)s->len;
-                if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-                memcpy(buf + pos, s->chars, clen);
-                pos += clen;
-            }
+            js_util_append_string(buf, &pos, sizeof(buf), str);
         }
         buf[pos] = '\0';
         return make_string_item(buf, pos);
@@ -115,22 +122,10 @@ extern "C" Item js_util_format(Item args_item) {
                     TypeId at = get_type_id(arg);
                     if (at == LMD_TYPE_INT && it2i(arg) <= -(int64_t)JS_SYMBOL_BASE) {
                         Item sym_str = js_symbol_to_string(arg);
-                        if (get_type_id(sym_str) == LMD_TYPE_STRING) {
-                            String* s = it2s(sym_str);
-                            int clen = (int)s->len;
-                            if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-                            memcpy(buf + pos, s->chars, clen);
-                            pos += clen;
-                        }
+                        js_util_append_string(buf, &pos, sizeof(buf), sym_str);
                     } else {
                         Item str = js_to_string(arg);
-                        if (get_type_id(str) == LMD_TYPE_STRING) {
-                            String* s = it2s(str);
-                            int clen = (int)s->len;
-                            if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-                            memcpy(buf + pos, s->chars, clen);
-                            pos += clen;
-                        }
+                        js_util_append_string(buf, &pos, sizeof(buf), str);
                     }
                     arg_idx++;
                     break;
@@ -237,11 +232,7 @@ extern "C" Item js_util_format(Item args_item) {
                 case 'j': {
                     Item str = js_json_stringify(arg);
                     if (get_type_id(str) == LMD_TYPE_STRING) {
-                        String* s = it2s(str);
-                        int clen = (int)s->len;
-                        if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-                        memcpy(buf + pos, s->chars, clen);
-                        pos += clen;
+                        js_util_append_string(buf, &pos, sizeof(buf), str);
                     } else {
                         // JSON.stringify returns undefined for Symbol, functions, etc.
                         const char* undef = "undefined";
@@ -254,13 +245,7 @@ extern "C" Item js_util_format(Item args_item) {
                 case 'o':
                 case 'O': {
                     Item str = js_json_stringify(arg);
-                    if (get_type_id(str) == LMD_TYPE_STRING) {
-                        String* s = it2s(str);
-                        int clen = (int)s->len;
-                        if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-                        memcpy(buf + pos, s->chars, clen);
-                        pos += clen;
-                    }
+                    js_util_append_string(buf, &pos, sizeof(buf), str);
                     arg_idx++;
                     break;
                 }
@@ -289,13 +274,7 @@ extern "C" Item js_util_format(Item args_item) {
         } else {
             str = js_util_inspect(extra, make_js_undefined());
         }
-        if (get_type_id(str) == LMD_TYPE_STRING) {
-            String* s = it2s(str);
-            int clen = (int)s->len;
-            if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-            memcpy(buf + pos, s->chars, clen);
-            pos += clen;
-        }
+        js_util_append_string(buf, &pos, sizeof(buf), str);
     }
 
     buf[pos] = '\0';
@@ -440,7 +419,7 @@ static Item js_util_inspect_number(Item obj_item, JsInspectContext* ctx) {
 
 static Item js_util_inspect_bigint(Item obj_item, JsInspectContext* ctx) {
     Item digits = js_to_string(obj_item);
-    if (js_check_exception() || get_type_id(digits) != LMD_TYPE_STRING) return make_string_item("0n");
+    if (item_is_error(digits) || get_type_id(digits) != LMD_TYPE_STRING) return make_string_item("0n");
     String* ds = it2s(digits);
     StrBuf* raw = strbuf_new();
     if (ds) strbuf_append_str_n(raw, ds->chars, ds->len);
@@ -896,15 +875,12 @@ static Item js_util_inspect_object(Item obj_item, JsInspectContext* ctx, int dep
     }
     if (ctx) js_array_push(ctx->seen, obj_item);
 
-    extern int js_check_exception(void);
-    extern Item js_clear_exception(void);
     Item custom_sym = js_symbol_for(make_string_item("nodejs.util.inspect.custom"));
     Item custom_fn = js_property_get(obj_item, custom_sym);
     if (get_type_id(custom_fn) == LMD_TYPE_FUNC) {
         Item result = js_call_function(custom_fn, obj_item, nullptr, 0);
         if (ctx) js_util_inspect_seen_pop(ctx->seen);
-        if (js_check_exception()) {
-            js_clear_exception();
+        if (item_is_error(result)) {
             return make_string_item("[object Object]");
         }
         if (get_type_id(result) == LMD_TYPE_STRING) return result;
@@ -1185,11 +1161,10 @@ static Item js_util_promisify_executor(Item env_item, Item resolve, Item reject)
     call_args[argc - 1] = callback_root.get();
 
     Item call_result = js_call_function(original_root.get(), this_root.get(), call_args, argc);
-    if (js_check_exception()) {
-        error_root.set(js_clear_exception());
+    if (item_is_error(call_result)) {
+        error_root.set(js_error_lane_payload(call_result));
         Item reject_args[1] = {error_root.get()};
-        js_call_function(reject_root.get(), make_js_undefined(), reject_args, 1);
-        if (js_check_exception()) js_clear_exception();
+        (void)js_call_function(reject_root.get(), make_js_undefined(), reject_args, 1);
     } else if (js_util_is_promise_like(call_result)) {
         js_util_emit_promisify_promise_warning();
     }
@@ -1235,10 +1210,7 @@ static bool js_util_is_promise_like(Item value) {
     TypeId type = get_type_id(value);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_FUNC) return false;
     Item then_fn = js_property_get(value, make_string_item("then"));
-    if (js_check_exception()) {
-        js_clear_exception();
-        return false;
-    }
+    if (item_is_error(then_fn)) return false;
     return get_type_id(then_fn) == LMD_TYPE_FUNC;
 }
 
@@ -1248,8 +1220,7 @@ static void js_util_emit_promisify_promise_warning(void) {
     js_property_set(warning, make_string_item("message"),
         make_string_item("Calling promisify on a function that returns a Promise is likely a mistake."));
     js_property_set(warning, make_string_item("code"), make_string_item("DEP0174"));
-    js_process_emit(make_string_item("warning"), warning);
-    if (js_check_exception()) js_clear_exception();
+    (void)js_process_emit(make_string_item("warning"), warning);
 }
 
 static Item js_util_promisify_result_from_args(Item custom_args, Item rest_args) {
@@ -1281,8 +1252,7 @@ extern "C" Item js_util_promisify(Item fn_item) {
     }
 
     Item custom_key = js_util_promisify_custom_symbol();
-    Item custom = js_property_get(fn_item, custom_key);
-    if (js_check_exception()) return ItemNull;
+    JS_ASSIGN_OR_RETURN(custom, js_property_get(fn_item, custom_key));
     if (custom.item != ITEM_NULL && custom.item != ITEM_JS_UNDEFINED &&
         get_type_id(custom) != LMD_TYPE_UNDEFINED) {
         if (get_type_id(custom) != LMD_TYPE_FUNC) {
@@ -1291,8 +1261,7 @@ extern "C" Item js_util_promisify(Item fn_item) {
         return custom;
     }
 
-    Item custom_args = js_property_get(fn_item, js_util_custom_promisify_args_symbol());
-    if (js_check_exception()) return ItemNull;
+    JS_ASSIGN_OR_RETURN(custom_args, js_property_get(fn_item, js_util_custom_promisify_args_symbol()));
 
     Item* env = js_alloc_env(2);
     env[0] = fn_item;
@@ -1358,15 +1327,11 @@ static Item js_util_callbackified_function(Item env_item, Item rest_args) {
 
     Item result = js_call_function(original, js_get_this(), call_args, argc);
     Item promise = ItemNull;
-    if (js_check_exception()) {
-        Item error = js_clear_exception();
-        promise = js_promise_reject(error);
+    if (item_is_error(result)) {
+        promise = js_promise_reject(js_error_lane_payload(result));
     } else {
         promise = js_promise_resolve(result);
-        if (js_check_exception()) {
-            Item error = js_clear_exception();
-            promise = js_promise_reject(error);
-        }
+        if (item_is_error(promise)) promise = js_promise_reject(js_error_lane_payload(promise));
     }
 
     Item* cb_env = js_alloc_env(1);
@@ -1424,14 +1389,12 @@ static Item js_util_aborted_on_abort(Item env_item, Item event_item) {
     Item remove_fn = js_property_get(signal, make_string_item("removeEventListener"));
     if (get_type_id(remove_fn) == LMD_TYPE_FUNC) {
         Item remove_args[2] = { make_string_item("abort"), handler };
-        js_call_function(remove_fn, signal, remove_args, 2);
-        if (js_check_exception()) js_clear_exception();
+        (void)js_call_function(remove_fn, signal, remove_args, 2);
     }
 
     if (get_type_id(resolve) == LMD_TYPE_FUNC) {
         Item resolve_args[1] = { make_js_undefined() };
-        js_call_function(resolve, make_js_undefined(), resolve_args, 1);
-        if (js_check_exception()) js_clear_exception();
+        (void)js_call_function(resolve, make_js_undefined(), resolve_args, 1);
     }
     return make_js_undefined();
 }
@@ -1445,8 +1408,7 @@ static Item js_util_aborted_executor(Item env_item, Item resolve, Item reject) {
     Item aborted = js_property_get(signal, make_string_item("aborted"));
     if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
         Item resolve_args[1] = { make_js_undefined() };
-        js_call_function(resolve, make_js_undefined(), resolve_args, 1);
-        if (js_check_exception()) js_clear_exception();
+        (void)js_call_function(resolve, make_js_undefined(), resolve_args, 1);
         return make_js_undefined();
     }
 
@@ -1460,8 +1422,7 @@ static Item js_util_aborted_executor(Item env_item, Item resolve, Item reject) {
     Item add_fn = js_property_get(signal, make_string_item("addEventListener"));
     if (get_type_id(add_fn) == LMD_TYPE_FUNC) {
         Item add_args[2] = { make_string_item("abort"), handler };
-        js_call_function(add_fn, signal, add_args, 2);
-        if (js_check_exception()) js_clear_exception();
+        (void)js_call_function(add_fn, signal, add_args, 2);
     }
     return make_js_undefined();
 }

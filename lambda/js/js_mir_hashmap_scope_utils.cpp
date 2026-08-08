@@ -131,6 +131,7 @@ JsTryContext* jm_try_context_push(JsMirTranspiler* mt) {
     JsTryContext* context = jm_try_context_at(mt, mt->try_ctx_depth);
     if (!context) return NULL;
     memset(context, 0, sizeof(*context));
+    context->end_label_error_lane_state = JS_ERROR_LANE_UNREACHABLE;
     mt->try_ctx_depth++;
     return context;
 }
@@ -181,10 +182,10 @@ static void js_call_root_value(void* owner, MIR_reg_t reg) {
     if (mt && mt->em.frame.active && reg) jm_create_gc_root_slot(mt, reg);
 }
 
-static void jm_note_call_exception(void* owner, JitExceptionEffect effect) {
+static void jm_note_call_error_lane(void* owner, JitExceptionEffect effect) {
     JsMirTranspiler* mt = (JsMirTranspiler*)owner;
     if (!mt) return;
-    jm_exc_note_call(mt, effect);
+    jm_error_lane_note_call(mt, effect);
 }
 
 JsMirTranspiler* jm_create_mir_transpiler(
@@ -203,9 +204,13 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->em.ctx = ctx;
     mt->em.name_pool = tp ? tp->name_pool : NULL;
     mt->em.note_mir_call = js_exec_profile_note_mir_call;
+#if JS_EXEC_PROFILE_ENABLED
+    // profile builds also rank helpers by dynamic call count (env-gated at emit)
+    mt->em.helper_call_counter = js_exec_profile_helper_call_counter;
+#endif
     mt->em.call_owner = mt;
     mt->em.root_call_value = js_call_root_value;
-    mt->em.note_call_exception = jm_note_call_exception;
+    mt->em.note_call_exception = jm_note_call_error_lane;
     mt->em.convert_rep = jm_convert_rep;
     mt->em.lookup_import_metadata = jm_lookup_import_metadata;
     mt->is_module = is_module;
@@ -486,11 +491,16 @@ void jm_update_gc_root_slot(JsMirTranspiler* mt, JsMirVarEntry* var) {
 
 void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
         bool item_return, MirScalarReturnMode scalar_return_mode,
-        MIR_reg_t runtime_reg) {
+        MIR_reg_t runtime_reg, bool clean_error_lane_entry) {
     if (!mt) return;
-    // Function entry must start unknown because callers may arrive with a
-    // pending exception already set, matching the legacy dirty-entry proof.
-    mt->exc_track = JS_EXC_UNKNOWN;
+    // Function entry starts unknown because the preceding native return may
+    // contain either a value or a returned ERROR Item; no ambient state exists.
+    mt->error_lane_track = JS_ERROR_LANE_UNKNOWN;
+    // Frame-local result registers cannot cross a function boundary.  A clean
+    // entry used to hide this stale register until a generator resume label
+    // reopened the lane, producing MIR that referenced another function's reg.
+    mt->last_call_result_reg = 0;
+    mt->func_error_lane_value_reg = 0;
     mt->arg_stack_scope = NULL;
     mt->arg_frame_base = 0;
     mt->arg_frame_base_add = NULL;
@@ -516,6 +526,9 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     mt->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
     mt->em.frame.active = true;
     jm_emit_label(mt, mt->em.frame.anchor);
+    if (clean_error_lane_entry) {
+        jm_error_lane_set_state(mt, JS_ERROR_LANE_CLEAN);
+    }
 }
 
 static void jm_finalize_side_root_prologue(JsMirTranspiler* mt) {
@@ -639,14 +652,14 @@ void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
             MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg), insn->ops[0]));
         jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_JMP,
             MIR_new_label_op(mt->ctx, mt->em.frame.return_label)));
-        jm_exc_set_state(mt, JS_EXC_UNREACHABLE);
+        jm_error_lane_set_state(mt, JS_ERROR_LANE_UNREACHABLE);
         _MIR_free_insn(mt->ctx, insn);
         return;
     }
     jm_emit_raw(mt, insn);
     if (!insn) return;
     if (insn->code == MIR_JMP || insn->code == MIR_RET) {
-        jm_exc_set_state(mt, JS_EXC_UNREACHABLE);
+        jm_error_lane_set_state(mt, JS_ERROR_LANE_UNREACHABLE);
     }
 }
 
@@ -657,16 +670,22 @@ void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
     }
     // Unowned labels may be joins from exception and non-exception paths; the
     // tracker must forget any stronger local proof before control merges here.
-    jm_exc_set_state(mt, JS_EXC_UNKNOWN);
+    // Async state-machine labels also merge distinct resume activations, so a
+    // prior call result does not dominate the label and cannot be an exception
+    // source for the next operation.
+    if (mt->in_async && !mt->in_generator) mt->last_call_result_reg = 0;
+    jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
     em_emit_label(&mt->em, label);
 }
 
-void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsExcTrack state) {
+void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsErrorLaneTrack state) {
     if (!label) {
         log_error("js-mir: attempt to emit NULL structured label — skipping");
         return;
     }
-    jm_exc_set_state(mt, state == JS_EXC_UNREACHABLE ? JS_EXC_UNKNOWN : state);
+    if (mt->in_async && !mt->in_generator && state != JS_ERROR_LANE_SET)
+        mt->last_call_result_reg = 0;
+    jm_error_lane_set_state(mt, state == JS_ERROR_LANE_UNREACHABLE ? JS_ERROR_LANE_UNKNOWN : state);
     em_emit_label(&mt->em, label);
 }
 

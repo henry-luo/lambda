@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "description": "Tune14 A1 keeps proved float and integer array paths on native MIR lanes, preserves the same-contract array witness across rebinding, and retains generic admission for a widened any[] control.",
+  "checks": [
+    {
+      "in_func": "_tune14_float_sum_#",
+      "expect": [
+        "call\tensure_typed_array_p, ensure_typed_array",
+        "dadd\t{{r}}"
+      ],
+      "forbid": [
+        "call\tfn_add_p, fn_add"
+      ]
+    },
+    {
+      "in_func": "_tune14_bitwise_#",
+      "expect": [
+        "call\tensure_typed_array_p, ensure_typed_array",
+        "rsh\t{{r}}",
+        "and\t{{r}}"
+      ],
+      "forbid": [
+        "call\tfn_shr_item_p, fn_shr_item",
+        "call\tfn_band_item_p, fn_band_item",
+        "call\tfn_int_p, fn_int"
+      ]
+    },
+    {
+      "in_func": "_tune14_rebind_#",
+      "expect": [
+        "call\tensure_typed_array_p, ensure_typed_array",
+        "mov\t{{r}}, i64:({{r}})",
+        "add\t{{r}}, {{r}}, {{r}}"
+      ],
+      "forbid": [
+        "call\tfn_index_p, fn_index",
+        "call\tfn_add_p, fn_add"
+      ]
+    },
+    {
+      "in_func": "_tune14_widened_#",
+      "expect": [
+        "call\tfn_index_p, fn_index",
+        "call\tfn_add_p, fn_add"
+      ],
+      "forbid": [
+        "call\tensure_typed_array_p, ensure_typed_array"
+      ]
+    }
+  ]
+}

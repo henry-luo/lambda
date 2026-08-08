@@ -39,10 +39,19 @@ void jm_emit_iterator_close(JsMirTranspiler* mt, MIR_reg_t iterator) {
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
 }
 
-void jm_emit_iterator_close_on_exception_if_open(JsMirTranspiler* mt, MIR_reg_t iterator,
+void jm_emit_iterator_close_checked(JsMirTranspiler* mt, MIR_reg_t iterator) {
+    // Normal-completion IteratorClose must forward a failing return lookup or
+    // call; exception-cleanup callers use the unchecked form to preserve the
+    // original abrupt completion while closing.
+    jm_call_1(mt, "js_iterator_close", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+    jm_emit_error_lane_propagate_check(mt);
+}
+
+void jm_emit_iterator_close_on_error_lane_if_open(JsMirTranspiler* mt, MIR_reg_t iterator,
     MIR_reg_t iter_done, MIR_label_t target)
 {
-    MIR_reg_t exc = jm_emit_exception_test(mt);
+    MIR_reg_t exc = jm_emit_error_lane_test(mt);
     MIR_label_t no_exc = jm_new_label(mt);
     MIR_label_t rethrow_only = jm_new_label(mt);
     MIR_label_t after_close = jm_new_label(mt);
@@ -51,20 +60,25 @@ void jm_emit_iterator_close_on_exception_if_open(JsMirTranspiler* mt, MIR_reg_t 
         MIR_new_label_op(mt->ctx, no_exc),
         MIR_new_reg_op(mt->ctx, exc)));
 
-    MIR_reg_t saved_exc = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+    MIR_reg_t saved_exc = jm_emit_error_lane_return(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
         MIR_new_label_op(mt->ctx, rethrow_only),
         MIR_new_reg_op(mt->ctx, iter_done)));
     jm_emit_iterator_close(mt, iterator);
-    jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+    // iterator close may set a second error; the saved result remains the
+    // abrupt completion that must be rethrown after cleanup.
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
         MIR_new_label_op(mt->ctx, after_close)));
 
     jm_emit_label(mt, rethrow_only);
     jm_emit_label(mt, after_close);
-    jm_call_void_1(mt, "js_throw_value",
+    jm_call_1(mt, "js_throw_value", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, saved_exc));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
         MIR_new_label_op(mt->ctx, target)));
     jm_emit_label(mt, no_exc);
+    // the fallthrough edge is the normal completion path; leaving the
+    // compile-time state as SET makes a later cleanup helper rethrow its
+    // uninitialized saved exception slot on iterator exhaustion.
+    jm_error_lane_set_state(mt, JS_ERROR_LANE_CLEAN);
 }

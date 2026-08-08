@@ -44,7 +44,7 @@ extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_
 extern "C" void js_async_hooks_emit_destroy_resource(Item resource);
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
-extern "C" void js_throw_value(Item error);
+extern "C" Item js_throw_value(Item error);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_symbol_for(Item key);
 extern Item js_make_number(double d);
@@ -231,8 +231,7 @@ static Item http_throw_invalid_status_code(Item status_item) {
     snprintf(message, sizeof(message), "Invalid status code: %s", display);
     Item err = js_new_error_with_name(make_string_item("RangeError"), make_string_item(message));
     js_property_set(err, make_string_item("code"), make_string_item("ERR_HTTP_INVALID_STATUS_CODE"));
-    js_throw_value(err);
-    return ItemNull;
+    return js_throw_value(err);
 }
 
 static bool http_status_code_is_valid(Item status_item, int* out_status) {
@@ -803,28 +802,6 @@ static void http_response_schedule_error(Item res, Item err) {
     js_next_tick_enqueue(tick);
 }
 
-static bool http_item_bytes(Item item, const char** data, int* len) {
-    if (!data || !len) return false;
-    *data = NULL;
-    *len = 0;
-    if (get_type_id(item) == LMD_TYPE_STRING) {
-        String* s = it2s(item);
-        *data = s->chars;
-        *len = (int)s->len;
-        return true;
-    }
-    if (js_is_typed_array(item)) {
-        if (js_typed_array_is_out_of_bounds_item(item)) return false;
-        int byte_len = js_typed_array_byte_length(item);
-        void* ptr = js_typed_array_current_data_ptr(item);
-        if (byte_len > 0 && !ptr) return false;
-        *data = (const char*)ptr;
-        *len = byte_len;
-        return true;
-    }
-    return false;
-}
-
 static Item http_encode_write_chunk(Item chunk_item, Item encoding_item) {
     if (get_type_id(chunk_item) == LMD_TYPE_STRING &&
         get_type_id(encoding_item) == LMD_TYPE_STRING) {
@@ -842,7 +819,7 @@ static void http_call_write_callback(Item callback) {
 static void http_response_append_body(Item self, Item chunk_item) {
     const char* chunk_data = NULL;
     int chunk_len = 0;
-    if (!http_item_bytes(chunk_item, &chunk_data, &chunk_len)) return;
+    if (!js_item_bytes(chunk_item, &chunk_data, &chunk_len)) return;
     if (chunk_len <= 0) return;
 
     Item chunks = js_property_get(self, make_string_item("__chunks__"));
@@ -885,7 +862,7 @@ static int http_response_body_len(Item self) {
                 Item chunk = js_array_get_int(chunks, i);
                 const char* data = NULL;
                 int len = 0;
-                if (http_item_bytes(chunk, &data, &len)) total += len;
+                if (js_item_bytes(chunk, &data, &len)) total += len;
             }
             return total;
         }
@@ -909,7 +886,7 @@ static int http_response_copy_body_range(Item self, char* dest, int start, int l
             Item chunk = js_array_get_int(chunks, i);
             const char* chunk_data = NULL;
             int chunk_len = 0;
-            if (!http_item_bytes(chunk, &chunk_data, &chunk_len)) continue;
+            if (!js_item_bytes(chunk, &chunk_data, &chunk_len)) continue;
             if (skip >= chunk_len) {
                 skip -= chunk_len;
                 continue;
@@ -968,7 +945,7 @@ static bool http_response_single_body_bytes(Item self, const char** data, int* l
     Item chunks = js_property_get(self, make_string_item("__chunks__"));
     if (get_type_id(chunks) != LMD_TYPE_ARRAY || js_array_length(chunks) != 1) return false;
     Item chunk = js_array_get_int(chunks, 0);
-    if (!http_item_bytes(chunk, data, len)) return false;
+    if (!js_item_bytes(chunk, data, len)) return false;
     return *len == http_response_body_len(self);
 }
 
@@ -1242,9 +1219,9 @@ static int http_append_header_value(char* resp_buf, int pos, int cap, Item name,
 
 static void http_response_set_header_pair(Item self, Item name_item, Item value_item) {
     Item name = http_validate_header_name(name_item);
-    if (js_check_exception() || name.item == 0) return;
+    if (item_is_error(name) || name.item == 0) return;
     Item value = http_validate_header_value(name, value_item);
-    if (js_check_exception() || value.item == 0) return;
+    if (item_is_error(value) || value.item == 0) return;
 
     Item headers = js_property_get(self, make_string_item("__headers__"));
     if (get_type_id(headers) != LMD_TYPE_MAP) {
@@ -1258,9 +1235,9 @@ static void http_response_set_header_pair(Item self, Item name_item, Item value_
 
 static void http_response_append_raw_header_pair(Item self, Item name_item, Item value_item) {
     Item name = http_validate_header_name(name_item);
-    if (js_check_exception() || name.item == 0) return;
+    if (item_is_error(name) || name.item == 0) return;
     Item value = http_validate_header_value(name, value_item);
-    if (js_check_exception() || value.item == 0) return;
+    if (item_is_error(value) || value.item == 0) return;
 
     Item headers = js_property_get(self, make_string_item("__headers__"));
     if (get_type_id(headers) != LMD_TYPE_MAP) {
@@ -1787,7 +1764,7 @@ static void http_response_flush(Item self) {
                 Item chunk = js_array_get_int(chunks, i);
                 const char* chunk_data = NULL;
                 int chunk_len = 0;
-                if (http_item_bytes(chunk, &chunk_data, &chunk_len)) {
+                if (js_item_bytes(chunk, &chunk_data, &chunk_len)) {
                     chunk_cap += chunk_len + 32;
                 }
             }
@@ -1800,7 +1777,7 @@ static void http_response_flush(Item self) {
                 Item chunk = js_array_get_int(chunks, i);
                 const char* chunk_data = NULL;
                 int chunk_len = 0;
-                if (!http_item_bytes(chunk, &chunk_data, &chunk_len) || chunk_len <= 0) continue;
+                if (!js_item_bytes(chunk, &chunk_data, &chunk_len) || chunk_len <= 0) continue;
                 cpos += snprintf(output_body + cpos, chunk_cap - cpos, "%X\r\n", (unsigned int)chunk_len);
                 memcpy(output_body + cpos, chunk_data, (size_t)chunk_len);
                 cpos += chunk_len;
@@ -2618,7 +2595,7 @@ static bool http_conn_write_bytes(JsHttpConn* conn, Item data_item, bool close_a
     if (!conn || conn->destroyed) return false;
     const char* data = NULL;
     int len = 0;
-    if (!http_item_bytes(data_item, &data, &len)) return false;
+    if (!js_item_bytes(data_item, &data, &len)) return false;
 
     HttpConnWriteReq* write_req =
         (HttpConnWriteReq*)mem_calloc(1, sizeof(HttpConnWriteReq), MEM_CAT_JS_RUNTIME);
@@ -3085,6 +3062,46 @@ static void http_server_send_expectation_failed(JsHttpConn* conn, ParsedRequest*
     http_response_flush(res_obj);
 }
 
+static void http_server_dispatch_request(JsHttpConn* conn, ParsedRequest* req,
+        Item on_req, Item on_expect, bool has_handler, bool has_request_event,
+        bool has_expect_handler, bool expect_continue, bool response_at_eof,
+        bool has_buffered_request) {
+    JsHttpServer* srv = conn->server;
+    if (conn->async_resource.item == 0) conn->async_resource = js_new_object();
+    Item req_obj = make_request_object(conn, req);
+    Item res_obj = http_response_for_request(conn, req, response_at_eof, false, has_buffered_request);
+    js_property_set(res_obj, make_string_item("__request__"), req_obj);
+    if (!req->body_complete) {
+        conn->current_request = req_obj;
+        conn->request_body_remaining = req->content_length - req->body_len;
+        conn->request_body_chunked = http_request_is_chunked(req);
+    }
+
+    Item args[2] = { req_obj, res_obj };
+    if (has_expect_handler) {
+        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
+        js_call_function(on_expect, srv->js_object, args, 2);
+        js_async_hooks_restore_resource(previous_resource);
+        js_microtask_flush();
+        return;
+    }
+    if (expect_continue) {
+        http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
+    }
+    if (has_handler) {
+        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
+        js_call_function(srv->request_handler, srv->js_object, args, 2);
+        js_async_hooks_restore_resource(previous_resource);
+        js_microtask_flush();
+    }
+    if (has_request_event && (!has_handler || on_req.item != srv->request_handler.item)) {
+        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
+        js_call_function(on_req, srv->js_object, args, 2);
+        js_async_hooks_restore_resource(previous_resource);
+        js_microtask_flush();
+    }
+}
+
 static void http_server_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
     buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
     buf->len = buf->base ? suggested_size : 0;
@@ -3210,41 +3227,9 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                     conn->recv_len = remaining;
                     continue;
                 }
-                if (conn->async_resource.item == 0) conn->async_resource = js_new_object();
-                Item req_obj = make_request_object(conn, &req);
-                Item res_obj = http_response_for_request(conn, &req, false, false, has_buffered_request);
-                js_property_set(res_obj, make_string_item("__request__"), req_obj);
-                if (!req.body_complete) {
-                    conn->current_request = req_obj;
-                    conn->request_body_remaining = req.content_length - req.body_len;
-                    conn->request_body_chunked = http_request_is_chunked(&req);
-                }
-
-                Item args[2] = { req_obj, res_obj };
-                if (has_expect_handler) {
-                    Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                    js_call_function(on_expect, srv->js_object, args, 2);
-                    js_async_hooks_restore_resource(previous_resource);
-                    js_microtask_flush();
-                } else {
-                    if (expect_continue) {
-                        http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
-                    }
-                    if (has_handler) {
-                        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                        js_call_function(srv->request_handler, srv->js_object, args, 2);
-                        js_async_hooks_restore_resource(previous_resource);
-                        js_microtask_flush();
-                    }
-
-                    // emit 'request' event
-                    if (has_request_event && (!has_handler || on_req.item != srv->request_handler.item)) {
-                        Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                        js_call_function(on_req, srv->js_object, args, 2);
-                        js_async_hooks_restore_resource(previous_resource);
-                        js_microtask_flush();
-                    }
-                }
+                http_server_dispatch_request(conn, &req, on_req, on_expect,
+                    has_handler, has_request_event, has_expect_handler,
+                    expect_continue, false, has_buffered_request);
             }
             int remaining = conn->recv_len - consumed;
             if (remaining > 0) memmove(conn->recv_buf, conn->recv_buf + consumed, (size_t)remaining);
@@ -3284,37 +3269,9 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                         http_server_send_expectation_failed(conn, &req, false);
                     } else if (has_expect_handler || has_handler || has_request_event) {
                         if (conn->async_resource.item == 0) conn->async_resource = js_new_object();
-                        Item req_obj = make_request_object(conn, &req);
-                        Item res_obj = http_response_for_request(conn, &req, true, false, false);
-                        js_property_set(res_obj, make_string_item("__request__"), req_obj);
-                        if (!req.body_complete) {
-                            conn->current_request = req_obj;
-                            conn->request_body_remaining = req.content_length - req.body_len;
-                            conn->request_body_chunked = http_request_is_chunked(&req);
-                        }
-                        Item args[2] = { req_obj, res_obj };
-                        if (has_expect_handler) {
-                            Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                            js_call_function(on_expect, srv->js_object, args, 2);
-                            js_async_hooks_restore_resource(previous_resource);
-                            js_microtask_flush();
-                        } else {
-                            if (expect_continue) {
-                                http_conn_write_bytes(conn, make_string_item("HTTP/1.1 100 Continue\r\n\r\n"), false);
-                            }
-                            if (has_handler) {
-                                Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                                js_call_function(srv->request_handler, srv->js_object, args, 2);
-                                js_async_hooks_restore_resource(previous_resource);
-                                js_microtask_flush();
-                            }
-                            if (has_request_event && (!has_handler || on_req.item != srv->request_handler.item)) {
-                                Item previous_resource = js_async_hooks_enter_resource(conn->async_resource);
-                                js_call_function(on_req, srv->js_object, args, 2);
-                                js_async_hooks_restore_resource(previous_resource);
-                                js_microtask_flush();
-                            }
-                        }
+                        http_server_dispatch_request(conn, &req, on_req, on_expect,
+                            has_handler, has_request_event, has_expect_handler,
+                            expect_continue, true, false);
                     }
                 }
                 int remaining = conn->recv_len - consumed;
@@ -4707,7 +4664,7 @@ static void http_client_write_chunk(JsHttpClientReq* creq, String* chunk, Item c
 static void http_client_write_chunked_body(JsHttpClientReq* creq, Item chunk_item, Item callback) {
     const char* data = NULL;
     int len = 0;
-    if (!http_item_bytes(chunk_item, &data, &len) || len <= 0) {
+    if (!js_item_bytes(chunk_item, &data, &len) || len <= 0) {
         http_call_write_callback(callback);
         return;
     }
@@ -4929,7 +4886,7 @@ static Item http_client_write_ex(Item self, Item data_item, Item encoding_item, 
     Item encoded_item = http_encode_write_chunk(data_item, encoding_item);
     const char* chunk_data = NULL;
     int chunk_len = 0;
-    if (http_item_bytes(encoded_item, &chunk_data, &chunk_len)) {
+    if (js_item_bytes(encoded_item, &chunk_data, &chunk_len)) {
         String* existing = it2s(body);
         int new_len = (int)existing->len + chunk_len;
         char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_JS_RUNTIME);
@@ -5230,45 +5187,40 @@ static Item http_client_make_request_object(JsHttpClientReq* creq,
     return obj;
 }
 
-static bool http_client_validate_header_pair(Item name_item, Item value_item) {
-    if (get_type_id(name_item) != LMD_TYPE_STRING) return true;
+static Item http_client_validate_header_pair(Item name_item, Item value_item) {
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return js_status_ok();
     String* name = it2s(name_item);
     if (http_header_name_equals(name, "host", 4) &&
         get_type_id(value_item) == LMD_TYPE_ARRAY) {
-        js_throw_invalid_arg_type("options.headers.host", "string", value_item);
-        return false;
+        return js_throw_invalid_arg_type("options.headers.host", "string", value_item);
     }
-    return true;
+    return js_status_ok();
 }
 
-static bool http_client_validate_headers(Item headers_item) {
+static Item http_client_validate_headers(Item headers_item) {
     if (get_type_id(headers_item) == LMD_TYPE_MAP) {
-        Item keys = js_object_keys(headers_item);
+        JS_ASSIGN_OR_RETURN(keys, js_object_keys(headers_item));
         int64_t nkeys = js_array_length(keys);
         for (int64_t i = 0; i < nkeys; i++) {
             Item k = js_array_get_int(keys, i);
-            if (!http_client_validate_header_pair(k, js_property_get(headers_item, k))) {
-                return false;
-            }
+            JS_ASSIGN_OR_RETURN(value, js_property_get(headers_item, k));
+            JS_RETURN_IF_ERROR(http_client_validate_header_pair(k, value));
         }
     } else if (get_type_id(headers_item) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(headers_item);
         for (int64_t i = 0; i < len; i++) {
             Item entry = js_array_get_int(headers_item, i);
             if (get_type_id(entry) == LMD_TYPE_ARRAY && js_array_length(entry) >= 2) {
-                if (!http_client_validate_header_pair(js_array_get_int(entry, 0),
-                                                      js_array_get_int(entry, 1))) {
-                    return false;
-                }
+                JS_RETURN_IF_ERROR(http_client_validate_header_pair(
+                    js_array_get_int(entry, 0), js_array_get_int(entry, 1)));
             } else if (i + 1 < len) {
-                if (!http_client_validate_header_pair(entry, js_array_get_int(headers_item, i + 1))) {
-                    return false;
-                }
+                JS_RETURN_IF_ERROR(http_client_validate_header_pair(
+                    entry, js_array_get_int(headers_item, i + 1)));
                 i++;
             }
         }
     }
-    return true;
+    return js_status_ok();
 }
 
 static int http_client_append_header_line(char* req_str, int rlen, int cap,
@@ -5578,7 +5530,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
                 js_property_get(options_item, make_string_item("password")));
         }
     }
-    if (!http_client_validate_headers(custom_headers)) return ItemNull;
+    JS_ASSIGN_OR_RETURN(headers_status, http_client_validate_headers(custom_headers));
 
     int rlen = snprintf(req_str, sizeof(req_str),
         "%s %s HTTP/1.1\r\n", method_buf, path_buf);
@@ -5975,15 +5927,15 @@ extern "C" Item js_http_agent_addRequest(Item request, Item options,
     } else {
         agent_options_root.set(js_property_get(agent_root.get(), make_string_item("options")));
         Item sources[2] = { options_root.get(), agent_options_root.get() };
-        js_object_assign(normalized_root.get(), sources, 2);
-        if (js_check_exception()) return ItemNull;
+        JS_ASSIGN_OR_RETURN(assign_result, js_object_assign(normalized_root.get(), sources, 2));
     }
 
     Item get_name = js_property_get(agent_root.get(), make_string_item("getName"));
     if (get_type_id(get_name) != LMD_TYPE_FUNC) return make_js_undefined();
     Item get_name_args[1] = { normalized_root.get() };
     name_root.set(js_call_function(get_name, agent_root.get(), get_name_args, 1));
-    if (js_check_exception() || get_type_id(name_root.get()) != LMD_TYPE_STRING) return ItemNull;
+    if (item_is_error(name_root.get())) return name_root.get();
+    if (get_type_id(name_root.get()) != LMD_TYPE_STRING) return ItemNull;
 
     Item sockets = js_property_get(agent_root.get(), make_string_item("sockets"));
     if (get_type_id(sockets) != LMD_TYPE_MAP) {
@@ -6015,7 +5967,7 @@ extern "C" Item js_http_agent_addRequest(Item request, Item options,
         }
         Item connection_args[1] = { normalized_root.get() };
         socket_root.set(js_call_function(create_connection, agent_root.get(), connection_args, 1));
-        if (js_check_exception()) return ItemNull;
+        if (item_is_error(socket_root.get())) return socket_root.get();
     }
 
     js_array_push(active, socket_root.get());

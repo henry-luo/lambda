@@ -3,26 +3,26 @@
 
 type TState = {moves: int}
 
-pn push_disk(var piles: int[], var tops: int[], disk_size: int, pile: int) {
+pn push_disk(var piles: int[], var tops: int[], disk_size: int, pile: int) any {
     let t: int = tops[pile]
     piles[pile * 14 + t] = disk_size
     tops[pile] = t + 1
 }
 
-pn pop_disk_from(piles: int[], var tops: int[], pile: int) {
+pn pop_disk_from(piles: int[], var tops: int[], pile: int) int {
     let t: int = tops[pile] - 1
     tops[pile] = t
     let disk_size = piles[pile * 14 + t]
     return disk_size
 }
 
-pn move_top_disk(var piles: int[], var tops: int[], var state: TState, from_pile: int, to_pile: int) {
+pn move_top_disk(var piles: int[], var tops: int[], var state: TState, from_pile: int, to_pile: int) any {
     let disk = pop_disk_from(piles, tops, from_pile)
     push_disk(piles, tops, disk, to_pile)
     state.moves = state.moves + 1
 }
 
-pn move_disks(var piles: int[], var tops: int[], var state: TState, disks: int, from_pile: int, to_pile: int) {
+pn move_disks(var piles: int[], var tops: int[], var state: TState, disks: int, from_pile: int, to_pile: int) any {
     if (disks == 1) {
         move_top_disk(piles, tops, state, from_pile, to_pile)
         return 0
@@ -33,7 +33,7 @@ pn move_disks(var piles: int[], var tops: int[], var state: TState, disks: int, 
     move_disks(piles, tops, state, disks - 1, other_pile, to_pile)
 }
 
-pn benchmark() {
+pn benchmark() int {
     var piles:int[] = fill(42, 0)
     var tops:int[] = [0, 0, 0]
     var i: int = 12

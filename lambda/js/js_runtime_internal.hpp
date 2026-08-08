@@ -106,7 +106,7 @@ Item _map_read_field(ShapeEntry* field, void* map_data);
 Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found);
 
 bool js_runtime_trace_enabled();
-void js_strict_throw_property_error(const char* reason, const char* prop_name, int prop_len);
+Item js_strict_throw_property_error(const char* reason, const char* prop_name, int prop_len);
 Map* js_resolve_object_prototype();
 Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found = nullptr);
 Item js_check_array_sym_iterator();
@@ -145,7 +145,7 @@ extern "C" Item js_object_prototype_has_own_property(Item this_val, Item key);
 void js_double_to_string(double d, char* out, int out_size);
 bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero);
 bool js_ta_numeric_index_valid(Item object, double numeric_index, bool is_negative_zero, int* out_index);
-bool js_ta_proto_chain_set(Item object, Item key, Item value);
+bool js_ta_proto_chain_set(Item object, Item key, Item value, Item* out_result);
 bool js_array_ta_proto_numeric_set(Item array, Item key, bool* no_op);
 
 static inline bool js_is_symbol(Item v) {
@@ -184,14 +184,13 @@ static inline Item js_native_bigint_to_bigint(Item v) {
     return v;
 }
 
-static inline bool js_check_bigint_arithmetic(Item left, Item right) {
+static inline Item js_check_bigint_arithmetic(Item left, Item right) {
     bool lbig = js_is_bigint(left);
     bool rbig = js_is_bigint(right);
     if (lbig != rbig) {
-        js_throw_type_error("Cannot mix BigInt and other types, use explicit conversions");
-        return true;
+        return js_throw_type_error("Cannot mix BigInt and other types, use explicit conversions");
     }
-    return false;
+    return ItemNull;
 }
 
 static inline bool js_is_deleted_sentinel(Item val) {

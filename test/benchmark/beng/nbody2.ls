@@ -8,12 +8,8 @@ let SOLAR_MASS = 4.0 * PI * PI
 let DAYS_PER_YEAR = 365.24
 
 // format a float to exactly 9 decimal places
-// NOTE: `pad` below stays unannotated — a declared `int` initialised from a len()
-// expression miscompiles in the MIR JIT and corrupts the concat
-// (repro: temp/repro_declared_int_len_concat.ls); likewise no `string` return type
-// (repro: temp/repro_string_return_segv.ls)
-pn format9(x: float) {
-    var neg = ""
+pn format9(x: float) string {
+    var neg: string = ""
     if (x < 0.0) {
         neg = "-"
         x = -x
@@ -28,18 +24,18 @@ pn format9(x: float) {
         frac_int = 0
     }
     var frac_str: string = string(frac_int)
-    var pad = 9 - len(frac_str)
+    var pad: int = 9 - len(frac_str)
     var prefix: string = ""
     while (pad > 0) {
         prefix = prefix ++ "0"
         pad = pad - 1
     }
     frac_str = prefix ++ frac_str
-    var result = neg ++ int_part ++ "." ++ frac_str
+    var result: string = neg ++ int_part ++ "." ++ frac_str
     return result
 }
 
-pn advance(var bx: float[], var by: float[], var bz: float[], var bvx: float[], var bvy: float[], var bvz: float[], bmass: float[], dt: float) {
+pn advance(var bx: float[], var by: float[], var bz: float[], var bvx: float[], var bvy: float[], var bvz: float[], bmass: float[], dt: float) any {
     var i: int = 0
     while (i < 5) {
         var j: int = i + 1
@@ -71,7 +67,7 @@ pn advance(var bx: float[], var by: float[], var bz: float[], var bvx: float[], 
     }
 }
 
-pn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[]) {
+pn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[]) float {
     var e: float = 0.0
     var i: int = 0
     while (i < 5) {
@@ -91,7 +87,7 @@ pn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz
     return e
 }
 
-pn offset_momentum(var bvx: float[], var bvy: float[], var bvz: float[], bmass: float[]) {
+pn offset_momentum(var bvx: float[], var bvy: float[], var bvz: float[], bmass: float[]) any {
     var px: float = 0.0
     var py: float = 0.0
     var pz: float = 0.0

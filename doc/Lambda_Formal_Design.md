@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.4.0 (2026-08-06)
+**Spec version:** 1.6.0 (2026-08-07)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -39,9 +39,10 @@ the decision records.
   implementation accidents**, and pay for reuse only below the semantic
   boundary (no guest inherits another language's truthiness, coercion, or
   object model). [Lang_Hosting P1–P10, C1–C10]
-- **D1.4 — Errors are return values at every boundary.** Exceptions pend;
-  no C++ exception, `longjmp`, or guest unwind ever crosses a language or
-  module boundary. [JA5, J3]
+- **D1.4v2 — Errors are return values at every boundary.** A fallible
+  function returns one merged `Item`: its success value or an ERROR-tagged
+  error value. No pending-exception side channel, C++ exception, `longjmp`,
+  or guest unwind crosses a language or module boundary. [S7.4.4, JA5, J3]
 - **D1.5 — Precise GC everywhere, forever.** Conservative native-stack
   scanning is retired from every build and stays retired; a guest is
   precise iff it emits through the shared rooting primitives. [CR1–CR8]
@@ -115,7 +116,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   generated code is immutable — never patched. [D8.3.3, D8.4.1]
 - **DI15 — Nothing unwinds across a boundary.** Errors are return values
   at every language and module boundary; no exception, `longjmp`, or guest
-  unwind crosses one; faults never cross a thread boundary. [D1.4, D6.3.3]
+  unwind crosses one; faults never cross a thread boundary. [D1.4v2, D6.3.3]
 - **DI16 — Transactional initialization.** A half-initialized package or a
   failed module registration is never observable — init commits or rolls
   back. [D7.2.2, D7.3.2]
@@ -127,6 +128,13 @@ language-visible counterparts are the semantics spec's SI ledger.
 - **DI19 — The COW bit.** The shared flag is monotonic; a false "shared"
   is a wasted copy, a false "unique" is a semantic bug; the unique fast
   path is one byte load/test/branch. [D4.4]
+- **DI20 — Native lanes are error-free.** No `error` value ever occupies a
+  native carrier — ArrayNum or native-Array storage, a packed map field, a
+  native local, an unboxed entry parameter or return — and no unboxed
+  operator ever receives an error operand. A source not provably
+  error-free is carried boxed until discharged; a lane store either proves
+  admission or does not happen. Gating is static and fail-closed; the
+  fault regime is separate. [D2.8]
 
 ## D2 Data Representation
 
@@ -288,6 +296,46 @@ language-visible counterparts are the semantics spec's SI ledger.
   loops), context-global slots, C-local forwarding. The ownerless-slot GC
   fallback is counted and **explicitly transitional**.* [SG2, Stack_API §15.5]
 
+### D2.8 The error-free lane invariant
+
+*The representational counterpart of the semantics' acceptance rule
+(§S7.8.1). What DI5 and DI8 are for nulls, this is for errors.*
+
+- **D2.8.1** **No native lane slot ever holds an error.** ArrayNum and
+  native-Array element storage, packed map-field storage, native locals,
+  unboxed entry parameters and returns, and the scalar homes behind them
+  are error-free **by representation** — there is no Item word to put an
+  error in, and no lane encoding is ever spent on one: the int lane's
+  out-of-band encodings denote `int.nan`/`int.inf` values (D2.2.2), the
+  null sentinels denote null (D2.5.2), and dense sized lanes have no spare
+  pattern at all. Both escape hatches are rejected rulings, not unbuilt
+  options: an **in-band error sentinel** records only *that* a failure
+  happened (contradicting rich error payloads) and re-creates the
+  consumer-dependent in-band sentinel that was a measured live divergence;
+  a **sidecar** index→error table fixes the write and nothing else,
+  because read-back then delivers an error into the lane anyway. A lane
+  that must be decoded for error-ness is a boxed Item wearing a native
+  costume. [S7.8.1; IEH I1, TE-17]
+- **D2.8.2*** **No unboxed operator ever receives an error operand**, and
+  the **emitter** guarantees it, not the runtime: no skip target, landing
+  pad, or error edge is ever emitted inside a native lane. Scope is
+  errors and defects only — system/resource faults are untyped, no static
+  analysis can gate them, and they unwind through `LambdaRecoveryFrame`
+  (D6.3.3), abandoning any partially-built container. [IEH I2, TE-15]
+- **D2.8.3*** **Lane entry is gated on static proof, never on runtime
+  rescue.** Admission is read from the destination contract (§S7.8.1): a
+  provably infallible source enters branch-free; a source only inferable
+  as `T | error` is **not lane-eligible** and stays boxed until
+  discharged — never a checked lane store that might fail mid-mutation. A
+  declaration's entry guard then dominates every use of the binding in its
+  scope (§S7.7.2), so D2.8.1 and D2.8.2 hold **by construction rather than
+  by per-use guards**. The gating analysis is `may_defect` with
+  fail-closed polarity (D6.1.3): unknown ⇒ defect-capable ⇒ demotion,
+  which is viral through unanalyzed callers — so the effect split is a
+  **prerequisite** for lane routing, not a later optimization, and an
+  unannotated literal that boxes solely for unproven fallibility must be
+  diagnosed rather than silently demoted. [TE-17, TE-18; IEH I3, I4]
+
 ## D3 Type and Shape
 
 Types are first-class in Lambda — composed, inferred, reflected, and
@@ -296,12 +344,15 @@ that carries them.
 
 ### D3.1 First-class type values
 
-- **D3.1.1*** A type value is a `Type*` graph node under one compact
-  TypeId (`LMD_TYPE_TYPE`), discriminated by `Type.kind`
-  (simple/unary/binary/constrained) — composite and constrained types
-  share the tag rather than spending tag-budget entries (D2.1.4). The
-  `Type*` graph is the **semantic authority** for every contract the
-  compiler carries (D2.4.1); a TypeId alone is never a contract.
+- **D3.1.1v2*** A type value is a `Type*` graph node under one compact
+  TypeId (`LMD_TYPE_TYPE`), discriminated by `Type.kind` (simple, unary,
+  binary, pattern, constrained, range, or parameter). Composite, pattern,
+  range, and constrained types share the tag rather than spending tag-budget
+  entries (D2.1.4). A range kind carries static bounds for inclusive
+  membership while preserving the value's storage domain; a pattern kind
+  carries its domain tag and compiled content matcher. The `Type*` graph is
+  the **semantic authority** for every contract the compiler carries
+  (D2.4.1); a TypeId alone is never a contract.
   [Lane §1, lambda-data.hpp]
 - **D3.1.2** Types compose as values (`|` union, `?`, `[]`, constraints)
   and compare **representationally** — normalized forms, not semantic
@@ -780,8 +831,8 @@ loosely across the corpus — context disambiguates, and we live with it.
   through the catalog, never by guessing. The host owns heap activation,
   context install, side-stack entry/exit, and recovery boundaries —
   guests never construct contexts or touch global runtime pointers (the
-  G1 gate). JS pending-exception behavior is not reused as another
-  guest's exception model.* [Lang_Hosting §5–§7, §13]
+  G1 gate). The JS merged Item error lane (D8.4.3) is not reused as another
+  guest's exception model.* [Lang_Hosting §5–§7, §13, D8.4.3]
 
 ### D7.5 Jube modules: trust and IO
 
@@ -883,6 +934,14 @@ loosely across the corpus — context disambiguates, and we live with it.
 - **D8.4.2** Core direct calls pass individual ABI operands (`Context*`,
   args, optional trailing scalar home); `Item* + argc` is the JS dynamic
   boundary only. [LC call-ABI]
+- **D8.4.3** **Fallible JS/Jube helpers use the merged Item error ABI.** A
+  helper that can raise returns an ERROR-tagged `Item` and never relies on a
+  pending flag or a separate poll result; MIR lowering tests the returned
+  tag, and try/catch/finally routing carries that same Item identity. Raw
+  scalar helpers are permitted only when their catalog contract is
+  infallible (`PRESERVES`). `LambdaError` is the shared ERROR carrier; its
+  Map-compatible resting prologue is traced as a heap reference, and JS
+  Error stack materialization may remain lazy. [S7.4.4, D1.4v2, JR3]
 
 ### D8.5 MIR module cache
 
@@ -939,6 +998,7 @@ Status of `*`-marked rulings as of 2026-08-06.
 | D2.6.2 | ArrayNum `==` representation-sensitivity is a known live bug (also gates the data-processing engines). |
 | D2.6.3 | ELEM_INT i64 revert landed; SIMD kernels only partly re-enabled (C16-era gating comments remain). |
 | D2.7.2 | Ownerless-slot GC scalar fallback active and counted; removal gated on the per-boundary inventory reaching zero. SG2 OQ audits open (dispatch-helper enumeration, resume-path slot reads, RetItem census). |
+| D2.8.2–D2.8.3 | TE-17 lane gating is designed, not built: the admission predicates exist (`lambda_type_accepts_error`, `lambda_type_lane_storage_desc`) but no lane-entry decision consults them, and the `may_defect` fixed point they need does not exist (D6.1.3) — so the current polarity is "trusted clean", the wrong direction. Known violation V1: `fn_array_set` silently despecializes a declared `int[]`, which keeps D2.8.1 true (the lane is lost, not poisoned) but makes the S7.7.2 dominance guarantee false today. |
 | D3.1.1 | `Type*` kind-discrimination is code-authoritative only — no design record owns the first-class type-value representation (DO22); the type-graph de-pointering census is deferred to its own doc (CP §6 census C). |
 | D3.2.2 | Constrained-type enforcement is base-only; the `is`/`fn_is`/validator three-way divergence is open (TE-6 P5). |
 | D3.4.3 | Shape pool shipped for `Input` (contrary to its doc's stale "planning" header); the runtime/EvalContext shape pool (Shape_Pool Phase 5) is not implemented — runtime maps rebuild per transition instead of interning. |
@@ -955,6 +1015,7 @@ Status of `*`-marked rulings as of 2026-08-06.
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
 | D8.2 | Unified AST design settled (U1–U26); phased migration not recorded as started; Python port is the acceptance test and its entry is disabled until it emits through `MirEmitter` (CR6). |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
+| D8.4.3 | Landed 2026-08-07 with JS Tune1: JS/Jube fallible helpers use one merged Item error lane; pending-exception polling and the legacy flag are deleted. |
 | D8.5.1 | MIR cache L1 landed; L2 lazy codegen approved but `mir.c` still eager. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
 
@@ -1015,9 +1076,12 @@ Numbered `DO#` (design-open); each links to its record.
   fixture; porting them is a decision, not a drift.
 - **DO14** Unified AST: the "views" fourth variance tier (adopt only when
   a real shared pass asks); C2MIR retirement revisit after Phase 4.
-- **DO15** Online exception-poll doc status conflict: the impl doc is
-  named `(done)` but reads PLANNED (E0–E6 future) — resolve before citing
-  OE1–OE10 as landed.
+- **DO15** *(resolved 2026-08-07)* Online exception-poll doc status
+  conflict: verified landed in `52c0f3c02` (2026-07-24) — `exc_track` is the
+  live mechanism, the G1 peephole and `jm_optimize_exception_polls` pass are
+  deleted from the tree; the impl doc's status line now reads IMPLEMENTED.
+  OE1–OE10 may be cited as landed. History: `vibe/jube/JS_Runtime_Redesign.md`
+  JR3.
 
 **Runtime services & modules**
 - **DO16** Name identity: temporal canonical accepted; dynamic-intern
@@ -1074,6 +1138,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.4 | Lane §1–§9 | `Lambda_Design_Compiling_Lane.md` |
 | D2.5–D2.6 | Nullable §1–§10; CW16 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md` |
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
+| D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Impl_Error_Handling (done).md` |
 | D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |
 | D3.4 | Shape_Pool §1–§8; Transpile_Map DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b | `Lambda_Shape_Pool.md`, `Lambda_Transpile_Map.md`, `Lambda_Design_Name_Identity.md` |
 | D4.1 | GC1 §2.10.4; CW8; SF16; CR8 | `Lambda_Garbage_Collector.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Stack_Rooting.md` |

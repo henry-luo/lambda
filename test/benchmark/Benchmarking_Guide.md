@@ -28,7 +28,9 @@ This document describes how to prepare, run, and report Lambda benchmarks across
 **Total: 62 benchmarks**
 
 Each benchmark has a Lambda script (`.ls`), a JavaScript equivalent (`.js`), and where available a Python equivalent (`.py`).
-The text-library suite is JavaScript-only and runs with `-s text`; its workloads intentionally have no `.ls` or Python counterpart.
+The text-library suite runs with `-s text` and has Lambda untyped/typed ports,
+native C2MIR ports, and JavaScript fixtures. It remains opt-in because these
+three library-shaped workloads are not part of the six historical suites.
 
 ### File naming
 

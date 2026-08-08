@@ -738,6 +738,7 @@ enum MapKind {
                                  // properties plus CSS-specific method dispatch.
     MAP_KIND_DESC       = 13, // regular JS/Lambda object with descriptor metadata
     MAP_KIND_ARRAY_SPARSE = 14, // array companion map plus numeric sparse hash table
+    MAP_KIND_ERROR       = 15, // resting-state LambdaError presented as a JS object
 };
 
 #define CONTAINER_FLAG_IMMORTAL (1u << 5)
@@ -1846,6 +1847,12 @@ static inline RetPath rp_err(LambdaError* error) {
 // ============================================================================
 #ifndef __cplusplus
 
+// C helpers use the same merged-lane tag test as the C++ runtime.  Keep the
+// implementation here so native host boundaries do not need the C++ Item API.
+static inline bool item_is_error(Item item) {
+    return ((uint64_t)item >> 56) == LMD_TYPE_ERROR;
+}
+
 // Wrap a legacy Item-returning function result into RetItem.
 // Error Items may be either the historical sentinel (pointer=0) or a tagged
 // LambdaError* created at runtime. Preserve the pointer when present and use
@@ -2008,6 +2015,7 @@ extern "C" {
     int64_t array_int64_get_raw(ArrayNum *array, int64_t index);
     double array_float_get_value(ArrayNum *arr, int64_t index);
     Item list_get(List *list, int64_t index);
+    Item fn_string_ascii_at(Item str, int64_t index);
     Item map_get(Map* map, Item key);
     Item elmt_get(Element *elmt, Item key);
     Item object_get(Object* obj, Item key);
@@ -2410,7 +2418,7 @@ extern "C" {
     Item fn_math_quantile_skip_null(Item a, Item p, bool skip_null);
     Item fn_reduce(Item collection, Item func);
 
-    Range* fn_to(Item a, Item b);
+    Item fn_to(Item a, Item b);
 
     // pipe operations
     typedef Item (*PipeMapFn)(Item item, Item index);

@@ -73,6 +73,19 @@ static void lru_touch(EnhancedFileCache* cache, CacheMetadata* meta) {
     meta->last_accessed = time(NULL);
 }
 
+static bool enhanced_cache_evict_lru_locked(EnhancedFileCache* cache) {
+    if (!cache || !cache->lru_tail) return false;
+    CacheMetadata* victim = cache->lru_tail;
+    log_debug("cache: evicting LRU entry: %s", victim->url);
+    lru_remove(cache, victim);
+    if (victim->cache_path) file_delete(victim->cache_path);
+    cache->current_size_bytes -= victim->content_size;
+    cache->entry_count--;
+    CacheEntry key = { .url = victim->url, .meta = NULL };
+    hashmap_delete((struct hashmap*)cache->metadata_map, &key);
+    return true;
+}
+
 static bool cache_acquire_write_slot(EnhancedFileCache* cache, bool wait_for_slot) {
     if (!cache) return false;
 
@@ -214,29 +227,7 @@ static char* enhanced_cache_store_impl(EnhancedFileCache* cache, const char* url
     // evict if needed before storing
     while (cache->entry_count >= cache->max_entries ||
            (cache->current_size_bytes + size > cache->max_size_bytes && cache->entry_count > 0)) {
-        // evict LRU entry (done inside lock)
-        if (cache->lru_tail) {
-            CacheMetadata* victim = cache->lru_tail;
-            log_debug("cache: evicting LRU entry: %s", victim->url);
-
-            // remove from LRU list
-            lru_remove(cache, victim);
-
-            // remove file from disk
-            if (victim->cache_path) {
-                file_delete(victim->cache_path);
-            }
-
-            // update stats
-            cache->current_size_bytes -= victim->content_size;
-            cache->entry_count--;
-
-            // remove from hashmap
-            CacheEntry key = { .url = victim->url, .meta = NULL };
-            hashmap_delete((struct hashmap*)cache->metadata_map, &key);
-        } else {
-            break;  // no more entries to evict
-        }
+        if (!enhanced_cache_evict_lru_locked(cache)) break;
     }
 
     // compute hash for filename
@@ -367,26 +358,7 @@ void enhanced_cache_evict_lru(EnhancedFileCache* cache) {
 
     pthread_rwlock_wrlock(&cache->rwlock);
 
-    if (cache->lru_tail) {
-        CacheMetadata* victim = cache->lru_tail;
-        log_debug("cache: evicting LRU entry: %s", victim->url);
-
-        // remove from LRU list
-        lru_remove(cache, victim);
-
-        // remove file from disk
-        if (victim->cache_path) {
-            file_delete(victim->cache_path);
-        }
-
-        // update stats
-        cache->current_size_bytes -= victim->content_size;
-        cache->entry_count--;
-
-        // remove from hashmap
-        CacheEntry key = { .url = victim->url, .meta = NULL };
-        hashmap_delete((struct hashmap*)cache->metadata_map, &key);
-    }
+    enhanced_cache_evict_lru_locked(cache);
 
     pthread_rwlock_unlock(&cache->rwlock);
 }

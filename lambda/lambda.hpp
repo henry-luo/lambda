@@ -20,6 +20,7 @@ enum TypeKind {
     TYPE_KIND_BINARY,       // TypeBinary: union, intersection, exclude
     TYPE_KIND_PATTERN,      // TypePattern: compiled regex pattern
     TYPE_KIND_CONSTRAINED,  // TypeConstrained: type with where constraint
+    TYPE_KIND_RANGE,        // TypeRange: value-level range membership contract
     // TypeParam keeps a compact carrier Type prefix plus its full source
     // contract. Mark it so identifier typing can safely recover that contract.
     TYPE_KIND_PARAM,
@@ -276,6 +277,12 @@ inline ConstItem Item::to_const() const {
 // get type_id from an Item
 static inline TypeId get_type_id(Item value) { return value.type_id(); }
 
+// An in-band exception is identified by its ordinary Item tag; no side channel
+// is needed by callers that already hold the helper's returned value.
+static inline bool item_is_error(Item value) {
+    return get_type_id(value) == LMD_TYPE_ERROR;
+}
+
 static inline bool lambda_item_uses_scalar_home(Item item) {
     // C16: `int` is NOT here. An int Item carries its own rotated IEEE bits at
     // every magnitude, so it never points at frame-scoped storage. The scalar
@@ -370,6 +377,7 @@ struct Range : Container {
     int64_t start;  // inclusive start
     int64_t end;    // inclusive end
     int64_t length;
+    bool is_char;    // true when bounds are Unicode codepoints materializing as strings
 };
 
 struct List : Container {

@@ -14,17 +14,17 @@ let BB_DEAD = 5
 // =====================================================
 // Helpers
 // =====================================================
-pn null16() {
+pn null16() any {
     var a = fill(16, null)
     return a
 }
 
-pn null32() {
+pn null32() any {
     var a = fill(32, null)
     return a
 }
 
-pn int32() {
+pn int32() any {
     var a = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
     return a
 }
@@ -33,12 +33,12 @@ pn int32() {
 // 3-level indexed array (arr): 16 x 16 x 32 = 8192 cap
 // For sparse/absolute-index access
 // =====================================================
-pn arr_new() {
+pn arr_new() any {
     var a = { l0: null16(), sz: 0 }
     return a
 }
 
-pn arr_get(a, idx) {
+pn arr_get(a, idx) any {
     var i2 = idx % 32
     var mid = shr(idx, 5)
     var i1 = mid % 16
@@ -52,7 +52,7 @@ pn arr_get(a, idx) {
     return r
 }
 
-pn arr_set(a, idx, val) {
+pn arr_set(a, idx, val) any {
     var i2 = idx % 32
     var mid = shr(idx, 5)
     var i1 = mid % 16
@@ -60,28 +60,25 @@ pn arr_set(a, idx, val) {
     var l0 = (a.l0)
     var c1 = l0[i0]
     if (c1 == null) {
-        var _d: int = 0
         c1 = null16()
         l0[i0] = c1
     }
     var c2 = c1[i1]
     if (c2 == null) {
-        var _d2: int = 0
         c2 = null32()
         c1[i1] = c2
     }
-    var _d3: int = 0
     c2[i2] = val
     return 0
 }
 
 // Integer array (defaults to 0)
-pn iarr_new() {
+pn iarr_new() any {
     var a = { l0: null16() }
     return a
 }
 
-pn iarr_get(a, idx) {
+pn iarr_get(a, idx) any {
     var i2 = idx % 32
     var mid = shr(idx, 5)
     var i1 = mid % 16
@@ -95,7 +92,7 @@ pn iarr_get(a, idx) {
     return r
 }
 
-pn iarr_set(a, idx, val) {
+pn iarr_set(a, idx, val) any {
     var i2 = idx % 32
     var mid = shr(idx, 5)
     var i1 = mid % 16
@@ -103,17 +100,14 @@ pn iarr_set(a, idx, val) {
     var l0 = (a.l0)
     var c1 = l0[i0]
     if (c1 == null) {
-        var _d: int = 0
         c1 = null16()
         l0[i0] = c1
     }
     var c2 = c1[i1]
     if (c2 == null) {
-        var _d2: int = 0
         c2 = int32()
         c1[i1] = c2
     }
-    var _d3: int = 0
     c2[i2] = val
     return 0
 }
@@ -122,30 +116,30 @@ pn iarr_set(a, idx, val) {
 // Big vector (bvec): sequential append/remove, 8192 cap
 // Uses 3-level arr internally plus first/sz tracking
 // =====================================================
-pn bvec_new() {
+pn bvec_new() any {
     var v = { data: [], first: 0 }
     return v
 }
 
-pn bvec_add(v, item) {
+pn bvec_add(v, item) any {
     push(v.data, item)
     return 0
 }
 
-pn bvec_raw_get(v, idx) {
+pn bvec_raw_get(v, idx) any {
     return (v.data)[idx]
 }
 
-pn bvec_at(v, idx) {
+pn bvec_at(v, idx) any {
     var f = (v.first)
     return (v.data)[f + idx]
 }
 
-pn bvec_size(v) {
+pn bvec_size(v) any {
     return len(v.data) - (v.first)
 }
 
-pn bvec_remove_first(v) {
+pn bvec_remove_first(v) any {
     var f = (v.first)
     if (f >= len(v.data)) { return null }
     var r = (v.data)[f]
@@ -153,13 +147,13 @@ pn bvec_remove_first(v) {
     return r
 }
 
-pn bvec_is_empty(v) {
+pn bvec_is_empty(v) any {
     if ((v.first) >= len(v.data)) { return 1 }
     return 0
 }
 
 // Check if bvec contains element with given dfn field
-pn bvec_has_dfn(v, id) {
+pn bvec_has_dfn(v, id) any {
     var f = (v.first)
     var s = len(v.data)
     for i in f to s - 1 {
@@ -175,32 +169,32 @@ pn bvec_has_dfn(v, id) {
 // =====================================================
 // Small vector (vec): 16x16=256, for per-node small lists
 // =====================================================
-pn vec_new() {
+pn vec_new() any {
     return []
 }
 
-pn vec_add(v, item) {
+pn vec_add(v, item) any {
     push(v, item)
     return 0
 }
 
-pn vec_at(v, idx) {
+pn vec_at(v, idx) any {
     return v[idx]
 }
 
-pn vec_size(v) {
+pn vec_size(v) any {
     return len(v)
 }
 
 // =====================================================
 // Integer Set (iset): for nonBackPreds - set of ints
 // =====================================================
-pn iset_new() {
+pn iset_new() any {
     var s = { items: vec_new() }
     return s
 }
 
-pn iset_add(s, val) {
+pn iset_add(s, val) any {
     var items = (s.items)
     var sz = len(items)
     var i: int = 0
@@ -213,7 +207,7 @@ pn iset_add(s, val) {
     return 1
 }
 
-pn iset_size(s) {
+pn iset_size(s) any {
     var items = (s.items)
     var r = vec_size(items)
     return r
@@ -222,7 +216,7 @@ pn iset_size(s) {
 // =====================================================
 // BasicBlock
 // =====================================================
-pn bb_new(name) {
+pn bb_new(name) any {
     var ie = vec_new()
     var oe = vec_new()
     var b = { bid: 0, inEdges: null, outEdges: null }
@@ -235,14 +229,14 @@ pn bb_new(name) {
 // =====================================================
 // ControlFlowGraph
 // =====================================================
-pn cfg_new() {
+pn cfg_new() any {
     var bbm = arr_new()
     var c = { startNode: null, bbMap: null, numNodes: 0 }
     c.bbMap = bbm
     return c
 }
 
-pn cfg_create_node(cfg, name) {
+pn cfg_create_node(cfg, name) any {
     var bbm = (cfg.bbMap)
     var node = arr_get(bbm, name)
     if (node == null) {
@@ -253,13 +247,12 @@ pn cfg_create_node(cfg, name) {
     }
     var nn2 = (cfg.numNodes)
     if (nn2 == 1) {
-        var _d: int = 0
         cfg.startNode = node
     }
     return node
 }
 
-pn cfg_add_edge(cfg, fromName, toName) {
+pn cfg_add_edge(cfg, fromName, toName) any {
     var fromNode = cfg_create_node(cfg, fromName)
     var toNode = cfg_create_node(cfg, toName)
     var foe = (fromNode.outEdges)
@@ -269,7 +262,7 @@ pn cfg_add_edge(cfg, fromName, toName) {
     return 0
 }
 
-pn cfg_get_num_nodes(cfg) {
+pn cfg_get_num_nodes(cfg) any {
     var r = (cfg.numNodes)
     return r
 }
@@ -277,7 +270,7 @@ pn cfg_get_num_nodes(cfg) {
 // =====================================================
 // SimpleLoop
 // =====================================================
-pn loop_new(bb, isReducible, counter) {
+pn loop_new(bb, isReducible, counter) any {
     var bbs = bvec_new()
     var chs = bvec_new()
     var l = { lid: 0, isRed: 0, parentId: -1, isRoot: 0, nestLvl: 0, depthLvl: 0, header: null, bbs: null, children: null }
@@ -287,25 +280,24 @@ pn loop_new(bb, isReducible, counter) {
     l.bbs = bbs
     l.children = chs
     if (bb != null) {
-        var _d: int = 0
         bvec_add(bbs, bb)
     }
     return l
 }
 
-pn loop_add_node(loop, bb) {
+pn loop_add_node(loop, bb) any {
     var bbs = (loop.bbs)
     bvec_add(bbs, bb)
     return 0
 }
 
-pn loop_add_child(loop, child) {
+pn loop_add_child(loop, child) any {
     var chs = (loop.children)
     bvec_add(chs, child)
     return 0
 }
 
-pn loop_set_parent(loop, parent) {
+pn loop_set_parent(loop, parent) any {
     var pid = (parent.lid)
     loop.parentId = pid
     loop_add_child(parent, loop)
@@ -315,7 +307,7 @@ pn loop_set_parent(loop, parent) {
 // =====================================================
 // LoopStructureGraph
 // =====================================================
-pn lsg_new() {
+pn lsg_new() any {
     var loops = arr_new()
     var root = loop_new(null, 1, 0)
     root.nestLvl = 0
@@ -327,7 +319,7 @@ pn lsg_new() {
     return l
 }
 
-pn lsg_create_new_loop(lsg, bb, isReducible) {
+pn lsg_create_new_loop(lsg, bb, isReducible) any {
     var lc = (lsg.loopCounter)
     var loop = loop_new(bb, isReducible, lc)
     var nlc = lc + 1
@@ -337,12 +329,12 @@ pn lsg_create_new_loop(lsg, bb, isReducible) {
     return loop
 }
 
-pn lsg_get_num_loops(lsg) {
+pn lsg_get_num_loops(lsg) any {
     var r = (lsg.loopCounter)
     return r
 }
 
-pn lsg_calc_nesting_rec(lsg, loop, depth) {
+pn lsg_calc_nesting_rec(lsg, loop, depth) any {
     loop.depthLvl = depth
     var chs = (loop.children)
     var f = (chs.first)
@@ -356,7 +348,6 @@ pn lsg_calc_nesting_rec(lsg, loop, depth) {
         var cnl1 = cnl + 1
         var lnl = (loop.nestLvl)
         if (cnl1 > lnl) {
-            var _d: int = 0
             loop.nestLvl = cnl1
         }
         i = i + 1
@@ -364,7 +355,7 @@ pn lsg_calc_nesting_rec(lsg, loop, depth) {
     return 0
 }
 
-pn lsg_calc_nesting(lsg) {
+pn lsg_calc_nesting(lsg) any {
     var loops = (lsg.loops)
     var lc = (lsg.loopCounter)
     var i: int = 0
@@ -390,12 +381,12 @@ pn lsg_calc_nesting(lsg) {
 // =====================================================
 // UnionFindNode
 // =====================================================
-pn uf_new() {
+pn uf_new() any {
     var n = { dfn: 0, parentDfn: 0, bb: null, loop: null }
     return n
 }
 
-pn uf_init(node, bb, dfsNum) {
+pn uf_init(node, bb, dfsNum) any {
     node.dfn = dfsNum
     node.parentDfn = dfsNum
     node.bb = bb
@@ -403,7 +394,7 @@ pn uf_init(node, bb, dfsNum) {
     return 0
 }
 
-pn uf_find_set(nodes, nodeId) {
+pn uf_find_set(nodes, nodeId) any {
     var node = arr_get(nodes, nodeId)
     var pdfn = (node.parentDfn)
     if (pdfn == nodeId) { return nodeId }
@@ -436,7 +427,7 @@ pn uf_find_set(nodes, nodeId) {
 // Havlak Loop Finder
 // =====================================================
 
-pn hlf_is_ancestor(hlf_last, w, v) {
+pn hlf_is_ancestor(hlf_last, w, v) any {
     if (w > v) { return 0 }
     var lw = iarr_get(hlf_last, w)
     if (v > lw) { return 0 }
@@ -444,7 +435,7 @@ pn hlf_is_ancestor(hlf_last, w, v) {
 }
 
 // Recursive DFS
-pn hlf_do_dfs(nodes, numMap, last_arr, currentBB, current) {
+pn hlf_do_dfs(nodes, numMap, last_arr, currentBB, current) any {
     var ufn = arr_get(nodes, current)
     uf_init(ufn, currentBB, current)
     var bid = (currentBB.bid)
@@ -467,7 +458,7 @@ pn hlf_do_dfs(nodes, numMap, last_arr, currentBB, current) {
     return lastId
 }
 
-pn hlf_process_edges(nodes, numMap, backPreds, nonBackPreds, hlf_last, nodeW, w) {
+pn hlf_process_edges(nodes, numMap, backPreds, nonBackPreds, hlf_last, nodeW, w) any {
     var ie = (nodeW.inEdges)
     var ieSz = vec_size(ie)
     var i: int = 0
@@ -491,7 +482,7 @@ pn hlf_process_edges(nodes, numMap, backPreds, nonBackPreds, hlf_last, nodeW, w)
     return 0
 }
 
-pn hlf_step_d(nodes, backPreds, hlf_type, w, nodePool) {
+pn hlf_step_d(nodes, backPreds, hlf_type, w, nodePool) any {
     var bp = arr_get(backPreds, w)
     var bpSz = vec_size(bp)
     var i: int = 0
@@ -510,7 +501,7 @@ pn hlf_step_d(nodes, backPreds, hlf_type, w, nodePool) {
     return 0
 }
 
-pn hlf_step_e(nodes, nonBackPreds, hlf_type, hlf_last, w, nodePool, workList, x) {
+pn hlf_step_e(nodes, nonBackPreds, hlf_type, hlf_last, w, nodePool, workList, x) any {
     var xdfn = (x.dfn)
     var nbp = arr_get(nonBackPreds, xdfn)
     var items = (nbp.items)
@@ -541,7 +532,7 @@ pn hlf_step_e(nodes, nonBackPreds, hlf_type, hlf_last, w, nodePool, workList, x)
     return 0
 }
 
-pn hlf_set_loop_attrs(nodes, hlf_header, w, nodePool, loop) {
+pn hlf_set_loop_attrs(nodes, hlf_header, w, nodePool, loop) any {
     var wNode = arr_get(nodes, w)
     wNode.loop = loop
     var f = (nodePool.first)
@@ -554,13 +545,11 @@ pn hlf_set_loop_attrs(nodes, hlf_header, w, nodePool, loop) {
         node.parentDfn = w
         var nl = (node.loop)
         if (nl != null) {
-            var _d: int = 0
             loop_set_parent(nl, loop)
         }
         if (nl == null) {
             var nbb = (node.bb)
             if (nbb != null) {
-                var _d2: int = 0
                 loop_add_node(loop, nbb)
             }
         }
@@ -569,7 +558,7 @@ pn hlf_set_loop_attrs(nodes, hlf_header, w, nodePool, loop) {
     return 0
 }
 
-pn hlf_find_loops(cfg, lsg) {
+pn hlf_find_loops(cfg, lsg) any {
     var sn = (cfg.startNode)
     if (sn == null) { return 0 }
     var size = cfg_get_num_nodes(cfg)
@@ -614,11 +603,9 @@ pn hlf_find_loops(cfg, lsg) {
         var ufNode = arr_get(nodes, wi)
         var nbb = (ufNode.bb)
         if (nbb == null) {
-            var _d: int = 0
             iarr_set(hlf_type, wi, BB_DEAD)
         }
         if (nbb != null) {
-            var _d2: int = 0
             hlf_process_edges(nodes, numMap, backPreds, nonBackPreds, hlf_last, nbb, wi)
         }
         wi = wi + 1
@@ -646,7 +633,6 @@ pn hlf_find_loops(cfg, lsg) {
             }
             var npSz = bvec_size(nodePool)
             if (npSz != 0) {
-                var _d3: int = 0
                 iarr_set(hlf_type, w, BB_REDUCIBLE)
             }
             while (bvec_is_empty(workList) == 0) {
@@ -664,7 +650,6 @@ pn hlf_find_loops(cfg, lsg) {
             if (npSz2 > 0) {
                 var isRed: int = 1
                 if (wtype == BB_IRREDUCIBLE) {
-                    var _d4: int = 0
                     isRed = 0
                 }
                 var loop = lsg_create_new_loop(lsg, nodeW, isRed)
@@ -686,7 +671,7 @@ pn hlf_find_loops(cfg, lsg) {
 // LoopTesterApp
 // =====================================================
 
-pn build_diamond(cfg, start) {
+pn build_diamond(cfg, start) any {
     var bb0 = start
     var bb1 = bb0 + 1
     var bb2 = bb0 + 2
@@ -698,12 +683,12 @@ pn build_diamond(cfg, start) {
     return bb3
 }
 
-pn build_connect(cfg, start, end) {
+pn build_connect(cfg, start, end) any {
     cfg_add_edge(cfg, start, end)
     return 0
 }
 
-pn build_straight(cfg, start, n) {
+pn build_straight(cfg, start, n) any {
     var i: int = 0
     while (i < n) {
         var s1 = start + i
@@ -715,7 +700,7 @@ pn build_straight(cfg, start, n) {
     return r
 }
 
-pn build_base_loop(cfg, from) {
+pn build_base_loop(cfg, from) any {
     var header = build_straight(cfg, from, 1)
     var diamond1 = build_diamond(cfg, header)
     var d11 = build_straight(cfg, diamond1, 1)
@@ -728,7 +713,7 @@ pn build_base_loop(cfg, from) {
     return footer
 }
 
-pn construct_simple_cfg(cfg) {
+pn construct_simple_cfg(cfg) any {
     cfg_create_node(cfg, 0)
     build_base_loop(cfg, 0)
     cfg_create_node(cfg, 1)
@@ -736,12 +721,12 @@ pn construct_simple_cfg(cfg) {
     return 0
 }
 
-pn find_loops(cfg, lsg) {
+pn find_loops(cfg, lsg) any {
     hlf_find_loops(cfg, lsg)
     return 0
 }
 
-pn add_dummy_loops(cfg, lsg, numDummyLoops) {
+pn add_dummy_loops(cfg, lsg, numDummyLoops) any {
     var i: int = 0
     while (i < numDummyLoops) {
         find_loops(cfg, lsg)
@@ -750,7 +735,7 @@ pn add_dummy_loops(cfg, lsg, numDummyLoops) {
     return 0
 }
 
-pn construct_cfg(cfg, parLoops, pparLoops, ppparLoops) {
+pn construct_cfg(cfg, parLoops, pparLoops, ppparLoops) any {
     var n: int = 2
     var pl: int = 0
     while (pl < parLoops) {
@@ -778,7 +763,7 @@ pn construct_cfg(cfg, parLoops, pparLoops, ppparLoops) {
     return 0
 }
 
-pn lta_main(numDummyLoops, findLoopIterations, parLoops, pparLoops, ppparLoops) {
+pn lta_main(numDummyLoops, findLoopIterations, parLoops, pparLoops, ppparLoops) any {
     var cfg = cfg_new()
     cfg_create_node(cfg, 0)
     construct_simple_cfg(cfg)
@@ -800,7 +785,7 @@ pn lta_main(numDummyLoops, findLoopIterations, parLoops, pparLoops, ppparLoops) 
     return result
 }
 
-pn verify_result(result, innerIterations) {
+pn verify_result(result, innerIterations) any {
     var remainder = result % 100000
     var lcount: int = 0
     var temp = result - remainder

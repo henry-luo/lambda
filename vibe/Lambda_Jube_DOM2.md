@@ -216,7 +216,7 @@ struct JubeHostAPI {
     uint32_t api_version;            // additive-only; features gated by version
     const JubeHostValues*   values;  // item construction, strings, arrays, numbers
     const JubeHostGC*       gc;      // register/unregister roots, handle scopes
-    const JubeHostErrors*   errors;  // pending-exception model: throw_value, new_error, check
+    const JubeHostErrors*   errors;  // D8.4.3 returned ERROR lane: throw_value, new_error, payload
     const JubeHostScript*   script;  // call_function, property get/set on script values
     const JubeHostDomHooks* dom;     // the narrow Radiant-behavior hooks (mutation notify,
                                      // live-range bookkeeping, focus/dirty-state invariants…)

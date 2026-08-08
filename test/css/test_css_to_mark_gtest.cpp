@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <chrono>
+#include <cinttypes>
 #include <algorithm>
 #include <cctype>
 #include "../../lambda/input/css/css_tokenizer.hpp"
@@ -1202,12 +1203,14 @@ TEST_F(CssAllFilesTest, ParseKnownCssFrameworks) {
             // Test tokenization for framework files
             struct stat st;
             if (stat(it->c_str(), &st) == 0) {
-                printf("Debug: File %s size is %lld bytes\n", framework.c_str(), st.st_size);
+                printf("Debug: File %s size is %" PRIdMAX " bytes\n", framework.c_str(),
+                       static_cast<intmax_t>(st.st_size));
                 if (st.st_size < 50000) {
                     printf("Debug: Calling validateComplexCssStructures for %s\n", framework.c_str());
                     validateComplexCssStructures(it->c_str(), framework.c_str());
                 } else {
-                    printf("Debug: Skipping %s - too large (%lld bytes)\n", framework.c_str(), st.st_size);
+                    printf("Debug: Skipping %s - too large (%" PRIdMAX " bytes)\n",
+                           framework.c_str(), static_cast<intmax_t>(st.st_size));
                 }
             } else {
                 printf("Debug: Cannot stat file for %s\n", framework.c_str());

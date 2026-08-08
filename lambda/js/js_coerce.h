@@ -34,15 +34,15 @@ typedef enum {
 // with the hint string and validates the result is primitive. Otherwise
 // runs OrdinaryToPrimitive — calling valueOf then toString (or reverse for
 // JS_HINT_STRING), returning the first primitive result. If both methods
-// return non-primitives (or @@toPrimitive returns a non-primitive), throws
-// a TypeError via js_throw_type_error and returns ItemNull.
+// return non-primitives (or @@toPrimitive returns a non-primitive), returns
+// the merged ERROR Item produced by js_throw_type_error.
 //
 // Wrapper objects with __primitiveValue__ short-circuit when no
 // valueOf/toString/@@toPrimitive shadow exists on the object — this
 // preserves the long-standing fast path for boxed primitives.
 //
-// The caller MUST check js_check_exception() / js_exception_pending after
-// the call when the input could be an object.
+// The returned Item is the complete result.  A result tagged ERROR is the
+// failure lane and must be returned by the caller without consulting a flag.
 Item js_to_primitive(Item value, JsHint hint);
 
 #ifdef __cplusplus

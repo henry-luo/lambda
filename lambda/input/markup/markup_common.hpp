@@ -316,6 +316,36 @@ inline int skip_whitespace(const char** pos) {
     return count;
 }
 
+// consume one HTML attribute value while preserving the caller's whitespace
+// policy; inline and block tag scanners differ only in where they skip spaces.
+inline bool parse_html_attribute_value(const char** pos,
+        bool skip_space_before_equal, bool preserve_boolean_position) {
+    const char* after_name = *pos;
+    if (skip_space_before_equal) {
+        while (**pos == ' ' || **pos == '\t' || **pos == '\n' || **pos == '\r') (*pos)++;
+    }
+    if (**pos != '=') {
+        if (preserve_boolean_position) *pos = after_name;
+        return true;
+    }
+    (*pos)++;
+    while (**pos == ' ' || **pos == '\t' || **pos == '\n' || **pos == '\r') (*pos)++;
+    if (**pos == '"' || **pos == '\'') {
+        char quote = **pos;
+        (*pos)++;
+        while (**pos && **pos != quote) (*pos)++;
+        if (**pos != quote) return false;
+        (*pos)++;
+        return true;
+    }
+    while (**pos && **pos != ' ' && **pos != '\t' && **pos != '\n' &&
+           **pos != '"' && **pos != '\'' && **pos != '=' && **pos != '<' &&
+           **pos != '>' && **pos != '`') {
+        (*pos)++;
+    }
+    return true;
+}
+
 /**
  * Count leading spaces (not converting tabs)
  */

@@ -241,7 +241,6 @@ void pool_destroy(Pool* pool) {
     }
 
     log_debug("pool_destroy: destroying pool=%p (id=%u)", (void*)pool, pool->pool_id);
-
     // unlink from the memory context if registered (factory-created pools).
     // Done here so ANY pool_destroy path safely removes the node — no dangling
     // node can outlive the pool, regardless of how it was created.
@@ -451,8 +450,10 @@ void mempool_cleanup(void) {
     if (rpmalloc_initialized) {
         pthread_mutex_lock(&init_mutex);
         if (rpmalloc_initialized) {
-            rpmalloc_thread_finalize();
+            // rpmalloc_finalize() finalizes the calling thread itself; doing
+            // it twice leaves the global heap list corrupted on Linux ARM64.
             rpmalloc_finalize();
+            thread_initialized = 0;
             rpmalloc_initialized = 0;
         }
         pthread_mutex_unlock(&init_mutex);

@@ -14,21 +14,6 @@
 namespace lambda {
 namespace markup {
 
-// Helper: Create element from parser
-static inline Element* create_element(MarkupParser* parser, const char* tag) {
-    return parser->builder.element(tag).final().element;
-}
-
-// Helper: Add attribute to element
-static inline void add_attribute_to_element(MarkupParser* parser, Element* elem,
-                                            const char* key, const char* val) {
-    String* k = parser->builder.createString(key);
-    String* v = parser->builder.createString(val);
-    if (k && v) {
-        parser->builder.putToElement(lam::gc_borrow(elem), k, Item{.item = s2it(v)});
-    }
-}
-
 /**
  * extract_alt_text - Extract plain text from alt attribute, stripping markdown
  *
@@ -49,6 +34,33 @@ static char* extract_alt_text(const char* start, size_t len) {
     const char* pos = start;
     const char* end = start + len;
 
+    auto copy_until_close = [&]() {
+        while (pos < end && *pos != ']') {
+            if (*pos == '\\' && pos + 1 < end) {
+                pos++;
+                *out++ = *pos++;
+            } else {
+                *out++ = *pos++;
+            }
+        }
+    };
+    auto skip_reference_target = [&]() {
+        if (pos < end && *pos == '(') {
+            int depth = 1;
+            pos++;
+            while (pos < end && depth > 0) {
+                if (*pos == '\\' && pos + 1 < end) pos += 2;
+                else if (*pos == '(') { depth++; pos++; }
+                else if (*pos == ')') { depth--; pos++; }
+                else pos++;
+            }
+        } else if (pos < end && *pos == '[') {
+            pos++;
+            while (pos < end && *pos != ']') pos++;
+            if (pos < end) pos++;
+        }
+    };
+
     while (pos < end) {
         // Handle backslash escapes
         if (*pos == '\\' && pos + 1 < end) {
@@ -67,31 +79,11 @@ static char* extract_alt_text(const char* start, size_t len) {
         if (*pos == '[') {
             pos++;  // Skip [
             // Extract text until ]
-            while (pos < end && *pos != ']') {
-                if (*pos == '\\' && pos + 1 < end) {
-                    pos++;
-                    *out++ = *pos++;
-                } else {
-                    *out++ = *pos++;
-                }
-            }
+            copy_until_close();
             if (pos < end && *pos == ']') {
                 pos++;  // Skip ]
                 // Skip (url) or [ref] part
-                if (pos < end && *pos == '(') {
-                    int depth = 1;
-                    pos++;
-                    while (pos < end && depth > 0) {
-                        if (*pos == '\\' && pos + 1 < end) pos += 2;
-                        else if (*pos == '(') { depth++; pos++; }
-                        else if (*pos == ')') { depth--; pos++; }
-                        else pos++;
-                    }
-                } else if (pos < end && *pos == '[') {
-                    pos++;
-                    while (pos < end && *pos != ']') pos++;
-                    if (pos < end) pos++;  // Skip ]
-                }
+                skip_reference_target();
             }
             continue;
         }
@@ -100,31 +92,11 @@ static char* extract_alt_text(const char* start, size_t len) {
         if (*pos == '!' && pos + 1 < end && *(pos + 1) == '[') {
             pos += 2;  // Skip ![
             // Extract alt text until ]
-            while (pos < end && *pos != ']') {
-                if (*pos == '\\' && pos + 1 < end) {
-                    pos++;
-                    *out++ = *pos++;
-                } else {
-                    *out++ = *pos++;
-                }
-            }
+            copy_until_close();
             if (pos < end && *pos == ']') {
                 pos++;  // Skip ]
                 // Skip (url) or [ref] part
-                if (pos < end && *pos == '(') {
-                    int depth = 1;
-                    pos++;
-                    while (pos < end && depth > 0) {
-                        if (*pos == '\\' && pos + 1 < end) pos += 2;
-                        else if (*pos == '(') { depth++; pos++; }
-                        else if (*pos == ')') { depth--; pos++; }
-                        else pos++;
-                    }
-                } else if (pos < end && *pos == '[') {
-                    pos++;
-                    while (pos < end && *pos != ']') pos++;
-                    if (pos < end) pos++;  // Skip ]
-                }
+                skip_reference_target();
             }
             continue;
         }

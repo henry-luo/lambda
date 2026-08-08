@@ -29,7 +29,6 @@ extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
 extern "C" void js_enqueue_promise_job(Item job);
 extern "C" int64_t js_key_is_symbol_c(Item key);
 extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest);
-extern "C" int js_check_exception(void);
 extern "C" Item js_promise_with_resolvers(void);
 extern "C" Item js_throw_error_with_code(const char* code, const char* message);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
@@ -99,36 +98,6 @@ static Item readline_find_by_input(Item input) {
     return ItemNull;
 }
 
-static int readline_utf8_next(const char* s, int len, int* index) {
-    unsigned char c = (unsigned char)s[*index];
-    if (c < 0x80) {
-        (*index)++;
-        return c;
-    }
-    if ((c & 0xE0) == 0xC0 && *index + 1 < len) {
-        int cp = ((c & 0x1F) << 6) | ((unsigned char)s[*index + 1] & 0x3F);
-        *index += 2;
-        return cp;
-    }
-    if ((c & 0xF0) == 0xE0 && *index + 2 < len) {
-        int cp = ((c & 0x0F) << 12) |
-                 (((unsigned char)s[*index + 1] & 0x3F) << 6) |
-                 ((unsigned char)s[*index + 2] & 0x3F);
-        *index += 3;
-        return cp;
-    }
-    if ((c & 0xF8) == 0xF0 && *index + 3 < len) {
-        int cp = ((c & 0x07) << 18) |
-                 (((unsigned char)s[*index + 1] & 0x3F) << 12) |
-                 (((unsigned char)s[*index + 2] & 0x3F) << 6) |
-                 ((unsigned char)s[*index + 3] & 0x3F);
-        *index += 4;
-        return cp;
-    }
-    (*index)++;
-    return c;
-}
-
 static int readline_codepoint_width(int cp) {
     if ((cp >= 0x0300 && cp <= 0x036F) || cp == 0x20DD || cp == 0x200E) return 0;
     if ((cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0xA4CF) ||
@@ -172,7 +141,7 @@ static int readline_display_width(String* s, int byte_limit) {
     if (byte_limit >= 0 && byte_limit < len) len = byte_limit;
     int width = 0, i = 0;
     while (i < len) {
-        int cp = readline_utf8_next(s->chars, len, &i);
+        int cp = js_utf8_next_codepoint(s->chars, len, &i);
         width += readline_codepoint_width(cp);
     }
     return width;
@@ -253,7 +222,7 @@ static void readline_display_position_update(String* s, int byte_limit, int colu
             continue;
         }
         int before = i;
-        int cp = readline_utf8_next(s->chars, len, &i);
+        int cp = js_utf8_next_codepoint(s->chars, len, &i);
         if (i <= before) i = before + 1;
         *line_cols += readline_codepoint_width(cp);
     }
@@ -283,7 +252,7 @@ static int readline_next_char_index(String* s, int cursor) {
     if (cursor < 0) cursor = 0;
     if (cursor >= (int)s->len) return (int)s->len;
     int i = cursor;
-    readline_utf8_next(s->chars, (int)s->len, &i);
+    js_utf8_next_codepoint(s->chars, (int)s->len, &i);
     return i;
 }
 
@@ -847,9 +816,9 @@ static bool readline_emit_keypress(Item rl, char c) {
     js_array_push(args, ch);
     js_array_push(args, key);
     readline_set(rl, "__synth_keypress__", (Item){.item = ITEM_TRUE});
-    js_ee_emit(input, make_string_item("keypress"), args);
+    Item emit_result = js_ee_emit(input, make_string_item("keypress"), args);
     readline_set(rl, "__synth_keypress__", (Item){.item = ITEM_FALSE});
-    return !js_check_exception();
+    return !item_is_error(emit_result);
 }
 
 static void readline_append_chars(char* buf, int buf_size, int* pos, const char* chars, int len) {

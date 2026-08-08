@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "Tune15 B2.1 elides the empty number frame for a native-only function while retaining the native integer operation.",
+  "checks": [
+    {
+      "in_func": "_tune15_leaf_#",
+      "expect": [
+        "add\t{{r}}, %p1, {{r}}"
+      ],
+      "forbid": [
+        "side_number_top",
+        "lambda_restore_number_frame_top",
+        "lambda_item_adopt_scalar_home"
+      ]
+    }
+  ]
+}

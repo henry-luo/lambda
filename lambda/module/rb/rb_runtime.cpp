@@ -765,7 +765,7 @@ extern "C" Item rb_iterator_next(Item iterator) {
         int64_t end_val = range->end;
         if (idx > end_val) return (Item){.item = ITEM_ERROR};
         iter->items[1] = (Item){.item = i2it(idx + 1)};
-        return (Item){.item = i2it(idx)};
+        return range->is_char ? fn_chr((Item){.item = i2it(idx)}) : (Item){.item = i2it(idx)};
     }
     return (Item){.item = ITEM_ERROR};
 }

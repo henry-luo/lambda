@@ -28,46 +28,46 @@ type Planner = any
 
 // Growable array via the built-ins `push`/`len`/`splice` — no chunked + `.sz` wrapper.
 // `splice(v, i, 1)` removes one element in place (shift + shrink).
-pn vec_new() {
+pn vec_new() any {
     return []
 }
 
-pn vec_add(var v: Vec, item) {
+pn vec_add(var v: Vec, item) any {
     push(v, item)
 }
 
-pn vec_at(var v: Vec, idx) {
+pn vec_at(var v: Vec, idx) any {
     return v[idx]
 }
 
-pn vec_size(v: Vec) {
+pn vec_size(v: Vec) any {
     return len(v)
 }
 
-pn vec_set(var v: Vec, idx, item) {
+pn vec_set(var v: Vec, idx, item) any {
     v[idx] = item
 }
 
-pn vec_is_empty(v: Vec) {
+pn vec_is_empty(v: Vec) any {
     if (len(v) == 0) { return 1 }
     return 0
 }
 
-pn vec_remove_first(var v: Vec) {
+pn vec_remove_first(var v: Vec) any {
     if (len(v) == 0) { return null }
     var first = v[0]
     splice(v, 0, 1)
     return first
 }
 
-pn vec_with(item) {
+pn vec_with(item) any {
     var v = vec_new()
     vec_add(v, item)
     return v
 }
 
 // Remove constraint by cid from vector
-pn vec_remove_cid(var v: Vec, cid) {
+pn vec_remove_cid(var v: Vec, cid) any {
     var sz = len(v)
     var found: int = -1
     var i: int = 0
@@ -87,47 +87,46 @@ pn vec_remove_cid(var v: Vec, cid) {
 }
 
 // --- Strength helpers ---
-pn s_stronger(a, b) {
+pn s_stronger(a, b) any {
     if (a < b) { return 1 }
     return 0
 }
 
-pn s_weaker(a, b) {
+pn s_weaker(a, b) any {
     if (a > b) { return 1 }
     return 0
 }
 
-pn s_weakest(a, b) {
+pn s_weakest(a, b) any {
     if (a > b) { return a }
     return b
 }
 
 // --- Variable ---
-pn var_new() {
+pn var_new() any {
     var cs = vec_new()
     var v = { val: 0, constraints: null, determinedBy: 0, walkStrength: 10000, stay: 1, mark: 0 }
     v.constraints = cs
     return v
 }
 
-pn var_value(aValue) {
+pn var_value(aValue) any {
     var v = var_new()
     v.val = aValue
     return v
 }
 
-pn var_add_constraint(var variable: any, c) {
+pn var_add_constraint(var variable: any, c) any {
     var cs: Vec = (variable.constraints)
     vec_add(cs, c)
 }
 
-pn var_remove_constraint(var variable: any, c) {
+pn var_remove_constraint(var variable: any, c) any {
     var cs: Vec = (variable.constraints)
     var ccid = (c.cid)
     vec_remove_cid(cs, ccid)
     var det = (variable.determinedBy)
     if (det == ccid) {
-        var _d: int = 0
         variable.determinedBy = 0
     }
 }
@@ -139,13 +138,13 @@ pn var_remove_constraint(var variable: any, c) {
 // Scale: { cid, kind:4, strength, v1:var, v2:var, direction:0|1|2, sc:var, off:var }
 // determinedBy stores cid (INT), 0 = no constraint
 
-pn c_is_input(c) {
+pn c_is_input(c) any {
     var k = (c.kind)
     if (k == K_EDIT) { return 1 }
     return 0
 }
 
-pn c_is_satisfied(c) {
+pn c_is_satisfied(c) any {
     var k = (c.kind)
     if (k == K_EDIT) {
         var s = (c.satisfied)
@@ -161,7 +160,7 @@ pn c_is_satisfied(c) {
     return 0
 }
 
-pn c_add_to_graph(var c: any) {
+pn c_add_to_graph(var c: any) any {
     var k = (c.kind)
     if (k == K_EDIT) {
         var o: Variable = (c.out)
@@ -193,7 +192,7 @@ pn c_add_to_graph(var c: any) {
     }
 }
 
-pn c_remove_from_graph(var c: any) {
+pn c_remove_from_graph(var c: any) any {
     var k = (c.kind)
     if (k == K_EDIT) {
         var o: Variable = (c.out)
@@ -229,7 +228,7 @@ pn c_remove_from_graph(var c: any) {
     }
 }
 
-pn c_choose_method(var c: any, mark) {
+pn c_choose_method(var c: any, mark) any {
     var k = (c.kind)
     if (k == K_EDIT) {
         var o = (c.out)
@@ -312,27 +311,23 @@ pn c_choose_method(var c: any, mark) {
     return 0
 }
 
-pn c_mark_unsatisfied(var c: any) {
+pn c_mark_unsatisfied(var c: any) any {
     var k = (c.kind)
     if (k == K_EDIT) {
-        var _d: int = 0
         c.satisfied = 0
     }
     if (k == K_STAY) {
-        var _d2: int = 0
         c.satisfied = 0
     }
     if (k == K_EQUAL) {
-        var _d3: int = 0
         c.direction = 0
     }
     if (k == K_SCALE) {
-        var _d4: int = 0
         c.direction = 0
     }
 }
 
-pn c_get_output(var c: any) {
+pn c_get_output(var c: any) any {
     var k = (c.kind)
     if (k == K_EDIT) {
         var o: Variable = (c.out)
@@ -352,7 +347,7 @@ pn c_get_output(var c: any) {
     return v1
 }
 
-pn c_mark_inputs(var c: any, mark) {
+pn c_mark_inputs(var c: any, mark) any {
     var k = (c.kind)
     // Unary: no inputs
     if (k == K_EDIT) { return 0 }
@@ -387,7 +382,7 @@ pn c_mark_inputs(var c: any, mark) {
 }
 
 // inputsKnown: all inputs must satisfy (mark==mark || stay || determinedBy==0)
-pn c_inputs_known(var c: any, mark) {
+pn c_inputs_known(var c: any, mark) any {
     var k = (c.kind)
     if (k == K_EDIT) { return 1 }
     if (k == K_STAY) { return 1 }
@@ -445,7 +440,7 @@ pn c_inputs_known(var c: any, mark) {
     return 1
 }
 
-pn c_recalculate(var c: any) {
+pn c_recalculate(var c: any) any {
     var k = (c.kind)
     if (k == K_EDIT) {
         var o: Variable = (c.out)
@@ -522,7 +517,7 @@ pn c_recalculate(var c: any) {
     return 0
 }
 
-pn c_execute(var c: any) {
+pn c_execute(var c: any) any {
     var k = (c.kind)
     // Edit and Stay: no-op
     if (k == K_EDIT) { return 0 }
@@ -573,18 +568,18 @@ pn c_execute(var c: any) {
 }
 
 // --- Planner ---
-pn planner_new() {
+pn planner_new() any {
     var p: Planner = { currentMark: 1, nextCid: 1 }
     return p
 }
 
-pn planner_new_mark(var planner: any) {
+pn planner_new_mark(var planner: any) any {
     var cm = (planner.currentMark) + 1
     planner.currentMark = cm
     return cm
 }
 
-pn planner_next_cid(var planner: any) {
+pn planner_next_cid(var planner: any) any {
     var nc = (planner.nextCid)
     var nn = nc + 1
     planner.nextCid = nn
@@ -592,7 +587,7 @@ pn planner_next_cid(var planner: any) {
 }
 
 // c_satisfy: returns overridden constraint (or null)
-pn c_satisfy(var c: any, mark, var planner: any) {
+pn c_satisfy(var c: any, mark, var planner: any) any {
     c_choose_method(c, mark)
     var sat = c_is_satisfied(c)
     if (sat == 1) {
@@ -633,12 +628,12 @@ pn c_satisfy(var c: any, mark, var planner: any) {
     return null
 }
 
-pn c_add_constraint(var c: any, var planner: any) {
+pn c_add_constraint(var c: any, var planner: any) any {
     c_add_to_graph(c)
     planner_incremental_add(planner, c)
 }
 
-pn c_destroy_constraint(var c: any, var planner: any) {
+pn c_destroy_constraint(var c: any, var planner: any) any {
     var sat = c_is_satisfied(c)
     if (sat == 1) {
         planner_incremental_remove(planner, c)
@@ -647,7 +642,7 @@ pn c_destroy_constraint(var c: any, var planner: any) {
 }
 
 // --- Constraint constructors ---
-pn edit_constraint_new(var v: any, strength, var planner: any) {
+pn edit_constraint_new(var v: any, strength, var planner: any) any {
     var cid = planner_next_cid(planner)
     var c: any = { cid: 0, kind: 1, strength: 0, out: null, satisfied: 0 }
     c.cid = cid
@@ -657,7 +652,7 @@ pn edit_constraint_new(var v: any, strength, var planner: any) {
     return c
 }
 
-pn stay_constraint_new(var v: any, strength, var planner: any) {
+pn stay_constraint_new(var v: any, strength, var planner: any) any {
     var cid = planner_next_cid(planner)
     var c: any = { cid: 0, kind: 2, strength: 0, out: null, satisfied: 0 }
     c.cid = cid
@@ -667,7 +662,7 @@ pn stay_constraint_new(var v: any, strength, var planner: any) {
     return c
 }
 
-pn equality_constraint_new(var v1: any, var v2: any, strength, var planner: any) {
+pn equality_constraint_new(var v1: any, var v2: any, strength, var planner: any) any {
     var cid = planner_next_cid(planner)
     var c: any = { cid: 0, kind: 3, strength: 0, v1: null, v2: null, direction: 0 }
     c.cid = cid
@@ -678,7 +673,7 @@ pn equality_constraint_new(var v1: any, var v2: any, strength, var planner: any)
     return c
 }
 
-pn scale_constraint_new(var src: any, var scale: any, var offset: any, var dest: any, strength, var planner: any) {
+pn scale_constraint_new(var src: any, var scale: any, var offset: any, var dest: any, strength, var planner: any) any {
     var cid = planner_next_cid(planner)
     var c: any = { cid: 0, kind: 4, strength: 0, v1: null, v2: null, direction: 0, sc: null, off: null }
     c.cid = cid
@@ -692,7 +687,7 @@ pn scale_constraint_new(var src: any, var scale: any, var offset: any, var dest:
 }
 
 // --- Planner methods ---
-pn planner_incremental_add(var planner: any, var c: any) {
+pn planner_incremental_add(var planner: any, var c: any) any {
     var mark = planner_new_mark(planner)
     var overridden = c_satisfy(c, mark, planner)
     while (overridden != null) {
@@ -700,7 +695,7 @@ pn planner_incremental_add(var planner: any, var c: any) {
     }
 }
 
-pn planner_incremental_remove(var planner: any, var c: any) {
+pn planner_incremental_remove(var planner: any, var c: any) any {
     var out: Variable = c_get_output(c)
     c_mark_unsatisfied(c)
     c_remove_from_graph(c)
@@ -714,7 +709,7 @@ pn planner_incremental_remove(var planner: any, var c: any) {
     }
 }
 
-pn planner_extract_plan(var planner: any, var constraints: Vec) {
+pn planner_extract_plan(var planner: any, var constraints: Vec) any {
     var sources: Vec = vec_new()
     var csz = vec_size(constraints)
     var i: int = 0
@@ -733,7 +728,7 @@ pn planner_extract_plan(var planner: any, var constraints: Vec) {
     return plan
 }
 
-pn planner_make_plan(var planner: any, var sources: Vec) {
+pn planner_make_plan(var planner: any, var sources: Vec) any {
     var mark = planner_new_mark(planner)
     var plan: Vec = vec_new()
     var todo = sources
@@ -755,7 +750,7 @@ pn planner_make_plan(var planner: any, var sources: Vec) {
     return plan
 }
 
-pn planner_propagate_from(var planner: any, var v: any) {
+pn planner_propagate_from(var planner: any, var v: any) any {
     var todo: Vec = vec_new()
     planner_add_constraints_consuming_to(planner, v, todo)
     var empty = vec_is_empty(todo)
@@ -768,7 +763,7 @@ pn planner_propagate_from(var planner: any, var v: any) {
     }
 }
 
-pn planner_add_constraints_consuming_to(var planner: any, var v: any, var coll: Vec) {
+pn planner_add_constraints_consuming_to(var planner: any, var v: any, var coll: Vec) any {
     var det = (v.determinedBy)
     var cs: Vec = (v.constraints)
     var csz = vec_size(cs)
@@ -786,7 +781,7 @@ pn planner_add_constraints_consuming_to(var planner: any, var v: any, var coll: 
     }
 }
 
-pn planner_add_propagate(var planner: any, var c: any, mark) {
+pn planner_add_propagate(var planner: any, var c: any, mark) any {
     var todo: Vec = vec_with(c)
     var empty = vec_is_empty(todo)
     while (empty == 0) {
@@ -804,7 +799,7 @@ pn planner_add_propagate(var planner: any, var c: any, mark) {
     return 1
 }
 
-pn planner_change(var planner: any, var v: any, newValue) {
+pn planner_change(var planner: any, var v: any, newValue) any {
     var editC = edit_constraint_new(v, S_PREFERRED, planner)
     var editV: Vec = vec_with(editC)
     var plan: Vec = planner_extract_plan(planner, editV)
@@ -824,7 +819,7 @@ pn planner_change(var planner: any, var v: any, newValue) {
     c_destroy_constraint(editC, planner)
 }
 
-pn planner_remove_propagate_from(var planner: any, var out: any) {
+pn planner_remove_propagate_from(var planner: any, var out: any) any {
     var unsatisfied: Vec = vec_new()
     out.determinedBy = 0
     out.walkStrength = S_ABSOLUTE_WEAKEST
@@ -868,7 +863,7 @@ pn planner_remove_propagate_from(var planner: any, var out: any) {
 
 // --- Benchmark tests ---
 
-pn chain_test(n) {
+pn chain_test(n) any {
     var planner: Planner = planner_new()
     // Create n+1 variables
     var vars: Vec = vec_new()
@@ -923,7 +918,7 @@ pn chain_test(n) {
     return 1
 }
 
-pn projection_test(n) {
+pn projection_test(n) any {
     var planner: Planner = planner_new()
     var dests: Vec = vec_new()
     var scale: Variable = var_value(10)

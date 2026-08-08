@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "Tune16 C3 lowers a fixed-shape scalar record read without routing through fn_member.",
+  "checks": [
+    {
+      "in_func": "_tune16_record_read_#",
+      "expect": [
+        "mov\t{{r}}, i64:({{r}})"
+      ],
+      "forbid": [
+        "call\tfn_member_p, fn_member",
+        "call\tfn_index_p, fn_index"
+      ]
+    }
+  ]
+}

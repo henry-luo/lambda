@@ -92,6 +92,20 @@ void print_ts_root(const char *source, TSTree* syntax_tree) {
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth = 0, const char* indent = NULL, bool is_attrs = false);
 
+static void print_range_char(StrBuf* strbuf, int64_t codepoint) {
+    char utf8[4];
+    size_t length = str_utf8_encode((uint32_t)codepoint, utf8, sizeof(utf8));
+    if (length == 0) {
+        strbuf_append_str(strbuf, "\"\"");
+        return;
+    }
+    // Boundary libraries share the printer but not the evaluator; render the
+    // codepoint directly so char ranges do not introduce an fn_chr link.
+    strbuf_append_char(strbuf, '\"');
+    strbuf_append_str_n(strbuf, utf8, length);
+    strbuf_append_char(strbuf, '\"');
+}
+
 void print_double(StrBuf *strbuf, double num) {
     char num_buf[64];
     lambda_double_to_shortest(num, num_buf, sizeof(num_buf));
@@ -435,9 +449,13 @@ struct PrintItemVisitor {
         Range* range = item.ptr();
         log_debug("print range: %p, start: %ld, end: %ld", range, range->start, range->end);
         strbuf_append_char(strbuf, '[');
-        for (int i = range->start; i <= range->end; i++) {
-            if (i > range->start) strbuf_append_str(strbuf, ", ");
-            strbuf_append_int(strbuf, i);
+        for (int64_t i = 0; i < range->length; i++) {
+            if (i > 0) strbuf_append_str(strbuf, ", ");
+            if (range->is_char) {
+                print_range_char(strbuf, range->start + i);
+            } else {
+                strbuf_append_int64(strbuf, range->start + i);
+            }
         }
         strbuf_append_char(strbuf, ']');
     }
@@ -976,20 +994,10 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         }
         break;
     }
-    case AST_NODE_FOR_EXPR: {
-        log_debug("[for expr:%s]", type_name);
-        AstNode *loop = ((AstForNode*)node)->loop;
-        while (loop) {
-            print_label(indent + 1, "loop:");
-            print_ast_node(script, loop, indent + 1);
-            loop = loop->next;
-        }
-        print_label(indent + 1, "then:");
-        print_ast_node(script, ((AstForNode*)node)->then, indent + 1);
-        break;
-    }
+    case AST_NODE_FOR_EXPR:
     case AST_NODE_FOR_STAM: {
-        log_debug("[for stam:%s]", type_name);
+        log_debug("[for %s:%s]",
+            node->node_type == AST_NODE_FOR_EXPR ? "expr" : "stam", type_name);
         AstNode *loop = ((AstForNode*)node)->loop;
         while (loop) {
             print_label(indent + 1, "loop:");

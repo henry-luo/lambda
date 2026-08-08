@@ -14,6 +14,7 @@
 #include "../../lib/str.h"
 #include <limits.h>
 #include <new>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -26,6 +27,13 @@ extern "C" {
 
 __thread Context* input_context = NULL;
 __thread InputAllocationContext* input_allocation_context = NULL;
+
+// Input parsing may run concurrently, but ArrayList and Pool are deliberately
+// single-owner types.  The manager lock protects only singleton bookkeeping;
+// each worker keeps its own parser pool so document construction remains parallel.
+static pthread_mutex_t g_input_manager_mutex = PTHREAD_MUTEX_INITIALIZER;
+static __thread InputManager* g_input_thread_manager = NULL;
+static __thread Pool* g_input_thread_pool = NULL;
 
 ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
     ShapeEntry* shape_entry = NULL;
@@ -88,54 +96,65 @@ static bool map_key_is_array_index_name(String* key) {
     return true;
 }
 
-static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
-    if (!field_ptr) return false;
+static bool store_common_field_value(void* field_ptr, TypeId type_id, Item value) {
     switch (type_id) {
     case LMD_TYPE_NULL:
     case LMD_TYPE_UNDEFINED:
-        // null/undefined value doesn't need to store anything - just mark the slot
         *(bool*)field_ptr = false;
-        break;
+        return true;
     case LMD_TYPE_BOOL:
         *(bool*)field_ptr = value.bool_val;
-        break;
-    case LMD_TYPE_INT: {
-        // Input-built maps share runtime maps' int64 lane; mixing a double
-        // writer with the lane reader makes even finite fields decode as inf.
+        return true;
+    case LMD_TYPE_INT:
         *(int64_t*)field_ptr = lambda_int_item_to_lane(value.item);
-        break;
-    }
+        return true;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
-        break;
+        return true;
     case LMD_TYPE_UINT64:
         *(uint64_t*)field_ptr = value.get_uint64();
-        break;
+        return true;
     case LMD_TYPE_NUM_SIZED:
-        // A plain shaped field keeps the packed Item so the i8/u32 subtype
-        // survives later validation or nullable-lane conversion.
         *(Item*)field_ptr = value;
-        break;
+        return true;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = value.get_double();
-        break;
+        return true;
     case LMD_TYPE_DTIME:
         *(DateTime**)field_ptr = value.get_datetime_ptr();
-        break;
+        return true;
     case LMD_TYPE_DECIMAL:
         *(Decimal**)field_ptr = value.get_decimal();
-        break;
+        return true;
     case LMD_TYPE_STRING:
         *(String**)field_ptr = value.get_safe_string();
-        break;
+        return true;
     case LMD_TYPE_SYMBOL:
         *(Symbol**)field_ptr = value.get_safe_symbol();
-        break;
+        return true;
     case LMD_TYPE_BINARY:
         *(Binary**)field_ptr = value.get_safe_binary();
-        break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
+        return true;
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_MAP:
+    case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT:
+        *(Container**)field_ptr = value.container;
+        return true;
+    case LMD_TYPE_PATH:
+        *(Path**)field_ptr = value.path;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
+    if (!field_ptr) return false;
+    if (store_common_field_value(field_ptr, type_id, value)) return true;
+    switch (type_id) {
+    case LMD_TYPE_RANGE:
         *(Container**)field_ptr = value.container;
         break;
     case LMD_TYPE_VMAP:
@@ -148,9 +167,6 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
         break;
     case LMD_TYPE_TYPE:
         *(Type**)field_ptr = value.type;
-        break;
-    case LMD_TYPE_PATH:
-        *(Path**)field_ptr = value.path;
         break;
     case LMD_TYPE_ANY: {
         Item item = value;
@@ -620,52 +636,8 @@ bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
 
 extern TypeElmt EmptyElmt;
 static void elmt_store_value(void* field_ptr, TypeId type_id, Item value) {
+    if (store_common_field_value(field_ptr, type_id, value)) return;
     switch (type_id) {
-    case LMD_TYPE_NULL:
-    case LMD_TYPE_UNDEFINED:
-        *(bool*)field_ptr = false;
-        break;
-    case LMD_TYPE_BOOL:
-        *(bool*)field_ptr = value.bool_val;
-        break;
-    case LMD_TYPE_INT:
-        // Input-built shapes share the runtime int64 lane representation.
-        *(int64_t*)field_ptr = lambda_int_item_to_lane(value.item);
-        break;
-    case LMD_TYPE_INT64:
-        *(int64_t*)field_ptr = value.get_int64();
-        break;
-    case LMD_TYPE_UINT64:
-        *(uint64_t*)field_ptr = value.get_uint64();
-        break;
-    case LMD_TYPE_NUM_SIZED:
-        *(Item*)field_ptr = value;
-        break;
-    case LMD_TYPE_FLOAT:
-        *(double*)field_ptr = value.get_double();
-        break;
-    case LMD_TYPE_DTIME:
-        *(DateTime**)field_ptr = value.get_datetime_ptr();
-        break;
-    case LMD_TYPE_DECIMAL:
-        *(Decimal**)field_ptr = value.get_decimal();
-        break;
-    case LMD_TYPE_STRING:
-        *(String**)field_ptr = value.get_safe_string();
-        break;
-    case LMD_TYPE_SYMBOL:
-        *(Symbol**)field_ptr = value.get_safe_symbol();
-        break;
-    case LMD_TYPE_BINARY:
-        *(Binary**)field_ptr = value.get_safe_binary();
-        break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
-        *(void**)field_ptr = value.container;
-        break;
-    case LMD_TYPE_PATH:
-        *(Path**)field_ptr = value.path;
-        break;
     default:
         log_debug("elmt_store_value: unknown type %d", type_id);
     }
@@ -1473,6 +1445,7 @@ InputManager::InputManager() {
         log_error("InputManager: Failed to create global_pool");
     }
     inputs = arraylist_new(16);
+    thread_pools = arraylist_new(4);
     // Use shared global decimal context
     decimal_ctx = decimal_fixed_context();
 }
@@ -1482,6 +1455,16 @@ InputManager::~InputManager() {
     if (inputs) {
         for (int i = 0; i < inputs->length; i++) {
             Input* input = (Input*)inputs->data[i];
+            if (input && input->mem_ctx) {
+                // destroy document-owned allocators before their backing pool;
+                // leaving the child context for process shutdown makes it walk
+                // arenas whose pool has already been released.
+                mem_context_destroy((MemContext*)input->mem_ctx);
+                input->mem_ctx = nullptr;
+                input->arena = nullptr;
+                input->name_pool = nullptr;
+                input->shape_pool = nullptr;
+            }
             if (input && input->url) {
                 url_destroy((Url*)input->url);
                 input->url = nullptr;
@@ -1491,6 +1474,15 @@ InputManager::~InputManager() {
             }
         }
         arraylist_free(inputs);
+    }
+
+    if (thread_pools) {
+        for (int i = 0; i < thread_pools->length; i++) {
+            Pool* pool = (Pool*)thread_pools->data[i];
+            if (pool) mem_pool_destroy(pool);
+        }
+        arraylist_free(thread_pools);
+        thread_pools = nullptr;
     }
 
     // Destroy the global pool (this frees all pool-allocated memory)
@@ -1523,55 +1515,89 @@ void input_manager_destroy(InputManager* mgr) {
 
 mpd_context_t* InputManager::decimal_context() {
     // Lazy initialization of singleton
+    pthread_mutex_lock(&g_input_manager_mutex);
     if (!g_input_manager) {
         g_input_manager = input_manager_create();
     }
-    if (!g_input_manager) return nullptr;
-    return g_input_manager->decimal_ctx;
+    mpd_context_t* context = g_input_manager ? g_input_manager->decimal_ctx : nullptr;
+    pthread_mutex_unlock(&g_input_manager_mutex);
+    return context;
 }
 
 // Static method to create input using global manager
 Input* InputManager::create_input(Url* abs_url) {
     // Lazy initialization of singleton
+    pthread_mutex_lock(&g_input_manager_mutex);
     if (!g_input_manager) {
         g_input_manager = input_manager_create();
     }
-    if (!g_input_manager) return nullptr;
-    return g_input_manager->create_input_instance(abs_url);
+    InputManager* manager = g_input_manager;
+    pthread_mutex_unlock(&g_input_manager_mutex);
+    if (!manager) return nullptr;
+    return manager->create_input_instance(abs_url);
 }
 
 // Instance method to create input
 Input* InputManager::create_input_instance(Url* abs_url) {
-    if (!global_pool) {
-        log_error("create_input_instance: global_pool is NULL");
-        return nullptr;
+    pthread_mutex_lock(&g_input_manager_mutex);
+
+    Pool* pool = nullptr;
+    if (g_input_thread_manager == this) {
+        pool = g_input_thread_pool;
+    }
+    if (!pool) {
+        pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "input.thread_pool");
+        if (!pool || !thread_pools || !arraylist_append(thread_pools, pool)) {
+            if (pool) mem_pool_destroy(pool);
+            pthread_mutex_unlock(&g_input_manager_mutex);
+            log_error("create_input_instance: failed to create thread input pool");
+            return nullptr;
+        }
+        g_input_thread_manager = this;
+        g_input_thread_pool = pool;
     }
 
-    // Use the static create method with the managed pool
-    Input* input = Input::create(global_pool, abs_url);
+    Input* input = Input::create(pool, abs_url);
     if (!input) {
+        pthread_mutex_unlock(&g_input_manager_mutex);
         log_error("create_input_instance: Input::create returned NULL");
         return nullptr;
     }
 
     // Track this input for cleanup
-    arraylist_append(inputs, input);
+    if (!inputs || !arraylist_append(inputs, input)) {
+        pthread_mutex_unlock(&g_input_manager_mutex);
+        log_error("create_input_instance: failed to track input");
+        return nullptr;
+    }
 
+    pthread_mutex_unlock(&g_input_manager_mutex);
     return input;
 }
 
 // Destroy the global instance
 void InputManager::destroy_global() {
-    if (g_input_manager) {
-        input_manager_destroy(g_input_manager);
+    pthread_mutex_lock(&g_input_manager_mutex);
+    InputManager* manager = g_input_manager;
+    if (manager) {
+        input_manager_destroy(manager);
         g_input_manager = nullptr;
     }
+    if (g_input_thread_manager == manager) {
+        g_input_thread_manager = nullptr;
+        g_input_thread_pool = nullptr;
+    }
+    pthread_mutex_unlock(&g_input_manager_mutex);
 }
 
 // Detach a URL pointer from any tracked Input that owns it, so the caller can
 // free the URL without ~InputManager double-freeing the same pointer.
 void InputManager::detach_url(Url* url) {
-    if (!g_input_manager || !url || !g_input_manager->inputs) return;
+    pthread_mutex_lock(&g_input_manager_mutex);
+    if (!g_input_manager || !url || !g_input_manager->inputs) {
+        pthread_mutex_unlock(&g_input_manager_mutex);
+        return;
+    }
     ArrayList* inputs = g_input_manager->inputs;
     for (int i = 0; i < inputs->length; i++) {
         Input* input = (Input*)inputs->data[i];
@@ -1579,6 +1605,7 @@ void InputManager::detach_url(Url* url) {
             input->url = nullptr;
         }
     }
+    pthread_mutex_unlock(&g_input_manager_mutex);
 }
 
 // Get the <html> element from the #document tree

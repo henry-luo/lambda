@@ -276,7 +276,7 @@ static void dns_scheduled_timer_cb(uv_timer_t* timer) {
     uv_close((uv_handle_t*)timer, dns_scheduled_close_cb);
 }
 
-static Item dns_lookup_emit_scheduled(Item env_item) {
+static Item dns_emit_scheduled_common(Item env_item, int success_arg_count) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
 
@@ -284,9 +284,6 @@ static Item dns_lookup_emit_scheduled(Item env_item) {
     Item resolve = env[1];
     Item reject = env[2];
     Item error = env[3];
-    Item callback_value = env[4];
-    Item callback_family = env[5];
-    Item promise_value = env[6];
 
     if (!is_nullish_item(error)) {
         if (is_callable(callback)) {
@@ -302,87 +299,44 @@ static Item dns_lookup_emit_scheduled(Item env_item) {
     }
 
     if (is_callable(callback)) {
-        Item args[3] = { ItemNull, callback_value, callback_family };
-        js_call_function(callback, make_js_undefined(), args, 3);
+        int argc = success_arg_count == 3 ? 3 : 2;
+        Item args[3] = { ItemNull, env[4], argc == 3 ? env[5] : ItemNull };
+        js_call_function(callback, make_js_undefined(), args, argc);
     }
     if (is_callable(resolve)) {
-        Item args[1] = { promise_value };
+        Item args[1] = { success_arg_count == 3 ? env[6] : env[4] };
         js_call_function(resolve, make_js_undefined(), args, 1);
     }
     js_microtask_flush();
     return make_js_undefined();
+}
+
+static Item dns_lookup_emit_scheduled(Item env_item) {
+    return dns_emit_scheduled_common(env_item, 3);
 }
 
 static Item dns_resolve_emit_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
-
-    Item callback = env[0];
-    Item resolve = env[1];
-    Item reject = env[2];
-    Item error = env[3];
-    Item value = env[4];
-
-    if (!is_nullish_item(error)) {
-        if (is_callable(callback)) {
-            Item args[1] = { error };
-            js_call_function(callback, make_js_undefined(), args, 1);
-        }
-        if (is_callable(reject)) {
-            Item args[1] = { error };
-            js_call_function(reject, make_js_undefined(), args, 1);
-        }
-        js_microtask_flush();
-        return make_js_undefined();
-    }
-
-    if (is_callable(callback)) {
-        Item args[2] = { ItemNull, value };
-        js_call_function(callback, make_js_undefined(), args, 2);
-    }
-    if (is_callable(resolve)) {
-        Item args[1] = { value };
-        js_call_function(resolve, make_js_undefined(), args, 1);
-    }
-    js_microtask_flush();
-    return make_js_undefined();
+    return dns_emit_scheduled_common(env_item, 2);
 }
 
 static Item dns_lookup_service_emit_scheduled(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    if (!env) return make_js_undefined();
+    return dns_emit_scheduled_common(env_item, 3);
+}
 
-    Item callback = env[0];
-    Item resolve = env[1];
-    Item reject = env[2];
-    Item error = env[3];
-    Item hostname = env[4];
-    Item service = env[5];
-    Item promise_value = env[6];
-
-    if (!is_nullish_item(error)) {
-        if (is_callable(callback)) {
-            Item args[1] = { error };
-            js_call_function(callback, make_js_undefined(), args, 1);
+static void dns_enqueue_scheduled(Item fn) {
+    uv_loop_t* loop = lambda_uv_loop();
+    if (loop) {
+        DnsScheduledReq* sr = (DnsScheduledReq*)mem_calloc(1, sizeof(DnsScheduledReq), MEM_CAT_JS_RUNTIME);
+        sr->callback = fn;
+        if (uv_timer_init(loop, &sr->timer) == 0) {
+            sr->timer.data = sr;
+            if (uv_timer_start(&sr->timer, dns_scheduled_timer_cb, 0, 0) == 0) return;
+            uv_close((uv_handle_t*)&sr->timer, dns_scheduled_close_cb);
+        } else {
+            mem_free(sr);
         }
-        if (is_callable(reject)) {
-            Item args[1] = { error };
-            js_call_function(reject, make_js_undefined(), args, 1);
-        }
-        js_microtask_flush();
-        return make_js_undefined();
     }
-
-    if (is_callable(callback)) {
-        Item args[3] = { ItemNull, hostname, service };
-        js_call_function(callback, make_js_undefined(), args, 3);
-    }
-    if (is_callable(resolve)) {
-        Item args[1] = { promise_value };
-        js_call_function(resolve, make_js_undefined(), args, 1);
-    }
-    js_microtask_flush();
-    return make_js_undefined();
+    js_next_tick_enqueue(fn);
 }
 
 static void dns_lookup_schedule(Item callback, Item resolve, Item reject,
@@ -398,22 +352,7 @@ static void dns_lookup_schedule(Item callback, Item resolve, Item reject,
     env[6] = promise_value;
     Item fn = js_new_closure((void*)dns_lookup_emit_scheduled, 0, env, 7);
 
-    uv_loop_t* loop = lambda_uv_loop();
-    if (loop) {
-        DnsScheduledReq* sr = (DnsScheduledReq*)mem_calloc(1, sizeof(DnsScheduledReq), MEM_CAT_JS_RUNTIME);
-        sr->callback = fn;
-        if (uv_timer_init(loop, &sr->timer) == 0) {
-            sr->timer.data = sr;
-            if (uv_timer_start(&sr->timer, dns_scheduled_timer_cb, 0, 0) == 0) {
-                return;
-            }
-            uv_close((uv_handle_t*)&sr->timer, dns_scheduled_close_cb);
-        } else {
-            mem_free(sr);
-        }
-    }
-
-    js_next_tick_enqueue(fn);
+    dns_enqueue_scheduled(fn);
 }
 
 static void dns_resolve_schedule(Item callback, Item resolve, Item reject,
@@ -426,22 +365,7 @@ static void dns_resolve_schedule(Item callback, Item resolve, Item reject,
     env[4] = value;
     Item fn = js_new_closure((void*)dns_resolve_emit_scheduled, 0, env, 5);
 
-    uv_loop_t* loop = lambda_uv_loop();
-    if (loop) {
-        DnsScheduledReq* sr = (DnsScheduledReq*)mem_calloc(1, sizeof(DnsScheduledReq), MEM_CAT_JS_RUNTIME);
-        sr->callback = fn;
-        if (uv_timer_init(loop, &sr->timer) == 0) {
-            sr->timer.data = sr;
-            if (uv_timer_start(&sr->timer, dns_scheduled_timer_cb, 0, 0) == 0) {
-                return;
-            }
-            uv_close((uv_handle_t*)&sr->timer, dns_scheduled_close_cb);
-        } else {
-            mem_free(sr);
-        }
-    }
-
-    js_next_tick_enqueue(fn);
+    dns_enqueue_scheduled(fn);
 }
 
 static void dns_lookup_service_schedule(Item callback, Item resolve, Item reject,
@@ -457,29 +381,13 @@ static void dns_lookup_service_schedule(Item callback, Item resolve, Item reject
     env[6] = promise_value;
     Item fn = js_new_closure((void*)dns_lookup_service_emit_scheduled, 0, env, 7);
 
-    uv_loop_t* loop = lambda_uv_loop();
-    if (loop) {
-        DnsScheduledReq* sr = (DnsScheduledReq*)mem_calloc(1, sizeof(DnsScheduledReq), MEM_CAT_JS_RUNTIME);
-        sr->callback = fn;
-        if (uv_timer_init(loop, &sr->timer) == 0) {
-            sr->timer.data = sr;
-            if (uv_timer_start(&sr->timer, dns_scheduled_timer_cb, 0, 0) == 0) {
-                return;
-            }
-            uv_close((uv_handle_t*)&sr->timer, dns_scheduled_close_cb);
-        } else {
-            mem_free(sr);
-        }
-    }
-
-    js_next_tick_enqueue(fn);
+    dns_enqueue_scheduled(fn);
 }
 
 static Item dns_promise_reject_later(Item error) {
-    Item capability = js_promise_with_resolvers();
-    if (js_check_exception()) return ItemNull;
-    Item promise = js_property_get(capability, make_string_item("promise"));
-    Item reject = js_property_get(capability, make_string_item("reject"));
+    JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
+    JS_ASSIGN_OR_RETURN(promise, js_property_get(capability, make_string_item("promise")));
+    JS_ASSIGN_OR_RETURN(reject, js_property_get(capability, make_string_item("reject")));
     dns_lookup_schedule(make_js_undefined(), make_js_undefined(), reject,
         error, make_js_undefined(), make_js_undefined(), make_js_undefined());
     return promise;
@@ -627,106 +535,99 @@ static bool copy_hostname(Item hostname_item, char* out, int out_size) {
     return true;
 }
 
-static bool validate_hints(Item value) {
-    if (is_nullish_item(value)) return true;
+static Item validate_hints(Item value) {
+    if (is_nullish_item(value)) return js_status_ok();
     if (is_symbol_item(value) || get_type_id(value) != LMD_TYPE_INT) {
-        js_throw_invalid_arg_type("options.hints", "number", value);
-        return false;
+        return js_throw_invalid_arg_type("options.hints", "number", value);
     }
     if (it2i(value) != 0) {
-        js_throw_value(make_invalid_hints_error(value));
-        return false;
+        return js_throw_value(make_invalid_hints_error(value));
     }
-    return true;
+    return js_status_ok();
 }
 
-static bool validate_family_value(Item value, bool object_form, int* out_family) {
+static Item validate_family_value(Item value, bool object_form, int* out_family) {
     if (is_nullish_item(value)) {
         *out_family = 0;
-        return true;
+        return js_status_ok();
     }
     if (is_symbol_item(value) || get_type_id(value) != LMD_TYPE_INT) {
-        if (object_form) js_throw_value(make_invalid_family_error(value));
-        else js_throw_invalid_arg_type("family", "number", value);
-        return false;
+        if (object_form) return js_throw_value(make_invalid_family_error(value));
+        return js_throw_invalid_arg_type("family", "number", value);
     }
     int64_t family = it2i(value);
     if (family != 0 && family != 4 && family != 6) {
-        if (object_form) js_throw_value(make_invalid_family_error(value));
+        if (object_form) return js_throw_value(make_invalid_family_error(value));
         else {
             char msg[128];
             snprintf(msg, sizeof(msg),
                 "The argument 'family' must be one of: 0, 4, 6. Received %lld",
                 (long long)family);
-            js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE, msg);
+            return js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE, msg);
         }
-        return false;
     }
     *out_family = (int)family;
-    return true;
+    return js_status_ok();
 }
 
-static bool validate_bool_option(Item options, const char* name, bool* out_value) {
-    Item value = js_property_get(options, make_string_item(name));
-    if (is_nullish_item(value)) return true;
+static Item validate_bool_option(Item options, const char* name, bool* out_value) {
+    JS_ASSIGN_OR_RETURN(value, js_property_get(options, make_string_item(name)));
+    if (is_nullish_item(value)) return js_status_ok();
     if (get_type_id(value) != LMD_TYPE_BOOL) {
         char arg_name[64];
         snprintf(arg_name, sizeof(arg_name), "options.%s", name);
-        js_throw_invalid_arg_type(arg_name, "boolean", value);
-        return false;
+        return js_throw_invalid_arg_type(arg_name, "boolean", value);
     }
     *out_value = it2b(value);
-    return true;
+    return js_status_ok();
 }
 
-static bool validate_order_option(Item options) {
-    Item value = js_property_get(options, make_string_item("order"));
-    if (is_nullish_item(value)) return true;
+static Item validate_order_option(Item options) {
+    JS_ASSIGN_OR_RETURN(value, js_property_get(options, make_string_item("order")));
+    if (is_nullish_item(value)) return js_status_ok();
     if (get_type_id(value) == LMD_TYPE_STRING) {
         String* s = it2s(value);
         if ((s->len == 8 && memcmp(s->chars, "verbatim", 8) == 0) ||
             (s->len == 9 && memcmp(s->chars, "ipv4first", 9) == 0) ||
             (s->len == 9 && memcmp(s->chars, "ipv6first", 9) == 0)) {
-            return true;
+            return js_status_ok();
         }
     }
-    js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE,
+    return js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE,
         "The property 'options.order' is invalid.");
-    return false;
 }
 
-static bool normalize_lookup_options(Item options_item, DnsLookupOptions* out) {
+static Item normalize_lookup_options(Item options_item, DnsLookupOptions* out) {
     out->family = 0;
     out->hints = 0;
     out->all = false;
 
-    if (is_nullish_item(options_item)) return true;
+    if (is_nullish_item(options_item)) return js_status_ok();
 
     if (get_type_id(options_item) == LMD_TYPE_INT) {
         return validate_family_value(options_item, false, &out->family);
     }
 
     if (get_type_id(options_item) != LMD_TYPE_MAP) {
-        js_throw_invalid_arg_type("options", "an integer or object", options_item);
-        return false;
+        return js_throw_invalid_arg_type("options", "an integer or object", options_item);
     }
 
-    Item hints = js_property_get(options_item, make_string_item("hints"));
-    if (!validate_hints(hints)) return false;
+    JS_ASSIGN_OR_RETURN(hints, js_property_get(options_item, make_string_item("hints")));
+    JS_RETURN_IF_ERROR(validate_hints(hints));
 
-    Item family = js_property_get(options_item, make_string_item("family"));
-    if (!validate_family_value(family, true, &out->family)) return false;
+    JS_ASSIGN_OR_RETURN(family, js_property_get(options_item, make_string_item("family")));
+    JS_RETURN_IF_ERROR(validate_family_value(family, true, &out->family));
 
-    if (!validate_bool_option(options_item, "all", &out->all)) return false;
+    JS_RETURN_IF_ERROR(validate_bool_option(options_item, "all", &out->all));
     bool verbatim = false;
-    if (!validate_bool_option(options_item, "verbatim", &verbatim)) return false;
+    JS_RETURN_IF_ERROR(validate_bool_option(options_item, "verbatim", &verbatim));
     (void)verbatim;
-    if (!validate_order_option(options_item)) return false;
+    JS_RETURN_IF_ERROR(validate_order_option(options_item));
 
-    return true;
+    return js_status_ok();
 }
 
-static bool normalize_lookup_args(Item rest_args, bool promise_mode, DnsLookupOptions* out) {
+static Item normalize_lookup_args(Item rest_args, bool promise_mode, DnsLookupOptions* out) {
     out->hostname[0] = '\0';
     out->family = 0;
     out->hints = 0;
@@ -748,37 +649,33 @@ static bool normalize_lookup_args(Item rest_args, bool promise_mode, DnsLookupOp
             options_item = make_js_undefined();
         }
     } else if (argc > 1 && is_callable(options_item)) {
-        js_throw_invalid_arg_type("options", "an integer or object", options_item);
-        return false;
+        return js_throw_invalid_arg_type("options", "an integer or object", options_item);
     }
 
-    if (!normalize_lookup_options(options_item, out)) return false;
+    JS_RETURN_IF_ERROR(normalize_lookup_options(options_item, out));
 
     if (!copy_hostname(hostname_item, out->hostname, (int)sizeof(out->hostname))) {
         if (promise_mode && get_type_id(hostname_item) == LMD_TYPE_BOOL &&
             out->all && out->family == 0) {
             out->reject_in_promise = true;
             out->promise_rejection = make_invalid_lookup_value_error();
-            return true;
+            return js_status_ok();
         }
         if (!promise_mode && get_type_id(hostname_item) == LMD_TYPE_BOOL &&
             out->all && out->family == 0) {
-            js_throw_value(make_invalid_lookup_value_error());
-            return false;
+            return js_throw_value(make_invalid_lookup_value_error());
         }
-        js_throw_invalid_arg_type("hostname", "string", hostname_item);
-        return false;
+        return js_throw_invalid_arg_type("hostname", "string", hostname_item);
     }
 
     if (!promise_mode) {
         if (!is_callable(callback_item)) {
-            js_throw_invalid_arg_type("callback", "function", callback_item);
-            return false;
+            return js_throw_invalid_arg_type("callback", "function", callback_item);
         }
         out->callback = callback_item;
     }
 
-    return true;
+    return js_status_ok();
 }
 
 static int dns_call_cares_getaddrinfo_hook(const DnsLookupOptions* options) {
@@ -794,10 +691,7 @@ static int dns_call_cares_getaddrinfo_hook(const DnsLookupOptions* options) {
         (Item){.item = b2it(options->all)}
     };
     Item result = js_call_function(fn, cares, args, 4);
-    if (js_check_exception()) {
-        js_clear_exception();
-        return 0;
-    }
+    if (item_is_error(result)) return 0;
     if (get_type_id(result) == LMD_TYPE_INT) return (int)it2i(result);
     return 0;
 }
@@ -907,7 +801,7 @@ static bool dns_lookup_start(const DnsLookupOptions* options, Item resolve, Item
 
 extern "C" Item js_dns_lookup(Item rest_args) {
     DnsLookupOptions options;
-    if (!normalize_lookup_args(rest_args, false, &options)) return ItemNull;
+    JS_RETURN_IF_ERROR(normalize_lookup_args(rest_args, false, &options));
 
     if (!js_permission_has_net() && !dns_lookup_is_ip_literal(&options)) {
         // Permission denial must precede resolver dispatch; otherwise a host
@@ -924,7 +818,7 @@ extern "C" Item js_dns_lookup(Item rest_args) {
 
 extern "C" Item js_dns_promises_lookup(Item rest_args) {
     DnsLookupOptions options;
-    if (!normalize_lookup_args(rest_args, true, &options)) return ItemNull;
+    JS_RETURN_IF_ERROR(normalize_lookup_args(rest_args, true, &options));
     if (options.reject_in_promise) return js_promise_reject(options.promise_rejection);
 
     if (!js_permission_has_net() && !dns_lookup_is_ip_literal(&options)) {
@@ -938,11 +832,10 @@ extern "C" Item js_dns_promises_lookup(Item rest_args) {
         }
     }
 
-    Item capability = js_promise_with_resolvers();
-    if (js_check_exception()) return ItemNull;
-    Item promise = js_property_get(capability, make_string_item("promise"));
-    Item resolve = js_property_get(capability, make_string_item("resolve"));
-    Item reject = js_property_get(capability, make_string_item("reject"));
+    JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
+    JS_ASSIGN_OR_RETURN(promise, js_property_get(capability, make_string_item("promise")));
+    JS_ASSIGN_OR_RETURN(resolve, js_property_get(capability, make_string_item("resolve")));
+    JS_ASSIGN_OR_RETURN(reject, js_property_get(capability, make_string_item("reject")));
     if (!dns_lookup_start(&options, resolve, reject, false)) {
         Item error = make_dns_error(UV_EAI_FAIL, options.hostname);
         Item args[1] = { error };
@@ -1001,58 +894,56 @@ static void dns_ensure_cares_channelwrap(void) {
     }
 }
 
-static bool dns_rrtype_to_family(Item rrtype_item, int* out_family, char* out_syscall, int syscall_size) {
+static Item dns_rrtype_to_family(Item rrtype_item, int* out_family, char* out_syscall, int syscall_size) {
     if (is_nullish_item(rrtype_item)) {
         *out_family = 4;
         snprintf(out_syscall, (size_t)syscall_size, "queryA");
-        return true;
+        return js_status_ok();
     }
     if (get_type_id(rrtype_item) != LMD_TYPE_STRING) {
-        js_throw_invalid_arg_type("rrtype", "string", rrtype_item);
-        return false;
+        return js_throw_invalid_arg_type("rrtype", "string", rrtype_item);
     }
     String* rrtype = it2s(rrtype_item);
     if (rrtype->len == 1 && rrtype->chars[0] == 'A') {
         *out_family = 4;
         snprintf(out_syscall, (size_t)syscall_size, "queryA");
-        return true;
+        return js_status_ok();
     }
     if (rrtype->len == 4 && memcmp(rrtype->chars, "AAAA", 4) == 0) {
         *out_family = 6;
         snprintf(out_syscall, (size_t)syscall_size, "queryAaaa");
-        return true;
+        return js_status_ok();
     }
     if (rrtype->len == 5 && memcmp(rrtype->chars, "CNAME", 5) == 0) {
         *out_family = 0;
         snprintf(out_syscall, (size_t)syscall_size, "queryCname");
-        return true;
+        return js_status_ok();
     }
     if (rrtype->len == 2 && memcmp(rrtype->chars, "MX", 2) == 0) {
         *out_family = 0;
         snprintf(out_syscall, (size_t)syscall_size, "queryMx");
-        return true;
+        return js_status_ok();
     }
     if (rrtype->len == 2 && memcmp(rrtype->chars, "NS", 2) == 0) {
         *out_family = 0;
         snprintf(out_syscall, (size_t)syscall_size, "queryNs");
-        return true;
+        return js_status_ok();
     }
     if (rrtype->len == 3 && memcmp(rrtype->chars, "SRV", 3) == 0) {
         *out_family = 0;
         snprintf(out_syscall, (size_t)syscall_size, "querySrv");
-        return true;
+        return js_status_ok();
     }
     if (rrtype->len == 3 && memcmp(rrtype->chars, "TXT", 3) == 0) {
         *out_family = 0;
         snprintf(out_syscall, (size_t)syscall_size, "queryTxt");
-        return true;
+        return js_status_ok();
     }
-    js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE,
+    return js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE,
         "The argument 'rrtype' must be one of: 'A', 'AAAA', 'CNAME', 'MX', 'NS', 'SRV', 'TXT'.");
-    return false;
 }
 
-static bool normalize_resolve_args(Item rest_args, bool promise_mode, int fixed_family,
+static Item normalize_resolve_args(Item rest_args, bool promise_mode, int fixed_family,
                                    DnsResolveOptions* out) {
     out->hostname[0] = '\0';
     out->family = fixed_family;
@@ -1066,8 +957,7 @@ static bool normalize_resolve_args(Item rest_args, bool promise_mode, int fixed_
     Item callback_item = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
 
     if (!copy_hostname(hostname_item, out->hostname, (int)sizeof(out->hostname))) {
-        js_throw_invalid_arg_type("name", "string", hostname_item);
-        return false;
+        return js_throw_invalid_arg_type("name", "string", hostname_item);
     }
 
     if (fixed_family == 4) {
@@ -1105,18 +995,15 @@ static bool normalize_resolve_args(Item rest_args, bool promise_mode, int fixed_
             callback_item = rrtype_item;
             rrtype_item = make_js_undefined();
         }
-        if (!dns_rrtype_to_family(rrtype_item, &out->family, out->syscall,
-                (int)sizeof(out->syscall))) {
-            return false;
-        }
+        JS_RETURN_IF_ERROR(dns_rrtype_to_family(rrtype_item, &out->family, out->syscall,
+                (int)sizeof(out->syscall)));
     }
 
     if (!promise_mode && !is_callable(callback_item)) {
-        js_throw_invalid_arg_type("callback", "function", callback_item);
-        return false;
+        return js_throw_invalid_arg_type("callback", "function", callback_item);
     }
     if (!promise_mode) out->callback = callback_item;
-    return true;
+    return js_status_ok();
 }
 
 static bool dns_call_cares_query_hook(const DnsResolveOptions* options,
@@ -1138,10 +1025,7 @@ static bool dns_call_cares_query_hook(const DnsResolveOptions* options,
 
     Item args[1] = { make_string_item(options->hostname) };
     Item result = js_call_function(fn, proto, args, 1);
-    if (js_check_exception()) {
-        js_clear_exception();
-        return false;
-    }
+    if (item_is_error(result)) return false;
 
     if (get_type_id(result) == LMD_TYPE_INT) {
         *out_status = (int)it2i(result);
@@ -1206,17 +1090,14 @@ static bool dns_resolve_start(const DnsResolveOptions* options, Item resolve, It
 
 static Item js_dns_resolve_common(Item rest_args, bool promise_mode, int family) {
     DnsResolveOptions options;
-    if (!normalize_resolve_args(rest_args, promise_mode, family, &options)) {
-        return ItemNull;
-    }
+    JS_RETURN_IF_ERROR(normalize_resolve_args(rest_args, promise_mode, family, &options));
 
     if (!js_permission_has_net()) {
         Item error = js_permission_make_net_error("resolve", options.hostname);
         if (promise_mode) {
-            Item capability = js_promise_with_resolvers();
-            if (js_check_exception()) return ItemNull;
-            Item promise = js_property_get(capability, make_string_item("promise"));
-            Item reject = js_property_get(capability, make_string_item("reject"));
+            JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
+            JS_ASSIGN_OR_RETURN(promise, js_property_get(capability, make_string_item("promise")));
+            JS_ASSIGN_OR_RETURN(reject, js_property_get(capability, make_string_item("reject")));
             dns_resolve_schedule(make_js_undefined(), make_js_undefined(), reject,
                 error, make_js_undefined());
             return promise;
@@ -1227,11 +1108,10 @@ static Item js_dns_resolve_common(Item rest_args, bool promise_mode, int family)
     }
 
     if (promise_mode) {
-        Item capability = js_promise_with_resolvers();
-        if (js_check_exception()) return ItemNull;
-        Item promise = js_property_get(capability, make_string_item("promise"));
-        Item resolve = js_property_get(capability, make_string_item("resolve"));
-        Item reject = js_property_get(capability, make_string_item("reject"));
+        JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
+        JS_ASSIGN_OR_RETURN(promise, js_property_get(capability, make_string_item("promise")));
+        JS_ASSIGN_OR_RETURN(resolve, js_property_get(capability, make_string_item("resolve")));
+        JS_ASSIGN_OR_RETURN(reject, js_property_get(capability, make_string_item("reject")));
         if (!dns_resolve_start(&options, resolve, reject)) {
             Item error = make_dns_resolve_error(UV_EAI_FAIL, options.hostname, options.syscall);
             dns_resolve_schedule(make_js_undefined(), make_js_undefined(), reject,
@@ -1336,7 +1216,7 @@ static int dns_getnameinfo_status_from_gai(int status) {
     return UV_EAI_FAIL;
 }
 
-static bool normalize_lookup_service_args(Item rest_args, bool promise_mode,
+static Item normalize_lookup_service_args(Item rest_args, bool promise_mode,
                                           DnsLookupServiceOptions* out) {
     out->address[0] = '\0';
     out->port = 0;
@@ -1349,40 +1229,35 @@ static bool normalize_lookup_service_args(Item rest_args, bool promise_mode,
     Item callback_item = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
 
     if (!copy_hostname(address_item, out->address, (int)sizeof(out->address))) {
-        js_throw_invalid_arg_type("address", "string", address_item);
-        return false;
+        return js_throw_invalid_arg_type("address", "string", address_item);
     }
 
     struct sockaddr_in addr4;
     struct sockaddr_in6 addr6;
     if (uv_ip4_addr(out->address, 0, &addr4) != 0 &&
         uv_ip6_addr(out->address, 0, &addr6) != 0) {
-        js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE,
+        return js_throw_type_error_code(JS_ERR_INVALID_ARG_VALUE,
             "The argument 'address' is invalid.");
-        return false;
     }
 
     if (is_symbol_item(port_item) || get_type_id(port_item) != LMD_TYPE_INT) {
-        js_throw_invalid_arg_type("port", "number", port_item);
-        return false;
+        return js_throw_invalid_arg_type("port", "number", port_item);
     }
     int64_t port = it2i(port_item);
     if (port < 0 || port > 65535) {
-        js_throw_range_error_code(JS_ERR_OUT_OF_RANGE,
+        return js_throw_range_error_code(JS_ERR_OUT_OF_RANGE,
             "The value of \"port\" is out of range. It must be >= 0 and <= 65535.");
-        return false;
     }
     out->port = (int)port;
 
     if (!promise_mode) {
         if (!is_callable(callback_item)) {
-            js_throw_invalid_arg_type("callback", "function", callback_item);
-            return false;
+            return js_throw_invalid_arg_type("callback", "function", callback_item);
         }
         out->callback = callback_item;
     }
 
-    return true;
+    return js_status_ok();
 }
 
 static bool dns_call_cares_getnameinfo_hook(const DnsLookupServiceOptions* options,
@@ -1398,10 +1273,7 @@ static bool dns_call_cares_getnameinfo_hook(const DnsLookupServiceOptions* optio
         (Item){.item = i2it(options->port)}
     };
     Item result = js_call_function(fn, cares, args, 2);
-    if (js_check_exception()) {
-        js_clear_exception();
-        return false;
-    }
+    if (item_is_error(result)) return false;
     if (get_type_id(result) == LMD_TYPE_INT) {
         *out_status = (int)it2i(result);
         return *out_status != 0;
@@ -1475,17 +1347,14 @@ static bool dns_lookup_service_start(const DnsLookupServiceOptions* options,
 
 static Item js_dns_lookupService_common(Item rest_args, bool promise_mode) {
     DnsLookupServiceOptions options;
-    if (!normalize_lookup_service_args(rest_args, promise_mode, &options)) {
-        return ItemNull;
-    }
+    JS_RETURN_IF_ERROR(normalize_lookup_service_args(rest_args, promise_mode, &options));
 
     if (!js_permission_has_net()) {
         Item error = js_permission_make_net_error("lookupService", options.address);
         if (promise_mode) {
-            Item capability = js_promise_with_resolvers();
-            if (js_check_exception()) return ItemNull;
-            Item promise = js_property_get(capability, make_string_item("promise"));
-            Item reject = js_property_get(capability, make_string_item("reject"));
+            JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
+            JS_ASSIGN_OR_RETURN(promise, js_property_get(capability, make_string_item("promise")));
+            JS_ASSIGN_OR_RETURN(reject, js_property_get(capability, make_string_item("reject")));
             dns_lookup_service_schedule(make_js_undefined(), make_js_undefined(), reject,
                 error, make_js_undefined(), make_js_undefined(), make_js_undefined());
             return promise;
@@ -1499,16 +1368,14 @@ static Item js_dns_lookupService_common(Item rest_args, bool promise_mode) {
     if (dns_call_cares_getnameinfo_hook(&options, &hook_status)) {
         Item error = make_dns_lookup_service_error(hook_status, options.address);
         if (promise_mode) return js_promise_reject(error);
-        js_throw_value(error);
-        return ItemNull;
+        return js_throw_value(error);
     }
 
     if (promise_mode) {
-        Item capability = js_promise_with_resolvers();
-        if (js_check_exception()) return ItemNull;
-        Item promise = js_property_get(capability, make_string_item("promise"));
-        Item resolve = js_property_get(capability, make_string_item("resolve"));
-        Item reject = js_property_get(capability, make_string_item("reject"));
+        JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
+        JS_ASSIGN_OR_RETURN(promise, js_property_get(capability, make_string_item("promise")));
+        JS_ASSIGN_OR_RETURN(resolve, js_property_get(capability, make_string_item("resolve")));
+        JS_ASSIGN_OR_RETURN(reject, js_property_get(capability, make_string_item("reject")));
         dns_lookup_service_start(&options, resolve, reject);
         return promise;
     }
@@ -1606,8 +1473,7 @@ static Item dns_get_default_servers(void) {
 
 static Item dns_validated_servers_copy(Item servers_item) {
     if (get_type_id(servers_item) != LMD_TYPE_ARRAY) {
-        throw_invalid_servers_array_type(servers_item);
-        return ItemNull;
+        return throw_invalid_servers_array_type(servers_item);
     }
 
     Item copy = js_array_new(0);
@@ -1617,8 +1483,7 @@ static Item dns_validated_servers_copy(Item servers_item) {
         if (get_type_id(server) != LMD_TYPE_STRING) {
             char name[32];
             snprintf(name, sizeof(name), "servers[%lld]", (long long)i);
-            js_throw_invalid_arg_type(name, "string", server);
-            return ItemNull;
+            return js_throw_invalid_arg_type(name, "string", server);
         }
         js_array_push(copy, server);
     }
@@ -1657,8 +1522,7 @@ extern "C" Item js_dns_getServers(void) {
 }
 
 extern "C" Item js_dns_setServers(Item servers_item) {
-    Item copy = dns_validated_servers_copy(servers_item);
-    if (js_check_exception()) return ItemNull;
+    JS_ASSIGN_OR_RETURN(copy, dns_validated_servers_copy(servers_item));
 
     Item receiver = js_get_this();
     if (receiver.item == dns_namespace.item ||

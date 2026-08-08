@@ -11,6 +11,7 @@
 #include "gc_heap.h"
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
+#include "../../../lib/mem_factory.h"
 #include "../../../lib/hashmap.h"
 #include "../../lambda.h"
 #include "../../js/js_exec_profile_weak.h"
@@ -360,6 +361,7 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define MAP_KIND_ITERATOR_ 6
 #define MAP_KIND_PROXY_    9
 #define MAP_KIND_ARRAY_SPARSE_ 14
+#define MAP_KIND_ERROR_    15
 
 typedef struct GcJsArraySparseHashEntry {
     int64_t index;
@@ -407,7 +409,10 @@ gc_heap_t* gc_heap_create(void) {
     // still-retained data-zone block under heavy JS allocation churn. Use the
     // mmap-backed bump pool for GC arenas so each retained block owns a distinct
     // virtual-memory mapping.
-    Pool* pool = pool_create_mmap();
+    // register the GC backing pool so child document allocators are detached
+    // before bulk unmapping; otherwise mem-context shutdown later walks arenas
+    // whose pool has already been released.
+    Pool* pool = mem_pool_create_mmap(NULL, MEM_ROLE_RUNTIME_HEAP, "gc.heap.pool");
     if (!pool) {
         log_error("gc_heap_create: failed to create pool");
         return NULL;
@@ -863,6 +868,9 @@ int gc_is_managed(gc_heap_t* gc, void* ptr) {
     if (!gc || !ptr) return 0;
     // check object zone
     if (gc_object_zone_owns(gc->object_zone, ptr)) return 1;
+    // Large JS environments use the malloc-backed object path; omitting that
+    // ownership class made their scalar-tail rehome guard silently skip them.
+    if (gc_large_object_contains(gc, ptr)) return 1;
     // check bump-allocated object structs
     if (gc_bump_block_owns_exact(gc, ptr)) return 1;
     // check data zones

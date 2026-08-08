@@ -1,0 +1,28 @@
+'===== SYMBOL PATTERN TESTS ====='
+'Test 1: Domain and content'
+1
+true
+2
+false
+3
+true
+4
+false
+5
+true
+6
+false
+'Test 2: Symbol match arm'
+7
+"symbol-digits"
+8
+"string-digits"
+9
+"other"
+'Test 3: Partial string operations reject symbol patterns'
+10
+error
+11
+error
+12
+error

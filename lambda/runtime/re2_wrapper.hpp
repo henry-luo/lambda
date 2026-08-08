@@ -25,6 +25,12 @@ struct Pool;
  */
 TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbol, const char** error_msg);
 
+// Compile a literal-only type union for partial string operations. Literal
+// islands intentionally normalize to ordinary type values, but find/replace/
+// split still need their union contents as a search pattern.
+TypePattern* compile_literal_type_pattern(Pool* pool, Type* type, bool is_symbol,
+                                           const char** error_msg);
+
 /**
  * Check if a string fully matches a compiled pattern.
  *

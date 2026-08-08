@@ -247,7 +247,7 @@ void js_install_native_accessor(Item obj, Item name, Item getter, Item setter,
 // `attrs`: JSPD_* bits (e.g. JSPD_NON_ENUMERABLE for class methods; pass 0 for
 // object literal accessors which should default to enumerable+configurable).
 // IS_ACCESSOR is always set on the resulting shape entry.
-void js_define_accessor_partial(Item obj, Item name, Item fn, int is_setter,
+Item js_define_accessor_partial(Item obj, Item name, Item fn, int is_setter,
                                 uint8_t attrs);
 
 // Phase-5C transpiler chokepoint: 4-arg wrapper around

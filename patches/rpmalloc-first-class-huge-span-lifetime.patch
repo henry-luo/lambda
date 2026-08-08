@@ -1,0 +1,25 @@
+diff --git a/rpmalloc/rpmalloc.c b/rpmalloc/rpmalloc.c
+--- a/rpmalloc/rpmalloc.c
++++ b/rpmalloc/rpmalloc.c
+@@ -1749,9 +1749,21 @@ span_deallocate_block(span_t* span, page_t* page, void* block) {
+ 		}
+ #endif
++		// first-class heap cleanup walks span_used; detach a released huge span
++		// before caching or unmapping it so that heap_free_all cannot follow a
++		// dangling span after the block has been individually freed.
++#if RPMALLOC_FIRST_CLASS_HEAPS
++		if (span->heap && !span->heap->owner_thread) {
++			span_t** link = &span->heap->span_used[PAGE_HUGE];
++			while (*link && (*link != span))
++				link = &(*link)->next;
++			if (*link == span)
++				*link = span->next;
++		}
++#endif
+ #if HUGE_CACHE_SLOT_COUNT
+		if (huge_cache_push(span))
+			return;
+ #endif
+ 		global_memory_interface->memory_unmap(span, span->offset, span->mapped_size);
+ 		return;
+ 	}

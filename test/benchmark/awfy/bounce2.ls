@@ -1,7 +1,7 @@
 // AWFY Benchmark: Bounce (Typed version)
 // Expected result: 1331
 
-pn random_next(var seed_arr: int[]) {
+pn random_next(var seed_arr: int[]) int {
     var s: int = seed_arr[0]
     s = s * 1309 + 13849
     s = int(s % 65536)
@@ -9,7 +9,7 @@ pn random_next(var seed_arr: int[]) {
     return s
 }
 
-pn benchmark() {
+pn benchmark() int {
     var seed_arr:int[] = [74755]
     var ball_count: int = 100
     var bounces: int = 0

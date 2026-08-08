@@ -6742,7 +6742,7 @@ static bool layout_single_file(
         js_event_loop_shutdown();
         // Reset JS runtime state to avoid cross-document leakage in batch mode.
         // Must happen BEFORE script_runner_cleanup_heap: js_batch_reset clears
-        // global Items (js_input, js_exception_value, etc.) that reference the
+        // global Items (js_input and the current call state) that reference the
         // JS heap. Freeing the heap first would leave dangling pointers.
         js_batch_reset();
         js_dom_batch_reset();

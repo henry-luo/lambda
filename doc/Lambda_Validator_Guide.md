@@ -428,14 +428,19 @@ type StringOrNumber = string | int
 type Result = {success: true, data: any} | {success: false, error: string}
 ```
 
-### Type Constraints (Future)
+### Type Constraints
 
-*Note: Constraint validation is planned for future releases*
+Constrained types attach a runtime predicate with `that (...)`, where `~` is
+the value being checked. String patterns cover content validation — see
+[Lambda_Type.md](Lambda_Type.md) § Constrained Types and § String Patterns.
 
 ```lambda
-// future syntax for constraints
-type Age = int where (value >= 0 and value <= 150)
-type Email = string where matches(value, /^[^\s@]+@[^\s@]+\.[^\s@]+$/)
+type Age = int that (~ >= 0 and ~ <= 150)
+type Email = \(w+ "@" w+ "." a[2,6])
+
+30 is Age            // true
+200 is Age           // false
+"a@b.com" is Email   // true
 ```
 
 ### Schema Composition

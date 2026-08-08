@@ -2,7 +2,7 @@
 // Count all solutions to N-Queens problem
 // Adapted from r7rs-benchmarks/src/nqueens.scm: nqueens(8) = 92 (scaled down)
 
-pn ok(row: int, dist: int, placed: int[], placed_len: int) {
+pn ok(row: int, dist: int, placed: int[], placed_len: int) int {
     if (dist > placed_len) {
         return 1
     }
@@ -17,7 +17,7 @@ pn ok(row: int, dist: int, placed: int[], placed_len: int) {
     return ok(row, dist + 1, placed, placed_len)
 }
 
-pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: int[], placed_len: int) {
+pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: int[], placed_len: int) int {
     if (cand_len == 0) {
         if (rest_len == 0) {
             return 1
@@ -67,7 +67,7 @@ pn solve(candidates: int[], cand_len: int, rest: int[], rest_len: int, placed: i
     return count
 }
 
-pn nqueens(n: int) {
+pn nqueens(n: int) int {
     var candidates:int[] = fill(n, 0)
     var i: int = 0
     while (i < n) {
@@ -79,7 +79,7 @@ pn nqueens(n: int) {
     return solve(candidates, n, empty, 0, placed, 0)
 }
 
-pn benchmark() {
+pn benchmark() int {
     var result: int = nqueens(8)
     return result
 }

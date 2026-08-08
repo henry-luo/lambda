@@ -30,6 +30,39 @@ Item js_undefined(void);
 Item make_js_undefined(void);
 Item js_make_string_len(const char* str, int len);
 Item js_make_string(const char* str);
+
+const char* js_item_to_cstr(Item value, char* buf, int buf_size);
+bool js_item_to_integral_int64(Item value, int64_t* out, bool allow_int64);
+
+static inline int js_utf8_next_codepoint(const char* s, int len, int* index) {
+    unsigned char c = (unsigned char)s[*index];
+    if (c < 0x80) {
+        (*index)++;
+        return c;
+    }
+    if ((c & 0xE0) == 0xC0 && *index + 1 < len) {
+        int cp = ((c & 0x1F) << 6) | ((unsigned char)s[*index + 1] & 0x3F);
+        *index += 2;
+        return cp;
+    }
+    if ((c & 0xF0) == 0xE0 && *index + 2 < len) {
+        int cp = ((c & 0x0F) << 12) |
+                 (((unsigned char)s[*index + 1] & 0x3F) << 6) |
+                 ((unsigned char)s[*index + 2] & 0x3F);
+        *index += 3;
+        return cp;
+    }
+    if ((c & 0xF8) == 0xF0 && *index + 3 < len) {
+        int cp = ((c & 0x07) << 18) |
+                 (((unsigned char)s[*index + 1] & 0x3F) << 12) |
+                 (((unsigned char)s[*index + 2] & 0x3F) << 6) |
+                 ((unsigned char)s[*index + 3] & 0x3F);
+        *index += 4;
+        return cp;
+    }
+    (*index)++;
+    return c;
+}
 // Converts a well-known Symbol numeric ID to its generated realm-local ref.
 // Internal runtime code uses this instead of diagnostic "__sym_N" spellings.
 Item js_well_known_symbol_key(int64_t symbol_id);
@@ -119,6 +152,19 @@ Item js_to_object(Item value);
  * Check if a value is truthy according to JavaScript rules.
  */
 bool js_is_truthy(Item value);
+// Item-status helpers use the same merged lane as ordinary JS calls: a
+// boolean true is success and an ERROR-tagged Item is the complete failure.
+Item js_status_ok(void);
+#define JS_RETURN_IF_ERROR(...) do { \
+    Item js_status_value = (__VA_ARGS__); \
+    if (item_is_error(js_status_value)) return js_status_value; \
+} while (0)
+// D8.4.3: use only as a standalone statement in an Item-returning function.
+// The assigned value is the one merged JS success/error lane; no ambient
+// exception state is consulted between the call and propagation.
+#define JS_ASSIGN_OR_RETURN(name, ...) \
+    Item name = (__VA_ARGS__); \
+    if (item_is_error(name)) return name
 int64_t js_is_nullish(Item value);
 
 // =============================================================================
@@ -592,21 +638,23 @@ void js_fetch_set_base_path(const char* dir_path);
 // Exception Handling (try/catch/throw)
 // =============================================================================
 
-/**
- * Set the exception flag and store the thrown value.
- * In the same try block, throw jumps directly to catch.
- * In a called function, throw sets the flag and returns; the caller checks.
- */
-void js_throw_value(Item value);
+// D8.4.3: throw returns the merged ERROR Item; routing carries that Item.
+Item js_throw_value(Item value);
+// Convert a routed ERROR Item to the JavaScript value observable at a catch,
+// rejection, or host boundary.  It never reads or clears ambient state.
+Item js_error_lane_payload(Item lane);
+// Format one routed lane for a host diagnostic without consulting ambient
+// ambient state.  `out` is caller-owned and may be empty on failure.
+void js_error_lane_format(Item lane, char* out, int out_size);
 
 /** v20: Throw a RangeError with the given message. */
 Item js_throw_range_error(const char* message);
 Item js_throw_type_error(const char* message);
-void js_throw_syntax_error(Item message);
-void js_throw_reference_error(Item message);
+Item js_throw_syntax_error(Item message);
+Item js_throw_reference_error(Item message);
 // Tune8 §2.3: unified entry point for MIR-emitted throws (kind=0:SyntaxError,
 // kind=1:ReferenceError). The named wrappers above are kept for C callers.
-void js_throw_named_error(int64_t kind, Item message);
+Item js_throw_named_error(int64_t kind, Item message);
 
 /** Throw TypeError/RangeError with Node.js error code (e.g. ERR_INVALID_ARG_TYPE). */
 Item js_throw_type_error_code(const char* code, const char* message);
@@ -625,28 +673,7 @@ Item js_throw_out_of_range(const char* name, const char* range, Item actual);
 Item js_throw_system_error(int uv_errno, const char* syscall, const char* path);
 
 /** Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible). */
-void js_require_object_coercible(Item value);
-
-/**
- * Check if an exception is currently pending.
- * Returns 1 if pending, 0 otherwise.
- */
-int js_check_exception(void);
-void js_debug_assert_exception_clear(void);
-void js_debug_assert_exception_set(void);
-
-/**
- * Clear the pending exception and return the thrown value.
- * Called at the start of a catch block.
- */
-Item js_clear_exception(void);
-
-/**
- * Get the pre-captured exception message string.
- * Captured at throw time while context is still alive.
- * Returns empty string if no exception message available.
- */
-const char* js_get_exception_message(void);
+Item js_require_object_coercible(Item value);
 
 /**
  * Create a new Error object with a message.
@@ -661,6 +688,7 @@ Item js_new_error_with_stack(Item message, Item stack_str);
  */
 Item js_new_error_with_name(Item error_name, Item message);
 Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str);
+Item js_error_materialize_stack(Item error_obj);
 
 /**
  * ES2021: Create AggregateError with errors array and message.
@@ -676,10 +704,10 @@ Item js_error_set_cause(Item error, Item options);
 Item js_error_captureStackTrace(Item target, Item ctor);
 
 // TDZ (Temporal Dead Zone) check for let/const
-void js_check_tdz(Item value, const char* name, int name_len);
+Item js_check_tdz(Item value, const char* name, int name_len);
 
 // Const assignment error
-void js_throw_const_assign(const char* name, int name_len);
+Item js_throw_const_assign(const char* name, int name_len);
 
 // =============================================================================
 // Runtime Context
@@ -716,7 +744,7 @@ void js_register_global_var_module_bindings_bulk(const Item* keys, const int* in
 
 /**
  * Reset all JS runtime global state between batch test runs.
- * Clears module vars, exception state, event loop, DOM context, and Input context.
+ * Clears module vars, event loop, DOM context, and Input context.
  */
 void js_batch_reset(void);
 void js_intrinsic_state_teardown(void);
@@ -861,21 +889,21 @@ int64_t js_global_binding_exists(Item key);
 // Tune8 §2.2: js_set_global_property now takes a strict flag
 // (0 = sloppy implicit global, 1 = strict throw-on-undeclared).
 // js_set_global_property_strict has been removed.
-void js_set_global_property(Item key, Item value, int64_t strict);
-void js_set_global_var_property_fast(Item key, Item value);
-void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
+Item js_set_global_property(Item key, Item value, int64_t strict);
+Item js_set_global_var_property_fast(Item key, Item value);
+Item js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
 void js_define_global_var_property(Item key, Item value);
 void js_define_global_eval_var_property(Item key, Item value);
 void js_define_global_function_property(Item key, Item value);
 void js_global_lexical_declare(Item key, Item value, int64_t immutable);
 int64_t js_global_lexical_binding_exists(Item key);
 Item js_global_lexical_get_or_fallback(Item key, Item fallback);
-int64_t js_global_lexical_set_if_exists(Item key, Item value);
-void js_evalscript_check_global_lex_decl(Item key);
+Item js_global_lexical_set_if_exists(Item key, Item value);
+Item js_evalscript_check_global_lex_decl(Item key);
 void js_mark_private_method_non_writable(Item object, Item name);
 void js_set_method_home_from_target(Item target, Item fn_item);
 void js_refresh_prototype_method_homes(Item prototype, Item class_item);
-void js_init_class_instance_fields(Item callee, Item object);
+Item js_init_class_instance_fields(Item callee, Item object);
 void js_set_class_instance_field_metadata_bulk(Item class_item,
     const char** field_names, const int* field_lens, const uint8_t* field_kinds,
     int count);
@@ -886,9 +914,10 @@ Item js_private_key_for_current_class(Item source_name);
 Item js_private_in(Item object, Item private_key);
 Item js_private_home_class_enter(Item class_item);
 void js_private_home_class_leave(Item previous_class);
-void js_private_brand_add(Item object, Item private_key, Item callee);
+Item js_private_home_class_leave_result(Item previous_class, Item result);
+Item js_private_brand_add(Item object, Item private_key, Item callee);
 void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
-Item js_get_global_builtin_fn(Item name, Item param_count);
+Item js_get_global_builtin_fn_by_id(Item global_id);
 void js_eval_env_push_frame(void);
 void js_eval_global_lexical_push_frame(void);
 int64_t js_eval_local_push_frame(void);
@@ -905,11 +934,12 @@ void js_eval_local_note_immutable_binding(Item key);
 int64_t js_eval_local_has_immutable_binding(Item key);
 int64_t js_with_depth_active(void);
 Item js_get_with_binding_or_fallback(Item key, Item fallback);
+Item js_get_with_binding_or_fallback_strict(Item key, Item fallback);
 Item js_get_last_with_binding_base_or_undefined(Item key);
-int64_t js_probe_with_binding(Item key);
-int64_t js_capture_with_binding(Item key);
-int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
-int64_t js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
+Item js_probe_with_binding(Item key);
+Item js_capture_with_binding(Item key);
+Item js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
+Item js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
 void js_eval_env_bind(Item key, Item value);
 void js_eval_env_bridge_journal_vars(void);
 void js_eval_global_lexical_bind(Item key, Item value);
@@ -918,7 +948,7 @@ int64_t js_eval_env_is_active(void);
 void js_eval_env_track_global_binding(Item key);
 void js_eval_env_pop_frame(void);
 void js_eval_global_lexical_pop_frame(void);
-void js_check_unresolved_capture(Item value, const char* name, int64_t len);
+Item js_check_unresolved_capture(Item value, const char* name, int64_t len);
 Item js_resolve_unresolved_binding(Item value, const char* name, int64_t len, int64_t in_typeof);
 
 // URL constructor
@@ -979,6 +1009,9 @@ Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state);
 Item js_gen_return_signal(Item value);
 int64_t js_gen_is_return_signal(Item value);
 Item js_gen_return_signal_value(Item value);
+Item js_gen_throw_signal(Item value);
+int64_t js_gen_is_throw_signal(Item value);
+Item js_gen_throw_signal_value(Item value);
 
 /**
  * v15: Convert an iterable to an array. Drains generators, passes arrays through.
@@ -1022,7 +1055,7 @@ Item js_promise_with_resolvers(void);            // Promise.withResolvers()
 Item js_await_sync(Item value);                  // Phase 5: synchronous await unwrap
 
 // Phase 6: Async state machine runtime
-int64_t js_async_must_suspend(Item value);       // 1 if pending promise, 0 otherwise
+Item js_async_must_suspend(Item value);          // true if pending promise, false otherwise
 Item js_async_get_resolved(void);                // get cached resolved value
 Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_size, Item this_val);
 Item js_async_context_create_mir(void* fn_ptr, Item* env, int64_t env_size,
@@ -1164,6 +1197,8 @@ void js_module_set_awaited_target(Item specifier, Item target);
 Item js_module_get_awaited_target(Item specifier);
 void js_module_inherit_awaited_target(Item current_specifier, Item dep_specifier);
 Item js_p5_module_await(Item specifier, Item value);
+void js_module_record_evaluation_error(Item specifier, Item error);
+Item js_module_get_evaluation_error(Item specifier);
 
 /* Js57 P7d: per-module TLA evaluation tracking. */
 void js_module_mark_has_tla(Item specifier);

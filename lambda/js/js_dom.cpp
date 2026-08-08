@@ -124,7 +124,7 @@ extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
 extern "C" int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
-extern "C" void js_throw_value(Item error);
+extern "C" Item js_throw_value(Item error);
 extern "C" Item js_dom_get_selection_function_for_document(void* doc);
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_object_get_own_property_names(Item object);
@@ -801,22 +801,21 @@ static int64_t js_dom_to_integer_or_zero(Item value) {
     return (int64_t)d;
 }
 
-static void js_dom_throw_index_size_error(const char* message) {
+static Item js_dom_throw_index_size_error(const char* message) {
     Item name = (Item){.item = s2it(heap_create_name("IndexSizeError"))};
     Item msg = (Item){.item = s2it(heap_create_name(
         message ? message : "The index is not in the allowed range."))};
-    js_throw_value(js_new_error_with_name(name, msg));
+    return js_throw_value(js_new_error_with_name(name, msg));
 }
 
-static bool js_dom_replace_text_data(DomText* text_node, uint32_t offset,
+static Item js_dom_replace_text_data(DomText* text_node, uint32_t offset,
                                      uint32_t count, const char* repl_chars) {
-    if (!text_node) return false;
+    if (!text_node) return js_status_ok();
     if (!repl_chars) repl_chars = "";
 
     uint32_t old_u16_len = dom_text_utf16_length(text_node);
     if (offset > old_u16_len) {
-        js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
-        return false;
+        return js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
     }
     uint32_t available = old_u16_len - offset;
     if (count > available) count = available;
@@ -828,7 +827,7 @@ static bool js_dom_replace_text_data(DomText* text_node, uint32_t offset,
         (DomNode*)text_node, text_node->parent);
     if (!dom_text_replace_data_contents(state, text_node, offset, count,
                                         repl_chars, repl_len, repl_u16_len)) {
-        return false;
+        return js_status_ok();
     }
     js_dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
                                   text_node->parent, 0);
@@ -836,7 +835,7 @@ static bool js_dom_replace_text_data(DomText* text_node, uint32_t offset,
                            text_node->parent, nullptr, old_text);
     log_debug("js_dom_replace_text_data: offset=%u count=%u replacement_u16=%u",
               offset, count, repl_u16_len);
-    return true;
+    return js_status_ok();
 }
 
 /**
@@ -1232,9 +1231,6 @@ static void js_dom_compile_event_attr_to_expando(DomElement* elem,
     Item fn = js_new_function_from_string(args, 2);
     if (get_type_id(fn) != LMD_TYPE_FUNC) {
         log_error("js_dom_event_attr: failed to compile %s handler", prop_name);
-        if (js_check_exception()) {
-            (void)js_clear_exception();
-        }
         return;
     }
 
@@ -3086,20 +3082,27 @@ static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
     return ItemNull;
 }
 
-extern "C" Item js_dom_owner_document_for_node(void* node_ptr) {
-    DomNode* node = (DomNode*)node_ptr;
-    DomNode* p = node;
-    while (p && !p->is_element()) p = p->parent;
-    if (p) {
-        DomDocument* od = p->as_element()->doc;
-        if (od && od != _js_current_document) {
-            // ownerDocument must preserve cached foreign-document wrapper identity
-            // while Radiant owns the property dispatch table.
-            Item w = lookup_foreign_doc_wrapper(od);
-            if (w.item != ITEM_NULL) return w;
+static Item js_dom_owner_document_from_node(DomNode* node) {
+    DomNode* element_node = node;
+    while (element_node && !element_node->is_element()) element_node = element_node->parent;
+    if (element_node) {
+        DomDocument* owner = element_node->as_element()->doc;
+        if (owner && owner != _js_current_document) {
+            Item wrapper = lookup_foreign_doc_wrapper(owner);
+            if (wrapper.item != ITEM_NULL) return wrapper;
         }
     }
     return js_get_document_object_value();
+}
+
+static Item js_dom_parent_element_or_null(DomNode* node) {
+    DomNode* parent = node ? node->parent : nullptr;
+    if (parent && parent->is_element()) return js_dom_wrap_element(parent->as_element());
+    return ItemNull;
+}
+
+extern "C" Item js_dom_owner_document_for_node(void* node_ptr) {
+    return js_dom_owner_document_from_node((DomNode*)node_ptr);
 }
 
 // Build a minimal HTML document tree:
@@ -5031,14 +5034,14 @@ extern "C" void js_dom_focus_if_editing_host_for_selection(void* dom_node) {
     if (old_focus != (View*)elem) js_dom_dispatch_focus_events(elem);
 }
 
-static void js_dom_throw_syntax_error(const char* message) {
+static Item js_dom_throw_syntax_error(const char* message) {
     Item name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
     Item msg = (Item){.item = s2it(heap_create_name(message ? message : "SyntaxError"))};
-    js_throw_value(js_new_error_with_name(name, msg));
+    return js_throw_value(js_new_error_with_name(name, msg));
 }
 
-extern "C" void js_dom_throw_contenteditable_syntax_error(void) {
-    js_dom_throw_syntax_error("Invalid contentEditable value");
+extern "C" Item js_dom_throw_contenteditable_syntax_error(void) {
+    return js_dom_throw_syntax_error("Invalid contentEditable value");
 }
 
 static void _collect_lookup_by_class_rec(DomElement* root, const char* cls, Item collection) {
@@ -5934,6 +5937,44 @@ static Item js_dom_create_tree_walker(Item root_item, Item what_to_show_item) {
     return walker_root.get();
 }
 
+static bool js_dom_append_document_text(DomDocument* doc, const char* text) {
+    DomElement* body = document_body_element(doc);
+    if (!body) return false;
+
+    const char* cursor = text;
+    while (*cursor) {
+        const char* br = nullptr;
+        for (const char* scan = cursor; *scan; scan++) {
+            if (*scan == '<' && strncasecmp(scan, "<br", 3) == 0) {
+                const char* end = strchr(scan, '>');
+                if (end) {
+                    br = scan;
+                    break;
+                }
+            }
+        }
+        size_t text_len = br ? (size_t)(br - cursor) : strlen(cursor);
+        if (text_len > 0) {
+            DomText* text_node = DomText::create_detached_copy(doc, cursor, text_len);
+            if (text_node) {
+                ((DomNode*)body)->append_child((DomNode*)text_node);
+                dom_post_insert((DomNode*)body, (DomNode*)text_node);
+            }
+        }
+        if (!br) break;
+        const char* br_end = strchr(br, '>');
+        MarkBuilder builder(doc->input);
+        Item br_item = builder.element("br").final();
+        DomElement* br_elem = dom_element_create(doc, "br", br_item.element);
+        if (br_elem) {
+            ((DomNode*)body)->append_child((DomNode*)br_elem);
+            dom_post_insert((DomNode*)body, (DomNode*)br_elem);
+        }
+        cursor = br_end ? br_end + 1 : br + 3;
+    }
+    return true;
+}
+
 extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     const char* method = fn_to_cstr(method_name);
     if (!method) {
@@ -6064,8 +6105,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
             // per DOM spec, throw SyntaxError for invalid selectors
             Item err_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
             Item err_msg = (Item){.item = s2it(heap_create_name("is not a valid selector"))};
-            js_throw_value(js_new_error_with_name(err_name, err_msg));
-            return ItemNull;
+            return js_throw_value(js_new_error_with_name(err_name, err_msg));
         }
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(doc);
@@ -6182,54 +6222,9 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         const char* text = fn_to_cstr(args[0]);
         if (!text) return ItemNull;
 
-        // find <body> element
-        DomElement* body = nullptr;
-        DomNode* child = doc->root->first_child;
-        while (child) {
-            if (child->is_element()) {
-                DomElement* e = child->as_element();
-                if (e->tag_name && strcmp(e->tag_name, "body") == 0) {
-                    body = e;
-                    break;
-                }
-            }
-            child = child->next_sibling;
-        }
-        if (!body) {
+        if (!js_dom_append_document_text(doc, text)) {
             log_debug("js_document_method: write - no body element found");
             return ItemNull;
-        }
-
-        const char* cursor = text;
-        while (*cursor) {
-            const char* br = nullptr;
-            for (const char* scan = cursor; *scan; scan++) {
-                if (*scan == '<' && strncasecmp(scan, "<br", 3) == 0) {
-                    const char* end = strchr(scan, '>');
-                    if (end) {
-                        br = scan;
-                        break;
-                    }
-                }
-            }
-            size_t text_len = br ? (size_t)(br - cursor) : strlen(cursor);
-            if (text_len > 0) {
-                DomText* text_node = DomText::create_detached_copy(doc, cursor, text_len);
-                if (text_node) {
-                    ((DomNode*)body)->append_child((DomNode*)text_node);
-                    dom_post_insert((DomNode*)body, (DomNode*)text_node);
-                }
-            }
-            if (!br) break;
-            const char* br_end = strchr(br, '>');
-            MarkBuilder builder(doc->input);
-            Item br_item = builder.element("br").final();
-            DomElement* br_elem = dom_element_create(doc, "br", br_item.element);
-            if (br_elem) {
-                ((DomNode*)body)->append_child((DomNode*)br_elem);
-                dom_post_insert((DomNode*)body, (DomNode*)br_elem);
-            }
-            cursor = br_end ? br_end + 1 : br + 3;
         }
         log_debug("js_document_method: write '%s' appended to body", text);
 
@@ -7041,8 +7036,7 @@ static Item js_text_control_set_range_text_for_elem(DomElement* elem,
         end = end_i < 0 ? 0 : (uint32_t)end_i;
     }
     if (start > end) {
-        js_dom_throw_index_size_error("The start offset is larger than the end offset.");
-        return make_js_undefined();
+        return js_dom_throw_index_size_error("The start offset is larger than the end offset.");
     }
     if (start > old_value_u16_len) start = old_value_u16_len;
     if (end > old_value_u16_len) end = old_value_u16_len;
@@ -7206,14 +7200,14 @@ static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
     int64_t offset = js_dom_to_integer_or_zero(offset_arg);
     int64_t count = js_dom_to_integer_or_zero(count_arg);
     if (offset < 0 || count < 0) {
-        js_dom_throw_index_size_error("The offset or count is negative.");
-        return make_js_undefined();
+        return js_dom_throw_index_size_error("The offset or count is negative.");
     }
 
     Item data_text_item = js_to_string(data_arg);
     const char* data_text = fn_to_cstr(data_text_item);
     if (!data_text) data_text = "";
-    js_dom_replace_text_data(text_node, (uint32_t)offset, (uint32_t)count, data_text);
+    JS_RETURN_IF_ERROR(js_dom_replace_text_data(text_node, (uint32_t)offset,
+        (uint32_t)count, data_text));
     return make_js_undefined();
 }
 
@@ -7241,13 +7235,11 @@ static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_ar
     int64_t offset = js_dom_to_integer_or_zero(offset_arg);
     int64_t count = js_dom_to_integer_or_zero(count_arg);
     if (offset < 0 || count < 0) {
-        js_dom_throw_index_size_error("The offset or count is negative.");
-        return make_js_undefined();
+        return js_dom_throw_index_size_error("The offset or count is negative.");
     }
     uint32_t old_u16_len = dom_text_utf16_length(text_node);
     if ((uint64_t)offset > old_u16_len) {
-        js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
-        return make_js_undefined();
+        return js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
     }
     uint32_t available = old_u16_len - (uint32_t)offset;
     uint32_t take = (uint64_t)count > available ? available : (uint32_t)count;
@@ -7269,7 +7261,7 @@ extern "C" Item js_dom_set_text_data_property(void* text_ptr, Item value) {
         uint32_t old_u16_len = dom_text_utf16_length(text_node);
         // text data writes must continue through the JS helper because it
         // updates live ranges and publishes the text mutation kind.
-        js_dom_replace_text_data(text_node, 0, old_u16_len, new_text);
+        JS_ASSIGN_OR_RETURN(set_result, js_dom_replace_text_data(text_node, 0, old_u16_len, new_text));
         log_debug("js_dom_set_text_data_property: set text node data='%.30s'", new_text);
     }
     return value;
@@ -8237,9 +8229,7 @@ extern "C" void js_dom_select_set_length_bridge(void* dom_elem, Item value) {
     js_dom_mutation_notify();
 }
 
-extern "C" void js_dom_set_option_selected_dirty(void* dom_elem, bool selected) {
-    DomElement* elem = (DomElement*)dom_elem;
-    if (!elem) return;
+static void js_dom_apply_option_selected(DomElement* elem, bool selected) {
     _set_selectedness(elem, selected);
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item != ITEM_NULL) {
@@ -8256,6 +8246,12 @@ extern "C" void js_dom_set_option_selected_dirty(void* dom_elem, bool selected) 
         _select_ask_for_reset(sel);
     }
     _select_refresh_cached_selected_options(sel);
+}
+
+extern "C" void js_dom_set_option_selected_dirty(void* dom_elem, bool selected) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem) return;
+    js_dom_apply_option_selected(elem, selected);
 }
 
 extern "C" void js_dom_set_option_text_bridge(void* dom_elem, const char* value) {
@@ -9138,6 +9134,25 @@ static Item js_dom_template_content(DomElement* template_elem) {
     return fragment_item;
 }
 
+static Item js_dom_collect_child_nodes(DomElement* elem, bool elements_only) {
+    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->items = nullptr;
+    arr->length = 0;
+    arr->capacity = 0;
+    DomNode* child = js_dom_first_script_visible_child(elem);
+    while (child) {
+        if (child->is_element()) {
+            array_push(arr, js_dom_wrap_element(child->as_element()));
+        } else if (!elements_only) {
+            // text and comment nodes share the DOM wrapper path.
+            array_push(arr, js_dom_wrap_element((DomElement*)(void*)child));
+        }
+        child = js_dom_next_script_visible_sibling(child);
+    }
+    return (Item){.array = arr};
+}
+
 extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // Range / Selection wrappers also live under the DOM resource carrier and route here.
 
@@ -9201,11 +9216,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = s2it(heap_create_name("#text"))};
         }
         if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
-            DomNode* parent = text_node->parent;
-            if (parent && parent->is_element()) {
-                return js_dom_wrap_element(parent->as_element());
-            }
-            return ItemNull;
+            return js_dom_parent_element_or_null((DomNode*)text_node);
         }
         if (strcmp(prop, "isConnected") == 0) {
             return (Item){.item = b2it(js_dom_node_is_connected((DomNode*)text_node) ? 1 : 0)};
@@ -9231,17 +9242,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return ItemNull;
         }
         if (strcmp(prop, "ownerDocument") == 0) {
-            // Walk up to find an element parent and use its doc.
-            DomNode* p = text_node->parent;
-            while (p && !p->is_element()) p = p->parent;
-            if (p) {
-                DomDocument* od = p->as_element()->doc;
-                if (od && od != _js_current_document) {
-                    Item w = lookup_foreign_doc_wrapper(od);
-                    if (w.item != ITEM_NULL) return w;
-                }
-            }
-            return js_get_document_object_value();
+            return js_dom_owner_document_from_node(text_node->parent);
         }
         if (strcmp(prop, "replaceData") == 0) {
             return js_bind_function(js_new_function((void*)js_text_replace_data_method, 3),
@@ -9289,11 +9290,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it((int64_t)comment_node->length)};
         }
         if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
-            DomNode* parent = comment_node->parent;
-            if (parent && parent->is_element()) {
-                return js_dom_wrap_element(parent->as_element());
-            }
-            return ItemNull;
+            return js_dom_parent_element_or_null((DomNode*)comment_node);
         }
         if (strcmp(prop, "isConnected") == 0) {
             return (Item){.item = b2it(js_dom_node_is_connected((DomNode*)comment_node) ? 1 : 0)};
@@ -9308,16 +9305,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return ItemNull;
         }
         if (strcmp(prop, "ownerDocument") == 0) {
-            DomNode* p = comment_node->parent;
-            while (p && !p->is_element()) p = p->parent;
-            if (p) {
-                DomDocument* od = p->as_element()->doc;
-                if (od && od != _js_current_document) {
-                    Item w = lookup_foreign_doc_wrapper(od);
-                    if (w.item != ITEM_NULL) return w;
-                }
-            }
-            return js_get_document_object_value();
+            return js_dom_owner_document_from_node(comment_node->parent);
         }
         Item expando_value = ItemNull;
         if (expando_get_property(node, prop_name, &expando_value)) return expando_value;
@@ -9490,37 +9478,17 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // children (array of child DOM elements only)
     if (strcmp(prop, "children") == 0) {
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        DomNode* child = js_dom_first_script_visible_child(elem);
-        while (child) {
-            if (child->is_element()) {
-                array_push(arr, js_dom_wrap_element(child->as_element()));
-            }
-            child = js_dom_next_script_visible_sibling(child);
-        }
-        return (Item){.array = arr};
+        return js_dom_collect_child_nodes(elem, true);
     }
 
     // parentElement
     if (strcmp(prop, "parentElement") == 0) {
-        DomNode* parent = (DomNode*)elem->parent;
-        if (parent && parent->is_element()) {
-            return js_dom_wrap_element(parent->as_element());
-        }
-        return ItemNull;
+        return js_dom_parent_element_or_null((DomNode*)elem);
     }
 
     // parentNode (includes text nodes — returns any parent)
     if (strcmp(prop, "parentNode") == 0) {
-        DomNode* parent = (DomNode*)elem->parent;
-        if (parent && parent->is_element()) {
-            return js_dom_wrap_element(parent->as_element());
-        }
-        return ItemNull;
+        return js_dom_parent_element_or_null((DomNode*)elem);
     }
 
     // isConnected — true iff the shadow-inclusive root is the Document.
@@ -9648,22 +9616,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // childNodes (all children including text nodes)
     if (strcmp(prop, "childNodes") == 0) {
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        DomNode* child = js_dom_first_script_visible_child(elem);
-        while (child) {
-            if (child->is_element()) {
-                array_push(arr, js_dom_wrap_element(child->as_element()));
-            } else {
-                // wrap text/comment nodes
-                array_push(arr, js_dom_wrap_element((DomElement*)(void*)child));
-            }
-            child = js_dom_next_script_visible_sibling(child);
-        }
-        return (Item){.array = arr};
+        return js_dom_collect_child_nodes(elem, false);
     }
 
     // children (array of child DOM elements only)
@@ -10680,7 +10633,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         const char* new_text = js_dom_to_dom_string_cstr(value);
         if (new_text) {
             uint32_t old_u16_len = dom_text_utf16_length(text_node);
-            js_dom_replace_text_data(text_node, 0, old_u16_len, new_text);
+            JS_ASSIGN_OR_RETURN(set_result, js_dom_replace_text_data(text_node, 0, old_u16_len, new_text));
             log_debug("js_dom_set_property: set text node data='%.30s'", new_text);
         }
         return value;
@@ -10807,8 +10760,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         const char* normalized = js_dom_normalize_contenteditable(s);
         if (!normalized) {
             log_debug("js_dom_contentEditable_setter_syntax_error: invalid value '%s'", s);
-            js_dom_throw_syntax_error("Invalid contentEditable value");
-            return value;
+            return js_dom_throw_syntax_error("Invalid contentEditable value");
         }
         if (strcmp(normalized, "inherit") == 0) {
             elem->remove_attribute("contenteditable");
@@ -11041,23 +10993,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     if (_is_tag(elem, "option")) {
         if (strcmp(prop, "selected") == 0) {
             bool selected = js_is_truthy(value);
-            _set_selectedness(elem, selected);
-            // Mark the option's dirty selectedness flag.
-            Item exp = expando_get_or_create_map((DomNode*)elem);
-            if (exp.item != ITEM_NULL) {
-                js_property_set(exp,
-                    (Item){.item = s2it(heap_create_name("__optDirty"))},
-                    (Item){.item = b2it(true)});
-            }
-            // The option explicitly being selected wins for non-multiple
-            // selects; do not let a later selected option in tree order undo it.
-            DomElement* sel = _option_owner_select(elem);
-            if (sel && selected && !sel->has_attribute("multiple")) {
-                _select_select_only_option(sel, elem);
-            } else if (sel) {
-                _select_ask_for_reset(sel);
-            }
-            _select_refresh_cached_selected_options(sel);
+            js_dom_apply_option_selected(elem, selected);
             return value;
         }
         // option.defaultSelected setter — reflects `selected` attribute.
@@ -14287,42 +14223,9 @@ extern "C" Item js_dom_document_write_bridge(void* doc_ptr, Item text_arg) {
     const char* text = fn_to_cstr(text_arg);
     if (!text) return ItemNull;
 
-    DomElement* body = document_body_element(doc);
-    if (!body) {
+    if (!js_dom_append_document_text(doc, text)) {
         log_debug("js_document_write_bridge: no body element found");
         return ItemNull;
-    }
-
-    const char* cursor = text;
-    while (*cursor) {
-        const char* br = nullptr;
-        for (const char* scan = cursor; *scan; scan++) {
-            if (*scan == '<' && strncasecmp(scan, "<br", 3) == 0) {
-                const char* end = strchr(scan, '>');
-                if (end) {
-                    br = scan;
-                    break;
-                }
-            }
-        }
-        size_t text_len = br ? (size_t)(br - cursor) : strlen(cursor);
-        if (text_len > 0) {
-            DomText* text_node = DomText::create_detached_copy(doc, cursor, text_len);
-            if (text_node) {
-                ((DomNode*)body)->append_child((DomNode*)text_node);
-                dom_post_insert((DomNode*)body, (DomNode*)text_node);
-            }
-        }
-        if (!br) break;
-        const char* br_end = strchr(br, '>');
-        MarkBuilder builder(doc->input);
-        Item br_item = builder.element("br").final();
-        DomElement* br_elem = dom_element_create(doc, "br", br_item.element);
-        if (br_elem) {
-            ((DomNode*)body)->append_child((DomNode*)br_elem);
-            dom_post_insert((DomNode*)body, (DomNode*)br_elem);
-        }
-        cursor = br_end ? br_end + 1 : br + 3;
     }
     log_debug("js_document_write_bridge: appended '%s' to body", text);
     return ItemNull;
@@ -15120,126 +15023,17 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         return ItemNull;
     }
 
-    // appendChild(child) — appends a child element or text node
     if (strcmp(method, "appendChild") == 0) {
-        if (argc < 1) return ItemNull;
-        DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[0]);
-        if (!child_node) {
-            log_error("js_dom_element_method appendChild: argument is not a DOM node");
-            return ItemNull;
-        }
-        // v12b: DocumentFragment support — move children instead of the fragment itself
-        if (child_node->is_element()) {
-            DomElement* child_elem = child_node->as_element();
-            if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
-                DomNode* frag_child = child_elem->first_child;
-                while (frag_child) {
-                    DomNode* next = frag_child->next_sibling;
-                    // A fragment may contain DOMParser nodes from another
-                    // document; transfer before detaching so its lifecycle
-                    // record never remains owned by the source document.
-                    if (!js_dom_prepare_cross_document_insertion(frag_child, elem)) {
-                        return ItemNull;
-                    }
-                    if (frag_child->is_element()) {
-                        // Fragment insertion must preserve the destination's Mark
-                        // children; base DOM linking alone leaves dynamic SVG out
-                        // of the renderer's source tree after a reflow.
-                        if (!js_dom_append_backed_element(elem, frag_child)) return ItemNull;
-                    } else if (!((DomNode*)elem)->append_child(frag_child)) {
-                        return ItemNull;
-                    }
-                    dom_post_insert((DomNode*)elem, frag_child);
-                    frag_child = next;
-                }
-                js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, (DomNode*)elem, (DomNode*)elem);
-                return args[0];
-            }
-        }
-        if (!js_dom_prepare_cross_document_insertion(child_node, elem)) {
-            return ItemNull;
-        }
-        if (child_node->is_element()) {
-            // Keep DOM and Mark ownership in lockstep: public appendChild()
-            // must not depend on the compiler's member-call fast path.
-            if (!js_dom_append_backed_element(elem, child_node)) return ItemNull;
-        } else if (!((DomNode*)elem)->append_child(child_node)) {
-            return ItemNull;
-        }
-        dom_post_insert((DomNode*)elem, child_node);
-        if (child_node->is_element() && child_node->as_element()->tag() == MARKUP_NAME_OPTION &&
-            elem->tag() == MARKUP_NAME_SELECT) {
-            _select_ask_for_reset(elem);
-        }
-        _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child_node, (DomNode*)elem);
-        // If we just inserted an <iframe>, queue its synthetic load event.
-        if (child_node->is_element()) {
-            DomElement* ce = child_node->as_element();
-            if (ce->tag_name && strcmp(ce->tag_name, "iframe") == 0) {
-                _schedule_iframe_load(ce);
-            }
-        }
-        return args[0];  // return the appended child
+        return js_dom_append_child_bridge((void*)elem, argc > 0 ? args[0] : ItemNull);
     }
 
-    // removeChild(child) — removes a child node (element or text)
     if (strcmp(method, "removeChild") == 0) {
-        if (argc < 1) return ItemNull;
-        DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[0]);
-        if (!child_node) {
-            log_error("js_dom_element_method removeChild: argument is not a DOM node");
-            return ItemNull;
-        }
-        dom_pre_remove(child_node);
-        if (!js_dom_remove_backed_child(elem, child_node)) return ItemNull;
-        if (child_node->is_element() && child_node->as_element()->tag() == MARKUP_NAME_OPTION &&
-            elem->tag() == MARKUP_NAME_SELECT) {
-            _select_ask_for_reset(elem);
-        }
-        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE, child_node, (DomNode*)elem);
-        return args[0];  // return the removed child
+        return js_dom_remove_child_bridge((void*)elem, argc > 0 ? args[0] : ItemNull);
     }
 
-    // insertBefore(newChild, refChild)
     if (strcmp(method, "insertBefore") == 0) {
-        if (argc < 2) return ItemNull;
-        DomNode* new_child = (DomNode*)js_dom_unwrap_element(args[0]);
-        DomNode* ref_child = (DomNode*)js_dom_unwrap_element(args[1]);
-        if (!new_child) return ItemNull;
-        DomNode* parent_node = (DomNode*)elem;
-        if (new_child == ref_child) {
-            // insertBefore(node, node) is a DOM no-op; detaching first drops keyed reconciler children.
-            return args[0];
-        }
-        if (ref_child && ref_child->parent != parent_node) {
-            log_error("js_dom insertBefore guard: reference node is not a child of target parent");
-            return ItemNull;
-        }
-        // v12b: DocumentFragment support — move children instead of the fragment itself
-        if (new_child->is_element()) {
-            DomElement* new_elem = new_child->as_element();
-            if (new_elem->tag_name && strcmp(new_elem->tag_name, "#document-fragment") == 0) {
-                bool mutated = false;
-                DomNode* frag_child = new_elem->first_child;
-                while (frag_child) {
-                    DomNode* next = frag_child->next_sibling;
-                    dom_pre_remove(frag_child);
-                    new_elem->remove_child(frag_child);
-                    if (parent_node->insert_before(frag_child, ref_child)) {
-                        dom_post_insert(parent_node, frag_child);
-                        mutated = true;
-                    }
-                    frag_child = next;
-                }
-                if (mutated) js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, (DomNode*)elem, (DomNode*)elem);
-                return args[0];
-            }
-        }
-        if (!js_dom_insert_before_child(elem, new_child, ref_child)) {
-            return ItemNull;
-        }
-        return args[0];
+        return js_dom_insert_before_bridge((void*)elem,
+            argc > 0 ? args[0] : ItemNull, argc > 1 ? args[1] : ItemNull);
     }
 
     // hasChildNodes() → boolean
@@ -15248,129 +15042,13 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         return (Item){.item = b2it(has ? 1 : 0)};
     }
 
-    // normalize() — merge adjacent text nodes
     if (strcmp(method, "normalize") == 0) {
-        DomNode* child = elem->first_child;
-        while (child) {
-            if (child->is_text()) {
-                DomText* text = child->as_text();
-                // merge consecutive text nodes
-                while (child->next_sibling && child->next_sibling->is_text()) {
-                    DomText* next_text = child->next_sibling->as_text();
-                    uint32_t head_u16  = dom_text_utf16_length(text);
-                    uint32_t tail_u16  = dom_text_utf16_length(next_text);
-                    // concatenate text content
-                    size_t new_len = text->length + next_text->length;
-                    char* combined = (char*)pool_alloc(elem->doc->document_pool, new_len + 1);
-                    if (!combined) break;
-                    if (text->text && text->length > 0)
-                        memcpy(combined, text->text, text->length);
-                    if (next_text->text && next_text->length > 0)
-                        memcpy(combined + text->length, next_text->text, next_text->length);
-                    combined[new_len] = '\0';
-                    // update main text node
-                    String* s = dom_document_create_string(elem->doc, combined, new_len);
-                    pool_free(elem->doc->document_pool, combined);
-                    if (!s) break;
-                    // normalize() must replace the surviving Mark string before
-                    // removing its sibling; otherwise a later innerHTML rebuild
-                    // relinks both stale text entries into the DOM child list.
-                    if (!dom_text_replace_backed_string(text, s) &&
-                        !dom_text_adopt_document_string(text, elem->doc, s)) break;
-                    // Spec: ranges with (next_text, k) move to (text, head_u16 + k);
-                    // appended-data shift handled separately.
-                    {
-                        DocState* st = js_dom_current_state();
-                        if (st) {
-                            // (a) shift any existing endpoints in `text` past head_u16 by tail_u16
-                            dom_mutation_text_replace_data(st, text, head_u16, 0, tail_u16);
-                            // (b) retarget endpoints inside `next_text` into the merged `text`
-                            dom_mutation_text_merge(st, text, next_text, head_u16);
-                        }
-                    }
-                    // remove the next text node
-                    DomNode* remove_node = child->next_sibling;
-                    dom_pre_remove(remove_node);
-                    if (!js_dom_remove_backed_child(elem, remove_node)) break;
-                }
-            }
-            child = child->next_sibling;
-        }
-        return ItemNull;
+        return js_dom_normalize_bridge((void*)elem);
     }
 
-    // cloneNode(deep) — clone element (and optionally children)
     if (strcmp(method, "cloneNode") == 0) {
-        bool deep = (argc > 0) ? js_is_truthy(args[0]) : false;
-        // create a new element with its own independent Lambda backing.
-        // Passing the embedded backing causes a shallow copy that shares the
-        // data buffer; a subsequent removeAttribute on the clone would free
-        // that shared buffer and leave the original with a dangling pointer.
-        // Instead, create a clean element via MarkBuilder (same approach as
-        // createElement) and then copy each content attribute individually.
-        MarkBuilder _clone_builder(elem->doc->input);
-        Item _clean_elem = _clone_builder.element(elem->tag_name).final();
-        DomElement* clone = dom_element_create(elem->doc, elem->tag_name, _clean_elem.element);
-        if (!clone) return ItemNull;
-        // Copy all content attributes from original to clone (DOM §4.6).
-        js_dom_clone_content_attributes(elem, clone);
-        // also copy IDL-set attributes stored in expando that may not be in
-        // Lambda backing yet (e.g. ele.type="url" on a fresh createElement)
-        {
-            Item orig_expando = expando_get_map((DomNode*)elem);
-            if (orig_expando.item != ITEM_NULL) {
-                Item clone_expando = expando_get_or_create_map((DomNode*)clone);
-                if (clone_expando.item != ITEM_NULL) {
-                    // walk the expando map's shape to copy string/scalar entries
-                    Map* em = orig_expando.map;
-                    if (em && em->type) {
-                        TypeMap* em_type = (TypeMap*)em->type;
-                        ShapeEntry* se = em_type->shape;
-                        while (se) {
-                            if (se->name && se->name->str) {
-                                const char* ek = se->name->str;
-                                Item ev = js_property_get(orig_expando,
-                                    (Item){.item = s2it(heap_create_name(ek))});
-                                if (!is_js_undefined(ev)) {
-                                    js_property_set(clone_expando,
-                                        (Item){.item = s2it(heap_create_name(ek))}, ev);
-                                }
-                            }
-                            se = se->next;
-                        }
-                    }
-                }
-            }
-        }
-        // Attributes above already create independent ID/class selector caches;
-        // sharing those pooled entries makes a later clone mutation free the
-        // original element's cache.
-        clone->tag_id = elem->tag_id;
-        // deep clone: recursively clone children
-        if (deep) {
-            DomNode* child = elem->first_child;
-            while (child) {
-                if (child->is_element()) {
-                    // recursively clone child element
-                    Item child_wrapped = js_dom_wrap_element(child->as_element());
-                    Item child_clone = js_dom_element_method(child_wrapped, method_name, args, argc);
-                    DomNode* cloned_child = (DomNode*)js_dom_unwrap_element(child_clone);
-                    if (cloned_child) {
-                        ((DomNode*)clone)->append_child(cloned_child);
-                    }
-                } else if (child->is_text()) {
-                    // clone text node
-                    DomText* text = child->as_text();
-                    String* s = text->native_string;
-                    DomText* text_clone = dom_text_create(s, clone);
-                    if (text_clone) {
-                        ((DomNode*)clone)->append_child((DomNode*)text_clone);
-                    }
-                }
-                child = child->next_sibling;
-            }
-        }
-        return js_dom_wrap_element(clone);
+        return js_dom_clone_node_bridge((void*)elem,
+            argc > 0 ? args[0] : ItemNull, argc > 0);
     }
 
     // v12b: replaceChild(newChild, oldChild)
@@ -15385,43 +15063,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // distinct from a no-op for live ranges anchored inside `node` even when
     // the only argument is `node` itself.
     if (strcmp(method, "replaceWith") == 0) {
-        DomNode* parent = node->parent;
-        if (!parent) return ItemNull;
-        // Compute the viable next sibling: first following sibling that is
-        // not among the replacement nodes (pre-spec algorithm).
-        DomNode* viable_next = node->next_sibling;
-        for (;;) {
-            bool in_args = false;
-            if (!viable_next) break;
-            for (int i = 0; i < argc; i++) {
-                if ((DomNode*)js_dom_unwrap_element(args[i]) == viable_next) {
-                    in_args = true; break;
-                }
-            }
-            if (!in_args) break;
-            viable_next = viable_next->next_sibling;
-        }
-        // Detach the receiver first; this collapses any live-range endpoint
-        // that lived inside `node` to (parent, indexOf(node)).
-        dom_pre_remove(node);
-        parent->remove_child(node);
-        // Insert each argument in order. Skip nulls / non-DOM args.
-        for (int i = 0; i < argc; i++) {
-            DomNode* a = (DomNode*)js_dom_unwrap_element(args[i]);
-            if (!a) continue;
-            if (a->parent) {
-                dom_pre_remove(a);
-                a->parent->remove_child(a);
-            }
-            if (viable_next && viable_next->parent == parent) {
-                parent->insert_before(a, viable_next);
-            } else {
-                parent->append_child(a);
-            }
-            dom_post_insert(parent, a);
-        }
-        js_dom_mutation_notify();
-        return ItemNull;
+        return js_dom_replace_with_bridge((void*)node, args, argc);
     }
 
     // v12b: toggleAttribute(name [, force])
@@ -15455,107 +15097,13 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // v12b: insertAdjacentElement(position, newElement)
     if (strcmp(method, "insertAdjacentElement") == 0) {
         if (argc < 2) return ItemNull;
-        const char* position = fn_to_cstr(args[0]);
-        DomNode* new_node = (DomNode*)js_dom_unwrap_element(args[1]);
-        if (!position || !new_node) return ItemNull;
-
-        // detach from old parent
-        if (new_node->parent) {
-            dom_pre_remove(new_node);
-            new_node->parent->remove_child(new_node);
-        }
-
-        DomNode* new_parent = nullptr;
-        if (strcasecmp(position, "beforebegin") == 0) {
-            if (elem->parent && elem->parent->is_element()) {
-                elem->parent->insert_before(new_node, (DomNode*)elem);
-                new_parent = elem->parent;
-            }
-        } else if (strcasecmp(position, "afterbegin") == 0) {
-            ((DomNode*)elem)->insert_before(new_node, elem->first_child);
-            new_parent = (DomNode*)elem;
-        } else if (strcasecmp(position, "beforeend") == 0) {
-            ((DomNode*)elem)->append_child(new_node);
-            new_parent = (DomNode*)elem;
-        } else if (strcasecmp(position, "afterend") == 0) {
-            if (elem->parent && elem->parent->is_element()) {
-                elem->parent->insert_before(new_node, elem->next_sibling);
-                new_parent = elem->parent;
-            }
-        }
-        if (new_parent) {
-            dom_post_insert(new_parent, new_node);
-            js_dom_mutation_notify();
-        }
-        return args[1]; // return the inserted element
+        return js_dom_insert_adjacent_element_bridge((void*)elem, args[0], args[1]);
     }
 
     // v12b: insertAdjacentHTML(position, text)
     if (strcmp(method, "insertAdjacentHTML") == 0) {
         if (argc < 2) return ItemNull;
-        const char* position = fn_to_cstr(args[0]);
-        const char* html_str = fn_to_cstr(args[1]);
-        if (!position || !html_str || !elem->doc) return ItemNull;
-
-        DomDocument* doc = elem->doc;
-        if (!doc->input) return ItemNull;
-
-        // parse the HTML fragment
-        Html5Parser* parser = html5_fragment_parser_create(
-            doc->document_pool, doc->node_arena, doc->input);
-        if (!parser) return ItemNull;
-        html5_fragment_parse(parser, html_str);
-        Element* body_elem = html5_fragment_get_body(parser);
-        if (!body_elem) return ItemNull;
-
-        // determine target parent and reference node based on position
-        DomElement* target_parent = nullptr;
-        DomNode* ref_node = nullptr;
-
-        if (strcasecmp(position, "beforebegin") == 0) {
-            if (!elem->parent || !elem->parent->is_element()) return ItemNull;
-            target_parent = elem->parent->as_element();
-            ref_node = (DomNode*)elem;
-        } else if (strcasecmp(position, "afterbegin") == 0) {
-            target_parent = elem;
-            ref_node = elem->first_child;
-        } else if (strcasecmp(position, "beforeend") == 0) {
-            target_parent = elem;
-            ref_node = nullptr;
-        } else if (strcasecmp(position, "afterend") == 0) {
-            if (!elem->parent || !elem->parent->is_element()) return ItemNull;
-            target_parent = elem->parent->as_element();
-            ref_node = elem->next_sibling;
-        } else {
-            log_error("insertAdjacentHTML: invalid position '%s'", position);
-            return ItemNull;
-        }
-
-        // build DOM nodes from parsed fragment and insert
-        for (int64_t i = 0; i < body_elem->length; i++) {
-            TypeId type = get_type_id(body_elem->items[i]);
-            if (type == LMD_TYPE_ELEMENT) {
-                DomElement* child_dom = build_dom_tree_from_element(
-                    body_elem->items[i].element, doc, nullptr);
-                if (child_dom) {
-                    if (ref_node)
-                        ((DomNode*)target_parent)->insert_before((DomNode*)child_dom, ref_node);
-                    else
-                        ((DomNode*)target_parent)->append_child((DomNode*)child_dom);
-                }
-            } else if (type == LMD_TYPE_STRING) {
-                String* s = js_dom_fragment_text(body_elem->items[i]);
-                if (!s) continue;
-                DomText* text_node = dom_text_create_detached(s, doc);
-                if (text_node) {
-                    if (ref_node)
-                        ((DomNode*)target_parent)->insert_before((DomNode*)text_node, ref_node);
-                    else
-                        ((DomNode*)target_parent)->append_child((DomNode*)text_node);
-                }
-            }
-        }
-        return ItemNull;
+        return js_dom_insert_adjacent_html_bridge((void*)elem, args[0], args[1]);
     }
 
     // EventTarget interface
@@ -15654,54 +15202,12 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
 
     // append(...nodes) — ParentNode.append(), accepts multiple args and strings
     if (strcmp(method, "append") == 0) {
-        for (int i = 0; i < argc; i++) {
-            DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[i]);
-            if (child_node) {
-                // detach from current parent if any
-                if (child_node->parent) child_node->parent->remove_child(child_node);
-                ((DomNode*)elem)->append_child(child_node);
-            } else {
-                // string arg → create text node
-                const char* text = fn_to_cstr(args[i]);
-                if (text) {
-                    DomText* tn = DomText::create_copy(text, strlen(text), elem);
-                    if (tn) ((DomNode*)elem)->append_child(tn);
-                }
-            }
-        }
-        js_dom_mutation_notify();
-        return make_js_undefined();
+        return js_dom_append_variadic_bridge((void*)elem, args, argc);
     }
 
     // prepend(...nodes) — ParentNode.prepend()
     if (strcmp(method, "prepend") == 0) {
-        // insert before first child
-        DomNode* ref = elem->first_child;
-        for (int i = 0; i < argc; i++) {
-            DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[i]);
-            if (child_node) {
-                if (child_node->parent) child_node->parent->remove_child(child_node);
-                ((DomNode*)elem)->insert_before(child_node, ref);
-                if (elem->tag() == MARKUP_NAME_SELECT && child_node->is_element() &&
-                    child_node->as_element()->tag() == MARKUP_NAME_OPTION) {
-                    DomElement* child_elem = child_node->as_element();
-                    if (_get_selectedness(child_elem) && !elem->has_attribute("multiple")) {
-                        _select_select_only_option(elem, child_elem);
-                    } else {
-                        _select_ask_for_reset(elem);
-                    }
-                }
-            } else {
-                const char* text = fn_to_cstr(args[i]);
-                if (text) {
-                    DomText* tn = DomText::create_copy(text, strlen(text), elem);
-                    if (tn) ((DomNode*)elem)->insert_before(tn, ref);
-                }
-            }
-        }
-        _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-        js_dom_mutation_notify();
-        return make_js_undefined();
+        return js_dom_prepend_variadic_bridge((void*)elem, args, argc);
     }
 
     // getClientRects() — returns array containing single DOMRect (same as getBoundingClientRect)
@@ -15840,14 +15346,13 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         // If new_opt is an ancestor of elem, must throw HierarchyRequestError.
         for (DomNode* p = (DomNode*)elem; p; p = p->parent) {
             if ((DomElement*)p == new_opt) {
-                extern void js_throw_value(Item error);
+                extern Item js_throw_value(Item error);
                 extern Item js_new_error_with_name(Item type_name, Item message);
                 Item n = (Item){.item = s2it(heap_create_name("HierarchyRequestError"))};
                 Item m = (Item){.item = s2it(heap_create_name(
                     "Failed to execute 'add' on 'HTMLSelectElement': "
                     "The new child element contains the parent."))};
-                js_throw_value(js_new_error_with_name(n, m));
-                return ItemNull;
+                return js_throw_value(js_new_error_with_name(n, m));
             }
         }
         // before: null/undefined/missing/-1 → append; else if number → option at index;

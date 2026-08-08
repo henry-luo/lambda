@@ -119,6 +119,19 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
 // Runtime Error Helper
 // =============================================================================
 
+static LambdaError* create_runtime_error(LambdaErrorCode code, const char* message) {
+    if (!context) return NULL;
+    SourceLocation loc = {0};
+    if (context->current_file) loc.file = context->current_file;
+    LambdaError* error = err_create(code, message, &loc);
+    if (!error) {
+        if (lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, code)) return NULL;
+        (void)lambda_recovery_publish_fault_item((Context*)context,
+            LAMBDA_FAULT_OUT_OF_MEMORY, code);
+    }
+    return error;
+}
+
 /**
  * Set a runtime error in the current evaluation context.
  * Captures a stack trace using native frame pointer walking.
@@ -132,24 +145,11 @@ static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     vsnprintf(message, sizeof(message), format, args);
     va_end(args);
 
-    // create error with current source location
-    SourceLocation loc = {0};
-    if (context->current_file) {
-        loc.file = context->current_file;
-    }
-
-    LambdaError* error = err_create(code, message, &loc);
-    if (!error) {
-        // A rich diagnostic must not allocate a second error when memory is
-        // already exhausted; an armed C14 frame owns the static OOM landing.
-        if (lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, code)) return;
-        (void)lambda_recovery_publish_fault_item((Context*)context,
-            LAMBDA_FAULT_OUT_OF_MEMORY, code);
-        return;
-    }
+    LambdaError* error = create_runtime_error(code, message);
+    if (!error) return;
 
     // capture native stack trace via FP walking
-    error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+    error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
 
     // store in context
     if (context->last_error) {
@@ -181,18 +181,8 @@ static void set_input_parse_error(const char* function_name, Input* input,
 extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* message) {
     if (!context) return;
 
-    SourceLocation loc = {0};
-    if (context->current_file) {
-        loc.file = context->current_file;
-    }
-
-    LambdaError* error = err_create(code, message, &loc);
-    if (!error) {
-        if (lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, code)) return;
-        (void)lambda_recovery_publish_fault_item((Context*)context,
-            LAMBDA_FAULT_OUT_OF_MEMORY, code);
-        return;
-    }
+    LambdaError* error = create_runtime_error(code, message);
+    if (!error) return;
     // Skip stack trace capture - may be called in low-stack conditions
 
     if (context->last_error) {
@@ -223,7 +213,7 @@ Item fn_error(Item message) {
         }
         LambdaError* error = err_create_heap(ERR_USER_ERROR, msg, &loc);
         if (error) {
-            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
             return err2it(error);
         }
     }
@@ -631,7 +621,52 @@ Item fn_normalize(Item str_item, Item type_item) {
     return (Item){.item = s2it(result)};
 }
 
-Range* fn_to(Item item_a, Item item_b) {
+static bool item_single_string_codepoint(Item item, uint32_t* codepoint) {
+    if (!codepoint || get_type_id(item) != LMD_TYPE_STRING) return false;
+    const char* chars = item.get_chars();
+    uint32_t length = item.get_len();
+    if (!chars || length == 0) return false;
+    uint32_t value = 0;
+    int decoded = str_utf8_decode(chars, length, &value);
+    if (decoded <= 0 || (uint32_t)decoded != length) return false;
+    *codepoint = value;
+    return true;
+}
+
+static bool range_contains_item(Range* range, Item item) {
+    if (!range) return false;
+    if (range->is_char) {
+        uint32_t codepoint = 0;
+        return item_single_string_codepoint(item, &codepoint) &&
+            range->start <= (int64_t)codepoint && (int64_t)codepoint <= range->end;
+    }
+    int64_t value = 0;
+    return lambda_item_to_int64_exact(item, &value) &&
+        range->start <= value && value <= range->end;
+}
+
+static bool range_type_contains_item(TypeRange* range, Item item) {
+    if (!range) return false;
+    if (range->is_char) {
+        uint32_t start = 0;
+        uint32_t end = 0;
+        uint32_t value = 0;
+        if (!item_single_string_codepoint(range->start, &start) ||
+                !item_single_string_codepoint(range->end, &end) ||
+                !item_single_string_codepoint(item, &value)) return false;
+        return start <= value && value <= end;
+    }
+    int64_t start = 0;
+    int64_t end = 0;
+    int64_t value = 0;
+    return lambda_item_to_int64_exact(range->start, &start) &&
+        lambda_item_to_int64_exact(range->end, &end) &&
+        lambda_item_to_int64_exact(item, &value) &&
+        start <= value && value <= end;
+}
+
+Item fn_to(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     int64_t start = 0;
     int64_t end = 0;
     if (lambda_item_to_int64_exact(item_a, &start) &&
@@ -651,7 +686,7 @@ Range* fn_to(Item item_a, Item item_b) {
             set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,
                 "int range bound outside +/-(2^53 - 1); use an `integer` range "
                 "(`1n to N`) for larger sequences");
-            return NULL;
+            return ItemError;
         }
         if (start > end) {
             // return empty range instead of NULL
@@ -660,18 +695,39 @@ Range* fn_to(Item item_a, Item item_b) {
             range->type_id = LMD_TYPE_RANGE;
             range->start = 0;  range->end = -1;  // Empty range
             range->length = 0;
-            return range;
+            range->is_char = false;
+            return {.range = range};
         }
         Range *range = (Range *)heap_alloc(sizeof(Range), LMD_TYPE_RANGE);
         range->type_id = LMD_TYPE_RANGE;
         range->start = start;  range->end = end;
         range->length = end - start + 1;
-        return range;
+        range->is_char = false;
+        return {.range = range};
+    }
+
+    uint32_t char_start = 0;
+    uint32_t char_end = 0;
+    if (item_single_string_codepoint(item_a, &char_start) &&
+            item_single_string_codepoint(item_b, &char_end)) {
+        Range* range = (Range*)heap_alloc(sizeof(Range), LMD_TYPE_RANGE);
+        range->type_id = LMD_TYPE_RANGE;
+        range->is_char = true;
+        if (char_start > char_end) {
+            range->start = 0;
+            range->end = -1;
+            range->length = 0;
+        } else {
+            range->start = (int64_t)char_start;
+            range->end = (int64_t)char_end;
+            range->length = (int64_t)char_end - (int64_t)char_start + 1;
+        }
+        return {.range = range};
     }
     else {
-        log_error("unknown range type: %s, %s",
+        log_error("fn_to: range bounds must be exact integers or single-codepoint strings, got %s, %s",
             get_type_name(get_type_id(item_a)), get_type_name(get_type_id(item_b)));
-        return NULL;
+        return ItemError;
     }
 }
 
@@ -844,7 +900,7 @@ static Item function_argument_count_check(Function* fn, int actual, const char* 
         if (context->current_file) loc.file = context->current_file;
         LambdaError* error = err_create_heap(ERR_ARGUMENT_COUNT_MISMATCH, message, &loc);
         if (error) {
-            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
             return err2it(error);
         }
     }
@@ -864,7 +920,7 @@ static Item unsupported_dynamic_abi_error(Function* fn, int required_abi_args,
         if (context->current_file) loc.file = context->current_file;
         LambdaError* error = err_create_heap(ERR_UNSUPPORTED_DYNAMIC_ABI, message, &loc);
         if (error) {
-            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
             return err2it(error);
         }
     }
@@ -1153,7 +1209,7 @@ static Item lambda_dynamic_call_error(LambdaErrorCode code, const char* caller,
         if (context->current_file) loc.file = context->current_file;
         LambdaError* error = err_create_heap(code, message, &loc);
         if (error) {
-            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
             return err2it(error);
         }
     }
@@ -1767,12 +1823,31 @@ static bool runtime_validate_value_against_type(Item item, Type* expected,
 
 static bool runtime_type_admit_value(Item value, Type* expected, Item* converted);
 
+static bool literal_type_matches_item(Type* expected, Item item) {
+    if (!expected || !expected->is_literal ||
+            (expected->type_id != LMD_TYPE_STRING && expected->type_id != LMD_TYPE_SYMBOL)) {
+        return false;
+    }
+    TypeId actual_id = get_type_id(item);
+    if (actual_id != expected->type_id) return false;
+    TypeString* literal = (TypeString*)expected;
+    const char* actual_chars = item.get_chars();
+    return literal->string && actual_chars &&
+        literal->string->len == item.get_len() &&
+        memcmp(literal->string->chars, actual_chars, item.get_len()) == 0;
+}
+
 bool lambda_type_matches(Item item, Type* expected) {
     expected = runtime_boundary_unwrap_type(expected);
     if (!expected) return false;
     TypeId actual_id = get_type_id(item);
     if (actual_id == LMD_TYPE_ERROR) return lambda_type_accepts_error(expected);
     if (expected->type_id == LMD_TYPE_ANY) return true;
+    // Literal aliases used to enter the pattern builder; compare their content directly now that literal-only forms are ordinary type values.
+    if (expected->is_literal &&
+            (expected->type_id == LMD_TYPE_STRING || expected->type_id == LMD_TYPE_SYMBOL)) {
+        return literal_type_matches_item(expected, item);
+    }
     if (expected == &TYPE_MAP && actual_id == LMD_TYPE_VMAP) {
         // Host-backed VMaps implement Lambda's map interface but retain a distinct
         // physical tag; the global map contract must not reject them at a native call.
@@ -1780,9 +1855,16 @@ bool lambda_type_matches(Item item, Type* expected) {
     }
 
     if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_PATTERN) {
-        if (!is_text_type_id(actual_id)) return false;
         TypePattern* pattern = (TypePattern*)expected;
+        if (pattern->is_symbol) {
+            if (actual_id != LMD_TYPE_SYMBOL) return false;
+        } else if (actual_id != LMD_TYPE_STRING) {
+            return false;
+        }
         return pattern_full_match_chars(pattern, item.get_chars(), item.get_len());
+    }
+    if (expected->type_id == LMD_TYPE_RANGE && expected->kind == TYPE_KIND_RANGE) {
+        return range_type_contains_item((TypeRange*)expected, item);
     }
     if ((expected->type_id == LMD_TYPE_TYPE &&
             (expected->kind == TYPE_KIND_BINARY || expected->kind == TYPE_KIND_UNARY)) ||
@@ -1896,7 +1978,7 @@ static Item lambda_type_error_with_validation(Item actual, Type* expected,
         if (context->current_file) loc.file = context->current_file;
         LambdaError* error = err_create_heap(ERR_TYPE_MISMATCH, message, &loc);
         if (error) {
-            error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
             return err2it(error);
         }
     }
@@ -1935,6 +2017,11 @@ Item lambda_type_check(Item value, Type* expected, const char* boundary) {
 
 Bool fn_is(Item a, Item b) {
     TypeId b_type_id = get_type_id(b);
+    if (b_type_id == LMD_TYPE_RANGE) {
+        // A runtime range in `is` is the value-space set denoted by its bounds;
+        // comparing the container identity would discard the range predicate.
+        return range_contains_item(b.range, a) ? BOOL_TRUE : BOOL_FALSE;
+    }
     if (b_type_id != LMD_TYPE_TYPE) return fn_eq(a, b);
 
     Type* b_type = b.type;
@@ -1945,6 +2032,12 @@ Bool fn_is(Item a, Item b) {
             return BOOL_ERROR;
         }
         TypePattern* pattern = (TypePattern*)b_type;
+        // pattern tags carry the value domain; content alone is not enough to
+        // make a string and symbol type interchangeable under `is`.
+        if ((pattern->is_symbol && a_type_id != LMD_TYPE_SYMBOL) ||
+                (!pattern->is_symbol && a_type_id != LMD_TYPE_STRING)) {
+            return BOOL_FALSE;
+        }
         return pattern_full_match_chars(pattern, a.get_chars(), a.get_len()) ? BOOL_TRUE : BOOL_FALSE;
     }
 
@@ -1971,6 +2064,15 @@ Bool fn_is(Item a, Item b) {
     }
 
     TypeType* type_b = (TypeType*)b_type;
+    if (type_b->type && type_b->type->type_id == LMD_TYPE_RANGE &&
+            type_b->type->kind == TYPE_KIND_RANGE) {
+        return range_type_contains_item((TypeRange*)type_b->type, a)
+            ? BOOL_TRUE : BOOL_FALSE;
+    }
+    if (type_b->type->is_literal &&
+            (type_b->type->type_id == LMD_TYPE_STRING || type_b->type->type_id == LMD_TYPE_SYMBOL)) {
+        return literal_type_matches_item(type_b->type, a) ? BOOL_TRUE : BOOL_FALSE;
+    }
     TypeId a_type_id = get_type_id(a);
     Type actual_type_scratch = {.type_id = LMD_TYPE_NULL};
     Type* actual_type = item_static_type_for_is(a, &actual_type_scratch);
@@ -2277,7 +2379,10 @@ static inline Item seq_get_element(Item item, TypeId tid, int64_t i) {
     switch (tid) {
     case LMD_TYPE_ARRAY:        return array_get(item.array, i);
     case LMD_TYPE_ARRAY_NUM:   return array_num_get(item.array_num, i);
-    case LMD_TYPE_RANGE:       return {.item = i2it(item.range->start + i)};
+    case LMD_TYPE_RANGE:
+        return item.range->is_char
+            ? fn_chr((Item){.item = i2it(item.range->start + i)})
+            : (Item){.item = i2it(item.range->start + i)};
     default:                   return ItemNull;
     }
 }
@@ -2511,7 +2616,8 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         if (a_tid == LMD_TYPE_RANGE) {
             Range* ra = a_item.range;
             Range* rb = b_item.range;
-            return (ra->start == rb->start && ra->end == rb->end && ra->length == rb->length)
+            return (ra->is_char == rb->is_char && ra->start == rb->start &&
+                    ra->end == rb->end && ra->length == rb->length)
                 ? BOOL_TRUE : BOOL_FALSE;
         }
         // object structural equality (same as map, fields must match)
@@ -3171,10 +3277,7 @@ Bool fn_in(Item a_item, Item b_item) {
             return false;
         }
         else if (b_type == LMD_TYPE_RANGE) {
-            Range *range = b_item.range;
-            int64_t a_val = 0;
-            if (!lambda_item_to_int64_exact(a_item, &a_val)) return false;
-            return range->start <= a_val && a_val <= range->end;
+            return range_contains_item(b_item.range, a_item);
         }
         else if (b_type == LMD_TYPE_ARRAY) {
             Array *arr = b_item.array;
@@ -3318,6 +3421,25 @@ String& STR_TRUE  = reinterpret_cast<String&>(_str_true);
 String& STR_FALSE = reinterpret_cast<String&>(_str_false);
 String& STR_ERROR = reinterpret_cast<String&>(_str_error);
 
+static int fn_datetime_append_suffix(DateTime* dt, char* buf, size_t buf_size,
+        int len) {
+    if (dt->millisecond > 0) {
+        len += snprintf(buf + len, buf_size - (size_t)len, ".%03d", dt->millisecond);
+    }
+    if (DATETIME_HAS_TIMEZONE(dt)) {
+        int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
+        if (tz_offset == 0) {
+            len += snprintf(buf + len, buf_size - (size_t)len, "z");
+        } else {
+            int hours = abs(tz_offset) / 60;
+            int minutes = abs(tz_offset) % 60;
+            len += snprintf(buf + len, buf_size - (size_t)len, "%+03d:%02d",
+                tz_offset >= 0 ? hours : -hours, minutes);
+        }
+    }
+    return len + snprintf(buf + len, buf_size - (size_t)len, "'");
+}
+
 String* fn_string(Item itm) {
     TypeId type_id = get_type_id(itm);
     switch (type_id) {
@@ -3379,25 +3501,7 @@ String* fn_string(Item itm) {
                     len = snprintf(buf, sizeof(buf), "t'%02d:%02d:%02d",
                         dt->hour, dt->minute, dt->second);
 
-                    // Add milliseconds if non-zero
-                    if (dt->millisecond > 0) {
-                        len += snprintf(buf + len, sizeof(buf) - len, ".%03d", dt->millisecond);
-                    }
-
-                    // Add timezone - use 'z' for UTC (+00:00)
-                    if (DATETIME_HAS_TIMEZONE(dt)) {
-                        int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
-                        if (tz_offset == 0) {
-                            len += snprintf(buf + len, sizeof(buf) - len, "z");
-                        } else {
-                            int hours = abs(tz_offset) / 60;
-                            int minutes = abs(tz_offset) % 60;
-                            len += snprintf(buf + len, sizeof(buf) - len, "%+03d:%02d",
-                                tz_offset >= 0 ? hours : -hours, minutes);
-                        }
-                    }
-
-                    len += snprintf(buf + len, sizeof(buf) - len, "'");
+                    len = fn_datetime_append_suffix(dt, buf, sizeof(buf), len);
                     break;
                 }
 
@@ -3408,25 +3512,7 @@ String* fn_string(Item itm) {
                         DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
                         dt->hour, dt->minute, dt->second);
 
-                    // Add milliseconds if non-zero
-                    if (dt->millisecond > 0) {
-                        len += snprintf(buf + len, sizeof(buf) - len, ".%03d", dt->millisecond);
-                    }
-
-                    // Add timezone - use 'z' for UTC (+00:00)
-                    if (DATETIME_HAS_TIMEZONE(dt)) {
-                        int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
-                        if (tz_offset == 0) {
-                            len += snprintf(buf + len, sizeof(buf) - len, "z");
-                        } else {
-                            int hours = abs(tz_offset) / 60;
-                            int minutes = abs(tz_offset) % 60;
-                            len += snprintf(buf + len, sizeof(buf) - len, "%+03d:%02d",
-                                tz_offset >= 0 ? hours : -hours, minutes);
-                        }
-                    }
-
-                    len += snprintf(buf + len, sizeof(buf) - len, "'");
+                    len = fn_datetime_append_suffix(dt, buf, sizeof(buf), len);
                     break;
                 }
             }
@@ -4298,6 +4384,10 @@ Item fn_index(Item item, Item index_item) {
         if (index_type == LMD_TYPE_RANGE) {
             Range* rng = index_item.range;
             if (rng) {
+                if (rng->is_char) {
+                    log_error("fn_index: character ranges cannot be used as slice bounds");
+                    return ItemError;
+                }
                 Item start_it = {.item = i2it(rng->start)};
                 Item end_it = {.item = i2it(rng->end + 1)}; // range end is inclusive, slice end is exclusive
                 return fn_slice(item, start_it, end_it);
@@ -4992,76 +5082,74 @@ Bool fn_ends_with(Item str_item, Item suffix_item) {
 
 // index_of raw search helper — -1 is retained only for C/JS adapters.
 // The public Lambda wrapper below converts absence to null.
-int64_t fn_index_of_raw(Item str_item, Item sub_item) {
+static int64_t fn_index_of_raw_impl(Item str_item, Item sub_item, bool reverse) {
     // This raw helper keeps the C-family -1 ABI for foreign adapters. Lambda's
     // public wrapper maps its broad-input no-answer result to null.
     if (get_type_id(str_item) == LMD_TYPE_ERROR || get_type_id(sub_item) == LMD_TYPE_ERROR) {
         return -1;
     }
     TypeId coll_type = get_type_id(str_item);
-
-    // --- List/Array: find first matching element ---
     if (coll_type == LMD_TYPE_ARRAY) {
         List* list = str_item.array;
         if (!list) return -1;
-        for (int64_t i = 0; i < list->length; i++) {
-            if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) {
-                return i;
+        if (!reverse) {
+            for (int64_t i = 0; i < list->length; i++) {
+                if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) return i;
+            }
+        } else {
+            for (int64_t i = list->length - 1; i >= 0; i--) {
+                if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) return i;
             }
         }
         return -1;
     }
     if (coll_type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = str_item.array_num;
-        return array_num_find_equal(arr, sub_item, false);
+        return array_num_find_equal(str_item.array_num, sub_item, reverse);
     }
 
-    // --- String/Symbol: substring search ---
     TypeId sub_type = get_type_id(sub_item);
-
-    if ((!is_text_type_id(coll_type)) ||
-        (!is_text_type_id(sub_type))) {
-        log_debug("fn_index_of: arguments must be strings/symbols or first arg must be a list");
+    if (!is_text_type_id(coll_type) || !is_text_type_id(sub_type)) {
+        log_debug("fn_%sindex_of: arguments must be strings/symbols or first arg must be a list",
+            reverse ? "last_" : "");
         return -1;
     }
-
     const char* str_chars = str_item.get_chars();
     uint32_t str_len = str_item.get_len();
     const char* sub_chars = sub_item.get_chars();
     uint32_t sub_len = sub_item.get_len();
+    if (!str_chars || !sub_chars) return -1;
 
-    if (!str_chars || !sub_chars) {
-        return -1;
-    }
-
-    if (sub_len == 0) {
-        return 0;  // empty substring is at position 0
-    }
-
-    if (str_len < sub_len) {
-        return -1;
-    }
-
-    // byte-based search, then convert byte offset to char offset
     bool is_ascii = false;
     if (coll_type == LMD_TYPE_STRING) {
         String* str = str_item.get_safe_string();
-        if (!str) {
-            return -1;
-        }
+        if (!str) return -1;
         is_ascii = str->is_ascii != 0;
     } else {
         is_ascii = str_is_ascii(str_chars, str_len);
     }
-    for (size_t i = 0; i <= str_len - sub_len; i++) {
-        if (memcmp(str_chars + i, sub_chars, sub_len) == 0) {
-            // convert byte offset to character offset
-            int64_t char_index = is_ascii ? (int64_t)i : (int64_t)str_utf8_count(str_chars, i);
-            return char_index;
+    if (sub_len == 0) {
+        if (!reverse) return 0;
+        return is_ascii ? (int64_t)str_len : (int64_t)str_utf8_count(str_chars, str_len);
+    }
+    if (str_len < sub_len) return -1;
+
+    if (!reverse) {
+        for (size_t i = 0; i <= str_len - sub_len; i++) {
+            if (memcmp(str_chars + i, sub_chars, sub_len) == 0)
+                return is_ascii ? (int64_t)i : (int64_t)str_utf8_count(str_chars, i);
+        }
+    } else {
+        for (size_t i = str_len - sub_len + 1; i > 0; i--) {
+            size_t pos = i - 1;
+            if (memcmp(str_chars + pos, sub_chars, sub_len) == 0)
+                return is_ascii ? (int64_t)pos : (int64_t)str_utf8_count(str_chars, pos);
         }
     }
-
     return -1;
+}
+
+int64_t fn_index_of_raw(Item str_item, Item sub_item) {
+    return fn_index_of_raw_impl(str_item, sub_item, false);
 }
 
 // Lambda's public search result uses null for absence. Keep the raw -1 helper
@@ -5079,88 +5167,7 @@ Item fn_index_of(Item str_item, Item sub_item) {
 // last_index_of raw search helper — -1 is retained only for C/JS adapters.
 // The public Lambda wrapper below converts absence to null.
 int64_t fn_last_index_of_raw(Item str_item, Item sub_item) {
-    // This raw helper keeps the C-family -1 ABI for foreign adapters. Lambda's
-    // public wrapper maps its broad-input no-answer result to null.
-    if (get_type_id(str_item) == LMD_TYPE_ERROR || get_type_id(sub_item) == LMD_TYPE_ERROR) {
-        return -1;
-    }
-    TypeId coll_type = get_type_id(str_item);
-
-    // --- List/Array: find last matching element ---
-    if (coll_type == LMD_TYPE_ARRAY) {
-        List* list = str_item.array;
-        if (!list) return -1;
-        for (int64_t i = list->length - 1; i >= 0; i--) {
-            if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) {
-                return i;
-            }
-        }
-        return -1;
-    }
-    if (coll_type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = str_item.array_num;
-        return array_num_find_equal(arr, sub_item, true);
-    }
-
-    // --- String/Symbol: substring search from end ---
-    TypeId sub_type = get_type_id(sub_item);
-
-    if ((!is_text_type_id(coll_type)) ||
-        (!is_text_type_id(sub_type))) {
-        log_debug("fn_last_index_of: arguments must be strings/symbols or first arg must be a list");
-        return -1;
-    }
-
-    const char* str_chars = str_item.get_chars();
-    uint32_t str_len = str_item.get_len();
-    const char* sub_chars = sub_item.get_chars();
-    uint32_t sub_len = sub_item.get_len();
-
-    if (!str_chars || !sub_chars) {
-        return -1;
-    }
-
-    if (sub_len == 0) {
-        // empty substring is at the end
-        bool is_ascii = false;
-        if (coll_type == LMD_TYPE_STRING) {
-            String* str = str_item.get_safe_string();
-            if (!str) {
-                return -1;
-            }
-            is_ascii = str->is_ascii != 0;
-        } else {
-            is_ascii = str_is_ascii(str_chars, str_len);
-        }
-        int64_t char_len = is_ascii ? (int64_t)str_len : (int64_t)str_utf8_count(str_chars, str_len);
-        return char_len;
-    }
-
-    if (str_len < sub_len) {
-        return -1;
-    }
-
-    // search from end to beginning
-    bool is_ascii = false;
-    if (coll_type == LMD_TYPE_STRING) {
-        String* str = str_item.get_safe_string();
-        if (!str) {
-            return -1;
-        }
-        is_ascii = str->is_ascii != 0;
-    } else {
-        is_ascii = str_is_ascii(str_chars, str_len);
-    }
-    for (size_t i = str_len - sub_len + 1; i > 0; i--) {
-        size_t pos = i - 1;
-        if (memcmp(str_chars + pos, sub_chars, sub_len) == 0) {
-            // convert byte offset to character offset
-            int64_t char_index = is_ascii ? (int64_t)pos : (int64_t)str_utf8_count(str_chars, pos);
-            return char_index;
-        }
-    }
-
-    return -1;
+    return fn_index_of_raw_impl(str_item, sub_item, true);
 }
 
 Item fn_last_index_of(Item str_item, Item sub_item) {
@@ -5508,12 +5515,21 @@ static String* split_heap_string_slice(Rooted<Item>& rooted_source, size_t offse
     return part;
 }
 
+static bool literal_type_pattern_item(Item type_item, Item* literal_item);
+static TypePattern* runtime_pattern_from_type(Type* type);
+
 // split(str, sep) - split string by separator, returns list of strings
 Item fn_split(Item str_item, Item sep_item) {
     // every split operand participates in dispatch, so no error may fall through to null or whitespace handling
     GUARD_ERROR2(str_item, sep_item);
     TypeId str_type = get_type_id(str_item);
     TypeId sep_type = get_type_id(sep_item);
+
+    Item literal_pattern = {.item = 0};
+    if (literal_type_pattern_item(sep_item, &literal_pattern)) {
+        sep_item = literal_pattern;
+        sep_type = LMD_TYPE_STRING;
+    }
 
     // typed array split: split(arr, n) → n equal parts along axis 0
     if (str_type == LMD_TYPE_ARRAY_NUM) {
@@ -5534,12 +5550,16 @@ Item fn_split(Item str_item, Item sep_item) {
     // pattern-based split: split(str, pattern)
     if (sep_type == LMD_TYPE_TYPE) {
         Type* type = (Type*)(sep_item.item & 0x00FFFFFFFFFFFFFF);
-        if (type && type->kind == TYPE_KIND_PATTERN) {
+        TypePattern* pattern = runtime_pattern_from_type(type);
+        if (pattern) {
+            if (pattern->is_symbol) {
+                log_error("fn_split: symbol-domain patterns cannot search strings");
+                return ItemError;
+            }
             if (!is_text_type_id(str_type)) {
                 log_debug("fn_split: first argument must be a string for pattern split");
                 return ItemError;
             }
-            TypePattern* pattern = (TypePattern*)type;
             List* ps = pattern_split(pattern, str_item, false);
             if (ps) ps->is_content = 1;
             return {.array = ps};
@@ -5652,6 +5672,12 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     TypeId sep_type = get_type_id(sep_item);
     TypeId keep_type = get_type_id(keep_item);
 
+    Item literal_pattern = {.item = 0};
+    if (literal_type_pattern_item(sep_item, &literal_pattern)) {
+        sep_item = literal_pattern;
+        sep_type = LMD_TYPE_STRING;
+    }
+
     // typed array split with explicit axis: split(arr, n, axis)
     if (str_type == LMD_TYPE_ARRAY_NUM) {
         int64_t n = 0, axis = 0;
@@ -5671,12 +5697,16 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     // pattern-based split with keep_delim
     if (sep_type == LMD_TYPE_TYPE) {
         Type* type = (Type*)(sep_item.item & 0x00FFFFFFFFFFFFFF);
-        if (type && type->kind == TYPE_KIND_PATTERN) {
+        TypePattern* pattern = runtime_pattern_from_type(type);
+        if (pattern) {
+            if (pattern->is_symbol) {
+                log_error("fn_split3: symbol-domain patterns cannot search strings");
+                return ItemError;
+            }
             if (!is_text_type_id(str_type)) {
                 log_debug("fn_split3: first argument must be a string for pattern split");
                 return ItemError;
             }
-            TypePattern* pattern = (TypePattern*)type;
             List* ps = pattern_split(pattern, str_item, keep_delim);
             if (ps) ps->is_content = 1;
             return {.array = ps};
@@ -6081,6 +6111,30 @@ static bool item_string_is_ascii(Item item, TypeId item_type) {
     return str && str->is_ascii != 0;
 }
 
+static bool literal_type_pattern_item(Item type_item, Item* literal_item) {
+    if (!literal_item || get_type_id(type_item) != LMD_TYPE_TYPE) return false;
+    Type* type = type_item.type;
+    if (!type) return false;
+    // TypePattern shares the TYPE tag but has no TypeType payload; only the
+    // simple wrapper layout may be unwrapped before inspecting a literal.
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
+        type = ((TypeType*)type)->type;
+    }
+    if (!type || !type->is_literal || type->type_id != LMD_TYPE_STRING) return false;
+    String* literal = ((TypeString*)type)->string;
+    if (!literal) return false;
+    *literal_item = (Item){.item = s2it(literal)};
+    return true;
+}
+
+static TypePattern* runtime_pattern_from_type(Type* type) {
+    if (!type) return nullptr;
+    if (type->kind == TYPE_KIND_PATTERN) return (TypePattern*)type;
+    const char* error_msg = nullptr;
+    return compile_literal_type_pattern(context ? context->pool : nullptr,
+        type, false, &error_msg);
+}
+
 static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindReplaceOptions options) {
     TypeId str_type = get_type_id(str_item);
     TypeId old_type = get_type_id(old_item);
@@ -6095,10 +6149,22 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
     bool new_is_null = (new_type == LMD_TYPE_NULL);
     if (new_is_null) new_type = LMD_TYPE_STRING;
 
+    // Literal-only type aliases remain exact string needles for the search APIs.
+    Item literal_pattern = {.item = 0};
+    if (literal_type_pattern_item(old_item, &literal_pattern)) {
+        old_item = literal_pattern;
+        old_type = LMD_TYPE_STRING;
+    }
+
     // pattern-based replacement: replace(str, pattern, repl_str[, options])
     if (old_type == LMD_TYPE_TYPE) {
         Type* type = (Type*)(old_item.item & 0x00FFFFFFFFFFFFFF);
-        if (type && type->kind == TYPE_KIND_PATTERN) {
+        TypePattern* pattern = runtime_pattern_from_type(type);
+        if (pattern) {
+            if (pattern->is_symbol) {
+                log_error("fn_replace: symbol-domain patterns cannot search strings");
+                return ItemError;
+            }
             if (!is_text_type_id(str_type)) {
                 log_debug("fn_replace: first argument must be a string for pattern replace");
                 return ItemError;
@@ -6107,7 +6173,6 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
                 log_debug("fn_replace: third argument must be a string for pattern replace");
                 return ItemError;
             }
-            TypePattern* pattern = (TypePattern*)type;
             const char* str_chars = str_item.get_chars();
             uint32_t str_len = str_item.get_len();
             const char* repl_chars = new_is_null ? "" : new_item.get_chars();
@@ -6225,6 +6290,12 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     TypeId source_type = get_type_id(source_item);
     TypeId pattern_type = get_type_id(pattern_item);
 
+    Item literal_pattern = {.item = 0};
+    if (literal_type_pattern_item(pattern_item, &literal_pattern)) {
+        pattern_item = literal_pattern;
+        pattern_type = LMD_TYPE_STRING;
+    }
+
     // null source -> empty list
     if (source_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.array = e}; }
 
@@ -6241,8 +6312,12 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     // pattern argument: check if it's a TypePattern
     if (pattern_type == LMD_TYPE_TYPE) {
         Type* type = (Type*)(pattern_item.item & 0x00FFFFFFFFFFFFFF);
-        if (type && type->kind == TYPE_KIND_PATTERN) {
-            TypePattern* pattern = (TypePattern*)type;
+        TypePattern* pattern = runtime_pattern_from_type(type);
+        if (pattern) {
+            if (pattern->is_symbol) {
+                log_error("fn_find: symbol-domain patterns cannot search strings");
+                return ItemError;
+            }
             if ((options.has_limit && options.limit == 0) ||
                 (options.has_last && options.last == 0)) {
                 List* e = list();
@@ -6688,6 +6763,12 @@ static bool runtime_array_representation_matches_contract(Item value,
     switch (desc->kind) {
     case LANE_STORAGE_INT:
         return value.array_num->get_elem_type() == ELEM_INT;
+    case LANE_STORAGE_BOOL:
+        // bool[] uses the non-nullable packed byte lane just like int[] and
+        // float[] use their legacy ArrayNum lanes. Omitting this proof sent a
+        // valid bool store through the post-write validator, which treated the
+        // still-correct ArrayNum carrier as an untyped array contract failure.
+        return value.array_num->get_elem_type() == ELEM_BOOL;
     case LANE_STORAGE_FLOAT64:
         return value.array_num->get_elem_type() == ELEM_FLOAT64;
     default:
@@ -6896,6 +6977,11 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
                 convert_specialized_to_generic(arr);
                 array_set(arr, index, value);
             }
+        } else if (etype == ELEM_BOOL) {
+            // Keep the packed boolean carrier on the checked fallback path;
+            // widening it to a generic Array made a valid bool[] parameter
+            // fail its representation proof after one mutation.
+            array_num_set_item(num_arr, index, value);
         } else {
             // ELEM_INT -- v5: an i64 LANE array. The whole int domain fits,
             // poison included, because poison rides as a lane sentinel.
@@ -7455,6 +7541,8 @@ typedef struct CowProfileCounters {
     uint64_t vmap_rejections;
     uint64_t mutable_value_calls;
     uint64_t map_admit_calls;
+    uint64_t map_admit_relation_cache_hits;
+    uint64_t map_admit_relation_cache_misses;
     uint64_t map_admit_exact_shape_hits;
     uint64_t map_admit_storage_compatible_hits;
     uint64_t map_admit_readonly_validations;
@@ -7588,6 +7676,10 @@ void cow_profile_dump(void) {
     strbuf_append_uint64(output, g_cow_profile.mutable_value_calls);
     strbuf_append_str(output, "\nmap_admit_calls\t");
     strbuf_append_uint64(output, g_cow_profile.map_admit_calls);
+    strbuf_append_str(output, "\nmap_admit_relation_cache_hits\t");
+    strbuf_append_uint64(output, g_cow_profile.map_admit_relation_cache_hits);
+    strbuf_append_str(output, "\nmap_admit_relation_cache_misses\t");
+    strbuf_append_uint64(output, g_cow_profile.map_admit_relation_cache_misses);
     strbuf_append_str(output, "\nmap_admit_exact_shape_hits\t");
     strbuf_append_uint64(output, g_cow_profile.map_admit_exact_shape_hits);
     strbuf_append_str(output, "\nmap_admit_storage_compatible_hits\t");
@@ -8712,6 +8804,32 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     return true;
 }
 
+static MapContractRelation runtime_map_contract_relation_cached(
+        const TypeMap* candidate, const TypeMap* expected) {
+    if (!candidate || !expected) return MAP_CONTRACT_INCOMPATIBLE;
+    Heap* heap = context ? context->heap : NULL;
+    if (!heap) return lambda_map_contract_relation(candidate, expected);
+
+    for (uint32_t i = 0; i < LAMBDA_MAP_CONTRACT_CACHE_CAPACITY; i++) {
+        LambdaMapContractCacheEntry* entry = &heap->map_contract_cache[i];
+        if (entry->candidate == candidate && entry->expected == expected) {
+            if (cow_profile_enabled()) {
+                g_cow_profile.map_admit_relation_cache_hits++;
+            }
+            return (MapContractRelation)entry->relation;
+        }
+    }
+
+    if (cow_profile_enabled()) g_cow_profile.map_admit_relation_cache_misses++;
+    MapContractRelation relation = lambda_map_contract_relation(candidate, expected);
+    uint32_t slot = heap->map_contract_cache_next++ %
+        LAMBDA_MAP_CONTRACT_CACHE_CAPACITY;
+    heap->map_contract_cache[slot].candidate = candidate;
+    heap->map_contract_cache[slot].expected = expected;
+    heap->map_contract_cache[slot].relation = (uint8_t)relation;
+    return relation;
+}
+
 static bool runtime_type_admit_value(Item value, Type* expected, Item* converted) {
     if (!converted) return false;
     expected = runtime_boundary_unwrap_type(expected);
@@ -8751,8 +8869,8 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
         TypeMap* expected_map = (TypeMap*)expected;
         TypeMap* candidate_map = value.map ? (TypeMap*)value.map->type : NULL;
         if (candidate_map && typemap_ptr_is_plausible(candidate_map)) {
-            MapContractRelation relation = lambda_map_contract_relation(candidate_map,
-                expected_map);
+            MapContractRelation relation = runtime_map_contract_relation_cached(
+                candidate_map, expected_map);
             if (relation == MAP_CONTRACT_EXACT_TRUSTED) {
                 if (cow_profile_enabled()) g_cow_profile.map_admit_exact_shape_hits++;
                 *converted = value;

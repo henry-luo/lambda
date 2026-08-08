@@ -73,27 +73,7 @@ static double net_number_value(Item value) {
 }
 
 static bool net_item_to_integral_int64(Item value, int64_t* out) {
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT) {
-        if (out) *out = it2i(value);
-        return true;
-    }
-    if (type == LMD_TYPE_INT64) {
-        if (out) *out = it2l(value);
-        return true;
-    }
-    if (type == LMD_TYPE_FLOAT) {
-        double number = it2d(value);
-        // JS option numbers are float-backed after the Number migration; host knobs still require integers.
-        if (!isfinite(number) || number != floor(number) ||
-            number < -9223372036854775808.0 ||
-            number > 9223372036854775807.0) {
-            return false;
-        }
-        if (out) *out = (int64_t)number;
-        return true;
-    }
-    return false;
+    return js_item_to_integral_int64(value, out, true);
 }
 
 // =============================================================================
@@ -488,8 +468,9 @@ static void socket_update_state_properties(JsSocket* sock) {
                     make_string_item(ready_state));
 }
 
-static void socket_set_address_properties(Item obj, const char* prefix,
-                                          const struct sockaddr_storage* addr) {
+static void net_set_endpoint_properties(Item obj, const char* prefix,
+                                        const struct sockaddr_storage* addr,
+                                        bool family_before_port) {
     if (!obj.item || !addr) return;
 
     char address[INET6_ADDRSTRLEN];
@@ -514,10 +495,17 @@ static void socket_set_address_properties(Item obj, const char* prefix,
     char key[32];
     snprintf(key, sizeof(key), "%sAddress", prefix);
     js_property_set(obj, make_string_item(key), make_string_item(address));
-    snprintf(key, sizeof(key), "%sFamily", prefix);
-    js_property_set(obj, make_string_item(key), make_string_item(family));
-    snprintf(key, sizeof(key), "%sPort", prefix);
-    js_property_set(obj, make_string_item(key), (Item){.item = i2it(port)});
+    if (family_before_port) {
+        snprintf(key, sizeof(key), "%sFamily", prefix);
+        js_property_set(obj, make_string_item(key), make_string_item(family));
+        snprintf(key, sizeof(key), "%sPort", prefix);
+        js_property_set(obj, make_string_item(key), (Item){.item = i2it(port)});
+    } else {
+        snprintf(key, sizeof(key), "%sPort", prefix);
+        js_property_set(obj, make_string_item(key), (Item){.item = i2it(port)});
+        snprintf(key, sizeof(key), "%sFamily", prefix);
+        js_property_set(obj, make_string_item(key), make_string_item(family));
+    }
 }
 
 static void socket_update_address_properties(JsSocket* sock) {
@@ -526,12 +514,12 @@ static void socket_update_address_properties(JsSocket* sock) {
     struct sockaddr_storage addr;
     int addrlen = sizeof(addr);
     if (uv_tcp_getsockname(&sock->tcp, (struct sockaddr*)&addr, &addrlen) == 0) {
-        socket_set_address_properties(sock->js_object, "local", &addr);
+        net_set_endpoint_properties(sock->js_object, "local", &addr, true);
     }
 
     addrlen = sizeof(addr);
     if (uv_tcp_getpeername(&sock->tcp, (struct sockaddr*)&addr, &addrlen) == 0) {
-        socket_set_address_properties(sock->js_object, "remote", &addr);
+        net_set_endpoint_properties(sock->js_object, "remote", &addr, true);
     }
 }
 
@@ -1405,6 +1393,22 @@ extern "C" Item js_socket_resetAndDestroy(Item error_item) {
     return self;
 }
 
+static void socket_close_handle_cb(uv_handle_t* handle) {
+    JsSocket* s = (JsSocket*)handle->data;
+    if (!s) return;
+    bool notify_ipc_parent = s->ipc_received_socket;
+    net_active_remove(&s->active_resource_id);
+    js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
+    if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
+    socket_emit_close(s->js_object, false);
+    socket_note_closed(s);
+    if (s->connect_pending) {
+        s->free_after_connect_pending = true;
+    } else {
+        mem_free(s);
+    }
+}
+
 static void socket_close_now(JsSocket* sock) {
     if (!sock) return;
     if (socket_delegate_close_to_tls(sock, make_undefined_item())) return;
@@ -1418,22 +1422,7 @@ static void socket_close_now(JsSocket* sock) {
         socket_update_writable(sock, false);
         js_property_set(sock->js_object, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
         socket_update_state_properties(sock);
-        uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* handle) {
-            JsSocket* s = (JsSocket*)handle->data;
-            if (s) {
-                bool notify_ipc_parent = s->ipc_received_socket;
-                net_active_remove(&s->active_resource_id);
-                js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
-                if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
-                socket_emit_close(s->js_object, false);
-                socket_note_closed(s);
-                if (s->connect_pending) {
-                    s->free_after_connect_pending = true;
-                } else {
-                    mem_free(s);
-                }
-            }
-        });
+        uv_close((uv_handle_t*)&sock->tcp, socket_close_handle_cb);
     }
 }
 
@@ -1450,39 +1439,9 @@ static void socket_close_reset_now(JsSocket* sock) {
         socket_update_writable(sock, false);
         js_property_set(sock->js_object, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
         socket_update_state_properties(sock);
-        int r = uv_tcp_close_reset(&sock->tcp, [](uv_handle_t* handle) {
-            JsSocket* s = (JsSocket*)handle->data;
-            if (s) {
-                bool notify_ipc_parent = s->ipc_received_socket;
-                net_active_remove(&s->active_resource_id);
-                js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
-                if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
-                socket_emit_close(s->js_object, false);
-                socket_note_closed(s);
-                if (s->connect_pending) {
-                    s->free_after_connect_pending = true;
-                } else {
-                    mem_free(s);
-                }
-            }
-        });
+        int r = uv_tcp_close_reset(&sock->tcp, socket_close_handle_cb);
         if (r != 0 && !uv_is_closing((uv_handle_t*)&sock->tcp)) {
-            uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* handle) {
-                JsSocket* s = (JsSocket*)handle->data;
-                if (s) {
-                    bool notify_ipc_parent = s->ipc_received_socket;
-                    net_active_remove(&s->active_resource_id);
-                    js_property_set(s->js_object, make_string_item("__handle__"), ItemNull);
-                    if (notify_ipc_parent) js_process_ipc_notify_socket_closed();
-                    socket_emit_close(s->js_object, false);
-                    socket_note_closed(s);
-                    if (s->connect_pending) {
-                        s->free_after_connect_pending = true;
-                    } else {
-                        mem_free(s);
-                    }
-                }
-            });
+            uv_close((uv_handle_t*)&sock->tcp, socket_close_handle_cb);
         }
     }
 }
@@ -1763,7 +1722,7 @@ static void socket_apply_type_of_service(JsSocket* sock) {
 #endif
 }
 
-static bool socket_read_uint8(Item value, int* out_value) {
+static Item socket_read_uint8(Item value, int* out_value) {
     TypeId type = get_type_id(value);
     double n = 0;
     if (type == LMD_TYPE_INT) {
@@ -1773,29 +1732,26 @@ static bool socket_read_uint8(Item value, int* out_value) {
     } else if (type == LMD_TYPE_FLOAT) {
         n = it2d(value);
         if (n != n) {
-            js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
                                      "The \"tos\" argument must be of type number.");
-            return false;
         }
     } else {
-        js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
                                  "The \"tos\" argument must be of type number.");
-        return false;
     }
     if (n < 0 || n > 255) {
-        js_throw_range_error_code("ERR_OUT_OF_RANGE",
+        return js_throw_range_error_code("ERR_OUT_OF_RANGE",
                                   "The value of \"tos\" is out of range.");
-        return false;
     }
     *out_value = (int)n;
-    return true;
+    return js_status_ok();
 }
 
 static Item js_socket_setTypeOfService(Item tos_item) {
     Item self = js_get_this();
     JsSocket* sock = socket_from_object(self);
     int tos = 0;
-    if (!socket_read_uint8(tos_item, &tos)) return make_undefined_item();
+    JS_RETURN_IF_ERROR(socket_read_uint8(tos_item, &tos));
     if (sock) {
         sock->type_of_service = tos;
         sock->tos_set = true;
@@ -1924,6 +1880,26 @@ static Item js_socket_pause(void) {
     return self;
 }
 
+static Item socket_make_address_result(const struct sockaddr_storage* addr) {
+    Item result = js_new_object();
+    if (addr->ss_family == AF_INET) {
+        const struct sockaddr_in* a4 = (const struct sockaddr_in*)addr;
+        char ip[64];
+        uv_ip4_name(a4, ip, sizeof(ip));
+        js_property_set(result, make_string_item("address"), make_string_item(ip));
+        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
+        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
+    } else if (addr->ss_family == AF_INET6) {
+        const struct sockaddr_in6* a6 = (const struct sockaddr_in6*)addr;
+        char ip[128];
+        uv_ip6_name(a6, ip, sizeof(ip));
+        js_property_set(result, make_string_item("address"), make_string_item(ip));
+        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
+        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
+    }
+    return result;
+}
+
 // Socket.address() — return local address info
 static Item js_socket_address(void) {
     Item self = js_get_this();
@@ -1935,23 +1911,7 @@ static Item js_socket_address(void) {
     int r = uv_tcp_getsockname(&sock->tcp, (struct sockaddr*)&addr, &addrlen);
     if (r != 0) return ItemNull;
 
-    Item result = js_new_object();
-    if (addr.ss_family == AF_INET) {
-        struct sockaddr_in* a4 = (struct sockaddr_in*)&addr;
-        char ip[64];
-        uv_ip4_name(a4, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
-    } else if (addr.ss_family == AF_INET6) {
-        struct sockaddr_in6* a6 = (struct sockaddr_in6*)&addr;
-        char ip[128];
-        uv_ip6_name(a6, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
-    }
-    return result;
+    return socket_make_address_result(&addr);
 }
 
 extern "C" Item js_net_createServer(Item rest_args);
@@ -2399,40 +2359,36 @@ static Item throw_bad_port(Item value) {
     return js_throw_range_error_code("ERR_SOCKET_BAD_PORT", msg);
 }
 
-static bool parse_port(Item value, int* out_port) {
+static Item parse_port(Item value, int* out_port) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) {
         int64_t p = it2i(value);
         if (p < 0 || p > 65535) {
-            throw_bad_port(value);
-            return false;
+            return throw_bad_port(value);
         }
         *out_port = (int)p;
-        return true;
+        return js_status_ok();
     }
     if (type == LMD_TYPE_INT64) {
         int64_t p = it2l(value);
         if (p < 0 || p > 65535) {
-            throw_bad_port(value);
-            return false;
+            return throw_bad_port(value);
         }
         *out_port = (int)p;
-        return true;
+        return js_status_ok();
     }
     if (type == LMD_TYPE_FLOAT) {
         double d = it2d(value);
         if (d != d || d == 1.0 / 0.0 || d == -1.0 / 0.0 || d < 0 || d > 65535 || d != (int64_t)d) {
-            throw_bad_port(value);
-            return false;
+            return throw_bad_port(value);
         }
         *out_port = (int)d;
-        return true;
+        return js_status_ok();
     }
     if (type == LMD_TYPE_STRING) {
         String* s = it2s(value);
         if (s->len == 0 || s->len >= 64) {
-            throw_bad_port(value);
-            return false;
+            return throw_bad_port(value);
         }
         char buf[64];
         memcpy(buf, s->chars, s->len);
@@ -2440,21 +2396,18 @@ static bool parse_port(Item value, int* out_port) {
         char* end = NULL;
         long p = strtol(buf, &end, 0);
         if (end == buf || *end != '\0' || p < 0 || p > 65535) {
-            throw_bad_port(value);
-            return false;
+            return throw_bad_port(value);
         }
         *out_port = (int)p;
-        return true;
+        return js_status_ok();
     }
-    js_throw_invalid_arg_type("port", "number or string", value);
-    return false;
+    return js_throw_invalid_arg_type("port", "number or string", value);
 }
 
-static bool parse_local_port(Item value, int* out_port) {
+static Item parse_local_port(Item value, int* out_port) {
     TypeId type = get_type_id(value);
     if (type != LMD_TYPE_INT && type != LMD_TYPE_INT64 && type != LMD_TYPE_FLOAT) {
-        js_throw_invalid_arg_type("options.localPort", "number", value);
-        return false;
+        return js_throw_invalid_arg_type("options.localPort", "number", value);
     }
     return parse_port(value, out_port);
 }
@@ -2477,15 +2430,14 @@ static bool string_item_has_nul(Item value) {
     return false;
 }
 
-static bool validate_host_string(Item value, const char* name) {
+static Item validate_host_string(Item value, const char* name) {
     if (string_item_has_nul(value)) {
         char msg[128];
         snprintf(msg, sizeof(msg),
                  "The property '%s' must be a string without null bytes.", name);
-        js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
-        return false;
+        return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
     }
-    return true;
+    return js_status_ok();
 }
 
 static JsBoundSocket* bound_socket_from_item(Item self) {
@@ -2588,23 +2540,7 @@ static Item js_bound_socket_address(void) {
     int r = uv_tcp_getsockname(&bound->tcp, (struct sockaddr*)&addr, &addrlen);
     if (r != 0) return ItemNull;
 
-    Item result = js_new_object();
-    if (addr.ss_family == AF_INET) {
-        struct sockaddr_in* a4 = (struct sockaddr_in*)&addr;
-        char ip[64];
-        uv_ip4_name(a4, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
-    } else if (addr.ss_family == AF_INET6) {
-        struct sockaddr_in6* a6 = (struct sockaddr_in6*)&addr;
-        char ip[128];
-        uv_ip6_name(a6, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
-    }
-    return result;
+    return socket_make_address_result(&addr);
 }
 
 static Item js_bound_socket_fd(void) {
@@ -2646,8 +2582,7 @@ extern "C" Item js_net_BoundSocket(Item options) {
     if (!loop) return ItemNull;
 
     if (!is_undefined_item(options) && options.item != ITEM_NULL && !net_is_object_like(options)) {
-        js_throw_invalid_arg_type("options", "Object", options);
-        return ItemNull;
+        return js_throw_invalid_arg_type("options", "Object", options);
     }
 
     int port = 0;
@@ -2659,14 +2594,13 @@ extern "C" Item js_net_BoundSocket(Item options) {
         Item host = js_property_get(options, make_string_item("host"));
         if (!is_undefined_item(host) && host.item != ITEM_NULL) {
             if (!copy_string_item(host, host_buf, (int)sizeof(host_buf))) {
-                js_throw_invalid_arg_type("options.host", "string", host);
-                return ItemNull;
+                return js_throw_invalid_arg_type("options.host", "string", host);
             }
-            if (!validate_host_string(host, "options.host")) return ItemNull;
+            JS_RETURN_IF_ERROR(validate_host_string(host, "options.host"));
         }
         Item port_item = js_property_get(options, make_string_item("port"));
         if (!is_undefined_item(port_item) && port_item.item != ITEM_NULL) {
-            if (!parse_port(port_item, &port)) return ItemNull;
+            JS_RETURN_IF_ERROR(parse_port(port_item, &port));
         }
         Item opt_ipv6_only = js_property_get(options, make_string_item("ipv6Only"));
         ipv6_only = get_type_id(opt_ipv6_only) == LMD_TYPE_BOOL && it2b(opt_ipv6_only);
@@ -2683,8 +2617,7 @@ extern "C" Item js_net_BoundSocket(Item options) {
     if (reuse_port) flags |= UV_TCP_REUSEPORT;
 #else
     if (reuse_port) {
-        js_throw_error_with_code("ENOSYS", "reusePort is not supported");
-        return ItemNull;
+        return js_throw_error_with_code("ENOSYS", "reusePort is not supported");
     }
 #endif
 
@@ -2698,14 +2631,12 @@ extern "C" Item js_net_BoundSocket(Item options) {
         addrlen = sizeof(struct sockaddr_in);
     }
     if (r != 0) {
-        js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The property 'options.host' is invalid");
-        return ItemNull;
+        return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", "The property 'options.host' is invalid");
     }
     if (!reuse_port && port > 0 &&
         bound_socket_has_live_listener((const struct sockaddr*)&addr, addrlen)) {
         Item err = make_uv_error(UV_EADDRINUSE, "bind", host_buf, port);
-        js_throw_value(err);
-        return ItemNull;
+        return js_throw_value(err);
     }
 
     JsBoundSocket* bound = (JsBoundSocket*)mem_calloc(1, sizeof(JsBoundSocket), MEM_CAT_JS_RUNTIME);
@@ -2721,8 +2652,7 @@ extern "C" Item js_net_BoundSocket(Item options) {
     if (r != 0) {
         Item err = make_uv_error(r, "bind", host_buf, port);
         bound_socket_close_handle(bound, false, true);
-        js_throw_value(err);
-        return ItemNull;
+        return js_throw_value(err);
     }
 
     Item obj = js_new_object();
@@ -2917,8 +2847,8 @@ static int net_keep_alive_delay_secs(Item value) {
     return (int)(d / 1000.0);
 }
 
-static bool net_parse_auto_select_timeout(Item value, const char* name, int* out_timeout) {
-    if (!out_timeout) return false;
+static Item net_parse_auto_select_timeout(Item value, const char* name, int* out_timeout) {
+    if (!out_timeout) return js_throw_type_error("Network timeout output is unavailable");
     TypeId type = get_type_id(value);
     double d = 0.0;
     if (type == LMD_TYPE_INT) {
@@ -2928,15 +2858,13 @@ static bool net_parse_auto_select_timeout(Item value, const char* name, int* out
     } else if (type == LMD_TYPE_FLOAT) {
         d = it2d(value);
     } else {
-        js_throw_invalid_arg_type(name, "number", value);
-        return false;
+        return js_throw_invalid_arg_type(name, "number", value);
     }
     if (d != d || d == 1.0 / 0.0 || d == -1.0 / 0.0 || d <= 0) {
-        js_throw_out_of_range(name, ">= 1", value);
-        return false;
+        return js_throw_out_of_range(name, ">= 1", value);
     }
     *out_timeout = d < 10.0 ? 10 : (int)d;
-    return true;
+    return js_status_ok();
 }
 
 static bool net_string_starts_with(Item value, const char* prefix) {
@@ -2967,8 +2895,9 @@ static void net_apply_cli_options(void) {
             if (end && end > start && end == s->chars + s->len && timeout > 0) {
                 Item timeout_item = (Item){.item = i2it(timeout)};
                 int parsed_timeout = 0;
-                if (net_parse_auto_select_timeout(timeout_item,
-                        "network-family-autoselection-attempt-timeout", &parsed_timeout)) {
+                Item timeout_result = net_parse_auto_select_timeout(timeout_item,
+                    "network-family-autoselection-attempt-timeout", &parsed_timeout);
+                if (!item_is_error(timeout_result)) {
                     net_auto_select_family_timeout = parsed_timeout;
                 }
             }
@@ -2981,30 +2910,27 @@ static bool option_is_true(Item options, const char* name) {
     return get_type_id(value) == LMD_TYPE_BOOL && it2b(value);
 }
 
-static bool validate_unsupported_stream_options(Item options) {
+static Item validate_unsupported_stream_options(Item options) {
     if (option_is_true(options, "objectMode")) {
-        js_throw_type_error_code(
+        return js_throw_type_error_code(
             "ERR_INVALID_ARG_VALUE",
             "The property 'options.objectMode' is not supported. Received true");
-        return false;
     }
     if (option_is_true(options, "readableObjectMode")) {
-        js_throw_type_error_code(
+        return js_throw_type_error_code(
             "ERR_INVALID_ARG_VALUE",
             "The property 'options.readableObjectMode' is not supported. Received true");
-        return false;
     }
     if (option_is_true(options, "writableObjectMode")) {
-        js_throw_type_error_code(
+        return js_throw_type_error_code(
             "ERR_INVALID_ARG_VALUE",
             "The property 'options.writableObjectMode' is not supported. Received true");
-        return false;
     }
-    return true;
+    return js_status_ok();
 }
 
-static bool normalize_options_object(Item options, NetConnectOptions* out) {
-    if (!validate_unsupported_stream_options(options)) return false;
+static Item normalize_options_object(Item options, NetConnectOptions* out) {
+    JS_RETURN_IF_ERROR(validate_unsupported_stream_options(options));
 
     Item hints = js_property_get(options, make_string_item("hints"));
     if (!is_undefined_item(hints) && hints.item != ITEM_NULL) {
@@ -3012,34 +2938,30 @@ static bool normalize_options_object(Item options, NetConnectOptions* out) {
             char msg[128];
             int64_t h = get_type_id(hints) == LMD_TYPE_INT ? it2i(hints) : 0;
             snprintf(msg, sizeof(msg), "The argument 'hints' is invalid. Received %lld", (long long)h);
-            js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
-            return false;
+            return js_throw_type_error_code("ERR_INVALID_ARG_VALUE", msg);
         }
     }
 
     Item port = js_property_get(options, make_string_item("port"));
     Item path = js_property_get(options, make_string_item("path"));
     if (is_undefined_item(port) && (is_undefined_item(path) || path.item == ITEM_NULL)) {
-        throw_missing_connect_args();
-        return false;
+        return throw_missing_connect_args();
     }
     if (!is_undefined_item(path) && path.item != ITEM_NULL) {
         if (!copy_string_item(path, out->path, (int)sizeof(out->path))) {
-            js_throw_invalid_arg_type("options.path", "string", path);
-            return false;
+            return js_throw_invalid_arg_type("options.path", "string", path);
         }
         out->has_path = true;
-        return true;
+        return js_status_ok();
     }
-    if (!parse_port(port, &out->port)) return false;
+    JS_RETURN_IF_ERROR(parse_port(port, &out->port));
 
     Item host = js_property_get(options, make_string_item("host"));
     if (!is_undefined_item(host) && host.item != ITEM_NULL) {
         if (!copy_string_item(host, out->host, (int)sizeof(out->host))) {
-            js_throw_invalid_arg_type("options.host", "string", host);
-            return false;
+            return js_throw_invalid_arg_type("options.host", "string", host);
         }
-        if (!validate_host_string(host, "options.host")) return false;
+        JS_RETURN_IF_ERROR(validate_host_string(host, "options.host"));
     }
 
     Item family = js_property_get(options, make_string_item("family"));
@@ -3061,22 +2983,20 @@ static bool normalize_options_object(Item options, NetConnectOptions* out) {
     Item local_address = js_property_get(options, make_string_item("localAddress"));
     if (!is_undefined_item(local_address) && local_address.item != ITEM_NULL) {
         if (!copy_string_item(local_address, out->local_address, (int)sizeof(out->local_address))) {
-            js_throw_invalid_arg_type("options.localAddress", "string", local_address);
-            return false;
+            return js_throw_invalid_arg_type("options.localAddress", "string", local_address);
         }
         struct sockaddr_in local4;
         struct sockaddr_in6 local6;
         if (uv_ip4_addr(out->local_address, 0, &local4) != 0 &&
             uv_ip6_addr(out->local_address, 0, &local6) != 0) {
-            throw_invalid_ip_address(local_address);
-            return false;
+            return throw_invalid_ip_address(local_address);
         }
         out->has_local_address = true;
     }
 
     Item local_port = js_property_get(options, make_string_item("localPort"));
     if (!is_undefined_item(local_port) && local_port.item != ITEM_NULL) {
-        if (!parse_local_port(local_port, &out->local_port)) return false;
+        JS_RETURN_IF_ERROR(parse_local_port(local_port, &out->local_port));
         out->has_local_port = true;
     }
 
@@ -3097,8 +3017,7 @@ static bool normalize_options_object(Item options, NetConnectOptions* out) {
         out->lookup = lookup;
         out->has_lookup = true;
     } else if (!is_undefined_item(lookup) && lookup.item != ITEM_NULL) {
-        js_throw_invalid_arg_type("options.lookup", "Function", lookup);
-        return false;
+        return js_throw_invalid_arg_type("options.lookup", "Function", lookup);
     }
 
     Item block_list = js_property_get(options, make_string_item("blockList"));
@@ -3110,8 +3029,7 @@ static bool normalize_options_object(Item options, NetConnectOptions* out) {
     Item auto_select = js_property_get(options, make_string_item("autoSelectFamily"));
     if (!is_undefined_item(auto_select) && auto_select.item != ITEM_NULL &&
         get_type_id(auto_select) != LMD_TYPE_BOOL) {
-        js_throw_invalid_arg_type("options.autoSelectFamily", "boolean", auto_select);
-        return false;
+        return js_throw_invalid_arg_type("options.autoSelectFamily", "boolean", auto_select);
     }
     if (get_type_id(auto_select) == LMD_TYPE_BOOL) {
         out->auto_select_family = it2b(auto_select);
@@ -3121,16 +3039,14 @@ static bool normalize_options_object(Item options, NetConnectOptions* out) {
     Item auto_select_timeout = js_property_get(options, make_string_item("autoSelectFamilyAttemptTimeout"));
     if (!is_undefined_item(auto_select_timeout) && auto_select_timeout.item != ITEM_NULL) {
         int parsed_timeout = 0;
-        if (!net_parse_auto_select_timeout(auto_select_timeout,
-                "options.autoSelectFamilyAttemptTimeout", &parsed_timeout)) {
-            return false;
-        }
+        JS_RETURN_IF_ERROR(net_parse_auto_select_timeout(auto_select_timeout,
+            "options.autoSelectFamilyAttemptTimeout", &parsed_timeout));
         out->auto_select_family_attempt_timeout = parsed_timeout;
     }
-    return true;
+    return js_status_ok();
 }
 
-static bool normalize_connect_args(Item rest_args, NetConnectOptions* out) {
+static Item normalize_connect_args(Item rest_args, NetConnectOptions* out) {
     out->port = 0;
     out->family = 0;
     out->host[0] = '\0';
@@ -3161,15 +3077,13 @@ static bool normalize_connect_args(Item rest_args, NetConnectOptions* out) {
     int64_t argc64 = js_array_length(rest_args);
     int argc = argc64 > 16 ? 16 : (int)argc64;
     if (argc <= 0) {
-        throw_missing_connect_args();
-        return false;
+        return throw_missing_connect_args();
     }
 
     Item first = js_array_get_int(rest_args, 0);
     if (argc == 1 && get_type_id(first) == LMD_TYPE_ARRAY) {
         if (!net_is_normalized_args(first)) {
-            throw_missing_connect_args();
-            return false;
+            return throw_missing_connect_args();
         }
         rest_args = first;
         argc64 = js_array_length(rest_args);
@@ -3178,51 +3092,51 @@ static bool normalize_connect_args(Item rest_args, NetConnectOptions* out) {
     }
 
     if (is_undefined_item(first)) {
-        throw_missing_connect_args();
-        return false;
+        return throw_missing_connect_args();
     }
 
     TypeId first_type = get_type_id(first);
     if (first_type == LMD_TYPE_MAP || first_type == LMD_TYPE_OBJECT ||
         first_type == LMD_TYPE_VMAP || first_type == LMD_TYPE_ELEMENT) {
-        if (!normalize_options_object(first, out)) return false;
+        JS_RETURN_IF_ERROR(normalize_options_object(first, out));
         if (argc > 1) {
             Item cb = js_array_get_int(rest_args, 1);
             if (is_callable(cb)) out->callback = cb;
         }
-        return true;
+        return js_status_ok();
     }
 
     if (get_type_id(first) == LMD_TYPE_STRING) {
         String* s = it2s(first);
         if (s->len > 0 && s->chars[0] == '/') {
-            if (!copy_string_item(first, out->path, (int)sizeof(out->path))) return false;
+            if (!copy_string_item(first, out->path, (int)sizeof(out->path))) {
+                return js_throw_invalid_arg_type("path", "string", first);
+            }
             out->has_path = true;
-            return true;
+            return js_status_ok();
         }
     }
 
-    if (!parse_port(first, &out->port)) return false;
+    JS_RETURN_IF_ERROR(parse_port(first, &out->port));
 
     if (argc > 1) {
         Item second = js_array_get_int(rest_args, 1);
         if (is_callable(second)) {
             out->callback = second;
-            return true;
+            return js_status_ok();
         }
         if (!is_undefined_item(second) && second.item != ITEM_NULL) {
             if (!copy_string_item(second, out->host, (int)sizeof(out->host))) {
-                js_throw_invalid_arg_type("host", "string", second);
-                return false;
+                return js_throw_invalid_arg_type("host", "string", second);
             }
-            if (!validate_host_string(second, "host")) return false;
+            JS_RETURN_IF_ERROR(validate_host_string(second, "host"));
         }
     }
     if (argc > 2) {
         Item third = js_array_get_int(rest_args, 2);
         if (is_callable(third)) out->callback = third;
     }
-    return true;
+    return js_status_ok();
 }
 
 static void client_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
@@ -3785,9 +3699,9 @@ static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options
         env[0] = (Item){.item = i2it((int64_t)(uintptr_t)nr)};
         Item callback = js_new_closure((void*)net_lookup_complete, -1, env, 1);
         Item args[3] = { make_string_item(options->host), lookup_options, callback };
-        js_call_function(options->lookup, make_undefined_item(), args, 3);
-        if (js_check_exception()) {
-            Item err = js_clear_exception();
+        Item lookup_result = js_call_function(options->lookup, make_undefined_item(), args, 3);
+        if (item_is_error(lookup_result)) {
+            Item err = js_error_lane_payload(lookup_result);
             net_connect_lookup_fail(nr, err);
             mem_free(nr);
             return 0;
@@ -4024,7 +3938,7 @@ static JsSocket* socket_reattach_for_connect(Item self) {
 
 static Item js_socket_connect_args(Item self, Item rest_args) {
     NetConnectOptions options;
-    if (!normalize_connect_args(rest_args, &options)) return ItemNull;
+    JS_RETURN_IF_ERROR(normalize_connect_args(rest_args, &options));
 
     JsSocket* sock = socket_from_object(self);
     if (!sock) sock = socket_reattach_for_connect(self);
@@ -4076,7 +3990,7 @@ extern "C" Item js_net_createConnection(Item rest_args) {
         connect_fn.item != net_socket_connect_fn.item;
     if (!patched_connect) {
         NetConnectOptions options;
-        if (!normalize_connect_args(rest_args, &options)) return ItemNull;
+        JS_RETURN_IF_ERROR(normalize_connect_args(rest_args, &options));
         return create_socket_for_connect(&options);
     }
 
@@ -4306,35 +4220,6 @@ static int server_max_connections(JsServer* srv) {
     return -1;
 }
 
-static void drop_set_endpoint(Item obj, const char* prefix, const struct sockaddr_storage* addr) {
-    if (!obj.item || !addr) return;
-    char address[INET6_ADDRSTRLEN];
-    const char* family = NULL;
-    int port = 0;
-    address[0] = '\0';
-    if (addr->ss_family == AF_INET) {
-        const struct sockaddr_in* a4 = (const struct sockaddr_in*)addr;
-        uv_ip4_name(a4, address, sizeof(address));
-        family = "IPv4";
-        port = ntohs(a4->sin_port);
-    } else if (addr->ss_family == AF_INET6) {
-        const struct sockaddr_in6* a6 = (const struct sockaddr_in6*)addr;
-        uv_ip6_name(a6, address, sizeof(address));
-        family = "IPv6";
-        port = ntohs(a6->sin6_port);
-    } else {
-        return;
-    }
-
-    char key[32];
-    snprintf(key, sizeof(key), "%sAddress", prefix);
-    js_property_set(obj, make_string_item(key), make_string_item(address));
-    snprintf(key, sizeof(key), "%sPort", prefix);
-    js_property_set(obj, make_string_item(key), (Item){.item = i2it(port)});
-    snprintf(key, sizeof(key), "%sFamily", prefix);
-    js_property_set(obj, make_string_item(key), make_string_item(family));
-}
-
 static Item server_make_drop_data(JsSocket* client) {
     Item data = js_new_object();
     if (!client) return data;
@@ -4342,11 +4227,11 @@ static Item server_make_drop_data(JsSocket* client) {
     struct sockaddr_storage addr;
     int addrlen = sizeof(addr);
     if (uv_tcp_getsockname(&client->tcp, (struct sockaddr*)&addr, &addrlen) == 0) {
-        drop_set_endpoint(data, "local", &addr);
+        net_set_endpoint_properties(data, "local", &addr, false);
     }
     addrlen = sizeof(addr);
     if (uv_tcp_getpeername(&client->tcp, (struct sockaddr*)&addr, &addrlen) == 0) {
-        drop_set_endpoint(data, "remote", &addr);
+        net_set_endpoint_properties(data, "remote", &addr, false);
     }
     return data;
 }
@@ -4759,12 +4644,11 @@ static Item js_server_abort_signal_event(Item env_item) {
     return make_undefined_item();
 }
 
-static bool server_configure_listen_signal(Item self, Item signal, bool* out_aborted) {
+static Item server_configure_listen_signal(Item self, Item signal, bool* out_aborted) {
     if (out_aborted) *out_aborted = false;
-    if (is_undefined_item(signal) || signal.item == ITEM_NULL) return true;
+    if (is_undefined_item(signal) || signal.item == ITEM_NULL) return js_status_ok();
     if (!net_is_object_like(signal)) {
-        js_throw_invalid_arg_type("options.signal", "AbortSignal", signal);
-        return false;
+        return js_throw_invalid_arg_type("options.signal", "AbortSignal", signal);
     }
     if (out_aborted) *out_aborted = server_signal_is_aborted(signal);
     Item add_fn = js_property_get(signal, make_string_item("addEventListener"));
@@ -4776,6 +4660,32 @@ static bool server_configure_listen_signal(Item self, Item signal, bool* out_abo
         js_call_function(add_fn, signal, args, 2);
         js_microtask_flush();
     }
+    return js_status_ok();
+}
+
+static bool server_listen_on_fd(Item self, JsServer* srv, Item callback, uv_os_sock_t fd,
+        bool close_fd_on_open_error) {
+    int open_r = uv_tcp_open(&srv->tcp, (uv_os_sock_t)fd);
+    if (open_r != 0) {
+#ifndef _WIN32
+        if (close_fd_on_open_error) close((int)fd);
+#endif
+        Item err = make_uv_error(open_r, "listen", NULL, -1);
+        server_schedule_error(self, err);
+        server_close_after_listen_error(srv);
+        return false;
+    }
+    int listen_r = uv_listen((uv_stream_t*)&srv->tcp, 128, server_connection_cb);
+    if (listen_r != 0) {
+        Item err = make_uv_error(listen_r, "listen", NULL, -1);
+        server_schedule_error(self, err);
+        server_close_after_listen_error(srv);
+        return false;
+    }
+    srv->active_resource_id = net_active_add(self, "TCPServerWrap");
+    server_update_connection_key(self, srv, 0);
+    js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
+    server_schedule_listening(self, srv, callback);
     return true;
 }
 
@@ -4804,8 +4714,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         // listen denial is synchronous in Node, and checking before bind/listen
         // avoids leaving socket files or referenced server handles behind.
         Item err = js_permission_make_net_error("listen", NULL);
-        js_throw_value(err);
-        return ItemNull;
+        return js_throw_value(err);
     }
 
     if (srv->closed && srv->close_requested && !srv->handle_closed) {
@@ -4855,27 +4764,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
             server_schedule_error(self, err);
             return self;
         }
-        int open_r = uv_tcp_open(&srv->tcp, (uv_os_sock_t)fd);
-        if (open_r != 0) {
-#ifndef _WIN32
-            close(fd);
-#endif
-            Item err = make_uv_error(open_r, "listen", NULL, -1);
-            server_schedule_error(self, err);
-            server_close_after_listen_error(srv);
-            return self;
-        }
-        int listen_r = uv_listen((uv_stream_t*)&srv->tcp, 128, server_connection_cb);
-        if (listen_r != 0) {
-            Item err = make_uv_error(listen_r, "listen", NULL, -1);
-            server_schedule_error(self, err);
-            server_close_after_listen_error(srv);
-            return self;
-        }
-        srv->active_resource_id = net_active_add(self, "TCPServerWrap");
-        server_update_connection_key(self, srv, 0);
-        js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
-        server_schedule_listening(self, srv, callback);
+        server_listen_on_fd(self, srv, callback, fd, true);
         return self;
     }
 
@@ -4897,67 +4786,44 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
                 valid_fd_number = true;
             }
             if (!valid_fd_number) {
-                js_throw_invalid_arg_type("options.fd", "number", fd_item);
-                return self;
+                return js_throw_invalid_arg_type("options.fd", "number", fd_item);
             }
             if (fd_value < 0) {
-                js_throw_type_error_code(
+                return js_throw_type_error_code(
                     "ERR_INVALID_ARG_VALUE",
                     "The argument 'options' must have the property \"port\" or \"path\". Received an instance of Object");
-                return self;
             }
-            int open_r = uv_tcp_open(&srv->tcp, (uv_os_sock_t)fd_value);
-            if (open_r != 0) {
-                Item err = make_uv_error(open_r, "listen", NULL, -1);
-                server_schedule_error(self, err);
-                server_close_after_listen_error(srv);
-                return self;
-            }
-            int listen_r = uv_listen((uv_stream_t*)&srv->tcp, 128, server_connection_cb);
-            if (listen_r != 0) {
-                Item err = make_uv_error(listen_r, "listen", NULL, -1);
-                server_schedule_error(self, err);
-                server_close_after_listen_error(srv);
-                return self;
-            }
-            srv->active_resource_id = net_active_add(self, "TCPServerWrap");
-            server_update_connection_key(self, srv, 0);
-            js_property_set(self, make_string_item("listening"), (Item){.item = ITEM_TRUE});
-            server_schedule_listening(self, srv, callback);
+            server_listen_on_fd(self, srv, callback, (uv_os_sock_t)fd_value, false);
             return self;
         }
         if (!has_port && !has_path) {
-            js_throw_type_error_code(
+            return js_throw_type_error_code(
                 "ERR_INVALID_ARG_VALUE",
                 "The argument 'options' must have the property \"port\" or \"path\". Received an instance of Object");
-            return self;
         }
         Item opt_port = js_property_get(port_item, make_string_item("port"));
         if (has_port) {
             if (is_undefined_item(opt_port) || opt_port.item == ITEM_NULL) {
                 port = 0;
             } else if (get_type_id(opt_port) == LMD_TYPE_BOOL) {
-                js_throw_type_error_code(
+                return js_throw_type_error_code(
                     "ERR_INVALID_ARG_VALUE",
                     "The argument 'options' is invalid. Received an instance of Object");
-                return self;
-            } else if (!parse_port(opt_port, &port)) {
-                return self;
+            } else {
+                JS_RETURN_IF_ERROR(parse_port(opt_port, &port));
             }
         } else {
             Item opt_path = js_property_get(port_item, make_string_item("path"));
             if (get_type_id(opt_path) != LMD_TYPE_STRING) {
-                js_throw_type_error_code(
+                return js_throw_type_error_code(
                     "ERR_INVALID_ARG_VALUE",
                     "The argument 'options' is invalid. Received an instance of Object");
-                return self;
             }
         }
         Item opt_host = js_property_get(port_item, make_string_item("host"));
         if (!is_undefined_item(opt_host) && opt_host.item != ITEM_NULL) {
             if (!copy_string_item(opt_host, host_buf, (int)sizeof(host_buf))) {
-                js_throw_invalid_arg_type("options.host", "string", opt_host);
-                return self;
+                return js_throw_invalid_arg_type("options.host", "string", opt_host);
             }
         }
         Item opt_ipv6_only = js_property_get(port_item, make_string_item("ipv6Only"));
@@ -4965,7 +4831,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         Item opt_reuse_port = js_property_get(port_item, make_string_item("reusePort"));
         reuse_port = get_type_id(opt_reuse_port) == LMD_TYPE_BOOL && it2b(opt_reuse_port);
         Item opt_signal = js_property_get(port_item, make_string_item("signal"));
-        if (!server_configure_listen_signal(self, opt_signal, &listen_signal_aborted)) return self;
+        JS_RETURN_IF_ERROR(server_configure_listen_signal(self, opt_signal, &listen_signal_aborted));
     } else if (port_type == LMD_TYPE_STRING) {
         String* s = it2s(port_item);
         char first[256];
@@ -4983,12 +4849,11 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
         port = (int)parsed;
     } else {
         if (port_type == LMD_TYPE_BOOL) {
-            js_throw_type_error_code(
+            return js_throw_type_error_code(
                 "ERR_INVALID_ARG_VALUE",
                 "The argument 'options' is invalid. Received false");
-            return self;
         }
-        if (!parse_port(port_item, &port)) return self;
+        JS_RETURN_IF_ERROR(parse_port(port_item, &port));
     }
 
     if (get_type_id(host_item) == LMD_TYPE_STRING) {
@@ -5060,28 +4925,7 @@ static Item js_server_address(void) {
     JsServer* srv = (JsServer*)(uintptr_t)it2i(handle_item);
     if (!srv) return ItemNull;
 
-    struct sockaddr_storage addr;
-    int addrlen = sizeof(addr);
-    int r = uv_tcp_getsockname(&srv->tcp, (struct sockaddr*)&addr, &addrlen);
-    if (r != 0) return ItemNull;
-
-    Item result = js_new_object();
-    if (addr.ss_family == AF_INET) {
-        struct sockaddr_in* a4 = (struct sockaddr_in*)&addr;
-        char ip[64];
-        uv_ip4_name(a4, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
-    } else if (addr.ss_family == AF_INET6) {
-        struct sockaddr_in6* a6 = (struct sockaddr_in6*)&addr;
-        char ip[128];
-        uv_ip6_name(a6, ip, sizeof(ip));
-        js_property_set(result, make_string_item("address"), make_string_item(ip));
-        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
-        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
-    }
-    return result;
+    return js_node_tcp_server_address(&srv->tcp);
 }
 
 static JsServer* server_from_object(Item self) {
@@ -5240,8 +5084,7 @@ extern "C" Item js_net_createServer(Item rest_args) {
     }
 
     if (!is_undefined_item(options) && options.item != ITEM_NULL && !net_is_object_like(options)) {
-        js_throw_invalid_arg_type("options", "Object", options);
-        return ItemNull;
+        return js_throw_invalid_arg_type("options", "Object", options);
     }
 
     JsServer* srv = (JsServer*)mem_calloc(1, sizeof(JsServer), MEM_CAT_JS_RUNTIME);
@@ -5369,12 +5212,10 @@ extern "C" Item js_net_Socket(Item options) {
             int64_t fd_value = 0;
             valid_fd_number = net_item_to_integral_int64(fd, &fd_value);
             if (!valid_fd_number) {
-                js_throw_invalid_arg_type("options.fd", "number", fd);
-                return ItemNull;
+                return js_throw_invalid_arg_type("options.fd", "number", fd);
             }
             if (fd_value < 0) {
-                js_throw_out_of_range("options.fd", ">= 0", fd);
-                return ItemNull;
+                return js_throw_out_of_range("options.fd", ">= 0", fd);
             }
         }
     }
@@ -5410,9 +5251,8 @@ extern "C" Item js_net_Socket(Item options) {
                 if (fd >= 0) close(fd);
 #endif
                 mem_free(sock);
-                js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
-                                         "The property 'options.handle' is invalid");
-                return ItemNull;
+                return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
+                                                "The property 'options.handle' is invalid");
             }
             sock->adopted_bound_socket = true;
         }
@@ -5470,8 +5310,7 @@ static Item js_block_list_addAddress(Item address, Item type) {
 
     NetBlockListEntry entry;
     if (!net_block_list_parse_address(address, type, &entry)) {
-        js_throw_invalid_arg_type("address", "valid IP address", address);
-        return self;
+        return js_throw_invalid_arg_type("address", "valid IP address", address);
     }
     list->entries[list->count++] = entry;
     return self;
@@ -5485,12 +5324,10 @@ static Item js_block_list_addSubnet(Item address, Item prefix, Item type) {
 
     NetBlockListEntry entry;
     if (!net_block_list_parse_address(address, type, &entry)) {
-        js_throw_invalid_arg_type("address", "valid IP address", address);
-        return self;
+        return js_throw_invalid_arg_type("address", "valid IP address", address);
     }
     if (!net_block_list_parse_prefix(prefix, entry.family, &entry.prefix)) {
-        js_throw_out_of_range("prefix", entry.family == 6 ? ">= 0 && <= 128" : ">= 0 && <= 32", prefix);
-        return self;
+        return js_throw_out_of_range("prefix", entry.family == 6 ? ">= 0 && <= 128" : ">= 0 && <= 32", prefix);
     }
     list->entries[list->count++] = entry;
     return self;

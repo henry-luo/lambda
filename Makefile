@@ -434,6 +434,8 @@ endef
 # EXTRA_FLAGS: extra flags/vars appended to the sub-make (e.g. -s CFLAGS="-w")
 # MAKE_TARGET: actual make target when it differs from LABEL (e.g. 'all' to build
 #              every project while logging under a friendly label)
+# The error-path location check below uses POSIX case because recipes run under
+# /bin/sh on Linux rather than Bash.
 define run_make_with_error_summary
 	@echo "🔨 Building '$(1)' (config: $(if $(2),$(2),debug_native)) — full clang log: temp/build_$(1).log"
 	@mkdir -p temp && BUILD_LOG="temp/build_$(1).log" && \
@@ -468,11 +470,10 @@ define run_make_with_error_summary
 				rel_path=$$(echo "$$file_info" | cut -d: -f1); \
 				line_no=$$(echo "$$file_info" | cut -d: -f2); \
 				col_no=$$(echo "$$file_info" | cut -d: -f3); \
-				if [[ "$$rel_path" == ../* ]]; then \
-					abs_path="$$(cd build/premake && realpath "$$rel_path" 2>/dev/null || echo "$$(pwd)/$$rel_path")"; \
-				else \
-					abs_path="$$(pwd)/build/premake/$$rel_path"; \
-				fi; \
+				case "$$rel_path" in \
+					../*) abs_path="$$(cd build/premake && realpath "$$rel_path" 2>/dev/null || echo "$$(pwd)/$$rel_path")" ;; \
+					*) abs_path="$$(pwd)/build/premake/$$rel_path" ;; \
+				esac; \
 				if [ -n "$$col_no" ] && [ "$$col_no" != "" ]; then \
 					location="$$line_no:$$col_no"; \
 				else \
@@ -504,7 +505,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar generate-names debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
-    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
+    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
@@ -1190,6 +1191,14 @@ test-jube-node-core-leaves: build
 	@./lambda.exe js test/node/jube_cluster_online_hook.js --no-log | diff -u test/node/jube_cluster_online_hook.txt -
 	@./lambda.exe js test/node/jube_console_formatter_hook.js --no-log | diff -u test/node/jube_console_formatter_hook.txt -
 	@JUBE_MODULE_PATH=./temp/no-node-profile ./lambda.exe js test/node/jube_console_minimal_formatter.js --no-log | diff -u test/node/jube_console_minimal_formatter.txt -
+
+# Tune1's merged Item error lane must preserve identity through nested calls,
+# accessors, primitive throws, finally, and forced collection.
+test-jube-node-error-lane: build
+	@./lambda.exe js test/node/js_tune1_error_lane.js --no-log | diff -u test/node/js_tune1_error_lane.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/js_tune1_error_lane.js --no-log | diff -u test/node/js_tune1_error_lane.txt -
+	@./lambda.exe js test/node/jube_error_ordinary_properties.js --no-log | diff -u test/node/jube_error_ordinary_properties.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_error_ordinary_properties.js --no-log | diff -u test/node/jube_error_ordinary_properties.txt -
 
 # Static-to-dynamic parity gate. The isolated root deliberately has no
 # module-set file, so node-core cannot be registered from the executable.
@@ -3162,10 +3171,13 @@ build-input-baseline: build-lambda-data
 # The Lambda baseline includes JS cases that require the external Node Jube
 # modules. Build them here because the focused lane intentionally does not use
 # the aggregate build-test target that normally supplies these DSOs.
+# debug and release share lambda.exe; remove it before a release host rebuild
+# so make cannot mistake an ASan debug binary for an up-to-date release host.
 build-lambda-baseline: build-input-baseline build-node-core build-node-fs
 	@echo "Building the Lambda baseline runtime and native test executables..."
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
+		rm -f lambda.exe; \
 		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)"; \
 	else \
 		echo "Rebuilding lambda.exe in debug mode (incremental)..."; \
@@ -3194,9 +3206,11 @@ build-test: build-lambda-data generate-tree-sitter-python-parser
 	@rm -f .lambda_build_backup.exe
 	@$(MAKE) --no-print-directory TEST_BUILD_QUIET=$(TEST_BUILD_QUIET) generate-premake
 	@out=$$(cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE) 2>&1) || { printf '%s\n' "$$out"; exit 1; }
-	@# If last build was release, rebuild lambda.exe incrementally in release mode
+# If last build was release, rebuild lambda.exe incrementally in release mode.
+# debug and release share lambda.exe; force a relink before copying the host.
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental) — log: temp/build_tests_lambda.log"; \
+		rm -f lambda.exe; \
 		mkdir -p temp; \
 		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" > temp/build_tests_lambda.log 2>&1 || { echo "❌ release lambda rebuild failed (see temp/build_tests_lambda.log):"; tail -20 temp/build_tests_lambda.log; exit 1; }; \
 		cp -p lambda.exe .lambda_build_backup.exe; \

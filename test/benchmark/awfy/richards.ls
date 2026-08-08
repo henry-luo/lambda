@@ -268,15 +268,11 @@ pn task_fn_worker(work, data, sched, task_table) {
         return mark_waiting(ct)
     }
     var dest = (data.destination)
-    // workaround: sole map assignment in if-block is dropped by transpiler
-    // so add a temp var before it
     if (dest == HANDLER_A) {
-        var _hb = HANDLER_B
-        data.destination = _hb
+        data.destination = HANDLER_B
     }
     if (dest != HANDLER_A) {
-        var _ha = HANDLER_A
-        data.destination = _ha
+        data.destination = HANDLER_A
     }
     var ndest = (data.destination)
     work.identity = ndest

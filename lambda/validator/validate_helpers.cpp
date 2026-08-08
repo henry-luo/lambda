@@ -115,21 +115,24 @@ void add_constraint_error_fmt(
     add_validation_error(result, error);
 }
 
+static void add_field_error(ValidationResult* result, SchemaValidator* validator,
+                            const char* field_name, ValidationErrorCode code,
+                            const char* format) {
+    if (!result) return;
+    char error_msg[256];
+    snprintf(error_msg, sizeof(error_msg), format, field_name);
+    ValidationError* error = create_validation_error(
+        code, error_msg, validator->get_current_path(), validator->get_pool());
+    add_validation_error(result, error);
+}
+
 void add_missing_field_error(
     ValidationResult* result,
     SchemaValidator* validator,
     const char* field_name
 ) {
-    if (!result) return;
-    
-    char error_msg[256];
-    snprintf(error_msg, sizeof(error_msg),
-            "Required field '%s' is missing from object", field_name);
-
-    ValidationError* error = create_validation_error(
-        AST_VALID_ERROR_MISSING_FIELD, error_msg,
-        validator->get_current_path(), validator->get_pool());
-    add_validation_error(result, error);
+    add_field_error(result, validator, field_name,
+        AST_VALID_ERROR_MISSING_FIELD, "Required field '%s' is missing from object");
 }
 
 void add_null_value_error(
@@ -137,16 +140,8 @@ void add_null_value_error(
     SchemaValidator* validator,
     const char* field_name
 ) {
-    if (!result) return;
-    
-    char error_msg[256];
-    snprintf(error_msg, sizeof(error_msg),
-            "Field cannot be null: %s", field_name);
-
-    ValidationError* error = create_validation_error(
-        AST_VALID_ERROR_NULL_VALUE, error_msg,
-        validator->get_current_path(), validator->get_pool());
-    add_validation_error(result, error);
+    add_field_error(result, validator, field_name,
+        AST_VALID_ERROR_NULL_VALUE, "Field cannot be null: %s");
 }
 
 void merge_errors(
@@ -168,7 +163,6 @@ void merge_errors(
             copied_error->actual = error->actual;
         }
         add_validation_error(dest, copied_error);
-        dest->error_count++;
         error = error->next;
     }
 }

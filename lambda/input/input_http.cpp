@@ -29,6 +29,13 @@ static HttpConfig default_http_config = {
     .enable_compression = true
 };
 
+// helper: configure the optional request body for methods that carry one
+static void http_set_request_body(CURL* curl, const FetchConfig* config) {
+    if (!config || !config->body) return;
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, config->body);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, config->body_size);
+}
+
 // Maximum response size (50 MB) — prevents unbounded memory growth from large pages
 #define HTTP_MAX_RESPONSE_SIZE (50 * 1024 * 1024)
 
@@ -549,24 +556,15 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
         size_t method_len = strlen(config->method);
         if (str_ieq_const(config->method, method_len, "POST")) {
             curl_easy_setopt(curl, CURLOPT_POST, 1L);
-            if (config->body) {
-                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, config->body);
-                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, config->body_size);
-            }
+            http_set_request_body(curl, config);
         } else if (str_ieq_const(config->method, method_len, "PUT")) {
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
-            if (config->body) {
-                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, config->body);
-                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, config->body_size);
-            }
+            http_set_request_body(curl, config);
         } else if (str_ieq_const(config->method, method_len, "DELETE")) {
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
         } else if (str_ieq_const(config->method, method_len, "PATCH")) {
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PATCH");
-            if (config->body) {
-                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, config->body);
-                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, config->body_size);
-            }
+            http_set_request_body(curl, config);
         } else if (str_ieq_const(config->method, method_len, "HEAD")) {
             curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
         }

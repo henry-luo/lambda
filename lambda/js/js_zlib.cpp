@@ -214,8 +214,7 @@ static Item make_zlib_error(const char* method, int zret, const char* detail) {
 }
 
 static Item throw_zlib_error(const char* method, int zret, const char* detail) {
-    js_throw_value(make_zlib_error(method, zret, detail));
-    return ItemNull;
+    return js_throw_value(make_zlib_error(method, zret, detail));
 }
 
 extern "C" Item js_zlib_throw_error_status(const char* method, int status) {
@@ -260,8 +259,8 @@ static Item js_zlib_callback_result(const char* method, ZlibSyncFn sync_fn,
     }
 
     Item result = sync_fn(input_item);
-    if (result.item == ItemNull.item) {
-        Item err = js_check_exception() ? js_clear_exception() :
+    if (item_is_error(result) || result.item == ItemNull.item) {
+        Item err = item_is_error(result) ? js_error_lane_payload(result) :
             make_zlib_error(method, Z_STREAM_ERROR, NULL);
         js_zlib_schedule_callback(callback_item, err, make_js_undefined());
         return make_js_undefined();
@@ -429,56 +428,49 @@ static Item zlib_throw_uint32_range_error(const char* range, Item actual) {
     return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
 }
 
-static bool zlib_crc32_seed_value(Item value, uint32_t* out_value) {
+static Item zlib_crc32_seed_value(Item value, uint32_t* out_value) {
     if (zlib_item_is_undefined(value)) {
         *out_value = 0;
-        return true;
+        return js_status_ok();
     }
     if (zlib_item_is_symbol(value)) {
-        js_throw_invalid_arg_type("value", "number", value);
-        return false;
+        return js_throw_invalid_arg_type("value", "number", value);
     }
 
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) {
         int64_t number = it2i(value);
         if (number < 0 || number > 0xFFFFFFFFLL) {
-            zlib_throw_uint32_range_error(">= 0 && <= 4294967295", value);
-            return false;
+            return zlib_throw_uint32_range_error(">= 0 && <= 4294967295", value);
         }
         *out_value = (uint32_t)number;
-        return true;
+        return js_status_ok();
     }
     if (type == LMD_TYPE_INT64) {
         int64_t number = it2l(value);
         if (number < 0 || number > 0xFFFFFFFFLL) {
-            zlib_throw_uint32_range_error(">= 0 && <= 4294967295", value);
-            return false;
+            return zlib_throw_uint32_range_error(">= 0 && <= 4294967295", value);
         }
         *out_value = (uint32_t)number;
-        return true;
+        return js_status_ok();
     }
     if (type == LMD_TYPE_FLOAT) {
         double number = it2d(value);
         if (number != number || number == 1.0 / 0.0 || number == -1.0 / 0.0) {
-            zlib_throw_uint32_range_error("an integer", value);
-            return false;
+            return zlib_throw_uint32_range_error("an integer", value);
         }
         if (number < 0.0 || number > 4294967295.0) {
-            zlib_throw_uint32_range_error(">= 0 && <= 4294967295", value);
-            return false;
+            return zlib_throw_uint32_range_error(">= 0 && <= 4294967295", value);
         }
         uint32_t integer = (uint32_t)number;
         if (number != (double)integer) {
-            zlib_throw_uint32_range_error("an integer", value);
-            return false;
+            return zlib_throw_uint32_range_error("an integer", value);
         }
         *out_value = integer;
-        return true;
+        return js_status_ok();
     }
 
-    js_throw_invalid_arg_type("value", "number", value);
-    return false;
+    return js_throw_invalid_arg_type("value", "number", value);
 }
 
 static bool zlib_validate_int_option(Item options_item, const char* key_name,
@@ -936,7 +928,7 @@ extern "C" Item js_zlib_createUnzip(Item options_item) {
 // crc32(data[, value]) — compute CRC32
 extern "C" Item js_zlib_crc32(Item data_item, Item init_val) {
     uint32_t crc_val = 0;
-    if (!zlib_crc32_seed_value(init_val, &crc_val)) return ItemNull;
+    JS_RETURN_IF_ERROR(zlib_crc32_seed_value(init_val, &crc_val));
 
     const uint8_t* data = NULL;
     int data_len = 0;

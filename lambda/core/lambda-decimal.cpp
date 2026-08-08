@@ -384,37 +384,42 @@ Item decimal_deep_copy(Item item, void* arena_ptr, bool is_unlimited) {
     return result;
 }
 
-// Create a fixed-precision Decimal from a string, arena-allocated.
-// The Decimal struct lives in the arena; the mpd_t* is malloc'd by mpdecimal
-// (not GC-managed). Safe to use from input parsers where GC heap allocation
-// would cause the object to be collected before it can be traced.
-Item decimal_from_string_arena(const char* str, void* arena_ptr) {
+static Item decimal_from_string_arena_with_context(const char* str, void* arena_ptr,
+                                                   mpd_context_t* ctx, uint8_t unlimited) {
     if (!str || !arena_ptr) return ItemNull;
-    
+
     Arena* arena = (Arena*)arena_ptr;
-    mpd_context_t* ctx = decimal_fixed_context();
     mpd_t* dec_val = mpd_new(ctx);
     if (!dec_val) return ItemNull;
-    
+
     uint32_t status = 0;
     mpd_qset_string(dec_val, str, ctx, &status);
     if (status != 0 || mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
         mpd_del(dec_val);
         return ItemNull;
     }
-    
+
     Decimal* dec = (Decimal*)arena_alloc(arena, sizeof(Decimal));
     if (!dec) {
         mpd_del(dec_val);
         return ItemNull;
     }
-    
-    dec->unlimited = 0;
+
+    dec->unlimited = unlimited;
     dec->dec_val = dec_val;
-    
+
     Item result;
     result.item = c2it(dec);
     return result;
+}
+
+// Create a fixed-precision Decimal from a string, arena-allocated.
+// The Decimal struct lives in the arena; the mpd_t* is malloc'd by mpdecimal
+// (not GC-managed). Safe to use from input parsers where GC heap allocation
+// would cause the object to be collected before it can be traced.
+Item decimal_from_string_arena(const char* str, void* arena_ptr) {
+    return decimal_from_string_arena_with_context(str, arena_ptr,
+        decimal_fixed_context(), 0);
 }
 
 static int decimal_count_literal_significant_digits(const char* str) {
@@ -435,61 +440,16 @@ static int decimal_count_literal_significant_digits(const char* str) {
 Item decimal_from_literal_string_arena(const char* str, void* arena_ptr, bool is_integer_literal) {
     if (!str || !arena_ptr) return ItemNull;
 
-    Arena* arena = (Arena*)arena_ptr;
     bool needs_unlimited = is_integer_literal ||
         decimal_count_literal_significant_digits(str) > DECIMAL_FIXED_PRECISION;
     mpd_context_t* ctx = needs_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
-    mpd_t* dec_val = mpd_new(ctx);
-    if (!dec_val) return ItemNull;
-
-    uint32_t status = 0;
-    mpd_qset_string(dec_val, str, ctx, &status);
-    if (status != 0 || mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
-        mpd_del(dec_val);
-        return ItemNull;
-    }
-
-    Decimal* dec = (Decimal*)arena_alloc(arena, sizeof(Decimal));
-    if (!dec) {
-        mpd_del(dec_val);
-        return ItemNull;
-    }
-
-    dec->unlimited = is_integer_literal ? DECIMAL_BIGINT : (needs_unlimited ? 1 : 0);
-    dec->dec_val = dec_val;
-
-    Item result;
-    result.item = c2it(dec);
-    return result;
+    uint8_t unlimited = is_integer_literal ? DECIMAL_BIGINT : (needs_unlimited ? 1 : 0);
+    return decimal_from_string_arena_with_context(str, arena_ptr, ctx, unlimited);
 }
 
 Item decimal_from_integer_string_arena(const char* str, void* arena_ptr) {
-    if (!str || !arena_ptr) return ItemNull;
-
-    Arena* arena = (Arena*)arena_ptr;
-    mpd_context_t* ctx = decimal_unlimited_context();
-    mpd_t* dec_val = mpd_new(ctx);
-    if (!dec_val) return ItemNull;
-
-    uint32_t status = 0;
-    mpd_qset_string(dec_val, str, ctx, &status);
-    if (status != 0 || mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
-        mpd_del(dec_val);
-        return ItemNull;
-    }
-
-    Decimal* dec = (Decimal*)arena_alloc(arena, sizeof(Decimal));
-    if (!dec) {
-        mpd_del(dec_val);
-        return ItemNull;
-    }
-
-    dec->unlimited = 1;
-    dec->dec_val = dec_val;
-
-    Item result;
-    result.item = c2it(dec);
-    return result;
+    return decimal_from_string_arena_with_context(str, arena_ptr,
+        decimal_unlimited_context(), 1);
 }
 
 // Create a fixed-precision Decimal from a double, arena-allocated.
@@ -882,22 +842,37 @@ static Item decimal_zero_division_result(mpd_t* numerator, mpd_t* divisor,
     return decimal_push_result(result, is_unlimited);
 }
 
-static Item decimal_division_apply(Item a, Item b, DecimalDivisionOp op) {
-    bool is_unlimited = should_be_unlimited(a, b);
+static bool decimal_prepare_operands(Item a, Item b, const char* operation,
+        mpd_context_t** ctx_out, bool* a_is_dec_out, bool* b_is_dec_out,
+        mpd_t** a_out, mpd_t** b_out) {
     mpd_context_t* dec_ctx = get_decimal_context(a, b);
-    
     bool a_is_dec = decimal_is_any(a);
     bool b_is_dec = decimal_is_any(b);
-    
     mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, dec_ctx);
     mpd_t* b_dec = b_is_dec ? b.get_decimal()->dec_val : decimal_item_to_mpd(b, dec_ctx);
-    
     if (!a_dec || !b_dec) {
         if (!a_is_dec) cleanup_temp(a_dec, false);
         if (!b_is_dec) cleanup_temp(b_dec, false);
-        log_error("decimal division: conversion failed");
-        return ItemError;
+        log_error("%s: conversion failed", operation);
+        return false;
     }
+    *ctx_out = dec_ctx;
+    *a_is_dec_out = a_is_dec;
+    *b_is_dec_out = b_is_dec;
+    *a_out = a_dec;
+    *b_out = b_dec;
+    return true;
+}
+
+static Item decimal_division_apply(Item a, Item b, DecimalDivisionOp op) {
+    bool is_unlimited = should_be_unlimited(a, b);
+    mpd_context_t* dec_ctx;
+    bool a_is_dec;
+    bool b_is_dec;
+    mpd_t* a_dec;
+    mpd_t* b_dec;
+    if (!decimal_prepare_operands(a, b, "decimal division", &dec_ctx,
+            &a_is_dec, &b_is_dec, &a_dec, &b_dec)) return ItemError;
     
     // C14c keeps computed zero divisors in the decimal domain. mpdecimal's
     // remainder operation would otherwise produce NaN for every nonzero lane,
@@ -951,20 +926,13 @@ Item decimal_mod(Item a, Item b) {
 
 Item decimal_pow(Item a, Item b) {
     bool is_unlimited = should_be_unlimited(a, b);
-    mpd_context_t* dec_ctx = get_decimal_context(a, b);
-    
-    bool a_is_dec = decimal_is_any(a);
-    bool b_is_dec = decimal_is_any(b);
-    
-    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, dec_ctx);
-    mpd_t* b_dec = b_is_dec ? b.get_decimal()->dec_val : decimal_item_to_mpd(b, dec_ctx);
-    
-    if (!a_dec || !b_dec) {
-        if (!a_is_dec) cleanup_temp(a_dec, false);
-        if (!b_is_dec) cleanup_temp(b_dec, false);
-        log_error("decimal_pow: conversion failed");
-        return ItemError;
-    }
+    mpd_context_t* dec_ctx;
+    bool a_is_dec;
+    bool b_is_dec;
+    mpd_t* a_dec;
+    mpd_t* b_dec;
+    if (!decimal_prepare_operands(a, b, "decimal_pow", &dec_ctx,
+            &a_is_dec, &b_is_dec, &a_dec, &b_dec)) return ItemError;
     
     mpd_t* result = mpd_new(dec_ctx);
     if (!result) {
@@ -981,7 +949,7 @@ Item decimal_pow(Item a, Item b) {
     return decimal_push_result(result, is_unlimited);
 }
 
-Item decimal_neg(Item a) {
+static Item decimal_unary_transform(Item a, bool absolute, const char* operation) {
     bool is_unlimited = decimal_is_unlimited(a);
     mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
     
@@ -989,7 +957,7 @@ Item decimal_neg(Item a) {
     mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, dec_ctx);
     
     if (!a_dec) {
-        log_error("decimal_neg: conversion failed");
+        log_error("%s: conversion failed", operation);
         return ItemError;
     }
     
@@ -999,40 +967,22 @@ Item decimal_neg(Item a) {
         return ItemError;
     }
     
-    mpd_minus(result, a_dec, dec_ctx);
+    if (absolute) mpd_abs(result, a_dec, dec_ctx);
+    else mpd_minus(result, a_dec, dec_ctx);
     
     if (!a_is_dec) mpd_del(a_dec);
     
-    // unary integer negation preserves the language-level integer type.
+    // unary integer transforms preserve the language-level integer type.
     if (decimal_item_is_bigint(a)) return decimal_push_bigint_result(result);
     return decimal_push_result(result, is_unlimited);
 }
 
+Item decimal_neg(Item a) {
+    return decimal_unary_transform(a, false, "decimal_neg");
+}
+
 Item decimal_abs(Item a) {
-    bool is_unlimited = decimal_is_unlimited(a);
-    mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
-    
-    bool a_is_dec = decimal_is_any(a);
-    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, dec_ctx);
-    
-    if (!a_dec) {
-        log_error("decimal_abs: conversion failed");
-        return ItemError;
-    }
-    
-    mpd_t* result = mpd_new(dec_ctx);
-    if (!result) {
-        if (!a_is_dec) mpd_del(a_dec);
-        return ItemError;
-    }
-    
-    mpd_abs(result, a_dec, dec_ctx);
-    
-    if (!a_is_dec) mpd_del(a_dec);
-    
-    // integer abs preserves the language-level integer type.
-    if (decimal_item_is_bigint(a)) return decimal_push_bigint_result(result);
-    return decimal_push_result(result, is_unlimited);
+    return decimal_unary_transform(a, true, "decimal_abs");
 }
 #endif
 

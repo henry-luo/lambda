@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.3: a CLEAN function entry plus PRESERVES helpers emits no ERROR-tag test.",
+  "checks": [
+    {
+      "in_func": "_js_cleanTry_#_body",
+      "expect": [
+        "call\tjs_with_save_depth"
+      ],
+      "forbid": [
+        "eq\t{{r}}, {{r}}, 27"
+      ]
+    }
+  ]
+}

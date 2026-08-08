@@ -414,24 +414,14 @@ extern "C" String* get_ascii_char_string(unsigned char ch) {
     return ascii_char_table[ch];
 }
 
-void heap_init() {
-    log_debug("heap init: %p", context);
-    context->heap = (Heap*)mem_calloc(1, sizeof(Heap), MEM_CAT_EVAL);
-    context->heap->gc = mem_gc_heap_create(NULL, MEM_ROLE_RUNTIME_HEAP, "eval.heap");
-    context->heap->pool = context->heap->gc->pool;  // alias for compatibility
-
-    // register a stable heap-owned result slot. EvalContext is often stack-local
-    // in JS/document paths, so registering context->result would leave stale
-    // root-slot addresses after that frame returns.
+static void heap_finish_init(void) {
+    // register the stable result root and all GC callbacks after the allocator
+    // has selected the heap backing pool.
     context->heap->result_root = context->result.item;
     gc_register_root(context->heap->gc, &context->heap->result_root);
-
-    // set the auto-collection callback so GC triggers when data zone fills up
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
     heap_configure_gc_force_schedule(context->heap->gc);
     heap_configure_gc_poisoning(context->heap->gc);
-
-    // register VMap tracing/finalization callbacks
     context->heap->gc->vmap_trace = vmap_gc_trace;
     context->heap->gc->vmap_destroy = gc_destroy_vmap_object;
     context->heap->gc->error_trace = err_gc_trace;
@@ -441,11 +431,16 @@ void heap_init() {
     context->heap->gc->js_function_compact = js_function_gc_compact;
     context->heap->gc->external_destroy = gc_destroy_external_payload;
     err_set_heap_allocator(heap_calloc);
+    if (!ascii_char_table_initialized) init_ascii_char_table();
+}
 
-    // initialize interned single-char ASCII table (one-time, idempotent)
-    if (!ascii_char_table_initialized) {
-        init_ascii_char_table();
-    }
+void heap_init() {
+    log_debug("heap init: %p", context);
+    context->heap = (Heap*)mem_calloc(1, sizeof(Heap), MEM_CAT_EVAL);
+    context->heap->gc = mem_gc_heap_create(NULL, MEM_ROLE_RUNTIME_HEAP, "eval.heap");
+    context->heap->pool = context->heap->gc->pool;  // alias for compatibility
+
+    heap_finish_init();
 }
 
 void heap_init_with_pool(Pool* pool) {
@@ -454,24 +449,7 @@ void heap_init_with_pool(Pool* pool) {
     context->heap->gc = mem_gc_heap_create_with_pool(NULL, pool, MEM_ROLE_RUNTIME_HEAP, "eval.heap");
     context->heap->pool = context->heap->gc->pool;
 
-    context->heap->result_root = context->result.item;
-    gc_register_root(context->heap->gc, &context->heap->result_root);
-    gc_set_collect_callback(context->heap->gc, heap_gc_collect);
-    heap_configure_gc_force_schedule(context->heap->gc);
-    heap_configure_gc_poisoning(context->heap->gc);
-    context->heap->gc->vmap_trace = vmap_gc_trace;
-    context->heap->gc->vmap_destroy = gc_destroy_vmap_object;
-    context->heap->gc->error_trace = err_gc_trace;
-    context->heap->gc->error_destroy = err_gc_destroy;
-    context->heap->gc->js_native_trace = js_native_map_gc_trace;
-    context->heap->gc->js_function_trace = js_function_gc_trace;
-    context->heap->gc->js_function_compact = js_function_gc_compact;
-    context->heap->gc->external_destroy = gc_destroy_external_payload;
-    err_set_heap_allocator(heap_calloc);
-
-    if (!ascii_char_table_initialized) {
-        init_ascii_char_table();
-    }
+    heap_finish_init();
 }
 
 // Trigger a collection from the runtime using only registered and side-stack

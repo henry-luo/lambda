@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "Tune16 C2 keeps proved integer band, bor, and bxor operations on native MIR lanes.",
+  "checks": [
+    {
+      "in_func": "_tune16_native_bitwise_#",
+      "expect": [
+        "and\t{{r}}",
+        "xor\t{{r}}",
+        "or\t{{r}}"
+      ],
+      "forbid": [
+        "call\tfn_band_item_p, fn_band_item",
+        "call\tfn_bxor_item_p, fn_bxor_item",
+        "call\tfn_bor_item_p, fn_bor_item"
+      ]
+    }
+  ]
+}

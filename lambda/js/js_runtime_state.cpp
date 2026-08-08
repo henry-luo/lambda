@@ -20,6 +20,62 @@ extern "C" void js_dom_observers_destroy_context(JsRuntimeState* state);
 extern "C" void js_xhr_reset(void);
 extern "C" void js_xhr_destroy_context(JsRuntimeState* state);
 extern "C" void js_history_reset(void);
+extern "C" void js_iterator_proto_cache_reset(void);
+
+extern "C" void js_reset_buffer_module(void);
+extern "C" void js_crypto_reset(void);
+extern "C" void js_dns_reset(void);
+extern "C" void js_zlib_reset(void);
+extern "C" void js_readline_reset(void);
+extern "C" void js_stream_reset(void);
+extern "C" void js_net_reset(void);
+extern "C" void js_tls_reset(void);
+extern "C" void js_http_reset(void);
+extern "C" void js_https_reset(void);
+extern "C" void js_assert_reset(void);
+extern "C" void js_node_test_reset(void);
+
+static void js_reset_cached_realm_objects(void) {
+    // Cached realm objects all point into the batch heap and must be invalidated together.
+    js_canvas_cleanup();
+    js_reset_math_object();
+    js_reset_json_object();
+    js_reset_intl_object();
+    js_reset_console_object();
+    js_reset_reflect_object();
+    js_reset_atomics_object();
+    js_reset_262_object();
+    js_reset_css_namespace_object();
+    js_reset_proto_key();
+    js_reset_template_registry();
+    js_iterator_proto_cache_reset();
+    js_symbol_registry_batch_reset();
+    js_func_cache_reset();
+    js_builtin_cache_reset();
+    js_deep_batch_reset();
+    extern void js_reset_constructor_prototypes(void);
+    js_reset_constructor_prototypes();
+}
+
+static void js_reset_core_module_caches(void) {
+    js_child_process_reset();
+    js_fs_reset();
+    js_util_reset();
+    js_reset_buffer_module();
+    js_crypto_reset();
+    js_dns_reset();
+    js_zlib_reset();
+    js_readline_reset();
+    js_stream_reset();
+    js_net_reset();
+    js_tls_reset();
+    js_http_reset();
+    js_https_reset();
+    js_fetch_reset();
+    js_history_reset();
+    js_assert_reset();
+    js_node_test_reset();
+}
 extern "C" void js_history_destroy_context(JsRuntimeState* state);
 extern "C" void js_window_dialog_reset(void);
 extern "C" void js_dom_collections_release_context(void);
@@ -329,7 +385,7 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
         "global object and lexical bindings");
     js_root_range_set_storage(&state->constructors.roots,
         state->constructors.global_builtin_functions,
-        32 + JS_CTOR_MAX + 2 + JS_TYPED_ARRAY_CACHE_TYPE_COUNT,
+        JS_BUILTIN_GLOBAL_MAX + JS_CTOR_MAX + 2 + JS_TYPED_ARRAY_CACHE_TYPE_COUNT,
         "global builtin and constructor caches");
     js_root_range_set_storage(&state->namespaces.roots,
         &state->namespaces.math, 8, "core JS namespace objects");
@@ -340,7 +396,7 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     js_root_range_set_storage(&state->process.roots, &state->process.argv,
         3 + 2 * JS_PROCESS_LISTENER_MAX + 2, "process realm state");
     js_root_range_set_storage(&state->iterators.roots,
-        &state->iterators.generator_return_marker, 7,
+        &state->iterators.generator_return_marker, 8,
         "generator and iterator prototype caches");
     js_root_range_set_storage(&state->diagnostics_channels.roots,
         state->diagnostics_channels.channel_names,
@@ -609,6 +665,32 @@ static int js_eval_source_display_column(String* source) {
     return pos + 1;
 }
 
+struct JsErrorTextParts {
+    const char* name;
+    int name_len;
+    const char* message;
+    int message_len;
+};
+
+static JsErrorTextParts js_error_text_parts(Item error_name, Item message) {
+    JsErrorTextParts parts = {"Error", 5, "", 0};
+    if (get_type_id(error_name) == LMD_TYPE_STRING) {
+        String* ns = it2s(error_name);
+        if (ns) {
+            parts.name = ns->chars;
+            parts.name_len = (int)ns->len;
+        }
+    }
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* ms = it2s(message);
+        if (ms) {
+            parts.message = ms->chars;
+            parts.message_len = (int)ms->len;
+        }
+    }
+    return parts;
+}
+
 static Item js_eval_source_stack_string(Item error_name, Item message) {
     Item filename_item = ItemNull;
     Item source_item = ItemNull;
@@ -630,18 +712,11 @@ static Item js_eval_source_stack_string(Item error_name, Item message) {
     int display_col = js_eval_source_display_column(source) + (int)column_offset;
     if (display_col < 1) display_col = 1;
 
-    const char* name_str = "Error";
-    int name_len = 5;
-    if (get_type_id(error_name) == LMD_TYPE_STRING) {
-        String* ns = it2s(error_name);
-        if (ns) { name_str = ns->chars; name_len = (int)ns->len; }
-    }
-    const char* msg_str = "";
-    int msg_len = 0;
-    if (get_type_id(message) == LMD_TYPE_STRING) {
-        String* ms = it2s(message);
-        if (ms) { msg_str = ms->chars; msg_len = (int)ms->len; }
-    }
+    JsErrorTextParts text = js_error_text_parts(error_name, message);
+    const char* name_str = text.name;
+    int name_len = text.name_len;
+    const char* msg_str = text.message;
+    int msg_len = text.message_len;
 
     if (compact_stack) {
         int total = name_len + msg_len + (int)filename->len + 64;
@@ -727,8 +802,8 @@ extern "C" void js_set_strict_mode(int64_t strict) {
 }
 
 // v24: throw TypeError in strict mode for property write violations
-void js_strict_throw_property_error(const char* reason, const char* prop_name, int prop_len) {
-    if (!js_strict_mode) return;
+Item js_strict_throw_property_error(const char* reason, const char* prop_name, int prop_len) {
+    if (!js_strict_mode) return js_status_ok();
     char msg[512];
     if (prop_name && prop_len > 0) {
         snprintf(msg, sizeof(msg), "Cannot %s property '%.*s' of object", reason, prop_len > 200 ? 200 : prop_len, prop_name);
@@ -738,7 +813,7 @@ void js_strict_throw_property_error(const char* reason, const char* prop_name, i
     Item err_name = (Item){.item = s2it(heap_create_name("TypeError"))};
     Item err_msg = (Item){.item = s2it(heap_create_name(msg))};
     Item error = js_new_error_with_name(err_name, err_msg);
-    js_throw_value(error);
+    return js_throw_value(error);
 }
 
 // Forward declaration for _map_read_field (defined in lambda-data-runtime.cpp)
@@ -849,7 +924,7 @@ extern "C" Item js_to_property_key(Item key) {
         return (Item){.item = s2it(heap_create_name("undefined", 9))};
     if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT || kt == LMD_TYPE_FUNC) {
         key = js_to_primitive(key, JS_HINT_STRING);
-        if (js_check_exception()) return ItemNull;
+        if (item_is_error(key)) return key;
         if (js_key_is_symbol(key)) return js_symbol_to_key(key);
         kt = get_type_id(key);
         if (kt == LMD_TYPE_STRING) return key;
@@ -963,11 +1038,15 @@ extern "C" bool js_copy_module_state_var_prefix(uint32_t source_module_state_id,
 }
 
 // =============================================================================
-// Exception Handling State
+// Error-lane construction (D8.4.3)
 // =============================================================================
 
+extern "C" Item js_status_ok(void) {
+    return (Item){.item = b2it(true)};
+}
+
 // Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible)
-extern "C" void js_require_object_coercible(Item value) {
+extern "C" Item js_require_object_coercible(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
         const char* type_str = (type == LMD_TYPE_NULL) ? "null" : "undefined";
@@ -976,100 +1055,120 @@ extern "C" void js_require_object_coercible(Item value) {
         Item err_name = (Item){.item = s2it(heap_create_name("TypeError"))};
         Item err_msg = (Item){.item = s2it(heap_create_name(msg))};
         Item error = js_new_error_with_name(err_name, err_msg);
-        js_throw_value(error);
+        return js_throw_value(error);
     }
+    return value;
 }
 
-extern "C" void js_throw_value(Item value) {
-    js_exception_pending = true;
-    // The exception state outlives the throwing frame, so its adjacent payload
-    // word must own pointer-backed scalars before the frame is reclaimed.
-    owned_item_slot_store(js_exception_slots, 1, 0, value);
-    value = js_exception_value;
-    // Capture exception message into static buffer while context is alive
-    js_exception_msg_buf[0] = '\0';
-    if (get_type_id(value) == LMD_TYPE_MAP) {
-        Item name_key = (Item){.item = s2it(heap_create_name("name"))};
-        Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
-        Item name_val = js_property_get(value, name_key);
-        Item msg_val = js_property_get(value, msg_key);
-        const char* nstr = "Error"; int nlen = 5;
-        if (get_type_id(name_val) == LMD_TYPE_STRING) {
-            String* ns = it2s(name_val);
-            nstr = ns->chars; nlen = ns->len;
+extern "C" Item js_throw_value(Item value) {
+    RootFrame roots(1);
+    Rooted<Item> thrown_root(roots, value);
+    value = thrown_root.get();
+    // An Error already resting in the JS object lane must be retagged in place;
+    // allocating a carrier here would break Error identity across throw/catch.
+    LambdaError* error = js_error_from_value(value);
+    bool original_is_error = error != NULL;
+    if (!error) {
+        char fallback_message[1024];
+        fallback_message[0] = '\0';
+        if (get_type_id(value) == LMD_TYPE_STRING) {
+            String* s = it2s(value);
+            if (s) snprintf(fallback_message, sizeof(fallback_message), "%.*s",
+                s->len, s->chars);
         }
-        if (get_type_id(msg_val) == LMD_TYPE_STRING) {
-            String* ms = it2s(msg_val);
-            snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
-                     "%.*s: %.*s", nlen, nstr, ms->len, ms->chars);
-        } else {
-            snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
-                     "%.*s", nlen, nstr);
+        if (fallback_message[0] == '\0') {
+            snprintf(fallback_message, sizeof(fallback_message), "JavaScript exception");
         }
-    } else if (get_type_id(value) == LMD_TYPE_STRING) {
-        String* s = it2s(value);
-        snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
-                 "%.*s", s->len, s->chars);
+        error = err_create_heap(ERR_USER_ERROR, fallback_message, NULL);
     }
-}
-
-extern "C" const char* js_get_exception_message(void) {
-    return js_exception_msg_buf;
-}
-
-extern "C" int js_check_exception(void) {
-    AutoAssertNoGC no_gc;
-    return js_exception_pending ? 1 : 0;
-}
-
-extern "C" void js_debug_assert_exception_clear(void) {
-#ifndef NDEBUG
-    AutoAssertNoGC no_gc;
-    if (js_exception_pending) {
-        log_error("js-exc assert-clear: pending flag unexpectedly set");
-        abort();
+    Item lane = error ? err2it(error) : ItemError;
+    if (error && !original_is_error) {
+        // Non-Lambda JS payloads are carried by the lane and unwrapped only at
+        // catch entry, preserving primitive throw semantics without a second ABI.
+        error->thrown_value_item = value.item;
     }
-#endif
+    return lane;
 }
 
-extern "C" void js_debug_assert_exception_set(void) {
-#ifndef NDEBUG
-    AutoAssertNoGC no_gc;
-    if (!js_exception_pending) {
-        log_error("js-exc assert-set: pending flag unexpectedly clear");
-        abort();
+extern "C" Item js_error_lane_payload(Item lane) {
+    LambdaError* error = js_error_from_value(lane);
+    if (error && error->thrown_value_item) {
+        // Catch observes the original JS payload; the ERROR carrier exists only
+        // to keep that payload alive while it crosses compiled/native frames.
+        return (Item){.item = error->thrown_value_item};
     }
-#endif
+    // Catch exposes the resting Map lane; only propagating frames use the
+    // ERROR tag, so an Error object is not mistaken for a failed return.
+    if (error && error->is_static) {
+        // Fault records have no shape while signals are being recovered; this
+        // is the first safe boundary at which their Map-compatible view exists.
+        error->prologue_reserved = MAP_KIND_ERROR;
+    }
+    Item result = error ? js_error_as_object(error) : lane;
+    return result;
 }
 
-extern "C" Item js_clear_exception(void) {
-    js_exception_pending = false;
-    // Re-materialize before clearing: a nested throw may overwrite this slot
-    // while the catcher still holds the returned wide scalar.
-    Item val = owned_item_slot_read(js_exception_slots, 1, 0, false);
-    js_exception_value = ItemNull;
-    js_exception_slots[1] = ItemNull;
-    return val;
+extern "C" void js_error_lane_format(Item lane, char* out, int out_size) {
+    if (!out || out_size <= 0) return;
+    out[0] = '\0';
+    LambdaError* error = js_error_from_value(lane);
+    if (!error) {
+        snprintf(out, (size_t)out_size, "JavaScript exception");
+        return;
+    }
+    Item payload = error->thrown_value_item
+        ? (Item){.item = error->thrown_value_item} : ItemNull;
+    if (get_type_id(payload) == LMD_TYPE_STRING) {
+        String* text = it2s(payload);
+        if (text) snprintf(out, (size_t)out_size, "%.*s", text->len, text->chars);
+        return;
+    }
+    const char* name = "Error";
+    int name_len = 5;
+    Item name_item = {.item = error->js_name_item};
+    if (get_type_id(name_item) == LMD_TYPE_STRING) {
+        String* text = it2s(name_item);
+        if (text) {
+            name = text->chars;
+            name_len = (int)text->len;
+        }
+    }
+    const char* message = error->message ? error->message : "";
+    Item message_item = {.item = error->js_message_item};
+    if (get_type_id(message_item) == LMD_TYPE_STRING) {
+        String* text = it2s(message_item);
+        if (text) {
+            snprintf(out, (size_t)out_size, "%.*s: %.*s", name_len, name,
+                (int)text->len, text->chars);
+            return;
+        }
+    }
+    if (message[0]) {
+        snprintf(out, (size_t)out_size, "%.*s: %s", name_len, name, message);
+    } else {
+        snprintf(out, (size_t)out_size, "%.*s", name_len, name);
+    }
 }
 
 // TDZ check: throw ReferenceError if variable is still in Temporal Dead Zone
-extern "C" void js_check_tdz(Item value, const char* name, int name_len) {
+extern "C" Item js_check_tdz(Item value, const char* name, int name_len) {
     if (value.item == ITEM_JS_TDZ) {
         char buf[256];
         int len = snprintf(buf, sizeof(buf), "Cannot access '%.*s' before initialization", name_len, name);
         Item tn = (Item){.item = s2it(heap_create_name("ReferenceError", 14))};
         Item msg = (Item){.item = s2it(heap_create_name(buf, len))};
-        js_throw_value(js_new_error_with_name(tn, msg));
+        return js_throw_value(js_new_error_with_name(tn, msg));
     }
+    return value;
 }
 
 // Const assignment check: throw TypeError when assigning to a const variable
-extern "C" void js_throw_const_assign(const char* name, int name_len) {
+extern "C" Item js_throw_const_assign(const char* name, int name_len) {
     char buf[256];
     int len = snprintf(buf, sizeof(buf), "Assignment to constant variable '%.*s'", name_len, name);
     Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
     Item msg = (Item){.item = s2it(heap_create_name(buf, len))};
-    js_throw_value(js_new_error_with_name(tn, msg));
+    return js_throw_value(js_new_error_with_name(tn, msg));
 }
 
 // forward declaration for js_batch_reset (defined near js_module_count_v14)
@@ -1108,45 +1207,12 @@ extern "C" void js_batch_reset() {
     js_module_cache_reset();
     // clear CommonJS metadata (filenames/modules are heap Items from the prior script)
     js_cjs_metadata_reset();
-    // clear any pending exception from previous script
-    js_exception_pending = false;
-    js_exception_value = (Item){0};
-    js_exception_slots[1] = (Item){0};
     // Report unbalanced eval scopes before cleanup erases the evidence.
     js_eval_state_assert_clear(&js_runtime_state.eval, "js_batch_reset pre-cleanup");
     js_reset_transient_call_state();
     js_reset_heap_bound_runtime_state();
     js_decimal_number_egress_warning_reset();
-    // reset cached global objects (Math, JSON, console, Reflect) so they're recreated fresh
-    // — tests may modify them (delete/overwrite properties)
-    js_canvas_cleanup();
-    js_reset_math_object();
-    js_reset_json_object();
-    // Intl is heap-backed like the neighboring namespace caches; leaving it
-    // out makes the next isolated document install a pointer to the freed heap.
-    js_reset_intl_object();
-    js_reset_console_object();
-    js_reset_reflect_object();
-    js_reset_atomics_object();
-    js_reset_262_object();
-    js_reset_css_namespace_object();
-    // reset interned __proto__ key (allocated in old pool)
-    js_reset_proto_key();
-    js_reset_template_registry();
-    js_iterator_proto_cache_reset();
-    // Registry symbol keys belong to the discarded realm's NamePool; retaining
-    // them would let a fresh realm dereference dead unique NameRecords.
-    js_symbol_registry_batch_reset();
-    // reset function pointer → JsFunction cache (JsFunction* in old pool)
-    js_func_cache_reset();
-    // reset builtin function cache (defined later in file, called via forward decl)
-    js_builtin_cache_reset();
-    // deep reset: generators, promises, async contexts, pending calls
-    js_deep_batch_reset();
-    // reset constructor prototypes and globalThis — tests may mutate built-in
-    // prototypes (Object.prototype, Error.prototype, etc.).
-    extern void js_reset_constructor_prototypes(void);
-    js_reset_constructor_prototypes();
+    js_reset_cached_realm_objects();
     // js_batch_reset() is the heavy/crash-recovery path. After restoring the
     // prototype snapshot above, invalidate it so (a) the upcoming
     // js_ctor_cache_reset actually runs, (b) the upcoming heap teardown
@@ -1179,40 +1245,7 @@ extern "C" void js_batch_reset() {
     js_process_reset_listeners();
     // reset strict mode — prevents strict-mode test from poisoning subsequent tests
     js_strict_mode = false;
-    // reset module namespace caches (pool-allocated function wrappers become dangling)
-    js_child_process_reset();
-    js_fs_reset();
-    js_util_reset();
-    // node-core owns EventEmitter's session cache and resets it through Jube.
-    extern void js_reset_buffer_module(void);
-    js_reset_buffer_module();
-    // reset Phase 4 modules
-    extern void js_crypto_reset(void);
-    js_crypto_reset();
-    extern void js_dns_reset(void);
-    js_dns_reset();
-    extern void js_zlib_reset(void);
-    js_zlib_reset();
-    extern void js_readline_reset(void);
-    js_readline_reset();
-    extern void js_stream_reset(void);
-    js_stream_reset();
-    extern void js_net_reset(void);
-    js_net_reset();
-    extern void js_tls_reset(void);
-    js_tls_reset();
-    extern void js_http_reset(void);
-    js_http_reset();
-    extern void js_https_reset(void);
-    js_https_reset();
-    // fetch() Response bodies live in a static side table so promise methods can
-    // read them later; batch cleanup must release the table before memtrack.
-    js_fetch_reset();
-    js_history_reset();
-    extern void js_assert_reset(void);
-    js_assert_reset();
-    extern void js_node_test_reset(void);
-    js_node_test_reset();
+    js_reset_core_module_caches();
     js_eval_preamble_cache_reset();
     js_dynfunc_cache_reset();
     js_array_runtime_items_cleanup_all();
@@ -1282,41 +1315,12 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // clear JS module cache counter
     js_module_cache_reset();
     js_cjs_metadata_reset();
-    // clear pending exception
-    js_exception_pending = false;
-    js_exception_value = (Item){0};
-    js_exception_slots[1] = (Item){0};
     // Keep partial batch resets equally strict about eval frame ownership.
     js_eval_state_assert_clear(&js_runtime_state.eval, "js_batch_reset_to pre-cleanup");
     js_reset_transient_call_state();
     js_reset_heap_bound_runtime_state();
     js_decimal_number_egress_warning_reset();
-    // reset cached global objects — tests may modify them
-    js_canvas_cleanup();
-    js_reset_math_object();
-    js_reset_json_object();
-    js_reset_intl_object();
-    js_reset_console_object();
-    js_reset_reflect_object();
-    js_reset_atomics_object();
-    js_reset_262_object();
-    js_reset_css_namespace_object();
-    // reset interned __proto__ key
-    js_reset_proto_key();
-    js_reset_template_registry();
-    js_iterator_proto_cache_reset();
-    // Partial resets can also release the active heap, so reset realm-owned
-    // registry keys before a subsequent compilation can reuse stale records.
-    js_symbol_registry_batch_reset();
-    // reset function pointer → JsFunction cache
-    js_func_cache_reset();
-    js_builtin_cache_reset();
-    // deep reset: generators, promises, async contexts, pending calls
-    js_deep_batch_reset();
-    // reset constructor prototypes and globalThis — tests may mutate built-in
-    // prototypes (Object.prototype, Error.prototype, etc.).
-    extern void js_reset_constructor_prototypes(void);
-    js_reset_constructor_prototypes();
+    js_reset_cached_realm_objects();
     // fs async requests release session-bound roots before Jube invalidates
     // their token; late libuv callbacks are then explicitly delivery-suppressed.
     js_fs_runtime_detach();
@@ -1340,38 +1344,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
     // reset regex compilation cache — AST pointers from previous test are stale
     js_regex_cache_reset();
-    // reset module namespace caches (epoch-cached objects may be stale after test mutations)
-    js_child_process_reset();
-    js_fs_reset();
-    js_util_reset();
-    extern void js_reset_buffer_module(void);
-    js_reset_buffer_module();
-    extern void js_crypto_reset(void);
-    js_crypto_reset();
-    extern void js_dns_reset(void);
-    js_dns_reset();
-    extern void js_zlib_reset(void);
-    js_zlib_reset();
-    extern void js_readline_reset(void);
-    js_readline_reset();
-    extern void js_stream_reset(void);
-    js_stream_reset();
-    extern void js_net_reset(void);
-    js_net_reset();
-    extern void js_tls_reset(void);
-    js_tls_reset();
-    extern void js_http_reset(void);
-    js_http_reset();
-    extern void js_https_reset(void);
-    js_https_reset();
-    // fetch() Response bodies live in a static side table so promise methods can
-    // read them later; batch cleanup must release the table before memtrack.
-    js_fetch_reset();
-    js_history_reset();
-    extern void js_assert_reset(void);
-    js_assert_reset();
-    extern void js_node_test_reset(void);
-    js_node_test_reset();
+    js_reset_core_module_caches();
     js_dynfunc_cache_reset();
     js_root_range_reset_all();
     js_assert_batch_runtime_state_clear("js_batch_reset_to", true);
@@ -1387,29 +1360,21 @@ extern "C" Item js_new_aggregate_error(Item errors, Item message) {
     Item err = js_new_error_with_name(err_name, message);
     // Convert errors iterable to array — use js_array_from for iterable conversion
     Item errors_arr = js_array_from(errors);
-    js_property_set(err, (Item){.item = s2it(heap_create_name("errors", 6))}, errors_arr);
+    // IterableToList is part of construction, so an abrupt iterator result must
+    // escape instead of being installed as the new error's `.errors` value.
+    if (item_is_error(errors_arr)) return errors_arr;
+    Item set_result = js_property_set(err,
+        (Item){.item = s2it(heap_create_name("errors", 6))}, errors_arr);
+    if (item_is_error(set_result)) return set_result;
     return err;
 }
 
 static Item js_error_default_stack_string(Item error_name, Item message) {
-    const char* name_str = "Error";
-    int name_len = 5;
-    if (get_type_id(error_name) == LMD_TYPE_STRING) {
-        String* ns = it2s(error_name);
-        if (ns) {
-            name_str = ns->chars;
-            name_len = (int)ns->len;
-        }
-    }
-    const char* msg_str = "";
-    int msg_len = 0;
-    if (get_type_id(message) == LMD_TYPE_STRING) {
-        String* ms = it2s(message);
-        if (ms) {
-            msg_str = ms->chars;
-            msg_len = (int)ms->len;
-        }
-    }
+    JsErrorTextParts text = js_error_text_parts(error_name, message);
+    const char* name_str = text.name;
+    int name_len = text.name_len;
+    const char* msg_str = text.message;
+    int msg_len = text.message_len;
     char buf[512];
     int len = msg_len > 0
         ? snprintf(buf, sizeof(buf), "%.*s: %.*s", name_len, name_str, msg_len, msg_str)
@@ -1547,17 +1512,64 @@ static StackFrame* js_capture_native_stack_frames(void) {
     return err_capture_stack_trace(context->debug_info, frame_limit);
 }
 
-static Item js_error_native_stack_string(Item error_name, Item message, Item stack_start_fn) {
-    StackFrame* trace = js_capture_native_stack_frames();
+static RawStackTrace* js_capture_raw_native_stack_trace(void) {
+    if (!context || !context->debug_info) return NULL;
+    Item error_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Error", 5))});
+    int frame_limit = 10;
+    if (get_type_id(error_ctor) == LMD_TYPE_FUNC) {
+        Item limit = js_property_get(error_ctor,
+            (Item){.item = s2it(heap_create_name("stackTraceLimit", 15))});
+        TypeId limit_type = get_type_id(limit);
+        if (limit_type == LMD_TYPE_INT || limit_type == LMD_TYPE_INT64 ||
+                limit_type == LMD_TYPE_FLOAT) {
+            double dlimit = it2d(limit);
+            if (dlimit <= 0 || dlimit != dlimit) return NULL;
+            frame_limit = (int)dlimit;
+            if (frame_limit > 200) frame_limit = 200;
+        }
+    }
+    return err_capture_raw_stack_trace(context->debug_info, frame_limit);
+}
+
+static Item js_error_stack_string_from_trace(Item error_name, Item message,
+                                              StackFrame* trace) {
     if (!trace) return (Item){.item = ITEM_JS_UNDEFINED};
 
     Item header = js_error_default_stack_string(error_name, message);
     String* header_str = get_type_id(header) == LMD_TYPE_STRING ? it2s(header) : NULL;
     StrBuf* sb = strbuf_new_cap(256);
+    if (!sb) return (Item){.item = ITEM_JS_UNDEFINED};
+    if (header_str) strbuf_append_str_n(sb, header_str->chars, header_str->len);
+
+    int frame_count = 0;
+    for (StackFrame* frame = trace; frame; frame = frame->next) {
+        int before = sb->length;
+        strbuf_append_char(sb, '\n');
+        if (js_stack_append_frame_text(sb, frame, true)) {
+            frame_count++;
+        } else {
+            sb->length = before;
+            sb->str[before] = '\0';
+        }
+    }
+    Item result = frame_count > 0
+        ? (Item){.item = s2it(heap_create_name(sb->str, sb->length))}
+        : (Item){.item = ITEM_JS_UNDEFINED};
+    strbuf_free(sb);
+    return result;
+}
+
+static Item js_error_native_stack_string(Item error_name, Item message, Item stack_start_fn) {
+    StackFrame* trace = js_capture_native_stack_frames();
+    if (!trace) return (Item){.item = ITEM_JS_UNDEFINED};
+
+    StrBuf* sb = strbuf_new_cap(256);
     if (!sb) {
         err_free_stack_trace(trace);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
+    Item header = js_error_default_stack_string(error_name, message);
+    String* header_str = get_type_id(header) == LMD_TYPE_STRING ? it2s(header) : NULL;
     if (header_str) strbuf_append_str_n(sb, header_str->chars, header_str->len);
 
     int frame_count = 0;
@@ -1585,7 +1597,7 @@ static Item js_error_native_stack_string(Item error_name, Item message, Item sta
     return result;
 }
 
-static Item js_error_prepare_stack_trace(Item error_obj) {
+static Item js_error_prepare_stack_trace_with_trace(Item error_obj, StackFrame* trace) {
     Item error_name = (Item){.item = s2it(heap_create_name("Error", 5))};
     Item error_ctor = js_get_constructor(error_name);
     if (get_type_id(error_ctor) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
@@ -1594,7 +1606,6 @@ static Item js_error_prepare_stack_trace(Item error_obj) {
     if (get_type_id(prepare) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
 
     Item frames = js_array_new(0);
-    StackFrame* trace = js_capture_native_stack_frames();
     int frame_count = 0;
     for (StackFrame* frame = trace; frame; frame = frame->next) {
         Item frame_text = js_stack_frame_string(frame);
@@ -1603,15 +1614,61 @@ static Item js_error_prepare_stack_trace(Item error_obj) {
             frame_count++;
         }
     }
-    if (trace) err_free_stack_trace(trace);
     if (frame_count == 0) return (Item){.item = ITEM_JS_UNDEFINED};
 
     Item args[2] = { error_obj, frames };
-    Item prepared = js_call_function(prepare, (Item){.item = ITEM_JS_UNDEFINED}, args, 2);
-    if (js_exception_pending) return (Item){.item = ITEM_JS_UNDEFINED};
+    JS_ASSIGN_OR_RETURN(prepared, js_call_function(prepare, (Item){.item = ITEM_JS_UNDEFINED}, args, 2));
     if (get_type_id(prepared) == LMD_TYPE_STRING) return prepared;
     return js_to_string(prepared);
 }
+
+extern "C" Item js_error_materialize_stack(Item error_obj) {
+    LambdaError* error = js_error_from_value(error_obj);
+    if (!error) return make_js_undefined();
+    if (error->js_stack_item) return (Item){.item = error->js_stack_item};
+
+    RootFrame roots(7);
+    Rooted<Item> error_root(roots, error_obj);
+    // Error property reads can allocate and move the unified carrier; read
+    // through the rooted object so the raw-stack owner is never invalidated.
+    Rooted<Item> name_root(roots, js_property_get(error_root.get(), make_string_item("name")));
+    Rooted<Item> message_root(roots, js_property_get(error_root.get(), make_string_item("message")));
+    Rooted<Item> prepared_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
+    Rooted<Item> native_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
+    Rooted<Item> eval_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
+    Rooted<Item> stack_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
+    if (item_is_error(name_root.get())) return name_root.get();
+    if (item_is_error(message_root.get())) return message_root.get();
+    if (get_type_id(name_root.get()) != LMD_TYPE_STRING) {
+        name_root.set(make_string_item("Error"));
+    }
+
+    error = js_error_from_value(error_root.get());
+    if (error && error->raw_stack_trace) {
+        error->stack_trace = err_materialize_raw_stack_trace(error->raw_stack_trace);
+        error->raw_stack_trace = NULL;
+    }
+    StackFrame* trace = error ? error->stack_trace : NULL;
+    if (trace) {
+        prepared_root.set(js_error_prepare_stack_trace_with_trace(error_root.get(), trace));
+        native_root.set(js_error_stack_string_from_trace(name_root.get(), message_root.get(), trace));
+    }
+    eval_root.set(js_eval_source_stack_string(name_root.get(), message_root.get()));
+    stack_root.set(prepared_root.get().item != ITEM_JS_UNDEFINED ? prepared_root.get() :
+        native_root.get().item != ITEM_JS_UNDEFINED ? native_root.get() :
+        eval_root.get().item != ITEM_JS_UNDEFINED ? eval_root.get() :
+        js_error_default_stack_string(name_root.get(), message_root.get()));
+    if (item_is_error(stack_root.get())) return stack_root.get();
+
+    error = js_error_from_value(error_root.get());
+    if (error) {
+        error->js_stack_item = stack_root.get().item;
+        error->js_own_flags |= JS_ERROR_OWN_STACK;
+    }
+    return stack_root.get();
+}
+
+extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str);
 
 // v12: Create Error with a compile-time stack trace string
 extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
@@ -1626,103 +1683,61 @@ extern "C" Item js_new_error_with_name(Item error_name, Item message) {
     return js_new_error_with_name_stack(error_name, message, (Item){.item = ITEM_JS_UNDEFINED});
 }
 
+extern "C" JsClass js_error_class_id(Item value) {
+    LambdaError* error = js_error_from_value(value);
+    return error ? (JsClass)error->js_class_id : JS_CLASS_NONE;
+}
+
+
 // v12: Create typed Error with compile-time stack trace
 extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str) {
-    RootFrame roots(14);
+    RootFrame roots(8);
     Rooted<Item> error_name_root(roots, error_name);
     Rooted<Item> message_root(roots, message);
     Rooted<Item> stack_str_root(roots, stack_str);
-    Rooted<Item> obj_root(roots, ItemNull);
-    Rooted<Item> msg_key_root(roots, ItemNull);
-    Rooted<Item> temp_key_root(roots, ItemNull);
-    Rooted<Item> temp_value_root(roots, ItemNull);
-    Rooted<Item> stack_key_root(roots, ItemNull);
-    Rooted<Item> ctor_root(roots, ItemNull);
-    Rooted<Item> proto_root(roots, ItemNull);
-    Rooted<Item> prepared_stack_root(roots, ItemNull);
-    Rooted<Item> native_stack_root(roots, ItemNull);
-    Rooted<Item> eval_stack_root(roots, ItemNull);
-    Rooted<Item> fallback_stack_root(roots, ItemNull);
-
-    // Error construction has many allocating property/stack helpers. Keep the
-    // new object and every temporary that crosses one of those calls exact.
-    obj_root.set(js_new_object());
-    // Per spec: 'name' is inherited from the prototype, NOT set as own property
-    // Only set 'message' when it is explicitly provided (not undefined/null)
-    msg_key_root.set((Item){.item = s2it(heap_create_name("message"))});
+    Rooted<Item> message_string_root(roots, ItemNull);
+    Rooted<Item> error_root(roots, ItemNull);
+    String* name_string = get_type_id(error_name_root.get()) == LMD_TYPE_STRING
+        ? it2s(error_name_root.get()) : NULL;
+    JsClass error_class = name_string
+        ? js_class_from_name(name_string->chars, (int)name_string->len)
+        : JS_CLASS_ERROR;
+    if (error_class == JS_CLASS_NONE) error_class = JS_CLASS_ERROR;
     if (message_root.get().item != ITEM_JS_UNDEFINED &&
             get_type_id(message_root.get()) != LMD_TYPE_UNDEFINED) {
-        if (get_type_id(message_root.get()) != LMD_TYPE_STRING) {
-            temp_value_root.set(js_to_string(message_root.get()));
-            js_property_set(obj_root.get(), msg_key_root.get(), temp_value_root.get());
-        } else {
-            js_property_set(obj_root.get(), msg_key_root.get(), message_root.get());
-        }
-        // mark message as non-enumerable per spec §20.5.1.1
-        js_mark_non_enumerable(obj_root.get(), msg_key_root.get());
-    }
-    stack_key_root.set((Item){.item = s2it(heap_create_name("stack"))});
-    // Stamp typed class identity. Unknown engine-created names ending in
-    // "Error" still get generic Error identity.
-    {
-        Item rooted_error_name = error_name_root.get();
-        String* en = (get_type_id(rooted_error_name) == LMD_TYPE_STRING) ?
-            it2s(rooted_error_name) : NULL;
-        JsClass ec = en ? js_class_from_name(en->chars, (int)en->len) : JS_CLASS_ERROR;
-        if (ec == JS_CLASS_NONE && en && en->len >= 5 &&
-            !strncmp(en->chars + en->len - 5, "Error", 5)) {
-            ec = JS_CLASS_ERROR;
-        }
-        if (ec == JS_CLASS_NONE) ec = JS_CLASS_ERROR;
-        js_class_stamp(obj_root.get(), ec);
-    }
-    // v18c: Set .constructor for assert.throws / constructor identity checks
-    ctor_root.set(js_get_constructor(error_name_root.get()));
-    if (ctor_root.get().item != ITEM_JS_UNDEFINED &&
-            get_type_id(ctor_root.get()) == LMD_TYPE_FUNC) {
-        temp_key_root.set((Item){.item = s2it(heap_create_name("constructor"))});
-        js_property_set(obj_root.get(), temp_key_root.get(), ctor_root.get());
-        // Mark constructor as non-enumerable
-        js_mark_non_enumerable(obj_root.get(), temp_key_root.get());
-        // Set __proto__ to ErrorType.prototype so prototype methods (toString) are found
-        temp_key_root.set((Item){.item = s2it(heap_create_name("prototype", 9))});
-        proto_root.set(js_property_get(ctor_root.get(), temp_key_root.get()));
-        if (proto_root.get().item != ItemNull.item &&
-                get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
-            js_set_prototype(obj_root.get(), proto_root.get());
-        }
+        message_string_root.set(get_type_id(message_root.get()) == LMD_TYPE_STRING
+            ? message_root.get() : js_to_string(message_root.get()));
+        if (item_is_error(message_string_root.get())) return message_string_root.get();
     } else {
-        // No matching constructor (e.g. DOMException names like
-        // "IndexSizeError", "WrongDocumentError"): set .name as an own
-        // property so `e.name` returns the supplied name. Per WHATWG
-        // DOMException spec, .name is a per-instance own property.
-        temp_key_root.set((Item){.item = s2it(heap_create_name("name", 4))});
-        js_property_set(obj_root.get(), temp_key_root.get(), error_name_root.get());
-        js_mark_non_enumerable(obj_root.get(), temp_key_root.get());
+        message_string_root.set((Item){.item = s2it(heap_create_name("", 0))});
     }
-    // Error.prepareStackTrace may test err instanceof SyntaxError, so typed
-    // errors must be linked before invoking the native-stack-backed hook.
-    prepared_stack_root.set(js_error_prepare_stack_trace(obj_root.get()));
-    native_stack_root.set(js_error_native_stack_string(error_name_root.get(),
-        message_root.get(), (Item){.item = ITEM_JS_UNDEFINED}));
-    eval_stack_root.set(js_eval_source_stack_string(error_name_root.get(), message_root.get()));
-    if (prepared_stack_root.get().item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj_root.get(), stack_key_root.get(), prepared_stack_root.get());
-    } else if (native_stack_root.get().item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj_root.get(), stack_key_root.get(), native_stack_root.get());
-    } else if (eval_stack_root.get().item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj_root.get(), stack_key_root.get(), eval_stack_root.get());
-    } else if (stack_str_root.get().item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj_root.get(), stack_key_root.get(), stack_str_root.get());
+    String* message_string = it2s(message_string_root.get());
+    const char* message_chars = message_string ? message_string->chars : "";
+    LambdaError* error = err_create_heap(ERR_RUNTIME_ERROR, message_chars, NULL);
+    if (!error) return ItemError;
+    error->js_class_id = (uint8_t)error_class;
+    error->js_name_item = name_string
+        ? error_name_root.get().item
+        : (Item){.item = s2it(heap_create_name("Error", 5))}.item;
+    if (message_root.get().item != ITEM_JS_UNDEFINED &&
+            get_type_id(message_root.get()) != LMD_TYPE_UNDEFINED) {
+        error->js_message_item = message_string_root.get().item;
+        error->js_own_flags |= JS_ERROR_OWN_MESSAGE;
+    }
+    error_root.set(js_error_as_object(error));
+
+    if (stack_str_root.get().item != ITEM_JS_UNDEFINED) {
+        error->js_stack_item = stack_str_root.get().item;
+        error->js_own_flags |= JS_ERROR_OWN_STACK;
     } else {
-        fallback_stack_root.set(js_error_default_stack_string(error_name_root.get(),
-            message_root.get()));
-        js_property_set(obj_root.get(), stack_key_root.get(), fallback_stack_root.get());
+        // stack symbolization is deferred; the raw PCs keep construction cheap
+        // while retaining the exact debug-info generation for first access.
+        error->raw_stack_trace = js_capture_raw_native_stack_trace();
+        error->js_own_flags |= JS_ERROR_OWN_STACK;
     }
-    // Mark stack as non-enumerable (per ES spec)
-    js_runtime_make_non_enumerable(obj_root.get(), stack_key_root.get());
-    return obj_root.get();
+    return error_root.get();
 }
+
 
 // ES2022: Extract cause from options object and set on error
 extern "C" Item js_error_set_cause(Item error, Item options) {
@@ -1732,12 +1747,10 @@ extern "C" Item js_error_set_cause(Item error, Item options) {
         return error;
     }
     Item cause_key = (Item){.item = s2it(heap_create_name("cause"))};
-    Item has_cause = js_in(cause_key, options);
-    if (js_exception_pending) return ItemNull;
+    JS_ASSIGN_OR_RETURN(has_cause, js_in(cause_key, options));
     if (js_is_truthy(has_cause)) {
-        Item cause_val = js_property_get(options, cause_key);
-        if (js_exception_pending) return ItemNull;
-        js_property_set(error, cause_key, cause_val);
+        JS_ASSIGN_OR_RETURN(cause_val, js_property_get(options, cause_key));
+        JS_ASSIGN_OR_RETURN(set_result, js_property_set(error, cause_key, cause_val));
         // mark cause as non-enumerable per spec §20.5.8.1
         js_mark_non_enumerable(error, cause_key);
     }
@@ -1776,7 +1789,6 @@ extern "C" void js_runtime_set_input(void* input) {
     heap_register_gc_root(&js_new_target.item);
     heap_register_gc_root(&js_pending_new_target.item);
     heap_register_gc_root(&js_pending_args_callee.item);
-    heap_register_gc_root(&js_exception_value.item);
 }
 
 extern "C" Item js_get_this() {
@@ -1786,8 +1798,7 @@ extern "C" Item js_get_this() {
     if (js_current_this.item == ITEM_JS_TDZ) {
         Item tn = (Item){.item = s2it(heap_create_name("ReferenceError", 14))};
         Item msg = (Item){.item = s2it(heap_create_name("Must call super constructor before accessing 'this'", 51))};
-        js_throw_value(js_new_error_with_name(tn, msg));
-        return make_js_undefined();
+        return js_throw_value(js_new_error_with_name(tn, msg));
     }
     if (js_current_this.item == 0) {
         extern Item js_get_global_this();
@@ -1805,8 +1816,7 @@ extern "C" Item js_resolve_lexical_this(Item this_val) {
     if (this_val.item == ITEM_JS_TDZ) {
         Item tn = (Item){.item = s2it(heap_create_name("ReferenceError", 14))};
         Item msg = (Item){.item = s2it(heap_create_name("Must call super constructor before accessing 'this'", 51))};
-        js_throw_value(js_new_error_with_name(tn, msg));
-        return make_js_undefined();
+        return js_throw_value(js_new_error_with_name(tn, msg));
     }
     if (this_val.item == 0) {
         extern Item js_get_global_this();
@@ -1884,14 +1894,6 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
     int leak_count = 0;
     const char* name = reset_name ? reset_name : "js_batch_reset";
 
-    if (js_exception_pending) {
-        leak_count++;
-        log_error("js-batch-state: %s left pending exception", name);
-    }
-    if (js_exception_value.item != 0) {
-        leak_count++;
-        log_error("js-batch-state: %s left exception value item=%lld", name, (long long)js_exception_value.item);
-    }
     if (js_strict_mode) {
         leak_count++;
         log_error("js-batch-state: %s left strict mode enabled", name);

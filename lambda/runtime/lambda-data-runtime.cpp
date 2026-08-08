@@ -1513,60 +1513,38 @@ Item array_end(Array* arr) {
     return {.array = arr};
 }
 
+static bool array_push_spread_array_items(Array* arr, Item item, bool require_spreadable) {
+    if (get_type_id(item) != LMD_TYPE_ARRAY || !item.array ||
+            (require_spreadable && !item.array->is_spreadable)) return false;
+    RootFrame roots(2);
+    Rooted<Array*> rooted_array(roots, arr);
+    Rooted<Item> rooted_source(roots, item);
+    for (int i = 0; i < rooted_source.get().array->length; i++) {
+        Array* inner = rooted_source.get().array;
+        array_push(rooted_array.get(), inner->items[i]);
+    }
+    return true;
+}
+
+static bool array_push_spread_array_num_items(Array* arr, Item item, bool require_spreadable) {
+    if (get_type_id(item) != LMD_TYPE_ARRAY_NUM || !item.array_num ||
+            (require_spreadable && !item.array_num->is_spreadable)) return false;
+    RootFrame roots(2);
+    Rooted<Array*> rooted_array(roots, arr);
+    Rooted<Item> rooted_source(roots, item);
+    for (int64_t i = 0; i < rooted_source.get().array_num->length; i++) {
+        Item value = array_num_get(rooted_source.get().array_num, i);
+        array_push(rooted_array.get(), value);
+    }
+    return true;
+}
+
 // push item to array, spreading if the item is a spreadable array
 // skips spreadable nulls (from empty for-expressions)
 void array_push_spread(Array* arr, Item item) {
-    TypeId type_id = get_type_id(item);
-    // skip spreadable null (empty for-expression result)
-    if (item.item == ITEM_NULL_SPREADABLE) {
-        return;
-    }
-    if (type_id == LMD_TYPE_ARRAY) {
-        Array* inner = item.array;
-        if (inner && inner->is_spreadable) {
-            RootFrame roots(2);
-            Rooted<Array*> rooted_array(roots, arr);
-            Rooted<Item> rooted_source(roots, item);
-            for (int i = 0; i < inner->length; i++) {
-                arr = rooted_array.get();
-                inner = rooted_source.get().array;
-                array_push(arr, inner->items[i]);
-            }
-            return;
-        }
-    }
-    // check if this is a spreadable list
-    if (type_id == LMD_TYPE_ARRAY) {
-        List* inner = item.array;
-        if (inner && inner->is_spreadable) {
-            RootFrame roots(2);
-            Rooted<Array*> rooted_array(roots, arr);
-            Rooted<Item> rooted_source(roots, item);
-            for (int i = 0; i < inner->length; i++) {
-                arr = rooted_array.get();
-                inner = rooted_source.get().array;
-                array_push(arr, inner->items[i]);
-            }
-            return;
-        }
-    }
-    // check if this is a spreadable ArrayNum
-    if (type_id == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* inner = item.array_num;
-        if (inner && inner->is_spreadable) {
-            RootFrame roots(2);
-            Rooted<Array*> rooted_array(roots, arr);
-            Rooted<Item> rooted_source(roots, item);
-            for (int64_t i = 0; i < inner->length; i++) {
-                inner = rooted_source.get().array_num;
-                Item value = array_num_get(inner, i);
-                arr = rooted_array.get();
-                array_push(arr, value);
-            }
-            return;
-        }
-    }
-    // not spreadable, push as-is
+    if (item.item == ITEM_NULL_SPREADABLE) return;
+    if (array_push_spread_array_items(arr, item, true) ||
+            array_push_spread_array_num_items(arr, item, true)) return;
     array_push(arr, item);
 }
 
@@ -1574,37 +1552,8 @@ void array_push_spread(Array* arr, Item item) {
 // used for pipe expression results in array literals: [a, pipe_expr | ~, b]
 void array_push_spread_all(Array* arr, Item item) {
     if (item.item == ITEM_NULL_SPREADABLE) return;
-    TypeId type_id = get_type_id(item);
-    if (type_id == LMD_TYPE_ARRAY) {
-        Array* inner = item.array;
-        if (inner) {
-            RootFrame roots(2);
-            Rooted<Array*> rooted_array(roots, arr);
-            Rooted<Item> rooted_source(roots, item);
-            for (int i = 0; i < inner->length; i++) {
-                arr = rooted_array.get();
-                inner = rooted_source.get().array;
-                array_push(arr, inner->items[i]);
-            }
-            return;
-        }
-    }
-    if (type_id == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* inner = item.array_num;
-        if (inner) {
-            RootFrame roots(2);
-            Rooted<Array*> rooted_array(roots, arr);
-            Rooted<Item> rooted_source(roots, item);
-            for (int64_t i = 0; i < inner->length; i++) {
-                inner = rooted_source.get().array_num;
-                Item value = array_num_get(inner, i);
-                arr = rooted_array.get();
-                array_push(arr, value);
-            }
-            return;
-        }
-    }
-    // non-array types are pushed as single items (maps, elements, scalars, etc.)
+    if (array_push_spread_array_items(arr, item, false) ||
+            array_push_spread_array_num_items(arr, item, false)) return;
     array_push(arr, item);
 }
 
@@ -2525,6 +2474,20 @@ static Item item_at_empty_string() {
     return empty ? (Item){.item = s2it(empty)} : ItemError;
 }
 
+// ASCII strings use byte offsets for character indexes; keep this allocation
+// path separate so the JIT can bypass UTF-8 scanning without changing the
+// single-character-string result contract of item_at (S4.1, D2.2.2).
+static Item string_ascii_at(String* str, int64_t index) {
+    if (!str || index < 0 || (uint64_t)index >= str->len) {
+        return item_at_empty_string();
+    }
+    unsigned char ch = (unsigned char)str->chars[index];
+    String* interned = get_ascii_char_string(ch);
+    if (interned) return {.item = s2it(interned)};
+    String* result = heap_strcpy(str->chars + index, 1);
+    return result ? (Item){.item = s2it(result)} : ItemError;
+}
+
 Item item_at(Item data, int64_t index) {
     if (!data.item) { return ItemNull; }
 
@@ -2542,6 +2505,7 @@ Item item_at(Item data, int64_t index) {
     case LMD_TYPE_RANGE: {
         Range *range = data.range;
         if (index < 0 || index >= range->length) { return ItemNull; }
+        if (range->is_char) return fn_chr((Item){.item = i2it(range->start + index)});
         int64_t value = range->start + index;
         return {.item = i2it(value)};
     }
@@ -2571,12 +2535,7 @@ Item item_at(Item data, int64_t index) {
                 Symbol* ch_sym = heap_create_symbol(chars + index, 1);
                 return {.item = y2it(ch_sym)};
             }
-            // return interned single-char string if available
-            unsigned char ch = (unsigned char)chars[index];
-            String* interned = get_ascii_char_string(ch);
-            if (interned) return {.item = s2it(interned)};
-            String *ch_str = heap_strcpy((char*)(chars + index), 1);
-            return {.item = s2it(ch_str)};
+            return string_ascii_at(data.get_safe_string(), index);
         }
 
         // UTF-8 path: combined bounds check + char-to-byte in a single pass
@@ -2625,6 +2584,13 @@ Item item_at(Item data, int64_t index) {
         log_error("item_at: unsupported item_at type: %d", type_id);
         return ItemNull;
     }
+}
+
+extern "C" Item fn_string_ascii_at(Item str_item, int64_t index) {
+    String* str = str_item.get_safe_string();
+    if (!str) return item_at(str_item, index);
+    if (str->is_ascii) return string_ascii_at(str, index);
+    return item_at(str_item, index);
 }
 // Get attribute by name from an Item (for map/element attribute access)
 Item item_attr(Item data, const char* key) {
@@ -2934,7 +2900,8 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         if ((element_type_id == LMD_TYPE_INT && et == ELEM_INT) ||
             (element_type_id == LMD_TYPE_FLOAT && et == ELEM_FLOAT64) ||
             (element_type_id == LMD_TYPE_INT64 && et == ELEM_INT64) ||
-            (element_type_id == LMD_TYPE_UINT64 && et == ELEM_UINT64)) {
+            (element_type_id == LMD_TYPE_UINT64 && et == ELEM_UINT64) ||
+            (element_type_id == LMD_TYPE_BOOL && et == ELEM_BOOL)) {
             return (void*)arr;
         }
     }
@@ -2985,6 +2952,16 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             ArrayNum* typed = array_num_new(ELEM_UINT64, length);
             for (int64_t i = 0; i < length; i++) {
                 ((uint64_t*)typed->data)[i] = item_to_uint64_value(array_num_get(src, i));
+            }
+            return typed;
+        }
+        else if (element_type_id == LMD_TYPE_BOOL && src->get_elem_type() == ELEM_BOOL) {
+            // bool[] is a semantic boolean contract, not numeric truthiness at
+            // a declaration boundary. Preserve the existing packed byte lane
+            // only when the source already carries boolean elements.
+            ArrayNum* typed = array_num_new(ELEM_BOOL, length);
+            for (int64_t i = 0; i < length; i++) {
+                ((uint8_t*)typed->data)[i] = ((uint8_t*)src->data)[i] ? 1 : 0;
             }
             return typed;
         }
@@ -3053,6 +3030,19 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
                     return NULL;
                 }
                 ((uint64_t*)typed->data)[i] = item_to_uint64_value(items[i]);
+            }
+            return typed;
+        }
+        else if (element_type_id == LMD_TYPE_BOOL) {
+            ArrayNum* typed = array_num_new(ELEM_BOOL, length);
+            for (int64_t i = 0; i < length; i++) {
+                TypeId elem_tid = get_type_id(items[i]);
+                if (elem_tid != LMD_TYPE_BOOL) {
+                    log_error("ensure_typed_array: element %lld has type %s, expected bool",
+                        i, get_type_name(elem_tid));
+                    return NULL;
+                }
+                ((uint8_t*)typed->data)[i] = items[i].bool_val == BOOL_TRUE ? 1 : 0;
             }
             return typed;
         }

@@ -7,8 +7,8 @@
 // The local buffers use packed ArrayNum storage; main records the jump table's
 // int[] contract before it crosses run_bf's checked parameter boundary.
 // Precompute matching brackets
-pn build_jump_table(prog: string, prog_len: int) {
-    var jumps = fill(prog_len, 0)
+pn build_jump_table(prog: string, prog_len: int) int[] {
+    var jumps: int[] = fill(prog_len, 0)
     var stack = fill(256, 0)
     var sp: int = 0
     var i: int = 0

@@ -294,8 +294,8 @@ os/net/dns/child_process. No `#ifdef` or runtime flag disables Node today;
   manifest scan `:3217–3250`).
 - **Host services** — `JubeHostAPI` (`jube.h:976`) with `gc` (roots, frames,
   weak refs), `value` (objects/arrays/properties), `script` (functions,
-  prototypes, `throw_value`/`check_exception` pending-exception model,
-  `call_function`, error construction), `data` (neutral names/maps/floats).
+  prototypes, `throw_value`/`error_lane_payload`, `call_function`, error
+  construction), `data` (neutral names/maps/floats).
   The `dom` table is the working proof that a large domain-specific service
   surface can live behind `JubeHostAPI`.
 - **Delivery** — the `lang-python` build-target shape
@@ -341,11 +341,11 @@ Each new host-API entry (§9) is justified by a named call site in the migrating
 builtin, mirroring how the hosted-language API v1 was derived. No speculative
 surface.
 
-### P6. Errors return, exceptions pend
+### P6. Errors return through one lane
 No C++ unwinding across the module boundary. Handlers return status codes and
-use the pending-exception model already established by the DOM3 binding tables
-(`jube.h` `JubeMemberBind` contract) and `JubeHostScriptAPI.throw_value`/
-`check_exception`.
+carry any JS abrupt completion as the same returned ERROR `Item`; boundary
+conversion uses `JubeHostScriptAPI.throw_value`/`error_lane_payload` with no
+ambient pending state (D8.4.3).
 
 ### P7. Static first, dynamic second, behaviorally identical
 Every module lands first as a statically registered `JubeModuleDef` (same

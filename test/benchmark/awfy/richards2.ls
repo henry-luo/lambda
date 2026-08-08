@@ -3,6 +3,15 @@
 // Ported from JavaScript AWFY suite
 // Result: PASS when queuePacketCount=23246 and holdCount=9297
 
+type Packet = {link: map?, identity: int, pkind: int, datum: int, data: int[]}
+type TCB = {link: map?, identity: int, priority: int, input: map?, pp: bool,
+            tw: bool, th: bool, handle: map?, fn_id: int}
+type Scheduler = {qpc: int, hc: int, ct: map?, cti: int, tl: map?}
+type DeviceData = {pending: map?}
+type HandlerData = {work_in: map?, device_in: map?}
+type IdleData = {control: int, icount: int}
+type WorkerData = {destination: int, wcount: int}
+
 // Constants
 let IDLER     = 0
 let WORKER    = 1
@@ -26,7 +35,7 @@ let FN_DEVICE  = 3
 // --- Packet ---
 // { link: null, identity: 0, pkind: 0, datum: 0, data: [0,0,0,0] }
 
-pn create_packet(link, identity, pkind) {
+pn create_packet(link, identity, pkind) any {
     var pkt = { link: null, identity: 0, pkind: 0, datum: 0, data: [0, 0, 0, 0] }
     pkt.link = link
     pkt.identity = identity
@@ -35,7 +44,7 @@ pn create_packet(link, identity, pkind) {
 }
 
 // append packet to end of queue, return queue head
-pn append_packet(packet, queue_head) {
+pn append_packet(packet, queue_head) any {
     packet.link = null
     if (queue_head == null) {
         return packet
@@ -55,7 +64,7 @@ pn append_packet(packet, queue_head) {
 //   pp: false, tw: false, th: false,
 //   handle: null, fn_id: 0 }
 
-pn create_tcb(link, identity, priority, initial_work, state_pp, state_tw, state_th, handle, fn_id) {
+pn create_tcb(link, identity, priority, initial_work, state_pp, state_tw, state_th, handle, fn_id) any {
     var tcb = { link: null, identity: 0, priority: 0, input: null,
                 pp: false, tw: false, th: false,
                 handle: null, fn_id: 0 }
@@ -71,7 +80,7 @@ pn create_tcb(link, identity, priority, initial_work, state_pp, state_tw, state_
     return tcb
 }
 
-pn tcb_is_held_or_waiting(tcb) {
+pn tcb_is_held_or_waiting(tcb) int {
     var th = (tcb.th)
     if (th == true) {
         return 1
@@ -86,7 +95,7 @@ pn tcb_is_held_or_waiting(tcb) {
     return 0
 }
 
-pn tcb_is_waiting_with_packet(tcb) {
+pn tcb_is_waiting_with_packet(tcb) int {
     var pp = (tcb.pp)
     var tw = (tcb.tw)
     var th = (tcb.th)
@@ -100,31 +109,31 @@ pn tcb_is_waiting_with_packet(tcb) {
     return 0
 }
 
-pn tcb_set_running(tcb) {
+pn tcb_set_running(tcb) any {
     tcb.pp = false
     tcb.tw = false
     tcb.th = false
 }
 
-pn tcb_set_packet_pending(tcb) {
+pn tcb_set_packet_pending(tcb) any {
     tcb.pp = true
     tcb.tw = false
     tcb.th = false
 }
 
-pn tcb_set_waiting(tcb) {
+pn tcb_set_waiting(tcb) any {
     tcb.pp = false
     tcb.tw = true
     tcb.th = false
 }
 
-pn tcb_set_waiting_with_packet(tcb) {
+pn tcb_set_waiting_with_packet(tcb) any {
     tcb.pp = true
     tcb.tw = true
     tcb.th = false
 }
 
-pn tcb_add_input(tcb, packet, old_task) {
+pn tcb_add_input(tcb, packet, old_task) any {
     var inp = (tcb.input)
     if (inp == null) {
         tcb.input = packet
@@ -141,7 +150,7 @@ pn tcb_add_input(tcb, packet, old_task) {
     return old_task
 }
 
-pn tcb_run_task(tcb, sched, task_table) {
+pn tcb_run_task(tcb, sched, task_table) any {
     var message = null
     var ww = tcb_is_waiting_with_packet(tcb)
     if (ww == 1) {
@@ -172,34 +181,34 @@ pn tcb_run_task(tcb, sched, task_table) {
 
 // --- Data Records ---
 
-pn create_device_data() {
+pn create_device_data() any {
     var rec = { pending: null }
     return rec
 }
 
-pn create_handler_data() {
+pn create_handler_data() any {
     var rec = { work_in: null, device_in: null }
     return rec
 }
 
-pn create_idle_data() {
+pn create_idle_data() any {
     var rec = { control: 1, icount: 1000 }
     return rec
 }
 
-pn create_worker_data() {
+pn create_worker_data() any {
     var rec = { destination: 2, wcount: 0 }
     return rec
 }
 
 // --- Scheduler helpers ---
 
-pn find_task(task_table, identity) {
+pn find_task(task_table, identity) any {
     var t = task_table[identity]
     return t
 }
 
-pn hold_self(sched, current_task) {
+pn hold_self(sched, current_task) any {
     var hc = (sched.hc) + 1
     sched.hc = hc
     current_task.th = true
@@ -207,12 +216,12 @@ pn hold_self(sched, current_task) {
     return lnk
 }
 
-pn mark_waiting(current_task) {
+pn mark_waiting(current_task) any {
     current_task.tw = true
     return current_task
 }
 
-pn queue_packet(sched, task_table, packet, current_task) {
+pn queue_packet(sched, task_table, packet, current_task) any {
     var pid = (packet.identity)
     var t = find_task(task_table, pid)
     if (t == null) {
@@ -227,7 +236,7 @@ pn queue_packet(sched, task_table, packet, current_task) {
     return result
 }
 
-pn release_task(sched, task_table, identity, current_task) {
+pn release_task(sched, task_table, identity, current_task) any {
     var t = find_task(task_table, identity)
     if (t == null) {
         return null
@@ -243,7 +252,7 @@ pn release_task(sched, task_table, identity, current_task) {
 
 // --- Task functions ---
 
-pn task_fn_idle(work, data, sched, task_table) {
+pn task_fn_idle(work, data, sched, task_table) any {
     var ct = (sched.ct)
     var ic = (data.icount) - 1
     data.icount = ic
@@ -262,21 +271,17 @@ pn task_fn_idle(work, data, sched, task_table) {
     return release_task(sched, task_table, DEVICE_B, ct)
 }
 
-pn task_fn_worker(work, data, sched, task_table) {
+pn task_fn_worker(work, data, sched, task_table) any {
     var ct = (sched.ct)
     if (work == null) {
         return mark_waiting(ct)
     }
     var dest = (data.destination)
-    // workaround: sole map assignment in if-block is dropped by transpiler
-    // so add a temp var before it
     if (dest == HANDLER_A) {
-        var _hb = HANDLER_B
-        data.destination = _hb
+        data.destination = HANDLER_B
     }
     if (dest != HANDLER_A) {
-        var _ha = HANDLER_A
-        data.destination = _ha
+        data.destination = HANDLER_A
     }
     var ndest = (data.destination)
     work.identity = ndest
@@ -298,7 +303,7 @@ pn task_fn_worker(work, data, sched, task_table) {
     return queue_packet(sched, task_table, work, ct)
 }
 
-pn task_fn_handler(work, data, sched, task_table) {
+pn task_fn_handler(work, data, sched, task_table) any {
     var ct = (sched.ct)
     if (work != null) {
         var wk = (work.pkind)
@@ -337,7 +342,7 @@ pn task_fn_handler(work, data, sched, task_table) {
     return queue_packet(sched, task_table, dev_pkt, ct)
 }
 
-pn task_fn_device(work, data, sched, task_table) {
+pn task_fn_device(work, data, sched, task_table) any {
     var ct = (sched.ct)
     if (work == null) {
         var pend = (data.pending)
@@ -354,14 +359,14 @@ pn task_fn_device(work, data, sched, task_table) {
 
 // --- Scheduler ---
 
-pn create_task(sched, task_table, identity, priority, work, state_pp, state_tw, state_th, handle, fn_id) {
+pn create_task(sched, task_table, identity, priority, work, state_pp, state_tw, state_th, handle, fn_id) any {
     var tl = (sched.tl)
     var tcb = create_tcb(tl, identity, priority, work, state_pp, state_tw, state_th, handle, fn_id)
     sched.tl = tcb
     task_table[identity] = tcb
 }
 
-pn schedule(sched, task_table) {
+pn schedule(sched, task_table) any {
     var ct = (sched.tl)
     sched.ct = ct
     while (ct != null) {
@@ -383,7 +388,7 @@ pn schedule(sched, task_table) {
     }
 }
 
-pn benchmark() {
+pn benchmark() any {
     // Scheduler state
     var sched = { qpc: 0, hc: 0, ct: null, cti: 0, tl: null }
     var task_table = fill(6, null)

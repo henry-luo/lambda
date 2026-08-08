@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "description": "A uniquely-owned typed float array uses the proved raw store lane.",
+  "checks": [
+    {
+      "in_func": "_tune16_proved_float_store_#",
+      "expect": [
+        "call\tlambda_array_set_checked_lane_p, lambda_array_set_checked_lane",
+        "dmov\td:({{r}}), {{r}}"
+      ]
+    }
+  ]
+}

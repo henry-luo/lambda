@@ -4,10 +4,6 @@
 // Computes edit distance between two strings, repeated for timing
 // Expected: levenshtein("kitten", "sitting") = 3
 
-// NOTE: no `string` return-type annotation on the string-building procedures —
-// it currently segfaults the MIR JIT once the returned string is large enough to
-// span a GC (repro: temp/repro_string_return_segv.ls). Param/local annotations
-// and `int` return types are unaffected.
 pn min2(a: int, b: int) int {
     if (a < b) { return a }
     return b
@@ -21,12 +17,9 @@ pn levenshtein(s1: string, s2: string) int {
     let n: int = len(s1)
     let m: int = len(s2)
 
-    // prev/curr stay unannotated: fill(n, int) already infers a packed ArrayNum,
-    // and the row swap below rebinds them, so a bracket annotation would only
-    // re-tag the vars as ANY
     // Use 2 rows instead of full matrix for space efficiency
-    var prev = fill(m + 1, 0)
-    var curr = fill(m + 1, 0)
+    var prev: int[] = fill(m + 1, 0)
+    var curr: int[] = fill(m + 1, 0)
 
     var j: int = 0
     while (j <= m) {
@@ -60,7 +53,7 @@ pn levenshtein(s1: string, s2: string) int {
     return prev[m]
 }
 
-pn make_string(ch: string, n: int) {
+pn make_string(ch: string, n: int) string {
     var s: string = ch
     var sz: int = 1
     while (sz * 2 <= n) {
@@ -80,7 +73,7 @@ pn make_string(ch: string, n: int) {
     return s
 }
 
-pn benchmark() {
+pn benchmark() int {
     // Basic verification
     var d1: int = levenshtein("kitten", "sitting")
     var d2: int = levenshtein("saturday", "sunday")

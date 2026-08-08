@@ -1,6 +1,6 @@
 # Lambda Impl Plan — Online Exception-Poll Tracking (JS MIR)
 
-**Date**: 2026-07-23  **Revised**: 2026-07-24  **Status**: PLANNED  **Tree anchor**: master `f8e454d75` (line refs below are as of this commit; anchor by function name when they drift)
+**Date**: 2026-07-23  **Revised**: 2026-08-07  **Status**: IMPLEMENTED — landed in `52c0f3c02` (2026-07-24); the G1 peephole and `jm_optimize_exception_polls` pass are deleted from the tree; `exc_track` is the live mechanism (verified 2026-08-07; resolves formal-design DO15). History and successor design: `vibe/jube/JS_Runtime_Redesign.md` JR3.  **Tree anchor**: master `f8e454d75` (line refs below are as of this commit; anchor by function name when they drift)
 
 **Decision**: Replace the blind-emit-then-optimize exception-poll scheme with an **online abstract state** consulted at emission time. Status reads are folded, route polls are skipped, and definitely-set routes are strengthened to unconditional jumps directly at emission. The adjacent-poll peephole and `jm_optimize_exception_polls` dataflow pass are deleted only after differential validation against the legacy pipeline. Runtime debug tripwires guard both false-clean and false-set proofs.
 

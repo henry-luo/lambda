@@ -20,7 +20,7 @@ extern "C" {
 // Bump this exact-build compiler contract whenever an opaque hosted-compiler
 // service table changes; struct-size checks alone cannot identify stale module
 // binaries built against a prior same-day table shape.
-#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260727-h9b42"
+#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260807-tune1"
 
 typedef struct JubeHostAPI JubeHostAPI;
 typedef struct JubeTypeDef JubeTypeDef;
@@ -364,8 +364,9 @@ struct JubeModuleRequirements {
 // DOM3: binding-table halves of the module interface declaration.
 // Shape (names, types, purity, arity, defaults) lives in Lambda type syntax in
 // JubeModuleDef.interface_decl; behavior lives here as handler pointers.
-// Handlers return 1 when handled, 0 to fall through, and use the
-// pending-exception model (no unwinding across the module boundary).
+// Handlers return 1 when handled, 0 to fall through. D8.4.3 routes abrupt
+// completion as the returned ERROR Item; no ambient exception state crosses
+// the module boundary.
 typedef enum JubeMemberFlags {
     JUBE_MEMBER_NONE = 0,
     JUBE_MEMBER_NON_ENUMERABLE = 1u << 0,  // excluded from own-key enumeration
@@ -532,12 +533,11 @@ struct JubeHostScriptAPI {
     Item (*global_this)(void);
     Item (*global_property)(Item key);
     Item (*new_error_with_name)(Item error_name, Item message);
-    void (*throw_value)(Item error);
+    Item (*throw_value)(Item error);
     Item (*reflect_own_keys)(Item obj);
     Item (*object_keys)(Item obj);
     Item (*reflect_delete_property)(Item obj, Item key);
     Item (*call_function)(Item func_item, Item this_val, Item* args, int arg_count);
-    int (*check_exception)(void);
     bool (*is_truthy)(Item value);
     Item (*intrinsic_prototype_for_class)(int class_id);
     Item (*make_number)(double value);
@@ -551,9 +551,9 @@ struct JubeHostScriptAPI {
     // need Object.create(null) semantics without naming JS object layouts.
     Item (*object_create)(Item prototype);
     Item (*throw_uri_error_code)(const char* code, const char* message);
-    // Clears a caught guest exception so a hosted module can implement a
-    // language-level fallback without leaking pending exception state.
-    Item (*clear_exception)(void);
+    // Converts a routed ERROR Item into the JS value visible at a catch,
+    // rejection, or host boundary without consulting ambient state.
+    Item (*error_lane_payload)(Item lane);
     void (*mark_non_writable)(Item object, Item key);
     Item (*object_freeze)(Item object);
     Item (*current_this)(void);
@@ -651,7 +651,7 @@ struct JubeHostDomAPI {
     void (*set_option_selected_dirty)(void* elem, bool selected);
     void (*set_option_text_bridge)(void* elem, const char* value);
     void (*after_srcdoc_set)(void* elem);
-    void (*throw_contenteditable_syntax_error)(void);
+    Item (*throw_contenteditable_syntax_error)(void);
     Item (*set_text_data_property)(void* text, Item value);
     Item (*text_control_set_value_bridge)(void* elem, Item value);
     Item (*text_control_set_selection_start_bridge)(void* elem, Item value);

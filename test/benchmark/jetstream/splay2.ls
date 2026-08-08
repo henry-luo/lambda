@@ -9,15 +9,18 @@ let TREE_MODIFICATIONS = 80
 // Type definitions for direct struct field access
 // Field order must match the map literal order in create_node
 type SplayNode = {key: float, left: map?, right: map?, value: map?}
-type SplayTree = {root: map?}
+// The root carries the same fixed record contract as nodes; keeping it open
+// forces every root handoff through runtime map admission and erases C3's
+// direct-shape proof.
+type SplayTree = {root: SplayNode?}
 type RngState = {seed: int}
 type PayloadLeaf = {arr: array, str: float}
 type PayloadBranch = {left_p: map, right_p: map}
 
 // Node: {key, left, right, value}
 // SplayNode type annotation ensures runtime data layout matches direct access offsets
-pn create_node(key: float, value) {
-    var node = {key: key, left: null, right: null, value: value}
+pn create_node(key: float, value) SplayNode {
+    var node: SplayNode = {key: key, left: null, right: null, value: value}
     return node
 }
 
@@ -25,7 +28,7 @@ pn create_node(key: float, value) {
 // u32 arithmetic intentionally wraps like the original 32-bit PRNG.
 // The PRNG and tree are explicit inout values; ordinary parameters are
 // snapshots under COW and would lose the state update that makes keys unique.
-pn next_random(var state: RngState) {
+pn next_random(var state: RngState) float {
     var s: u32 = state.seed
     s = s * 1103515245u32 + 12345u32
     state.seed = int(s)
@@ -33,16 +36,16 @@ pn next_random(var state: RngState) {
 }
 
 // Splay tree using maps for tree state
-pn splay_tree_new() {
+pn splay_tree_new() SplayTree {
     var tree: SplayTree = {root: null}
     return tree
 }
 
-pn splay_is_empty(tree: SplayTree) {
+pn splay_is_empty(tree: SplayTree) bool {
     return tree.root == null
 }
 
-pn splay(var tree: SplayTree, key: float) {
+pn splay(var tree: SplayTree, key: float) int {
     if (splay_is_empty(tree)) {
         return 0
     }
@@ -115,7 +118,7 @@ pn splay(var tree: SplayTree, key: float) {
     return 0
 }
 
-pn splay_insert(var tree: SplayTree, key: float, value) {
+pn splay_insert(var tree: SplayTree, key: float, value) int {
     if (splay_is_empty(tree)) {
         tree.root = create_node(key, value)
         return 0
@@ -140,7 +143,7 @@ pn splay_insert(var tree: SplayTree, key: float, value) {
     return 0
 }
 
-pn splay_remove(var tree: SplayTree, key: float) {
+pn splay_remove(var tree: SplayTree, key: float) map? {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -161,7 +164,7 @@ pn splay_remove(var tree: SplayTree, key: float) {
     return removed
 }
 
-pn splay_find(var tree: SplayTree, key: float) {
+pn splay_find(var tree: SplayTree, key: float) map? {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -172,14 +175,14 @@ pn splay_find(var tree: SplayTree, key: float) {
     return null
 }
 
-pn splay_find_max(node: SplayNode) {
+pn splay_find_max(node: SplayNode) SplayNode {
     while (node.right != null) {
         node = node.right
     }
     return node
 }
 
-pn splay_find_greatest_less_than(var tree: SplayTree, key: float) {
+pn splay_find_greatest_less_than(var tree: SplayTree, key: float) map? {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -194,7 +197,7 @@ pn splay_find_greatest_less_than(var tree: SplayTree, key: float) {
 }
 
 // Count nodes for verification
-pn count_nodes(node: SplayNode?) {
+pn count_nodes(node: SplayNode?) int {
     if (node == null) {
         return 0
     }
@@ -202,7 +205,7 @@ pn count_nodes(node: SplayNode?) {
 }
 
 // Collect keys in-order for verification
-pn traverse_keys(node: SplayNode?, keys, idx_in) {
+pn traverse_keys(node: SplayNode?, keys: float[], idx_in: int) int {
     if (node == null) {
         return idx_in
     }
@@ -214,7 +217,7 @@ pn traverse_keys(node: SplayNode?, keys, idx_in) {
 }
 
 // Generate payload tree for node values
-pn generate_payload(depth: int, tag: float) {
+pn generate_payload(depth: int, tag: float) map {
     if (depth == 0) {
         var leaf = {arr: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], str: tag}
         return leaf
@@ -224,7 +227,7 @@ pn generate_payload(depth: int, tag: float) {
     return branch
 }
 
-pn insert_new_node(var tree: SplayTree, var rng: RngState) {
+pn insert_new_node(var tree: SplayTree, var rng: RngState) float {
     var key = next_random(rng)
     while (splay_find(tree, key) != null) {
         key = next_random(rng)
@@ -234,7 +237,7 @@ pn insert_new_node(var tree: SplayTree, var rng: RngState) {
     return key
 }
 
-pn run_splay() {
+pn run_splay() int {
     var tree = splay_tree_new()
     var rng = {seed: 49734321}
 

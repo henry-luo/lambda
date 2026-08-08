@@ -557,10 +557,9 @@ static Item make_assertion_error_full(const char* message, Item actual, Item exp
 }
 
 static Item throw_assertion_error_full(const char* message, Item actual, Item expected, const char* op_str, bool generated = true) {
-    extern void js_throw_value(Item error);
+    extern Item js_throw_value(Item error);
     Item error = make_assertion_error_full(message, actual, expected, op_str, generated);
-    js_throw_value(error);
-    return make_js_undefined();
+    return js_throw_value(error);
 }
 
 static Item throw_assertion_error(const char* message) {
@@ -569,10 +568,9 @@ static Item throw_assertion_error(const char* message) {
 
 static Item throw_assertion_error_full_item(Item message, Item actual, Item expected,
                                             const char* op_str, bool generated = true) {
-    extern void js_throw_value(Item error);
+    extern Item js_throw_value(Item error);
     Item error = make_assertion_error_full_item(message, actual, expected, op_str, generated);
-    js_throw_value(error);
-    return make_js_undefined();
+    return js_throw_value(error);
 }
 
 // helper: check truthiness
@@ -684,14 +682,13 @@ static Item js_assert_resolve_user_message(Item message, Item actual, Item expec
     if (!js_assert_is_function_like_value(message)) return message;
 
     extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
-    extern int js_check_exception(void);
     Item args[2] = { actual, expected };
     Item result = js_call_function(message, make_js_undefined(), args, 2);
-    if (js_check_exception()) {
-        // User message functions run before AssertionError construction; if
-        // they throw, the original exception remains pending for the caller.
+    if (item_is_error(result)) {
+        // user message functions run before AssertionError construction; carry
+        // their returned error directly so the original exception is retained.
         if (resolved) *resolved = true;
-        return ItemNull;
+        return result;
     }
     if (get_type_id(result) == LMD_TYPE_STRING) {
         if (resolved) *resolved = true;
@@ -710,24 +707,45 @@ static Item js_assert_throw_invalid_fn_arg(Item actual) {
     return js_throw_type_error_code(JS_ERR_INVALID_ARG_TYPE, msg);
 }
 
-// helper: throw with user message or auto-generated message and props
-static Item throw_assert_msg_or_auto(Item message, const char* default_msg,
-                                     Item actual, Item expected, const char* op_str) {
+typedef enum {
+    ASSERT_MESSAGE_AUTO = 0,
+    ASSERT_MESSAGE_USER,
+    ASSERT_MESSAGE_EARLY_RETURN,
+} AssertMessageKind;
+
+static AssertMessageKind js_assert_prepare_message(Item message, Item actual,
+                                                    Item expected, Item* formatted,
+                                                    Item* early_result) {
     if (js_assert_is_symbol_value(message)) {
         // Symbol messages cannot be coerced; Node reports the bad message argument before creating AssertionError.
-        return js_assert_throw_invalid_message_arg(message);
+        *early_result = js_assert_throw_invalid_message_arg(message);
+        return ASSERT_MESSAGE_EARLY_RETURN;
     }
     if (get_type_id(message) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(message))) {
         // Node treats an Error supplied as the user message as the thrown value itself.
-        extern void js_throw_value(Item error);
-        js_throw_value(message);
-        return make_js_undefined();
+        extern Item js_throw_value(Item error);
+        *early_result = js_throw_value(message);
+        return ASSERT_MESSAGE_EARLY_RETURN;
     }
     bool has_user_message = false;
-    Item formatted = js_assert_resolve_user_message(message, actual, expected, &has_user_message);
-    if (has_user_message) {
-        extern int js_check_exception(void);
-        if (js_check_exception()) return make_js_undefined();
+    *formatted = js_assert_resolve_user_message(message, actual, expected, &has_user_message);
+    if (item_is_error(*formatted)) {
+        *early_result = *formatted;
+        return ASSERT_MESSAGE_EARLY_RETURN;
+    }
+    if (!has_user_message) return ASSERT_MESSAGE_AUTO;
+    return ASSERT_MESSAGE_USER;
+}
+
+// helper: throw with user message or auto-generated message and props
+static Item throw_assert_msg_or_auto(Item message, const char* default_msg,
+                                     Item actual, Item expected, const char* op_str) {
+    Item formatted = ItemNull;
+    Item early_result = ItemNull;
+    AssertMessageKind message_kind = js_assert_prepare_message(
+        message, actual, expected, &formatted, &early_result);
+    if (message_kind == ASSERT_MESSAGE_EARLY_RETURN) return early_result;
+    if (message_kind == ASSERT_MESSAGE_USER) {
         String* s = get_type_id(formatted) == LMD_TYPE_STRING ? it2s(formatted) : NULL;
         char buf[512];
         int len = s && (int)s->len < 500 ? (int)s->len : 500;
@@ -740,21 +758,12 @@ static Item throw_assert_msg_or_auto(Item message, const char* default_msg,
 
 static Item throw_assert_msg_or_auto_item(Item message, Item default_msg,
                                           Item actual, Item expected, const char* op_str) {
-    if (js_assert_is_symbol_value(message)) {
-        // Symbol messages cannot be coerced; Node reports the bad message argument before creating AssertionError.
-        return js_assert_throw_invalid_message_arg(message);
-    }
-    if (get_type_id(message) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(message))) {
-        // Node treats an Error supplied as the user message as the thrown value itself.
-        extern void js_throw_value(Item error);
-        js_throw_value(message);
-        return make_js_undefined();
-    }
-    bool has_user_message = false;
-    Item formatted = js_assert_resolve_user_message(message, actual, expected, &has_user_message);
-    if (has_user_message) {
-        extern int js_check_exception(void);
-        if (js_check_exception()) return make_js_undefined();
+    Item formatted = ItemNull;
+    Item early_result = ItemNull;
+    AssertMessageKind message_kind = js_assert_prepare_message(
+        message, actual, expected, &formatted, &early_result);
+    if (message_kind == ASSERT_MESSAGE_EARLY_RETURN) return early_result;
+    if (message_kind == ASSERT_MESSAGE_USER) {
         return throw_assertion_error_full_item(formatted, actual, expected, op_str, false);
     }
     return throw_assertion_error_full_item(default_msg, actual, expected, op_str, true);
@@ -767,13 +776,10 @@ static Item throw_assert_deep_msg_or_auto_item(Item message, Item default_msg,
         return throw_assert_msg_or_auto_item(message, default_msg, actual, expected, op_str);
     }
     bool has_user_message = false;
-    Item formatted = js_assert_resolve_user_message(message, actual, expected, &has_user_message);
+    JS_ASSIGN_OR_RETURN(formatted, js_assert_resolve_user_message(message, actual, expected, &has_user_message));
     if (!has_user_message) {
         return throw_assertion_error_full_item(default_msg, actual, expected, op_str, true);
     }
-    extern int js_check_exception(void);
-    if (js_check_exception()) return make_js_undefined();
-
     StrBuf* sb = strbuf_new();
     String* ms = get_type_id(formatted) == LMD_TYPE_STRING ? it2s(formatted) : NULL;
     if (ms) strbuf_append_str_n(sb, ms->chars, ms->len);
@@ -1415,6 +1421,22 @@ static bool js_assert_lcs_should_take_actual(Item actual, Item expected,
     return true;
 }
 
+static void js_assert_build_lcs_score(Item actual, Item expected,
+                                      int64_t actual_len, int64_t expected_len,
+                                      int score[65][65]) {
+    memset(score, 0, sizeof(int) * 65 * 65);
+    for (int64_t i = actual_len - 1; i >= 0; i--) {
+        for (int64_t j = expected_len - 1; j >= 0; j--) {
+            if (js_assert_deep_values_same(js_array_get_int(actual, i), js_array_get_int(expected, j))) {
+                score[i][j] = score[i + 1][j + 1] + 1;
+            } else {
+                score[i][j] = score[i + 1][j] > score[i][j + 1] ?
+                    score[i + 1][j] : score[i][j + 1];
+            }
+        }
+    }
+}
+
 static void js_assert_append_structural_diff(StrBuf* sb, Item actual, Item expected,
                                              int indent, bool trailing_comma,
                                              int depth_left);
@@ -1428,17 +1450,7 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
     int64_t max_len = actual_len > expected_len ? actual_len : expected_len;
     if (actual_len <= 64 && expected_len <= 64) {
         int score[65][65];
-        memset(score, 0, sizeof(score));
-        for (int64_t i = actual_len - 1; i >= 0; i--) {
-            for (int64_t j = expected_len - 1; j >= 0; j--) {
-                if (js_assert_deep_values_same(js_array_get_int(actual, i), js_array_get_int(expected, j))) {
-                    score[i][j] = score[i + 1][j + 1] + 1;
-                } else {
-                    score[i][j] = score[i + 1][j] > score[i][j + 1] ?
-                        score[i + 1][j] : score[i][j + 1];
-                }
-            }
-        }
+        js_assert_build_lcs_score(actual, expected, actual_len, expected_len, score);
         int64_t i = 0;
         int64_t j = 0;
         while (i < actual_len || j < expected_len) {
@@ -1540,17 +1552,7 @@ static void js_assert_append_array_diff_contents(StrBuf* sb, Item actual, Item e
     int64_t actual_len = js_array_length(actual);
     int64_t expected_len = js_array_length(expected);
     int score[65][65];
-    memset(score, 0, sizeof(score));
-    for (int64_t i = actual_len - 1; i >= 0; i--) {
-        for (int64_t j = expected_len - 1; j >= 0; j--) {
-            if (js_assert_deep_values_same(js_array_get_int(actual, i), js_array_get_int(expected, j))) {
-                score[i][j] = score[i + 1][j + 1] + 1;
-            } else {
-                score[i][j] = score[i + 1][j] > score[i][j + 1] ?
-                    score[i + 1][j] : score[i][j + 1];
-            }
-        }
-    }
+    js_assert_build_lcs_score(actual, expected, actual_len, expected_len, score);
     int64_t i = 0;
     int64_t j = 0;
     while (i < actual_len || j < expected_len) {
@@ -2117,13 +2119,8 @@ static bool js_assert_date_iso(Item value, StrBuf* sb) {
     else if (found_time && get_type_id(time_value) == LMD_TYPE_FLOAT) millis = it2d(time_value);
     else {
         extern Item js_date_method(Item date_obj, int method_id);
-        extern int js_check_exception(void);
-        extern Item js_clear_exception(void);
         Item iso = js_date_method(value, 8);
-        if (js_check_exception()) {
-            js_clear_exception();
-            return false;
-        }
+        if (item_is_error(iso)) return false;
         String* s = get_type_id(iso) == LMD_TYPE_STRING ? it2s(iso) : NULL;
         if (!s) return false;
         strbuf_append_str_n(sb, s->chars, s->len);
@@ -2704,8 +2701,7 @@ extern "C" Item js_assert_strictEqual(Item actual, Item expected, Item message) 
         bool has_user_message = false;
         Item user_message = js_assert_resolve_user_message(message, actual, expected, &has_user_message);
         if (has_user_message) {
-            extern int js_check_exception(void);
-            if (js_check_exception()) return make_js_undefined();
+            if (item_is_error(user_message)) return user_message;
             StrBuf* sb = strbuf_new();
             String* ms = get_type_id(user_message) == LMD_TYPE_STRING ? it2s(user_message) : NULL;
             if (ms) strbuf_append_str_n(sb, ms->chars, ms->len);
@@ -2743,8 +2739,7 @@ extern "C" Item js_assert_notStrictEqual(Item actual, Item expected, Item messag
 extern "C" Item js_assert_deepStrictEqual(Item actual, Item expected, Item message) {
     if (js_pending_call_argc < 2) return js_assert_throw_missing_actual_expected();
     Item result = js_util_isDeepStrictEqual(actual, expected);
-    extern int js_check_exception(void);
-    if (js_check_exception()) {
+    if (item_is_error(result)) {
         // Deep equality observes proxy traps; assertion wrapping must not hide
         // the original trap-invariant TypeError behind an AssertionError.
         return make_js_undefined();
@@ -2763,9 +2758,7 @@ extern "C" Item js_assert_deepStrictEqual(Item actual, Item expected, Item messa
     if (!equal) {
         if (js_assert_is_function_like_value(message)) {
             bool has_user_message = false;
-            Item user_message = js_assert_resolve_user_message(message, actual, expected, &has_user_message);
-            extern int js_check_exception(void);
-            if (js_check_exception()) return make_js_undefined();
+            JS_ASSIGN_OR_RETURN(user_message, js_assert_resolve_user_message(message, actual, expected, &has_user_message));
             if (has_user_message) {
                 StrBuf* sb = strbuf_new();
                 String* ms = get_type_id(user_message) == LMD_TYPE_STRING ? it2s(user_message) : NULL;
@@ -2921,9 +2914,8 @@ extern "C" Item js_assert_fail(Item message) {
     }
     // if message is an Error object, re-throw it directly (Node.js behavior)
     if (tid == LMD_TYPE_MAP) {
-        extern void js_throw_value(Item error);
-        js_throw_value(message);
-        return make_js_undefined();
+        extern Item js_throw_value(Item error);
+        return js_throw_value(message);
     }
     if (tid == LMD_TYPE_UNDEFINED || tid == LMD_TYPE_NULL) {
         return throw_assertion_error_full("Failed", make_js_undefined(), make_js_undefined(), "fail", true);
@@ -2976,13 +2968,12 @@ static void js_assert_append_item_text(StrBuf* sb, Item value) {
 }
 
 static Item js_assert_throw_throws_assertion(Item message, Item actual, Item expected, bool generated) {
-    extern void js_throw_value(Item error);
+    extern Item js_throw_value(Item error);
     Item error = make_assertion_error_full_item(message, actual, expected, NULL, generated);
     // assert.throws owns the operator property, but its internal frame must not
     // be appended to user-visible stacks.
     js_property_set(error, assert_make_string("operator"), assert_make_string("throws"));
-    js_throw_value(error);
-    return make_js_undefined();
+    return js_throw_value(error);
 }
 
 static bool js_assert_expected_constructor_label(Item expected, StrBuf* sb) {
@@ -3407,8 +3398,6 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
     }
 
     extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
-    extern int js_check_exception(void);
-    extern Item js_clear_exception(void);
     extern Item js_instanceof(Item left, Item right);
     extern Item js_regex_test(Item regex, Item str);
     extern Item js_property_get(Item obj, Item key);
@@ -3422,15 +3411,14 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
         return js_assert_throw_invalid_throws_expected(error_expected);
     }
 
-    // call fn — if it throws, exception will be pending
-    js_call_function(fn, make_js_undefined(), NULL, 0);
-
-    if (!js_check_exception()) {
+    // call fn and inspect its merged-lane result directly.
+    Item call_result = js_call_function(fn, make_js_undefined(), NULL, 0);
+    if (!item_is_error(call_result)) {
         return js_assert_throws_missing_error(error_expected, message);
     }
 
     // fn threw — get the thrown value
-    Item thrown = js_clear_exception();
+    Item thrown = js_error_lane_payload(call_result);
 
     // if no expected argument, any throw is a pass
     if (second_arg_is_message || exp_type == LMD_TYPE_UNDEFINED || exp_type == LMD_TYPE_NULL) {
@@ -3463,7 +3451,7 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
         }
         // maybe it's a validation function — call it with thrown
         Item validate_result = js_call_function(error_expected, make_js_undefined(), &thrown, 1);
-        if (js_check_exception()) {
+        if (item_is_error(validate_result)) {
             // validation function threw — re-throw
             return make_js_undefined();
         }
@@ -3626,7 +3614,7 @@ static void js_assert_append_does_not_throw_user_message(StrBuf* sb, Item messag
 }
 
 static Item js_assert_throw_unwanted_exception(Item thrown, Item expected, Item message) {
-    extern void js_throw_value(Item error);
+    extern Item js_throw_value(Item error);
 
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "Got unwanted exception");
@@ -3649,8 +3637,7 @@ static Item js_assert_throw_unwanted_exception(Item thrown, Item expected, Item 
     Item error = make_assertion_error_full(sb->str, thrown, expected, NULL, false);
     js_property_set(error, assert_make_string("operator"), assert_make_string("doesNotThrow"));
     strbuf_free(sb);
-    js_throw_value(error);
-    return make_js_undefined();
+    return js_throw_value(error);
 }
 
 // assert.doesNotThrow(fn[, error[, message]])
@@ -3677,20 +3664,17 @@ extern "C" Item js_assert_module_doesNotThrow(Item fn, Item error_cls, Item mess
     }
 
     extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
-    extern int js_check_exception(void);
-    extern Item js_clear_exception(void);
-    extern void js_throw_value(Item error);
+    extern Item js_throw_value(Item error);
 
-    js_call_function(fn, ItemNull, NULL, 0);
-    if (!js_check_exception()) return make_js_undefined();
+    Item call_result = js_call_function(fn, ItemNull, NULL, 0);
+    if (!item_is_error(call_result)) return make_js_undefined();
 
-    Item thrown = js_clear_exception();
+    Item thrown = js_error_lane_payload(call_result);
     if (js_assert_expected_error_matches(thrown, error_cls)) {
         return js_assert_throw_unwanted_exception(thrown, error_cls, message);
     }
 
-    js_throw_value(thrown);
-    return make_js_undefined();
+    return js_throw_value(thrown);
 }
 
 // assert.ifError(value) — throw if value is truthy
@@ -3730,7 +3714,7 @@ extern "C" Item js_assert_ifError(Item value) {
     // ifError throws for any value that is NOT null or undefined
     TypeId tid = get_type_id(value);
     if (value.item != 0 && tid != LMD_TYPE_NULL && tid != LMD_TYPE_UNDEFINED) {
-        extern void js_throw_value(Item error);
+        extern Item js_throw_value(Item error);
         extern Item js_property_set(Item obj, Item key, Item value);
         extern Item js_new_error_with_name(Item type_name, Item message);
 
@@ -3747,7 +3731,7 @@ extern "C" Item js_assert_ifError(Item value) {
         js_assert_mark_instance_error(error);
         js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(false)});
         js_assert_attach_assertion_error_prototype(error);
-        js_throw_value(error);
+        return js_throw_value(error);
     }
     return make_js_undefined();
 }
@@ -3825,17 +3809,14 @@ static Item js_assert_match_message_or_default(Item message, Item string_val, It
         return js_assert_throw_ambiguous_assert_message(message);
     }
     if (get_type_id(message) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(message))) {
-        extern void js_throw_value(Item error);
+        extern Item js_throw_value(Item error);
         // Error-valued assert.match messages are thrown verbatim; wrapping them
         // in AssertionError loses the documented message-object contract.
-        js_throw_value(message);
-        return make_js_undefined();
+        return js_throw_value(message);
     }
     bool message_is_function = js_assert_is_function_like_value(message);
     bool has_user_message = false;
-    Item user_message = js_assert_resolve_user_message(message, string_val, regexp, &has_user_message);
-    extern int js_check_exception(void);
-    if (js_check_exception()) return make_js_undefined();
+    JS_ASSIGN_OR_RETURN(user_message, js_assert_resolve_user_message(message, string_val, regexp, &has_user_message));
     if (has_user_message) {
         return throw_assertion_error_full_item(user_message, string_val, regexp, op, false);
     }
@@ -4749,8 +4730,7 @@ static Item js_assert_partial_diff_message(Item message, Item actual, Item expec
     } else if (js_assert_is_function_like_value(message)) {
         bool has_user_message = false;
         Item user_message = js_assert_resolve_user_message(message, actual, expected, &has_user_message);
-        extern int js_check_exception(void);
-        if (js_check_exception()) {
+        if (item_is_error(user_message)) {
             strbuf_free(sb);
             return ItemNull;
         }
@@ -4986,8 +4966,6 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
     extern Item js_property_get(Item obj, Item key);
     extern Item js_strict_equal(Item left, Item right);
     extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
-    extern int js_check_exception(void);
-    extern Item js_clear_exception(void);
     extern Item js_object_keys(Item obj);
 
     TypeId exp_type = get_type_id(error_expected);
@@ -5007,12 +4985,11 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
         Item proto = js_property_get(error_expected, assert_make_string("prototype"));
         if (get_type_id(proto) == LMD_TYPE_MAP || get_type_id(proto) == LMD_TYPE_ELEMENT) {
             Item result = js_instanceof(thrown, error_expected);
-            if (js_check_exception()) js_clear_exception();
-            else if (get_type_id(result) == LMD_TYPE_BOOL && it2b(result)) return true;
+            if (!item_is_error(result) && get_type_id(result) == LMD_TYPE_BOOL && it2b(result)) return true;
         }
         // Maybe it's a validation function.
         Item validate_result = js_call_function(error_expected, make_js_undefined(), &thrown, 1);
-        if (js_check_exception()) return true; // validator threw — propagate
+        if (item_is_error(validate_result)) return true; // validator threw — propagate
         if (get_type_id(validate_result) == LMD_TYPE_BOOL && it2b(validate_result)) return true;
         // validation failed
         char result_text[160];
@@ -5104,9 +5081,8 @@ static Item js_assert_rejects_on_fulfilled_with_env(Item env_item, Item value) {
     (void)value;
     Item* env = (Item*)(uintptr_t)env_item.item;
     Item error_expected = env ? env[0] : make_js_undefined();
-    extern void js_throw_value(Item error);
-    js_throw_value(js_assert_missing_rejection_error(error_expected));
-    return make_js_undefined();
+    extern Item js_throw_value(Item error);
+    return js_throw_value(js_assert_missing_rejection_error(error_expected));
 }
 
 static Item js_assert_rejects_on_rejected(Item env_item, Item reason) {
@@ -5114,48 +5090,46 @@ static Item js_assert_rejects_on_rejected(Item env_item, Item reason) {
     Item error_expected = env ? env[0] : make_js_undefined();
     Item message = env ? env[1] : make_js_undefined();
     bool matched = validate_rejection(reason, error_expected, message);
-    if (!matched && !js_check_exception()) {
-        extern void js_throw_value(Item error);
-        js_throw_value(reason);
+    if (!matched) {
+        extern Item js_throw_value(Item error);
+        return js_throw_value(reason);
     }
     return make_js_undefined();
+}
+
+static bool js_assert_normalize_async_input(Item* promise) {
+    extern Item js_promise_resolve(Item value);
+    if (!js_assert_is_async_assertion_input(*promise)) return false;
+    if (!js_assert_is_native_promise(*promise)) {
+        *promise = js_promise_resolve(*promise);
+    }
+    return true;
 }
 
 // assert.rejects(asyncFnOrPromise[, error[, message]])
 extern "C" Item js_assert_rejects(Item asyncFnOrPromise, Item error_expected, Item message) {
     extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
-    extern int js_check_exception(void);
-    extern Item js_clear_exception(void);
     extern Item js_promise_resolve(Item value);
     extern Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
 
     Item promise;
     if (get_type_id(asyncFnOrPromise) == LMD_TYPE_FUNC) {
         promise = js_call_function(asyncFnOrPromise, make_js_undefined(), NULL, 0);
-        if (js_check_exception()) {
-            Item thrown = js_clear_exception();
+        if (item_is_error(promise)) {
+            Item thrown = js_error_lane_payload(promise);
             bool matched = validate_rejection(thrown, error_expected, message);
-            if (js_check_exception()) {
-                return js_assert_reject_with_error(js_clear_exception());
-            }
             if (!matched) {
                 return js_assert_reject_with_error(thrown);
             }
             return js_promise_resolve(make_js_undefined());
         }
-        if (!js_assert_is_async_assertion_input(promise)) {
+        if (!js_assert_normalize_async_input(&promise)) {
             return js_assert_reject_with_error(js_assert_make_invalid_return_error(promise));
-        }
-        if (!js_assert_is_native_promise(promise)) {
-            promise = js_promise_resolve(promise);
         }
     } else {
         promise = asyncFnOrPromise;
-        if (!js_assert_is_async_assertion_input(promise)) {
+        if (!js_assert_normalize_async_input(&promise)) {
             return js_assert_reject_with_error(js_assert_make_invalid_arg_type_error(asyncFnOrPromise));
-        }
-        if (!js_assert_is_native_promise(promise)) {
-            promise = js_promise_resolve(promise);
         }
     }
 
@@ -5169,23 +5143,17 @@ extern "C" Item js_assert_rejects(Item asyncFnOrPromise, Item error_expected, It
 
 static Item js_assert_doesNotReject_on_rejected(Item env_item, Item reason) {
     // promise rejected when it should not have
-    extern void js_throw_value(Item error);
+    extern Item js_throw_value(Item error);
     Item* env = (Item*)(uintptr_t)env_item.item;
     Item error_expected = env ? env[0] : make_js_undefined();
     TypeId exp_type = get_type_id(error_expected);
     if (exp_type == LMD_TYPE_UNDEFINED || exp_type == LMD_TYPE_NULL) {
-        js_throw_value(reason);
-        return make_js_undefined();
+        return js_throw_value(reason);
     }
 
     bool matched = validate_rejection(reason, error_expected, env ? env[1] : make_js_undefined());
-    if (js_check_exception()) {
-        js_clear_exception();
-        js_throw_value(reason);
-        return make_js_undefined();
-    }
     if (matched) {
-        js_throw_value(js_assert_unwanted_rejection_error(reason, error_expected));
+        return js_throw_value(js_assert_unwanted_rejection_error(reason, error_expected));
     }
     return make_js_undefined();
 }
@@ -5193,30 +5161,20 @@ static Item js_assert_doesNotReject_on_rejected(Item env_item, Item reason) {
 // assert.doesNotReject(asyncFnOrPromise[, error[, message]])
 extern "C" Item js_assert_doesNotReject(Item asyncFnOrPromise, Item error_expected, Item message) {
     extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
-    extern int js_check_exception(void);
-    extern Item js_clear_exception(void);
     extern Item js_promise_resolve(Item value);
     extern Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
 
     Item promise;
     if (get_type_id(asyncFnOrPromise) == LMD_TYPE_FUNC) {
         promise = js_call_function(asyncFnOrPromise, make_js_undefined(), NULL, 0);
-        if (js_check_exception()) {
-            return js_assert_reject_with_error(js_clear_exception());
-        }
-        if (!js_assert_is_async_assertion_input(promise)) {
+        if (item_is_error(promise)) return js_assert_reject_with_error(promise);
+        if (!js_assert_normalize_async_input(&promise)) {
             return js_assert_reject_with_error(js_assert_make_invalid_return_error(promise));
-        }
-        if (!js_assert_is_native_promise(promise)) {
-            promise = js_promise_resolve(promise);
         }
     } else {
         promise = asyncFnOrPromise;
-        if (!js_assert_is_async_assertion_input(promise)) {
+        if (!js_assert_normalize_async_input(&promise)) {
             return js_assert_reject_with_error(js_assert_make_invalid_arg_type_error(asyncFnOrPromise));
-        }
-        if (!js_assert_is_native_promise(promise)) {
-            promise = js_promise_resolve(promise);
         }
     }
 
@@ -5773,14 +5731,13 @@ static void node_test_store_hook(Item* hooks, int* count, Item fn) {
     (*count)++;
 }
 
-static void node_test_run_hooks(Item* hooks, int count) {
+static Item node_test_run_hooks(Item* hooks, int count) {
     for (int i = 0; i < count; i++) {
         if (get_type_id(hooks[i]) != LMD_TYPE_FUNC) continue;
-        js_call_function(hooks[i], make_js_undefined(), NULL, 0);
+        JS_ASSIGN_OR_RETURN(hook_result, js_call_function(hooks[i], make_js_undefined(), NULL, 0));
         js_microtask_flush();
-        extern int js_check_exception(void);
-        if (js_check_exception()) return;
     }
+    return ItemNull;
 }
 
 static bool node_test_is_promise_like(Item value) {
@@ -5972,22 +5929,27 @@ static Item js_build_test_context(void) {
     return t;
 }
 
+static void js_node_test_resolve_options(Item options_or_fn, Item fn,
+        Item* options_out, Item* callback_out) {
+    *options_out = make_js_undefined();
+    *callback_out = make_js_undefined();
+    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+        *callback_out = fn;
+        *options_out = options_or_fn;
+    } else if (get_type_id(options_or_fn) == LMD_TYPE_FUNC) {
+        *callback_out = options_or_fn;
+    }
+}
+
 // test(name, fn) / test(name, options, fn) — run fn synchronously
 extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
-    extern int js_check_exception(void);
-    extern Item js_clear_exception(void);
-    extern void js_throw_value(Item error);
+    extern Item js_throw_value(Item error);
     extern bool js_is_truthy(Item value);
 
     // Check for skip/todo option in options object
-    Item options = make_js_undefined();
-    Item callback = make_js_undefined();
-    if (get_type_id(fn) == LMD_TYPE_FUNC) {
-        callback = fn;
-        options = options_or_fn;
-    } else if (get_type_id(options_or_fn) == LMD_TYPE_FUNC) {
-        callback = options_or_fn;
-    }
+    Item options;
+    Item callback;
+    js_node_test_resolve_options(options_or_fn, fn, &options, &callback);
 
     // If options has skip: true or skip is a string, skip the test
     if (get_type_id(options) == LMD_TYPE_MAP) {
@@ -6026,15 +5988,14 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     Item diagnostics_message = node_test_diagnostics_message(name, "test");
     Item diagnostics_previous = node_test_diagnostics_start(diagnostics_message);
 
-    node_test_run_hooks(g_node_before_each_hooks, g_node_before_each_count);
-    if (js_check_exception()) {
-        Item err = js_clear_exception();
+    Item before_hooks_result = node_test_run_hooks(g_node_before_each_hooks, g_node_before_each_count);
+    if (item_is_error(before_hooks_result)) {
+        Item err = js_error_lane_payload(before_hooks_result);
         node_test_emit_event("test:fail", name, test_id, err);
         node_test_emit_event("test:complete", name, test_id, make_js_undefined());
         node_test_diagnostics_error(diagnostics_message, err);
         node_test_diagnostics_end(diagnostics_message, diagnostics_previous);
-        js_throw_value(err);
-        return make_js_undefined();
+        return js_throw_value(err);
     }
 
     // run callback with (t) or (t, done) — for sync tests we pass t only
@@ -6045,8 +6006,8 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     // if test threw, re-throw (let the test runner handle it)
     bool callback_threw = false;
     Item callback_error = make_js_undefined();
-    if (js_check_exception()) {
-        callback_error = js_clear_exception();
+    if (item_is_error(callback_result)) {
+        callback_error = js_error_lane_payload(callback_result);
         callback_threw = true;
     }
     if (!callback_threw && callback_is_async) {
@@ -6058,16 +6019,14 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     }
 
     if (!callback_is_async) {
-        node_test_run_hooks(g_node_after_each_hooks, g_node_after_each_count);
-        if (js_check_exception()) {
+        Item after_hooks_result = node_test_run_hooks(g_node_after_each_hooks, g_node_after_each_count);
+        if (item_is_error(after_hooks_result)) {
             if (!callback_threw) {
-                Item err = js_clear_exception();
+                Item err = js_error_lane_payload(after_hooks_result);
                 node_test_diagnostics_error(diagnostics_message, err);
                 node_test_diagnostics_end(diagnostics_message, diagnostics_previous);
-                js_throw_value(err);
-                return make_js_undefined();
+                return js_throw_value(err);
             }
-            js_clear_exception();
         }
     }
 
@@ -6087,19 +6046,12 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
 
 // describe(name, fn) — grouping, just run fn with scoped hooks
 extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
-    extern int js_check_exception(void);
-    extern Item js_clear_exception(void);
-    extern void js_throw_value(Item error);
+    extern Item js_throw_value(Item error);
     extern bool js_is_truthy(Item value);
 
-    Item options = make_js_undefined();
-    Item callback = make_js_undefined();
-    if (get_type_id(fn) == LMD_TYPE_FUNC) {
-        callback = fn;
-        options = options_or_fn;
-    } else if (get_type_id(options_or_fn) == LMD_TYPE_FUNC) {
-        callback = options_or_fn;
-    }
+    Item options;
+    Item callback;
+    js_node_test_resolve_options(options_or_fn, fn, &options, &callback);
 
     if (get_type_id(options) == LMD_TYPE_MAP) {
         Item skip_val = js_property_get(options, assert_make_string("skip"));
@@ -6111,16 +6063,15 @@ extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
     int after_each_mark = g_node_after_each_count;
     Item diagnostics_message = node_test_diagnostics_message(name, "suite");
     Item diagnostics_previous = node_test_diagnostics_start(diagnostics_message);
-    js_call_function(callback, make_js_undefined(), NULL, 0);
+    Item callback_result = js_call_function(callback, make_js_undefined(), NULL, 0);
     js_microtask_flush();
     g_node_before_each_count = before_each_mark;
     g_node_after_each_count = after_each_mark;
-    if (js_check_exception()) {
-        Item err = js_clear_exception();
+    if (item_is_error(callback_result)) {
+        Item err = js_error_lane_payload(callback_result);
         node_test_diagnostics_error(diagnostics_message, err);
         node_test_diagnostics_end(diagnostics_message, diagnostics_previous);
-        js_throw_value(err);
-        return make_js_undefined();
+        return js_throw_value(err);
     }
     node_test_diagnostics_end(diagnostics_message, diagnostics_previous);
     return make_js_undefined();
@@ -6155,8 +6106,6 @@ extern "C" Item js_node_test_after_each(Item fn, Item options) {
 
 static Item js_node_test_run_files(Item options) {
     extern Item js_require(Item specifier);
-    extern int js_check_exception(void);
-    extern Item js_clear_exception(void);
 
     node_test_register_roots();
     Item previous_queue = g_node_test_event_queue;
@@ -6174,10 +6123,10 @@ static Item js_node_test_run_files(Item options) {
             for (int64_t i = 0; i < len; i++) {
                 Item file = js_array_get_int(files, i);
                 if (get_type_id(file) != LMD_TYPE_STRING) continue;
-                js_require(file);
+                Item require_result = js_require(file);
                 js_microtask_flush();
-                if (js_check_exception()) {
-                    Item err = js_clear_exception();
+                if (item_is_error(require_result)) {
+                    Item err = js_error_lane_payload(require_result);
                     int64_t id = g_node_test_next_id++;
                     node_test_emit_event("test:enqueue", file, id, make_js_undefined());
                     node_test_emit_event("test:dequeue", file, id, make_js_undefined());

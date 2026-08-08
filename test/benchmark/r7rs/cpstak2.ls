@@ -4,7 +4,7 @@
 // we run the direct tak variant twice to approximate cpstak workload.
 // Adapted from r7rs-benchmarks/src/cpstak.scm
 
-pn tak(x: int, y: int, z: int) {
+pn tak(x: int, y: int, z: int) int {
     if (y >= x) {
         return z
     }
@@ -14,7 +14,7 @@ pn tak(x: int, y: int, z: int) {
     return tak(a, b, c)
 }
 
-pn benchmark() {
+pn benchmark() int {
     var result: int = tak(18, 12, 6)
     result = tak(18, 12, 6)
     return result

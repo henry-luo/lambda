@@ -1814,16 +1814,16 @@ static bool prepare_browser_preamble_consumer(const JsPreambleState* preamble) {
     return true;
 }
 
-static void script_runner_clear_pending_exception(const char* phase_name, const char* filename) {
-    if (!js_check_exception()) return;
+static void script_runner_report_result(Item result, const char* phase_name, const char* filename) {
+    if (!item_is_error(result)) return;
 
-    const char* message = js_get_exception_message();
+    char message[1024];
+    js_error_lane_format(result, message, sizeof(message));
     log_error("execute_document_scripts: %s exception in %s%s%s",
               phase_name ? phase_name : "script",
               filename ? filename : "<unknown>",
-              message && message[0] ? ": " : "",
-              message && message[0] ? message : "");
-    (void)js_clear_exception();
+              message[0] ? ": " : "",
+              message[0] ? message : "");
 }
 
 static bool execute_browser_global_sync(Runtime* runtime, JsPreambleState* preamble,
@@ -1841,8 +1841,8 @@ static bool execute_browser_global_sync(Runtime* runtime, JsPreambleState* pream
     uint64_t result_home = 0;
     Item result = execute_js_source_with_preamble(runtime, preamble, sync_buf->str,
                                                  sync_len, "<browser-global-sync>", true, &result_home);
-    if (get_type_id(result) == LMD_TYPE_ERROR) {
-        script_runner_clear_pending_exception("global-sync", "<browser-global-sync>");
+    if (item_is_error(result)) {
+        script_runner_report_result(result, "global-sync", "<browser-global-sync>");
         log_error("execute_document_scripts: browser global sync failed");
         return false;
     }
@@ -1961,17 +1961,15 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         }
 #endif
         if (get_type_id(result) == LMD_TYPE_ERROR) {
-            script_runner_clear_pending_exception(phase_name, filename);
+            script_runner_report_result(result, phase_name, filename);
             log_error("execute_document_scripts: %s script task failed: %s",
                       phase_name ? phase_name : "scheduled", filename);
         }
         if (!execute_browser_global_sync(runtime, preamble, collection)) {
             fatal_error = true;
         }
-        js_microtask_flush();
-        if (js_check_exception()) {
-            script_runner_clear_pending_exception(phase_name, filename);
-        }
+        Item microtask_result = js_microtask_flush_result();
+        script_runner_report_result(microtask_result, phase_name, filename);
         task->executed = true;
     }
     return !fatal_error;
@@ -1990,15 +1988,13 @@ static bool execute_body_onload_tasks(Runtime* runtime, JsScriptTaskCollection* 
     Item result = execute_js_source_with_preamble(runtime, preamble, onload_buf->str,
                                                  onload_buf->length, "<body-onload>", true, &result_home);
     strbuf_free(onload_buf);
-    js_microtask_flush();
-    if (get_type_id(result) == LMD_TYPE_ERROR) {
-        script_runner_clear_pending_exception("body-onload", "<body-onload>");
+    Item microtask_result = js_microtask_flush_result();
+    if (item_is_error(result)) {
+        script_runner_report_result(result, "body-onload", "<body-onload>");
         log_error("execute_document_scripts: body onload task failed");
         return true;
     }
-    if (js_check_exception()) {
-        script_runner_clear_pending_exception("body-onload", "<body-onload>");
-    }
+    script_runner_report_result(microtask_result, "body-onload", "<body-onload>");
     return true;
 }
 

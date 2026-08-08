@@ -5,9 +5,7 @@
 
 let BOARD_SIZE = 10
 
-// The generic boolean buffers intentionally use explicit any: solve stores and
-// reads Item values without imposing a numeric ArrayNum representation.
-pn solve(row: int, cols: any, diag1: any, diag2: any, n: int) int {
+pn solve(row: int, cols: bool[], diag1: bool[], diag2: bool[], n: int) int {
     if (row == n) {
         return 1
     }
@@ -31,9 +29,9 @@ pn solve(row: int, cols: any, diag1: any, diag2: any, n: int) int {
 }
 
 pn benchmark() int {
-    var cols = fill(BOARD_SIZE, false)
-    var diag1 = fill(BOARD_SIZE * 2, false)
-    var diag2 = fill(BOARD_SIZE * 2, false)
+    var cols: bool[] = fill(BOARD_SIZE, false)
+    var diag1: bool[] = fill(BOARD_SIZE * 2, false)
+    var diag2: bool[] = fill(BOARD_SIZE * 2, false)
 
     var result: int = solve(0, cols, diag1, diag2, BOARD_SIZE)
     return result

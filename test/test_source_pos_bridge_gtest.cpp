@@ -152,15 +152,23 @@ TEST(SourcePosBridgeC, StubsReturnFalse) {
 // Path side-table: record + reverse-lookup round-trip.
 // ---------------------------------------------------------------------------
 
+static Item synthetic_bridge_item(int64_t value) {
+    // Side-table tests use identity-only values, but Item pointer lanes must
+    // still be valid tagged scalars before render-map code inspects their type.
+    Item result;
+    result.item = i2it(value);
+    return result;
+}
+
 TEST(SourcePosBridgePathTable, RecordAndLookupRoundTrip) {
     source_pos_bridge_reset();
     render_map_reset();
 
     // Two synthetic source items + two synthetic result items.
-    Item src_a; src_a.item = 0xA000ULL;
-    Item src_b; src_b.item = 0xB000ULL;
-    Item res_a; res_a.item = 0xA111ULL;
-    Item res_b; res_b.item = 0xB222ULL;
+    Item src_a = synthetic_bridge_item(0xA000);
+    Item src_b = synthetic_bridge_item(0xB000);
+    Item res_a = synthetic_bridge_item(0xA111);
+    Item res_b = synthetic_bridge_item(0xB222);
     const char* tref = "test_template";
 
     // Record forward (source → result) and side-table (source → path).
@@ -195,8 +203,8 @@ TEST(SourcePosBridgePathTable, OverwriteFreesPriorPath) {
     source_pos_bridge_reset();
     render_map_reset();
 
-    Item src; src.item = 0xCAFE;
-    Item res; res.item = 0xBEEF;
+    Item src = synthetic_bridge_item(0xCAFE);
+    Item res = synthetic_bridge_item(0xBEEF);
     const char* tref = "tmpl_x";
     render_map_record(src, tref, res, Item{0}, 0);
 
@@ -223,8 +231,8 @@ TEST(SourcePosBridgePathTable, MissingPathStillReturnsLookup) {
     // out_path stays empty.
     source_pos_bridge_reset();
     render_map_reset();
-    Item src; src.item = 0x1234;
-    Item res; res.item = 0x5678;
+    Item src = synthetic_bridge_item(0x1234);
+    Item res = synthetic_bridge_item(0x5678);
     const char* tref = "tmpl_y";
     render_map_record(src, tref, res, Item{0}, 0);
     // (deliberately no record_path)
@@ -242,9 +250,9 @@ TEST(SourcePosBridgePathTable, ReusedResultRefreshesDirectOwner) {
     source_pos_bridge_reset();
     render_map_reset();
 
-    Item old_source; old_source.item = 0x4100ULL;
-    Item new_source; new_source.item = 0x4200ULL;
-    Item reused_result; reused_result.item = 0x4300ULL;
+    Item old_source = synthetic_bridge_item(0x4100);
+    Item new_source = synthetic_bridge_item(0x4200);
+    Item reused_result = synthetic_bridge_item(0x4300);
     const char* tref = "reused_template";
     render_map_record(old_source, tref, reused_result, Item{0}, 0);
     render_map_record(new_source, tref, reused_result, Item{0}, 0);
@@ -263,7 +271,7 @@ TEST(SourcePosBridgePathTable, ReusedResultRefreshesDirectOwner) {
 TEST(SourcePosBridgePathTable, MissOnUnknownResultItem) {
     source_pos_bridge_reset();
     render_map_reset();
-    Item ghost; ghost.item = 0xDEADBEEFULL;
+    Item ghost = synthetic_bridge_item(0xDEADBEEF);
     RenderMapLookup lk;
     SourcePathC out;
     EXPECT_FALSE(render_map_reverse_lookup_with_path(ghost, &lk, &out));

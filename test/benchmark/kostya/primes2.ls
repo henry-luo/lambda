@@ -4,9 +4,7 @@
 // Expected: pi(1000000) = 78498
 
 pn sieve(limit: int) int {
-    // flags stay a boxed array: only int/float/int64/uint64 have packed
-    // ArrayNum layouts, so a bool[] annotation would fail to coerce
-    var flags = fill(limit + 1, true)
+    var flags: bool[] = fill(limit + 1, true)
     flags[0] = false
     flags[1] = false
     var i: int = 2
