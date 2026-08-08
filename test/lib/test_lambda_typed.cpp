@@ -376,12 +376,14 @@ TEST(LambdaTypedItem, TypeMapHashLookupFallsBackToLastShapeMatch) {
     EXPECT_EQ(typemap_hash_lookup(&tm, "dup", 3), &second);
 }
 
-TEST(LambdaTypedItem, JsOrdinarySetOutcomeSeparatesDataWrite) {
+TEST(LambdaTypedItem, JsAccessorSetOutcomeSeparatesDispatch) {
     static_assert(JS_SET_NOT_FOUND == 0,
                   "no-accessor status stays ABI-stable for existing callers");
-    static_assert(JS_SET_DATA_WRITTEN != JS_SET_NOT_FOUND,
-                  "successful data writes must not look like missing setters");
-    EXPECT_NE(JS_SET_DATA_WRITTEN, JS_SET_NOT_FOUND);
+    // Data writes now return their Item directly; the only setter status is
+    // the accessor dispatch outcome, which avoids a parallel error channel.
+    static_assert(JS_SET_DISPATCHED != JS_SET_NOT_FOUND,
+                  "a dispatched setter must not look like a missing accessor");
+    EXPECT_NE(JS_SET_DISPATCHED, JS_SET_NOT_FOUND);
 }
 
 TEST(LambdaTypedItem, HoleSentinelWrapsDeletedSlotPayload) {

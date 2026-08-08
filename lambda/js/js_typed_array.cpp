@@ -45,7 +45,6 @@ extern __thread EvalContext* context;
 #define JS_TA_SET_STATS_PID() getpid()
 #endif
 
-extern "C" int js_check_exception(void);
 extern "C" Item js_get_constructor(Item name_item);
 extern "C" Item js_property_get(Item object, Item key);
 extern "C" Item js_to_object(Item value);
@@ -69,37 +68,33 @@ static bool js_dataview_is_bigint(Item value) {
     return dec && dec->unlimited == DECIMAL_BIGINT;
 }
 
-static bool js_dataview_to_bigint_value(Item value, Item* out_bigint) {
+static Item js_dataview_to_bigint_value(Item value, Item* out_bigint) {
     if (js_dataview_is_bigint(value)) {
         *out_bigint = value;
-        return true;
+        return js_status_ok();
     }
 
     TypeId value_type = get_type_id(value);
     if (value_type == LMD_TYPE_MAP || value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_FUNC) {
-        Item primitive = js_to_primitive(value, JS_HINT_NUMBER);
-        if (js_check_exception()) return false;
+        JS_ASSIGN_OR_RETURN(primitive, js_to_primitive(value, JS_HINT_NUMBER));
         return js_dataview_to_bigint_value(primitive, out_bigint);
     }
 
     if (value_type == LMD_TYPE_INT) {
         int64_t int_value = it2i(value);
         if (int_value <= -(int64_t)JS_SYMBOL_BASE) {
-            js_throw_type_error("Cannot convert a Symbol value to a BigInt");
+            return js_throw_type_error("Cannot convert a Symbol value to a BigInt");
         } else {
-            js_throw_type_error("Cannot convert non-BigInt value to BigInt");
+            return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
         }
-        return false;
     }
     if (value_type == LMD_TYPE_FLOAT || value_type == LMD_TYPE_NULL || value.item == ITEM_JS_UNDEFINED) {
-        js_throw_type_error("Cannot convert non-BigInt value to BigInt");
-        return false;
+        return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
     }
 
-    Item bigint_value = js_bigint_constructor(value);
-    if (js_check_exception()) return false;
+    JS_ASSIGN_OR_RETURN(bigint_value, js_bigint_constructor(value));
     *out_bigint = bigint_value;
-    return true;
+    return js_status_ok();
 }
 
 static Item js_dataview_biguint64_item(uint64_t value) {
@@ -117,46 +112,41 @@ static uint64_t js_dataview_bigint_to_uint64(Item value) {
     return (uint64_t)raw_value;
 }
 
-static bool js_dataview_to_index(Item value, int* out_index) {
+static Item js_dataview_to_index(Item value, int* out_index) {
     if (get_type_id(value) == LMD_TYPE_UNDEFINED) {
         *out_index = 0;
-        return true;
+        return js_status_ok();
     }
     TypeId value_type = get_type_id(value);
     if (value_type == LMD_TYPE_SYMBOL ||
         (value_type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
-        js_throw_type_error("Cannot convert a Symbol value to a number");
-        return false;
+        return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
-    Item num = js_to_number(value);
-    if (js_check_exception()) return false;
+    JS_ASSIGN_OR_RETURN(num, js_to_number(value));
     TypeId type = get_type_id(num);
     double d = (type == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
     if (std::isnan(d)) {
         *out_index = 0;
-        return true;
+        return js_status_ok();
     }
     d = std::trunc(d);
     if (d < 0 || !std::isfinite(d) || d > (double)INT_MAX) {
-        js_throw_range_error("Invalid DataView index");
-        return false;
+        return js_throw_range_error("Invalid DataView index");
     }
     *out_index = (int)d;
-    return true;
+    return js_status_ok();
 }
 
-static bool js_dataview_to_number_value(Item value, double* out_number) {
+static Item js_dataview_to_number_value(Item value, double* out_number) {
     TypeId value_type = get_type_id(value);
     if (value_type == LMD_TYPE_SYMBOL ||
         (value_type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
-        js_throw_type_error("Cannot convert a Symbol value to a number");
-        return false;
+        return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
-    Item num = js_to_number(value);
-    if (js_check_exception()) return false;
+    JS_ASSIGN_OR_RETURN(num, js_to_number(value));
     TypeId num_type = get_type_id(num);
     *out_number = (num_type == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
-    return true;
+    return js_status_ok();
 }
 
 static int64_t js_dataview_to_integer_value(double value) {
@@ -846,38 +836,34 @@ extern "C" int js_typed_array_raw_index_of(Item ta_item, Item search_value,
     return -1;
 }
 
-static bool js_to_index_int(Item value, int* out_index, const char* error_message) {
+static Item js_to_index_int(Item value, int* out_index, const char* error_message) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
         *out_index = 0;
-        return true;
+        return js_status_ok();
     }
     if (type == LMD_TYPE_SYMBOL ||
         (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
-        js_throw_type_error("Cannot convert a Symbol value to a number");
-        return false;
+        return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
-    Item num = js_to_number(value);
-    if (js_check_exception()) return false;
+    JS_ASSIGN_OR_RETURN(num, js_to_number(value));
     type = get_type_id(num);
     double dval = (type == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
     if (std::isnan(dval)) {
         *out_index = 0;
-        return true;
+        return js_status_ok();
     }
     dval = std::trunc(dval);
     // ToIndex rejects values above Number.MAX_SAFE_INTEGER before any host allocation cap;
     // large JS Numbers may arrive as boxed floats and must not wrap through int storage.
     if (dval < 0 || !std::isfinite(dval) || dval > 9007199254740991.0) {
-        js_throw_range_error(error_message);
-        return false;
+        return js_throw_range_error(error_message);
     }
     if (dval > 1073741824.0) {
-        js_throw_range_error(error_message);
-        return false;
+        return js_throw_range_error(error_message);
     }
     *out_index = (int)dval;
-    return true;
+    return js_status_ok();
 }
 
 static bool js_atomics_is_integer_type(JsTypedArrayType type) {
@@ -900,47 +886,43 @@ static bool js_atomics_is_bigint_type(JsTypedArrayType type) {
     return type == JS_TYPED_BIGINT64 || type == JS_TYPED_BIGUINT64;
 }
 
-static JsTypedArray* js_validate_atomic_typed_array(Item typed_array, bool require_shared, bool waitable) {
+static Item js_validate_atomic_typed_array(Item typed_array, bool require_shared, bool waitable,
+                                           JsTypedArray** out_ta) {
+    *out_ta = NULL;
     if (!js_is_typed_array(typed_array)) {
-        js_throw_type_error("Atomics operation requires a TypedArray");
-        return NULL;
+        return js_throw_type_error("Atomics operation requires a TypedArray");
     }
     JsTypedArray* ta = js_get_typed_array_ptr(typed_array.map);
     if (!ta) {
-        js_throw_type_error("Atomics operation requires a TypedArray");
-        return NULL;
+        return js_throw_type_error("Atomics operation requires a TypedArray");
     }
     if (require_shared && !js_arraybuffer_shared(ta->buffer)) {
-        js_throw_type_error("Atomics operation requires a SharedArrayBuffer-backed TypedArray");
-        return NULL;
+        return js_throw_type_error("Atomics operation requires a SharedArrayBuffer-backed TypedArray");
     }
     if (ta->buffer && js_arraybuffer_detached(ta->buffer)) {
-        js_throw_type_error(require_shared ? "Atomics operation requires a non-detached SharedArrayBuffer" :
+        return js_throw_type_error(require_shared ? "Atomics operation requires a non-detached SharedArrayBuffer" :
                                            "Atomics operation requires a non-detached ArrayBuffer");
-        return NULL;
     }
     if (waitable) {
         if (ta->element_type != JS_TYPED_INT32 && ta->element_type != JS_TYPED_BIGINT64) {
-            js_throw_type_error("Atomics.wait/notify requires an Int32Array or BigInt64Array");
-            return NULL;
+            return js_throw_type_error("Atomics.wait/notify requires an Int32Array or BigInt64Array");
         }
     } else if (!js_atomics_is_integer_type(ta->element_type)) {
-        js_throw_type_error("Atomics operation requires an integer TypedArray");
-        return NULL;
+        return js_throw_type_error("Atomics operation requires an integer TypedArray");
     }
-    return ta;
+    *out_ta = ta;
+    return js_status_ok();
 }
 
-static bool js_atomics_validate_index(JsTypedArray* ta, Item index_item, int* out_index) {
+static Item js_atomics_validate_index(JsTypedArray* ta, Item index_item, int* out_index) {
     int length = js_typed_array_current_length(ta);
     int index = 0;
-    if (!js_to_index_int(index_item, &index, "Invalid atomic access index")) return false;
+    JS_ASSIGN_OR_RETURN(validation, js_to_index_int(index_item, &index, "Invalid atomic access index"));
     if (index < 0 || index >= length) {
-        js_throw_range_error("Invalid atomic access index");
-        return false;
+        return js_throw_range_error("Invalid atomic access index");
     }
     *out_index = index;
-    return true;
+    return js_status_ok();
 }
 
 static Item js_atomics_number_to_integer_item(double number) {
@@ -957,38 +939,37 @@ static Item js_atomics_number_to_integer_item(double number) {
     return js_make_number(integer);
 }
 
-static bool js_atomics_to_number_bits(JsTypedArrayType type, Item value, uint64_t* out_bits, Item* out_store_value) {
+static Item js_atomics_to_number_bits(JsTypedArrayType type, Item value, uint64_t* out_bits, Item* out_store_value) {
     double number = 0.0;
-    if (!js_dataview_to_number_value(value, &number)) return false;
+    JS_ASSIGN_OR_RETURN(validation, js_dataview_to_number_value(value, &number));
     if (out_store_value) *out_store_value = js_atomics_number_to_integer_item(number);
     switch (type) {
     case JS_TYPED_INT8:
         *out_bits = (uint8_t)(int8_t)js_typed_array_to_int_n(number, 8, true);
-        return true;
+        return js_status_ok();
     case JS_TYPED_UINT8:
         *out_bits = (uint8_t)js_typed_array_to_int_n(number, 8, false);
-        return true;
+        return js_status_ok();
     case JS_TYPED_INT16:
         *out_bits = (uint16_t)(int16_t)js_typed_array_to_int_n(number, 16, true);
-        return true;
+        return js_status_ok();
     case JS_TYPED_UINT16:
         *out_bits = (uint16_t)js_typed_array_to_int_n(number, 16, false);
-        return true;
+        return js_status_ok();
     case JS_TYPED_INT32:
         *out_bits = (uint32_t)(int32_t)js_typed_array_to_int_n(number, 32, true);
-        return true;
+        return js_status_ok();
     case JS_TYPED_UINT32:
         *out_bits = (uint32_t)js_typed_array_to_int_n(number, 32, false);
-        return true;
+        return js_status_ok();
     default:
-        js_throw_type_error("Atomics operation requires a Number typed array");
-        return false;
+        return js_throw_type_error("Atomics operation requires a Number typed array");
     }
 }
 
-static bool js_atomics_to_bigint_bits(JsTypedArrayType type, Item value, uint64_t* out_bits, Item* out_store_value) {
+static Item js_atomics_to_bigint_bits(JsTypedArrayType type, Item value, uint64_t* out_bits, Item* out_store_value) {
     Item bigint_item;
-    if (!js_dataview_to_bigint_value(value, &bigint_item)) return false;
+    JS_ASSIGN_OR_RETURN(validation, js_dataview_to_bigint_value(value, &bigint_item));
     if (out_store_value) *out_store_value = bigint_item;
     Item wrapped;
     if (type == JS_TYPED_BIGINT64) {
@@ -996,12 +977,12 @@ static bool js_atomics_to_bigint_bits(JsTypedArrayType type, Item value, uint64_
     } else {
         wrapped = js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_item);
     }
-    if (js_check_exception()) return false;
+    if (item_is_error(wrapped)) return wrapped;
     *out_bits = js_dataview_bigint_to_uint64(wrapped);
-    return true;
+    return js_status_ok();
 }
 
-static bool js_atomics_to_element_bits(JsTypedArrayType type, Item value, uint64_t* out_bits, Item* out_store_value) {
+static Item js_atomics_to_element_bits(JsTypedArrayType type, Item value, uint64_t* out_bits, Item* out_store_value) {
     if (js_atomics_is_bigint_type(type)) return js_atomics_to_bigint_bits(type, value, out_bits, out_store_value);
     return js_atomics_to_number_bits(type, value, out_bits, out_store_value);
 }
@@ -1275,7 +1256,8 @@ extern "C" Item js_atomics_resolve_waiter_report(int waiter_id, Item report_stri
 extern "C" void js_atomics_agent_sleep(Item ms) {
     double sleep_ms = 0.0;
     if (get_type_id(ms) != LMD_TYPE_UNDEFINED) {
-        if (!js_dataview_to_number_value(ms, &sleep_ms)) return;
+        Item validation = js_dataview_to_number_value(ms, &sleep_ms);
+        if (item_is_error(validation)) return;
         if (std::isnan(sleep_ms) || sleep_ms < 0.0) sleep_ms = 0.0;
         if (!std::isfinite(sleep_ms)) sleep_ms = 2147483647.0;
     }
@@ -1341,10 +1323,11 @@ extern "C" void js_atomics_agent_leaving(int agent_slot) {
 } while (0)
 
 extern "C" Item js_atomics_operation(int op, Item typed_array, Item index_item, Item value, Item replacement) {
-    JsTypedArray* ta = js_validate_atomic_typed_array(typed_array, false, false);
-    if (!ta) return ItemNull;
+    JsTypedArray* ta = NULL;
+    JS_ASSIGN_OR_RETURN(validation, js_validate_atomic_typed_array(typed_array, false, false, &ta));
     int index = 0;
-    if (!js_atomics_validate_index(ta, index_item, &index)) return ItemNull;
+    validation = js_atomics_validate_index(ta, index_item, &index);
+    if (item_is_error(validation)) return validation;
     void* data = js_typed_array_current_data(ta);
     if (!data) return js_throw_range_error("Invalid atomic access index");
     bool agent_spin_assist = js_arraybuffer_shared(ta->buffer) && js_262_agent_current_slot_for_atomics() >= 0;
@@ -1353,9 +1336,13 @@ extern "C" Item js_atomics_operation(int op, Item typed_array, Item index_item, 
     uint64_t replacement_bits = 0;
     Item store_return = value;
     if ((JsAtomicsOp)op != JS_ATOMICS_OP_LOAD) {
-        if (!js_atomics_to_element_bits(ta->element_type, value, &value_bits, &store_return)) return ItemNull;
-        if ((JsAtomicsOp)op == JS_ATOMICS_OP_COMPARE_EXCHANGE &&
-            !js_atomics_to_element_bits(ta->element_type, replacement, &replacement_bits, NULL)) return ItemNull;
+        validation = js_atomics_to_element_bits(ta->element_type, value, &value_bits, &store_return);
+        if (item_is_error(validation)) return validation;
+        if ((JsAtomicsOp)op == JS_ATOMICS_OP_COMPARE_EXCHANGE) {
+            validation = js_atomics_to_element_bits(ta->element_type, replacement,
+                &replacement_bits, NULL);
+            if (item_is_error(validation)) return validation;
+        }
     }
 
     switch (ta->element_type) {
@@ -1384,21 +1371,22 @@ typedef struct JsAtomicsWaitInputs {
     Item error;
 } JsAtomicsWaitInputs;
 
-static bool js_atomics_prepare_wait(Item typed_array, Item index_item, Item expected,
+static Item js_atomics_prepare_wait(Item typed_array, Item index_item, Item expected,
         Item timeout, JsAtomicsWaitInputs* inputs) {
     inputs->error = ItemNull;
-    inputs->ta = js_validate_atomic_typed_array(typed_array, true, true);
-    if (!inputs->ta) return false;
-    if (!js_atomics_validate_index(inputs->ta, index_item, &inputs->index)) return false;
+    JS_ASSIGN_OR_RETURN(validation, js_validate_atomic_typed_array(typed_array, true, true, &inputs->ta));
+    validation = js_atomics_validate_index(inputs->ta, index_item, &inputs->index);
+    if (item_is_error(validation)) return validation;
     inputs->expected_bits = 0;
-    if (!js_atomics_to_element_bits(inputs->ta->element_type, expected,
-            &inputs->expected_bits, NULL)) return false;
+    validation = js_atomics_to_element_bits(inputs->ta->element_type, expected,
+        &inputs->expected_bits, NULL);
+    if (item_is_error(validation)) return validation;
 
     inputs->timeout_number = INFINITY;
     inputs->has_timeout = false;
     if (get_type_id(timeout) != LMD_TYPE_UNDEFINED) {
-        js_dataview_to_number_value(timeout, &inputs->timeout_number);
-        if (js_check_exception()) return false;
+        validation = js_dataview_to_number_value(timeout, &inputs->timeout_number);
+        if (item_is_error(validation)) return validation;
         if (std::isnan(inputs->timeout_number)) inputs->timeout_number = INFINITY;
         else if (inputs->timeout_number < 0.0) inputs->timeout_number = 0.0;
         else inputs->timeout_number = std::trunc(inputs->timeout_number);
@@ -1408,7 +1396,7 @@ static bool js_atomics_prepare_wait(Item typed_array, Item index_item, Item expe
     void* data = js_typed_array_current_data(inputs->ta);
     if (!data) {
         inputs->error = js_throw_range_error("Invalid atomic access index");
-        return false;
+        return inputs->error;
     }
     if (inputs->ta->element_type == JS_TYPED_INT32) {
         int32_t current = __atomic_load_n(((int32_t*)data) + inputs->index, __ATOMIC_SEQ_CST);
@@ -1417,12 +1405,12 @@ static bool js_atomics_prepare_wait(Item typed_array, Item index_item, Item expe
         int64_t current = __atomic_load_n(((int64_t*)data) + inputs->index, __ATOMIC_SEQ_CST);
         inputs->equal = current == (int64_t)inputs->expected_bits;
     }
-    return true;
+    return js_status_ok();
 }
 
 extern "C" Item js_atomics_wait(Item typed_array, Item index_item, Item expected, Item timeout) {
     JsAtomicsWaitInputs inputs;
-    if (!js_atomics_prepare_wait(typed_array, index_item, expected, timeout, &inputs)) return inputs.error;
+    JS_ASSIGN_OR_RETURN(validation, js_atomics_prepare_wait(typed_array, index_item, expected, timeout, &inputs));
     if (!inputs.equal) return js_atomics_wait_result("not-equal", 9);
 
     if (!js_atomics_host_can_suspend()) {
@@ -1450,7 +1438,7 @@ extern "C" Item js_atomics_wait(Item typed_array, Item index_item, Item expected
 
 extern "C" Item js_atomics_wait_async(Item typed_array, Item index_item, Item expected, Item timeout) {
     JsAtomicsWaitInputs inputs;
-    if (!js_atomics_prepare_wait(typed_array, index_item, expected, timeout, &inputs)) return inputs.error;
+    JS_ASSIGN_OR_RETURN(validation, js_atomics_prepare_wait(typed_array, index_item, expected, timeout, &inputs));
     if (!inputs.equal) return js_atomics_wait_async_result(false, js_atomics_wait_result("not-equal", 9));
     if (inputs.has_timeout && inputs.timeout_number <= 0.0) {
         return js_atomics_wait_async_result(false, js_atomics_wait_result("timed-out", 9));
@@ -1472,8 +1460,7 @@ extern "C" Item js_atomics_wait_async(Item typed_array, Item index_item, Item ex
         return js_atomics_wait_async_result(true, report_status);
     }
 
-    Item promise = js_promise_create_pending();
-    if (js_check_exception()) return ItemNull;
+    JS_ASSIGN_OR_RETURN(promise, js_promise_create_pending());
     if (get_type_id(promise) != LMD_TYPE_MAP) return ItemNull;
 
     int waiter_id = js_atomics_record_waiter(inputs.ta->buffer, inputs.index, agent_slot,
@@ -1487,14 +1474,16 @@ extern "C" Item js_atomics_wait_async(Item typed_array, Item index_item, Item ex
 }
 
 extern "C" Item js_atomics_notify(Item typed_array, Item index_item, Item count) {
-    JsTypedArray* ta = js_validate_atomic_typed_array(typed_array, false, true);
-    if (!ta) return ItemNull;
+    JsTypedArray* ta = NULL;
+    JS_ASSIGN_OR_RETURN(validation, js_validate_atomic_typed_array(typed_array, false, true, &ta));
     int index = 0;
-    if (!js_atomics_validate_index(ta, index_item, &index)) return ItemNull;
+    validation = js_atomics_validate_index(ta, index_item, &index);
+    if (item_is_error(validation)) return validation;
     int notify_count = INT_MAX;
     if (get_type_id(count) != LMD_TYPE_UNDEFINED) {
         double count_number = 0.0;
-        if (!js_dataview_to_number_value(count, &count_number)) return ItemNull;
+        validation = js_dataview_to_number_value(count, &count_number);
+        if (item_is_error(validation)) return validation;
         if (std::isnan(count_number) || count_number <= 0.0) notify_count = 0;
         else if (std::isfinite(count_number) && count_number < (double)INT_MAX) notify_count = (int)std::trunc(count_number);
     }
@@ -1515,7 +1504,7 @@ extern "C" Item js_atomics_notify(Item typed_array, Item index_item, Item count)
 
 extern "C" Item js_atomics_is_lock_free(Item size) {
     double number = 0.0;
-    if (!js_dataview_to_number_value(size, &number)) return ItemNull;
+    JS_ASSIGN_OR_RETURN(validation, js_dataview_to_number_value(size, &number));
     if (std::isnan(number) || !std::isfinite(number)) number = 0.0;
     int64_t int_size = (int64_t)std::trunc(number);
     return (Item){.item = b2it(int_size == 1 || int_size == 2 || int_size == 4 || int_size == 8)};
@@ -1621,15 +1610,16 @@ extern "C" Item js_arraybuffer_construct(Item length_arg) {
 extern "C" Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg) {
     // ToIndex: undefined/null → 0
     int byte_length = 0;
-    if (!js_to_index_int(length_arg, &byte_length, "Invalid array buffer length")) return ItemNull;
+    JS_ASSIGN_OR_RETURN(validation, js_to_index_int(length_arg, &byte_length, "Invalid array buffer length"));
 
     int max_byte_length = byte_length;
     bool resizable = false;
     if (get_type_id(options_arg) == LMD_TYPE_MAP) {
         Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength"))};
-        Item max_item = js_property_get(options_arg, max_key);
+        JS_ASSIGN_OR_RETURN(max_item, js_property_get(options_arg, max_key));
         if (get_type_id(max_item) != LMD_TYPE_UNDEFINED && max_item.item != ITEM_NULL) {
-            if (!js_to_index_int(max_item, &max_byte_length, "Invalid array buffer maxByteLength")) return ItemNull;
+            validation = js_to_index_int(max_item, &max_byte_length, "Invalid array buffer maxByteLength");
+            if (item_is_error(validation)) return validation;
             if (max_byte_length < byte_length) return js_throw_range_error("Invalid array buffer maxByteLength");
             resizable = true;
         }
@@ -1713,7 +1703,7 @@ extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
     if (!ab) return js_throw_type_error("ArrayBuffer is detached");
     if (!js_arraybuffer_resizable(ab)) return js_throw_type_error("ArrayBuffer is not resizable");
     int new_length = 0;
-    if (!js_to_index_int(new_length_item, &new_length, "Invalid array buffer length")) return ItemNull;
+    JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid array buffer length"));
     if (js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
     if (new_length > js_arraybuffer_max_length(ab)) return js_throw_range_error("Invalid array buffer length");
     if (!byte_buffer_resize(&ab->handle, (size_t)new_length)) return ItemError;
@@ -1739,7 +1729,7 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
         if (js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
         new_length = js_arraybuffer_length(ab);
     } else {
-        if (!js_to_index_int(new_length_item, &new_length, "Invalid array buffer length")) return ItemNull;
+        JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid array buffer length"));
         if (js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
     }
 
@@ -1786,14 +1776,12 @@ extern "C" Item js_arraybuffer_slice(Item val, int begin, int end) {
     if (!js_is_arraybuffer(val)) return (Item){.item = ITEM_NULL};
     // ES spec: ArrayBuffer.prototype.slice must throw TypeError for SharedArrayBuffer
     if (js_is_sharedarraybuffer(val)) {
-        js_throw_type_error("ArrayBuffer.prototype.slice requires that |this| not be a SharedArrayBuffer");
-        return ItemNull;
+        return js_throw_type_error("ArrayBuffer.prototype.slice requires that |this| not be a SharedArrayBuffer");
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return (Item){.item = ITEM_NULL};
     if (js_arraybuffer_detached(ab)) {
-        js_throw_type_error("ArrayBuffer.prototype.slice called on detached buffer");
-        return ItemNull;
+        return js_throw_type_error("ArrayBuffer.prototype.slice called on detached buffer");
     }
 
     int source_length = js_arraybuffer_length(ab);
@@ -1813,7 +1801,7 @@ extern "C" Item js_arraybuffer_slice(Item val, int begin, int end) {
 
 static bool js_arraybuffer_slice_index(Item value, int len, int* out_index) {
     Item num = js_to_number(value);
-    if (js_check_exception()) return false;
+    if (item_is_error(num)) return false;
     TypeId nt = get_type_id(num);
     double n = (nt == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
     if (std::isnan(n)) n = 0;
@@ -1853,8 +1841,7 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
 
     Item result_item = ItemNull;
     Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-    Item ctor = js_property_get(val, ctor_key);
-    if (js_check_exception()) return ItemNull;
+    JS_ASSIGN_OR_RETURN(ctor, js_property_get(val, ctor_key));
 
     bool use_default_ctor = get_type_id(ctor) == LMD_TYPE_UNDEFINED;
     if (!use_default_ctor) {
@@ -1864,8 +1851,7 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
             return js_throw_type_error("ArrayBuffer species constructor must be an object");
         }
         Item species_key = js_well_known_symbol_key(6);
-        Item species = js_property_get(ctor, species_key);
-        if (js_check_exception()) return ItemNull;
+        JS_ASSIGN_OR_RETURN(species, js_property_get(ctor, species_key));
         TypeId species_type = get_type_id(species);
         if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
             use_default_ctor = true;
@@ -1880,13 +1866,13 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
             }
             Item len_arg = (Item){.item = i2it(new_len)};
             result_item = js_new_from_class_object(species, &len_arg, 1);
-            if (js_check_exception()) return ItemNull;
+            if (item_is_error(result_item)) return result_item;
         }
     }
     if (use_default_ctor) {
         result_item = js_arraybuffer_construct((Item){.item = i2it(new_len)});
     }
-    if (js_check_exception()) return ItemNull;
+    if (item_is_error(result_item)) return result_item;
     if (!js_is_arraybuffer(result_item) || js_is_sharedarraybuffer(result_item)) {
         return js_throw_type_error("ArrayBuffer species constructor did not return an ArrayBuffer");
     }
@@ -1948,13 +1934,11 @@ extern "C" Item js_sharedarraybuffer_construct_with_options(Item length_arg, Ite
 
     // Symbol → TypeError (cannot convert to number)
     if (type == LMD_TYPE_INT && it2i(length_arg) <= -(int64_t)JS_SYMBOL_BASE) {
-        js_throw_type_error("Cannot convert a Symbol value to a number");
-        return ItemNull;
+        return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
 
     // Convert to number
-    Item num = js_to_number(length_arg);
-    if (js_check_exception()) return ItemNull;
+    JS_ASSIGN_OR_RETURN(num, js_to_number(length_arg));
     type = get_type_id(num);
 
     double dval;
@@ -1983,9 +1967,9 @@ extern "C" Item js_sharedarraybuffer_construct_with_options(Item length_arg, Ite
     bool growable = false;
     if (get_type_id(options_arg) == LMD_TYPE_MAP) {
         Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength"))};
-        Item max_item = js_property_get(options_arg, max_key);
+        JS_ASSIGN_OR_RETURN(max_item, js_property_get(options_arg, max_key));
         if (get_type_id(max_item) != LMD_TYPE_UNDEFINED && max_item.item != ITEM_NULL) {
-            if (!js_to_index_int(max_item, &max_byte_length, "Invalid shared array buffer maxByteLength")) return ItemNull;
+            JS_ASSIGN_OR_RETURN(validation, js_to_index_int(max_item, &max_byte_length, "Invalid shared array buffer maxByteLength"));
             if (max_byte_length < byte_length) return js_throw_range_error("Invalid shared array buffer maxByteLength");
             growable = true;
         }
@@ -2039,16 +2023,14 @@ extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* ar
         int source_length = js_arraybuffer_length(ab);
         int begin = 0, end = source_length;
         if (argc > 0) {
-            Item b = js_to_number(args[0]);
-            if (js_check_exception()) return ItemNull;
+            JS_ASSIGN_OR_RETURN(b, js_to_number(args[0]));
             begin = (int)(get_type_id(b) == LMD_TYPE_FLOAT ? it2d(b) : (double)it2i(b));
             if (begin < 0) begin = source_length + begin;
             if (begin < 0) begin = 0;
             if (begin > source_length) begin = source_length;
         }
         if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-            Item e = js_to_number(args[1]);
-            if (js_check_exception()) return ItemNull;
+            JS_ASSIGN_OR_RETURN(e, js_to_number(args[1]));
             end = (int)(get_type_id(e) == LMD_TYPE_FLOAT ? it2d(e) : (double)it2i(e));
             if (end < 0) end = source_length + end;
             if (end < 0) end = 0;
@@ -2059,8 +2041,7 @@ extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* ar
 
         Item result_item = ItemNull;
         Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-        Item ctor = js_property_get(sab, ctor_key);
-        if (js_check_exception()) return ItemNull;
+        JS_ASSIGN_OR_RETURN(ctor, js_property_get(sab, ctor_key));
 
         bool use_default_ctor = get_type_id(ctor) == LMD_TYPE_UNDEFINED;
         if (!use_default_ctor) {
@@ -2070,21 +2051,20 @@ extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* ar
                 return js_throw_type_error("SharedArrayBuffer species constructor must be an object");
             }
             Item species_key = js_well_known_symbol_key(6);
-            Item species = js_property_get(ctor, species_key);
-            if (js_check_exception()) return ItemNull;
+            JS_ASSIGN_OR_RETURN(species, js_property_get(ctor, species_key));
             TypeId species_type = get_type_id(species);
             if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
                 use_default_ctor = true;
             } else {
                 Item len_arg = (Item){.item = i2it(new_len)};
                 result_item = js_new_from_class_object(species, &len_arg, 1);
-                if (js_check_exception()) return ItemNull;
+                if (item_is_error(result_item)) return result_item;
             }
         }
         if (use_default_ctor) {
             result_item = js_sharedarraybuffer_construct((Item){.item = i2it(new_len)});
         }
-        if (js_check_exception()) return ItemNull;
+        if (item_is_error(result_item)) return result_item;
         if (!js_is_sharedarraybuffer(result_item)) {
             return js_throw_type_error("SharedArrayBuffer species constructor did not return a SharedArrayBuffer");
         }
@@ -2106,7 +2086,7 @@ extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* ar
         if (!js_arraybuffer_resizable(ab)) return js_throw_type_error("SharedArrayBuffer is not growable");
         Item new_length_item = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
         int new_length = 0;
-        if (!js_to_index_int(new_length_item, &new_length, "Invalid shared array buffer length")) return ItemNull;
+        JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid shared array buffer length"));
         int current_length = js_arraybuffer_length(ab);
         if (new_length < current_length || new_length > js_arraybuffer_max_length(ab)) {
             return js_throw_range_error("Invalid shared array buffer length");
@@ -2129,7 +2109,9 @@ extern "C" bool js_is_typed_array(Item val) {
     TypeId type = get_type_id(val);
     if (type != LMD_TYPE_MAP) return false;
     Map* m = val.map;
-    return m && m->map_kind == MAP_KIND_TYPED_ARRAY;
+    // %TypedArray%.prototype carries the typed-array map kind for native
+    // property dispatch but has no [[ViewedArrayBuffer]] internal slot.
+    return m && m->map_kind == MAP_KIND_TYPED_ARRAY && js_get_typed_array_ptr(m);
 }
 
 // Get the JsTypedArray* from a Map, handling both original and upgraded layouts.
@@ -2398,7 +2380,7 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
                 source = source_root.get();
                 Item idx = (Item){.item = i2it(i)};
                 Item val = js_typed_array_get(source, idx);
-                js_typed_array_set(result_root.get(), idx, val);
+                JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(result_root.get(), idx, val));
             }
         }
         return result_root.get();
@@ -2417,7 +2399,11 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
             Item idx = (Item){.item = i2it(i)};
             Item val = values ? values[i] : ItemNull;
             if (val.item == JS_DELETED_SENTINEL_VAL) val = (Item){.item = ITEM_JS_UNDEFINED};
-            js_typed_array_set(result_root.get(), idx, val);
+            Item set_result = js_typed_array_set(result_root.get(), idx, val);
+            if (item_is_error(set_result)) {
+                if (values) mem_free(values);
+                return set_result;
+            }
         }
         if (values) mem_free(values);
         return result_root.get();
@@ -2459,10 +2445,13 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
     // Check if arg is an ArrayBuffer
     if (js_is_arraybuffer(arg)) {
         int byte_offset = 0;
-        if (argc > 1 && !js_dataview_to_index(byte_offset_root.get(), &byte_offset)) return ItemNull;
+        if (argc > 1) {
+            JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(byte_offset_root.get(), &byte_offset));
+        }
         int length = -1;
-        if (argc > 2 && get_type_id(length_root.get()) != LMD_TYPE_UNDEFINED &&
-            !js_dataview_to_index(length_root.get(), &length)) return ItemNull;
+        if (argc > 2 && get_type_id(length_root.get()) != LMD_TYPE_UNDEFINED) {
+            JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(length_root.get(), &length));
+        }
         return js_typed_array_new_from_buffer(type_id, arg_root.get(), byte_offset, length);
     }
 
@@ -2473,8 +2462,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
     }
     if (arg_type == LMD_TYPE_ARRAY) {
         Item iter_key = js_well_known_symbol_key(1);
-        Item iter_method = js_property_get(arg_root.get(), iter_key);
-        if (js_check_exception()) return ItemNull;
+        JS_ASSIGN_OR_RETURN(iter_method, js_property_get(arg_root.get(), iter_key));
         TypeId iter_type = get_type_id(iter_method);
         bool has_iter = iter_type != LMD_TYPE_UNDEFINED && iter_type != LMD_TYPE_NULL &&
             iter_method.item != ITEM_JS_UNDEFINED;
@@ -2482,8 +2470,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
             if (iter_type != LMD_TYPE_FUNC) {
                 return js_throw_type_error("@@iterator is not callable");
             }
-            Item values = js_iterable_to_array(arg_root.get());
-            if (js_check_exception()) return ItemNull;
+            JS_ASSIGN_OR_RETURN(values, js_iterable_to_array(arg_root.get()));
             return js_typed_array_new_from_array(type_id, values);
         }
         return js_typed_array_new_from_array(type_id, arg_root.get());
@@ -2492,35 +2479,30 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
     if (arg_type == LMD_TYPE_MAP || arg_type == LMD_TYPE_ELEMENT || arg_type == LMD_TYPE_FUNC || js_is_generator(arg)) {
         Item iter_method = (Item){.item = ITEM_JS_UNDEFINED};
         if (js_is_generator(arg)) {
-            Item values = js_iterable_to_array(arg);
-            if (js_check_exception()) return ItemNull;
+            JS_ASSIGN_OR_RETURN(values, js_iterable_to_array(arg));
             return js_typed_array_new_from_array(type_id, values);
         }
         Item iter_key = js_well_known_symbol_key(1);
         iter_method = js_property_get(arg_root.get(), iter_key);
-        if (js_check_exception()) return ItemNull;
+        if (item_is_error(iter_method)) return iter_method;
         TypeId iter_type = get_type_id(iter_method);
         bool has_iter = iter_type != LMD_TYPE_UNDEFINED && iter_type != LMD_TYPE_NULL && iter_method.item != ITEM_JS_UNDEFINED;
         if (has_iter) {
             if (iter_type != LMD_TYPE_FUNC) {
                 return js_throw_type_error("@@iterator is not callable");
             }
-            Item values = js_iterable_to_array(arg_root.get());
-            if (js_check_exception()) return ItemNull;
+            JS_ASSIGN_OR_RETURN(values, js_iterable_to_array(arg_root.get()));
             return js_typed_array_new_from_array(type_id, values);
         }
 
         Item length_key = (Item){.item = s2it(heap_create_name("length"))};
-        Item length_value = js_property_get(arg_root.get(), length_key);
-        if (js_check_exception()) return ItemNull;
+        JS_ASSIGN_OR_RETURN(length_value, js_property_get(arg_root.get(), length_key));
         int len = 0;
-        if (!js_dataview_to_index(length_value, &len)) return ItemNull;
+        JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(length_value, &len));
         Item result = js_typed_array_new(type_id, len);
         for (int i = 0; i < len; i++) {
-            Item value = js_property_get(arg_root.get(), (Item){.item = i2it(i)});
-            if (js_check_exception()) return ItemNull;
-            js_typed_array_set(result, (Item){.item = i2it(i)}, value);
-            if (js_check_exception()) return ItemNull;
+            JS_ASSIGN_OR_RETURN(value, js_property_get(arg_root.get(), (Item){.item = i2it(i)}));
+            JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(result, (Item){.item = i2it(i)}, value));
         }
         return result;
     }
@@ -2534,7 +2516,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
 
     if (arg_type != LMD_TYPE_MAP && arg_type != LMD_TYPE_ARRAY && arg_type != LMD_TYPE_FUNC) {
         int len = 0;
-        if (!js_dataview_to_index(arg, &len)) return ItemNull;
+        JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(arg, &len));
         return js_typed_array_new(type_id, len);
     }
 
@@ -2653,31 +2635,26 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
             if (vt == LMD_TYPE_INT) {
                 int64_t iv = it2i(value);
                 if (iv > -(int64_t)JS_SYMBOL_BASE) {
-                    js_throw_type_error("Cannot convert non-BigInt value to BigInt");
-                    return (Item){.item = ITEM_NULL};
+                    return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
                 }
                 // Symbol → handled by ctor (throws)
             } else if (vt == LMD_TYPE_FLOAT) {
-                js_throw_type_error("Cannot convert non-BigInt value to BigInt");
-                return (Item){.item = ITEM_NULL};
+                return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
             } else if (vt == LMD_TYPE_NULL || value.item == ITEM_JS_UNDEFINED) {
-                js_throw_type_error("Cannot convert non-BigInt value to BigInt");
-                return (Item){.item = ITEM_NULL};
+                return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
             }
             bi = js_bigint_constructor(value);
-            if (js_check_exception()) return (Item){.item = ITEM_NULL};
+            if (item_is_error(bi)) return bi;
         }
         int current_length = js_typed_array_current_length(ta);
         void* data = js_typed_array_prepare_write(ta);
         if (idx < 0 || idx >= current_length || !data) return value;
         if (ta->element_type == JS_TYPED_BIGINT64) {
-            Item wrapped = js_bigint_as_int_n((Item){.item = i2it(64)}, bi);
-            if (js_check_exception()) return (Item){.item = ITEM_NULL};
+            JS_ASSIGN_OR_RETURN(wrapped, js_bigint_as_int_n((Item){.item = i2it(64)}, bi));
             int64_t iv = bigint_to_int64(wrapped);
             ((int64_t*)data)[idx] = iv;
         } else {
-            Item wrapped = js_bigint_as_uint_n((Item){.item = i2it(64)}, bi);
-            if (js_check_exception()) return (Item){.item = ITEM_NULL};
+            JS_ASSIGN_OR_RETURN(wrapped, js_bigint_as_uint_n((Item){.item = i2it(64)}, bi));
             ((uint64_t*)data)[idx] = js_dataview_bigint_to_uint64(wrapped);
         }
         return value;
@@ -2691,8 +2668,7 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
         // Check for Symbol (encoded as negative int <= -JS_SYMBOL_BASE)
         int64_t iv = it2i(value);
         if (iv <= -(int64_t)JS_SYMBOL_BASE) {
-            js_throw_type_error("Cannot convert a Symbol value to a number");
-            return (Item){.item = ITEM_NULL};
+            return js_throw_type_error("Cannot convert a Symbol value to a number");
         }
         num_val = (double)iv;
     } else if (vtype == LMD_TYPE_FLOAT) {
@@ -2700,8 +2676,7 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
     } else {
         // ES spec: IntegerIndexedElementSet calls ToNumber(value)
         // This throws TypeError for Symbol, which is the spec-required behavior
-        Item num_item = js_to_number(value);
-        if (js_check_exception()) return (Item){.item = ITEM_NULL};
+        JS_ASSIGN_OR_RETURN(num_item, js_to_number(value));
         vtype = get_type_id(num_item);
         if (vtype == LMD_TYPE_INT) num_val = (double)it2i(num_item);
         else if (vtype == LMD_TYPE_FLOAT) num_val = it2d(num_item);
@@ -2821,12 +2796,12 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
 
     if (is_bigint_array) {
         Item bigint_item;
-        if (!js_dataview_to_bigint_value(value, &bigint_item)) return ItemNull;
+        JS_ASSIGN_OR_RETURN(validation, js_dataview_to_bigint_value(value, &bigint_item));
         // BigInt typed-array stores wrap modulo 64 bits; bigint_to_int64 alone clamps oversized inputs.
         Item wrapped = (ta->element_type == JS_TYPED_BIGINT64)
             ? js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_item)
             : js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_item);
-        if (js_check_exception()) return ItemNull;
+        if (item_is_error(wrapped)) return wrapped;
         if (ta->element_type == JS_TYPED_BIGINT64) {
             bigint_i64 = bigint_to_int64(wrapped);
         } else {
@@ -2835,8 +2810,8 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
     } else {
         if (value.item == ITEM_JS_UNDEFINED) {
             num_val = NAN;
-        } else if (!js_dataview_to_number_value(value, &num_val)) {
-            return ItemNull;
+        } else {
+            JS_ASSIGN_OR_RETURN(validation, js_dataview_to_number_value(value, &num_val));
         }
     }
 
@@ -3005,16 +2980,16 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
         if (!values) return js_throw_type_error("TypedArray.prototype.set allocation failed");
         for (int i = 0; i < src_len; i++) {
             values[i] = js_typed_array_get(source, (Item){.item = i2it(i)});
-            if (js_check_exception()) {
+            if (item_is_error(values[i])) {
                 mem_free(values);
-                return ItemNull;
+                return values[i];
             }
         }
         for (int i = 0; i < src_len; i++) {
-            js_typed_array_set(ta_item, (Item){.item = i2it(offset + i)}, values[i]);
-            if (js_check_exception()) {
+            Item set_result = js_typed_array_set(ta_item, (Item){.item = i2it(offset + i)}, values[i]);
+            if (item_is_error(set_result)) {
                 mem_free(values);
-                return ItemNull;
+                return set_result;
             }
         }
         mem_free(values);
@@ -3025,14 +3000,11 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
     if (source_type == LMD_TYPE_NULL || source_type == LMD_TYPE_UNDEFINED || source.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot convert undefined or null to object");
     }
-    Item src_obj = js_to_object(source);
-    if (js_check_exception()) return ItemNull;
+    JS_ASSIGN_OR_RETURN(src_obj, js_to_object(source));
 
     Item length_key = (Item){.item = s2it(heap_create_name("length"))};
-    Item length_item = js_property_get(src_obj, length_key);
-    if (js_check_exception()) return ItemNull;
-    Item length_num = js_to_number(length_item);
-    if (js_check_exception()) return ItemNull;
+    JS_ASSIGN_OR_RETURN(length_item, js_property_get(src_obj, length_key));
+    JS_ASSIGN_OR_RETURN(length_num, js_to_number(length_item));
     double length_double = js_get_number(length_num);
     int64_t src_len = 0;
     if (length_double != length_double || length_double <= 0.0) {
@@ -3060,10 +3032,8 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
 
     if (ta_set_stats_enabled) js_ta_set_stats_add(&g_js_ta_set_stats.array_like_loop_elements, src_len);
     for (int64_t i = 0; i < src_len; i++) {
-        Item value = js_property_get(src_obj, (Item){.item = i2it(i)});
-        if (js_check_exception()) return ItemNull;
-        js_typed_array_set(ta_item, (Item){.item = i2it((int64_t)offset + i)}, value);
-        if (js_check_exception()) return ItemNull;
+        JS_ASSIGN_OR_RETURN(value, js_property_get(src_obj, (Item){.item = i2it(i)}));
+        JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(ta_item, (Item){.item = i2it((int64_t)offset + i)}, value));
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -3084,14 +3054,12 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
     if (end < 0) end = current_len + end;
     if (start < 0) start = 0;
     if (start >= end) {
-        Item result = js_typed_array_species_create(ta_item, 0);
-        if (js_check_exception()) return (Item){.item = ITEM_NULL};
+        JS_ASSIGN_OR_RETURN(result, js_typed_array_species_create(ta_item, 0));
         return result;
     }
 
     int new_length = end - start;
-    Item result = js_typed_array_species_create(ta_item, new_length);
-    if (js_check_exception()) return (Item){.item = ITEM_NULL};
+    JS_ASSIGN_OR_RETURN(result, js_typed_array_species_create(ta_item, new_length));
     if (new_length > 0 && !js_dispatch_as_array_method) {
         if (ta->buffer && js_arraybuffer_detached(ta->buffer)) {
             return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on a detached ArrayBuffer");
@@ -3214,24 +3182,21 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     Rooted<Item> buffer_root(roots, buffer);
     buffer = buffer_root.get();
     if (!js_is_arraybuffer(buffer)) {
-        js_throw_type_error("First argument to DataView constructor must be an ArrayBuffer");
-        return ItemNull;
+        return js_throw_type_error("First argument to DataView constructor must be an ArrayBuffer");
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer.map);
     if (!ab) return ItemNull;
 
     int byte_offset = 0;
-    if (!js_dataview_to_index(offset_item, &byte_offset)) return ItemNull;
+    JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(offset_item, &byte_offset));
 
     if (js_arraybuffer_detached(ab)) {
-        js_throw_type_error("DataView buffer is detached");
-        return ItemNull;
+        return js_throw_type_error("DataView buffer is detached");
     }
 
     int buffer_length = js_arraybuffer_length(ab);
     if (byte_offset < 0 || byte_offset > buffer_length) {
-        js_throw_range_error("Start offset is outside the bounds of the buffer");
-        return ItemNull;
+        return js_throw_range_error("Start offset is outside the bounds of the buffer");
     }
 
     int byte_length;
@@ -3243,12 +3208,12 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     if (lt == LMD_TYPE_UNDEFINED) {
         byte_length = buffer_length - byte_offset;
     } else {
-        if (!js_dataview_to_index(length_item, &byte_length)) return ItemNull;
+        validation = js_dataview_to_index(length_item, &byte_length);
+        if (item_is_error(validation)) return validation;
     }
 
     if (byte_length < 0 || (int64_t)byte_offset + (int64_t)byte_length > buffer_length) {
-        js_throw_range_error("Invalid DataView length");
-        return ItemNull;
+        return js_throw_range_error("Invalid DataView length");
     }
 
     JsDataView* dv = (JsDataView*)mem_alloc(sizeof(JsDataView), MEM_CAT_JS_RUNTIME);
@@ -3302,13 +3267,12 @@ static inline bool dv_is_out_of_bounds(JsDataView* dv) {
 }
 
 // Js54 P2: throws TypeError if the DataView is detached or out-of-bounds.
-// Returns true on success (in-bounds), false on throw — caller should propagate.
-static inline bool dv_validate_or_throw(JsDataView* dv) {
+// The status Item keeps the coercion error on the same lane as DataView calls.
+static inline Item dv_validate_or_throw(JsDataView* dv) {
     if (dv_is_out_of_bounds(dv)) {
-        js_throw_type_error("DataView buffer is detached or out of bounds");
-        return false;
+        return js_throw_type_error("DataView buffer is detached or out of bounds");
     }
-    return true;
+    return js_status_ok();
 }
 
 // Helper: get raw pointer into DataView's buffer at given offset
@@ -3382,13 +3346,16 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
 
     int offset = 0;
     Item offset_item = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
-    if (!js_dataview_to_index(offset_item, &offset)) return ItemNull;
+    JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(offset_item, &offset));
     bool is_set_method = (ml >= 3 && mn[0] == 's' && mn[1] == 'e' && mn[2] == 't');
     // Js54 P2: get-methods validate up front (spec: TypeError on detached or OOB).
     // set-methods perform ToNumber/ToBigInt on the value first (those calls can
     // observe side effects that resize the buffer), so per spec the OOB check
     // moves into each individual setter after the value coercion.
-    if (!is_set_method && !dv_validate_or_throw(dv)) return ItemNull;
+    if (!is_set_method) {
+        validation = dv_validate_or_throw(dv);
+        if (item_is_error(validation)) return validation;
+    }
     bool sys_le = is_little_endian_system();
 
     // Getter methods
@@ -3483,8 +3450,10 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 7 && strncmp(mn, "setInt8", 7) == 0) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
-        if (!dv_validate_or_throw(dv)) return ItemNull;
+        validation = js_dataview_to_number_value(value_item, &number_value);
+        if (item_is_error(validation)) return validation;
+        validation = dv_validate_or_throw(dv);
+        if (item_is_error(validation)) return validation;
         uint8_t* p = dv_write_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         int64_t raw_val = js_dataview_to_integer_value(number_value);
@@ -3494,8 +3463,10 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 8 && strncmp(mn, "setUint8", 8) == 0) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
-        if (!dv_validate_or_throw(dv)) return ItemNull;
+        validation = js_dataview_to_number_value(value_item, &number_value);
+        if (item_is_error(validation)) return validation;
+        validation = dv_validate_or_throw(dv);
+        if (item_is_error(validation)) return validation;
         uint8_t* p = dv_write_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         int64_t raw_val = js_dataview_to_integer_value(number_value);
@@ -3505,8 +3476,10 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 8 && strncmp(mn, "setInt16", 8) == 0) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
-        if (!dv_validate_or_throw(dv)) return ItemNull;
+        validation = js_dataview_to_number_value(value_item, &number_value);
+        if (item_is_error(validation)) return validation;
+        validation = dv_validate_or_throw(dv);
+        if (item_is_error(validation)) return validation;
         uint8_t* p = dv_write_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3518,8 +3491,10 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 9 && strncmp(mn, "setUint16", 9) == 0) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
-        if (!dv_validate_or_throw(dv)) return ItemNull;
+        validation = js_dataview_to_number_value(value_item, &number_value);
+        if (item_is_error(validation)) return validation;
+        validation = dv_validate_or_throw(dv);
+        if (item_is_error(validation)) return validation;
         uint8_t* p = dv_write_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3531,8 +3506,10 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 8 && strncmp(mn, "setInt32", 8) == 0) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
-        if (!dv_validate_or_throw(dv)) return ItemNull;
+        validation = js_dataview_to_number_value(value_item, &number_value);
+        if (item_is_error(validation)) return validation;
+        validation = dv_validate_or_throw(dv);
+        if (item_is_error(validation)) return validation;
         uint8_t* p = dv_write_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3544,8 +3521,10 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 9 && strncmp(mn, "setUint32", 9) == 0) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
-        if (!dv_validate_or_throw(dv)) return ItemNull;
+        validation = js_dataview_to_number_value(value_item, &number_value);
+        if (item_is_error(validation)) return validation;
+        validation = dv_validate_or_throw(dv);
+        if (item_is_error(validation)) return validation;
         uint8_t* p = dv_write_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3557,8 +3536,10 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 10 && strncmp(mn, "setFloat32", 10) == 0) {
         Item val_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         double number_value = 0.0;
-        if (!js_dataview_to_number_value(val_item, &number_value)) return ItemNull;
-        if (!dv_validate_or_throw(dv)) return ItemNull;
+        validation = js_dataview_to_number_value(val_item, &number_value);
+        if (item_is_error(validation)) return validation;
+        validation = dv_validate_or_throw(dv);
+        if (item_is_error(validation)) return validation;
         uint8_t* p = dv_write_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3572,8 +3553,10 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 10 && strncmp(mn, "setFloat64", 10) == 0) {
         Item val_item2 = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         double d = 0.0;
-        if (!js_dataview_to_number_value(val_item2, &d)) return ItemNull;
-        if (!dv_validate_or_throw(dv)) return ItemNull;
+        validation = js_dataview_to_number_value(val_item2, &d);
+        if (item_is_error(validation)) return validation;
+        validation = dv_validate_or_throw(dv);
+        if (item_is_error(validation)) return validation;
         uint8_t* p = dv_write_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3586,13 +3569,14 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 11 && strncmp(mn, "setBigInt64", 11) == 0) {
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         Item bigint_value;
-        if (!js_dataview_to_bigint_value(value_item, &bigint_value)) return ItemNull;
-        if (!dv_validate_or_throw(dv)) return ItemNull;
+        validation = js_dataview_to_bigint_value(value_item, &bigint_value);
+        if (item_is_error(validation)) return validation;
+        validation = dv_validate_or_throw(dv);
+        if (item_is_error(validation)) return validation;
         uint8_t* p = dv_write_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
-        Item wrapped = js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_value);
-        if (js_check_exception()) return ItemNull;
+        JS_ASSIGN_OR_RETURN(wrapped, js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_value));
         uint64_t raw = (uint64_t)bigint_to_int64(wrapped);
         if (little_endian != sys_le) raw = swap64(raw);
         memcpy(p, &raw, 8);
@@ -3601,13 +3585,14 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 12 && strncmp(mn, "setBigUint64", 12) == 0) {
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         Item bigint_value;
-        if (!js_dataview_to_bigint_value(value_item, &bigint_value)) return ItemNull;
-        if (!dv_validate_or_throw(dv)) return ItemNull;
+        validation = js_dataview_to_bigint_value(value_item, &bigint_value);
+        if (item_is_error(validation)) return validation;
+        validation = dv_validate_or_throw(dv);
+        if (item_is_error(validation)) return validation;
         uint8_t* p = dv_write_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
-        Item wrapped = js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_value);
-        if (js_check_exception()) return ItemNull;
+        JS_ASSIGN_OR_RETURN(wrapped, js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_value));
         uint64_t raw = js_dataview_bigint_to_uint64(wrapped);
         if (little_endian != sys_le) raw = swap64(raw);
         memcpy(p, &raw, 8);

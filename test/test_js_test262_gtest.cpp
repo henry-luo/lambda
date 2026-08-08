@@ -4816,14 +4816,20 @@ int main(int argc, char** argv) {
                     p.is_negative = cm.flags & 32;
                     p.negative_type = cm.neg_type;
                     p.is_strict = cm.flags & 8;
+                    p.is_async = cm.flags & 1;
+                    p.is_module = cm.flags & 2;
+                    p.is_raw = cm.flags & 4;
                     p.includes = cm.includes;
-                    p.native_harness = cm.native_harness;
+                    p.features = cm.features;
+                    p.native_harness = !p.is_async && cm.native_harness;
                 }
                 // Phase 4 rebuilds prepared records from all_tests, so carry the
                 // batch-local helper policy too.  Without this, helper-dependent
                 // regressions retry without their special preamble and thousands
                 // of retry results become infrastructure noise instead of signal.
                 p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
+                if (p.is_raw) p.native_harness = true;
+                if (p.is_module) p.native_harness = false;
                 retry_indices.push_back(retry_prepared.size());
                 retry_prepared.push_back(std::move(p));
             }

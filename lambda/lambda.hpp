@@ -276,6 +276,12 @@ inline ConstItem Item::to_const() const {
 // get type_id from an Item
 static inline TypeId get_type_id(Item value) { return value.type_id(); }
 
+// An in-band exception is identified by its ordinary Item tag; no side channel
+// is needed by callers that already hold the helper's returned value.
+static inline bool item_is_error(Item value) {
+    return get_type_id(value) == LMD_TYPE_ERROR;
+}
+
 static inline bool lambda_item_uses_scalar_home(Item item) {
     // C16: `int` is NOT here. An int Item carries its own rotated IEEE bits at
     // every magnitude, so it never points at frame-scoped storage. The scalar

@@ -52,7 +52,6 @@ static bool node_os_roots_begin(JubeRootFrame* frame, size_t count) {
 #define js_property_get(OBJECT, KEY) node_os_host->value->property_get(OBJECT, KEY)
 #define js_property_set(OBJECT, KEY, VALUE) node_os_host->value->property_set(OBJECT, KEY, VALUE)
 #define js_new_function(FUNCTION, COUNT) node_os_host->script->new_function(FUNCTION, COUNT)
-#define js_check_exception() node_os_host->script->check_exception()
 #define js_object_freeze(OBJECT) node_os_host->script->object_freeze(OBJECT)
 #define js_mark_non_writable(OBJECT, KEY) node_os_host->script->mark_non_writable(OBJECT, KEY)
 
@@ -665,8 +664,8 @@ extern "C" Item js_os_networkInterfaces(void) {
 // os.userInfo() — returns user information
 extern "C" Item js_os_userInfo(Item options) {
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        js_property_get(options, make_string_item("encoding"));
-        if (js_check_exception()) return ItemNull;
+        Item encoding = js_property_get(options, make_string_item("encoding"));
+        if (item_is_error(encoding)) return encoding;
     }
     Item obj = js_new_object();
 #ifdef _WIN32
@@ -978,7 +977,8 @@ int node_os_init(const JubeHostAPI* host) {
             !host->value->property_set || !host->value->string_from_utf8_n ||
             !host->script->new_function || !host->script->make_number ||
             !host->script->get_number ||
-            !host->script->check_exception || !host->script->mark_non_writable ||
+            !host->script->error_lane_payload ||
+            !host->script->mark_non_writable ||
             !host->script->object_freeze) return -1;
     node_os_host = host;
     return 0;

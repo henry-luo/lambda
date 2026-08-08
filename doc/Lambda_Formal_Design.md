@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.4.0 (2026-08-06)
+**Spec version:** 1.5.0 (2026-08-07)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -39,9 +39,10 @@ the decision records.
   implementation accidents**, and pay for reuse only below the semantic
   boundary (no guest inherits another language's truthiness, coercion, or
   object model). [Lang_Hosting P1–P10, C1–C10]
-- **D1.4 — Errors are return values at every boundary.** Exceptions pend;
-  no C++ exception, `longjmp`, or guest unwind ever crosses a language or
-  module boundary. [JA5, J3]
+- **D1.4v2 — Errors are return values at every boundary.** A fallible
+  function returns one merged `Item`: its success value or an ERROR-tagged
+  error value. No pending-exception side channel, C++ exception, `longjmp`,
+  or guest unwind crosses a language or module boundary. [S7.4.4, JA5, J3]
 - **D1.5 — Precise GC everywhere, forever.** Conservative native-stack
   scanning is retired from every build and stays retired; a guest is
   precise iff it emits through the shared rooting primitives. [CR1–CR8]
@@ -115,7 +116,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   generated code is immutable — never patched. [D8.3.3, D8.4.1]
 - **DI15 — Nothing unwinds across a boundary.** Errors are return values
   at every language and module boundary; no exception, `longjmp`, or guest
-  unwind crosses one; faults never cross a thread boundary. [D1.4, D6.3.3]
+  unwind crosses one; faults never cross a thread boundary. [D1.4v2, D6.3.3]
 - **DI16 — Transactional initialization.** A half-initialized package or a
   failed module registration is never observable — init commits or rolls
   back. [D7.2.2, D7.3.2]
@@ -780,8 +781,8 @@ loosely across the corpus — context disambiguates, and we live with it.
   through the catalog, never by guessing. The host owns heap activation,
   context install, side-stack entry/exit, and recovery boundaries —
   guests never construct contexts or touch global runtime pointers (the
-  G1 gate). JS pending-exception behavior is not reused as another
-  guest's exception model.* [Lang_Hosting §5–§7, §13]
+  G1 gate). The JS merged Item error lane (D8.4.3) is not reused as another
+  guest's exception model.* [Lang_Hosting §5–§7, §13, D8.4.3]
 
 ### D7.5 Jube modules: trust and IO
 
@@ -883,6 +884,14 @@ loosely across the corpus — context disambiguates, and we live with it.
 - **D8.4.2** Core direct calls pass individual ABI operands (`Context*`,
   args, optional trailing scalar home); `Item* + argc` is the JS dynamic
   boundary only. [LC call-ABI]
+- **D8.4.3** **Fallible JS/Jube helpers use the merged Item error ABI.** A
+  helper that can raise returns an ERROR-tagged `Item` and never relies on a
+  pending flag or a separate poll result; MIR lowering tests the returned
+  tag, and try/catch/finally routing carries that same Item identity. Raw
+  scalar helpers are permitted only when their catalog contract is
+  infallible (`PRESERVES`). `LambdaError` is the shared ERROR carrier; its
+  Map-compatible resting prologue is traced as a heap reference, and JS
+  Error stack materialization may remain lazy. [S7.4.4, D1.4v2, JR3]
 
 ### D8.5 MIR module cache
 
@@ -955,6 +964,7 @@ Status of `*`-marked rulings as of 2026-08-06.
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
 | D8.2 | Unified AST design settled (U1–U26); phased migration not recorded as started; Python port is the acceptance test and its entry is disabled until it emits through `MirEmitter` (CR6). |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
+| D8.4.3 | Landed 2026-08-07 with JS Tune1: JS/Jube fallible helpers use one merged Item error lane; pending-exception polling and the legacy flag are deleted. |
 | D8.5.1 | MIR cache L1 landed; L2 lazy codegen approved but `mir.c` still eager. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
 
@@ -1015,9 +1025,12 @@ Numbered `DO#` (design-open); each links to its record.
   fixture; porting them is a decision, not a drift.
 - **DO14** Unified AST: the "views" fourth variance tier (adopt only when
   a real shared pass asks); C2MIR retirement revisit after Phase 4.
-- **DO15** Online exception-poll doc status conflict: the impl doc is
-  named `(done)` but reads PLANNED (E0–E6 future) — resolve before citing
-  OE1–OE10 as landed.
+- **DO15** *(resolved 2026-08-07)* Online exception-poll doc status
+  conflict: verified landed in `52c0f3c02` (2026-07-24) — `exc_track` is the
+  live mechanism, the G1 peephole and `jm_optimize_exception_polls` pass are
+  deleted from the tree; the impl doc's status line now reads IMPLEMENTED.
+  OE1–OE10 may be cited as landed. History: `vibe/jube/JS_Runtime_Redesign.md`
+  JR3.
 
 **Runtime services & modules**
 - **DO16** Name identity: temporal canonical accepted; dynamic-intern

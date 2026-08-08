@@ -172,8 +172,7 @@ static Item js_history_push(Item state, Item title, Item url) {
     (void)title;
     DomDocument* document = js_history_document();
     if (!document) return make_js_undefined();
-    Item cloned_state = js_structuredClone(state);
-    if (js_check_exception()) return ItemNull;
+    JS_ASSIGN_OR_RETURN(cloned_state, js_structuredClone(state));
     radiant_history_push_state(document, cloned_state, js_history_optional_url(url));
     js_history_refresh_object();
     return make_js_undefined();
@@ -183,8 +182,7 @@ static Item js_history_replace(Item state, Item title, Item url) {
     (void)title;
     DomDocument* document = js_history_document();
     if (!document) return make_js_undefined();
-    Item cloned_state = js_structuredClone(state);
-    if (js_check_exception()) return ItemNull;
+    JS_ASSIGN_OR_RETURN(cloned_state, js_structuredClone(state));
     radiant_history_replace_state(document, cloned_state, js_history_optional_url(url));
     js_history_refresh_object();
     return make_js_undefined();

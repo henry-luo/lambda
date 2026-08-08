@@ -15,7 +15,7 @@ extern "C" uint32_t js_get_active_module_state_id(void);
 extern "C" bool js_set_active_module_state_id(uint32_t module_state_id);
 extern "C" bool js_module_state_is_available(uint32_t module_state_id);
 extern void js_double_to_string(double d, char* out, int out_size);
-extern "C" void js_process_emit_before_exit(int code);
+extern "C" Item js_process_emit_before_exit(int code);
 extern "C" void js_process_emit_exit(int code);
 extern MIR_error_func_t g_batch_mir_error_handler;
 extern unsigned int g_js_mir_optimize_level;
@@ -171,7 +171,7 @@ MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type);
 MIR_label_t jm_new_label(JsMirTranspiler* mt);
 void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn);
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label);
-void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsExcTrack state);
+void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsErrorLaneTrack state);
 void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     bool item_return, MirScalarReturnMode scalar_return_mode,
     MIR_reg_t runtime_reg);
@@ -195,7 +195,8 @@ MIR_reg_t jm_emit_iterator_step(JsMirTranspiler* mt, MIR_reg_t iterator);
 MIR_reg_t jm_emit_iterator_done_test(JsMirTranspiler* mt, MIR_reg_t step_result, const char* prefix);
 MIR_reg_t jm_emit_iterator_collect_rest(JsMirTranspiler* mt, MIR_reg_t iterator);
 void jm_emit_iterator_close(JsMirTranspiler* mt, MIR_reg_t iterator);
-void jm_emit_iterator_close_on_exception_if_open(JsMirTranspiler* mt, MIR_reg_t iterator,
+void jm_emit_iterator_close_checked(JsMirTranspiler* mt, MIR_reg_t iterator);
+void jm_emit_iterator_close_on_error_lane_if_open(JsMirTranspiler* mt, MIR_reg_t iterator,
     MIR_reg_t iter_done, MIR_label_t target);
 void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt);
 void jm_emit_break_completion(JsMirTranspiler* mt, JsBreakContinueNode* brk);
@@ -208,19 +209,20 @@ void jm_emit_resume_env_restore(JsMirTranspiler* mt);
 void jm_emit_try_state_reset(JsMirTranspiler* mt);
 void jm_emit_async_resume_refresh(JsMirTranspiler* mt);
 JsTryContext* jm_find_completion_context(JsMirTranspiler* mt, JsMirCompletionKind kind);
-JsExcTrack jm_exc_state(JsMirTranspiler* mt);
-JsExcTrack jm_exc_merge(JsExcTrack a, JsExcTrack b);
-void jm_exc_set_state(JsMirTranspiler* mt, JsExcTrack state);
-void jm_exc_note_call(JsMirTranspiler* mt, JitExceptionEffect effect);
-MIR_reg_t jm_emit_exception_test(JsMirTranspiler* mt);
-void jm_emit_exception_route(JsMirTranspiler* mt, JsMirCompletionKind kind);
-void jm_emit_exception_guard(JsMirTranspiler* mt, MIR_label_t target);
+JsErrorLaneTrack jm_error_lane_state(JsMirTranspiler* mt);
+JsErrorLaneTrack jm_error_lane_merge(JsErrorLaneTrack a, JsErrorLaneTrack b);
+void jm_error_lane_set_state(JsMirTranspiler* mt, JsErrorLaneTrack state);
+void jm_error_lane_note_call(JsMirTranspiler* mt, JitExceptionEffect effect);
+MIR_reg_t jm_emit_error_lane_test(JsMirTranspiler* mt);
+void jm_emit_error_lane_route(JsMirTranspiler* mt, JsMirCompletionKind kind);
+void jm_emit_error_lane_guard(JsMirTranspiler* mt, MIR_label_t target);
 MIR_reg_t jm_arg_frame_base(JsMirTranspiler* mt);
 void jm_emit_arg_frame_clear(JsMirTranspiler* mt, JsMirArgStackScope* scope);
 bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
     JsMirCompletionKind kind);
 void jm_emit_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);
-void jm_emit_pending_exception_exit(JsMirTranspiler* mt);
+void jm_emit_generator_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);
+void jm_emit_error_lane_exit(JsMirTranspiler* mt);
 MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t value);
 MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r);
 struct hashmap* jm_var_scope_at(JsMirTranspiler* mt, int depth);
@@ -274,13 +276,30 @@ MIR_reg_t jm_call_1_or_inline(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1);
 void jm_call_void_2_or_inline(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2);
-#define jm_call_0(mt, fn, ret) em_call_0(&(mt)->em, fn, ret, true)
+#define jm_call_0(mt, fn, ret) \
+    jm_publish_call_result((mt), em_call_0(&(mt)->em, fn, ret, true))
 #define jm_call_1(mt, fn, ret, ...) jm_call_1_or_inline(mt, fn, ret, __VA_ARGS__)
-#define jm_call_2(mt, fn, ret, ...) em_call_2(&(mt)->em, fn, ret, __VA_ARGS__, true)
-#define jm_call_3(mt, fn, ret, ...) em_call_3(&(mt)->em, fn, ret, __VA_ARGS__, true)
-#define jm_call_4(mt, fn, ret, ...) em_call_4(&(mt)->em, fn, ret, __VA_ARGS__, true)
-#define jm_call_5(mt, fn, ret, ...) em_call_5(&(mt)->em, fn, ret, __VA_ARGS__, true)
-#define jm_call_6(mt, fn, ret, ...) em_call_6(&(mt)->em, fn, ret, __VA_ARGS__, true)
+#define jm_call_2(mt, fn, ret, ...) \
+    jm_publish_call_result((mt), em_call_2(&(mt)->em, fn, ret, __VA_ARGS__, true))
+#define jm_call_3(mt, fn, ret, ...) \
+    jm_publish_call_result((mt), em_call_3(&(mt)->em, fn, ret, __VA_ARGS__, true))
+#define jm_call_4(mt, fn, ret, ...) \
+    jm_publish_call_result((mt), em_call_4(&(mt)->em, fn, ret, __VA_ARGS__, true))
+#define jm_call_5(mt, fn, ret, ...) \
+    jm_publish_call_result((mt), em_call_5(&(mt)->em, fn, ret, __VA_ARGS__, true))
+#define jm_call_6(mt, fn, ret, ...) \
+    jm_publish_call_result((mt), em_call_6(&(mt)->em, fn, ret, __VA_ARGS__, true))
+static inline MIR_reg_t jm_publish_call_result(JsMirTranspiler* mt,
+                                                MIR_reg_t result) {
+    // only boxed Item calls can carry the merged error lane; publishing a
+    // native double made later tag checks emit integer shifts on float regs.
+    if (mt) {
+        MIR_type_t result_type = result
+            ? MIR_reg_type(mt->ctx, result, mt->em.func) : MIR_T_UNDEF;
+        mt->last_call_result_reg = result_type == MIR_T_I64 ? result : 0;
+    }
+    return result;
+}
 MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
         int arg_count, MIR_reg_t* arg_regs, bool discard_result = false);
 MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
@@ -298,15 +317,21 @@ MIR_reg_t jm_map_method_into(JsMirTranspiler* mt, MIR_op_t object,
 MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
         int arg_count, MIR_reg_t* arg_regs);
 MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
-#define jm_call_void_0(mt, fn) em_call_void_0(&(mt)->em, fn, true)
-#define jm_call_void_1(mt, fn, ...) em_call_void_1(&(mt)->em, fn, __VA_ARGS__, true)
+#define jm_call_void_0(mt, fn) \
+    ((mt)->last_call_result_reg = 0, em_call_void_0(&(mt)->em, fn, true))
+#define jm_call_void_1(mt, fn, ...) \
+    ((mt)->last_call_result_reg = 0, em_call_void_1(&(mt)->em, fn, __VA_ARGS__, true))
 #define jm_call_void_2(mt, fn, ...) jm_call_void_2_or_inline(mt, fn, __VA_ARGS__)
-#define jm_call_void_3(mt, fn, ...) em_call_void_3(&(mt)->em, fn, __VA_ARGS__, true)
-#define jm_call_void_4(mt, fn, ...) em_call_void_4(&(mt)->em, fn, __VA_ARGS__, true)
-#define jm_call_void_5(mt, fn, ...) em_call_void_5(&(mt)->em, fn, __VA_ARGS__, true)
+#define jm_call_void_3(mt, fn, ...) \
+    ((mt)->last_call_result_reg = 0, em_call_void_3(&(mt)->em, fn, __VA_ARGS__, true))
+#define jm_call_void_4(mt, fn, ...) \
+    ((mt)->last_call_result_reg = 0, em_call_void_4(&(mt)->em, fn, __VA_ARGS__, true))
+#define jm_call_void_5(mt, fn, ...) \
+    ((mt)->last_call_result_reg = 0, em_call_void_5(&(mt)->em, fn, __VA_ARGS__, true))
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt);
+MIR_reg_t jm_emit_error_lane_return(JsMirTranspiler* mt);
 bool jm_is_native_binary_expression(JsMirTranspiler* mt, JsBinaryNode* bin);
 bool jm_is_native_unary_expression(JsMirTranspiler* mt, JsUnaryNode* un);
 MIR_reg_t jm_box_int_const(JsMirTranspiler* mt, int64_t value);
@@ -536,7 +561,7 @@ bool jm_push_typeof_narrow(JsMirTranspiler* mt, JsIdentifierNode* id, TypeId nar
 void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node);
 void jm_scope_env_reload_vars(JsMirTranspiler* mt);
 void jm_env_reload_shared_captures(JsMirTranspiler* mt);
-void jm_emit_exc_propagate_check(JsMirTranspiler* mt);
+void jm_emit_error_lane_propagate_check(JsMirTranspiler* mt);
 void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf);
 void jm_emit_class_static_block(JsMirTranspiler* mt, JsClassEntry* ce, JsAstNode* block);
 void jm_emit_class_static_initializers(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce,

@@ -681,7 +681,7 @@ static bool js_accessor_half_same(Item left, Item right) {
     return it2b(js_object_is(left, right));
 }
 
-extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
+extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
                                             int is_setter, uint8_t attrs) {
     extern __thread EvalContext* context;
     RootFrame roots(4);
@@ -692,9 +692,9 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
     obj = obj_root.get();
     name = name_root.get();
     fn = fn_root.get();
-    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    if (get_type_id(name) != LMD_TYPE_STRING) return js_status_ok();
     String* ns = it2s(name);
-    if (!ns) return;
+    if (!ns) return js_status_ok();
 
     // Bypass setter accessor-dispatch in our own recursive js_property_set call:
     // we are storing the pair Item literally under name X, not invoking the
@@ -726,14 +726,12 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
     }
     if (se && !jspd_is_configurable(se)) {
         if (!jspd_is_accessor(se)) {
-            js_throw_type_error("Cannot redefine property");
-            return;
+            return js_throw_type_error("Cannot redefine property");
         }
         Item current_half = ItemNull;
         if (pair) current_half = is_setter ? pair->setter : pair->getter;
         if (!js_accessor_half_same(current_half, fn)) {
-            js_throw_type_error("Cannot redefine property");
-            return;
+            return js_throw_type_error("Cannot redefine property");
         }
     }
 
@@ -743,15 +741,16 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
         else           pair->getter = fn;
         // Re-store to keep slot value canonical (idempotent — same pointer bits).
         pair_root.set(js_accessor_pair_to_item(pair));
-        js_property_set(obj_root.get(), name_root.get(), pair_root.get());
+        JS_ASSIGN_OR_RETURN(set_result, js_property_set(obj_root.get(), name_root.get(), pair_root.get()));
     } else {
         // Allocate fresh pair with the requested half populated.
         Item g = is_setter ? ItemNull : fn;
         Item s = is_setter ? fn       : ItemNull;
         pair = js_alloc_accessor_pair(g, s);
-        if (!pair) return;
+        if (!pair) return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
+                                                   "accessor pair allocation failed");
         pair_root.set(js_accessor_pair_to_item(pair));
-        js_property_set(obj_root.get(), name_root.get(), pair_root.get());
+        JS_ASSIGN_OR_RETURN(set_result, js_property_set(obj_root.get(), name_root.get(), pair_root.get()));
     }
 
     // Set IS_ACCESSOR + caller-requested attribute bits on the shape entry.
@@ -765,6 +764,7 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
         js_shape_entry_update_flags(obj, ns->chars, (int)ns->len, set_mask, JSPD_DELETED);
         js_attr_mark_array_index_shape(obj, ns->chars, (int)ns->len);
     }
+    return js_status_ok();
 }
 
 // Phase-5C: 4-arg MIR-friendly wrapper. Returns `obj` so transpiler call sites
@@ -780,8 +780,11 @@ extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
     // Canonicalize the property key per ES §7.1.14 ToPropertyKey: numeric/bool
     // literal keys (e.g. `{ get [1]() {} }`) must be converted to their string
     // form before the chokepoint stores under that name.
-    name_root.set(js_to_property_key(name_root.get()));
-    js_define_accessor_partial(obj_root.get(), name_root.get(), fn_root.get(), is_setter, 0);
+    JS_ASSIGN_OR_RETURN(key_result, js_to_property_key(name_root.get()));
+    name_root.set(key_result);
+    Item accessor_result = js_define_accessor_partial(
+        obj_root.get(), name_root.get(), fn_root.get(), is_setter, 0);
+    if (item_is_error(accessor_result)) return accessor_result;
     return obj_root.get();
 }
 

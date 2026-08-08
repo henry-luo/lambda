@@ -46,7 +46,9 @@ bool js_event_loop_is_shutting_down(void);
 void js_microtask_enqueue(Item callback);
 void js_next_tick_enqueue(Item callback);
 void js_microtask_flush(void);
+Item js_microtask_flush_result(void);
 int  js_microtask_pending_count(void);
+bool js_microtask_is_running(void);
 // Js57 P2c: bounded loop drain — runs uv_run(UV_RUN_NOWAIT) + microtask flush in
 // tight turns until predicate(user) is non-zero or one of three bounds expires
 // (watchdog_ms, max_no_progress turns, max_turns). See impl for details.

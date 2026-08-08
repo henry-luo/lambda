@@ -49,10 +49,9 @@ static Item js_require_module_not_found(const char* specifier) {
     snprintf(message, sizeof(message), "Cannot find module '%s'", name);
     Item error = js_new_error_with_name(make_string_item("Error"), make_string_item(message));
     js_property_set(error, make_string_item("code"), make_string_item("MODULE_NOT_FOUND"));
-    // Returning null without a pending exception turns require('missing') into
-    // an unrelated property error; preserve Node's module-resolution failure.
-    js_throw_value(error);
-    return ItemNull;
+    // the returned error must stay attached to the call result; there is no
+    // pending side channel for require callers to recover.
+    return js_throw_value(error);
 }
 
 static JsMirPhaseTiming g_last_js_mir_phase_timing;
@@ -1071,8 +1070,8 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         _lambda_stack_overflow_flag = false;
         lambda_recovery_frame_end(recovery_frame);
         result = recovered;
-        // Report the error so it shows up as an uncaught exception
-        js_throw_range_error("Maximum call stack size exceeded");
+        // the recovery result already carries the boundary error; a second
+        // throw would replace its identity with a generic stack-overflow value.
     } else {
         if (!lambda_recovery_frame_arm(recovery_frame)) {
             log_error("js-mir: failed to arm recovery frame");
@@ -1086,10 +1085,8 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     }
     }
     g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - phase_start;
-    log_debug("js-mir: JIT execution returned (type=%d)", get_type_id(result));
-    if (result.item == ItemError.item || js_check_exception()) {
-        log_error("js-mir-execution: uncaught exception: %s",
-                  js_get_exception_message());
+    if (item_is_error(result)) {
+        log_error("js-mir-execution: uncaught error lane");
     }
     log_mem_stage("js-core: js_main_done");
 
@@ -1128,25 +1125,20 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     // process; process lifecycle events are a CLI/Node boundary, not a
     // per-test boundary, and running them here pollutes hot-reload batches.
     if (!g_jm_preamble_compile_only && !js_batch_execution_mode) {
-        int exit_code = (result.item == ITEM_ERROR || js_check_exception()) ? 1 : js_process_current_exit_code();
-        // An exception already pending here is the SCRIPT's uncaught exception;
-        // it must survive to the CLI so it is reported and sets exit code 1.
-        // Only an exception newly raised BY a beforeExit listener may be
-        // cleared below — without this distinction the clearing swallowed
-        // every uncaught script exception (silent exit 0 under --no-log).
-        bool script_exception_pending = js_check_exception();
+        int exit_code = item_is_error(result) ? 1 : js_process_current_exit_code();
+        // The script's result owns its ERROR Item; lifecycle callbacks receive
+        // no ambient exception state and cannot consume that failure.
         js_async_hooks_drain_destroy_queue();
-        js_process_emit_before_exit(exit_code);
-        bool before_exit_threw = !script_exception_pending && js_check_exception();
+        // beforeExit listener failures are intentionally consumed at this
+        // process-shutdown boundary; the listener result itself carries the
+        // failure, so no global state needs to be cleared.
+        (void)js_process_emit_before_exit(exit_code);
         if (js_event_loop_has_refed_handles()) {
             js_event_loop_drain();
         } else {
             js_microtask_flush();
         }
         js_process_emit_exit(exit_code);
-        if (before_exit_threw && js_process_current_exit_code() == 0) {
-            js_clear_exception();
-        }
         js_trace_flush();
         js_process_current_exit_code();
     }
@@ -1715,11 +1707,11 @@ static char* js_require_read_package_main(char* path_buf, int path_buf_size,
     Item package_text = (Item){.item = s2it(heap_create_name(package_source, strlen(package_source)))};
     Item package_obj = js_json_parse(package_text);
     mem_free(package_source);
-    if (js_check_exception()) return NULL;
+    if (item_is_error(package_obj)) return NULL;
 
     Item main_key = (Item){.item = s2it(heap_create_name("main", 4))};
     Item main_value = js_property_get(package_obj, main_key);
-    if (js_check_exception() || get_type_id(main_value) != LMD_TYPE_STRING) return NULL;
+    if (item_is_error(main_value) || get_type_id(main_value) != LMD_TYPE_STRING) return NULL;
 
     String* main_str = it2s(main_value);
     if (!main_str || main_str->len <= 0) return NULL;
@@ -1778,7 +1770,6 @@ static char* js_require_read_resolved_path_internal(char* path_buf, int path_buf
     if (!has_node_prefix && allow_package_main) {
         source = js_require_read_package_main(path_buf, path_buf_size, path_buf);
         if (source) return source;
-        if (js_check_exception()) return NULL;
     }
     if (plen + strlen("/index.js") < (size_t)path_buf_size) {
         strncat(path_buf, "/index.js", path_buf_size - strlen(path_buf) - 1);
@@ -2095,7 +2086,7 @@ extern "C" Item js_require(Item specifier) {
         Item json_text = (Item){.item = s2it(heap_create_name(source, strlen(source)))};
         Item parsed = js_json_parse(json_text);
         mem_free(source);
-        if (js_check_exception()) return ItemNull;
+        if (item_is_error(parsed)) return parsed;
         js_module_register(resolved_spec, parsed);
         js_cjs_note_child(resolved_spec, parsed);
         return parsed;
@@ -2117,7 +2108,7 @@ extern "C" Item js_require(Item specifier) {
         mem_free(source);
         jm_track_active_js_transpile(NULL, NULL, wrapped);
         ns = transpile_js_module_to_mir(runtime, wrapped, path_buf);
-        if (js_check_exception()) {
+        if (item_is_error(ns)) {
             // A synthetic JS try block changes a CJS file's top-level lexical
             // bindings into block bindings; close metadata here on abrupt exit
             // so the original source retains its Node/CommonJS lexical scope.
@@ -2161,8 +2152,8 @@ static Item js_dynamic_import_reject_type_error(const char* message) {
 // dynamic import() — synchronous load, wrapped in a resolved Promise
 extern "C" Item js_dynamic_import(Item specifier) {
     Item specifier_string = js_to_string(specifier);
-    if (js_check_exception() || get_type_id(specifier_string) != LMD_TYPE_STRING) {
-        return js_promise_reject(js_clear_exception());
+    if (item_is_error(specifier_string) || get_type_id(specifier_string) != LMD_TYPE_STRING) {
+        return js_promise_reject(specifier_string);
     }
     String* spec = it2s(specifier_string);
     if (!spec || spec->len == 0) {
@@ -2204,8 +2195,8 @@ extern "C" Item js_dynamic_import(Item specifier) {
         mem_free(source);
     }
     js_dynamic_import_suppress_module_drain--;
-    if (js_check_exception()) {
-        return js_promise_reject(js_clear_exception());
+    if (item_is_error(ns)) {
+        return js_promise_reject(ns);
     }
     if (get_type_id(ns) == LMD_TYPE_NULL) {
         char msg[256];

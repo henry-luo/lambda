@@ -254,14 +254,8 @@ static Item node_zlib_callback_transform(Item data_item, Item options_item, Item
     *error_root = ItemNull.item;
     *result_root = ITEM_JS_UNDEFINED;
     Item result = node_zlib_sync_transform(data_item, mode, method, failure_message);
-    if (result.item == ItemNull.item) {
-        if (node_zlib_host->script && node_zlib_host->script->check_exception &&
-                node_zlib_host->script->clear_exception && node_zlib_host->script->check_exception()) {
-            *error_root = node_zlib_host->script->clear_exception().item;
-        } else {
-            node_zlib_host->node->roots->root_frame_end(&frame);
-            return ItemNull;
-        }
+    if (item_is_error(result)) {
+        *error_root = node_zlib_host->script->error_lane_payload(result).item;
     } else {
         *result_root = result.item;
     }
@@ -360,7 +354,7 @@ static int node_zlib_init(const JubeHostAPI* host) {
             !host->node->error->throw_zlib_error ||
             !host->node->zlib->crc32 || !host->node->zlib->codec || !host->node->zlib->result_release ||
             !host->node->async_ops->next_tick_callback ||
-            !host->script->check_exception || !host->script->clear_exception) return -1;
+            !host->script->error_lane_payload) return -1;
     node_zlib_host = host;
     return 0;
 }

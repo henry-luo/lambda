@@ -1,8 +1,8 @@
 # LambdaJS — MIR Lowering, Code Generation & Exceptions
 
-> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the phase-2/3 lowering mechanics: how typed AST nodes become MIR instructions, the boxed-Item-by-default emission model and its native INT/FLOAT fast paths, boxing/unboxing tag arithmetic, condition lowering and the comparison `_raw` facades, short-circuit operators, constant folding and dead-branch elimination, call emission, the exception model (state, JIT try/catch/finally, signal-based stack overflow), and dynamic code (`eval` / `Function`).
+> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the phase-2/3 lowering mechanics: how typed AST nodes become MIR instructions, the boxed-Item-by-default emission model and its native INT/FLOAT fast paths, boxing/unboxing tag arithmetic, condition lowering and the comparison `_raw` facades, short-circuit operators, constant folding and dead-branch elimination, call emission, the in-band Item exception model (JIT try/catch/finally, signal-based stack overflow), and dynamic code (`eval` / `Function`).
 >
-> **Primary sources:** `lambda/js/js_mir_expression_lowering.cpp` (`jm_transpile_binary`, `jm_transpile_unary`, `jm_transpile_call`, `jm_transpile_condition`, `jm_try_fold_const`), `lambda/js/js_mir_statement_lowering.cpp` (`jm_transpile_if`, loops, try/catch/finally, `jm_emit_exc_propagate_check`, `jm_branch_dead_safe`), `lambda/js/js_mir_calls_boxing_types.cpp` (`jm_ensure_import`, `jm_call_*`, boxing/unboxing, `jm_emit_is_truthy`), `lambda/js/js_mir_eval_lowering.cpp` (`js_builtin_eval`, `new Function`), `lambda/js/js_mir_completion.cpp` (abrupt completions), `lambda/js/js_runtime_state.cpp` (`js_throw_value` / `js_check_exception` / `js_clear_exception`), `lambda/lambda-stack.cpp` (stack-overflow guard).
+> **Primary sources:** `lambda/js/js_mir_expression_lowering.cpp` (`jm_transpile_binary`, `jm_transpile_unary`, `jm_transpile_call`, `jm_transpile_condition`, `jm_try_fold_const`), `lambda/js/js_mir_statement_lowering.cpp` (`jm_transpile_if`, loops, try/catch/finally, `jm_emit_error_lane_propagate_check`, `jm_branch_dead_safe`), `lambda/js/js_mir_calls_boxing_types.cpp` (`jm_ensure_import`, `jm_call_*`, boxing/unboxing, `jm_emit_is_truthy`), `lambda/js/js_mir_eval_lowering.cpp` (`js_builtin_eval`, `new Function`), `lambda/js/js_mir_completion.cpp` (abrupt completions), `lambda/js/js_runtime_state.cpp` (`js_throw_value` / `js_error_lane_payload`), `lambda/lambda-stack.cpp` (stack-overflow guard).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -96,21 +96,58 @@ Runtime helpers are referenced by name and resolved at link time. The emit side 
 
 Every generated entry point also uses the shared Lambda side-stack emitter. `jm_begin_function_frame` inserts one checked prologue that binds the context stacks, saves root/number watermarks, and reserves the function's static root count. Heap-capable locals and raw env/args pointers publish into root slots; assignments refresh their slots and helper calls first publish all live scope variables. `jm_emit` rewrites every `MIR_RET` to one return label. Return inference selects a scalar lifetime mode (`NONE`, `FLOAT`, `INT64`, `DTIME`, or `DYNAMIC`). `jm_finish_function_frame` re-homes owned env scalars, then the shared MIR emitter either restores the number watermark directly or donates one normalized frame-base slot for a callee-owned wide scalar. No scalar capture/rebuild import is involved. Generator and async state-machine entries use `DYNAMIC` and the same discipline, so suspension state owns no pointer into a reclaimed invocation.
 
-`jm_transpile_call` (`js_mir_expression_lowering.cpp:6458`) is a large dispatcher that recognizes special callees before the generic path: `console.log` (`:6462`), `require(literal)` resolved to `js_require` at transpile time (`:6482`), dynamic `import()` (`:6519`), and `super.method(...)` (`:6611`). The generic user-function call boxes the callee and `this`, builds an argument array via `jm_build_args_array`, and emits `js_call_function(fn, this, args, argc)` (e.g. `:6879`); spread-or-apply forms route through `js_apply_function`. Every call site that can observe side effects is wrapped, in `jm_transpile_expression`'s call case (`:12474`), by `js_args_save`/`js_args_restore` (to reset the transient argument stack), `jm_scope_env_reload_vars` / `jm_env_reload_shared_captures` (to re-read captured variables a callee may have mutated — see [JS_05](JS_05_Functions_Closures.md)), and `jm_emit_exc_propagate_check` (§9).
+`jm_transpile_call` (`js_mir_expression_lowering.cpp:6458`) is a large dispatcher that recognizes special callees before the generic path: `console.log` (`:6462`), `require(literal)` resolved to `js_require` at transpile time (`:6482`), dynamic `import()` (`:6519`), and `super.method(...)` (`:6611`). The generic user-function call boxes the callee and `this`, builds an argument array via `jm_build_args_array`, and emits `js_call_function(fn, this, args, argc)` (e.g. `:6879`); spread-or-apply forms route through `js_apply_function`. Every call site that can observe side effects is wrapped, in `jm_transpile_expression`'s call case (`:12474`), by `js_args_save`/`js_args_restore` (to reset the transient argument stack), `jm_scope_env_reload_vars` / `jm_env_reload_shared_captures` (to re-read captured variables a callee may have mutated — see [JS_05](JS_05_Functions_Closures.md)), and `jm_emit_error_lane_propagate_check` (§9).
 
 ---
 
 ## 9. Exceptions
 
-LambdaJS does not use C++ exceptions or `longjmp` for ordinary JS throws. Instead it uses a **thread-global pending-exception flag** plus emitted check-and-branch sequences, so JIT'd frames unwind by returning normally.
+LambdaJS does not use C++ exceptions or `longjmp` for ordinary JS throws. It
+uses Lambda's merged Item error lane, as required by S7.4.4 and D8.4.3: a
+fallible helper returns either its normal Item or an ERROR-tagged
+`LambdaError*`, and JIT frames unwind by returning that Item normally.
 
-**State** (`js_runtime_state.cpp`): `js_throw_value(v)` sets `js_exception_pending = true`, re-homes a pointer-backed wide scalar to traced heap storage, stores `js_exception_value`, and caches a human-readable message; `js_check_exception` reads the flag; `js_clear_exception` reads-and-clears, returning the value. `js_exception_value` is registered as a GC root. The heap re-home is necessary because this singleton outlives the throwing frame's number watermark. The convenience throwers (`js_throw_type_error`, `js_throw_named_error`, `js_check_tdz`, `js_throw_const_assign`, …) all funnel into `js_throw_value`.
+**Carrier** (`js_runtime_state.cpp`): `js_throw_value(v)` creates or reuses
+the `LambdaError` carrier and returns its ERROR-tagged Item; every convenience
+thrower funnels through it. `js_error_lane_payload` is the catch-boundary
+conversion: it unwraps a primitive throw carrier or retags the same Error
+pointer to its Map-compatible resting form. `JsRuntimeState` holds neither an
+exception value/message buffer nor fault-bridge slots; there is no pending
+flag or `js_check_exception`/`js_clear_exception` protocol.
 
-**Propagation** is emitted by `jm_emit_exc_propagate_check` (`js_mir_statement_lowering.cpp:1307`), called after essentially every runtime call that can throw. It finds the topmost non-`yield_state_only` entry on `try_ctx_stack` (the fixed-depth-16 stack in `JsMirTranspiler`): inside a try it emits `MIR_BT` to the catch (or finally) label; outside any try it emits `MIR_BT` to a per-function `func_except_label` that returns null (`:1322`). This is what makes exceptions propagate correctly through nested calls, loops and if/else even without an explicit `try`.
+**Propagation** is emitted by `jm_emit_error_lane_propagate_check`, called after
+runtime calls whose catalog effect may set an error. `jm_emit_error_lane_test`
+branches on the high-byte ERROR tag of the latest Item result. It finds the
+topmost non-`yield_state_only` entry on `try_ctx_stack`: inside a try it emits
+`MIR_BT` to the catch/finally label; outside any try it emits `MIR_BT` to the
+per-function `func_error_lane_label`, which returns the error Item. This preserves
+the original identity through nested calls, loops, and accessors.
+
+**Online lane proof.** `error_lane_track ∈ {UNKNOWN, CLEAN, SET, UNREACHABLE}`
+is compiler-only dataflow used to elide branches. Catalog-proven `PRESERVES`
+calls do not emit a branch; `UNKNOWN` tests the already-held Item result; `SET`
+routes directly. No poll helper, signal-coherence tripwire, or ambient runtime
+state is emitted. The proof is saved/restored around nested function and
+state-machine compilation.
 
 <img alt="Exception model and stack-overflow recovery" src="diagram/d04_exceptions.svg" width="720">
 
-**JIT try/catch/finally** (`JS_AST_NODE_TRY_STATEMENT`, `:5483`) pushes a `JsTryContext` recording the catch/finally/end labels and delayed-return registers (`return_val_reg`, `has_return_reg`). After each statement in the try body it branches to catch/finally on a pending exception (`:5552`). The catch block restores the `with`-scope depth and the transient argument-stack mark (a throw during argument evaluation leaks a half-built arg frame — `js_args_save`/`js_args_restore` reclaim it, `:5532`), then `js_clear_exception` yields the thrown value to bind the catch parameter (`:5596`). The finally block **saves and clears** any pending exception so the finalizer starts clean, runs, and then re-throws the saved exception via `js_throw_value` **unless** the finalizer itself threw a new one (which takes precedence per spec §13.15.8) (`:5768`–`:5824`). `throw` (`:5885`) and abrupt `return`/`break`/`continue` (via `jm_emit_abrupt_jump_cleanup`, `js_mir_completion.cpp:7`) inline intervening finalizers and pop `with` scopes before transferring control. The `yield_state_only` flag marks synthetic contexts pushed only so a generator resume can re-initialize delayed-return registers — they are skipped by throw/return routing (`:5616`).
+**JIT try/catch/finally** (`JS_AST_NODE_TRY_STATEMENT`, `:5483`) pushes a
+`JsTryContext` recording the catch/finally/end labels, delayed-return
+registers, and a stable incoming-error register. After each statement in the
+try body it routes an ERROR-tagged result to catch/finally (`:5552`). The
+catch block restores the `with`-scope depth and transient argument-stack mark
+(a throw during argument evaluation can leave a half-built arg frame), then
+`js_error_lane_payload` supplies the thrown value to the catch parameter.
+Finally saves the in-flight Item, scopes a clean compiler proof for its body,
+and re-raises the
+saved Item unless the finalizer itself throws a new one (which takes
+precedence per spec §13.15.8). A fallback carrier is written into the existing
+try register rather than replacing that register after catch lowering, which
+protects nested-call error identity. `throw` and abrupt
+`return`/`break`/`continue` still inline intervening finalizers and pop
+`with` scopes. `yield_state_only` contexts remain synthetic resume state and
+are skipped by throw/return routing.
 
 **Stack overflow** is the one case that *does* use signals (`lambda/lambda-stack.cpp`, shared with the Lambda runtime). `lambda_stack_init` installs a `SIGSEGV` handler on an alternate stack (`sigaltstack` + `SA_ONSTACK`, `:194`). The core pipeline arms a `sigsetjmp` recovery point and sets `_lambda_recovery_armed` only around the `js_main` call (`js_mir_entrypoints_require.cpp:798`–`:815`). On a fault the handler disambiguates a genuine stack overflow from other segfaults, and — only if armed — `siglongjmp`s back (`lambda-stack.cpp:177`–`:191`); the pipeline then converts the recovery into a normal JS exception via `js_throw_range_error("Maximum call stack size exceeded")` (`js_mir_entrypoints_require.cpp:810`). An unarmed overflow (e.g. during AST build) falls through to a clean default crash rather than jumping into a zero-initialized `jmp_buf`.
 
@@ -151,12 +188,12 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 | File | Responsibility (this doc) |
 |---|---|
 | `lambda/js/js_mir_expression_lowering.cpp` | `jm_transpile_binary`/`_unary`/`_call`/`_condition`/`_conditional`, native arithmetic, short-circuit, `jm_try_fold_const` body, `_raw` facade emission. |
-| `lambda/js/js_mir_statement_lowering.cpp` | `jm_transpile_if`, loops, try/catch/finally, throw, `jm_emit_exc_propagate_check`, `jm_branch_dead_safe`. |
+| `lambda/js/js_mir_statement_lowering.cpp` | `jm_transpile_if`, loops, try/catch/finally, throw, `jm_emit_error_lane_propagate_check`, `jm_branch_dead_safe`. |
 | `lambda/js/js_mir_calls_boxing_types.cpp` | `jm_ensure_import` + `jm_call_*`, inline box/unbox helpers, `jm_box_native`, `jm_is_native_type`, `jm_emit_is_truthy`, `jm_transpile_as_native`. |
 | `lambda/js/js_mir_eval_lowering.cpp` | `js_builtin_eval` tiers, `new Function` / `GeneratorFunction` / `AsyncFunction`. |
 | `lambda/js/js_mir_completion.cpp` | Abrupt-completion cleanup (`jm_emit_abrupt_jump_cleanup`, break/continue). |
 | `lambda/js/js_mir_analysis.cpp` | `jm_gen_spill_save` / `jm_gen_spill_load`. |
-| `lambda/js/js_runtime_state.cpp` | `js_throw_value` / `js_check_exception` / `js_clear_exception`, TDZ/const-assign throwers. |
+| `lambda/js/js_runtime_state.cpp` | `js_throw_value` / `js_error_lane_payload`, TDZ/const-assign throwers. |
 | `lambda/lambda-stack.cpp` | `lambda_stack_init`, SIGSEGV alt-stack handler, `sigsetjmp` recovery. |
 
 ## Appendix B — Related documents

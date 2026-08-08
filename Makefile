@@ -504,7 +504,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar generate-names debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
-    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
+    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
@@ -1190,6 +1190,14 @@ test-jube-node-core-leaves: build
 	@./lambda.exe js test/node/jube_cluster_online_hook.js --no-log | diff -u test/node/jube_cluster_online_hook.txt -
 	@./lambda.exe js test/node/jube_console_formatter_hook.js --no-log | diff -u test/node/jube_console_formatter_hook.txt -
 	@JUBE_MODULE_PATH=./temp/no-node-profile ./lambda.exe js test/node/jube_console_minimal_formatter.js --no-log | diff -u test/node/jube_console_minimal_formatter.txt -
+
+# Tune1's merged Item error lane must preserve identity through nested calls,
+# accessors, primitive throws, finally, and forced collection.
+test-jube-node-error-lane: build
+	@./lambda.exe js test/node/js_tune1_error_lane.js --no-log | diff -u test/node/js_tune1_error_lane.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/js_tune1_error_lane.js --no-log | diff -u test/node/js_tune1_error_lane.txt -
+	@./lambda.exe js test/node/jube_error_ordinary_properties.js --no-log | diff -u test/node/jube_error_ordinary_properties.txt -
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_error_ordinary_properties.js --no-log | diff -u test/node/jube_error_ordinary_properties.txt -
 
 # Static-to-dynamic parity gate. The isolated root deliberately has no
 # module-set file, so node-core cannot be registered from the executable.

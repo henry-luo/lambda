@@ -165,14 +165,15 @@ static void observer_release_transient_roots(JsObserverTarget* target) {
     target->transient_root_count = 0;
 }
 
-static JsObserverState* observer_create(JsObserverKind kind, Item callback) {
+static Item observer_create(JsObserverKind kind, Item callback, JsObserverState** out_observer) {
+    if (!out_observer) return js_throw_type_error("Observer output is unavailable");
+    *out_observer = nullptr;
     if (!js_is_callable(callback)) {
-        js_throw_type_error("Observer callback must be callable");
-        return nullptr;
+        return js_throw_type_error("Observer callback must be callable");
     }
     if (observer_count >= JS_OBSERVER_CAP) {
         log_error("dom-observer: observer capacity %d exhausted", JS_OBSERVER_CAP);
-        return nullptr;
+        return js_status_ok();
     }
     observer_register_roots();
     RootFrame roots(2);
@@ -188,7 +189,8 @@ static JsObserverState* observer_create(JsObserverKind kind, Item callback) {
     // on that object makes the GC ownership match the observable lifetime.
     js_property_set(observer->object, observer_key("__lambdaObserverCallback"), callback_root.get());
     observer_replace_pending(observer);
-    return observer;
+    *out_observer = observer;
+    return js_status_ok();
 }
 
 static bool observer_option_bool(Item options, const char* name) {
@@ -328,8 +330,7 @@ static Item js_mutation_observer_observe(Item target_item, Item options) {
     if (attribute_old_value) attributes = true;
     if (character_data_old_value) character_data = true;
     if (!child_list && !attributes && !character_data) {
-        js_throw_type_error("MutationObserver options must enable a mutation type");
-        return make_js_undefined();
+        return js_throw_type_error("MutationObserver options must enable a mutation type");
     }
     JsObserverTarget* target = observer_find_target(observer, node);
     if (!target) {
@@ -475,21 +476,24 @@ static void observer_install_common_methods(JsObserverState* observer, bool muta
 }
 
 extern "C" Item js_mutation_observer_new(Item callback) {
-    JsObserverState* observer = observer_create(JS_OBSERVER_MUTATION, callback);
+    JsObserverState* observer = nullptr;
+    JS_RETURN_IF_ERROR(observer_create(JS_OBSERVER_MUTATION, callback, &observer));
     if (!observer) return ItemNull;
     observer_install_common_methods(observer, true);
     return observer->object;
 }
 
 extern "C" Item js_resize_observer_new(Item callback) {
-    JsObserverState* observer = observer_create(JS_OBSERVER_RESIZE, callback);
+    JsObserverState* observer = nullptr;
+    JS_RETURN_IF_ERROR(observer_create(JS_OBSERVER_RESIZE, callback, &observer));
     if (!observer) return ItemNull;
     observer_install_common_methods(observer, false);
     return observer->object;
 }
 
 extern "C" Item js_intersection_observer_new(Item callback, Item options) {
-    JsObserverState* observer = observer_create(JS_OBSERVER_INTERSECTION, callback);
+    JsObserverState* observer = nullptr;
+    JS_RETURN_IF_ERROR(observer_create(JS_OBSERVER_INTERSECTION, callback, &observer));
     if (!observer) return ItemNull;
     observer_install_common_methods(observer, false);
     Item root_item = observer_option(options, "root");

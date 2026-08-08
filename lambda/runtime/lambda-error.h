@@ -178,20 +178,50 @@ typedef struct StackFrame {
     struct StackFrame* next;    // next frame (toward main)
 } StackFrame;
 
+// Native return addresses are captured without symbolization.  The debug-info
+// table remains owned by the active script; materialization resolves these
+// addresses only when an error consumer actually asks for a stack.
+typedef struct RawStackTrace {
+    void** return_addresses;
+    int count;
+    int capacity;
+    void* debug_info;
+    int max_frames;
+} RawStackTrace;
+
 // ============================================================================
 // Lambda Error Structure
 // ============================================================================
 
 typedef struct LambdaError {
+    // Keep the object prefix compatible with the runtime's Map/Container
+    // prologue so an ERROR item can cross JS/Lambda boundaries without a
+    // wrapper allocation or a second truth source for its identity.
+    uint8_t type_id;
+    uint8_t flags;
+    uint8_t array_flags;
+    uint8_t prologue_reserved;
+    struct TypeMap* type;
     LambdaErrorCode code;       // error code (e.g., 201)
     bool is_heap;               // true when allocated on the Lambda GC heap
     bool is_static;             // true for pre-reserved fault storage; never free payload
     char* message;              // human-readable message (owned unless is_static)
     SourceLocation location;    // where the error occurred
     StackFrame* stack_trace;    // call stack (if enabled)
+    RawStackTrace* raw_stack_trace; // unresolved native PCs, consumed on materialization
     char* help;                 // suggestion text (owned, optional)
     void* details;              // error-specific details (optional)
     struct LambdaError* cause;  // chained error (optional)
+    uint64_t thrown_value_item; // original non-error JS throw payload, if any
+    uint64_t js_name_item;      // JS-visible name for the merged Error lane
+    uint64_t js_message_item;   // JS-visible message for the merged Error lane
+    uint64_t js_cause_item;     // JS-visible cause, when supplied by JS
+    uint64_t js_stack_item;     // lazily materialized JS-visible stack value
+    // ordinary JS own properties live in a separate Map because this carrier
+    // shares only the Container prologue, not Map's full shape/data layout.
+    uint64_t js_properties_item;
+    uint8_t js_class_id;        // JS built-in class identity for unified Error values
+    uint8_t js_own_flags;       // own-property bits for Error's non-enumerable fields
 } LambdaError;
 
 // C14 system faults use non-allocating records until a recovery frame can
@@ -273,6 +303,10 @@ void err_add_help(LambdaError* error, const char* help);
 void err_set_cause(LambdaError* error, LambdaError* cause);
 
 // Stack trace
+RawStackTrace* err_capture_raw_stack_trace(void* debug_info_list, int max_frames);
+StackFrame* err_materialize_raw_stack_trace(RawStackTrace* raw_trace);
+void err_free_raw_stack_trace(RawStackTrace* raw_trace);
+void err_ensure_stack_trace(LambdaError* error);
 StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames);
 void err_set_stack_trace(LambdaError* error, StackFrame* trace);
 

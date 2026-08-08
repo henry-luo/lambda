@@ -124,7 +124,7 @@ extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
 extern "C" int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
-extern "C" void js_throw_value(Item error);
+extern "C" Item js_throw_value(Item error);
 extern "C" Item js_dom_get_selection_function_for_document(void* doc);
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_object_get_own_property_names(Item object);
@@ -796,22 +796,21 @@ static int64_t js_dom_to_integer_or_zero(Item value) {
     return (int64_t)d;
 }
 
-static void js_dom_throw_index_size_error(const char* message) {
+static Item js_dom_throw_index_size_error(const char* message) {
     Item name = (Item){.item = s2it(heap_create_name("IndexSizeError"))};
     Item msg = (Item){.item = s2it(heap_create_name(
         message ? message : "The index is not in the allowed range."))};
-    js_throw_value(js_new_error_with_name(name, msg));
+    return js_throw_value(js_new_error_with_name(name, msg));
 }
 
-static bool js_dom_replace_text_data(DomText* text_node, uint32_t offset,
+static Item js_dom_replace_text_data(DomText* text_node, uint32_t offset,
                                      uint32_t count, const char* repl_chars) {
-    if (!text_node) return false;
+    if (!text_node) return js_status_ok();
     if (!repl_chars) repl_chars = "";
 
     uint32_t old_u16_len = dom_text_utf16_length(text_node);
     if (offset > old_u16_len) {
-        js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
-        return false;
+        return js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
     }
     uint32_t available = old_u16_len - offset;
     if (count > available) count = available;
@@ -823,7 +822,7 @@ static bool js_dom_replace_text_data(DomText* text_node, uint32_t offset,
         (DomNode*)text_node, text_node->parent);
     if (!dom_text_replace_data_contents(state, text_node, offset, count,
                                         repl_chars, repl_len, repl_u16_len)) {
-        return false;
+        return js_status_ok();
     }
     js_dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
                                   text_node->parent, 0);
@@ -831,7 +830,7 @@ static bool js_dom_replace_text_data(DomText* text_node, uint32_t offset,
                            text_node->parent, nullptr, old_text);
     log_debug("js_dom_replace_text_data: offset=%u count=%u replacement_u16=%u",
               offset, count, repl_u16_len);
-    return true;
+    return js_status_ok();
 }
 
 /**
@@ -1227,9 +1226,6 @@ static void js_dom_compile_event_attr_to_expando(DomElement* elem,
     Item fn = js_new_function_from_string(args, 2);
     if (get_type_id(fn) != LMD_TYPE_FUNC) {
         log_error("js_dom_event_attr: failed to compile %s handler", prop_name);
-        if (js_check_exception()) {
-            (void)js_clear_exception();
-        }
         return;
     }
 
@@ -5033,14 +5029,14 @@ extern "C" void js_dom_focus_if_editing_host_for_selection(void* dom_node) {
     if (old_focus != (View*)elem) js_dom_dispatch_focus_events(elem);
 }
 
-static void js_dom_throw_syntax_error(const char* message) {
+static Item js_dom_throw_syntax_error(const char* message) {
     Item name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
     Item msg = (Item){.item = s2it(heap_create_name(message ? message : "SyntaxError"))};
-    js_throw_value(js_new_error_with_name(name, msg));
+    return js_throw_value(js_new_error_with_name(name, msg));
 }
 
-extern "C" void js_dom_throw_contenteditable_syntax_error(void) {
-    js_dom_throw_syntax_error("Invalid contentEditable value");
+extern "C" Item js_dom_throw_contenteditable_syntax_error(void) {
+    return js_dom_throw_syntax_error("Invalid contentEditable value");
 }
 
 static void _collect_lookup_by_class_rec(DomElement* root, const char* cls, Item collection) {
@@ -6100,8 +6096,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
             // per DOM spec, throw SyntaxError for invalid selectors
             Item err_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
             Item err_msg = (Item){.item = s2it(heap_create_name("is not a valid selector"))};
-            js_throw_value(js_new_error_with_name(err_name, err_msg));
-            return ItemNull;
+            return js_throw_value(js_new_error_with_name(err_name, err_msg));
         }
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(doc);
@@ -7032,8 +7027,7 @@ static Item js_text_control_set_range_text_for_elem(DomElement* elem,
         end = end_i < 0 ? 0 : (uint32_t)end_i;
     }
     if (start > end) {
-        js_dom_throw_index_size_error("The start offset is larger than the end offset.");
-        return make_js_undefined();
+        return js_dom_throw_index_size_error("The start offset is larger than the end offset.");
     }
     if (start > old_value_u16_len) start = old_value_u16_len;
     if (end > old_value_u16_len) end = old_value_u16_len;
@@ -7197,14 +7191,14 @@ static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
     int64_t offset = js_dom_to_integer_or_zero(offset_arg);
     int64_t count = js_dom_to_integer_or_zero(count_arg);
     if (offset < 0 || count < 0) {
-        js_dom_throw_index_size_error("The offset or count is negative.");
-        return make_js_undefined();
+        return js_dom_throw_index_size_error("The offset or count is negative.");
     }
 
     Item data_text_item = js_to_string(data_arg);
     const char* data_text = fn_to_cstr(data_text_item);
     if (!data_text) data_text = "";
-    js_dom_replace_text_data(text_node, (uint32_t)offset, (uint32_t)count, data_text);
+    JS_RETURN_IF_ERROR(js_dom_replace_text_data(text_node, (uint32_t)offset,
+        (uint32_t)count, data_text));
     return make_js_undefined();
 }
 
@@ -7232,13 +7226,11 @@ static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_ar
     int64_t offset = js_dom_to_integer_or_zero(offset_arg);
     int64_t count = js_dom_to_integer_or_zero(count_arg);
     if (offset < 0 || count < 0) {
-        js_dom_throw_index_size_error("The offset or count is negative.");
-        return make_js_undefined();
+        return js_dom_throw_index_size_error("The offset or count is negative.");
     }
     uint32_t old_u16_len = dom_text_utf16_length(text_node);
     if ((uint64_t)offset > old_u16_len) {
-        js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
-        return make_js_undefined();
+        return js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
     }
     uint32_t available = old_u16_len - (uint32_t)offset;
     uint32_t take = (uint64_t)count > available ? available : (uint32_t)count;
@@ -7260,7 +7252,7 @@ extern "C" Item js_dom_set_text_data_property(void* text_ptr, Item value) {
         uint32_t old_u16_len = dom_text_utf16_length(text_node);
         // text data writes must continue through the JS helper because it
         // updates live ranges and publishes the text mutation kind.
-        js_dom_replace_text_data(text_node, 0, old_u16_len, new_text);
+        JS_ASSIGN_OR_RETURN(set_result, js_dom_replace_text_data(text_node, 0, old_u16_len, new_text));
         log_debug("js_dom_set_text_data_property: set text node data='%.30s'", new_text);
     }
     return value;
@@ -10595,7 +10587,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         const char* new_text = js_dom_to_dom_string_cstr(value);
         if (new_text) {
             uint32_t old_u16_len = dom_text_utf16_length(text_node);
-            js_dom_replace_text_data(text_node, 0, old_u16_len, new_text);
+            JS_ASSIGN_OR_RETURN(set_result, js_dom_replace_text_data(text_node, 0, old_u16_len, new_text));
             log_debug("js_dom_set_property: set text node data='%.30s'", new_text);
         }
         return value;
@@ -10722,8 +10714,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         const char* normalized = js_dom_normalize_contenteditable(s);
         if (!normalized) {
             log_debug("js_dom_contentEditable_setter_syntax_error: invalid value '%s'", s);
-            js_dom_throw_syntax_error("Invalid contentEditable value");
-            return value;
+            return js_dom_throw_syntax_error("Invalid contentEditable value");
         }
         if (strcmp(normalized, "inherit") == 0) {
             elem->remove_attribute("contenteditable");
@@ -15309,14 +15300,13 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         // If new_opt is an ancestor of elem, must throw HierarchyRequestError.
         for (DomNode* p = (DomNode*)elem; p; p = p->parent) {
             if ((DomElement*)p == new_opt) {
-                extern void js_throw_value(Item error);
+                extern Item js_throw_value(Item error);
                 extern Item js_new_error_with_name(Item type_name, Item message);
                 Item n = (Item){.item = s2it(heap_create_name("HierarchyRequestError"))};
                 Item m = (Item){.item = s2it(heap_create_name(
                     "Failed to execute 'add' on 'HTMLSelectElement': "
                     "The new child element contains the parent."))};
-                js_throw_value(js_new_error_with_name(n, m));
-                return ItemNull;
+                return js_throw_value(js_new_error_with_name(n, m));
             }
         }
         // before: null/undefined/missing/-1 → append; else if number → option at index;

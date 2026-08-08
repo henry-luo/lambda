@@ -86,6 +86,7 @@ struct JsEventLoopQueueState {
     int microtask_head = 0;
     int microtask_tail = 0;
     int microtask_count = 0;
+    bool microtask_running = false;
 
     Item raf_callback[JS_EVENT_RAF_CAPACITY] = {};
     int64_t raf_id[JS_EVENT_RAF_CAPACITY] = {};
@@ -122,15 +123,6 @@ struct JsRegexpLastMatch {
     int group_count;
     int match_start;
     int match_end;
-};
-
-struct JsExceptionState {
-    bool pending = false;
-    // slots[0] is the GC-visible Item; slots[1] is its scalar payload home.
-    // Keep wide scalar payloads owned by the runtime state rather than in a
-    // standalone GC cell that outlives the throwing activation.
-    Item slots[2] = {};
-    char msg_buf[1024] = {};
 };
 
 typedef void (*JsRootRangeResetFn)(void* owner);
@@ -507,7 +499,7 @@ struct JsGlobalBindingState {
 // Constructor identity is observable (`Array === globalThis.Array`), so these
 // caches must be private to a realm even though construction is infrequent.
 struct JsConstructorCacheState {
-    Item global_builtin_functions[32] = {};
+    Item global_builtin_functions[JS_BUILTIN_GLOBAL_MAX] = {};
     Item constructors[JS_CTOR_MAX] = {};
     Item typed_array_base = {};
     Item typed_array_base_prototype = {};
@@ -585,6 +577,7 @@ struct JsProcessState {
 
 struct JsIteratorState {
     Item generator_return_marker = {};
+    Item generator_throw_marker = {};
     Item iterator_prototype = {};
     Item array_iterator_prototype = {};
     Item string_iterator_prototype = {};
@@ -715,6 +708,7 @@ struct JsPromiseRuntimeState {
     bool unhandled_strict = false;
     JsItemStack domain_stack = {};
     uint64_t record_roots_epoch = 0;
+    int record_roots_count = 0;
     JsRootRange roots = {};
 };
 
@@ -725,6 +719,7 @@ struct JsModule {
     String* specifier = NULL;
     Item namespace_obj = {};
     Item awaited_target = {};
+    Item evaluation_error = {};
     int has_tla = 0;
     int pending_async_deps = 0;
     int async_parent_count = 0;
@@ -1105,7 +1100,6 @@ struct JsRuntimeState {
     bool resolving_object_proto = false;
     bool private_field_initializing = false;
     bool eval_initializer_context = false;
-    JsExceptionState exception = {};
     int pending_args_is_strict = 0;
     Item pending_args_callee = {0};
 
@@ -1176,10 +1170,6 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_private_field_initializing (js_runtime_state.private_field_initializing)
 #define js_eval_initializer_context (js_runtime_state.eval_initializer_context)
 #define js_deferred_instance_field_class (js_runtime_state.operations.deferred_instance_field_class)
-#define js_exception_pending (js_runtime_state.exception.pending)
-#define js_exception_slots (js_runtime_state.exception.slots)
-#define js_exception_value (js_exception_slots[0])
-#define js_exception_msg_buf (js_runtime_state.exception.msg_buf)
 #define js_pending_args_is_strict (js_runtime_state.pending_args_is_strict)
 #define js_pending_args_callee (js_runtime_state.pending_args_callee)
 #define _trace_last_fn (js_runtime_state.trace_last_fn)

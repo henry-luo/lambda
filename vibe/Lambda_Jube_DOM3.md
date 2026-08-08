@@ -333,7 +333,8 @@ typedef struct JubeTypeBinding {
 } JubeTypeBinding;
 ```
 
-Handlers return status ints under the pending-exception model, matching `JubeHostObjectOps`.
+Handlers return status ints; any abrupt completion remains the returned ERROR
+`Item` under D8.4.3, matching `JubeHostObjectOps` without a pending flag.
 Same-name members with different `applies_to`/`guard` are legal; **declaration order is
 resolution order** (first matching guard wins), preserving today's ordering-dependent overloads
 (`<select>.remove(index)` before `ChildNode.remove()`, js_dom.cpp:12550) as visible data.

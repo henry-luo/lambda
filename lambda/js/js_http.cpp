@@ -44,7 +44,7 @@ extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_
 extern "C" void js_async_hooks_emit_destroy_resource(Item resource);
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
-extern "C" void js_throw_value(Item error);
+extern "C" Item js_throw_value(Item error);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_symbol_for(Item key);
 extern Item js_make_number(double d);
@@ -231,8 +231,7 @@ static Item http_throw_invalid_status_code(Item status_item) {
     snprintf(message, sizeof(message), "Invalid status code: %s", display);
     Item err = js_new_error_with_name(make_string_item("RangeError"), make_string_item(message));
     js_property_set(err, make_string_item("code"), make_string_item("ERR_HTTP_INVALID_STATUS_CODE"));
-    js_throw_value(err);
-    return ItemNull;
+    return js_throw_value(err);
 }
 
 static bool http_status_code_is_valid(Item status_item, int* out_status) {
@@ -1220,9 +1219,9 @@ static int http_append_header_value(char* resp_buf, int pos, int cap, Item name,
 
 static void http_response_set_header_pair(Item self, Item name_item, Item value_item) {
     Item name = http_validate_header_name(name_item);
-    if (js_check_exception() || name.item == 0) return;
+    if (item_is_error(name) || name.item == 0) return;
     Item value = http_validate_header_value(name, value_item);
-    if (js_check_exception() || value.item == 0) return;
+    if (item_is_error(value) || value.item == 0) return;
 
     Item headers = js_property_get(self, make_string_item("__headers__"));
     if (get_type_id(headers) != LMD_TYPE_MAP) {
@@ -1236,9 +1235,9 @@ static void http_response_set_header_pair(Item self, Item name_item, Item value_
 
 static void http_response_append_raw_header_pair(Item self, Item name_item, Item value_item) {
     Item name = http_validate_header_name(name_item);
-    if (js_check_exception() || name.item == 0) return;
+    if (item_is_error(name) || name.item == 0) return;
     Item value = http_validate_header_value(name, value_item);
-    if (js_check_exception() || value.item == 0) return;
+    if (item_is_error(value) || value.item == 0) return;
 
     Item headers = js_property_get(self, make_string_item("__headers__"));
     if (get_type_id(headers) != LMD_TYPE_MAP) {
@@ -5188,45 +5187,40 @@ static Item http_client_make_request_object(JsHttpClientReq* creq,
     return obj;
 }
 
-static bool http_client_validate_header_pair(Item name_item, Item value_item) {
-    if (get_type_id(name_item) != LMD_TYPE_STRING) return true;
+static Item http_client_validate_header_pair(Item name_item, Item value_item) {
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return js_status_ok();
     String* name = it2s(name_item);
     if (http_header_name_equals(name, "host", 4) &&
         get_type_id(value_item) == LMD_TYPE_ARRAY) {
-        js_throw_invalid_arg_type("options.headers.host", "string", value_item);
-        return false;
+        return js_throw_invalid_arg_type("options.headers.host", "string", value_item);
     }
-    return true;
+    return js_status_ok();
 }
 
-static bool http_client_validate_headers(Item headers_item) {
+static Item http_client_validate_headers(Item headers_item) {
     if (get_type_id(headers_item) == LMD_TYPE_MAP) {
-        Item keys = js_object_keys(headers_item);
+        JS_ASSIGN_OR_RETURN(keys, js_object_keys(headers_item));
         int64_t nkeys = js_array_length(keys);
         for (int64_t i = 0; i < nkeys; i++) {
             Item k = js_array_get_int(keys, i);
-            if (!http_client_validate_header_pair(k, js_property_get(headers_item, k))) {
-                return false;
-            }
+            JS_ASSIGN_OR_RETURN(value, js_property_get(headers_item, k));
+            JS_RETURN_IF_ERROR(http_client_validate_header_pair(k, value));
         }
     } else if (get_type_id(headers_item) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(headers_item);
         for (int64_t i = 0; i < len; i++) {
             Item entry = js_array_get_int(headers_item, i);
             if (get_type_id(entry) == LMD_TYPE_ARRAY && js_array_length(entry) >= 2) {
-                if (!http_client_validate_header_pair(js_array_get_int(entry, 0),
-                                                      js_array_get_int(entry, 1))) {
-                    return false;
-                }
+                JS_RETURN_IF_ERROR(http_client_validate_header_pair(
+                    js_array_get_int(entry, 0), js_array_get_int(entry, 1)));
             } else if (i + 1 < len) {
-                if (!http_client_validate_header_pair(entry, js_array_get_int(headers_item, i + 1))) {
-                    return false;
-                }
+                JS_RETURN_IF_ERROR(http_client_validate_header_pair(
+                    entry, js_array_get_int(headers_item, i + 1)));
                 i++;
             }
         }
     }
-    return true;
+    return js_status_ok();
 }
 
 static int http_client_append_header_line(char* req_str, int rlen, int cap,
@@ -5536,7 +5530,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
                 js_property_get(options_item, make_string_item("password")));
         }
     }
-    if (!http_client_validate_headers(custom_headers)) return ItemNull;
+    JS_ASSIGN_OR_RETURN(headers_status, http_client_validate_headers(custom_headers));
 
     int rlen = snprintf(req_str, sizeof(req_str),
         "%s %s HTTP/1.1\r\n", method_buf, path_buf);
@@ -5933,15 +5927,15 @@ extern "C" Item js_http_agent_addRequest(Item request, Item options,
     } else {
         agent_options_root.set(js_property_get(agent_root.get(), make_string_item("options")));
         Item sources[2] = { options_root.get(), agent_options_root.get() };
-        js_object_assign(normalized_root.get(), sources, 2);
-        if (js_check_exception()) return ItemNull;
+        JS_ASSIGN_OR_RETURN(assign_result, js_object_assign(normalized_root.get(), sources, 2));
     }
 
     Item get_name = js_property_get(agent_root.get(), make_string_item("getName"));
     if (get_type_id(get_name) != LMD_TYPE_FUNC) return make_js_undefined();
     Item get_name_args[1] = { normalized_root.get() };
     name_root.set(js_call_function(get_name, agent_root.get(), get_name_args, 1));
-    if (js_check_exception() || get_type_id(name_root.get()) != LMD_TYPE_STRING) return ItemNull;
+    if (item_is_error(name_root.get())) return name_root.get();
+    if (get_type_id(name_root.get()) != LMD_TYPE_STRING) return ItemNull;
 
     Item sockets = js_property_get(agent_root.get(), make_string_item("sockets"));
     if (get_type_id(sockets) != LMD_TYPE_MAP) {
@@ -5973,7 +5967,7 @@ extern "C" Item js_http_agent_addRequest(Item request, Item options,
         }
         Item connection_args[1] = { normalized_root.get() };
         socket_root.set(js_call_function(create_connection, agent_root.get(), connection_args, 1));
-        if (js_check_exception()) return ItemNull;
+        if (item_is_error(socket_root.get())) return socket_root.get();
     }
 
     js_array_push(active, socket_root.get());

@@ -214,8 +214,7 @@ static bool js_eval_at_line_terminator(const char* source, size_t len, size_t po
 extern "C" void js_set_function_name(Item fn_item, Item name_item);
 
 static Item js_dynamic_function_throw_syntax_error(const char* message) {
-    js_throw_syntax_error((Item){.item = s2it(heap_create_name(message, (int)strlen(message)))});
-    return ItemNull;
+    return js_throw_syntax_error((Item){.item = s2it(heap_create_name(message, (int)strlen(message)))});
 }
 
 static bool js_dynfunc_stats_is_enabled(void) {
@@ -666,6 +665,12 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         String* ps = it2s(args[i]);
         if (!ps) {
             Item str_item = js_to_string(args[i]);
+            // new Function applies ToString before parsing; an abrupt conversion
+            // must escape instead of being misreported as a source SyntaxError.
+            if (item_is_error(str_item)) {
+                strbuf_free(sb);
+                return str_item;
+            }
             ps = it2s(str_item);
         }
         if (ps && ps->len > 0) {
@@ -691,6 +696,11 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     String* body = (argc > 0) ? it2s(args[argc - 1]) : NULL;
     if (!body && argc > 0) {
         Item str_item = js_to_string(args[argc - 1]);
+        // preserve an abrupt body ToString before any dynamic-source parsing.
+        if (item_is_error(str_item)) {
+            strbuf_free(sb);
+            return str_item;
+        }
         body = it2s(str_item);
     }
     if (body && body->len > 0) {
@@ -771,8 +781,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     if (early_errors > 0) {
         js_transpiler_destroy(tp);
         mem_free(source);
-        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid function source", 23))});
-        return ItemNull;
+        return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid function source", 23))});
     }
 
     // Use optimize level 0 for dynamic code (eval/new Function) — small snippets
@@ -1205,28 +1214,26 @@ static JsEvalInitializerScan js_eval_scan_initializer_source(const char* source,
     return scan;
 }
 
-static bool js_eval_initializer_early_error(String* code_str, bool is_direct_eval) {
-    if ((!js_private_field_initializing && !js_eval_initializer_context) || !code_str) return false;
+static Item js_eval_initializer_early_error(String* code_str, bool is_direct_eval) {
+    if ((!js_private_field_initializing && !js_eval_initializer_context) || !code_str) return js_status_ok();
     JsEvalInitializerScan scan = js_eval_scan_initializer_source(code_str->chars, code_str->len);
     if ((is_direct_eval && scan.contains_arguments) || (!is_direct_eval && scan.contains_new_target) ||
         scan.contains_super_call || (!is_direct_eval && scan.contains_super_property)) {
-        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval in class field initializer", 39))});
-        return true;
+        return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval in class field initializer", 39))});
     }
-    return false;
+    return js_status_ok();
 }
 
-static bool js_eval_var_conflicts_lexical_name(String* name) {
-    if (!name || name->len <= 0) return false;
+static Item js_eval_var_conflicts_lexical_name(String* name) {
+    if (!name || name->len <= 0) return js_status_ok();
     extern int64_t js_eval_local_has_lexical_binding(Item key);
     Item key = (Item){.item = s2it(heap_create_name(name->chars, name->len))};
-    if (!js_eval_local_has_lexical_binding(key)) return false;
-    js_throw_syntax_error((Item){.item = s2it(heap_create_name("Eval var conflicts with lexical declaration", 43))});
-    return true;
+    if (!js_eval_local_has_lexical_binding(key)) return js_status_ok();
+    return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Eval var conflicts with lexical declaration", 43))});
 }
 
-static bool js_eval_var_conflicts_lexical_pattern(JsAstNode* node) {
-    if (!node) return false;
+static Item js_eval_var_conflicts_lexical_pattern(JsAstNode* node) {
+    if (!node) return js_status_ok();
     switch (node->node_type) {
         case JS_AST_NODE_IDENTIFIER:
             return js_eval_var_conflicts_lexical_name(((JsIdentifierNode*)node)->name);
@@ -1237,42 +1244,42 @@ static bool js_eval_var_conflicts_lexical_pattern(JsAstNode* node) {
             return js_eval_var_conflicts_lexical_pattern(((JsSpreadElementNode*)node)->argument);
         case JS_AST_NODE_ARRAY_PATTERN:
             for (JsAstNode* e = ((JsArrayPatternNode*)node)->elements; e; e = e->next) {
-                if (js_eval_var_conflicts_lexical_pattern(e)) return true;
+                JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_pattern(e));
             }
             break;
         case JS_AST_NODE_OBJECT_PATTERN:
             for (JsAstNode* p = ((JsObjectPatternNode*)node)->properties; p; p = p->next) {
                 if (p->node_type == JS_AST_NODE_PROPERTY) {
-                    if (js_eval_var_conflicts_lexical_pattern(((JsPropertyNode*)p)->value)) return true;
-                } else if (js_eval_var_conflicts_lexical_pattern(p)) {
-                    return true;
+                    JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_pattern(((JsPropertyNode*)p)->value));
+                } else {
+                    JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_pattern(p));
                 }
             }
             break;
         default:
             break;
     }
-    return false;
+    return js_status_ok();
 }
 
-static bool js_eval_var_conflicts_lexical_statement(JsAstNode* node);
+static Item js_eval_var_conflicts_lexical_statement(JsAstNode* node);
 
-static bool js_eval_var_conflicts_lexical_statements(JsAstNode* stmt) {
+static Item js_eval_var_conflicts_lexical_statements(JsAstNode* stmt) {
     for (; stmt; stmt = stmt->next) {
-        if (js_eval_var_conflicts_lexical_statement(stmt)) return true;
+        JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(stmt));
     }
-    return false;
+    return js_status_ok();
 }
 
-static bool js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
-    if (!node) return false;
+static Item js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
+    if (!node) return js_status_ok();
     switch (node->node_type) {
         case JS_AST_NODE_VARIABLE_DECLARATION: {
             JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
-            if (vd->kind != JS_VAR_VAR) return false;
+            if (vd->kind != JS_VAR_VAR) return js_status_ok();
             for (JsAstNode* d = vd->declarations; d; d = d->next) {
                 if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
-                if (js_eval_var_conflicts_lexical_pattern(((JsVariableDeclaratorNode*)d)->id)) return true;
+                JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_pattern(((JsVariableDeclaratorNode*)d)->id));
             }
             break;
         }
@@ -1282,8 +1289,8 @@ static bool js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
             return js_eval_var_conflicts_lexical_statements(((JsBlockNode*)node)->statements);
         case JS_AST_NODE_IF_STATEMENT: {
             JsIfNode* in = (JsIfNode*)node;
-            return js_eval_var_conflicts_lexical_statement(in->consequent) ||
-                js_eval_var_conflicts_lexical_statement(in->alternate);
+            JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(in->consequent));
+            return js_eval_var_conflicts_lexical_statement(in->alternate);
         }
         case JS_AST_NODE_WHILE_STATEMENT:
             return js_eval_var_conflicts_lexical_statement(((JsWhileNode*)node)->body);
@@ -1291,28 +1298,29 @@ static bool js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
             return js_eval_var_conflicts_lexical_statement(((JsDoWhileNode*)node)->body);
         case JS_AST_NODE_FOR_STATEMENT: {
             JsForNode* fn = (JsForNode*)node;
-            return js_eval_var_conflicts_lexical_statement(fn->init) ||
-                js_eval_var_conflicts_lexical_statement(fn->body);
+            JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(fn->init));
+            return js_eval_var_conflicts_lexical_statement(fn->body);
         }
         case JS_AST_NODE_FOR_IN_STATEMENT:
         case JS_AST_NODE_FOR_OF_STATEMENT: {
             JsForOfNode* fo = (JsForOfNode*)node;
-            return js_eval_var_conflicts_lexical_statement(fo->left) ||
-                js_eval_var_conflicts_lexical_statement(fo->body);
+            JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(fo->left));
+            return js_eval_var_conflicts_lexical_statement(fo->body);
         }
         case JS_AST_NODE_SWITCH_STATEMENT: {
             JsSwitchNode* sw = (JsSwitchNode*)node;
             for (JsAstNode* c = sw->cases; c; c = c->next) {
                 if (c->node_type != JS_AST_NODE_SWITCH_CASE) continue;
-                if (js_eval_var_conflicts_lexical_statements(((JsSwitchCaseNode*)c)->consequent)) return true;
+                JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statements(((JsSwitchCaseNode*)c)->consequent));
             }
             break;
         }
         case JS_AST_NODE_TRY_STATEMENT: {
             JsTryNode* tn = (JsTryNode*)node;
-            return js_eval_var_conflicts_lexical_statement(tn->block) ||
-                js_eval_var_conflicts_lexical_statement(tn->handler) ||
-                js_eval_var_conflicts_lexical_statement(tn->finalizer);
+            JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(tn->block));
+            status = js_eval_var_conflicts_lexical_statement(tn->handler);
+            if (item_is_error(status)) return status;
+            return js_eval_var_conflicts_lexical_statement(tn->finalizer);
         }
         case JS_AST_NODE_CATCH_CLAUSE:
             return js_eval_var_conflicts_lexical_statement(((JsCatchNode*)node)->body);
@@ -1321,11 +1329,11 @@ static bool js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
         default:
             break;
     }
-    return false;
+    return js_status_ok();
 }
 
-static bool js_eval_var_conflicts_lexical_program(JsAstNode* ast) {
-    if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return false;
+static Item js_eval_var_conflicts_lexical_program(JsAstNode* ast) {
+    if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return js_status_ok();
     return js_eval_var_conflicts_lexical_statements(((JsProgramNode*)ast)->body);
 }
 
@@ -1508,9 +1516,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         return (Item){.item = native_probe_value ? b2it(true) : ITEM_JS_UNDEFINED};
     }
 
-    if (js_eval_initializer_early_error(code_str, is_direct_eval)) {
-        return ItemNull;
-    }
+    JS_ASSIGN_OR_RETURN(initializer_status, js_eval_initializer_early_error(code_str, is_direct_eval));
 
     // Check for whitespace/comment-only code — should return undefined
     {
@@ -1588,12 +1594,10 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
     Item fn_item = ItemNull;
 
     if (is_direct_eval && inherited_strict && js_eval_source_assigns_immutable_binding(code_str)) {
-        js_throw_type_error("Assignment to constant variable");
-        return ItemNull;
+        return js_throw_type_error("Assignment to constant variable");
     }
     if (is_direct_eval && inherited_strict && js_eval_strict_assigns_restricted_name(code_str)) {
-        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid strict eval assignment", 30))});
-        return ItemNull;
+        return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid strict eval assignment", 30))});
     }
 
     // v37: Phase A — try expression form for single-expression eval code.
@@ -1720,9 +1724,9 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             Item body_item = (Item){.item = s2it(heap_create_name(body, total - 1))};
             mem_free(body);
             fn_item = js_new_function_from_string(&body_item, 1);
-            if (js_check_exception()) {
+            if (item_is_error(fn_item)) {
                 js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
-                return ItemNull;
+                return fn_item;
             }
         }
     }
@@ -1736,7 +1740,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         extern Item js_get_lexical_this_binding();
         Item eval_this = js_get_lexical_this_binding();
         Item result = js_call_function(fn_item, eval_this, NULL, 0);
-        if (js_check_exception()) js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
+        if (item_is_error(result)) js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
         return result;
     }
 
@@ -1762,8 +1766,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
             // Dynamic eval surfaces parser diagnostics through SyntaxError;
             // the REPL uses the same location to render the source caret.
-            js_throw_syntax_error(syntax_message);
-            return ItemNull;
+            return js_throw_syntax_error(syntax_message);
         }
 
         TSNode root = ts_tree_root_node(tp->tree);
@@ -1777,12 +1780,14 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         int early_errors = js_check_early_errors(tp, js_ast);
         if (early_errors > 0) {
             js_transpiler_destroy(tp);
-            js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval source", 19))});
-            return ItemNull;
+            return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval source", 19))});
         }
-        if (is_direct_eval && !inherited_strict && js_eval_var_conflicts_lexical_program(js_ast)) {
-            js_transpiler_destroy(tp);
-            return ItemNull;
+        if (is_direct_eval && !inherited_strict) {
+            Item conflict_status = js_eval_var_conflicts_lexical_program(js_ast);
+            if (item_is_error(conflict_status)) {
+                js_transpiler_destroy(tp);
+                return conflict_status;
+            }
         }
 
         // Use optimize level 0 for eval code — small snippets don't benefit
@@ -1914,7 +1919,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         }
 
         Item result = js_main_fn((Context*)context);
-        if (js_check_exception()) js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
+        if (item_is_error(result)) js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
 
         if (js_eval_fresh_module_scope) {
             js_set_active_module_state_id(js_eval_prev_module_state_id);

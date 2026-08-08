@@ -146,12 +146,14 @@ typedef struct JsMirTdzClosureCapture {
     const char* name;   // NamePool-owned binding name
 } JsMirTdzClosureCapture;
 
-typedef enum JsExcTrack {
-    JS_EXC_UNKNOWN = 0,
-    JS_EXC_CLEAN,
-    JS_EXC_SET,
-    JS_EXC_UNREACHABLE,
-} JsExcTrack;
+typedef enum JsErrorLaneTrack {
+    // D8.4.3: compiler dataflow for the last returned Item, never ambient
+    // runtime exception state.
+    JS_ERROR_LANE_UNKNOWN = 0,
+    JS_ERROR_LANE_CLEAN,
+    JS_ERROR_LANE_SET,
+    JS_ERROR_LANE_UNREACHABLE,
+} JsErrorLaneTrack;
 
 // Loop label pair for break/continue
 struct JsLoopLabels {
@@ -371,8 +373,9 @@ struct JsTryContext {
     bool yield_state_only;       // synthetic ctx solely for yield-resume re-init of state regs;
                                  // invisible to throw/return routing (skip in stack walks)
     JsAstNode* finally_body;     // v18: AST of finally block for inlining before break/continue
-    MIR_reg_t saved_exc_flag_reg; // generator finally: pending-exception flag saved before finalizer
-    MIR_reg_t saved_exc_val_reg;  // generator finally: pending-exception value saved before finalizer
+    MIR_reg_t saved_error_lane_flag_reg; // generator finally: routed ERROR tag saved before finalizer
+    MIR_reg_t saved_error_lane_val_reg;  // generator finally: routed ERROR Item saved before finalizer
+    MIR_reg_t incoming_error_lane_val_reg; // routed ERROR Item handed to catch/finally
 };
 
 // A call/new expression owns one fixed argument-root extent inside its
@@ -518,10 +521,17 @@ struct JsMirTranspiler {
     int gen_spill_slot_next;         // next available spill slot in env (for temporaries across yields)
     int gen_active_iterator_slot;    // iterator to close if generator.return interrupts destructuring
 
-    // Exception propagation: label to jump to when an exception is detected outside a try block.
-    // Lazily created when first needed within a function body. Jumps to this label → return null.
-    MIR_label_t func_except_label;   // 0 if not yet created for current function
-    JsExcTrack exc_track;
+    // D8.4.3: route a returned ERROR Item outside a lexical try to this
+    // lazily-created function exit; no flag is polled or cleared.
+    MIR_label_t func_error_lane_label;   // 0 if not yet created for current function
+    JsErrorLaneTrack error_lane_track;
+    // The transition emitter remembers the most recent boxed call result so
+    // in-band mode can test its ERROR tag without issuing a separate poll.
+    MIR_reg_t last_call_result_reg;
+    // A function-level exceptional edge must retain the exact Item that
+    // triggered the branch; later cleanup emitted on the normal path may
+    // legitimately replace last_call_result_reg before the landing pad.
+    MIR_reg_t func_error_lane_value_reg;
 
     JsMirArgStackScope* arg_stack_scope; // active call/new argument extent, if any
     MIR_reg_t arg_frame_base;

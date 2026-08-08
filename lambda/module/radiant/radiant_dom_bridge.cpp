@@ -162,7 +162,6 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_get_ui_context radiant_host_api->dom->get_ui_context
 #define js_dom_has_committed_geometry_snapshot radiant_host_api->dom->has_committed_geometry_snapshot
 #define js_call_function radiant_host_api->script->call_function
-#define js_check_exception radiant_host_api->script->check_exception
 
 static const int RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE = 4096;
 static const char s_radiant_dom_vmap_type_marker = 0;
@@ -2238,8 +2237,7 @@ RADIANT_C_API int radiant_dom_m4b_content_editable_set(Item r, Item v, Item* out
     } else {
         const char* normalized = radiant_dom_normalize_contenteditable(text);
         if (!normalized) {
-            js_dom_throw_contenteditable_syntax_error();
-            *out = v;
+            *out = js_dom_throw_contenteditable_syntax_error();
             return 1;
         }
         if (strcmp(normalized, "inherit") == 0) {
@@ -2302,11 +2300,13 @@ static Item radiant_dom_input_files_get(DomElement* elem) {
     return files;
 }
 
-static void radiant_dom_input_throw(const char* name, const char* message) {
+static Item radiant_dom_input_throw(const char* name, const char* message) {
     Item error = radiant_host_api->script->new_error_with_name(
         (Item){.item = s2it(heap_create_name(name))},
         (Item){.item = s2it(heap_create_name(message))});
-    radiant_host_api->script->throw_value(error);
+    // the host ABI carries exceptions in the returned Item; discarding this
+    // lane would let a rejected DOM setter continue as a successful write.
+    return radiant_host_api->script->throw_value(error);
 }
 
 RADIANT_C_API int radiant_dom_input_type_get(Item r, Item* out) {
@@ -2369,8 +2369,9 @@ RADIANT_C_API int radiant_dom_input_typed_value_set(Item r, Item v, Item* out) {
     if (kind == RADIANT_INPUT_VALUE_FILE) {
         if (text[0]) {
             // File inputs cannot manufacture host paths from script-provided text.
-            radiant_dom_input_throw("InvalidStateError",
-                                    "File input value can only be set to the empty string");
+            *out = radiant_dom_input_throw("InvalidStateError",
+                                          "File input value can only be set to the empty string");
+            return 1;
         } else {
             radiant_input_set_files(elem, radiant_dom_input_empty_file_list());
         }
@@ -2399,12 +2400,14 @@ RADIANT_C_API int radiant_dom_input_value_as_number_set(Item r, Item v, Item* ou
     double number = radiant_host_api->script->get_number(v);
     char formatted[128];
     if (!isfinite(number)) {
-        radiant_dom_input_throw("TypeError", "valueAsNumber must be finite");
+        *out = radiant_dom_input_throw("TypeError", "valueAsNumber must be finite");
+        return 1;
     } else if (!radiant_input_value_from_number(
                    elem->get_attribute("type"), number,
                    formatted, sizeof(formatted))) {
-        radiant_dom_input_throw("InvalidStateError",
-                                "This input type has no numeric value state");
+        *out = radiant_dom_input_throw("InvalidStateError",
+                                      "This input type has no numeric value state");
+        return 1;
     } else {
         radiant_input_set_live_value(elem, formatted);
     }
@@ -2432,12 +2435,14 @@ RADIANT_C_API int radiant_dom_input_value_as_date_set(Item r, Item v, Item* out)
     if (!elem || !out) return 0;
     const char* type = elem->get_attribute("type");
     if (!radiant_input_value_as_date_supported(type)) {
-        radiant_dom_input_throw("InvalidStateError",
-                                "This input type has no Date value state");
+        *out = radiant_dom_input_throw("InvalidStateError",
+                                      "This input type has no Date value state");
+        return 1;
     } else if (v.item == ITEM_NULL) {
         radiant_input_set_live_value(elem, "");
     } else if (radiant_host_api->script->class_id(v) != JS_CLASS_DATE) {
-        radiant_dom_input_throw("TypeError", "valueAsDate requires a Date or null");
+        *out = radiant_dom_input_throw("TypeError", "valueAsDate requires a Date or null");
+        return 1;
     } else {
         Item time = radiant_host_api->script->date_method(v, 0);
         double number = radiant_host_api->script->get_number(time);
@@ -2476,7 +2481,8 @@ RADIANT_C_API int radiant_dom_input_files_set_member(Item r, Item v, Item* out) 
         // arbitrary Array would let script bypass the file-input security model.
         radiant_input_set_files(elem, v);
     } else {
-        radiant_dom_input_throw("TypeError", "files must be a FileList or null");
+        *out = radiant_dom_input_throw("TypeError", "files must be a FileList or null");
+        return 1;
     }
     *out = v;
     return 1;
@@ -2491,7 +2497,8 @@ RADIANT_C_API int radiant_dom_input_step_up(Item r, Item* args, int argc, Item* 
             radiant_input_live_value(elem), elem->get_attribute("min"),
             elem->get_attribute("max"), elem->get_attribute("step"),
             count, stepped, sizeof(stepped))) {
-        radiant_dom_input_throw("InvalidStateError", "Input value cannot be stepped");
+        *out = radiant_dom_input_throw("InvalidStateError", "Input value cannot be stepped");
+        return 1;
     } else {
         radiant_input_set_live_value(elem, stepped);
     }
@@ -4199,10 +4206,10 @@ RADIANT_C_API int radiant_dom_foreign_document_method(Item object,
     void* prev = js_dom_swap_active_document(foreign_doc);
     Item result = js_document_proxy_method(method_name, args, argc);
     js_dom_restore_active_document(prev);
-    if (result.item == ItemNull.item && !js_check_exception()) {
+    if (result.item == ItemNull.item) {
         Item fallback = radiant_dom_call_foreign_window_global_method(
             object, foreign_doc, method_name, args, argc);
-        if (fallback.item != ItemNull.item || js_check_exception()) {
+        if (fallback.item != ItemNull.item || item_is_error(fallback)) {
             *out = fallback;
             return 1;
         }

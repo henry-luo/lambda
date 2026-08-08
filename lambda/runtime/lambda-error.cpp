@@ -275,10 +275,26 @@ static LambdaError* err_init(LambdaError* error, LambdaErrorCode code, const cha
                              SourceLocation* location, bool is_heap) {
     if (!error) return NULL;
 
+    error->type_id = LMD_TYPE_MAP;
+    error->flags = 0;
+    error->array_flags = 0;
+    // the shared error prologue is a resting-state Map; reserve its map-kind
+    // byte so JS property paths can recognize the struct without probing data.
+    error->prologue_reserved = MAP_KIND_ERROR;
+    error->type = NULL;
     error->code = code;
     error->is_heap = is_heap;
     error->is_static = false;
+    error->thrown_value_item = 0;
+    error->js_name_item = 0;
+    error->js_message_item = 0;
+    error->js_cause_item = 0;
+    error->js_stack_item = 0;
+    error->js_properties_item = 0;
+    error->js_class_id = 0;
+    error->js_own_flags = 0;
     error->message = message ? err_strdup(message) : err_strdup(err_code_message(code));
+    error->raw_stack_trace = NULL;
 
     if (location) {
         error->location = *location;
@@ -373,6 +389,19 @@ void lambda_fault_record_prepare(LambdaFaultRecord* record,
     record->prior_error_code = prior_error_code;
     record->active = reason != LAMBDA_FAULT_NONE;
     record->error.code = lambda_fault_error_code(reason);
+    record->error.type_id = LMD_TYPE_MAP;
+    record->error.flags = 0;
+    record->error.array_flags = 0;
+    record->error.prologue_reserved = 0;
+    record->error.type = NULL;
+    record->error.raw_stack_trace = NULL;
+    record->error.thrown_value_item = 0;
+    record->error.js_name_item = 0;
+    record->error.js_message_item = 0;
+    record->error.js_cause_item = 0;
+    record->error.js_stack_item = 0;
+    record->error.js_class_id = 0;
+    record->error.js_own_flags = 0;
     // A recovery landing exposes this embedded error through Context::last_error.
     // It must never be released as an ordinary heap/system error after OOM.
     record->error.is_static = true;
@@ -413,6 +442,10 @@ void err_set_cause(LambdaError* error, LambdaError* cause) {
 
 void err_set_stack_trace(LambdaError* error, StackFrame* trace) {
     if (!error) return;
+    if (error->raw_stack_trace) {
+        err_free_raw_stack_trace(error->raw_stack_trace);
+        error->raw_stack_trace = NULL;
+    }
     error->stack_trace = trace;
 }
 
@@ -717,12 +750,108 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
     return result;
 }
 
+RawStackTrace* err_capture_raw_stack_trace(void* debug_info_list, int max_frames) {
+    if (max_frames <= 0) max_frames = 64;
+    // The frame walk is a bounded diagnostic path; clamp before multiplying so
+    // a hostile stackTraceLimit cannot wrap the allocation capacity.
+    if (max_frames > 128) max_frames = 128;
+    int capacity = max_frames * 8;
+    if (capacity < max_frames || capacity > 1024) capacity = 1024;
+
+    RawStackTrace* trace = (RawStackTrace*)mem_calloc(1, sizeof(RawStackTrace), MEM_CAT_SYSTEM);
+    if (!trace) return NULL;
+    trace->return_addresses = (void**)mem_calloc((size_t)capacity, sizeof(void*), MEM_CAT_SYSTEM);
+    if (!trace->return_addresses) {
+        mem_free(trace);
+        return NULL;
+    }
+    trace->capacity = capacity;
+    trace->debug_info = debug_info_list;
+    trace->max_frames = max_frames;
+
+    void* fp = get_frame_pointer();
+    if (!fp) return trace;
+    void* stack_top = NULL;
+    void* stack_bottom = NULL;
+    get_stack_bounds(&stack_top, &stack_bottom);
+    void** frame_ptr = (void**)fp;
+    while (frame_ptr && trace->count < trace->capacity) {
+        uintptr_t fp_addr = (uintptr_t)frame_ptr;
+        if ((fp_addr & 0x7) != 0 || (void*)frame_ptr < stack_top ||
+                (void*)frame_ptr >= stack_bottom) {
+            break;
+        }
+        void* return_addr = frame_ptr[1];
+        void* prev_fp = frame_ptr[0];
+        if (return_addr) trace->return_addresses[trace->count++] = return_addr;
+        if (!prev_fp || (uintptr_t)prev_fp <= (uintptr_t)frame_ptr) break;
+        frame_ptr = (void**)prev_fp;
+    }
+    return trace;
+}
+
+void err_free_raw_stack_trace(RawStackTrace* raw_trace) {
+    if (!raw_trace) return;
+    if (raw_trace->return_addresses) mem_free(raw_trace->return_addresses);
+    mem_free(raw_trace);
+}
+
+StackFrame* err_materialize_raw_stack_trace(RawStackTrace* raw_trace) {
+    if (!raw_trace) return NULL;
+    StackFrame* result = NULL;
+    StackFrame** tail = &result;
+    int visible_count = 0;
+    for (int i = 0; i < raw_trace->count && visible_count < raw_trace->max_frames; i++) {
+        void* return_addr = raw_trace->return_addresses[i];
+        FuncDebugInfo* info = lookup_debug_info(raw_trace->debug_info, return_addr);
+        if (info) {
+            StackFrame* frame = (StackFrame*)mem_calloc(1, sizeof(StackFrame), MEM_CAT_SYSTEM);
+            if (!frame) break;
+            frame->function_name = info->lambda_func_name;
+            frame->location.file = info->source_file;
+            frame->location.line = info->source_line;
+            frame->is_native = false;
+            *tail = frame;
+            tail = &frame->next;
+            visible_count++;
+            continue;
+        }
+#if defined(__APPLE__) || defined(__linux__)
+        Dl_info dl_info;
+        if (dladdr(return_addr, &dl_info) && dl_info.dli_sname) {
+            const char* name = dl_info.dli_sname;
+            bool is_lambda_sys_func = strncmp(name, "fn_", 3) == 0;
+            bool is_error_machinery = strncmp(name, "set_runtime_error", 17) == 0 ||
+                                      strncmp(name, "err_", 4) == 0;
+            if (is_lambda_sys_func && !is_error_machinery) {
+                StackFrame* frame = (StackFrame*)mem_calloc(1, sizeof(StackFrame), MEM_CAT_SYSTEM);
+                if (!frame) break;
+                frame->function_name = err_strdup(name);
+                frame->is_native = true;
+                *tail = frame;
+                tail = &frame->next;
+                visible_count++;
+            }
+        }
+#endif
+    }
+    err_free_raw_stack_trace(raw_trace);
+    return result;
+}
+
+void err_ensure_stack_trace(LambdaError* error) {
+    if (!error || error->stack_trace || !error->raw_stack_trace) return;
+    error->stack_trace = err_materialize_raw_stack_trace(error->raw_stack_trace);
+    error->raw_stack_trace = NULL;
+}
+
 // ============================================================================
 // Error Output
 // ============================================================================
 
 char* err_format(LambdaError* error) {
     if (!error) return err_strdup("(null error)");
+    err_ensure_stack_trace(error);
     
     char buffer[4096];
     int pos = 0;
@@ -924,6 +1053,7 @@ static void json_escape_string(char* dest, size_t dest_size, const char* src) {
 
 char* err_format_json(LambdaError* error) {
     if (!error) return err_strdup("null");
+    err_ensure_stack_trace(error);
     
     char buffer[4096];
     int pos = 0;
@@ -1047,11 +1177,13 @@ void err_release_payload(LambdaError* error) {
 
     if (error->message) mem_free(error->message);
     if (error->help) mem_free(error->help);
+    if (error->raw_stack_trace) err_free_raw_stack_trace(error->raw_stack_trace);
     if (error->stack_trace) err_free_stack_trace(error->stack_trace);
     if (error->cause && !error->cause->is_heap) err_free(error->cause);
 
     error->message = NULL;
     error->help = NULL;
+    error->raw_stack_trace = NULL;
     error->stack_trace = NULL;
     error->cause = NULL;
 }
@@ -1066,10 +1198,20 @@ void err_free(LambdaError* error) {
 
 void err_gc_trace(void* data, gc_heap_t* gc) {
     LambdaError* error = (LambdaError*)data;
-    if (!error || !error->is_heap || !error->cause || !error->cause->is_heap) return;
-    uint64_t cause_item = ((uint64_t)LMD_TYPE_ERROR << 56) |
-                          ((uint64_t)(uintptr_t)error->cause & 0x00FFFFFFFFFFFFFFULL);
-    gc_mark_item(gc, cause_item);
+    if (!error || !error->is_heap) return;
+    if (error->cause && error->cause->is_heap) {
+        uint64_t cause_item = ((uint64_t)LMD_TYPE_ERROR << 56) |
+                              ((uint64_t)(uintptr_t)error->cause & 0x00FFFFFFFFFFFFFFULL);
+        gc_mark_item(gc, cause_item);
+    }
+    // JS throws may carry an arbitrary heap Item; the ERROR lane owns that
+    // carrier while the catcher is still outside the throwing frame.
+    if (error->thrown_value_item) gc_mark_item(gc, error->thrown_value_item);
+    if (error->js_name_item) gc_mark_item(gc, error->js_name_item);
+    if (error->js_message_item) gc_mark_item(gc, error->js_message_item);
+    if (error->js_cause_item) gc_mark_item(gc, error->js_cause_item);
+    if (error->js_stack_item) gc_mark_item(gc, error->js_stack_item);
+    if (error->js_properties_item) gc_mark_item(gc, error->js_properties_item);
 }
 
 void err_gc_destroy(void* data) {
