@@ -6385,11 +6385,9 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     mt->last_closure_capture_count = 0;
     mt->in_main = true;
     mt->func_error_lane_label = 0;  // reset for js_main
-    mt->last_call_result_reg = 0;
-    mt->func_error_lane_value_reg = 0;
 
     jm_begin_function_frame(mt, main_ret, true, MIR_SCALAR_RETURN_DYNAMIC,
-        MIR_reg(mt->ctx, "ctx", main_func));
+        MIR_reg(mt->ctx, "ctx", main_func), true);
     jm_push_scope(mt);
 
     // Initialize result register to undefined (JS completion value default)

@@ -367,6 +367,8 @@ struct JsTryContext {
     MIR_label_t end_label;       // end of entire try statement
     MIR_reg_t return_val_reg;    // stores delayed return value
     MIR_reg_t has_return_reg;    // flag: 1 if return encountered in try/catch
+    bool end_label_has_edge;     // compiler-only: an emitted completion targets end_label
+    JsErrorLaneTrack end_label_error_lane_state; // merged proof for end_label predecessors
     bool has_catch;
     bool has_finally;
     bool inlining_finally;       // re-entrance guard for finally block inlining

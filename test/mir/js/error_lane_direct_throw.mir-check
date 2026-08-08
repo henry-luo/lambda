@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.3: a known ERROR Item routes directly from throw to catch; no ERROR-tag test is emitted in the function body.",
+  "checks": [
+    {
+      "in_func": "_js_directCaught_#_body",
+      "expect": [
+        "call\tjs_throw_value",
+        "call\tjs_error_lane_payload"
+      ],
+      "forbid": [
+        "eq\t{{r}}, {{r}}, 27"
+      ]
+    }
+  ]
+}

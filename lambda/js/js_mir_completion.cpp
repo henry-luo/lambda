@@ -434,6 +434,13 @@ bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
     }
     MIR_label_t target = jm_completion_target(context, kind, true);
     if (!target) return false;
+    if (target == context->end_label) {
+        // A delayed return is an actual end-label predecessor.  Preserve its
+        // lane proof so an otherwise dead join cannot revive a D8.4.3 tag test.
+        context->end_label_has_edge = true;
+        context->end_label_error_lane_state = jm_error_lane_merge(
+            context->end_label_error_lane_state, jm_error_lane_state(mt));
+    }
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, context->return_val_reg),
         MIR_new_reg_op(mt->ctx, value)));
