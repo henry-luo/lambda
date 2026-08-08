@@ -1098,28 +1098,10 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     // Dynamic import loads modules from inside an already-running script; if the
     // nested module drains the global microtask queue, outer async-generator
     // Promise jobs can run with the imported module's temporary context active.
-    if (!g_jm_preamble_compile_only && js_dom_is_host_driven_loop()) {
-        // A long-lived host (Radiant `view`) keeps this MIR context alive and
-        // pumps the event loop after it commits the first layout. Firing timers
-        // now would run load-time setTimeout(0) callbacks against an uncommitted
-        // document (geometry APIs read zero boxes). Settle only promise
-        // microtasks; leave timers + rAF queued for the host's post-commit pump.
-        js_microtask_flush();
-    } else if (!g_jm_preamble_compile_only) {
-        if (js_dynamic_import_suppress_module_drain <= 0) {
-            // CLI document sessions have no native frame. Commit pending DOM
-            // mutations before the initial microtask checkpoint so observers
-            // receive the post-mutation geometry without getter reentrancy.
-            if (runtime->dom_doc) js_dom_commit_headless_layout();
-            js_event_loop_drain();
-        }
-        if (runtime->dom_doc) {
-            // Headless Radiant layout has no frame clock; flush a bounded number
-            // of requestAnimationFrame ticks before the JS heap/context are
-            // restored so DOM callbacks can still allocate wrapper objects.
-            // WPT reftest-wait pages often call takeScreenshot() from rAF.
-            js_animation_frame_drain(64);
-        }
+    if (!g_jm_preamble_compile_only) {
+        js_event_loop_drain_script_turn(
+            runtime->dom_doc != NULL,
+            js_dynamic_import_suppress_module_drain <= 0);
     }
     log_debug("js-mir: event loop drained");
 

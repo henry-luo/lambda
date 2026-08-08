@@ -26,7 +26,14 @@
 /**
  * Check if a FloatBox intersects a Y range [y_top, y_bottom)
  */
-static bool float_intersects_y_range(FloatBox* box, float y_top, float y_bottom) {
+static bool float_intersects_y_range(FloatBox* box, float y_top, float y_bottom,
+                                     bool float_placement_query) {
+    if (float_placement_query && y_bottom <= y_top &&
+        box->margin_box_top <= y_top && y_top < box->margin_box_bottom) {
+        // CSS 2.1 §9.5.1 Rule 2 constrains a zero-height float by its top
+        // edge; an empty query interval must still see preceding floats.
+        return true;
+    }
     return !(box->margin_box_bottom <= y_top || box->margin_box_top >= y_bottom);
 }
 
@@ -257,8 +264,9 @@ bool block_context_establishes_bfc(ViewBlock* block) {
     }
 
     // 9. Multi-column containers establish BFC (CSS Multicol §3)
-    if (block->multicol_prop() &&
-        (block->multicol_prop()->column_count > 1 || block->multicol_prop()->column_width > 0)) {
+    // Reuse the multicol classifier so `columns:1 0px` keeps its formatting
+    // context; narrowing this check would let its child margins escape.
+    if (is_multicol_container(block)) {
         return true;
     }
 
@@ -419,7 +427,8 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
 // ============================================================================
 
 FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height,
-                                              bool line_query) {
+                                              bool line_query,
+                                              bool float_placement_query) {
     FloatAvailableSpace space;
     space.left = ctx->float_left_edge;
     space.right = ctx->float_right_edge;
@@ -439,7 +448,7 @@ FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float h
 
     // Check left floats - find rightmost intrusion
     for (FloatBox* fb = ctx->left_floats; fb; fb = fb->next) {
-        bool intersects = float_intersects_y_range(fb, y_top, y_bottom) &&
+        bool intersects = float_intersects_y_range(fb, y_top, y_bottom, float_placement_query) &&
             !(line_query && fb->initial_letter_clearance && fb->margin_box_top > y_top);
         if (intersects) {
             if (fb->margin_box_right > space.left) {
@@ -451,7 +460,7 @@ FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float h
 
     // Check right floats - find leftmost intrusion
     for (FloatBox* fb = ctx->right_floats; fb; fb = fb->next) {
-        bool intersects = float_intersects_y_range(fb, y_top, y_bottom) &&
+        bool intersects = float_intersects_y_range(fb, y_top, y_bottom, float_placement_query) &&
             !(line_query && fb->initial_letter_clearance && fb->margin_box_top > y_top);
         if (intersects) {
             if (fb->margin_box_left < space.right) {

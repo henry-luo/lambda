@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "view.hpp"
+#include "render.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
@@ -49,12 +50,7 @@ static size_t normalize_whitespace_for_flex(const char* text, size_t length, cha
     return out_pos;
 }
 
-struct FlexMeasureTextRun {
-    const char* text;
-    size_t length;
-};
-
-static FlexMeasureTextRun flex_measure_prepare_text_run(DomNode* text_node, const char* text, size_t length) {
+FlexMeasureTextRun flex_measure_prepare_text_run(DomNode* text_node, const char* text, size_t length) {
     FlexMeasureTextRun run = {text, length};
     if (!text) return run;
 
@@ -694,14 +690,17 @@ static FlexNestedHeightResult flex_measure_nested_flex_height(LayoutContext* lyc
 }
 
 static FlexChildExplicitSizes flex_measure_child_explicit_sizes(LayoutContext* lycon, ViewElement* child_view) {
+    bool width_is_percentage = layout_axis_size_is_percentage(
+        child_view->as_element(), true) ||
+        layout_axis_size_is_percentage(lam::view_as_block(child_view), true);
     FlexChildExplicitSizes sizes = {
-        child_view->blk && child_view->block_mut()->given_width >= 0.0f,
+        !width_is_percentage && child_view->blk && child_view->block_mut()->given_width >= 0.0f,
         child_view->blk && child_view->block_mut()->given_height >= 0.0f,
         child_view->blk ? child_view->block()->given_width : -1.0f,
         child_view->blk ? child_view->block()->given_height : -1.0f
     };
 
-    if (!sizes.has_width && lycon) {
+    if (!sizes.has_width && !width_is_percentage && lycon) {
         float dom_css_width = get_explicit_css_width(lycon, child_view);
         if (dom_css_width > 0.0f) {
             sizes.has_width = true;
@@ -1717,11 +1716,28 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     // CRITICAL FIX: Set up font for the flex item BEFORE measuring text
     // This ensures text measurement uses the correct font (e.g., bold, specific size)
     LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
+    float percentage_height_basis = -1.0f;
+    if (flex_layout) {
+        bool row_flex = is_main_axis_horizontal(flex_layout);
+        if (row_flex && flex_layout->has_definite_cross_size) {
+            percentage_height_basis = flex_layout->cross_axis_size;
+        } else if (!row_flex && !flex_layout->main_axis_is_indefinite) {
+            percentage_height_basis = flex_layout->main_axis_size;
+        }
+    }
+    // Intrinsic queries re-resolve styles; preserve the flex container's
+    // definite cross/main height instead of the stale outer block height.
+    PercentageContainingBlockHeightScope flex_height_scope(lycon, percentage_height_basis);
     FontBox saved_font;  // Save current font to restore later
     bool font_changed = false;
-    if (lycon && item->font) {
+    FontProp* intrinsic_font = item->font;
+    if (!intrinsic_font) {
+        ViewElement* parent = item->parent_view();
+        intrinsic_font = parent ? parent->font : nullptr;
+    }
+    if (lycon && intrinsic_font) {
         saved_font = lycon->font;
-        setup_font(lycon->ui_context, &lycon->font, item->font);
+        setup_font(lycon->ui_context, &lycon->font, intrinsic_font);
         font_changed = true;
     }
 
@@ -1729,10 +1745,61 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     // Use float to preserve precision from text measurement (avoids truncation)
     float min_width = 0, max_width = 0, min_height = 0, max_height = 0;
 
-    // Check if this is a replaced element (img, video) - needs special handling
+    // Check if this is a replaced element (img, video, or SVG) - needs special handling
     NameId elmt_name = item->tag();
     bool is_replaced = (elmt_name == MARKUP_NAME_IMG || elmt_name == MARKUP_NAME_VIDEO ||
-                        elmt_name == MARKUP_NAME_IFRAME || elmt_name == MARKUP_NAME_CANVAS);
+                        elmt_name == MARKUP_NAME_IFRAME || elmt_name == MARKUP_NAME_CANVAS ||
+                        elmt_name == MARKUP_NAME_SVG);
+
+    if (is_replaced && lycon && elmt_name == MARKUP_NAME_SVG) {
+        Element* native_elem = dom_element_backing(lam::dom_require_element(item));
+        SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(native_elem);
+        float intrinsic_width = intrinsic.width;
+        float intrinsic_height = intrinsic.height;
+
+        if (intrinsic.has_intrinsic_width && intrinsic.has_intrinsic_height) {
+            // SVG width/height attributes are natural dimensions.
+        } else if (intrinsic.has_intrinsic_width && intrinsic.has_intrinsic_aspect_ratio) {
+            intrinsic_height = intrinsic_width / intrinsic.aspect_ratio;
+        } else if (intrinsic.has_intrinsic_height && intrinsic.has_intrinsic_aspect_ratio) {
+            intrinsic_width = intrinsic_height * intrinsic.aspect_ratio;
+        } else if (intrinsic.has_intrinsic_aspect_ratio) {
+            bool main_is_horizontal = is_main_axis_horizontal(flex_layout);
+            float available_inline = main_is_horizontal
+                ? flex_layout->main_axis_size : flex_layout->cross_axis_size;
+            bool available_inline_is_definite = main_is_horizontal
+                ? flex_layout->main_axis_available_size_is_definite
+                : flex_layout->has_definite_cross_size;
+            if (available_inline_is_definite && available_inline > 0.0f) {
+                float inline_border_size = layout_stretch_fit_border_box_size(
+                    lam::view_as_block(item), available_inline, main_is_horizontal);
+                float inline_content_size = layout_content_size_from_border_box(
+                    lam::view_as_block(item), inline_border_size, main_is_horizontal);
+                if (main_is_horizontal) {
+                    intrinsic_width = inline_content_size;
+                    intrinsic_height = inline_content_size / intrinsic.aspect_ratio;
+                } else {
+                    intrinsic_height = inline_content_size;
+                    intrinsic_width = inline_content_size * intrinsic.aspect_ratio;
+                }
+            } else {
+                // CSS Sizing 3 §5.1: without a definite available inline size,
+                // a ratio-only replaced box uses the default object width.
+                intrinsic_width = 300.0f;
+                intrinsic_height = intrinsic_width / intrinsic.aspect_ratio;
+            }
+        }
+
+        min_width = max_width = intrinsic_width;
+        min_height = max_height = intrinsic_height;
+        flex_store_intrinsic_sizes(item, min_width, max_width, min_height, max_height);
+        log_debug("calculate_item_intrinsic_sizes: SVG intrinsic size=%.1fx%.1f ratio=%.3f",
+                  max_width, max_height, intrinsic.aspect_ratio);
+        if (font_changed) {
+            lycon->font = saved_font;
+        }
+        return;
+    }
 
     if (is_replaced && lycon && elmt_name == MARKUP_NAME_IMG) {
         // Load image to get intrinsic dimensions
@@ -1796,8 +1863,18 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 min_height = max_height = 16.0f;
             }
         } else {
-            // No current request: <img> has no intrinsic dimensions.
-            min_width = max_width = 0.0f;
+            // HTML width attributes supply a replaced element's intrinsic
+            // contribution even before an image request exists; without this,
+            // Flexbox's auto minimum sees 0 and shrinks the declared box away.
+            const char* width_attr = item->get_attribute("width");
+            CssDeclaration* css_width_decl = item->specified_style
+                ? style_tree_get_declaration(item->specified_style, CSS_PROPERTY_WIDTH)
+                : nullptr;
+            bool has_html_pixel_width = width_attr && !css_width_decl && item->blk &&
+                item->block()->given_width >= 0.0f &&
+                isnan(item->block()->given_width_percent);
+            min_width = max_width = has_html_pixel_width
+                ? min(item->block()->given_width, MAX_LAYOUT_DIMENSION) : 0.0f;
             min_height = max_height = 0.0f;
         }
 
@@ -1895,7 +1972,21 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // per CSS Flexbox §4.5). Using given_width/given_height here would conflate the
         // content_size_suggestion with the specified_size_suggestion, preventing items from
         // shrinking below their explicit size even when content is empty.
-        if (has_pseudo_content) {
+        if (elmt_name == MARKUP_NAME_BR) {
+            // A forced break is a line box contribution even without child content;
+            // zero intrinsic height made the flex algorithm place following items too early.
+            float break_line_height = resolve_flex_inherited_line_height(lycon, item);
+            if (break_line_height <= 0.0f && intrinsic_font) {
+                break_line_height = flex_measure_normal_line_height_for_font(
+                    lycon, intrinsic_font, intrinsic_font->font_size);
+            }
+            if (break_line_height <= 0.0f && lycon->font.font_handle) {
+                break_line_height = calc_normal_line_height(lycon->font.font_handle);
+            }
+            if (break_line_height > 0.0f) {
+                min_height = max_height = break_line_height;
+            }
+        } else if (has_pseudo_content) {
             min_width = max_width = pseudo_width;
             min_height = max_height = pseudo_height;
         } else {
@@ -1964,6 +2055,16 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 }
                 float available_width = flex_measure_item_content_width_for_height(
                     lycon, item, flex_layout);
+                ViewBlock* item_block = lam::view_as_block(item);
+                bool max_content_inline_size = item_block && item_block->blk &&
+                    (item_block->block()->given_width_type == CSS_VALUE_MAX_CONTENT ||
+                     item_block->block()->given_min_width_type == CSS_VALUE_MAX_CONTENT ||
+                     item_block->block()->given_max_width_type == CSS_VALUE_MAX_CONTENT);
+                if (max_content_inline_size) {
+                    // Max-content sizing removes the container-width wrap
+                    // constraint; its intrinsic text height must use max-content.
+                    available_width = max_width;
+                }
                 CssEnum white_space = get_white_space_value(child);
                 bool preserve_single_line_intrinsic_height =
                     (item->fi && item->fi->aspect_ratio > 0.0f) ||
@@ -2131,6 +2232,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // Track min and max content widths separately per CSS intrinsic sizing spec
         float min_child_width = 0.0f;  // For min-content: max of children's min-content
         float max_child_width = 0.0f;  // For max-content: max of children's max-content
+        float total_child_min_width = 0.0f;  // For nowrap row flex: sum of min-content contributions
         float total_child_width = 0.0f;  // For row flex containers: sum of child widths
         float max_single_child_width = 0.0f;  // For wrapping row flex: max of individual items
         float total_child_height = 0.0f;
@@ -2196,6 +2298,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     // was only MAX'd which caused incorrect intrinsic width calculation
                     // for inline-flex containers with both text and element children.
                     if (is_row_flex_container) {
+                        total_child_min_width += text_min_width;
                         total_child_width += text_max_width;  // Row flex: sum for max-content
                         child_count++;  // Count text as a child for gap calculation
                     } else {
@@ -2227,6 +2330,17 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         float child_min_width = 0.0f;
                         float child_max_width = 0.0f;
                         float child_height = 0.0f;
+                        bool child_width_is_percentage = layout_axis_size_is_percentage(
+                            c->as_element(), true) ||
+                            layout_axis_size_is_percentage(lam::view_as_block(child_view), true);
+                        float child_width_percentage = NAN;
+                        CssDeclaration* child_width_decl = c->as_element()
+                            ? dom_element_get_specified_value(c->as_element(), CSS_PROPERTY_WIDTH)
+                            : nullptr;
+                        if (child_width_decl && child_width_decl->value &&
+                            child_width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            child_width_percentage = child_width_decl->value->data.percentage.value;
+                        }
 
                         // Get child width - explicit (from View or DOM) or intrinsic
                         if (child_explicit.has_width) {
@@ -2240,8 +2354,21 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             log_debug("Used flex container intrinsic widths for child: min=%.1f, max=%.1f",
                                       child_min_width, child_max_width);
                         } else if (child_view->form_control()) {
-                            child_min_width = child_view->form->intrinsic_width;
-                            child_max_width = child_view->form->intrinsic_width;
+                            if (child_width_is_percentage && lycon) {
+                                IntrinsicSizes child_sizes = measure_element_intrinsic_widths(
+                                    lycon, c->as_element(), true);
+                                child_min_width = child_sizes.min_content;
+                                child_max_width = child_sizes.max_content;
+                                if (!isnan(child_width_percentage)) {
+                                    // Flex item intrinsic sizing uses the percentage
+                                    // size suggestion against the natural max-content size.
+                                    child_min_width = child_max_width *
+                                        child_width_percentage / 100.0f;
+                                }
+                            } else {
+                                child_min_width = child_view->form->intrinsic_width;
+                                child_max_width = child_view->form->intrinsic_width;
+                            }
                             if (child_max_width <= 0.0f && lycon) {
                                 IntrinsicSizes child_sizes = measure_element_intrinsic_widths(
                                     lycon, lam::dom_require<DOM_NODE_ELEMENT>(child_view));
@@ -2261,9 +2388,13 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             // Child doesn't have fi yet - use measure_element_intrinsic_widths
                             // This handles the case where intrinsic sizing runs before fi is initialized
                             IntrinsicSizes child_sizes = flex_measure_child_intrinsic_widths(
-                                lycon, child_view, /*content_only=*/false);
+                                lycon, child_view, /*content_only=*/child_width_is_percentage);
                             child_min_width = child_sizes.min_content;
                             child_max_width = child_sizes.max_content;
+                            if (!isnan(child_width_percentage)) {
+                                child_min_width = child_max_width *
+                                    child_width_percentage / 100.0f;
+                            }
                             log_debug("Used measure_element_intrinsic_widths for child: min=%.1f, max=%.1f",
                                       child_min_width, child_max_width);
                         }
@@ -2319,6 +2450,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         // For width: row flex sums widths, column flex takes max
                         // Track both min and max content widths separately
                         if (is_row_flex_container) {
+                            total_child_min_width += child_min_width + child_h_margin;
                             float outer_width = child_max_width + child_h_margin;
                             total_child_width += outer_width;  // Row flex: sum for max-content
                             max_single_child_width = max(max_single_child_width, child_min_width + child_h_margin);
@@ -2374,8 +2506,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 log_debug("Using wrapping row flex widths: min=%.1f (max single), max=%.1f (sum)", min_width, max_width);
             } else {
                 // Nowrap: min-content = sum of outer min-content contributions
-                min_width = total_child_width;
-                log_debug("Using nowrap row flex widths: min=max=%.1f (sum)", min_width);
+                min_width = total_child_min_width;
+                log_debug("Using nowrap row flex widths: min=%.1f (min sum), max=%.1f (max sum)",
+                          min_width, max_width);
             }
         } else if (min_child_width > 0.0f || max_child_width > 0.0f) {
             // Use properly tracked min and max content widths

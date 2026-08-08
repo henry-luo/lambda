@@ -147,6 +147,28 @@ static void flex_shift_direct_text_br_run(ViewBlock* flex_container, float dx, f
     }
 }
 
+static void flex_align_direct_text_lines(ViewBlock* flex_container,
+                                         float content_x, float content_width,
+                                         CssEnum text_align) {
+    if (!flex_container ||
+        (text_align != CSS_VALUE_CENTER && text_align != CSS_VALUE_RIGHT)) return;
+
+    DomNode* child = flex_container->first_child;
+    while (child) {
+        if (child->is_text() && child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                float target_x = text_align == CSS_VALUE_CENTER
+                    ? content_x + (content_width - rect->width) / 2.0f
+                    : content_x + content_width - rect->width;
+                rect->x += target_x - rect->x;
+            }
+            adjust_text_bounds(text);
+        }
+        child = child->next_sibling;
+    }
+}
+
 static void flex_normalize_direct_br_boxes(ViewBlock* flex_container) {
     if (!flex_container) return;
 
@@ -219,12 +241,8 @@ static void flex_normalize_break_item_boxes(LayoutContext* lycon,
                     : next_view->x - break_height / 2.0f;
             }
         } else if (!main_axis_horizontal) {
-            DomNode* next = child->next_sibling;
-            while (next && !next->is_element()) next = next->next_sibling;
-            ViewElement* next_view = next ? lam::view_as_element(next) : nullptr;
-            if (next_view && next_view->view_type != RDT_VIEW_NONE) {
-                br->y = next_view->y - break_height / 2.0f;
-            }
+            // The flex algorithm already positions a column break as a flex item;
+            // centering it from the following item would discard that main-axis position.
         }
     }
 }
@@ -362,7 +380,8 @@ static bool flex_final_content_is_block_item(View* view) {
 static bool flex_final_content_is_layout_item(View* view) {
     if (!flex_final_content_is_block_item(view)) return false;
     ViewBlock* block = lam::view_as_block(view);
-    return block && !layout_view_is_abs_or_fixed(block);
+    return block && !flex_item_is_anonymous_text(lam::view_as_element(view)) &&
+        !layout_view_is_abs_or_fixed(block);
 }
 
 static float flex_final_content_outer_height(ViewElement* elem) {
@@ -691,6 +710,13 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
             log_debug("AUTO-HEIGHT: container height set by parent column flex (explicit flex-basis=%.1f)",
                       flex_container->fi->flex_basis);
         }
+        // A positive grow factor also assigns the column main size when the
+        // free-space pass did not set main_size_from_flex on this nested item.
+        else if (!parent_is_row && flex_container->fi->flex_grow > 0.0f) {
+            has_explicit_height = true;
+            log_debug("AUTO-HEIGHT: container height set by parent column flex-grow (fg=%.1f)",
+                      flex_container->fi->flex_grow);
+        }
     }
     // Check if this container is a grid item whose height was set by parent grid
     // Grid items with align-items: stretch should preserve their grid-assigned height
@@ -724,9 +750,14 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
                     continue;
                 }
                 if (item && item->fi && item->height > 0) {
-                    if (item->height > max_item_height) {
-                        max_item_height = item->height;
-                        log_debug("AUTO-HEIGHT: row flex item height = %.1f, max = %.1f", item->height, max_item_height);
+                    MeasurementCacheEntry* cached = get_from_measurement_cache(child);
+                    float item_height = cached && cached->measured_height > 0
+                        ? (float)cached->measured_height : item->height;
+                    if (item_height > max_item_height) {
+                        // Intrinsic measurement is authoritative here; the existing
+                        // view height can be stale from an earlier unconstrained pass.
+                        max_item_height = item_height;
+                        log_debug("AUTO-HEIGHT: row flex item height = %.1f, max = %.1f", item_height, max_item_height);
                     }
                 } else if (item) {
                     // Try measured content height from cache
@@ -784,6 +815,19 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
                     else if (item->fi->flex_basis >= 0) {
                         item_contribution = item->fi->flex_basis;
                         log_debug("AUTO-HEIGHT: column flex item flex-basis = %.1f", item_contribution);
+                    }
+                    // An explicit height remains the flex item's content
+                    // contribution even when the item is itself a flex container.
+                    else if (item->blk && item->block()->given_height >= 0.0f) {
+                        item_contribution = item->block()->given_height;
+                        log_debug("AUTO-HEIGHT: column flex item height = %.1f", item_contribution);
+                    }
+                    // Nested auto-height column flex items contribute their
+                    // children’s max-content main size, not their min-height seed.
+                    else if (item->display.inner == CSS_VALUE_FLEX) {
+                        item_contribution = flex_column_content_contribution(lycon, item);
+                        log_debug("AUTO-HEIGHT: nested column flex content contribution = %.1f",
+                                  item_contribution);
                     }
                     // Priority 2: explicit height
                     else if (item->height > 0) {
@@ -1072,6 +1116,26 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         }
     }
 
+    WritingMode flex_item_writing_mode = layout_block_writing_mode(flex_item);
+    bool flex_item_vertical = flex_item_writing_mode == WM_VERTICAL_LR ||
+        flex_item_writing_mode == WM_VERTICAL_RL;
+    if (flex_item_vertical) {
+        // CSS Writing Modes maps the inline axis to physical y; the flex-item
+        // flow formatter still uses horizontal logical coordinates here.
+        float physical_content_width = content_width;
+        content_width = content_height;
+        content_height = physical_content_width;
+        if (flex_item->bound) {
+            BoxMetrics item_box = layout_box_metrics(flex_item);
+            content_x_offset = item_box.padding.top;
+            content_y_offset = item_box.padding.left;
+            if (flex_item->boundary()->border) {
+                content_x_offset += flex_item->boundary()->border->width.top;
+                content_y_offset += flex_item->boundary()->border->width.left;
+            }
+        }
+    }
+
     // Set up block formatting context for nested content
     lycon->block.content_width = content_width;
     lycon->block.content_height = content_height;
@@ -1089,8 +1153,15 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
     // CRITICAL: Set up font for this flex item (required for correct line-height calculation)
     // The flex item may have its own font-size (e.g., inline-block with font-size: 48px)
-    if (flex_item->font) {
-        setup_font(lycon->ui_context, &lycon->font, flex_item->font);
+    FontProp* content_font = flex_item->font;
+    if (!content_font) {
+        ViewElement* parent = flex_item->parent_view();
+        content_font = parent ? parent->font : nullptr;
+    }
+    if (content_font) {
+        // Inherited-only flex items have no own font object; use the parent so a
+        // preceding sibling's font cannot leak into their line-box layout.
+        setup_font(lycon->ui_context, &lycon->font, content_font);
     }
     // Set up line height for this flex item (uses the font that was just set up)
     setup_line_height(lycon, flex_item);
@@ -1408,6 +1479,27 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         flex_item->content_height = lycon->block.advance_y - content_y_offset;
     }
 
+    if (flex_item_vertical && flex_item->display.inner == CSS_VALUE_FLOW &&
+        flex_item->first_child) {
+        BoxMetrics item_box = layout_box_metrics(flex_item);
+        float surrogate_inline_origin = item_box.border.top + item_box.padding.top;
+        float physical_inline_origin = surrogate_inline_origin;
+        float surrogate_block_origin = item_box.border.left + item_box.padding.left;
+        float physical_block_origin = flex_item_writing_mode == WM_VERTICAL_RL
+            ? item_box.border.right + item_box.padding.right
+            : surrogate_block_origin;
+        bool center_button_block_axis = flex_item->form_control() &&
+            flex_item->form_control()->control_type == FORM_CONTROL_BUTTON;
+        // Flex-item content bypasses finalize_block_flow, so publish its
+        // logical inline rectangles at the formatting-context boundary.
+        layout_map_vertical_writing_text_geometry(
+            static_cast<View*>(flex_item->first_child), flex_item_writing_mode,
+            flex_item->width, lycon->block.line_height,
+            surrogate_inline_origin, physical_inline_origin,
+            surrogate_block_origin, physical_block_origin,
+            center_button_block_axis);
+    }
+
     // Flex items bypass finalize_block_flow, so retain both line baseline sets.
     if (flex_item->blk) {
         flex_item->blk->first_line_baseline = lycon->block.first_line_ascender;
@@ -1461,6 +1553,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         bool has_explicit_height = (flex_item->blk && flex_item->block_mut()->given_height >= 0);
         bool is_replaced = (flex_item->display.inner == RDT_DISPLAY_REPLACED);
         bool has_aspect_ratio = (flex_item->fi && flex_item->fi->aspect_ratio > 0.0f);
+        bool has_cyclic_percentage_ratio_descendant = flex_item->is_element() &&
+            layout_has_cyclic_percentage_ratio_descendant(lycon, flex_item->as_element());
         // Only for block-level items (not nested flex/grid which handle their own sizing)
         bool is_inner_flex_or_grid = (flex_item->display.inner == CSS_VALUE_FLEX ||
                                       flex_item->display.inner == CSS_VALUE_GRID);
@@ -1476,7 +1570,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 skip_for_stretch = true;
             }
         }
-        if (!has_explicit_height && !is_replaced && !has_aspect_ratio && !is_inner_flex_or_grid &&
+        if (!has_explicit_height && !is_replaced && !has_aspect_ratio &&
+            !has_cyclic_percentage_ratio_descendant && !is_inner_flex_or_grid &&
             !skip_for_stretch && flex_item->content_height > 0) {
             float total_height = flex_content_border_box_height(flex_item);
             // Post-content row-flex sizing can refine estimates, but it must not
@@ -1586,6 +1681,9 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 line_break(lycon);
             }
             flex_normalize_direct_br_boxes(flex_container);
+            flex_align_direct_text_lines(
+                flex_container, container_content_x, container_content_width,
+                lycon->block.text_align);
 
             float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
             if (flex_direct_text_br_bounds(flex_container, &min_x, &min_y, &max_x, &max_y)) {
@@ -1595,19 +1693,27 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 float target_y = min_y;
 
                 if (is_row) {
-                    switch (justify_content) {
-                        case CSS_VALUE_CENTER:
-                            target_x = container_content_x + (container_content_width - run_width) / 2.0f;
-                            break;
-                        case CSS_VALUE_FLEX_END:
-                        case CSS_VALUE_END:
-                            target_x = container_content_x + container_content_width - run_width;
-                            break;
-                        case CSS_VALUE_FLEX_START:
-                        case CSS_VALUE_START:
-                        default:
-                            target_x = container_content_x;
-                            break;
+                    // Inline text alignment already positions each forced-break
+                    // line; applying flex main-axis alignment to the union of
+                    // those lines would shift the whole run a second time.
+                    if (lycon->block.text_align == CSS_VALUE_CENTER ||
+                        lycon->block.text_align == CSS_VALUE_RIGHT) {
+                        target_x = min_x;
+                    } else {
+                        switch (justify_content) {
+                            case CSS_VALUE_CENTER:
+                                target_x = container_content_x + (container_content_width - run_width) / 2.0f;
+                                break;
+                            case CSS_VALUE_FLEX_END:
+                            case CSS_VALUE_END:
+                                target_x = container_content_x + container_content_width - run_width;
+                                break;
+                            case CSS_VALUE_FLEX_START:
+                            case CSS_VALUE_START:
+                            default:
+                                target_x = container_content_x;
+                                break;
+                        }
                     }
                     switch (align_items) {
                         case CSS_VALUE_CENTER:
@@ -2005,15 +2111,18 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         // update the container height if it has auto height and text content
         // makes it taller than the current height (from element flex items).
         bool has_explicit_height = flex_container->blk && flex_container->block_mut()->given_height >= 0;
-        // Also treat height as definite if parent column flex set it via flex-grow/shrink
-        if (!has_explicit_height && flex_container->fi && flex_container->fi->main_size_from_flex) {
+        // A column flex parent assigns a flex-growing item's main size even when
+        // the item flag is not recorded during an earlier intrinsic pass; letting
+        // its text re-expand the item would discard that used height.
+        if (!has_explicit_height && flex_container->fi) {
             DomNode* p = flex_container->parent;
             if (p && p->is_element()) {
                 ViewElement* pe = lam::view_require_element(p);
                 if (pe->embed && pe->embedp()->flex) {
                     int dir = pe->embedp()->flex->direction;
                     if (dir == CSS_VALUE_COLUMN || dir == CSS_VALUE_COLUMN_REVERSE) {
-                        has_explicit_height = true;
+                        has_explicit_height = flex_container->fi->main_size_from_flex ||
+                            flex_container->fi->flex_grow > 0.0f;
                     }
                 }
             }
@@ -2121,6 +2230,9 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             if (!fchild) continue;
             if (fchild->view_type == RDT_VIEW_BLOCK || fchild->view_type == RDT_VIEW_INLINE_BLOCK ||
                 fchild->view_type == RDT_VIEW_LIST_ITEM || fchild->view_type == RDT_VIEW_TABLE) {
+                if (flex_item_is_anonymous_text(lam::view_as_element(fchild))) {
+                    continue;
+                }
                 ViewBlock* flex_item = lam::view_require_block(fchild);
                 layout_flex_item_content(lycon, flex_item);
             }
@@ -2144,6 +2256,10 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             child = child->next();
         }
     }
+
+    // Anonymous text is laid out by the normal inline pass; only its flex item
+    // geometry is deferred until flexible lengths and alignment are final.
+    apply_anonymous_flex_text_geometry(flex);
 
     // CRITICAL: Adjust positions of items after content layout for column flex
     // Some items may have had their heights updated based on actual content
@@ -2343,7 +2459,11 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     for (int item_idx = 0; item_idx < line->item_count; item_idx++) {
                         ViewElement* item = lam::view_as_element(line->items[item_idx]);
                         if (!item) continue;
-                        float item_cross = flex_final_content_outer_height(item);
+                        bool cyclic_ratio_overflow = item->is_element() &&
+                            layout_has_cyclic_percentage_ratio_descendant(
+                                lycon, item->as_element());
+                        float item_cross = cyclic_ratio_overflow
+                            ? item->height : flex_final_content_outer_height(item);
                         if (item_cross > line_cross) line_cross = item_cross;
                     }
                     if (actual_line_count > 0) {
@@ -2356,7 +2476,11 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 for (int item_idx = 0; item_idx < flex->item_count; item_idx++) {
                     ViewElement* item = lam::view_as_element(flex->flex_items[item_idx]);
                     if (!item) continue;
-                    float item_cross = flex_final_content_outer_height(item);
+                    bool cyclic_ratio_overflow = item->is_element() &&
+                        layout_has_cyclic_percentage_ratio_descendant(
+                            lycon, item->as_element());
+                    float item_cross = cyclic_ratio_overflow
+                        ? item->height : flex_final_content_outer_height(item);
                     if (item_cross > actual_cross_height) actual_cross_height = item_cross;
                 }
                 actual_line_count = actual_cross_height > 0.0f ? 1 : 0;
@@ -2445,7 +2569,12 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                                   fi->node_name(), fi->height, orig);
                         fi->height = orig;
                     } else if (fabsf(fi->height - orig) > 0.5f) {
-                        any_height_changed = true;
+                        bool cyclic_ratio_overflow = fi->is_element() &&
+                            layout_has_cyclic_percentage_ratio_descendant(
+                                lycon, fi->as_element());
+                        if (!cyclic_ratio_overflow) {
+                            any_height_changed = true;
+                        }
                     }
                     check_idx++;
                 }
@@ -2465,7 +2594,12 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     for (int ii = 0; ii < line->item_count; ii++) {
                         ViewElement* line_item = lam::view_as_element(line->items[ii]);
                         if (!line_item) continue;
-                        float item_outer_cross = flex_item_outer_height_after_content(line_item);
+                        bool cyclic_ratio_overflow = line_item->is_element() &&
+                            layout_has_cyclic_percentage_ratio_descendant(
+                                lycon, line_item->as_element());
+                        float item_outer_cross = cyclic_ratio_overflow
+                            ? line_item->height
+                            : flex_item_outer_height_after_content(line_item);
                         if (item_outer_cross > recomputed_line_cross) {
                             recomputed_line_cross = item_outer_cross;
                         }
@@ -2617,7 +2751,12 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK ||
                         item->view_type == RDT_VIEW_LIST_ITEM) {
                         ViewElement* flex_item = lam::view_require_element(item);
-                        float item_outer_height = flex_item_outer_height_after_content(flex_item);
+                        bool cyclic_ratio_overflow = flex_item->is_element() &&
+                            layout_has_cyclic_percentage_ratio_descendant(
+                                lycon, flex_item->as_element());
+                        float item_outer_height = cyclic_ratio_overflow
+                            ? flex_item->height
+                            : flex_item_outer_height_after_content(flex_item);
                         if (item_outer_height > max_item_height) {
                             max_item_height = item_outer_height;
                             log_debug("ROW FLEX HEIGHT FIX: item %s height=%.1f (outer=%.1f), max=%.1f",

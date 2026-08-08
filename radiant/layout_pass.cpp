@@ -30,6 +30,7 @@ struct LayoutViewSnapshot {
     float block_given_height;
     CssEnum block_given_width_type;
     CssEnum block_given_height_type;
+    bool block_aspect_ratio_auto_height;
 };
 
 static void layout_measure_snapshot_append(::LayoutContext* lycon,
@@ -71,6 +72,8 @@ static void layout_measure_snapshot_append(::LayoutContext* lycon,
             snapshot->block_given_height = element->block()->given_height;
             snapshot->block_given_width_type = element->block()->given_width_type;
             snapshot->block_given_height_type = element->block()->given_height_type;
+            snapshot->block_aspect_ratio_auto_height =
+                element->block()->aspect_ratio_auto_height;
         }
     }
 
@@ -125,6 +128,8 @@ static void layout_measure_snapshot_restore(::LayoutContext* lycon, ArrayList* s
                 element->blk->given_height = snapshot->block_given_height;
                 element->blk->given_width_type = snapshot->block_given_width_type;
                 element->blk->given_height_type = snapshot->block_given_height_type;
+                element->blk->aspect_ratio_auto_height =
+                    snapshot->block_aspect_ratio_auto_height;
             }
         }
 

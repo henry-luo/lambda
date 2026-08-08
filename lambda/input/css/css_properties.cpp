@@ -37,6 +37,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_OVERFLOW_X, "overflow-x", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "visible", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_OVERFLOW_Y, "overflow-y", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "visible", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_VISIBILITY, "visibility", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "visible", true, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_ZOOM, "zoom", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "1", true, false, NULL, 0, validate_number, NULL},
 
     // Additional Layout Properties
     {CSS_PROPERTY_CLIP, "clip", PROP_TYPE_STRING, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_string, NULL},
@@ -445,7 +446,8 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_WRAP_FLOW, "wrap-flow", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_WRAP_THROUGH, "wrap-through", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "wrap", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_LINE_CLAMP, "line-clamp", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_WEBKIT_LINE_CLAMP, "-webkit-line-clamp", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_length, NULL}
+    {CSS_PROPERTY_WEBKIT_LINE_CLAMP, "-webkit-line-clamp", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_ALL, "all", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "initial", false, false, NULL, 0, validate_keyword, NULL}
 };
 
 #define PROPERTY_DEFINITION_COUNT (sizeof(property_definitions) / sizeof(property_definitions[0]))

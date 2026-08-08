@@ -195,6 +195,7 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_CLIP,
     CSS_PROPERTY_CLIP_PATH,
     CSS_PROPERTY_VISIBILITY,
+    CSS_PROPERTY_ZOOM,
 
     // Box Model Properties
     CSS_PROPERTY_WIDTH,
@@ -603,6 +604,9 @@ typedef enum CssPropertyCode {
 
     // Content Visibility
     CSS_PROPERTY_CONTENT_VISIBILITY,
+
+    // Global property reset
+    CSS_PROPERTY_ALL,
 
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,

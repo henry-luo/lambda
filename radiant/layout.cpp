@@ -28,6 +28,18 @@ using namespace std::chrono;
 // Layout timing accumulators
 // ============================================================================
 double g_style_resolve_time = 0;
+
+float layout_effective_zoom(View* view) {
+    float effective_zoom = 1.0f;
+    for (View* current = view; current; current = current->parent_view()) {
+        if (!current->is_element()) continue;
+        DomElement* element = current->as_element();
+        if (!element->blk) continue;
+        float local_zoom = element->block()->zoom;
+        if (local_zoom > 0.0f) effective_zoom *= local_zoom;
+    }
+    return effective_zoom;
+}
 double g_text_layout_time = 0;
 double g_block_layout_time = 0;
 double g_inline_layout_time = 0;
@@ -276,7 +288,9 @@ static inline float collapse_root_margins(float a, float b) {
 }
 
 static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
-    if (!block || block->height > 0.0f) return false;
+    // Extreme aspect-ratio resolution can leave an empty box with a tiny
+    // positive residual; treat it as zero for root margin collapsing.
+    if (!block || block->height > 0.01f) return false;
     if (block->view_type == RDT_VIEW_TABLE ||
         block->view_type == RDT_VIEW_TABLE_ROW ||
         block->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
@@ -298,7 +312,9 @@ static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
     // make an otherwise empty body count both adjoining margins in root height.
     bool creates_bfc = block_context_establishes_bfc(block);
     if (creates_bfc) return false;
-    if (block->position && element_has_float(block)) return false;
+    if (block->position && element_has_float(block)) {
+        return false;
+    }
     if (block->display.inner == CSS_VALUE_FLOW_ROOT ||
         block->display.inner == CSS_VALUE_FLEX ||
         block->display.inner == CSS_VALUE_GRID) {
@@ -386,6 +402,17 @@ static void reset_non_inherited_style_cache(ViewSpan* view) {
         bg->radial_layers = NULL;
         bg->radial_layer_count = 0;
     }
+}
+
+static bool element_has_author_all_reset(DomElement* element) {
+    if (!element || !element->specified_style) return false;
+    CssDeclaration* declaration = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_ALL);
+    if (!declaration || !declaration->value ||
+        declaration->value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+
+    // `all: revert` exposes the lower-origin UA rules; other global values replace them.
+    return declaration->value->data.keyword != CSS_VALUE_REVERT;
 }
 
 // ============================================================================
@@ -825,6 +852,9 @@ float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* val
 float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
                                    FontProp* style) {
     if (!style) return 0.0f;
+    // A zero-sized font has no advance; probing its platform space glyph can
+    // otherwise return a fallback width and inflate intrinsic inline runs.
+    if (style->font_size <= 0.0f) return 0.0f;
     if (!handle) handle = style->font_handle;
     if (handle) {
         FontStyleDesc desc = font_style_desc_from_prop(style);
@@ -1078,7 +1108,12 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 // not the mutable font context left by previously-laid-out siblings.
                 setup_font(lycon->ui_context, &lycon->font, parent_elem->font);
             }
-            apply_element_default_style(lycon, dom_elem);
+            if (!element_has_author_all_reset(dom_elem)) {
+                apply_element_default_style(lycon, dom_elem);
+            } else {
+                // Author `all` must suppress UA declarations before CSS initial/inherited values resolve.
+                log_debug("[CSS] all reset suppresses HTML default style for <%s>", dom_elem->tag_name);
+            }
 
             // Track measurement vs full resolution
             if (layout_context_is_measuring(lycon)) {
@@ -1102,6 +1137,10 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                     dom_elem->display = resolved;
                 }
             }
+
+            // Web Animation effects sample after cascade so neutral keyframes
+            // capture the resolved underlying size without entering the CSS scheduler.
+            css_web_animation_resolve(dom_elem, lycon);
 
             // CSS Animations: check if element has animation-name and start animations
             if (lycon->ui_context) {
@@ -1129,7 +1168,12 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             }
         } else {
             // No specified_style - still apply element default styles for HTML attributes
-            apply_element_default_style(lycon, dom_elem);
+            if (!element_has_author_all_reset(dom_elem)) {
+                apply_element_default_style(lycon, dom_elem);
+            } else {
+                // Author `all` must suppress UA declarations before CSS initial/inherited values resolve.
+                log_debug("[CSS] all reset suppresses HTML default style for <%s>", dom_elem->tag_name);
+            }
 
             // CSS 2.1: Elements without specified styles still have computed values
             // from inheritance. Propagate font from the current layout context so
@@ -1570,6 +1614,12 @@ bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* bl
     if (!lycon || !lycon->doc || !lycon->doc->view_tree) return false;
     if (!is_quirks_mode(lycon->doc->view_tree->html_version)) return false;
     if (!block) block = lycon->block.establishing_element;
+    if (!block && lycon->line.start_view && lycon->line.has_replaced_content &&
+        lycon->line.atomic_inline_count == 1) {
+        // A single atomic line in a quirks inline-only block has no root strut;
+        // locate that line's container because it usually is not a BFC owner.
+        block = layout_nearest_block_ancestor(lycon->line.start_view->parent_view());
+    }
     if (!block) return false;
     for (DomNode* child = block->first_child; child; child = child->next_sibling) {
         if (is_block_level_element(child)) return false;
@@ -1801,7 +1851,11 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
                     layout_block_start_content_offset(block) + flex_baseline;
             }
-        } else if (block->blk && block->block_mut()->last_line_max_ascender > 0) {
+        } else if (!layout_inline_box_is_orthogonal_to_parent(block) &&
+                   block->blk && block->block_mut()->last_line_max_ascender > 0) {
+            // CSS Writing Modes synthesizes an orthogonal inline-block baseline
+            // from its physical bottom edge; its vertical-flow text baseline is
+            // not on the horizontal parent's baseline axis.
             bool is_replaced_elem = (block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
                 block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
                 (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute(MARKUP_NAME_DATA)) ||
@@ -2370,6 +2424,11 @@ static void normalize_phantom_left_float_spans(View* view, float continuation_x)
 }
 
 void line_align(LayoutContext* lycon) {
+    // UAX #9 reorders the complete inline line before CSS text alignment; doing
+    // this after alignment would move logical siblings but leave their range
+    // unions and inline decorations in the old order.
+    layout_bidi_line(lycon);
+
     // horizontal text alignment: left, right, center, justify, start, end
     // Convert logical values (start/end) to physical values (left/right)
     // CSS 2.1 §16.2: 'start' maps to 'left' for LTR and 'right' for RTL
@@ -2845,6 +2904,12 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             return;
         }
 
+        // HTML <br> preserves its forced-break semantics when author CSS changes
+        // its display value; only display:none suppresses the generated break box.
+        if (elem->tag() == MARKUP_NAME_BR && display.outer != CSS_VALUE_NONE) {
+            display.outer = CSS_VALUE_INLINE;
+        }
+
         switch (display.outer) {
         case CSS_VALUE_BLOCK:  case CSS_VALUE_INLINE_BLOCK:  case CSS_VALUE_LIST_ITEM:
         case CSS_VALUE_TABLE_CELL:  // CSS display: table-cell on non-table elements
@@ -3093,6 +3158,22 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         }
     }
 
+    CssEnum root_intrinsic_width = layout_intrinsic_preferred_size_keyword(html, true);
+    if (!root_has_explicit_width &&
+        (root_intrinsic_width == CSS_VALUE_MIN_CONTENT ||
+         root_intrinsic_width == CSS_VALUE_MAX_CONTENT)) {
+        IntrinsicSizes intrinsic = measure_element_intrinsic_widths(
+            lycon, elmt->as_element());
+        float intrinsic_border_width = root_intrinsic_width == CSS_VALUE_MIN_CONTENT
+            ? intrinsic.min_content : intrinsic.max_content;
+        root_css_width = max(intrinsic_border_width - root_bp_left - root_bp_right, 0.0f);
+        root_has_explicit_width = true;
+        // CSS Sizing intrinsic keywords determine the root's used inline size;
+        // the viewport fallback must not replace a valid min/max-content result.
+        log_debug("[CSS] Root intrinsic width: keyword=%d, content=%.1f",
+                  root_intrinsic_width, root_css_width);
+    }
+
     // Check for explicit CSS height on the root element
     bool root_has_explicit_height = false;
     float root_css_height = -1;  // content-box height from CSS
@@ -3129,6 +3210,14 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         lycon->block.given_height = root_css_height;
         if (html->blk) html->blk->given_height = root_css_height;
         log_debug("[CSS] Root explicit height: css_height=%.1f, border_box=%.1f", root_css_height, border_box_height);
+    }
+
+    if (!root_has_explicit_height && layout_block_inline_axis_is_vertical(html)) {
+        // Vertical writing maps the viewport height to the root inline axis;
+        // descendants need that definite basis before root post-layout sizing.
+        lycon->block.given_height = physical_height;
+        if (html->blk) html->blk->given_height = physical_height;
+        log_debug("[CSS] Root vertical inline basis: height=%.1f", physical_height);
     }
 
     if (root_is_abspos) {
@@ -3281,19 +3370,26 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     WritingMode root_writing_mode = layout_block_writing_mode(html);
     bool root_uses_vertical_writing =
         root_writing_mode == WM_VERTICAL_LR || root_writing_mode == WM_VERTICAL_RL;
+    if (!root_uses_vertical_writing && body_view) {
+        WritingMode body_writing_mode = layout_block_writing_mode(body_view);
+        // The root's auto physical size follows a vertical body even when the
+        // html element keeps its initial horizontal writing mode.
+        root_uses_vertical_writing = body_writing_mode == WM_VERTICAL_LR ||
+            body_writing_mode == WM_VERTICAL_RL;
+    }
     if (!root_has_explicit_width && !root_has_explicit_height &&
         root_uses_vertical_writing && body_view) {
         float body_margin_left = body_view->bound ? body_view->boundary()->margin.left : 0.0f;
         float body_margin_right = body_view->bound ? body_view->boundary()->margin.right : 0.0f;
         float body_margin_bottom = body_view->bound ? body_view->boundary()->margin.bottom : 0.0f;
-        float content_block_size = 0.0f;
-        View* vc = body_view->first_placed_child();
-        while (vc) {
-            float child_extent = vc->x + vc->width;
-            if (child_extent > content_block_size) content_block_size = child_extent;
-            vc = vc->next();
+        float content_block_size = layout_compute_in_flow_child_width_extent(body_view);
+        if (content_block_size <= 0.0f) {
+            // A zero-width vertical inline line still contributes its used line
+            // extent to the root block axis when the replaced resource is empty.
+            FontHandle* line_font = body_view->font ? body_view->fontp()->font_handle : lycon->font.font_handle;
+            float line_extent = line_font ? calc_normal_line_height(line_font) : 0.0f;
+            content_block_size = line_extent > 0.0f ? line_extent : body_view->height;
         }
-        if (content_block_size < body_view->height) content_block_size = body_view->height;
         body_view->width = content_block_size;
         body_view->content_width = content_block_size;
         body_view->height = physical_height - body_view->y - body_margin_bottom;
@@ -3331,9 +3427,9 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
                     float margin_top = child_block->bound ? child_block->boundary()->margin.top : 0.0f;
                     float margin_bottom = child_block->bound ? child_block->boundary()->margin.bottom : 0.0f;
                     float child_extent = child_block->y + child_block->height + margin_bottom;
-                    if (root_child_margins_are_self_collapsing(child_block)) {
-                        float collapsed_margin = collapse_root_margins(margin_top, margin_bottom);
-                        float collapsed_child_extent = child_block->y - margin_top + collapsed_margin;
+                if (root_child_margins_are_self_collapsing(child_block)) {
+                    float collapsed_margin = collapse_root_margins(margin_top, margin_bottom);
+                    float collapsed_child_extent = child_block->y - margin_top + collapsed_margin;
                         if (collapsed_child_extent > collapsed_root_content_extent) {
                             collapsed_root_content_extent = collapsed_child_extent;
                         }
@@ -3384,10 +3480,14 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             if (vc->is_block()) {
                 ViewBlock* vb = lam::view_require_block(vc);
                 if (vb->tag() == MARKUP_NAME_BODY) {
+                    bool body_uses_quirks_auto_min_height = !vb->blk ||
+                        vb->block()->given_min_height_type == CSS_VALUE_AUTO;
                     float body_margin_bottom = (vb->bound && vb->boundary_mut()->margin.bottom > 0)
                         ? vb->boundary()->margin.bottom : 0;
                     float body_available = physical_height - vb->y - body_margin_bottom;
-                    if (vb->height < body_available) {
+                    // Quirks viewport fill is the body's auto min-height behavior;
+                    // explicit min-height must survive aspect-ratio sizing.
+                    if (body_uses_quirks_auto_min_height && vb->height < body_available) {
                         log_debug("  quirks viewport stretch: body height %.1f -> %.1f", vb->height, body_available);
                         vb->height = body_available;
                     }
@@ -3591,6 +3691,41 @@ static void reset_float_prelaid_flags(DomNode* node) {
     }
 }
 
+static void layout_store_last_remembered_sizes(DomNode* node) {
+    if (!node || !node->is_element()) return;
+
+    DomElement* element = node->as_element();
+    if (element->blk && !element->block()->content_visibility_hidden &&
+        (element->block()->contain_intrinsic_width_auto ||
+         element->block()->contain_intrinsic_height_auto)) {
+        float remembered_width = element->width;
+        float remembered_height = element->height;
+        LayoutFragmentBox* fragment = element->layout_fragment_list();
+        if (fragment) {
+            remembered_width = 0.0f;
+            remembered_height = 0.0f;
+            for (; fragment; fragment = fragment->next) {
+                remembered_width = max(remembered_width, fragment->width);
+                remembered_height += fragment->height;
+            }
+        }
+
+        // Fragmented boxes remember the logical flow extent, not only the
+        // first fragment's clipped border box; hidden sizing otherwise loses
+        // the content that continued into later fragmentainers.
+        if (element->block()->contain_intrinsic_width_auto) {
+            element->set_last_remembered_width(remembered_width);
+        }
+        if (element->block()->contain_intrinsic_height_auto) {
+            element->set_last_remembered_height(remembered_height);
+        }
+    }
+
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        layout_store_last_remembered_sizes(child);
+    }
+}
+
 void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
@@ -3675,6 +3810,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
 
     log_debug("calling layout_html_root...");
     layout_html_root(&lycon, root_node);
+
+    layout_store_last_remembered_sizes(root_node);
 
     if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);

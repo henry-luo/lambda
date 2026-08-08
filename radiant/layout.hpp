@@ -55,6 +55,15 @@ constexpr int MAX_FLEX_DEPTH = 16;
 constexpr int MAX_GRID_DEPTH = 4;
 constexpr int MAX_IFRAME_DEPTH = 3;
 
+// browser layout coordinates use a signed 2^25 CSS-pixel range.
+constexpr float MAX_LAYOUT_DIMENSION = 33554432.0f;
+
+static inline float layout_clamp_dimension(float value) {
+    if (!isfinite(value)) return value;
+    return value < -MAX_LAYOUT_DIMENSION ? -MAX_LAYOUT_DIMENSION :
+        value > MAX_LAYOUT_DIMENSION ? MAX_LAYOUT_DIMENSION : value;
+}
+
 // ============================================================================
 // Available Space Type System
 // ============================================================================
@@ -200,9 +209,12 @@ float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float width);
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
                                    bool ignore_definite_block_size = false);
+bool layout_has_cyclic_percentage_replaced_descendant(DomElement* element);
+bool layout_has_cyclic_percentage_ratio_descendant(LayoutContext* lycon, DomElement* element);
 float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width);
 
 bool layout_element_inline_axis_is_vertical(DomElement* element);
+CssEnum layout_element_css_writing_mode(DomElement* element);
 WritingMode layout_element_writing_mode(DomElement* element);
 bool layout_inline_element_is_orthogonal(DomElement* element);
 CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
@@ -210,6 +222,8 @@ CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
 CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* element,
                                                                    bool horizontal,
                                                                    bool minimum);
+bool layout_axis_size_is_percentage(ViewBlock* block, bool horizontal);
+bool layout_axis_size_is_percentage(DomElement* element, bool horizontal);
 CssEnum layout_intrinsic_preferred_size_keyword(ViewBlock* block, bool horizontal);
 CssEnum layout_intrinsic_min_size_keyword(ViewBlock* block, bool horizontal);
 CssEnum layout_intrinsic_max_size_keyword(ViewBlock* block, bool horizontal);
@@ -243,6 +257,11 @@ float compute_text_height_at_width(LayoutContext* lycon,
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
                                                  bool content_only = false);
+void layout_resolve_intrinsic_horizontal_margins(LayoutContext* lycon,
+                                                  DomElement* element,
+                                                  bool include_logical,
+                                                  float* margin_left,
+                                                  float* margin_right);
 
 // tier-3: layout-transient, valid within pass
 struct IntrinsicSizesBidirectional {
@@ -300,9 +319,16 @@ TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
 
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
+float layout_aspect_ratio_height(float width, float aspect_ratio);
 float layout_preferred_aspect_ratio(ViewBlock* block);
 float layout_used_preferred_aspect_ratio(ViewBlock* block);
+void layout_apply_preferred_ratio_to_replaced_auto_axes(LayoutContext* lycon,
+                                                        ViewBlock* block);
+char* layout_resolve_replaced_image_source(DomElement* element);
 bool layout_aspect_ratio_uses_content_box(ViewBlock* block);
+ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
+                                                   ViewBlock* block,
+                                                   DomElement* element);
 bool layout_canvas_natural_size(ViewBlock* block, float* out_width, float* out_height);
 CssEnum layout_intrinsic_min_size_keyword(ViewBlock* block, bool horizontal);
 
@@ -563,7 +589,8 @@ static inline bool layout_uses_border_box(ViewBlock* block) {
 float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_border_box);
 float layout_apply_min_max_height(ViewBlock* block, float height, bool height_is_border_box);
 float layout_apply_min_max_axis(ViewBlock* block, float size, bool horizontal, bool size_is_border_box);
-float layout_apply_min_max_border_box_axis(ViewBlock* block, float border_size, bool horizontal);
+float layout_apply_min_max_border_box_axis(ViewBlock* block, float border_size, bool horizontal,
+                                           bool ignore_percentage_max = false);
 void layout_apply_aspect_ratio_min_max_constraints(ViewBlock* block, float aspect_ratio,
                                                    float* content_width, float* content_height);
 float layout_clamp_min_max_width(ViewBlock* block, float width);
@@ -588,7 +615,11 @@ static inline float layout_explicit_min_width_or(ViewBlock* block, float fallbac
 }
 
 static inline float layout_explicit_min_height_or(ViewBlock* block, float fallback) {
-    return (block && block->blk && block->block()->given_min_height >= 0.0f)
+    // resolved min-height:auto is stored as numeric zero; its AUTO type must
+    // remain distinguishable from an author-specified zero for auto minimums.
+    return (block && block->blk &&
+            block->block()->given_min_height_type != CSS_VALUE_AUTO &&
+            block->block()->given_min_height >= 0.0f)
         ? block->block()->given_min_height
         : fallback;
 }
@@ -1219,6 +1250,7 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
 // ============================================================================
 
 bool is_multicol_container(ViewBlock* block);
+bool multicol_spanner_can_escape_child(ViewBlock* child);
 float multicol_normal_gap_size(ViewBlock* block);
 float multicol_empty_intrinsic_inline_size(ViewBlock* block);
 void calculate_multicol_dimensions(
@@ -1482,6 +1514,7 @@ typedef struct Linebox {
     bool has_space;                 // whether last layout character is a space
     bool has_float_intrusion;       // true if floats affect this line
     bool has_replaced_content;      // true if line has inline replaced elements (images, inline-blocks)
+    int atomic_inline_count;        // number of atomic inline items placed on this line
     float max_desc_before_last_text; // max_descender value before last output_text (for trailing space rollback)
     bool has_expanded_inline_lh;    // true if an inline element's own line-height exceeds the parent block's
     float max_inline_line_height;   // max explicit line-height from baseline-aligned inline descendants
@@ -1642,6 +1675,18 @@ typedef struct FlexContainerLayout : FlexProp {
 
 bool flex_item_will_stretch_cross_axis(ViewElement* item, FlexContainerLayout* flex_layout);
 bool flex_item_has_content_flex_basis(ViewElement* item);
+bool flex_item_is_anonymous_text(ViewElement* item);
+float flex_column_content_contribution(LayoutContext* lycon, ViewElement* container);
+void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout);
+
+typedef struct FlexMeasureTextRun {
+    const char* text;
+    size_t length;
+} FlexMeasureTextRun;
+
+FlexMeasureTextRun flex_measure_prepare_text_run(DomNode* text_node,
+                                                  const char* text,
+                                                  size_t length);
 
 // ============================================================================
 // Layout Axis Helpers
@@ -2197,6 +2242,8 @@ inline bool layout_context_is_measuring(LayoutContext* lycon) {
 // ============================================================================
 
 bool layout_resolve_percentage_value(const CssValue* value, float percentage_base, float* out);
+bool layout_css_value_has_nonzero_percentage(const CssValue* value);
+bool layout_css_value_has_percentage(const CssValue* value);
 bool layout_resolve_deferred_percentage(float percent, float percentage_base, float* out);
 bool layout_apply_deferred_percentage(float percent, float percentage_base, float* target, float* resolved);
 float layout_block_used_content_size(ViewBlock* block, bool horizontal, bool require_positive);
@@ -2204,12 +2251,35 @@ float layout_block_given_content_size(ViewBlock* block, bool horizontal);
 float layout_block_declared_content_size(LayoutContext* lycon, ViewBlock* block, CssPropertyCode property, bool horizontal);
 bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal);
 bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal);
+bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* containing_block);
 bool layout_block_has_automatic_height(ViewBlock* block);
 WritingMode layout_block_writing_mode(ViewBlock* block);
+WritingMode layout_writing_mode_from_css(CssEnum writing_mode);
+void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
+                                               float block_extent,
+                                               float line_height,
+                                               float surrogate_inline_origin,
+                                               float physical_inline_origin,
+                                               float surrogate_block_origin,
+                                               float physical_block_origin,
+                                               bool center_block_axis);
+float layout_vertical_flow_block_start_margin(ViewBlock* child, WritingMode parent_mode);
+float layout_vertical_flow_block_end_margin(ViewBlock* child, WritingMode parent_mode);
+bool layout_parent_block_edge_is_unedged(ViewBlock* block, bool horizontal, bool start);
 void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
                                       bool swap_dimensions);
 void layout_normalize_vertical_breaks(ViewBlock* block);
 bool layout_block_inline_axis_is_vertical(ViewBlock* block);
+float layout_compute_in_flow_child_width_extent(ViewBlock* parent);
+inline bool layout_inline_box_is_orthogonal_to_parent(ViewBlock* block) {
+    if (!block) return false;
+    ViewBlock* parent = layout_nearest_block_ancestor(block->parent_view());
+    return parent &&
+        // writing-mode is inherited; BlockProp may still carry its default
+        // horizontal value before the inherited declaration is materialized.
+        layout_element_inline_axis_is_vertical(block->as_element()) !=
+        layout_element_inline_axis_is_vertical(parent->as_element());
+}
 inline float layout_block_start_content_offset(ViewBlock* block) {
     if (!block) return 0.0f;
     BoxMetrics box = layout_box_metrics(block);
@@ -2239,6 +2309,7 @@ float layout_block_empty_content_size_in_axis(ViewBlock* block, bool horizontal)
 float layout_block_stable_scrollbar_gutter(ViewBlock* block, bool horizontal);
 float layout_block_auto_content_width_from_inline_base(ViewBlock* block, float inline_base);
 void layout_reresolve_percentage_box(ViewBlock* block, float inline_base);
+bool layout_view_tree_has_percentage_spacing(View* root);
 
 // ============================================================================
 // Table Captions
@@ -2414,10 +2485,13 @@ void block_context_recompute_lowest_float_bottom(BlockContext* ctx);
  * @param height Height of the line/element being placed
  * @param line_query Exclude a specially lowered initial-letter float from a
  *                   line that already originated above the float.
+ * @param float_placement_query Apply same-side float intrusion at the
+ *                              candidate top even for a zero-height float.
  * @return Available space bounds adjusted for floats
  */
 FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height,
-                                              bool line_query = false);
+                                              bool line_query = false,
+                                              bool float_placement_query = false);
 
 /**
  * Find the lowest Y where a given width is available
@@ -2513,10 +2587,16 @@ const char* map_lambda_font_family_keyword(const char* keyword);
 
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);
+void layout_bidi_line(LayoutContext* lycon);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
 View* layout_inline_fragment_root(View* view);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
+void layout_block_resolve_intrinsic_width_constraints(LayoutContext* lycon,
+                                                      ViewBlock* block);
+void layout_block_resolve_intrinsic_height_constraints(LayoutContext* lycon,
+                                                       ViewBlock* block,
+                                                       float content_width);
 DomElement* find_fieldset_rendered_legend(ViewBlock* fieldset);
 void layout_block(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_text(LayoutContext* lycon, DomNode* text_node);
@@ -2609,7 +2689,9 @@ static inline bool layout_block_is_hidden_or_display_none(const ViewBlock* block
 }
 
 static inline bool layout_block_is_skipped_container_item(const ViewBlock* block) {
-    return layout_block_is_hidden_or_display_none(block) ||
+    // CSS Visibility keeps a hidden box in layout; only display:none and
+    // out-of-flow boxes are excluded from grid/flex item collection.
+    return !block || layout_block_is_display_none(block) ||
            layout_block_is_out_of_flow_positioned(block);
 }
 
@@ -2771,6 +2853,27 @@ struct PercentageContainingBlockWidthScope {
     }
     PercentageContainingBlockWidthScope(const PercentageContainingBlockWidthScope&) = delete;
     PercentageContainingBlockWidthScope& operator=(const PercentageContainingBlockWidthScope&) = delete;
+};
+
+// tier-3: layout-transient, valid within pass
+struct PercentageContainingBlockHeightScope {
+    LayoutContext* lycon;
+    BlockContext* saved_parent;
+    BlockContext containing_block;
+
+    PercentageContainingBlockHeightScope(LayoutContext* l, float content_height)
+        : lycon(l), saved_parent(l ? l->block.parent : nullptr), containing_block{} {
+        if (!lycon) return;
+        if (saved_parent) containing_block = *saved_parent;
+        containing_block.content_height = content_height;
+        containing_block.given_height = content_height >= 0.0f ? content_height : -1.0f;
+        lycon->block.parent = &containing_block;
+    }
+    ~PercentageContainingBlockHeightScope() {
+        if (lycon) lycon->block.parent = saved_parent;
+    }
+    PercentageContainingBlockHeightScope(const PercentageContainingBlockHeightScope&) = delete;
+    PercentageContainingBlockHeightScope& operator=(const PercentageContainingBlockHeightScope&) = delete;
 };
 
 /**

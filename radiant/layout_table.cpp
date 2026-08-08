@@ -6147,6 +6147,14 @@ static void table_mirror_vertical_descendants(View* view,
     }
 }
 
+static bool table_has_explicit_physical_block_size(ViewTable* table) {
+    if (!table || !table->is_element()) return false;
+    DomElement* element = table->as_element();
+    CssDeclaration* declaration = layout_specified_physical_size_declaration(
+        element, true);
+    return declaration && declaration->property_code == CSS_PROPERTY_BLOCK_SIZE;
+}
+
 static void table_publish_vertical_geometry(ViewTable* table) {
     if (!table || !layout_block_inline_axis_is_vertical(table)) return;
 
@@ -6167,8 +6175,7 @@ static void table_publish_vertical_geometry(ViewTable* table) {
             float caption_width = child->width;
             float margin_top = table_caption_positive_margin_top(child);
             float margin_bottom = table_caption_positive_margin_bottom(child);
-            child->height = max(
-                logical_width - margin_top - margin_bottom, 0.0f);
+            child->height = max(logical_width - margin_top - margin_bottom, 0.0f);
             child->y = margin_top;
             bool is_bottom = table_caption_is_bottom(child);
             if ((is_bottom && !vertical_rl) || (!is_bottom && vertical_rl)) {
@@ -6183,17 +6190,15 @@ static void table_publish_vertical_geometry(ViewTable* table) {
 
         float logical_x = child->x;
         float logical_y = child->y;
-        float logical_width = child->width;
-        float logical_height = child->height;
+        float logical_child_width = child->width;
+        float logical_child_height = child->height;
         child->x = logical_y;
         child->y = logical_x;
-        child->width = logical_height;
-        child->height = logical_width;
+        child->width = logical_child_height;
+        child->height = logical_child_width;
         table_swap_vertical_descendants(child);
         child->x += top_caption_extent;
-        if (!have_grid_bounds || child->x < grid_origin) {
-            grid_origin = child->x;
-        }
+        if (!have_grid_bounds || child->x < grid_origin) grid_origin = child->x;
         if (!have_grid_bounds || child->x + child->width > grid_end) {
             grid_end = child->x + child->width;
         }
@@ -6201,30 +6206,20 @@ static void table_publish_vertical_geometry(ViewTable* table) {
     });
 
     if (vertical_rl && have_grid_bounds) {
-        // CSS Writing Modes reverses block progression in vertical-rl; the
-        // table rows and every descendant must share that physical mapping.
+        // CSS Writing Modes reverses block progression in vertical-rl.
         for_each_direct_table_block(table, [&](ViewBlock* child) {
             if (!table_view_is_caption(child)) {
-                table_mirror_vertical_descendants(
-                    child, grid_origin, grid_end - grid_origin);
+                table_mirror_vertical_descendants(child, grid_origin,
+                    grid_end - grid_origin);
             }
         });
     }
 
-    table->width = physical_width;
-    table->height = physical_height;
-    table->content_width = physical_width;
-    table->content_height = physical_height;
-    table->width = max(table->width, 0.0f);
-    table->height = max(table->height, 0.0f);
+    table->width = max(physical_width, 0.0f);
+    table->height = max(physical_height, 0.0f);
+    table->content_width = table->width;
+    table->content_height = table->height;
     layout_normalize_vertical_breaks(table);
-    // CSS Writing Modes maps table rows to the block axis and columns to the
-    // inline axis; publish this before block finalization so table internals
-    // cannot be mistaken for a horizontal flow child extent.
-    log_debug("%s vertical table geometry: logical=%.1fx%.1f physical=%.1fx%.1f captions=%.1f/%.1f mode=%s",
-              table->source_loc(), logical_width, logical_height,
-              table->width, table->height, top_caption_extent,
-              bottom_caption_extent, vertical_rl ? "rl" : "lr");
 }
 
 static float table_measure_caption_width_contribution(LayoutContext* lycon,
@@ -6661,7 +6656,9 @@ static void align_table_cell_block_child(ViewTableCell* cell, ViewBlock* child,
                                          float content_start_x, float content_width) {
     if (!cell || !child || !cell->blk || content_width <= 0.0f) return;
     CssEnum align = cell->block()->legacy_block_align;
-    if (align != CSS_VALUE_CENTER && align != CSS_VALUE_RIGHT) return;
+    bool vertical_middle = layout_block_inline_axis_is_vertical(cell) && cell->td &&
+        cell->td->vertical_align == TableCellProp::CELL_VALIGN_MIDDLE;
+    if (align != CSS_VALUE_CENTER && align != CSS_VALUE_RIGHT && !vertical_middle) return;
     if (layout_block_is_out_of_flow_positioned(child)) {
         return;
     }
@@ -6672,6 +6669,8 @@ static void align_table_cell_block_child(ViewTableCell* cell, ViewBlock* child,
     if (align == CSS_VALUE_RIGHT) {
         target_x = content_start_x + content_width - child->width;
     } else {
+        // In vertical writing, table-cell middle alignment centers block
+        // content along the physical block axis, which is the cell width.
         target_x = content_start_x + (content_width - child->width) / 2.0f;
     }
 
@@ -7175,9 +7174,22 @@ static float table_intrinsic_child_horizontal_margin(LayoutContext* lycon,
         if (child_elem->boundary()->margin.right_type != CSS_VALUE_AUTO) {
             margin_h += child_elem->boundary()->margin.right;
         }
-        return margin_h;
+        if (margin_h != 0.0f || !child_elem->specified_style) return margin_h;
+        // intrinsic measurement can see a bound view before its CSS margins are
+        // resolved; fall through so specified margins still affect max-content.
     }
     if (!child_elem->specified_style) return 0.0f;
+
+    if (include_shorthand) {
+        float margin_left = 0.0f;
+        float margin_right = 0.0f;
+        // CSS Sizing 3 §5.2: table-cell intrinsic sizing must preserve the
+        // fixed term in calc(percentage + length) while resolving its percentage
+        // term against zero, just like the generic intrinsic-size path.
+        layout_resolve_intrinsic_horizontal_margins(
+            lycon, child_elem, false, &margin_left, &margin_right);
+        return margin_left + margin_right;
+    }
 
     CssDeclaration* ml = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
     if (ml && ml->value && ml->value->type == CSS_VALUE_TYPE_LENGTH) {
@@ -7417,6 +7429,22 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
             // block/inline elements, floats, replaced elements, etc. Floats are
             // out of normal flow vertically, but they still contribute to the
             // intrinsic width of the block formatting context that contains them.
+            DisplayValue child_display = resolve_display_value(child);
+            bool child_is_replaced = child_display.inner == RDT_DISPLAY_REPLACED;
+            if (!child_elem->styles_resolved() &&
+                child_is_replaced &&
+                child_elem->specified_style &&
+                child_elem->specified_style->tree &&
+                child_elem->specified_style->tree->node_count > 0) {
+                // Table intrinsic sizing must resolve styled cell children before
+                // used margins and aspect-ratio transfers are measured.
+                radiant::LayoutRunModeScope run_mode_scope(
+                    lycon, radiant::RunMode::ComputeSize);
+                View* saved_view = lycon->view;
+                lycon->view = static_cast<View*>(child_elem);
+                dom_node_resolve_style(child_elem, lycon);
+                lycon->view = saved_view;
+            }
             IntrinsicSizes child_sizes = layout_measure_intrinsic_widths(lycon, child_elem, "table cell child");
             float child_max = child_sizes.max_content;
             float child_min = child_sizes.min_content;
@@ -7431,7 +7459,6 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
                       child->node_name(), child_min, child_max);
 
             // Check if this is an inline element (flows with text) or block element (starts new line)
-            DisplayValue child_display = resolve_display_value(child);
             bool is_inline = (child_display.outer == CSS_VALUE_INLINE ||
                               child_display.outer == CSS_VALUE_INLINE_BLOCK);
             bool child_is_float = table_element_is_floated(child_elem);
@@ -8024,6 +8051,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     table->width = empty_table_auto_width;
                 }
             }
+            // Empty tables still honor a resolved min-width after the
+            // explicit/automatic width branch has chosen their base size.
+            table->width = layout_apply_min_max_width(table, table->width, true);
+            table->content_width = layout_content_width_from_border_box(
+                table, table->width);
             table->height = bp_top + bp_bottom;
             if (table->blk && table->block_mut()->given_height > 0) {
                 if (layout_uses_border_box(table)) {
@@ -8514,7 +8546,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_debug("CSS 2.1: Using explicit table content width: %.1fpx (requested: %.1fpx)", used_table_width, explicit_content_area);
     } else {
         // CSS 2.1: Table width is auto - use preferred width
-        used_table_width = pref_table_width;
+        // A specified cell width can be below its min-content contribution;
+        // auto table sizing must still honor the table's minimum width.
+        used_table_width = max(pref_table_width, min_table_width);
         if (has_direct_float && table->display.outer == CSS_VALUE_BLOCK &&
             max_available_width > used_table_width) {
             // Direct floated children establish float intrusions inside the table
@@ -9843,7 +9877,14 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
 
     // Step 2: Calculate layout
     table_auto_layout(lycon, table);
-    table_publish_vertical_geometry(table);
+    // Explicit physical width already represents vertical block-size after
+    // logical-property resolution; only auto tables need axis publication.
+    bool has_explicit_physical_width = table->blk &&
+        table->block_mut()->given_width >= 0.0f;
+    bool has_logical_block_size = table_has_explicit_physical_block_size(table);
+    if (!has_explicit_physical_width && !has_logical_block_size) {
+        table_publish_vertical_geometry(table);
+    }
     log_debug("%s Table layout calculated: %dx%d", tableNode->source_loc(), table->width, table->height);
 
     // Step 3: Update layout context for proper block integration
