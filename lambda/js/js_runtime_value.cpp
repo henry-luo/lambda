@@ -3,9 +3,7 @@
 
 extern __thread EvalContext* context;
 
-extern "C" bool js_ordinary_has_property(Item object, const char* name, int name_len);
 extern "C" void* jube_host_identity(Item item);
-extern "C" bool js_is_proxy(Item obj);
 
 extern "C" Item js_undefined(void) {
     return (Item){.item = ITEM_JS_UNDEFINED};
@@ -843,10 +841,6 @@ extern "C" int64_t js_loose_eq_raw(Item left, Item right) {
 }
 
 // js_property_get_str: property access with C string key (avoids string boxing)
-extern "C" Item js_property_get_str(Item object, const char* key, int key_len);
-extern "C" bool js_typed_array_is_out_of_bounds_item(Item ta_item);
-extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
-extern "C" Item js_has_own_property(Item obj, Item key);
 
 bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero) {
     if (is_negative_zero) *is_negative_zero = false;

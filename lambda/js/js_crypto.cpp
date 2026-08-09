@@ -34,6 +34,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include <psa/crypto.h>
 
 extern "C" Item bigint_from_string(const char* str, int len);
+
 extern __thread EvalContext* context;
 
 #ifdef _WIN32

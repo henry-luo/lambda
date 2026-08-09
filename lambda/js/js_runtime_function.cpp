@@ -7,7 +7,6 @@
 #include "../runtime/side_stack.h"
 
 extern __thread EvalContext* context;
-extern void heap_register_gc_root(uint64_t* slot);
 
 // =============================================================================
 // Function object wrappers
@@ -166,10 +165,7 @@ extern "C" void js_func_cache_suppress_pop(void) {
     }
 }
 
-extern "C" int64_t js_with_depth_active(void);
 extern "C" Item* js_with_capture_stack(int* out_depth);
-extern "C" Item js_get_global_this(void);
-extern void heap_register_gc_root(uint64_t* slot);
 
 static void js_function_capture_with_env(JsFunction* fn) {
     if (!fn || !js_with_depth_active()) return;

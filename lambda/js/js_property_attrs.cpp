@@ -15,9 +15,7 @@
 #include <string.h>
 #include <stdio.h>
 
-extern "C" void* heap_calloc(size_t size, TypeId type);
 String* heap_create_name(const char* name, size_t len);
-extern "C" Item js_object_is(Item left, Item right);
 extern void map_put(Map* mp, String* key, Item value, Input* input);
 
 extern "C" JsAccessorPair* js_alloc_accessor_pair(Item getter, Item setter) {
@@ -769,7 +767,6 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
 
 // Phase-5C: 4-arg MIR-friendly wrapper. Returns `obj` so transpiler call sites
 // can drop the result on the floor without needing a void-returning helper.
-extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
                                           int is_setter) {
     extern __thread EvalContext* context;
@@ -788,8 +785,6 @@ extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
     return obj_root.get();
 }
 
-extern "C" Item js_get_prototype(Item object);
-extern "C" Item js_get_prototype_of(Item object);
 
 extern "C" JsAccessorPair* js_find_accessor_pair_inheritable_key(Item obj,
                                                                    PropertyKeyRef key) {

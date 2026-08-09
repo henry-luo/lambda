@@ -30,21 +30,14 @@
 #endif
 
 extern __thread EvalContext* context;
-extern "C" void js_function_set_prototype(Item fn_item, Item proto);
-extern "C" void js_clearTimeout(Item timer_id);
-extern "C" Item js_new_aggregate_error(Item errors, Item message);
-extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
-extern "C" Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual);
-extern "C" Item js_throw_type_error_code(const char* code, const char* message);
-extern "C" Item js_throw_out_of_range(const char* name, const char* range, Item actual);
 extern "C" Item js_timeout_ref(Item this_val);
 extern "C" Item js_timeout_unref(Item this_val);
 extern "C" Item js_net_Socket(Item options);
-extern "C" Item js_object_keys(Item object);
 extern "C" void js_cluster_notify_worker_listening(void);
 extern "C" void js_process_ipc_notify_handle_accepted(void);
 extern "C" void js_process_ipc_notify_socket_closed(void);
 extern "C" uint64_t js_get_heap_epoch(void);
+extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern Item js_make_number(double d);
 
 static Item make_undefined_item(void) {

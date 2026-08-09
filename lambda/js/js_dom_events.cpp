@@ -32,16 +32,11 @@
 #include <cmath>
 #include <functional>
 
+extern Item js_make_number(double d);
+
 // Forward decls used by Event helpers below (signatures from js_runtime.h /
 // js_dom.h, declared here under extern "C" to avoid header coupling).
-extern "C" Item js_get_this();
-extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern __thread EvalContext* context;
-extern Item js_array_new(int length);
-extern Item js_array_push(Item array, Item value);
-extern Item js_get_document_object_value();
-extern "C" Item js_get_global_this();
-extern Item js_make_number(double d);
 
 // Form-control IDL helpers from js_dom.cpp — used by HTMLElement click
 // activation behavior (HTML §6.4.4).
@@ -52,14 +47,9 @@ extern "C" const char* js_dom_input_type_lower(void* dom_elem);
 extern "C" const char* js_dom_tag_name_raw(void* dom_elem);
 extern "C" bool js_dom_is_disabled(void* dom_elem);
 extern "C" bool js_dom_is_connected(void* dom_elem);
-extern "C" void* js_dom_popover_target_for_button(void* button);
-extern "C" int js_dom_popover_target_action(void* button);
-extern "C" bool js_dom_activate_popover(void* popover, int action);
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
 extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
 extern "C" Item js_dom_check_validity_bridge(Item elem_item);
-extern "C" int64_t js_array_length(Item array);
-extern "C" Item js_array_get_int(Item array, int64_t index);
 static inline Item event_make_double(double v) {
     return js_make_number(v);
 }
@@ -181,7 +171,6 @@ static double event_now_ms() {
 }
 
 static Item event_exception_message(Item err) {
-    extern Item js_to_string(Item value);
     Item msg = err;
     if (get_type_id(err) == LMD_TYPE_MAP || get_type_id(err) == LMD_TYPE_OBJECT) {
         Item m_key = (Item){.item = s2it(heap_create_name("message"))};
@@ -217,7 +206,6 @@ static void log_event_exception_detail(const char* source, const char* type, Ite
 // `window.onerror` (HTML spec: report exception). Best-effort: if
 // onerror is not a function, just swallow.
 static void report_exception_to_window_onerror(Item err, const char* type) {
-    extern Item js_get_global_this(void);
     Item global = js_get_global_this();
     if (global.item == 0) return;
     Item onerr_key = (Item){.item = s2it(heap_create_name("onerror"))};
@@ -1376,7 +1364,6 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
     // (returnValue, cancelBubble, defaultPrevented). These override the
     // plain data properties set above.
     {
-        extern Item js_object_define_property(Item obj, Item name, Item descriptor);
         Item get_key = (Item){.item = s2it(heap_create_name("get"))};
         Item set_key = (Item){.item = s2it(heap_create_name("set"))};
         Item conf_key = (Item){.item = s2it(heap_create_name("configurable"))};
@@ -2655,7 +2642,6 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
         }
     } else if (act_kind == 3 && act_target && !prevented && !act_disabled) {
         // Reset-button activation: walk up to owning <form> and call reset().
-        extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
         if (!js_dom_is_disabled(act_target) && js_dom_is_connected(act_target)) {
             DomElement* el = (DomElement*)act_target;
             DomElement* owner = nullptr;

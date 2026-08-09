@@ -8,19 +8,18 @@
 
 __thread JsRuntimeState* js_active_runtime_state = NULL;
 extern __thread EvalContext* context;
-extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
 extern "C" int js_initial_call_stack_limit(void);
 extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_regex_cache_destroy_context(JsRuntimeState* state);
-extern "C" void js_reset_template_registry(void);
 extern "C" void js_dom_platform_destroy_context(JsRuntimeState* state);
 extern "C" void js_dom_events_destroy_context(JsRuntimeState* state);
 extern "C" void js_dom_observers_destroy_context(JsRuntimeState* state);
-extern "C" void js_xhr_reset(void);
 extern "C" void js_xhr_destroy_context(JsRuntimeState* state);
-extern "C" void js_history_reset(void);
 extern "C" void js_iterator_proto_cache_reset(void);
+extern "C" void js_history_reset(void);
+extern "C" void js_xhr_reset(void);
+extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 
 extern "C" void js_reset_buffer_module(void);
 extern "C" void js_crypto_reset(void);
@@ -53,7 +52,6 @@ static void js_reset_cached_realm_objects(void) {
     js_func_cache_reset();
     js_builtin_cache_reset();
     js_deep_batch_reset();
-    extern void js_reset_constructor_prototypes(void);
     js_reset_constructor_prototypes();
 }
 
@@ -83,7 +81,6 @@ extern "C" void js_dom_collections_destroy_context(JsRuntimeState* state);
 extern "C" void js_dom_foreign_documents_release_context(void);
 extern "C" void js_dom_foreign_documents_destroy_context(JsRuntimeState* state);
 extern "C" void js_fetch_apply_bootstrap_base_path(void);
-extern "C" void js_fetch_reset(void);
 extern "C" void js_fetch_destroy_context(JsRuntimeState* state);
 extern "C" void js_fs_pending_destroy_context(JsRuntimeState* state);
 extern "C" void js_tls_destroy_context(JsRuntimeState* state);
@@ -93,7 +90,6 @@ extern "C" void js_crypto_destroy_context(JsRuntimeState* state);
 extern "C" void js_atomics_destroy_context(JsRuntimeState* state);
 extern "C" void js_canvas_destroy_context(JsRuntimeState* state);
 extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* state);
-extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 
 static bool js_runtime_state_init_well_known_refs(JsRuntimeState* state) {
     if (!state) return false;
@@ -820,10 +816,6 @@ Item js_strict_throw_property_error(const char* reason, const char* prop_name, i
 Item _map_read_field(ShapeEntry* field, void* map_data);
 // Forward declaration for _map_get (used as fallback for nested/spread maps)
 Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found);
-extern "C" void js_mark_non_enumerable(Item object, Item name);
-extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
-extern "C" void js_set_prototype(Item object, Item prototype);
-extern "C" Item js_in(Item key, Item object);
 extern "C" Item js_get_current_this(void) { return js_current_this; }
 
 static void js_runtime_make_non_enumerable(Item object, Item name) {
@@ -851,7 +843,6 @@ bool js_runtime_trace_enabled() {
 }
 
 // Forward declaration: defined in js_globals.cpp.
-extern "C" bool js_func_is_builtin_ctor(Item fn);
 extern "C" uint64_t js_get_heap_epoch() { return js_heap_epoch; }
 
 // v37: Toggle private field initialization mode (called from transpiled code)
@@ -1173,20 +1164,11 @@ extern "C" Item js_throw_const_assign(const char* name, int name_len) {
 
 // forward declaration for js_batch_reset (defined near js_module_count_v14)
 // forward declaration for array custom prototype check
-extern "C" Item js_array_get_custom_proto(Item arr);
 // forward declarations for module namespace cache resets
-extern "C" void js_child_process_reset();
-extern "C" void js_fs_reset();
 extern "C" void js_fs_runtime_detach();
-extern "C" void js_util_reset();
-extern "C" void js_reset_template_registry(void);
 extern "C" void js_iterator_proto_cache_reset(void);
-extern "C" void js_reset_css_namespace_object(void);
 extern "C" void js_dynfunc_cache_reset(void);
-extern "C" void js_canvas_cleanup(void);
 extern "C" void js_cjs_metadata_reset(void);
-extern "C" void js_fetch_reset(void);
-extern "C" void js_history_reset(void);
 
 extern "C" void js_batch_reset() {
     // A host can finish a document after its context-owned JS state was
@@ -1228,17 +1210,14 @@ extern "C" void js_batch_reset() {
     jube_modules_runtime_reset();
     jube_modules_runtime_detach();
     // reset globalThis, constructor cache, process object — stale heap pointers
-    extern void js_globals_batch_reset(void);
     js_globals_batch_reset();
     // reset DOM state — stale document proxy and document pointer
-    extern void js_dom_batch_reset(void);
     js_dom_batch_reset();
     // reset legacy RegExp static properties ($1-$9, input, etc.)
     memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
     // reset regex compilation cache — AST pointers from previous test are stale
     js_regex_cache_reset();
     // reset microtask queue and timers — callbacks referencing old heap
-    extern void js_event_loop_init(void);
     js_event_loop_init();
     // reset process event listeners — callbacks referencing old heap
     extern void js_process_reset_listeners(void);
@@ -1329,13 +1308,10 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     jube_modules_runtime_reset();
     jube_modules_runtime_detach();
     // reset globalThis, constructor cache, process object — stale heap pointers
-    extern void js_globals_batch_reset(void);
     js_globals_batch_reset();
     // reset DOM state — stale document proxy and document pointer
-    extern void js_dom_batch_reset(void);
     js_dom_batch_reset();
     // reset microtask queue and timers — callbacks referencing old heap
-    extern void js_event_loop_init(void);
     js_event_loop_init();
     // reset process event listeners — callbacks referencing old heap
     extern void js_process_reset_listeners(void);
@@ -1668,7 +1644,6 @@ extern "C" Item js_error_materialize_stack(Item error_obj) {
     return stack_root.get();
 }
 
-extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str);
 
 // v12: Create Error with a compile-time stack trace string
 extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
@@ -1801,7 +1776,6 @@ extern "C" Item js_get_this() {
         return js_throw_value(js_new_error_with_name(tn, msg));
     }
     if (js_current_this.item == 0) {
-        extern Item js_get_global_this();
         return js_get_global_this();
     }
     return js_current_this;
@@ -1819,7 +1793,6 @@ extern "C" Item js_resolve_lexical_this(Item this_val) {
         return js_throw_value(js_new_error_with_name(tn, msg));
     }
     if (this_val.item == 0) {
-        extern Item js_get_global_this();
         return js_get_global_this();
     }
     return this_val;
@@ -1973,7 +1946,6 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
     }
 }
 
-extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len);
 
 extern "C" Item js_build_arguments_object() {
     RootFrame roots(10);

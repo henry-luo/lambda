@@ -44,10 +44,8 @@ extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_
 extern "C" void js_async_hooks_emit_destroy_resource(Item resource);
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
-extern "C" Item js_throw_value(Item error);
-extern "C" Item js_process_emit(Item event_name, Item arg1);
-extern "C" Item js_symbol_for(Item key);
 extern Item js_make_number(double d);
+extern "C" Item js_process_emit(Item event_name, Item arg1);
 
 #define http_server_prototype (js_runtime_state.http.server_prototype)
 #define http_incoming_message_prototype (js_runtime_state.http.incoming_message_prototype)

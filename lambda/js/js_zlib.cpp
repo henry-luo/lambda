@@ -22,13 +22,10 @@
 
 extern "C" Item js_get_stream_namespace(void);
 extern "C" Item js_transform_new(Item opts);
-extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" Item js_readable_push(Item self, Item chunk);
 extern "C" void js_stream_flush_data_if_flowing(Item self);
 extern "C" void js_stream_transform_flush_drained(Item self);
-extern "C" void js_next_tick_enqueue(Item callback);
-extern "C" void js_mark_non_writable(Item object, Item name);
-extern "C" void js_mark_non_configurable(Item object, Item name);
+extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern __thread EvalContext* context;
 
 enum ZlibTransformMode {
@@ -1033,7 +1030,6 @@ extern "C" Item js_get_zlib_namespace(void) {
     zlib_set_method(zlib_namespace, "createUnzip",         (void*)js_zlib_createUnzip, 1);
 
     // constants — all zlib constants including flush modes, error codes, compression levels, strategies
-    extern Item js_object_freeze(Item obj);
     Item constants = js_new_object();
     constants_root.set(constants);
     // flush modes

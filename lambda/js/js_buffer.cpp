@@ -23,13 +23,15 @@
 #include <cstring>
 #include <cstdlib>
 
+extern "C" Item bigint_from_int64(int64_t val);
+extern "C" Item bigint_from_string(const char* str, int len);
+extern Item js_make_number(double d);
+
 static const int64_t JS_BUFFER_MAX_LENGTH = (1LL << 30) - 1;
 static const int64_t JS_BUFFER_MAX_STRING_LENGTH = (1LL << 28) - 16;
 
 extern "C" Item js_get_current_this(void);
 extern "C" Item js_blob_new(Item parts, Item options);
-extern "C" void js_set_function_name(Item fn_item, Item name_item);
-extern Item js_make_number(double d);
 void* heap_alloc(int size, TypeId type_id);
 
 static Item js_buffer_resolve_object_url(Item id_item) {
@@ -92,8 +94,6 @@ static int buffer_decode_base64_bytes(const char* str, int str_len, Base64Varian
     return copy_len;
 }
 
-extern "C" Item bigint_from_int64(int64_t val);
-extern "C" Item bigint_from_string(const char* str, int len);
 extern "C" int64_t bigint_to_int64(Item bi);
 extern "C" char* bigint_to_cstring_radix(Item bi, int radix);
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
@@ -234,7 +234,6 @@ static int format_received_suffix(char* buf, int buf_size, Item value) {
         case LMD_TYPE_UNDEFINED:
             return snprintf(buf, buf_size, " Received undefined");
         case LMD_TYPE_MAP: {
-            extern Item js_property_get(Item object, Item key);
             Item ctor = js_property_get(value, make_string_item("constructor"));
             Item name = get_type_id(ctor) == LMD_TYPE_FUNC
                 ? js_property_get(ctor, make_string_item("name"))
@@ -2704,8 +2703,6 @@ extern "C" Item js_get_buffer_namespace(void) {
     js_property_set(buffer_namespace, make_string_item("default"), buffer_namespace);
 
     // Node.js: buffer module also exports atob/btoa
-    extern Item js_atob(Item);
-    extern Item js_btoa(Item);
     buf_set_method(buffer_namespace, "atob", (void*)js_atob, 1);
     buf_set_method(buffer_namespace, "btoa", (void*)js_btoa, 1);
     {

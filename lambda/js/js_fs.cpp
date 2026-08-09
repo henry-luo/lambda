@@ -40,6 +40,9 @@ extern "C" Item js_util_custom_promisify_args_symbol(void);
 extern "C" Item js_util_promisify_custom_symbol(void);
 extern "C" Item js_domain_get_current(void);
 extern "C" Item js_domain_call_function(Item domain, Item fn, Item this_val, Item* args, int arg_count);
+extern "C" Item bigint_from_int64(int64_t val);
+extern "C" Item bigint_from_string(const char* str, int len);
+extern Item js_make_number(double d);
 extern __thread EvalContext* context;
 
 #define item_to_cstr js_item_to_cstr
@@ -466,20 +469,12 @@ static Item fs_throw_empty_read_buffer(JsTypedArray* ta) {
 // Stats prototype — provides isFile(), isDirectory(), etc. methods
 // =============================================================================
 // Stats method: checks mode bits via js_get_this().__mode
-extern "C" Item js_get_this(void);
-extern "C" Item js_date_new_from(Item value);
 extern "C" Item js_readable_new(Item opts);
 extern "C" Item js_readable_push(Item self, Item chunk);
 extern "C" Item js_stream_destroy(Item self, Item err);
-extern Item js_promise_resolve(Item value);
-extern Item js_promise_reject(Item reason);
-extern "C" Item bigint_from_int64(int64_t val);
-extern "C" Item bigint_from_string(const char* str, int len);
 extern "C" int bigint_cmp(Item a, Item b);
-extern Item js_make_number(double d);
 extern "C" Item js_buffer_alloc(Item size_item, Item fill_item);
 extern "C" int64_t bigint_to_int64(Item bi);
-extern "C" Item js_array_is_array(Item value);
 extern "C" Item js_fs_openSync(Item path_item, Item flags_item, Item mode_item);
 extern "C" Item js_fs_closeSync(Item fd_item);
 
@@ -3121,10 +3116,6 @@ static void js_fs_set_custom_promisify(Item fn, void* func_ptr, int param_count)
 
 // ─── fs.promises wrapper functions ─────────────────────────────────────────
 // Each wraps the sync version, returning a resolved/rejected Promise
-extern Item js_promise_resolve(Item value);
-extern Item js_promise_reject(Item reason);
-extern "C" Item js_promise_with_resolvers(void);
-extern "C" void js_next_tick_enqueue(Item callback);
 static Item fs_promise_wrap_result(Item result) {
     if (item_is_error(result)) return js_promise_reject(result);
     return js_promise_resolve(result);
@@ -3745,7 +3736,6 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "fstatSync",       (void*)js_fs_fstatSync, 2);
 
     // fs.constants — null prototype per Node.js spec
-    extern Item js_object_create(Item proto);
     constants_root.set(js_object_create(ItemNull));
     Item constants = constants_root.get();
     js_property_set(constants, make_string_item("F_OK"), (Item){.item = i2it(0)});
@@ -3797,8 +3787,6 @@ extern "C" Item js_get_fs_namespace(void) {
 
     // fs.promises — promise-based API
     {
-        extern Item js_promise_resolve(Item value);
-        extern Item js_promise_reject(Item reason);
 
         promises_root.set(js_new_object());
         Item promises = promises_root.get();

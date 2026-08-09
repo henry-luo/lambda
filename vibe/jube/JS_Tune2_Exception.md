@@ -1,7 +1,7 @@
 # JS Tune2 Exception — Implementation Record
 
 **Date**: 2026-08-09  
-**Status**: IMPLEMENTED — final validation passed  
+**Status**: IMPLEMENTED — final validation passed; X6 cleanup landed
 **Tree anchor**: master `0ed462fe3` plus this uncommitted Tune2 change set  
 **Design authority**: **D8.4.3** (merged `Item` error ABI), **S7.4.4**
 (errors are first-class and deliberate), and **D6.1.3** (unknown effects are
@@ -120,6 +120,25 @@ The Tune1 runtime/helper notes and the runtime redesign document now state
 that P5 did not land in Tune1, distinguish eliminated poll calls from emitted
 ERROR-tag tests, and identify Tune2 as the owner of the catalog gate.
 
+### X6 — shared exception API declaration boundary — complete
+
+The JS translation units had accumulated local `extern` redeclarations for
+the same runtime/error APIs already exposed by `js_runtime.h`, `js_props.h`,
+`js_typed_array.h`, and the shared runtime headers. That duplicated the
+exception surface and allowed stale signatures to drift away from the
+single-lane ABI. The cleanup removes only declarations proven redundant by
+the included headers; APIs that are intentionally file-local remain declared
+at their use boundary. No call sites or ABI contracts changed, so **D8.4.3**
+continues to be enforced by the same merged `Item` lane.
+
+LOC is measured over production C/C++ only (`lambda/` and `radiant/` sources
+and headers); tests, Make/build files, tools, and Markdown are excluded. The
+cleanup slice is **39 insertions / 720 deletions = 681 net C/C++ lines
+removed** against the pre-cleanup `HEAD` (`fd89a37eb`). The cumulative
+production diff against the Tune2 anchor is **241 insertions / 864 deletions
+= 623 net lines removed** (**169 / 849 = 680 net source-only**), exceeding the
+requested 500-line reduction either way.
+
 ## 3. Reproducible checks
 
 ```bash
@@ -155,7 +174,10 @@ D8.4.3 tier C -- boxed-Item helper cataloged as a raw scalar: 0
 | focused Test262 exception repro | pass, 4/4 across typed-array, arrow, iterator, and try/destructuring cases |
 | focused DOM golden | pass, 1/1 for `JavaScriptTests/JsFileTest.Run/dom_module_props`; template content is correctly a detached `DocumentFragment` |
 | `make test-lambda-baseline` | pass, 3,668/3,668; includes the corrected `dom_module_props` template-content golden |
+| transient baseline isolation | `lib_htmx` first missed once; focused retry 1/1, then full baseline rerun 3,668/3,668 |
 | `make test262-baseline` | pass, 40,261/40,261; 0 non-fully-passing, 0 failed, 0 regressions, retry 0.0s |
+| `make build` after X6 declaration cleanup | pass; debug-native Lambda executable built with 0 errors (12 existing warnings) |
+| production C/C++ LOC slice | pass; 720 deleted / 39 added = 681 net lines removed (tests/Make/build excluded) |
 | `git diff --check` | pass after the DOM-golden and Tune2-ledger updates |
 
 The Lambda baseline is clean. `dom_module_props` now records that a template's
@@ -187,6 +209,7 @@ unchanged on a host with the project-compatible ThorVG headers using
 
 ## 6. Closed scope
 
-Tune2 is complete. A future optimization of genuinely fallible helpers such as
+Tune2's exception cleanup and X6 declaration consolidation are complete. A
+future optimization of genuinely fallible helpers such as
 `js_call_function_prerooted_args_into` would require reducing real call sites,
 not weakening their D8.4.3 error-lane checks; that is separate runtime work.

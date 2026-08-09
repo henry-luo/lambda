@@ -29,10 +29,9 @@
 
 // forward declarations
 extern "C" Item js_util_inspect(Item obj_item, Item options_item);
-extern "C" Item js_symbol_for(Item desc);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_buffer_isBuffer(Item obj);
-extern "C" Item js_get_process_argv(void);
+extern "C" bool js_props_obj_query_enumerable(Item obj, const char* name, int name_len);
 extern __thread EvalContext* context;
 
 #define JS_UTIL_FUNC_FLAG_GENERATOR 1
@@ -285,7 +284,6 @@ extern "C" Item js_util_format(Item args_item) {
 // util.inspect(obj[, options]) — Node.js-style formatting for diagnostics
 // =============================================================================
 
-extern "C" bool js_props_obj_query_enumerable(Item obj, const char* name, int name_len);
 
 struct JsInspectContext {
     bool show_hidden;
@@ -1641,7 +1639,6 @@ static bool js_util_strict_zero_sign_differs(Item a, Item b) {
 }
 
 static bool js_util_has_own_key(Item object, const char* key, int len) {
-    extern Item js_has_own_property(Item obj, Item key);
     Item result = js_has_own_property(object,
         (Item){.item = s2it(heap_create_name(key, len))});
     return get_type_id(result) == LMD_TYPE_BOOL && it2b(result);
@@ -2136,10 +2133,6 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
             }
         }
         // Check if both are Set or Map collections
-        extern bool js_is_set_instance(Item obj);
-        extern bool js_is_map_instance(Item obj);
-        extern Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
-        extern Item js_iterable_to_array(Item iterable);
         bool a_set = js_is_set_instance(a), b_set = js_is_set_instance(b);
         bool a_map = js_is_map_instance(a), b_map = js_is_map_instance(b);
         if (a_set && b_set) {
@@ -2633,7 +2626,6 @@ static Item js_debuglog_noop(Item args_rest) {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
 }
 
-extern "C" Item js_json_stringify(Item val);
 
 static Item js_debuglog_active(Item args_rest) {
     // simple: log first argument to stderr
@@ -2821,7 +2813,6 @@ extern "C" Item js_get_util_namespace(void) {
     js_util_set_method(util_namespace, "inspect",             (void*)js_util_inspect, 2);
     // Set util.inspect.custom = Symbol.for('nodejs.util.inspect.custom')
     {
-        extern Item js_symbol_for(Item desc);
         inspect_root.set(js_property_get(util_namespace, make_string_item("inspect")));
         custom_symbol_root.set(js_symbol_for(make_string_item("nodejs.util.inspect.custom")));
         js_property_set(inspect_root.get(), make_string_item("custom"), custom_symbol_root.get());
@@ -2908,8 +2899,6 @@ extern "C" Item js_get_util_namespace(void) {
     js_util_set_method(util_namespace, "getCallSites", (void*)js_util_getCallSites, 1);
 
     // TextEncoder/TextDecoder — expose constructors on util namespace
-    extern Item js_text_encoder_new(void);
-    extern Item js_text_decoder_new(Item encoding_item, Item options_item);
     text_encoder_root.set(js_new_function((void*)js_text_encoder_new, 0));
     text_decoder_root.set(js_new_function((void*)js_text_decoder_new, 2));
     js_property_set(util_namespace, make_string_item("TextEncoder"), text_encoder_root.get());

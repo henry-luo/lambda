@@ -23,6 +23,8 @@
 #include "../jube/jube_registry.h"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
+
+extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
@@ -36,34 +38,15 @@
 #define JS_STREAM_FUNC_FLAG_ASYNC 128
 
 // forward declarations
-extern "C" Item js_throw_error_with_code(const char* code, const char* message);
-extern "C" Item js_throw_type_error_code(const char* code, const char* message);
-extern "C" Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual);
-extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_ordinary_has_instance(Item left, Item right);
-extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item);
 extern "C" Item js_buffer_isBuffer(Item obj);
 extern "C" Item js_buffer_concat(Item list, Item total_length_item);
 extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Item end_item);
 extern "C" Item js_buffer_slice(Item buf, Item start_item, Item end_item);
 extern "C" Item js_blob_new(Item parts, Item options);
-extern "C" Item js_arraybuffer_new(int byte_length);
-extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, int byte_offset, int length);
-extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_util_inspect(Item obj_item, Item options_item);
-extern "C" Item js_to_string(Item value);
-extern "C" Item js_symbol_for(Item key);
-extern "C" Item js_symbol_create(Item description);
-extern "C" Item js_symbol_get_description(Item sym);
-extern "C" Item js_object_get_own_property_symbols(Item object);
-extern "C" Item js_promise_with_resolvers(void);
-extern "C" Item js_promise_resolve(Item value);
-extern "C" Item js_promise_reject(Item reason);
-extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
-extern "C" Item js_setImmediate(Item callback);
-extern "C" Item js_get_async_iterator(Item iterable);
 extern "C" Item js_async_iterator_step_result(Item iterator);
 extern "C" Item js_iterator_result_done(Item result);
 extern "C" Item js_iterator_result_value(Item result);
@@ -73,9 +56,6 @@ extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, 
 extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);
 extern "C" Item js_async_hooks_enter_resource(Item resource);
 extern "C" void js_async_hooks_restore_resource(Item previous);
-extern "C" Item js_get_this(void);
-extern "C" Item js_writable_stream_new(Item underlying_sink);
-extern "C" Item js_get_global_property(Item key);
 
 // noop function for use as callbacks
 extern "C" Item js_noop(void) {

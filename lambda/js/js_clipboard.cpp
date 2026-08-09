@@ -37,19 +37,6 @@
 #include <stdlib.h>
 
 // Forward decls from elsewhere -----------------------------------------------
-extern "C" Item js_promise_resolve(Item value);
-extern "C" Item js_promise_reject(Item reason);
-extern "C" Item js_new_error_with_name(Item error_name, Item message);
-extern "C" Item js_throw_type_error(const char* message);
-extern "C" Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual);
-extern "C" Item js_get_global_this(void);
-extern "C" void js_set_function_name(Item fn_item, Item name_item);
-extern "C" Item js_object_keys(Item obj);
-extern "C" Item js_promise_all(Item iterable);
-extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
-extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
-extern "C" void js_set_prototype(Item object, Item prototype);
-extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 
 // Forward decls for sibling fns within this file (used before their definition).
 extern "C" Item js_lambda_clipboard_write_records(Item arr);
@@ -59,7 +46,6 @@ extern "C" Item js_clipboard_item_get_type(Item type_item);
 extern "C" Item js_blob_text(void);
 extern "C" Item js_blob_array_buffer(void);
 extern "C" Item js_blob_slice(Item start_item, Item end_item, Item type_item);
-extern "C" JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val);
 
 // Local helpers --------------------------------------------------------------
 static inline Item make_str(const char* s) {

@@ -22,6 +22,8 @@
 #include <cmath>
 
 extern __thread EvalContext* context;
+extern Item js_make_number(double d);
+extern double js_get_number(Item value);
 
 #ifdef _WIN32
 #include <direct.h>
@@ -45,22 +47,11 @@ extern __thread EvalContext* context;
 #define JS_TA_SET_STATS_PID() getpid()
 #endif
 
-extern "C" Item js_get_constructor(Item name_item);
-extern "C" Item js_property_get(Item object, Item key);
-extern "C" Item js_to_object(Item value);
-extern "C" void js_set_prototype(Item object, Item prototype);
-extern "C" Item js_iterable_to_array(Item iterable);
 extern "C" bool js_is_generator(Item obj);
-extern Item js_to_number(Item);
-extern double js_get_number(Item value);
-extern Item js_make_number(double d);
 extern "C" Item js_bigint_constructor(Item value);
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
 extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 extern "C" int js_262_agent_current_slot_for_atomics(void);
-extern "C" Item js_promise_create_pending(void);
-extern "C" void js_promise_fulfill_existing(Item promise, Item value);
-extern "C" void heap_register_gc_root(uint64_t* slot);
 
 static bool js_dataview_is_bigint(Item value) {
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
@@ -2122,7 +2113,6 @@ extern "C" JsTypedArray* js_get_typed_array_ptr(Map* m) {
         return (JsTypedArray*)m->data;
     // upgraded: retrieve from __ta__ internal property
     bool found = false;
-    extern Item js_map_get_fast_ext(Map*, const char*, int, bool*);
     Item ta_val = js_map_get_fast_ext(m, "__ta__", 6, &found);
     if (found) return (JsTypedArray*)(uintptr_t)it2i(ta_val);
     return NULL;
@@ -2573,12 +2563,9 @@ extern "C" Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int id
         return js_make_number(((double*)data)[idx]);
     }
     case JS_TYPED_BIGINT64: {
-        extern Item bigint_from_int64(int64_t val);
         return bigint_from_int64(((int64_t*)data)[idx]);
     }
     case JS_TYPED_BIGUINT64: {
-        extern Item bigint_from_int64(int64_t val);
-        extern Item bigint_from_string(const char* str, int len);
         uint64_t v = ((uint64_t*)data)[idx];
         if (v <= (uint64_t)INT64_MAX) return bigint_from_int64((int64_t)v);
         // Value exceeds int64 range — construct from string
@@ -3106,7 +3093,6 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
             if (start + i < current_len) {
                 elem = js_typed_array_get(ta_item, (Item){.item = i2it(start + i)});
             } else if (ta->element_type == JS_TYPED_BIGINT64 || ta->element_type == JS_TYPED_BIGUINT64) {
-                extern Item bigint_from_int64(int64_t val);
                 elem = bigint_from_int64(0);
             } else {
                 elem = (Item){.item = i2it(0)};
