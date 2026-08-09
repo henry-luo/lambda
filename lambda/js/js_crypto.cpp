@@ -6663,18 +6663,16 @@ static Item crypto_generated_keypair_result(const uint8_t* private_bytes, int pr
                                             Item fallback_details) {
     Item public_encoding = js_property_get(options_item, make_string_item_crypto("publicKeyEncoding"));
     Item private_encoding = js_property_get(options_item, make_string_item_crypto("privateKeyEncoding"));
-    Item private_key = crypto_item_is_undefined(private_encoding) ?
+    JS_ASSIGN_OR_RETURN(private_key, crypto_item_is_undefined(private_encoding) ?
         crypto_asymmetric_key_object_from_bytes(private_bytes, private_len,
             "private", asymmetric_type, parsed_private) :
         crypto_asymmetric_export_key_bytes(private_bytes, private_len, true,
-            private_encoding);
-    if (item_is_error(private_key)) return private_key;
-    Item public_key = crypto_item_is_undefined(public_encoding) ?
+            private_encoding));
+    JS_ASSIGN_OR_RETURN(public_key, crypto_item_is_undefined(public_encoding) ?
         crypto_asymmetric_key_object_from_bytes(public_bytes, public_len,
             "public", asymmetric_type, parsed_private) :
         crypto_asymmetric_export_key_bytes(public_bytes, public_len, false,
-            public_encoding);
-    if (item_is_error(public_key)) return public_key;
+            public_encoding));
 
     if (!crypto_item_is_undefined(fallback_details)) {
         if (get_type_id(private_key) == LMD_TYPE_MAP) {
@@ -7117,8 +7115,7 @@ extern "C" Item js_cipher_end(Item data_item) {
     Item self = js_get_current_this();
     Item chunk = crypto_buffer_from_bytes(NULL, 0);
     if (!crypto_item_is_undefined(data_item) && data_item.item != ITEM_NULL) {
-        chunk = js_cipher_update(data_item, make_js_undefined_crypto(), make_string_item_crypto("buffer"));
-        if (item_is_error(chunk)) return chunk;
+        JS_ASSIGN_OR_RETURN_INTO(chunk, js_cipher_update(data_item, make_js_undefined_crypto(), make_string_item_crypto("buffer")));
     }
     JS_ASSIGN_OR_RETURN(tail, js_cipher_final(make_string_item_crypto("buffer")));
     Item combined = crypto_concat_buffer_items(chunk, tail);

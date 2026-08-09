@@ -875,9 +875,8 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
     if (!is_accessor_desc && !is_data_desc) {
         JS_ASSIGN_OR_RETURN(has_own, js_has_own_property(object, name_item));
         if (!it2b(has_own)) {
-            Item set_result = js_property_set(object, name_item,
-                                              (Item){.item = ITEM_JS_UNDEFINED});
-            if (item_is_error(set_result)) return set_result;
+            JS_ASSIGN_OR_RETURN(set_result, js_property_set(object, name_item,
+                                              (Item){.item = ITEM_JS_UNDEFINED}));
         }
     }
 

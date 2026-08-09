@@ -163,9 +163,8 @@ static Item tls_validate_material_option(Item options, const char* name,
 }
 
 static Item tls_validate_material_options(Item options, bool allow_zero) {
-    Item err = tls_validate_material_option(options, "key",
-        "string or an instance of Buffer, TypedArray, or DataView", true, allow_zero);
-    if (item_is_error(err)) return err;
+    JS_ASSIGN_OR_RETURN(err, tls_validate_material_option(options, "key",
+        "string or an instance of Buffer, TypedArray, or DataView", true, allow_zero));
     err = tls_validate_material_option(options, "cert",
         "string or an instance of Buffer, TypedArray, or DataView", false, allow_zero);
     if (item_is_error(err)) return err;

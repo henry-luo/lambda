@@ -779,9 +779,8 @@ extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
     // form before the chokepoint stores under that name.
     JS_ASSIGN_OR_RETURN(key_result, js_to_property_key(name_root.get()));
     name_root.set(key_result);
-    Item accessor_result = js_define_accessor_partial(
-        obj_root.get(), name_root.get(), fn_root.get(), is_setter, 0);
-    if (item_is_error(accessor_result)) return accessor_result;
+    JS_ASSIGN_OR_RETURN(accessor_result, js_define_accessor_partial(
+        obj_root.get(), name_root.get(), fn_root.get(), is_setter, 0));
     return obj_root.get();
 }
 

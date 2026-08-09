@@ -1314,8 +1314,7 @@ static Item js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
         case JS_AST_NODE_TRY_STATEMENT: {
             JsTryNode* tn = (JsTryNode*)node;
             JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(tn->block));
-            status = js_eval_var_conflicts_lexical_statement(tn->handler);
-            if (item_is_error(status)) return status;
+            JS_ASSIGN_OR_RETURN_INTO(status, js_eval_var_conflicts_lexical_statement(tn->handler));
             return js_eval_var_conflicts_lexical_statement(tn->finalizer);
         }
         case JS_AST_NODE_CATCH_CLAUSE:

@@ -1317,8 +1317,7 @@ extern "C" Item js_atomics_operation(int op, Item typed_array, Item index_item, 
     JsTypedArray* ta = NULL;
     JS_ASSIGN_OR_RETURN(validation, js_validate_atomic_typed_array(typed_array, false, false, &ta));
     int index = 0;
-    validation = js_atomics_validate_index(ta, index_item, &index);
-    if (item_is_error(validation)) return validation;
+    JS_ASSIGN_OR_RETURN_INTO(validation, js_atomics_validate_index(ta, index_item, &index));
     void* data = js_typed_array_current_data(ta);
     if (!data) return js_throw_range_error("Invalid atomic access index");
     bool agent_spin_assist = js_arraybuffer_shared(ta->buffer) && js_262_agent_current_slot_for_atomics() >= 0;
@@ -1327,8 +1326,7 @@ extern "C" Item js_atomics_operation(int op, Item typed_array, Item index_item, 
     uint64_t replacement_bits = 0;
     Item store_return = value;
     if ((JsAtomicsOp)op != JS_ATOMICS_OP_LOAD) {
-        validation = js_atomics_to_element_bits(ta->element_type, value, &value_bits, &store_return);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_atomics_to_element_bits(ta->element_type, value, &value_bits, &store_return));
         if ((JsAtomicsOp)op == JS_ATOMICS_OP_COMPARE_EXCHANGE) {
             validation = js_atomics_to_element_bits(ta->element_type, replacement,
                 &replacement_bits, NULL);
@@ -1366,8 +1364,7 @@ static Item js_atomics_prepare_wait(Item typed_array, Item index_item, Item expe
         Item timeout, JsAtomicsWaitInputs* inputs) {
     inputs->error = ItemNull;
     JS_ASSIGN_OR_RETURN(validation, js_validate_atomic_typed_array(typed_array, true, true, &inputs->ta));
-    validation = js_atomics_validate_index(inputs->ta, index_item, &inputs->index);
-    if (item_is_error(validation)) return validation;
+    JS_ASSIGN_OR_RETURN_INTO(validation, js_atomics_validate_index(inputs->ta, index_item, &inputs->index));
     inputs->expected_bits = 0;
     validation = js_atomics_to_element_bits(inputs->ta->element_type, expected,
         &inputs->expected_bits, NULL);
@@ -1376,8 +1373,7 @@ static Item js_atomics_prepare_wait(Item typed_array, Item index_item, Item expe
     inputs->timeout_number = INFINITY;
     inputs->has_timeout = false;
     if (get_type_id(timeout) != LMD_TYPE_UNDEFINED) {
-        validation = js_dataview_to_number_value(timeout, &inputs->timeout_number);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(timeout, &inputs->timeout_number));
         if (std::isnan(inputs->timeout_number)) inputs->timeout_number = INFINITY;
         else if (inputs->timeout_number < 0.0) inputs->timeout_number = 0.0;
         else inputs->timeout_number = std::trunc(inputs->timeout_number);
@@ -1468,13 +1464,11 @@ extern "C" Item js_atomics_notify(Item typed_array, Item index_item, Item count)
     JsTypedArray* ta = NULL;
     JS_ASSIGN_OR_RETURN(validation, js_validate_atomic_typed_array(typed_array, false, true, &ta));
     int index = 0;
-    validation = js_atomics_validate_index(ta, index_item, &index);
-    if (item_is_error(validation)) return validation;
+    JS_ASSIGN_OR_RETURN_INTO(validation, js_atomics_validate_index(ta, index_item, &index));
     int notify_count = INT_MAX;
     if (get_type_id(count) != LMD_TYPE_UNDEFINED) {
         double count_number = 0.0;
-        validation = js_dataview_to_number_value(count, &count_number);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(count, &count_number));
         if (std::isnan(count_number) || count_number <= 0.0) notify_count = 0;
         else if (std::isfinite(count_number) && count_number < (double)INT_MAX) notify_count = (int)std::trunc(count_number);
     }
@@ -1609,8 +1603,7 @@ extern "C" Item js_arraybuffer_construct_resizable(Item length_arg, Item options
         Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength"))};
         JS_ASSIGN_OR_RETURN(max_item, js_property_get(options_arg, max_key));
         if (get_type_id(max_item) != LMD_TYPE_UNDEFINED && max_item.item != ITEM_NULL) {
-            validation = js_to_index_int(max_item, &max_byte_length, "Invalid array buffer maxByteLength");
-            if (item_is_error(validation)) return validation;
+            JS_ASSIGN_OR_RETURN_INTO(validation, js_to_index_int(max_item, &max_byte_length, "Invalid array buffer maxByteLength"));
             if (max_byte_length < byte_length) return js_throw_range_error("Invalid array buffer maxByteLength");
             resizable = true;
         }
@@ -1856,8 +1849,7 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
                 return js_throw_type_error("ArrayBuffer species is not a constructor");
             }
             Item len_arg = (Item){.item = i2it(new_len)};
-            result_item = js_new_from_class_object(species, &len_arg, 1);
-            if (item_is_error(result_item)) return result_item;
+            JS_ASSIGN_OR_RETURN_INTO(result_item, js_new_from_class_object(species, &len_arg, 1));
         }
     }
     if (use_default_ctor) {
@@ -2048,8 +2040,7 @@ extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* ar
                 use_default_ctor = true;
             } else {
                 Item len_arg = (Item){.item = i2it(new_len)};
-                result_item = js_new_from_class_object(species, &len_arg, 1);
-                if (item_is_error(result_item)) return result_item;
+                JS_ASSIGN_OR_RETURN_INTO(result_item, js_new_from_class_object(species, &len_arg, 1));
             }
         }
         if (use_default_ctor) {
@@ -2473,8 +2464,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
             return js_typed_array_new_from_array(type_id, values);
         }
         Item iter_key = js_well_known_symbol_key(1);
-        iter_method = js_property_get(arg_root.get(), iter_key);
-        if (item_is_error(iter_method)) return iter_method;
+        JS_ASSIGN_OR_RETURN_INTO(iter_method, js_property_get(arg_root.get(), iter_key));
         TypeId iter_type = get_type_id(iter_method);
         bool has_iter = iter_type != LMD_TYPE_UNDEFINED && iter_type != LMD_TYPE_NULL && iter_method.item != ITEM_JS_UNDEFINED;
         if (has_iter) {
@@ -2630,8 +2620,7 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
             } else if (vt == LMD_TYPE_NULL || value.item == ITEM_JS_UNDEFINED) {
                 return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
             }
-            bi = js_bigint_constructor(value);
-            if (item_is_error(bi)) return bi;
+            JS_ASSIGN_OR_RETURN_INTO(bi, js_bigint_constructor(value));
         }
         int current_length = js_typed_array_current_length(ta);
         void* data = js_typed_array_prepare_write(ta);
@@ -2785,10 +2774,9 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
         Item bigint_item;
         JS_ASSIGN_OR_RETURN(validation, js_dataview_to_bigint_value(value, &bigint_item));
         // BigInt typed-array stores wrap modulo 64 bits; bigint_to_int64 alone clamps oversized inputs.
-        Item wrapped = (ta->element_type == JS_TYPED_BIGINT64)
+        JS_ASSIGN_OR_RETURN(wrapped, (ta->element_type == JS_TYPED_BIGINT64)
             ? js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_item)
-            : js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_item);
-        if (item_is_error(wrapped)) return wrapped;
+            : js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_item));
         if (ta->element_type == JS_TYPED_BIGINT64) {
             bigint_i64 = bigint_to_int64(wrapped);
         } else {
@@ -3194,8 +3182,7 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     if (lt == LMD_TYPE_UNDEFINED) {
         byte_length = buffer_length - byte_offset;
     } else {
-        validation = js_dataview_to_index(length_item, &byte_length);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_index(length_item, &byte_length));
     }
 
     if (byte_length < 0 || (int64_t)byte_offset + (int64_t)byte_length > buffer_length) {
@@ -3339,8 +3326,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     // observe side effects that resize the buffer), so per spec the OOB check
     // moves into each individual setter after the value coercion.
     if (!is_set_method) {
-        validation = dv_validate_or_throw(dv);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
     }
     bool sys_le = is_little_endian_system();
 
@@ -3436,10 +3422,8 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 7 && strncmp(mn, "setInt8", 7) == 0) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        validation = js_dataview_to_number_value(value_item, &number_value);
-        if (item_is_error(validation)) return validation;
-        validation = dv_validate_or_throw(dv);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
         uint8_t* p = dv_write_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         int64_t raw_val = js_dataview_to_integer_value(number_value);
@@ -3449,10 +3433,8 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 8 && strncmp(mn, "setUint8", 8) == 0) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        validation = js_dataview_to_number_value(value_item, &number_value);
-        if (item_is_error(validation)) return validation;
-        validation = dv_validate_or_throw(dv);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
         uint8_t* p = dv_write_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         int64_t raw_val = js_dataview_to_integer_value(number_value);
@@ -3462,10 +3444,8 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 8 && strncmp(mn, "setInt16", 8) == 0) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        validation = js_dataview_to_number_value(value_item, &number_value);
-        if (item_is_error(validation)) return validation;
-        validation = dv_validate_or_throw(dv);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
         uint8_t* p = dv_write_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3477,10 +3457,8 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 9 && strncmp(mn, "setUint16", 9) == 0) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        validation = js_dataview_to_number_value(value_item, &number_value);
-        if (item_is_error(validation)) return validation;
-        validation = dv_validate_or_throw(dv);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
         uint8_t* p = dv_write_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3492,10 +3470,8 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 8 && strncmp(mn, "setInt32", 8) == 0) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        validation = js_dataview_to_number_value(value_item, &number_value);
-        if (item_is_error(validation)) return validation;
-        validation = dv_validate_or_throw(dv);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
         uint8_t* p = dv_write_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3507,10 +3483,8 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 9 && strncmp(mn, "setUint32", 9) == 0) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        validation = js_dataview_to_number_value(value_item, &number_value);
-        if (item_is_error(validation)) return validation;
-        validation = dv_validate_or_throw(dv);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
         uint8_t* p = dv_write_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3522,10 +3496,8 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 10 && strncmp(mn, "setFloat32", 10) == 0) {
         Item val_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         double number_value = 0.0;
-        validation = js_dataview_to_number_value(val_item, &number_value);
-        if (item_is_error(validation)) return validation;
-        validation = dv_validate_or_throw(dv);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(val_item, &number_value));
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
         uint8_t* p = dv_write_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3539,10 +3511,8 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 10 && strncmp(mn, "setFloat64", 10) == 0) {
         Item val_item2 = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         double d = 0.0;
-        validation = js_dataview_to_number_value(val_item2, &d);
-        if (item_is_error(validation)) return validation;
-        validation = dv_validate_or_throw(dv);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(val_item2, &d));
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
         uint8_t* p = dv_write_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3555,10 +3525,8 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 11 && strncmp(mn, "setBigInt64", 11) == 0) {
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         Item bigint_value;
-        validation = js_dataview_to_bigint_value(value_item, &bigint_value);
-        if (item_is_error(validation)) return validation;
-        validation = dv_validate_or_throw(dv);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_bigint_value(value_item, &bigint_value));
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
         uint8_t* p = dv_write_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -3571,10 +3539,8 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 12 && strncmp(mn, "setBigUint64", 12) == 0) {
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         Item bigint_value;
-        validation = js_dataview_to_bigint_value(value_item, &bigint_value);
-        if (item_is_error(validation)) return validation;
-        validation = dv_validate_or_throw(dv);
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_bigint_value(value_item, &bigint_value));
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
         uint8_t* p = dv_write_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;

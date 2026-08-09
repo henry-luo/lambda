@@ -55,6 +55,8 @@ static inline Item make_str(const char* s) {
 static inline Item make_str_n(const char* s, size_t n) {
     return (Item){.item = s2it(heap_create_name(s, (int)n))};
 }
+#define JS_CLIPBOARD_REJECT(type_name, message) \
+    return js_promise_reject(js_new_error_with_name(make_str(type_name), make_str(message)))
 static inline void mark_class(Item obj, const char* name) {
     JsClass cls = js_class_from_name(name, (int)strlen(name));
     if (cls != JS_CLASS_NONE) js_class_stamp(obj, cls);
@@ -385,23 +387,19 @@ extern "C" Item js_clipboard_item_get_type(Item type_item) {
     Item self = js_get_this();
     Item gen = js_property_get(self, make_str("_clipboard_generation"));
     if (get_type_id(gen) == LMD_TYPE_INT && (int64_t)it2i(gen) != g_clipboard_generation) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("DataError"), make_str("clipboard item is stale")));
+        JS_CLIPBOARD_REJECT("DataError", "clipboard item is stale");
     }
     if (get_type_id(type_item) != LMD_TYPE_STRING) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("TypeError"), make_str("ClipboardItem.getType: type must be a string")));
+        JS_CLIPBOARD_REJECT("TypeError", "ClipboardItem.getType: type must be a string");
     }
     Item reps = js_property_get(self, make_str("_reps"));
     if (get_type_id(reps) != LMD_TYPE_MAP) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("NotFoundError"), make_str("type not found")));
+        JS_CLIPBOARD_REJECT("NotFoundError", "type not found");
     }
     String* ts = it2s(type_item);
     char buf[256];
     if (!ts || ts->len == 0 || ts->len >= sizeof(buf)) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("NotFoundError"), make_str("type not found")));
+        JS_CLIPBOARD_REJECT("NotFoundError", "type not found");
     }
     for (size_t j = 0; j < ts->len; j++) {
         unsigned char c = (unsigned char)ts->chars[j];
@@ -410,8 +408,7 @@ extern "C" Item js_clipboard_item_get_type(Item type_item) {
     buf[ts->len] = '\0';
     Item rep = js_property_get(reps, make_str(buf));
     if (rep.item == ITEM_JS_UNDEFINED || get_type_id(rep) == LMD_TYPE_NULL) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("NotFoundError"), make_str("type not found")));
+        JS_CLIPBOARD_REJECT("NotFoundError", "type not found");
     }
     // If it's already a Blob, resolve directly. If it's a string, wrap in Blob.
     if (get_type_id(rep) == LMD_TYPE_STRING) {
@@ -1127,18 +1124,14 @@ extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
 
 extern "C" Item js_clipboard_write_text(Item text_item) {
     if (clipboard_store_get_permission_write() == CLIPBOARD_PERMISSION_DENIED) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("NotAllowedError"),
-            make_str("Write permission denied")));
+        JS_CLIPBOARD_REJECT("NotAllowedError", "Write permission denied");
     }
     // Per WebIDL, writeText(DOMString) requires its argument; calling with no
     // args (undefined) must reject with TypeError. `null` stringifies to "null"
     // by spec but the WPT subset treats null as empty string \u2014 mirror the
     // previous polyfill's `data == null ? "" : String(data)` semantics.
     if (text_item.item == ITEM_JS_UNDEFINED) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("TypeError"),
-            make_str("writeText requires 1 argument")));
+        JS_CLIPBOARD_REJECT("TypeError", "writeText requires 1 argument");
     }
     const char* t = "";
     if (get_type_id(text_item) == LMD_TYPE_STRING) {
@@ -1152,9 +1145,7 @@ extern "C" Item js_clipboard_write_text(Item text_item) {
 
 extern "C" Item js_clipboard_read_text(void) {
     if (clipboard_store_get_permission_read() == CLIPBOARD_PERMISSION_DENIED) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("NotAllowedError"),
-            make_str("Read permission denied")));
+        JS_CLIPBOARD_REJECT("NotAllowedError", "Read permission denied");
     }
     const char* t = clipboard_store_read_text();
     return js_promise_resolve(make_str(t ? t : ""));
@@ -1328,9 +1319,7 @@ static Item js_clipboard_materialise(Item items_array, Item resolved_values) {
             // image/* representations MUST be Blob — reject the whole write.
             if (ks->len >= 6 && memcmp(ks->chars, "image/", 6) == 0) {
                 if (!item_is_blob_like(v)) {
-                    return js_promise_reject(js_new_error_with_name(
-                        make_str("TypeError"),
-                        make_str("image representation must be a Blob")));
+                    JS_CLIPBOARD_REJECT("TypeError", "image representation must be a Blob");
                 }
             }
 
@@ -1365,27 +1354,19 @@ static Item js_clipboard_materialise(Item items_array, Item resolved_values) {
 
 extern "C" Item js_clipboard_write(Item items_array) {
     if (clipboard_store_get_permission_write() == CLIPBOARD_PERMISSION_DENIED) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("NotAllowedError"),
-            make_str("Write permission denied")));
+        JS_CLIPBOARD_REJECT("NotAllowedError", "Write permission denied");
     }
     if (get_type_id(items_array) != LMD_TYPE_ARRAY) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("TypeError"),
-            make_str("write() requires a sequence of ClipboardItems")));
+        JS_CLIPBOARD_REJECT("TypeError", "write() requires a sequence of ClipboardItems");
     }
     int64_t n_items = js_array_length(items_array);
     if (n_items == 0) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("TypeError"),
-            make_str("write() requires a sequence of ClipboardItems")));
+        JS_CLIPBOARD_REJECT("TypeError", "write() requires a sequence of ClipboardItems");
     }
     // Per spec quirk (matched by all major browsers + WPT), only one
     // ClipboardItem may be written per call.
     if (n_items > 1) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("NotAllowedError"),
-            make_str("writing more than one ClipboardItem is not supported")));
+        JS_CLIPBOARD_REJECT("NotAllowedError", "writing more than one ClipboardItem is not supported");
     }
 
     int web_custom_count = 0;
@@ -1393,9 +1374,7 @@ extern "C" Item js_clipboard_write(Item items_array) {
     for (int64_t i = 0; i < n_items; i++) {
         Item item = js_array_get_int(items_array, i);
         if (!item_is_clipboard_item(item)) {
-            return js_promise_reject(js_new_error_with_name(
-                make_str("TypeError"),
-                make_str("write() entries must be ClipboardItem")));
+            JS_CLIPBOARD_REJECT("TypeError", "write() entries must be ClipboardItem");
         }
         Item orig_types = js_property_get(item, make_str("_orig_types"));
         Item types_lower = js_property_get(item, make_str("types"));
@@ -1405,9 +1384,7 @@ extern "C" Item js_clipboard_write(Item items_array) {
         for (int64_t j = 0; j < nk; j++) {
             Item ot = js_array_get_int(orig_types, j);
             if (get_type_id(ot) != LMD_TYPE_STRING) {
-                return js_promise_reject(js_new_error_with_name(
-                    make_str("NotAllowedError"),
-                    make_str("invalid clipboard format")));
+                JS_CLIPBOARD_REJECT("NotAllowedError", "invalid clipboard format");
             }
             String* ots = it2s(ot);
             if (!ots) continue;
@@ -1419,9 +1396,7 @@ extern "C" Item js_clipboard_write(Item items_array) {
                 size_t subl = otl - 4;
                 if (str_has_upper_ascii(sub, subl) ||
                     !is_valid_mime_body(sub, subl)) {
-                    return js_promise_reject(js_new_error_with_name(
-                        make_str("NotAllowedError"),
-                        make_str("invalid web custom format")));
+                    JS_CLIPBOARD_REJECT("NotAllowedError", "invalid web custom format");
                 }
                 web_custom_count++;
                 // Blob.type vs format check.
@@ -1434,30 +1409,22 @@ extern "C" Item js_clipboard_write(Item items_array) {
                         if (bts && bts->len > 0 &&
                             strcmp(bts->chars, sub) != 0 &&
                             strcmp(bts->chars, otc) != 0) {
-                            return js_promise_reject(js_new_error_with_name(
-                                make_str("NotAllowedError"),
-                                make_str("Blob.type does not match format")));
+                            JS_CLIPBOARD_REJECT("NotAllowedError", "Blob.type does not match format");
                         }
                     }
                 }
                 continue;
             }
             if (str_has_upper_ascii(otc, otl)) {
-                return js_promise_reject(js_new_error_with_name(
-                    make_str("NotAllowedError"),
-                    make_str("invalid (non-lowercase) format")));
+                JS_CLIPBOARD_REJECT("NotAllowedError", "invalid (non-lowercase) format");
             }
             if (!is_standard_mandatory_mime(otc)) {
-                return js_promise_reject(js_new_error_with_name(
-                    make_str("NotAllowedError"),
-                    make_str("unsupported clipboard format")));
+                JS_CLIPBOARD_REJECT("NotAllowedError", "unsupported clipboard format");
             }
         }
     }
     if (web_custom_count > 100) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("NotAllowedError"),
-            make_str("too many custom formats (max 100)")));
+        JS_CLIPBOARD_REJECT("NotAllowedError", "too many custom formats (max 100)");
     }
 
     // Build flat array of resolved-promises over each rep value.
@@ -1486,9 +1453,7 @@ extern "C" Item js_clipboard_write(Item items_array) {
 // in ClipboardItems whose representations are Blobs (per spec).
 extern "C" Item js_clipboard_read(Item opts) {
     if (clipboard_store_get_permission_read() == CLIPBOARD_PERMISSION_DENIED) {
-        return js_promise_reject(js_new_error_with_name(
-            make_str("NotAllowedError"),
-            make_str("Read permission denied")));
+        JS_CLIPBOARD_REJECT("NotAllowedError", "Read permission denied");
     }
     // ClipboardUnsanitizedFormats.unsanitized: per WebIDL it must be a
     // sequence. An *absent* key is fine (skip). An explicit `null` (or any
@@ -1516,14 +1481,10 @@ extern "C" Item js_clipboard_read(Item opts) {
             TypeId ut = get_type_id(u);
             if (ut == LMD_TYPE_ARRAY) {
                 if (js_array_length(u) > 0) {
-                    return js_promise_reject(js_new_error_with_name(
-                        make_str("NotAllowedError"),
-                        make_str("unsanitized read is not supported")));
+                    JS_CLIPBOARD_REJECT("NotAllowedError", "unsanitized read is not supported");
                 }
             } else {
-                return js_promise_reject(js_new_error_with_name(
-                    make_str("TypeError"),
-                    make_str("ClipboardUnsanitizedFormats.unsanitized must be a sequence")));
+                JS_CLIPBOARD_REJECT("TypeError", "ClipboardUnsanitizedFormats.unsanitized must be a sequence");
             }
         }
     }

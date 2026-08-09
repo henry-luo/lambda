@@ -1084,9 +1084,8 @@ extern "C" Item js_reflect_get_with_receiver(Item target, Item key, Item receive
 static Item js_proxy_trap_set_failure(Item key) {
     if (js_strict_mode && get_type_id(key) == LMD_TYPE_STRING) {
         String* sk = it2s(key);
-        Item status = js_strict_throw_property_error("set", sk ? sk->chars : NULL,
-                                                     sk ? (int)sk->len : 0);
-        if (item_is_error(status)) return status;
+        JS_ASSIGN_OR_RETURN(status, js_strict_throw_property_error("set", sk ? sk->chars : NULL,
+                                                     sk ? (int)sk->len : 0));
     } else if (js_strict_mode) {
         JS_ASSIGN_OR_RETURN(status, js_strict_throw_property_error("set", NULL, 0));
     }
@@ -1309,9 +1308,8 @@ static Item js_typed_array_sort_merge(Item* values, Item* scratch, int start, in
     int right = mid;
     int out = start;
     while (left < mid && right < end) {
-        Item cmp = js_typed_array_sort_compare(values[left], values[right],
-            comparefn, has_comparefn);
-        if (item_is_error(cmp)) return cmp;
+        JS_ASSIGN_OR_RETURN(cmp, js_typed_array_sort_compare(values[left], values[right],
+            comparefn, has_comparefn));
         if (it2i(cmp) <= 0) {
             scratch[out++] = values[left++];
         } else {
@@ -1328,12 +1326,10 @@ static Item js_typed_array_sort_merge_sort(Item* values, Item* scratch, int star
                                            Item comparefn, bool has_comparefn) {
     if (end - start <= 1) return ItemNull;
     int mid = start + (end - start) / 2;
-    Item left = js_typed_array_sort_merge_sort(values, scratch, start, mid,
-        comparefn, has_comparefn);
-    if (item_is_error(left)) return left;
-    Item right = js_typed_array_sort_merge_sort(values, scratch, mid, end,
-        comparefn, has_comparefn);
-    if (item_is_error(right)) return right;
+    JS_ASSIGN_OR_RETURN(left, js_typed_array_sort_merge_sort(values, scratch, start, mid,
+        comparefn, has_comparefn));
+    JS_ASSIGN_OR_RETURN(right, js_typed_array_sort_merge_sort(values, scratch, mid, end,
+        comparefn, has_comparefn));
     return js_typed_array_sort_merge(values, scratch, start, mid, end,
         comparefn, has_comparefn);
 }
@@ -1402,8 +1398,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
             result_type != LMD_TYPE_INT && result_type != LMD_TYPE_INT64 &&
             result_type != LMD_TYPE_FLOAT && result_type != LMD_TYPE_BOOL &&
             result_type != LMD_TYPE_STRING && !js_key_is_symbol(key_list)) {
-            key_list = js_array_like_to_array(key_list);
-            if (item_is_error(key_list)) return key_list;
+            JS_ASSIGN_OR_RETURN_INTO(key_list, js_array_like_to_array(key_list));
         }
     }
     
@@ -1700,9 +1695,8 @@ extern "C" Item js_proxy_trap_get_prototype_of(Item proxy) {
     LAMBDA_SCALAR_HOME(get_prototype_trap_home);
     // The result is validated and consumed by this proxy operation before it
     // returns, so the temporary home cannot escape this native frame.
-    Item result = js_call_function_into(trap, PD_HANDLER(pd), args, 1,
-        &get_prototype_trap_home);
-    if (item_is_error(result)) return result;
+    JS_ASSIGN_OR_RETURN(result, js_call_function_into(trap, PD_HANDLER(pd), args, 1,
+        &get_prototype_trap_home));
     // ES2020 §9.5.1 invariant: result must be Object or null
     TypeId rt = get_type_id(result);
     if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC &&
@@ -1731,9 +1725,8 @@ extern "C" Item js_proxy_trap_set_prototype_of(Item proxy, Item proto) {
     LAMBDA_SCALAR_HOME(set_prototype_trap_home);
     // The trap result is immediately coerced to boolean, so this native
     // boundary is a terminal scalar consumer rather than a forwarding ABI.
-    Item result = js_call_function_into(trap, PD_HANDLER(pd), args, 2,
-        &set_prototype_trap_home);
-    if (item_is_error(result)) return result;
+    JS_ASSIGN_OR_RETURN(result, js_call_function_into(trap, PD_HANDLER(pd), args, 2,
+        &set_prototype_trap_home));
     bool bool_result = it2b(js_to_boolean(result));
     // ES2020 §9.5.2 step 9: If booleanTrapResult is false, return false
     // (skip IsExtensible check — step 10 only applies when trap returned true)
@@ -2386,9 +2379,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             js_has_pending_new_target = false;
             char buf[256];
             int len = snprintf(buf, sizeof(buf), "%s is not a constructor", fn->name ? fn->name->chars : "function");
-            Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-            Item msg = (Item){.item = s2it(heap_create_name(buf, len))};
-            return js_throw_value(js_new_error_with_name(tn, msg));
+            return js_throw_type_error(buf);
         }
 
         // Dispatch native built-in constructors by name (for dynamic new ctor(...))
@@ -2798,9 +2789,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             // Plain object — not a constructor
             js_pending_new_target = ItemNull;
             js_has_pending_new_target = false;
-            Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-            Item msg = (Item){.item = s2it(heap_create_name("is not a constructor", 20))};
-            return js_throw_value(js_new_error_with_name(tn, msg));
+            return js_throw_type_error("is not a constructor");
         }
         if (new_target_root.get().item != ItemNull.item &&
                 new_target_root.get().item != callee_root.get().item) {
@@ -2963,9 +2952,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             (int)ct, argc, ret_addr, (unsigned long long)callee.item,
             _trace_last_fn_len, _trace_last_fn,
             _trace_total_calls);
-        Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-        Item msg = (Item){.item = s2it(heap_create_name("is not a constructor", 20))};
-        return js_throw_value(js_new_error_with_name(tn, msg));
+        return js_throw_type_error("is not a constructor");
     }
 }
 
@@ -4968,8 +4955,7 @@ extern "C" Item js_property_get(Item object, Item key) {
         return elmt_get(object.element, key);
     } else if (type == LMD_TYPE_ARRAY) {
         if (js_property_key_needs_object_to_key(key)) {
-            key = js_to_property_key(key);
-            if (item_is_error(key)) return key;
+            JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
         }
         js_array_exotic_before_property_get(object, key);
         // Array index access
@@ -6596,8 +6582,7 @@ static Item js_array_companion_try_write_existing_data(Item object, const char* 
 static Item js_property_set_array(Item object, Item key, Item value) {
     if (js_property_key_needs_object_to_key(key)) {
         JS_PROPERTY_SET_BRANCH("array_object_key_to_property_key");
-        key = js_to_property_key(key);
-        if (item_is_error(key)) return key;
+        JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     }
     js_array_exotic_before_property_set(object, key, value);
     // Handle arr.length = newLength (resize array)
@@ -6724,9 +6709,8 @@ static Item js_property_set_array(Item object, Item key, Item value) {
                 Array* arr = object.array;
                 Map* pm;
                 bool companion_write_handled = false;
-                Item companion_write_status = js_array_companion_try_write_existing_data(
-                    object, sk->chars, (int)sk->len, value, &companion_write_handled);
-                if (item_is_error(companion_write_status)) return companion_write_status;
+                JS_ASSIGN_OR_RETURN(companion_write_status, js_array_companion_try_write_existing_data(
+                    object, sk->chars, (int)sk->len, value, &companion_write_handled));
                 if (own_data_prop && companion_write_handled) {
                     JS_PROPERTY_SET_BRANCH("array_named_inplace");
                     return value;
@@ -6908,8 +6892,7 @@ static Item js_property_set_map(Item object, Item key, Item value) {
     if (kt == LMD_TYPE_INT && js_key_is_symbol(key)) {
         // Map storage indexes Symbols by their NamePool record; treating the
         // compact public id as a number would publish a different string key.
-        key = js_to_property_key(key);
-        if (item_is_error(key)) return key;
+        JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     } else if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
         char buf[64];
         if (kt == LMD_TYPE_INT) {
@@ -6929,8 +6912,7 @@ static Item js_property_set_map(Item object, Item key, Item value) {
     } else if (kt != LMD_TYPE_STRING && !js_key_is_symbol(key)) {
         // Bracket assignment keys use ToPropertyKey too; object wrappers like
         // new String("x") must address property "x", not an unnameable slot.
-        key = js_to_property_key(key);
-        if (item_is_error(key)) return key;
+        JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     }
     bool private_internal_property_key = js_is_private_internal_property_key(key);
     if (private_internal_property_key && js_is_proxy(object)) {
@@ -7784,10 +7766,7 @@ extern "C" Item js_property_access(Item object, Item key) {
         } else {
             snprintf(msg, sizeof(msg), "Cannot read properties of %s", type_str);
         }
-        Item err_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-        Item err_msg = (Item){.item = s2it(heap_create_name(msg))};
-        Item error = js_new_error_with_name(err_name, err_msg);
-        return js_throw_value(error);
+        return js_throw_type_error(msg);
     }
     Item result = js_property_get(object, key);
     // TRACE: update ring buffer with result type
@@ -7925,8 +7904,7 @@ extern "C" Item js_super_property_get(Item receiver, Item key) {
     TypeId type = get_type_id(proto);
     if (type != LMD_TYPE_MAP) return js_property_get(proto, key);
 
-    key = js_to_property_key(key);
-    if (item_is_error(key)) return key;
+    JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
 
     // Phase 5: if proto has an own accessor at `key` (IS_ACCESSOR flag),
     // Stage A1.3c: own-property + IS_ACCESSOR dispatch on proto routed
@@ -7985,8 +7963,7 @@ extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
     TypeId type = get_type_id(proto);
     if (type != LMD_TYPE_MAP) return js_property_get(proto, key);
 
-    key = js_to_property_key(key);
-    if (item_is_error(key)) return key;
+    JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
 
     // Stage A1.3c: own-property + IS_ACCESSOR on proto via shared kernel.
     {
@@ -8017,8 +7994,7 @@ static Item js_super_property_set_impl(Item receiver, Item key, Item value, bool
     TypeId type = get_type_id(proto);
     if (type != LMD_TYPE_MAP) return js_property_set(receiver, key, value);
 
-    key = js_to_property_key(key);
-    if (item_is_error(key)) return key;
+    JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
 
     // check setter on proto chain — call with receiver as this.
     // Use accessor-pair lookup (IS_ACCESSOR shape flag) which is the new
@@ -8099,10 +8075,7 @@ extern "C" Item js_property_get_str(Item object, const char* key, int key_len) {
         char msg[256];
         snprintf(msg, sizeof(msg), "Cannot read properties of %s (reading '%.*s')",
                  type_str, key_len, key);
-        Item err_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-        Item err_msg = (Item){.item = s2it(heap_create_name(msg))};
-        Item error = js_new_error_with_name(err_name, err_msg);
-        return js_throw_value(error);
+        return js_throw_type_error(msg);
     }
     // create string key and delegate to js_property_get
     Item str_key = (Item){.item = s2it(heap_create_name(key, key_len))};
@@ -9266,8 +9239,7 @@ extern "C" Item js_array_get(Item array, Item index) {
     TypeId index_tid = get_type_id(index);
     if (index_tid == LMD_TYPE_MAP || index_tid == LMD_TYPE_ARRAY ||
         index_tid == LMD_TYPE_ELEMENT || index_tid == LMD_TYPE_FUNC) {
-        index = js_to_property_key(index);
-        if (item_is_error(index)) return index;
+        JS_ASSIGN_OR_RETURN_INTO(index, js_to_property_key(index));
         index_tid = get_type_id(index);
     }
     if ((index_tid == LMD_TYPE_STRING || index_tid == LMD_TYPE_INT || index_tid == LMD_TYPE_FLOAT) &&
@@ -9665,8 +9637,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     if (itid == LMD_TYPE_MAP || itid == LMD_TYPE_ARRAY ||
         itid == LMD_TYPE_ELEMENT || itid == LMD_TYPE_FUNC) {
         JS_PROPERTY_SET_BRANCH("array_set_object_key_to_property_key");
-        index = js_to_property_key(index);
-        if (item_is_error(index)) return index;
+        JS_ASSIGN_OR_RETURN_INTO(index, js_to_property_key(index));
         itid = get_type_id(index);
     }
 
@@ -10151,9 +10122,7 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         // TypedArray method validation: if accessed via %TypedArray%.prototype, this must be a TypedArray
         if (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD) {
             if (!js_is_typed_array(js_current_this)) {
-                Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item msg = (Item){.item = s2it(heap_create_name("Method requires a TypedArray as receiver"))};
-                return js_throw_value(js_new_error_with_name(type_name, msg));
+                return js_throw_type_error("Method requires a TypedArray as receiver");
             }
         }
         // Js54 P5: propagate Array-vs-TypedArray prototype dispatch mode for
@@ -10780,6 +10749,13 @@ static int js_resolve_ta_type_from_ctor(Item ctor) {
 
 static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args, int arg_count,
         uint64_t* result_home) {
+        // Every delegated array operation must clear the temporary receiver,
+        // including ERROR returns; keep that invariant in one return form.
+#define JS_ARRAY_RETURN(...) do { \
+            Item js_array_result = (__VA_ARGS__); \
+            js_array_method_real_this = (Item){0}; \
+            return js_array_result; \
+        } while (0)
         // Map builtin_id to method name and delegate to js_map_method
         const JsBuiltinMethodSpec* catalog_spec = js_builtin_catalog_find_id(builtin_id);
         if (!catalog_spec) return ItemNull;
@@ -10831,8 +10807,7 @@ static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args,
             Item join_fn = ItemNull;
             Item join_key = (Item){.item = s2it(heap_create_name("join", 4))};
             if (js_is_proxy(wrapped)) {
-                join_fn = js_property_get(wrapped, join_key);
-                if (item_is_error(join_fn)) return join_fn;
+                JS_ASSIGN_OR_RETURN_INTO(join_fn, js_property_get(wrapped, join_key));
             }
             if (get_type_id(wrapped) == LMD_TYPE_MAP) {
                 bool own_join = false;
@@ -10860,9 +10835,7 @@ static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args,
             // species constructor lookup must go through the proxy target.
             if (builtin_id == JS_BUILTIN_ARR_CONCAT) {
                 js_array_method_real_this = this_val;
-                Item result = js_array_method(this_val, method_name, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
+                JS_ARRAY_RETURN(js_array_method(this_val, method_name, args, arg_count));
             }
             if (builtin_id == JS_BUILTIN_ARR_FILL) {
                 return js_array_generic_fill(this_val, args, arg_count);
@@ -10919,9 +10892,7 @@ static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args,
                 return js_array_generic_reduce(this_val, args, arg_count, true, result_home);
             }
             if (builtin_id == JS_BUILTIN_ARR_SLICE) {
-                Item result = js_array_generic_slice(this_val, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
+                JS_ARRAY_RETURN(js_array_generic_slice(this_val, args, arg_count));
             }
             if (builtin_id == JS_BUILTIN_ARR_FLAT) {
                 return js_array_generic_flat(this_val, args, arg_count);
@@ -10961,16 +10932,12 @@ static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args,
                 }
             }
             if (builtin_id == JS_BUILTIN_ARR_SPLICE) {
-                Item result = js_array_generic_splice(this_val, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
+                JS_ARRAY_RETURN(js_array_generic_splice(this_val, args, arg_count));
             }
             if (builtin_id == JS_BUILTIN_ARR_FIND_LAST ||
                 builtin_id == JS_BUILTIN_ARR_FIND_LAST_INDEX) {
-                Item result = js_array_generic_find_last(
-                    this_val, args, arg_count, builtin_id == JS_BUILTIN_ARR_FIND_LAST_INDEX);
-                js_array_method_real_this = (Item){0};
-                return result;
+                JS_ARRAY_RETURN(js_array_generic_find_last(
+                    this_val, args, arg_count, builtin_id == JS_BUILTIN_ARR_FIND_LAST_INDEX));
             }
             Item temp_arr = js_array_like_to_array(this_val);
             if (item_is_error(temp_arr)) { js_array_method_real_this = (Item){0}; return temp_arr; }
@@ -11053,89 +11020,41 @@ static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args,
             }
             Item wrapped = js_to_object(this_val);
             js_array_method_real_this = wrapped;
-            if (builtin_id == JS_BUILTIN_ARR_SORT) {
-                Item result = js_array_generic_sort(wrapped, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_CONCAT) {
-                Item result = js_array_method(wrapped, method_name, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
+            if (builtin_id == JS_BUILTIN_ARR_SORT)
+                JS_ARRAY_RETURN(js_array_generic_sort(wrapped, args, arg_count));
+            if (builtin_id == JS_BUILTIN_ARR_CONCAT)
+                JS_ARRAY_RETURN(js_array_method(wrapped, method_name, args, arg_count));
             // For strings, use the raw primitive for array-like conversion
             // since js_property_get on strings supports indexed char access
             Item source = (this_type == LMD_TYPE_STRING) ? this_val : wrapped;
-            if (builtin_id == JS_BUILTIN_ARR_INCLUDES) {
-                Item result = js_array_generic_includes(source, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FOR_EACH) {
-                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_FOR_EACH);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_MAP) {
-                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_MAP);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FILTER) {
-                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_FILTER);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_SOME) {
-                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_SOME);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_EVERY) {
-                Item result = js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_EVERY);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_REDUCE) {
-                Item result = js_array_generic_reduce_with_object(source, wrapped, args, arg_count, false);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_REDUCE_RIGHT) {
-                Item result = js_array_generic_reduce_with_object(source, wrapped, args, arg_count, true);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FLAT) {
-                Item result = js_array_generic_flat(source, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_FLAT_MAP) {
-                Item result = js_array_generic_flat_map(source, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_TO_REVERSED) {
-                Item result = js_array_generic_to_reversed(source);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_TO_SORTED) {
-                Item result = js_array_generic_to_sorted(source, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_TO_SPLICED) {
-                Item result = js_array_generic_to_spliced(source, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
-            if (builtin_id == JS_BUILTIN_ARR_WITH) {
-                Item result = js_array_generic_with(source, args, arg_count);
-                js_array_method_real_this = (Item){0};
-                return result;
-            }
+            if (builtin_id == JS_BUILTIN_ARR_INCLUDES)
+                JS_ARRAY_RETURN(js_array_generic_includes(source, args, arg_count));
+            if (builtin_id == JS_BUILTIN_ARR_FOR_EACH)
+                JS_ARRAY_RETURN(js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_FOR_EACH));
+            if (builtin_id == JS_BUILTIN_ARR_MAP)
+                JS_ARRAY_RETURN(js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_MAP));
+            if (builtin_id == JS_BUILTIN_ARR_FILTER)
+                JS_ARRAY_RETURN(js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_FILTER));
+            if (builtin_id == JS_BUILTIN_ARR_SOME)
+                JS_ARRAY_RETURN(js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_SOME));
+            if (builtin_id == JS_BUILTIN_ARR_EVERY)
+                JS_ARRAY_RETURN(js_array_generic_iterative_callback_with_object(source, wrapped, args, arg_count, JS_ARRAY_ITER_EVERY));
+            if (builtin_id == JS_BUILTIN_ARR_REDUCE)
+                JS_ARRAY_RETURN(js_array_generic_reduce_with_object(source, wrapped, args, arg_count, false));
+            if (builtin_id == JS_BUILTIN_ARR_REDUCE_RIGHT)
+                JS_ARRAY_RETURN(js_array_generic_reduce_with_object(source, wrapped, args, arg_count, true));
+            if (builtin_id == JS_BUILTIN_ARR_FLAT)
+                JS_ARRAY_RETURN(js_array_generic_flat(source, args, arg_count));
+            if (builtin_id == JS_BUILTIN_ARR_FLAT_MAP)
+                JS_ARRAY_RETURN(js_array_generic_flat_map(source, args, arg_count));
+            if (builtin_id == JS_BUILTIN_ARR_TO_REVERSED)
+                JS_ARRAY_RETURN(js_array_generic_to_reversed(source));
+            if (builtin_id == JS_BUILTIN_ARR_TO_SORTED)
+                JS_ARRAY_RETURN(js_array_generic_to_sorted(source, args, arg_count));
+            if (builtin_id == JS_BUILTIN_ARR_TO_SPLICED)
+                JS_ARRAY_RETURN(js_array_generic_to_spliced(source, args, arg_count));
+            if (builtin_id == JS_BUILTIN_ARR_WITH)
+                JS_ARRAY_RETURN(js_array_generic_with(source, args, arg_count));
             Item temp_arr = js_array_like_to_array(source);
             if (item_is_error(temp_arr)) { js_array_method_real_this = (Item){0}; return temp_arr; }
             Item result = js_array_method(temp_arr, method_name, args, arg_count);
@@ -11152,7 +11071,7 @@ static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args,
             }
             return result;
         }
-
+#undef JS_ARRAY_RETURN
 }
 
 static Item js_dispatch_string_builtin(int builtin_id, Item this_val, Item* args, int arg_count) {
@@ -11165,10 +11084,7 @@ static Item js_dispatch_string_builtin(int builtin_id, Item this_val, Item* args
             TypeId st = get_type_id(this_val);
             if (this_val.item == ITEM_JS_UNDEFINED || this_val.item == ITEM_NULL ||
                 st == LMD_TYPE_NULL) {
-                Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item msg = (Item){.item = s2it(heap_create_name("Cannot read properties of null or undefined"))};
-                Item error = js_new_error_with_name(type_name, msg);
-                return js_throw_value(error);
+                return js_throw_type_error("Cannot read properties of null or undefined");
             }
         }
         // String.prototype.toString/valueOf: throw TypeError if not a string
@@ -11192,6 +11108,47 @@ static Item js_dispatch_math_builtin(int builtin_id, Item* args, int arg_count) 
         .item = s2it(heap_create_name(spec->name, spec->len))
     };
     return js_math_method(method_name, args, arg_count);
+}
+
+static Item js_dispatch_collection_method(int builtin_id, Item this_val,
+        Item arg0, Item arg1) {
+    JsCollectionData* cd = js_get_collection_data(this_val);
+    bool is_map = false;
+    bool is_set = false;
+    bool is_weak = false;
+    int mid = -1;
+    const char* receiver_error = "Collection method called on incompatible receiver";
+    switch (builtin_id) {
+    case JS_BUILTIN_MAP_SET: is_map = true; receiver_error = "Method Map.prototype.* called on incompatible receiver"; mid = 0; break;
+    case JS_BUILTIN_MAP_GET: is_map = true; receiver_error = "Method Map.prototype.* called on incompatible receiver"; mid = 1; break;
+    case JS_BUILTIN_MAP_HAS: is_map = true; receiver_error = "Method Map.prototype.* called on incompatible receiver"; mid = 2; break;
+    case JS_BUILTIN_MAP_DELETE: is_map = true; receiver_error = "Method Map.prototype.* called on incompatible receiver"; mid = 3; break;
+    case JS_BUILTIN_MAP_CLEAR: is_map = true; receiver_error = "Method Map.prototype.* called on incompatible receiver"; mid = 4; break;
+    case JS_BUILTIN_MAP_FOREACH: is_map = true; receiver_error = "Method Map.prototype.* called on incompatible receiver"; mid = 5; break;
+    case JS_BUILTIN_SET_ADD: is_set = true; receiver_error = "Method Set.prototype.* called on incompatible receiver"; mid = 0; break;
+    case JS_BUILTIN_SET_HAS: is_set = true; receiver_error = "Method Set.prototype.* called on incompatible receiver"; mid = 2; break;
+    case JS_BUILTIN_SET_DELETE: is_set = true; receiver_error = "Method Set.prototype.* called on incompatible receiver"; mid = 3; break;
+    case JS_BUILTIN_SET_CLEAR: is_set = true; receiver_error = "Method Set.prototype.* called on incompatible receiver"; mid = 4; break;
+    case JS_BUILTIN_SET_FOREACH: is_set = true; receiver_error = "Method Set.prototype.* called on incompatible receiver"; mid = 5; break;
+    case JS_BUILTIN_WEAKMAP_SET: is_map = true; is_weak = true; receiver_error = "Method WeakMap.prototype.* called on incompatible receiver"; mid = 0; break;
+    case JS_BUILTIN_WEAKMAP_GET: is_map = true; is_weak = true; receiver_error = "Method WeakMap.prototype.* called on incompatible receiver"; mid = 1; break;
+    case JS_BUILTIN_WEAKMAP_HAS: is_map = true; is_weak = true; receiver_error = "Method WeakMap.prototype.* called on incompatible receiver"; mid = 2; break;
+    case JS_BUILTIN_WEAKMAP_DELETE: is_map = true; is_weak = true; receiver_error = "Method WeakMap.prototype.* called on incompatible receiver"; mid = 3; break;
+    case JS_BUILTIN_WEAKSET_ADD: is_set = true; is_weak = true; receiver_error = "Method WeakSet.prototype.* called on incompatible receiver"; mid = 0; break;
+    case JS_BUILTIN_WEAKSET_HAS: is_set = true; is_weak = true; receiver_error = "Method WeakSet.prototype.* called on incompatible receiver"; mid = 2; break;
+    case JS_BUILTIN_WEAKSET_DELETE: is_set = true; is_weak = true; receiver_error = "Method WeakSet.prototype.* called on incompatible receiver"; mid = 3; break;
+    default: return ItemNull;
+    }
+    if (!cd || cd->type != (is_map ? JS_COLLECTION_MAP : JS_COLLECTION_SET) || cd->is_weak != is_weak) {
+        return js_throw_type_error(receiver_error);
+    }
+    Item first = (is_map && mid == 4) || (is_set && mid == 4) ? ItemNull : arg0;
+    Item second = ItemNull;
+    if ((is_map && (mid == 0 || mid == 5)) || (is_set && mid == 5) ||
+            (is_map && is_weak && mid == 0)) {
+        second = arg1;
+    }
+    return js_collection_method(this_val, mid, first, second);
 }
 
 // Dispatch a built-in method call by builtin_id
@@ -11945,9 +11902,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             JS_ASSIGN_OR_RETURN(set_result, js_create_data_property_or_throw(result, (int64_t)i, args[i]));
         }
         Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
-        Item length_result = js_array_set_length_throw_status(
-            result, len_key, (int64_t)arg_count);
-        if (item_is_error(length_result)) return length_result;
+        JS_ASSIGN_OR_RETURN(length_result, js_array_set_length_throw_status(
+            result, len_key, (int64_t)arg_count));
         return result;
     }
     case JS_BUILTIN_ARRAY_ITER_NEXT: {
@@ -13227,97 +13183,25 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
 
     // v76: Collection prototype methods (exposed on Map/Set.prototype)
-    // Map methods — throw TypeError if this is not a Map with [[MapData]]
     case JS_BUILTIN_MAP_SET:
     case JS_BUILTIN_MAP_GET:
     case JS_BUILTIN_MAP_HAS:
     case JS_BUILTIN_MAP_DELETE:
     case JS_BUILTIN_MAP_CLEAR:
-    case JS_BUILTIN_MAP_FOREACH: {
-        JsCollectionData* cd = js_get_collection_data(this_val);
-        if (!cd || cd->type != JS_COLLECTION_MAP || cd->is_weak) {
-            Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-            Item msg = (Item){.item = s2it(heap_create_name("Method Map.prototype.* called on incompatible receiver"))};
-            return js_throw_value(js_new_error_with_name(tn, msg));
-        }
-        int mid = 0;
-        switch (builtin_id) {
-            case JS_BUILTIN_MAP_SET: mid = 0; break;
-            case JS_BUILTIN_MAP_GET: mid = 1; break;
-            case JS_BUILTIN_MAP_HAS: mid = 2; break;
-            case JS_BUILTIN_MAP_DELETE: mid = 3; break;
-            case JS_BUILTIN_MAP_CLEAR: mid = 4; break;
-            case JS_BUILTIN_MAP_FOREACH: mid = 5; break;
-        }
-        Item a1 = (mid == 4) ? ItemNull : arg0;
-        Item a2 = (mid == 0 || mid == 5) ? arg1 : ItemNull;
-        return js_collection_method(this_val, mid, a1, a2);
-    }
-    // Set methods — throw TypeError if this is not a Set with [[SetData]]
+    case JS_BUILTIN_MAP_FOREACH:
     case JS_BUILTIN_SET_ADD:
     case JS_BUILTIN_SET_HAS:
     case JS_BUILTIN_SET_DELETE:
     case JS_BUILTIN_SET_CLEAR:
-    case JS_BUILTIN_SET_FOREACH: {
-        JsCollectionData* cd = js_get_collection_data(this_val);
-        if (!cd || cd->type != JS_COLLECTION_SET || cd->is_weak) {
-            Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-            Item msg = (Item){.item = s2it(heap_create_name("Method Set.prototype.* called on incompatible receiver"))};
-            return js_throw_value(js_new_error_with_name(tn, msg));
-        }
-        int mid = 0;
-        switch (builtin_id) {
-            case JS_BUILTIN_SET_ADD: mid = 0; break;
-            case JS_BUILTIN_SET_HAS: mid = 2; break;
-            case JS_BUILTIN_SET_DELETE: mid = 3; break;
-            case JS_BUILTIN_SET_CLEAR: mid = 4; break;
-            case JS_BUILTIN_SET_FOREACH: mid = 5; break;
-        }
-        Item a1 = (mid == 4) ? ItemNull : arg0;
-        Item a2 = (mid == 5) ? arg1 : ItemNull;
-        return js_collection_method(this_val, mid, a1, a2);
-    }
-    // WeakMap methods — require is_weak Map
+    case JS_BUILTIN_SET_FOREACH:
     case JS_BUILTIN_WEAKMAP_SET:
     case JS_BUILTIN_WEAKMAP_GET:
     case JS_BUILTIN_WEAKMAP_HAS:
-    case JS_BUILTIN_WEAKMAP_DELETE: {
-        JsCollectionData* cd = js_get_collection_data(this_val);
-        if (!cd || cd->type != JS_COLLECTION_MAP || !cd->is_weak) {
-            Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-            Item msg = (Item){.item = s2it(heap_create_name("Method WeakMap.prototype.* called on incompatible receiver"))};
-            return js_throw_value(js_new_error_with_name(tn, msg));
-        }
-        int mid = 0;
-        switch (builtin_id) {
-            case JS_BUILTIN_WEAKMAP_SET: mid = 0; break;
-            case JS_BUILTIN_WEAKMAP_GET: mid = 1; break;
-            case JS_BUILTIN_WEAKMAP_HAS: mid = 2; break;
-            case JS_BUILTIN_WEAKMAP_DELETE: mid = 3; break;
-        }
-        Item a1 = arg0;
-        Item a2 = (mid == 0) ? arg1 : ItemNull;
-        return js_collection_method(this_val, mid, a1, a2);
-    }
-    // WeakSet methods — require is_weak Set
+    case JS_BUILTIN_WEAKMAP_DELETE:
     case JS_BUILTIN_WEAKSET_ADD:
     case JS_BUILTIN_WEAKSET_HAS:
-    case JS_BUILTIN_WEAKSET_DELETE: {
-        JsCollectionData* cd = js_get_collection_data(this_val);
-        if (!cd || cd->type != JS_COLLECTION_SET || !cd->is_weak) {
-            Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-            Item msg = (Item){.item = s2it(heap_create_name("Method WeakSet.prototype.* called on incompatible receiver"))};
-            return js_throw_value(js_new_error_with_name(tn, msg));
-        }
-        int mid = 0;
-        switch (builtin_id) {
-            case JS_BUILTIN_WEAKSET_ADD: mid = 0; break;
-            case JS_BUILTIN_WEAKSET_HAS: mid = 2; break;
-            case JS_BUILTIN_WEAKSET_DELETE: mid = 3; break;
-        }
-        Item a1 = arg0;
-        return js_collection_method(this_val, mid, a1, ItemNull);
-    }
+    case JS_BUILTIN_WEAKSET_DELETE:
+        return js_dispatch_collection_method(builtin_id, this_val, arg0, arg1);
     case JS_BUILTIN_WEAKREF_DEREF: {
         return js_weakref_deref(this_val);
     }
@@ -13485,23 +13369,17 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_generator_throw(this_val, arg_count > 0 ? arg0 : make_js_undefined());
     case JS_BUILTIN_ASYNC_GENERATOR_NEXT:
         if (!js_is_async_generator(this_val)) {
-            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-            Item msg = (Item){.item = s2it(heap_create_name("AsyncGenerator.prototype.next called on incompatible receiver"))};
-            return js_promise_reject(js_new_error_with_name(tn, msg));
+            return js_promise_reject(js_new_named_error("TypeError", "AsyncGenerator.prototype.next called on incompatible receiver"));
         }
         return js_generator_next(this_val, arg_count > 0 ? arg0 : make_js_undefined());
     case JS_BUILTIN_ASYNC_GENERATOR_RETURN:
         if (!js_is_async_generator(this_val)) {
-            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-            Item msg = (Item){.item = s2it(heap_create_name("AsyncGenerator.prototype.return called on incompatible receiver"))};
-            return js_promise_reject(js_new_error_with_name(tn, msg));
+            return js_promise_reject(js_new_named_error("TypeError", "AsyncGenerator.prototype.return called on incompatible receiver"));
         }
         return js_generator_return(this_val, arg_count > 0 ? arg0 : make_js_undefined());
     case JS_BUILTIN_ASYNC_GENERATOR_THROW:
         if (!js_is_async_generator(this_val)) {
-            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-            Item msg = (Item){.item = s2it(heap_create_name("AsyncGenerator.prototype.throw called on incompatible receiver"))};
-            return js_promise_reject(js_new_error_with_name(tn, msg));
+            return js_promise_reject(js_new_named_error("TypeError", "AsyncGenerator.prototype.throw called on incompatible receiver"));
         }
         return js_generator_throw(this_val, arg_count > 0 ? arg0 : make_js_undefined());
     case JS_BUILTIN_ATOMICS_ADD:
@@ -13568,9 +13446,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             }
             char msg[128];
             snprintf(msg, sizeof(msg), "Set.prototype.%s requires that 'this' be a Set", method_name_str);
-            Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-            Item err_msg = (Item){.item = s2it(heap_create_name(msg, strlen(msg)))};
-            return js_throw_value(js_new_error_with_name(type_name, err_msg));
+            return js_throw_type_error(msg);
         }
         // Delegate to js_map_method which has the Set operation logic
         const char* method_name_str = NULL;
@@ -14365,10 +14241,7 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         for (int i = 0; i < arg_count && i < 5; i++) {
             log_error("  arg[%d]: type=%d raw=0x%llx", i, get_type_id(args[i]), (unsigned long long)args[i].item);
         }
-        Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-        Item msg = (Item){.item = s2it(heap_create_name("is not a function"))};
-        Item error = js_new_error_with_name(type_name, msg);
-        return js_throw_value(error);
+        return js_throw_type_error("is not a function");
     }
 
     JsFunction* fn = (JsFunction*)func_item.function;
@@ -14472,9 +14345,7 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         // TypedArray stub methods: validate this before returning
         if (fn && (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) {
             if (!js_is_typed_array(this_val)) {
-                Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item msg = (Item){.item = s2it(heap_create_name("Method requires a TypedArray as receiver"))};
-                return js_throw_value(js_new_error_with_name(type_name, msg));
+                return js_throw_type_error("Method requires a TypedArray as receiver");
             }
             if (fn->name) {
                 const char* name = fn->name->chars;
@@ -14553,9 +14424,7 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
             Item effective_this = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
                 ? js_function_get_bound_this(fn) : this_val;
             if (!js_is_typed_array(effective_this)) {
-                Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item msg = (Item){.item = s2it(heap_create_name("Method requires a TypedArray as receiver"))};
-                return js_throw_value(js_new_error_with_name(type_name, msg));
+            return js_throw_type_error("Method requires a TypedArray as receiver");
             }
         }
         // Handle bound builtins
@@ -15258,10 +15127,7 @@ static Item js_apply_function_impl(Item func_item, Item this_val, Item args_arra
             }
         }
         log_error("js_apply_function: not a function (type=%d)", get_type_id(func_item));
-        Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-        Item msg = (Item){.item = s2it(heap_create_name("apply called on non-function"))};
-        Item error = js_new_error_with_name(type_name, msg);
-        return js_throw_value(error);
+        return js_throw_type_error("apply called on non-function");
     }
     int argc = 0;
     Item* args = NULL;
@@ -15493,9 +15359,7 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, 
     // Do NOT delegate to js_map_method for MAPs — that would look up .bind() on
     // the prototype chain (e.g. Function.prototype.bind) and recurse infinitely.
     log_error("js_func_bind: not a function, type=%d raw=0x%llx", get_type_id(func_item), (unsigned long long)func_item.item);
-    Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-    Item msg = (Item){.item = s2it(heap_create_name("Bind must be called on a function"))};
-    return js_throw_value(js_new_error_with_name(tn, msg));
+    return js_throw_type_error("Bind must be called on a function");
 }
 
 // =============================================================================
@@ -19186,8 +19050,7 @@ static void js_regex_prepare_subject(String* input_s, bool needs_utf16,
 
 static Item js_regex_read_lastindex(Item regex, Item li_key, int* start_pos) {
     JS_ASSIGN_OR_RETURN(li_val, js_property_get(regex, li_key));
-    li_val = js_to_number(li_val);
-    if (item_is_error(li_val)) return li_val;
+    JS_ASSIGN_OR_RETURN_INTO(li_val, js_to_number(li_val));
     TypeId li_tid = get_type_id(li_val);
     if (li_tid == LMD_TYPE_INT || li_tid == LMD_TYPE_INT64) {
         *start_pos = (int)it2i(li_val);
@@ -19205,8 +19068,7 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     if (!rd) return js_throw_type_error("Method RegExp.prototype.test called on incompatible receiver");
     TypeId tid = get_type_id(str);
     if (tid != LMD_TYPE_STRING) {
-        str = js_to_string(str);
-        if (item_is_error(str)) return str;
+        JS_ASSIGN_OR_RETURN_INTO(str, js_to_string(str));
         tid = get_type_id(str);
         if (tid != LMD_TYPE_STRING) return ItemNull;
     }
@@ -19301,14 +19163,10 @@ static Item js_regex_set_lastindex_item_strict(Item regex, Item li_key, Item val
             return js_throw_type_error("Cannot set property lastIndex which has only a getter");
         }
         if (!js_props_query_writable(m, _se, "lastIndex", 9)) {
-            Item err_name = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-            Item err_msg = (Item){.item = s2it(heap_create_name("Cannot assign to read only property 'lastIndex' of object", 56))};
-            return js_throw_value(js_new_error_with_name(err_name, err_msg));
+            return js_throw_type_error("Cannot assign to read only property 'lastIndex' of object");
         }
         if (!_se && js_proto_chain_has_nonwritable_data(regex, "lastIndex", 9)) {
-            Item err_name = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-            Item err_msg = (Item){.item = s2it(heap_create_name("Cannot assign to read only property 'lastIndex' of object", 56))};
-            return js_throw_value(js_new_error_with_name(err_name, err_msg));
+            return js_throw_type_error("Cannot assign to read only property 'lastIndex' of object");
         }
         if (!_se && !js_is_truthy(js_object_is_extensible(regex))) {
             return js_throw_type_error("Cannot add property 'lastIndex' to non-extensible object");
@@ -19466,8 +19324,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // v46: convert argument to string (handles new String(), numbers, etc.)
     TypeId tid = get_type_id(str);
     if (tid != LMD_TYPE_STRING) {
-        str = js_to_string(str);
-        if (item_is_error(str)) return str;
+        JS_ASSIGN_OR_RETURN_INTO(str, js_to_string(str));
         tid = get_type_id(str);
         if (tid != LMD_TYPE_STRING) return ItemNull;
     }
@@ -19836,8 +19693,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         return js_throw_type_error("RegExp.prototype[@@replace] called on incompatible receiver");
     // Step 3: S = ToString(string)
     if (get_type_id(str) != LMD_TYPE_STRING) {
-        str = js_to_string(str);
-        if (item_is_error(str)) return str;
+        JS_ASSIGN_OR_RETURN_INTO(str, js_to_string(str));
     }
     String* S = it2s(str);
     int lengthS = S ? (int)S->len : 0;
@@ -19845,8 +19701,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
     bool functional_replace = (get_type_id(replacement) == LMD_TYPE_FUNC);
     // Step 6: If not functional, replaceValue = ToString(replaceValue)
     if (!functional_replace) {
-        replacement = js_to_string(replacement);
-        if (item_is_error(replacement)) return replacement;
+        JS_ASSIGN_OR_RETURN_INTO(replacement, js_to_string(replacement));
     }
     JsRegexData* fast_rd = js_get_regex_data(this_val);
     // Js55 P10b: js_regex_exec returns match.index in UTF-16 code units whenever
@@ -20099,9 +19954,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
 static Item js_regexp_symbol_search(Item this_val, Item arg0) {
     // ES spec §22.2.5.9: Type(this) must be Object
     if (get_type_id(this_val) != LMD_TYPE_MAP && get_type_id(this_val) != LMD_TYPE_ARRAY) {
-        Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-        Item msg = (Item){.item = s2it(heap_create_name("RegExp.prototype[@@search] called on incompatible receiver"))};
-        return js_throw_value(js_new_error_with_name(tn, msg));
+        return js_throw_type_error("RegExp.prototype[@@search] called on incompatible receiver");
     }
     // ES spec step 3: Let S be ToString(string).
     JS_ASSIGN_OR_RETURN(str, (get_type_id(arg0) == LMD_TYPE_STRING) ? arg0 : js_to_string(arg0));
@@ -20145,9 +19998,7 @@ static Item js_regexp_symbol_search(Item this_val, Item arg0) {
 static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     // Step 2: Type(rx) must be Object
     if (!js_is_object_constructor_result(this_val)) {
-        Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-        Item msg = (Item){.item = s2it(heap_create_name("RegExp.prototype[@@split] called on incompatible receiver"))};
-        return js_throw_value(js_new_error_with_name(tn, msg));
+        return js_throw_type_error("RegExp.prototype[@@split] called on incompatible receiver");
     }
     // Step 3: S = ToString(string)
     if (get_type_id(str) != LMD_TYPE_STRING) str = js_to_string(str);
@@ -20720,10 +20571,7 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
                 char msg[256];
                 snprintf(msg, sizeof(msg), "Cannot %s on a frozen %s", method_name,
                          cd->type == JS_COLLECTION_SET ? "Set" : "Map");
-                Item err_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item err_msg = (Item){.item = s2it(heap_create_name(msg))};
-                Item error = js_new_error_with_name(err_name, err_msg);
-                return js_throw_value(error);
+                return js_throw_type_error(msg);
             }
         }
     }
@@ -21134,10 +20982,9 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
             if (method->len == 3 && strncmp(method->chars, "map", 3) == 0) {
                 Item callback;
                 Item this_arg;
-                Item callback_status = js_typed_array_prepare_callback(obj, args, argc,
+                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc,
                         "Cannot perform %TypedArray%.prototype.map on an out-of-bounds ArrayBuffer",
-                        &callback, &this_arg);
-                if (item_is_error(callback_status)) return callback_status;
+                        &callback, &this_arg));
                 // Js55 P21: when Array.prototype.map is called on a TA, ES spec
                 // ArraySpeciesCreate creates a regular Array (not a TA). The
                 // generic path uses HasProperty (skip on OOB → sparse holes).
@@ -21236,10 +21083,9 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
             if (method->len == 7 && strncmp(method->chars, "forEach", 7) == 0) {
                 Item callback;
                 Item this_arg;
-                Item callback_status = js_typed_array_prepare_callback(obj, args, argc,
+                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc,
                         "Cannot perform %TypedArray%.prototype.forEach on an out-of-bounds ArrayBuffer",
-                        &callback, &this_arg);
-                if (item_is_error(callback_status)) return callback_status;
+                        &callback, &this_arg));
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
                     // Js54 P6: Array.prototype.forEach uses HasProperty per spec;
@@ -21255,10 +21101,9 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
             }
             if (method->len == 6 && strncmp(method->chars, "reduce", 6) == 0) {
                 Item callback;
-                Item callback_status = js_typed_array_prepare_callback(obj, args, argc,
+                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc,
                         "Cannot perform %TypedArray%.prototype.reduce on an out-of-bounds ArrayBuffer",
-                        &callback, NULL);
-                if (item_is_error(callback_status)) return callback_status;
+                        &callback, NULL));
                 int len = js_typed_array_length(obj);
                 int start_idx = 0;
                 Item acc;
@@ -21276,18 +21121,16 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[4] = {acc, elem, idx_item, obj};
-                    acc = js_call_function(callback, make_js_undefined(), fn_args, 4);
-                    if (item_is_error(acc)) return acc;
+                    JS_ASSIGN_OR_RETURN_INTO(acc, js_call_function(callback, make_js_undefined(), fn_args, 4));
                 }
                 return acc;
             }
             if (method->len == 4 && strncmp(method->chars, "find", 4) == 0) {
                 Item callback;
                 Item this_arg;
-                Item callback_status = js_typed_array_prepare_callback(obj, args, argc,
+                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc,
                         "Cannot perform %TypedArray%.prototype.find on an out-of-bounds ArrayBuffer",
-                        &callback, &this_arg);
-                if (item_is_error(callback_status)) return callback_status;
+                        &callback, &this_arg));
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
                     // Js55 P19: find spec doesn't use HasProperty — yield undefined for OOB
@@ -21305,10 +21148,9 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
             if (method->len == 9 && strncmp(method->chars, "findIndex", 9) == 0) {
                 Item callback;
                 Item this_arg;
-                Item callback_status = js_typed_array_prepare_callback(obj, args, argc,
+                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc,
                         "Cannot perform %TypedArray%.prototype.findIndex on an out-of-bounds ArrayBuffer",
-                        &callback, &this_arg);
-                if (item_is_error(callback_status)) return callback_status;
+                        &callback, &this_arg));
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
                     // Js55 P19: findIndex spec doesn't use HasProperty — yield undefined for OOB
@@ -21326,10 +21168,9 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
             if (method->len == 5 && strncmp(method->chars, "every", 5) == 0) {
                 Item callback;
                 Item this_arg;
-                Item callback_status = js_typed_array_prepare_callback(obj, args, argc,
+                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc,
                         "Cannot perform %TypedArray%.prototype.every on an out-of-bounds ArrayBuffer",
-                        &callback, &this_arg);
-                if (item_is_error(callback_status)) return callback_status;
+                        &callback, &this_arg));
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
                     if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
@@ -21345,10 +21186,9 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
             if (method->len == 4 && strncmp(method->chars, "some", 4) == 0) {
                 Item callback;
                 Item this_arg;
-                Item callback_status = js_typed_array_prepare_callback(obj, args, argc,
+                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc,
                         "Cannot perform %TypedArray%.prototype.some on an out-of-bounds ArrayBuffer",
-                        &callback, &this_arg);
-                if (item_is_error(callback_status)) return callback_status;
+                        &callback, &this_arg));
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
                     if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
@@ -21364,10 +21204,9 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
             if (method->len == 8 && strncmp(method->chars, "findLast", 8) == 0) {
                 Item callback;
                 Item this_arg;
-                Item callback_status = js_typed_array_prepare_callback(obj, args, argc,
+                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc,
                         "Cannot perform %TypedArray%.prototype.findLast on an out-of-bounds ArrayBuffer",
-                        &callback, &this_arg);
-                if (item_is_error(callback_status)) return callback_status;
+                        &callback, &this_arg));
                 int len = js_typed_array_length(obj);
                 for (int i = len - 1; i >= 0; i--) {
                     // Js55 P19: when called as Array method, OOB indices yield
@@ -21387,10 +21226,9 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
             if (method->len == 13 && strncmp(method->chars, "findLastIndex", 13) == 0) {
                 Item callback;
                 Item this_arg;
-                Item callback_status = js_typed_array_prepare_callback(obj, args, argc,
+                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc,
                         "Cannot perform %TypedArray%.prototype.findLastIndex on an out-of-bounds ArrayBuffer",
-                        &callback, &this_arg);
-                if (item_is_error(callback_status)) return callback_status;
+                        &callback, &this_arg));
                 int len = js_typed_array_length(obj);
                 for (int i = len - 1; i >= 0; i--) {
                     // Js55 P19: yield undefined for OOB indices when called as Array method
@@ -21407,10 +21245,9 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
             }
             if (method->len == 11 && strncmp(method->chars, "reduceRight", 11) == 0) {
                 Item callback;
-                Item callback_status = js_typed_array_prepare_callback(obj, args, argc,
+                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc,
                         "Cannot perform %TypedArray%.prototype.reduceRight on an out-of-bounds ArrayBuffer",
-                        &callback, NULL);
-                if (item_is_error(callback_status)) return callback_status;
+                        &callback, NULL));
                 int len = js_typed_array_length(obj);
                 int start_idx;
                 Item acc;
@@ -21421,18 +21258,14 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
                     acc = js_typed_array_get(obj, (Item){.item = i2it(len - 1)});
                     start_idx = len - 2;
                 } else {
-                    Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-                    Item msg_item = (Item){.item = s2it(heap_create_name("Reduce of empty array with no initial value"))};
-                    Item error = js_new_error_with_name(type_name, msg_item);
-                    return js_throw_value(error);
+        return js_throw_type_error("Reduce of empty array with no initial value");
                 }
                 for (int i = start_idx; i >= 0; i--) {
                     if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[4] = {acc, elem, idx_item, obj};
-                    acc = js_call_function(callback, make_js_undefined(), fn_args, 4);
-                    if (item_is_error(acc)) return acc;
+                    JS_ASSIGN_OR_RETURN_INTO(acc, js_call_function(callback, make_js_undefined(), fn_args, 4));
                 }
                 return acc;
             }
@@ -21523,10 +21356,9 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
             if (method->len == 6 && strncmp(method->chars, "filter", 6) == 0) {
                 Item callback;
                 Item this_arg;
-                Item callback_status = js_typed_array_prepare_callback(obj, args, argc,
+                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc,
                         "Cannot perform %TypedArray%.prototype.filter on an out-of-bounds ArrayBuffer",
-                        &callback, &this_arg);
-                if (item_is_error(callback_status)) return callback_status;
+                        &callback, &this_arg));
                 int len = js_typed_array_length(obj);
                 // collect matching elements first
                 Item* temp = (Item*)mem_alloc(len * sizeof(Item), MEM_CAT_JS_RUNTIME);
@@ -21802,9 +21634,8 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
                 }
                 Item raw_value = argc > 1 ? args[1] : make_js_undefined();
                 Item converted_holder = js_typed_array_new((int)ta->element_type, 1);
-                    Item converted_set = js_typed_array_set(converted_holder,
-                        (Item){.item = i2it(0)}, raw_value);
-                    if (item_is_error(converted_set)) return converted_set;
+                    JS_ASSIGN_OR_RETURN(converted_set, js_typed_array_set(converted_holder,
+                        (Item){.item = i2it(0)}, raw_value));
                 JS_ASSIGN_OR_RETURN(converted_value, js_typed_array_get(converted_holder, (Item){.item = i2it(0)}));
 
                 // Js55 P11: ES2024 §22.2.3.34 step 9 — IsValidIntegerIndex uses
@@ -21821,18 +21652,15 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
                 // not the post-coercion length. Spec is explicit.
                 Item result = js_typed_array_new((int)ta->element_type, len);
                 if (js_typed_array_raw_copy_same_type(result, obj)) {
-                    Item set_result = js_typed_array_set(result,
-                        (Item){.item = i2it(actual_index)}, converted_value);
-                    if (item_is_error(set_result)) return set_result;
+                    JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(result,
+                        (Item){.item = i2it(actual_index)}, converted_value));
                     return result;
                 }
                 for (int i = 0; i < len; i++) {
-                    Item value = (i == actual_index) ? converted_value :
-                        js_typed_array_get(obj, (Item){.item = i2it(i)});
-                    if (item_is_error(value)) return value;
-                    Item set_result = js_typed_array_set(result,
-                        (Item){.item = i2it(i)}, value);
-                    if (item_is_error(set_result)) return set_result;
+                    JS_ASSIGN_OR_RETURN(value, (i == actual_index) ? converted_value :
+                        js_typed_array_get(obj, (Item){.item = i2it(i)}));
+                    JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(result,
+                        (Item){.item = i2it(i)}, value));
                 }
                 return result;
             }
@@ -21868,9 +21696,8 @@ static Item js_map_method_impl(Item obj, Item method_name, Item* args, int argc,
                 if (!js_typed_array_raw_copy_same_type(result, obj)) {
                     for (int i = 0; i < len; i++) {
                         JS_ASSIGN_OR_RETURN(value, js_typed_array_get(obj, (Item){.item = i2it(i)}));
-                        Item set_result = js_typed_array_set(result,
-                            (Item){.item = i2it(i)}, value);
-                        if (item_is_error(set_result)) return set_result;
+                        JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(result,
+                            (Item){.item = i2it(i)}, value));
                     }
                 }
                 if (len > 1) {
@@ -22788,12 +22615,10 @@ static Item js_try_fast_replace_non_whitespace(Item regex, Item str, Item replac
 
 static Item js_string_replace_nonws_global_fast_impl(Item str, Item replacement, bool replacement_known_no_dollar) {
     if (get_type_id(str) != LMD_TYPE_STRING) {
-        str = js_to_string(str);
-        if (item_is_error(str)) return str;
+        JS_ASSIGN_OR_RETURN_INTO(str, js_to_string(str));
     }
     if (get_type_id(replacement) != LMD_TYPE_STRING) {
-        replacement = js_to_string(replacement);
-        if (item_is_error(replacement)) return replacement;
+        JS_ASSIGN_OR_RETURN_INTO(replacement, js_to_string(replacement));
     }
     int64_t cached_cp = js_string_last_fromCharCode_cp(str);
     if (cached_cp >= 0) {
@@ -22827,8 +22652,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
 
     if (rd) {
         if (!replacement_is_func) {
-            replacement_arg = js_to_string(replacement_arg);
-            if (item_is_error(replacement_arg)) return replacement_arg;
+            JS_ASSIGN_OR_RETURN_INTO(replacement_arg, js_to_string(replacement_arg));
         }
         if (s->len == 0 && !is_replace_all) return str;
         Item fast = js_try_fast_replace_non_whitespace(search_arg, str, replacement_arg, rd, replacement_is_func);
@@ -22903,8 +22727,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     // string-based replace
     JS_ASSIGN_OR_RETURN(search_str_item, js_to_string(search_arg));
     if (!replacement_is_func) {
-        replacement_arg = js_to_string(replacement_arg);
-        if (item_is_error(replacement_arg)) return replacement_arg;
+        JS_ASSIGN_OR_RETURN_INTO(replacement_arg, js_to_string(replacement_arg));
     }
 
     if (s->len == 0 && !is_replace_all) return str;
@@ -23652,8 +23475,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 }
             }
             if (get_type_id(str) != LMD_TYPE_STRING) {
-                str = js_to_string(str);
-                if (item_is_error(str)) return str;
+                JS_ASSIGN_OR_RETURN_INTO(str, js_to_string(str));
                 if (get_type_id(str) != LMD_TYPE_STRING)
                     return js_throw_type_error("String method receiver is not a string");
             }
@@ -23921,8 +23743,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         // coerce non-string separators (null, number, boolean) to string
         // (ToString may throw for objects — must happen before lim==0 check)
         if (get_type_id(sep) != LMD_TYPE_STRING) {
-            sep = js_to_string(sep);
-            if (item_is_error(sep)) return sep;
+            JS_ASSIGN_OR_RETURN_INTO(sep, js_to_string(sep));
         }
         // Step 8: If lim = 0, return empty array (after separator coercion)
         if (lim == 0) return js_array_new(0);
@@ -24566,20 +24387,13 @@ static Item js_throw_not_callable(const char* method_name) {
     return js_throw_value(error);
 }
 
-static Item js_throw_named_error(const char* type_name, const char* message) {
-    Item type_item = (Item){.item = s2it(heap_create_name(type_name))};
-    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
-    Item error = js_new_error_with_name(type_item, msg_item);
-    return js_throw_value(error);
-}
-
 // v20: Helper: throw RangeError
 extern "C" Item js_throw_range_error(const char* message) {
-    return js_throw_named_error("RangeError", message);
+    return js_throw_named_error_text("RangeError", message);
 }
 
 extern "C" Item js_throw_type_error(const char* message) {
-    return js_throw_named_error("TypeError", message);
+    return js_throw_named_error_text("TypeError", message);
 }
 
 static Item js_throw_named_error_code(const char* type_name, const char* code,
@@ -24857,12 +24671,9 @@ static Item js_create_data_property_or_throw(Item object, int64_t index, Item va
         Item desc = js_new_object();
         js_set_prototype(desc, ItemNull);
         JS_ASSIGN_OR_RETURN(set_result, js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value));
-        set_result = js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-        if (item_is_error(set_result)) return set_result;
-        set_result = js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
-        if (item_is_error(set_result)) return set_result;
-        set_result = js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
-        if (item_is_error(set_result)) return set_result;
+        JS_ASSIGN_OR_RETURN_INTO(set_result, js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)}));
+        JS_ASSIGN_OR_RETURN_INTO(set_result, js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)}));
+        JS_ASSIGN_OR_RETURN_INTO(set_result, js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)}));
         return js_object_define_property(object, js_array_index_key(index), desc);
     }
     if (type == LMD_TYPE_ARRAY) {
@@ -24952,8 +24763,7 @@ static Item js_array_species_create(Item original_array, int64_t length) {
             // Phase 3 Stage C: js_property_get fast-path handles IS_ACCESSOR
             // dispatch for FUNC, MAP and ARRAY receivers.
             Item species_key = js_well_known_symbol_key(6);
-            S = js_property_get(C, species_key);
-            if (item_is_error(S)) return S;
+            JS_ASSIGN_OR_RETURN_INTO(S, js_property_get(C, species_key));
         }
         // step 7b: if species is null, set C to undefined (→ use default Array)
         // step 8: if C is undefined, return ArrayCreate(length)
@@ -25834,9 +25644,8 @@ static Item js_array_flatten_into_status(Item target, Item source, int64_t sourc
             Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
             int64_t element_len = 0;
             JS_ASSIGN_OR_RETURN(length_status, js_array_to_length_status(js_property_get(element, len_key), &element_len));
-            Item nested = js_array_flatten_into_status(target, element, element_len, target_index,
-                depth - 1, ItemNull, make_js_undefined());
-            if (item_is_error(nested)) return nested;
+            JS_ASSIGN_OR_RETURN(nested, js_array_flatten_into_status(target, element, element_len, target_index,
+                depth - 1, ItemNull, make_js_undefined()));
         } else {
             if (*target_index >= 9007199254740991LL) {
                 return js_throw_type_error("Array.prototype.flat result exceeds 2^53 - 1");
@@ -25863,9 +25672,8 @@ static Item js_array_generic_flat(Item object, Item* args, int argc) {
     }
     JS_ASSIGN_OR_RETURN(result, js_array_species_create(object, 0));
     int64_t target_index = 0;
-    Item flatten_status = js_array_flatten_into_status(result, object, len, &target_index,
-        depth, ItemNull, make_js_undefined());
-    if (item_is_error(flatten_status)) return flatten_status;
+    JS_ASSIGN_OR_RETURN(flatten_status, js_array_flatten_into_status(result, object, len, &target_index,
+        depth, ItemNull, make_js_undefined()));
     return result;
 }
 
@@ -25879,9 +25687,8 @@ static Item js_array_generic_flat_map(Item object, Item* args, int argc) {
     JS_ASSIGN_OR_RETURN(result, js_array_species_create(object, 0));
     Item this_arg = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
     int64_t target_index = 0;
-    Item flatten_status = js_array_flatten_into_status(result, object, len, &target_index,
-        1, args[0], this_arg);
-    if (item_is_error(flatten_status)) return flatten_status;
+    JS_ASSIGN_OR_RETURN(flatten_status, js_array_flatten_into_status(result, object, len, &target_index,
+        1, args[0], this_arg));
     return result;
 }
 
@@ -26066,9 +25873,8 @@ static Item js_array_generic_splice(Item object, Item* args, int argc) {
     for (int64_t j = 0; j < insert_count; j++) {
         JS_ASSIGN_OR_RETURN(set_result, js_property_set(object, js_array_index_key(actual_start + j), args[2 + j]));
     }
-    Item set_length = js_array_set_length_throw_status(object, len_key,
-        len - actual_delete_count + insert_count);
-    if (item_is_error(set_length)) return set_length;
+    JS_ASSIGN_OR_RETURN(set_length, js_array_set_length_throw_status(object, len_key,
+        len - actual_delete_count + insert_count));
     return deleted;
 }
 
@@ -26149,14 +25955,12 @@ static Item js_array_generic_reverse(Item object) {
         Item lower_value = make_js_undefined();
         Item upper_value = make_js_undefined();
         if (lower_exists) {
-            lower_value = js_property_get(object, lower_key);
-            if (item_is_error(lower_value)) return lower_value;
+            JS_ASSIGN_OR_RETURN_INTO(lower_value, js_property_get(object, lower_key));
         }
         JS_ASSIGN_OR_RETURN(upper_has, js_array_method_has_property_status(object, upper_key));
         bool upper_exists = js_is_truthy(upper_has);
         if (upper_exists) {
-            upper_value = js_property_get(object, upper_key);
-            if (item_is_error(upper_value)) return upper_value;
+            JS_ASSIGN_OR_RETURN_INTO(upper_value, js_property_get(object, upper_key));
         }
         if (lower_exists && upper_exists) {
             JS_ASSIGN_OR_RETURN(lower_set, js_property_set_strict(object, lower_key, upper_value));
@@ -26642,8 +26446,7 @@ static Item js_array_generic_with(Item object, Item* args, int argc) {
         Item from_value = value;
         if (k != actual_index) {
             Item key = js_array_index_key(k);
-            from_value = js_property_get(object, key);
-            if (item_is_error(from_value)) return from_value;
+            JS_ASSIGN_OR_RETURN_INTO(from_value, js_property_get(object, key));
         }
         JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result, k, from_value));
     }
@@ -26664,9 +26467,8 @@ static Item js_array_generic_iterative_callback_with_object(Item object, Item ca
     // and current values for the entire loop rather than trusting C locals.
     key_root.set((Item){.item = s2it(heap_create_name("length", 6))});
     int64_t len = 0;
-    Item length_status = js_array_to_length_status(
-        js_property_get(object_root.get(), key_root.get()), &len);
-    if (item_is_error(length_status)) return length_status;
+    JS_ASSIGN_OR_RETURN(length_status, js_array_to_length_status(
+        js_property_get(object_root.get(), key_root.get()), &len));
     if (argc < 1 || get_type_id(callback_root.get()) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
 
     this_arg_root.set((argc >= 2 && args[1].item != ITEM_JS_UNDEFINED &&
@@ -26719,8 +26521,7 @@ static Item js_array_generic_iterative_callback_with_object(Item object, Item ca
             Item key = js_array_index_key(k);
             JS_ASSIGN_OR_RETURN(has, js_array_method_has_property_status(object_root.get(), key));
             if (js_is_truthy(has)) {
-                elem = js_property_get(object_root.get(), key);
-                if (item_is_error(elem)) return elem;
+                JS_ASSIGN_OR_RETURN_INTO(elem, js_property_get(object_root.get(), key));
                 present = true;
             }
         }
@@ -26804,8 +26605,7 @@ static Item js_array_generic_reduce_with_object(Item object, Item callback_objec
             Item key = js_array_index_key(k);
             JS_ASSIGN_OR_RETURN(has, js_array_method_has_property_status(object, key));
             if (js_is_truthy(has)) {
-                accumulator = js_property_get(object, key);
-                if (item_is_error(accumulator)) return accumulator;
+                JS_ASSIGN_OR_RETURN_INTO(accumulator, js_property_get(object, key));
                 found = true;
                 k += from_right ? -1 : 1;
                 break;
@@ -26978,8 +26778,7 @@ static Item js_array_method_impl(Item arr, Item method_name, Item* args, int arg
         if (is_generic) {
             // Note: slice/map/filter length validation per ArraySpeciesCreate is done
             // up-front in js_dispatch_builtin (LMD_TYPE_MAP branch) before reaching here.
-            arr = js_array_like_to_array(arr);
-            if (item_is_error(arr)) return arr;
+            JS_ASSIGN_OR_RETURN_INTO(arr, js_array_like_to_array(arr));
             arr_type = get_type_id(arr);
         }
     }
@@ -27118,9 +26917,8 @@ static Item js_array_method_impl(Item arr, Item method_name, Item* args, int arg
             JS_ASSIGN_OR_RETURN(result, js_property_get(cb_this, idx_key));
             // Delete the property and decrement length
             JS_ASSIGN_OR_RETURN(delete_result, js_delete_property(cb_this, idx_key));
-            Item set_length = js_property_set(cb_this, len_key,
-                (Item){.item = i2it((int)(length - 1))});
-            if (item_is_error(set_length)) return set_length;
+            JS_ASSIGN_OR_RETURN(set_length, js_property_set(cb_this, len_key,
+                (Item){.item = i2it((int)(length - 1))}));
             return result;
         }
         if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
@@ -27364,12 +27162,10 @@ includes_slow_path:
                 if (sparse_val.item == JS_DELETED_SENTINEL_VAL) continue;
                 if (jspd_is_accessor(se)) {
                     Item sparse_key = (Item){.item = s2it(heap_create_name(se->name->str, (int)se->name->length))};
-                    sparse_val = js_property_get(arr, sparse_key);
-                    if (item_is_error(sparse_val)) return sparse_val;
+                    JS_ASSIGN_OR_RETURN_INTO(sparse_val, js_property_get(arr, sparse_key));
                 }
-                Item create_result = js_create_data_property_or_throw(result, sparse_idx - start,
-                    sparse_val);
-                if (item_is_error(create_result)) return create_result;
+                JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result, sparse_idx - start,
+                    sparse_val));
             }
             SparseArrayMap* sm = js_array_sparse_from_map(pm);
             if (sm && sm->sparse_indices) {
@@ -27380,9 +27176,8 @@ includes_slow_path:
                     int64_t sparse_idx = entry->index;
                     if (sparse_idx < start || sparse_idx >= end || sparse_idx < dense_end) continue;
                     if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
-                    Item create_result = js_create_data_property_or_throw(result,
-                        sparse_idx - start, entry->value);
-                    if (item_is_error(create_result)) return create_result;
+                    JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result,
+                        sparse_idx - start, entry->value));
                 }
             }
         }
@@ -27547,9 +27342,8 @@ includes_slow_path:
                 if (result_is_plain_array) {
                     js_array_push_item_direct(dst, element_root.get());
                 } else {
-                    Item create_result = js_create_data_property_or_throw(result_root.get(), out_idx,
-                        element_root.get());
-                    if (item_is_error(create_result)) return create_result;
+                    JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result_root.get(), out_idx,
+                        element_root.get()));
                 }
                 out_idx++;
             }
@@ -27586,10 +27380,7 @@ includes_slow_path:
                 }
             }
             if (!found) {
-                Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item msg_item = (Item){.item = s2it(heap_create_name("Reduce of empty array with no initial value"))};
-                Item error = js_new_error_with_name(type_name, msg_item);
-                return js_throw_value(error);
+        return js_throw_type_error("Reduce of empty array with no initial value");
             }
             start_idx = k + 1;
             check_proto = js_proto_chain_has_numeric_keys(arr);
@@ -27603,8 +27394,7 @@ includes_slow_path:
             Item cb_args[4] = { accumulator, elem, (Item){.item = i2it(i)}, cb_this };
             // The reduce result escapes this dispatcher, so this local cannot own it.
             // The explicit map-method result-home path supplies the final home.
-            accumulator = js_invoke_fn(fn, cb_args, 4, result_home);
-            if (item_is_error(accumulator)) return accumulator;
+            JS_ASSIGN_OR_RETURN_INTO(accumulator, js_invoke_fn(fn, cb_args, 4, result_home));
             // J39-7: refresh check_proto in case callback mutated proto chain.
             check_proto = js_proto_chain_has_numeric_keys(arr);
         }
@@ -27982,10 +27772,7 @@ includes_slow_path:
                 }
             }
             if (!found) {
-                Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item msg_item = (Item){.item = s2it(heap_create_name("Reduce of empty array with no initial value"))};
-                Item error = js_new_error_with_name(type_name, msg_item);
-                return js_throw_value(error);
+        return js_throw_type_error("Reduce of empty array with no initial value");
             }
             start_idx = k - 1;
             check_proto = js_proto_chain_has_numeric_keys(arr);
@@ -27998,8 +27785,7 @@ includes_slow_path:
             Item cb_args[4] = { accumulator, elem, (Item){.item = i2it(i)}, cb_this };
             // The reduceRight result is forwarded by the map-method ABI and
             // therefore cannot use a transient terminal home here.
-            accumulator = js_invoke_fn(fn, cb_args, 4, result_home);
-            if (item_is_error(accumulator)) return accumulator;
+            JS_ASSIGN_OR_RETURN_INTO(accumulator, js_invoke_fn(fn, cb_args, 4, result_home));
             // J39-7: refresh check_proto in case callback mutated proto chain.
             check_proto = js_proto_chain_has_numeric_keys(arr);
         }
@@ -29899,9 +29685,8 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
             int key_len = snprintf(key_buf, sizeof(key_buf), "%d", i);
             Item key = (Item){.item = s2it(heap_create_name(key_buf, key_len))};
             bool excluded = false;
-            Item exclude_status = js_object_rest_key_excluded(key, exclude_keys, exclude_count,
-                &excluded);
-            if (item_is_error(exclude_status)) return exclude_status;
+            JS_ASSIGN_OR_RETURN(exclude_status, js_object_rest_key_excluded(key, exclude_keys, exclude_count,
+                &excluded));
             if (excluded) continue;
             JS_ASSIGN_OR_RETURN(val, js_property_get(src, key));
             JS_ASSIGN_OR_RETURN(set_result, js_property_set(rest, key, val));
@@ -29918,9 +29703,8 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
     for (int i = 0; i < key_arr->length; i++) {
         Item key = key_arr->items[i];
         bool excluded = false;
-        Item exclude_status = js_object_rest_key_excluded(key, exclude_keys, exclude_count,
-            &excluded);
-        if (item_is_error(exclude_status)) return exclude_status;
+        JS_ASSIGN_OR_RETURN(exclude_status, js_object_rest_key_excluded(key, exclude_keys, exclude_count,
+            &excluded));
         if (excluded) continue;
         JS_ASSIGN_OR_RETURN(desc, js_object_get_own_property_descriptor(src, key));
         if (get_type_id(desc) != LMD_TYPE_MAP) continue;
@@ -29977,9 +29761,8 @@ static Item js_make_iter_result(Item value, bool done) {
     // Property insertion may collect; retain both the fresh result map and a
     // scalar payload still owned by the generator state-result container.
     JS_ASSIGN_OR_RETURN(value_result, js_property_set(result_root.get(), (Item){.item = s2it(val_key)}, value_root.get()));
-    Item done_result = js_property_set(result_root.get(), (Item){.item = s2it(done_key)},
-        (Item){.item = b2it(done)});
-    if (item_is_error(done_result)) return done_result;
+    JS_ASSIGN_OR_RETURN(done_result, js_property_set(result_root.get(), (Item){.item = s2it(done_key)},
+        (Item){.item = b2it(done)}));
     return result_root.get();
 }
 
@@ -30421,10 +30204,7 @@ extern "C" Item js_generator_next(Item generator, Item input) {
 
     // ES spec: throw TypeError if called while generator is already executing
     if (gen->executing) {
-        Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-        Item msg = (Item){.item = s2it(heap_create_name("Generator is already running"))};
-        Item error = js_new_error_with_name(type_name, msg);
-        return js_throw_value(error);
+        return js_throw_type_error("Generator is already running");
     }
 
     gen->started = true;
@@ -31330,9 +31110,8 @@ extern "C" Item js_iterator_step(Item iterator) {
             if (idx >= len) return (Item){.item = JS_ITER_DONE_SENTINEL};  // done
             result_root.set(js_property_access(source_root.get(), (Item){.item = i2it(idx)}));
             source_root.set((Item){.item = s2it(heap_create_name("__idx__", 7))});
-            Item set_result = js_property_set(iterator_root.get(), source_root.get(),
-                (Item){.item = i2it(idx + 1)});
-            if (item_is_error(set_result)) return set_result;
+            JS_ASSIGN_OR_RETURN(set_result, js_property_set(iterator_root.get(), source_root.get(),
+                (Item){.item = i2it(idx + 1)}));
             return result_root.get();
         }
 
@@ -31370,9 +31149,8 @@ extern "C" Item js_iterator_step(Item iterator) {
             }
             temp_root.set((Item){.item = s2it(heap_create_name(str->chars + idx, total_len))});
             source_root.set((Item){.item = s2it(heap_create_name("__idx__", 7))});
-            Item set_result = js_property_set(iterator_root.get(), source_root.get(),
-                (Item){.item = i2it(idx + total_len)});
-            if (item_is_error(set_result)) return set_result;
+            JS_ASSIGN_OR_RETURN(set_result, js_property_set(iterator_root.get(), source_root.get(),
+                (Item){.item = i2it(idx + total_len)}));
             return temp_root.get();
         }
 
@@ -31399,15 +31177,13 @@ extern "C" Item js_iterator_step(Item iterator) {
             int len = js_typed_array_length(source_root.get());
             if (idx >= len) {
                 next_fn_root.set((Item){.item = s2it(heap_create_name("__done__", 8))});
-                Item set_result = js_property_set(iterator_root.get(), next_fn_root.get(),
-                    (Item){.item = b2it(true)});
-                if (item_is_error(set_result)) return set_result;
+                JS_ASSIGN_OR_RETURN(set_result, js_property_set(iterator_root.get(), next_fn_root.get(),
+                    (Item){.item = b2it(true)}));
                 return (Item){.item = JS_ITER_DONE_SENTINEL};
             }
             next_fn_root.set((Item){.item = s2it(heap_create_name("__index__", 9))});
-            Item set_result = js_property_set(iterator_root.get(), next_fn_root.get(),
-                (Item){.item = i2it(idx + 1)});
-            if (item_is_error(set_result)) return set_result;
+            JS_ASSIGN_OR_RETURN(set_result, js_property_set(iterator_root.get(), next_fn_root.get(),
+                (Item){.item = i2it(idx + 1)}));
             if (kind == 0) {
                 return (Item){.item = i2it(idx)};
             }
@@ -31613,10 +31389,8 @@ extern "C" Item js_iterable_to_array(Item iterable) {
                 while (node) {
                     temp_root.set(js_array_new(2));
                     JS_ASSIGN_OR_RETURN(set_result, js_array_set_int(temp_root.get(), 0, node->key));
-                    set_result = js_array_set_int(temp_root.get(), 1, node->value);
-                    if (item_is_error(set_result)) return set_result;
-                    set_result = js_array_set_int(array_root.get(), idx, temp_root.get());
-                    if (item_is_error(set_result)) return set_result;
+                    JS_ASSIGN_OR_RETURN_INTO(set_result, js_array_set_int(temp_root.get(), 1, node->value));
+                    JS_ASSIGN_OR_RETURN_INTO(set_result, js_array_set_int(array_root.get(), idx, temp_root.get()));
                     idx++;
                     node = node->next;
                 }
@@ -32371,19 +32145,16 @@ static Item js_promise_unhandled_check(Item promise_item) {
                 error = js_new_error_with_name(
                     (Item){.item = s2it(heap_create_name("UnhandledPromiseRejection", 25))},
                     (Item){.item = s2it(heap_create_name(msg, strlen(msg)))});
-                Item code_result = js_property_set(error,
+                JS_ASSIGN_OR_RETURN(code_result, js_property_set(error,
                     (Item){.item = s2it(heap_create_name("code", 4))},
-                    (Item){.item = s2it(heap_create_name("ERR_UNHANDLED_REJECTION", 23))});
-                if (item_is_error(code_result)) return code_result;
+                    (Item){.item = s2it(heap_create_name("ERR_UNHANDLED_REJECTION", 23))}));
             }
-            Item emit_result = js_process_emit2((Item){.item = s2it(heap_create_name("uncaughtException", 17))},
+            JS_ASSIGN_OR_RETURN(emit_result, js_process_emit2((Item){.item = s2it(heap_create_name("uncaughtException", 17))},
                 error,
-                (Item){.item = s2it(heap_create_name("unhandledRejection", 18))});
-            if (item_is_error(emit_result)) return emit_result;
+                (Item){.item = s2it(heap_create_name("unhandledRejection", 18))}));
         }
-        Item rejection_result = js_process_emit2((Item){.item = s2it(heap_create_name("unhandledRejection", 18))},
-            p->result, promise_item);
-        if (item_is_error(rejection_result)) return rejection_result;
+        JS_ASSIGN_OR_RETURN(rejection_result, js_process_emit2((Item){.item = s2it(heap_create_name("unhandledRejection", 18))},
+            p->result, promise_item));
     }
     return ItemNull;
 }
@@ -33731,9 +33502,8 @@ static void js_promise_mark_custom_capability_settled(Item counter_obj) {
 
 static Item js_promise_element_call_capability(Item counter_obj, const char* key,
                                                 int key_len, Item value) {
-    Item capability = js_property_get(counter_obj,
-        (Item){.item = s2it(heap_create_name(key, key_len))});
-    if (item_is_error(capability)) return capability;
+    JS_ASSIGN_OR_RETURN(capability, js_property_get(counter_obj,
+        (Item){.item = s2it(heap_create_name(key, key_len))}));
     if (get_type_id(capability) != LMD_TYPE_FUNC) {
         return js_throw_type_error("Promise result capability is not callable");
     }
@@ -35024,9 +34794,8 @@ static Item js_vm_read_options(Item options, const char** names, int count, JsVm
     }
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return ItemNull;
     for (int i = 0; i < count; i++) {
-        Item option = js_property_get(options,
-            (Item){.item = s2it(heap_create_name(names[i], strlen(names[i])))});
-        if (item_is_error(option)) return option;
+        JS_ASSIGN_OR_RETURN(option, js_property_get(options,
+            (Item){.item = s2it(heap_create_name(names[i], strlen(names[i])))}));
     }
     if (out) {
         Item filename_key = (Item){.item = s2it(heap_create_name("filename", 8))};
@@ -35088,8 +34857,7 @@ static Item js_vm_validate_string_option(Item options, const char* key_name,
 
 static Item js_vm_validate_create_context_options(Item options) {
     JS_ASSIGN_OR_RETURN(status, js_vm_validate_options_object(options));
-    status = js_vm_validate_string_option(options, "name", 4, "options.name");
-    if (item_is_error(status)) return status;
+    JS_ASSIGN_OR_RETURN_INTO(status, js_vm_validate_string_option(options, "name", 4, "options.name"));
     return js_vm_validate_string_option(options, "origin", 6, "options.origin");
 }
 
@@ -35456,8 +35224,7 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     const char* names[] = {"breakOnSigint", "timeout", "displayErrors", "filename", "lineOffset", "columnOffset"};
     JsVmEvalOptions eval_options;
     JS_ASSIGN_OR_RETURN(option_status, js_vm_read_options(options, names, 6, &eval_options));
-    option_status = js_vm_validate_run_context_options(options);
-    if (item_is_error(option_status)) return option_status;
+    JS_ASSIGN_OR_RETURN_INTO(option_status, js_vm_validate_run_context_options(options));
 
     sandbox = js_vm_contextify(sandbox);
 
@@ -35517,8 +35284,7 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     const char* option_names[] = {"filename", "lineOffset", "columnOffset", "cachedData",
         "produceCachedData", "parsingContext", "contextExtensions"};
     JsVmEvalOptions eval_options;
-    option_status = js_vm_read_options(options, option_names, 7, &eval_options);
-    if (item_is_error(option_status)) return option_status;
+    JS_ASSIGN_OR_RETURN_INTO(option_status, js_vm_read_options(options, option_names, 7, &eval_options));
     String* code_str = it2s(code);
     if (js_vm_function_body_has_unmatched_close_brace(code_str)) {
         return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Unexpected token '}'", 20))});
@@ -35530,16 +35296,13 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     bool cached_data_rejected = false;
     int extension_count = 0;
     if (js_vm_is_options_object(options)) {
-        context_extensions = js_property_get(options, (Item){.item = s2it(heap_create_name("contextExtensions", 17))});
-        if (item_is_error(context_extensions)) return context_extensions;
+        JS_ASSIGN_OR_RETURN_INTO(context_extensions, js_property_get(options, (Item){.item = s2it(heap_create_name("contextExtensions", 17))}));
         if (get_type_id(context_extensions) == LMD_TYPE_ARRAY) {
             int64_t length = js_array_length(context_extensions);
             extension_count = length > 16 ? 16 : (int)length;
         }
-        parsing_context = js_property_get(options, (Item){.item = s2it(heap_create_name("parsingContext", 14))});
-        if (item_is_error(parsing_context)) return parsing_context;
-        cached_data = js_property_get(options, (Item){.item = s2it(heap_create_name("cachedData", 10))});
-        if (item_is_error(cached_data)) return cached_data;
+        JS_ASSIGN_OR_RETURN_INTO(parsing_context, js_property_get(options, (Item){.item = s2it(heap_create_name("parsingContext", 14))}));
+        JS_ASSIGN_OR_RETURN_INTO(cached_data, js_property_get(options, (Item){.item = s2it(heap_create_name("cachedData", 10))}));
         if (!js_vm_is_undefined_item(cached_data)) {
             bool valid_cached_type = false;
             bool matched = js_vm_cached_data_matches_source(cached_data, code, &valid_cached_type);
@@ -35719,8 +35482,7 @@ static Item js_vm_Script_constructor(Item code, Item options) {
     if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
         get_type_id(options) == LMD_TYPE_VMAP) {
         Item cached_data_key = (Item){.item = s2it(heap_create_name("cachedData", 10))};
-        cached_data = js_property_get(options, cached_data_key);
-        if (item_is_error(cached_data)) return cached_data;
+        JS_ASSIGN_OR_RETURN_INTO(cached_data, js_property_get(options, cached_data_key));
         if (get_type_id(cached_data) != LMD_TYPE_UNDEFINED) {
             bool valid_cached_type = false;
             bool matched = js_vm_cached_data_matches_source(cached_data, code, &valid_cached_type);
@@ -36520,9 +36282,8 @@ static Item js_dc_tc_tracePromise(Item fn, Item context, Item this_arg, Item res
         return js_call_function(fn, this_arg, args, argc);
     }
     Item ctx = ItemNull;
-    Item result = js_dc_trace_invoke(fn, this_arg, args, argc,
-        start_ch, end_ch, error_ch, context, false, &ctx);
-    if (item_is_error(result)) return result;
+    JS_ASSIGN_OR_RETURN(result, js_dc_trace_invoke(fn, this_arg, args, argc,
+        start_ch, end_ch, error_ch, context, false, &ctx));
     Item then_fn = js_property_get(result, js_dc_key("then"));
     if (get_type_id(then_fn) != LMD_TYPE_FUNC) {
         js_dc_emit_trace_promise_non_thenable_warning(fn);

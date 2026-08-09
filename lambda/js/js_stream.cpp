@@ -2833,9 +2833,8 @@ static Item js_readable_read_exact(Item self, Item buf, int64_t blen, int64_t wa
     if (want > available) want = available;
     if (want == available) {
         // concat can allocate and trigger GC, so keep the chunk list rooted on the stream until after it returns.
-        Item consumed = blen == 1 ? js_array_get_int(buf, 0)
-                                  : js_buffer_concat(buf, (Item){.item = i2it(want)});
-        if (item_is_error(consumed)) return consumed;
+        JS_ASSIGN_OR_RETURN(consumed, blen == 1 ? js_array_get_int(buf, 0)
+                                  : js_buffer_concat(buf, (Item){.item = i2it(want)}));
         js_stream_set_readable_buffer(self, js_array_new(0));
         if (js_item_is_true(js_property_get(self, key_end_pending)))
             js_stream_schedule_end(self);
@@ -3009,12 +3008,11 @@ extern "C" Item js_readable_read_size(Item self, Item size_item) {
                 return js_stream_maybe_emit_manual_data(self, decoded);
             }
         }
-        Item joined = blen == 1
+        JS_ASSIGN_OR_RETURN(joined, blen == 1
             ? js_array_get_int(buf, 0)
             : (js_stream_readable_buffer_has_string(buf)
                 ? js_stream_concat_decoded_chunks(buf, encoding)
-                : js_buffer_concat(buf, make_js_undefined()));
-        if (item_is_error(joined)) return joined;
+                : js_buffer_concat(buf, make_js_undefined())));
         js_stream_set_readable_buffer(self, js_array_new(0));
         js_stream_iter_maybe_drain(self);
         if (js_item_is_true(js_property_get(self, key_end_pending)))
@@ -3837,12 +3835,9 @@ static Item js_stream_validate_concurrency(Item options) {
 
 static Item js_readable_transform_helper(Item readable, Item fn, Item options, int64_t mode) {
     JS_ASSIGN_OR_RETURN(validation, js_stream_validate_helper_fn(fn));
-    validation = js_stream_validate_helper_options(options);
-    if (item_is_error(validation)) return validation;
-    validation = js_stream_validate_helper_signal(options);
-    if (item_is_error(validation)) return validation;
-    validation = js_stream_validate_concurrency(options);
-    if (item_is_error(validation)) return validation;
+    JS_ASSIGN_OR_RETURN_INTO(validation, js_stream_validate_helper_options(options));
+    JS_ASSIGN_OR_RETURN_INTO(validation, js_stream_validate_helper_signal(options));
+    JS_ASSIGN_OR_RETURN_INTO(validation, js_stream_validate_concurrency(options));
 
     Item opts = js_new_object();
     js_property_set(opts, make_string_item("objectMode"), js_bool_item(true));
@@ -4081,8 +4076,7 @@ static Item js_readable_compose_bridge_write(Item env_item, Item chunk, Item enc
     Item result = make_js_undefined();
     if (get_type_id(write_fn) == LMD_TYPE_FUNC) {
         Item args[3] = { chunk, encoding, callback };
-        result = js_call_function(write_fn, source, args, 3);
-        if (item_is_error(result)) return result;
+        JS_ASSIGN_OR_RETURN_INTO(result, js_call_function(write_fn, source, args, 3));
     }
     if (input.item != source.item &&
         (get_type_id(input) == LMD_TYPE_MAP || get_type_id(input) == LMD_TYPE_ELEMENT)) {
@@ -4404,12 +4398,10 @@ static Item js_stream_consumer_buffer_from_array(Item chunks, bool stringify_oth
             if (!stringify_other) {
                 return js_throw_invalid_arg_type("chunk", "string, Buffer, ArrayBuffer, or ArrayBufferView", part);
             }
-            part = js_to_string(part);
-            if (item_is_error(part)) return part;
+            JS_ASSIGN_OR_RETURN_INTO(part, js_to_string(part));
         }
         if (!js_stream_chunk_is_buffer(part)) {
-            part = js_buffer_from(part, make_string_item("utf8"), make_js_undefined());
-            if (item_is_error(part)) return part;
+            JS_ASSIGN_OR_RETURN_INTO(part, js_buffer_from(part, make_string_item("utf8"), make_js_undefined()));
         }
         js_array_push(parts, part);
     }
@@ -4628,8 +4620,7 @@ static Item js_stream_iter_make_batch_iterable(Item source, bool async_iterable,
     Item iterator = make_js_undefined();
     bool single = js_stream_iter_source_is_single_chunk(source);
     if (!single) {
-        iterator = js_get_iterator(source);
-        if (item_is_error(iterator)) return iterator;
+        JS_ASSIGN_OR_RETURN_INTO(iterator, js_get_iterator(source));
     }
 
     Item* env = js_alloc_env(5);
@@ -4964,8 +4955,7 @@ static Item js_stream_iter_pullSync(Item source, Item transform1, Item transform
     Item transforms[7] = { transform1, transform2, transform3, transform4,
                            transform5, transform6, transform7 };
     for (int i = 0; i < 7; i++) {
-        chunks = js_stream_iter_apply_sync_transform(chunks, transforms[i]);
-        if (item_is_error(chunks)) return chunks;
+        JS_ASSIGN_OR_RETURN_INTO(chunks, js_stream_iter_apply_sync_transform(chunks, transforms[i]));
     }
     return chunks;
 }
@@ -7479,10 +7469,9 @@ static Item js_duplex_from_function(Item fn) {
     }
 
     Item then_fn = js_property_get(result, make_string_item("then"));
-    Item readable = get_type_id(then_fn) == LMD_TYPE_FUNC
+    JS_ASSIGN_OR_RETURN(readable, get_type_id(then_fn) == LMD_TYPE_FUNC
         ? js_duplex_from_promise(js_promise_resolve(result))
-        : js_readable_compose_from_result(input, result, make_js_undefined());
-    if (item_is_error(readable)) return readable;
+        : js_readable_compose_from_result(input, result, make_js_undefined()));
     Item pair = js_new_object();
     js_property_set(pair, make_string_item("readable"), readable);
     js_property_set(pair, make_string_item("writable"), input);
@@ -8083,15 +8072,12 @@ static Item js_stream_pipeline_function_dest(Item source, Item dest, Item callba
 
 static Item js_stream_pipeline_prepare_source(Item source) {
     if (!js_stream_is_stream_like(source) && get_type_id(source) == LMD_TYPE_FUNC) {
-        source = js_call_function(source, make_js_undefined(), NULL, 0);
-        if (item_is_error(source)) return source;
-        source = js_stream_pipeline_to_stream(source);
-        if (item_is_error(source)) return source;
+        JS_ASSIGN_OR_RETURN_INTO(source, js_call_function(source, make_js_undefined(), NULL, 0));
+        JS_ASSIGN_OR_RETURN_INTO(source, js_stream_pipeline_to_stream(source));
         return source;
     }
     if (!js_stream_is_stream_like(source)) {
-        source = js_readable_from(source);
-        if (item_is_error(source)) return source;
+        JS_ASSIGN_OR_RETURN_INTO(source, js_readable_from(source));
     }
     return source;
 }
@@ -8131,8 +8117,7 @@ static Item js_stream_pipeline_rest(Item rest_args) {
     if (stream_count == 2) {
         Item source = js_array_get_int(rest_args, 0);
         Item dest = js_array_get_int(rest_args, 1);
-        source = js_stream_pipeline_prepare_source(source);
-        if (item_is_error(source)) return source;
+        JS_ASSIGN_OR_RETURN_INTO(source, js_stream_pipeline_prepare_source(source));
         if (get_type_id(dest) == LMD_TYPE_FUNC) {
             Item streams = js_array_new(0);
             js_array_push(streams, source);
@@ -8142,8 +8127,7 @@ static Item js_stream_pipeline_rest(Item rest_args) {
     }
 
     Item first = js_array_get_int(rest_args, 0);
-    first = js_stream_pipeline_prepare_source(first);
-    if (item_is_error(first)) return first;
+    JS_ASSIGN_OR_RETURN_INTO(first, js_stream_pipeline_prepare_source(first));
 
     Item streams = js_array_new(0);
     js_array_push(streams, first);
@@ -8156,8 +8140,7 @@ static Item js_stream_pipeline_rest(Item rest_args) {
         if (get_type_id(dest) == LMD_TYPE_FUNC) {
             Item args[1] = { previous };
             JS_ASSIGN_OR_RETURN(result, js_call_function(dest, make_js_undefined(), args, 1));
-            dest = js_stream_pipeline_to_stream(result);
-            if (item_is_error(dest)) return dest;
+            JS_ASSIGN_OR_RETURN_INTO(dest, js_stream_pipeline_to_stream(result));
             js_array_push(streams, dest);
             previous = dest;
             continue;

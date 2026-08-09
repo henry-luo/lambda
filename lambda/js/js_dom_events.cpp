@@ -310,9 +310,8 @@ extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter
 
     bool has_submitter = false;
     DomElement* submitter = nullptr;
-    Item submitter_result = js_dom_resolve_request_submitter(form, submitter_item,
-        &has_submitter, &submitter);
-    if (item_is_error(submitter_result)) return submitter_result;
+    JS_ASSIGN_OR_RETURN(submitter_result, js_dom_resolve_request_submitter(form, submitter_item,
+        &has_submitter, &submitter));
     if (has_submitter && !submitter) return make_js_undefined();
 
     if (js_dom_should_validate_submit(form, submitter)) {
@@ -1751,9 +1750,7 @@ static bool js_input_event_is_static_range(Item range) {
 }
 
 static Item js_input_event_throw_dom_exception(const char* name, const char* message) {
-    Item err_name = (Item){.item = s2it(heap_create_name(name ? name : "InvalidStateError"))};
-    Item err_msg = (Item){.item = s2it(heap_create_name(message ? message : ""))};
-    return js_throw_value(js_new_error_with_name(err_name, err_msg));
+    return js_throw_named_error_text(name ? name : "InvalidStateError", message ? message : "");
 }
 
 static Item js_input_event_live_target_ranges(Item target_ranges) {
@@ -1780,13 +1777,12 @@ static Item js_input_event_live_target_ranges(Item target_ranges) {
             continue;
         }
         const char* exc = nullptr;
-        Item live_range = js_dom_create_live_range_from_boundaries(
+        JS_ASSIGN_OR_RETURN(live_range, js_dom_create_live_range_from_boundaries(
             start_container,
             init_int(range, "startOffset", 0),
             end_container,
             init_int(range, "endOffset", 0),
-            &exc);
-        if (item_is_error(live_range)) return live_range;
+            &exc));
         if (live_range.item == ItemNull.item) {
             return js_input_event_throw_dom_exception(exc ? exc : "InvalidStateError",
                 "Invalid InputEvent targetRanges boundary");

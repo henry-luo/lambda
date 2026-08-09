@@ -575,8 +575,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         }
 
         int byte_length = buffer_length - byte_offset;
-        validation = buffer_from_to_index(length_item, byte_length, 0, &byte_length, "length");
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, buffer_from_to_index(length_item, byte_length, 0, &byte_length, "length"));
         if (byte_length > buffer_length - byte_offset) {
             return js_throw_range_error_code("ERR_BUFFER_OUT_OF_BOUNDS",
                 "\"length\" is outside of buffer bounds");
@@ -1691,9 +1690,8 @@ extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item e
     const uint8_t* needle = NULL;
     int needle_len = 0;
     uint8_t enc_buf[4096]; // stack buffer for encoded needle
-    Item preparation = buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
-        enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error);
-    if (item_is_error(preparation)) return preparation;
+    JS_ASSIGN_OR_RETURN(preparation, buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
+        enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error));
     if (!needle) return (Item){.item = i2it(-1)};
 
     int found = buffer_find_needle(data, blen, needle, needle_len, start, false,
@@ -1783,9 +1781,8 @@ extern "C" Item js_buffer_lastIndexOf(Item buf, Item value, Item offset_item, It
     const uint8_t* needle = NULL;
     int needle_len = 0;
     uint8_t enc_buf[4096];
-    Item preparation = buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
-        enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error);
-    if (item_is_error(preparation)) return preparation;
+    JS_ASSIGN_OR_RETURN(preparation, buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
+        enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error));
     if (!needle) return (Item){.item = i2it(-1)};
 
     int found = buffer_find_needle(data, blen, needle, needle_len, end, true,
@@ -2330,10 +2327,9 @@ static Item js_buffer_write_bigint64(Item buf, Item value_item, Item offset_item
     if (offset < 0 || offset + 8 > blen) return ItemNull;
     Item bigint_value;
     JS_ASSIGN_OR_RETURN(validation, buffer_to_bigint_value(value_item, &bigint_value));
-    Item wrapped = unsigned_value ?
+    JS_ASSIGN_OR_RETURN(wrapped, unsigned_value ?
         js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_value) :
-        js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_value);
-    if (item_is_error(wrapped)) return wrapped;
+        js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_value));
     uint64_t val = unsigned_value ? buffer_bigint_to_uint64_bits(wrapped) :
         (uint64_t)bigint_to_int64(wrapped);
     for (int i = 0; i < 8; i++) {

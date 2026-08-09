@@ -524,17 +524,13 @@ static Item fs_read_parse_options(Item options_item, Item fallback_buffer,
     if (fs_is_options_object(options_item)) {
         JS_ASSIGN_OR_RETURN(option_buffer, js_property_get(options_item, make_string_item("buffer")));
         if (!fs_is_nullish(option_buffer)) buffer = option_buffer;
-        offset = js_property_get(options_item, make_string_item("offset"));
-        if (item_is_error(offset)) return offset;
-        length = js_property_get(options_item, make_string_item("length"));
-        if (item_is_error(length)) return length;
-        position = js_property_get(options_item, make_string_item("position"));
-        if (item_is_error(position)) return position;
+        JS_ASSIGN_OR_RETURN_INTO(offset, js_property_get(options_item, make_string_item("offset")));
+        JS_ASSIGN_OR_RETURN_INTO(length, js_property_get(options_item, make_string_item("length")));
+        JS_ASSIGN_OR_RETURN_INTO(position, js_property_get(options_item, make_string_item("position")));
     }
 
     if (fs_is_nullish(buffer)) {
-        buffer = js_buffer_alloc((Item){.item = i2it(16384)}, make_js_undefined());
-        if (item_is_error(buffer)) return buffer;
+        JS_ASSIGN_OR_RETURN_INTO(buffer, js_buffer_alloc((Item){.item = i2it(16384)}, make_js_undefined()));
     }
     if (fs_is_nullish(offset)) offset = (Item){.item = i2it(0)};
     if (fs_is_nullish(length) && fs_get_typed_array(buffer)) {
@@ -823,12 +819,10 @@ static Item js_fs_readstream_drain(Item stream) {
     JS_ASSIGN_OR_RETURN(callback_result, js_call_function(data_cb, stream, data_args, 1));
 
     if (get_type_id(end_cb) == LMD_TYPE_FUNC) {
-        callback_result = js_call_function(end_cb, stream, NULL, 0);
-        if (item_is_error(callback_result)) return callback_result;
+        JS_ASSIGN_OR_RETURN_INTO(callback_result, js_call_function(end_cb, stream, NULL, 0));
     }
     if (get_type_id(close_cb) == LMD_TYPE_FUNC) {
-        callback_result = js_call_function(close_cb, stream, NULL, 0);
-        if (item_is_error(callback_result)) return callback_result;
+        JS_ASSIGN_OR_RETURN_INTO(callback_result, js_call_function(close_cb, stream, NULL, 0));
     }
     return make_js_undefined();
 }
@@ -2329,9 +2323,8 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
         if (!fs_is_options_object(offset_item) && !fs_is_nullish(offset_item)) {
             return js_throw_invalid_arg_type("options", "object", offset_item);
         }
-        Item parse_result = fs_read_parse_options(offset_item, buffer_item, &read_buffer,
-                                   &read_offset, &read_length, &read_position);
-        if (item_is_error(parse_result)) return parse_result;
+        JS_ASSIGN_OR_RETURN(parse_result, fs_read_parse_options(offset_item, buffer_item, &read_buffer,
+                                   &read_offset, &read_length, &read_position));
     }
 
     JsTypedArray* ta = fs_get_typed_array(read_buffer);
@@ -2391,13 +2384,11 @@ extern "C" Item js_fs_read(Item fd_item, Item buffer_item, Item offset_item, Ite
                                 (fs_is_options_object(offset_item) || fs_is_nullish(offset_item)) &&
                                 fs_is_nullish(length_item) && fs_is_nullish(position_item);
     if (second_arg_is_options) {
-        Item parse_result = fs_read_parse_options(buffer_item, make_js_undefined(), &read_buffer,
-                                   &read_offset, &read_length, &read_position);
-        if (item_is_error(parse_result)) return parse_result;
+        JS_ASSIGN_OR_RETURN(parse_result, fs_read_parse_options(buffer_item, make_js_undefined(), &read_buffer,
+                                   &read_offset, &read_length, &read_position));
     } else if (third_arg_is_options) {
-        Item parse_result = fs_read_parse_options(offset_item, buffer_item, &read_buffer,
-                                   &read_offset, &read_length, &read_position);
-        if (item_is_error(parse_result)) return parse_result;
+        JS_ASSIGN_OR_RETURN(parse_result, fs_read_parse_options(offset_item, buffer_item, &read_buffer,
+                                   &read_offset, &read_length, &read_position));
     }
 
     JS_ASSIGN_OR_RETURN(bytes_read, js_fs_readSync(fd_item, read_buffer, read_offset, read_length, read_position));
@@ -2600,12 +2591,9 @@ static Item fs_write_parse_options(Item options_item, Item data_item,
     Item length = make_js_undefined();
     Item position = make_js_undefined();
     if (fs_is_options_object(options_item)) {
-        offset = js_property_get(options_item, make_string_item("offset"));
-        if (item_is_error(offset)) return offset;
-        length = js_property_get(options_item, make_string_item("length"));
-        if (item_is_error(length)) return length;
-        position = js_property_get(options_item, make_string_item("position"));
-        if (item_is_error(position)) return position;
+        JS_ASSIGN_OR_RETURN_INTO(offset, js_property_get(options_item, make_string_item("offset")));
+        JS_ASSIGN_OR_RETURN_INTO(length, js_property_get(options_item, make_string_item("length")));
+        JS_ASSIGN_OR_RETURN_INTO(position, js_property_get(options_item, make_string_item("position")));
     }
     if (fs_is_nullish(offset)) offset = (Item){.item = i2it(0)};
     if (fs_is_nullish(length)) {

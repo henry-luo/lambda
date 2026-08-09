@@ -353,6 +353,117 @@ static inline Item js_numeric_operand(Item val) {
     return val;
 }
 
+int32_t js_to_int32(double d);
+
+// All binary numeric operators share the same ToNumeric/error-lane prelude.
+// Keeping that prelude in one helper prevents an operator from accidentally
+// returning a raw conversion failure instead of the existing ERROR carrier.
+typedef enum JsNumericBinaryOp {
+    JS_NUMERIC_ADD,
+    JS_NUMERIC_SUBTRACT,
+    JS_NUMERIC_MULTIPLY,
+    JS_NUMERIC_DIVIDE,
+    JS_NUMERIC_MODULO,
+    JS_NUMERIC_POWER,
+    JS_NUMERIC_BITWISE_AND,
+    JS_NUMERIC_BITWISE_OR,
+    JS_NUMERIC_BITWISE_XOR,
+    JS_NUMERIC_LEFT_SHIFT,
+    JS_NUMERIC_RIGHT_SHIFT,
+    JS_NUMERIC_UNSIGNED_RIGHT_SHIFT,
+} JsNumericBinaryOp;
+
+static Item js_numeric_binary(Item left, Item right, JsNumericBinaryOp op) {
+    bool to_numeric = op >= JS_NUMERIC_BITWISE_AND;
+    if (to_numeric) {
+        JS_ASSIGN_OR_RETURN(left_numeric, js_to_numeric(left));
+        JS_ASSIGN_OR_RETURN(right_numeric, js_to_numeric(right));
+        left = left_numeric;
+        right = right_numeric;
+    } else {
+        left = js_numeric_operand(left);
+        if (item_is_error(left)) return left;
+        right = js_numeric_operand(right);
+        if (item_is_error(right)) return right;
+    }
+
+    if (js_is_symbol(left) || js_is_symbol(right)) {
+        return js_throw_type_error("Cannot convert a Symbol value to a number");
+    }
+    if (js_is_bigint(left) || js_is_bigint(right)) {
+        if (op == JS_NUMERIC_UNSIGNED_RIGHT_SHIFT) {
+            return js_throw_type_error("Cannot mix BigInt and other types, use explicit conversions");
+        }
+        JS_ASSIGN_OR_RETURN(bigint_error, js_check_bigint_arithmetic(left, right));
+        switch (op) {
+        case JS_NUMERIC_ADD: return bigint_add(left, right);
+        case JS_NUMERIC_SUBTRACT: return bigint_sub(left, right);
+        case JS_NUMERIC_MULTIPLY: return bigint_mul(left, right);
+        case JS_NUMERIC_DIVIDE:
+            if (bigint_is_zero(right)) return js_throw_range_error("Division by zero");
+            return bigint_div(left, right);
+        case JS_NUMERIC_MODULO:
+            if (bigint_is_zero(right)) return js_throw_range_error("Division by zero");
+            return bigint_mod(left, right);
+        case JS_NUMERIC_POWER:
+            if (bigint_is_negative(right)) return js_throw_range_error("Exponent must be positive");
+            return bigint_pow(left, right);
+        case JS_NUMERIC_BITWISE_AND: return bigint_bitwise_and(left, right);
+        case JS_NUMERIC_BITWISE_OR: return bigint_bitwise_or(left, right);
+        case JS_NUMERIC_BITWISE_XOR: return bigint_bitwise_xor(left, right);
+        case JS_NUMERIC_LEFT_SHIFT: return bigint_left_shift(left, right);
+        case JS_NUMERIC_RIGHT_SHIFT: return bigint_right_shift(left, right);
+        case JS_NUMERIC_UNSIGNED_RIGHT_SHIFT: break;
+        }
+    }
+
+    if (op == JS_NUMERIC_POWER) {
+        JS_ASSIGN_OR_RETURN(base, js_to_number(left));
+        JS_ASSIGN_OR_RETURN(exponent, js_to_number(right));
+        return js_make_number(js_math_pow_d(js_get_number(base), js_get_number(exponent)));
+    }
+
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    switch (op) {
+    case JS_NUMERIC_ADD: return js_make_number(l + r);
+    case JS_NUMERIC_SUBTRACT: return js_make_number(l - r);
+    case JS_NUMERIC_MULTIPLY: return js_make_number(l * r);
+    case JS_NUMERIC_DIVIDE: return js_make_number(l / r);
+    case JS_NUMERIC_MODULO: return js_make_number(fmod(l, r));
+    case JS_NUMERIC_BITWISE_AND: {
+        int32_t li = js_to_int32(l), ri = js_to_int32(r);
+        return js_make_number((double)(li & ri));
+    }
+    case JS_NUMERIC_BITWISE_OR: {
+        int32_t li = js_to_int32(l), ri = js_to_int32(r);
+        return js_make_number((double)(li | ri));
+    }
+    case JS_NUMERIC_BITWISE_XOR: {
+        int32_t li = js_to_int32(l), ri = js_to_int32(r);
+        return js_make_number((double)(li ^ ri));
+    }
+    case JS_NUMERIC_LEFT_SHIFT: {
+        int32_t li = js_to_int32(l);
+        uint32_t ri = (uint32_t)js_to_int32(r) & 0x1F;
+        return js_make_number((double)(li << ri));
+    }
+    case JS_NUMERIC_RIGHT_SHIFT: {
+        int32_t li = js_to_int32(l);
+        uint32_t ri = (uint32_t)js_to_int32(r) & 0x1F;
+        return js_make_number((double)(li >> ri));
+    }
+    case JS_NUMERIC_UNSIGNED_RIGHT_SHIFT: {
+        uint32_t li = (uint32_t)js_to_int32(l);
+        uint32_t ri = (uint32_t)js_to_int32(r) & 0x1F;
+        return js_make_number((double)(li >> ri));
+    }
+    case JS_NUMERIC_POWER:
+        break;
+    }
+    return js_make_number(NAN);
+}
+
 // ES spec §7.1.12.1 Number::toString
 // Converts a double to its JavaScript string representation.
 // - Uses shortest representation that round-trips
@@ -557,8 +668,7 @@ extern "C" Item js_to_string(Item value) {
             (void)js_map_get_fast(value.map, "toString", 8, &own_ts);
             bool ts_found = own_ts || js_ordinary_has_property(value, "toString", 8);
             Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
-            ts_fn = js_property_get(value, ts_key);
-            if (item_is_error(ts_fn)) return ts_fn;
+            JS_ASSIGN_OR_RETURN_INTO(ts_fn, js_property_get(value, ts_key));
             if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
                 JS_ASSIGN_OR_RETURN(result, js_call_function(ts_fn, value, NULL, 0));
                 TypeId rt = get_type_id(result);
@@ -1039,8 +1149,7 @@ Item js_make_number(double d) {
 
 // Increment: handles both Number and BigInt (for ++ operator)
 extern "C" Item js_increment(Item value) {
-    value = js_numeric_operand(value);
-    if (item_is_error(value)) return value;
+    JS_ASSIGN_OR_RETURN_INTO(value, js_numeric_operand(value));
     if (js_is_bigint(value)) return bigint_inc(value);
     double d = js_get_number(value);
     return js_make_number(d + 1.0);
@@ -1048,8 +1157,7 @@ extern "C" Item js_increment(Item value) {
 
 // Decrement: handles both Number and BigInt (for -- operator)
 extern "C" Item js_decrement(Item value) {
-    value = js_numeric_operand(value);
-    if (item_is_error(value)) return value;
+    JS_ASSIGN_OR_RETURN_INTO(value, js_numeric_operand(value));
     if (js_is_bigint(value)) return bigint_dec(value);
     double d = js_get_number(value);
     return js_make_number(d - 1.0);
@@ -1206,14 +1314,12 @@ extern "C" Item js_add(Item left, Item right) {
     // and throws TypeError on object results / non-callable @@toPrimitive.
     if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY ||
         left_type == LMD_TYPE_ELEMENT || left_type == LMD_TYPE_FUNC) {
-        left = js_op_to_primitive(left, 0);
-        if (item_is_error(left)) return left;
+        JS_ASSIGN_OR_RETURN_INTO(left, js_op_to_primitive(left, 0));
         left_type = get_type_id(left);
     }
     if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY ||
         right_type == LMD_TYPE_ELEMENT || right_type == LMD_TYPE_FUNC) {
-        right = js_op_to_primitive(right, 0);
-        if (item_is_error(right)) return right;
+        JS_ASSIGN_OR_RETURN_INTO(right, js_op_to_primitive(right, 0));
         right_type = get_type_id(right);
     }
 
@@ -1227,92 +1333,27 @@ extern "C" Item js_add(Item left, Item right) {
         return js_concat_strings_fast(it2s(left_str), it2s(right_str));
     }
 
-    left = js_numeric_operand(left);
-    if (item_is_error(left)) return left;
-    right = js_numeric_operand(right);
-    if (item_is_error(right)) return right;
-
-    // Numeric addition — use double arithmetic for JS semantics
-    if (js_is_symbol(left) || js_is_symbol(right)) return js_throw_type_error("Cannot convert a Symbol value to a number");
-    // BigInt: mixed types → TypeError, same types → integer addition
-    if (js_is_bigint(left) || js_is_bigint(right)) {
-        JS_ASSIGN_OR_RETURN(bigint_error, js_check_bigint_arithmetic(left, right));
-        return bigint_add(left, right);
-    }
-    double l = js_get_number(left);
-    double r = js_get_number(right);
-    return js_make_number(l + r);
+    return js_numeric_binary(left, right, JS_NUMERIC_ADD);
 }
 
 extern "C" Item js_subtract(Item left, Item right) {
-    left = js_numeric_operand(left); if (item_is_error(left)) return left;
-    right = js_numeric_operand(right); if (item_is_error(right)) return right;
-    if (js_is_symbol(left) || js_is_symbol(right)) return js_throw_type_error("Cannot convert a Symbol value to a number");
-    if (js_is_bigint(left) || js_is_bigint(right)) {
-        JS_ASSIGN_OR_RETURN(bigint_error, js_check_bigint_arithmetic(left, right));
-        return bigint_sub(left, right);
-    }
-    double l = js_get_number(left);
-    double r = js_get_number(right);
-    return js_make_number(l - r);
+    return js_numeric_binary(left, right, JS_NUMERIC_SUBTRACT);
 }
 
 extern "C" Item js_multiply(Item left, Item right) {
-    left = js_numeric_operand(left); if (item_is_error(left)) return left;
-    right = js_numeric_operand(right); if (item_is_error(right)) return right;
-    if (js_is_symbol(left) || js_is_symbol(right)) return js_throw_type_error("Cannot convert a Symbol value to a number");
-    if (js_is_bigint(left) || js_is_bigint(right)) {
-        JS_ASSIGN_OR_RETURN(bigint_error, js_check_bigint_arithmetic(left, right));
-        return bigint_mul(left, right);
-    }
-    double l = js_get_number(left);
-    double r = js_get_number(right);
-    return js_make_number(l * r);
+    return js_numeric_binary(left, right, JS_NUMERIC_MULTIPLY);
 }
 
 extern "C" Item js_divide(Item left, Item right) {
-    left = js_numeric_operand(left); if (item_is_error(left)) return left;
-    right = js_numeric_operand(right); if (item_is_error(right)) return right;
-    if (js_is_symbol(left) || js_is_symbol(right)) return js_throw_type_error("Cannot convert a Symbol value to a number");
-    if (js_is_bigint(left) || js_is_bigint(right)) {
-        JS_ASSIGN_OR_RETURN(bigint_error, js_check_bigint_arithmetic(left, right));
-        if (bigint_is_zero(right)) return js_throw_range_error("Division by zero");
-        return bigint_div(left, right);
-    }
-    double l = js_get_number(left);
-    double r = js_get_number(right);
-    return js_make_number(l / r);
+    return js_numeric_binary(left, right, JS_NUMERIC_DIVIDE);
 }
 
 extern "C" Item js_modulo(Item left, Item right) {
-    left = js_numeric_operand(left); if (item_is_error(left)) return left;
-    right = js_numeric_operand(right); if (item_is_error(right)) return right;
-    if (js_is_symbol(left) || js_is_symbol(right)) return js_throw_type_error("Cannot convert a Symbol value to a number");
-    if (js_is_bigint(left) || js_is_bigint(right)) {
-        JS_ASSIGN_OR_RETURN(bigint_error, js_check_bigint_arithmetic(left, right));
-        if (bigint_is_zero(right)) return js_throw_range_error("Division by zero");
-        return bigint_mod(left, right);
-    }
-    double l = js_get_number(left);
-    double r = js_get_number(right);
-    return js_make_number(fmod(l, r));
+    return js_numeric_binary(left, right, JS_NUMERIC_MODULO);
 }
 
 extern "C" Item js_power(Item left, Item right) {
-    left = js_numeric_operand(left); if (item_is_error(left)) return left;
-    right = js_numeric_operand(right); if (item_is_error(right)) return right;
-    if (js_is_symbol(left) || js_is_symbol(right)) return js_throw_type_error("Cannot convert a Symbol value to a number");
-    if (js_is_bigint(left) || js_is_bigint(right)) {
-        JS_ASSIGN_OR_RETURN(bigint_error, js_check_bigint_arithmetic(left, right));
-        // BigInt exponents are arbitrary precision; sign checks must not truncate through int64.
-        if (bigint_is_negative(right)) return js_throw_range_error("Exponent must be positive");
-        return bigint_pow(left, right);
-    }
-    JS_ASSIGN_OR_RETURN(base, js_to_number(left));
-    JS_ASSIGN_OR_RETURN(exponent, js_to_number(right));
-    double base_d = js_get_number(base);
-    double exp_d = js_get_number(exponent);
-    return js_make_number(js_math_pow_d(base_d, exp_d));
+    return js_numeric_binary(left, right, JS_NUMERIC_POWER);
 }
 
 // =============================================================================
@@ -1602,24 +1643,20 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
     // the right parameter is the syntactic-left source operand and must be converted first.
     if (leftFirst) {
         if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_FUNC || left_type == LMD_TYPE_ELEMENT) {
-            left = js_op_to_primitive(left, 1);
-            if (item_is_error(left)) return left;
+            JS_ASSIGN_OR_RETURN_INTO(left, js_op_to_primitive(left, 1));
             left_type = get_type_id(left);
         }
         if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_FUNC || right_type == LMD_TYPE_ELEMENT) {
-            right = js_op_to_primitive(right, 1);
-            if (item_is_error(right)) return right;
+            JS_ASSIGN_OR_RETURN_INTO(right, js_op_to_primitive(right, 1));
             right_type = get_type_id(right);
         }
     } else {
         if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_FUNC || right_type == LMD_TYPE_ELEMENT) {
-            right = js_op_to_primitive(right, 1);
-            if (item_is_error(right)) return right;
+            JS_ASSIGN_OR_RETURN_INTO(right, js_op_to_primitive(right, 1));
             right_type = get_type_id(right);
         }
         if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_FUNC || left_type == LMD_TYPE_ELEMENT) {
-            left = js_op_to_primitive(left, 1);
-            if (item_is_error(left)) return left;
+            JS_ASSIGN_OR_RETURN_INTO(left, js_op_to_primitive(left, 1));
             left_type = get_type_id(left);
         }
     }
@@ -1773,47 +1810,19 @@ extern "C" int64_t js_double_to_int32(double d) {
 }
 
 extern "C" Item js_bitwise_and(Item left, Item right) {
-    left = js_to_numeric(left); if (item_is_error(left)) return left;
-    right = js_to_numeric(right); if (item_is_error(right)) return right;
-    if (js_is_symbol(left) || js_is_symbol(right)) return js_throw_type_error("Cannot convert a Symbol value to a number");
-    if (js_is_bigint(left) || js_is_bigint(right)) {
-        JS_ASSIGN_OR_RETURN(bigint_error, js_check_bigint_arithmetic(left, right));
-        return bigint_bitwise_and(left, right);
-    }
-    int32_t l = js_to_int32(js_get_number(left));
-    int32_t r = js_to_int32(js_get_number(right));
-    return js_make_number((double)(l & r));
+    return js_numeric_binary(left, right, JS_NUMERIC_BITWISE_AND);
 }
 
 extern "C" Item js_bitwise_or(Item left, Item right) {
-    left = js_to_numeric(left); if (item_is_error(left)) return left;
-    right = js_to_numeric(right); if (item_is_error(right)) return right;
-    if (js_is_symbol(left) || js_is_symbol(right)) return js_throw_type_error("Cannot convert a Symbol value to a number");
-    if (js_is_bigint(left) || js_is_bigint(right)) {
-        JS_ASSIGN_OR_RETURN(bigint_error, js_check_bigint_arithmetic(left, right));
-        return bigint_bitwise_or(left, right);
-    }
-    int32_t l = js_to_int32(js_get_number(left));
-    int32_t r = js_to_int32(js_get_number(right));
-    return js_make_number((double)(l | r));
+    return js_numeric_binary(left, right, JS_NUMERIC_BITWISE_OR);
 }
 
 extern "C" Item js_bitwise_xor(Item left, Item right) {
-    left = js_to_numeric(left); if (item_is_error(left)) return left;
-    right = js_to_numeric(right); if (item_is_error(right)) return right;
-    if (js_is_symbol(left) || js_is_symbol(right)) return js_throw_type_error("Cannot convert a Symbol value to a number");
-    if (js_is_bigint(left) || js_is_bigint(right)) {
-        JS_ASSIGN_OR_RETURN(bigint_error, js_check_bigint_arithmetic(left, right));
-        return bigint_bitwise_xor(left, right);
-    }
-    int32_t l = js_to_int32(js_get_number(left));
-    int32_t r = js_to_int32(js_get_number(right));
-    return js_make_number((double)(l ^ r));
+    return js_numeric_binary(left, right, JS_NUMERIC_BITWISE_XOR);
 }
 
 extern "C" Item js_bitwise_not(Item operand) {
-    operand = js_numeric_operand(operand);
-    if (item_is_error(operand)) return operand;
+    JS_ASSIGN_OR_RETURN_INTO(operand, js_numeric_operand(operand));
     if (js_is_symbol(operand)) return js_throw_type_error("Cannot convert a Symbol value to a number");
     if (js_is_bigint(operand)) {
         return bigint_bitwise_not(operand);
@@ -1823,42 +1832,15 @@ extern "C" Item js_bitwise_not(Item operand) {
 }
 
 extern "C" Item js_left_shift(Item left, Item right) {
-    left = js_numeric_operand(left); if (item_is_error(left)) return left;
-    right = js_numeric_operand(right); if (item_is_error(right)) return right;
-    if (js_is_symbol(left) || js_is_symbol(right)) return js_throw_type_error("Cannot convert a Symbol value to a number");
-    if (js_is_bigint(left) || js_is_bigint(right)) {
-        JS_ASSIGN_OR_RETURN(bigint_error, js_check_bigint_arithmetic(left, right));
-        return bigint_left_shift(left, right);
-    }
-    int32_t l = js_to_int32(js_get_number(left));
-    uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
-    return js_make_number((double)(l << r));
+    return js_numeric_binary(left, right, JS_NUMERIC_LEFT_SHIFT);
 }
 
 extern "C" Item js_right_shift(Item left, Item right) {
-    left = js_numeric_operand(left); if (item_is_error(left)) return left;
-    right = js_numeric_operand(right); if (item_is_error(right)) return right;
-    if (js_is_symbol(left) || js_is_symbol(right)) return js_throw_type_error("Cannot convert a Symbol value to a number");
-    if (js_is_bigint(left) || js_is_bigint(right)) {
-        JS_ASSIGN_OR_RETURN(bigint_error, js_check_bigint_arithmetic(left, right));
-        return bigint_right_shift(left, right);
-    }
-    int32_t l = js_to_int32(js_get_number(left));
-    uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
-    return js_make_number((double)(l >> r));
+    return js_numeric_binary(left, right, JS_NUMERIC_RIGHT_SHIFT);
 }
 
 extern "C" Item js_unsigned_right_shift(Item left, Item right) {
-    left = js_numeric_operand(left); if (item_is_error(left)) return left;
-    right = js_numeric_operand(right); if (item_is_error(right)) return right;
-    if (js_is_symbol(left) || js_is_symbol(right)) return js_throw_type_error("Cannot convert a Symbol value to a number");
-    // ES spec: BigInt does not support unsigned right shift (>>>)
-    if (js_is_bigint(left) || js_is_bigint(right)) {
-        return js_throw_type_error("Cannot mix BigInt and other types, use explicit conversions");
-    }
-    uint32_t l = (uint32_t)js_to_int32(js_get_number(left));
-    uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
-    return js_make_number((double)(l >> r));
+    return js_numeric_binary(left, right, JS_NUMERIC_UNSIGNED_RIGHT_SHIFT);
 }
 
 // =============================================================================
@@ -2009,8 +1991,7 @@ extern "C" Item js_unary_plus(Item operand) {
 
 extern "C" Item js_unary_minus(Item operand) {
     // ToNumeric for objects (unwrap Object(BigInt) etc.)
-    operand = js_numeric_operand(operand);
-    if (item_is_error(operand)) return operand;
+    JS_ASSIGN_OR_RETURN_INTO(operand, js_numeric_operand(operand));
     // BigInt negation
     if (js_is_bigint(operand)) {
         return bigint_neg(operand);

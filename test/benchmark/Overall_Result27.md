@@ -183,3 +183,116 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | fast_diff | text-diff | 1.41s | 521.6 | 13.3 | 2.33s | 625.0 | 41.5 | 33.9x | 12.6x | 0.32x | 56.0x | 15.1x |
 | microdiff | data-diff | 0.999 | 0.963 | 0.018 | 1.53s | 110.8 | 17.0 | 0.06x | 0.06x | 0.001x | 90.0x | 6.51x |
 | hyphen | hyphenation | 2.69 | 3.64 | 0.091 | 313.9 | 53.0 | 6.68 | 0.40x | 0.54x | 0.01x | 47.0x | 7.93x |
+
+---
+
+## Analysis: Result27 vs Tune17 (2026-08-09)
+
+Result27 is the measurement of the Tune17 implementation (`vibe/Lambda_Impl_Tune17.md`,
+commit `0f65f9d6df`). The headline is flat, and the movement underneath is large but
+net-zero. All row deltas below are stated as ratio-to-Node change, so host drift between
+runs is factored out.
+
+**Aggregates (v26 → v27):** untyped/Node geo 2.25x → **2.14x**; typed/Node geo
+1.26x → **1.26x (unchanged)**; typed/C2MIR **6.70x → 7.13x (worse)**; LambdaJS
+16.0x → 16.1x. Against the Tune17 §4 round targets: untyped ≤1.7x missed, typed ≤1.0x
+missed, typed/C2MIR ≤5x missed and moved backwards. The only target met is the T3 sha1
+evidence gate (≤8x → achieved 3.93x).
+
+### Regression ledger vs Result26
+
+**One catastrophic untyped regression:**
+
+| Row | v26 | v27 | Change |
+|---|---:|---:|---|
+| awfy/havlak **untyped** | 62.9 ms (0.43x) | **12.76 s (123x)** | ~200x slower |
+
+Typed havlak is fine (56.2 ms, faster than v26), so one lane diverged ~227x from the
+other on the same program. havlak untyped was ~40–63 ms in R18, R26, and in the typed
+column of every round — this is a v27-specific collapse of the inferred lane, the prime
+T1 lane-unification fallout suspect (an inferred-edge path deopting to the boxed lane
+inside the CFG loops). It single-handedly drags AWFY untyped geo from 2.43x to 3.62x.
+
+**New typed regressions — annotated micro rows that were healthy in v26:**
+
+| Row (typed) | v26 | v27 | Change |
+|---|---:|---:|---|
+| awfy/permute | 0.152 ms (0.18x) | 1.85 ms (2.21x) | **12x worse** |
+| awfy/towers | 0.700 ms (0.62x) | 3.30 ms (2.84x) | **4.7x worse** — now the #1 widest C2MIR gap (117x) |
+| awfy/storage | 0.473 ms (0.75x) | 1.04 ms (1.60x) | 2.2x worse |
+| beng/fannkuch | 1.87 ms | 2.29 ms | +25% (untyped also +155%) |
+| larceny/quicksort | 5.64 ms | 7.45 ms | +17% |
+| jetstream/splay | 290.8 ms | 267.5 ms raw | +10% vs Node (untyped +22%) |
+
+These are precisely the shapes Tune17 T1.2 rerouted ("declared contracts route through
+the inference specializer"). In v26, permute and towers typed *beat* their untyped
+columns; after the reroute they are 2–3.5x *worse* than untyped. The R3 inversion was
+not closed — it moved: pnpoly/nbody left the inversion ledger, permute/towers/storage
+entered it.
+
+**Delivered by Tune17 (for fairness):** the R1 recursion family is fully recovered —
+tak/cpstak/fib/ack untyped all −68% to −84%, back to parity with typed (T1.1). sha1
+typed 235 → 35.5 ms (24.9x → 3.93x Node, the round's biggest win; T3). pnpoly typed
+53.8 → 17.1, nbody typed 39.5 → 22.3 (typed finally beats untyped), gcbench −39%,
+binarytrees −44%, deriv −37%, collatz untyped −64%, crypto_sha1 untyped −72%.
+
+### Regression ledger vs Result18 (pre-enforcement)
+
+Aggregate typed is well ahead of R18 (1.87x → 1.26x), but 13 typed rows remain >25%
+above the R18 line, and the worst offenders **got worse this round**: towers **+318%**,
+permute **+277%**, fannkuch +264%, quicksort +230%, splay +114%, list +94%,
+richards +82%, deltablue +74%, storage +73%, cd +39%, brainfuck +33%, nqueens +31% —
+plus the havlak untyped blowup, which is off any chart. towers, permute, storage, and
+quicksort are regressions introduced *in v27 itself*: on these shapes the distance to
+R18 is growing, not shrinking, three tuning rounds after the enforcement step.
+
+### Why the typed column has stalled
+
+The typed geo over the last three rounds is 1.32x → 1.26x → 1.26x, while typed/C2MIR
+went 7.14x → 6.70x → 7.13x — a round trip. Four structural reasons, all visible in this
+data:
+
+1. **The rounds are zero-sum lane rebalancing, not cost deletion.** Each round's
+   mechanism fixes one lane's rows and breaks the other lane's rows: Tune16's C0.C
+   annotations created the R2 family (fannkuch/primes/sieve); Tune17's T1 fixed R1/R3
+   and created permute/towers/storage. Gross movement in v27 is huge (sha1 −84%,
+   pnpoly −68% against permute +1097%, towers +359%) and the geomean nets to exactly
+   zero. The "same facts ⇒ same code" invariant (Tune17 §2, per D3.2.1, D2.4) is only
+   enforced on the fixture shapes (tak and pnpoly carry emission-identity fixtures);
+   every shape without a fixture is free to re-diverge, and did. Until emission identity
+   is asserted as a broad ratchet rather than per-specimen, the pattern will repeat.
+
+2. **The residual typed gap is representational, and check tuning cannot reach it.**
+   The v27 widest-gap list is made of: towers/list/quicksort (record and list
+   allocation + dynamic ShapeEntry lookup), base64 85.9x (no binary/byte lane),
+   microdiff/hyphen/fast_diff 39–53x (per-char string building), gcbench 6.5x Node
+   (allocator). Tune17's own T4 evidence gate concluded the dominant macro-row family
+   is dynamic map/ShapeEntry lookup with no safe universal COW or fixed-shape
+   invalidation proof — and correctly shipped nothing speculative. The honest reading
+   of the Tune17 status note: **the safe admission/elision slices are exhausted.**
+   What remains needs value-model design work — the S1.4–S1.6 binary lane, record
+   lowering to fixed shapes, and the LambdaJS NameId path (D8.4.1 permits ICs there) —
+   not another elision pass.
+
+3. **Enforcement debt is still being amortized.** The R18→R20 type-enforcement round
+   (bisected to `274625d56`: unconditional `emit_checked_boundary` + ANY downgrade)
+   imposed a step cost exactly on annotated boundaries. Tune13–17 have mostly been
+   buying that back — which is why "progress" looks like recovery toward the R18 line
+   rather than advance past it, and why 13 rows still have not recovered.
+
+4. **Micro-row structure makes annotations binary: free or fatal.** C2MIR runs towers
+   in 28 µs and permute in 29 µs. At that scale a single boxed adapter, one boundary
+   admission, or one root-frame setup per call *is* the entire 30–100x gap. There is no
+   incremental tuning of these rows — either the annotated emission is
+   instruction-identical to the best inferred emission, or the row is lost. That is a
+   compiler-architecture property (T1.3's single decision point, evidently not yet
+   actually singular), not a knob.
+
+### Leads for the next round
+
+In order: (a) root-cause **havlak untyped** — MIR-diff v26 vs v27; it is the largest
+single regression in any round and the prime T1 fallout suspect; (b) MIR-diff
+**permute/towers typed** v26 vs v27 to name what T1.2's reroute changed in the
+declared-lane emission; (c) accept that reaching typed/C2MIR ≤5x now runs through the
+gated design items — record fixed-shape representation and the binary lane — rather
+than a Tune18 of the same shape as Tune15–17.

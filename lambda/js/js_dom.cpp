@@ -6122,9 +6122,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) {
             // per DOM spec, throw SyntaxError for invalid selectors
-            Item err_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
-            Item err_msg = (Item){.item = s2it(heap_create_name("is not a valid selector"))};
-            return js_throw_value(js_new_error_with_name(err_name, err_msg));
+            return js_throw_syntax_error(make_string_item("is not a valid selector"));
         }
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(doc);

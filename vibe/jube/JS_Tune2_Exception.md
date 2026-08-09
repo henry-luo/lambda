@@ -1,7 +1,7 @@
 # JS Tune2 Exception — Implementation Record
 
 **Date**: 2026-08-09  
-**Status**: IMPLEMENTED — final validation passed; X6 cleanup landed
+**Status**: IMPLEMENTED — final validation passed; X7 cleanup landed
 **Tree anchor**: master `0ed462fe3` plus this uncommitted Tune2 change set  
 **Design authority**: **D8.4.3** (merged `Item` error ABI), **S7.4.4**
 (errors are first-class and deliberate), and **D6.1.3** (unknown effects are
@@ -139,6 +139,29 @@ production diff against the Tune2 anchor is **241 insertions / 864 deletions
 = 623 net lines removed** (**169 / 849 = 680 net source-only**), exceeding the
 requested 500-line reduction either way.
 
+### X7 — fallible helper and receiver-error consolidation — complete
+
+The second production cleanup slice keeps the same merged `Item` ERROR lane
+while removing repeated propagation and construction scaffolding:
+
+- `JS_ASSIGN_OR_RETURN_INTO` centralizes staged fallible assignments without
+  changing the destination identity or the return carrier.
+- Numeric/BigInt binary operators now share one `ToNumeric`/operand/error
+  prelude; named text errors use the shared constructor boundary.
+- Stack-trace limits/frame emission, batch-reset cache teardown, collection
+  dispatch validation, array delegated-return cleanup, and clipboard promise
+  rejection construction each have one shared implementation.
+- Repeated literal TypeError/RangeError/SyntaxError/ReferenceError blocks and
+  declaration-only exception API duplicates were removed only where the
+  existing helper contract is identical. This preserves **D8.4.3**'s single
+  carrier and **D6.1.3**'s fail-closed behavior for unknown effects.
+
+Measured over production C/C++ source only, the X7 worktree slice is
+**667 insertions / 1,167 deletions = 500 net lines removed** against `HEAD`
+(`2584b71aa`); tests, Make/build files, tools, and Markdown are excluded. The
+cumulative source-only diff against the Tune2 anchor `0ed462fe3` is
+**836 insertions / 2,016 deletions = 1,180 net lines removed**.
+
 ## 3. Reproducible checks
 
 ```bash
@@ -171,13 +194,15 @@ D8.4.3 tier C -- boxed-Item helper cataloged as a raw scalar: 0
 | full MIR ratchet suite | pass, 16/16; includes the error-lane ratchet |
 | Moment regression suite | pass, 131/131 |
 | error-lane target + explicit forced-GC/poison run | pass |
+| `lib_yup` focused semantic guard after dispatcher cleanup | pass; exact expected output |
 | focused Test262 exception repro | pass, 4/4 across typed-array, arrow, iterator, and try/destructuring cases |
 | focused DOM golden | pass, 1/1 for `JavaScriptTests/JsFileTest.Run/dom_module_props`; template content is correctly a detached `DocumentFragment` |
+| DOM node unit suite | pass, 39/39 |
 | `make test-lambda-baseline` | pass, 3,668/3,668; includes the corrected `dom_module_props` template-content golden |
-| transient baseline isolation | `lib_htmx` first missed once; focused retry 1/1, then full baseline rerun 3,668/3,668 |
+| transient baseline isolation | `lib_yup` and `lib_htmx` each missed once in earlier batch runs; focused retries 1/1; final full rerun 3,668/3,668 |
 | `make test262-baseline` | pass, 40,261/40,261; 0 non-fully-passing, 0 failed, 0 regressions, retry 0.0s |
-| `make build` after X6 declaration cleanup | pass; debug-native Lambda executable built with 0 errors (12 existing warnings) |
-| production C/C++ LOC slice | pass; 720 deleted / 39 added = 681 net lines removed (tests/Make/build excluded) |
+| `make build` after X7 cleanup | pass; debug-native Lambda executable built with 0 errors |
+| production C/C++ LOC slice | pass; X7 1,167 deleted / 667 added = 500 net lines removed; cumulative source-only net 1,180 (tests/Make/build excluded) |
 | `git diff --check` | pass after the DOM-golden and Tune2-ledger updates |
 
 The Lambda baseline is clean. `dom_module_props` now records that a template's
@@ -209,7 +234,8 @@ unchanged on a host with the project-compatible ThorVG headers using
 
 ## 6. Closed scope
 
-Tune2's exception cleanup and X6 declaration consolidation are complete. A
+Tune2's exception cleanup, X6 declaration consolidation, and X7 propagation /
+receiver consolidation are complete. A
 future optimization of genuinely fallible helpers such as
 `js_call_function_prerooted_args_into` would require reducing real call sites,
 not weakening their D8.4.3 error-lane checks; that is separate runtime work.
