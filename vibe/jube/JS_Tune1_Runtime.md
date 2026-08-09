@@ -44,7 +44,7 @@ the normative contract in S7.4.4 and D8.4.3.
 | Tune1-Helpers | Disposition |
 |---|---|
 | P1a lazy promise root registration | **Merged here as E1** (quick win + measurement hygiene); full JR7 (VMap promise) stays a later phase |
-| P5 exception-effect catalog tightening | **Merged here** — woven into E0/E4/E6; under in-band it is branch-elision fuel (rung (a) of the check ladder), and the census walks every row anyway (today: 15 `PRESERVES` of 505 `js_*` rows) |
+| P5 exception-effect catalog tightening | **Not landed in Tune1** — the in-band conversion landed, but the required raw-scalar/void conformance and branch-elision audit remained. Carried to `JS_Tune2_Exception.md` (D8.4.3). |
 | P2 key plumbing / dense arrays, P3 prototype cache, P4 class instantiation | **Not merged** — superseded by redesign phases R1/R4/R5; implementing them twice would violate the retirement discipline |
 
 `JS_Tune1_Helpers.md` gets a status note recording this disposition.
@@ -88,7 +88,8 @@ catch lowering has captured it.
   converted checks; add the D2 GC note's obligation (ERROR-tagged Items
   traced as heap references) with a GC-stress case.
 
-Result: the census drove the helper conversion and the raw-scalar audit.
+Result: the census drove the helper conversion, but not the promised
+raw-scalar/P5 audit; Tune2 closes that gap with a standing lint.
 
 ### E1 — Quick win: lazy promise root registration (Tune1-P1a) — implemented
 
@@ -189,9 +190,9 @@ without translating the former pending exception state.
   exception slots/message buffer, the flag half of the tripwires,
   `js_check_exception` from the helper ABI (0 emitted sites), and dead
   `js_clear_exception` forms. No ambient error carrier remains.
-- Catalog audit lands (P5): census-proven rows flip to `PRESERVES`
-  (15 → target from census; each mechanically verified), shrinking emitted
-  branches.
+- The planned P5 catalog audit did **not** land in this flag day. The legacy
+  channel deletion is complete, but catalog conformance and tag-test elision
+  are carried to Tune2 rather than claimed here.
 - **Rule-17 landing**: §8's D-ruling into `doc/Lambda_Formal_Design.md`
   (semver bump); `doc/dev/js/JS_04_MIR_Lowering.md` §9 rewritten for the
   in-band model (G3 note added to the poll-reduction paragraph);
@@ -248,9 +249,11 @@ below.
   stack, descriptors, `instanceof`, and finally precedence.
 - **3.2 Census**: error channels **1**; emitted exception-poll sites **0**;
   `js_check_exception`, `js_clear_exception`, and the pending-state symbols
-  have no remaining JS/Jube/host references.
-- **3.3 ABI**: raw-scalar helpers remain outside the fallible Item lane;
-  fallible status helpers return Item results and callers propagate them.
+  have no remaining JS/Jube/host references. This is a retired-mechanism
+  count, not a count of inline ERROR-tag tests; Tune2 adds that live metric.
+- **3.3 ABI**: the merged Item ABI is correct for Item-returning helpers, but
+  Tune1 did not enforce raw-scalar/void catalog conformance. Tune2 carries
+  the D8.4.3 lint and the emitter gate.
 - **3.4 GC**: promise root registration is epoch-scoped and lazy; Error
   carriers and raw stack storage are rooted/owned at their representation
   boundaries.
@@ -288,9 +291,11 @@ below.
 
 ## 6. Open items
 
-No Tune1 design or validation items remain. The broader Node matrix is not a
-Tune1 pass/fail gate: it completed with 2,682 passes, 368 skips, and 379
-compatibility failures in unrelated subsystems.
+Tune1's channel migration is complete. Its unresolved P5 catalog audit and
+raw-scalar lane publication defect are carried to `JS_Tune2_Exception.md`;
+the broader Node matrix is not a Tune1 pass/fail gate and completed with
+2,682 passes, 368 skips, and 379 compatibility failures in unrelated
+subsystems.
 
 ## 7. E8 evidence appendix
 

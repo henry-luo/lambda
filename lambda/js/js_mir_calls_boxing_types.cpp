@@ -53,13 +53,14 @@ MIR_reg_t jm_call_1_or_inline(JsMirTranspiler* mt, const char* fn_name,
     // The module-var slab can grow while a generated function is running.
     // Resolve it in the native helper so MIR cannot retain a pointer to the
     // retired exact allocation across a nested eval or compilation.
+    jm_preserve_error_lane_carrier(mt, fn_name, true);
     MIR_reg_t result = em_call_1(&mt->em, fn_name, ret_type, a1t, a1, true);
-    return jm_publish_call_result(mt, result);
+    return jm_publish_call_result(mt, result, fn_name);
 }
 
 void jm_call_void_2_or_inline(JsMirTranspiler* mt, const char* fn_name,
         MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2) {
-    if (mt) mt->last_call_result_reg = 0;
+    jm_preserve_error_lane_carrier(mt, fn_name, false);
     em_call_void_2(&mt->em, fn_name, a1t, a1, a2t, a2, true);
 }
 

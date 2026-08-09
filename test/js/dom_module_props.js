@@ -863,6 +863,7 @@ console.log(attrs.length);
 console.log(sawIdAttr);
 console.log(sawClassAttr);
 console.log(sawInternalAttr);
+// template content is a detached DocumentFragment, never the template wrapper.
 var tpl = document.createElement("template");
 var tplChild = document.createElement("span");
 tpl.appendChild(tplChild);
