@@ -638,62 +638,60 @@ static float positioned_inset_stretch_css_height(ViewBlock* block, float cb_heig
         layout_content_height_from_border_box(block, border_box_height);
 }
 
-static void resolve_abs_vertical_auto_margins(ViewBlock* block, float cb_height,
-                                              float content_height) {
-    if (!block || !block->positionp()->has_top || !block->positionp()->has_bottom) return;
+static void resolve_abs_auto_margins(ViewBlock* block, bool horizontal,
+                                     float containing_size, float content_size,
+                                     TextDirection direction = TD_LTR) {
+    if (!block || !block->bound || !block->positionp()) return;
 
-    bool auto_top = block->bound && block->boundary()->margin.top_type == CSS_VALUE_AUTO;
-    bool auto_bottom = block->bound && block->boundary()->margin.bottom_type == CSS_VALUE_AUTO;
-    float used_height = layout_uses_border_box(block)
-        ? content_height : content_height + layout_padding_border_height(block);
-    float remaining = cb_height - block->positionp()->top - block->positionp()->bottom - used_height;
-    if (auto_top && auto_bottom) {
-        // Absolute-positioned auto margins absorb negative remaining space too;
-        // clamping here moves an over-constrained fit-content box to its top inset.
+    const PositionProp* position = block->positionp();
+    bool has_start_end = horizontal
+        ? position->has_left && position->has_right
+        : position->has_top && position->has_bottom;
+    if (!has_start_end) return;
+
+    BoundaryProp* boundary = block->boundary_mut();
+    float& start_margin = horizontal ? boundary->margin.left : boundary->margin.top;
+    float& end_margin = horizontal ? boundary->margin.right : boundary->margin.bottom;
+    CssEnum start_type = horizontal ? boundary->margin.left_type : boundary->margin.top_type;
+    CssEnum end_type = horizontal ? boundary->margin.right_type : boundary->margin.bottom_type;
+    bool auto_start = start_type == CSS_VALUE_AUTO;
+    bool auto_end = end_type == CSS_VALUE_AUTO;
+    float start_inset = horizontal ? position->left : position->top;
+    float end_inset = horizontal ? position->right : position->bottom;
+    float padding_border = horizontal
+        ? layout_padding_border_width(block) : layout_padding_border_height(block);
+    float used_size = layout_uses_border_box(block)
+        ? content_size : content_size + padding_border;
+    float remaining = containing_size - start_inset - end_inset - used_size;
+    const char* start_name = horizontal ? "left" : "top";
+    const char* end_name = horizontal ? "right" : "bottom";
+
+    if (auto_start && auto_end) {
+        // Negative vertical remaining space is preserved; clamping it would move
+        // an over-constrained fit-content box away from its specified inset.
         float each = remaining / 2.0f;
-        block->boundary_mut()->margin.top = each;
-        block->boundary_mut()->margin.bottom = each;
-        log_debug("[ABS POS] auto margin centering vertical: remaining=%.1f, each=%.1f", remaining, each);
-    } else if (auto_top) {
-        float margin_bottom = block->boundary()->margin.bottom;
-        block->boundary_mut()->margin.top = max(remaining - margin_bottom, 0.0f);
-        log_debug("[ABS POS] auto margin-top=%.1f", block->boundary()->margin.top);
-    } else if (auto_bottom) {
-        float margin_top = block->boundary()->margin.top;
-        block->boundary_mut()->margin.bottom = max(remaining - margin_top, 0.0f);
-        log_debug("[ABS POS] auto margin-bottom=%.1f", block->boundary()->margin.bottom);
-    }
-}
-
-static void resolve_abs_horizontal_auto_margins(ViewBlock* block, float cb_width,
-                                                float content_width,
-                                                TextDirection direction) {
-    if (!block || !block->positionp()->has_left || !block->positionp()->has_right) return;
-
-    bool auto_left = block->bound && block->boundary()->margin.left_type == CSS_VALUE_AUTO;
-    bool auto_right = block->bound && block->boundary()->margin.right_type == CSS_VALUE_AUTO;
-    float used_width = layout_uses_border_box(block)
-        ? content_width : content_width + layout_padding_border_width(block);
-    float remaining = cb_width - block->positionp()->left - block->positionp()->right - used_width;
-    if (auto_left && auto_right) {
-        float each = remaining / 2.0f;
-        if (each < 0.0f) {
+        if (horizontal && each < 0.0f) {
             if (direction == TD_RTL) {
-                block->boundary_mut()->margin.right = 0.0f;
-                block->boundary_mut()->margin.left = remaining;
+                end_margin = 0.0f;
+                start_margin = remaining;
             } else {
-                block->boundary_mut()->margin.left = 0.0f;
-                block->boundary_mut()->margin.right = remaining;
+                start_margin = 0.0f;
+                end_margin = remaining;
             }
         } else {
-            block->boundary_mut()->margin.left = each;
-            block->boundary_mut()->margin.right = each;
+            start_margin = each;
+            end_margin = each;
         }
-        log_debug("[ABS POS] auto margin centering horizontal: remaining=%.1f, each=%.1f", remaining, each);
-    } else if (auto_left) {
-        block->boundary_mut()->margin.left = remaining - block->boundary()->margin.right;
-    } else if (auto_right) {
-        block->boundary_mut()->margin.right = remaining - block->boundary()->margin.left;
+        log_debug("[ABS POS] auto margin centering %s: remaining=%.1f, each=%.1f",
+                  horizontal ? "horizontal" : "vertical", remaining, each);
+    } else if (auto_start) {
+        float value = remaining - end_margin;
+        start_margin = horizontal ? value : max(value, 0.0f);
+        log_debug("[ABS POS] auto margin-%s=%.1f", start_name, start_margin);
+    } else if (auto_end) {
+        float value = remaining - start_margin;
+        end_margin = horizontal ? value : max(value, 0.0f);
+        log_debug("[ABS POS] auto margin-%s=%.1f", end_name, end_margin);
     }
 }
 
@@ -1091,7 +1089,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // When left, right, and width are all NOT auto, the equation is over-constrained.
     // Auto margins absorb the remaining space; if both are auto, they split it equally (centering).
     if (has_width && block->positionp()->has_left && block->positionp()->has_right) {
-        resolve_abs_horizontal_auto_margins(block, cb_width, content_width, cb_direction);
+        resolve_abs_auto_margins(block, true, cb_width, content_width, cb_direction);
     } else {
         // When not all three (left, right, width) are specified, auto margins become 0
         if (has_auto_margin_left && block->bound) block->boundary_mut()->margin.left = 0;
@@ -1274,7 +1272,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // CSS 2.1 §10.6.4: Solve auto margins for vertical axis
     // When top, bottom, and height are all NOT auto, auto margins absorb remaining space.
     if (has_height && block->positionp()->has_top && block->positionp()->has_bottom) {
-        resolve_abs_vertical_auto_margins(block, cb_height, content_height);
+        resolve_abs_auto_margins(block, false, cb_height, content_height);
     } else {
         // When not all three (top, bottom, height) are specified, auto margins become 0
         if (has_auto_margin_top && block->bound) block->boundary_mut()->margin.top = 0;
@@ -1996,8 +1994,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         float used_content_width = layout_uses_border_box(block)
             ? block->width
             : layout_content_width_from_border_box(block, block->width);
-        resolve_abs_horizontal_auto_margins(
-            block, used_cb.padding_width, used_content_width,
+        resolve_abs_auto_margins(
+            block, true, used_cb.padding_width, used_content_width,
             get_static_position_direction(cb));
         block->x = used_cb.padding_x + block->positionp()->left +
             (block->bound ? block->boundary()->margin.left : 0.0f);
@@ -2158,8 +2156,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                     ? block->height
                     : layout_content_height_from_border_box(block, block->height);
                 LayoutContainingBlock used_cb = layout_absolute_containing_block(lycon, cb);
-                resolve_abs_vertical_auto_margins(
-                    block, used_cb.padding_height, used_content_height);
+                resolve_abs_auto_margins(
+                    block, false, used_cb.padding_height, used_content_height);
                 block->y = used_cb.padding_y + block->positionp()->top +
                     (block->bound ? block->boundary()->margin.top : 0.0f);
             }

@@ -570,6 +570,72 @@ static bool layout_block_intrinsic_content_widths(LayoutContext* lycon, ViewBloc
     return true;
 }
 
+static float layout_block_intrinsic_fit_content(
+    LayoutContext* lycon, ViewBlock* block, bool horizontal, float intrinsic_min, float intrinsic_max,
+    CssEnum min_type, float min_value, CssEnum max_type, float max_value) {
+    if (!lycon || !block) return -1.0f;
+    float available = lycon->block.parent
+        ? (horizontal ? lycon->block.parent->content_width : lycon->block.parent->content_height)
+        : -1.0f;
+    if (block->bound) {
+        const auto& margin = block->boundary()->margin;
+        available -= horizontal
+            ? (margin.left_type == CSS_VALUE_AUTO ? 0.0f : margin.left) +
+              (margin.right_type == CSS_VALUE_AUTO ? 0.0f : margin.right)
+            : (margin.top_type == CSS_VALUE_AUTO ? 0.0f : margin.top) +
+              (margin.bottom_type == CSS_VALUE_AUTO ? 0.0f : margin.bottom);
+    }
+
+    float pad_border = horizontal
+        ? layout_padding_border_width(block) : layout_padding_border_height(block);
+    float fit_available = available;
+    float specified = min_type == CSS_VALUE_FIT_CONTENT && min_value >= 0.0f
+        ? min_value : max_type == CSS_VALUE_FIT_CONTENT && max_value >= 0.0f
+            ? max_value : -1.0f;
+    if (specified >= 0.0f) {
+        fit_available = layout_uses_border_box(block)
+            ? (horizontal ? layout_border_width_from_content_box(block, specified)
+                          : layout_border_height_from_content_box(block, specified))
+            : specified;
+    }
+
+    float fit_border = layout_resolve_intrinsic_size_keyword(
+        CSS_VALUE_FIT_CONTENT, intrinsic_min + pad_border,
+        intrinsic_max + pad_border, fit_available);
+    return layout_uses_border_box(block) ? fit_border
+        : (horizontal ? layout_content_width_from_border_box(block, fit_border)
+                      : layout_content_height_from_border_box(block, fit_border));
+}
+
+static void layout_block_apply_intrinsic_axis_constraints(
+    ViewBlock* block, bool horizontal, bool has_min, bool has_max,
+    float intrinsic_min, float intrinsic_max, float fit_content) {
+    if (!block || !block->blk) return;
+    BlockProp* props = block->blk;
+    CssEnum min_type = horizontal ? props->given_min_width_type : props->given_min_height_type;
+    CssEnum max_type = horizontal ? props->given_max_width_type : props->given_max_height_type;
+    auto resolve = [&](CssEnum type) {
+        float content = type == CSS_VALUE_MIN_CONTENT ? intrinsic_min
+            : type == CSS_VALUE_MAX_CONTENT ? intrinsic_max : fit_content;
+        return layout_uses_border_box(block)
+            ? (horizontal ? layout_border_width_from_content_box(block, content)
+                          : layout_border_height_from_content_box(block, content))
+            : content;
+    };
+    if (has_min) {
+        if (horizontal) props->given_min_width = resolve(min_type);
+        else props->given_min_height = resolve(min_type);
+        if (horizontal) props->given_min_width_type = CSS_VALUE__UNDEF;
+        else props->given_min_height_type = CSS_VALUE__UNDEF;
+    }
+    if (has_max) {
+        if (horizontal) props->given_max_width = resolve(max_type);
+        else props->given_max_height = resolve(max_type);
+        if (horizontal) props->given_max_width_type = CSS_VALUE__UNDEF;
+        else props->given_max_height_type = CSS_VALUE__UNDEF;
+    }
+}
+
 void layout_block_resolve_intrinsic_width_constraints(LayoutContext* lycon,
                                                       ViewBlock* block) {
     if (!lycon || !block || !block->blk) return;
@@ -632,62 +698,14 @@ void layout_block_resolve_intrinsic_width_constraints(LayoutContext* lycon,
         intrinsic_max_width = definite_content_width;
     }
 
-    float fit_content_width = -1.0f;
-    if (props->given_min_width_type == CSS_VALUE_FIT_CONTENT ||
-        props->given_max_width_type == CSS_VALUE_FIT_CONTENT) {
-        float available_outer_width = lycon->block.parent
-            ? lycon->block.parent->content_width : -1.0f;
-        if (block->bound) {
-            available_outer_width -= block->boundary()->margin.left_type == CSS_VALUE_AUTO
-                ? 0.0f : block->boundary()->margin.left;
-            available_outer_width -= block->boundary()->margin.right_type == CSS_VALUE_AUTO
-                ? 0.0f : block->boundary()->margin.right;
-        }
-        float pad_border = layout_padding_border_width(block);
-        float min_border_width = intrinsic_min_width + pad_border;
-        float max_border_width = intrinsic_max_width + pad_border;
-        float fit_available_width = available_outer_width;
-        if (props->given_min_width_type == CSS_VALUE_FIT_CONTENT &&
-            props->given_min_width >= 0.0f) {
-            fit_available_width = layout_uses_border_box(block)
-                ? layout_border_width_from_content_box(block, props->given_min_width)
-                : props->given_min_width;
-        } else if (props->given_max_width_type == CSS_VALUE_FIT_CONTENT &&
-                   props->given_max_width >= 0.0f) {
-            fit_available_width = layout_uses_border_box(block)
-                ? layout_border_width_from_content_box(block, props->given_max_width)
-                : props->given_max_width;
-        }
-        float fit_border_width = layout_resolve_intrinsic_size_keyword(
-            CSS_VALUE_FIT_CONTENT, min_border_width, max_border_width,
-            fit_available_width);
-        fit_content_width = layout_uses_border_box(block)
-            ? fit_border_width
-            : layout_content_width_from_border_box(block, fit_border_width);
-        // Fit-content min/max keywords need a containing block before they can
-        // become numeric constraints; resolving them here prevents auto sizing
-        // from treating the keyword as an unconstrained zero value.
-    }
-
-    // Intrinsic min/max keywords must become numeric before width clamping consumes them.
-    if (has_intrinsic_min) {
-        float intrinsic_width = props->given_min_width_type == CSS_VALUE_MIN_CONTENT
-            ? intrinsic_min_width
-            : props->given_min_width_type == CSS_VALUE_MAX_CONTENT
-                ? intrinsic_max_width : fit_content_width;
-        props->given_min_width = layout_uses_border_box(block)
-            ? layout_border_width_from_content_box(block, intrinsic_width) : intrinsic_width;
-        props->given_min_width_type = CSS_VALUE__UNDEF;
-    }
-    if (has_intrinsic_max) {
-        float intrinsic_width = props->given_max_width_type == CSS_VALUE_MIN_CONTENT
-            ? intrinsic_min_width
-            : props->given_max_width_type == CSS_VALUE_MAX_CONTENT
-                ? intrinsic_max_width : fit_content_width;
-        props->given_max_width = layout_uses_border_box(block)
-            ? layout_border_width_from_content_box(block, intrinsic_width) : intrinsic_width;
-        props->given_max_width_type = CSS_VALUE__UNDEF;
-    }
+    float fit_content_width = (props->given_min_width_type == CSS_VALUE_FIT_CONTENT ||
+                               props->given_max_width_type == CSS_VALUE_FIT_CONTENT)
+        ? layout_block_intrinsic_fit_content(lycon, block, true, intrinsic_min_width, intrinsic_max_width,
+            props->given_min_width_type, props->given_min_width,
+            props->given_max_width_type, props->given_max_width) : -1.0f;
+    layout_block_apply_intrinsic_axis_constraints(
+        block, true, has_intrinsic_min, has_intrinsic_max,
+        intrinsic_min_width, intrinsic_max_width, fit_content_width);
 }
 
 void layout_block_resolve_intrinsic_height_constraints(LayoutContext* lycon,
@@ -758,58 +776,14 @@ void layout_block_resolve_intrinsic_height_constraints(LayoutContext* lycon,
         }
     }
 
-    float fit_content_height = -1.0f;
-    if (props->given_min_height_type == CSS_VALUE_FIT_CONTENT ||
-        props->given_max_height_type == CSS_VALUE_FIT_CONTENT) {
-        // Resolve fit-content against the intrinsic block contribution before
-        // auto-height finalization can discard the symbolic constraint.
-        float available_outer_height = lycon->block.parent
-            ? lycon->block.parent->content_height : -1.0f;
-        if (block->bound) {
-            available_outer_height -= block->boundary()->margin.top_type == CSS_VALUE_AUTO
-                ? 0.0f : block->boundary()->margin.top;
-            available_outer_height -= block->boundary()->margin.bottom_type == CSS_VALUE_AUTO
-                ? 0.0f : block->boundary()->margin.bottom;
-        }
-        float pad_border = layout_padding_border_height(block);
-        float min_border_height = intrinsic_height + pad_border;
-        float max_border_height = intrinsic_height + pad_border;
-        float fit_available_height = available_outer_height;
-        if (props->given_min_height_type == CSS_VALUE_FIT_CONTENT &&
-            props->given_min_height >= 0.0f) {
-            fit_available_height = layout_uses_border_box(block)
-                ? layout_border_height_from_content_box(block, props->given_min_height)
-                : props->given_min_height;
-        } else if (props->given_max_height_type == CSS_VALUE_FIT_CONTENT &&
-                   props->given_max_height >= 0.0f) {
-            fit_available_height = layout_uses_border_box(block)
-                ? layout_border_height_from_content_box(block, props->given_max_height)
-                : props->given_max_height;
-        }
-        float fit_border_height = layout_resolve_intrinsic_size_keyword(
-            CSS_VALUE_FIT_CONTENT, min_border_height, max_border_height,
-            fit_available_height);
-        fit_content_height = layout_uses_border_box(block)
-            ? fit_border_height
-            : layout_content_height_from_border_box(block, fit_border_height);
-    }
-
-    if (has_intrinsic_min) {
-        float intrinsic_min_height = props->given_min_height_type == CSS_VALUE_FIT_CONTENT
-            ? fit_content_height : intrinsic_height;
-        props->given_min_height = layout_uses_border_box(block)
-            ? layout_border_height_from_content_box(block, intrinsic_min_height)
-            : intrinsic_min_height;
-        props->given_min_height_type = CSS_VALUE__UNDEF;
-    }
-    if (has_intrinsic_max) {
-        float intrinsic_max_height = props->given_max_height_type == CSS_VALUE_FIT_CONTENT
-            ? fit_content_height : intrinsic_height;
-        props->given_max_height = layout_uses_border_box(block)
-            ? layout_border_height_from_content_box(block, intrinsic_max_height)
-            : intrinsic_max_height;
-        props->given_max_height_type = CSS_VALUE__UNDEF;
-    }
+    float fit_content_height = (props->given_min_height_type == CSS_VALUE_FIT_CONTENT ||
+                                props->given_max_height_type == CSS_VALUE_FIT_CONTENT)
+        ? layout_block_intrinsic_fit_content(lycon, block, false, intrinsic_height, intrinsic_height,
+            props->given_min_height_type, props->given_min_height,
+            props->given_max_height_type, props->given_max_height) : -1.0f;
+    layout_block_apply_intrinsic_axis_constraints(
+        block, false, has_intrinsic_min, has_intrinsic_max,
+        intrinsic_height, intrinsic_height, fit_content_height);
 }
 
 static float layout_definite_abspos_content_height(ViewBlock* block) {
@@ -2433,11 +2407,6 @@ static float compute_block_lead_y(ViewBlock* block) {
     return lead_y;
 }
 
-// Check if a block view is out-of-flow (absolutely positioned, fixed, or floated)
-static bool is_out_of_flow_block(ViewBlock* vb) {
-    return layout_block_is_out_of_flow(vb);
-}
-
 static bool is_inline_level_atomic_block(View* child, ViewBlock* block) {
     if (!child || !block) return false;
     if (child->view_type == RDT_VIEW_INLINE_BLOCK) return true;
@@ -2459,7 +2428,7 @@ static InFlowBlockEdge find_in_flow_block_edge(ViewElement* container, bool find
         ViewBlock* candidate = nullptr;
         if (child->is_block()) {
             ViewBlock* block = lam::view_require_block(child);
-            if (!is_out_of_flow_block(block) && !is_inline_level_atomic_block(child, block)) {
+            if (!layout_block_is_out_of_flow(block) && !is_inline_level_atomic_block(child, block)) {
                 candidate = block;
             }
         } else if (child->view_type == RDT_VIEW_INLINE) {
@@ -2504,116 +2473,36 @@ static bool shrink_inline_wrappers_containing_block(View* inline_view, ViewBlock
     return false;
 }
 
-// Check whether any inline/text views exist before the first in-flow block child.
-// If so, an implicit anonymous block would wrap them per CSS 2.1 §9.2.1.1.
-// Inline wrappers containing blocks (block-in-inline) are treated as block children.
-static bool has_any_inline_before_first_block(ViewBlock* container) {
-    View* child = container->first_placed_child();
+// CSS 2.1 §9.2.1.1: one walk finds sized inline content on either side of a block.
+static bool has_inline_edge_content(ViewBlock* container, bool after_last_block,
+                                    bool require_size) {
+    if (!container) return false;
+    View* child = nullptr;
+    if (after_last_block) {
+        InFlowBlockEdge edge = find_in_flow_block_edge(container, true);
+        if (!edge.owner_child) return false;
+        child = edge.owner_child->next();
+    } else {
+        child = container->first_placed_child();
+    }
+
     while (child) {
         if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (is_inline_level_atomic_block(child, vb)) return true;
-            if (!is_out_of_flow_block(vb)) {
-                return false; // hit first in-flow block without finding inline content
+            ViewBlock* block = lam::view_require_block(child);
+            if (is_inline_level_atomic_block(child, block)) {
+                return !require_size || child->width > 0 || child->height > 0;
             }
-            child = child->next();
-            continue;
-        }
-        if (child->view_type == RDT_VIEW_INLINE) {
-            // An inline wrapping a block is effectively a block, not inline content
+            if (!after_last_block && !layout_block_is_out_of_flow(block)) return false;
+        } else if (child->view_type == RDT_VIEW_INLINE) {
             if (find_first_block_in_inline(child)) {
-                return false; // block-in-inline acts as first block
-            }
-            return true;
-        }
-        if (child->view_type == RDT_VIEW_TEXT) {
-            return true;
-        }
-        child = child->next();
-    }
-    return false;
-}
-
-// Check whether any inline/text views exist after the last in-flow block child.
-// Inline wrappers containing blocks (block-in-inline) are treated as block children.
-static bool has_any_inline_after_last_block(ViewBlock* container) {
-    InFlowBlockEdge edge = find_in_flow_block_edge(container, true);
-    if (!edge.owner_child) return false;
-
-    View* child = edge.owner_child->next();
-    while (child) {
-        if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (is_inline_level_atomic_block(child, vb)) return true;
-        }
-        if (child->view_type == RDT_VIEW_TEXT) {
-            return true;
-        }
-        if (child->view_type == RDT_VIEW_INLINE && !find_first_block_in_inline(child)) {
-            return true; // pure inline after last block
-        }
-        child = child->next();
-    }
-    return false;
-}
-
-// Check whether inline content before the first block child has real content
-// (non-whitespace text or non-empty inline elements that generate line boxes).
-// Inline wrappers containing blocks (block-in-inline) are treated as block children.
-static bool has_inline_content_before_first_block(ViewBlock* container) {
-    View* child = container->first_placed_child();
-    while (child) {
-        if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (is_inline_level_atomic_block(child, vb)) {
-                return child->width > 0 || child->height > 0;
-            }
-            if (!is_out_of_flow_block(vb)) {
-                return false;
-            }
-            child = child->next();
-            continue;
-        }
-        if (child->view_type == RDT_VIEW_INLINE && find_first_block_in_inline(child)) {
-            return false; // block-in-inline acts as first block
-        }
-        if (child->view_type == RDT_VIEW_TEXT && child->width > 0) return true;
-        if (child->view_type == RDT_VIEW_INLINE && (child->width > 0 || child->height > 0)) return true;
-        child = child->next();
-    }
-    return false;
-}
-
-// Check whether inline content after the last block child has real content.
-// Inline wrappers containing blocks (block-in-inline) are treated as block children.
-static bool has_inline_content_after_last_block(ViewBlock* container) {
-    View* child = container->first_placed_child();
-    View* last_block = nullptr;
-    while (child) {
-        if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb)) {
-                last_block = child;
-            }
-        } else if (child->view_type == RDT_VIEW_INLINE && find_first_block_in_inline(child)) {
-            last_block = child; // block-in-inline acts as a block
-        }
-        child = child->next();
-    }
-    if (!last_block) return false;
-
-    child = last_block->next();
-    while (child) {
-        if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (is_inline_level_atomic_block(child, vb) &&
-                (child->width > 0 || child->height > 0)) {
+                if (!after_last_block) return false;
+            } else if (!require_size || child->width > 0 || child->height > 0) {
                 return true;
             }
+        } else if (child->view_type == RDT_VIEW_TEXT &&
+                   (!require_size || child->width > 0)) {
+            return true;
         }
-        if (child->view_type == RDT_VIEW_TEXT && child->width > 0) return true;
-        if (child->view_type == RDT_VIEW_INLINE && !find_first_block_in_inline(child) &&
-            (child->width > 0 || child->height > 0)) return true;
         child = child->next();
     }
     return false;
@@ -2635,7 +2524,7 @@ static ViewBlock* find_line_clamped_descendant_in_view(View* view) {
     if (!view) return nullptr;
     if (view->is_block()) {
         ViewBlock* vb = lam::view_require_block(view);
-        if (is_out_of_flow_block(vb) || is_inline_level_atomic_block(view, vb)) {
+        if (layout_block_is_out_of_flow(vb) || is_inline_level_atomic_block(view, vb)) {
             return nullptr;
         }
         if (vb->blk && vb->block_mut()->line_clamped && vb->block_mut()->line_clamp_inherited) {
@@ -2667,7 +2556,7 @@ static FormattedLineContent classify_formatted_line_content(ViewBlock* container
     while (child) {
         if (child->is_block()) {
             ViewBlock* block = lam::view_require_block(child);
-            if (!is_out_of_flow_block(block) && !is_inline_level_atomic_block(child, block)) {
+            if (!layout_block_is_out_of_flow(block) && !is_inline_level_atomic_block(child, block)) {
                 return FORMATTED_LINE_BLOCK;
             }
             if (is_inline_level_atomic_block(child, block)) {
@@ -2706,8 +2595,8 @@ static ViewBlock* find_first_formatted_line_block(ViewBlock* container) {
     // an anonymous block wraps it — and THAT anonymous block is the first
     // in-flow block-level child. If it has real content → return container.
     // If it has no formatted line (whitespace-only) → no first formatted line.
-    if (has_any_inline_before_first_block(container)) {
-        if (has_inline_content_before_first_block(container)) {
+    if (has_inline_edge_content(container, false, false)) {
+        if (has_inline_edge_content(container, false, true)) {
             return container; // anonymous block has real content
         }
         return nullptr; // anonymous block has no formatted line
@@ -2737,8 +2626,8 @@ static ViewBlock* find_last_formatted_line_block(ViewBlock* container) {
     // Container has block children. Check if inline content after last block
     // forms an implicit anonymous block (which would be the last in-flow
     // block-level child per CSS 2.1 §9.2.1.1).
-    if (has_any_inline_after_last_block(container)) {
-        if (has_inline_content_after_last_block(container)) {
+    if (has_inline_edge_content(container, true, false)) {
+        if (has_inline_edge_content(container, true, true)) {
             return container; // anonymous block after last explicit block has content
         }
         return nullptr; // anonymous block has no formatted line
@@ -2967,7 +2856,7 @@ static void shift_inline_with_block_children_y(View* view, float delta) {
     shift_text_rects_y_inline_only(view, delta);
     View* child = lam::view_require<RDT_VIEW_INLINE>(view)->first_placed_child();
     while (child) {
-        if (child->is_block() && !is_out_of_flow_block(lam::view_require_block(child))) {
+        if (child->is_block() && !layout_block_is_out_of_flow(lam::view_require_block(child))) {
             child->y += delta;
         }
         child = child->next();
@@ -2979,7 +2868,7 @@ static void shift_block_axis_content_for_alignment(ViewBlock* block, float delta
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb)) {
+            if (!layout_block_is_out_of_flow(vb)) {
                 child->y += delta;
             }
         } else if (child->view_type == RDT_VIEW_INLINE) {
@@ -3074,7 +2963,7 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
-            if (is_out_of_flow_block(vb)) {
+            if (layout_block_is_out_of_flow(vb)) {
                 child = child->next();
                 continue;
             }
@@ -3180,50 +3069,28 @@ static void apply_end_trim_recursive(ViewBlock* container, ViewBlock* target, fl
     }
 }
 
-// Check if there is any non-zero padding or border between 'container' and 'target'
-// on the block-start side (top). Returns true if trim should be suppressed.
-static bool has_start_padding_or_border_between(ViewBlock* container, ViewBlock* target) {
+// A decorated intermediate box owns the spacing at the trim edge.
+static bool has_padding_or_border_between(ViewBlock* container, ViewBlock* target,
+                                          bool end_edge) {
     if (container == target) return false;
-    // Walk the path from container's first in-flow block child down to target
     ViewBlock* current = container;
     while (current != target) {
-        ViewBlock* next_block = find_in_flow_block_edge(current, false).block;
+        InFlowBlockEdge edge = find_in_flow_block_edge(current, end_edge);
+        ViewBlock* next_block = edge.block;
         if (!next_block) break;
-        // Check this block's padding-top and border-top
         if (next_block->bound) {
-            if (next_block->boundary()->padding.top > 0) return true;
-            if (next_block->boundary_mut()->border && next_block->boundary_mut()->border->width.top > 0) return true;
+            float padding = end_edge ? next_block->boundary()->padding.bottom
+                                     : next_block->boundary()->padding.top;
+            if (padding > 0) return true;
+            BorderProp* border = next_block->boundary()->border;
+            if (border && (end_edge ? border->width.bottom : border->width.top) > 0) return true;
         }
         current = next_block;
     }
     return false;
 }
 
-// Check if there is any non-zero padding or border between 'container' and 'target'
-// on the block-end side (bottom). Returns true if trim should be suppressed.
-static bool has_end_padding_or_border_between(ViewBlock* container, ViewBlock* target) {
-    if (container == target) return false;
-    ViewBlock* current = container;
-    while (current != target) {
-        ViewBlock* last_block = find_in_flow_block_edge(current, true).block;
-        if (!last_block) break;
-        if (last_block->bound) {
-            if (last_block->boundary()->padding.bottom > 0) return true;
-            if (last_block->boundary_mut()->border && last_block->boundary_mut()->border->width.bottom > 0) return true;
-        }
-        current = last_block;
-    }
-    return false;
-}
-
-// Apply text-box-trim adjustments to a block and its children.
-// CSS Inline 3 §5: trims half-leading from first/last formatted lines.
-// CSS Inline Level 3 §5: Compute text-box-trim amounts and adjust child
-// positions.  Returns the total height to subtract from the block's flow
-// height.  The caller is responsible for reducing block->height /
-// block->content_height so that min/max-height constraints are applied
-// AFTER the trim (per spec, trim modifies intrinsic height before
-// min-height/max-height kicks in).
+// CSS Inline 3 §5: trim half-leading and return height removed before min/max.
 static float apply_text_box_trim(ViewBlock* block, float end_trim_limit) {
     if (!block->blk) return 0;
     block->blk->text_box_trim_applied = 0;
@@ -3239,7 +3106,7 @@ static float apply_text_box_trim(ViewBlock* block, float end_trim_limit) {
 
     if (trim & TEXT_BOX_TRIM_START) {
         first_line_block = find_first_formatted_line_block(block);
-        if (first_line_block && !has_start_padding_or_border_between(block, first_line_block)) {
+        if (first_line_block && !has_padding_or_border_between(block, first_line_block, false)) {
             // CSS Inline 3 §5: text-box-edge is inherited; use the value from
             // the formatted line block, not the trimming block.
             CssEnum over_edge, under_edge;
@@ -3250,7 +3117,7 @@ static float apply_text_box_trim(ViewBlock* block, float end_trim_limit) {
 
     if (trim & TEXT_BOX_TRIM_END) {
         last_line_block = find_last_formatted_line_block(block);
-        if (last_line_block && !has_end_padding_or_border_between(block, last_line_block)) {
+        if (last_line_block && !has_padding_or_border_between(block, last_line_block, true)) {
             CssEnum over_edge, under_edge;
             get_text_box_edge(last_line_block, &over_edge, &under_edge);
             end_trim = compute_under_trim(last_line_block, under_edge);
@@ -3285,10 +3152,6 @@ static float apply_text_box_trim(ViewBlock* block, float end_trim_limit) {
     return total_trim;
 }
 
-static bool block_recompute_view_is_out_of_flow(ViewBlock* block) {
-    return layout_block_is_out_of_flow(block);
-}
-
 static bool inline_span_has_in_flow_block_child_for_recompute(ViewSpan* span) {
     if (!span) return false;
     for (View* child = span->first_child; child; child = child->next()) {
@@ -3296,7 +3159,7 @@ static bool inline_span_has_in_flow_block_child_for_recompute(ViewSpan* span) {
             bool is_inline_level_table = child->view_type == RDT_VIEW_TABLE &&
                 (block->display.outer == CSS_VALUE_INLINE ||
                  block->display.outer == CSS_VALUE_INLINE_BLOCK);
-            if (!block_recompute_view_is_out_of_flow(block) &&
+            if (!layout_block_is_out_of_flow(block) &&
                 child->view_type != RDT_VIEW_INLINE_BLOCK &&
                 !is_inline_level_table) {
                 return true;
@@ -3306,16 +3169,12 @@ static bool inline_span_has_in_flow_block_child_for_recompute(ViewSpan* span) {
     return false;
 }
 
-static bool block_recompute_view_is_inline_level_atomic(View* child, ViewBlock* block) {
-    return is_inline_level_atomic_block(child, block);
-}
-
 static bool inline_span_has_inline_level_atomic_child_for_recompute(ViewSpan* span) {
     if (!span) return false;
     for (View* child = span->first_child; child; child = child->next()) {
         ViewBlock* block = lam::view_as_block(child);
-        if (!block || block_recompute_view_is_out_of_flow(block)) continue;
-        if (block_recompute_view_is_inline_level_atomic(child, block)) return true;
+        if (!block || layout_block_is_out_of_flow(block)) continue;
+        if (is_inline_level_atomic_block(child, block)) return true;
     }
     return false;
 }
@@ -3325,8 +3184,8 @@ static bool inline_span_has_recomputable_child_box(ViewSpan* span) {
     for (View* child = span->first_child; child; child = child->next()) {
         if (child->view_type == RDT_VIEW_NONE) continue;
         if (ViewBlock* block = lam::view_as_block(child)) {
-            if (block_recompute_view_is_out_of_flow(block)) continue;
-            if (block_recompute_view_is_inline_level_atomic(child, block)) continue;
+            if (layout_block_is_out_of_flow(block)) continue;
+            if (is_inline_level_atomic_block(child, block)) continue;
             return true;
         }
         if (child->view_type == RDT_VIEW_TEXT) {
@@ -3722,7 +3581,7 @@ float layout_compute_in_flow_child_width_extent(ViewBlock* parent) {
              child; child = child->next()) {
             if (!child->is_block()) continue;
             ViewBlock* child_block = lam::view_require_block(child);
-            if (is_out_of_flow_block(child_block)) continue;
+            if (layout_block_is_out_of_flow(child_block)) continue;
             if (has_line_clamp &&
                 child_block->display.outer != CSS_VALUE_BLOCK &&
                 child_block->display.outer != CSS_VALUE_LIST_ITEM) continue;
@@ -3809,7 +3668,7 @@ float layout_compute_in_flow_child_width_extent(ViewBlock* parent) {
     for (View* child = lam::view_require_element(parent)->first_placed_child();
          child; child = child->next()) {
         if (!child->view_type) continue;
-        if (child->is_block() && is_out_of_flow_block(lam::view_require_block(child))) continue;
+        if (child->is_block() && layout_block_is_out_of_flow(lam::view_require_block(child))) continue;
         float child_extent = child->width;
         if (child->is_block()) {
             ViewBlock* child_block = lam::view_require_block(child);
@@ -4077,7 +3936,7 @@ static float compute_in_flow_child_margin_box_width(ViewBlock* parent) {
         for (View* child = parent_el->first_placed_child(); child; child = child->next()) {
             if (!child->view_type || !child->is_block()) continue;
             ViewBlock* child_block = lam::view_require_block(child);
-            if (is_out_of_flow_block(child_block)) continue;
+            if (layout_block_is_out_of_flow(child_block)) continue;
             bool is_normal_block = child_block->display.outer == CSS_VALUE_BLOCK ||
                 child_block->display.outer == CSS_VALUE_LIST_ITEM;
             bool is_atomic_inline = child_block->view_type == RDT_VIEW_INLINE_BLOCK;
@@ -4137,7 +3996,7 @@ static float compute_in_flow_child_margin_box_width(ViewBlock* parent) {
         if (!child->view_type || !child->is_block()) continue;
 
         ViewBlock* child_block = lam::view_require_block(child);
-        if (is_out_of_flow_block(child_block)) continue;
+        if (layout_block_is_out_of_flow(child_block)) continue;
 
         float margin_right = 0;
         if (child_block->bound && child_block->boundary_mut()->margin.right_type != CSS_VALUE_AUTO) {
@@ -11817,7 +11676,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // Skip out-of-flow elements (floats, absolute, fixed)
                     // CSS 2.1 §9.4.1: Out-of-flow elements don't participate in
                     // parent-child margin collapsing
-                    if (is_out_of_flow_block(vb)) {
+                    if (layout_block_is_out_of_flow(vb)) {
                         View* next = static_cast<View*>(first_in_flow_child->next_sibling);
                         while (next && !next->view_type) {
                             next = static_cast<View*>(next->next_sibling);

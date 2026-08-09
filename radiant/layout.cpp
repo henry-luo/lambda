@@ -3815,7 +3815,10 @@ static void layout_store_last_remembered_sizes(DomNode* node) {
     if (!node || !node->is_element()) return;
 
     DomElement* element = node->as_element();
-    if (element->blk && !element->block()->content_visibility_hidden &&
+    // ::marker reuses the blk slot for the smaller MarkerProp; never interpret
+    // that tagged storage as BlockProp while recording remembered sizes.
+    if (element->blk && (!element->tag_name || strcmp(element->tag_name, "::marker") != 0) &&
+        !element->block()->content_visibility_hidden &&
         (element->block()->contain_intrinsic_width_auto ||
          element->block()->contain_intrinsic_height_auto)) {
         float remembered_width = element->width;

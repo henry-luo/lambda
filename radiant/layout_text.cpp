@@ -271,6 +271,15 @@ static const FullCaseMapping* lookup_full_case(const FullCaseMapping* table,
  */
 int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
     bool is_word_start, uint32_t* out) {
+    // CSS capitalize uses single-codepoint titlecase for four Latin digraphs.
+    if (text_transform == CSS_VALUE_CAPITALIZE && is_word_start) {
+        switch (codepoint) {
+        case 0x01C6: out[0] = 0x01C5; return 1;
+        case 0x01C9: out[0] = 0x01C8; return 1;
+        case 0x01CC: out[0] = 0x01CB; return 1;
+        case 0x01F3: out[0] = 0x01F2; return 1;
+        }
+    }
     if (text_transform == CSS_VALUE_UPPERCASE || (text_transform == CSS_VALUE_CAPITALIZE && is_word_start)) {
         // check full case mapping table for 1-to-many expansions
         const FullCaseMapping* m = lookup_full_case(g_uppercase_full, g_uppercase_full_count, codepoint);
@@ -4192,8 +4201,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     lycon->line.has_cjk_text = true;
                 }
             }
-            // CSS 2.1 §16.4: letter-spacing is added after every character
-            // Browsers include trailing letter-spacing in text node width
             wd += lycon->font.style->letter_spacing;
 
             // CSS 2.1 §16.4: word-spacing affects each space (U+0020) and

@@ -9,7 +9,6 @@
 // min/max macros for int and float
 #define MIN_INT(a, b) ((a) < (b) ? (a) : (b))
 #define MAX_INT(a, b) ((a) > (b) ? (a) : (b))
-#define MIN_FLOAT(a, b) ((a) < (b) ? (a) : (b))
 #define MAX_FLOAT(a, b) ((a) > (b) ? (a) : (b))
 
 static bool multicol_has_vertical_inline_axis(ViewBlock* block);
@@ -604,8 +603,8 @@ static void multicol_finalize_fragmented_inline_continuations(View* view) {
     }
 }
 
-static ViewBlock* multicol_next_in_flow_block_sibling(View* start) {
-    View* sibling = start ? start->next_sibling : nullptr;
+static ViewBlock* multicol_in_flow_block_sibling(View* start, bool next) {
+    View* sibling = start ? (next ? start->next_sibling : start->prev_sibling) : nullptr;
     while (sibling) {
         if (sibling->is_element() && sibling->is_block()) {
             ViewBlock* block = lam::view_require_block(sibling);
@@ -613,21 +612,7 @@ static ViewBlock* multicol_next_in_flow_block_sibling(View* start) {
                 return block;
             }
         }
-        sibling = sibling->next_sibling;
-    }
-    return nullptr;
-}
-
-static ViewBlock* multicol_prev_in_flow_block_sibling(View* start) {
-    View* sibling = start ? start->prev_sibling : nullptr;
-    while (sibling) {
-        if (sibling->is_element() && sibling->is_block()) {
-            ViewBlock* block = lam::view_require_block(sibling);
-            if (!multicol_is_out_of_flow(block)) {
-                return block;
-            }
-        }
-        sibling = sibling->prev_sibling;
+        sibling = next ? sibling->next_sibling : sibling->prev_sibling;
     }
     return nullptr;
 }
@@ -671,10 +656,10 @@ static void multicol_apply_static_fragment_anchor(ViewBlock* multicol, ViewBlock
     if (!multicol || !oof || !multicol_is_out_of_flow(oof)) return;
     if (!multicol_uses_static_x(oof) && !multicol_uses_static_y(oof)) return;
 
-    ViewBlock* anchor = multicol_next_in_flow_block_sibling(static_cast<View*>(oof));
+    ViewBlock* anchor = multicol_in_flow_block_sibling(static_cast<View*>(oof), true);
     bool anchor_is_next = anchor != nullptr;
     if (!anchor) {
-        anchor = multicol_prev_in_flow_block_sibling(static_cast<View*>(oof));
+        anchor = multicol_in_flow_block_sibling(static_cast<View*>(oof), false);
     }
     if (!anchor) return;
 
@@ -2598,8 +2583,6 @@ float multicol_intrinsic_vertical_block_extent(LayoutContext* lycon,
     scratch_free(&lycon->scratch, item_extents);
     return result;
 }
-
-static bool multicol_group_wraps_rows(ViewBlock* container);
 
 static void multicol_group_init(
     ColumnGroup* group,

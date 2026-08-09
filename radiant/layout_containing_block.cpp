@@ -78,6 +78,38 @@ bool layout_is_initial_containing_block(LayoutContext* lycon, ViewBlock* block) 
     return block->parent_view() == nullptr;
 }
 
+static void layout_resolve_percent_size_axis(LayoutContext* lycon, ViewBlock* child,
+                                             bool horizontal, float base, bool definite,
+                                             const char* context) {
+    float percent = horizontal ? child->block()->given_width_percent : child->block()->given_height_percent;
+    if (isnan(percent) || !definite) return;
+
+    float value = base * percent / 100.0f;
+    float& given = horizontal ? lycon->block.given_width : lycon->block.given_height;
+    float& child_given = horizontal ? child->blk->given_width : child->blk->given_height;
+    const char* axis = horizontal ? "width" : "height";
+    log_debug("[LAYOUT_CB] %s %s %.1f%% of %.1f = %.1f (was %.1f)",
+              context, axis, percent, base, value, given);
+    given = value;
+    child_given = value;
+}
+
+static void layout_resolve_percent_offset_axis(PositionProp* position, bool horizontal,
+                                               bool start, float base, const char* context) {
+    bool has_offset = horizontal ? (start ? position->has_left : position->has_right)
+                                 : (start ? position->has_top : position->has_bottom);
+    float percent = horizontal ? (start ? position->left_percent : position->right_percent)
+                               : (start ? position->top_percent : position->bottom_percent);
+    if (!has_offset || isnan(percent)) return;
+
+    float& offset = horizontal ? (start ? position->left : position->right)
+                               : (start ? position->top : position->bottom);
+    const char* side = horizontal ? (start ? "left" : "right") : (start ? "top" : "bottom");
+    offset = percent * base / 100.0f;
+    log_debug("[LAYOUT_CB] %s %s %.1f%% of %.1f = %.1f",
+              context, side, percent, base, offset);
+}
+
 LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, ViewBlock* block) {
     if (!block) return layout_initial_containing_block(lycon);
 
@@ -97,21 +129,10 @@ void layout_resolve_percent_size_for_child(LayoutContext* lycon, ViewBlock* chil
     float width_base = use_content_box ? cb.content_width : cb.padding_width;
     float height_base = use_content_box ? cb.content_height : cb.padding_height;
     const char* context = log_context ? log_context : "child";
-
-    if (!isnan(child->block()->given_width_percent) && cb.has_definite_width) {
-        float width = width_base * child->block()->given_width_percent / 100.0f;
-        log_debug("[LAYOUT_CB] %s width %.1f%% of %.1f = %.1f (was %.1f)",
-                  context, child->block()->given_width_percent, width_base, width, lycon->block.given_width);
-        lycon->block.given_width = width;
-        child->blk->given_width = width;
-    }
-    if (!isnan(child->block()->given_height_percent) && cb.has_definite_height) {
-        float height = height_base * child->block()->given_height_percent / 100.0f;
-        log_debug("[LAYOUT_CB] %s height %.1f%% of %.1f = %.1f (was %.1f)",
-                  context, child->block()->given_height_percent, height_base, height, lycon->block.given_height);
-        lycon->block.given_height = height;
-        child->blk->given_height = height;
-    }
+    layout_resolve_percent_size_axis(
+        lycon, child, true, width_base, cb.has_definite_width, context);
+    layout_resolve_percent_size_axis(
+        lycon, child, false, height_base, cb.has_definite_height, context);
 }
 
 void layout_resolve_percent_offsets_for_child(ViewBlock* child,
@@ -121,24 +142,8 @@ void layout_resolve_percent_offsets_for_child(ViewBlock* child,
     PositionProp* pos = child->position;
     const char* context = log_context ? log_context : "positioned child";
 
-    if (pos->has_left && !isnan(pos->left_percent)) {
-        pos->left = pos->left_percent * cb.padding_width / 100.0f;
-        log_debug("[LAYOUT_CB] %s left %.1f%% of %.1f = %.1f",
-                  context, pos->left_percent, cb.padding_width, pos->left);
-    }
-    if (pos->has_right && !isnan(pos->right_percent)) {
-        pos->right = pos->right_percent * cb.padding_width / 100.0f;
-        log_debug("[LAYOUT_CB] %s right %.1f%% of %.1f = %.1f",
-                  context, pos->right_percent, cb.padding_width, pos->right);
-    }
-    if (pos->has_top && !isnan(pos->top_percent)) {
-        pos->top = pos->top_percent * cb.padding_height / 100.0f;
-        log_debug("[LAYOUT_CB] %s top %.1f%% of %.1f = %.1f",
-                  context, pos->top_percent, cb.padding_height, pos->top);
-    }
-    if (pos->has_bottom && !isnan(pos->bottom_percent)) {
-        pos->bottom = pos->bottom_percent * cb.padding_height / 100.0f;
-        log_debug("[LAYOUT_CB] %s bottom %.1f%% of %.1f = %.1f",
-                  context, pos->bottom_percent, cb.padding_height, pos->bottom);
-    }
+    layout_resolve_percent_offset_axis(pos, true, true, cb.padding_width, context);
+    layout_resolve_percent_offset_axis(pos, true, false, cb.padding_width, context);
+    layout_resolve_percent_offset_axis(pos, false, true, cb.padding_height, context);
+    layout_resolve_percent_offset_axis(pos, false, false, cb.padding_height, context);
 }

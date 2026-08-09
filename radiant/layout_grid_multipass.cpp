@@ -82,46 +82,24 @@ static float grid_flex_container_auto_border_height(ViewBlock* flex_container,
         gap = is_row ? flex->row_gap : flex->column_gap;
     }
 
-    if (is_row) {
-        for (DomNode* child = flex_container->first_child; child; child = child->next_sibling) {
-            if (grid_node_has_non_whitespace_text(child)) {
-                float text_extent = fallback_content_height + box.pad_border_v;
-                if (text_extent > child_extent) child_extent = text_extent;
-                has_child = true;
-                continue;
-            }
+    for (DomNode* child = flex_container->first_child; child; child = child->next_sibling) {
+        float outer_height = 0.0f;
+        if (grid_node_has_non_whitespace_text(child)) {
+            outer_height = fallback_content_height + box.pad_border_v;
+        } else {
             if (!child->is_element()) continue;
             ViewBlock* child_block = lam::view_as_block(child->as_element());
-            if (!child_block) continue;
-            if (layout_block_is_display_none(child_block) ||
+            if (!child_block || layout_block_is_display_none(child_block) ||
                 layout_view_is_abs_or_fixed(child_block)) {
                 continue;
             }
             BoxMetrics child_box = layout_box_metrics(child_block);
-            float outer_height = child_box.margin.top + child_block->height + child_box.margin.bottom;
-            if (outer_height > child_extent) child_extent = outer_height;
-            has_child = true;
+            outer_height = child_box.margin.top + child_block->height + child_box.margin.bottom;
         }
-    } else {
-        for (DomNode* child = flex_container->first_child; child; child = child->next_sibling) {
-            if (grid_node_has_non_whitespace_text(child)) {
-                if (has_child && gap > 0.0f) child_extent += gap;
-                child_extent += fallback_content_height + box.pad_border_v;
-                has_child = true;
-                continue;
-            }
-            if (!child->is_element()) continue;
-            ViewBlock* child_block = lam::view_as_block(child->as_element());
-            if (!child_block) continue;
-            if (layout_block_is_display_none(child_block) ||
-                layout_view_is_abs_or_fixed(child_block)) {
-                continue;
-            }
-            BoxMetrics child_box = layout_box_metrics(child_block);
-            if (has_child && gap > 0.0f) child_extent += gap;
-            child_extent += child_box.margin.top + child_block->height + child_box.margin.bottom;
-            has_child = true;
-        }
+        if (!is_row && has_child && gap > 0.0f) child_extent += gap;
+        if (is_row) child_extent = max(child_extent, outer_height);
+        else child_extent += outer_height;
+        has_child = true;
     }
 
     return child_extent + box.pad_border_v;
@@ -969,14 +947,6 @@ void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_l
     log_debug("grid_layout=%p, item_count=%d, grid_items=%p",
               grid_layout, grid_layout->item_count, grid_layout->grid_items);
 
-    // DEBUG: Print item pointers for comparison
-    for (int i = 0; i < grid_layout->item_count; i++) {
-        ViewBlock* item = grid_layout->grid_items[i];
-        log_debug("Pass3: grid_items[%d]=%p, x=%.1f, y=%.1f, w=%.1f, h=%.1f\n",
-               i, (void*)item, item ? item->x : -1, item ? item->y : -1,
-               item ? item->width : -1, item ? item->height : -1);
-    }
-
     // Layout content within each grid item with their final sizes
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* item = grid_layout->grid_items[i];
@@ -1078,12 +1048,6 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         lycon->block.parent = saved_parent;
         grid_item->content_height = grid_flex_container_auto_border_height(grid_item, lycon->block.advance_y);
 
-    } else if (grid_item->display.inner == CSS_VALUE_TABLE) {
-        // A table keeps its own role while gi describes participation in this grid.
-        View* saved_view = lycon->view;
-        lycon->view = grid_item;
-        layout_table_content(lycon, grid_item, grid_item->display);
-        lycon->view = saved_view;
     } else if (grid_item->display.inner == CSS_VALUE_TABLE) {
         // A table keeps its own role while gi describes participation in this grid.
         View* saved_view = lycon->view;
