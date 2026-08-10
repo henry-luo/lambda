@@ -311,8 +311,12 @@ def check_profile_markers(log_path=None):
 def main():
     parser = argparse.ArgumentParser(description="Standard Lambda benchmark snapshot workflow")
     parser.add_argument("--engines", default=DEFAULT_ENGINES, help="comma-separated engines to run")
+    parser.add_argument("--suite", default=None,
+                        help="comma-separated suite name(s) to pass to the benchmark runner")
     parser.add_argument("--runs", type=int, default=3, help="runs per benchmark per engine")
     parser.add_argument("--timeout", type=int, default=180, help="timeout per single run in seconds")
+    parser.add_argument("--cooldown", type=int, default=10,
+                        help="idle seconds between suites (default: 10; 0 disables)")
     parser.add_argument("--skip-build", action="store_true", help="reuse the existing lambda.exe")
     parser.add_argument("--skip-profile-check", action="store_true", help="skip release binary profiling-symbol check")
     parser.add_argument("--skip-power-check", action="store_true",
@@ -340,7 +344,12 @@ def main():
         str(args.timeout),
         "--results-output",
         results_output,
+        "--cooldown",
+        str(args.cooldown),
     ]
+    if args.suite:
+        # named snapshots must be able to include opt-in suites without losing the guarded workflow
+        benchmark_cmd.extend(["-s", args.suite])
     if not args.merge:
         benchmark_cmd.append("--fresh")
     if args.typed:
