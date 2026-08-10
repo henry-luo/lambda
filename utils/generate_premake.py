@@ -215,6 +215,7 @@ class PremakeGenerator:
                 libraries[lib['name']] = {
                     'include': lib.get('include', ''),
                     'lib': lib.get('lib', ''),
+                    'optional': lib.get('optional', False),
                     'link': lib.get('link', 'static')
                 }
 
@@ -224,6 +225,7 @@ class PremakeGenerator:
                 libraries[lib['name']] = {
                     'include': lib.get('include', ''),
                     'lib': lib.get('lib', ''),
+                    'optional': lib.get('optional', False),
                     'link': lib.get('link', 'static')
                 }
 
@@ -254,6 +256,7 @@ class PremakeGenerator:
                         libraries[lib['name']] = {
                             'include': lib.get('include', ''),
                             'lib': lib.get('lib', ''),
+                            'optional': lib.get('optional', False),
                             'link': lib.get('link', 'static')
                         }
 
@@ -269,6 +272,7 @@ class PremakeGenerator:
                         libraries[lib['name']] = {
                             'include': lib.get('include', ''),
                             'lib': lib.get('lib', ''),
+                            'optional': lib.get('optional', False),
                             'link': lib.get('link', 'static')
                         }
 
@@ -288,6 +292,7 @@ class PremakeGenerator:
                         libraries[lib['name']] = {
                             'include': lib.get('include', ''),
                             'lib': lib.get('lib', ''),
+                            'optional': lib.get('optional', False),
                             'link': lib.get('link', 'dynamic')  # Default to dynamic on macOS
                         }
 
@@ -303,6 +308,7 @@ class PremakeGenerator:
                         libraries[lib['name']] = {
                             'include': lib.get('include', ''),
                             'lib': lib.get('lib', ''),
+                            'optional': lib.get('optional', False),
                             'link': lib.get('link', 'dynamic')  # Default to dynamic on macOS
                         }
 
@@ -322,6 +328,7 @@ class PremakeGenerator:
                         libraries[lib['name']] = {
                             'include': lib.get('include', ''),
                             'lib': lib.get('lib', ''),
+                            'optional': lib.get('optional', False),
                             'link': lib.get('link', 'static')
                         }
 
@@ -337,6 +344,7 @@ class PremakeGenerator:
                         libraries[lib['name']] = {
                             'include': lib.get('include', ''),
                             'lib': lib.get('lib', ''),
+                            'optional': lib.get('optional', False),
                             'link': lib.get('link', 'static')
                         }
 
@@ -1054,7 +1062,25 @@ class PremakeGenerator:
             if library not in libraries:
                 libraries.append(library)
         excluded = set(platform_overrides.get('exclude_libraries', []))
-        return [library for library in libraries if library not in excluded]
+        resolved = []
+        for library in libraries:
+            if library in excluded:
+                continue
+            info = self.external_libraries.get(library)
+            # Feature-probed sources must not pull an absent optional archive into the link.
+            if info and info.get('optional') and not self._optional_library_available(info):
+                continue
+            resolved.append(library)
+        return resolved
+
+    def _optional_library_available(self, library: Dict[str, Any]) -> bool:
+        if not library.get('optional'):
+            return True
+        lib_path = library.get('lib', '')
+        if lib_path.startswith('-l'):
+            include_path = library.get('include', '')
+            return bool(include_path) and Path(include_path, 'fribidi', 'fribidi.h').is_file()
+        return bool(lib_path) and Path(lib_path).is_file()
 
     def _external_library_for_target(self, target: Dict[str, Any], name: str) -> Dict[str, Any]:
         """Apply a target-local link override without changing executable linkage."""
@@ -3112,6 +3138,12 @@ class PremakeGenerator:
             if all_excluded:
                 vlog(f"DEBUG: Variant '{self.variant}' excluding libraries: {all_excluded}")
                 dependencies = [d for d in dependencies if d not in all_excluded]
+
+        # Keep the main executable's platform closure aligned with optional feature probes.
+        dependencies = [d for d in dependencies
+                         if d not in self.external_libraries or
+                         not self.external_libraries[d].get('optional') or
+                         self._optional_library_available(self.external_libraries[d])]
 
         # NOTE: dev_libraries (ginac, cln, gmp, criterion, catch2) are NOT included
         # in the main program - they are only for development and testing

@@ -39,13 +39,62 @@ static bool apply_fixed_input_intrinsic_size(FormControlProp* form, float pixel_
     return false;
 }
 
+static void set_form_child_box(DomElement* elem, float x, float y,
+                               float width, float height) {
+    if (!elem) return;
+    elem->x = x;
+    elem->y = y;
+    elem->width = elem->content_width = width;
+    elem->height = elem->content_height = height;
+}
+
 static void zero_form_child_box(DomElement* elem) {
-    elem->x = 0.0f;
-    elem->y = 0.0f;
-    elem->width = 0.0f;
-    elem->height = 0.0f;
-    elem->content_width = 0.0f;
-    elem->content_height = 0.0f;
+    set_form_child_box(elem, 0.0f, 0.0f, 0.0f, 0.0f);
+}
+
+static void layout_form_option_child(DomElement* option, bool listbox,
+                                     float x, float* current_y, float width,
+                                     float row_height) {
+    if (!option) return;
+    option->view_type = RDT_VIEW_BLOCK;
+    if (!listbox) {
+        zero_form_child_box(option);
+        return;
+    }
+    set_form_child_box(option, x, *current_y, width, row_height);
+    *current_y += row_height;
+}
+
+static float form_resolve_axis_size(ViewBlock* block, float intrinsic, bool horizontal,
+                                    float* content_size) {
+    if (!content_size) return 0.0f;
+    const BlockProp* prop = block && block->blk ? block->block() : nullptr;
+    float given = prop ? (horizontal ? prop->given_width : prop->given_height) : -1.0f;
+    if (given >= 0.0f) {
+        *content_size = layout_css_size_to_content_box(
+            block->bound, layout_box_sizing(block), given, horizontal);
+        return layout_css_size_to_border_box(
+            block->bound, layout_box_sizing(block), given, horizontal);
+    }
+    *content_size = intrinsic;
+    return layout_border_size_from_content_box(block, intrinsic, horizontal);
+}
+
+static void form_apply_axis_min_max(ViewBlock* block, bool horizontal,
+                                    bool is_border_box, float* border_size,
+                                    float* content_size) {
+    if (!block || !block->blk || !border_size || !content_size) return;
+    if (is_border_box) {
+        *border_size = horizontal ? adjust_min_max_width(block, *border_size)
+                                  : adjust_min_max_height(block, *border_size);
+        *content_size = layout_content_size_from_border_box(
+            block, *border_size, horizontal);
+    } else {
+        *content_size = horizontal ? adjust_min_max_width(block, *content_size)
+                                   : adjust_min_max_height(block, *content_size);
+        *border_size = layout_border_size_from_content_box(
+            block, *content_size, horizontal);
+    }
 }
 
 static bool form_control_has_specified_font(const ViewBlock* block) {
@@ -635,27 +684,8 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     float content_height = form->intrinsic_height;
     float width, height;
 
-    if (block->blk && block->block_mut()->given_width >= 0) {
-        // CSS specifies width
-        content_width = layout_css_size_to_content_box(
-            block->bound, layout_box_sizing(block), block->block()->given_width, true);
-        width = layout_css_size_to_border_box(
-            block->bound, layout_box_sizing(block), block->block()->given_width, true);
-    } else {
-        // Use intrinsic content size + actual CSS border/padding
-        width = layout_border_width_from_content_box(block, content_width);
-    }
-
-    if (block->blk && block->block_mut()->given_height >= 0) {
-        // CSS specifies height
-        content_height = layout_css_size_to_content_box(
-            block->bound, layout_box_sizing(block), block->block()->given_height, false);
-        height = layout_css_size_to_border_box(
-            block->bound, layout_box_sizing(block), block->block()->given_height, false);
-    } else {
-        // Use intrinsic content size + actual CSS border/padding
-        height = layout_border_height_from_content_box(block, content_height);
-    }
+    width = form_resolve_axis_size(block, form->intrinsic_width, true, &content_width);
+    height = form_resolve_axis_size(block, form->intrinsic_height, false, &content_height);
 
     log_debug("[FORM] layout: intrinsic=%.1fx%.1f, given=%.1fx%.1f, border=%.1f/%.1f, padding=%.1f/%.1f, box_sizing=%s",
               form->intrinsic_width, form->intrinsic_height,
@@ -666,19 +696,8 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     // Apply CSS min-width/max-width constraints (e.g., max-width: 100px on textarea).
     // Per CSS spec: for content-box, min/max-width constrains content area;
     // for border-box, min/max-width constrains the border-box (already handled correctly).
-    if (block->blk) {
-        if (is_border_box) {
-            width = adjust_min_max_width(block, width);
-            content_width = layout_content_width_from_border_box(block, width);
-            height = adjust_min_max_height(block, height);
-            content_height = layout_content_height_from_border_box(block, height);
-        } else {
-            content_width = adjust_min_max_width(block, content_width);
-            content_height = adjust_min_max_height(block, content_height);
-            width = layout_border_width_from_content_box(block, content_width);
-            height = layout_border_height_from_content_box(block, content_height);
-        }
-    }
+    form_apply_axis_min_max(block, true, is_border_box, &width, &content_width);
+    form_apply_axis_min_max(block, false, is_border_box, &height, &content_height);
 
     if (width > MAX_LAYOUT_DIMENSION) {
         // css Values 4 permits approximating an unsupported used extent; after
@@ -790,29 +809,15 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
             NameId ctag = celem->tag();
 
             if (ctag == MARKUP_NAME_OPTION) {
-                celem->view_type = RDT_VIEW_BLOCK;
-                if (is_listbox) {
-                    celem->x = border_left;
-                    celem->y = current_y;
-                    celem->width = option_width;
-                    celem->height = row_height;
-                    celem->content_width = option_width;
-                    celem->content_height = row_height;
-                    current_y += row_height;
-                } else {
-                    zero_form_child_box(celem);
-                }
+                layout_form_option_child(celem, is_listbox, border_left,
+                                         &current_y, option_width, row_height);
             } else if (ctag == MARKUP_NAME_HR) {
                 celem->view_type = RDT_VIEW_BLOCK;
                 if (is_listbox) {
                     // hr inside listbox: zero height, margin-top = 0.5em (UA stylesheet)
                     current_y += hr_margin_top;
-                    celem->x = border_left;
-                    celem->y = current_y;
-                    celem->width = option_width;
-                    celem->height = 0;
-                    celem->content_width = option_width;
-                    celem->content_height = 0;
+                    set_form_child_box(celem, border_left, current_y,
+                                       option_width, 0.0f);
                 } else {
                     zero_form_child_box(celem);
                 }
@@ -825,18 +830,8 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                     DomElement* gcelem = gc->as_element();
                     uintptr_t gctag = gcelem->tag();
                     if (gctag == MARKUP_NAME_OPTION) {
-                        gcelem->view_type = RDT_VIEW_BLOCK;
-                        if (is_listbox) {
-                            gcelem->x = border_left;
-                            gcelem->y = current_y;
-                            gcelem->width = option_width;
-                            gcelem->height = row_height;
-                            gcelem->content_width = option_width;
-                            gcelem->content_height = row_height;
-                            current_y += row_height;
-                        } else {
-                            zero_form_child_box(gcelem);
-                        }
+                        layout_form_option_child(gcelem, is_listbox, border_left,
+                                                 &current_y, option_width, row_height);
                     } else if (gctag == MARKUP_NAME_OPTGROUP) {
                         gcelem->view_type = RDT_VIEW_BLOCK;
                         zero_form_child_box(gcelem);

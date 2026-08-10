@@ -1831,10 +1831,10 @@ test-input-baseline: build-input-baseline ensure-yaml-submodule
 LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-text wpt-css-inline wpt-css-images wpt-css-multicol puppertino markdown
 # The baseline target must select recorded entries before reporting aggregate
 # failures; otherwise untracked work-in-progress fixtures are misreported as
-# baseline regressions. Keep batches small and serial: concurrent child
-# processes share font/layout resources and can drop result files, producing
-# false missing-test failures instead of layout comparisons.
-LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --baseline-only --batch-size 20 --concurrency 1
+# baseline regressions.
+# Keep one shared layout context per 100-file batch; the runner resets
+# document-scoped caches between files and reaps timed-out workers.
+LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --baseline-only --batch-size 100 --concurrency 1
 # Layout categories clear temp/ before each batch; keep aggregate records outside
 # that workspace so a later suite cannot erase an earlier suite's result.
 LAYOUT_BASELINE_RESULTS = test_output/_layout_baseline_results.txt

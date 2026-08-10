@@ -483,6 +483,10 @@ struct FontProp {
     int16_t font_weight_numeric;  // CSS numeric weight 100-900 (0 = not set, use font_weight keyword)
     float letter_spacing;  // letter spacing in pixels (default 0)
     float word_spacing;  // word spacing in pixels (default 0)
+    float letter_spacing_percent;  // authored percentage, retained for inheritance
+    bool letter_spacing_is_percent;
+    float word_spacing_percent;  // authored percentage, retained for inheritance
+    bool word_spacing_is_percent;
     bool font_size_from_medium;  // true if font_size originates from the CSS 'medium' keyword (initial value)
     // derived font properties
     float space_width;  // width of a space character of the current font

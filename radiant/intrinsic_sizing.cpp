@@ -33,6 +33,12 @@ static bool intrinsic_view_uses_border_box(ViewBlock* view, DomElement* element)
 #include <cmath>
 #include <cstring>
 #include <chrono>
+
+IntrinsicFontScope::~IntrinsicFontScope() {
+    font_prop_release_handle(prop_a);
+    font_prop_release_handle(prop_b);
+    if (lycon) lycon->font = saved_font;
+}
 #include <cstdlib>
 
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
@@ -3183,19 +3189,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // This ensures text measurement uses the element's own font (e.g., monospace for <code>)
     // rather than inheriting from parent context.
     FontBox saved_font = lycon->font;  // Save parent font context
-    struct TempIntrinsicFontGuard {
-        LayoutContext* lycon;
-        FontBox saved_font;
-        FontProp* prop_a;
-        FontProp* prop_b;
-        TempIntrinsicFontGuard(LayoutContext* lycon, FontBox saved_font)
-            : lycon(lycon), saved_font(saved_font), prop_a(nullptr), prop_b(nullptr) {}
-        ~TempIntrinsicFontGuard() {
-            font_prop_release_handle(prop_a);
-            font_prop_release_handle(prop_b);
-            lycon->font = saved_font;
-        }
-    } temp_font_guard(lycon, saved_font);
+    IntrinsicFontScope temp_font_guard(lycon, saved_font);
     bool font_changed = false;
     ViewBlock* view_block_font = lam::unsafe_view_block_element_storage(element);
 
@@ -3453,13 +3447,20 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
         if (letter_spacing_decl && letter_spacing_decl->value) {
             const CssValue* ls_val = letter_spacing_decl->value;
-            if (ls_val->type == CSS_VALUE_TYPE_LENGTH) {
+            if (ls_val->type == CSS_VALUE_TYPE_LENGTH ||
+                ls_val->type == CSS_VALUE_TYPE_PERCENTAGE ||
+                ls_val->type == CSS_VALUE_TYPE_FUNCTION) {
                 temp_font_prop->letter_spacing =
                     resolve_length_value(lycon, CSS_PROPERTY_LETTER_SPACING, ls_val);
+                temp_font_prop->letter_spacing_is_percent = ls_val->type == CSS_VALUE_TYPE_PERCENTAGE;
+                temp_font_prop->letter_spacing_percent = temp_font_prop->letter_spacing_is_percent
+                    ? (float)ls_val->data.percentage.value : 0.0f;
                 need_font_setup = true;
             } else if (ls_val->type == CSS_VALUE_TYPE_KEYWORD &&
                        ls_val->data.keyword == CSS_VALUE_NORMAL) {
                 temp_font_prop->letter_spacing = 0.0f;
+                temp_font_prop->letter_spacing_is_percent = false;
+                temp_font_prop->letter_spacing_percent = 0.0f;
                 need_font_setup = true;
             }
         } else if (lycon->font.style) {
@@ -3479,6 +3480,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         } else if (lycon->font.style) {
             temp_font_prop->word_spacing = lycon->font.style->word_spacing;
+            temp_font_prop->word_spacing_percent = lycon->font.style->word_spacing_percent;
+            temp_font_prop->word_spacing_is_percent = lycon->font.style->word_spacing_is_percent;
         }
 
         if (need_font_setup) {
@@ -5035,8 +5038,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 log_debug("measure_element_intrinsic: TABLE %s: min=%.1f, max=%.1f",
                           element->node_name(), sizes.min_content, sizes.max_content);
 
-                // Restore font if changed
-                if (font_changed) lycon->font = saved_font;
                 return sizes;
             }
             // No table structure found — fall through to generic measurement
@@ -5239,8 +5240,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 }
             }
 
-            // Restore font
-            if (font_changed) lycon->font = saved_font;
             return {total_min, total_max};
         }
     }
@@ -6555,11 +6554,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     sizes.min_content = layout_clamp_dimension(sizes.min_content);
     sizes.max_content = layout_clamp_dimension(sizes.max_content);
 
-    // Restore parent font context
-    if (font_changed) {
-        lycon->font = saved_font;
-    }
-
     // store result in intrinsic sizing cache
     if (!content_only && !intrinsic_percentage_width_is_indefinite(lycon) &&
         element->styles_resolved()) {
@@ -6843,21 +6837,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     // child text nodes inherit lycon->font, so we must set the element's font
     // before processing children (mirrors the logic in measure_element_intrinsic_widths).
     FontBox saved_font_h = lycon->font;
-    struct TempHeightFontGuard {
-        LayoutContext* lycon;
-        FontBox saved_font;
-        FontProp* prop;
-        TempHeightFontGuard(LayoutContext* lycon, FontBox saved_font)
-            : lycon(lycon), saved_font(saved_font), prop(nullptr) {}
-        ~TempHeightFontGuard() {
-            font_prop_release_handle(prop);
-            lycon->font = saved_font;
-        }
-    } temp_height_font_guard(lycon, saved_font_h);
-    bool height_font_changed = false;
+    IntrinsicFontScope temp_height_font_guard(lycon, saved_font_h);
     if (view->font && lycon->ui_context) {
         setup_font(lycon->ui_context, &lycon->font, view->font);
-        height_font_changed = true;
     } else if (element->specified_style && lycon->ui_context && lycon->font.style) {
         CssDeclaration* font_size_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_FONT_SIZE);
@@ -6868,14 +6850,13 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             if (resolved_size >= 0.0f && fabsf(resolved_size - lycon->font.style->font_size) > 0.1f) {
                 FontProp* tfp = alloc_font_prop(lycon);
                 if (tfp) {
-                    temp_height_font_guard.prop = tfp;
+                    temp_height_font_guard.prop_a = tfp;
                     if (lycon->font.style) {
                         radiant_retain_font_family(tfp, lam::PoolPtr<char>(lycon->font.style->family));
                     }
                     tfp->font_size = resolved_size;
                     tfp->font_size_from_medium = resolved_from_medium;
                     setup_font(lycon->ui_context, &lycon->font, tfp);
-                    height_font_changed = true;
                 }
             }
         }
@@ -7713,7 +7694,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
     }
 
-    if (height_font_changed) lycon->font = saved_font_h;
     return height;
 }
 
@@ -7791,16 +7771,5 @@ IntrinsicSizesBidirectional measure_intrinsic_sizes(
     return result;
 }
 
-// ============================================================================
-// Backward Compatibility Notes
-// ============================================================================
-//
-// The following functions are now wrappers or remain for backward compatibility:
-// - calculate_min_content_width() - use measure_intrinsic_sizes().min_content_width
-// - calculate_max_content_width() - use measure_intrinsic_sizes().max_content_width
-// - calculate_min_content_height() - use measure_intrinsic_sizes().min_content_height
-// - calculate_max_content_height() - use measure_intrinsic_sizes().max_content_height
-// - measure_element_intrinsic_widths() - use measure_intrinsic_sizes() for width
-//
-// These will be gradually deprecated in favor of the unified API.
-// ============================================================================
+// the scalar intrinsic queries remain the compatibility boundary for callers
+// that need one axis instead of the bidirectional result.
