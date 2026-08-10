@@ -410,12 +410,73 @@ if (!context->validator) {
 }
 ```
 
+## Validation Modes (PROPOSAL, 2026-08-10)
+
+The validator was designed for **data validation** (`lambda validate`), where
+the deliverable is a detailed report: every `ValidationError` carries a
+message, a path, expected/actual types, and optional suggestions. The runtime
+type checker (`lambda_type_check` at declared boundaries, the `is` operator)
+reuses that same machinery — but it is a **predicate**. It needs a yes/no
+answer, and on the overwhelmingly common success it discards everything the
+reporting path constructed.
+
+The consequence is structural, not incidental: `validate_occurrence_type` →
+`validate_list_occurrence` allocates one `ValidationResult` **per element**
+via `create_validation_result()`, so a declared `T[]` boundary over an
+N-element container costs N allocations that are immediately thrown away.
+Measured: with tracking off, ~96% of a `bool[]`-heavy benchmark's runtime sat
+inside the validator's allocator calls. Choosing a cheaper allocator does not
+fix this — O(N) discarded records is the wrong shape regardless of where the
+bytes come from.
+
+### Proposed design
+
+1. **Fast mode — allocation-free.** `validate_against_type` gains a mode that
+   returns only true/false and allocates nothing: no `ValidationResult`, no
+   `ValidationError`, no path segments, no message formatting. All runtime
+   type checking uses this mode. Predicate helpers already exist in spirit
+   (e.g. representation checks like `validator_array_elem_embeds`); the work
+   is threading a mode flag (or a parallel entry point) through the recursive
+   walk so no level allocates.
+2. **Full mode on demand.** When fast mode reports failure *and* a diagnostic
+   is actually needed, re-run the same validation in full mode to build the
+   detailed `ValidationResult` for the error report. The detailed cost is
+   paid once, on the cold path, for a value already known to be invalid.
+   Re-running is strictly cheaper than allocating eagerly on every success,
+   and keeps one implementation of the validation rules — the two modes must
+   not diverge into two rule sets.
+3. **Duplicate-error suppression in collections.** Reporting must not emit
+   one error per element when a whole collection fails the same way (`N`
+   elements of the wrong type should not produce `N` near-identical errors).
+   Needs a collapse policy — first-K plus a count, or grouping by
+   (error code, expected type, depth) — chosen so the report stays useful
+   without being O(N).
+
+### Open questions
+
+- Does the mode belong in `ValidationOptions`, as a distinct entry point, or
+  as a separate lightweight predicate walker sharing the rule tables?
+- Which existing callers legitimately need full mode on success? (Suspected:
+  none — full mode is only ever consumed after a failure.)
+- Where does the collapse policy live — in the validator, or in the error
+  formatter that renders `ValidationResult`?
+- Interaction with TE-17: representation-level admission for packed arrays
+  would remove the per-element walk entirely for the hottest shapes, making
+  fast mode's element loop rare rather than merely cheap.
+
+**Memory-design consequence** (owned by
+[Lambda_Design_Mem_Heap.md](./Lambda_Design_Mem_Heap.md) R4): the runtime
+validation path must allocate nothing. That document does not prescribe how
+the modes are structured; it only requires the allocation to disappear.
+
 ## Performance Considerations
 
 - Validators are cached per EvalContext to avoid repeated creation
 - Type resolution uses caching for named types
 - Validation depth is limited to prevent stack overflow
 - Timeout support for untrusted input
+- Runtime type checking should use the allocation-free fast mode above;
+  eager per-element `ValidationResult` construction is the known hot spot
 
 ## See Also
 
