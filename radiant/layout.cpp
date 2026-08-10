@@ -1693,7 +1693,13 @@ float layout_inline_atomic_extent(LayoutContext* lycon, ViewBlock* block) {
     ViewElement* parent_view = block->parent_view();
     ViewBlock* parent = layout_nearest_block_ancestor(parent_view);
     bool vertical_parent = parent && layout_block_inline_axis_is_vertical(parent);
-    float extent = vertical_parent ? block->width : block->height;
+    bool vertical_child = layout_block_inline_axis_is_vertical(block);
+    // A same-writing-mode atomic child advances along the parent's physical
+    // inline axis (height); using its block width turns vertical columns into
+    // oversized line boxes. Orthogonal children still advance by their width.
+    float extent = vertical_parent
+        ? (vertical_child ? block->height : block->width)
+        : block->height;
     if (block->bound) {
         if (vertical_parent) {
             extent += block->boundary()->margin.left + block->boundary()->margin.right;

@@ -485,6 +485,26 @@ static bool flex_measurement_tag_is_inline(NameId tag) {
     }
 }
 
+static bool flex_break_has_block_siblings(ViewElement* item) {
+    if (!item) return false;
+    DomNode* previous = item->prev_sibling;
+    while (previous && (!previous->is_element() ||
+                        previous->as_element()->tag() == MARKUP_NAME_BR)) {
+        previous = previous->prev_sibling;
+    }
+    DomNode* next = item->next_sibling;
+    while (next && (!next->is_element() ||
+                    next->as_element()->tag() == MARKUP_NAME_BR)) {
+        next = next->next_sibling;
+    }
+    if (!previous || !next) return false;
+    bool previous_inline = flex_measurement_tag_is_inline(
+        previous->as_element()->tag());
+    bool next_inline = flex_measurement_tag_is_inline(
+        next->as_element()->tag());
+    return !previous_inline && !next_inline;
+}
+
 static CssEnum flex_measure_resolve_text_transform(DomNode* start) {
     for (DomNode* node = start; node; node = node->parent) {
         if (!node->is_element()) continue;
@@ -1929,9 +1949,16 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // content_size_suggestion with the specified_size_suggestion, preventing items from
         // shrinking below their explicit size even when content is empty.
         if (elmt_name == MARKUP_NAME_BR) {
-            // A direct br is itself a blockified flex item; its forced-break
-            // line box is not a sibling flex item's intrinsic main size.
-            min_height = max_height = 0.0f;
+            // A column flex break between block-level flex items contributes a
+            // line-box main advance; inline runs keep the browser's zero-size
+            // break item behavior used by fieldsets and mixed inline content.
+            float break_height = 0.0f;
+            if (flex_layout && !is_main_axis_horizontal(flex_layout) &&
+                flex_break_has_block_siblings(item)) {
+                break_height = layout_br_line_box_extent(
+                    lycon, lycon ? lycon->font.font_handle : nullptr);
+            }
+            min_height = max_height = break_height;
         } else if (has_pseudo_content) {
             min_width = max_width = pseudo_width;
             min_height = max_height = pseudo_height;

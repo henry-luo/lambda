@@ -33,6 +33,7 @@ static bool intrinsic_view_uses_border_box(ViewBlock* view, DomElement* element)
 #include <cmath>
 #include <cstring>
 #include <chrono>
+#include <utf8proc.h>
 
 IntrinsicFontScope::~IntrinsicFontScope() {
     font_prop_release_handle(prop_a);
@@ -1897,6 +1898,45 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     return result;
 }
 
+float layout_vertical_text_block_extent(const char* text, size_t length,
+                                         float line_advance,
+                                         float available_inline_size) {
+    if (line_advance <= 0.0f) return 0.0f;
+    if (!text || length == 0 || available_inline_size <= 0.0f) {
+        return line_advance;
+    }
+
+    size_t units_per_line = (size_t)floorf(available_inline_size / line_advance);
+    if (units_per_line == 0) units_per_line = 1;
+
+    size_t codepoint_count = 0;
+    bool has_non_whitespace = false;
+    for (size_t offset = 0; offset < length;) {
+        uint32_t codepoint = 0;
+        int byte_count = str_utf8_decode(text + offset, length - offset, &codepoint);
+        if (byte_count <= 0) byte_count = 1;
+        offset += (size_t)byte_count;
+        if (codepoint == '\n' || codepoint == '\r' ||
+            text_codepoint_has_zero_advance(codepoint)) {
+            continue;
+        }
+        bool is_whitespace = codepoint == ' ' || codepoint == '\t' ||
+            codepoint == '\f' || codepoint == 0x00A0 ||
+            utf8proc_category(static_cast<utf8proc_int32_t>(codepoint)) ==
+                UTF8PROC_CATEGORY_ZS;
+        if (!is_whitespace) has_non_whitespace = true;
+        codepoint_count++;
+    }
+    // Collapsed whitespace has no independent vertical column; counting each
+    // nbsp in a whitespace-only float inflated its intrinsic block-size before
+    // the definite line-height could establish the one real line box.
+    if (!has_non_whitespace) return line_advance;
+    if (codepoint_count == 0) return line_advance;
+
+    size_t line_count = (codepoint_count + units_per_line - 1) / units_per_line;
+    return (float)line_count * line_advance;
+}
+
 float measure_direct_text_children_intrinsic_width(LayoutContext* lycon,
                                                    DomElement* element,
                                                    bool use_min_content,
@@ -3569,6 +3609,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
     ViewBlock* resolved_width_view = lam::unsafe_view_block_element_storage(element);
+    bool physical_width_is_vertical_block_axis =
+        layout_block_inline_axis_is_vertical(resolved_width_view);
     bool has_intrinsic_min_width = layout_intrinsic_min_size_keyword(
         resolved_width_view, true) != CSS_VALUE__UNDEF;
     bool has_intrinsic_preferred_width = layout_intrinsic_preferred_size_keyword(
@@ -3746,6 +3788,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         !(percentage_width_is_intrinsic_auto || percentage_replaced_size_is_intrinsic_auto) &&
         !percentage_size_resolves_to_zero &&
         !is_table_display && !is_inline_non_replaced &&
+        !physical_width_is_vertical_block_axis &&
         resolved_width_view->blk && resolved_width_view->block_mut()->given_width >= 0.0f) {
         float resolved_width = resolved_width_view->block()->given_width;
         bool is_border_box = layout_uses_border_box(resolved_width_view);
@@ -3769,7 +3812,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         !has_intrinsic_preferred_width && !has_intrinsic_max_width &&
         !(percentage_width_is_intrinsic_auto || percentage_replaced_size_is_intrinsic_auto) &&
         !percentage_size_resolves_to_zero &&
-        !is_table_display && !is_inline_non_replaced) {
+        !is_table_display && !is_inline_non_replaced &&
+        !physical_width_is_vertical_block_axis) {
         CssDeclaration* width_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_WIDTH);
         if (width_decl && width_decl->value &&
@@ -5054,7 +5098,24 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     float inline_max_sum = 0.0f;  // Sum of max-content widths for inline children
     float vertical_block_axis_max = 0.0f;
     float vertical_text_block_axis_max = 0.0f;
+    ViewBlock* view_block = lam::unsafe_view_block_element_storage(element);
     bool element_inline_axis_is_vertical = layout_element_inline_axis_is_vertical(element);
+    float vertical_inline_basis = 0.0f;
+    if (element_inline_axis_is_vertical) {
+        // A vertical text query needs the containing inline-size to know how many
+        // glyph advances fit in one column; without it the content stays one column.
+        if (view_block->blk && view_block->block()->given_height >= 0.0f) {
+            vertical_inline_basis = layout_uses_border_box(view_block)
+                ? layout_content_height_from_border_box(
+                    view_block, view_block->block()->given_height)
+                : view_block->block()->given_height;
+        } else if (lycon->block.parent && lycon->block.parent->content_height > 0.0f) {
+            vertical_inline_basis = lycon->block.parent->content_height;
+        }
+    }
+    float vertical_line_advance = element_inline_axis_is_vertical
+        ? intrinsic_element_line_height(lycon, element, view_block) : 0.0f;
+    float vertical_block_axis_sum = 0.0f;
     bool has_inline_content = false;
     bool inline_run_ends_with_collapsible_space = false;
     float first_inline_child_min = -1.0f;  // First inline child's min-content (for text-indent)
@@ -5127,8 +5188,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool is_flex_wrap = false;
     float flex_gap = 0;
     int flex_child_count = 0;  // Count of flex children for gap calculation
-    ViewBlock* view_block = lam::unsafe_view_block_element_storage(element);
-
     // Check if this is a grid container.
     bool is_grid_container = intrinsic_element_display_matches(
         element, view_block, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
@@ -5538,6 +5597,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 }
 
                 TextIntrinsicWidths text_widths;
+                float vertical_text_extent = 0.0f;
                 float tab_size = (view_block->blk && view_block->block_mut()->tab_size >= 0)
                     ? view_block->block()->tab_size : 8.0f;
                 if (preserve_newlines) {
@@ -5567,6 +5627,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             if (lw.min_content > text_widths.min_content)
                                 text_widths.min_content = lw.min_content;
                             line_width = lw.max_content;
+                            if (element_inline_axis_is_vertical) {
+                                vertical_text_extent = max(vertical_text_extent,
+                                    layout_vertical_text_block_extent(
+                                        line_start, line_len,
+                                        vertical_line_advance,
+                                        vertical_inline_basis));
+                            }
                         }
                         if (line_count == 0) first_line_width = line_width;
                         last_line_width = line_width;
@@ -5596,17 +5663,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             lycon, normalized_buffer, out_pos, inline_max_sum,
                             text_transform, font_variant, tab_size);
                     }
+                    if (element_inline_axis_is_vertical) {
+                        vertical_text_extent = layout_vertical_text_block_extent(
+                            normalized_buffer, out_pos, vertical_line_advance,
+                            vertical_inline_basis);
+                    }
                 }
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
 
                 if (element_inline_axis_is_vertical) {
-                    // CSS Writing Modes maps a vertical inline container's
-                    // physical width to its block axis; preserve the measured
-                    // glyph advance when the inherited font context is still
-                    // provisional during the recursive intrinsic query.
                     vertical_text_block_axis_max = max(vertical_text_block_axis_max,
-                        text_widths.max_content);
+                        vertical_inline_basis > 0.0f
+                            ? vertical_text_extent : text_widths.max_content);
                 }
 
                 // white-space: nowrap/pre prevents line breaks, so min-content = max-content
@@ -5682,11 +5751,16 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 (is_inline_level_element(element) && node_is_table_cell_like(child)));
 
             if (is_inline && element_inline_axis_is_vertical) {
-                // Orthogonal inline descendants contribute their physical
-                // block-axis max-content size to this line box; summing it
-                // follows the horizontal surrogate instead of writing-mode.
-                vertical_block_axis_max = max(vertical_block_axis_max,
-                    child_sizes.max_content);
+                // With a definite vertical inline-size, inline descendants that
+                // overflow that size form additional physical columns; their
+                // block-axis contributions therefore add instead of collapsing to
+                // the widest child.
+                if (vertical_inline_basis > 0.0f) {
+                    vertical_block_axis_sum += child_sizes.max_content;
+                } else {
+                    vertical_block_axis_max = max(vertical_block_axis_max,
+                        child_sizes.max_content);
+                }
             }
 
             log_debug("  child %s: min=%.1f, max=%.1f, is_inline=%d",
@@ -6177,7 +6251,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             lycon, element, view_block);
         // In vertical writing, line-height is the line box's physical block
         // extent; text glyph width alone would under-measure shrink-to-fit floats.
-        float block_axis_extent = max(block_axis_line_extent, vertical_block_axis_max);
+        float vertical_child_extent = vertical_inline_basis > 0.0f
+            ? vertical_block_axis_sum : vertical_block_axis_max;
+        float block_axis_extent = max(block_axis_line_extent, vertical_child_extent);
         sizes.min_content = max(sizes.min_content, block_axis_extent);
         sizes.max_content = max(sizes.max_content, block_axis_extent);
     }
@@ -6273,9 +6349,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (element_inline_axis_is_vertical) {
             // CSS Writing Modes maps this container's physical width to the
             // block axis, so its inline line is sized by the widest item.
+            float vertical_child_extent = vertical_inline_basis > 0.0f
+                ? vertical_block_axis_sum : vertical_block_axis_max;
             float block_axis_extent = max(
                 intrinsic_element_line_height(lycon, element, view_block),
-                max(vertical_block_axis_max, vertical_text_block_axis_max));
+                max(vertical_child_extent, vertical_text_block_axis_max));
             if (layout_element_css_writing_mode(element) == CSS_VALUE_SIDEWAYS_RL &&
                 vertical_block_axis_max > 0.0f) {
                 float sideways_ascender = 0.0f;
@@ -6497,13 +6575,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         given_max_width = view_for_minmax->block()->given_max_width;
     }
     // Fallback: check CSS if blk hasn't been set up yet
-    if (given_max_width < 0 && element->specified_style) {
-        CssDeclaration* mw_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_MAX_WIDTH);
-        if (mw_decl && mw_decl->value &&
-            mw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-            given_max_width = resolve_length_value(lycon, CSS_PROPERTY_MAX_WIDTH, mw_decl->value);
-        }
+    if (given_max_width < 0 && max_width_declaration && max_width_declaration->value &&
+        max_width_declaration->value->type == CSS_VALUE_TYPE_LENGTH) {
+        // Intrinsic passes may have no resolved BlockProp yet; use the already
+        // cascade-selected physical declaration so a vertical child’s definite
+        // max-width still constrains its parent’s shrink-to-fit contribution.
+        given_max_width = resolve_length_value(
+            lycon, CSS_PROPERTY_MAX_WIDTH, max_width_declaration->value);
     }
     if (given_max_width >= 0 &&
         max_width_keyword != CSS_VALUE_FIT_CONTENT &&
@@ -6546,6 +6624,52 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // A min-content preferred size caps the max-content contribution;
         // otherwise shrink-to-fit parents incorrectly expand the child.
         sizes.max_content = sizes.min_content;
+    }
+
+    if (physical_width_is_vertical_block_axis && !content_only) {
+        float explicit_width = -1.0f;
+        if (view_for_minmax->blk &&
+            view_for_minmax->block()->given_width >= 0.0f &&
+            view_for_minmax->block()->given_width_type != CSS_VALUE_AUTO) {
+            explicit_width = view_for_minmax->block()->given_width;
+        } else if (element->specified_style) {
+            CssDeclaration* width_decl = layout_specified_physical_size_declaration(
+                element, true);
+            if (width_decl && width_decl->value &&
+                (width_decl->value->type == CSS_VALUE_TYPE_LENGTH ||
+                 width_decl->value->type == CSS_VALUE_TYPE_FUNCTION)) {
+                explicit_width = resolve_length_value(
+                    lycon, CSS_PROPERTY_WIDTH, width_decl->value);
+            }
+        }
+        if (explicit_width >= 0.0f) {
+            float explicit_border_width = intrinsic_view_uses_border_box(
+                view_for_minmax, element)
+                ? explicit_width : explicit_width + horiz_padding + horiz_border;
+            explicit_border_width = layout_floor_border_box_width(
+                view_for_minmax, explicit_border_width);
+            // The physical block-axis width path runs after the generic
+            // min/max pass; reapply definite max-width here or the authored
+            // width restores an intrinsic contribution that the used box later
+            // clamps away.
+            explicit_border_width = intrinsic_apply_definite_width_constraints(
+                explicit_border_width);
+            bool width_has_intrinsic_constraint = has_intrinsic_min_width ||
+                has_intrinsic_preferred_width || has_intrinsic_max_width;
+            if (!width_has_intrinsic_constraint) {
+                // A definite physical block-size owns the containing box's
+                // intrinsic contribution. Descendant overflow remains local;
+                // letting it enlarge this size makes a fixed vertical block
+                // inflate its horizontal shrink-to-fit parent.
+                sizes.min_content = explicit_border_width;
+                sizes.max_content = explicit_border_width;
+            } else {
+                // Intrinsic min/max keywords intentionally expose descendant
+                // contributions instead of the definite physical block-size.
+                sizes.min_content = max(sizes.min_content, explicit_border_width);
+                sizes.max_content = max(sizes.max_content, explicit_border_width);
+            }
+        }
     }
 
     // css Values 4 permits approximating intrinsic contributions when their

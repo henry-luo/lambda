@@ -134,3 +134,59 @@ bool radiant_resolve_layout_support_resource_path(const char* href, const char* 
     if (access(out_path, R_OK) == 0) return true;
     return radiant_resolve_wpt_root_resource_path(href, out_path, out_size);
 }
+
+bool radiant_resolve_layout_relative_resource_path(const char* source_path,
+                                                   const char* base_path,
+                                                   char* out_path, size_t out_size) {
+    if (!source_path || !base_path || !out_path || out_size == 0) return false;
+    if (access(source_path, R_OK) == 0) return false;
+
+    char* local_base = radiant_resource_base_to_local_path(base_path);
+    if (!local_base) return false;
+
+    size_t data_root_len = 0;
+    if (!radiant_resource_data_root_len(local_base, &data_root_len)) {
+        mem_free(local_base);
+        return false;
+    }
+
+    // WPT mirrors keep HTML fixtures under layout/data while shared support
+    // files remain under ref/wpt/css/<suite>; resolve the missing relative
+    // source against that canonical tree before layout falls back to a system
+    // resource with different metrics.
+    const char* suite_start = local_base + data_root_len;
+    if (*suite_start == '/') suite_start++;
+    if (strncmp(suite_start, "wpt-", 4) != 0) {
+        mem_free(local_base);
+        return false;
+    }
+    const char* suite_end = strchr(suite_start, '/');
+    if (!suite_end || suite_end == suite_start + 4) {
+        mem_free(local_base);
+        return false;
+    }
+
+    size_t source_prefix_len = data_root_len + 1 + (size_t)(suite_end - suite_start);
+    if (strncmp(source_path, local_base, source_prefix_len) != 0 ||
+        source_path[source_prefix_len] != '/') {
+        mem_free(local_base);
+        return false;
+    }
+
+    const char* relative_path = source_path + source_prefix_len + 1;
+    size_t suite_name_len = (size_t)(suite_end - suite_start) - 4;
+    size_t required = strlen("ref/wpt/css/") + suite_name_len + 1 +
+        strlen(relative_path) + 1;
+    if (required > out_size) {
+        mem_free(local_base);
+        return false;
+    }
+
+    // INT_CAST_OK: snprintf precision is an int string-length parameter.
+    int written = snprintf(out_path, out_size, "ref/wpt/css/%.*s/%s",
+                           (int)suite_name_len, suite_start + 4, relative_path);
+    bool resolved = written > 0 && (size_t)written < out_size &&
+        access(out_path, R_OK) == 0;
+    mem_free(local_base);
+    return resolved;
+}

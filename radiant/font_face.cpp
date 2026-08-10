@@ -1,5 +1,6 @@
 #include "view.hpp"
 #include "layout.hpp"
+#include "radiant.hpp"
 #include "../lib/font/font.h"  // unified font module — font_face_register, font_family_exists
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_font_face.hpp"
@@ -45,6 +46,26 @@ static bool is_supported_web_font_source(const char* url, const char* format) {
            (len >= 4 && strncasecmp(clean_end - 4, ".ttf", 4) == 0) ||
            (len >= 4 && strncasecmp(clean_end - 4, ".otf", 4) == 0) ||
            (len >= 4 && strncasecmp(clean_end - 4, ".ttc", 4) == 0);
+}
+
+static void resolve_missing_font_source_path(char** source, const char* base_path) {
+    if (!source || !*source || !base_path || is_http_url(*source) ||
+        strncmp(*source, "data:", 5) == 0) {
+        return;
+    }
+
+    char resolved[2048];
+    if (!radiant_resolve_layout_relative_resource_path(
+            *source, base_path, resolved, sizeof(resolved))) {
+        return;
+    }
+
+    // the mirrored WPT HTML may not carry its support directory; keep the
+    // declared font family but point the source at the canonical local asset.
+    char* replacement = mem_strdup(resolved, MEM_CAT_FONT);
+    if (!replacement) return;
+    mem_free(*source);
+    *source = replacement;
 }
 
 // Text flow logging categories
@@ -157,6 +178,13 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
     for (int i = 0; i < count; i++) {
         CssFontFaceDescriptor* css_desc = css_descs[i];
         if (!css_desc) continue;
+
+        resolve_missing_font_source_path(&css_desc->src_url, base_path);
+        if (css_desc->src_urls) {
+            for (int j = 0; j < css_desc->src_count; j++) {
+                resolve_missing_font_source_path(&css_desc->src_urls[j].url, base_path);
+            }
+        }
 
         // Remote web fonts are discovered by the network resource manager and
         // installed when their downloads complete; synchronously downloading

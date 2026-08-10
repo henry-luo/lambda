@@ -5926,6 +5926,7 @@ struct LayoutOptions {
     const char* timing_output_file;              // optional JSONL phase timing output
     const char* memory_profile_output_file;      // post-layout six-domain snapshot
     bool auto_close;                            // cancel async JS timers after load/onload
+    bool disable_animations;                    // freeze CSS animation/transition effects for snapshots
 };
 
 bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
@@ -5946,6 +5947,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     opts->timing_output_file = nullptr;
     opts->memory_profile_output_file = nullptr;
     opts->auto_close = false;
+    opts->disable_animations = false;
 
     // Parse arguments
     for (int i = 0; i < argc; i++) {
@@ -6016,6 +6018,9 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         }
         else if (strcmp(argv[i], "--auto-close") == 0) {
             opts->auto_close = true;
+        }
+        else if (strcmp(argv[i], "--disable-animations") == 0) {
+            opts->disable_animations = true;
         }
         else if (strcmp(argv[i], "--timing-output") == 0) {
             if (i + 1 < argc) {
@@ -6303,7 +6308,8 @@ static bool layout_single_file(
     bool enable_state_dump = false,
     FILE* timing_file = nullptr,
     const char* memory_profile_output_file = nullptr,
-    bool auto_close = false
+    bool auto_close = false,
+    bool disable_animations = false
 ) {
     log_debug("[Layout] Processing file: %s", input_file);
     auto total_start = std::chrono::high_resolution_clock::now();
@@ -6502,6 +6508,9 @@ static bool layout_single_file(
     js_mir_end_document_phase_timing(&document_js_timing);
 
     ui_context->document = doc;
+    // browser layout snapshots freeze animations before measuring; doing this
+    // on the document prevents sampled effects from changing used geometry.
+    doc->disable_css_animations = disable_animations;
 
     DocState* state = radiant_document_ensure_state(doc, "layout_single_file");
     if (!state) {
@@ -7074,7 +7083,8 @@ int cmd_layout(int argc, char** argv) {
                 opts.state_dump,
                 timing_file,
                 opts.memory_profile_output_file,
-                auto_close
+                auto_close,
+                opts.disable_animations
             );
         } catch (...) {
             log_error("batch layout: uncaught exception processing %s", input_file);
@@ -7099,7 +7109,8 @@ int cmd_layout(int argc, char** argv) {
                     opts.state_dump,
                     timing_file,
                     opts.memory_profile_output_file,
-                    auto_close
+                    auto_close,
+                    opts.disable_animations
                 );
             } catch (...) {
                 log_error("batch layout: uncaught exception processing %s", input_file);

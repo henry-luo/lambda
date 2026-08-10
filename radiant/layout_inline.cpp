@@ -86,11 +86,9 @@ static InlineOutOfFlowKind inline_out_of_flow_kind(DomElement* elem) {
 }
 
 static CssEnum inline_span_css_writing_mode(ViewSpan* span) {
-    ViewBlock* block = span
-        ? layout_nearest_block_ancestor(span->parent_view()) : nullptr;
-    return block && block->is_element()
-        ? layout_element_css_writing_mode(block->as_element())
-        : CSS_VALUE_HORIZONTAL_TB;
+    // mixed writing-mode inline descendants use their own flow-relative edges;
+    // reading the parent block here erased an inline span's orthogonal mode.
+    return span ? layout_element_css_writing_mode(span) : CSS_VALUE_HORIZONTAL_TB;
 }
 
 static bool inline_span_uses_vertical_axis(ViewSpan* span) {
