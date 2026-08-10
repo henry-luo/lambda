@@ -97,15 +97,7 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
         }
     }
     if (cap->blk) {
-        bool is_border_box = layout_uses_border_box(cap);
-        if (is_border_box) {
-            cap->height = adjust_min_max_height(cap, cap->height);
-        } else {
-            BoxMetrics box = layout_box_metrics(cap);
-            float content_h = cap->height - box.pad_border_v;
-            float clamped_h = adjust_min_max_height(cap, content_h);
-            cap->height = clamped_h + box.pad_border_v;
-        }
+        cap->height = layout_apply_min_max_axis(cap, cap->height, false, true);
     }
 
     log_debug("Caption re-layout complete: width=%.1f, height=%.1f", cap->width, cap->height);
@@ -137,15 +129,7 @@ float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width) {
         cap->width = wrapper_content_width - cap_margin_h;
     }
     if (cap->blk) {
-        bool is_border_box = layout_uses_border_box(cap);
-        if (is_border_box) {
-            cap->width = adjust_min_max_width(cap, cap->width);
-        } else {
-            BoxMetrics box = layout_box_metrics(cap);
-            float content_w = cap->width - box.pad_border_h;
-            float clamped_w = adjust_min_max_width(cap, content_w);
-            cap->width = clamped_w + box.pad_border_h;
-        }
+        cap->width = layout_apply_min_max_axis(cap, cap->width, true, true);
     }
     return cap->width;
 }

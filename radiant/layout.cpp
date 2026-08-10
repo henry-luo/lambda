@@ -1208,10 +1208,16 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                         dom_elem->font->text_deco_thickness = lycon->font.style->text_deco_thickness;
                     if (dom_elem->fontp()->text_underline_offset == 0 && lycon->font.style->text_underline_offset != 0)
                         dom_elem->font->text_underline_offset = lycon->font.style->text_underline_offset;
-                    if (dom_elem->fontp()->letter_spacing == 0)
+                    if (dom_elem->fontp()->letter_spacing == 0) {
                         dom_elem->font->letter_spacing = lycon->font.style->letter_spacing;
-                    if (dom_elem->fontp()->word_spacing == 0)
+                        dom_elem->font->letter_spacing_percent = lycon->font.style->letter_spacing_percent;
+                        dom_elem->font->letter_spacing_is_percent = lycon->font.style->letter_spacing_is_percent;
+                    }
+                    if (dom_elem->fontp()->word_spacing == 0) {
                         dom_elem->font->word_spacing = lycon->font.style->word_spacing;
+                        dom_elem->font->word_spacing_percent = lycon->font.style->word_spacing_percent;
+                        dom_elem->font->word_spacing_is_percent = lycon->font.style->word_spacing_is_percent;
+                    }
                 }
             }
         }
@@ -1415,10 +1421,6 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     lycon->line.parent_font_handle = saved_pa_handle;
 }
 
-static bool block_view_is_out_of_flow(ViewBlock* block) {
-    return layout_block_is_out_of_flow(block);
-}
-
 static bool inline_span_has_in_flow_block_child(ViewSpan* span) {
     if (!span) return false;
     View* child = span->first_child;
@@ -1427,7 +1429,7 @@ static bool inline_span_has_in_flow_block_child(ViewSpan* span) {
             bool is_inline_level_table = child->view_type == RDT_VIEW_TABLE &&
                 (block->display.outer == CSS_VALUE_INLINE ||
                  block->display.outer == CSS_VALUE_INLINE_BLOCK);
-            if (!block_view_is_out_of_flow(block) &&
+            if (!layout_block_is_out_of_flow(block) &&
                 child->view_type != RDT_VIEW_INLINE_BLOCK &&
                 !is_inline_level_table) {
                 return true;
@@ -1463,7 +1465,7 @@ static ViewBlock* inline_span_anonymous_inline_table_child(ViewSpan* span) {
             bool is_inline_table = child->view_type == RDT_VIEW_TABLE &&
                 (block->display.outer == CSS_VALUE_INLINE ||
                  block->display.outer == CSS_VALUE_INLINE_BLOCK);
-            if (!block_view_is_out_of_flow(block) &&
+            if (!layout_block_is_out_of_flow(block) &&
                 is_inline_table &&
                 element_has_anonymous_table_tag(block->as_element(), "::anon-table")) {
                 return block;
@@ -3695,6 +3697,9 @@ static void layout_store_last_remembered_sizes(DomNode* node) {
     if (!node || !node->is_element()) return;
 
     DomElement* element = node->as_element();
+    // marker nodes store MarkerProp in blk; they are generated outside normal
+    // block sizing and must not be interpreted as BlockProp here.
+    if (element->view_type == RDT_VIEW_MARKER) return;
     if (element->blk && !element->block()->content_visibility_hidden &&
         (element->block()->contain_intrinsic_width_auto ||
          element->block()->contain_intrinsic_height_auto)) {

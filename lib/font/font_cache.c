@@ -489,3 +489,7 @@ FontHandle* font_resolve_for_codepoint(FontContext* ctx, const FontStyleDesc* st
     if (!ctx || !style) return NULL;
     return font_find_codepoint_fallback(ctx, style, codepoint);
 }
+
+bool font_handle_is_document_font(FontHandle* handle) {
+    return handle && handle->is_document_font;
+}

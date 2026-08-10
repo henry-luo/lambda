@@ -235,21 +235,12 @@ static bool flex_measurement_child_is_skipped_flex_item(ViewElement* child_view,
     return flex_measurement_position_declares_out_of_flow(child_view);
 }
 
-static void flex_accumulate_child_cross_height(bool use_max_height, float height,
-                                               float* max_height, float* sum_height) {
+static void flex_accumulate_height(bool use_max_height, float height,
+                                   float* max_height, float* sum_height) {
     if (use_max_height) {
         *max_height = fmax(*max_height, height);
     } else {
         *sum_height += height;
-    }
-}
-
-static void flex_accumulate_intrinsic_child_height(bool is_row_flex, float height,
-                                                   float* total_height) {
-    if (is_row_flex) {
-        *total_height = fmax(*total_height, height);
-    } else {
-        *total_height += height;
     }
 }
 
@@ -260,10 +251,6 @@ static float get_explicit_css_length(LayoutContext* lycon, ViewElement* elem,
     if (!decl || !decl->value || decl->value->type != CSS_VALUE_TYPE_LENGTH) return -1.0f;
     float size = resolve_length_value(lycon, property_code, decl->value);
     return !isnan(size) && size > 0.0f ? size : -1.0f;
-}
-
-static float get_explicit_css_width(LayoutContext* lycon, ViewElement* elem) {
-    return get_explicit_css_length(lycon, elem, CSS_PROPERTY_WIDTH);
 }
 
 static bool flex_element_has_declared_line_height(DomElement* elem) {
@@ -309,12 +296,9 @@ static float resolve_flex_inherited_line_height(LayoutContext* lycon, DomElement
     return 0;
 }
 
-static float get_explicit_css_height(LayoutContext* lycon, ViewElement* elem) {
-    return get_explicit_css_length(lycon, elem, CSS_PROPERTY_HEIGHT);
-}
-
 static float get_explicit_dom_css_height(LayoutContext* lycon, DomElement* elem) {
-    return elem ? get_explicit_css_height(lycon, lam::view_as_element(elem)) : -1.0f;
+    return elem ? get_explicit_css_length(lycon, lam::view_as_element(elem), CSS_PROPERTY_HEIGHT)
+                : -1.0f;
 }
 
 static CssValue* flex_margin_side_value(const CssValue* value, CssPropertyCode property_code) {
@@ -701,7 +685,8 @@ static FlexChildExplicitSizes flex_measure_child_explicit_sizes(LayoutContext* l
     };
 
     if (!sizes.has_width && !width_is_percentage && lycon) {
-        float dom_css_width = get_explicit_css_width(lycon, child_view);
+        float dom_css_width = get_explicit_css_length(
+            lycon, child_view, CSS_PROPERTY_WIDTH);
         if (dom_css_width > 0.0f) {
             sizes.has_width = true;
             sizes.width = dom_css_width;
@@ -710,7 +695,8 @@ static FlexChildExplicitSizes flex_measure_child_explicit_sizes(LayoutContext* l
     }
 
     if (!sizes.has_height && lycon) {
-        float dom_css_height = get_explicit_css_height(lycon, child_view);
+        float dom_css_height = get_explicit_css_length(
+            lycon, child_view, CSS_PROPERTY_HEIGHT);
         if (dom_css_height > 0.0f) {
             sizes.has_height = true;
             sizes.height = dom_css_height;
@@ -756,16 +742,25 @@ static float flex_measure_shorthand_side_pair(LayoutContext* lycon, CssValue* va
     return first + second;
 }
 
-static float flex_measure_vertical_padding_sum(LayoutContext* lycon, DomElement* elem) {
+static float flex_measure_axis_padding_sum(LayoutContext* lycon, DomElement* elem,
+                                           bool horizontal) {
     if (!elem || !elem->specified_style) return 0.0f;
 
-    float padding = flex_measure_length_decl_pair(
-        lycon, elem, CSS_PROPERTY_PADDING_TOP, CSS_PROPERTY_PADDING_BOTTOM);
-    if (padding != 0.0f) return padding;
-
     CssDeclaration* pad_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING);
-    return flex_measure_shorthand_side_pair(lycon, pad_sh ? pad_sh->value : nullptr,
-                                            CSS_PROPERTY_PADDING, 0, 2);
+    if (horizontal && pad_sh && pad_sh->value &&
+        pad_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
+        return resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_sh->value) * 2.0f;
+    }
+
+    float padding = flex_measure_length_decl_pair(
+        lycon, elem,
+        horizontal ? CSS_PROPERTY_PADDING_LEFT : CSS_PROPERTY_PADDING_TOP,
+        horizontal ? CSS_PROPERTY_PADDING_RIGHT : CSS_PROPERTY_PADDING_BOTTOM);
+    if (horizontal) return padding;
+    if (padding != 0.0f) return padding;
+    return flex_measure_shorthand_side_pair(
+        lycon, pad_sh ? pad_sh->value : nullptr, CSS_PROPERTY_PADDING,
+        horizontal ? 1 : 0, horizontal ? 3 : 2);
 }
 
 static float flex_measure_border_all_width(LayoutContext* lycon, CssValue* value) {
@@ -786,56 +781,34 @@ static float flex_measure_border_all_width(LayoutContext* lycon, CssValue* value
     return 0.0f;
 }
 
-static float flex_measure_vertical_border_sum(LayoutContext* lycon, DomElement* elem) {
+static float flex_measure_axis_border_sum(LayoutContext* lycon, DomElement* elem,
+                                          bool horizontal) {
     if (!elem || !elem->specified_style) return 0.0f;
 
-    float border = flex_measure_length_decl_pair(
-        lycon, elem, CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_BOTTOM_WIDTH);
-    if (border != 0.0f) return border;
-
     CssDeclaration* bw_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER_WIDTH);
-    border = flex_measure_shorthand_side_pair(lycon, bw_sh ? bw_sh->value : nullptr,
-                                              CSS_PROPERTY_BORDER_WIDTH, 0, 2);
-    if (border != 0.0f) return border;
+    if (horizontal && bw_sh && bw_sh->value &&
+        bw_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
+        return resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bw_sh->value) * 2.0f;
+    }
+
+    float border = 0.0f;
+    if (!horizontal) {
+        border = flex_measure_length_decl_pair(
+            lycon, elem, CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_BOTTOM_WIDTH);
+        if (border != 0.0f) return border;
+        border = flex_measure_shorthand_side_pair(
+            lycon, bw_sh ? bw_sh->value : nullptr, CSS_PROPERTY_BORDER_WIDTH, 0, 2);
+        if (border != 0.0f) return border;
+    }
 
     CssDeclaration* b_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER);
     float border_width = flex_measure_border_all_width(lycon, b_sh ? b_sh->value : nullptr);
     return border_width * 2.0f;
 }
 
-static float flex_measure_horizontal_padding_sum(LayoutContext* lycon, ViewElement* elem) {
-    if (!elem || !elem->specified_style) return 0.0f;
-
-    CssDeclaration* pad_decl = style_tree_get_declaration(
-        elem->specified_style, CSS_PROPERTY_PADDING);
-    if (pad_decl && pad_decl->value && pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-        float padding = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
-        return padding * 2.0f;
-    }
-
-    return flex_measure_length_decl_pair(
-        lycon, elem, CSS_PROPERTY_PADDING_LEFT, CSS_PROPERTY_PADDING_RIGHT);
-}
-
-static float flex_measure_horizontal_border_sum(LayoutContext* lycon, ViewElement* elem) {
-    if (!elem || !elem->specified_style) return 0.0f;
-
-    CssDeclaration* bw_decl = style_tree_get_declaration(
-        elem->specified_style, CSS_PROPERTY_BORDER_WIDTH);
-    if (bw_decl && bw_decl->value && bw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-        float border = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bw_decl->value);
-        return border * 2.0f;
-    }
-
-    CssDeclaration* b_sh = style_tree_get_declaration(
-        elem->specified_style, CSS_PROPERTY_BORDER);
-    float border_width = flex_measure_border_all_width(lycon, b_sh ? b_sh->value : nullptr);
-    return border_width * 2.0f;
-}
-
 static float flex_measure_horizontal_box_extra(LayoutContext* lycon, ViewElement* elem) {
-    return flex_measure_horizontal_padding_sum(lycon, elem) +
-           flex_measure_horizontal_border_sum(lycon, elem);
+    return flex_measure_axis_padding_sum(lycon, elem, true) +
+           flex_measure_axis_border_sum(lycon, elem, true);
 }
 
 static float flex_measure_text_child_vertical_extra(LayoutContext* lycon,
@@ -848,8 +821,8 @@ static float flex_measure_text_child_vertical_extra(LayoutContext* lycon,
         }
     }
     if (!elem || !elem->specified_style) return 0.0f;
-    return flex_measure_vertical_padding_sum(lycon, elem) +
-           flex_measure_vertical_border_sum(lycon, elem);
+    return flex_measure_axis_padding_sum(lycon, elem, false) +
+           flex_measure_axis_border_sum(lycon, elem, false);
 }
 
 static float flex_measure_select_max_option_text_width(LayoutContext* lycon,
@@ -1184,8 +1157,8 @@ static void flex_accumulate_direct_element_height(NameId tag,
                             measured.has_explicit_height_css || is_inline_child)) ||
         (!use_max_height && measured.has_explicit_height_css)
             ? 0.0f : 10.0f;
-    flex_accumulate_child_cross_height(use_max_height, measured.height + margin,
-                                       max_child_height, measured_height);
+    flex_accumulate_height(use_max_height, measured.height + margin,
+                           max_child_height, measured_height);
 }
 
 static IntrinsicSizes flex_measure_child_intrinsic_widths(LayoutContext* lycon,
@@ -1215,8 +1188,8 @@ static void flex_measure_direct_child_heights(LayoutContext* lycon, DomElement* 
     for (DomNode* sub_child = child_elem ? child_elem->first_child : nullptr;
          sub_child; sub_child = sub_child->next_sibling) {
         if (layout_text_node_has_content(sub_child)) {
-            flex_accumulate_child_cross_height(true, text_line_height,
-                                               max_child_height, measured_height);
+            flex_accumulate_height(true, text_line_height,
+                                   max_child_height, measured_height);
         } else if (sub_child->is_element()) {
             DomElement* elem = sub_child->as_element();
             NameId tag = sub_child->tag();
@@ -2253,7 +2226,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     item_height = item->block()->given_height;
                 } else {
                     // Try to get from CSS
-                    item_height = get_explicit_css_height(lycon, item);
+                    item_height = get_explicit_css_length(
+                        lycon, item, CSS_PROPERTY_HEIGHT);
                 }
                 if (item_height > 0) {
                     saved_parent = lycon->block.parent;
@@ -2307,8 +2281,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     }
 
                     // For height, row flex takes max, column flex sums
-                    flex_accumulate_intrinsic_child_height(
-                        is_row_flex_container, text_height, &total_child_height);
+                    flex_accumulate_height(
+                        is_row_flex_container, text_height,
+                        &total_child_height, &total_child_height);
                 } else if (c->is_element()) {
                     ViewElement* child_view = lam::view_require_element(c);
                     if (child_view) {
@@ -2461,9 +2436,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         child_count++;
 
                         // For height, column flex containers sum heights, row flex takes max
-                        flex_accumulate_intrinsic_child_height(
+                        flex_accumulate_height(
                             is_row_flex_container, child_height + child_v_margin,
-                            &total_child_height);
+                            &total_child_height, &total_child_height);
 
                         log_debug("Child element: min_width=%.1f, max_width=%.1f, height=%.1f (explicit=%d/%d)",
                                   child_min_width, child_max_width, child_height,

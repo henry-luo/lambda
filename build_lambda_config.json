@@ -1563,6 +1563,7 @@
           "description": "Unicode Bidirectional Algorithm implementation",
           "include": "/usr/include",
           "lib": "-lfribidi",
+          "optional": true,
           "link": "dynamic"
         },
         {
@@ -1887,6 +1888,7 @@
           "description": "Unicode Bidirectional Algorithm implementation",
           "include": "/opt/homebrew/include",
           "lib": "/opt/homebrew/lib/libfribidi.a",
+          "optional": true,
           "link": "static"
         },
         {

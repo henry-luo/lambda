@@ -3832,6 +3832,14 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         if (effective_property == CSS_PROPERTY_FONT_SIZE || effective_property == CSS_PROPERTY_LINE_HEIGHT || effective_property == CSS_PROPERTY_VERTICAL_ALIGN) {
             // font-size percentage is relative to parent font size
             result = percentage * lycon->font.style->font_size / 100.0;
+        } else if (effective_property == CSS_PROPERTY_LETTER_SPACING) {
+            // CSS Text 4 defines spacing percentages against the current font
+            // size; the generic percentage path would incorrectly use the parent
+            // box width and make computed spacing depend on layout geometry.
+            if (lycon->font.current_font_size < 0) {
+                resolve_font_size(lycon, NULL);
+            }
+            result = percentage * lycon->font.current_font_size / 100.0;
         } else if (effective_property == CSS_PROPERTY_HEIGHT || effective_property == CSS_PROPERTY_MIN_HEIGHT ||
                    effective_property == CSS_PROPERTY_MAX_HEIGHT || effective_property == CSS_PROPERTY_TOP ||
                    effective_property == CSS_PROPERTY_BOTTOM) {
@@ -5580,11 +5588,22 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 ancestor && ancestor->font) {
                 ViewSpan* span = lam::view_require_element(lycon->view);
                 span->ensure_font(lycon);
-                // font-relative spacing inherits its computed px length; re-resolving em would compound
                 if (prop_id == CSS_PROPERTY_LETTER_SPACING) {
                     span->font->letter_spacing = ancestor->font->letter_spacing;
+                    span->font->letter_spacing_percent = ancestor->font->letter_spacing_percent;
+                    span->font->letter_spacing_is_percent = ancestor->font->letter_spacing_is_percent;
                 } else {
                     span->font->word_spacing = ancestor->font->word_spacing;
+                    span->font->word_spacing_percent = ancestor->font->word_spacing_percent;
+                    span->font->word_spacing_is_percent = ancestor->font->word_spacing_is_percent;
+                }
+                if (span->font->word_spacing_is_percent && prop_id == CSS_PROPERTY_WORD_SPACING) {
+                    span->font->word_spacing = span->font->word_spacing_percent *
+                        span->font->font_size / 100.0f;
+                }
+                if (span->font->letter_spacing_is_percent && prop_id == CSS_PROPERTY_LETTER_SPACING) {
+                    span->font->letter_spacing = span->font->letter_spacing_percent *
+                        span->font->font_size / 100.0f;
                 }
                 continue;
             }
@@ -10031,12 +10050,19 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_LETTER_SPACING: {
             span->ensure_font(lycon);
 
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH ||
+                value->type == CSS_VALUE_TYPE_PERCENTAGE ||
+                value->type == CSS_VALUE_TYPE_FUNCTION) {
                 float spacing = resolve_length_value(lycon, prop_id, value);
                 span->font->letter_spacing = spacing;
+                span->font->letter_spacing_is_percent = value->type == CSS_VALUE_TYPE_PERCENTAGE;
+                span->font->letter_spacing_percent = span->font->letter_spacing_is_percent
+                    ? (float)value->data.percentage.value : 0.0f;
                 log_debug("[CSS] letter-spacing: %.2fpx", spacing);
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL) {
                 span->font->letter_spacing = 0.0f;
+                span->font->letter_spacing_is_percent = false;
+                span->font->letter_spacing_percent = 0.0f;
                 log_debug("[CSS] letter-spacing: normal -> 0px");
             }
             break;

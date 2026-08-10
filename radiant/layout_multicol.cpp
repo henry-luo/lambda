@@ -9,7 +9,6 @@
 // min/max macros for int and float
 #define MIN_INT(a, b) ((a) < (b) ? (a) : (b))
 #define MAX_INT(a, b) ((a) > (b) ? (a) : (b))
-#define MIN_FLOAT(a, b) ((a) < (b) ? (a) : (b))
 #define MAX_FLOAT(a, b) ((a) > (b) ? (a) : (b))
 
 /**
@@ -78,9 +77,6 @@ void calculate_multicol_dimensions(
     int column_count = multicol->column_count;  // 0 = auto
     float column_width = multicol->column_width; // 0 = auto
 
-    log_debug("[MULTICOL] Input: count=%d, width=%.1f, gap=%.1f, available=%.1f",
-              column_count, column_width, gap, available_width);
-
     // CSS Multi-column §3.4: Pseudo-algorithm for column layout
     if (column_count > 0 && column_width > 0) {
         // Both specified: use min of count and what fits
@@ -109,9 +105,6 @@ void calculate_multicol_dimensions(
     // Ensure at least 1 column
     column_count = MAX_INT(1, column_count);
     column_width = MAX_FLOAT(0.0f, column_width);
-
-    log_debug("[MULTICOL] Computed: count=%d, width=%.1f, gap=%.1f",
-              column_count, column_width, gap);
 
     *out_column_count = column_count;
     *out_column_width = column_width;
@@ -289,10 +282,6 @@ float multicol_normal_gap_size(ViewBlock* block) {
     return 16.0f;
 }
 
-static bool multicol_is_out_of_flow(ViewBlock* block) {
-    return layout_block_is_out_of_flow_positioned(block);
-}
-
 static bool multicol_uses_static_x(ViewBlock* block) {
     return block && block->position &&
            !block->positionp()->has_left &&
@@ -308,7 +297,7 @@ static bool multicol_uses_static_y(ViewBlock* block) {
 static bool multicol_is_spanner_block(ViewBlock* block) {
     return block && block->multicol_prop() &&
            block->multicol_prop()->span == COLUMN_SPAN_ALL &&
-           !multicol_is_out_of_flow(block);
+           !layout_block_is_out_of_flow_positioned(block);
 }
 
 static bool multicol_forces_column_break(CssEnum value) {
@@ -533,32 +522,24 @@ static void multicol_finalize_fragmented_inline_continuations(View* view) {
     }
 }
 
-static ViewBlock* multicol_next_in_flow_block_sibling(View* start) {
-    View* sibling = start ? start->next_sibling : nullptr;
+static ViewBlock* multicol_in_flow_block_sibling(View* start, bool next) {
+    View* sibling = start ? (next ? start->next_sibling : start->prev_sibling) : nullptr;
     while (sibling) {
         if (sibling->is_element() && sibling->is_block()) {
             ViewBlock* block = lam::view_require_block(sibling);
-            if (!multicol_is_out_of_flow(block)) {
-                return block;
-            }
+            if (!layout_block_is_out_of_flow_positioned(block)) return block;
         }
-        sibling = sibling->next_sibling;
+        sibling = next ? sibling->next_sibling : sibling->prev_sibling;
     }
     return nullptr;
 }
 
+static ViewBlock* multicol_next_in_flow_block_sibling(View* start) {
+    return multicol_in_flow_block_sibling(start, true);
+}
+
 static ViewBlock* multicol_prev_in_flow_block_sibling(View* start) {
-    View* sibling = start ? start->prev_sibling : nullptr;
-    while (sibling) {
-        if (sibling->is_element() && sibling->is_block()) {
-            ViewBlock* block = lam::view_require_block(sibling);
-            if (!multicol_is_out_of_flow(block)) {
-                return block;
-            }
-        }
-        sibling = sibling->prev_sibling;
-    }
-    return nullptr;
+    return multicol_in_flow_block_sibling(start, false);
 }
 
 static void multicol_absolute_normal_origin(ViewBlock* block, float* out_x, float* out_y) {
@@ -597,7 +578,7 @@ static LayoutFragmentBox* multicol_last_layout_fragment(ViewBlock* block) {
 }
 
 static void multicol_apply_static_fragment_anchor(ViewBlock* multicol, ViewBlock* oof) {
-    if (!multicol || !oof || !multicol_is_out_of_flow(oof)) return;
+    if (!multicol || !oof || !layout_block_is_out_of_flow_positioned(oof)) return;
     if (!multicol_uses_static_x(oof) && !multicol_uses_static_y(oof)) return;
 
     ViewBlock* anchor = multicol_next_in_flow_block_sibling(static_cast<View*>(oof));
@@ -685,7 +666,7 @@ static bool multicol_apply_spanner_containing_block_anchor(
     ViewBlock* multicol,
     ViewBlock* oof
 ) {
-    if (!multicol || !oof || !multicol_is_out_of_flow(oof)) return false;
+    if (!multicol || !oof || !layout_block_is_out_of_flow_positioned(oof)) return false;
     if (!multicol_has_spanner_ancestor(multicol, oof)) return false;
 
     ViewBlock* containing_block = find_positioned_containing_block(oof);
@@ -732,7 +713,7 @@ static void multicol_apply_positioned_fragment_anchors_in_subtree(
 
     if (view != static_cast<View*>(multicol) && view->is_element() && view->is_block()) {
         ViewBlock* block = lam::view_require_block(view);
-        if (multicol_is_out_of_flow(block)) {
+        if (layout_block_is_out_of_flow_positioned(block)) {
             // Fragment anchors belong to positioned descendants; reanchoring
             // the multicol root would replace its own containing-block position.
             multicol_apply_spanner_containing_block_anchor(lycon, multicol, block);
@@ -1183,7 +1164,7 @@ static void multicol_project_fragmented_descendants(
     while (descendant) {
         View* next = descendant->next();
         if (ViewBlock* descendant_block = lam::view_as_block(descendant)) {
-            if (multicol_is_out_of_flow(descendant_block)) {
+            if (layout_block_is_out_of_flow_positioned(descendant_block)) {
                 descendant = next;
                 continue;
             }
@@ -1629,7 +1610,7 @@ static float multicol_split_child_around_spanners(
             break;
         }
         ViewBlock* nested_block = lam::view_as_block(nested_candidate);
-        if (!nested_block || multicol_is_out_of_flow(nested_block) ||
+        if (!nested_block || layout_block_is_out_of_flow_positioned(nested_block) ||
             multicol_is_spanner_block(nested_block) ||
             !multicol_spanner_can_escape_child(nested_block) ||
             !multicol_has_direct_spanner_child(nested_block) ||
@@ -1676,7 +1657,7 @@ static float multicol_split_child_around_spanners(
     while (descendant && child_count < MAX_MULTICOL_BLOCKS) {
         if (descendant->is_block()) {
             ViewBlock* descendant_block = lam::view_require_block(descendant);
-            if (!multicol_is_out_of_flow(descendant_block)) {
+        if (!layout_block_is_out_of_flow_positioned(descendant_block)) {
                 float descendant_height = descendant_block->height;
                 if (descendant_block->bound) {
                     descendant_height += descendant_block->boundary()->margin.top +
@@ -2212,7 +2193,7 @@ static bool multicol_place_direct_block_after_inline_flow(
         if (!child->is_element()) return false;
 
         ViewBlock* child_block = lam::view_as_block(static_cast<View*>(child));
-        if (!child_block || multicol_is_out_of_flow(child_block)) return false;
+        if (!child_block || layout_block_is_out_of_flow_positioned(child_block)) return false;
         if (multicol_is_spanner_block(child_block) || child_block->view_type != RDT_VIEW_BLOCK ||
             !saw_visible_inline || direct_block) {
             return false;
@@ -2543,7 +2524,7 @@ static void multicol_store_positioned_baselines(LayoutContext* lycon,
     bool has_baseline = false;
     for (View* view = container->first_placed_child(); view; view = view->next()) {
         ViewBlock* child = lam::view_as_block(view);
-        if (!child || multicol_is_out_of_flow(child) ||
+        if (!child || layout_block_is_out_of_flow_positioned(child) ||
             child->display.inner == CSS_VALUE_TABLE) {
             continue;
         }
@@ -2650,7 +2631,7 @@ static bool multicol_preserve_simple_direct_spanner_flow(
     View* inline_run_first = nullptr;
     for (View* child = block->first_placed_child(); child; child = child->next()) {
         ViewBlock* child_block = lam::view_as_block(child);
-        if (child_block && !multicol_is_out_of_flow(child_block)) {
+        if (child_block && !layout_block_is_out_of_flow_positioned(child_block)) {
             if (inline_run_first) {
                 bool has_visible_text = false;
                 if (!multicol_direct_text_run_is_single_line(
@@ -2672,7 +2653,7 @@ static bool multicol_preserve_simple_direct_spanner_flow(
             continue;
         }
 
-        if (multicol_is_out_of_flow(child_block)) continue;
+        if (layout_block_is_out_of_flow_positioned(child_block)) continue;
         if (child->node_type != DOM_NODE_TEXT) return false;
         if (!inline_run_first) inline_run_first = child;
     }
@@ -2784,7 +2765,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             if (placed->is_block()) {
                 ViewBlock* child_block = lam::view_require_block(placed);
                 multicol_clear_layout_fragments(child_block);
-                if (!multicol_is_out_of_flow(child_block) &&
+                if (!layout_block_is_out_of_flow_positioned(child_block) &&
                     multicol_has_direct_spanner_child(child_block)) {
                     float flow_height = multicol_split_child_around_spanners(
                         lycon, block, child_block, 1, available_width, gap);
@@ -2901,7 +2882,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
 
                 multicol_clear_layout_fragments(child_block);
 
-                if (multicol_is_out_of_flow(child_block)) {
+                if (layout_block_is_out_of_flow_positioned(child_block)) {
                     log_debug("[MULTICOL] Skipping out-of-flow child %s in column distribution",
                               child_block->node_name());
                     child = child->next_sibling;

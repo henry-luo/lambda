@@ -553,6 +553,9 @@ typedef struct BoxMetrics {
 
 BoxMetrics layout_box_metrics(ViewBlock* block);
 BoxMetrics layout_boundary_metrics(const BoundaryProp* bound);
+void layout_store_given_axis(LayoutContext* lycon, ViewBlock* block, float size,
+                             bool horizontal, bool reset_type = false);
+void layout_clear_given_axis(LayoutContext* lycon, ViewBlock* block, bool horizontal);
 
 float layout_padding_border_width(ViewBlock* block);
 float layout_padding_border_height(ViewBlock* block);
@@ -608,38 +611,36 @@ static inline float layout_clamp_positive_min_max_width(ViewBlock* block, float 
     return constrained_width;
 }
 
+static inline float layout_explicit_min_axis_or(ViewBlock* block, bool horizontal, float fallback) {
+    if (!block || !block->blk) return fallback;
+    const BlockProp* prop = block->block();
+    float value = horizontal ? prop->given_min_width : prop->given_min_height;
+    // resolved min-height:auto is stored as numeric zero; its AUTO type must
+    // remain distinguishable from an author-specified zero for auto minimums.
+    if (!horizontal && prop->given_min_height_type == CSS_VALUE_AUTO) return fallback;
+    return value >= 0.0f ? value : fallback;
+}
+
 static inline float layout_explicit_min_width_or(ViewBlock* block, float fallback) {
-    return (block && block->blk && block->block()->given_min_width >= 0.0f)
-        ? block->block()->given_min_width
-        : fallback;
+    return layout_explicit_min_axis_or(block, true, fallback);
 }
 
 static inline float layout_explicit_min_height_or(ViewBlock* block, float fallback) {
-    // resolved min-height:auto is stored as numeric zero; its AUTO type must
-    // remain distinguishable from an author-specified zero for auto minimums.
-    return (block && block->blk &&
-            block->block()->given_min_height_type != CSS_VALUE_AUTO &&
-            block->block()->given_min_height >= 0.0f)
-        ? block->block()->given_min_height
-        : fallback;
+    return layout_explicit_min_axis_or(block, false, fallback);
 }
 
-static inline float layout_explicit_min_axis_or(ViewBlock* block, bool horizontal, float fallback) {
-    return horizontal
-        ? layout_explicit_min_width_or(block, fallback)
-        : layout_explicit_min_height_or(block, fallback);
+static inline float layout_explicit_max_axis_or(ViewBlock* block, bool horizontal, float fallback) {
+    if (!block || !block->blk) return fallback;
+    float value = horizontal ? block->block()->given_max_width : block->block()->given_max_height;
+    return value >= 0.0f ? value : fallback;
 }
 
 static inline float layout_explicit_max_width_or(ViewBlock* block, float fallback) {
-    return (block && block->blk && block->block()->given_max_width >= 0.0f)
-        ? block->block()->given_max_width
-        : fallback;
+    return layout_explicit_max_axis_or(block, true, fallback);
 }
 
 static inline float layout_explicit_max_height_or(ViewBlock* block, float fallback) {
-    return (block && block->blk && block->block()->given_max_height >= 0.0f)
-        ? block->block()->given_max_height
-        : fallback;
+    return layout_explicit_max_axis_or(block, false, fallback);
 }
 
 static inline bool layout_has_explicit_min_width(ViewBlock* block) {
@@ -650,66 +651,53 @@ static inline bool layout_has_explicit_min_height(ViewBlock* block) {
     return layout_explicit_min_height_or(block, -1.0f) >= 0.0f;
 }
 
+static inline float layout_positive_min_axis(ViewBlock* block, bool horizontal) {
+    float minimum = layout_explicit_min_axis_or(block, horizontal, -1.0f);
+    return minimum > 0.0f ? minimum : 0.0f;
+}
+
 static inline float layout_positive_min_width(ViewBlock* block) {
-    float min_width = layout_explicit_min_width_or(block, -1.0f);
-    return min_width > 0.0f ? min_width : 0.0f;
+    return layout_positive_min_axis(block, true);
 }
 
 static inline float layout_positive_min_height(ViewBlock* block) {
-    float min_height = layout_explicit_min_height_or(block, -1.0f);
-    return min_height > 0.0f ? min_height : 0.0f;
-}
-
-static inline float layout_positive_min_axis(ViewBlock* block, bool horizontal) {
-    return horizontal
-        ? layout_positive_min_width(block)
-        : layout_positive_min_height(block);
-}
-
-static inline float layout_positive_max_width_or(ViewBlock* block, float fallback) {
-    float max_width = layout_explicit_max_width_or(block, fallback);
-    return max_width > 0.0f ? max_width : fallback;
-}
-
-static inline float layout_positive_max_height_or(ViewBlock* block, float fallback) {
-    float max_height = layout_explicit_max_height_or(block, fallback);
-    return max_height > 0.0f ? max_height : fallback;
+    return layout_positive_min_axis(block, false);
 }
 
 static inline float layout_positive_max_axis_or(ViewBlock* block, bool horizontal, float fallback) {
-    return horizontal
-        ? layout_positive_max_width_or(block, fallback)
-        : layout_positive_max_height_or(block, fallback);
+    float maximum = layout_explicit_max_axis_or(block, horizontal, fallback);
+    return maximum > 0.0f ? maximum : fallback;
+}
+
+static inline float layout_positive_max_width_or(ViewBlock* block, float fallback) {
+    return layout_positive_max_axis_or(block, true, fallback);
+}
+
+static inline float layout_positive_max_height_or(ViewBlock* block, float fallback) {
+    return layout_positive_max_axis_or(block, false, fallback);
+}
+
+static inline float layout_floor_min_axis(ViewBlock* block, float size, bool horizontal) {
+    if (!block || !block->blk) return size;
+    float minimum = horizontal ? block->block()->given_min_width : block->block()->given_min_height;
+    return minimum >= 0.0f && size < minimum ? minimum : size;
 }
 
 static inline float layout_floor_min_width(ViewBlock* block, float width) {
-    if (!block || !block->blk || block->block()->given_min_width < 0.0f) return width;
-    return width < block->block()->given_min_width ? block->block()->given_min_width : width;
+    return layout_floor_min_axis(block, width, true);
 }
 
 static inline float layout_floor_min_height(ViewBlock* block, float height) {
-    if (!block || !block->blk || block->block()->given_min_height < 0.0f) return height;
-    return height < block->block()->given_min_height ? block->block()->given_min_height : height;
+    return layout_floor_min_axis(block, height, false);
 }
 
 static inline void layout_apply_positive_min_max_contribution(ViewBlock* block, bool horizontal,
                                                               float* min_size, float* max_size) {
     if (!block || !block->blk) return;
-    if (horizontal) {
-        if (min_size && block->block()->given_min_width > 0.0f && *min_size < block->block()->given_min_width) {
-            *min_size = block->block()->given_min_width;
-        }
-        if (max_size && block->block()->given_max_width > 0.0f && *max_size > block->block()->given_max_width) {
-            *max_size = block->block()->given_max_width;
-        }
-    } else {
-        if (min_size && block->block()->given_min_height > 0.0f && *min_size < block->block()->given_min_height) {
-            *min_size = block->block()->given_min_height;
-        }
-        if (max_size && block->block()->given_max_height > 0.0f && *max_size > block->block()->given_max_height) {
-            *max_size = block->block()->given_max_height;
-        }
-    }
+    float minimum = horizontal ? block->block()->given_min_width : block->block()->given_min_height;
+    float maximum = horizontal ? block->block()->given_max_width : block->block()->given_max_height;
+    if (min_size && minimum > 0.0f && *min_size < minimum) *min_size = minimum;
+    if (max_size && maximum > 0.0f && *max_size > maximum) *max_size = maximum;
 }
 
 static inline const CssValue* css_box_shorthand_side_value(const CssValue* value, int side) {
@@ -1089,6 +1077,7 @@ inline bool white_space_preserves_space_advance(CssEnum white_space) {
         white_space == CSS_VALUE_PRE_WRAP ||
         white_space == CSS_VALUE_BREAK_SPACES;
 }
+float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
 
 // ============================================================================
@@ -2633,6 +2622,7 @@ static inline bool layout_element_is_display_none(const DomElement* element) {
 
 // CSS Positioning functions
 void layout_relative_position_offset(ViewBlock* block, float* offset_x, float* offset_y);
+float layout_relative_axis_offset(ViewBlock* block, bool horizontal, float containing_size);
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
 bool element_has_float(ViewBlock* block);

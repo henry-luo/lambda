@@ -57,8 +57,8 @@ typedef struct BidiLineCounts {
     bool has_bidi_trigger;
 } BidiLineCounts;
 
-static bool bidi_codepoint_triggers_reorder(uint32_t codepoint) {
 #if RDT_HAS_FRIBIDI
+static bool bidi_codepoint_triggers_reorder(uint32_t codepoint) {
     FriBidiCharType type = fribidi_get_bidi_type((FriBidiChar)codepoint);
     return type == FRIBIDI_TYPE_RTL || type == FRIBIDI_TYPE_AL ||
            type == FRIBIDI_TYPE_LRE || type == FRIBIDI_TYPE_RLE ||
@@ -66,10 +66,6 @@ static bool bidi_codepoint_triggers_reorder(uint32_t codepoint) {
            type == FRIBIDI_TYPE_PDF || type == FRIBIDI_TYPE_LRI ||
            type == FRIBIDI_TYPE_RLI || type == FRIBIDI_TYPE_FSI ||
            type == FRIBIDI_TYPE_PDI;
-#else
-    (void)codepoint;
-    return false;
-#endif
 }
 
 static bool bidi_is_line_text_rect(ViewText* text, TextRect* rect, int line_number) {
@@ -240,8 +236,10 @@ static void bidi_scale_rect_widths(BidiCharFragment* chars, BidiRectInfo* rects,
     }
 }
 
+// use the pass's stable index type here; FriBidi is optional and its type is unavailable
+// when the platform omits the header even though these shared helpers still compile.
 static void bidi_update_span_visual_ranges(BidiCharFragment* chars,
-                                            const FriBidiStrIndex* visual_to_logical,
+                                            const int* visual_to_logical,
                                             BidiSpanInfo* spans, int span_count,
                                             int char_count) {
     for (int visual = 0; visual < char_count; visual++) {
@@ -276,7 +274,7 @@ static void bidi_place_visual_line(LayoutContext* lycon,
                                    BidiCharFragment* chars,
                                    BidiRectInfo* rects, int rect_count,
                                    BidiSpanInfo* spans, int span_count,
-                                   const FriBidiStrIndex* visual_to_logical,
+                                   const int* visual_to_logical,
                                    int char_count, int max_depth) {
     float cursor = bidi_line_origin(chars, spans, char_count, span_count);
     for (int visual = 0; visual < char_count; visual++) {
@@ -351,6 +349,7 @@ static void bidi_refresh_bounds(View* view, int line_number,
     (void)spans;
     (void)span_count;
 }
+#endif
 
 void layout_bidi_line(LayoutContext* lycon) {
 #if !RDT_HAS_FRIBIDI

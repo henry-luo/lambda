@@ -95,27 +95,18 @@ static void layout_apply_percentage_spacing_candidate(ViewBlock* block, int side
     if (!layout_resolve_percentage_value(candidate->value, inline_base, &resolved)) return;
 
     Spacing* spacing = margin ? (Spacing*)&block->boundary_mut()->margin : &block->boundary_mut()->padding;
-    switch (side) {
-        case 0:
-            spacing->top = resolved;
-            spacing->top_specificity = candidate->priority;
-            if (margin) block->boundary_mut()->margin.top_type = CSS_VALUE__PERCENTAGE;
-            break;
-        case 1:
-            spacing->right = resolved;
-            spacing->right_specificity = candidate->priority;
-            if (margin) block->boundary_mut()->margin.right_type = CSS_VALUE__PERCENTAGE;
-            break;
-        case 2:
-            spacing->bottom = resolved;
-            spacing->bottom_specificity = candidate->priority;
-            if (margin) block->boundary_mut()->margin.bottom_type = CSS_VALUE__PERCENTAGE;
-            break;
-        case 3:
-            spacing->left = resolved;
-            spacing->left_specificity = candidate->priority;
-            if (margin) block->boundary_mut()->margin.left_type = CSS_VALUE__PERCENTAGE;
-            break;
+    if (side < 0 || side >= 4) return;
+    float* values[4] = {&spacing->top, &spacing->right, &spacing->bottom, &spacing->left};
+    int64_t* priorities[4] = {&spacing->top_specificity, &spacing->right_specificity,
+                              &spacing->bottom_specificity, &spacing->left_specificity};
+    *values[side] = resolved;
+    *priorities[side] = candidate->priority;
+    if (margin) {
+        CssEnum* types[4] = {&block->boundary_mut()->margin.top_type,
+                             &block->boundary_mut()->margin.right_type,
+                             &block->boundary_mut()->margin.bottom_type,
+                             &block->boundary_mut()->margin.left_type};
+        *types[side] = CSS_VALUE__PERCENTAGE;
     }
 }
 
@@ -130,26 +121,27 @@ static void layout_collect_physical_spacing_candidates(
 
     CssPropertyCode shorthand = margin ? CSS_PROPERTY_MARGIN : CSS_PROPERTY_PADDING;
     CssDeclaration* decl = style_tree_get_declaration(block->specified_style, shorthand);
+    LayoutPercentageSpacingCandidate* candidates[4] = {top, right, bottom, left};
     if (decl && decl->value) {
-        layout_consider_percentage_spacing_candidate(top, decl, (CssValue*)css_box_shorthand_side_value(decl->value, 0));
-        layout_consider_percentage_spacing_candidate(right, decl, (CssValue*)css_box_shorthand_side_value(decl->value, 1));
-        layout_consider_percentage_spacing_candidate(bottom, decl, (CssValue*)css_box_shorthand_side_value(decl->value, 2));
-        layout_consider_percentage_spacing_candidate(left, decl, (CssValue*)css_box_shorthand_side_value(decl->value, 3));
+        for (int side = 0; side < 4; side++) {
+            layout_consider_percentage_spacing_candidate(
+                candidates[side], decl,
+                (CssValue*)css_box_shorthand_side_value(decl->value, side));
+        }
     }
 
-    CssPropertyCode prop_top = margin ? CSS_PROPERTY_MARGIN_TOP : CSS_PROPERTY_PADDING_TOP;
-    CssPropertyCode prop_right = margin ? CSS_PROPERTY_MARGIN_RIGHT : CSS_PROPERTY_PADDING_RIGHT;
-    CssPropertyCode prop_bottom = margin ? CSS_PROPERTY_MARGIN_BOTTOM : CSS_PROPERTY_PADDING_BOTTOM;
-    CssPropertyCode prop_left = margin ? CSS_PROPERTY_MARGIN_LEFT : CSS_PROPERTY_PADDING_LEFT;
-
-    CssDeclaration* side_decl = style_tree_get_declaration(block->specified_style, prop_top);
-    layout_consider_percentage_spacing_candidate(top, side_decl, side_decl ? side_decl->value : nullptr);
-    side_decl = style_tree_get_declaration(block->specified_style, prop_right);
-    layout_consider_percentage_spacing_candidate(right, side_decl, side_decl ? side_decl->value : nullptr);
-    side_decl = style_tree_get_declaration(block->specified_style, prop_bottom);
-    layout_consider_percentage_spacing_candidate(bottom, side_decl, side_decl ? side_decl->value : nullptr);
-    side_decl = style_tree_get_declaration(block->specified_style, prop_left);
-    layout_consider_percentage_spacing_candidate(left, side_decl, side_decl ? side_decl->value : nullptr);
+    CssPropertyCode properties[4] = {
+        margin ? CSS_PROPERTY_MARGIN_TOP : CSS_PROPERTY_PADDING_TOP,
+        margin ? CSS_PROPERTY_MARGIN_RIGHT : CSS_PROPERTY_PADDING_RIGHT,
+        margin ? CSS_PROPERTY_MARGIN_BOTTOM : CSS_PROPERTY_PADDING_BOTTOM,
+        margin ? CSS_PROPERTY_MARGIN_LEFT : CSS_PROPERTY_PADDING_LEFT
+    };
+    for (int side = 0; side < 4; side++) {
+        CssDeclaration* side_decl = style_tree_get_declaration(
+            block->specified_style, properties[side]);
+        layout_consider_percentage_spacing_candidate(
+            candidates[side], side_decl, side_decl ? side_decl->value : nullptr);
+    }
 }
 
 static void layout_collect_logical_spacing_candidates(
@@ -162,32 +154,44 @@ static void layout_collect_logical_spacing_candidates(
     if (!block || !block->specified_style) return;
 
     CssPropertyCode inline_prop = margin ? CSS_PROPERTY_MARGIN_INLINE : CSS_PROPERTY_PADDING_INLINE;
+    LayoutPercentageSpacingCandidate* inline_candidates[2] = {left, right};
     CssDeclaration* decl = style_tree_get_declaration(block->specified_style, inline_prop);
     if (decl && decl->value) {
-        layout_consider_percentage_spacing_candidate(left, decl, layout_pair_spacing_value(decl->value, false));
-        layout_consider_percentage_spacing_candidate(right, decl, layout_pair_spacing_value(decl->value, true));
+        for (int side = 0; side < 2; side++) {
+            layout_consider_percentage_spacing_candidate(
+                inline_candidates[side], decl, layout_pair_spacing_value(decl->value, side != 0));
+        }
     }
 
-    CssPropertyCode inline_start = margin ? CSS_PROPERTY_MARGIN_INLINE_START : CSS_PROPERTY_PADDING_INLINE_START;
-    CssPropertyCode inline_end = margin ? CSS_PROPERTY_MARGIN_INLINE_END : CSS_PROPERTY_PADDING_INLINE_END;
-    decl = style_tree_get_declaration(block->specified_style, inline_start);
-    layout_consider_percentage_spacing_candidate(left, decl, decl ? decl->value : nullptr);
-    decl = style_tree_get_declaration(block->specified_style, inline_end);
-    layout_consider_percentage_spacing_candidate(right, decl, decl ? decl->value : nullptr);
+    CssPropertyCode inline_properties[2] = {
+        margin ? CSS_PROPERTY_MARGIN_INLINE_START : CSS_PROPERTY_PADDING_INLINE_START,
+        margin ? CSS_PROPERTY_MARGIN_INLINE_END : CSS_PROPERTY_PADDING_INLINE_END
+    };
+    for (int side = 0; side < 2; side++) {
+        decl = style_tree_get_declaration(block->specified_style, inline_properties[side]);
+        layout_consider_percentage_spacing_candidate(
+            inline_candidates[side], decl, decl ? decl->value : nullptr);
+    }
 
     CssPropertyCode block_prop = margin ? CSS_PROPERTY_MARGIN_BLOCK : CSS_PROPERTY_PADDING_BLOCK;
     decl = style_tree_get_declaration(block->specified_style, block_prop);
+    LayoutPercentageSpacingCandidate* block_candidates[2] = {top, bottom};
     if (decl && decl->value) {
-        layout_consider_percentage_spacing_candidate(top, decl, layout_pair_spacing_value(decl->value, false));
-        layout_consider_percentage_spacing_candidate(bottom, decl, layout_pair_spacing_value(decl->value, true));
+        for (int side = 0; side < 2; side++) {
+            layout_consider_percentage_spacing_candidate(
+                block_candidates[side], decl, layout_pair_spacing_value(decl->value, side != 0));
+        }
     }
 
-    CssPropertyCode block_start = margin ? CSS_PROPERTY_MARGIN_BLOCK_START : CSS_PROPERTY_PADDING_BLOCK_START;
-    CssPropertyCode block_end = margin ? CSS_PROPERTY_MARGIN_BLOCK_END : CSS_PROPERTY_PADDING_BLOCK_END;
-    decl = style_tree_get_declaration(block->specified_style, block_start);
-    layout_consider_percentage_spacing_candidate(top, decl, decl ? decl->value : nullptr);
-    decl = style_tree_get_declaration(block->specified_style, block_end);
-    layout_consider_percentage_spacing_candidate(bottom, decl, decl ? decl->value : nullptr);
+    CssPropertyCode block_properties[2] = {
+        margin ? CSS_PROPERTY_MARGIN_BLOCK_START : CSS_PROPERTY_PADDING_BLOCK_START,
+        margin ? CSS_PROPERTY_MARGIN_BLOCK_END : CSS_PROPERTY_PADDING_BLOCK_END
+    };
+    for (int side = 0; side < 2; side++) {
+        decl = style_tree_get_declaration(block->specified_style, block_properties[side]);
+        layout_consider_percentage_spacing_candidate(
+            block_candidates[side], decl, decl ? decl->value : nullptr);
+    }
 }
 
 static void layout_reresolve_percentage_spacing(ViewBlock* block, float inline_base, bool margin) {

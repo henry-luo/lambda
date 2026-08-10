@@ -38,14 +38,48 @@ BoxMetrics layout_box_metrics(ViewBlock* block) {
     return layout_boundary_metrics(block ? block->bound : nullptr);
 }
 
-float layout_padding_border_width(ViewBlock* block) {
+void layout_store_given_axis(LayoutContext* lycon, ViewBlock* block, float size,
+                             bool horizontal, bool reset_type) {
+    if (!lycon || !block) return;
+    float* context_size = horizontal ? &lycon->block.given_width : &lycon->block.given_height;
+    *context_size = size;
+    if (!block->blk) return;
+    float* block_size = horizontal ? &block->blk->given_width : &block->blk->given_height;
+    *block_size = size;
+    if (reset_type) {
+        CssEnum* block_type = horizontal ? &block->blk->given_width_type
+                                         : &block->blk->given_height_type;
+        *block_type = CSS_VALUE__UNDEF;
+    }
+}
+
+void layout_clear_given_axis(LayoutContext* lycon, ViewBlock* block, bool horizontal) {
+    layout_store_given_axis(lycon, block, -1.0f, horizontal, true);
+}
+
+static float layout_padding_border_axis(ViewBlock* block, bool horizontal) {
     BoxMetrics metrics = layout_box_metrics(block);
-    return metrics.pad_border_h;
+    return horizontal ? metrics.pad_border_h : metrics.pad_border_v;
+}
+
+static float layout_content_from_border_axis(ViewBlock* block, float border_size,
+                                             bool horizontal) {
+    float content_size = border_size - layout_padding_border_axis(block, horizontal);
+    return content_size > 0.0f ? content_size : 0.0f;
+}
+
+static float layout_border_from_content_axis(ViewBlock* block, float content_size,
+                                             bool horizontal) {
+    float clamped_content = content_size > 0.0f ? content_size : 0.0f;
+    return clamped_content + layout_padding_border_axis(block, horizontal);
+}
+
+float layout_padding_border_width(ViewBlock* block) {
+    return layout_padding_border_axis(block, true);
 }
 
 float layout_padding_border_height(ViewBlock* block) {
-    BoxMetrics metrics = layout_box_metrics(block);
-    return metrics.pad_border_v;
+    return layout_padding_border_axis(block, false);
 }
 
 float layout_boundary_padding_border_axis(const BoundaryProp* bound, bool horizontal) {
@@ -54,53 +88,37 @@ float layout_boundary_padding_border_axis(const BoundaryProp* bound, bool horizo
 }
 
 float layout_content_width_from_border_box(ViewBlock* block, float border_width) {
-    BoxMetrics metrics = layout_box_metrics(block);
-    float content_width = border_width - metrics.pad_border_h;
-    return content_width > 0 ? content_width : 0;
+    return layout_content_from_border_axis(block, border_width, true);
 }
 
 float layout_content_height_from_border_box(ViewBlock* block, float border_height) {
-    BoxMetrics metrics = layout_box_metrics(block);
-    float content_height = border_height - metrics.pad_border_v;
-    return content_height > 0 ? content_height : 0;
+    return layout_content_from_border_axis(block, border_height, false);
 }
 
 float layout_border_width_from_content_box(ViewBlock* block, float content_width) {
-    BoxMetrics metrics = layout_box_metrics(block);
-    float clamped_content_width = content_width > 0 ? content_width : 0;
-    return clamped_content_width + metrics.pad_border_h;
+    return layout_border_from_content_axis(block, content_width, true);
 }
 
 float layout_border_height_from_content_box(ViewBlock* block, float content_height) {
-    BoxMetrics metrics = layout_box_metrics(block);
-    float clamped_content_height = content_height > 0 ? content_height : 0;
-    return clamped_content_height + metrics.pad_border_v;
+    return layout_border_from_content_axis(block, content_height, false);
 }
 
 float layout_boundary_content_size_from_border_box(const BoundaryProp* bound, float border_size, bool horizontal) {
-    BoxMetrics metrics = layout_boundary_metrics(bound);
-    float padding_border = horizontal ? metrics.pad_border_h : metrics.pad_border_v;
-    float content_size = border_size - padding_border;
+    float content_size = border_size - layout_boundary_padding_border_axis(bound, horizontal);
     return content_size > 0 ? content_size : 0;
 }
 
 float layout_boundary_border_size_from_content_box(const BoundaryProp* bound, float content_size, bool horizontal) {
-    BoxMetrics metrics = layout_boundary_metrics(bound);
-    float padding_border = horizontal ? metrics.pad_border_h : metrics.pad_border_v;
     float clamped_content_size = content_size > 0 ? content_size : 0;
-    return clamped_content_size + padding_border;
+    return clamped_content_size + layout_boundary_padding_border_axis(bound, horizontal);
 }
 
 float layout_content_size_from_border_box(ViewBlock* block, float border_size, bool horizontal) {
-    return horizontal
-        ? layout_content_width_from_border_box(block, border_size)
-        : layout_content_height_from_border_box(block, border_size);
+    return layout_content_from_border_axis(block, border_size, horizontal);
 }
 
 float layout_border_size_from_content_box(ViewBlock* block, float content_size, bool horizontal) {
-    return horizontal
-        ? layout_border_width_from_content_box(block, content_size)
-        : layout_border_height_from_content_box(block, content_size);
+    return layout_border_from_content_axis(block, content_size, horizontal);
 }
 
 float layout_css_size_to_content_box(const BoundaryProp* bound, CssEnum box_sizing, float css_size, bool horizontal) {
@@ -116,102 +134,81 @@ float layout_css_size_to_border_box(const BoundaryProp* bound, CssEnum box_sizin
 }
 
 float layout_floor_border_box_width(ViewBlock* block, float border_width) {
-    float floor_width = layout_padding_border_width(block);
-    return border_width < floor_width ? floor_width : border_width;
+    return layout_floor_border_box_axis(block, border_width, true);
 }
 
 float layout_floor_border_box_height(ViewBlock* block, float border_height) {
-    float floor_height = layout_padding_border_height(block);
-    return border_height < floor_height ? floor_height : border_height;
+    return layout_floor_border_box_axis(block, border_height, false);
 }
 
 float layout_floor_border_box_axis(ViewBlock* block, float border_size, bool horizontal) {
-    return horizontal
-        ? layout_floor_border_box_width(block, border_size)
-        : layout_floor_border_box_height(block, border_size);
+    float floor = layout_padding_border_axis(block, horizontal);
+    return border_size < floor ? floor : border_size;
+}
+
+static float layout_clamp_min_max_axis_value(ViewBlock* block, float size, bool horizontal) {
+    if (!block || !block->blk) return size;
+
+    BlockProp* prop = block->block_mut();
+    float maximum = horizontal ? prop->given_max_width : prop->given_max_height;
+    float minimum = horizontal ? prop->given_min_width : prop->given_min_height;
+    float constrained = size;
+    if (maximum >= 0.0f && constrained > maximum) {
+        constrained = maximum;
+        if (horizontal) log_debug("[LAYOUT_BOX] width clamped to max: %.2f", constrained);
+    }
+    // the minimum wins when declarations overlap, matching CSS used-value resolution.
+    if (minimum >= 0.0f && constrained < minimum) {
+        constrained = minimum;
+        if (horizontal) log_debug("[LAYOUT_BOX] width clamped to min: %.2f", constrained);
+    }
+    return constrained;
 }
 
 float layout_clamp_min_max_width(ViewBlock* block, float width) {
-    if (!block || !block->blk) return width;
-
-    float constrained_width = width;
-    if (block->block()->given_max_width >= 0 && constrained_width > block->block()->given_max_width) {
-        constrained_width = block->block()->given_max_width;
-        log_debug("[LAYOUT_BOX] width clamped to max: %.2f", constrained_width);
-    }
-    // given_min_width overrides given_max_width if both are specified
-    if (block->block()->given_min_width >= 0 && constrained_width < block->block()->given_min_width) {
-        constrained_width = block->block()->given_min_width;
-        log_debug("[LAYOUT_BOX] width clamped to min: %.2f", constrained_width);
-    }
-    return constrained_width;
+    return layout_clamp_min_max_axis_value(block, width, true);
 }
 
 float layout_clamp_min_max_height(ViewBlock* block, float height) {
-    if (!block || !block->blk) return height;
+    return layout_clamp_min_max_axis_value(block, height, false);
+}
 
-    float constrained_height = height;
-    if (block->block()->given_max_height >= 0 && constrained_height > block->block()->given_max_height) {
-        constrained_height = block->block()->given_max_height;
+static float layout_apply_min_max_axis_value(ViewBlock* block, float size,
+                                              bool horizontal, bool size_is_border_box) {
+    if (!block || !block->blk) return size;
+
+    float constrained = size;
+    if (size_is_border_box && !layout_uses_border_box(block)) {
+        // convert border-box candidates before content-box min/max constraints.
+        float content_size = layout_content_from_border_axis(block, size, horizontal);
+        content_size = layout_clamp_min_max_axis_value(block, content_size, horizontal);
+        constrained = layout_border_from_content_axis(block, content_size, horizontal);
+    } else {
+        constrained = layout_clamp_min_max_axis_value(block, size, horizontal);
     }
-    // given_min_height overrides given_max_height if both are specified
-    if (block->block()->given_min_height >= 0 && constrained_height < block->block()->given_min_height) {
-        constrained_height = block->block()->given_min_height;
+    if (size_is_border_box || layout_uses_border_box(block)) {
+        float floor = layout_padding_border_axis(block, horizontal);
+        if (constrained < floor) {
+            if (horizontal) {
+                log_debug("[LAYOUT_BOX] width border-box floor: %.2f -> %.2f (padding+border)",
+                          constrained, floor);
+            }
+            constrained = floor;
+        }
     }
-    return constrained_height;
+    return constrained;
 }
 
 float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_border_box) {
-    if (!block || !block->blk) return width;
-
-    float constrained_width = width;
-    if (width_is_border_box && !layout_uses_border_box(block)) {
-        // Convert the border-box candidate before applying content-box
-        // min/max declarations; clamping the raw border size loses the
-        // padding/border contribution at a content-box max-width.
-        float content_width = layout_content_width_from_border_box(block, width);
-        content_width = layout_clamp_min_max_width(block, content_width);
-        constrained_width = layout_border_width_from_content_box(block, content_width);
-    } else {
-        constrained_width = layout_clamp_min_max_width(block, width);
-    }
-    if (width_is_border_box || layout_uses_border_box(block)) {
-        BoxMetrics metrics = layout_box_metrics(block);
-        if (constrained_width < metrics.pad_border_h) {
-            log_debug("[LAYOUT_BOX] width border-box floor: %.2f -> %.2f (padding+border)",
-                      constrained_width, metrics.pad_border_h);
-            constrained_width = metrics.pad_border_h;
-        }
-    }
-    return constrained_width;
+    return layout_apply_min_max_axis_value(block, width, true, width_is_border_box);
 }
 
 float layout_apply_min_max_height(ViewBlock* block, float height, bool height_is_border_box) {
-    if (!block || !block->blk) return height;
-
-    float constrained_height = height;
-    if (height_is_border_box && !layout_uses_border_box(block)) {
-        // BFC float containment produces a border-box candidate; convert it
-        // before applying content-box min/max constraints or max-height is bypassed.
-        float content_height = layout_content_height_from_border_box(block, height);
-        content_height = layout_clamp_min_max_height(block, content_height);
-        constrained_height = layout_border_height_from_content_box(block, content_height);
-    } else {
-        constrained_height = layout_clamp_min_max_height(block, height);
-    }
-    if (height_is_border_box || layout_uses_border_box(block)) {
-        BoxMetrics metrics = layout_box_metrics(block);
-        if (constrained_height < metrics.pad_border_v) {
-            constrained_height = metrics.pad_border_v;
-        }
-    }
-    return constrained_height;
+    return layout_apply_min_max_axis_value(block, height, false, height_is_border_box);
 }
 
 float layout_apply_min_max_axis(ViewBlock* block, float size, bool horizontal, bool size_is_border_box) {
-    return horizontal
-        ? layout_apply_min_max_width(block, size, size_is_border_box)
-        : layout_apply_min_max_height(block, size, size_is_border_box);
+    return layout_apply_min_max_axis_value(block, size, horizontal, size_is_border_box);
 }
 
 float adjust_min_max_width(ViewBlock* block, float width) {
