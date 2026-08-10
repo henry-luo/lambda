@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "The int53 validity guard in front of a proven raw int[] store must use the 64-bit GE/LE comparisons. MIR's `S` suffix selects the 32-bit form, which truncates the int53 bounds to 1 and -1 and makes the guard unsatisfiable, so every proven store falls through to lambda_array_set_checked_inplace_lane.",
+  "checks": [
+    {
+      "in_func": "_tune17b_swap_#",
+      "expect": [
+        "ge\t{{r}}, {{r}}, -9007199254740991",
+        "le\t{{r}}, {{r}}, 9007199254740991"
+      ],
+      "forbid": [
+        "ges\t{{r}}, {{r}}, -9007199254740991",
+        "les\t{{r}}, {{r}}, 9007199254740991"
+      ]
+    }
+  ]
+}
