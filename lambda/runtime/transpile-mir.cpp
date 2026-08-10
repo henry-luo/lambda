@@ -2043,15 +2043,6 @@ static bool mir_function_has_borrowed_params(AstFuncNode* fn_node) {
     return false;
 }
 
-static bool mir_borrowed_map_param_requires_boxed_body(TypeId type_id) {
-    // A borrowed map Item is still a GC-managed container pointer. A native
-    // body may allocate before the next write, but its raw parameter has no
-    // caller-owned root slot or map write-back carrier. Keep that body boxed;
-    // typed numeric arrays have a separate raw witness/COW protocol (D5.2).
-    return type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT ||
-        type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_ELEMENT;
-}
-
 static bool mir_borrowed_param_requires_raw_abi(AstFuncNode* fn_node,
         const TypeId* resolved_types, int resolved_count) {
     int index = 0;
@@ -2060,8 +2051,14 @@ static bool mir_borrowed_param_requires_raw_abi(AstFuncNode* fn_node,
         if (mir_param_ownership(param) == MIR_PARAM_BORROWED_VAR) {
             TypeId resolved = index < resolved_count
                 ? resolved_types[index] : mir_param_type_at(fn_node, index);
-            if (mir_borrowed_map_param_requires_boxed_body(resolved) ||
-                    mir_is_native_param_type(resolved)) {
+            // Only a param that would take a *raw* carrier can lose its
+            // caller-owned root by entering the native body. Container kinds
+            // (map/object/vmap/element and typed arrays) are never native
+            // param types, so they stay boxed Items in both bodies and their
+            // borrow/COW write-back is owned by the `_b` adapter either way.
+            // Disqualifying the whole function for such a param only stripped
+            // the *sibling* scalar params of their native lanes (D3.2.1, D5.2).
+            if (mir_is_native_param_type(resolved)) {
                 return true;
             }
         }
@@ -13940,10 +13937,15 @@ static void emit_int_lane_validity_check(MirTranspiler* mt, MIR_reg_t value,
     MIR_reg_t lower_ok = new_reg(mt, "lane_lo_ok", MIR_T_I64);
     MIR_reg_t upper_ok = new_reg(mt, "lane_hi_ok", MIR_T_I64);
     MIR_reg_t valid = new_reg(mt, "lane_valid", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GES,
+    // MIR's `S` suffix selects the 32-bit comparison, not "signed": GES/LES
+    // truncate both operands to int32. Against the 64-bit int53 bounds that
+    // made the test `(int32)v >= 1 && (int32)v <= -1` — unsatisfiable, so every
+    // proven raw int store fell through to the checked setter. The 64-bit
+    // GE/LE are the same ops the cold path already uses (S4.1, D2.2.2).
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE,
         MIR_new_reg_op(mt->ctx, lower_ok), MIR_new_reg_op(mt->ctx, value),
         MIR_new_int_op(mt->ctx, INT53_MIN)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LES,
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LE,
         MIR_new_reg_op(mt->ctx, upper_ok), MIR_new_reg_op(mt->ctx, value),
         MIR_new_int_op(mt->ctx, INT53_MAX)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
@@ -15525,13 +15527,16 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             bool routed_to_inferred_slow_body = false;
             StrBuf* entry_name_buf = NULL;
             const char* direct_call_name = fn_mangled;
-        if (borrowed_var_call && fn_def) {
-                // A borrowed var parameter aliases a caller Item root. The raw
-                // direct edge has no public write-back boundary, so an
-                // allocating callee can observe a stale container after its
-                // first safepoint. Enter the generated boxed adapter, which
-                // owns the borrow/COW admission before invoking the raw body
-                // (D3.3.1, D5.2).
+            // A borrowed var parameter aliases a caller Item root, so it must
+            // reach the callee as an Item rather than a raw carrier. That is
+            // already guaranteed structurally: mir_borrowed_param_requires_raw_abi
+            // suppresses the native body whenever any var param would take a
+            // native lane, so wherever a native entry exists every borrowed
+            // param is a boxed Item in that entry too. `_b` is a thin unbox-and-
+            // call wrapper and performs no extra borrow/COW admission, so
+            // forcing the route only stripped the *sibling* scalar arguments of
+            // their raw lanes (D3.3.1, D5.2).
+            if (borrowed_var_call && fn_def && !native_call) {
                 entry_name_buf = strbuf_new_cap(64);
                 write_fn_name_ex(entry_name_buf, fn_def,
                     ident->entry ? ident->entry->import : NULL, "_b");

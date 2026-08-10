@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "A borrowed `var` record parameter keeps its function's native body and its call sites on the direct raw edge. Routing through the `_b` adapter re-boxes every sibling scalar argument without adding any borrow/COW admission.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "call\t_tune17b_step_"
+      ],
+      "forbid": [
+        "call\t_tune17b_step_b_"
+      ]
+    }
+  ]
+}
