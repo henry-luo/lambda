@@ -1959,10 +1959,23 @@ int main(int argc, char *argv[]) {
     log_debug("initializing memory tracker");
     // Check environment variable for debug mode
     const char* memtrack_env = shell_getenv("MEMTRACK_MODE");
-    MemtrackMode mode = MEMTRACK_MODE_STATS;  // Default to stats mode
+    // Tracked modes register every allocation in a process-global map under a
+    // mutex, so the cost is per-allocation and unbounded in hot code. That is a
+    // diagnostic, not a runtime service: once pools stopped owning their own
+    // backing memory, pool_alloc began routing each allocation through this
+    // registry and the default turned into a ~5x tax on allocation-heavy work.
+    // Keep the leak/stat reporting on for debug builds, off for release, and
+    // let MEMTRACK_MODE override either way.
+#ifdef NDEBUG
+    MemtrackMode mode = MEMTRACK_MODE_OFF;
+#else
+    MemtrackMode mode = MEMTRACK_MODE_STATS;
+#endif
     if (memtrack_env && strcmp(memtrack_env, "DEBUG") == 0) {
         mode = MEMTRACK_MODE_DEBUG;
         log_debug("memory tracker in DEBUG mode");
+    } else if (memtrack_env && strcmp(memtrack_env, "STATS") == 0) {
+        mode = MEMTRACK_MODE_STATS;
     } else if (memtrack_env && strcmp(memtrack_env, "OFF") == 0) {
         mode = MEMTRACK_MODE_OFF;
     }

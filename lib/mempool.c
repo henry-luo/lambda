@@ -39,20 +39,19 @@ MEMPOOL_WEAK void mem_free_loc(void* ptr, int line) {
 
 typedef struct PoolBlock PoolBlock;
 
-typedef struct PoolLookupEntry {
-    void* user;
-    PoolBlock* block;
-} PoolLookupEntry;
-
+// One inline metadata record per allocation (design §5.2 / MP-14, D4.2.5): the
+// record sits immediately before the payload, so ownership is resolved by fixed
+// header arithmetic and there is no side index that can fail after the system
+// allocation succeeded. `base` and `allocated` are deliberately absent: the base
+// address is the record address, and the owned size is
+// `requested + block_header_size()`. 48 bytes, 16-aligned.
 struct PoolBlock {
     uint32_t magic;
     uint32_t _pad;
     struct Pool* owner;
     PoolBlock* prev;
     PoolBlock* next;
-    void* base;
     size_t requested;
-    size_t allocated;
 };
 
 struct Pool {
@@ -67,9 +66,6 @@ struct Pool {
     size_t high_water_live_bytes;
     size_t free_count;
     void* mem_node;
-    PoolLookupEntry* lookup;
-    size_t lookup_capacity;
-    size_t lookup_count;
 };
 
 static unsigned next_pool_id = 1;
@@ -94,96 +90,15 @@ static size_t block_header_size(void) {
     return align_up_size(sizeof(PoolBlock), POOL_ALIGNMENT);
 }
 
-#define POOL_LOOKUP_TOMBSTONE ((void*)(uintptr_t)1)
-#define POOL_LOOKUP_INITIAL_CAPACITY 64u
+// the one-record budget (§5.2): growing PoolBlock past 48 B re-inflates the
+// per-allocation overhead R3 removed, so a regression must be deliberate.
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(PoolBlock) <= 48, "PoolBlock must stay within one 48-byte record");
+#endif
 
-static size_t pool_lookup_hash(void* ptr, size_t capacity) {
-    uintptr_t value = (uintptr_t)ptr >> 4;
-    value ^= value >> 23;
-    value *= UINT64_C(0x9E3779B97F4A7C15);
-    return (size_t)value & (capacity - 1);
-}
-
-static bool pool_lookup_resize(Pool* pool, size_t new_capacity) {
-    PoolLookupEntry* entries = (PoolLookupEntry*)calloc(
-        new_capacity, sizeof(PoolLookupEntry));
-    if (!entries) return false;
-    for (size_t i = 0; i < pool->lookup_capacity; i++) {
-        PoolLookupEntry old = pool->lookup[i];
-        if (!old.user || old.user == POOL_LOOKUP_TOMBSTONE) continue;
-        size_t slot = pool_lookup_hash(old.user, new_capacity);
-        while (entries[slot].user) slot = (slot + 1) & (new_capacity - 1);
-        entries[slot] = old;
-    }
-    free(pool->lookup);
-    pool->lookup = entries;
-    pool->lookup_capacity = new_capacity;
-    return true;
-}
-
-static bool pool_lookup_init(Pool* pool) {
-    return pool_lookup_resize(pool, POOL_LOOKUP_INITIAL_CAPACITY);
-}
-
-static bool pool_lookup_insert(Pool* pool, void* user, PoolBlock* block) {
-    if (!pool || !user || !block) return false;
-    if (pool->lookup_count * 2 >= pool->lookup_capacity &&
-        !pool_lookup_resize(pool, pool->lookup_capacity * 2)) {
-        return false;
-    }
-    size_t slot = pool_lookup_hash(user, pool->lookup_capacity);
-    size_t first_tombstone = SIZE_MAX;
-    for (;;) {
-        void* key = pool->lookup[slot].user;
-        if (!key) {
-            if (first_tombstone != SIZE_MAX) slot = first_tombstone;
-            pool->lookup[slot].user = user;
-            pool->lookup[slot].block = block;
-            pool->lookup_count++;
-            return true;
-        }
-        if (key == POOL_LOOKUP_TOMBSTONE) {
-            if (first_tombstone == SIZE_MAX) first_tombstone = slot;
-        } else if (key == user) {
-            return false;
-        }
-        slot = (slot + 1) & (pool->lookup_capacity - 1);
-    }
-}
-
-static PoolBlock* pool_lookup_find(Pool* pool, void* user) {
-    if (!pool || !user || !pool->lookup_capacity) return NULL;
-    size_t slot = pool_lookup_hash(user, pool->lookup_capacity);
-    for (;;) {
-        void* key = pool->lookup[slot].user;
-        if (!key) return NULL;
-        if (key != POOL_LOOKUP_TOMBSTONE && key == user) {
-            return pool->lookup[slot].block;
-        }
-        slot = (slot + 1) & (pool->lookup_capacity - 1);
-    }
-}
-
-static void pool_lookup_remove(Pool* pool, void* user) {
-    if (!pool || !user || !pool->lookup_capacity) return;
-    size_t slot = pool_lookup_hash(user, pool->lookup_capacity);
-    for (;;) {
-        void* key = pool->lookup[slot].user;
-        if (!key) return;
-        if (key != POOL_LOOKUP_TOMBSTONE && key == user) {
-            pool->lookup[slot].user = POOL_LOOKUP_TOMBSTONE;
-            pool->lookup[slot].block = NULL;
-            if (pool->lookup_count > 0) pool->lookup_count--;
-            return;
-        }
-        slot = (slot + 1) & (pool->lookup_capacity - 1);
-    }
-}
-
-static void pool_lookup_clear(Pool* pool) {
-    if (!pool || !pool->lookup) return;
-    memset(pool->lookup, 0, pool->lookup_capacity * sizeof(PoolLookupEntry));
-    pool->lookup_count = 0;
+// the owned size of one allocation: inline record + payload
+static size_t pool_block_owned_size(const PoolBlock* block) {
+    return block->requested + block_header_size();
 }
 
 static Pool* pool_alloc_struct(void) {
@@ -212,7 +127,6 @@ static void pool_init(Pool* pool) {
     pool->pool_id = next_pool_id++;
     pool->valid = POOL_VALID_MARKER;
     pool->category = MEM_CAT_SYSTEM;
-    (void)pool_lookup_init(pool);
 }
 
 static void pool_link_block(Pool* pool, PoolBlock* block) {
@@ -231,20 +145,29 @@ static void pool_unlink_block(Pool* pool, PoolBlock* block) {
     block->next = NULL;
 }
 
+// resolve the inline record by fixed header arithmetic (§5.2): the payload is
+// always block_header_size() past its own record, so ownership needs no side
+// index. magic + owner reject foreign, already-freed and interior pointers.
 static PoolBlock* pool_find_block(Pool* pool, void* ptr) {
-    return pool_lookup_find(pool, ptr);
+    if (!pool || !ptr) return NULL;
+    PoolBlock* block = (PoolBlock*)((uint8_t*)ptr - block_header_size());
+    if (block->magic != POOL_BLOCK_MAGIC || block->owner != pool) return NULL;
+    return block;
 }
 
 static void pool_release_block(Pool* pool, PoolBlock* block, bool count_free) {
     if (!pool || !block) return;
-    void* user = (uint8_t*)block->base + block_header_size();
-    pool_lookup_remove(pool, user);
     pool_unlink_block(pool, block);
-    pool->live_bytes = pool->live_bytes >= block->allocated
-        ? pool->live_bytes - block->allocated : 0;
+    size_t owned = pool_block_owned_size(block);
+    // clear magic before the record's memory is handed back: with ownership
+    // resolved by header arithmetic, a stale or double-freed pointer would
+    // otherwise still parse as a valid record if the allocator has not yet
+    // reused the bytes. Zeroing it makes pool_find_block reject them.
+    block->magic = 0;
+    pool->live_bytes = pool->live_bytes >= owned ? pool->live_bytes - owned : 0;
     if (count_free) pool->free_count++;
-    if (mem_free_loc) mem_free_loc(block->base, 0);
-    else free(block->base);
+    if (mem_free_loc) mem_free_loc(block, 0);
+    else free(block);
 }
 
 static void pool_release_all_blocks(Pool* pool) {
@@ -269,10 +192,6 @@ Pool* pool_create(void) {
     Pool* pool = pool_alloc_struct();
     if (!pool) return NULL;
     pool_init(pool);
-    if (!pool->lookup) {
-        pool_free_struct(pool);
-        return NULL;
-    }
     return pool;
 }
 
@@ -287,15 +206,12 @@ void pool_destroy(Pool* pool) {
     if (!pool || pool->valid != POOL_VALID_MARKER) return;
     log_debug("pool_destroy: destroying pool=%p (id=%u)", (void*)pool, pool->pool_id);
     pool_drain(pool);
-    free(pool->lookup);
-    pool->lookup = NULL;
     pool_free_struct(pool);
 }
 
 void pool_reset(Pool* pool) {
     if (!pool || pool->valid != POOL_VALID_MARKER) return;
     pool_release_all_blocks(pool);
-    pool_lookup_clear(pool);
 }
 
 void pool_set_mem_category(Pool* pool, int category) {
@@ -318,14 +234,7 @@ void* pool_alloc(Pool* pool, size_t size) {
     if (!base) return NULL;
     PoolBlock* block = (PoolBlock*)base;
     block->magic = POOL_BLOCK_MAGIC;
-    block->base = base;
     block->requested = size;
-    block->allocated = total;
-    void* user = (uint8_t*)base + header;
-    if (!pool_lookup_insert(pool, user, block)) {
-        mem_free_loc(base, 0);
-        return NULL;
-    }
     pool_link_block(pool, block);
 
     pool->alloc_bytes += size;
@@ -419,8 +328,10 @@ void pool_get_mem_stats(Pool* pool, size_t* reserved, size_t* in_use,
 }
 
 size_t pool_allocation_size(Pool* pool, void* ptr) {
+    // header-inclusive, matching what pool_release_block subtracts from
+    // live_bytes (radiant/view_reuse.cpp relies on the symmetry)
     PoolBlock* block = pool_find_block(pool, ptr);
-    return block ? block->allocated : 0;
+    return block ? pool_block_owned_size(block) : 0;
 }
 
 void pool_get_detailed_stats(Pool* pool, PoolStats* out) {

@@ -1,6 +1,6 @@
 # Memory Context — Central Allocator Factory & Introspection
 
-**Scope**: Lambda + Radiant memory management (continuation of [Memory_Pooling.md](./Memory_Pooling.md))
+**Scope**: Lambda + Radiant memory management (continuation of the retired `Memory_Pooling.md` survey — see [Lambda_Design_Mem_Heap.md Appendix A](./Lambda_Design_Mem_Heap.md))
 **Status**: Implementation record — allocator retirement and Stage 2 foundation complete
 **Date**: 2026-08-08
 
@@ -116,7 +116,7 @@ Today the codebase has **three allocator ownership shapes** — grouped variable
 - Their parent/child (backing) relationships
 - Whether any leaked past their owner's lifetime, or were torn down out of order
 
-This makes leak detection, profiling, and lifecycle correctness all manual and error-prone — e.g. the Arena-before-Pool-drain ordering hazard ([Memory_Pooling.md §I2](./Memory_Pooling.md)) is real and currently only documented in prose.
+This makes leak detection, profiling, and lifecycle correctness all manual and error-prone — e.g. the Arena-before-Pool-drain ordering hazard ([Memory_Pooling.md §I2](./Lambda_Design_Mem_Heap.md)) is real and currently only documented in prose.
 
 **Design**: `MemContext` is the **single factory through which every allocator is created and destroyed**. Direct legacy constructors become internal compatibility entry points during migration; application call sites route through the context and the existing `memtrack_pool_*` group surface. Because the context *owns* every allocator, it can:
 
@@ -169,7 +169,7 @@ Fields the factory will populate / take ownership of:
 - `Heap { Pool* pool; struct gc_heap* gc; }` — `lambda/transpiler.hpp:10`
 - `LayoutContext { Pool* pool; ScratchArena scratch; }` — `radiant/layout.hpp:346,369`
 - `RenderContext { ScratchArena scratch; }` — `render.hpp`
-- `ViewTree { Arena* arena; Pool* pool; }` — added in [Memory_Pooling.md §8.3 item 5](./Memory_Pooling.md)
+- `ViewTree { Arena* arena; Pool* pool; }` — added in [Memory_Pooling.md §8.3 item 5](./Lambda_Design_Mem_Heap.md)
 - `Input { Pool* pool; Arena* arena; NamePool* name_pool; ShapePool* shape_pool; ArrayList* type_list; void* url; Input* parent; }` — `lambda/lambda-data.hpp:576`; created by `Input::create()` at `lambda/input/input.cpp:894` (arena/name_pool/shape_pool spun up at `:905-907`)
 - `InputManager { Pool* global_pool; ArrayList* inputs; }` — `lambda/input/input.cpp:920`; the process-wide owner of all `Input`s
 - `DomDocument { Input* input; Pool* pool; Arena* arena; Url* url; NetworkResourceManager* resource_manager; ViewTree* view_tree; }` — `lambda/input/css/dom_element.hpp:53` — the real "document" object tying URL → parsed tree → view tree → network resources
@@ -245,7 +245,7 @@ MemContext (root)
 ### What ownership buys us over registration
 1. **No off-graph allocators**: there is no `pool_create()` in application code to forget to register.
 2. **Parent edge is automatic**: `mem_arena_create(ctx, backing_pool, …)` reads `backing_pool->mem_node` and wires the edge — call sites cannot get it wrong.
-3. **Cascade teardown**: `mem_context_destroy(ctx)` (or destroying a sub-context) frees owned allocators in reverse-dependency order, structurally eliminating the [§I2](./Memory_Pooling.md) ordering hazard.
+3. **Cascade teardown**: `mem_context_destroy(ctx)` (or destroying a sub-context) frees owned allocators in reverse-dependency order, structurally eliminating the [§I2](./Lambda_Design_Mem_Heap.md) ordering hazard.
 4. **Consistent policy**: chunk-size defaults, mmap-vs-rpmalloc choice, debug poisoning, and budget caps can be applied uniformly in one place instead of per call site.
 
 ---
@@ -470,7 +470,7 @@ Under `MEM_CONTEXT_DISABLED` (release-minimal builds), the factory functions bec
 This is what the factory model unlocks that registration alone cannot.
 
 ### 7.1 The `child_count` invariant
-Each node tracks how many live allocators are backed by it. Destroying or draining a node requires `child_count == 0`. This makes the [§I2](./Memory_Pooling.md) hazard a **runtime-enforced invariant**:
+Each node tracks how many live allocators are backed by it. Destroying or draining a node requires `child_count == 0`. This makes the [§I2](./Lambda_Design_Mem_Heap.md) hazard a **runtime-enforced invariant**:
 
 ```c
 void mem_pool_drain(Pool* pool) {
@@ -508,7 +508,7 @@ void mem_context_destroy(MemContext* ctx) {
 ### 7.3 Scoped contexts
 - **Root context**: process-lifetime singletons (global font arena, shape pool).
 - **Per-document / per-request sub-context**: created on `Input::create` or per layout pass; destroyed when the document is dropped — bulk-frees the whole input/view/layout allocator subtree. This is the natural carrier of `doc_id`: the sub-context calls `mem_doc_register(ctx, url, parent_doc)` once, stores the returned id in `ctx->doc_id`, and every allocator the factory creates under it inherits that id automatically ([§5 registry](#document-url-registry), [§6](#6-the-factory-api)). Sub-resources (CSS/JS/font/image loaded by the page) register with the page's `doc_id` as `parent_doc`, so reports roll them up under the page.
-- **Per-worker-thread sub-context**: link/unlink hit the thread-local context lock (uncontended); only root aggregation locks across threads. Mirrors rpmalloc's per-thread heap model and addresses the [§P2](./Memory_Pooling.md) `rpmalloc_thread_finalize()` concern (the context teardown is the natural hook).
+- **Per-worker-thread sub-context**: link/unlink hit the thread-local context lock (uncontended); only root aggregation locks across threads. Mirrors rpmalloc's per-thread heap model and addresses the [§P2](./Lambda_Design_Mem_Heap.md) `rpmalloc_thread_finalize()` concern (the context teardown is the natural hook).
 
 ---
 
@@ -694,7 +694,7 @@ Because the factory is **mandatory**, this is a real (but mechanical) migration 
 - Register `UiContext.image_cache` and the ThorVG vector/paint caches as `MEM_KIND_CACHE`/`MEM_ROLE_MEDIA` nodes; wire the `image.cache`/`vector.cache` reclaimers.
 
 **Phase 4 — Cascade teardown adoption**
-- Replace manual multi-allocator teardown sequences (the fragile [§I2](./Memory_Pooling.md) ordering) with `mem_context_destroy(sub_ctx)`. Remove hand-ordered destroy calls.
+- Replace manual multi-allocator teardown sequences (the fragile [§I2](./Lambda_Design_Mem_Heap.md) ordering) with `mem_context_destroy(sub_ctx)`. Remove hand-ordered destroy calls.
 
 **Phase 5 — Consumers** — ✅ **JSON dump + leak report DONE; `--mem-top` TUI pending**
 - `mem_context_dump_json_file(ctx, path)` and `mem_context_report_leaks(ctx)` added to `lib/mem_context.{h,c}`. `lambda/main.cpp` parses `--mem-dump[=PATH]` (early, stripped from argv like `--no-log`; default `./temp/mem_snapshot.json`) and, at the process-exit cleanup path (after `runtime_cleanup`, before `mempool_cleanup`), writes the JSON snapshot and logs a `MEMCTX-LEAK:` report of survivors.
@@ -725,7 +725,7 @@ Each phase is independently shippable and behavior-neutral; the registry is a no
 | R3 | Lock contention if many short-lived pools are created in a loop | Per-thread / per-document sub-contexts ([§7.3](#73-scoped-contexts)); create/destroy is O(1). Measure against the temp-pool sites. |
 | R4 | `mem_node` field bloats every allocator | One pointer (8 B) + slab node; compiled out under `MEM_CONTEXT_DISABLED`. |
 | R5 | rpmalloc `alloc_count` is an upper bound (frees not subtracted) | Flagged in snapshot; `bytes_in_use` marked best-effort for rpmalloc pools. |
-| R6 | A site destroys a backing pool while children live | `child_count` invariant refuses + `log_error` ([§7.1](#71-the-child_count-invariant)); cascade teardown does it correctly. Turns [§I2](./Memory_Pooling.md) into an enforced rule. |
+| R6 | A site destroys a backing pool while children live | `child_count` invariant refuses + `log_error` ([§7.1](#71-the-child_count-invariant)); cascade teardown does it correctly. Turns [§I2](./Lambda_Design_Mem_Heap.md) into an enforced rule. |
 | Q1 | Root context lazy vs explicit init | Lean lazy (mirrors `ensure_rpmalloc_initialized`), explicit teardown in `main()` exit alongside `mempool_cleanup()`. |
 | Q2 | Keep raw primitives publicly callable for tests, or fully seal them? | Keep `*_raw` in a private/test-only header so GTest fixtures can build allocators without a context; application code uses the factory only. |
 | Q3 | mmap-backed reuse pool (`script_runner.cpp`) and FreeType realloc pool — still factory-created? | Yes — they are created via `mem_pool_create_mmap` / `mem_pool_create`; the factory just records them. No behavior change. |
@@ -760,7 +760,7 @@ Each phase is independently shippable and behavior-neutral; the registry is a no
 
 ## 14. Additional Suggestions
 
-1. **Leak gate in CI**. After `make test`, capture a teardown snapshot and fail if any node outlives its context (excluding process-lifetime singletons). Catches the [§I2](./Memory_Pooling.md) bug class automatically.
+1. **Leak gate in CI**. After `make test`, capture a teardown snapshot and fail if any node outlives its context (excluding process-lifetime singletons). Catches the [§I2](./Lambda_Design_Mem_Heap.md) bug class automatically.
 
 2. **`child_count` ordering assertions** ([§7.1](#71-the-child_count-invariant)). Already core to the factory — turns the documented ordering hazard into an enforced invariant rather than a convention.
 
@@ -788,7 +788,7 @@ Stage 1 makes the context the **owner** of every allocator and gives it a comple
 
 ### 15.1 Motivation & Position in the Stack
 
-Today an OOM is handled locally and pessimistically. After the [§P1](./Memory_Pooling.md) fix, `mmap_pool_grow` on `MAP_FAILED` just nulls the cursor and the caller returns `NULL` — the failure propagates with no attempt to recover, even though the process may be holding tens of MB of **reclaimable** memory: font glyph caches, document caches, decompression scratch, empty trailing arena chunks, dead GC objects awaiting collection.
+Today an OOM is handled locally and pessimistically. After the [§P1](./Lambda_Design_Mem_Heap.md) fix, `mmap_pool_grow` on `MAP_FAILED` just nulls the cursor and the caller returns `NULL` — the failure propagates with no attempt to recover, even though the process may be holding tens of MB of **reclaimable** memory: font glyph caches, document caches, decompression scratch, empty trailing arena chunks, dead GC objects awaiting collection.
 
 Other runtimes never give up on the first failure. The JVM runs a full GC (and clears `SoftReference` caches) before throwing `OutOfMemoryError`; V8 fires a `NearHeapLimitCallback`; iOS/Android push memory-warning callbacks so apps drop caches; the Linux kernel runs `kswapd`/direct reclaim before the OOM killer. Stage 2 brings the same **reclaim-then-retry** discipline to Lambda/Radiant, centralized in the one component that already knows what every allocator is for and how big it is.
 
@@ -881,7 +881,7 @@ score = harm_weight(harm) * W_HARM
 
 So the default escalation is: **drop recomputable caches** (harm 0, regenerated on demand) → **compact** (harm 1, no data lost, just slower next access) → **lossy drops / forced GC** (harm 2) → **back-pressure**. The cost model is the same family of reasoning as buffer-pool eviction (clock-sweep) and `SoftReference` clearing — cheapest-to-lose memory goes first.
 
-**Example reclaimers** (mapped to real subsystems from [Memory_Pooling.md](./Memory_Pooling.md)):
+**Example reclaimers** (mapped to real subsystems from [Memory_Pooling.md](./Lambda_Design_Mem_Heap.md)):
 
 | Reclaimer | Role | harm | What it does |
 |-----------|------|------|--------------|
@@ -1008,7 +1008,7 @@ Concrete edits, all at *backing-growth* sites (never per-object):
 
 | Site | Today | Stage 2 |
 |------|-------|---------|
-| `mempool.c` `mmap_pool_grow` | `mmap()`; on `MAP_FAILED` null cursor ([§P1](./Memory_Pooling.md)) | call `mem_page_alloc(ctx, chunk, MEM_PAGE_MMAP, pool->mem_node)` |
+| `mempool.c` `mmap_pool_grow` | `mmap()`; on `MAP_FAILED` null cursor ([§P1](./Lambda_Design_Mem_Heap.md)) | call `mem_page_alloc(ctx, chunk, MEM_PAGE_MMAP, pool->mem_node)` |
 | `mempool.c` rpmalloc span growth | `rpmalloc_heap_alloc` | wrap span acquisition through `mem_page_alloc(…, MEM_PAGE_RPMALLOC, …)` |
 | `arena.c` chunk allocation | chunk from `pool_alloc` | route chunk request via the pool, which routes pages via `mem_page_alloc` (no arena change needed — it inherits) |
 | `gc_heap` block growth | direct pool/OS | `mem_page_alloc(…, requester = heap->mem_node)`; also registers the `heap.gc` reclaimer |
@@ -1020,7 +1020,7 @@ Concrete edits, all at *backing-growth* sites (never per-object):
 | `mir.c` `jit_init` | `MIR_context_t`, mmap'd code pages, no accounting | register `Script.jit_context` as `MEM_KIND_JIT` node; optionally hook MIR's code allocator through `mem_page_alloc` for exact code-size accounting ([§3.2](#32-jit-code-font--media-caches-also-centralized), [Q7](#1511-risks--open-questions)) |
 | `font_context.c` | `glyph_arena` + LRU hashmap caches + per-doc reset (`font_context_reset_document_fonts`) | `glyph_arena` factory-created (role FONT); register caches as `MEM_KIND_CACHE`; system fonts `doc_id=0`, document fonts doc-scoped → register `font.glyph_cache` reclaimer (L0) |
 | `surface.cpp` / `rdt_vector_tvg.cpp` | `UiContext.image_cache` (path→`ImageSurface`), ThorVG global caches | register as `MEM_KIND_CACHE`/`MEM_ROLE_MEDIA`; page images doc-scoped, ThorVG caches `doc_id=0` → register `image.cache`/`vector.cache` reclaimers (L0) |
-| `arena.c` | free-list coalescing already exists ([§A4/§8.3.3](./Memory_Pooling.md)) | expose as the `arena.compact` reclaimer (L1) |
+| `arena.c` | free-list coalescing already exists ([§A4/§8.3.3](./Lambda_Design_Mem_Heap.md)) | expose as the `arena.compact` reclaimer (L1) |
 
 Most subsystems only need to **register a reclaimer**; the page-routing is concentrated in `mempool.c` and `gc_heap`, which everything else is already backed by.
 
@@ -1046,7 +1046,7 @@ Most subsystems only need to **register a reclaimer**; the page-routing is conce
 | S6 | Aborting mid-task leaks or corrupts | Abort is cooperative at safe points only; cleanup is Stage 1 `mem_context_destroy` cascade — never a hard kill. |
 | Q4 | Does rpmalloc expose a hook to intercept span allocation, or must we wrap at `pool_alloc` granularity? | Investigate `rpmalloc` span APIs; fallback is to route at the pool-chunk level, which already covers arenas and most growth. |
 | Q5 | Should watermarks be global or per-role (e.g. cap font memory independently of view memory)? | Start global per-context; add per-role sub-budgets ([§14.4](#14-additional-suggestions)) if a single role dominates pressure. |
-| Q6 | Interaction with rpmalloc's own thread caches holding freed-but-unreturned memory | A reclaimer can call `rpmalloc_thread_finalize`/trim on idle threads to return cached spans to the OS ([§P2](./Memory_Pooling.md)). |
+| Q6 | Interaction with rpmalloc's own thread caches holding freed-but-unreturned memory | A reclaimer can call `rpmalloc_thread_finalize`/trim on idle threads to return cached spans to the OS ([§P2](./Lambda_Design_Mem_Heap.md)). |
 | Q7 | Can the linked MIR build expose a custom allocator / code-size hook for exact JIT accounting? | If yes, route MIR code-page allocation through `mem_page_alloc` for exact bytes; if no, record an estimate from generated-function/module count on the `MEM_KIND_JIT` node. Either way JIT code becomes visible in snapshots ([§3.2](#32-jit-code-font--media-caches-also-centralized)). |
 
 ---
