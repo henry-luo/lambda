@@ -523,11 +523,9 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             }
 
             // Set up font context for text measurement
-            FontBox saved_font = lycon->font;
-            bool font_changed = false;
+            LayoutFontScope font_scope(lycon);
             if (item->font && lycon->ui_context) {
                 setup_font(lycon->ui_context, &lycon->font, item->font);
-                font_changed = true;
             }
 
             float max_block_size = 0.0f;
@@ -577,8 +575,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
                 }
                 child = child->next_sibling;
             }
-
-            if (font_changed) lycon->font = saved_font;
 
             // Add padding and border in the block direction (horizontal)
             BoxMetrics item_box = layout_box_metrics(item);

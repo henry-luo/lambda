@@ -19,26 +19,21 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
 // Forward declarations for static functions
 static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewBlock* grid_item);
 
-static float grid_container_content_width_for_item_percentages(LayoutContext* lycon, ViewBlock* grid_container) {
-    if (!grid_container) return 0.0f;
+static float grid_container_content_size_for_item_percentages(LayoutContext* lycon,
+                                                             ViewBlock* grid_container,
+                                                             bool horizontal) {
+    if (!grid_container) return horizontal ? 0.0f : -1.0f;
 
-    float content_width = layout_block_used_content_size(grid_container, true, false);
-    if (content_width < 0.0f) content_width = 0.0f;
-
-    float given_width = layout_block_given_content_size(grid_container, true);
-    if (given_width >= 0.0f) return given_width;
-
-    float declared_width = layout_block_declared_content_size(lycon, grid_container, CSS_PROPERTY_WIDTH, true);
-    return declared_width >= 0.0f ? declared_width : content_width;
-}
-
-static float grid_container_content_height_for_item_percentages(ViewBlock* grid_container) {
-    if (!grid_container) return -1.0f;
-
-    float content_height = layout_block_used_content_size(grid_container, false, false);
-    float given_height = layout_block_given_content_size(grid_container, false);
-    if (given_height >= 0.0f) content_height = given_height;
-    return content_height > 0.0f ? content_height : -1.0f;
+    float content_size = layout_block_used_content_size(grid_container, horizontal, false);
+    float given_size = layout_block_given_content_size(grid_container, horizontal);
+    if (given_size >= 0.0f) return given_size;
+    if (horizontal) {
+        if (content_size < 0.0f) content_size = 0.0f;
+        float declared_size = layout_block_declared_content_size(
+            lycon, grid_container, CSS_PROPERTY_WIDTH, true);
+        return declared_size >= 0.0f ? declared_size : content_size;
+    }
+    return content_size > 0.0f ? content_size : -1.0f;
 }
 
 static float grid_item_percentage_base_from_parent(LayoutContext* lycon, ViewBlock* grid_item) {
@@ -47,19 +42,7 @@ static float grid_item_percentage_base_from_parent(LayoutContext* lycon, ViewBlo
     }
     ViewBlock* grid_container = lam::view_as_block(grid_item->parent->as_element());
     if (!grid_container) return grid_item->width;
-    return grid_container_content_width_for_item_percentages(lycon, grid_container);
-}
-
-static bool grid_node_has_non_whitespace_text(DomNode* node) {
-    if (!node || !node->is_text()) return false;
-    const char* text = (const char*)node->text_data();
-    if (!text) return false;
-    for (const char* p = text; *p; p++) {
-        if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f') {
-            return true;
-        }
-    }
-    return false;
+    return grid_container_content_size_for_item_percentages(lycon, grid_container, true);
 }
 
 static float grid_flex_container_auto_border_height(ViewBlock* flex_container,
@@ -84,7 +67,7 @@ static float grid_flex_container_auto_border_height(ViewBlock* flex_container,
 
     for (DomNode* child = flex_container->first_child; child; child = child->next_sibling) {
         float item_extent = 0.0f;
-        if (grid_node_has_non_whitespace_text(child)) {
+        if (layout_text_node_has_content(child)) {
             item_extent = fallback_content_height + box.pad_border_v;
         } else {
             if (!child->is_element()) continue;
@@ -217,21 +200,9 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     log_enter();
     log_info("GRID LAYOUT START: container=%p (%s) width=%.1f height=%.1f", grid_container, grid_container->node_name(), grid_container->width, grid_container->height);
 
-    DomNode* saved_elmt = lycon->elmt;
-    View* saved_view = lycon->view;
+    LayoutViewScope view_scope(lycon);
     lycon->elmt = static_cast<DomNode*>(grid_container);
     lycon->view = static_cast<View*>(grid_container);
-    struct GridLayoutContextGuard {
-        LayoutContext* lycon;
-        DomNode* saved_elmt;
-        View* saved_view;
-        GridLayoutContextGuard(LayoutContext* lycon, DomNode* saved_elmt, View* saved_view)
-            : lycon(lycon), saved_elmt(saved_elmt), saved_view(saved_view) {}
-        ~GridLayoutContextGuard() {
-            lycon->elmt = saved_elmt;
-            lycon->view = saved_view;
-        }
-    } context_guard(lycon, saved_elmt, saved_view);
 
     // =========================================================================
     // CACHE LOOKUP: Check if we have a cached result for these constraints
@@ -362,7 +333,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                     float bb_max = layout_css_size_to_border_box(
                         item->bound, layout_box_sizing(item), item->block()->given_max_height, false);
                     if (layout_uses_border_box(item)) {
-                        bb_max = layout_floor_border_box_height(item, bb_max);
+                        bb_max = layout_floor_border_box_axis(item, bb_max, false);
                     }
                     if (h > bb_max) h = bb_max;
                 }
@@ -626,23 +597,16 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
     // (Same pattern as flex layout — see layout_flex.cpp and CSS §8.3.)
     // For an indefinite container (content_width == 0), percentages resolve to 0 (= auto),
     // which is correct per CSS Grid spec §7.2.1.
-    float container_content_width = grid_container_content_width_for_item_percentages(lycon, grid_container);
+    float container_content_width = grid_container_content_size_for_item_percentages(
+        lycon, grid_container, true);
 
-    // Temporarily override lycon->block.parent so that percentage resolution
-    // inside dom_node_resolve_style uses the grid container as the containing block,
-    // not the grid container's parent.
-    BlockContext grid_parent_ctx = {};
-    BlockContext* saved_parent = lycon->block.parent;
-    if (saved_parent) {
-        grid_parent_ctx = *saved_parent;
-    }
-    grid_parent_ctx.content_width = container_content_width;
-    float container_content_height = grid_container_content_height_for_item_percentages(grid_container);
-    if (container_content_height > 0.0f) {
-        grid_parent_ctx.content_height = container_content_height;
-        grid_parent_ctx.given_height = container_content_height;
-    }
-    lycon->block.parent = &grid_parent_ctx;
+    float container_content_height = grid_container_content_size_for_item_percentages(
+        lycon, grid_container, false);
+    // style resolution must see the grid area as the containing block; the
+    // scope restores the outer context after every grid-item setup pass.
+    LayoutContainingBlockScope grid_parent_scope(
+        lycon, container_content_width, container_content_height,
+        container_content_height > 0.0f);
 
     int item_count = 0;
     DomNode* child = grid_container->first_child;
@@ -671,9 +635,6 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
         }
         child = child->next_sibling;
     }
-
-    // Restore original parent block context
-    lycon->block.parent = saved_parent;
 
     log_leave();
     return item_count;
@@ -721,15 +682,12 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
 
     // CRITICAL: Set lycon->view to this element so style resolution
     // applies properties to this element, not some other view
-    View* saved_view = lycon->view;
+    LayoutViewScope view_scope(lycon);
     lycon->view = static_cast<View*>(elem);
 
     // Resolve styles for this element (CSS cascade, inheritance, etc.)
     // This will now correctly apply padding/margin/border to elem->bound
     dom_node_resolve_style(child, lycon);
-
-    // Restore previous view
-    lycon->view = saved_view;
 
 }
 
@@ -746,19 +704,15 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
     ViewBlock* container = lam::view_as_block(lycon->elmt);
     DomNode* child = container ? container->first_child : nullptr;
 
-    float container_content_width = grid_container_content_width_for_item_percentages(lycon, container);
-    BlockContext grid_parent_ctx = {};
-    BlockContext* saved_parent = lycon->block.parent;
-    if (saved_parent) {
-        grid_parent_ctx = *saved_parent;
-    }
-    grid_parent_ctx.content_width = container_content_width;
-    float container_content_height = grid_container_content_height_for_item_percentages(container);
-    if (container_content_height > 0.0f) {
-        grid_parent_ctx.content_height = container_content_height;
-        grid_parent_ctx.given_height = container_content_height;
-    }
-    lycon->block.parent = &grid_parent_ctx;
+    float container_content_width = grid_container_content_size_for_item_percentages(
+        lycon, container, true);
+    float container_content_height = grid_container_content_size_for_item_percentages(
+        lycon, container, false);
+    // measurement uses the same percentage containing block as style setup;
+    // keeping one scope prevents the two grid passes from diverging.
+    LayoutContainingBlockScope grid_parent_scope(
+        lycon, container_content_width, container_content_height,
+        container_content_height > 0.0f);
 
     while (child) {
         if (child->is_element()) {
@@ -790,8 +744,6 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
         }
         child = child->next_sibling;
     }
-
-    lycon->block.parent = saved_parent;
 
     log_leave();
 }
@@ -826,7 +778,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
         if (!width_is_percentage && item->block()->given_width > 0) {
             float w = layout_css_size_to_border_box(
                 item->bound, layout_box_sizing(item), item->block()->given_width, true);
-            w = layout_floor_border_box_width(item, w);
+            w = layout_floor_border_box_axis(item, w, true);
             *min_width = *max_width = w;
             has_explicit_width = true;
         }
@@ -836,7 +788,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
         if (item->block()->given_height > 0 && !has_intrinsic_height_constraint) {
             float h = layout_css_size_to_border_box(
                 item->bound, layout_box_sizing(item), item->block()->given_height, false);
-            h = layout_floor_border_box_height(item, h);
+            h = layout_floor_border_box_axis(item, h, false);
             *min_height = *max_height = h;
             has_explicit_height = true;
         }
@@ -922,10 +874,7 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
              grid_item->width, grid_item->height,
              grid_item->x, grid_item->y);
 
-    // Save parent context
-    BlockContext pa_block = lycon->block;
-    Linebox pa_line = lycon->line;
-    FontBox pa_font = lycon->font;
+    LayoutContextScope context_scope(lycon);
 
     float grid_item_percentage_base = grid_item_percentage_base_from_parent(lycon, grid_item);
     layout_reresolve_percentage_box(grid_item, grid_item_percentage_base);
@@ -937,8 +886,8 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     }
 
     // Calculate content area dimensions accounting for box model
-    float content_width = layout_content_width_from_border_box(grid_item, grid_item->width);
-    float content_height = layout_content_height_from_border_box(grid_item, grid_item->height);
+    float content_width = layout_content_size_from_border_box(grid_item, grid_item->width, true);
+    float content_height = layout_content_size_from_border_box(grid_item, grid_item->height, false);
     float content_x_offset = 0;
     float content_y_offset = 0;
 
@@ -974,13 +923,11 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         log_info(">>> NESTED GRID DETECTED: item=%p (%s)", grid_item, grid_item->node_name());
 
         // Recursively handle nested grid
-        BlockContext item_parent_ctx = {};
-        BlockContext* saved_parent = lycon->block.parent;
-        if (saved_parent) item_parent_ctx = *saved_parent;
-        item_parent_ctx.content_width = grid_item_percentage_base;
-        lycon->block.parent = &item_parent_ctx;
-        layout_grid_content(lycon, grid_item);
-        lycon->block.parent = saved_parent;
+        {
+            LayoutContainingBlockScope item_parent_scope(
+                lycon, LAYOUT_AXIS_X, grid_item_percentage_base);
+            layout_grid_content(lycon, grid_item);
+        }
 
     } else if (grid_item->display.inner == CSS_VALUE_FLEX) {
         log_info(">>> NESTED FLEX DETECTED: item=%p (%s)", grid_item, grid_item->node_name());
@@ -989,21 +936,18 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         // The flex layout will initialize its own flex items with init_flex_item_view
         // Do NOT call init_grid_item_view for flex children - they are flex items, not grid items!
         extern void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container);
-        BlockContext item_parent_ctx = {};
-        BlockContext* saved_parent = lycon->block.parent;
-        if (saved_parent) item_parent_ctx = *saved_parent;
-        item_parent_ctx.content_width = grid_item_percentage_base;
-        lycon->block.parent = &item_parent_ctx;
-        layout_flex_container_with_nested_content(lycon, grid_item);
-        lycon->block.parent = saved_parent;
+        {
+            LayoutContainingBlockScope item_parent_scope(
+                lycon, LAYOUT_AXIS_X, grid_item_percentage_base);
+            layout_flex_container_with_nested_content(lycon, grid_item);
+        }
         grid_item->content_height = grid_flex_container_auto_border_height(grid_item, lycon->block.advance_y);
 
     } else if (grid_item->display.inner == CSS_VALUE_TABLE) {
         // A table keeps its own role while gi describes participation in this grid.
-        View* saved_view = lycon->view;
+        LayoutViewScope view_scope(lycon);
         lycon->view = grid_item;
         layout_table_content(lycon, grid_item, grid_item->display);
-        lycon->view = saved_view;
     } else {
         // Standard flow layout for grid item content
         DomNode* child = grid_item->first_child;
@@ -1038,11 +982,6 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         grid_item->blk->first_line_baseline = lycon->block.first_line_ascender;
         grid_item->blk->last_line_baseline = lycon->block.last_line_ascender;
     }
-
-    // Restore parent context
-    lycon->block = pa_block;
-    lycon->line = pa_line;
-    lycon->font = pa_font;
 
     log_info("Grid item content layout complete: %s, content=%dx%d",
              grid_item->node_name(), grid_item->content_width, grid_item->content_height);

@@ -85,13 +85,13 @@ static void form_apply_axis_min_max(ViewBlock* block, bool horizontal,
                                     float* content_size) {
     if (!block || !block->blk || !border_size || !content_size) return;
     if (is_border_box) {
-        *border_size = horizontal ? adjust_min_max_width(block, *border_size)
-                                  : adjust_min_max_height(block, *border_size);
+        *border_size = horizontal ? layout_apply_min_max_axis(block, *border_size, true, false)
+                                  : layout_apply_min_max_axis(block, *border_size, false, false);
         *content_size = layout_content_size_from_border_box(
             block, *border_size, horizontal);
     } else {
-        *content_size = horizontal ? adjust_min_max_width(block, *content_size)
-                                   : adjust_min_max_height(block, *content_size);
+        *content_size = horizontal ? layout_apply_min_max_axis(block, *content_size, true, false)
+                                   : layout_apply_min_max_axis(block, *content_size, false, false);
         *border_size = layout_border_size_from_content_box(
             block, *content_size, horizontal);
     }
@@ -704,12 +704,12 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         // large padding is added, keep the replaced border box representable
         // and derive a non-negative content box from that final border box.
         width = MAX_LAYOUT_DIMENSION;
-        content_width = layout_content_width_from_border_box(block, width);
+        content_width = layout_content_size_from_border_box(block, width, true);
     }
     if (height > MAX_LAYOUT_DIMENSION) {
         // Preserve the border-box/content-box invariant for the block axis too.
         height = MAX_LAYOUT_DIMENSION;
-        content_height = layout_content_height_from_border_box(block, height);
+        content_height = layout_content_size_from_border_box(block, height, false);
     }
     block->width = width;
     block->height = height;

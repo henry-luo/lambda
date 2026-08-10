@@ -173,9 +173,9 @@ void layout_apply_aspect_ratio_min_max_constraints(ViewBlock* block, float aspec
     bool ratio_uses_border_box = !layout_aspect_ratio_uses_content_box(block) &&
         layout_uses_border_box(block);
     float ratio_width = ratio_uses_border_box
-        ? layout_border_width_from_content_box(block, *content_width) : *content_width;
+        ? layout_border_size_from_content_box(block, *content_width, true) : *content_width;
     float ratio_height = ratio_uses_border_box
-        ? layout_border_height_from_content_box(block, *content_height) : *content_height;
+        ? layout_border_size_from_content_box(block, *content_height, false) : *content_height;
     float min_width = layout_aspect_ratio_constraint_size(
         block, block->block()->given_min_width, true, ratio_uses_border_box);
     float max_width = layout_aspect_ratio_constraint_size(
@@ -216,9 +216,9 @@ void layout_apply_aspect_ratio_min_max_constraints(ViewBlock* block, float aspec
     if (max_height >= 0.0f && ratio_height > max_height) ratio_height = max_height;
     if (min_height >= 0.0f && ratio_height < min_height) ratio_height = min_height;
     *content_width = ratio_uses_border_box
-        ? layout_content_width_from_border_box(block, ratio_width) : ratio_width;
+        ? layout_content_size_from_border_box(block, ratio_width, true) : ratio_width;
     *content_height = ratio_uses_border_box
-        ? layout_content_height_from_border_box(block, ratio_height) : ratio_height;
+        ? layout_content_size_from_border_box(block, ratio_height, false) : ratio_height;
 }
 
 float layout_apply_min_max_border_box_axis(ViewBlock* block, float border_size, bool horizontal,
