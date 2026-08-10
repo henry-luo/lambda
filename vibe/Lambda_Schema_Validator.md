@@ -548,38 +548,51 @@ immutability of the singletons.
 
 ### Implementation status (2026-08-10)
 
-**Stage 1 landed.** The mode, the singletons, and the two occurrence walks:
+**Stages 1-4 landed.** The mode, the singletons, and every hot kind:
 
-- `SchemaValidator::fast_mode` + `is_fast_mode()`/`set_fast_mode()`,
-  default off (`doc_validator.cpp`).
+- `SchemaValidator::fast_mode` + `is_fast_mode()`/`set_fast_mode()`, default
+  off (`doc_validator.cpp`).
 - `const ValidationResult VALIDATION_OK` / `VALIDATION_FAIL` with the
   `validation_verdict(bool)` helper (`validator.hpp`, defined in
   `doc_validator.cpp`).
-- `validate_array_num_occurrence` and `validate_list_occurrence` gained
-  fast-mode prologues (`validate_pattern.cpp`): same rules, verdict only, no
-  allocation — and the list walk **returns on the first bad element**, which
-  full mode may never do.
+- **Stage 1 — occurrence walks** (`validate_pattern.cpp`):
+  `validate_array_num_occurrence` (O(1) representation check) and
+  `validate_list_occurrence` (element walk, **returns on first bad element**).
+- **Stage 2 — base type** (`validate.cpp`): `validate_against_base_type` is
+  the leaf the element walk calls per item, so its unconditional
+  `create_validation_result` was the per-element allocation. Fast mode handles
+  `any`, delegating kinds (unary/binary), numeric embedding, the generic
+  `TYPE_MAP`/`TYPE_ELMT` singletons, shaped map/element, and plain nominal
+  matches; patterns, arrays, and literals fall through to full mode.
+- **Stage 3 — map/element fields** (`validate.cpp`): `shape_entries_match_fast`
+  mirrors `validate_shape_entries`' field rules as a predicate — no PathScope
+  bookkeeping, no merge, stops at the first bad field. Used by both
+  `validate_against_map_type` and `validate_against_element_type`.
+- **Stage 4 — union** (`validate_pattern.cpp`): returns on the first matching
+  member and skips `min_errors` scoring entirely, which exists only to pick
+  the closest member for an error message fast mode never produces.
 - `runtime_validate_value_against_type` selects the mode from its own
   contract: callers passing `validation = NULL` want a predicate and get fast
   mode; callers passing a slot are building an error message and get the
   reporting walk. This required no call-site changes — the two predicate
   callers already passed `NULL`.
 
-An important discovery while wiring it: **`lambda_type_check` already had the
-two-mode structure.** It runs `runtime_type_admit_value` first and only calls
-the validator *after* admission fails, to build the message. So the R4
+An important discovery while wiring stage 1: **`lambda_type_check` already had
+the two-mode structure.** It runs `runtime_type_admit_value` first and only
+calls the validator *after* admission fails, to build the message. So the R4
 premise ("the runtime allocates a report it discards on success") was true of
-the occurrence walk reached through admission, not of the boundary entry
+the validation walk reached through admission, not of the boundary entry
 point itself.
 
-Measured on awfy/cd2 (the benchmark with the largest remaining validator
-share): validator samples 32 → 22, `create_validation_result` → 1. cd2's
-dominant cost is `runtime_type_admit_value` (~49% of samples), which this
-work does not touch and which is the next target.
+**Measured** (release, 3 runs, vs archived v27, ms):
 
-**Remaining stages** (unconverted kinds still fall through to full mode and
-return a real result, which is correct — just allocating): primitives/base
-type, map/element fields, union short-circuit.
+| row | v27 | before | after stages 2-4 |
+|---|---:|---:|---:|
+| jetstream/splay2 | 267 | 315 (+18%) | **271** (+1.5%) |
+| jetstream/deltablue2 | 71.8 | 88.4 (+22%) | **79.9** (+11%) |
+| jetstream/raytrace3d2 | 63.9 | 66.8 (+5%) | **62.8** (flat/better) |
+| awfy/list2 | 0.93 | 0.95 | 0.93 (flat) |
+| awfy/cd2 | 569 | 570 | 566 (flat — its cost is admission) |
 
 ### Implementation plan (as built)
 

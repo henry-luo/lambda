@@ -341,6 +341,21 @@ ValidationResult* validate_against_union_type(
     Type** union_types,
     int type_count
 ) {
+    if (validator->is_fast_mode()) {
+        // A union verdict is "does any member match?", so fast mode returns on
+        // the first success. The min_errors scoring below exists only to pick
+        // the closest member for the error message, which fast mode never
+        // produces — so it is skipped entirely rather than degenerating (every
+        // fast-mode failure carries error_count 0).
+        if (!union_types || type_count <= 0) return validation_verdict(false);
+        for (int i = 0; i < type_count; i++) {
+            if (!union_types[i]) continue;
+            ValidationResult* member = validate_against_type(validator, item, union_types[i]);
+            if (member && member->valid) return validation_verdict(true);
+        }
+        return validation_verdict(false);
+    }
+
     ValidationResult* result = create_validation_result(validator->get_pool());
 
     if (!union_types || type_count <= 0) {
