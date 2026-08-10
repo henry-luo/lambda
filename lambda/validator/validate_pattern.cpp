@@ -61,6 +61,42 @@ static ValidationResult* validate_array_num_occurrence(
     const ArrayNum* arr_num,
     TypeUnary* type_unary
 ) {
+    if (validator->is_fast_mode()) {
+        // Same rules as below, verdict only: count constraint, then the O(1)
+        // representation check. No allocation, and no error text to build.
+        int fast_count = 0;
+        if (arr_num) {
+            if (arr_num->is_ndim && arr_num->extra) {
+                ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)arr_num->extra;
+                fast_count = (s && s->ndim >= 1) ? (int)array_num_shape_dims(s)[0]
+                                                 : (int)arr_num->length;
+            } else {
+                fast_count = (int)arr_num->length;
+            }
+        }
+        CountConstraint fast_c = get_count_constraint(type_unary);
+        if (fast_count < fast_c.min) return validation_verdict(false);
+        if (fast_c.max >= 0 && fast_count > fast_c.max) return validation_verdict(false);
+        Type* fast_operand = unwrap_type(type_unary->operand);
+        if (!fast_operand) return validation_verdict(false);
+        if (fast_operand->type_id == LMD_TYPE_ANY) return validation_verdict(true);
+        if (arr_num && arr_num->is_ndim) {
+            ArrayNumElemType et = arr_num->get_elem_type();
+            TypeId leaf = (et == ELEM_FLOAT64) ? LMD_TYPE_FLOAT :
+                          (et == ELEM_BOOL) ? LMD_TYPE_BOOL : LMD_TYPE_INT;
+            Type* cur = fast_operand;
+            while (cur && cur->kind == TYPE_KIND_UNARY) {
+                Type* inner = unwrap_type(((TypeUnary*)cur)->operand);
+                if (!inner) break;
+                cur = inner;
+            }
+            return validation_verdict(cur && (cur->type_id == leaf ||
+                (leaf == LMD_TYPE_INT && cur->type_id == LMD_TYPE_INT64)));
+        }
+        return validation_verdict(arr_num &&
+            validator_array_elem_embeds(arr_num->get_elem_type(), fast_operand));
+    }
+
     ValidationResult* result = create_validation_result(validator->get_pool());
 
     // For N-D arrays use the leading-axis count (shape[0]) to match the
@@ -197,6 +233,29 @@ static ValidationResult* validate_list_occurrence(
     const List* list,
     TypeUnary* type_unary
 ) {
+    if (validator->is_fast_mode()) {
+        // The element walk is the O(n) shape this whole mode exists for. With
+        // no report to assemble it can stop at the first bad element, which
+        // full mode must never do (it owes every indexed path).
+        int fast_count = list ? (int)list->length : 0;
+        CountConstraint fast_c = get_count_constraint(type_unary);
+        if (fast_count < fast_c.min) return validation_verdict(false);
+        if (fast_c.max >= 0 && fast_count > fast_c.max) return validation_verdict(false);
+        Type* fast_operand = unwrap_type(type_unary->operand);
+        if (!fast_operand) return validation_verdict(false);
+        if (list && fast_count > 0) {
+            TypeType fast_wrapper;
+            fast_wrapper.type_id = LMD_TYPE_TYPE;
+            fast_wrapper.type = fast_operand;
+            for (int i = 0; i < fast_count; i++) {
+                ValidationResult* elem = validate_against_base_type(
+                    validator, list->get(i), &fast_wrapper);
+                if (!elem || !elem->valid) return validation_verdict(false);
+            }
+        }
+        return validation_verdict(true);
+    }
+
     ValidationResult* result = create_validation_result(validator->get_pool());
 
     int count = list ? (int)list->length : 0;
@@ -282,6 +341,21 @@ ValidationResult* validate_against_union_type(
     Type** union_types,
     int type_count
 ) {
+    if (validator->is_fast_mode()) {
+        // A union verdict is "does any member match?", so fast mode returns on
+        // the first success. The min_errors scoring below exists only to pick
+        // the closest member for the error message, which fast mode never
+        // produces — so it is skipped entirely rather than degenerating (every
+        // fast-mode failure carries error_count 0).
+        if (!union_types || type_count <= 0) return validation_verdict(false);
+        for (int i = 0; i < type_count; i++) {
+            if (!union_types[i]) continue;
+            ValidationResult* member = validate_against_type(validator, item, union_types[i]);
+            if (member && member->valid) return validation_verdict(true);
+        }
+        return validation_verdict(false);
+    }
+
     ValidationResult* result = create_validation_result(validator->get_pool());
 
     if (!union_types || type_count <= 0) {

@@ -165,6 +165,49 @@ ValidationResult* validate_against_primitive_type(SchemaValidator* validator, Co
 }
 
 ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstItem item, TypeType* type) {
+    if (validator->is_fast_mode()) {
+        // This is the leaf the element walk calls once per item, so the
+        // allocation at the top of full mode is exactly what fast mode must
+        // avoid. Delegating kinds recurse into already-converted functions and
+        // return their singleton directly; anything not handled here falls
+        // through to full mode, which is correct, just allocating.
+        Type* fast_base = unwrap_type(type->type);
+        if (!fast_base) return validation_verdict(false);
+        if (fast_base->type_id == LMD_TYPE_ANY) {
+            return validation_verdict(item.type_id() != LMD_TYPE_ERROR);
+        }
+        if (fast_base->kind == TYPE_KIND_UNARY) {
+            return validate_occurrence_type(validator, item, (TypeUnary*)fast_base);
+        }
+        if (fast_base->kind == TYPE_KIND_BINARY) {
+            return validate_binary_type(validator, item, (TypeBinary*)fast_base);
+        }
+        if (fast_base == &TYPE_NUMBER) {
+            return validation_verdict(IS_NUMERIC_ID(item.type_id()));
+        }
+        if (fast_base == &TYPE_INTEGER || IS_NUMERIC_ID(fast_base->type_id)) {
+            return validation_verdict(validator_numeric_item_embeds(item, fast_base));
+        }
+        if (fast_base == &TYPE_MAP) {
+            return validation_verdict(item.type_id() == LMD_TYPE_MAP);
+        }
+        if (fast_base == &TYPE_ELMT) {
+            return validation_verdict(item.type_id() == LMD_TYPE_ELEMENT);
+        }
+        if (fast_base->type_id == LMD_TYPE_MAP) {
+            return validate_against_map_type(validator, item, (TypeMap*)fast_base);
+        }
+        if (fast_base->type_id == LMD_TYPE_ELEMENT) {
+            return validate_against_element_type(validator, item, (TypeElmt*)fast_base);
+        }
+        if (fast_base->kind != TYPE_KIND_PATTERN &&
+                fast_base->type_id != LMD_TYPE_ARRAY && !fast_base->is_literal) {
+            // plain nominal match; patterns/arrays/literals keep the full path
+            return validation_verdict(fast_base->type_id == item.type_id());
+        }
+        // fall through to full mode for the remaining kinds
+    }
+
     ValidationResult* result = create_validation_result(validator->get_pool());
     Type* base_type = type->type;
 
@@ -512,7 +555,46 @@ static void validate_shape_entries(SchemaValidator* validator, ValidationResult*
     }
 }
 
+// Fast-mode shape walk: the same field rules as validate_shape_entries, as a
+// predicate. No result to populate means no PathScope bookkeeping and no
+// merge, and it stops at the first bad field — full mode may never do that,
+// because it owes an error for every field.
+template <typename HasValueFn, typename GetValueFn>
+static bool shape_entries_match_fast(SchemaValidator* validator, ShapeEntry* shape,
+                                     HasValueFn has_value, GetValueFn get_value,
+                                     bool report_missing, bool check_null) {
+    for (ShapeEntry* shape_entry = shape; shape_entry; shape_entry = shape_entry->next) {
+        if (!shape_entry->name) continue;   // full mode logs; the verdict is unaffected
+        const char* field_name = shape_entry->name->str;
+
+        if (!has_value(field_name)) {
+            if (report_missing && !is_type_optional(shape_entry->type)) return false;
+            continue;
+        }
+        ItemReader field_value = get_value(field_name);
+        ConstItem field_item = field_value.item().to_const();
+        if (check_null && field_item.type_id() == LMD_TYPE_NULL) {
+            if (!is_type_optional(shape_entry->type)) return false;
+            continue;
+        }
+        ValidationResult* field_result = validate_against_type(validator, field_item, shape_entry->type);
+        if (!field_result || !field_result->valid) return false;
+    }
+    return true;
+}
+
 ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstItem item, TypeMap* map_type) {
+    if (validator->is_fast_mode()) {
+        ItemReader fast_reader(item);
+        if (!fast_reader.isMap()) return validation_verdict(false);
+        if (!map_type->shape) return validation_verdict(true);
+        MapReader fast_map = fast_reader.asMap();
+        return validation_verdict(shape_entries_match_fast(validator, map_type->shape,
+            [&fast_map](const char* name) { return fast_map.has(name); },
+            [&fast_map](const char* name) { return fast_map.get(name); },
+            true, true));
+    }
+
     ValidationResult* result = create_validation_result(validator->get_pool());
 
     log_debug("[VALIDATOR] validate_against_map_type: item.item=0x%016lx map_type=%p",
@@ -542,6 +624,28 @@ ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstIte
 }
 
 ValidationResult* validate_against_element_type(SchemaValidator* validator, ConstItem item, TypeElmt* element_type) {
+    if (validator->is_fast_mode()) {
+        ItemReader fast_reader(item);
+        if (!fast_reader.isElement()) return validation_verdict(false);
+        ElementReader fast_elem = fast_reader.asElement();
+        if (element_type->name.length > 0 && !fast_elem.hasTag(element_type->name.str)) {
+            return validation_verdict(false);
+        }
+        TypeMap* fast_map_part = (TypeMap*)element_type;
+        if (fast_map_part->shape &&
+                !shape_entries_match_fast(validator, fast_map_part->shape,
+                    [&fast_elem](const char* name) { return fast_elem.has_attr(name); },
+                    [&fast_elem](const char* name) { return fast_elem.get_attr(name); },
+                    false, false)) {
+            return validation_verdict(false);
+        }
+        if (element_type->content_length > 0 &&
+                fast_elem.childCount() != element_type->content_length) {
+            return validation_verdict(false);
+        }
+        return validation_verdict(true);
+    }
+
     ValidationResult* result = create_validation_result(validator->get_pool());
 
     // Check if item is actually an element

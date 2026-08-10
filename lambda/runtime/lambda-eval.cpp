@@ -1815,8 +1815,14 @@ static Type* runtime_boundary_unwrap_type(Type* type) {
 static bool runtime_validate_value_against_type(Item item, Type* expected,
         ValidationResult** validation) {
     if (!context || !context->validator) return false;
+    // A caller that wants no diagnostic wants a predicate: run the
+    // allocation-free fast mode. A caller that passed `validation` is building
+    // an error message, so it needs the reporting walk.
+    bool want_report = (validation != NULL);
+    context->validator->set_fast_mode(!want_report);
     ValidationResult* result = schema_validator_validate_type(context->validator,
         item.to_const(), expected);
+    context->validator->set_fast_mode(false);
     if (validation) *validation = result;
     return result && result->valid;
 }
@@ -6870,6 +6876,14 @@ static void convert_specialized_to_generic(Array* arr) {
                 extra_count++;
             }
             arr->extra = extra_count;
+        } else if (etype == ELEM_BOOL) {
+            // packed bools are one byte each; the i64-lane fallback below read
+            // eight of them per element and produced integers like 65537.
+            // Bools are inline-tagged, so no extra slot storage is needed.
+            uint8_t* old_items = (uint8_t*)num_arr->data;
+            for (int64_t i = 0; i < len; i++) {
+                new_items[i] = {.item = b2it(old_items[i] ? BOOL_TRUE : BOOL_FALSE)};
+            }
         } else {
             // v5: ELEM_INT is an i64 LANE array; box each lane through the encoder.
             int64_t* old_items = num_arr->items;
@@ -6978,10 +6992,21 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
                 array_set(arr, index, value);
             }
         } else if (etype == ELEM_BOOL) {
-            // Keep the packed boolean carrier on the checked fallback path;
-            // widening it to a generic Array made a valid bool[] parameter
-            // fail its representation proof after one mutation.
-            array_num_set_item(num_arr, index, value);
+            if (val_type == LMD_TYPE_BOOL) {
+                // Every bool write keeps the packed carrier, so a valid
+                // bool[] parameter never loses its representation proof by
+                // being mutated.
+                array_num_set_item(num_arr, index, value);
+            } else {
+                // A non-bool write must widen exactly like the numeric lanes.
+                // Coercing it through array_num_set_item stored `false` for a
+                // string — silent data loss on an untyped `fill(n, true)`
+                // array, which the language allows to hold mixed values.
+                // A *declared* bool[] never reaches here with a non-bool: the
+                // checked setter admits the element first.
+                convert_specialized_to_generic(arr);
+                array_set(arr, index, value);
+            }
         } else {
             // ELEM_INT -- v5: an i64 LANE array. The whole int domain fits,
             // poison included, because poison rides as a lane sentinel.
