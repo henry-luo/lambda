@@ -16,9 +16,6 @@
 #include <stdio.h>
 
 extern "C" Item js_get_current_this(void);
-extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
-extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
-extern "C" void js_set_prototype(Item object, Item prototype);
 extern "C" Item js_readline_completion_callback(Item err_item, Item result_item);
 extern "C" Item js_readline_completion_fulfilled(Item rl_item, Item result_item);
 extern "C" Item js_readline_completion_rejected(Item rl_item, Item err_item);
@@ -26,14 +23,10 @@ extern "C" Item js_readline_completion_callback_bound(Item rl_item, Item tab_cou
 extern "C" Item js_readline_completion_fulfilled_bound(Item rl_item, Item tab_count_item, Item result_item);
 extern "C" Item js_readline_completion_rejected_bound(Item rl_item, Item tab_count_item, Item err_item);
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
+extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest);
+extern "C" void js_stream_flush_data_now(Item self);
 extern "C" void js_enqueue_promise_job(Item job);
 extern "C" int64_t js_key_is_symbol_c(Item key);
-extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest);
-extern "C" Item js_promise_with_resolvers(void);
-extern "C" Item js_throw_error_with_code(const char* code, const char* message);
-extern "C" Item js_new_error_with_name(Item error_name, Item message);
-extern "C" void js_set_function_name(Item fn_item, Item name_item);
-extern "C" void js_stream_flush_data_now(Item self);
 extern Item js_make_number(double d);
 
 #define readline_namespace (js_runtime_state.readline.namespace_object)

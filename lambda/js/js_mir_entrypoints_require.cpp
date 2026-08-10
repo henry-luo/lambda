@@ -35,13 +35,10 @@
 
 int js_dynamic_import_suppress_module_drain = 0;
 extern "C" int js_batch_execution_mode = 0;
-extern "C" bool js_dom_is_host_driven_loop(void);
 extern "C" int js_process_current_exit_code(void);
 extern "C" void js_async_hooks_drain_destroy_queue(void);
-extern "C" bool js_event_loop_has_refed_handles(void);
 extern "C" void js_trace_flush(void);
 extern "C" Item js_module_get_builtin(Item specifier);
-extern "C" Item js_get_global_this(void);
 
 static Item js_require_module_not_found(const char* specifier) {
     const char* name = specifier ? specifier : "";
@@ -2175,7 +2172,6 @@ extern "C" Item js_dynamic_import(Item specifier) {
     // had a pending TLA target captured, return a Promise chained on that
     // target so dynamic-import .then/.finally callbacks fire in spec order
     // (importing modules' callbacks fire after the underlying TLA settles).
-    extern Item js_module_get_awaited_target(Item);
     extern Item js_p5_chain_dynamic_import(Item, Item);
     Item awaited = js_module_get_awaited_target(specifier_string);
     if (get_type_id(awaited) != LMD_TYPE_NULL) {

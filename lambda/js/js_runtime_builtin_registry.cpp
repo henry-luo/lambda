@@ -17,7 +17,6 @@ static bool js_builtin_cache_ensure_roots(void) {
     return js_root_range_ensure_registered(&js_runtime_state.builtin_cache.roots);
 }
 
-extern "C" void js_func_init_property(Item fn_item, Item key, Item value);
 
 typedef struct JsBuiltinDescriptor {
     JsBuiltinDispatchGroup dispatch_group;

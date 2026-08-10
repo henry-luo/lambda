@@ -81,15 +81,16 @@ bool layout_is_initial_containing_block(LayoutContext* lycon, ViewBlock* block) 
 static void layout_resolve_percent_size_axis(LayoutContext* lycon, ViewBlock* child,
                                              bool horizontal, float base, bool definite,
                                              const char* context) {
-    float percent = horizontal ? child->block()->given_width_percent : child->block()->given_height_percent;
+    LayoutAxisConstraintRefs axis(child->block_mut(), horizontal);
+    float percent = *axis.given_percent;
     if (isnan(percent) || !definite) return;
 
     float value = base * percent / 100.0f;
     float& given = horizontal ? lycon->block.given_width : lycon->block.given_height;
-    float& child_given = horizontal ? child->blk->given_width : child->blk->given_height;
-    const char* axis = horizontal ? "width" : "height";
+    float& child_given = *axis.given;
+    const char* axis_name = horizontal ? "width" : "height";
     log_debug("[LAYOUT_CB] %s %s %.1f%% of %.1f = %.1f (was %.1f)",
-              context, axis, percent, base, value, given);
+              context, axis_name, percent, base, value, given);
     given = value;
     child_given = value;
 }

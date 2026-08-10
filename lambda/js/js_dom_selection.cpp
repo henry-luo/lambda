@@ -42,14 +42,9 @@
 #include <cstdio>
 
 extern __thread EvalContext* context;
-extern "C" void heap_register_gc_root(uint64_t* slot);
-extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern "C" void* js_dom_current_active_text_control(void);
 extern "C" bool js_doc_has_browsing_context(void* doc);
-extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
-extern "C" Item js_object_get_own_property_names(Item object);
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
-extern "C" Item js_get_prototype(Item object);
 
 static Item js_dom_flush_selectionchange(Item this_val, Item* args, int argc);
 
@@ -1394,13 +1389,11 @@ extern "C" void js_dom_selection_install_globals(void) {
     // own get_property hooks); these are pure idl shape.
     Item sel_proto = js_property_get(sel_ctor, make_key("prototype"));
     if (get_type_id(sel_proto) != LMD_TYPE_MAP) {
-        extern Item js_new_object();
         sel_proto = js_new_object();
         js_property_set(sel_ctor, make_key("prototype"), sel_proto);
     }
     Item range_proto = js_property_get(range_ctor, make_key("prototype"));
     if (get_type_id(range_proto) != LMD_TYPE_MAP) {
-        extern Item js_new_object();
         range_proto = js_new_object();
         js_property_set(range_ctor, make_key("prototype"), range_proto);
     }

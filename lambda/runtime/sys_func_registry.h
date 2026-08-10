@@ -169,6 +169,18 @@ enum {
     JIT_IMPORT_ARGS_BORROWED_AUDITED = 1u << 2,
 };
 
+// A raw scalar has no ERROR-tag transport.  Keep its catalog contract in one
+// named initializer so every audited JS fast-path row states PRESERVES.
+#define JIT_IMPORT_RAW_SCALAR_PRESERVES \
+    {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_NON_GC_SCALAR, \
+     0, 0, JIT_EXCEPTION_PRESERVES, 0}
+
+// Void imports have no merged-Item return transport and must be audited as
+// preserving the lane rather than silently relying on the emitter's fold.
+#define JIT_IMPORT_VOID_PRESERVES \
+    {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_NON_GC_SCALAR, \
+     0, 0, JIT_EXCEPTION_PRESERVES, 0}
+
 static inline JitValueClass jit_import_arg_class(
         const JitImportMetadata* metadata, int index) {
     if (!metadata || index < 0 || index >= 8) return JIT_VALUE_UNKNOWN;

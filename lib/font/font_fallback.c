@@ -15,6 +15,7 @@
 #include "font_internal.h"
 #include "../str.h"
 #include "../memtrack.h"
+#include "../utf.h"
 
 // ============================================================================
 // Generic CSS family → concrete font name lists
@@ -193,6 +194,62 @@ FontHandle* font_resolve_fallback(FontContext* ctx, const FontStyleDesc* style) 
 
 // CodepointFallbackEntry is defined in font_internal.h
 
+static bool fallback_family_is_color_emoji(const char* family) {
+    return family && strstr(family, "Emoji") != NULL;
+}
+
+static FontHandle* resolve_exact_fallback_family(FontContext* ctx,
+                                                  const FontStyleDesc* style,
+                                                  const char* family,
+                                                  uint32_t codepoint) {
+    if (!ctx || !style || !family) return NULL;
+
+    char* key = font_cache_make_key(ctx->arena, family, style->weight,
+                                    style->slant, style->size_px);
+    FontHandle* cached = font_cache_lookup(ctx, key, false, NULL);
+    if (cached) {
+        if (font_has_codepoint(cached, codepoint)) {
+            font_handle_retain(cached);
+            return cached;
+        }
+        // Keep the cached face as a negative family result; reloading a face
+        // that already lacks the codepoint multiplies native font state for
+        // every glyph in a Unicode run.
+        return NULL;
+    }
+
+    FontDatabaseCriteria criteria;
+    memset(&criteria, 0, sizeof(criteria));
+    strncpy(criteria.family_name, family, sizeof(criteria.family_name) - 1);
+    criteria.weight = (int)style->weight;
+    criteria.style = (style->slant == FONT_SLANT_ITALIC) ? 1 : 0;
+    criteria.required_codepoint = codepoint;
+
+    FontDatabaseResult result = font_database_find_best_match_internal(
+        ctx->database, &criteria);
+    if (!result.font || !result.font->file_path || !result.exact_family_match) {
+        return NULL;
+    }
+
+    float pixel_ratio = ctx->config.pixel_ratio;
+    float physical_size = style->size_px * pixel_ratio;
+    int face_index = result.font->is_collection ? result.font->collection_index : 0;
+    FontHandle* handle = font_load_face_internal(
+        ctx, result.font->file_path, face_index,
+        style->size_px, physical_size, style->weight, style->slant);
+    if (!handle) return NULL;
+    if (!font_has_codepoint(handle, codepoint)) {
+        font_cache_insert(ctx, key, handle, false);
+        font_handle_release(handle);
+        return NULL;
+    }
+
+    // cache the exact family face; platform substitution here would change
+    // glyph metrics for every later codepoint in the same fallback family.
+    font_cache_insert(ctx, key, handle, false);
+    return handle;
+}
+
 static uint64_t cp_fallback_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const CodepointFallbackEntry* e = (const CodepointFallbackEntry*)item;
     // hash on (codepoint, size_px) — same codepoint at different sizes needs separate entries
@@ -316,34 +373,20 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
     // search through fallback fonts for one that has this codepoint
     if (ctx->fallback_fonts) {
         for (int i = 0; ctx->fallback_fonts[i]; i++) {
-            FontDatabaseCriteria criteria;
-            memset(&criteria, 0, sizeof(criteria));
-            strncpy(criteria.family_name, ctx->fallback_fonts[i],
-                    sizeof(criteria.family_name) - 1);
-            criteria.weight = (int)style->weight;
-            criteria.style = (style->slant == FONT_SLANT_ITALIC) ? 1 : 0;
-            criteria.required_codepoint = codepoint;
-
-            FontDatabaseResult result = font_database_find_best_match_internal(
-                ctx->database, &criteria);
-            // only use the result if it's an exact family match — avoid picking
-            // a random font (e.g. Menlo) when the requested family isn't installed
-            if (result.font && result.font->file_path && result.exact_family_match) {
-                int face_index = result.font->is_collection ? result.font->collection_index : 0;
-                FontHandle* handle = font_load_face_internal(
-                    ctx, result.font->file_path, face_index,
-                    style->size_px, physical_size,
-                    style->weight, style->slant);
-                if (handle && font_has_codepoint(handle, codepoint)) {
-                    // cache positive result
-                    CodepointFallbackEntry entry = {.codepoint = codepoint, .size_px = style->size_px, .handle = handle};
-                    font_handle_retain(handle);
-                    hashmap_set(cache, &entry);
-                    log_debug("font_fallback: codepoint U+%04X → '%s'",
-                              codepoint, ctx->fallback_fonts[i]);
-                    return handle;
-                }
-                if (handle) font_handle_release(handle);
+            // Normal text metrics must not select a color-emoji face merely
+            // because it contains a symbol; explicit emoji presentation uses
+            // font_load_glyph_emoji() and owns that selection separately.
+            if (fallback_family_is_color_emoji(ctx->fallback_fonts[i])) continue;
+            FontHandle* handle = resolve_exact_fallback_family(
+                ctx, style, ctx->fallback_fonts[i], codepoint);
+            if (handle) {
+                CodepointFallbackEntry entry = {
+                    .codepoint = codepoint, .size_px = style->size_px, .handle = handle};
+                font_handle_retain(handle);
+                hashmap_set(cache, &entry);
+                log_debug("font_fallback: codepoint U+%04X → '%s'",
+                          codepoint, ctx->fallback_fonts[i]);
+                return handle;
             }
         }
     }

@@ -24,6 +24,15 @@ static inline ViewBlock* layout_inline_as_block_view(View* view) {
     return lam::view_as_block(view);
 }
 
+float layout_inline_end_edge(ViewSpan* span) {
+    if (!span || !span->bound) return 0.0f;
+    float edge = span->boundary()->margin.right + span->boundary()->padding.right;
+    if (span->boundary()->border) {
+        edge += span->boundary()->border->width.right;
+    }
+    return edge;
+}
+
 static inline ViewBlock* layout_inline_unsafe_block_api_span(ViewSpan* span) {
     return lam::unsafe_view_block_api_span(span);
 }
@@ -1880,7 +1889,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Advance the inline cursor so child text/elements start inside the margin+border+padding.
     // This applies to both normal inline content and block-in-inline splitting.
     float inline_left_edge = 0;
-    float inline_right_edge = 0;
+    float inline_right_edge = layout_inline_end_edge(span);
     if (span->bound) {
         // CSS Writing Modes maps inline decorations to physical top/bottom
         // in vertical flows; using left/right here shifts initial letters onto

@@ -668,11 +668,9 @@ void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
         log_error("js-mir: attempt to emit NULL label — skipping");
         return;
     }
-    // Unowned labels may be joins from exception and non-exception paths; the
-    // tracker must forget any stronger local proof before control merges here.
-    // Async state-machine labels also merge distinct resume activations, so a
-    // prior call result does not dominate the label and cannot be an exception
-    // source for the next operation.
+    // Async state-machine labels merge distinct resume activations, so the
+    // prior call result cannot dominate the label. Ordinary labels can be
+    // deliberate exception-rethrow targets and must retain their Item carrier.
     if (mt->in_async && !mt->in_generator) mt->last_call_result_reg = 0;
     jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
     em_emit_label(&mt->em, label);

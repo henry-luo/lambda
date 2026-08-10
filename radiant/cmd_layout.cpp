@@ -6954,12 +6954,13 @@ int cmd_layout(int argc, char** argv) {
     }
 #endif
 
-    // Initialize logging system (only write log.txt when log.conf exists, i.e. dev/debug mode)
-    if (file_exists("log.conf")) {
+    // preserve the process-wide no-log flag; parsing here would re-enable
+    // glyph-level logging after main() disabled it for layout workers.
+    if (!log_is_disabled() && file_exists("log.conf")) {
         FILE *file = fopen("log.txt", "w");
         if (file) { fclose(file); }
+        log_parse_config_file("log.conf");
     }
-    log_parse_config_file("log.conf");
 
     // Parse command-line options
     LayoutOptions opts;

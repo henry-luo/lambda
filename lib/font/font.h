@@ -106,6 +106,7 @@ void        font_handle_release(FontHandle* handle);
 // returns false if handle is NULL, true otherwise
 bool font_handle_get_style(FontHandle* handle, const char** out_family,
                            float* out_size_px, FontWeight* out_weight, FontSlant* out_slant);
+bool font_handle_is_document_font(FontHandle* handle);
 
 // ============================================================================
 // Font Metrics — per-face, per-size metrics

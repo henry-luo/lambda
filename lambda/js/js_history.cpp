@@ -15,6 +15,7 @@
 
 extern double js_get_number(Item value);
 
+
 typedef struct JsHistoryEventTask {
     Item state;
     char* old_url;

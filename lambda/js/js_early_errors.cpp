@@ -22,7 +22,6 @@
 #include <cstring>
 #include <cstdio>
 
-extern "C" Item js_eval_private_resolve(Item unscoped_key);
 
 // context flags passed down during AST walk
 struct EarlyErrorCtx {

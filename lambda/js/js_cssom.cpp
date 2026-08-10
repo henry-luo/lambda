@@ -25,7 +25,6 @@
 #include <cstring>
 #include <cctype>
 
-extern "C" void heap_register_gc_root(uint64_t* slot);
 extern String* heap_create_name(const char* name, size_t len);
 extern "C" Item vmap_new(void);
 extern "C" const void* radiant_dom_stylesheet_host_type(void);

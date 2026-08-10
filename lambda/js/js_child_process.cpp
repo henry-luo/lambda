@@ -39,9 +39,6 @@
 #endif
 
 extern "C" Item js_process_emit(Item event_name, Item arg1);
-extern "C" void js_next_tick_enqueue(Item callback);
-extern "C" Item js_json_parse(Item str_item);
-extern "C" Item js_json_stringify(Item value);
 extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe);
 extern "C" int js_net_dup_ipc_stdio_fd(Item handle_item);
 extern "C" uv_stream_t* js_net_stream_from_ipc_send_handle(Item handle_item);
@@ -50,7 +47,6 @@ extern "C" void js_net_close_ipc_sent_stream_defer_account(uv_stream_t* stream);
 extern "C" void* js_net_ipc_sent_stream_connection_account(uv_stream_t* stream);
 extern "C" void js_net_complete_transferred_connection_account(void* account);
 extern "C" uint64_t js_get_heap_epoch(void);
-extern "C" void heap_register_gc_root(uint64_t* slot);
 
 static void js_child_process_emit_or_queue_cluster_online(Item obj);
 

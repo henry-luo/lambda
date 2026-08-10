@@ -16,6 +16,7 @@ FRAME_RE = re.compile(
     r"instructions=(\d+) roots=(\d+) root_stores=(\d+) "
     r"scalar_homes=(\d+) number_scratch=(\d+) safepoints=(\d+)"
 )
+ERROR_LANE_TAG_TEST_RE = re.compile(r"^eq\s+[^,]+,\s+[^,]+,\s+27$")
 
 
 def call_target(line: str) -> str | None:
@@ -110,7 +111,12 @@ def enrich(function: dict, frame: dict[str, int] | None) -> None:
     function.setdefault("safepoints", 0)
     function["insns"] = len(function["instructions"])
     function["calls"] = function["opcodes"]["call"]
-    function["exception_polls"] = callees["js_check_exception"]
+    # D8.4.3 emits an inline tag comparison; the retired helper poll is
+    # structurally absent and no longer measures exception-check work.
+    function["error_lane_tag_tests"] = sum(
+        1 for instruction in function["instructions"]
+        if ERROR_LANE_TAG_TEST_RE.match(instruction)
+    )
     function["eval_ops"] = sum(
         count for name, count in callees.items() if name.startswith("js_eval_local_")
     )
@@ -129,7 +135,7 @@ def enrich(function: dict, frame: dict[str, int] | None) -> None:
 
 def aggregate(functions: list[dict]) -> dict:
     keys = (
-        "insns", "locals", "calls", "exception_polls", "eval_ops", "arg_ops",
+        "insns", "locals", "calls", "error_lane_tag_tests", "eval_ops", "arg_ops",
         "tdz_checks", "conversions", "roots", "root_stores", "scalar_homes",
         "number_scratch", "safepoints",
     )
@@ -142,7 +148,7 @@ def print_group(name: str, functions: list[dict]) -> None:
     total = aggregate(functions)
     print("\t".join(str(value) for value in (
         name, total["functions"], total["insns"], total["locals"],
-        total["calls"], total["exception_polls"], total["eval_ops"],
+        total["calls"], total["error_lane_tag_tests"], total["eval_ops"],
         total["arg_ops"], total["tdz_checks"], total["conversions"],
         total["roots"], total["root_stores"], total["scalar_homes"],
         total["safepoints"],
@@ -162,7 +168,7 @@ def main() -> int:
             function["file"] = path.stem
             functions.append(function)
 
-    print("group\tfunctions\tinsns\tlocals\tcalls\texception_polls\teval_ops"
+    print("group\tfunctions\tinsns\tlocals\tcalls\terror_lane_tag_tests\teval_ops"
           "\targ_ops\ttdz_checks\tconversions\troots\troot_stores"
           "\tscalar_homes\tsafepoints")
     print_group("all", functions)
@@ -170,13 +176,13 @@ def main() -> int:
                         (2, "native_body"), (3, "resume")):
         print_group(name, [f for f in functions if f["entry"] == entry])
 
-    print("\nfile\tfunction\tentry\tbound\tinsns\tlocals\tcalls\texception_polls"
+    print("\nfile\tfunction\tentry\tbound\tinsns\tlocals\tcalls\terror_lane_tag_tests"
           "\teval_ops\targ_ops\ttdz_checks\tconversions\troots\troot_stores"
           "\tscalar_homes\tsafepoints")
     for function in functions:
         print("\t".join(str(function[key]) for key in (
             "file", "name", "entry", "bound", "insns", "locals", "calls",
-            "exception_polls", "eval_ops", "arg_ops", "tdz_checks",
+            "error_lane_tag_tests", "eval_ops", "arg_ops", "tdz_checks",
             "conversions", "roots", "root_stores", "scalar_homes", "safepoints",
         )))
     if check:
@@ -193,11 +199,6 @@ def main() -> int:
             # each call's normal-path restore, so restores may exceed saves.
             if saves > pushes or restores < saves:
                 errors.append(f"{function['name']}: unowned argument watermark")
-            instructions = function["instructions"]
-            for index in range(len(instructions) - 1):
-                if call_target(instructions[index]) == "js_check_exception" and \
-                        call_target(instructions[index + 1]) == "js_check_exception":
-                    errors.append(f"{function['name']}: adjacent exception polls")
         binding = next((f for f in functions if "tuneBindings" in f["name"] and
                         f["entry"] == 1), None)
         if not binding or binding["tdz_checks"] != 0:

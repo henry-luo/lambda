@@ -204,14 +204,11 @@ static void js_dynfunc_cache_insert(uint64_t hash, char* source, size_t source_l
         MIR_context_t ctx, JsDynFuncMainFunc js_main_fn);
 static Item js_dynfunc_cache_execute(JsDynFuncCacheEntry* entry, Item* args, int argc, const char* source_prefix);
 static void js_dynfunc_apply_function_metadata(Item fn_item, Item* args, int argc, const char* source_prefix);
-extern "C" void js_func_cache_suppress_push(void);
-extern "C" void js_func_cache_suppress_pop(void);
 
 static bool js_source_contains_import_meta(const char* source, size_t len);
 static bool js_dynamic_function_source_has_hashbang(const char* source, size_t len);
 static bool js_dynamic_function_param_has_invalid_html_close_comment(const char* source, size_t len);
 static bool js_eval_at_line_terminator(const char* source, size_t len, size_t pos, size_t* width);
-extern "C" void js_set_function_name(Item fn_item, Item name_item);
 
 static Item js_dynamic_function_throw_syntax_error(const char* message) {
     return js_throw_syntax_error((Item){.item = s2it(heap_create_name(message, (int)strlen(message)))});
@@ -1226,7 +1223,6 @@ static Item js_eval_initializer_early_error(String* code_str, bool is_direct_eva
 
 static Item js_eval_var_conflicts_lexical_name(String* name) {
     if (!name || name->len <= 0) return js_status_ok();
-    extern int64_t js_eval_local_has_lexical_binding(Item key);
     Item key = (Item){.item = s2it(heap_create_name(name->chars, name->len))};
     if (!js_eval_local_has_lexical_binding(key)) return js_status_ok();
     return js_throw_syntax_error((Item){.item = s2it(heap_create_name("Eval var conflicts with lexical declaration", 43))});
@@ -1318,8 +1314,7 @@ static Item js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
         case JS_AST_NODE_TRY_STATEMENT: {
             JsTryNode* tn = (JsTryNode*)node;
             JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(tn->block));
-            status = js_eval_var_conflicts_lexical_statement(tn->handler);
-            if (item_is_error(status)) return status;
+            JS_ASSIGN_OR_RETURN_INTO(status, js_eval_var_conflicts_lexical_statement(tn->handler));
             return js_eval_var_conflicts_lexical_statement(tn->finalizer);
         }
         case JS_AST_NODE_CATCH_CLAUSE:
@@ -1339,7 +1334,6 @@ static Item js_eval_var_conflicts_lexical_program(JsAstNode* ast) {
 
 static bool js_eval_source_assigns_immutable_binding(String* code_str) {
     if (!code_str) return false;
-    extern int64_t js_eval_local_has_immutable_binding(Item key);
     const char* source = code_str->chars;
     size_t len = code_str->len;
     size_t pos = 0;
@@ -1473,9 +1467,6 @@ static Item js_eval_parse_error_message(const JsTranspiler* tp) {
     return (Item){.item = s2it(heap_create_name(message, strlen(message)))};
 }
 
-extern "C" int64_t js_eval_env_is_active(void);
-extern "C" void js_eval_env_pop_frame(void);
-extern "C" void js_eval_global_lexical_pop_frame(void);
 
 static void js_eval_unwind_direct_bridge(bool is_direct_eval, bool is_global_scope) {
     if (js_eval_env_is_active()) {
@@ -1589,7 +1580,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         }
     }
 
-    extern Item js_call_function(Item func, Item this_val, Item* args, int argc);
     size_t code_len = code_str->len;
     Item fn_item = ItemNull;
 
@@ -1737,7 +1727,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         // uninitialized (TDZ) one inside a derived constructor before super().
         // Resolving it here would make even `eval("1+1")` throw; the binding is
         // passed through instead so only a `this` read inside the eval throws.
-        extern Item js_get_lexical_this_binding();
         Item eval_this = js_get_lexical_this_binding();
         Item result = js_call_function(fn_item, eval_this, NULL, 0);
         if (item_is_error(result)) js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
@@ -1885,8 +1874,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         // v37: Save/restore new.target, set to undefined for eval code.
         // Per ES spec, eval in class field initializers runs "outside a constructor",
         // so new.target should be undefined, not the enclosing constructor.
-        extern Item js_get_new_target();
-        extern void js_set_direct_new_target(Item);
         Item prev_nt = js_get_new_target();
         js_set_direct_new_target((Item){.item = ITEM_JS_UNDEFINED});
 

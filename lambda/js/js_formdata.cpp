@@ -39,8 +39,6 @@
 // Forward declarations of engine APIs used here
 // ============================================================================
 
-extern "C" Item js_call_function(Item func, Item this_val, Item* args, int argc);
-extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc);
 
 // Helpers from js_dom.cpp used for form control inspection
 extern "C" bool js_dom_get_checkedness(void* dom_elem);

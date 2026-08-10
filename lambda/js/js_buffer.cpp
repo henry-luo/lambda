@@ -23,13 +23,15 @@
 #include <cstring>
 #include <cstdlib>
 
+extern "C" Item bigint_from_int64(int64_t val);
+extern "C" Item bigint_from_string(const char* str, int len);
+extern Item js_make_number(double d);
+
 static const int64_t JS_BUFFER_MAX_LENGTH = (1LL << 30) - 1;
 static const int64_t JS_BUFFER_MAX_STRING_LENGTH = (1LL << 28) - 16;
 
 extern "C" Item js_get_current_this(void);
 extern "C" Item js_blob_new(Item parts, Item options);
-extern "C" void js_set_function_name(Item fn_item, Item name_item);
-extern Item js_make_number(double d);
 void* heap_alloc(int size, TypeId type_id);
 
 static Item js_buffer_resolve_object_url(Item id_item) {
@@ -92,8 +94,6 @@ static int buffer_decode_base64_bytes(const char* str, int str_len, Base64Varian
     return copy_len;
 }
 
-extern "C" Item bigint_from_int64(int64_t val);
-extern "C" Item bigint_from_string(const char* str, int len);
 extern "C" int64_t bigint_to_int64(Item bi);
 extern "C" char* bigint_to_cstring_radix(Item bi, int radix);
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
@@ -234,7 +234,6 @@ static int format_received_suffix(char* buf, int buf_size, Item value) {
         case LMD_TYPE_UNDEFINED:
             return snprintf(buf, buf_size, " Received undefined");
         case LMD_TYPE_MAP: {
-            extern Item js_property_get(Item object, Item key);
             Item ctor = js_property_get(value, make_string_item("constructor"));
             Item name = get_type_id(ctor) == LMD_TYPE_FUNC
                 ? js_property_get(ctor, make_string_item("name"))
@@ -576,8 +575,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         }
 
         int byte_length = buffer_length - byte_offset;
-        validation = buffer_from_to_index(length_item, byte_length, 0, &byte_length, "length");
-        if (item_is_error(validation)) return validation;
+        JS_ASSIGN_OR_RETURN_INTO(validation, buffer_from_to_index(length_item, byte_length, 0, &byte_length, "length"));
         if (byte_length > buffer_length - byte_offset) {
             return js_throw_range_error_code("ERR_BUFFER_OUT_OF_BOUNDS",
                 "\"length\" is outside of buffer bounds");
@@ -1692,9 +1690,8 @@ extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item e
     const uint8_t* needle = NULL;
     int needle_len = 0;
     uint8_t enc_buf[4096]; // stack buffer for encoded needle
-    Item preparation = buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
-        enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error);
-    if (item_is_error(preparation)) return preparation;
+    JS_ASSIGN_OR_RETURN(preparation, buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
+        enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error));
     if (!needle) return (Item){.item = i2it(-1)};
 
     int found = buffer_find_needle(data, blen, needle, needle_len, start, false,
@@ -1784,9 +1781,8 @@ extern "C" Item js_buffer_lastIndexOf(Item buf, Item value, Item offset_item, It
     const uint8_t* needle = NULL;
     int needle_len = 0;
     uint8_t enc_buf[4096];
-    Item preparation = buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
-        enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error);
-    if (item_is_error(preparation)) return preparation;
+    JS_ASSIGN_OR_RETURN(preparation, buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
+        enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error));
     if (!needle) return (Item){.item = i2it(-1)};
 
     int found = buffer_find_needle(data, blen, needle, needle_len, end, true,
@@ -2331,10 +2327,9 @@ static Item js_buffer_write_bigint64(Item buf, Item value_item, Item offset_item
     if (offset < 0 || offset + 8 > blen) return ItemNull;
     Item bigint_value;
     JS_ASSIGN_OR_RETURN(validation, buffer_to_bigint_value(value_item, &bigint_value));
-    Item wrapped = unsigned_value ?
+    JS_ASSIGN_OR_RETURN(wrapped, unsigned_value ?
         js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_value) :
-        js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_value);
-    if (item_is_error(wrapped)) return wrapped;
+        js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_value));
     uint64_t val = unsigned_value ? buffer_bigint_to_uint64_bits(wrapped) :
         (uint64_t)bigint_to_int64(wrapped);
     for (int i = 0; i < 8; i++) {
@@ -2704,8 +2699,6 @@ extern "C" Item js_get_buffer_namespace(void) {
     js_property_set(buffer_namespace, make_string_item("default"), buffer_namespace);
 
     // Node.js: buffer module also exports atob/btoa
-    extern Item js_atob(Item);
-    extern Item js_btoa(Item);
     buf_set_method(buffer_namespace, "atob", (void*)js_atob, 1);
     buf_set_method(buffer_namespace, "btoa", (void*)js_btoa, 1);
     {

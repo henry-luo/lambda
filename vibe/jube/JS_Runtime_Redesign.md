@@ -21,8 +21,11 @@ accretion patterns (string-keyed builtin dispatch, 54 property entry points,
 five type discriminators, poll-based exceptions). This is a redesign, not a
 tune: mechanisms are replaced and **their predecessors deleted**.
 
-**JR1 — Extend Lambda; never reinvent beside it.** The JS runtime keeps and
-deepens its alignment with the Lambda runtime: the Item data model (D2),
+### JR1 — Extend Lambda; never reinvent beside it
+
+The governing principle; JR2–JR10 are its application per area. The JS
+runtime keeps and deepens its alignment with the Lambda runtime: the Item
+data model (D2),
 TypeMap shapes (D3.4), the stack model, scalar homes and precise rooting
 (D5), the GC heap (D4), function values (D6.2), and module management (D7).
 Where QuickJS or V8 practice is imported, it is expressed **through an
@@ -117,6 +120,11 @@ canonicalization; duplicate hashing (`hashmap_sip` on hot paths);
 
 **Interactions.** DO16 (intern growth bound) becomes easier to enforce:
 interning happens at compile/boot, not per lookup.
+
+**Implementation plan**: `vibe/jube/JS_Tune2_Name.md` (phases N0–N6,
+sub-rulings JR2.1–JR2.8), implementing `Lambda_Design_Name_Identity.md`
+W4.1/W4.2 + W2; "JsName" above *is* NI1's canonical
+`String*`/`PropertyKeyRef` — no new type is introduced (JR2.1).
 
 ### JR3 — Exceptions: in-band signal, one channel
 
@@ -319,11 +327,10 @@ note: ERROR-tagged Items are heap references and must be traced as such
 (D8.4.3).
 
 **The scalar-return rule.** Raw-scalar returns (MIR_T_D/I64 lanes) cannot
-carry a sentinel — this is *why* polling existed. Survey: only **4 helpers**
-are emitted with raw-double returns (`js_get_number`, `js_math_ceil_d`,
-`js_math_pow_d`, `js_math_round`). Rule: **only infallible (`PRESERVES`,
-non-throwing) helpers may return raw scalars**; fallible helpers return Item.
-The audit is 4 rows today; the rule becomes a catalog lint.
+carry a sentinel — this is *why* polling existed. Rule: **only infallible
+(`PRESERVES`, non-throwing) helpers may return raw scalars**; fallible helpers
+return Item. Tune1 did not complete that catalog audit; Tune2 supplies the
+emitter value-class gate and standing catalog lint against D8.4.3.
 
 **Deleted.** Poll emission (~153k sites), `js_check_exception` from the hot
 ABI, 467 manual flag checks (mechanical rewrite to sentinel checks), the
@@ -509,6 +516,7 @@ redesign, not a semantics change.
 | `js_call_*` entry variants | 12 | 2 |
 | Module loader/caches for JS | 2 | 1 |
 | Emitted exception-poll sites (batch) | 153,725 | 0 |
+| Emitted ERROR-tag tests (fixed MIR probe) | Tune2 baseline | 1 |
 | Sentinel-property conventions | ≥2 | 0 |
 
 The census script (extension of the review's greps) lives in `utils/` and
@@ -561,9 +569,10 @@ compatibility failures are outside the JR3 error-lane scope.
 **Implementation record:** `vibe/jube/JS_Tune1_Runtime.md` (E0–E8).
 
 Tune1 mapping: P1 ⊂ R6 (superseded by construction), P2 ⊂ R1+R4, P3 ⊂ R5,
-P4's constructor-shape work lands naturally in R3/R5, P5 becomes the JR3
-catalog lint. If a quick win is wanted before R6 lands, Tune1-P1a remains a
-valid stopgap.
+P4's constructor-shape work lands naturally in R3/R5. P5 was not completed
+by Tune1; `JS_Tune2_Exception.md` owns the JR3 catalog lint and tag-test
+ratchet. If a quick win is wanted before R6 lands, Tune1-P1a remains a valid
+stopgap.
 
 ## 7. Risks
 
@@ -622,6 +631,8 @@ The JR3 contract landed as D8.4.3 in `doc/Lambda_Formal_Design.md` version
    lazily; resting state rides `LMD_TYPE_MAP` with the shared class-Error
    shape over struct-backed slots (no new TypeId — the D2 ripple was judged
    too costly for a cold path). Implemented; E8 validation is complete.
+   The sub-ruling series continues as JR3.3–JR3.9 (catalog conformance and
+   lane-check elision) in `vibe/jube/JS_Tune2_Exception.md` §1.
 2. **JR5**: builtin function objects — shared immutable shape with a C-entry
    slot, or a distinct lightweight callable header? Cost target: ≤2 words over
    a plain function value; `Function.prototype` methods must see them as

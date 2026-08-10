@@ -12,6 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern "C" void heap_register_gc_root(uint64_t* slot);
+extern Item js_make_number(double d);
+
 #define JS_OBSERVER_CAP 64
 #define JS_OBSERVER_TARGET_CAP 32
 
@@ -86,11 +89,9 @@ static JsObserverRuntimeState* js_observer_runtime_state() {
 #define observer_roots_epoch (js_observer_runtime_state()->roots_epoch)
 extern __thread EvalContext* context;
 extern "C" uint64_t js_get_heap_epoch(void);
-extern "C" void heap_register_gc_root(uint64_t* slot);
 
 static Item js_geometry_observer_initial_sample(void);
 
-extern Item js_make_number(double value);
 
 static void observer_register_roots(void) {
     uint64_t epoch = js_get_heap_epoch();

@@ -7822,7 +7822,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // nested calls see depth >= 2 while the outermost transpile sits at 1;
     // the matching exit at the end of the function drains continuations only
     // when this is the outermost call.
-    extern void js_tla_enter_module(void);
     js_tla_enter_module();
     JsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) {
@@ -7831,7 +7830,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     }
     jm_track_active_js_transpile(tp, NULL, NULL);
 
-    extern void js_tla_exit_module(void);
 
     jm_log_module_phase_progress(filename, "parse-begin");
     if (!js_transpiler_parse(tp, js_source, strlen(js_source))) {
@@ -8051,7 +8049,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // chunks. Sits AFTER the namespace/module-vars restore so
     // continuations that touch module-level state read whichever active
     // namespace the outer caller had — typically the entry module's.
-    extern void js_tla_exit_module(void);
     js_tla_exit_module();
 
     if (module_body_threw) {
@@ -8144,7 +8141,6 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
                         String* cur_str_c = heap_create_name(filename, strlen(filename));
                         Item cur_item_c = (Item){.item = s2it(cur_str_c)};
                         jm_propagate_import_evaluation_error(cur_item_c, spec_item);
-                        extern void js_module_inherit_awaited_target(Item, Item);
                         js_module_inherit_awaited_target(cur_item_c, spec_item);
                         // Js57 P7d-B: cached dep — if it still hasn't finished
                         // its TLA evaluation, register the importer as a parent
@@ -8198,7 +8194,6 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
                     String* cur_str = heap_create_name(filename, strlen(filename));
                     Item cur_item = (Item){.item = s2it(cur_str)};
                     jm_propagate_import_evaluation_error(cur_item, spec_item);
-                    extern void js_module_inherit_awaited_target(Item, Item);
                     js_module_inherit_awaited_target(cur_item, spec_item);
                     // Js57 P7d-B: freshly-loaded dep — if it has TLA or
                     // transitively depends on a TLA module, register the

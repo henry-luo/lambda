@@ -25,7 +25,6 @@
 #endif
 
 extern "C" Item js_internal_binding(Item name);
-extern "C" void heap_register_gc_root(uint64_t* slot);
 
 static bool dns_is_object_like(Item item);
 

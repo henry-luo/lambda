@@ -18,7 +18,7 @@
 #define PATH_MAX 4096
 #endif
 
-extern String* heap_create_name(const char* str, size_t len);
+extern String* heap_create_name(const char* name, size_t len);
 
 #define JS_PERMISSION_MAX_GRANTS 128
 

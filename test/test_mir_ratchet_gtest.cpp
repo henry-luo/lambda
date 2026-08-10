@@ -51,6 +51,7 @@ struct Metric {
 struct FunctionBudget {
     std::string name;  // may contain '#' digit wildcards
     Metric insns;
+    Metric error_lane_tag_tests;
 };
 
 // frame shape is addressed by the *telemetry's* function names, which are a
@@ -148,7 +149,7 @@ inline bool load_budgets(const std::string& path, std::vector<Probe>* out, std::
 
     static const char* kProbeKeys[] = { "name", "script", "language", "description", "budgets" };
     static const char* kBudgetKeys[] = { "module_insns", "functions", "frames" };
-    static const char* kFuncKeys[] = { "insns" };
+    static const char* kFuncKeys[] = { "insns", "error_lane_tag_tests" };
     static const char* kFrameKeys[] = {
         "name", "occurrence", "roots", "root_stores", "scalar_homes",
         "number_scratch", "safepoints",
@@ -222,6 +223,8 @@ inline bool load_budgets(const std::string& path, std::vector<Probe>* out, std::
                     }
                 }
                 if (!read_metric(metrics, "insns", &budget.insns, error)) return false;
+                if (!read_metric(metrics, "error_lane_tag_tests",
+                                 &budget.error_lane_tag_tests, error)) return false;
                 probe.functions.push_back(budget);
             }
         }
@@ -306,6 +309,20 @@ void compare(const char* metric, const std::string& where, const Metric& budget,
     }
 }
 
+template <typename Lines>
+static long long count_error_lane_tag_tests(const Lines& lines) {
+    long long total = 0;
+    for (size_t i = 0; i < lines.size(); i++) {
+        const auto& text = lines[i].text;
+        if (text.find("\teq\t") != 0) continue;
+        size_t comma = text.rfind(", 27");
+        // D8.4.3's ERROR carrier has tag 27; this metric deliberately pins
+        // the emitted comparison, not the retired source-level poll helper.
+        if (comma != (size_t)-1 && comma + 4 == text.size()) total++;
+    }
+    return total;
+}
+
 class MirRatchetTest : public ::testing::TestWithParam<Probe> {};
 
 TEST_P(MirRatchetTest, WithinBudget) {
@@ -350,6 +367,11 @@ TEST_P(MirRatchetTest, WithinBudget) {
         if (budget.insns.present) {
             compare("insns", budget.name, budget.insns,
                     mir_check::count_instructions(scopes[0]->lines), &report);
+        }
+        if (budget.error_lane_tag_tests.present) {
+            compare("error_lane_tag_tests", budget.name,
+                    budget.error_lane_tag_tests,
+                    count_error_lane_tag_tests(scopes[0]->lines), &report);
         }
     }
 
