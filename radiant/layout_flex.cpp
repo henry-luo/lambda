@@ -89,7 +89,7 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
     if (!item->fi) return nullptr;
     item->fi->anonymous_text = text;
 
-    FontBox saved_font = lycon->font;
+    LayoutFontScope font_scope(lycon);
     if (item->font) setup_font(lycon->ui_context, &lycon->font, item->font);
     const char* text_data = (const char*)text->text_data();
     // CSS Flexbox intrinsic sizing uses the collapsed anonymous text run;
@@ -107,8 +107,6 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
     if (text_height <= 0.0f) {
         text_height = lycon->font.style ? lycon->font.style->font_height : 0.0f;
     }
-    lycon->font = saved_font;
-
     float item_width_min = widths.min_content;
     float item_width_max = widths.max_content;
     float item_height = text_height;
@@ -1063,7 +1061,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                                 }
                                 // Clamp by min-width/max-width (§1.1)
                                 if (ViewBlock* item_block = lam::view_as_block(item)) {
-                                    item_width = layout_clamp_min_max_width(item_block, item_width);
+                                    item_width = layout_clamp_min_max_axis(item_block, item_width, true);
                                 }
                                 child_count++;
                             } else if (dom_child->is_text()) {
@@ -1427,7 +1425,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     if (item->blk) {
                         ViewBlock* item_block = lam::view_as_block(item);
                         if (item_block) {
-                            item_width = layout_apply_min_max_width(item_block, item_width, true);
+                            item_width = layout_apply_min_max_axis(item_block, item_width, true, true);
                         }
                     }
                     flex_item_count++;
@@ -1651,9 +1649,9 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         float min_height_border = min_height > 0.0f ? layout_css_size_to_border_box(
             container->bound, layout_box_sizing(container), min_height, false) : 0.0f;
         float min_width_content = min_width_border > 0.0f
-            ? layout_content_width_from_border_box(container, min_width_border) : 0.0f;
+            ? layout_content_size_from_border_box(container, min_width_border, true) : 0.0f;
         float min_height_content = min_height_border > 0.0f
-            ? layout_content_height_from_border_box(container, min_height_border) : 0.0f;
+            ? layout_content_size_from_border_box(container, min_height_border, false) : 0.0f;
 
         if (is_main_axis_horizontal(flex_layout)) {
             // Row flex: min-width affects main_axis_size (for justify-content)
@@ -1948,8 +1946,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         if (container->height < min_height_border) {
             log_debug("%s Phase 7b: Applying min-height constraint: %.1f -> %.1f", container->source_loc(), container->height, min_height_border);
             container->height = min_height_border;
-            float content_val = layout_content_height_from_border_box(
-                container, min_height_border);
+            float content_val = layout_content_size_from_border_box(
+                container, min_height_border, false);
             if (is_main_axis_horizontal(flex_layout)) {
                 flex_layout->cross_axis_size = content_val;
             } else {
@@ -2367,10 +2365,12 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
     float container_content_width = cb.content_width;
     float container_content_height = cb.has_definite_height ? cb.content_height : -1.0f;
 
-    PercentageContainingBlockWidthScope flex_parent_scope(lycon, container_content_width);
+    LayoutContainingBlockScope flex_parent_scope(
+        lycon, LAYOUT_AXIS_X, container_content_width);
     // flex-item percentages resolve against the flex container's content box;
     // the outer block context still contains the container's border-box size.
-    PercentageContainingBlockHeightScope flex_parent_height_scope(lycon, container_content_height);
+    LayoutContainingBlockScope flex_parent_height_scope(
+        lycon, LAYOUT_AXIS_Y, container_content_height);
 
     // Single pass through all children
     while (child) {
@@ -5654,8 +5654,8 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
     }
     // Hypothetical cross sizing re-resolves percentage descendants; keep the
     // flex axis indefinite here so fit-content containers measure them as auto.
-    PercentageContainingBlockHeightScope percentage_height_scope(
-        lycon, percentage_height_basis);
+    LayoutContainingBlockScope percentage_height_scope(
+        lycon, LAYOUT_AXIS_Y, percentage_height_basis);
     log_debug("HYPOTHETICAL_CROSS: Starting determination, is_horizontal=%d", is_horizontal);
 
     for (int i = 0; i < flex_layout->line_count; i++) {

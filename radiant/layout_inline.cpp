@@ -7,11 +7,6 @@
 #include <float.h>
 #include <cstring>
 
-// Forward declarations from layout_block.cpp for pseudo-element handling
-extern PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
-extern void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before);
-extern void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before);
-
 static inline DomElement* layout_inline_as_element(DomNode* node) {
     return lam::dom_as<DOM_NODE_ELEMENT>(node);
 }
@@ -1780,23 +1775,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Allocate pseudo-element content if ::before or ::after is present
     // Inline elements can have pseudo-elements too (e.g., <span>::before)
     if (elmt->is_element()) {
-        DomElement* elem = layout_inline_as_element(elmt);
         ViewBlock* block_api_span = layout_inline_unsafe_block_api_span(span);
-        elem->pseudo = alloc_pseudo_content_prop(lycon, block_api_span);
-
-        // Generate pseudo-element content from CSS content property
-        generate_pseudo_element_content(lycon, block_api_span, true);   // ::before
-        generate_pseudo_element_content(lycon, block_api_span, false);  // ::after
-
-        // Insert pseudo-elements into DOM tree for proper view tree linking
-        if (elem->pseudo) {
-            if (elem->pseudo->before) {
-                insert_pseudo_into_dom(elem, elem->pseudo->before, true);
-            }
-            if (elem->pseudo->after) {
-                insert_pseudo_into_dom(elem, elem->pseudo->after, false);
-            }
-        }
+        layout_materialize_pseudo_content(lycon, block_api_span);
     }
 
     if (pa_font.style) {

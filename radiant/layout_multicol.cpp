@@ -321,7 +321,7 @@ static float multicol_specified_border_height(ViewBlock* block) {
     // must add padding and borders before the later block finalizer sees it.
     return layout_uses_border_box(block)
         ? specified_height
-        : layout_border_height_from_content_box(block, specified_height);
+        : layout_border_size_from_content_box(block, specified_height, false);
 }
 
 static float multicol_row_gap(ViewBlock* block) {

@@ -1572,26 +1572,20 @@ static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* e
     if (!is_column_marker && !is_empty_caption_marker) return false;
 
     View* marker = static_cast<View*>(elem);
-    View* saved_view = lycon->view;
-    DomNode* saved_elmt = lycon->elmt;
-    BlockContext saved_block = lycon->block;
-    Linebox saved_line = lycon->line;
-    FontBox saved_font = lycon->font;
     ViewType saved_view_type = marker->view_type;
 
     // resolve computed style with the same element/view context normal inline
     // layout provides, then restore layout state because non-rendered table
     // internals do not generate inline boxes or affect siblings.
-    marker->view_type = RDT_VIEW_INLINE;
-    lycon->view = marker;
-    lycon->elmt = elem;
-    dom_node_resolve_style(elem, lycon);
-    marker->view_type = saved_view_type;
-    lycon->view = saved_view;
-    lycon->elmt = saved_elmt;
-    lycon->block = saved_block;
-    lycon->line = saved_line;
-    lycon->font = saved_font;
+    {
+        LayoutContextScope context_scope(lycon);
+        LayoutViewScope view_scope(lycon);
+        marker->view_type = RDT_VIEW_INLINE;
+        lycon->view = marker;
+        lycon->elmt = elem;
+        dom_node_resolve_style(elem, lycon);
+        marker->view_type = saved_view_type;
+    }
 
     elem->display = display;
     if (is_empty_caption_marker && table_caption_has_box_contribution(elem)) {
@@ -3120,14 +3114,13 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             elem->height = 0;
 
             // Set lycon->view for style resolution (resolve_css_styles uses it)
-            View* saved_view = lycon->view;
-            lycon->view = (View*)elem;
+            {
+                LayoutViewScope view_scope(lycon);
+                lycon->view = (View*)elem;
 
-            // Resolve CSS styles so counter properties are populated on elem->blk
-            dom_node_resolve_style(node, lycon);
-
-            // Restore view context
-            lycon->view = saved_view;
+                // Resolve CSS styles so counter properties are populated on elem->blk
+                dom_node_resolve_style(node, lycon);
+            }
 
             // CSS Lists 3: "An element that does not generate a box... also does not
             // increment, set, or reset any counters." display:contents does not
@@ -3423,17 +3416,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // CSS 2.1 §12.2: Generate pseudo-elements for the root <html> element
     // Supports html:before and html:after in CSS conformance tests
     if (elmt->is_element()) {
-        html->pseudo = alloc_pseudo_content_prop(lycon, html);
-        generate_pseudo_element_content(lycon, html, true);   // ::before
-        generate_pseudo_element_content(lycon, html, false);  // ::after
-        if (html->pseudo) {
-            if (html->pseudo->before) {
-                insert_pseudo_into_dom(lam::dom_require_element(elmt), html->pseudo->before, true);
-            }
-            if (html->pseudo->after) {
-                insert_pseudo_into_dom(lam::dom_require_element(elmt), html->pseudo->after, false);
-            }
-        }
+        layout_materialize_pseudo_content(lycon, html);
     }
 
     // CSS 2.1 §9.2: Lay out ALL visible children of <html>, not just <body>.

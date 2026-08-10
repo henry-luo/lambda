@@ -593,8 +593,8 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                                lycon->grid_container->content_width > 0;
         IntrinsicSizesBidirectional all_sizes;
         if (override_parent) {
-            PercentageContainingBlockWidthScope grid_parent_scope(
-                lycon, lycon->grid_container->content_width);
+            LayoutContainingBlockScope grid_parent_scope(
+                lycon, LAYOUT_AXIS_X, lycon->grid_container->content_width);
             all_sizes = measure_intrinsic_sizes(lycon, item, available);
         } else {
             all_sizes = measure_intrinsic_sizes(lycon, item, available);

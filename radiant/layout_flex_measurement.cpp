@@ -551,8 +551,9 @@ static float flex_measure_intrinsic_max_height(LayoutContext* lycon, DomNode* no
     if (percentage_containing_width > 0.0f) {
         // The intrinsic query re-resolves style, so percentages must retain the
         // flex container's definite cross-size instead of the outer block width.
-        PercentageContainingBlockWidthScope percentage_parent_scope(
-            lycon, percentage_containing_width);
+        LayoutContainingBlockScope percentage_parent_scope(
+            lycon, LAYOUT_AXIS_X,
+            percentage_containing_width);
         IntrinsicSizesBidirectional sizes = measure_intrinsic_sizes(lycon, block, available);
         return sizes.max_content_height;
     }
@@ -715,124 +716,6 @@ static FlexChildExplicitSizes flex_measure_child_explicit_sizes(LayoutContext* l
     }
 
     return sizes;
-}
-
-static float flex_measure_length_decl(LayoutContext* lycon, DomElement* elem,
-                                      CssPropertyCode property,
-                                      CssPropertyCode resolve_property) {
-    if (!elem || !elem->specified_style) return 0.0f;
-
-    CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property);
-    if (!decl || !decl->value || decl->value->type != CSS_VALUE_TYPE_LENGTH) return 0.0f;
-    return resolve_length_value(lycon, resolve_property, decl->value);
-}
-
-static float flex_measure_length_decl_pair(LayoutContext* lycon, DomElement* elem,
-                                           CssPropertyCode first_property,
-                                           CssPropertyCode second_property) {
-    return flex_measure_length_decl(lycon, elem, first_property, first_property) +
-           flex_measure_length_decl(lycon, elem, second_property, second_property);
-}
-
-static float flex_measure_shorthand_side_pair(LayoutContext* lycon, CssValue* value,
-                                              CssPropertyCode resolve_property,
-                                              int first_side, int second_side) {
-    if (!value) return 0.0f;
-
-    float first = 0.0f;
-    float second = 0.0f;
-    const CssValue* first_value = css_box_shorthand_side_value(value, first_side);
-    const CssValue* second_value = css_box_shorthand_side_value(value, second_side);
-    if (first_value) {
-        first = resolve_length_value(lycon, resolve_property, first_value);
-    }
-    if (second_value) {
-        second = resolve_length_value(lycon, resolve_property, second_value);
-    }
-    return first + second;
-}
-
-static float flex_measure_axis_padding_sum(LayoutContext* lycon, DomElement* elem,
-                                           bool horizontal) {
-    if (!elem || !elem->specified_style) return 0.0f;
-
-    CssDeclaration* pad_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING);
-    if (horizontal && pad_sh && pad_sh->value &&
-        pad_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
-        return resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_sh->value) * 2.0f;
-    }
-
-    float padding = flex_measure_length_decl_pair(
-        lycon, elem,
-        horizontal ? CSS_PROPERTY_PADDING_LEFT : CSS_PROPERTY_PADDING_TOP,
-        horizontal ? CSS_PROPERTY_PADDING_RIGHT : CSS_PROPERTY_PADDING_BOTTOM);
-    if (horizontal) return padding;
-    if (padding != 0.0f) return padding;
-    return flex_measure_shorthand_side_pair(
-        lycon, pad_sh ? pad_sh->value : nullptr, CSS_PROPERTY_PADDING,
-        horizontal ? 1 : 0, horizontal ? 3 : 2);
-}
-
-static float flex_measure_border_all_width(LayoutContext* lycon, CssValue* value) {
-    if (!value) return 0.0f;
-
-    if (value->type == CSS_VALUE_TYPE_LIST) {
-        for (int bi = 0; bi < value->data.list.count; bi++) {
-            CssValue* bv = value->data.list.values[bi];
-            if (bv->type == CSS_VALUE_TYPE_LENGTH || bv->type == CSS_VALUE_TYPE_NUMBER) {
-                return resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bv);
-            }
-        }
-        return 0.0f;
-    }
-    if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        return resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, value);
-    }
-    return 0.0f;
-}
-
-static float flex_measure_axis_border_sum(LayoutContext* lycon, DomElement* elem,
-                                          bool horizontal) {
-    if (!elem || !elem->specified_style) return 0.0f;
-
-    CssDeclaration* bw_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER_WIDTH);
-    if (horizontal && bw_sh && bw_sh->value &&
-        bw_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
-        return resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bw_sh->value) * 2.0f;
-    }
-
-    float border = 0.0f;
-    if (!horizontal) {
-        border = flex_measure_length_decl_pair(
-            lycon, elem, CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_BOTTOM_WIDTH);
-        if (border != 0.0f) return border;
-        border = flex_measure_shorthand_side_pair(
-            lycon, bw_sh ? bw_sh->value : nullptr, CSS_PROPERTY_BORDER_WIDTH, 0, 2);
-        if (border != 0.0f) return border;
-    }
-
-    CssDeclaration* b_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER);
-    float border_width = flex_measure_border_all_width(lycon, b_sh ? b_sh->value : nullptr);
-    return border_width * 2.0f;
-}
-
-static float flex_measure_horizontal_box_extra(LayoutContext* lycon, ViewElement* elem) {
-    return flex_measure_axis_padding_sum(lycon, elem, true) +
-           flex_measure_axis_border_sum(lycon, elem, true);
-}
-
-static float flex_measure_text_child_vertical_extra(LayoutContext* lycon,
-                                                    DomElement* elem,
-                                                    ViewElement* sub_view) {
-    if (sub_view && sub_view->bound) {
-        float vert_extra = layout_boundary_metrics(sub_view->bound).pad_border_v;
-        if (vert_extra != 0.0f || !elem || !elem->specified_style) {
-            return vert_extra;
-        }
-    }
-    if (!elem || !elem->specified_style) return 0.0f;
-    return flex_measure_axis_padding_sum(lycon, elem, false) +
-           flex_measure_axis_border_sum(lycon, elem, false);
 }
 
 static float flex_measure_select_max_option_text_width(LayoutContext* lycon,
@@ -998,7 +881,8 @@ static float flex_measure_row_child_height_at_estimated_share(LayoutContext* lyc
     } else if (child_view->specified_style) {
         // unresolved child bounds still need the CSS box extra removed before
         // intrinsic height measurement, or row-share fallback double-counts it.
-        child_content_w -= flex_measure_horizontal_box_extra(lycon, child_view);
+        child_content_w -= layout_intrinsic_padding_border_axis(
+            lycon, child_view, true, 0.0f);
     }
     if (child_content_w < 0.0f) child_content_w = 0.0f;
     float child_height = flex_measure_intrinsic_max_height(lycon, child, child_content_w);
@@ -1109,14 +993,14 @@ static FlexMeasuredElementHeight flex_measure_direct_element_height(LayoutContex
         FlexDirectContentSummary content_summary = flex_measure_direct_content_summary(elem);
         if (content_summary.has_text_content) {
             float child_content_height = text_line_height;
-            ViewElement* sub_view = lam::view_require_element(elem);
             float inherited_lh = resolve_flex_inherited_line_height(lycon, elem);
             if (inherited_lh > 0.0f) {
                 child_content_height = inherited_lh;
             }
             result.height = child_content_height;
 
-            float vert_extra = flex_measure_text_child_vertical_extra(lycon, elem, sub_view);
+            float vert_extra = layout_intrinsic_padding_border_axis(
+                lycon, elem, false, lycon->block.content_width);
             result.height += vert_extra;
             if (vert_extra > 0.0f) result.has_explicit_height_css = true;
             log_debug("Element %s: content_height=%.1f, padding+border=%.1f, total=%.1f",
@@ -1174,21 +1058,16 @@ static void flex_accumulate_direct_element_height(NameId tag,
 static IntrinsicSizes flex_measure_child_intrinsic_widths(LayoutContext* lycon,
                                                           ViewElement* child_view,
                                                           bool content_only) {
-    FontBox saved_child_font = lycon->font;
-    bool child_font_changed = false;
+    LayoutFontScope font_scope(lycon);
     if (child_view->font) {
         // Intrinsic text width must be measured in the child font; parent font state
         // is restored immediately so sibling measurement keeps its inherited context.
         setup_font(lycon->ui_context, &lycon->font, child_view->font);
-        child_font_changed = true;
     }
 
     IntrinsicSizes child_sizes = measure_element_intrinsic_widths(
         lycon, lam::dom_require<DOM_NODE_ELEMENT>(child_view), content_only);
 
-    if (child_font_changed) {
-        lycon->font = saved_child_font;
-    }
     return child_sizes;
 }
 
@@ -1468,12 +1347,11 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             // reached via the layout_form_control dispatch, not flex/grid).
             if (elem->form->control_type == FORM_CONTROL_SELECT &&
                 !elem->form->multiple && elem->form->select_size <= 1) {
-                FontBox saved_font = lycon->font;
+                LayoutFontScope font_scope(lycon);
                 if (elem->font && elem->fontp()->font_size > 0 && lycon->ui_context) {
                     setup_font(lycon->ui_context, &lycon->font, elem->font);
                 }
                 float max_text_width = flex_measure_select_max_option_text_width(lycon, elem);
-                lycon->font = saved_font;
                 float new_w = layout_select_combo_intrinsic_width(
                     max_text_width, !elem->form->appearance_none);
                 if (new_w > content_width) {
@@ -1496,13 +1374,12 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                 // Measure text content of button
                 // Set up button's own font for measurement (UA default 13.3333px Arial,
                 // not parent's inherited font which may differ)
-                FontBox saved_font = lycon->font;
+                LayoutFontScope font_scope(lycon);
                 if (elem->font && elem->fontp()->font_size > 0 && lycon->ui_context) {
                     setup_font(lycon->ui_context, &lycon->font, elem->font);
                 }
                 float max_text_width = measure_direct_text_children_intrinsic_width(
                     lycon, elem, false, btn_text_transform);
-                lycon->font = saved_font;  // restore parent font
                 if (max_text_width > 0) {
                     // Store intrinsic size in form property for flex-basis calculation
                     elem->form->intrinsic_width = max_text_width;
@@ -1647,7 +1524,7 @@ static bool flex_measure_pseudo_content(LayoutContext* lycon, DomElement* item,
     const char* content = dom_element_get_pseudo_element_content(item, pseudo_element);
     if (!content || !*content) return false;
 
-    FontBox saved = lycon->font;
+    LayoutFontScope font_scope(lycon);
     if (item->font) setup_font(lycon->ui_context, &lycon->font, item->font);
     TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, content, strlen(content));
     float line_height = lycon->font.style && lycon->font.style->font_size > 0
@@ -1658,7 +1535,6 @@ static bool flex_measure_pseudo_content(LayoutContext* lycon, DomElement* item,
     if (line_height > *height) *height = line_height;
     log_debug("calculate_item_intrinsic_sizes: %s content='%s' -> width=%.1f, height=%.1f",
               label, content, widths.max_content, line_height);
-    lycon->font = saved;
     return true;
 }
 
@@ -1703,18 +1579,16 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     }
     // Intrinsic queries re-resolve styles; preserve the flex container's
     // definite cross/main height instead of the stale outer block height.
-    PercentageContainingBlockHeightScope flex_height_scope(lycon, percentage_height_basis);
-    FontBox saved_font;  // Save current font to restore later
-    bool font_changed = false;
+    LayoutContainingBlockScope flex_height_scope(
+        lycon, LAYOUT_AXIS_Y, percentage_height_basis);
+    LayoutFontScope font_scope(lycon);
     FontProp* intrinsic_font = item->font;
     if (!intrinsic_font) {
         ViewElement* parent = item->parent_view();
         intrinsic_font = parent ? parent->font : nullptr;
     }
     if (lycon && intrinsic_font) {
-        saved_font = lycon->font;
         setup_font(lycon->ui_context, &lycon->font, intrinsic_font);
-        font_changed = true;
     }
 
     // Initialize to zero
@@ -1771,9 +1645,6 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         flex_store_intrinsic_sizes(item, min_width, max_width, min_height, max_height);
         log_debug("calculate_item_intrinsic_sizes: SVG intrinsic size=%.1fx%.1f ratio=%.3f",
                   max_width, max_height, intrinsic.aspect_ratio);
-        if (font_changed) {
-            lycon->font = saved_font;
-        }
         return;
     }
 
@@ -1858,10 +1729,6 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
         log_debug("calculate_item_intrinsic_sizes: image final intrinsic=%.1fx%.1f", max_width, max_height);
 
-        // Restore font before returning
-        if (font_changed) {
-            lycon->font = saved_font;
-        }
         return;
     }
 
@@ -1897,9 +1764,6 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             }
         }
         flex_store_intrinsic_sizes(item, min_width, max_width, min_height, max_height);
-        if (font_changed) {
-            lycon->font = saved_font;
-        }
         return;
     }
 
@@ -2216,27 +2080,16 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
             // Set up parent context with item's height so children with percentage heights
             // and aspect-ratio can compute their intrinsic width
-            BlockContext* saved_parent = nullptr;
-            BlockContext temp_parent = {};
-            bool need_restore_parent = false;
+            float item_height = -1.0f;
             if (lycon) {
-                // Get item's explicit height (from CSS or resolved)
-                float item_height = -1;
-                if (layout_axis_has_given_size(item, false)) {
-                    item_height = item->block()->given_height;
-                } else {
-                    // Try to get from CSS
-                    item_height = get_explicit_css_length(
-                        lycon, item, CSS_PROPERTY_HEIGHT);
-                }
-                if (item_height > 0) {
-                    saved_parent = lycon->block.parent;
-                    temp_parent.content_height = item_height;
-                    temp_parent.given_height = item_height;
-                    lycon->block.parent = &temp_parent;
-                    need_restore_parent = true;
-                    log_debug("calculate_item_intrinsic_sizes: set up parent context with height=%.1f", item_height);
-                }
+                item_height = layout_axis_has_given_size(item, false)
+                    ? item->block()->given_height
+                    : get_explicit_css_length(lycon, item, CSS_PROPERTY_HEIGHT);
+            }
+            LayoutContainingBlockScope item_height_scope(
+                lycon, LAYOUT_AXIS_Y, item_height, item_height > 0.0f);
+            if (item_height > 0.0f) {
+                log_debug("calculate_item_intrinsic_sizes: set up parent context with height=%.1f", item_height);
             }
 
             while (c) {
@@ -2460,10 +2313,6 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             log_debug("Traversed children: min_width=%.1f, max_width=%.1f, total_width=%.1f, total_height=%.1f, is_row_flex=%d",
                       min_child_width, max_child_width, total_child_width, total_child_height, is_row_flex_container);
 
-            // Restore parent context
-            if (need_restore_parent && lycon) {
-                lycon->block.parent = saved_parent;
-            }
         }
 
         // Determine intrinsic width from children or cache.
@@ -2551,8 +2400,4 @@ store_results:
     log_debug("Intrinsic sizes calculated: width=[%.1f, %.1f], height=[%.1f, %.1f]",
               min_width, max_width, min_height, max_height);
 
-    // Restore font after measurement
-    if (font_changed) {
-        lycon->font = saved_font;
-    }
 }

@@ -253,6 +253,8 @@ CssEnum layout_intrinsic_min_size_keyword(ViewBlock* block, bool horizontal);
 CssEnum layout_intrinsic_max_size_keyword(ViewBlock* block, bool horizontal);
 float layout_resolve_intrinsic_size_keyword(CssEnum keyword, float min_size,
                                             float max_size, float available_outer_size);
+float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* element,
+                                           bool horizontal, float inline_base);
 
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
@@ -584,22 +586,15 @@ void layout_store_given_axis(LayoutContext* lycon, ViewBlock* block, float size,
                              bool horizontal, bool reset_type = false);
 void layout_clear_given_axis(LayoutContext* lycon, ViewBlock* block, bool horizontal);
 
-float layout_padding_border_width(ViewBlock* block);
-float layout_padding_border_height(ViewBlock* block);
+float layout_padding_border_axis(ViewBlock* block, bool horizontal);
 float layout_boundary_padding_border_axis(const BoundaryProp* bound, bool horizontal);
 
-float layout_content_width_from_border_box(ViewBlock* block, float border_width);
-float layout_content_height_from_border_box(ViewBlock* block, float border_height);
-float layout_border_width_from_content_box(ViewBlock* block, float content_width);
-float layout_border_height_from_content_box(ViewBlock* block, float content_height);
 float layout_boundary_content_size_from_border_box(const BoundaryProp* bound, float border_size, bool horizontal);
 float layout_boundary_border_size_from_content_box(const BoundaryProp* bound, float content_size, bool horizontal);
 float layout_content_size_from_border_box(ViewBlock* block, float border_size, bool horizontal);
 float layout_border_size_from_content_box(ViewBlock* block, float content_size, bool horizontal);
 float layout_css_size_to_content_box(const BoundaryProp* bound, CssEnum box_sizing, float css_size, bool horizontal);
 float layout_css_size_to_border_box(const BoundaryProp* bound, CssEnum box_sizing, float css_size, bool horizontal);
-float layout_floor_border_box_width(ViewBlock* block, float border_width);
-float layout_floor_border_box_height(ViewBlock* block, float border_height);
 float layout_floor_border_box_axis(ViewBlock* block, float border_size, bool horizontal);
 float layout_stretch_fit_border_box_size(ViewBlock* block, float available_margin_box_size,
                                          bool horizontal);
@@ -616,15 +611,12 @@ static inline bool layout_uses_border_box(ViewBlock* block) {
     return layout_box_sizing(block) == CSS_VALUE_BORDER_BOX;
 }
 
-float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_border_box);
-float layout_apply_min_max_height(ViewBlock* block, float height, bool height_is_border_box);
 float layout_apply_min_max_axis(ViewBlock* block, float size, bool horizontal, bool size_is_border_box);
 float layout_apply_min_max_border_box_axis(ViewBlock* block, float border_size, bool horizontal,
                                            bool ignore_percentage_max = false);
 void layout_apply_aspect_ratio_min_max_constraints(ViewBlock* block, float aspect_ratio,
                                                    float* content_width, float* content_height);
-float layout_clamp_min_max_width(ViewBlock* block, float width);
-float layout_clamp_min_max_height(ViewBlock* block, float height);
+float layout_clamp_min_max_axis(ViewBlock* block, float size, bool horizontal);
 
 static inline float layout_clamp_positive_min_max_width(ViewBlock* block, float width) {
     if (!block || !block->blk) return width;
@@ -777,11 +769,6 @@ static inline void layout_resolve_auto_margin_pair(float available_size, float b
             available_size - border_box_size - *start_margin);
     }
 }
-
-float adjust_min_max_width(ViewBlock* block, float width);
-float adjust_min_max_height(ViewBlock* block, float height);
-float adjust_border_padding_width(ViewBlock* block, float width);
-float adjust_border_padding_height(ViewBlock* block, float height);
 
 // ============================================================================
 // Containing Blocks
@@ -2683,6 +2670,13 @@ void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span);
 PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
 void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before);
 void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before);
+void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
+                                       bool generate_before = true,
+                                       bool generate_after = true,
+                                       bool include_marker = false,
+                                       bool create_first_letter = false);
+void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
+                                int iframe_width, int iframe_height);
 View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
 
 // ============================================================================
@@ -2973,44 +2967,51 @@ struct BlockContextScope {
  * Style resolution persists used percentage values in the view, so a nested
  * query must expose its real containing block rather than an ancestor context.
  */
+// One containing-block override owns the copied parent and restoration. Keeping
+// the axis policy here prevents width and height percentage queries from
+// drifting in how they preserve the surrounding layout context.
 // tier-3: layout-transient, valid within pass
-struct PercentageContainingBlockWidthScope {
+struct LayoutContainingBlockScope {
     LayoutContext* lycon;
     BlockContext* saved_parent;
     BlockContext containing_block;
+    bool active;
 
-    PercentageContainingBlockWidthScope(LayoutContext* l, float content_width)
-        : lycon(l), saved_parent(l->block.parent), containing_block{} {
+    LayoutContainingBlockScope(LayoutContext* l, LayoutAxis axis, float content_size,
+                               bool enabled = true)
+        : lycon(l), saved_parent(l ? l->block.parent : nullptr), containing_block{},
+          active(false) {
+        if (!lycon || !enabled) return;
+        active = true;
+        if (saved_parent) containing_block = *saved_parent;
+        if (axis == LAYOUT_AXIS_X) {
+            containing_block.content_width = content_size;
+        } else {
+            containing_block.content_height = content_size;
+            containing_block.given_height = content_size >= 0.0f ? content_size : -1.0f;
+        }
+        lycon->block.parent = &containing_block;
+    }
+    LayoutContainingBlockScope(LayoutContext* l, float content_width,
+                               float content_height, bool has_definite_height,
+                               bool enabled = true)
+        : lycon(l), saved_parent(l ? l->block.parent : nullptr), containing_block{},
+          active(false) {
+        if (!lycon || !enabled) return;
+        active = true;
         if (saved_parent) containing_block = *saved_parent;
         containing_block.content_width = content_width;
+        if (has_definite_height) {
+            containing_block.content_height = content_height;
+            containing_block.given_height = content_height;
+        }
         lycon->block.parent = &containing_block;
     }
-    ~PercentageContainingBlockWidthScope() {
-        lycon->block.parent = saved_parent;
+    ~LayoutContainingBlockScope() {
+        if (active) lycon->block.parent = saved_parent;
     }
-    PercentageContainingBlockWidthScope(const PercentageContainingBlockWidthScope&) = delete;
-    PercentageContainingBlockWidthScope& operator=(const PercentageContainingBlockWidthScope&) = delete;
-};
-
-// tier-3: layout-transient, valid within pass
-struct PercentageContainingBlockHeightScope {
-    LayoutContext* lycon;
-    BlockContext* saved_parent;
-    BlockContext containing_block;
-
-    PercentageContainingBlockHeightScope(LayoutContext* l, float content_height)
-        : lycon(l), saved_parent(l ? l->block.parent : nullptr), containing_block{} {
-        if (!lycon) return;
-        if (saved_parent) containing_block = *saved_parent;
-        containing_block.content_height = content_height;
-        containing_block.given_height = content_height >= 0.0f ? content_height : -1.0f;
-        lycon->block.parent = &containing_block;
-    }
-    ~PercentageContainingBlockHeightScope() {
-        if (lycon) lycon->block.parent = saved_parent;
-    }
-    PercentageContainingBlockHeightScope(const PercentageContainingBlockHeightScope&) = delete;
-    PercentageContainingBlockHeightScope& operator=(const PercentageContainingBlockHeightScope&) = delete;
+    LayoutContainingBlockScope(const LayoutContainingBlockScope&) = delete;
+    LayoutContainingBlockScope& operator=(const LayoutContainingBlockScope&) = delete;
 };
 
 /**
@@ -3032,6 +3033,61 @@ struct LayoutContextScope {
     }
     LayoutContextScope(const LayoutContextScope&) = delete;
     LayoutContextScope& operator=(const LayoutContextScope&) = delete;
+};
+
+// Intrinsic width recursion changes both the element cycle bit and active view;
+// one owner keeps those temporary states paired on every return path.
+// tier-3: layout-transient, valid within pass
+struct IntrinsicMeasureScope {
+    LayoutContext* lycon;
+    DomElement* element;
+    View* saved_view;
+
+    IntrinsicMeasureScope(LayoutContext* l, DomElement* e)
+        : lycon(l), element(e), saved_view(l ? l->view : nullptr) {
+        if (element) element->set_measuring_intrinsic_width(true);
+        if (lycon && element) lycon->view = static_cast<View*>(element);
+    }
+    ~IntrinsicMeasureScope() {
+        if (element) element->set_measuring_intrinsic_width(false);
+        if (lycon) lycon->view = saved_view;
+    }
+    IntrinsicMeasureScope(const IntrinsicMeasureScope&) = delete;
+    IntrinsicMeasureScope& operator=(const IntrinsicMeasureScope&) = delete;
+};
+
+// Nested DOM/view work must restore both handles together; restoring only the
+// view leaves style resolution attached to the previous element on early exit.
+// tier-3: layout-transient, valid within pass
+struct LayoutViewScope {
+    LayoutContext* lycon;
+    DomNode* saved_elmt;
+    View* saved_view;
+    explicit LayoutViewScope(LayoutContext* l)
+        : lycon(l), saved_elmt(l ? l->elmt : nullptr), saved_view(l ? l->view : nullptr) {}
+    ~LayoutViewScope() {
+        if (!lycon) return;
+        lycon->elmt = saved_elmt;
+        lycon->view = saved_view;
+    }
+    LayoutViewScope(const LayoutViewScope&) = delete;
+    LayoutViewScope& operator=(const LayoutViewScope&) = delete;
+};
+
+// Font setup is a borrowed mutation of the surrounding layout pass; every
+// measurement helper must restore it even when the measured subtree returns
+// early.
+// tier-3: layout-transient, valid within pass
+struct LayoutFontScope {
+    LayoutContext* lycon;
+    FontBox saved_font;
+    explicit LayoutFontScope(LayoutContext* l)
+        : lycon(l), saved_font(l ? l->font : FontBox{}) {}
+    ~LayoutFontScope() {
+        if (lycon) lycon->font = saved_font;
+    }
+    LayoutFontScope(const LayoutFontScope&) = delete;
+    LayoutFontScope& operator=(const LayoutFontScope&) = delete;
 };
 
 /**
