@@ -1815,8 +1815,14 @@ static Type* runtime_boundary_unwrap_type(Type* type) {
 static bool runtime_validate_value_against_type(Item item, Type* expected,
         ValidationResult** validation) {
     if (!context || !context->validator) return false;
+    // A caller that wants no diagnostic wants a predicate: run the
+    // allocation-free fast mode. A caller that passed `validation` is building
+    // an error message, so it needs the reporting walk.
+    bool want_report = (validation != NULL);
+    context->validator->set_fast_mode(!want_report);
     ValidationResult* result = schema_validator_validate_type(context->validator,
         item.to_const(), expected);
+    context->validator->set_fast_mode(false);
     if (validation) *validation = result;
     return result && result->valid;
 }

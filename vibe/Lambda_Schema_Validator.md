@@ -546,6 +546,41 @@ two modes cannot drift into two rule sets: internal predicate helpers return
 set, zero fast-mode allocation, unchanged call sites, and compiler-enforced
 immutability of the singletons.
 
+### Implementation status (2026-08-10)
+
+**Stage 1 landed.** The mode, the singletons, and the two occurrence walks:
+
+- `SchemaValidator::fast_mode` + `is_fast_mode()`/`set_fast_mode()`,
+  default off (`doc_validator.cpp`).
+- `const ValidationResult VALIDATION_OK` / `VALIDATION_FAIL` with the
+  `validation_verdict(bool)` helper (`validator.hpp`, defined in
+  `doc_validator.cpp`).
+- `validate_array_num_occurrence` and `validate_list_occurrence` gained
+  fast-mode prologues (`validate_pattern.cpp`): same rules, verdict only, no
+  allocation — and the list walk **returns on the first bad element**, which
+  full mode may never do.
+- `runtime_validate_value_against_type` selects the mode from its own
+  contract: callers passing `validation = NULL` want a predicate and get fast
+  mode; callers passing a slot are building an error message and get the
+  reporting walk. This required no call-site changes — the two predicate
+  callers already passed `NULL`.
+
+An important discovery while wiring it: **`lambda_type_check` already had the
+two-mode structure.** It runs `runtime_type_admit_value` first and only calls
+the validator *after* admission fails, to build the message. So the R4
+premise ("the runtime allocates a report it discards on success") was true of
+the occurrence walk reached through admission, not of the boundary entry
+point itself.
+
+Measured on awfy/cd2 (the benchmark with the largest remaining validator
+share): validator samples 32 → 22, `create_validation_result` → 1. cd2's
+dominant cost is `runtime_type_admit_value` (~49% of samples), which this
+work does not touch and which is the next target.
+
+**Remaining stages** (unconverted kinds still fall through to full mode and
+return a real result, which is correct — just allocating): primitives/base
+type, map/element fields, union short-circuit.
+
 ### Implementation plan (as built)
 
 **Mode placement.** `bool fast_mode` is per-validation-call state on
