@@ -373,18 +373,12 @@ static float get_css_margin(LayoutContext* lycon, ViewElement* elem,
     return 0.0f;
 }
 
-// Helper to get horizontal margins (left + right) for an element
-static float get_child_horizontal_margins(LayoutContext* lycon, ViewElement* elem,
-                                          float inline_base = -1.0f) {
-    return get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_LEFT, inline_base)
-         + get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_RIGHT, inline_base);
-}
-
-// Helper to get vertical margins (top + bottom) for an element
-static float get_child_vertical_margins(LayoutContext* lycon, ViewElement* elem,
-                                        float inline_base = -1.0f) {
-    return get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_TOP, inline_base)
-         + get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_BOTTOM, inline_base);
+static float get_child_axis_margins(LayoutContext* lycon, ViewElement* elem,
+                                    bool horizontal, float inline_base = -1.0f) {
+    CssPropertyCode start = horizontal ? CSS_PROPERTY_MARGIN_LEFT : CSS_PROPERTY_MARGIN_TOP;
+    CssPropertyCode end = horizontal ? CSS_PROPERTY_MARGIN_RIGHT : CSS_PROPERTY_MARGIN_BOTTOM;
+    return get_css_margin(lycon, elem, start, inline_base) +
+           get_css_margin(lycon, elem, end, inline_base);
 }
 
 static float flex_item_content_width_for_child_percentages(LayoutContext* lycon,
@@ -441,7 +435,7 @@ static float flex_measure_item_content_width_for_height(LayoutContext* lycon,
         flex_layout->cross_axis_size > 0.0f) {
         float border_box_width = flex_layout->cross_axis_size;
         float inline_base = border_box_width;
-        border_box_width -= get_child_horizontal_margins(lycon, item, inline_base);
+        border_box_width -= get_child_axis_margins(lycon, item, true, inline_base);
         if (border_box_width < 0.0f) border_box_width = 0.0f;
         border_box_width = layout_clamp_positive_min_max_width(block, border_box_width);
         content_width = layout_css_size_to_content_box(
@@ -476,10 +470,6 @@ static bool flex_measure_item_uses_vertical_writing_mode(ViewElement* item) {
 // ============================================================================
 // Nested flex content height measurement
 // ============================================================================
-
-static bool has_flex_item_prop(ViewElement* item) {
-    return item && item->flex_item();
-}
 
 static bool flex_measurement_tag_is_inline(NameId tag) {
     switch (tag) {
@@ -867,7 +857,7 @@ static float flex_child_height_fallback_available_width(LayoutContext* lycon,
     if (is_row_flex_container || !item) return available_width;
 
     float parent_cw = -1.0f;
-    if (item->blk && item->block_mut()->given_width >= 0.0f) {
+    if (layout_axis_has_given_size(item, true)) {
         parent_cw = layout_css_size_to_content_box(
             item->bound, layout_box_sizing(lam::view_as_block(item)), item->block()->given_width, true);
     } else if (flex_layout && flex_layout->cross_axis_size > 0.0f) {
@@ -903,7 +893,7 @@ static float flex_child_height_fallback_available_width(LayoutContext* lycon,
     }
 
     if (parent_cw > 0.0f) {
-        float child_margins = get_child_horizontal_margins(lycon, child_view, parent_cw);
+        float child_margins = get_child_axis_margins(lycon, child_view, true, parent_cw);
         available_width = fmax(parent_cw - child_margins, 0.0f);
     }
     return available_width;
@@ -1345,10 +1335,11 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 
     if (child->is_text()) {
         // Measure text content
-        int mw_int = 0, mh_int = 0;
-        measure_text_content(&measure_context, child, &mw_int, &mh_int);
-        measured_width = mw_int;
-        measured_height = mh_int;
+        int min_width = 0, max_width = 0, height = 0;
+        measure_text_content_accurate(
+            &measure_context, child, &min_width, &max_width, &height);
+        measured_width = max_width;
+        measured_height = height;
         content_width = measured_width;
         content_height = measured_height;
     } else {
@@ -1420,7 +1411,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         // CRITICAL FIX: For elements without explicit width, measured_width should be based
         // on content, not container. Only use container_width if the element has explicit width.
         ViewElement* elem = lam::view_require_element(child);
-        bool has_explicit_width = (elem && elem->blk && elem->block_mut()->given_width >= 0);
+        bool has_explicit_width = layout_axis_has_given_size(elem, true);
 
         if (has_explicit_width) {
             measured_width = elem->block()->given_width;
@@ -1549,14 +1540,6 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
     lycon->node_count = current_node_count;
 
     log_debug("Content measurement complete for %s", child->node_name());
-}
-
-void measure_text_content(LayoutContext* lycon, DomNode* text_node, int* width, int* height) {
-    // Legacy function - redirects to accurate measurement
-    int min_w, max_w, h;
-    measure_text_content_accurate(lycon, text_node, &min_w, &max_w, &h);
-    *width = max_w;  // Use max-content for width
-    *height = h;
 }
 
 // Enhanced accurate text measurement for intrinsic sizing
@@ -1791,9 +1774,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 float h = img->height * lycon->ui_context->pixel_ratio;
 
                 // Check for explicit CSS dimensions
-                float explicit_width = (item->blk && item->block_mut()->given_width >= 0) ?
+                float explicit_width = layout_axis_has_given_size(item, true) ?
                     item->block()->given_width : -1;
-                float explicit_height = (item->blk && item->block_mut()->given_height >= 0) ?
+                float explicit_height = layout_axis_has_given_size(item, false) ?
                     item->block()->given_height : -1;
                 float preferred_aspect_ratio = layout_used_preferred_aspect_ratio(
                     lam::view_as_block(item));
@@ -2076,7 +2059,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // CRITICAL FIX: For items without explicit dimensions, the cached values may be
         // based on container size, not intrinsic size. In such cases, we should NOT use
         // the cache for the axis that doesn't have an explicit size.
-        bool has_explicit_height = (item->blk && item->block_mut()->given_height >= 0);
+        bool has_explicit_height = layout_axis_has_given_size(item, false);
 
         // Check if this item is a row flex container
         // For row flex containers, the cached height from measure_flex_child_content might be incorrect
@@ -2212,7 +2195,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             if (lycon) {
                 // Get item's explicit height (from CSS or resolved)
                 float item_height = -1;
-                if (item->blk && item->block_mut()->given_height >= 0) {
+                if (layout_axis_has_given_size(item, false)) {
                     item_height = item->block()->given_height;
                 } else {
                     // Try to get from CSS
@@ -2407,10 +2390,10 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         // CSS Flexbox §9.9.1: Each flex item's contribution to the container's
                         // intrinsic size is its outer size (content + padding + border + margin).
                         // Add child margins to width/height for proper intrinsic sizing.
-                        float child_h_margin = get_child_horizontal_margins(
-                            lycon, child_view, child_margin_inline_base);
-                        float child_v_margin = get_child_vertical_margins(
-                            lycon, child_view, child_margin_inline_base);
+                        float child_h_margin = get_child_axis_margins(
+                            lycon, child_view, true, child_margin_inline_base);
+                        float child_v_margin = get_child_axis_margins(
+                            lycon, child_view, false, child_margin_inline_base);
 
                         // For width: row flex sums widths, column flex takes max
                         // Track both min and max content widths separately

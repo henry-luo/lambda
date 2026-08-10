@@ -44,12 +44,10 @@ void layout_store_given_axis(LayoutContext* lycon, ViewBlock* block, float size,
     float* context_size = horizontal ? &lycon->block.given_width : &lycon->block.given_height;
     *context_size = size;
     if (!block->blk) return;
-    float* block_size = horizontal ? &block->blk->given_width : &block->blk->given_height;
-    *block_size = size;
+    LayoutAxisConstraintRefs axis(block->block_mut(), horizontal);
+    *axis.given = size;
     if (reset_type) {
-        CssEnum* block_type = horizontal ? &block->blk->given_width_type
-                                         : &block->blk->given_height_type;
-        *block_type = CSS_VALUE__UNDEF;
+        *axis.given_type = CSS_VALUE__UNDEF;
     }
 }
 
@@ -149,9 +147,9 @@ float layout_floor_border_box_axis(ViewBlock* block, float border_size, bool hor
 static float layout_clamp_min_max_axis_value(ViewBlock* block, float size, bool horizontal) {
     if (!block || !block->blk) return size;
 
-    BlockProp* prop = block->block_mut();
-    float maximum = horizontal ? prop->given_max_width : prop->given_max_height;
-    float minimum = horizontal ? prop->given_min_width : prop->given_min_height;
+    LayoutAxisConstraintRefs axis(block->block_mut(), horizontal);
+    float maximum = *axis.maximum;
+    float minimum = *axis.minimum;
     float constrained = size;
     if (maximum >= 0.0f && constrained > maximum) {
         constrained = maximum;

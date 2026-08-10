@@ -2062,7 +2062,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // given_height into lycon->block). block->block()->given_height is set once from CSS parsing
     // and from calculate_absolute_position for top+bottom constraints; it is not corrupted.
     // This mirrors the same pattern used in finalize_block_flow.
-    float abs_block_given_height = (block->blk && block->block_mut()->given_height >= 0) ? block->block_mut()->given_height : -1;
+    float abs_block_given_height = layout_axis_has_given_size(block, false)
+        ? layout_axis_given_size(block->block(), LAYOUT_AXIS_Y) : -1.0f;
     bool ratio_auto_height = block->blk && block->block()->aspect_ratio_auto_height;
     float ratio_auto_height_floor = 0.0f;
     if (ratio_auto_height) {

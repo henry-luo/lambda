@@ -269,7 +269,8 @@ float layout_block_used_content_size(ViewBlock* block, bool horizontal, bool req
 
 float layout_block_given_content_size(ViewBlock* block, bool horizontal) {
     if (!block || !block->blk) return -1.0f;
-    float css_size = horizontal ? block->block()->given_width : block->block()->given_height;
+    LayoutAxisConstraintRefs axis(block->block_mut(), horizontal);
+    float css_size = *axis.given;
     if (css_size < 0.0f) return -1.0f;
     float content_size = layout_css_size_to_content_box(
         block->bound, layout_box_sizing(block), css_size, horizontal);
@@ -336,9 +337,9 @@ bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* conta
 
 bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal) {
     if (!block || !block->blk) return true;
-    float given_size = horizontal ? block->block()->given_width : block->block()->given_height;
-    CssEnum given_size_type = horizontal
-        ? block->block()->given_width_type : block->block()->given_height_type;
+    LayoutAxisConstraintRefs axis(block->block_mut(), horizontal);
+    float given_size = *axis.given;
+    CssEnum given_size_type = *axis.given_type;
     if (given_size < 0.0f || given_size_type == CSS_VALUE_AUTO) return true;
 
     const CssDeclaration* specified_size = block->is_element()

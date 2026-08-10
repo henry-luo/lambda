@@ -212,6 +212,22 @@ struct TextIntrinsicWidths {
     float max_content;
 };
 
+// Intrinsic measurements may temporarily replace the active font and allocate
+// pooled font props. One scope owns both restorations so early exits cannot
+// leave speculative font state in the parent layout pass.
+// tier-3: layout-transient, valid within pass
+struct IntrinsicFontScope {
+    LayoutContext* lycon;
+    FontBox saved_font;
+    FontProp* prop_a;
+    FontProp* prop_b;
+
+    IntrinsicFontScope(LayoutContext* l, FontBox saved)
+        : lycon(l), saved_font(saved), prop_a(nullptr), prop_b(nullptr) {}
+
+    ~IntrinsicFontScope();
+};
+
 float calculate_min_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float width);
@@ -1249,6 +1265,20 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
 // Multi-column Layout
 // ============================================================================
 
+// One in-flow item used by both direct and nested multicol distribution.
+// Keeping the break and fragmentation facts beside the measured extent avoids
+// two collectors drifting when a new fragmentation rule is added.
+// tier-3: layout-transient, valid within pass
+typedef struct MulticolFlowItem {
+    ViewBlock* block;
+    float height;
+    float inline_offset;
+    bool can_fragment;
+    bool spans_all;
+    bool break_before_column;
+    bool break_after_column;
+} MulticolFlowItem;
+
 bool is_multicol_container(ViewBlock* block);
 float multicol_used_block_axis_extent(ViewBlock* block);
 float multicol_intrinsic_vertical_block_extent(LayoutContext* lycon,
@@ -1645,6 +1675,22 @@ typedef struct FlexLineInfo {
     float baseline;
 } FlexLineInfo;
 
+typedef struct FlexAxisConstraintValues {
+    float minimum;
+    float maximum;
+    FlexAxisConstraintValues(const FlexItemProp* item, bool horizontal)
+        : minimum(0.0f), maximum(0.0f) {
+        if (!item) return;
+        if (horizontal) {
+            minimum = item->resolved_min_width;
+            maximum = item->resolved_max_width;
+        } else {
+            minimum = item->resolved_min_height;
+            maximum = item->resolved_max_height;
+        }
+    }
+} FlexAxisConstraintValues;
+
 // tier-3: layout-transient, valid within pass
 typedef struct FlexContainerLayout : FlexProp {
     // Layout state (computed during layout)
@@ -1739,6 +1785,28 @@ inline bool layout_axis_is_horizontal(LayoutAxis axis) {
     return axis == LAYOUT_AXIS_X;
 }
 
+// Select the CSS size slots for one physical axis once; this keeps min/max
+// resolution paths from drifting across repeated width/height branches.
+typedef struct LayoutAxisConstraintRefs {
+    float* given, *minimum, *maximum, *given_percent, *minimum_percent, *maximum_percent;
+    CssEnum* given_type, *minimum_type, *maximum_type;
+    LayoutAxisConstraintRefs(BlockProp* block, bool horizontal)
+        : given(nullptr), minimum(nullptr), maximum(nullptr), given_percent(nullptr),
+          minimum_percent(nullptr), maximum_percent(nullptr), given_type(nullptr),
+          minimum_type(nullptr), maximum_type(nullptr) {
+        if (!block) return;
+        given = horizontal ? &block->given_width : &block->given_height;
+        minimum = horizontal ? &block->given_min_width : &block->given_min_height;
+        maximum = horizontal ? &block->given_max_width : &block->given_max_height;
+        given_percent = horizontal ? &block->given_width_percent : &block->given_height_percent;
+        minimum_percent = horizontal ? &block->given_min_width_percent : &block->given_min_height_percent;
+        maximum_percent = horizontal ? &block->given_max_width_percent : &block->given_max_height_percent;
+        given_type = horizontal ? &block->given_width_type : &block->given_height_type;
+        minimum_type = horizontal ? &block->given_min_width_type : &block->given_min_height_type;
+        maximum_type = horizontal ? &block->given_max_width_type : &block->given_max_height_type;
+    }
+} LayoutAxisConstraintRefs;
+
 inline float layout_axis_given_size(const BlockProp* block, LayoutAxis axis) {
     if (!block) return -1.0f;
     return axis == LAYOUT_AXIS_X ? block->given_width : block->given_height;
@@ -1747,6 +1815,18 @@ inline float layout_axis_given_size(const BlockProp* block, LayoutAxis axis) {
 inline float layout_axis_given_max_size(const BlockProp* block, LayoutAxis axis) {
     if (!block) return -1.0f;
     return axis == LAYOUT_AXIS_X ? block->given_max_width : block->given_max_height;
+}
+
+inline bool layout_axis_has_given_size(ViewBlock* block, bool horizontal) {
+    if (!block || !block->blk) return false;
+    return layout_axis_given_size(block->block(),
+                                  horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y) >= 0.0f;
+}
+
+inline bool layout_axis_has_given_size(ViewElement* item, bool horizontal) {
+    if (!item || !item->blk) return false;
+    return layout_axis_given_size(item->block(),
+                                  horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y) >= 0.0f;
 }
 
 inline float layout_axis_spacing_start(const Spacing* spacing, LayoutAxis axis) {
@@ -1785,6 +1865,10 @@ inline float layout_axis_margin_end(const BoundaryProp* bound, LayoutAxis axis) 
     return bound ? layout_axis_spacing_end(&bound->margin, axis) : 0.0f;
 }
 
+inline bool has_flex_item_prop(ViewElement* item) {
+    return item && item->flex_item();
+}
+
 inline LayoutAxis flex_main_axis_from_props(const FlexProp* flex) {
     if (!flex) return LAYOUT_AXIS_X;
     bool column_direction = flex->direction == CSS_VALUE_COLUMN ||
@@ -1804,9 +1888,28 @@ inline LayoutAxis flex_cross_axis(FlexContainerLayout* flex) {
     return flex_main_axis(flex) == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
 }
 
+inline bool is_main_axis_horizontal(FlexProp* flex) {
+    return layout_axis_is_horizontal(flex_main_axis_from_props(flex));
+}
+
+inline float get_item_flex_grow(ViewElement* item) {
+    return has_flex_item_prop(item) ? item->fi->flex_grow : 0.0f;
+}
+
+inline float get_item_flex_shrink(ViewElement* item) {
+    return has_flex_item_prop(item) ? item->fi->flex_shrink : 1.0f;
+}
+
 inline float flex_gap_for_axis(FlexContainerLayout* flex, LayoutAxis axis) {
     if (!flex) return 0.0f;
     return axis == LAYOUT_AXIS_X ? flex->column_gap : flex->row_gap;
+}
+
+inline float calculate_gap_space(FlexContainerLayout* flex, int item_count,
+                                 bool is_main_axis) {
+    if (item_count <= 1) return 0.0f;
+    LayoutAxis axis = is_main_axis ? flex_main_axis(flex) : flex_cross_axis(flex);
+    return flex_gap_for_axis(flex, axis) * (item_count - 1);
 }
 
 void init_flex_container(LayoutContext* lycon, ViewBlock* container);
@@ -1842,7 +1945,6 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 void align_content(FlexContainerLayout* flex_layout);
 void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container);
-bool is_main_axis_horizontal(FlexProp* flex);
 float get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
 float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
 float get_cross_axis_position(ViewElement* item, FlexContainerLayout* flex_layout);
@@ -1850,10 +1952,7 @@ void set_main_axis_position(ViewElement* item, float position, FlexContainerLayo
 void set_cross_axis_position(ViewElement* item, float position, FlexContainerLayout* flex_layout);
 void set_main_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout);
 void set_cross_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout);
-float get_item_flex_grow(ViewElement* item);
-float get_item_flex_shrink(ViewElement* item);
 float find_max_baseline(FlexLineInfo* line, int container_align_items);
-float calculate_gap_space(FlexContainerLayout* flex_layout, int item_count, bool is_main_axis);
 
 // tier-3: layout-transient, valid within pass
 typedef struct MeasurementCacheEntry {
@@ -1867,7 +1966,6 @@ typedef struct MeasurementCacheEntry {
 } MeasurementCacheEntry;
 
 void measure_flex_child_content(LayoutContext* lycon, DomNode* child);
-void measure_text_content(LayoutContext* lycon, DomNode* text_node, int* width, int* height);
 void calculate_intrinsic_sizes(ViewBlock* view, LayoutContext* lycon);
 void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout);
 void measure_text_content_accurate(LayoutContext* lycon, DomNode* text_node,
@@ -2336,6 +2434,12 @@ float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width);
 // Table Layout
 // ============================================================================
 
+typedef struct TableCellInsets {
+    float border_left, border_right, border_top, border_bottom;
+    float padding_left, padding_right, padding_top, padding_bottom;
+} TableCellInsets;
+
+TableCellInsets table_cell_insets(ViewTableCell* cell);
 void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 struct ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt);
 void table_auto_layout(LayoutContext* lycon, struct ViewTable* table);

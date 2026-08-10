@@ -359,10 +359,6 @@ extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 // External function for scroller (from scroller.cpp)
 void update_scroller(ViewBlock* block, float content_width, float content_height);
 
-static bool has_flex_item_prop(ViewElement* item) {
-    return item && item->flex_item();
-}
-
 static bool flex_final_content_is_block_item(View* view) {
     return view && (view->view_type == RDT_VIEW_BLOCK ||
         view->view_type == RDT_VIEW_INLINE_BLOCK ||
@@ -442,19 +438,42 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
     bool container_position_finalized_later =
         container->fi != nullptr || inline_container_position_finalized_later;
 
-    if (is_reverse) {
-        if (is_row && !child_block->positionp()->has_left && !child_block->positionp()->has_right) {
-            float base_x = inline_container_position_finalized_later ? 0.0f : cb.content_x;
-            float static_x = cb.content_width - child_block->width + base_x;
-            if (child_block->bound) static_x -= child_block->boundary()->margin.right;
-            child_block->x = static_x;
+    LayoutAxis main_axis = is_row ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+    LayoutAxis cross_axis = is_row ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+    float main_axis_size = is_row ? cb.content_width : cb.content_height;
+    float cross_axis_size = is_row ? cb.content_height : cb.content_width;
+    float item_main = layout_axis_size(static_cast<ViewElement*>(child_block), main_axis);
+    float item_cross = layout_axis_size(static_cast<ViewElement*>(child_block), cross_axis);
+    float margin_left = 0.0f, margin_top = 0.0f;
+    float margin_right = 0.0f, margin_bottom = 0.0f;
+    if (child_block->bound) {
+        margin_left = child_block->boundary()->margin.left;
+        margin_top = child_block->boundary()->margin.top;
+        margin_right = child_block->boundary()->margin.right;
+        margin_bottom = child_block->boundary()->margin.bottom;
+    }
+    auto axis_margin = [&](LayoutAxis axis, bool start) {
+        if (axis == LAYOUT_AXIS_X) return start ? margin_left : margin_right;
+        return start ? margin_top : margin_bottom;
+    };
+    auto set_static_position = [&](LayoutAxis axis, float position) {
+        layout_axis_set_pos(static_cast<ViewElement*>(child_block), axis, position);
+        if (axis == LAYOUT_AXIS_X) {
             child_block->position->static_x_needs_parent_offset = container_position_finalized_later;
-        } else if (!is_row && !child_block->positionp()->has_top && !child_block->positionp()->has_bottom) {
-            float base_y = inline_container_position_finalized_later ? 0.0f : cb.content_y;
-            float static_y = cb.content_height - child_block->height + base_y;
-            if (child_block->bound) static_y -= child_block->boundary()->margin.bottom;
-            child_block->y = static_y;
+        } else {
             child_block->position->static_y_needs_parent_offset = container_position_finalized_later;
+        }
+    };
+
+    if (is_reverse) {
+        bool has_main_inset = main_axis == LAYOUT_AXIS_X
+            ? child_block->positionp()->has_left || child_block->positionp()->has_right
+            : child_block->positionp()->has_top || child_block->positionp()->has_bottom;
+        if (!has_main_inset) {
+            float base = inline_container_position_finalized_later ? 0.0f
+                : (main_axis == LAYOUT_AXIS_X ? cb.content_x : cb.content_y);
+            set_static_position(main_axis, base + main_axis_size - item_main -
+                                axis_margin(main_axis, false));
         }
         return;
     }
@@ -466,40 +485,23 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
     int justify_content = flex ? flex->justify : CSS_VALUE_FLEX_START;
     int align_items = flex ? flex->align_items : CSS_VALUE_STRETCH;
 
-    float main_axis_size = is_row ? cb.content_width : cb.content_height;
-    float cross_axis_size = is_row ? cb.content_height : cb.content_width;
-    float item_main = is_row ? child_block->width : child_block->height;
-    float item_cross = is_row ? child_block->height : child_block->width;
-
-    float margin_left = 0.0f, margin_top = 0.0f, margin_right = 0.0f, margin_bottom = 0.0f;
-    if (child_block->bound) {
-        margin_left = child_block->boundary()->margin.left;
-        margin_top = child_block->boundary()->margin.top;
-        margin_right = child_block->boundary()->margin.right;
-        margin_bottom = child_block->boundary()->margin.bottom;
-    }
-
-    if ((is_row && adjust_x) || (!is_row && adjust_y)) {
-        float margin_start = is_row ? margin_left : margin_top;
-        float margin_end = is_row ? margin_right : margin_bottom;
+    bool adjust_main = main_axis == LAYOUT_AXIS_X ? adjust_x : adjust_y;
+    bool adjust_cross = cross_axis == LAYOUT_AXIS_X ? adjust_x : adjust_y;
+    if (adjust_main) {
+        float margin_start = axis_margin(main_axis, true);
+        float margin_end = axis_margin(main_axis, false);
         float main_offset = margin_start;
         if (justify_content == CSS_VALUE_CENTER) {
             main_offset = (main_axis_size - item_main) / 2.0f;
         } else if (justify_content == CSS_VALUE_FLEX_END || justify_content == CSS_VALUE_END) {
             main_offset = main_axis_size - item_main - margin_end;
         }
-        if (is_row) {
-            float base_x = inline_container_position_finalized_later ? 0.0f : cb.content_x;
-            child_block->x = base_x + main_offset;
-            child_block->position->static_x_needs_parent_offset = container_position_finalized_later;
-        } else {
-            float base_y = inline_container_position_finalized_later ? 0.0f : cb.content_y;
-            child_block->y = base_y + main_offset;
-            child_block->position->static_y_needs_parent_offset = container_position_finalized_later;
-        }
+        float base = inline_container_position_finalized_later ? 0.0f
+            : (main_axis == LAYOUT_AXIS_X ? cb.content_x : cb.content_y);
+        set_static_position(main_axis, base + main_offset);
     }
 
-    if ((is_row && adjust_y) || (!is_row && adjust_x)) {
+    if (adjust_cross) {
         int item_align = align_items;
         if (child_block->fi && child_block->fi->align_self != CSS_VALUE_AUTO &&
             child_block->fi->align_self != 0) {
@@ -514,8 +516,8 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
             }
         }
 
-        float margin_cross_start = is_row ? margin_top : margin_left;
-        float margin_cross_end = is_row ? margin_bottom : margin_right;
+        float margin_cross_start = axis_margin(cross_axis, true);
+        float margin_cross_end = axis_margin(cross_axis, false);
         float cross_offset = margin_cross_start;
         if (effective_align == CSS_VALUE_CENTER) {
             cross_offset = (cross_axis_size - item_cross) / 2.0f;
@@ -523,15 +525,9 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
             cross_offset = cross_axis_size - item_cross - margin_cross_end;
         }
 
-        if (is_row) {
-            float base_y = inline_container_position_finalized_later ? 0.0f : cb.content_y;
-            child_block->y = base_y + cross_offset;
-            child_block->position->static_y_needs_parent_offset = container_position_finalized_later;
-        } else {
-            float base_x = inline_container_position_finalized_later ? 0.0f : cb.content_x;
-            child_block->x = base_x + cross_offset;
-            child_block->position->static_x_needs_parent_offset = container_position_finalized_later;
-        }
+        float base = inline_container_position_finalized_later ? 0.0f
+            : (cross_axis == LAYOUT_AXIS_X ? cb.content_x : cb.content_y);
+        set_static_position(cross_axis, base + cross_offset);
     }
 
     log_debug("[LAYOUT_ABS] flex static: justify=%d align=%d adjust_x=%d adjust_y=%d -> (%.1f, %.1f)",
@@ -622,7 +618,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
 
     // Check if container has explicit height from CSS OR was sized by a parent flex/grid layout
     bool has_explicit_height = false;
-    if (flex_container->blk && flex_container->block_mut()->given_height >= 0) {
+    if (layout_axis_has_given_size(flex_container, false)) {
         has_explicit_height = true;
     }
     // Also check if this container is a flex item whose height was set by parent flex
@@ -842,7 +838,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     // This is symmetric to auto-height for row flex
     // NOTE: Do NOT auto-size if this element is a flex item with explicit flex-basis
     // (its width is determined by parent flex layout, not by its children)
-    bool has_explicit_width = flex_container->blk && flex_container->block_mut()->given_width >= 0;
+    bool has_explicit_width = layout_axis_has_given_size(flex_container, true);
     bool has_flex_basis_width = flex_container->fi && flex_container->fi->flex_basis >= 0;  // non-auto flex-basis
     // Check if width was only set to padding (content_width is 0)
     float current_content_width = flex_container->width;
@@ -945,35 +941,27 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
                 // which correctly distributes free space among ALL items' auto margins.
                 // Re-centering main axis here would ignore other items and produce wrong positions.
                 bool is_horizontal = is_main_axis_horizontal(flex_layout);
-
-                if (!is_horizontal && item->bound && item->boundary_mut()->margin.left_type == CSS_VALUE_AUTO && item->boundary_mut()->margin.right_type == CSS_VALUE_AUTO) {
-                    // Cross-axis centering for column flex (horizontal is cross axis)
+                LayoutAxis cross_axis = is_horizontal ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+                float cross_size = is_horizontal ? container_height : container_width;
+                float item_cross_size = is_horizontal ? item->height : item->width;
+                CssEnum cross_start_type = layout_axis_margin_start_type(
+                    &item->boundary()->margin, cross_axis);
+                CssEnum cross_end_type = layout_axis_margin_end_type(
+                    &item->boundary()->margin, cross_axis);
+                if (cross_start_type == CSS_VALUE_AUTO && cross_end_type == CSS_VALUE_AUTO) {
                     float margin_start = 0.0f, margin_end = 0.0f;
                     layout_resolve_auto_margin_pair(
-                        container_width, item->width, true, true, &margin_start, &margin_end);
-                    float center_x = margin_start;
+                        cross_size, item_cross_size, true, true,
+                        &margin_start, &margin_end);
+                    float position = margin_start;
                     if (flex_container->bound) {
-                        center_x += flex_container->boundary()->padding.left;
+                        position += layout_axis_padding_start(flex_container->bound, cross_axis);
                         if (flex_container->boundary()->border) {
-                            center_x += flex_container->boundary()->border->width.left;
+                            position += layout_axis_border_start(
+                                flex_container->boundary()->border, cross_axis);
                         }
                     }
-                    item->x = center_x;
-                }
-
-                if (is_horizontal && item->bound && item->boundary_mut()->margin.top_type == CSS_VALUE_AUTO && item->boundary_mut()->margin.bottom_type == CSS_VALUE_AUTO) {
-                    // Cross-axis centering for row flex (vertical is cross axis)
-                    float margin_start = 0.0f, margin_end = 0.0f;
-                    layout_resolve_auto_margin_pair(
-                        container_height, item->height, true, true, &margin_start, &margin_end);
-                    float center_y = margin_start;
-                    if (flex_container->bound) {
-                        center_y += flex_container->boundary()->padding.top;
-                        if (flex_container->boundary()->border) {
-                            center_y += flex_container->boundary()->border->width.top;
-                        }
-                    }
-                    item->y = center_y;
+                    layout_axis_set_pos(static_cast<ViewElement*>(item), cross_axis, position);
                 }
             }
         }
@@ -1091,13 +1079,6 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 if (child->is_element()) {
                     // CRITICAL: Just create the View structure without layout
                     init_flex_item_view(lycon, child);
-                } else if (child->is_text()) {
-                    // Text nodes in flex containers become anonymous flex items
-                    // Check if non-whitespace text
-                    const char* text = (const char*)child->text_data();
-                    bool is_whitespace_only = is_only_whitespace(text);
-                    if (!is_whitespace_only) {
-                    }
                 }
                 child = child->next_sibling;
             } while (child);
@@ -1936,7 +1917,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         // contribute to the container's auto-height. After processing text,
         // update the container height if it has auto height and text content
         // makes it taller than the current height (from element flex items).
-        bool has_explicit_height = flex_container->blk && flex_container->block_mut()->given_height >= 0;
+        bool has_explicit_height = layout_axis_has_given_size(flex_container, false);
         // A column flex parent assigns a flex-growing item's main size even when
         // the item flag is not recorded during an earlier intrinsic pass; letting
         // its text re-expand the item would discard that used height.
@@ -2043,7 +2024,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         // Update container height if needed (for auto-height containers)
         if (y_shift > 0.5f) {
             // Check if container has explicit height from CSS
-            bool has_explicit_height = (flex_container->blk && flex_container->block_mut()->given_height >= 0);
+            bool has_explicit_height = layout_axis_has_given_size(flex_container, false);
 
             // CRITICAL FIX: Also check if this container is a flex item whose height was
             // set by parent flex sizing. This prevents growing containers that were
@@ -2139,7 +2120,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     }
 
     if (flex && is_main_axis_horizontal(flex)) {
-        bool has_explicit_height = (flex_container->blk && flex_container->block_mut()->given_height >= 0);
+        bool has_explicit_height = layout_axis_has_given_size(flex_container, false);
         if (!has_explicit_height && !flex->has_definite_cross_size) {
             float actual_cross_height = 0.0f;
             int actual_line_count = 0;
@@ -2276,7 +2257,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         if (any_height_changed) {
             // For auto-height containers, update cross_axis_size to reflect
             // the new line cross sizes after content layout.
-            bool has_explicit_cross = (flex_container->blk && flex_container->block_mut()->given_height >= 0);
+        bool has_explicit_cross = layout_axis_has_given_size(flex_container, false);
             if (!has_explicit_cross) {
                 float total_line_cross = 0;
                 float max_line_cross = 0;
@@ -2354,7 +2335,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     // column flex layout (i.e., has flex-grow > 0 and parent is column flex),
     // or if this container was stretched by a parent ROW flex layout.
     if (flex && is_main_axis_horizontal(flex)) {
-        bool has_explicit_height = (flex_container->blk && flex_container->block_mut()->given_height >= 0);
+        bool has_explicit_height = layout_axis_has_given_size(flex_container, false);
 
         // Also check if this element is a flex item that was sized by parent flex layout
         // If it has flex-grow > 0 and is in a column flex container, its height is constrained

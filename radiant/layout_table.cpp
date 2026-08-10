@@ -265,6 +265,25 @@ ViewTableCell* ViewTable::next_direct_cell(ViewTableCell* current) {
 // =============================================================================
 // Common operations for table cell layout to reduce code duplication.
 
+TableCellInsets table_cell_insets(ViewTableCell* cell) {
+    TableCellInsets insets = {};
+    if (!cell || !cell->bound) return insets;
+
+    BoundaryProp* boundary = cell->boundary_mut();
+    if (boundary->border) {
+        BorderProp* border = boundary->border;
+        insets.border_left = border->left_style != CSS_VALUE_NONE ? border->width.left : 0.0f;
+        insets.border_right = border->right_style != CSS_VALUE_NONE ? border->width.right : 0.0f;
+        insets.border_top = border->top_style != CSS_VALUE_NONE ? border->width.top : 0.0f;
+        insets.border_bottom = border->bottom_style != CSS_VALUE_NONE ? border->width.bottom : 0.0f;
+    }
+    insets.padding_left = boundary->padding.left >= 0.0f ? boundary->padding.left : 0.0f;
+    insets.padding_right = boundary->padding.right >= 0.0f ? boundary->padding.right : 0.0f;
+    insets.padding_top = boundary->padding.top >= 0.0f ? boundary->padding.top : 0.0f;
+    insets.padding_bottom = boundary->padding.bottom >= 0.0f ? boundary->padding.bottom : 0.0f;
+    return insets;
+}
+
 // Get parent table from a cell, traversing up through row and row group
 static ViewTable* get_parent_table(ViewTableCell* cell) {
     if (!cell) return nullptr;
@@ -957,8 +976,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
 
     // Set up line-height for this cell so we can use it for text content measurement
     // This ensures we use the cell's own line-height, not a stale value from lycon
-    FontBox saved_font = lycon->font;
-    BlockContextScope bscope(lycon);
+    LayoutContextScope context_scope(lycon);
 
     if (tcell->font) {
         setup_font(lycon->ui_context, &lycon->font, tcell->font);
@@ -982,10 +1000,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
         // The inline-only quirks rule omits the cell root strut during row sizing too.
         cell_line_height = 0.0f;
     }
-
-    // Restore context
-    lycon->font = saved_font;
-    // block auto-restored by bscope destructor
+    lycon->font = context_scope.saved_font;
 
     for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
         if (child->view_type == RDT_VIEW_TEXT) {
@@ -1443,7 +1458,6 @@ static float find_cell_baseline(LayoutContext* lycon, ViewTableCell* tcell,
             }
             baseline = content_edge_bottom;
         }
-    } else {
     }
     return baseline;
 }
@@ -1564,8 +1578,7 @@ static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* tr
 static float compute_cell_strut_baseline(LayoutContext* lycon, ViewTableCell* tcell) {
     if (!lycon || !tcell) return 0.0f;
 
-    FontBox saved_font = lycon->font;
-    BlockContextScope bscope(lycon);
+    LayoutContextScope context_scope(lycon);
 
     if (tcell->font) {
         setup_font(lycon->ui_context, &lycon->font, tcell->font);
@@ -1575,7 +1588,6 @@ static float compute_cell_strut_baseline(LayoutContext* lycon, ViewTableCell* tc
     float half_leading = (lycon->block.line_height -
         (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
     float baseline = lycon->block.init_ascender + half_leading;
-    lycon->font = saved_font;
     return baseline;
 }
 
@@ -1681,34 +1693,10 @@ static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell
         return;
     }
 
-    // Calculate content area by subtracting actual border and padding
-    float cell_content_area = cell_height;
-
-    // Subtract actual border widths
-    if (tcell->bound && tcell->boundary_mut()->border) {
-        float border_top = (tcell->boundary()->border->top_style != CSS_VALUE_NONE)
-            ? tcell->boundary()->border->width.top : 0.0f;
-        float border_bottom = (tcell->boundary()->border->bottom_style != CSS_VALUE_NONE)
-            ? tcell->boundary()->border->width.bottom : 0.0f;
-        cell_content_area -= border_top + border_bottom;
-    }
-
-    // Subtract padding
-    if (tcell->bound && tcell->boundary_mut()->padding.top >= 0 && tcell->boundary_mut()->padding.bottom >= 0) {
-        cell_content_area -= layout_box_metrics(tcell).padding_v;
-    }
-
-
-    // Calculate the content start Y position (border + padding from top)
-    float content_start_y = 0.0f;
-    if (tcell->bound && tcell->boundary_mut()->border) {
-        if (tcell->boundary()->border->top_style != CSS_VALUE_NONE) {
-            content_start_y += tcell->boundary()->border->width.top;
-        }
-    }
-    if (tcell->bound && tcell->boundary_mut()->padding.top >= 0) {
-        content_start_y += tcell->boundary()->padding.top;
-    }
+    TableCellInsets insets = table_cell_insets(tcell);
+    float cell_content_area = cell_height - insets.border_top - insets.border_bottom -
+                              insets.padding_top - insets.padding_bottom;
+    float content_start_y = insets.border_top + insets.padding_top;
 
     // Calculate target Y position for content based on alignment
     float target_y = content_start_y;  // Default: top alignment
@@ -2397,8 +2385,6 @@ static float table_resolve_fixed_explicit_height(LayoutContext* lycon, ViewTable
                 dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
             if (height_decl && height_decl->value) {
                 explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-                if (explicit_height > 0.0f) {
-                }
             }
         }
         if (explicit_height <= 0.0f && table->blk && table->block_mut()->given_height > 0.0f) {
@@ -2655,8 +2641,7 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     // CSS 2.1 §17.6.2: In border-collapse mode, col_widths already include
     // per-cell border halves (added during column width measurement).
     // No additional border adjustment needed here.
-    if (table->tb->border_collapse) {
-    } else {
+    if (!table->tb->border_collapse) {
         cell_width += table_cell_internal_border_spacing(table, tcell);
     }
 
@@ -4407,17 +4392,8 @@ static void flush_anonymous_noncell_run(LayoutContext* lycon, DomElement* row,
     arraylist_clear(run);
 }
 
-/*
- * CSS 2.1 Section 17.2.1: Anonymous table objects
- * 3. If a child of a table/inline-table is not a proper table child (row-group, row, column, caption),
- *    wrap it appropriately:
- *    - Consecutive table-cells get wrapped in anonymous table-row, then in anonymous table-row-group
- *    - Consecutive table-rows get wrapped in anonymous table-row-group
- *    - Non-table content (like text/inline) gets wrapped in cell -> row -> row-group
- *
- * Note: This modifies the DOM tree by inserting anonymous wrapper elements.
- * Anonymous elements are created with proper CSS 2.1 style inheritance.
- */
+// Anonymous table repair is kept behind this single generator so view marking
+// never has to duplicate DOM wrapping decisions.
 static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* table) {
     if (!lycon || !table) return;
 
@@ -5554,35 +5530,10 @@ static float table_caption_positive_margin(ViewBlock* caption, bool horizontal, 
     return (horizontal && type == CSS_VALUE_AUTO) || value <= 0.0f ? 0.0f : value;
 }
 
-static float table_caption_positive_margin_top(ViewBlock* caption) {
-    return table_caption_positive_margin(caption, false, true);
-}
-
-static float table_caption_positive_margin_bottom(ViewBlock* caption) {
-    return table_caption_positive_margin(caption, false, false);
-}
-
-static float table_caption_positive_margin_left(ViewBlock* caption) {
-    return table_caption_positive_margin(caption, true, true);
-}
-
-static float table_caption_positive_margin_right(ViewBlock* caption) {
-    return table_caption_positive_margin(caption, true, false);
-}
-
-static float table_caption_positive_horizontal_margin(ViewBlock* caption) {
-    return table_caption_positive_margin_left(caption) +
-        table_caption_positive_margin_right(caption);
-}
-
-static float table_caption_positive_vertical_margin(ViewBlock* caption) {
-    return table_caption_positive_margin_top(caption) +
-        table_caption_positive_margin_bottom(caption);
-}
-
 static float table_caption_height_with_margins(ViewBlock* caption) {
     if (!caption) return 0.0f;
-    float margin_v = table_caption_positive_vertical_margin(caption);
+    float margin_v = table_caption_positive_margin(caption, false, true) +
+        table_caption_positive_margin(caption, false, false);
     return caption->height + margin_v;
 }
 
@@ -5649,8 +5600,8 @@ static TableCaptionCollection table_collect_captions(ViewTable* table) {
 
 static void table_position_caption_with_margins(ViewBlock* caption, float base_y) {
     if (!caption) return;
-    caption->x = table_caption_positive_margin_left(caption);
-    caption->y = base_y + table_caption_positive_margin_top(caption);
+    caption->x = table_caption_positive_margin(caption, true, true);
+    caption->y = base_y + table_caption_positive_margin(caption, false, true);
 }
 
 enum TableCaptionWidthChangeReference {
@@ -5658,17 +5609,11 @@ enum TableCaptionWidthChangeReference {
     TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER
 };
 
-enum TableCaptionStackSide {
-    TABLE_CAPTION_STACK_TOP,
-    TABLE_CAPTION_STACK_BOTTOM
-};
-
 static float table_adjust_caption_width_and_height(LayoutContext* lycon,
                                                    ViewTable* table,
                                                    ViewBlock* caption,
                                                    float table_width,
                                                    float wrapper_content_width,
-                                                   int caption_index,
                                                    TableCaptionWidthChangeReference reference) {
     float old_width = caption->width;
     adjust_table_caption_width(caption, wrapper_content_width);
@@ -5679,8 +5624,6 @@ static float table_adjust_caption_width_and_height(LayoutContext* lycon,
         return table_caption_height_with_margins(caption);
     }
 
-    if (reference == TABLE_CAPTION_WIDTH_REFERENCE_ADJUSTED_CAP) {
-    }
     return relayout_table_caption(lycon, caption, table_width);
 }
 
@@ -5690,15 +5633,14 @@ static float table_position_caption_stack(LayoutContext* lycon,
                                           float base_y,
                                           float table_width,
                                           float wrapper_content_width,
-                                          TableCaptionWidthChangeReference reference,
-                                          TableCaptionStackSide side) {
+                                          TableCaptionWidthChangeReference reference) {
     float cap_y = base_y;
     float total_height = 0.0f;
-    for_each_table_caption(captions, [&](ViewBlock* cap, int ci) {
+    for_each_table_caption(captions, [&](ViewBlock* cap, int) {
         table_position_caption_with_margins(cap, cap_y);
 
         float this_cap_height = table_adjust_caption_width_and_height(
-            lycon, table, cap, table_width, wrapper_content_width, ci, reference);
+            lycon, table, cap, table_width, wrapper_content_width, reference);
 
         total_height += this_cap_height;
         cap_y += this_cap_height;
@@ -5774,16 +5716,16 @@ static void table_publish_vertical_geometry(ViewTable* table) {
     for_each_direct_table_block(table, [&](ViewBlock* child) {
         if (table_view_is_caption(child)) {
             float caption_width = child->width;
-            float margin_top = table_caption_positive_margin_top(child);
-            float margin_bottom = table_caption_positive_margin_bottom(child);
+            float margin_top = table_caption_positive_margin(child, false, true);
+            float margin_bottom = table_caption_positive_margin(child, false, false);
             child->height = max(logical_width - margin_top - margin_bottom, 0.0f);
             child->y = margin_top;
             bool is_bottom = table_caption_is_bottom(child);
             if ((is_bottom && !vertical_rl) || (!is_bottom && vertical_rl)) {
                 child->x = physical_width - caption_width -
-                    table_caption_positive_margin_right(child);
+                    table_caption_positive_margin(child, true, false);
             } else {
-                child->x = table_caption_positive_margin_left(child);
+                child->x = table_caption_positive_margin(child, true, true);
             }
             table_swap_vertical_descendants(child);
             return;
@@ -5853,8 +5795,8 @@ static float table_measure_caption_width_contribution(LayoutContext* lycon,
     }
 
     if (caption->bound) {
-        float ml = table_caption_positive_margin_left(caption);
-        float mr = table_caption_positive_margin_right(caption);
+        float ml = table_caption_positive_margin(caption, true, true);
+        float mr = table_caption_positive_margin(caption, true, false);
         if (ml + mr > 0.0f) {
             contribution += ml + mr;
         }
@@ -6261,10 +6203,8 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     // No need to clear text rectangles - this is the first and only layout pass!
 
     // Save layout context to restore later
-    BlockContext saved_block = lycon->block;
-    Linebox saved_line = lycon->line;
+    LayoutContextScope context_scope(lycon);
     DomNode* saved_elmt = lycon->elmt;
-    FontBox saved_font = lycon->font;
     View* saved_view = lycon->view;
 
     // table cells use a dedicated content pass instead of finalize_block_flow;
@@ -6297,40 +6237,15 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     ViewTable* parent_table = get_parent_table(tcell);
     bool border_collapse = parent_table && parent_table->tb && parent_table->tb->border_collapse;
 
-    // Calculate cell border and padding offsets from actual CSS style
-    // Content area starts AFTER border and padding
-    float border_left = 0;
-    float border_top = 0;
-    float border_right = 0;
-    float border_bottom = 0;
-
-    // Read border widths from cell's bound style (if present)
-    if (tcell->bound && tcell->boundary_mut()->border) {
-        if (tcell->boundary()->border->left_style != CSS_VALUE_NONE) {
-            border_left = tcell->boundary()->border->width.left;
-        }
-        if (tcell->boundary()->border->top_style != CSS_VALUE_NONE) {
-            border_top = tcell->boundary()->border->width.top;
-        }
-        if (tcell->boundary()->border->right_style != CSS_VALUE_NONE) {
-            border_right = tcell->boundary()->border->width.right;
-        }
-        if (tcell->boundary()->border->bottom_style != CSS_VALUE_NONE) {
-            border_bottom = tcell->boundary()->border->width.bottom;
-        }
-    }
-
-    float padding_left = 0;
-    float padding_right = 0;
-    float padding_top = 0;
-    float padding_bottom = 0;
-
-    if (tcell->bound) {
-        padding_left = tcell->boundary()->padding.left >= 0 ? tcell->boundary()->padding.left : 0;
-        padding_right = tcell->boundary()->padding.right >= 0 ? tcell->boundary()->padding.right : 0;
-        padding_top = tcell->boundary()->padding.top >= 0 ? tcell->boundary()->padding.top : 0;
-        padding_bottom = tcell->boundary()->padding.bottom >= 0 ? tcell->boundary()->padding.bottom : 0;
-    }
+    TableCellInsets insets = table_cell_insets(tcell);
+    float border_left = insets.border_left;
+    float border_top = insets.border_top;
+    float border_right = insets.border_right;
+    float border_bottom = insets.border_bottom;
+    float padding_left = insets.padding_left;
+    float padding_right = insets.padding_right;
+    float padding_top = insets.padding_top;
+    float padding_bottom = insets.padding_bottom;
 
     // In border-collapse mode, the cell width is the content width (column width),
     // and borders are shared/collapsed with adjacent cells. Content starts at padding only.
@@ -6397,7 +6312,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     // Table cells establish a BFC; otherwise floats inside the cell are
     // registered against an outer context and following inline content cannot
     // query their intrusion in cell coordinates.
-    lycon->block.parent = &saved_block;
+    lycon->block.parent = &context_scope.saved_block;
     lycon->block.establishing_element = cell;
     lycon->block.is_bfc_root = true;
     lycon->block.origin_x = cell->x + content_start_x;
@@ -6566,10 +6481,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     apply_cell_vertical_alignment(lycon, tcell, content_height);
 
     // Restore layout context
-    lycon->block = saved_block;
-    lycon->line = saved_line;
     lycon->elmt = saved_elmt;
-    lycon->font = saved_font;
     lycon->view = saved_view;
 }
 
@@ -7459,7 +7371,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             float caption_box_width = table_width;  // Caption's own box width (without margins)
             // CSS 2.1 §17.4: The table wrapper must accommodate the caption's margin-box.
             // Add fixed horizontal margins to the table wrapper width without affecting caption width.
-            table_width += table_caption_positive_horizontal_margin(caption);
+            table_width += table_caption_positive_margin(caption, true, true) +
+                table_caption_positive_margin(caption, true, false);
 
             // CSS Tables: captions with different sides form separate stacks.
             float cap_y = 0;
@@ -7652,11 +7565,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     float explicit_table_width = 0;
     bool has_explicit_table_width = false;
     float table_content_width = 0; // Width available for cells
-
-    // Check if we're in intrinsic sizing mode (propagated via available_space)
-    bool is_intrinsic_sizing = lycon->available_space.is_intrinsic_sizing();
-    if (is_intrinsic_sizing) {
-    }
 
     // First check resolved style (from HTML width attribute or CSS)
     // The given_width is already resolved to absolute pixels during style resolution
@@ -8040,11 +7948,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         available_content_width = pref_table_content_width;
     }
 
-    // In border-collapse mode, col_max_widths and col_min_widths already include
-    // per-cell border halves (added during measurement). No additional subtraction needed.
-    if (table->tb->border_collapse && explicit_table_width > 0) {
-    }
-
     bool used_percent_distribution = table_apply_percent_column_distribution(
         meta, col_widths, columns, total_percent_col_width,
         available_content_width, min_table_content_width);
@@ -8212,7 +8115,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (top_captions->length > 0) {
         top_caption_height = table_position_caption_stack(
             lycon, table, top_captions, 0.0f, table_width, wrapper_content_width,
-            TABLE_CAPTION_WIDTH_REFERENCE_ADJUSTED_CAP, TABLE_CAPTION_STACK_TOP);
+            TABLE_CAPTION_WIDTH_REFERENCE_ADJUSTED_CAP);
         caption_height = top_caption_height;
 
         // Update current_y with total caption height
@@ -8681,7 +8584,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (bottom_captions->length > 0) {
         float total_bottom_caption_height = table_position_caption_stack(
             lycon, table, bottom_captions, final_table_height, table_width, wrapper_content_width,
-            TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER, TABLE_CAPTION_STACK_BOTTOM);
+            TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER);
         final_table_height += total_bottom_caption_height;
     }
 

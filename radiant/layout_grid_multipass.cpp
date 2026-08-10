@@ -66,7 +66,7 @@ static float grid_flex_container_auto_border_height(ViewBlock* flex_container,
                                                     float fallback_content_height) {
     if (!flex_container) return 0.0f;
 
-    bool has_explicit_height = flex_container->blk && flex_container->block_mut()->given_height >= 0.0f;
+    bool has_explicit_height = layout_axis_has_given_size(flex_container, false);
     if (has_explicit_height) {
         return flex_container->height;
     }
