@@ -1614,6 +1614,18 @@ Item fn_fill(Item n_item, Item value) {
         }
         return { .array_num = result };
     }
+    else if (val_type == LMD_TYPE_BOOL) {
+        // bool needs its own packed lane: falling through to the boxed Array
+        // branch below made `fill(n, true)` produce n boxed Items, which costs
+        // 8x the memory and — because the value then reaches a declared
+        // `bool[]` boundary as a generic array — turns admission into an
+        // O(n) element walk instead of the O(1) representation check.
+        ArrayNum* result = array_num_new(ELEM_BOOL, n);
+        if (!result) return ItemError;
+        uint8_t val = it2b(value) ? 1 : 0;
+        memset(result->data, val, (size_t)n);
+        return { .array_num = result };
+    }
     else {
         // spreadable array for non-numeric values (avoids list merge behavior for strings)
         Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*n, LMD_TYPE_ARRAY);
