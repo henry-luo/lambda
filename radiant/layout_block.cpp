@@ -3563,6 +3563,27 @@ static bool block_has_vertical_flow_child(ViewBlock* parent) {
     return false;
 }
 
+static float layout_vertical_inline_gap_before(ViewBlock* child) {
+    if (!child) return 0.0f;
+    DomNode* previous = child->prev_sibling;
+    while (previous && !previous->view_type) previous = previous->prev_sibling;
+    if (!previous || previous->view_type != RDT_VIEW_TEXT) return 0.0f;
+
+    ViewText* text = lam::view_require_text(static_cast<View*>(previous));
+    float gap = 0.0f;
+    for (TextRect* rect = text->rect; rect; rect = rect->next) {
+        if (!layout_text_rect_has_painted_codepoint(text, rect)) {
+            // Vertical text mapping swaps the whitespace advance into height;
+            // use the smaller axis here so publication sees the same advance
+            // before and after that axis conversion.
+            float advance = rect->width;
+            if (rect->height < advance) advance = rect->height;
+            gap += max(advance, 0.0f);
+        }
+    }
+    return gap;
+}
+
 float layout_compute_in_flow_child_width_extent(ViewBlock* parent) {
     if (!parent || !parent->is_element()) return 0.0f;
 
@@ -3629,11 +3650,12 @@ float layout_compute_in_flow_child_width_extent(ViewBlock* parent) {
             } else {
                 logical_block_offset = child_block->y - content_top;
             }
+            float child_block_extent = vertical_child_block_contribution(child_block);
             min_offset = min(min_offset, logical_block_offset);
             max_extent = max(max_extent,
-                logical_block_offset + child_block->width);
+                logical_block_offset + child_block_extent);
             max_physical = max(max_physical,
-                child_block->x + child_block->width);
+                child_block->x + child_block_extent);
             has_in_flow_child = true;
             if (!children_are_axis_mapped && has_block_flow_child) {
                 float margin_start = vertical_flow_effective_block_start_margin(
@@ -3641,7 +3663,7 @@ float layout_compute_in_flow_child_width_extent(ViewBlock* parent) {
                 float margin_end = layout_vertical_flow_block_end_margin(
                     child_block, layout_block_writing_mode(parent));
                 logical_block_cursor += margin_start +
-                    vertical_child_block_contribution(child_block) + margin_end;
+                    child_block_extent + margin_end;
             }
         }
         if (has_in_flow_child) {
@@ -3699,6 +3721,7 @@ static bool compute_vertical_block_child_inline_extent(ViewBlock* parent,
     bool have_previous_atomic = false;
     int previous_atomic_line = -1;
     bool use_surrogate_inline_cursor = radiant::layout_uses_explicit_baseline_source(parent);
+    float vertical_inline_gap_total = 0.0f;
     for (View* child = lam::view_require_element(parent)->first_placed_child();
          child; child = child->next()) {
         if (!child->is_block()) continue;
@@ -3706,6 +3729,7 @@ static bool compute_vertical_block_child_inline_extent(ViewBlock* parent,
         if (layout_block_is_out_of_flow_positioned(child_block)) continue;
         if (child_block->view_type == RDT_VIEW_INLINE_BLOCK &&
             !vertical_parent_has_atomic_block_flow(parent)) {
+            vertical_inline_gap_total += layout_vertical_inline_gap_before(child_block);
             if (child_block->inline_line_number >= 0 &&
                 previous_atomic_line >= 0 &&
                 child_block->inline_line_number != previous_atomic_line) {
@@ -3722,6 +3746,7 @@ static bool compute_vertical_block_child_inline_extent(ViewBlock* parent,
                     ? 0.0f : max((use_surrogate_inline_cursor ? child_block->x
                         - content_left : child_block->y - parent_box.border.top -
                         parent_box.padding.top), 0.0f);
+                atomic_inline_cursor += vertical_inline_gap_total;
                 direct_inline_extent = parent->block()->direction == CSS_VALUE_RTL
                     ? 0.0f : max((use_surrogate_inline_cursor ? child_block->x
                         - content_left : child_block->y - parent_box.border.top -
@@ -3955,13 +3980,14 @@ static float compute_in_flow_child_margin_box_width(ViewBlock* parent) {
             }
 
             float child_extent;
+            float child_block_extent = vertical_child_block_contribution(child_block);
             if (!children_are_axis_mapped) {
                 // Atomic inline-level children advance the logical block axis
                 // in source order before vertical coordinates are published.
                 child_extent = logical_block_cursor +
-                    vertical_child_block_contribution(child_block);
+                    child_block_extent;
             } else {
-                child_extent = child_block->x + child_block->width - content_left;
+                child_extent = child_block->x + child_block_extent - content_left;
             }
             child_extent += layout_non_auto_margin_right(child_block);
             max_extent = max(max_extent, child_extent);
@@ -3971,7 +3997,7 @@ static float compute_in_flow_child_margin_box_width(ViewBlock* parent) {
                 float margin_end = layout_vertical_flow_block_end_margin(
                     child_block, layout_block_writing_mode(parent));
                 logical_block_cursor += margin_start +
-                    vertical_child_block_contribution(child_block) + margin_end;
+                    child_block_extent + margin_end;
             }
         }
         if ((has_normal_block_child || has_atomic_inline_child) && max_extent > 0.0f) {
@@ -4015,7 +4041,7 @@ static void set_block_scroller_clip(ViewBlock* block) {
 }
 
 static float block_context_float_bottom(const BlockContext* context,
-                                        bool include_lowest) {
+                                         bool include_lowest) {
     if (!context) return 0.0f;
     float max_bottom = include_lowest ? context->lowest_float_bottom : 0.0f;
     for (FloatBox* float_box = context->left_floats; float_box; float_box = float_box->next) {
@@ -4063,6 +4089,7 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
     float previous_multicol_inline_offset = 0.0f;
     bool have_previous_multicol_inline_offset = false;
     ViewBlock* previous_vertical_multicol_child = nullptr;
+    float vertical_inline_gap_total = 0.0f;
 
 
     for (View* child = element->first_placed_child(); child; child = child->next()) {
@@ -4084,7 +4111,11 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
             layout_block_inline_axis_is_vertical(child_block);
         if (layout_block_is_out_of_flow_positioned(child_block) ||
             (!layout_block_inline_axis_is_vertical(child_block) &&
-             !is_atomic_inline && !is_orthogonal_block)) continue;
+            !is_atomic_inline && !is_orthogonal_block)) continue;
+
+        float vertical_inline_gap = is_atomic_inline && !atomic_block_flow
+            ? layout_vertical_inline_gap_before(child_block) : 0.0f;
+        vertical_inline_gap_total += vertical_inline_gap;
 
         if (is_atomic_inline && !atomic_block_flow &&
             child_block->inline_line_number >= 0 &&
@@ -4115,6 +4146,7 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
                 // before or after the direct text in the physical inline axis.
                 logical_inline_cursor = block->block()->direction == CSS_VALUE_RTL
                     ? 0.0f : max(child_block->y - content_top, 0.0f);
+                logical_inline_cursor += vertical_inline_gap_total;
                 if (block->block()->direction != CSS_VALUE_RTL &&
                     has_explicit_baseline_child) {
                     // an explicit baseline source makes the surrogate inline
@@ -7004,29 +7036,75 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 }
 
-static bool layout_text_rect_has_painted_codepoint(ViewText* text, TextRect* rect) {
+LayoutTextRectContentKind layout_text_rect_content_kind(ViewText* text,
+                                                        TextRect* rect) {
     // Whitespace ranges report line-box geometry; only painted glyph ranges
     // need the vertical-writing correction below.
-    if (!text || !rect || rect->length <= 0) return false;
+    if (!text || !rect || rect->length <= 0) {
+        return LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE;
+    }
     const unsigned char* data = text->text_data();
-    if (!data) return false;
+    if (!data) return LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE;
     const char* cursor = reinterpret_cast<const char*>(data + rect->start_index);
     size_t remaining = static_cast<size_t>(rect->length);
+    bool has_non_collapsible_space = false;
     while (remaining > 0) {
         uint32_t codepoint = 0;
         int bytes = str_utf8_decode(cursor, remaining, &codepoint);
-        if (bytes <= 0 || static_cast<size_t>(bytes) > remaining) return true;
+        if (bytes <= 0 || static_cast<size_t>(bytes) > remaining) {
+            return LAYOUT_TEXT_RECT_PAINTED_CONTENT;
+        }
         utf8proc_category_t category = utf8proc_category(
             static_cast<utf8proc_int32_t>(codepoint));
-        bool is_line_whitespace = codepoint == ' ' || codepoint == '\t' ||
+        bool is_non_collapsible_space = codepoint == 0x00A0 ||
+            codepoint == 0x2007 || codepoint == 0x202F;
+        if (is_non_collapsible_space) has_non_collapsible_space = true;
+        bool is_line_whitespace = !is_non_collapsible_space &&
+            (codepoint == ' ' || codepoint == '\t' ||
             codepoint == '\n' || codepoint == '\r' || codepoint == '\f' ||
-            codepoint == 0x00A0 || codepoint == 0x2028 || codepoint == 0x2029 ||
-            category == UTF8PROC_CATEGORY_ZS;
-        if (!is_line_whitespace) return true;
+            codepoint == 0x2028 || codepoint == 0x2029 ||
+            category == UTF8PROC_CATEGORY_ZS);
+        if (!is_line_whitespace && !is_non_collapsible_space) {
+            return LAYOUT_TEXT_RECT_PAINTED_CONTENT;
+        }
         cursor += bytes;
         remaining -= static_cast<size_t>(bytes);
     }
-    return false;
+    return has_non_collapsible_space
+        ? LAYOUT_TEXT_RECT_NON_COLLAPSIBLE_WHITESPACE
+        : LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE;
+}
+
+bool layout_text_rect_has_painted_codepoint(ViewText* text, TextRect* rect) {
+    return layout_text_rect_content_kind(text, rect) ==
+        LAYOUT_TEXT_RECT_PAINTED_CONTENT;
+}
+
+bool layout_text_rect_has_non_collapsible_whitespace(ViewText* text,
+                                                     TextRect* rect) {
+    return layout_text_rect_content_kind(text, rect) ==
+        LAYOUT_TEXT_RECT_NON_COLLAPSIBLE_WHITESPACE;
+}
+
+static bool layout_vertical_whitespace_inline_anchor(ViewText* text,
+                                                     TextRect* rect,
+                                                     float* inline_offset) {
+    if (!text || !rect || !inline_offset ||
+        layout_text_rect_has_painted_codepoint(text, rect)) return false;
+    DomNode* next = static_cast<DomNode*>(text)->next_sibling;
+    while (next && !next->view_type) next = next->next_sibling;
+    if (!next || (next->view_type != RDT_VIEW_INLINE_BLOCK &&
+                  next->view_type != RDT_VIEW_TABLE)) return false;
+
+    ViewBlock* next_block = lam::view_require_block(static_cast<View*>(next));
+    // The whitespace rect ends where the following atomic box starts. The
+    // publisher has already applied preceding gaps to that box's physical
+    // inline position, so use the published edge instead of the reset line's
+    // surrogate x coordinate.
+    float gap = rect->width;
+    if (rect->height < gap) gap = rect->height;
+    *inline_offset = max(next_block->y - gap, 0.0f);
+    return true;
 }
 
 void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
@@ -7053,6 +7131,21 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                 float logical_inline_offset = rect->x - surrogate_inline_origin;
                 float logical_width = rect->width;
                 float logical_height = rect->height;
+                LayoutTextRectContentKind content_kind =
+                    layout_text_rect_content_kind(text, rect);
+                bool has_painted_codepoint = content_kind ==
+                    LAYOUT_TEXT_RECT_PAINTED_CONTENT;
+                bool has_non_collapsible_whitespace = content_kind ==
+                    LAYOUT_TEXT_RECT_NON_COLLAPSIBLE_WHITESPACE;
+                bool has_collapsed_whitespace = content_kind ==
+                    LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE;
+                float whitespace_inline_offset = 0.0f;
+                bool has_whitespace_inline_anchor =
+                    layout_vertical_whitespace_inline_anchor(
+                        text, rect, &whitespace_inline_offset);
+                if (has_whitespace_inline_anchor) {
+                    logical_x = whitespace_inline_offset;
+                }
                 // CSS Writing Modes centers the glyph area in the vertical line
                 // box; the horizontal surrogate's y is the font-content origin,
                 // so it omits the line-height leading on the physical block axis.
@@ -7061,7 +7154,7 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                 bool line_axis_already_trimmed = text_block && text_block->blk &&
                     text_block->block()->text_box_trim_applied;
                 float inline_leading = !line_axis_already_trimmed &&
-                    layout_text_rect_has_painted_codepoint(text, rect) &&
+                    has_painted_codepoint &&
                     line_height > logical_height
                     ? (line_height - logical_height) / 2.0f : 0.0f;
                 // css inline 3 §4.1: auto uses the central baseline in vertical
@@ -7070,13 +7163,32 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                 // central centering to the horizontal surrogate collapses all lines.
                 bool atomic_vertical_container = text_block &&
                     text_block->view_type == RDT_VIEW_INLINE_BLOCK;
+                ViewBlock* text_parent_block = atomic_vertical_container
+                    ? layout_nearest_block_ancestor(text_block->parent_view()) : nullptr;
+                bool mixed_vertical_baseline = atomic_vertical_container &&
+                    text_parent_block &&
+                    layout_block_inline_axis_is_vertical(text_parent_block) !=
+                        layout_block_inline_axis_is_vertical(text_block);
                 bool vertical_central = use_central_baseline &&
                     !reverse_inline_axis &&
-                    atomic_vertical_container &&
+                    mixed_vertical_baseline &&
                     (mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL);
                 bool center_painted_vertical_glyph = vertical_central &&
-                    layout_text_rect_has_painted_codepoint(text, rect);
-                float logical_y = center_block_axis || center_painted_vertical_glyph
+                    has_painted_codepoint;
+                bool center_vertical_space = has_non_collapsible_whitespace &&
+                    text_block && layout_block_inline_axis_is_vertical(text_block) &&
+                    line_height > logical_height;
+                // A collapsed whitespace fragment is an inline gap, not a
+                // baseline-bearing glyph box. Its surrogate y coordinate is
+                // the preceding line position; mapping that coordinate onto
+                // the physical block axis moves the gap across columns.
+                bool vertical_whitespace = text_block &&
+                    layout_block_inline_axis_is_vertical(text_block) &&
+                    has_collapsed_whitespace;
+                float logical_y = vertical_whitespace
+                    ? physical_block_origin
+                    : center_block_axis || center_painted_vertical_glyph ||
+                        center_vertical_space
                     ? (block_extent - logical_height) / 2.0f
                     : rect->y - surrogate_block_origin + physical_block_origin +
                         inline_leading;

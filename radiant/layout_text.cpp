@@ -2123,15 +2123,38 @@ static bool line_has_only_zero_sized_atomic(LayoutContext* lycon) {
     return lycon->block.line_height <= 0.0f;
 }
 
+static bool line_trailing_space_is_vertical_atomic_gap(ViewText* text_view,
+                                                       TextRect* text_rect) {
+    if (!text_view || !text_rect ||
+        layout_text_rect_has_painted_codepoint(text_view, text_rect)) {
+        return false;
+    }
+    ViewBlock* parent = layout_nearest_block_ancestor(text_view->parent_view());
+    if (!parent || !layout_block_inline_axis_is_vertical(parent)) return false;
+
+    // The horizontal surrogate starts a new line when the next vertical atomic
+    // box does not fit its provisional width. In the physical vertical flow,
+    // that break is the column transition and the whitespace remains the gap
+    // between the two inline-blocks.
+    DomNode* next = static_cast<DomNode*>(text_view)->next_sibling;
+    while (next && !next->view_type) next = next->next_sibling;
+    return next && (next->view_type == RDT_VIEW_INLINE_BLOCK ||
+                    next->view_type == RDT_VIEW_TABLE);
+}
+
 void line_break(LayoutContext* lycon) {
     // CSS 2.1 §16.6.1: For normal/nowrap/pre-line white-space, trailing spaces
     // at the end of a line are removed. Trim the last text rect's width.
     if (lycon->line.trailing_space_width > 0 && lycon->line.last_text_rect) {
-        float trim_amount = lycon->line.trailing_space_width;
+        bool preserve_vertical_gap = line_trailing_space_is_vertical_atomic_gap(
+            lycon->line.last_text_view, lycon->line.last_text_rect);
+        float trim_amount = preserve_vertical_gap ? 0.0f :
+            lycon->line.trailing_space_width;
         lycon->line.last_text_rect->width -= trim_amount;
         lycon->line.advance_x -= trim_amount;
         lycon->line.trailing_space_width = 0;
-        if (lycon->line.last_text_rect->width <= 0.01f && lycon->line.last_text_view) {
+        if (!preserve_vertical_gap &&
+            lycon->line.last_text_rect->width <= 0.01f && lycon->line.last_text_view) {
             record_collapsed_line_fragment_for_inline_ancestors(
                 lycon, lycon->line.last_text_view, lycon->line.last_text_rect);
         }
@@ -2149,10 +2172,15 @@ void line_break(LayoutContext* lycon) {
     // with the trailing-space rect still being the last text on the line,
     // trim it using the committed trailing space info.
     else if (lycon->line.committed_trailing_space > 0 && lycon->line.committed_trailing_rect) {
-        float trim_amount = lycon->line.committed_trailing_space;
+        bool preserve_vertical_gap = line_trailing_space_is_vertical_atomic_gap(
+            lycon->line.committed_trailing_view,
+            lycon->line.committed_trailing_rect);
+        float trim_amount = preserve_vertical_gap ? 0.0f :
+            lycon->line.committed_trailing_space;
         lycon->line.committed_trailing_rect->width -= trim_amount;
         lycon->line.advance_x -= trim_amount;
-        if (lycon->line.committed_trailing_rect->width <= 0.01f &&
+        if (!preserve_vertical_gap &&
+            lycon->line.committed_trailing_rect->width <= 0.01f &&
             lycon->line.committed_trailing_view) {
             record_collapsed_line_fragment_for_inline_ancestors(
                 lycon, lycon->line.committed_trailing_view,

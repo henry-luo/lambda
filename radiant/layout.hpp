@@ -262,6 +262,9 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum white_space = CSS_VALUE_NORMAL,
                                                    CssEnum overflow_wrap = CSS_VALUE_NORMAL,
                                                    CssEnum word_break = CSS_VALUE_NORMAL);
+float layout_vertical_text_block_extent(const char* text, size_t length,
+                                         float line_advance,
+                                         float available_inline_size);
 float measure_direct_text_children_intrinsic_width(LayoutContext* lycon,
                                                    DomElement* element,
                                                    bool use_min_content,
@@ -2375,6 +2378,16 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                                                bool center_block_axis,
                                                bool use_central_baseline,
                                                bool reverse_inline_axis);
+typedef enum LayoutTextRectContentKind {
+    LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE = 0,
+    LAYOUT_TEXT_RECT_NON_COLLAPSIBLE_WHITESPACE,
+    LAYOUT_TEXT_RECT_PAINTED_CONTENT,
+} LayoutTextRectContentKind;
+LayoutTextRectContentKind layout_text_rect_content_kind(ViewText* text,
+                                                        TextRect* rect);
+bool layout_text_rect_has_painted_codepoint(ViewText* text, TextRect* rect);
+bool layout_text_rect_has_non_collapsible_whitespace(ViewText* text,
+                                                     TextRect* rect);
 float layout_vertical_flow_block_start_margin(ViewBlock* child, WritingMode parent_mode);
 float layout_vertical_flow_block_end_margin(ViewBlock* child, WritingMode parent_mode);
 bool layout_parent_block_edge_is_unedged(ViewBlock* block, bool horizontal, bool start);

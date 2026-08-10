@@ -211,8 +211,9 @@ static void flex_normalize_break_item_boxes(LayoutContext* lycon,
         lycon->font = saved_font;
         if (break_height <= 0.0f) continue;
 
-        // A blockified <br> has zero inline extent, but its generated line box
-        // remains observable even though it contributes no flex main size.
+        // A blockified <br> has zero inline extent; column flex intrinsic sizing
+        // supplies its line-box main advance, while this pass publishes the
+        // same line box for the final view geometry.
         bool vertical_writing = flex->writing_mode == WM_VERTICAL_LR ||
             flex->writing_mode == WM_VERTICAL_RL;
         if (vertical_writing) {

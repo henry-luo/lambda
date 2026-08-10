@@ -227,6 +227,9 @@ struct DomDocument {
     // Phase 16: Incremental layout mode — skip pool recreate, skip clean subtrees
     bool incremental_layout;
 
+    // Headless snapshot mode freezes CSS animation effects before layout.
+    bool disable_css_animations;
+
     DomJsRuntime js;
 
     // Last DOM reconcile result. Tests assert this instead of parsing log.txt,
@@ -265,6 +268,7 @@ struct DomDocument {
                     element_dom_map(nullptr),
                     skip_style_reset(false),
                     incremental_layout(false),
+                    disable_css_animations(false),
                     pending_navigation_url(nullptr),
                     document_charset(nullptr),
                     pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f),

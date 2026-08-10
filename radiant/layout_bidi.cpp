@@ -57,8 +57,8 @@ typedef struct BidiLineCounts {
     bool has_bidi_trigger;
 } BidiLineCounts;
 
-#if RDT_HAS_FRIBIDI
 static bool bidi_codepoint_triggers_reorder(uint32_t codepoint) {
+#if RDT_HAS_FRIBIDI
     FriBidiCharType type = fribidi_get_bidi_type((FriBidiChar)codepoint);
     return type == FRIBIDI_TYPE_RTL || type == FRIBIDI_TYPE_AL ||
            type == FRIBIDI_TYPE_LRE || type == FRIBIDI_TYPE_RLE ||
@@ -66,6 +66,15 @@ static bool bidi_codepoint_triggers_reorder(uint32_t codepoint) {
            type == FRIBIDI_TYPE_PDF || type == FRIBIDI_TYPE_LRI ||
            type == FRIBIDI_TYPE_RLI || type == FRIBIDI_TYPE_FSI ||
            type == FRIBIDI_TYPE_PDI;
+#else
+    // explicit embedding controls still need visual reordering when the
+    // optional FriBidi dependency is unavailable in the native build.
+    return codepoint == 0x202A || codepoint == 0x202B ||
+           codepoint == 0x202C || codepoint == 0x202D ||
+           codepoint == 0x202E || codepoint == 0x2066 ||
+           codepoint == 0x2067 || codepoint == 0x2068 ||
+           codepoint == 0x2069 || utf_bidi_strong_class(codepoint) == 1;
+#endif
 }
 
 static bool bidi_is_line_text_rect(ViewText* text, TextRect* rect, int line_number) {
@@ -225,12 +234,26 @@ static void bidi_scale_rect_widths(BidiCharFragment* chars, BidiRectInfo* rects,
             for (int j = 0; j < rect_info->char_count; j++) {
                 chars[rect_info->first_char + j].width *= scale;
             }
-        } else if (rect_info->visible_count > 0) {
+        } else {
+            // The fallback font can have no glyph advance for a bidi script,
+            // while the normal text pass still measured the complete range.
+            // Preserve that range by distributing its established width over
+            // the renderable codepoints before visual reordering.
+            rect_info->visible_count = 0;
+            for (int j = 0; j < rect_info->char_count; j++) {
+                uint32_t codepoint = chars[rect_info->first_char + j].codepoint;
+                if (!text_codepoint_has_zero_advance(codepoint)) {
+                    rect_info->visible_count++;
+                }
+            }
+            if (rect_info->visible_count > 0) {
             float width = rect_info->rect->width / rect_info->visible_count;
             for (int j = 0; j < rect_info->char_count; j++) {
-                if (chars[rect_info->first_char + j].width > 0.0f) {
+                    if (!text_codepoint_has_zero_advance(
+                            chars[rect_info->first_char + j].codepoint)) {
                     chars[rect_info->first_char + j].width = width;
                 }
+            }
             }
         }
     }
@@ -244,7 +267,7 @@ static void bidi_update_span_visual_ranges(BidiCharFragment* chars,
                                             int char_count) {
     for (int visual = 0; visual < char_count; visual++) {
         int logical = visual_to_logical[visual];
-        if (logical < 0 || logical >= char_count || chars[logical].width <= 0.0f) continue;
+        if (logical < 0 || logical >= char_count) continue;
         for (int span_index = 0; span_index < span_count; span_index++) {
             BidiSpanInfo* span = &spans[span_index];
             if (logical < span->logical_start || logical > span->logical_end) continue;
@@ -288,9 +311,9 @@ static void bidi_place_visual_line(LayoutContext* lycon,
         }
 
         int logical = visual_to_logical[visual];
-        if (logical >= 0 && logical < char_count && chars[logical].width > 0.0f) {
+        if (logical >= 0 && logical < char_count) {
             chars[logical].visual_x = cursor;
-            cursor += chars[logical].width;
+            if (chars[logical].width > 0.0f) cursor += chars[logical].width;
         }
 
         for (int depth = max_depth; depth >= 0; depth--) {
@@ -311,7 +334,8 @@ static void bidi_place_visual_line(LayoutContext* lycon,
         max_x[i] = -FLT_MAX;
     }
     for (int i = 0; i < char_count; i++) {
-        if (chars[i].width <= 0.0f) continue;
+        if (chars[i].width <= 0.0f &&
+            !text_codepoint_has_zero_advance(chars[i].codepoint)) continue;
         int slot = -1;
         for (int rect_index = 0; rect_index < rect_count; rect_index++) {
             if (rects[rect_index].rect == chars[i].rect) {
@@ -349,13 +373,7 @@ static void bidi_refresh_bounds(View* view, int line_number,
     (void)spans;
     (void)span_count;
 }
-#endif
-
 void layout_bidi_line(LayoutContext* lycon) {
-#if !RDT_HAS_FRIBIDI
-    (void)lycon;
-    return;
-#else
     if (!lycon || !lycon->line.start_view || lycon->line.has_replaced_content) return;
     View* root = layout_inline_fragment_root(lycon->line.start_view);
     if (!root) return;
@@ -365,7 +383,7 @@ void layout_bidi_line(LayoutContext* lycon) {
     // Ordinary LTR lines already have correct fragment geometry; UAX #9 must
     // only rewrite lines whose bidi data can change visual order.
     if (counts.chars <= 0 || counts.rects <= 0 || counts.has_atomic ||
-        !counts.has_bidi_trigger) return;
+        (!counts.has_bidi_trigger && lycon->block.direction != CSS_VALUE_RTL)) return;
 
     BidiCharFragment* chars = (BidiCharFragment*)scratch_calloc(
         &lycon->scratch, sizeof(BidiCharFragment) * counts.chars);
@@ -373,18 +391,11 @@ void layout_bidi_line(LayoutContext* lycon) {
         &lycon->scratch, sizeof(BidiRectInfo) * counts.rects);
     BidiSpanInfo* spans = (BidiSpanInfo*)scratch_calloc(
         &lycon->scratch, sizeof(BidiSpanInfo) * counts.spans);
-    FriBidiChar* logical = (FriBidiChar*)scratch_alloc(
-        &lycon->scratch, sizeof(FriBidiChar) * counts.chars);
-    FriBidiChar* visual = (FriBidiChar*)scratch_alloc(
-        &lycon->scratch, sizeof(FriBidiChar) * counts.chars);
-    FriBidiStrIndex* logical_to_visual = (FriBidiStrIndex*)scratch_alloc(
-        &lycon->scratch, sizeof(FriBidiStrIndex) * counts.chars);
-    FriBidiStrIndex* visual_to_logical = (FriBidiStrIndex*)scratch_alloc(
-        &lycon->scratch, sizeof(FriBidiStrIndex) * counts.chars);
-    FriBidiLevel* levels = (FriBidiLevel*)scratch_alloc(
-        &lycon->scratch, sizeof(FriBidiLevel) * counts.chars);
-    if (!chars || !rects || !spans || !logical || !visual || !logical_to_visual ||
-        !visual_to_logical || !levels) return;
+    int* visual_to_logical = (int*)scratch_alloc(
+        &lycon->scratch, sizeof(int) * counts.chars);
+    int* levels = (int*)scratch_alloc(
+        &lycon->scratch, sizeof(int) * counts.chars);
+    if (!chars || !rects || !spans || !visual_to_logical || !levels) return;
 
     int char_cursor = 0;
     int rect_cursor = 0;
@@ -392,14 +403,87 @@ void layout_bidi_line(LayoutContext* lycon) {
     bidi_fill_views(root, lycon->block.line_number, 0, chars, rects, spans,
                     &char_cursor, &rect_cursor, &span_cursor);
     if (char_cursor != counts.chars || rect_cursor != counts.rects) return;
-    for (int i = 0; i < counts.chars; i++) logical[i] = chars[i].codepoint;
     bidi_scale_rect_widths(chars, rects, counts.rects);
+
+    int max_level = 0;
+#if RDT_HAS_FRIBIDI
+    FriBidiChar* logical = (FriBidiChar*)scratch_alloc(
+        &lycon->scratch, sizeof(FriBidiChar) * counts.chars);
+    FriBidiChar* visual = (FriBidiChar*)scratch_alloc(
+        &lycon->scratch, sizeof(FriBidiChar) * counts.chars);
+    FriBidiStrIndex* logical_to_visual = (FriBidiStrIndex*)scratch_alloc(
+        &lycon->scratch, sizeof(FriBidiStrIndex) * counts.chars);
+    FriBidiStrIndex* fri_visual_to_logical = (FriBidiStrIndex*)scratch_alloc(
+        &lycon->scratch, sizeof(FriBidiStrIndex) * counts.chars);
+    FriBidiLevel* fri_levels = (FriBidiLevel*)scratch_alloc(
+        &lycon->scratch, sizeof(FriBidiLevel) * counts.chars);
+    if (!logical || !visual || !logical_to_visual || !fri_visual_to_logical ||
+        !fri_levels) return;
+    for (int i = 0; i < counts.chars; i++) logical[i] = chars[i].codepoint;
 
     FriBidiParType base_direction = lycon->block.direction == CSS_VALUE_RTL
         ? FRIBIDI_PAR_RTL : FRIBIDI_PAR_LTR;
-    FriBidiLevel max_level = fribidi_log2vis(
+    FriBidiLevel fri_max_level = fribidi_log2vis(
         logical, counts.chars, &base_direction, visual,
-        logical_to_visual, visual_to_logical, levels);
+        logical_to_visual, fri_visual_to_logical, fri_levels);
+    max_level = (int)fri_max_level;
+    for (int i = 0; i < counts.chars; i++) {
+        visual_to_logical[i] = (int)fri_visual_to_logical[i];
+        levels[i] = (int)fri_levels[i];
+    }
+#else
+    int embedding_stack[64];
+    int embedding_depth = 0;
+    int current_level = lycon->block.direction == CSS_VALUE_RTL ? 1 : 0;
+    max_level = current_level;
+    for (int i = 0; i < counts.chars; i++) {
+        uint32_t cp = chars[i].codepoint;
+        levels[i] = current_level;
+        if (cp == 0x202A || cp == 0x202D) {
+            if (embedding_depth < 64) embedding_stack[embedding_depth++] = current_level;
+            current_level++;
+            if ((current_level & 1) != 0) current_level++;
+            if (current_level > max_level) max_level = current_level;
+        } else if (cp == 0x202B || cp == 0x202E) {
+            if (embedding_depth < 64) embedding_stack[embedding_depth++] = current_level;
+            current_level++;
+            if ((current_level & 1) != 1) current_level++;
+            if (current_level > max_level) max_level = current_level;
+        } else if (cp == 0x202C) {
+            if (embedding_depth > 0) current_level = embedding_stack[--embedding_depth];
+        } else {
+            int strong_class = utf_bidi_strong_class(cp);
+            // Implicit levels keep an LTR run in source order inside an RTL
+            // paragraph; assigning every character the paragraph level would
+            // reverse Latin words one codepoint at a time.
+            if ((strong_class == 1 && (current_level & 1) == 0) ||
+                (strong_class == -1 && (current_level & 1) != 0)) {
+                levels[i] = current_level + 1;
+                if (levels[i] > max_level) max_level = levels[i];
+            }
+        }
+        visual_to_logical[i] = i;
+    }
+    // UAX #9 L2 applies to the complete inline line. Reversing each span in
+    // isolation leaves bidi fragments from one decorated span trapped before
+    // the next span, so box-decoration-break:clone cannot expose the visual
+    // union that the browser lays out.
+    for (int level = max_level; level >= 1; level--) {
+        int visual = 0;
+        while (visual < counts.chars) {
+            while (visual < counts.chars &&
+                   levels[visual_to_logical[visual]] < level) visual++;
+            int begin = visual;
+            while (visual < counts.chars &&
+                   levels[visual_to_logical[visual]] >= level) visual++;
+            for (int left = begin, right = visual - 1; left < right; left++, right--) {
+                int logical = visual_to_logical[left];
+                visual_to_logical[left] = visual_to_logical[right];
+                visual_to_logical[right] = logical;
+            }
+        }
+    }
+#endif
     if (max_level == 0) return;
 
     bidi_update_span_visual_ranges(chars, visual_to_logical, spans, counts.spans,
@@ -416,5 +500,4 @@ void layout_bidi_line(LayoutContext* lycon) {
                 span_info->span->font ? span_info->span->fontp()->font_handle : nullptr);
         }
     }
-#endif
 }

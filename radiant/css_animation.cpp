@@ -1242,6 +1242,10 @@ void css_web_animation_set_current_time(CssWebAnimationState* state,
 
 void css_web_animation_resolve(DomElement* element, LayoutContext* lycon) {
     if (!element) return;
+    if (lycon && lycon->ui_context && lycon->ui_context->document &&
+        lycon->ui_context->document->disable_css_animations) {
+        return;
+    }
 
     CssWebAnimationState* state =
         (CssWebAnimationState*)element->web_animation_state();
@@ -1391,6 +1395,10 @@ bool css_animation_parse_timing_function_text(const char* value,
 
 void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     if (!element || !lycon || !lycon->ui_context) return;
+    if (lycon->ui_context->document &&
+        lycon->ui_context->document->disable_css_animations) {
+        return;
+    }
 
     // check if element has animation-name set
     StyleTree* style_tree = element->specified_style;
@@ -2204,6 +2212,10 @@ static void css_transition_start(AnimationScheduler* scheduler, DomElement* elem
 
 void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
     if (!element || !lycon || !lycon->ui_context) return;
+    if (lycon->ui_context->document &&
+        lycon->ui_context->document->disable_css_animations) {
+        return;
+    }
 
     StyleTree* style_tree = element->specified_style;
     if (!style_tree || !style_tree->tree) return;
