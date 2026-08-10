@@ -24,6 +24,7 @@ static BlockProp make_block_prop_default() {
     value.box_sizing = CSS_VALUE_CONTENT_BOX;
     value.box_decoration_break = CSS_VALUE_SLICE;
     value.baseline_source = CSS_VALUE_AUTO;
+    value.dominant_baseline = CSS_VALUE_AUTO;
     value.given_width = value.given_height = -1.0f;
     value.aspect_ratio_auto_height = false;
     value.given_width_fit_content_limit = value.given_height_fit_content_limit = -1.0f;

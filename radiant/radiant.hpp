@@ -122,6 +122,8 @@ const char* radiant_frame_clock_mode_name(const RadiantFrameClock* clock);
 
 bool radiant_resolve_shared_data_resource_path(const char* href, const char* base_path,
                                                char* out_path, size_t out_size);
+bool radiant_resolve_layout_support_resource_path(const char* href, const char* base_path,
+                                                  char* out_path, size_t out_size);
 
 // ===== script runner =====
 

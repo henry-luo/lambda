@@ -27,14 +27,11 @@
 #include <dlfcn.h>
 #endif
 
-extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" Item js_get_net_namespace(void);
-extern "C" int64_t js_array_length(Item array);
-extern "C" Item js_array_get_int(Item array, int64_t index);
-extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" Item js_tls_socket_getSession(void);
 extern "C" uv_tcp_t* js_net_socket_adopt_for_tls(Item socket_obj, Item tls_obj);
 extern "C" void js_net_socket_tls_closed(Item socket_obj, bool had_error);
+extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 
 static bool tls_is_missing(Item item) {
     TypeId type = get_type_id(item);
@@ -166,9 +163,8 @@ static Item tls_validate_material_option(Item options, const char* name,
 }
 
 static Item tls_validate_material_options(Item options, bool allow_zero) {
-    Item err = tls_validate_material_option(options, "key",
-        "string or an instance of Buffer, TypedArray, or DataView", true, allow_zero);
-    if (item_is_error(err)) return err;
+    JS_ASSIGN_OR_RETURN(err, tls_validate_material_option(options, "key",
+        "string or an instance of Buffer, TypedArray, or DataView", true, allow_zero));
     err = tls_validate_material_option(options, "cert",
         "string or an instance of Buffer, TypedArray, or DataView", false, allow_zero);
     if (item_is_error(err)) return err;

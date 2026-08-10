@@ -1648,11 +1648,43 @@ float line_baseline_position(LayoutContext* lycon, float* out_line_height) {
         }
     }
     if (out_line_height) *out_line_height = line_height;
+    ViewElement* line_start_parent = lycon->line.start_view
+        ? lycon->line.start_view->parent_view() : nullptr;
+    ViewBlock* line_block = layout_nearest_block_ancestor(line_start_parent);
+    bool dominant_text_top = line_block && line_block->blk &&
+        line_block->block()->dominant_baseline == CSS_VALUE_TEXT_TOP;
+    if (dominant_text_top) {
+        float content_baseline = max(lycon->line.max_text_ascender,
+            lycon->line.max_atomic_inline_height);
+        if (content_baseline > 0.0f) {
+            // dominant-baseline:text-top replaces the block strut's alphabetic
+            // baseline with the line content union; retaining the strut here
+            // displaces direct text while atomic descendants use the union.
+            return content_baseline;
+        }
+    }
     if (layout_quirks_block_ignores_line_height(lycon, nullptr)) {
         // without a root strut, the descendant content establishes the baseline.
         return lycon->line.max_ascender;
     }
     return max(lycon->line.max_ascender, strut_baseline);
+}
+
+bool radiant::layout_inline_context_has_explicit_baseline_source(
+    ViewBlock* block) {
+    if (!block) return false;
+    if (radiant::layout_uses_explicit_baseline_source(block)) return true;
+    if (!block->is_element()) return false;
+    ViewElement* element = lam::view_require_element(block);
+    for (View* child = element->first_placed_child(); child;
+         child = child->next()) {
+        if (child->is_block() &&
+            radiant::layout_uses_explicit_baseline_source(
+                lam::view_require_block(child))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 float layout_inline_atomic_extent(LayoutContext* lycon, ViewBlock* block) {
@@ -1762,6 +1794,11 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             ViewBlock* text_parent = layout_nearest_block_ancestor(text_view->parent_view());
             bool vertical_text_parent = text_parent &&
                 layout_block_inline_axis_is_vertical(text_parent);
+            bool sideways_text_parent = text_parent && text_parent->is_element() &&
+                (layout_element_css_writing_mode(text_parent->as_element()) ==
+                     CSS_VALUE_SIDEWAYS_LR ||
+                 layout_element_css_writing_mode(text_parent->as_element()) ==
+                     CSS_VALUE_SIDEWAYS_RL);
             if (vertical_text_parent) {
                 // Vertical writing maps this rect's baseline coordinate to the
                 // physical block axis; using the raster ascent leaves the
@@ -1783,7 +1820,15 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // CSS 2.1 §10.8.1: Content area may overflow the line box when
             // line-height < content-height (negative half-leading). Allow negative
             // offsets so the content area extends above the line box top.
-            rect->y = lycon->block.advance_y + vertical_offset;
+            bool text_uses_baseline = lycon->line.vertical_align == CSS_VALUE_BASELINE ||
+                lycon->line.vertical_align == CSS_VALUE__UNDEF;
+            if (sideways_text_parent && text_uses_baseline) {
+                // in vertical and sideways writing, keep the surrogate at the
+                // line origin; its mapped glyph geometry adds half-leading once.
+                rect->y = lycon->block.advance_y;
+            } else {
+                rect->y = lycon->block.advance_y + vertical_offset;
+            }
             rect = rect->next;
         }
         adjust_text_bounds(text_view);
@@ -1791,6 +1836,9 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     else if (view->view_type == RDT_VIEW_INLINE_BLOCK ||
              view->view_type == RDT_VIEW_TABLE) {
         ViewBlock* block = lam::view_require_block(view);
+        ViewBlock* inline_parent = layout_nearest_block_ancestor(block->parent_view());
+        bool vertical_inline_parent = inline_parent &&
+            layout_block_inline_axis_is_vertical(inline_parent);
         bool is_inline_table = view->view_type == RDT_VIEW_TABLE &&
             (block->display.outer == CSS_VALUE_INLINE ||
              block->display.outer == CSS_VALUE_INLINE_BLOCK);
@@ -1804,11 +1852,9 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // For non-replaced empty inline-blocks: baseline = bottom margin edge.
         float item_baseline;
         if (is_inline_table) {
-            bool prefers_last = layout_block_inline_axis_is_vertical(block) &&
-                radiant::layout_prefers_last_baseline(block, false);
-            float table_baseline = prefers_last
-                ? find_last_baseline_recursive(lycon, view, 0.0f, true)
-                : find_first_baseline_recursive(lycon, view, 0.0f, true);
+            bool prefers_last = radiant::layout_prefers_last_baseline(block, false);
+            float table_baseline = layout_table_baseline_for_source(
+                lycon, block, prefers_last);
             if (table_baseline >= 0.0f &&
                 !prefers_last) {
                 item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
@@ -1853,11 +1899,14 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
                     layout_block_start_content_offset(block) + flex_baseline;
             }
-        } else if (!layout_inline_box_is_orthogonal_to_parent(block) &&
+        } else if (!is_inline_table &&
+                   !layout_inline_box_is_orthogonal_to_parent(block) &&
                    block->blk && block->block_mut()->last_line_max_ascender > 0) {
             // CSS Writing Modes synthesizes an orthogonal inline-block baseline
             // from its physical bottom edge; its vertical-flow text baseline is
-            // not on the horizontal parent's baseline axis.
+            // not on the horizontal parent's baseline axis. Tables keep their
+            // row baseline selected above; their content baseline is not a
+            // second generic inline-block baseline.
             bool is_replaced_elem = (block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
                 block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
                 (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute(MARKUP_NAME_DATA)) ||
@@ -1893,7 +1942,31 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             replaced_baseline_pos : baseline_pos;
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
             line_height, align_baseline_pos, item_baseline, valign_offset);
-        block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->boundary()->margin.top : 0);
+        ViewBlock* baseline_parent = layout_nearest_block_ancestor(block->parent_view());
+        bool parent_uses_text_top_baseline = baseline_parent && baseline_parent->blk &&
+            baseline_parent->block()->dominant_baseline == CSS_VALUE_TEXT_TOP;
+        bool baseline_source_context = baseline_parent &&
+            radiant::layout_inline_context_has_explicit_baseline_source(baseline_parent);
+        if (layout_inline_box_is_orthogonal_to_parent(block) &&
+            !vertical_inline_parent && parent_uses_text_top_baseline) {
+            // dominant-baseline:text-top keeps the orthogonal box at the
+            // parent's text-top origin through the final alignment pass;
+            // vertical projection handles this baseline in its own axis.
+            block->y = lycon->block.advance_y;
+        } else if (!vertical_inline_parent || baseline_source_context) {
+            block->y = lycon->block.advance_y + max(vertical_offset, 0) +
+                (block->bound ? block->boundary()->margin.top : 0);
+        } else {
+            // In a vertical parent, y is the published inline-axis position;
+            // horizontal baseline alignment must not replace it with a line
+            // origin derived from the orthogonal child's local baseline.
+        }
+        if (vertical_inline_parent && lycon->line.has_clamped_baseline_tail &&
+            block->tag() != MARKUP_NAME_TEXTAREA) {
+            // keep non-control atomic inlines at the line-start edge after a
+            // clamped textarea baseline expands the vertical line box.
+            block->y += lycon->line.clamped_baseline_tail;
+        }
         if (layout_zero_sized_atomic_in_vertical_lr(block)) {
             // The second vertical-align pass must preserve the vertical-lr
             // inline-start static position chosen during inline-block placement.
@@ -2090,7 +2163,10 @@ static bool shift_span_current_line_rects(float offset, int line_number, ViewSpa
     return shifted;
 }
 
-static void shift_preceding_current_line_views(float offset, int line_number, View* view) {
+void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
+                                              View* view, float offset) {
+    if (!lycon || !view) return;
+    int line_number = lycon->block.line_number;
     View* prev = static_cast<View*>(static_cast<DomNode*>(view)->prev_sibling);
     while (prev) {
         if (prev->view_type == RDT_VIEW_TEXT) {
@@ -2183,7 +2259,9 @@ static void shift_span_line_fragment_unions(ViewSpan* span, float offset) {
 
 static void rtl_initial_letter_line_metrics(View* view, int line_number,
                                             float* line_width,
-                                            float* initial_width) {
+                                            float* initial_width,
+                                            float* initial_margin_left,
+                                            float* initial_margin_right) {
     while (view) {
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
@@ -2193,13 +2271,19 @@ static void rtl_initial_letter_line_metrics(View* view, int line_number,
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
                 if (rect->line_number != line_number) continue;
                 *line_width += rect->width;
-                if (is_initial) *initial_width += rect->width;
+                if (is_initial) {
+                    *initial_width += rect->width;
+                    InitialLetterBoxInsets insets = layout_initial_letter_box_insets(text);
+                    *initial_margin_left = insets.left;
+                    *initial_margin_right = insets.right;
+                }
             }
         } else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
             if (span->first_child) {
                 rtl_initial_letter_line_metrics(
-                    span->first_child, line_number, line_width, initial_width);
+                    span->first_child, line_number, line_width, initial_width,
+                    initial_margin_left, initial_margin_right);
             }
         }
         view = view->next();
@@ -2207,7 +2291,8 @@ static void rtl_initial_letter_line_metrics(View* view, int line_number,
 }
 
 static float rtl_initial_letter_place_line(View* view, int line_number,
-                                           float cursor) {
+                                           float cursor,
+                                           bool* initial_margin_applied) {
     while (view) {
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
@@ -2216,12 +2301,23 @@ static float rtl_initial_letter_place_line(View* view, int line_number,
                 rect->x = cursor - rect->width;
                 cursor = rect->x;
             }
+            InitialLetterInfo initial = {};
+            if (!*initial_margin_applied &&
+                layout_get_text_initial_letter_info(
+                    static_cast<DomNode*>(text), &initial)) {
+                // CSS Inline 3 §7.5.2 keeps the initial's inline-start margin
+                // between its margin box and the following originating-line content.
+                InitialLetterBoxInsets insets = layout_initial_letter_box_insets(text);
+                cursor -= insets.left;
+                *initial_margin_applied = true;
+            }
             adjust_text_bounds(text);
         } else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
             if (span->first_child) {
                 cursor = rtl_initial_letter_place_line(
-                    span->first_child, line_number, cursor);
+                    span->first_child, line_number, cursor,
+                    initial_margin_applied);
             }
         } else if (view->view_type == RDT_VIEW_BR) {
             view->x = cursor;
@@ -2241,16 +2337,33 @@ static void place_rtl_initial_letter_line(LayoutContext* lycon) {
 
     float line_width = 0.0f;
     float initial_width = 0.0f;
+    float initial_margin_left = 0.0f;
+    float initial_margin_right = 0.0f;
     rtl_initial_letter_line_metrics(
         lycon->line.start_view, lycon->block.line_number,
-        &line_width, &initial_width);
+        &line_width, &initial_width, &initial_margin_left,
+        &initial_margin_right);
     if (line_width <= 0.0f || initial_width <= 0.0f) return;
 
     // CSS Inline 3 §7.5.2 places the initial at the inline-end in RTL;
     // split text fragments must therefore consume the line from right to left.
-    float inline_end = lycon->line.effective_right - lycon->line.text_indent_offset;
+    // CSS Inline 3 §7.8.2 applies text-indent to the originating line and then
+    // shifts the initial-letter line content as a unit; the generated initial
+    // therefore consumes the indent once through the line bounds and once here.
+    float initial_letter_indent = lycon->line.text_indent_offset;
+    float inline_end = lycon->line.effective_right - lycon->line.text_indent_offset -
+        initial_letter_indent - initial_margin_right;
+    bool initial_margin_applied = false;
     rtl_initial_letter_place_line(
-        lycon->line.start_view, lycon->block.line_number, inline_end);
+        lycon->line.start_view, lycon->block.line_number, inline_end,
+        &initial_margin_applied);
+    float initial_left = inline_end - initial_width;
+    float placed_exclusion_width = lycon->line.right - initial_left +
+        initial_margin_left;
+    // The exclusion follows the post-indentation initial position; retaining
+    // only the glyph width lets later RTL lines reclaim the indent space.
+    lycon->block.initial_letter_exclusion_width = max(
+        lycon->block.initial_letter_exclusion_width, placed_exclusion_width);
 }
 
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
@@ -2425,6 +2538,13 @@ static void normalize_phantom_left_float_spans(View* view, float continuation_x)
     }
 }
 
+float layout_rtl_inline_item_x(Linebox* line, float item_width) {
+    if (!line) return 0.0f;
+    // RTL inline cursors measure used advance from inline-start; place the
+    // item's margin box against the current physical inline-end edge.
+    return line->effective_right - (line->advance_x - line->left) - item_width;
+}
+
 void line_align(LayoutContext* lycon) {
     // UAX #9 reorders the complete inline line before CSS text alignment; doing
     // this after alignment would move logical siblings but leave their range
@@ -2556,8 +2676,8 @@ void line_align(LayoutContext* lycon) {
                 // for text continuation rects on the current line. This happens when a text
                 // node wraps and a sibling inline element (e.g., <span>) follows on the same
                 // line — start_view points to the span, but the wrapped text rect precedes it.
-                shift_preceding_current_line_views(
-                    offset, lycon->block.line_number, view);
+                layout_shift_preceding_inline_line_views(
+                    lycon, view, offset);
                 // Normal case: align all views in the line
                 view_line_align(lycon, offset, view);
             }
@@ -2585,8 +2705,8 @@ void line_align(LayoutContext* lycon) {
                             } else {
                                 // CSS 2.1 §16.2: Also check preceding siblings for
                                 // text continuation rects on the current line.
-                                shift_preceding_current_line_views(
-                                    offset, lycon->block.line_number, view);
+                                layout_shift_preceding_inline_line_views(
+                                    lycon, view, offset);
                                 view_line_align(lycon, offset, view);
                             }
                         }

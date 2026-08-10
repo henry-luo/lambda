@@ -271,6 +271,15 @@ static const FullCaseMapping* lookup_full_case(const FullCaseMapping* table,
  */
 int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
     bool is_word_start, uint32_t* out) {
+    // CSS capitalize uses single-codepoint titlecase for four Latin digraphs.
+    if (text_transform == CSS_VALUE_CAPITALIZE && is_word_start) {
+        switch (codepoint) {
+        case 0x01C6: out[0] = 0x01C5; return 1;
+        case 0x01C9: out[0] = 0x01C8; return 1;
+        case 0x01CC: out[0] = 0x01CB; return 1;
+        case 0x01F3: out[0] = 0x01F2; return 1;
+        }
+    }
     if (text_transform == CSS_VALUE_UPPERCASE || (text_transform == CSS_VALUE_CAPITALIZE && is_word_start)) {
         // check full case mapping table for 1-to-many expansions
         const FullCaseMapping* m = lookup_full_case(g_uppercase_full, g_uppercase_full_count, codepoint);
@@ -1702,6 +1711,8 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.max_top_bottom_height = 0;
     lycon->line.max_top_height = 0;
     lycon->line.max_bottom_height = 0;
+    lycon->line.max_text_ascender = 0;
+    lycon->line.max_text_descender = 0;
     lycon->line.max_desc_before_last_text = 0;
     lycon->line.has_expanded_inline_lh = false;
     lycon->line.max_inline_line_height = 0;
@@ -1749,17 +1760,35 @@ void line_reset(LayoutContext* lycon) {
     }
 
     float line_content_top = lycon->block.advance_y + lycon->block.lead_y;
+    ViewBlock* line_container = lycon->view
+        ? layout_nearest_block_ancestor(lycon->view->parent_view()) : nullptr;
+    CssEnum css_writing_mode = line_container && line_container->is_element()
+        ? layout_element_css_writing_mode(line_container->as_element())
+        : CSS_VALUE_HORIZONTAL_TB;
+    bool vertical_writing = css_writing_mode == CSS_VALUE_VERTICAL_LR ||
+        css_writing_mode == CSS_VALUE_VERTICAL_RL;
+    bool vertical_float_flow = vertical_writing && bfc &&
+        (bfc->left_float_count > 0 || bfc->right_float_count > 0);
     bool count_exclusion = lycon->block.initial_letter_exclusion_lines > 0;
     bool geometry_exclusion = line_content_top <
         lycon->block.initial_letter_exclusion_bottom - 0.01f;
     bool shortens_line = lycon->block.initial_letter_exclusion_requires_intersection
         ? count_exclusion && geometry_exclusion
         : count_exclusion || geometry_exclusion;
-    if (lycon->block.initial_letter_exclusion_width > 0.0f && shortens_line) {
+    if (lycon->block.initial_letter_exclusion_width > 0.0f && shortens_line &&
+        !vertical_float_flow) {
+        // CSS Writing Modes maps the surrogate line width to physical inline
+        // progression; a horizontal initial-letter exclusion would shift
+        // later vertical columns along the wrong axis.
         // The initial letter is in-flow, but its margin box still shortens each
         // following line whose content area still intersects its block-size.
         if (lycon->block.direction == CSS_VALUE_RTL) {
-            lycon->line.effective_right -= lycon->block.initial_letter_exclusion_width;
+            // The exclusion width is measured from the unshortened line edge;
+            // subtracting it from a float-shortened edge counts the float twice.
+            float initial_letter_right = lycon->line.right -
+                lycon->block.initial_letter_exclusion_width;
+            lycon->line.effective_right = min(lycon->line.effective_right,
+                initial_letter_right);
             // RTL alignment must use the shortened line box; otherwise start alignment
             // treats this in-flow initial exclusion as if the full container were available.
             lycon->line.has_float_intrusion = true;
@@ -1812,6 +1841,21 @@ void line_init(LayoutContext* lycon, float left, float right) {
 
 static void align_forced_break_rect_to_line_baseline(LayoutContext* lycon) {
     if (!lycon || !lycon->view || lycon->view->view_type != RDT_VIEW_BR) return;
+    ViewBlock* br_container = layout_nearest_block_ancestor(lycon->view->parent_view());
+    bool nested_atomic_container = br_container &&
+        (br_container->view_type == RDT_VIEW_INLINE_BLOCK ||
+         br_container->view_type == RDT_VIEW_TABLE) &&
+        lycon->block.establishing_element != br_container;
+    if (nested_atomic_container) {
+        // A break inside an inline-level atomic box was already aligned by its
+        // own formatting context; an ancestor line must not realign that child.
+        return;
+    }
+    if (lycon->block.line_clamped) {
+        // Clamping clips later line boxes after layout; baseline realignment
+        // would move a post-clamp br back onto the visible clamp boundary.
+        return;
+    }
     // Ordinary text lines place <br> from its inherited font when it is created.
     // Replaced content and mixed inline fonts can change the finalized baseline;
     // fallback glyph extrema must not move the break independently of its text.
@@ -2238,6 +2282,39 @@ void line_break(LayoutContext* lycon) {
     // CSS 2.1 10.8.1: Line height controls vertical spacing between line boxes
     // When line-height is explicitly set (e.g., line-height: 1), use it exactly
     // even if it's smaller than font metrics (allowing lines to overlap)
+    ViewBlock* line_owner = lycon->block.establishing_element;
+    if ((!line_owner || !line_owner->blk ||
+         line_owner->block()->dominant_baseline != CSS_VALUE_TEXT_TOP) &&
+        lycon->view && lycon->view->is_block()) {
+        ViewBlock* view_block = lam::view_require_block(lycon->view);
+        if (view_block->blk &&
+            view_block->block()->dominant_baseline == CSS_VALUE_TEXT_TOP) {
+            // The BFC owner can be an ancestor with the default baseline;
+            // line metrics belong to the block that supplied the inline style.
+            line_owner = view_block;
+        }
+    }
+    if (!line_owner || !line_owner->blk ||
+        line_owner->block()->dominant_baseline != CSS_VALUE_TEXT_TOP) {
+        ViewElement* line_start_parent = lycon->line.start_view
+            ? lycon->line.start_view->parent_view() : nullptr;
+        ViewBlock* line_block = layout_nearest_block_ancestor(line_start_parent);
+        if (line_block && line_block->blk &&
+            line_block->block()->dominant_baseline == CSS_VALUE_TEXT_TOP) {
+            // Inline lines start below the block context's owner; use the
+            // nearest styled block so dominant-baseline survives that split.
+            line_owner = line_block;
+        }
+    }
+    bool dominant_text_top = line_owner && line_owner->blk &&
+        line_owner->block()->dominant_baseline == CSS_VALUE_TEXT_TOP;
+    if (dominant_text_top && lycon->line.max_text_ascender > 0.0f) {
+        // text-top establishes the line's dominant baseline from content, so
+        // the block strut must not reintroduce its larger font ascent/descent.
+        lycon->line.max_ascender = max(lycon->line.max_text_ascender,
+            lycon->line.max_atomic_inline_height);
+        lycon->line.max_descender = lycon->line.max_text_descender;
+    }
     float font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
     float css_line_height = lycon->block.line_height;
     log_debug("line_break metrics: max_ascender=%.1f, max_descender=%.1f, font_lh=%.1f, css_lh=%.1f, has_replaced=%d, line_height_is_normal=%d",
@@ -2358,6 +2435,12 @@ void line_break(LayoutContext* lycon) {
 
     if (lycon->line.ruby_annotation_min_line_height > used_line_height) {
         used_line_height = lycon->line.ruby_annotation_min_line_height;
+    }
+
+    if (dominant_text_top && lycon->line.max_text_ascender > 0.0f) {
+        // CSS Inline's text-top baseline uses the actual line union rather than
+        // the explicit strut height when orthogonal atomic content is present.
+        used_line_height = font_line_height;
     }
 
     if (layout_quirks_block_ignores_line_height(lycon, nullptr)) {
@@ -2878,14 +2961,7 @@ static bool initial_letter_block_trims_start_edge(const DomNode* text_node,
          TEXT_BOX_TRIM_START) != 0;
 }
 
-typedef struct InitialLetterBoxInsets {
-    float top;
-    float right;
-    float bottom;
-    float left;
-} InitialLetterBoxInsets;
-
-static InitialLetterBoxInsets initial_letter_box_insets(ViewText* text) {
+InitialLetterBoxInsets layout_initial_letter_box_insets(ViewText* text) {
     InitialLetterBoxInsets insets = {};
     ViewElement* pseudo = text ? text->parent_view() : NULL;
     if (!pseudo || !pseudo->bound) return insets;
@@ -2904,6 +2980,27 @@ static InitialLetterBoxInsets initial_letter_box_insets(ViewText* text) {
     insets.right += max(pseudo->boundary()->padding.right, 0.0f);
     insets.bottom += max(pseudo->boundary()->padding.bottom, 0.0f);
     insets.left += max(pseudo->boundary()->padding.left, 0.0f);
+    ViewBlock* block = text ? layout_nearest_block_ancestor(text->parent_view()) : nullptr;
+    WritingMode writing_mode = block ? layout_block_writing_mode(block)
+                                     : WM_HORIZONTAL_TB;
+    if (writing_mode == WM_VERTICAL_LR || writing_mode == WM_VERTICAL_RL) {
+        // physical margins must follow the surrogate's mapped axes; otherwise
+        // top/bottom spacing changes the block coordinate and left/right spacing
+        // changes line shortening in vertical writing.
+        InitialLetterBoxInsets logical = {};
+        // CSS Writing Modes maps block-start to physical right in vertical-rl;
+        // keeping the vertical-lr mapping here puts the initial on the wrong
+        // side when its block-position margins are applied.
+        bool reverse_block_axis = writing_mode == WM_VERTICAL_RL;
+        logical.top = reverse_block_axis ? insets.right : insets.left;
+        bool sideways_lr = block && block->is_element() &&
+            layout_element_css_writing_mode(block->as_element()) ==
+                CSS_VALUE_SIDEWAYS_LR;
+        logical.right = sideways_lr ? insets.top : insets.bottom;
+        logical.bottom = reverse_block_axis ? insets.left : insets.right;
+        logical.left = sideways_lr ? insets.bottom : insets.top;
+        return logical;
+    }
     return insets;
 }
 
@@ -2967,12 +3064,24 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     rect->length = text_length;
     rect->width = text_width;
     rect->line_number = lycon->block.line_number;
+    ViewBlock* text_line_parent = layout_nearest_block_ancestor(text->parent_view());
+    bool horizontal_rtl_line = lycon->block.direction == CSS_VALUE_RTL &&
+        (!text_line_parent || !layout_block_inline_axis_is_vertical(text_line_parent));
+    bool rtl_inline_block_line = lycon->block.establishing_element &&
+        lycon->block.establishing_element->view_type == RDT_VIEW_INLINE_BLOCK;
+    if (horizontal_rtl_line &&
+        (lycon->line.has_initial_letter || rtl_inline_block_line)) {
+        // continuation lines are aligned against the shortened line edge;
+        // pre-placing their text from the RTL cursor makes line_align apply
+        // the initial-letter exclusion a second time.
+        rect->x = layout_rtl_inline_item_x(&lycon->line, text_width);
+    }
     InitialLetterInfo initial_letter = {};
     bool is_initial_letter = layout_get_text_initial_letter_info(
         static_cast<DomNode*>(text), &initial_letter);
     bool is_raised_initial_letter = is_initial_letter && initial_letter.raised;
     InitialLetterBoxInsets initial_insets = is_initial_letter ?
-        initial_letter_box_insets(text) : InitialLetterBoxInsets{};
+        layout_initial_letter_box_insets(text) : InitialLetterBoxInsets{};
     if (is_initial_letter && !lycon->block.initial_letter_origin_offset_applied) {
         // Initial-letter alignment anchors the outer box, so its block-start
         // decoration insets the glyph without changing its used font size.
@@ -3141,6 +3250,10 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
             descender -= baseline_shift;
             css_baseline_ascender += baseline_shift;
         }
+        lycon->line.max_text_ascender = max(
+            lycon->line.max_text_ascender, ascender);
+        lycon->line.max_text_descender = max(
+            lycon->line.max_text_descender, descender);
         log_debug("output_text BEFORE: prev_max_asc=%.1f prev_max_desc=%.1f new_asc=%.1f new_desc=%.1f va_off=%.1f va=%d",
             lycon->line.max_ascender, lycon->line.max_descender, ascender, descender,
             baseline_shift, lycon->line.vertical_align);

@@ -165,6 +165,14 @@ Item js_status_ok(void);
 #define JS_ASSIGN_OR_RETURN(name, ...) \
     Item name = (__VA_ARGS__); \
     if (item_is_error(name)) return name
+
+// Reuse an existing destination while preserving the same single ERROR lane.
+// This form is for staged conversions that intentionally keep the variable's
+// identity (for example a rooted receiver or an accumulator).
+#define JS_ASSIGN_OR_RETURN_INTO(name, ...) do { \
+    (name) = (__VA_ARGS__); \
+    if (item_is_error(name)) return (name); \
+} while (0)
 int64_t js_is_nullish(Item value);
 
 // =============================================================================
@@ -681,6 +689,8 @@ Item js_require_object_coercible(Item value);
  * Returns a Map with {name: "Error", message: msg, stack: trace}.
  */
 Item js_new_error(Item message);
+Item js_new_named_error(const char* type_name, const char* message);
+Item js_throw_named_error_text(const char* type_name, const char* message);
 Item js_new_error_with_stack(Item message, Item stack_str);
 
 /**

@@ -1946,19 +1946,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // content_size_suggestion with the specified_size_suggestion, preventing items from
         // shrinking below their explicit size even when content is empty.
         if (elmt_name == MARKUP_NAME_BR) {
-            // A forced break is a line box contribution even without child content;
-            // zero intrinsic height made the flex algorithm place following items too early.
-            float break_line_height = resolve_flex_inherited_line_height(lycon, item);
-            if (break_line_height <= 0.0f && intrinsic_font) {
-                break_line_height = flex_measure_normal_line_height_for_font(
-                    lycon, intrinsic_font, intrinsic_font->font_size);
-            }
-            if (break_line_height <= 0.0f && lycon->font.font_handle) {
-                break_line_height = calc_normal_line_height(lycon->font.font_handle);
-            }
-            if (break_line_height > 0.0f) {
-                min_height = max_height = break_line_height;
-            }
+            // A direct br is itself a blockified flex item; its forced-break
+            // line box is not a sibling flex item's intrinsic main size.
+            min_height = max_height = 0.0f;
         } else if (has_pseudo_content) {
             min_width = max_width = pseudo_width;
             min_height = max_height = pseudo_height;

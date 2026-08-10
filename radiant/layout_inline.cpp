@@ -21,25 +21,7 @@ static inline DomText* layout_inline_as_text(DomNode* node) {
 }
 
 static inline ViewBlock* layout_inline_as_block_view(View* view) {
-    if (!view) return nullptr;
-    switch (view->view_type) {
-        case RDT_VIEW_INLINE_BLOCK: return lam::view_as_block<RDT_VIEW_INLINE_BLOCK>(view);
-        case RDT_VIEW_BLOCK: return lam::view_as_block<RDT_VIEW_BLOCK>(view);
-        case RDT_VIEW_LIST_ITEM: return lam::view_as_block<RDT_VIEW_LIST_ITEM>(view);
-        case RDT_VIEW_TABLE: return lam::view_as_block<RDT_VIEW_TABLE>(view);
-        case RDT_VIEW_TABLE_ROW_GROUP: return lam::view_as_block<RDT_VIEW_TABLE_ROW_GROUP>(view);
-        case RDT_VIEW_TABLE_ROW: return lam::view_as_block<RDT_VIEW_TABLE_ROW>(view);
-        case RDT_VIEW_TABLE_CELL: return lam::view_as_block<RDT_VIEW_TABLE_CELL>(view);
-        case RDT_VIEW_TABLE_COLUMN_GROUP: return lam::view_as_block<RDT_VIEW_TABLE_COLUMN_GROUP>(view);
-        case RDT_VIEW_TABLE_COLUMN: return lam::view_as_block<RDT_VIEW_TABLE_COLUMN>(view);
-        case RDT_VIEW_NONE:
-        case RDT_VIEW_TEXT:
-        case RDT_VIEW_BR:
-        case RDT_VIEW_MARKER:
-        case RDT_VIEW_INLINE:
-            return nullptr;
-    }
-    return nullptr;
+    return lam::view_as_block(view);
 }
 
 float layout_inline_end_edge(ViewSpan* span) {
@@ -103,16 +85,55 @@ static InlineOutOfFlowKind inline_out_of_flow_kind(DomElement* elem) {
     return kind;
 }
 
+static CssEnum inline_span_css_writing_mode(ViewSpan* span) {
+    ViewBlock* block = span
+        ? layout_nearest_block_ancestor(span->parent_view()) : nullptr;
+    return block && block->is_element()
+        ? layout_element_css_writing_mode(block->as_element())
+        : CSS_VALUE_HORIZONTAL_TB;
+}
+
+static bool inline_span_uses_vertical_axis(ViewSpan* span) {
+    CssEnum writing_mode = inline_span_css_writing_mode(span);
+    return writing_mode == CSS_VALUE_VERTICAL_LR ||
+        writing_mode == CSS_VALUE_VERTICAL_RL ||
+        writing_mode == CSS_VALUE_SIDEWAYS_LR ||
+        writing_mode == CSS_VALUE_SIDEWAYS_RL;
+}
+
+static bool inline_span_start_uses_bottom(ViewSpan* span, bool rtl) {
+    if (!inline_span_uses_vertical_axis(span)) return false;
+    // sideways-lr maps inline-start to physical top in ltr and bottom in rtl;
+    // treating it as the opposite direction swapped flow-relative margins.
+    return rtl;
+}
+
+static float inline_span_edge_extent(ViewSpan* span, bool rtl, bool start_edge,
+                                     bool include_margin) {
+    if (!span || !span->bound) return 0.0f;
+    bool vertical = inline_span_uses_vertical_axis(span);
+    bool use_right = start_edge == rtl;
+    bool use_bottom = start_edge
+        ? inline_span_start_uses_bottom(span, rtl)
+        : !inline_span_start_uses_bottom(span, rtl);
+    bool use_end = vertical ? use_bottom : use_right;
+    BoundaryProp* boundary = span->boundary_mut();
+    float edge = 0.0f;
+    if (include_margin) edge += vertical
+        ? (use_end ? boundary->margin.bottom : boundary->margin.top)
+        : (use_end ? boundary->margin.right : boundary->margin.left);
+    if (boundary->border) edge += vertical
+        ? (use_end ? boundary->border->width.bottom : boundary->border->width.top)
+        : (use_end ? boundary->border->width.right : boundary->border->width.left);
+    edge += vertical
+        ? (use_end ? boundary->padding.bottom : boundary->padding.top)
+        : (use_end ? boundary->padding.right : boundary->padding.left);
+    return edge;
+}
+
 static bool inline_has_axis_edge_decoration(ViewSpan* span, bool rtl, bool start_edge) {
     if (!span || !span->bound) return false;
-    // Logical start is right only in RTL; logical end is right only in LTR.
-    bool use_right = start_edge == rtl;
-    float border = 0.0f;
-    if (span->boundary()->border) {
-        border = use_right ? span->boundary()->border->width.right : span->boundary()->border->width.left;
-    }
-    float padding = use_right ? span->boundary()->padding.right : span->boundary()->padding.left;
-    return border > 0.0f || padding > 0.0f;
+    return inline_span_edge_extent(span, rtl, start_edge, false) > 0.0f;
 }
 
 static bool text_is_all_collapsible_space(DomText* text, ViewSpan* span);
@@ -174,7 +195,7 @@ static bool text_has_non_whitespace_content(DomText* text) {
     return false;
 }
 
-static bool has_following_inline_content(DomNode* node) {
+static bool has_following_content(DomNode* node, bool inline_only) {
     DomNode* current = node;
     while (current) {
         DomNode* sib = current->next_sibling;
@@ -186,7 +207,11 @@ static bool has_following_inline_content(DomNode* node) {
             } else if (sib->is_element()) {
                 DomElement* elem = layout_inline_as_element(sib);
                 DisplayValue display = resolve_display_value(elem);
-                return display.outer == CSS_VALUE_INLINE;
+                if (inline_only) return display.outer == CSS_VALUE_INLINE;
+                InlineOutOfFlowKind kind = inline_out_of_flow_kind(elem);
+                if (display.outer != CSS_VALUE_NONE && !kind.floated && !kind.positioned) {
+                    return true;
+                }
             }
             sib = sib->next_sibling;
         }
@@ -195,37 +220,6 @@ static bool has_following_inline_content(DomNode* node) {
         if (!parent || !parent->is_element()) break;
         DomElement* parent_elem = layout_inline_as_element(parent);
         if (!parent_elem || parent_elem->view_type != RDT_VIEW_INLINE) break;
-        current = parent;
-    }
-    return false;
-}
-
-static bool has_following_in_flow_content(DomNode* node) {
-    DomNode* current = node;
-    while (current) {
-        for (DomNode* sibling = current->next_sibling; sibling;
-             sibling = sibling->next_sibling) {
-            if (sibling->is_text()) {
-                if (text_has_non_whitespace_content(layout_inline_as_text(sibling))) {
-                    return true;
-                }
-                continue;
-            }
-            if (!sibling->is_element()) continue;
-
-            DomElement* elem = layout_inline_as_element(sibling);
-            DisplayValue display = resolve_display_value(elem);
-            InlineOutOfFlowKind kind = inline_out_of_flow_kind(elem);
-            if (display.outer != CSS_VALUE_NONE && !kind.floated && !kind.positioned) {
-                return true;
-            }
-        }
-
-        DomNode* parent = current->parent;
-        if (!parent || !parent->is_element() ||
-            parent->view_type != RDT_VIEW_INLINE) {
-            break;
-        }
         current = parent;
     }
     return false;
@@ -533,13 +527,8 @@ bool inline_span_has_multiple_line_fragments(ViewSpan* span) {
 
 static bool span_has_inline_axis_decoration(ViewSpan* span) {
     if (!span || !span->bound) return false;
-    if (span->boundary()->margin.left != 0.0f || span->boundary()->margin.right != 0.0f ||
-        span->boundary()->padding.left != 0.0f || span->boundary()->padding.right != 0.0f) {
-        return true;
-    }
-    return span->boundary()->border &&
-        (span->boundary()->border->width.left != 0.0f ||
-         span->boundary()->border->width.right != 0.0f);
+    return inline_span_edge_extent(span, false, true, true) > 0.0f ||
+        inline_span_edge_extent(span, false, false, true) > 0.0f;
 }
 
 static bool span_children_have_no_line_content(ViewSpan* span);
@@ -1478,7 +1467,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
     // After all children are processed, if the last block child has a bottom
     // margin and the container has no bottom border/padding, collapse it.
     if (last_block_child_elem && !visible_inline_after_last_block &&
-        !has_following_in_flow_content(inline_elem) &&
+        !has_following_content(inline_elem, false) &&
         (!in_inline_sequence || lycon->line.is_line_start)) {
         ViewBlock* last_blk = layout_inline_as_block_view(last_block_child_elem);
         DomNode* container_node = inline_elem->parent;
@@ -1531,7 +1520,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
     // 2. The trailing anonymous block is empty (is_line_start still true)
     // 3. The span has non-zero inline-END decoration (border/padding on the end side)
     if (!visible_inline_after_last_block && (!in_inline_sequence || lycon->line.is_line_start) &&
-        !has_following_inline_content(inline_elem)) {
+        !has_following_content(inline_elem, true)) {
         // The last content was a block child, or trailing inline content was whitespace-only.
         // Check if the span has inline-end decoration that would keep the line box open.
         bool has_inline_end_decoration = inline_has_axis_edge_decoration(
@@ -1599,32 +1588,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // content on the line, including replaced elements.
         float br_line_height = lycon->block.line_height > 0.0f ? lycon->block.line_height : br_font_height;
         br_view->y = lycon->block.advance_y + (br_line_height - br_font_height) / 2.0f;
+        bool was_line_clamped = lycon->block.line_clamped;
+        bool line_had_replaced_content = lycon->line.has_replaced_content;
         bool collapse_br_rect = quirks_br_after_nested_inline_text(lycon, elmt);
         float collapsed_br_y = lycon->block.advance_y + lycon->line.max_ascender;
-        bool was_line_clamped = lycon->block.line_clamped;
-        if (was_line_clamped && lycon->block.line_clamp_advance_y >= 0.0f) {
-            // A forced break after the clamp boundary is part of the clipped
-            // line, not a new line box; retain the boundary and discard its
-            // pending line so block finalization cannot advance again.
-            br_view->y = lycon->block.line_clamp_advance_y - br_line_height +
-                (br_line_height - br_font_height) / 2.0f;
-            log_debug("BR_CLAMP_PROBE early x=%.1f y=%.1f boundary=%.1f last_base=%.1f max_asc=%.1f max_desc=%.1f line_h=%.1f font_h=%.1f",
-                br_view->x, br_view->y, lycon->block.line_clamp_advance_y,
-                lycon->block.line_clamp_last_line_ascender,
-                lycon->block.line_clamp_last_line_max_ascender,
-                lycon->block.line_clamp_last_line_max_descender,
-                br_line_height, br_font_height);
-            line_reset(lycon);
-            return;
-        }
         // CSS Text 3 §7.2: text-align-last applies to lines immediately before
         // a forced line break. <br> is a forced break per CSS Text 3 §4.1.
         lycon->line.is_last_line = true;
         line_break(lycon);
         lycon->line.is_last_line = false;
-        log_debug("BR_CLAMP_PROBE normal x=%.1f y=%.1f line=%d boundary=%.1f",
-            br_view->x, br_view->y, lycon->block.line_number,
-            lycon->block.line_clamp_advance_y);
         if (collapse_br_rect) {
             // A quirks block without a root strut exposes this break as a
             // caret-position box; the descendant line still advances normally.
@@ -1632,11 +1604,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             br_view->height = 0.0f;
         }
         if (!vertical_parent && !was_line_clamped &&
-            lycon->block.line_clamped && lycon->font.font_handle) {
-            GlyphInfo ellipsis = font_get_glyph(lycon->font.font_handle, 0x2026); // U+2026
-            br_view->width = ellipsis.id != 0 ? ellipsis.advance_x : lycon->font.current_font_size * 0.5f;
+            lycon->block.line_clamped && !line_had_replaced_content &&
+            lycon->font.font_handle) {
+            // The break that reaches the clamp boundary carries the clipped
+            // ellipsis line width only when text supplies that line; an
+            // atomic-only line break remains a zero-width box.
+            GlyphInfo ellipsis = font_get_glyph(lycon->font.font_handle, 0x2026);
+            br_view->width = ellipsis.id != 0
+                ? ellipsis.advance_x : lycon->font.current_font_size * 0.5f;
         }
-
         // CSS 2.1 §9.5.2: check if the <br> has a 'clear' property and apply float clearance.
         // Browsers treat <br style="clear:both"> as clearing floats at the line break point.
         if (elmt->is_element()) {
@@ -1742,12 +1718,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
+    DomElement* elmt_elem = layout_inline_as_element(elmt);
 
     // CSS Counter handling (CSS 2.1 Section 12.4, CSS Lists 3)
     // Push a new counter scope for this inline element so that counter-reset
     // creates a properly nested counter instance (not modifying the parent scope)
     bool pushed_counter_scope = false;
-    DomElement* elmt_elem = layout_inline_as_element(elmt);
     bool is_before_pseudo = elmt_elem && elmt_elem->tag_name &&
         strcmp(elmt_elem->tag_name, "::before") == 0;
     bool is_after_pseudo = elmt_elem && elmt_elem->tag_name &&
@@ -1913,15 +1889,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Advance the inline cursor so child text/elements start inside the margin+border+padding.
     // This applies to both normal inline content and block-in-inline splitting.
     float inline_left_edge = 0;
-    if (span->bound) {
-        // CSS 2.1 §8.3: horizontal margins apply to inline elements
-        inline_left_edge += span->boundary()->margin.left;
-        if (span->boundary()->border) {
-            inline_left_edge += span->boundary()->border->width.left;
-        }
-        inline_left_edge += span->boundary()->padding.left;
-    }
     float inline_right_edge = layout_inline_end_edge(span);
+    if (span->bound) {
+        // CSS Writing Modes maps inline decorations to physical top/bottom
+        // in vertical flows; using left/right here shifts initial letters onto
+        // the wrong axis before their exclusion geometry is computed.
+        bool rtl = lycon->block.direction == CSS_VALUE_RTL;
+        inline_left_edge = inline_span_edge_extent(span, rtl, true, true);
+        inline_right_edge = inline_span_edge_extent(span, rtl, false, true);
+    }
     float saved_inline_pending = lycon->line.inline_start_edge_pending;
 
     // CSS 2.1 §9.2.1.1 and §17.2.1: Check for block-level and table-internal children
@@ -2282,7 +2258,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     float saved_trailing = 0;
     View* last_child_for_trim = nullptr;
     if (lycon->line.trailing_space_width > 0) {
-        bool has_following_inline = has_following_inline_content(span);
+        bool has_following_inline = has_following_content(span, true);
 
         if (!has_following_inline) {
             // Span is last inline content on this line — trim trailing whitespace

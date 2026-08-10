@@ -1,8 +1,9 @@
 # JS Tune1 Proposal: Runtime Helper Cost Reduction
 
 **Date**: 2026-08-07  **Status**: DISPOSED — absorbed by the redesign line.
-P1a (lazy promise rooting) and P5 (catalog tightening) are implemented via
-`JS_Tune1_Runtime.md` (E1, E0/E4/E6); P1's full fix is superseded by
+P1a (lazy promise rooting) is implemented via `JS_Tune1_Runtime.md` (E1).
+P5 (catalog tightening) did not land there and is carried by
+`JS_Tune2_Exception.md`; P1's full fix is superseded by
 `JS_Runtime_Redesign.md` JR7 (VMap promise), P2 by JR2/JR6, P3 by JR4/JR6,
 P4 by JR5/R5. Do not implement P2–P4 from this doc — their targets are
 covered by redesign phases with retirement lists.

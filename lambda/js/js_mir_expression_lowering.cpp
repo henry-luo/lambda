@@ -4,7 +4,6 @@
 #include "js_exec_profile.h"
 #include "../../lib/lambda_alloca.h"
 
-extern "C" Item js_eval_private_resolve(Item unscoped_key);
 
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc);
 static void jm_emit_global_var_property_sync(JsMirTranspiler* mt,

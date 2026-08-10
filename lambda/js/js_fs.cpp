@@ -40,6 +40,9 @@ extern "C" Item js_util_custom_promisify_args_symbol(void);
 extern "C" Item js_util_promisify_custom_symbol(void);
 extern "C" Item js_domain_get_current(void);
 extern "C" Item js_domain_call_function(Item domain, Item fn, Item this_val, Item* args, int arg_count);
+extern "C" Item bigint_from_int64(int64_t val);
+extern "C" Item bigint_from_string(const char* str, int len);
+extern Item js_make_number(double d);
 extern __thread EvalContext* context;
 
 #define item_to_cstr js_item_to_cstr
@@ -466,20 +469,12 @@ static Item fs_throw_empty_read_buffer(JsTypedArray* ta) {
 // Stats prototype — provides isFile(), isDirectory(), etc. methods
 // =============================================================================
 // Stats method: checks mode bits via js_get_this().__mode
-extern "C" Item js_get_this(void);
-extern "C" Item js_date_new_from(Item value);
 extern "C" Item js_readable_new(Item opts);
 extern "C" Item js_readable_push(Item self, Item chunk);
 extern "C" Item js_stream_destroy(Item self, Item err);
-extern Item js_promise_resolve(Item value);
-extern Item js_promise_reject(Item reason);
-extern "C" Item bigint_from_int64(int64_t val);
-extern "C" Item bigint_from_string(const char* str, int len);
 extern "C" int bigint_cmp(Item a, Item b);
-extern Item js_make_number(double d);
 extern "C" Item js_buffer_alloc(Item size_item, Item fill_item);
 extern "C" int64_t bigint_to_int64(Item bi);
-extern "C" Item js_array_is_array(Item value);
 extern "C" Item js_fs_openSync(Item path_item, Item flags_item, Item mode_item);
 extern "C" Item js_fs_closeSync(Item fd_item);
 
@@ -529,17 +524,13 @@ static Item fs_read_parse_options(Item options_item, Item fallback_buffer,
     if (fs_is_options_object(options_item)) {
         JS_ASSIGN_OR_RETURN(option_buffer, js_property_get(options_item, make_string_item("buffer")));
         if (!fs_is_nullish(option_buffer)) buffer = option_buffer;
-        offset = js_property_get(options_item, make_string_item("offset"));
-        if (item_is_error(offset)) return offset;
-        length = js_property_get(options_item, make_string_item("length"));
-        if (item_is_error(length)) return length;
-        position = js_property_get(options_item, make_string_item("position"));
-        if (item_is_error(position)) return position;
+        JS_ASSIGN_OR_RETURN_INTO(offset, js_property_get(options_item, make_string_item("offset")));
+        JS_ASSIGN_OR_RETURN_INTO(length, js_property_get(options_item, make_string_item("length")));
+        JS_ASSIGN_OR_RETURN_INTO(position, js_property_get(options_item, make_string_item("position")));
     }
 
     if (fs_is_nullish(buffer)) {
-        buffer = js_buffer_alloc((Item){.item = i2it(16384)}, make_js_undefined());
-        if (item_is_error(buffer)) return buffer;
+        JS_ASSIGN_OR_RETURN_INTO(buffer, js_buffer_alloc((Item){.item = i2it(16384)}, make_js_undefined()));
     }
     if (fs_is_nullish(offset)) offset = (Item){.item = i2it(0)};
     if (fs_is_nullish(length) && fs_get_typed_array(buffer)) {
@@ -828,12 +819,10 @@ static Item js_fs_readstream_drain(Item stream) {
     JS_ASSIGN_OR_RETURN(callback_result, js_call_function(data_cb, stream, data_args, 1));
 
     if (get_type_id(end_cb) == LMD_TYPE_FUNC) {
-        callback_result = js_call_function(end_cb, stream, NULL, 0);
-        if (item_is_error(callback_result)) return callback_result;
+        JS_ASSIGN_OR_RETURN_INTO(callback_result, js_call_function(end_cb, stream, NULL, 0));
     }
     if (get_type_id(close_cb) == LMD_TYPE_FUNC) {
-        callback_result = js_call_function(close_cb, stream, NULL, 0);
-        if (item_is_error(callback_result)) return callback_result;
+        JS_ASSIGN_OR_RETURN_INTO(callback_result, js_call_function(close_cb, stream, NULL, 0));
     }
     return make_js_undefined();
 }
@@ -2334,9 +2323,8 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
         if (!fs_is_options_object(offset_item) && !fs_is_nullish(offset_item)) {
             return js_throw_invalid_arg_type("options", "object", offset_item);
         }
-        Item parse_result = fs_read_parse_options(offset_item, buffer_item, &read_buffer,
-                                   &read_offset, &read_length, &read_position);
-        if (item_is_error(parse_result)) return parse_result;
+        JS_ASSIGN_OR_RETURN(parse_result, fs_read_parse_options(offset_item, buffer_item, &read_buffer,
+                                   &read_offset, &read_length, &read_position));
     }
 
     JsTypedArray* ta = fs_get_typed_array(read_buffer);
@@ -2396,13 +2384,11 @@ extern "C" Item js_fs_read(Item fd_item, Item buffer_item, Item offset_item, Ite
                                 (fs_is_options_object(offset_item) || fs_is_nullish(offset_item)) &&
                                 fs_is_nullish(length_item) && fs_is_nullish(position_item);
     if (second_arg_is_options) {
-        Item parse_result = fs_read_parse_options(buffer_item, make_js_undefined(), &read_buffer,
-                                   &read_offset, &read_length, &read_position);
-        if (item_is_error(parse_result)) return parse_result;
+        JS_ASSIGN_OR_RETURN(parse_result, fs_read_parse_options(buffer_item, make_js_undefined(), &read_buffer,
+                                   &read_offset, &read_length, &read_position));
     } else if (third_arg_is_options) {
-        Item parse_result = fs_read_parse_options(offset_item, buffer_item, &read_buffer,
-                                   &read_offset, &read_length, &read_position);
-        if (item_is_error(parse_result)) return parse_result;
+        JS_ASSIGN_OR_RETURN(parse_result, fs_read_parse_options(offset_item, buffer_item, &read_buffer,
+                                   &read_offset, &read_length, &read_position));
     }
 
     JS_ASSIGN_OR_RETURN(bytes_read, js_fs_readSync(fd_item, read_buffer, read_offset, read_length, read_position));
@@ -2605,12 +2591,9 @@ static Item fs_write_parse_options(Item options_item, Item data_item,
     Item length = make_js_undefined();
     Item position = make_js_undefined();
     if (fs_is_options_object(options_item)) {
-        offset = js_property_get(options_item, make_string_item("offset"));
-        if (item_is_error(offset)) return offset;
-        length = js_property_get(options_item, make_string_item("length"));
-        if (item_is_error(length)) return length;
-        position = js_property_get(options_item, make_string_item("position"));
-        if (item_is_error(position)) return position;
+        JS_ASSIGN_OR_RETURN_INTO(offset, js_property_get(options_item, make_string_item("offset")));
+        JS_ASSIGN_OR_RETURN_INTO(length, js_property_get(options_item, make_string_item("length")));
+        JS_ASSIGN_OR_RETURN_INTO(position, js_property_get(options_item, make_string_item("position")));
     }
     if (fs_is_nullish(offset)) offset = (Item){.item = i2it(0)};
     if (fs_is_nullish(length)) {
@@ -3121,10 +3104,6 @@ static void js_fs_set_custom_promisify(Item fn, void* func_ptr, int param_count)
 
 // ─── fs.promises wrapper functions ─────────────────────────────────────────
 // Each wraps the sync version, returning a resolved/rejected Promise
-extern Item js_promise_resolve(Item value);
-extern Item js_promise_reject(Item reason);
-extern "C" Item js_promise_with_resolvers(void);
-extern "C" void js_next_tick_enqueue(Item callback);
 static Item fs_promise_wrap_result(Item result) {
     if (item_is_error(result)) return js_promise_reject(result);
     return js_promise_resolve(result);
@@ -3745,7 +3724,6 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "fstatSync",       (void*)js_fs_fstatSync, 2);
 
     // fs.constants — null prototype per Node.js spec
-    extern Item js_object_create(Item proto);
     constants_root.set(js_object_create(ItemNull));
     Item constants = constants_root.get();
     js_property_set(constants, make_string_item("F_OK"), (Item){.item = i2it(0)});
@@ -3797,8 +3775,6 @@ extern "C" Item js_get_fs_namespace(void) {
 
     // fs.promises — promise-based API
     {
-        extern Item js_promise_resolve(Item value);
-        extern Item js_promise_reject(Item reason);
 
         promises_root.set(js_new_object());
         Item promises = promises_root.get();

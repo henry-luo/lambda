@@ -37,6 +37,16 @@ static void layout_measure_cache_store(LayoutContext* lycon, ViewBlock* block,
     radiant::layout_pass_cache_store_for_space(lycon, element, known, space, size, label);
 }
 
+static IntrinsicSize layout_measure_flat_size(LayoutContext* lycon, ViewBlock* block,
+                                              AvailableSpace space, float width, float height,
+                                              const char* label) {
+    IntrinsicSize result = {};
+    result.min_width = result.max_width = max(width, 0.0f);
+    result.min_height = result.max_height = max(height, 0.0f);
+    layout_measure_cache_store(lycon, block, space, result, label);
+    return result;
+}
+
 IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, AvailableSpace space) {
     IntrinsicSize result = {};
     if (!block) return result;
@@ -71,12 +81,7 @@ IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, Av
             if (height <= 0.0f) height = FormDefaults::PROGRESS_HEIGHT;
         }
     }
-    result.min_width = width;
-    result.max_width = width;
-    result.min_height = height;
-    result.max_height = height;
-    layout_measure_cache_store(lycon, block, space, result, "REPLACED_MEASURE");
-    return result;
+    return layout_measure_flat_size(lycon, block, space, width, height, "REPLACED_MEASURE");
 }
 
 IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block, AvailableSpace space) {
@@ -101,12 +106,7 @@ IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block
         else if (block->height > 0.0f) height = block->height;
     }
 
-    result.min_width = width > 0.0f ? width : 0.0f;
-    result.max_width = result.min_width;
-    result.min_height = height > 0.0f ? height : 0.0f;
-    result.max_height = result.min_height;
-    layout_measure_cache_store(lycon, block, space, result, "FORM_MEASURE");
-    return result;
+    return layout_measure_flat_size(lycon, block, space, width, height, "FORM_MEASURE");
 }
 
 IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement* element,

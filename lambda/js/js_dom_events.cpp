@@ -32,16 +32,11 @@
 #include <cmath>
 #include <functional>
 
+extern Item js_make_number(double d);
+
 // Forward decls used by Event helpers below (signatures from js_runtime.h /
 // js_dom.h, declared here under extern "C" to avoid header coupling).
-extern "C" Item js_get_this();
-extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern __thread EvalContext* context;
-extern Item js_array_new(int length);
-extern Item js_array_push(Item array, Item value);
-extern Item js_get_document_object_value();
-extern "C" Item js_get_global_this();
-extern Item js_make_number(double d);
 
 // Form-control IDL helpers from js_dom.cpp — used by HTMLElement click
 // activation behavior (HTML §6.4.4).
@@ -55,8 +50,6 @@ extern "C" bool js_dom_is_connected(void* dom_elem);
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
 extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
 extern "C" Item js_dom_check_validity_bridge(Item elem_item);
-extern "C" int64_t js_array_length(Item array);
-extern "C" Item js_array_get_int(Item array, int64_t index);
 static inline Item event_make_double(double v) {
     return js_make_number(v);
 }
@@ -178,7 +171,6 @@ static double event_now_ms() {
 }
 
 static Item event_exception_message(Item err) {
-    extern Item js_to_string(Item value);
     Item msg = err;
     if (get_type_id(err) == LMD_TYPE_MAP || get_type_id(err) == LMD_TYPE_OBJECT) {
         Item m_key = (Item){.item = s2it(heap_create_name("message"))};
@@ -214,7 +206,6 @@ static void log_event_exception_detail(const char* source, const char* type, Ite
 // `window.onerror` (HTML spec: report exception). Best-effort: if
 // onerror is not a function, just swallow.
 static void report_exception_to_window_onerror(Item err, const char* type) {
-    extern Item js_get_global_this(void);
     Item global = js_get_global_this();
     if (global.item == 0) return;
     Item onerr_key = (Item){.item = s2it(heap_create_name("onerror"))};
@@ -227,26 +218,12 @@ static void report_exception_to_window_onerror(Item err, const char* type) {
     (void)type;
 }
 
-static DomElement* js_dom_find_element_by_id(DomNode* node, const char* id) {
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            const char* elem_id = elem->get_attribute("id");
-            if (elem_id && strcmp(elem_id, id) == 0) return elem;
-            DomElement* found = js_dom_find_element_by_id(elem->first_child, id);
-            if (found) return found;
-        }
-        node = node->next_sibling;
-    }
-    return nullptr;
-}
-
 static DomElement* js_dom_find_form_owner(DomElement* control) {
     if (!control) return nullptr;
     const char* form_id = control->get_attribute("form");
     if (form_id && *form_id) {
         DomDocument* doc = control->doc;
-        if (doc && doc->root) return js_dom_find_element_by_id((DomNode*)doc->root, form_id);
+        if (doc && doc->root) return js_dom_find_element_by_id(doc->root, form_id);
         return nullptr;
     }
 
@@ -333,9 +310,8 @@ extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter
 
     bool has_submitter = false;
     DomElement* submitter = nullptr;
-    Item submitter_result = js_dom_resolve_request_submitter(form, submitter_item,
-        &has_submitter, &submitter);
-    if (item_is_error(submitter_result)) return submitter_result;
+    JS_ASSIGN_OR_RETURN(submitter_result, js_dom_resolve_request_submitter(form, submitter_item,
+        &has_submitter, &submitter));
     if (has_submitter && !submitter) return make_js_undefined();
 
     if (js_dom_should_validate_submit(form, submitter)) {
@@ -1387,7 +1363,6 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
     // (returnValue, cancelBubble, defaultPrevented). These override the
     // plain data properties set above.
     {
-        extern Item js_object_define_property(Item obj, Item name, Item descriptor);
         Item get_key = (Item){.item = s2it(heap_create_name("get"))};
         Item set_key = (Item){.item = s2it(heap_create_name("set"))};
         Item conf_key = (Item){.item = s2it(heap_create_name("configurable"))};
@@ -1775,9 +1750,7 @@ static bool js_input_event_is_static_range(Item range) {
 }
 
 static Item js_input_event_throw_dom_exception(const char* name, const char* message) {
-    Item err_name = (Item){.item = s2it(heap_create_name(name ? name : "InvalidStateError"))};
-    Item err_msg = (Item){.item = s2it(heap_create_name(message ? message : ""))};
-    return js_throw_value(js_new_error_with_name(err_name, err_msg));
+    return js_throw_named_error_text(name ? name : "InvalidStateError", message ? message : "");
 }
 
 static Item js_input_event_live_target_ranges(Item target_ranges) {
@@ -1804,13 +1777,12 @@ static Item js_input_event_live_target_ranges(Item target_ranges) {
             continue;
         }
         const char* exc = nullptr;
-        Item live_range = js_dom_create_live_range_from_boundaries(
+        JS_ASSIGN_OR_RETURN(live_range, js_dom_create_live_range_from_boundaries(
             start_container,
             init_int(range, "startOffset", 0),
             end_container,
             init_int(range, "endOffset", 0),
-            &exc);
-        if (item_is_error(live_range)) return live_range;
+            &exc));
         if (live_range.item == ItemNull.item) {
             return js_input_event_throw_dom_exception(exc ? exc : "InvalidStateError",
                 "Invalid InputEvent targetRanges boundary");
@@ -2440,6 +2412,8 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     // wpt: "disabled checkbox should still be checked when clicked").
     // ------------------------------------------------------------------
     void* act_target = nullptr;        // DomElement* target of activation, NULL if none
+    void* popover_target = nullptr;    // DomElement* target of popover activation
+    int popover_action = 0;
     int act_kind = 0;                  // 1 = checkbox/radio toggle, 2 = submit
     bool act_old_checked = false;
     bool act_disabled = false;         // disabled at pre-activation time
@@ -2490,6 +2464,10 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
                             act_target = el; act_kind = 3;
                         }
                     }
+                }
+                if (tag && strcasecmp(tag, "button") == 0) {
+                    popover_target = js_dom_popover_target_for_button(el);
+                    popover_action = js_dom_popover_target_action(el);
                 }
             }
         }
@@ -2660,7 +2638,6 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
         }
     } else if (act_kind == 3 && act_target && !prevented && !act_disabled) {
         // Reset-button activation: walk up to owning <form> and call reset().
-        extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
         if (!js_dom_is_disabled(act_target) && js_dom_is_connected(act_target)) {
             DomElement* el = (DomElement*)act_target;
             DomElement* owner = nullptr;
@@ -2703,6 +2680,9 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
                 js_dom_element_method(form_item, m, nullptr, 0);
             }
         }
+    }
+    if (popover_target && !prevented && !act_disabled) {
+        js_dom_activate_popover(popover_target, popover_action);
     }
 
     log_debug("js_dom_dispatch_event: dispatched '%s' on %p (prevented=%d)",

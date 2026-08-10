@@ -8,19 +8,18 @@
 
 __thread JsRuntimeState* js_active_runtime_state = NULL;
 extern __thread EvalContext* context;
-extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
 extern "C" int js_initial_call_stack_limit(void);
 extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_regex_cache_destroy_context(JsRuntimeState* state);
-extern "C" void js_reset_template_registry(void);
 extern "C" void js_dom_platform_destroy_context(JsRuntimeState* state);
 extern "C" void js_dom_events_destroy_context(JsRuntimeState* state);
 extern "C" void js_dom_observers_destroy_context(JsRuntimeState* state);
-extern "C" void js_xhr_reset(void);
 extern "C" void js_xhr_destroy_context(JsRuntimeState* state);
-extern "C" void js_history_reset(void);
 extern "C" void js_iterator_proto_cache_reset(void);
+extern "C" void js_history_reset(void);
+extern "C" void js_xhr_reset(void);
+extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 
 extern "C" void js_reset_buffer_module(void);
 extern "C" void js_crypto_reset(void);
@@ -53,7 +52,6 @@ static void js_reset_cached_realm_objects(void) {
     js_func_cache_reset();
     js_builtin_cache_reset();
     js_deep_batch_reset();
-    extern void js_reset_constructor_prototypes(void);
     js_reset_constructor_prototypes();
 }
 
@@ -83,7 +81,6 @@ extern "C" void js_dom_collections_destroy_context(JsRuntimeState* state);
 extern "C" void js_dom_foreign_documents_release_context(void);
 extern "C" void js_dom_foreign_documents_destroy_context(JsRuntimeState* state);
 extern "C" void js_fetch_apply_bootstrap_base_path(void);
-extern "C" void js_fetch_reset(void);
 extern "C" void js_fetch_destroy_context(JsRuntimeState* state);
 extern "C" void js_fs_pending_destroy_context(JsRuntimeState* state);
 extern "C" void js_tls_destroy_context(JsRuntimeState* state);
@@ -93,7 +90,6 @@ extern "C" void js_crypto_destroy_context(JsRuntimeState* state);
 extern "C" void js_atomics_destroy_context(JsRuntimeState* state);
 extern "C" void js_canvas_destroy_context(JsRuntimeState* state);
 extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* state);
-extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 
 static bool js_runtime_state_init_well_known_refs(JsRuntimeState* state) {
     if (!state) return false;
@@ -810,20 +806,13 @@ Item js_strict_throw_property_error(const char* reason, const char* prop_name, i
     } else {
         snprintf(msg, sizeof(msg), "Cannot %s property of object", reason);
     }
-    Item err_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-    Item err_msg = (Item){.item = s2it(heap_create_name(msg))};
-    Item error = js_new_error_with_name(err_name, err_msg);
-    return js_throw_value(error);
+    return js_throw_type_error(msg);
 }
 
 // Forward declaration for _map_read_field (defined in lambda-data-runtime.cpp)
 Item _map_read_field(ShapeEntry* field, void* map_data);
 // Forward declaration for _map_get (used as fallback for nested/spread maps)
 Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found);
-extern "C" void js_mark_non_enumerable(Item object, Item name);
-extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
-extern "C" void js_set_prototype(Item object, Item prototype);
-extern "C" Item js_in(Item key, Item object);
 extern "C" Item js_get_current_this(void) { return js_current_this; }
 
 static void js_runtime_make_non_enumerable(Item object, Item name) {
@@ -851,7 +840,6 @@ bool js_runtime_trace_enabled() {
 }
 
 // Forward declaration: defined in js_globals.cpp.
-extern "C" bool js_func_is_builtin_ctor(Item fn);
 extern "C" uint64_t js_get_heap_epoch() { return js_heap_epoch; }
 
 // v37: Toggle private field initialization mode (called from transpiled code)
@@ -923,8 +911,7 @@ extern "C" Item js_to_property_key(Item key) {
     if (kt == LMD_TYPE_UNDEFINED)
         return (Item){.item = s2it(heap_create_name("undefined", 9))};
     if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT || kt == LMD_TYPE_FUNC) {
-        key = js_to_primitive(key, JS_HINT_STRING);
-        if (item_is_error(key)) return key;
+        JS_ASSIGN_OR_RETURN_INTO(key, js_to_primitive(key, JS_HINT_STRING));
         if (js_key_is_symbol(key)) return js_symbol_to_key(key);
         kt = get_type_id(key);
         if (kt == LMD_TYPE_STRING) return key;
@@ -1052,10 +1039,7 @@ extern "C" Item js_require_object_coercible(Item value) {
         const char* type_str = (type == LMD_TYPE_NULL) ? "null" : "undefined";
         char msg[256];
         snprintf(msg, sizeof(msg), "Cannot destructure '%s' as it is %s.", type_str, type_str);
-        Item err_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-        Item err_msg = (Item){.item = s2it(heap_create_name(msg))};
-        Item error = js_new_error_with_name(err_name, err_msg);
-        return js_throw_value(error);
+        return js_throw_type_error(msg);
     }
     return value;
 }
@@ -1155,9 +1139,7 @@ extern "C" Item js_check_tdz(Item value, const char* name, int name_len) {
     if (value.item == ITEM_JS_TDZ) {
         char buf[256];
         int len = snprintf(buf, sizeof(buf), "Cannot access '%.*s' before initialization", name_len, name);
-        Item tn = (Item){.item = s2it(heap_create_name("ReferenceError", 14))};
-        Item msg = (Item){.item = s2it(heap_create_name(buf, len))};
-        return js_throw_value(js_new_error_with_name(tn, msg));
+        return js_throw_named_error_text("ReferenceError", buf);
     }
     return value;
 }
@@ -1166,27 +1148,45 @@ extern "C" Item js_check_tdz(Item value, const char* name, int name_len) {
 extern "C" Item js_throw_const_assign(const char* name, int name_len) {
     char buf[256];
     int len = snprintf(buf, sizeof(buf), "Assignment to constant variable '%.*s'", name_len, name);
-    Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
-    Item msg = (Item){.item = s2it(heap_create_name(buf, len))};
-    return js_throw_value(js_new_error_with_name(tn, msg));
+    return js_throw_named_error_text("TypeError", buf);
 }
 
 // forward declaration for js_batch_reset (defined near js_module_count_v14)
 // forward declaration for array custom prototype check
-extern "C" Item js_array_get_custom_proto(Item arr);
 // forward declarations for module namespace cache resets
-extern "C" void js_child_process_reset();
-extern "C" void js_fs_reset();
 extern "C" void js_fs_runtime_detach();
-extern "C" void js_util_reset();
-extern "C" void js_reset_template_registry(void);
 extern "C" void js_iterator_proto_cache_reset(void);
-extern "C" void js_reset_css_namespace_object(void);
 extern "C" void js_dynfunc_cache_reset(void);
-extern "C" void js_canvas_cleanup(void);
 extern "C" void js_cjs_metadata_reset(void);
-extern "C" void js_fetch_reset(void);
-extern "C" void js_history_reset(void);
+extern "C" void js_proto_snapshot_invalidate(void);
+extern "C" void js_process_reset_listeners(void);
+
+static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
+    // Both reset modes must clear the same exception-bearing roots; leaving a
+    // promise callback or assertion hook behind leaks the prior ERROR lane.
+    js_eval_state_assert_clear(&js_runtime_state.eval, reason);
+    js_reset_transient_call_state();
+    js_reset_heap_bound_runtime_state();
+    js_decimal_number_egress_warning_reset();
+    js_reset_cached_realm_objects();
+    if (full_reset) js_proto_snapshot_invalidate();
+    js_fs_runtime_detach();
+    jube_modules_runtime_reset();
+    jube_modules_runtime_detach();
+    js_globals_batch_reset();
+    js_dom_batch_reset();
+    memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
+    js_regex_cache_reset();
+    js_event_loop_init();
+    js_process_reset_listeners();
+    js_strict_mode = false;
+    js_reset_core_module_caches();
+    if (full_reset) js_eval_preamble_cache_reset();
+    js_dynfunc_cache_reset();
+    if (full_reset) js_array_runtime_items_cleanup_all();
+    js_root_range_reset_all();
+    js_assert_batch_runtime_state_clear(reason, true);
+}
 
 extern "C" void js_batch_reset() {
     // A host can finish a document after its context-owned JS state was
@@ -1207,50 +1207,7 @@ extern "C" void js_batch_reset() {
     js_module_cache_reset();
     // clear CommonJS metadata (filenames/modules are heap Items from the prior script)
     js_cjs_metadata_reset();
-    // Report unbalanced eval scopes before cleanup erases the evidence.
-    js_eval_state_assert_clear(&js_runtime_state.eval, "js_batch_reset pre-cleanup");
-    js_reset_transient_call_state();
-    js_reset_heap_bound_runtime_state();
-    js_decimal_number_egress_warning_reset();
-    js_reset_cached_realm_objects();
-    // js_batch_reset() is the heavy/crash-recovery path. After restoring the
-    // prototype snapshot above, invalidate it so (a) the upcoming
-    // js_ctor_cache_reset actually runs, (b) the upcoming heap teardown
-    // doesn't leave stale Map*/JsCtor* pointers in the snapshot, and (c) the
-    // next preamble's js_batch_reset_to takes a fresh snapshot.
-    extern void js_proto_snapshot_invalidate(void);
-    js_proto_snapshot_invalidate();
-    // fs async requests release session-bound roots before Jube invalidates
-    // their token; late libuv callbacks are then explicitly delivery-suppressed.
-    js_fs_runtime_detach();
-    // Reset Jube session caches while globalThis/process and the owning heap
-    // still exist; module hooks may release precise roots during this phase.
-    jube_modules_runtime_reset();
-    jube_modules_runtime_detach();
-    // reset globalThis, constructor cache, process object — stale heap pointers
-    extern void js_globals_batch_reset(void);
-    js_globals_batch_reset();
-    // reset DOM state — stale document proxy and document pointer
-    extern void js_dom_batch_reset(void);
-    js_dom_batch_reset();
-    // reset legacy RegExp static properties ($1-$9, input, etc.)
-    memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
-    // reset regex compilation cache — AST pointers from previous test are stale
-    js_regex_cache_reset();
-    // reset microtask queue and timers — callbacks referencing old heap
-    extern void js_event_loop_init(void);
-    js_event_loop_init();
-    // reset process event listeners — callbacks referencing old heap
-    extern void js_process_reset_listeners(void);
-    js_process_reset_listeners();
-    // reset strict mode — prevents strict-mode test from poisoning subsequent tests
-    js_strict_mode = false;
-    js_reset_core_module_caches();
-    js_eval_preamble_cache_reset();
-    js_dynfunc_cache_reset();
-    js_array_runtime_items_cleanup_all();
-    js_root_range_reset_all();
-    js_assert_batch_runtime_state_clear("js_batch_reset", true);
+    js_batch_reset_runtime_caches("js_batch_reset pre-cleanup", true);
 }
 
 // Get current module var count (for checkpointing)
@@ -1315,43 +1272,21 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // clear JS module cache counter
     js_module_cache_reset();
     js_cjs_metadata_reset();
-    // Keep partial batch resets equally strict about eval frame ownership.
-    js_eval_state_assert_clear(&js_runtime_state.eval, "js_batch_reset_to pre-cleanup");
-    js_reset_transient_call_state();
-    js_reset_heap_bound_runtime_state();
-    js_decimal_number_egress_warning_reset();
-    js_reset_cached_realm_objects();
-    // fs async requests release session-bound roots before Jube invalidates
-    // their token; late libuv callbacks are then explicitly delivery-suppressed.
-    js_fs_runtime_detach();
-    // Reset Jube session caches while globalThis/process and the owning heap
-    // still exist; module hooks may release precise roots during this phase.
-    jube_modules_runtime_reset();
-    jube_modules_runtime_detach();
-    // reset globalThis, constructor cache, process object — stale heap pointers
-    extern void js_globals_batch_reset(void);
-    js_globals_batch_reset();
-    // reset DOM state — stale document proxy and document pointer
-    extern void js_dom_batch_reset(void);
-    js_dom_batch_reset();
-    // reset microtask queue and timers — callbacks referencing old heap
-    extern void js_event_loop_init(void);
-    js_event_loop_init();
-    // reset process event listeners — callbacks referencing old heap
-    extern void js_process_reset_listeners(void);
-    js_process_reset_listeners();
-    // reset legacy RegExp static properties ($1-$9, input, etc.)
-    memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
-    // reset regex compilation cache — AST pointers from previous test are stale
-    js_regex_cache_reset();
-    js_reset_core_module_caches();
-    js_dynfunc_cache_reset();
-    js_root_range_reset_all();
-    js_assert_batch_runtime_state_clear("js_batch_reset_to", true);
+    js_batch_reset_runtime_caches("js_batch_reset_to pre-cleanup", false);
 }
 
 extern "C" Item js_new_error(Item message) {
     return js_new_error_with_stack(message, (Item){.item = ITEM_JS_UNDEFINED});
+}
+
+extern "C" Item js_new_named_error(const char* type_name, const char* message) {
+    Item name = (Item){.item = s2it(heap_create_name(type_name ? type_name : "Error"))};
+    Item text = (Item){.item = s2it(heap_create_name(message ? message : ""))};
+    return js_new_error_with_name(name, text);
+}
+
+extern "C" Item js_throw_named_error_text(const char* type_name, const char* message) {
+    return js_throw_value(js_new_named_error(type_name, message));
 }
 
 // AggregateError(errors, message): Error subclass with .errors array
@@ -1363,9 +1298,8 @@ extern "C" Item js_new_aggregate_error(Item errors, Item message) {
     // IterableToList is part of construction, so an abrupt iterator result must
     // escape instead of being installed as the new error's `.errors` value.
     if (item_is_error(errors_arr)) return errors_arr;
-    Item set_result = js_property_set(err,
-        (Item){.item = s2it(heap_create_name("errors", 6))}, errors_arr);
-    if (item_is_error(set_result)) return set_result;
+    JS_ASSIGN_OR_RETURN(set_result, js_property_set(err,
+        (Item){.item = s2it(heap_create_name("errors", 6))}, errors_arr));
     return err;
 }
 
@@ -1438,6 +1372,21 @@ static bool js_stack_function_name_matches(Item fn_item, StackFrame* frame) {
         strncmp(display, fn->name->chars, (size_t)display_len) == 0;
 }
 
+static int js_error_stack_trace_limit(void) {
+    if (!context || !context->debug_info) return 0;
+    Item error_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Error", 5))});
+    if (get_type_id(error_ctor) != LMD_TYPE_FUNC) return 10;
+    Item limit = js_property_get(error_ctor,
+        (Item){.item = s2it(heap_create_name("stackTraceLimit", 15))});
+    TypeId limit_type = get_type_id(limit);
+    if (limit_type != LMD_TYPE_INT && limit_type != LMD_TYPE_INT64 &&
+            limit_type != LMD_TYPE_FLOAT) return 10;
+    double dlimit = it2d(limit);
+    if (dlimit <= 0 || dlimit != dlimit) return 0;
+    int frame_limit = (int)dlimit;
+    return frame_limit > 200 ? 200 : frame_limit;
+}
+
 static int js_stack_append_frame_text(StrBuf* sb, StackFrame* frame, bool include_prefix) {
     if (!sb || !frame || !js_stack_raw_name_visible(frame->function_name)) return 0;
     if (frame->is_native) return 0;
@@ -1493,41 +1442,37 @@ static Item js_stack_frame_string(StackFrame* frame) {
     return result;
 }
 
-static StackFrame* js_capture_native_stack_frames(void) {
-    if (!context || !context->debug_info) return NULL;
-    Item error_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Error", 5))});
-    int frame_limit = 10;
-    if (get_type_id(error_ctor) == LMD_TYPE_FUNC) {
-        Item limit = js_property_get(error_ctor, (Item){.item = s2it(heap_create_name("stackTraceLimit", 15))});
-        TypeId limit_type = get_type_id(limit);
-        if (limit_type == LMD_TYPE_INT || limit_type == LMD_TYPE_INT64 || limit_type == LMD_TYPE_FLOAT) {
-            double dlimit = it2d(limit);
-            if (dlimit <= 0 || dlimit != dlimit) return NULL;
-            frame_limit = (int)dlimit;
-            if (frame_limit > 200) frame_limit = 200;
+static int js_error_append_stack_frames(StrBuf* sb, StackFrame* trace, Item stack_start_fn) {
+    int frame_count = 0;
+    bool trimming = get_type_id(stack_start_fn) == LMD_TYPE_FUNC;
+    for (StackFrame* frame = trace; frame; frame = frame->next) {
+        if (trimming) {
+            if (js_stack_function_name_matches(stack_start_fn, frame)) trimming = false;
+            continue;
+        }
+        int before = sb->length;
+        strbuf_append_char(sb, '\n');
+        if (js_stack_append_frame_text(sb, frame, true)) {
+            frame_count++;
+        } else {
+            sb->length = before;
+            sb->str[before] = '\0';
         }
     }
+    return frame_count;
+}
+
+static StackFrame* js_capture_native_stack_frames(void) {
+    int frame_limit = js_error_stack_trace_limit();
+    if (frame_limit <= 0) return NULL;
     // LambdaJS stack traces reuse Lambda's zero-normal-overhead frame walk:
     // capture only while constructing an Error stack, never on successful calls.
     return err_capture_stack_trace(context->debug_info, frame_limit);
 }
 
 static RawStackTrace* js_capture_raw_native_stack_trace(void) {
-    if (!context || !context->debug_info) return NULL;
-    Item error_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Error", 5))});
-    int frame_limit = 10;
-    if (get_type_id(error_ctor) == LMD_TYPE_FUNC) {
-        Item limit = js_property_get(error_ctor,
-            (Item){.item = s2it(heap_create_name("stackTraceLimit", 15))});
-        TypeId limit_type = get_type_id(limit);
-        if (limit_type == LMD_TYPE_INT || limit_type == LMD_TYPE_INT64 ||
-                limit_type == LMD_TYPE_FLOAT) {
-            double dlimit = it2d(limit);
-            if (dlimit <= 0 || dlimit != dlimit) return NULL;
-            frame_limit = (int)dlimit;
-            if (frame_limit > 200) frame_limit = 200;
-        }
-    }
+    int frame_limit = js_error_stack_trace_limit();
+    if (frame_limit <= 0) return NULL;
     return err_capture_raw_stack_trace(context->debug_info, frame_limit);
 }
 
@@ -1541,17 +1486,8 @@ static Item js_error_stack_string_from_trace(Item error_name, Item message,
     if (!sb) return (Item){.item = ITEM_JS_UNDEFINED};
     if (header_str) strbuf_append_str_n(sb, header_str->chars, header_str->len);
 
-    int frame_count = 0;
-    for (StackFrame* frame = trace; frame; frame = frame->next) {
-        int before = sb->length;
-        strbuf_append_char(sb, '\n');
-        if (js_stack_append_frame_text(sb, frame, true)) {
-            frame_count++;
-        } else {
-            sb->length = before;
-            sb->str[before] = '\0';
-        }
-    }
+    int frame_count = js_error_append_stack_frames(sb, trace,
+        (Item){.item = ITEM_JS_UNDEFINED});
     Item result = frame_count > 0
         ? (Item){.item = s2it(heap_create_name(sb->str, sb->length))}
         : (Item){.item = ITEM_JS_UNDEFINED};
@@ -1572,22 +1508,7 @@ static Item js_error_native_stack_string(Item error_name, Item message, Item sta
     String* header_str = get_type_id(header) == LMD_TYPE_STRING ? it2s(header) : NULL;
     if (header_str) strbuf_append_str_n(sb, header_str->chars, header_str->len);
 
-    int frame_count = 0;
-    bool trimming = get_type_id(stack_start_fn) == LMD_TYPE_FUNC;
-    for (StackFrame* frame = trace; frame; frame = frame->next) {
-        if (trimming) {
-            if (js_stack_function_name_matches(stack_start_fn, frame)) trimming = false;
-            continue;
-        }
-        int before = sb->length;
-        strbuf_append_char(sb, '\n');
-        if (js_stack_append_frame_text(sb, frame, true)) {
-            frame_count++;
-        } else {
-            sb->length = before;
-            sb->str[before] = '\0';
-        }
-    }
+    int frame_count = js_error_append_stack_frames(sb, trace, stack_start_fn);
 
     Item result = frame_count > 0
         ? (Item){.item = s2it(heap_create_name(sb->str, sb->length))}
@@ -1668,7 +1589,6 @@ extern "C" Item js_error_materialize_stack(Item error_obj) {
     return stack_root.get();
 }
 
-extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str);
 
 // v12: Create Error with a compile-time stack trace string
 extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
@@ -1796,12 +1716,9 @@ extern "C" Item js_get_this() {
     // before installing the binding. Here only the uninitialized sentinel means
     // "no explicit this"; an actual JS null must remain observable to strict code.
     if (js_current_this.item == ITEM_JS_TDZ) {
-        Item tn = (Item){.item = s2it(heap_create_name("ReferenceError", 14))};
-        Item msg = (Item){.item = s2it(heap_create_name("Must call super constructor before accessing 'this'", 51))};
-        return js_throw_value(js_new_error_with_name(tn, msg));
+        return js_throw_reference_error(make_string_item("Must call super constructor before accessing 'this'"));
     }
     if (js_current_this.item == 0) {
-        extern Item js_get_global_this();
         return js_get_global_this();
     }
     return js_current_this;
@@ -1814,12 +1731,9 @@ extern "C" Item js_get_lexical_this_binding(void) {
 
 extern "C" Item js_resolve_lexical_this(Item this_val) {
     if (this_val.item == ITEM_JS_TDZ) {
-        Item tn = (Item){.item = s2it(heap_create_name("ReferenceError", 14))};
-        Item msg = (Item){.item = s2it(heap_create_name("Must call super constructor before accessing 'this'", 51))};
-        return js_throw_value(js_new_error_with_name(tn, msg));
+        return js_throw_reference_error(make_string_item("Must call super constructor before accessing 'this'"));
     }
     if (this_val.item == 0) {
-        extern Item js_get_global_this();
         return js_get_global_this();
     }
     return this_val;
@@ -1973,7 +1887,6 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
     }
 }
 
-extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len);
 
 extern "C" Item js_build_arguments_object() {
     RootFrame roots(10);

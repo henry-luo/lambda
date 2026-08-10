@@ -9,6 +9,9 @@
 #include "js_state_guards.h"
 #include "../lambda-data.hpp"
 
+extern Item _map_read_field(ShapeEntry* field, void* map_data);
+extern String* heap_create_name(const char* name, size_t len);
+
 // js_runtime.cpp internals we need. Public header counterparts:
 //   js_map_get_fast_ext   — js_runtime.h
 //   js_call_function      — js_runtime.h
@@ -33,9 +36,7 @@ static inline Item js_props_undefined() {
 
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
 // forward-declare here so the kernels below can build name keys.
-extern "C++" String* heap_create_name(const char* name, size_t len);
 extern void fn_map_set(Item map_item, Item key, Item value);
-extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
 // Debug-only property-storage invariants. Empty-string keys are valid.
 #ifndef NDEBUG
@@ -532,11 +533,9 @@ extern "C" bool js_get_own_property_descriptor_key(Item object,
 
 // Property-descriptor parser and apply kernel.
 
-extern "C" void js_func_init_property(Item fn, Item key, Item value);
 
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
 // forward-declare here to avoid pulling the heavy transpiler header.
-extern "C++" String* heap_create_name(const char* name, size_t len);
 
 static inline Item js_props_str(const char* s, int len) {
     return (Item){.item = s2it(heap_create_name(s, (size_t)len))};
@@ -876,9 +875,8 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
     if (!is_accessor_desc && !is_data_desc) {
         JS_ASSIGN_OR_RETURN(has_own, js_has_own_property(object, name_item));
         if (!it2b(has_own)) {
-            Item set_result = js_property_set(object, name_item,
-                                              (Item){.item = ITEM_JS_UNDEFINED});
-            if (item_is_error(set_result)) return set_result;
+            JS_ASSIGN_OR_RETURN(set_result, js_property_set(object, name_item,
+                                              (Item){.item = ITEM_JS_UNDEFINED}));
         }
     }
 

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.3: a cataloged raw scalar return is not published into the merged Item error lane, so its comparison branch has no unreachable ERROR-tag test.",
+  "checks": [
+    {
+      "in_func": "_js_rawScalarBranch_#_body",
+      "expect": [
+        "call\tjs_eq_raw",
+        "call\tjs_logical_not"
+      ],
+      "forbid": [
+        "eq\t{{r}}, {{r}}, 27"
+      ]
+    }
+  ]
+}

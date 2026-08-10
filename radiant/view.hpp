@@ -1018,6 +1018,7 @@ typedef struct MultiColumnProp {
     int computed_column_count;   // Actual number of columns after layout
     int computed_used_column_count; // Columns that received content in layout
     float computed_column_width; // Actual column width after layout
+    float computed_block_axis_extent; // Used block-axis span in vertical layout
 } MultiColumnProp;
 
 // tier-2: view-pool, rebuilt each relayout
@@ -1204,6 +1205,7 @@ typedef struct BlockProp {
     CssEnum text_box_over_edge;  // CSS Inline 3 text-box-edge over metric (CSS_VALUE_TEXT, CSS_VALUE_CAP, CSS_VALUE_EX, etc.)
     CssEnum text_box_under_edge; // CSS Inline 3 text-box-edge under metric (CSS_VALUE_TEXT, CSS_VALUE_ALPHABETIC, etc.)
     CssEnum baseline_source;  // CSS Inline 3 baseline-source: auto, first, or last
+    CssEnum dominant_baseline;  // CSS Inline 3 dominant-baseline: auto or named baseline
     float given_width, given_height;  // CSS specified width/height values
     CssEnum given_width_type;
     CssEnum given_height_type;
@@ -2152,6 +2154,9 @@ struct FormControlProp {
     // replaced-element fallback at the bottom border edge.
     float first_text_baseline;
     float last_text_baseline;
+    // CSS Box Alignment retains the parent line's strut tail when a
+    // scroll-container last baseline is clamped at its border edge.
+    float last_text_baseline_overflow;
 
     // Computed ::placeholder pseudo-element rendering style.
     FontProp* placeholder_font;

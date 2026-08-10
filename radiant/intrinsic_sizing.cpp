@@ -1013,6 +1013,13 @@ static inline bool intrinsic_is_simple_latin_shaping_byte(unsigned char ch) {
     return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
 }
 
+static bool intrinsic_apply_small_caps(uint32_t* codepoint, CssEnum font_variant) {
+    if (!codepoint || font_variant != CSS_VALUE_SMALL_CAPS) return false;
+    uint32_t original = *codepoint;
+    *codepoint = apply_text_transform(*codepoint, CSS_VALUE_UPPERCASE, false);
+    return *codepoint != original;
+}
+
 static bool intrinsic_can_shape_simple_latin_run(LayoutContext* lycon,
                                                  CssEnum text_transform,
                                                  CssEnum font_variant,
@@ -1454,6 +1461,13 @@ static bool intrinsic_element_text_starts_with_whitespace(DomNode* element) {
     return false;
 }
 
+static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
+                                            uint32_t codepoint,
+                                            bool small_caps_lower,
+                                            float kerning,
+                                            bool emoji_presentation,
+                                            bool* loaded);
+
 static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const char* text,
                                                     size_t length, float start_offset,
                                                     CssEnum text_transform, CssEnum font_variant,
@@ -1510,29 +1524,20 @@ static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const 
         uint32_t tt_out[3];
         int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
         codepoint = tt_out[0];
-        bool is_small_caps_lower = false;
-        if (font_variant == CSS_VALUE_SMALL_CAPS) {
-            uint32_t original = codepoint;
-            codepoint = apply_text_transform(codepoint, CSS_VALUE_UPPERCASE, false);
-            is_small_caps_lower = (codepoint != original);
-        }
+        bool is_small_caps_lower = intrinsic_apply_small_caps(&codepoint, font_variant);
         is_word_start = false;
 
-        FontStyleDesc sd = font_style_desc_from_prop(lycon->font.style);
-        float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
-            ? lycon->ui_context->pixel_ratio : 1.0f;
         for (int ti = 0; ti < tt_count; ti++) {
             uint32_t cp = (ti == 0) ? codepoint : tt_out[ti];
             if (cp == 0 || text_codepoint_has_zero_advance(cp)) {
                 continue;
             }
-            LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &sd, cp, false);
-            float advance = glyph ? (glyph->advance_x / pixel_ratio)
-                                  : (lycon->font.style ? lycon->font.style->font_size * 0.5f : 8.0f);
-            if (is_small_caps_lower) {
-                advance *= font_get_small_caps_scale(lycon->font.font_handle);
+            bool loaded = false;
+            float advance = intrinsic_loaded_glyph_advance(
+                lycon, cp, is_small_caps_lower, 0.0f, false, &loaded);
+            if (!loaded) {
+                advance = lycon->font.style ? lycon->font.style->font_size * 0.5f : 8.0f;
             }
-            if (lycon->font.style) advance += lycon->font.style->letter_spacing;
             width += advance;
         }
         i += (size_t)bytes;
@@ -1820,14 +1825,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             continue;
         }
 
-        // CSS font-variant: small-caps — convert lowercase to uppercase glyphs
-        // rendered at ~0.7× size (CSS 2.1 §15.8, matching layout_text.cpp)
-        bool is_small_caps_lower = false;
-        if (font_variant == CSS_VALUE_SMALL_CAPS) {
-            uint32_t original = codepoint;
-            codepoint = apply_text_transform(codepoint, CSS_VALUE_UPPERCASE, false);
-            is_small_caps_lower = (codepoint != original);
-        }
+        // CSS font-variant: small-caps uses uppercase glyphs with scaled advance.
+        bool is_small_caps_lower = intrinsic_apply_small_caps(&codepoint, font_variant);
 
         is_word_start = false;  // No longer at word start after first character
 
@@ -2116,52 +2115,25 @@ float compute_text_height_at_width(LayoutContext* lycon,
         current_word_width += intrinsic_apply_full_text_transform(
             lycon, &codepoint, text_transform, is_word_start);
 
-        // CSS font-variant: small-caps scaling (matching measure_text_intrinsic_widths)
-        bool is_small_caps_lower = false;
-        if (font_variant == CSS_VALUE_SMALL_CAPS) {
-            uint32_t original = codepoint;
-            codepoint = apply_text_transform(codepoint, CSS_VALUE_UPPERCASE, false);
-            is_small_caps_lower = (codepoint != original);
-        }
+        // CSS font-variant: small-caps uses uppercase glyphs with scaled advance.
+        bool is_small_caps_lower = intrinsic_apply_small_caps(&codepoint, font_variant);
 
         is_word_start = false;
 
-        float advance = 0;
         if (text_codepoint_has_zero_advance(codepoint)) {
             i += bytes;
             continue;
         }
-        if (has_font) {
-            uint32_t glyph_index = font_get_glyph_index(lycon->font.font_handle, codepoint);
-            if (glyph_index) {
-                float kerning = 0;
-                if (has_kerning && prev_codepoint) {
-                    kerning = font_get_kerning(lycon->font.font_handle, prev_codepoint, codepoint);
-                }
-                GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
-                float sc_scale = is_small_caps_lower ?
-                    font_get_small_caps_scale(lycon->font.font_handle) : 1.0f;
-                advance = (ginfo.id != 0) ? ginfo.advance_x * sc_scale + kerning : 11.0f;
-            } else {
-                FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
-                LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
-                if (glyph) {
-                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                    advance = glyph->advance_x / pixel_ratio;
-                    if (is_small_caps_lower) {
-                        advance *= font_get_small_caps_scale(lycon->font.font_handle);
-                    }
-                } else {
-                    advance = 11.0f;
-                }
-            }
-            // letter-spacing after every character (CSS 2.1 §16.4, matching layout_text.cpp)
-            if (lycon->font.style) {
-                advance += lycon->font.style->letter_spacing;
-            }
+        bool glyph_loaded = false;
+        bool primary_glyph = has_font &&
+            font_get_glyph_index(lycon->font.font_handle, codepoint) != 0;
+        float kerning = primary_glyph && has_kerning && prev_codepoint
+            ? font_get_kerning(lycon->font.font_handle, prev_codepoint, codepoint) : 0.0f;
+        float advance = has_font ? intrinsic_loaded_glyph_advance(
+            lycon, codepoint, is_small_caps_lower, kerning, false, &glyph_loaded) : 0.0f;
+        if (!glyph_loaded) advance = 11.0f;
+        if (primary_glyph) {
             prev_codepoint = codepoint;
-        } else {
-            advance = 11.0f;
         }
 
         current_word_width += advance;
@@ -5088,6 +5060,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // Track inline-level content separately
     float inline_min_sum = 0.0f;  // Sum of the current unbreakable inline run
     float inline_max_sum = 0.0f;  // Sum of max-content widths for inline children
+    float vertical_block_axis_max = 0.0f;
+    float vertical_text_block_axis_max = 0.0f;
+    bool element_inline_axis_is_vertical = layout_element_inline_axis_is_vertical(element);
     bool has_inline_content = false;
     bool inline_run_ends_with_collapsible_space = false;
     float first_inline_child_min = -1.0f;  // First inline child's min-content (for text-indent)
@@ -5635,6 +5610,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
 
+                if (element_inline_axis_is_vertical) {
+                    // CSS Writing Modes maps a vertical inline container's
+                    // physical width to its block axis; preserve the measured
+                    // glyph advance when the inherited font context is still
+                    // provisional during the recursive intrinsic query.
+                    vertical_text_block_axis_max = max(vertical_text_block_axis_max,
+                        text_widths.max_content);
+                }
+
                 // white-space: nowrap/pre prevents line breaks, so min-content = max-content
                 if (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE) {
                     child_sizes.min_content = child_sizes.max_content;
@@ -5706,6 +5690,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             child_is_float = intrinsic_element_is_float(child_elem);
             is_inline = !child_is_float && (is_inline_level_element(child_elem) ||
                 (is_inline_level_element(element) && node_is_table_cell_like(child)));
+
+            if (is_inline && element_inline_axis_is_vertical) {
+                // Orthogonal inline descendants contribute their physical
+                // block-axis max-content size to this line box; summing it
+                // follows the horizontal surrogate instead of writing-mode.
+                vertical_block_axis_max = max(vertical_block_axis_max,
+                    child_sizes.max_content);
+            }
 
             log_debug("  child %s: min=%.1f, max=%.1f, is_inline=%d",
                       child_elem->node_name(), child_sizes.min_content, child_sizes.max_content, is_inline);
@@ -6190,13 +6182,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
-    if (has_inline_content && layout_block_inline_axis_is_vertical(view_block)) {
+    if (has_inline_content && element_inline_axis_is_vertical) {
         float block_axis_line_extent = intrinsic_element_line_height(
             lycon, element, view_block);
         // In vertical writing, line-height is the line box's physical block
         // extent; text glyph width alone would under-measure shrink-to-fit floats.
-        sizes.min_content = max(sizes.min_content, block_axis_line_extent);
-        sizes.max_content = max(sizes.max_content, block_axis_line_extent);
+        float block_axis_extent = max(block_axis_line_extent, vertical_block_axis_max);
+        sizes.min_content = max(sizes.min_content, block_axis_extent);
+        sizes.max_content = max(sizes.max_content, block_axis_extent);
     }
 
     // CSS Generated Content §2: ::before/::after pseudo-elements generate boxes that
@@ -6287,11 +6280,35 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 inline_min_sum = fmaxf(first_line_min, nonfirst_inline_min_max);
             }
         }
-        sizes.min_content = max(sizes.min_content, inline_min_sum);
-        // CSS 2.1 §9.5 + CSS Sizing 3 §4: At max-content (infinite width),
-        // floats and inline content share the same line. The total width needed
-        // is the sum of float widths + inline content width.
-        sizes.max_content = max(sizes.max_content, inline_max_sum + float_width_alongside_inline);
+        if (element_inline_axis_is_vertical) {
+            // CSS Writing Modes maps this container's physical width to the
+            // block axis, so its inline line is sized by the widest item.
+            float block_axis_extent = max(
+                intrinsic_element_line_height(lycon, element, view_block),
+                max(vertical_block_axis_max, vertical_text_block_axis_max));
+            if (layout_element_css_writing_mode(element) == CSS_VALUE_SIDEWAYS_RL &&
+                vertical_block_axis_max > 0.0f) {
+                float sideways_ascender = 0.0f;
+                float sideways_descender = 0.0f;
+                if (lycon->font.font_handle) {
+                    // sideways-rl maps the font's cross-axis content area into
+                    // the inline box; the descender therefore contributes to
+                    // the physical block extent alongside the child box.
+                    font_get_content_area_split(lycon->font.font_handle,
+                        &sideways_ascender, &sideways_descender);
+                }
+                block_axis_extent = max(block_axis_extent,
+                    vertical_block_axis_max + sideways_descender);
+            }
+            sizes.min_content = max(sizes.min_content, block_axis_extent);
+            sizes.max_content = max(sizes.max_content, block_axis_extent);
+        } else {
+            sizes.min_content = max(sizes.min_content, inline_min_sum);
+            // CSS 2.1 §9.5 + CSS Sizing 3 §4: At max-content (infinite width),
+            // floats and inline content share the same line. The total width needed
+            // is the sum of float widths + inline content width.
+            sizes.max_content = max(sizes.max_content, inline_max_sum + float_width_alongside_inline);
+        }
         // For min-content, floats stack vertically so inline content gets full width
         // (float_width not added to inline_min_sum)
 
@@ -6329,13 +6346,27 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             : multicol->column_gap;
         if (gap < 0.0f) gap = 0.0f;
         float total_gap = gap * (intrinsic_column_count - 1);
-        float column_floor = multicol->column_width;
-        float column_min = max(sizes.min_content, column_floor);
-        float column_max = max(sizes.max_content, column_floor);
-        // Auto column-count resolves to one column for this intrinsic query; the
-        // fixed column width is still a floor even when content is hidden.
-        sizes.min_content = column_min * intrinsic_column_count + total_gap;
-        sizes.max_content = column_max * intrinsic_column_count + total_gap;
+        if (layout_block_inline_axis_is_vertical(view_block) &&
+            multicol->column_height <= 0.0f &&
+            multicol->fill == COLUMN_FILL_BALANCE) {
+            // In vertical writing, columns advance along the inline axis; the
+            // physical width is the balanced block-axis extent of one column,
+            // not the horizontal sum of all column tracks.
+            float block_extent = multicol_intrinsic_vertical_block_extent(
+                lycon, view_block, element);
+            if (block_extent > 0.0f) {
+                sizes.min_content = max(sizes.min_content, block_extent);
+                sizes.max_content = max(sizes.max_content, block_extent);
+            }
+        } else {
+            float column_floor = multicol->column_width;
+            float column_min = max(sizes.min_content, column_floor);
+            float column_max = max(sizes.max_content, column_floor);
+            // Auto column-count resolves to one column for this intrinsic query; the
+            // fixed column width is still a floor even when content is hidden.
+            sizes.min_content = column_min * intrinsic_column_count + total_gap;
+            sizes.max_content = column_max * intrinsic_column_count + total_gap;
+        }
     }
 
     // Add padding and border
@@ -7697,26 +7728,12 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
 float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width) {
     // measure both min and max content in a single call to avoid redundant subtree traversals
-    float min_content, max_content;
-    if (node && node->is_element()) {
-        DomElement* element = node->as_element();
-        if (element) {
-            IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, element);
-            min_content = sizes.min_content;
-            max_content = sizes.max_content;
-        } else {
-            min_content = calculate_min_content_width(lycon, node);
-            max_content = calculate_max_content_width(lycon, node);
-        }
-    } else {
-        min_content = calculate_min_content_width(lycon, node);
-        max_content = calculate_max_content_width(lycon, node);
-    }
+    IntrinsicSizes sizes = calculate_node_intrinsic_widths(lycon, node);
 
     // CSS Sizing 3 §4.1: fit-content = max(min-content, min(max-content, available))
     // This ensures min-content is always respected as a floor, even when max-content
     // is smaller than min-content (e.g., negative text-indent).
-    return fmaxf(min_content, fminf(max_content, available_width));
+    return fmaxf(sizes.min_content, fminf(sizes.max_content, available_width));
 }
 
 // ============================================================================
@@ -7747,23 +7764,10 @@ IntrinsicSizesBidirectional measure_intrinsic_sizes(
 
     DomNode* node = static_cast<DomNode*>(element);
 
-    // Step 1: Measure width intrinsic sizes
-    // Width measurement doesn't depend on available width
-    // measure both min and max content widths in a single call
-    if (node->is_element()) {
-        DomElement* elem = node->as_element();
-        if (elem) {
-            IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, elem);
-            result.min_content_width = sizes.min_content;
-            result.max_content_width = sizes.max_content;
-        } else {
-            result.min_content_width = calculate_min_content_width(lycon, node);
-            result.max_content_width = calculate_max_content_width(lycon, node);
-        }
-    } else {
-        result.min_content_width = calculate_min_content_width(lycon, node);
-        result.max_content_width = calculate_max_content_width(lycon, node);
-    }
+    // Step 1: width measurement does not depend on available width.
+    IntrinsicSizes width_sizes = calculate_node_intrinsic_widths(lycon, node);
+    result.min_content_width = width_sizes.min_content;
+    result.max_content_width = width_sizes.max_content;
 
     // Step 2: Determine the width to use for height measurement
     // Height depends on width due to text wrapping

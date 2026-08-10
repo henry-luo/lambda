@@ -27,6 +27,7 @@
 #include <cstdio>
 
 extern __thread EvalContext* context;
+extern Item js_make_number(double value);
 extern "C" bool js_dom_is_host_driven_loop(void);  // defined in lambda/js/js_dom.cpp
 extern "C" Item js_async_hooks_get_current_resource(void);
 extern "C" Item js_async_hooks_enter_resource(Item resource);
@@ -47,7 +48,6 @@ extern "C" Item js_domain_capture_stack(void);
 extern "C" Item js_domain_capture_async_stack(void);
 extern "C" Item js_domain_set_stack(Item stack);
 extern "C" void js_domain_restore_stack(Item previous);
-extern Item js_make_number(double value);
 
 // =============================================================================
 // Task Queues
@@ -270,7 +270,6 @@ static Item raf_pop(int64_t* out_id) {
 
 extern "C" Item js_requestAnimationFrame(Item callback) {
     if (get_type_id(callback) != LMD_TYPE_FUNC) {
-        extern Item js_throw_type_error_code(const char*, const char*);
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"callback\" argument must be of type function.");
     }
@@ -478,7 +477,6 @@ static void timer_runtime_exit(JsTimerRuntimeScope* scope) {
 
 static void timer_unregister_gc_roots(JsTimerHandle *th) {
     if (!th || !th->roots_registered) return;
-    extern void heap_unregister_gc_root(uint64_t* slot);
 
     // timer roots belong to the captured heap. they do not need the captured
     // document, and re-entering a detached document can rebuild DOM globals on
@@ -518,7 +516,6 @@ static void timer_close_cb(uv_handle_t *handle) {
 // register a timer handle's callback and extra_args as GC roots so they
 // survive garbage collection while the timer is pending
 static void timer_register_gc_roots(JsTimerHandle *th) {
-    extern void heap_register_gc_root(uint64_t* slot);
     JsTimerRuntimeScope scope;
     if (!timer_runtime_enter(th, &scope)) return;
     heap_register_gc_root(&th->callback.item);
@@ -786,7 +783,6 @@ static Item make_timer_object(int64_t id, JsClass cls) {
                     (Item){.item = b2it(false)});
 
     // bind methods
-    extern Item js_new_function(void* fn, int nargs);
     // Native timeout methods use one Item ABI argument (the JS argument or
     // undefined). Declaring zero made the invoke trampoline call a P0 function
     // even though these handlers read Item this_val, corrupting `@@toPrimitive`.
@@ -968,7 +964,6 @@ extern "C" int js_event_loop_advance_virtual_time(double delta_ms, int frame_ste
 static Item js_schedule_timer(Item callback, Item delay, Item args_array,
                               bool has_args, bool is_interval) {
     if (get_type_id(callback) != LMD_TYPE_FUNC) {
-        extern Item js_throw_type_error_code(const char*, const char*);
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"callback\" argument must be of type function.");
     }
@@ -1022,7 +1017,6 @@ extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
 
 static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) {
     if (get_type_id(callback) != LMD_TYPE_FUNC) {
-        extern Item js_throw_type_error_code(const char*, const char*);
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"callback\" argument must be of type function.");
     }
@@ -1155,8 +1149,6 @@ static Item make_abort_error(Item signal) {
 // helper: check if signal is aborted, validate options types
 // returns 0=ok, 1=already aborted (reject_out set), -1=type error thrown
 static Item check_timer_options(Item options, Item* reject_out, int* result_code) {
-    extern Item js_promise_reject(Item reason);
-    extern Item js_throw_type_error_code(const char*, const char*);
     if (result_code) *result_code = 0;
     auto reject_reason = [reject_out](Item reason) -> int {
         if (item_is_error(reason)) reason = js_error_lane_payload(reason);
@@ -1255,8 +1247,6 @@ extern "C" void js_mock_scheduler_tick(Item delay) {
 }
 
 static Item js_mock_scheduler_wait(Item delay, Item options) {
-    extern Item js_promise_with_resolvers(void);
-    extern Item js_promise_reject(Item reason);
 
     Item reject_out = ItemNull;
     int opt_rc = 0;
@@ -1305,8 +1295,6 @@ static void mock_scheduler_register_gc_roots(void) {
 
 static Item js_set_promise_timer(Item delay, Item value, Item options,
         const char* timer_name, int timer_name_len, uint64_t start_delay) {
-    extern Item js_promise_with_resolvers(void);
-    extern Item js_promise_reject(Item reason);
 
     // check options for signal before creating timer
     Item reject_out = ItemNull;

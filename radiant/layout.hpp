@@ -33,10 +33,18 @@ struct InitialLetterInfo {
     bool raised;
 };
 
+struct InitialLetterBoxInsets {
+    float top;
+    float right;
+    float bottom;
+    float left;
+};
+
 bool layout_get_initial_letter_info(const DomElement* element,
                                     InitialLetterInfo* out_info);
 bool layout_get_text_initial_letter_info(const DomNode* text_node,
                                          InitialLetterInfo* out_info);
+InitialLetterBoxInsets layout_initial_letter_box_insets(ViewText* text);
 
 // ============================================================================
 // Layout Safety Guards
@@ -1016,6 +1024,9 @@ inline bool layout_uses_explicit_baseline_source(const ViewBlock* block) {
     return baseline_source == CSS_VALUE_FIRST || baseline_source == CSS_VALUE_LAST;
 }
 
+bool layout_inline_context_has_explicit_baseline_source(
+    ViewBlock* block);
+
 // Form controls own editable line boxes without exposing child ViewText nodes.
 // Select their baseline set directly so explicit baseline-source does not fall
 // back to the generic replaced-element border-edge baseline.
@@ -1239,6 +1250,10 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
 // ============================================================================
 
 bool is_multicol_container(ViewBlock* block);
+float multicol_used_block_axis_extent(ViewBlock* block);
+float multicol_intrinsic_vertical_block_extent(LayoutContext* lycon,
+                                               ViewBlock* block,
+                                               DomElement* element);
 bool multicol_spanner_can_escape_child(ViewBlock* child);
 float multicol_normal_gap_size(ViewBlock* block);
 float multicol_empty_intrinsic_inline_size(ViewBlock* block);
@@ -1508,6 +1523,12 @@ typedef struct Linebox {
     bool has_expanded_inline_lh;    // true if an inline element's own line-height exceeds the parent block's
     float max_inline_line_height;   // max explicit line-height from baseline-aligned inline descendants
     float max_atomic_inline_height; // max margin-box height from inline-block/replaced descendants
+    float max_text_ascender;        // maximum baseline-relative ascent from text on this line
+    float max_text_descender;       // maximum baseline-relative descent from text on this line
+    // A clamped scroll-container baseline leaves the parent strut tail below
+    // the alignment baseline; vertical publication consumes this separately.
+    float clamped_baseline_tail;
+    bool has_clamped_baseline_tail;
     bool has_inline_spans;          // true if line contains inline span elements (for bbox correction)
     bool has_different_inline_font; // true if any inline text uses a different font from the block's strut
     float max_normal_line_height;   // max normal line-height across all inline boxes on this line
@@ -2246,12 +2267,16 @@ WritingMode layout_block_writing_mode(ViewBlock* block);
 WritingMode layout_writing_mode_from_css(CssEnum writing_mode);
 void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                                                float block_extent,
+                                               float inline_extent,
                                                float line_height,
+                                               float clamped_baseline_tail,
                                                float surrogate_inline_origin,
                                                float physical_inline_origin,
                                                float surrogate_block_origin,
                                                float physical_block_origin,
-                                               bool center_block_axis);
+                                               bool center_block_axis,
+                                               bool use_central_baseline,
+                                               bool reverse_inline_axis);
 float layout_vertical_flow_block_start_margin(ViewBlock* child, WritingMode parent_mode);
 float layout_vertical_flow_block_end_margin(ViewBlock* child, WritingMode parent_mode);
 bool layout_parent_block_edge_is_unedged(ViewBlock* block, bool horizontal, bool start);
@@ -2317,6 +2342,8 @@ void table_auto_layout(LayoutContext* lycon, struct ViewTable* table);
 void adjust_table_text_positions_final(struct ViewTable* table);
 float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh = false);
 float find_last_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_x, bool use_normal_lh = false);
+float layout_table_baseline_for_source(LayoutContext* lycon, ViewBlock* table,
+                                       bool prefer_last);
 void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row,
     float table_abs_x, float cell_border, float cell_padding);
 void adjust_cell_text_positions_final(struct ViewBlock* cell, float text_abs_x);
@@ -2576,10 +2603,13 @@ const char* map_lambda_font_family_keyword(const char* keyword);
 
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);
+void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
+                                              View* view, float offset);
 void layout_bidi_line(LayoutContext* lycon);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
 View* layout_inline_fragment_root(View* view);
+float layout_rtl_inline_item_x(Linebox* line, float item_width);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
 void layout_block_resolve_intrinsic_width_constraints(LayoutContext* lycon,
                                                       ViewBlock* block);

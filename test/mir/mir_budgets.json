@@ -306,6 +306,21 @@
       }
     },
     {
+      "name": "js_error_lane_tag_budget",
+      "script": "test/mir/js/error_lane_dynamic_catch.js",
+      "language": "js",
+      "description": "D8.4.3 standing emission ratchet: the deliberate dynamic property-access error path has exactly one emitted ERROR-tag comparison. Any added lane check must be reviewed and re-baselined in this file.",
+      "budgets": {
+        "default": {
+          "functions": {
+            "_js_dynamicCaught_#_body": {
+              "error_lane_tag_tests": 1
+            }
+          }
+        }
+      }
+    },
+    {
       "name": "js_tune6_exact_collection",
       "script": "test/mir/js/tune6_exact_collection.js",
       "language": "js",

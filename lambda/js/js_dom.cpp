@@ -33,6 +33,10 @@
 #include "../../lib/mem_factory.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
+
+extern "C" void heap_register_gc_root(uint64_t* slot);
+extern "C" void heap_unregister_gc_weak(uint64_t* slot);
+extern Item js_make_number(double d);
 #include "../../lib/arena.h"
 #include "../../lib/str.h"
 #include "../../lib/url.h"
@@ -51,12 +55,10 @@
 #include "../input/html5/html5_parser.h"
 #include "../../lib/hashmap.h"
 
-extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern "C" Item vmap_new(void);
 extern "C" Item vmap_backing_get(VMap* vm, Item key);
 extern "C" bool vmap_backing_set(VMap* vm, Item key, Item value);
 extern void free_document(DomDocument* doc);
-extern Item js_make_number(double d);
 extern __thread EvalContext* context;
 void parse_xml(Input* input, const char* xml_string);
 
@@ -110,7 +112,6 @@ extern "C" const char* js_dom_to_attribute_cstr(Item value) {
 }
 
 // Forward declarations
-extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" Item js_eventtarget_add_listener(Item type, Item callback, Item opts);
 extern "C" Item js_eventtarget_remove_listener(Item type, Item callback, Item opts);
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
@@ -123,14 +124,8 @@ extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type,
 extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
 extern "C" int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out);
-extern "C" Item js_new_error_with_name(Item error_name, Item message);
-extern "C" Item js_throw_value(Item error);
 extern "C" Item js_dom_get_selection_function_for_document(void* doc);
-extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
-extern "C" Item js_object_get_own_property_names(Item object);
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
-extern "C" Item js_get_prototype(Item object);
-extern "C" void js_set_prototype(Item object, Item prototype);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
@@ -145,7 +140,7 @@ static Item js_dom_svg_get_animated_class_name(DomElement* elem);
 static Item js_dom_svg_create_transform(void);
 static Item js_dom_svg_create_transform_from_matrix(Item matrix);
 static RdtMatrix js_dom_svg_transform_from_element(DomElement* elem);
-static DomElement* dom_find_by_id(DomElement* root, const char* id);
+DomElement* js_dom_find_element_by_id(DomElement* root, const char* id);
 
 static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation);
@@ -274,7 +269,6 @@ extern "C" bool js_dom_current_is_main_document(void) {
 // Forward decls (defined further down in the foreign-doc / iframe section).
 extern "C" bool js_doc_has_browsing_context(void* doc);
 extern "C" void js_doc_mark_has_browsing_context(void* doc);
-extern "C" void* js_get_foreign_doc(Item item);
 static Url* js_dom_make_fallback_url(const char* raw_url);
 
 static inline DocState* js_dom_current_state();
@@ -1899,7 +1893,6 @@ static bool js_dom_collection_runtime_state_ensure() {
 
 extern "C" void heap_register_gc_weak(uint64_t* slot,
     void (*on_clear)(uint64_t*, void*), void* weak_context);
-extern "C" void heap_unregister_gc_weak(uint64_t* slot);
 
 struct DomCollectionRefreshGuard {
     bool active = false;
@@ -2178,10 +2171,6 @@ static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection)
     return nullptr;
 }
 
-extern "C" Item js_get_this(void);
-extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
-extern "C" Item js_new_function(void* func_ptr, int param_count);
-extern "C" void js_set_function_name(Item fn_item, Item name_item);
 static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
                                             Item count_arg, Item data_arg);
 static Item js_dom_text_insert_data_method(DomText* text_node, Item offset_arg,
@@ -3694,7 +3683,6 @@ extern "C" void js_dom_restore_active_document(void* prev_doc) {
 // document.implementation Singleton
 // ============================================================================
 
-extern "C" bool js_dom_implementation_method(Item method_name, Item* args, int argc, Item* out);
 
 static Item js_dom_impl_create_html_document_method(Item title) {
     Item method = (Item){.item = s2it(heap_create_name("createHTMLDocument"))};
@@ -3809,8 +3797,6 @@ extern "C" bool js_is_computed_style_item(Item item) {
     return js_is_computed_style(item);
 }
 
-extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name);
-extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item value);
 
 static bool js_is_inline_style(Item item) {
     TypeId tid = get_type_id(item);
@@ -4606,19 +4592,52 @@ static CssDeclaration* js_match_custom_property(DomElement* elem, const char* pr
 // Helper: find element by ID (tree walk)
 // ============================================================================
 
-static DomElement* dom_find_by_id(DomElement* root, const char* id) {
+DomElement* js_dom_find_element_by_id(DomElement* root, const char* id) {
     if (!root || !id) return nullptr;
     if (root->id && strcmp(root->id, id) == 0) return root;
 
     DomNode* child = root->first_child;
     while (child) {
         if (child->is_element()) {
-            DomElement* found = dom_find_by_id(child->as_element(), id);
+            DomElement* found = js_dom_find_element_by_id(child->as_element(), id);
             if (found) return found;
         }
         child = child->next_sibling;
     }
     return nullptr;
+}
+
+extern "C" void* js_dom_popover_target_for_button(void* button_ptr) {
+    DomElement* button = (DomElement*)button_ptr;
+    if (!button || !button->doc || !button->tag_name ||
+        strcasecmp(button->tag_name, "button") != 0) {
+        return nullptr;
+    }
+    const char* target_id = button->get_attribute("popovertarget");
+    if (!target_id || !*target_id || !button->doc->root) return nullptr;
+    DomElement* target = js_dom_find_element_by_id(button->doc->root, target_id);
+    return target && target->has_attribute("popover") ? target : nullptr;
+}
+
+extern "C" int js_dom_popover_target_action(void* button_ptr) {
+    DomElement* button = (DomElement*)button_ptr;
+    const char* action = button ? button->get_attribute("popovertargetaction") : nullptr;
+    if (!action || strcasecmp(action, "toggle") == 0) return 0;
+    if (strcasecmp(action, "show") == 0) return 1;
+    if (strcasecmp(action, "hide") == 0) return 2;
+    return 0;
+}
+
+extern "C" bool js_dom_activate_popover(void* popover_ptr, int action) {
+    DomElement* popover = (DomElement*)popover_ptr;
+    if (!popover || !popover->has_attribute("popover")) return false;
+
+    bool was_open = popover->is_popover_open();
+    bool should_open = action == 1 ? true : action == 2 ? false : !was_open;
+    if (was_open == should_open) return false;
+    popover->set_popover_open(should_open);
+    js_dom_notify_mutation(DOM_JS_MUTATION_STYLE, popover, popover->parent);
+    return true;
 }
 
 static const char* js_dom_normalize_contenteditable(const char* value) {
@@ -4651,7 +4670,7 @@ static DomElement* js_dom_form_owner(DomElement* elem) {
     if (form_id && *form_id) {
         DomDocument* doc = elem->doc ? elem->doc : _js_current_document;
         DomElement* root = doc ? doc->root : nullptr;
-        return dom_find_by_id(root, form_id);
+        return js_dom_find_element_by_id(root, form_id);
     }
     DomNode* p = elem->parent;
     while (p) {
@@ -6065,7 +6084,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         if (argc < 1) return ItemNull;
         const char* id = fn_to_cstr(args[0]);
         if (!id) return ItemNull;
-        DomElement* found = dom_find_by_id(root, id);
+        DomElement* found = js_dom_find_element_by_id(root, id);
         return found ? js_dom_wrap_element(found) : ItemNull;
     }
 
@@ -6103,9 +6122,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) {
             // per DOM spec, throw SyntaxError for invalid selectors
-            Item err_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
-            Item err_msg = (Item){.item = s2it(heap_create_name("is not a valid selector"))};
-            return js_throw_value(js_new_error_with_name(err_name, err_msg));
+            return js_throw_syntax_error(make_string_item("is not a valid selector"));
         }
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(doc);
@@ -8468,7 +8485,7 @@ static void _run_form_reset(DomElement* form_elem) {
                         const char* fa = ce->get_attribute("form");
                         DomElement* owner = nullptr;
                         if (fa && *fa) {
-                            owner = doc_root ? dom_find_by_id(doc_root, fa) : nullptr;
+                            owner = doc_root ? js_dom_find_element_by_id(doc_root, fa) : nullptr;
                         } else {
                             owner = nearest_form;
                         }
@@ -8506,7 +8523,7 @@ static void _run_form_reset(DomElement* form_elem) {
                         if (is_ctrl) {
                             const char* fa = ce->get_attribute("form");
                             if (fa && *fa) {
-                                DomElement* owner = dom_find_by_id(doc_root, fa);
+                                DomElement* owner = js_dom_find_element_by_id(doc_root, fa);
                                 if (owner == form_elem) _reset_form_control(ce);
                             }
                         }
@@ -12938,7 +12955,7 @@ static DomElement* js_dom_svg_use_reference(DomElement* elem) {
     const char* href = elem->get_attribute("href");
     if (!href) href = elem->get_attribute("xlink:href");
     if (!href || href[0] != '#' || !href[1]) return nullptr;
-    return dom_find_by_id(elem->doc->root, href + 1);
+    return js_dom_find_element_by_id(elem->doc->root, href + 1);
 }
 
 static JsDomSvgShapeHit js_dom_svg_reference_hit_viewport_point(DomElement* reference,
@@ -15253,7 +15270,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         if (argc < 1) return ItemNull;
         const char* id = fn_to_cstr(args[0]);
         if (!id) return ItemNull;
-        DomElement* found = dom_find_by_id(elem, id);
+        DomElement* found = js_dom_find_element_by_id(elem, id);
         return found ? js_dom_wrap_element(found) : ItemNull;
     }
 
@@ -15346,8 +15363,6 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         // If new_opt is an ancestor of elem, must throw HierarchyRequestError.
         for (DomNode* p = (DomNode*)elem; p; p = p->parent) {
             if ((DomElement*)p == new_opt) {
-                extern Item js_throw_value(Item error);
-                extern Item js_new_error_with_name(Item type_name, Item message);
                 Item n = (Item){.item = s2it(heap_create_name("HierarchyRequestError"))};
                 Item m = (Item){.item = s2it(heap_create_name(
                     "Failed to execute 'add' on 'HTMLSelectElement': "
@@ -15915,9 +15930,6 @@ extern "C" Item js_dom_style_remove_property_bridge(void* dom_elem, Item prop_ar
 // is satisfied by Array .item() and indexed access).
 // ============================================================================
 
-extern "C" Item js_throw_type_error(const char* message);
-extern "C" void js_set_function_name(Item fn_item, Item name_item);
-extern "C" Item js_new_function(void* func_ptr, int param_count);
 
 static Item _coll_illegal_constructor(Item /*first*/) {
     return js_throw_type_error("Illegal constructor");
