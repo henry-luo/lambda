@@ -2687,6 +2687,44 @@ static void shift_text_rects_y(View* view, float delta) {
     }
 }
 
+static void adjust_text_bounds_in_view(View* view);
+
+static bool text_rect_overlaps_first_fragment(ViewBlock* block, TextRect* rect) {
+    if (!block || !rect) return false;
+    DomElement* elem = lam::dom_require_element(block);
+    LayoutFragmentBox* first = elem->layout_fragment_list();
+    if (!first) return false;
+
+    float left = rect->x - block->x;
+    float top = rect->y - block->y;
+    float right = left + rect->width;
+    float bottom = top + rect->height;
+    return right > first->x && bottom > first->y &&
+        left < first->x + first->width && top < first->y + first->height;
+}
+
+static void shift_text_rects_y_in_first_fragment(View* view, ViewBlock* block, float delta) {
+    if (!view || !block) return;
+    if (view->view_type == RDT_VIEW_TEXT) {
+        TextRect* rect = lam::view_require<RDT_VIEW_TEXT>(view)->rect;
+        while (rect) {
+            if (text_rect_overlaps_first_fragment(block, rect)) {
+                rect->y += delta;
+            }
+            rect = rect->next;
+        }
+        adjust_text_bounds_in_view(view);
+        return;
+    }
+    if (view->is_group()) {
+        View* child = lam::view_require_element(view)->first_placed_child();
+        while (child) {
+            shift_text_rects_y_in_first_fragment(child, block, delta);
+            child = child->next();
+        }
+    }
+}
+
 // Shift text rects within an inline view, skipping block children.
 // Block children inside inline wrappers (block-in-inline) have their text rects
 // shifted separately when the block itself is shifted by apply_start_trim_recursive.
@@ -2828,6 +2866,7 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
         // area, and trim-start shrinks the top of the content area.
         // Absolute/fixed elements are NOT shifted — they're positioned
         // relative to the containing block edges, not the content area.
+        bool has_fragmented_content = block_has_layout_fragments(container);
         View* child = container->first_placed_child();
         while (child) {
             bool skip = false;
@@ -2838,6 +2877,20 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
                 }
             }
             if (!skip) {
+                if (has_fragmented_content) {
+                    // multicol projection has already positioned continuation
+                    // fragments at their fragmentainer start; shifting all
+                    // rects here would move every continuation by start trim.
+                    if (child->is_block()) {
+                        // block-flow siblings follow the shortened first
+                        // fragment, so their containing block still shifts.
+                        child->y -= trim;
+                    } else {
+                        shift_text_rects_y_in_first_fragment(child, container, -trim);
+                    }
+                    child = child->next();
+                    continue;
+                }
                 bool shift_child_box = true;
                 if (child->is_block()) {
                     ViewBlock* vb = lam::view_require_block(child);

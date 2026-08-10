@@ -2378,6 +2378,16 @@ static float multicol_project_mixed_direct_inline_content(
         flow_end->has_visible_lines = true;
     }
 
+    if (current_fragment > 0) {
+        // direct inline runs need the same first-fragment metadata as block
+        // descendants so text-box-trim can leave continuation fragments at
+        // their own fragmentainer start edge.
+        float row_gap = multicol_row_gap(block);
+        if (row_gap < 0.0f) row_gap = 0.0f;
+        multicol_store_layout_fragments(block, current_fragment + 1, column_count,
+            target_height, column_width, column_gap, row_gap, column_width, 0.0f);
+    }
+
     for (int bi = 0; bi < break_count; bi++) {
         int matched_line = -1;
         for (int li = 0; li < line_count; li++) {

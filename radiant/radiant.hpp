@@ -124,6 +124,9 @@ bool radiant_resolve_shared_data_resource_path(const char* href, const char* bas
                                                char* out_path, size_t out_size);
 bool radiant_resolve_layout_support_resource_path(const char* href, const char* base_path,
                                                   char* out_path, size_t out_size);
+bool radiant_resolve_layout_relative_resource_path(const char* source_path,
+                                                   const char* base_path,
+                                                   char* out_path, size_t out_size);
 
 // ===== script runner =====
 

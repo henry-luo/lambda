@@ -161,6 +161,9 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 1. Check `./log.txt` for execution trace
 2. Inspect the transpiled MIR — debug builds dump the JIT'd MIR to `temp/mir_dump.txt`; read it to debug Lambda script transpilation/codegen issues (boxing, type, comparison representation)
 
+### Chromium Reference Capture
+On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bundled `chrome-headless-shell` via `CHROME_HEADLESS_SHELL` instead; keep capture outputs under `./temp/`.
+
 ## Lambda Language Documentation
 - `doc/Lambda_Formal_Semantics.md` — **Normative semantics specification (ADR)** — core principles, value domain, truthiness, numerics, equality, total order, absence/errors, mutability, operators, metaprogramming; the semantic authority when docs or implementation disagree (decision records in `vibe/Lambda_Semantics_Formal*.md`)
 - `doc/Lambda_Formal_Design.md` — **Normative design/implementation specification** — D-numbered rulings D1–D8 (architecture, data representation, type & shape, memory, stacks/rooting, functions, modules/Jube, compilation) with impl footnotes and open issues `DO#`; the design authority when design docs or implementation disagree
