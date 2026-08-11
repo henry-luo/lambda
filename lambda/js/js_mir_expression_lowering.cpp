@@ -12781,9 +12781,16 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         // for settled Promises / non-Promises so `export default await
         // Promise.resolve(42)` still unwraps to 42. The chain-pending case is
         // what gives the dynamic-import chain its spec-order property.
+        extern int js_dynamic_import_suppress_module_drain;
+        // Dynamic imports enter module compilation at depth one, but their
+        // pending top-level await still has to suspend the import promise;
+        // otherwise js_await_sync returns an undefined placeholder instead of
+        // preserving the module's evaluation dependency.
+        bool is_dynamic_import_module = js_dynamic_import_suppress_module_drain > 0;
         bool is_p5_module_tla = (mt->is_module && mt->in_main &&
-            mt->current_func_index < 0 && !mt->in_generator && !mt->in_async &&
-            js_tla_module_depth_get() >= 2 && mt->filename);
+            !mt->in_generator && !mt->in_async && mt->filename &&
+            ((mt->current_func_index < 0 && js_tla_module_depth_get() >= 2) ||
+             is_dynamic_import_module));
         if (is_p5_module_tla) {
             MIR_reg_t spec_reg = jm_box_string_literal(mt, mt->filename,
                 (int)strlen(mt->filename));

@@ -9380,9 +9380,18 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
         (name_len == 10 && strncmp(name, "__frozen__", 10) == 0) ||
         (name_len == 12 && strncmp(name, "__is_proto__", 12) == 0) ||
         (name_len == 18 && strncmp(name, "__json_own_proto__", 18) == 0) ||
+        // Math and Date keep their native state in ordinary map slots; those
+        // implementation slots must not enter Object.keys or descriptor enumeration.
+        (name_len == 11 && strncmp(name, "__is_math__", 11) == 0) ||
+        (name_len == 8 && strncmp(name, "__time__", 8) == 0) ||
         (name_len == 4 && strncmp(name, "__rd", 4) == 0) ||
         (name_len == 6 && strncmp(name, "__ta__", 6) == 0) ||
-        (name_len == 6 && strncmp(name, "__ab__", 6) == 0)) {
+        (name_len == 6 && strncmp(name, "__ab__", 6) == 0) ||
+        // WeakRef and FinalizationRegistry store their specification internal
+        // slots in map storage; those slots must not become public own keys.
+        (name_len == 18 && strncmp(name, "__weakref_target__", 18) == 0) ||
+        (name_len == 14 && strncmp(name, "__fr_cleanup__", 14) == 0) ||
+        (name_len == 12 && strncmp(name, "__fr_cells__", 12) == 0)) {
         return true;
     }
     return false;
