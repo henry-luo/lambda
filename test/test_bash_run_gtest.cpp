@@ -40,7 +40,10 @@
 #endif
 
 static const char* BASH_SCRIPT_DIR = "test/bash";
+#ifndef _WIN32
+// the Windows runner uses its native process path and does not use this POSIX timeout.
 static const int TEST_TIMEOUT_SECONDS = 10;
+#endif
 
 //==============================================================================
 // Test Info

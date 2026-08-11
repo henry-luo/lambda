@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <inttypes.h>
 
 // ============================================================================
 #include "avl_tree.h"
@@ -783,7 +784,8 @@ bool avl_tree_validate(AvlTree* tree) {
 // Helper callback for avl_tree_print
 static bool print_node_callback(AvlNode* node, void* ctx) {
     struct PrintContext* pc = (struct PrintContext*)ctx;
-    printf("  [%d] key=%lu", pc->index++, node->property_id);
+    // uintptr_t has a different printf width under MinGW; use its portable format macro.
+    printf("  [%d] key=%" PRIuPTR, pc->index++, node->property_id);
     if (pc->print_value) {
         printf(" value=");
         pc->print_value(node->declaration);

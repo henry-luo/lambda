@@ -1211,7 +1211,9 @@ void font_add_scan_directory(FontDatabase* db, const char* directory) {
     log_debug("Added font scan directory: %s", directory);
 }
 
-// Fast font file extension checking using suffix matching
+#ifndef _WIN32
+// windows uses its native font directory path, so the POSIX recursive-scan helpers are not compiled.
+// fast font file extension checking using suffix matching
 static bool is_font_file(const char* filename) {
     if (!filename) return false;
 
@@ -1392,6 +1394,7 @@ static FontEntry* create_font_placeholder(const char* file_path, Arena* arena) {
 
     return font;
 }
+#endif
 
 static void scan_directory_recursive(FontDatabase* db, const char* directory, int max_depth) {
     if (max_depth <= 0) return;
@@ -1618,6 +1621,8 @@ bool font_database_scan(FontDatabase* db) {
     // PHASE 2: Parse priority fonts immediately
     log_debug("Phase 2: Parsing priority fonts (%d total files found)", db->all_fonts->length);
     int priority_fonts_parsed = 0;
+#ifndef _WIN32
+    // windows does not populate the POSIX recursive scan inventory before this phase.
     for (size_t i = 0; i < db->all_fonts->length; i++) {
         FontEntry* font = (FontEntry*)db->all_fonts->data[i];
         if (font && font->is_placeholder && font->family_name &&
@@ -1652,6 +1657,7 @@ bool font_database_scan(FontDatabase* db) {
             }
         }
     }
+#endif
 
 #ifdef _WIN32
     // Also scan Windows registry

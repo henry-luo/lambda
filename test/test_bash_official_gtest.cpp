@@ -360,7 +360,10 @@ static std::vector<BashOfficialTestInfo> discover_bash_tests() {
 //==============================================================================
 
 // Per-test timeout in seconds (some tests may hang on interactive features)
+#ifndef _WIN32
+// the Windows runner does not compile the POSIX fork/select timeout path.
 static const int TEST_TIMEOUT_SECONDS = 10;
+#endif
 
 #ifndef _WIN32
 #include <signal.h>

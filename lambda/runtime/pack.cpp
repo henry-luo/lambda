@@ -14,9 +14,11 @@
 
 static int convert_to_virtual_impl(Pack* pack);
 static void vm_grow(Pack* pack, size_t needed_size);
+#if defined(__APPLE__) || defined(__linux__)
 static void* vm_reserve(size_t size);
 static int vm_commit(void* addr, size_t size);
 static void vm_release(void* addr, size_t size);
+#endif
 
 // Global page size variable
 static size_t g_page_size = 0;

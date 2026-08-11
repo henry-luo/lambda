@@ -60,6 +60,8 @@ static int frame_clock_load_int(volatile int* target) {
     return __atomic_load_n(target, __ATOMIC_ACQUIRE);
 }
 
+#if defined(__APPLE__) || defined(__linux__)
+// windows stores its frame timestamp in the QPC-specific int64 field below.
 static void frame_clock_store_u64(volatile uint64_t* target, uint64_t value) {
     __atomic_store_n(target, value, __ATOMIC_RELEASE);
 }
@@ -67,6 +69,7 @@ static void frame_clock_store_u64(volatile uint64_t* target, uint64_t value) {
 static uint64_t frame_clock_load_u64(volatile uint64_t* target) {
     return __atomic_load_n(target, __ATOMIC_ACQUIRE);
 }
+#endif
 
 #if defined(_WIN32)
 static void frame_clock_store_i64(volatile int64_t* target, int64_t value) {

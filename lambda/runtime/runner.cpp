@@ -204,6 +204,8 @@ static void profile_record_phase(const PhaseProfile* profile) {
 #endif
 }
 
+#ifndef _WIN32
+// windows does not compile the parallel import profiler that records these levels.
 static void profile_record_import_level(const ImportLevelProfile* profile) {
     if (!profile) return;
 #ifndef _WIN32
@@ -216,6 +218,7 @@ static void profile_record_import_level(const ImportLevelProfile* profile) {
     pthread_mutex_unlock(&profile_mutex);
 #endif
 }
+#endif
 
 void profile_dump_to_file() {
     if (!profile_enabled || profile_count == 0) return;

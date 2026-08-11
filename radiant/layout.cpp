@@ -2418,7 +2418,8 @@ static float rtl_initial_letter_place_line(View* view, int line_number,
     return cursor;
 }
 
-static void place_rtl_initial_letter_line(LayoutContext* lycon) {
+// this helper is shared with layout_text.cpp, so its definition must match the header's external linkage.
+void place_rtl_initial_letter_line(LayoutContext* lycon) {
     if (!lycon || !lycon->line.has_initial_letter ||
         lycon->block.direction != CSS_VALUE_RTL || !lycon->line.start_view) return;
 

@@ -15,6 +15,8 @@
 #include <ctime>
 #ifndef _WIN32
 #include <unistd.h>    // for usleep
+#else
+#include <windows.h>
 #endif
 
 #include "../../../lib/log.h"
@@ -851,7 +853,12 @@ static Item py_time_sleep(Item secs) {
     if (t == LMD_TYPE_FLOAT) s = it2d(secs);
     else if (t == LMD_TYPE_INT) s = (double)it2i(secs);
     if (s > 0) {
+#ifdef _WIN32
+        // the Windows CRT has no POSIX useconds_t/usleep pair.
+        Sleep((DWORD)(s * 1000.0));
+#else
         usleep((useconds_t)(s * 1e6));
+#endif
     }
     return ItemNull;
 }

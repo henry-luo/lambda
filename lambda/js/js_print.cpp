@@ -150,6 +150,9 @@ void print_js_ast_node(JsAstNode* node, int indent) {
                 case JS_LITERAL_UNDEFINED:
                     printf("undefined\n");
                     break;
+                default:
+                    // shared AST tags include Python-only literals; JS diagnostics leave unknown tags unlabeled.
+                    break;
             }
             break;
         }

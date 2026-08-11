@@ -3424,13 +3424,13 @@ static bool cp_get_spawn_timeout_ms(Item options_item, int64_t* timeout_ms) {
     return true;
 }
 
-static const char* cp_signal_name_from_number(int sig) {
 #ifndef _WIN32
+static const char* cp_signal_name_from_number(int sig) {
     if (sig == SIGKILL) return "SIGKILL";
     if (sig == SIGTERM) return "SIGTERM";
-#endif
     return "SIGTERM";
 }
+#endif
 
 static int cp_get_kill_signal(Item options_item, const char** signal_name) {
 #ifndef _WIN32

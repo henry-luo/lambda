@@ -1424,6 +1424,8 @@ static Item dns_array_copy(Item servers) {
     return copy;
 }
 
+// windows uses the native resolver path and never parses /etc/resolv.conf.
+#ifndef _WIN32
 static void dns_push_resolv_conf_server(Item servers, const char* start, const char* end) {
     while (start < end && (*start == ' ' || *start == '\t')) start++;
     while (end > start && (end[-1] == ' ' || end[-1] == '\t' ||
@@ -1434,6 +1436,7 @@ static void dns_push_resolv_conf_server(Item servers, const char* start, const c
     int len = (int)(end - start);
     if (len > 0 && len < 128) js_array_push(servers, make_string_item(start, len));
 }
+#endif
 
 static Item dns_load_system_servers(void) {
     Item servers = js_array_new(0);
