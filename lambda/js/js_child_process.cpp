@@ -14,6 +14,7 @@
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
+#include "../../lib/windows_compat.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -3563,7 +3564,9 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
                                            (int)sizeof(full_cmd), &pos);
     }
 
-    mkdir("temp", 0755);
+    // Windows ignores POSIX directory modes; use the shared compatibility
+    // helper so the spawnSync capture directory is created on every target.
+    lambda_mkdir("temp", 0755);
     char temp_dir[PATH_MAX];
 #ifndef _WIN32
     if (getcwd(temp_dir, sizeof(temp_dir))) {

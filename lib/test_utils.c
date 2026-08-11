@@ -14,9 +14,20 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#ifdef _WIN32
+#include <direct.h>
+#include <process.h>
+#define getpid _getpid
+#define mkdir(path, mode) _mkdir(path)
+#define popen _popen
+#define pclose _pclose
+#define WIFEXITED(status) 1
+#define WEXITSTATUS(status) (status)
+#else
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
+#endif
+#include <time.h>
 
 // -----------------------------------------------------------------------------
 // Internal: build "./temp/<base>_<pid>_<epoch>[.<ext>]". Caller frees.
