@@ -619,11 +619,17 @@ static bool jm_current_function_captures_with_scope(JsMirTranspiler* mt) {
 }
 
 static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
-    if (!mt || mt->current_func_index < 0 || mt->func_count <= 0) return false;
+    if (!mt || !mt->current_fc) return false;
+    // Synthetic/native body lowering can leave current_func_index unset even
+    // though current_fc identifies a direct IIFE declaration. Keep its
+    // promoted lexical bindings visible; otherwise a retained function reads
+    // them as unresolved globals after the original IIFE has returned.
+    if (mt->current_fc->is_iife_func_decl || mt->current_fc->is_iife_body) return true;
+    if (mt->current_func_index < 0 || mt->func_count <= 0) return false;
     int idx = mt->current_func_index;
     while (idx >= 0 && idx < mt->func_count) {
         JsFuncCollected* fc = &mt->func_entries[idx];
-        if (fc->is_iife_body) return true;
+        if (fc->is_iife_func_decl || fc->is_iife_body) return true;
         idx = fc->parent_index;
     }
     return false;
@@ -12627,20 +12633,16 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         return result;
     }
     case JS_AST_NODE_REGEX: {
-        // Static AST literals have pool-owned spelling, so their compiled form
-        // can be safely retained by the literal cache across evaluations.
+        // Embed literal bytes in MIR; compiler name-pool pointers can be retired
+        // before a later event executes this generated code.
         JsRegexNode* re = (JsRegexNode*)expr;
-        MIR_reg_t pat_ptr = jm_new_reg(mt, "re_pat", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pat_ptr),
-            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)re->pattern)));
-        MIR_reg_t flags_ptr = jm_new_reg(mt, "re_flags", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, flags_ptr),
-            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)re->flags)));
-        return jm_call_4(mt, "js_create_regex_literal", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, pat_ptr),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, re->pattern_len),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, flags_ptr),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, re->flags_len));
+        MIR_reg_t pattern = jm_box_string_literal(mt, re->pattern, re->pattern_len);
+        MIR_reg_t flags = re->flags
+            ? jm_box_string_literal(mt, re->flags, re->flags_len)
+            : jm_box_string_literal(mt, "", 0);
+        return jm_call_2(mt, "js_create_regex_literal_items", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, pattern),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, flags));
     }
     case JS_AST_NODE_YIELD_EXPRESSION: {
         JsYieldNode* yield_node = (JsYieldNode*)expr;

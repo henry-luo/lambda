@@ -1151,7 +1151,7 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
 
     float abs_x = 0.0f, abs_y = 0.0f;
     view_to_absolute_position(static_cast<View*>(select), select->x,
-                              select->y + select->height,
+                              select->y + form_select_dropdown_row_height(form),
                               0.0f, 0.0f, &abs_x, &abs_y);
     View* parent = select->parent;
     while (parent) {
@@ -1174,8 +1174,9 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
     float y = rdcon->block.y + abs_y * s;
     float w = select->width * s;
 
-    // Option height based on select height
-    float option_height = select->height * s;
+    // native option rows keep their intrinsic metric when the closed control
+    // has an author-specified height
+    float option_height = form_select_dropdown_row_height(form) * s;
     int max_visible = 10;
     int visible_count = (form->option_count < max_visible) ? form->option_count : max_visible;
     if (visible_count <= 0) visible_count = 1;

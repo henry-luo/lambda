@@ -88,6 +88,26 @@ bool editing_surface_from_focus(DocState* state, EditingSurface* out) {
     return editing_surface_from_target(focused, out);
 }
 
+View* editing_focus_target_from_target(View* target) {
+    if (!target) return nullptr;
+
+    EditingSurface surface;
+    if (editing_surface_from_target(target, &surface)) {
+        if (surface.owner) return static_cast<View*>(surface.owner);
+        return target;
+    }
+
+    if (!target->is_element()) return nullptr;
+    DomElement* element = target->as_element();
+    for (DomNode* child = element->first_child;
+         child; child = child->next_sibling) {
+        View* candidate = editing_focus_target_from_target(static_cast<View*>(child));
+        if (candidate) return candidate;
+    }
+
+    return nullptr;
+}
+
 bool editing_surface_is_rich(const EditingSurface* surface) {
     return surface && surface->kind == EDIT_SURFACE_CONTENTEDITABLE;
 }

@@ -120,6 +120,7 @@ static bool sim_focus_element_with_js_runtime(DomDocument* doc, View* target) {
 }
 
 static bool sim_target_is_rich_editing_surface(View* target) {
+    target = editing_focus_target_from_target(target);
     EditingSurface surface;
     return target && editing_surface_from_target(target, &surface) &&
         editing_surface_is_rich(&surface);
@@ -3721,13 +3722,15 @@ static View* resolve_assert_element(EventSimContext* ctx, UiContext* uicon,
 static void sim_focus_typing_target(UiContext* uicon, SimEvent* ev) {
     if (!uicon || !ev || (!ev->target_selector && !ev->target_text)) return;
     View* target_elem = resolve_target_element(ev, uicon->document);
+    View* focus_target = editing_focus_target_from_target(target_elem);
+    View* native_focus_target = focus_target ? focus_target : target_elem;
     DocState* state = uicon->document ? (DocState*)uicon->document->state : nullptr;
-    bool already_focused = target_elem && target_elem->is_element() &&
-        state_get_pseudo_state(state, target_elem, PSEUDO_STATE_FOCUS);
+    bool already_focused = native_focus_target && native_focus_target->is_element() &&
+        state_get_pseudo_state(state, native_focus_target, PSEUDO_STATE_FOCUS);
     if (already_focused) return;
 
     if (sim_target_is_rich_editing_surface(target_elem) &&
-        sim_focus_element_with_js_runtime(uicon->document, target_elem)) {
+        sim_focus_element_with_js_runtime(uicon->document, native_focus_target)) {
         sim_input_turn_mark_pending();
         return;
     }
@@ -3742,10 +3745,12 @@ static void sim_focus_typing_target(UiContext* uicon, SimEvent* ev) {
     // lookup and mouse dispatch. Re-resolve before the programmatic fallback
     // so physical keys cannot remain on a detached previous editing host.
     target_elem = resolve_target_element(ev, uicon->document);
+    focus_target = editing_focus_target_from_target(target_elem);
+    native_focus_target = focus_target ? focus_target : target_elem;
     state = uicon->document ? (DocState*)uicon->document->state : nullptr;
-    if (target_elem && target_elem->is_element() &&
-        (!state || focus_get(state) != target_elem) &&
-        sim_focus_element_with_js_runtime(uicon->document, target_elem)) {
+    if (native_focus_target && native_focus_target->is_element() &&
+        (!state || focus_get(state) != native_focus_target) &&
+        sim_focus_element_with_js_runtime(uicon->document, native_focus_target)) {
         sim_input_turn_mark_pending();
     }
 }
@@ -4248,11 +4253,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_FOCUS: {
             View* target = resolve_target_element(ev, uicon->document);
+            View* focus_target = editing_focus_target_from_target(target);
+            View* native_focus_target = focus_target ? focus_target : target;
             // Rich editor blocks can install document-level pointer selection.
             // A stale layout hit from the focus harness must not select a
             // different block before this explicit focus operation runs.
             if (sim_target_is_rich_editing_surface(target) &&
-                sim_focus_element_with_js_runtime(uicon->document, target)) {
+                sim_focus_element_with_js_runtime(uicon->document, native_focus_target)) {
                 sim_input_turn_mark_pending();
                 break;
             }
@@ -4267,9 +4274,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // The click can cause an editor to rebuild its block subtree;
             // never call focus() through the view captured before that turn.
             target = resolve_target_element(ev, uicon->document);
+            focus_target = editing_focus_target_from_target(target);
+            native_focus_target = focus_target ? focus_target : target;
             if (target && target->is_element() &&
-                (!uicon->document->state || focus_get(uicon->document->state) != target) &&
-                sim_focus_element_with_js_runtime(uicon->document, target)) {
+                (!uicon->document->state || focus_get(uicon->document->state) != native_focus_target) &&
+                sim_focus_element_with_js_runtime(uicon->document, native_focus_target)) {
                 sim_input_turn_mark_pending();
             }
             break;
@@ -4391,6 +4400,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         case SIM_EVENT_PASTE_TEXT: {
             if (ev->target_selector || ev->target_text) {
                 View* target = resolve_target_element(ev, uicon->document);
+                View* focus_target = editing_focus_target_from_target(target);
                 // A pointer click can open an editor toolbar and steal focus before
                 // Cmd/Ctrl+V; JS-backed rich hosts require the same direct focus path
                 // used by physical typing so clipboard input reaches their owner.
@@ -4398,7 +4408,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     // The preceding focus/selection is the caller's intended paste
                     // position. Re-focusing can activate editor chrome instead.
                 } else if (sim_target_is_rich_editing_surface(target) &&
-                    sim_focus_element_with_js_runtime(uicon->document, target)) {
+                    sim_focus_element_with_js_runtime(uicon->document, focus_target)) {
                     sim_input_turn_mark_pending();
                 } else {
                     int x, y;

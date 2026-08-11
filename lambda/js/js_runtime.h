@@ -366,6 +366,7 @@ Item js_eval_private_resolve(Item unscoped_key);
 int64_t js_262_eval_script_is_active(void);
 Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len);
 Item js_create_regex_literal(const char* pattern, int pattern_len, const char* flags, int flags_len);
+Item js_create_regex_literal_items(Item pattern_item, Item flags_item);
 Item js_regexp_construct(Item pattern_item, Item flags_item);
 Item js_regex_test(Item regex, Item str);
 Item js_regex_exec(Item regex, Item str);

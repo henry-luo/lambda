@@ -2070,6 +2070,7 @@ JitImport jit_runtime_imports[] = {
     {"js_builtin_eval", FPTR(js_builtin_eval)},
     {"js_create_regex", FPTR(js_create_regex)},
     {"js_create_regex_literal", FPTR(js_create_regex_literal)},
+    {"js_create_regex_literal_items", FPTR(js_create_regex_literal_items)},
     {"js_regexp_construct", FPTR(js_regexp_construct)},
     {"js_url_construct", FPTR(js_url_construct)},
     {"js_url_construct_with_base", FPTR(js_url_construct_with_base)},

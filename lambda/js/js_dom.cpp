@@ -1364,6 +1364,9 @@ static void _set_checkedness(DomElement* elem, bool v) {
     DocState* state = _state_for_element(elem);
     if (state) {
         form_control_set_checked(state, (View*)elem, v);
+        // JS checkedness changes the live form state without passing through
+        // native click dispatch, so explicitly refresh dependent :checked CSS.
+        radiant_sync_pseudo_state((View*)elem, PSEUDO_STATE_CHECKED, v);
         return;
     }
 
@@ -5019,7 +5022,8 @@ static void js_dom_focus_set_selection_for_element(DocState* state, DomElement* 
 
     if (js_dom_is_editing_host(elem)) {
         DomSelection* existing = state->dom_selection;
-        if (js_dom_selection_is_inside_element(existing, elem)) {
+        bool selection_inside = js_dom_selection_is_inside_element(existing, elem);
+        if (selection_inside) {
             return;
         }
         DomBoundary boundary = { (DomNode*)elem, 0 };
@@ -5994,6 +5998,54 @@ static bool js_dom_append_document_text(DomDocument* doc, const char* text) {
     return true;
 }
 
+static bool js_dom_exec_command_insert_html(DomDocument* doc, Item value) {
+    if (!doc || !doc->state || !doc->state->dom_selection) return false;
+
+    DomSelection* selection = doc->state->dom_selection;
+    if (selection->range_count != 1) return false;
+    DomRange* range = selection->ranges[0];
+    if (!range || !range->start.node || range->start.node != range->end.node ||
+        !range->start.node->is_text()) {
+        return false;
+    }
+
+    EditingSurface surface;
+    if (!editing_surface_from_focus(doc->state, &surface) ||
+        !editing_surface_is_rich(&surface)) {
+        return false;
+    }
+
+    const char* replacement = js_dom_to_dom_string_cstr(value);
+    if (!replacement) replacement = "";
+    DomText* text = range->start.node->as_text();
+    uint32_t start = range->start.offset;
+    uint32_t end = range->end.offset;
+    if (end < start) {
+        uint32_t swap = start;
+        start = end;
+        end = swap;
+    }
+    uint32_t replacement_len = js_dom_utf16_length_from_utf8(
+        replacement, strlen(replacement));
+    Item replacement_result = js_dom_replace_text_data(
+        text, start, end - start, replacement);
+    if (item_is_error(replacement_result)) {
+        return false;
+    }
+
+    const char* exception = nullptr;
+    if (!dom_selection_collapse(selection, static_cast<DomNode*>(text),
+                                start + replacement_len, &exception)) {
+        log_error("js_document_exec_command: failed to place insertion caret: %s",
+                  exception ? exception : "unknown");
+        return false;
+    }
+    // Editor.js uses execCommand(insertHTML) for a plain paste; the DOM
+    // bridge must mutate the selected text run or its onChange save remains
+    // unchanged even though the paste event was handled.
+    return true;
+}
+
 extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     const char* method = fn_to_cstr(method_name);
     if (!method) {
@@ -6025,6 +6077,16 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     DomElement* root = doc->root; // may be null for foreign docs without a root
 
     log_debug("js_document_method: '%s' with %d args", method, argc);
+
+    if (strcmp(method, "execCommand") == 0) {
+        if (argc < 1) return (Item){.item = ITEM_FALSE};
+        const char* command = fn_to_cstr(args[0]);
+        if (!command || strcasecmp(command, "insertHTML") != 0) {
+            return (Item){.item = ITEM_FALSE};
+        }
+        return (Item){.item = b2it(argc >= 3 &&
+            js_dom_exec_command_insert_html(doc, args[2]))};
+    }
 
     Item module_result = ItemNull;
     // MIR lowers direct document.method() calls here, bypassing the proxy entry.
@@ -7145,7 +7207,12 @@ extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus) {
             View* old_focus = state ? focus_get(state) : nullptr;
             js_document_active_element = elem;
             focus_set_programmatic(state, (View*)elem);
-            js_dom_focus_set_selection_for_element(state, elem);
+            // focus() on an already-focused editing host must preserve the
+            // live selection; reinitialising it here moves scripted caret
+            // placement back to the host start before the next key event.
+            if (old_focus != (View*)elem) {
+                js_dom_focus_set_selection_for_element(state, elem);
+            }
             if (old_focus != (View*)elem) js_dom_dispatch_focus_events(elem);
         }
     } else {
@@ -7167,8 +7234,13 @@ extern "C" bool js_dom_focus_editing_host_for_automation(void* dom_elem) {
     // focus() would dereference an unbound interpreter context. The common
     // focus and Selection writers are sufficient for physical input routing.
     js_document_active_element = elem;
+    View* old_focus = focus_get(state);
     focus_set_programmatic(state, (View*)elem);
-    js_dom_focus_set_selection_for_element(state, elem);
+    // automation focus follows the same idempotent focus contract as JS:
+    // preserve an explicitly placed selection when the host already owns focus.
+    if (old_focus != (View*)elem) {
+        js_dom_focus_set_selection_for_element(state, elem);
+    }
     return true;
 }
 
@@ -10918,10 +10990,14 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             }
             log_debug("js_dom_set_property: set textContent on <%s>",
                       elem->tag_name ? elem->tag_name : "?");
-            // textContent replaces an entire child list. Record it atomically
-            // so reconciliation cannot relayout only the removed old child.
-            js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
-                                   (DomNode*)elem, (DomNode*)elem);
+            // textContent replaces children, but its impact is still known:
+            // stylesheet text changes CSS globally while ordinary text changes
+            // only the target subtree. TREE_REPLACE erased that distinction and
+            // incorrectly forced broad reconciliation for both cases.
+            DomJsMutationKind kind = elem->tag_name &&
+                strcasecmp(elem->tag_name, "style") == 0
+                ? DOM_JS_MUTATION_STYLE : DOM_JS_MUTATION_TEXT;
+            js_dom_mutation_notify(kind, (DomNode*)elem, (DomNode*)elem);
         }
         return value;
     }
@@ -12033,12 +12109,13 @@ static RdtMatrix js_dom_svg_viewbox_transform(DomElement* elem) {
     float viewport_width = js_dom_svg_attribute_number(elem, "width", 0.0f);
     float viewport_height = js_dom_svg_attribute_number(elem, "height", 0.0f);
     if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
-        Item rect = js_dom_get_bounding_client_rect_bridge((void*)elem);
+        // hit-testing runs for Lambda template documents without a JS realm;
+        // querying a temporary DOMRect here dereferenced that absent realm.
         if (viewport_width <= 0.0f) {
-            viewport_width = js_dom_svg_number(js_property_get(rect, js_string_key("width")), 0.0f);
+            viewport_width = (float)js_dom_geometry_dimension(elem, true);
         }
         if (viewport_height <= 0.0f) {
-            viewport_height = js_dom_svg_number(js_property_get(rect, js_string_key("height")), 0.0f);
+            viewport_height = (float)js_dom_geometry_dimension(elem, false);
         }
     }
     if (viewport_width <= 0.0f || viewport_height <= 0.0f) return transform;
@@ -13855,6 +13932,8 @@ static int64_t js_dom_backed_node_index(DomElement* parent, DomNode* child) {
     return -1;
 }
 
+static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child);
+
 static bool js_dom_remove_backed_element_item(DomElement* parent,
                                                DomElement* child,
                                                int64_t child_index) {
@@ -13961,7 +14040,64 @@ static bool js_dom_insert_backed_element(DomElement* parent, DomNode* child,
         log_error("js_dom_insert_backed_element: inline insert changed backing identity");
         return false;
     }
-    return child->parent == (DomNode*)parent;
+    if (child->parent != (DomNode*)parent) {
+        // MarkEditor relinks only wrappers already present in the backing
+        // Element; a newly-created mark wrapper still needs the DOM-side link
+        // or the renderer loses the element immediately after insertion.
+        return ((DomNode*)parent)->insert_before(child, ref_child);
+    }
+    return true;
+}
+
+static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
+                                      DomNode* ref_child) {
+    if (!parent || !text || !text->native_string || !parent->doc ||
+        !parent->doc->input) return false;
+
+    if (text->parent) {
+        if (!text->parent->is_element() ||
+            !js_dom_remove_backed_child(text->parent->as_element(),
+                                        (DomNode*)text)) {
+            return false;
+        }
+    }
+
+    int64_t insert_index = dom_element_to_element(parent)->length;
+    if (ref_child) {
+        insert_index = -1;
+        for (DomNode* candidate = ref_child; candidate;
+             candidate = candidate->next_sibling) {
+            int64_t candidate_index = js_dom_backed_node_index(parent, candidate);
+            if (candidate_index >= 0) {
+                insert_index = candidate_index;
+                break;
+            }
+        }
+        if (insert_index < 0) {
+            // DOM-only siblings are preserved by MarkEditor relinking; count
+            // backed siblings before the reference to keep their relative order.
+            insert_index = 0;
+            for (DomNode* candidate = parent->first_child;
+                 candidate && candidate != ref_child;
+                 candidate = candidate->next_sibling) {
+                if (js_dom_backed_node_index(parent, candidate) >= 0) {
+                    insert_index++;
+                }
+            }
+        }
+    }
+
+    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    Element* parent_backing = dom_element_to_element(parent);
+    Item result = editor.elmt_insert_child(
+        {.element = parent_backing},
+        (int)insert_index,
+        {.item = s2it(text->native_string)});
+    if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
+        log_error("js_dom_insert_backed_text: inline insert changed backing identity");
+        return false;
+    }
+    return text->parent == (DomNode*)parent;
 }
 
 static bool js_dom_insert_before_child(DomElement* parent, DomNode* child,
@@ -13977,8 +14113,10 @@ static bool js_dom_insert_before_child(DomElement* parent, DomNode* child,
     if (child->parent) dom_pre_remove(child);
     bool inserted = child->is_element()
         ? js_dom_insert_backed_element(parent, child, ref_child)
-        : ((child->parent ? child->parent->remove_child(child) : true) &&
-           ((DomNode*)parent)->insert_before(child, ref_child));
+        : child->is_text()
+            ? js_dom_insert_backed_text(parent, child->as_text(), ref_child)
+            : ((child->parent ? child->parent->remove_child(child) : true) &&
+               ((DomNode*)parent)->insert_before(child, ref_child));
     if (!inserted) return false;
 
     dom_post_insert((DomNode*)parent, child);
@@ -14063,6 +14201,10 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
                     // tree; the base DOM linker leaves renderer-visible SVG
                     // children detached from their Element backing.
                     if (!js_dom_append_backed_element(elem, frag_child)) return ItemNull;
+                } else if (frag_child->is_text()) {
+                    if (!js_dom_insert_backed_text(elem, frag_child->as_text(), nullptr)) {
+                        return ItemNull;
+                    }
                 } else if (!((DomNode*)elem)->append_child(frag_child)) {
                     return ItemNull;
                 }
@@ -14078,6 +14220,8 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         // DOM-created elements have independent Mark backings, so append through
         // DomElement to preserve the renderer's tree as well as DOM links.
         if (!js_dom_append_backed_element(elem, child_node)) return ItemNull;
+    } else if (child_node->is_text()) {
+        if (!js_dom_insert_backed_text(elem, child_node->as_text(), nullptr)) return ItemNull;
     } else if (!((DomNode*)elem)->append_child(child_node)) {
         return ItemNull;
     }
