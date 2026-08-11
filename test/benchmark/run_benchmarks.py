@@ -823,6 +823,13 @@ def run_native_engine(engine, suite, name, num_runs, timeout_s, results, row):
     print(f" {fmt_ms(e if e is not None else w)}")
 
 
+def variant_desc(args):
+    """One-line description of which Lambda variant(s) TIME mode will measure."""
+    if args.typed:
+        return "typed + untyped (MIR-U = <bench>.ls, MIR-T = <bench>2.ls)"
+    return "LEGACY — MIR-U column runs the TYPED <bench>2.ls (no untyped run)"
+
+
 def mir_script_variants(b):
     """Return (untyped, typed-or-None) Lambda scripts for a benchmark."""
     ls_path = b["ls_path"]
@@ -1689,6 +1696,10 @@ Examples:
                              f"hotter machine (default: {DEFAULT_SUITE_COOLDOWN_S}; 0 disables)")
     parser.add_argument("--typed", action="store_true",
                         help="Time typed and untyped MIR variants; in mir-vs-c also include typed R7RS variants")
+    parser.add_argument("--legacy", action="store_true",
+                        help="TIME mode only: legacy single-column run. Times ONLY the typed *2.ls "
+                             "script and reports it under the MIR-U heading. Kept for comparability "
+                             "with historical result files; prefer --typed for new measurements")
     parser.add_argument("--list", action="store_true",
                         help="List all available benchmarks and exit")
     parser.add_argument("--dry-run", action="store_true",
@@ -1713,6 +1724,32 @@ Examples:
 
     mode = args.mode
     timeout_s = args.timeout
+
+    # TIME mode must state which Lambda variant it is measuring. The two modes differ
+    # in what the "mir" result key MEANS — legacy stores the typed *2.ls timing under it,
+    # --typed stores the untyped *.ls timing there and the typed one under "mir_typed".
+    # Defaulting to either silently mixes the two across result files, so require it.
+    if mode == "time":
+        if args.typed and args.legacy:
+            print("error: --typed and --legacy are mutually exclusive.\n", file=sys.stderr)
+            sys.exit(2)
+        if not args.typed and not args.legacy:
+            print(
+                "error: TIME mode requires an explicit variant selection.\n"
+                "\n"
+                "  --typed   run BOTH Lambda variants (recommended)\n"
+                "              MIR-U column = untyped  <bench>.ls\n"
+                "              MIR-T column = typed    <bench>2.ls\n"
+                "\n"
+                "  --legacy  legacy single-column run, kept for comparability with\n"
+                "            historical result files: times ONLY the typed <bench>2.ls\n"
+                "            and reports it under the MIR-U heading\n"
+                "\n"
+                "This used to default to the --legacy behaviour, which labelled a typed\n"
+                "measurement as untyped and wrote it to the same \"mir\" key that --typed\n"
+                "uses for the untyped script.\n",
+                file=sys.stderr)
+            sys.exit(2)
     if mode == "time":
         results_output = args.results_output or TIME_JSON_PATH
     elif mode == "memory":
@@ -1770,6 +1807,8 @@ Examples:
                           else "MIR typed + untyped variants included")
             print(f"  Typed   : yes ({typed_text})")
         if mode == "time":
+            print(f"  Variant : {variant_desc(args)}")
+        if mode == "time":
             print(f"  Output  : {results_output}")
         elif mode == "memory":
             print(f"  Output  : {results_output}")
@@ -1800,6 +1839,8 @@ Examples:
     print(f"  Timeout   : {timeout_s}s")
     print(f"  Output    : {results_output}")
     print(f"  Fresh     : {'yes' if args.fresh else 'no (merge mode)'}")
+    if mode == "time":
+        print(f"  Variant   : {variant_desc(args)}")
     print(f"  Platform  : {platform.system()} {platform.machine()}")
     print(f"  Lambda    : {LAMBDA_EXE}")
 
@@ -1814,6 +1855,10 @@ Examples:
     # --- Dispatch to mode ---
     if mode == "time":
         metadata["typed_variants"] = args.typed
+        metadata["legacy_variants"] = args.legacy
+        # Spell out what the "mir" key holds so a stored file is self-describing;
+        # typed_variants alone was written but never read by any consumer.
+        metadata["mir_key_source"] = "untyped <bench>.ls" if args.typed else "typed <bench>2.ls"
         run_time_mode(benchmarks, engines, num_runs, timeout_s, args.no_save, results_output,
                       args.fresh, metadata, args.typed, args.cooldown)
     elif mode == "memory":

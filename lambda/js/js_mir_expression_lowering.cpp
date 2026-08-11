@@ -1666,6 +1666,9 @@ MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
             MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
         return u;
     }
+    default:
+        // shared AST tags include Python-only literals; JS lowers unknown tags to null.
+        break;
     }
     return jm_emit_null(mt);
 }
@@ -12333,6 +12336,8 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
                 MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
             return r;
         }
+        default:
+            return jm_emit_null(mt);
         }
     }
 

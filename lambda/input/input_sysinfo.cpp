@@ -210,7 +210,8 @@ static Element* create_system_info_element(SysInfoManager* manager, Input* input
     time_t current_time = time(nullptr);
     if (current_time != -1) {
         char timestamp_str[32];
-        snprintf(timestamp_str, sizeof(timestamp_str), "%ld", current_time);
+        // mingw's time_t is wider than long; normalize the value before formatting.
+        snprintf(timestamp_str, sizeof(timestamp_str), "%lld", (long long)current_time);
         system_elem.attr("timestamp", timestamp_str);
     }
 

@@ -37,8 +37,6 @@
 #include <psapi.h>
 #undef ERROR  // windows.h defines ERROR as a macro; conflicts with ParseErrorSeverity::ERROR
 #define STDERR_FILENO 2
-static inline int backtrace(void** arr, int max) { (void)arr; (void)max; return 0; }
-static inline void backtrace_symbols_fd(void** arr, int n, int fd) { (void)arr; (void)n; (void)fd; }
 #else
 #include <execinfo.h>
 #include <unistd.h>

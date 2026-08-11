@@ -64,6 +64,10 @@ extern void jm_cleanup_active_mir(void);
 extern void jm_abandon_active_mir_after_signal(void);
 
 // Crash guard for JS JIT execution (catches SIGSEGV/SIGBUS in compiled code)
+// Keep the teardown flag platform-wide because the public cleanup query and
+// reset path run on Windows even though the POSIX signal watchdog does not.
+static volatile sig_atomic_t js_batch_cleanup_unsafe = 0;
+
 #ifndef _WIN32
 static sigjmp_buf js_exec_jmpbuf;
 static volatile sig_atomic_t js_exec_guarded = 0;
@@ -75,8 +79,6 @@ static struct sigaction js_exec_old_prof;
 #define JS_EXEC_TIMEOUT_BASE_SECONDS 5
 #define JS_EXEC_TIMEOUT_MAX_SECONDS 120
 #define JS_EXEC_TIMEOUT_ENV_MAX_SECONDS 600
-static volatile sig_atomic_t js_batch_cleanup_unsafe = 0;
-
 static void js_exec_timeout_handler(int sig) {
     if (js_exec_guarded) {
         js_exec_timed_out = 1;

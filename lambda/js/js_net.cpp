@@ -22,10 +22,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <math.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#ifndef _WIN32
 #include <unistd.h>
 #endif
 
@@ -1709,9 +1712,19 @@ static void socket_apply_type_of_service(JsSocket* sock) {
     uv_os_fd_t fd;
     if (uv_fileno((const uv_handle_t*)&sock->tcp, &fd) != 0) return;
     int value = sock->type_of_service;
+#ifdef _WIN32
+    // libuv returns Windows TCP handles through HANDLE-typed uv_os_fd_t, while
+    // Winsock requires the underlying SOCKET value for setsockopt.
+    uv_os_sock_t socket = (uv_os_sock_t)(uintptr_t)fd;
+    setsockopt(socket, IPPROTO_IP, IP_TOS, (const char*)&value, sizeof(value));
+#ifdef IPV6_TCLASS
+    setsockopt(socket, IPPROTO_IPV6, IPV6_TCLASS, (const char*)&value, sizeof(value));
+#endif
+#else
     setsockopt(fd, IPPROTO_IP, IP_TOS, &value, sizeof(value));
 #ifdef IPV6_TCLASS
     setsockopt(fd, IPPROTO_IPV6, IPV6_TCLASS, &value, sizeof(value));
+#endif
 #endif
 }
 

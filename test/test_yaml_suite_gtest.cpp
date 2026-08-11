@@ -304,11 +304,14 @@ static Input* parse_yaml_source(const char* yaml_source);
 static volatile sig_atomic_t parse_timed_out = 0;
 static jmp_buf timeout_jmp;
 
+#ifndef _WIN32
+// windows uses the direct parse path because it has no alarm-based timeout handler.
 static void timeout_handler(int sig) {
     (void)sig;
     parse_timed_out = 1;
     longjmp(timeout_jmp, 1);
 }
+#endif
 
 // parse YAML source with a timeout (seconds). Returns NULL on timeout.
 static Input* parse_yaml_source_with_timeout(const char* yaml_source, int timeout_secs, bool* timed_out) {

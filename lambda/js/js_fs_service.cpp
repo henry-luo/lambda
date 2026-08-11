@@ -13,8 +13,21 @@
 #include <io.h>
 #include <windows.h>
 typedef struct _stat64 JsFsServiceStat;
+static int js_fs_service_unsupported(void) {
+    // Windows has no POSIX uid/gid or descriptor-mode operation equivalent.
+    errno = ENOSYS;
+    return -1;
+}
+
+static int js_fs_service_link(const char* existing_path, const char* new_path) {
+    // Windows exposes POSIX hard links through CreateHardLinkA with reversed arguments.
+    if (CreateHardLinkA(new_path, existing_path, NULL)) return 0;
+    errno = EIO;
+    return -1;
+}
+
 #define JS_FS_SERVICE_CLOSE _close
-#define JS_FS_SERVICE_FCHMOD _chmod
+#define JS_FS_SERVICE_FCHMOD(descriptor, mode) js_fs_service_unsupported()
 #define JS_FS_SERVICE_FSTAT _fstat64
 #define JS_FS_SERVICE_LSTAT _stat64
 #define JS_FS_SERVICE_STAT _stat64
@@ -23,7 +36,7 @@ typedef struct _stat64 JsFsServiceStat;
 #define JS_FS_SERVICE_WRITE _write
 #define JS_FS_SERVICE_ACCESS _access
 #define JS_FS_SERVICE_CHMOD _chmod
-#define JS_FS_SERVICE_LINK _link
+#define JS_FS_SERVICE_LINK js_fs_service_link
 #define JS_FS_SERVICE_MKDIR(path, mode) _mkdir(path)
 #define JS_FS_SERVICE_RMDIR _rmdir
 #define JS_FS_SERVICE_UNLINK _unlink
@@ -282,8 +295,7 @@ bool js_node_fs_path_operation(JubeNodeFilesystemPathOperation* operation) {
         break;
     case JUBE_NODE_FILESYSTEM_PATH_CHOWN:
 #if defined(_WIN32)
-        result = _chown(operation->path, (int)operation->numeric_value,
-                        (int)operation->secondary_numeric_value);
+        result = js_fs_service_unsupported();
 #else
         result = chown(operation->path, (uid_t)operation->numeric_value,
                        (gid_t)operation->secondary_numeric_value);
@@ -292,8 +304,7 @@ bool js_node_fs_path_operation(JubeNodeFilesystemPathOperation* operation) {
         break;
     case JUBE_NODE_FILESYSTEM_PATH_LCHOWN:
 #if defined(_WIN32)
-        result = _chown(operation->path, (int)operation->numeric_value,
-                        (int)operation->secondary_numeric_value);
+        result = js_fs_service_unsupported();
 #else
         result = lchown(operation->path, (uid_t)operation->numeric_value,
                         (gid_t)operation->secondary_numeric_value);
@@ -304,8 +315,7 @@ bool js_node_fs_path_operation(JubeNodeFilesystemPathOperation* operation) {
 #if defined(__APPLE__)
         result = lchmod(operation->path, (mode_t)operation->numeric_value);
 #elif defined(_WIN32)
-        errno = ENOSYS;
-        result = -1;
+        result = js_fs_service_unsupported();
 #else
         result = JS_FS_SERVICE_CHMOD(operation->path, (int)operation->numeric_value);
 #endif
@@ -557,8 +567,7 @@ bool js_node_fs_descriptor_operation(JubeNodeFilesystemDescriptorOperation* oper
     }
     case JUBE_NODE_FILESYSTEM_DESCRIPTOR_FCHOWN:
 #if defined(_WIN32)
-        errno = ENOSYS;
-        result = -1;
+        result = js_fs_service_unsupported();
 #else
         result = fchown(operation->descriptor, (uid_t)operation->mode_value,
                         (gid_t)operation->secondary_mode_value);

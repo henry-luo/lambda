@@ -14,6 +14,7 @@
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
+#include "../../lib/windows_compat.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -3423,13 +3424,13 @@ static bool cp_get_spawn_timeout_ms(Item options_item, int64_t* timeout_ms) {
     return true;
 }
 
-static const char* cp_signal_name_from_number(int sig) {
 #ifndef _WIN32
+static const char* cp_signal_name_from_number(int sig) {
     if (sig == SIGKILL) return "SIGKILL";
     if (sig == SIGTERM) return "SIGTERM";
-#endif
     return "SIGTERM";
 }
+#endif
 
 static int cp_get_kill_signal(Item options_item, const char** signal_name) {
 #ifndef _WIN32
@@ -3563,7 +3564,9 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
                                            (int)sizeof(full_cmd), &pos);
     }
 
-    mkdir("temp", 0755);
+    // Windows ignores POSIX directory modes; use the shared compatibility
+    // helper so the spawnSync capture directory is created on every target.
+    lambda_mkdir("temp", 0755);
     char temp_dir[PATH_MAX];
 #ifndef _WIN32
     if (getcwd(temp_dir, sizeof(temp_dir))) {
