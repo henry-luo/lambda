@@ -718,6 +718,132 @@ typedef struct {
     CssEnum border_image_repeat;
 } BorderProp;
 
+// physical side access is shared by cascade, layout, and table border code;
+// keeping the value and specificity lanes together prevents side updates from
+// silently selecting different fields.
+enum CssBoxSide : uint8_t {
+    CSS_BOX_SIDE_TOP = 0,
+    CSS_BOX_SIDE_RIGHT = 1,
+    CSS_BOX_SIDE_BOTTOM = 2,
+    CSS_BOX_SIDE_LEFT = 3,
+};
+
+inline float* radiant_spacing_value(Spacing* spacing, CssBoxSide side) {
+    if (!spacing) return nullptr;
+    switch (side) {
+        case CSS_BOX_SIDE_TOP: return &spacing->top;
+        case CSS_BOX_SIDE_RIGHT: return &spacing->right;
+        case CSS_BOX_SIDE_BOTTOM: return &spacing->bottom;
+        case CSS_BOX_SIDE_LEFT: return &spacing->left;
+    }
+    return &spacing->top;
+}
+
+inline int64_t* radiant_spacing_specificity(Spacing* spacing, CssBoxSide side) {
+    if (!spacing) return nullptr;
+    switch (side) {
+        case CSS_BOX_SIDE_TOP: return &spacing->top_specificity;
+        case CSS_BOX_SIDE_RIGHT: return &spacing->right_specificity;
+        case CSS_BOX_SIDE_BOTTOM: return &spacing->bottom_specificity;
+        case CSS_BOX_SIDE_LEFT: return &spacing->left_specificity;
+    }
+    return &spacing->top_specificity;
+}
+
+inline CssEnum* radiant_margin_type(Margin* margin, CssBoxSide side) {
+    if (!margin) return nullptr;
+    switch (side) {
+        case CSS_BOX_SIDE_TOP: return &margin->top_type;
+        case CSS_BOX_SIDE_RIGHT: return &margin->right_type;
+        case CSS_BOX_SIDE_BOTTOM: return &margin->bottom_type;
+        case CSS_BOX_SIDE_LEFT: return &margin->left_type;
+    }
+    return &margin->top_type;
+}
+
+inline void radiant_spacing_set_all(Spacing* spacing, float value,
+                                    int64_t specificity = -1) {
+    if (!spacing) return;
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        *radiant_spacing_value(spacing, (CssBoxSide)side) = value;
+        *radiant_spacing_specificity(spacing, (CssBoxSide)side) = specificity;
+    }
+}
+
+inline void radiant_spacing_set_specificity_all(Spacing* spacing,
+                                                int64_t specificity = -1) {
+    if (!spacing) return;
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        *radiant_spacing_specificity(spacing, (CssBoxSide)side) = specificity;
+    }
+}
+
+inline void radiant_spacing_set_pair(Spacing* spacing, CssBoxSide first,
+                                     CssBoxSide second, float value,
+                                     int64_t specificity = -1) {
+    if (!spacing) return;
+    *radiant_spacing_value(spacing, first) = value;
+    *radiant_spacing_value(spacing, second) = value;
+    *radiant_spacing_specificity(spacing, first) = specificity;
+    *radiant_spacing_specificity(spacing, second) = specificity;
+}
+
+inline void radiant_margin_set_type_all(Margin* margin, CssEnum type) {
+    if (!margin) return;
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        *radiant_margin_type(margin, (CssBoxSide)side) = type;
+    }
+}
+
+struct RadiantBorderSide {
+    float* width;
+    int64_t* width_specificity;
+    CssEnum* style;
+    int64_t* style_specificity;
+    Color* color;
+    int64_t* color_specificity;
+};
+
+inline RadiantBorderSide radiant_border_side(BorderProp* border, CssBoxSide side) {
+    RadiantBorderSide result = {};
+    if (!border) return result;
+    switch (side) {
+        case CSS_BOX_SIDE_TOP:
+            result.width = &border->width.top;
+            result.width_specificity = &border->width.top_specificity;
+            result.style = &border->top_style;
+            result.style_specificity = &border->top_style_specificity;
+            result.color = &border->top_color;
+            result.color_specificity = &border->top_color_specificity;
+            break;
+        case CSS_BOX_SIDE_RIGHT:
+            result.width = &border->width.right;
+            result.width_specificity = &border->width.right_specificity;
+            result.style = &border->right_style;
+            result.style_specificity = &border->right_style_specificity;
+            result.color = &border->right_color;
+            result.color_specificity = &border->right_color_specificity;
+            break;
+        case CSS_BOX_SIDE_BOTTOM:
+            result.width = &border->width.bottom;
+            result.width_specificity = &border->width.bottom_specificity;
+            result.style = &border->bottom_style;
+            result.style_specificity = &border->bottom_style_specificity;
+            result.color = &border->bottom_color;
+            result.color_specificity = &border->bottom_color_specificity;
+            break;
+        case CSS_BOX_SIDE_LEFT:
+            result.width = &border->width.left;
+            result.width_specificity = &border->width.left_specificity;
+            result.style = &border->left_style;
+            result.style_specificity = &border->left_style_specificity;
+            result.color = &border->left_color;
+            result.color_specificity = &border->left_color_specificity;
+            break;
+    }
+    return result;
+}
+
 // Color stop for gradients
 // tier-2: view-pool, rebuilt each relayout
 typedef struct {
@@ -1094,6 +1220,24 @@ typedef struct PositionProp {
     float static_parent_offset_x;       // parent-to-containing-block offset when static x was set
     float static_parent_offset_y;       // parent-to-containing-block offset when static y was set
 } PositionProp;
+
+// Keep the three physical inset lanes coupled so logical-position resolution
+// cannot update a value without its percentage and presence metadata.
+typedef struct RadiantInsetSide {
+    float* value;
+    float* percent;
+    bool* has;
+} RadiantInsetSide;
+
+inline RadiantInsetSide radiant_inset_side(PositionProp* position, CssBoxSide side) {
+    switch (side) {
+        case CSS_BOX_SIDE_TOP: return {&position->top, &position->top_percent, &position->has_top};
+        case CSS_BOX_SIDE_RIGHT: return {&position->right, &position->right_percent, &position->has_right};
+        case CSS_BOX_SIDE_BOTTOM: return {&position->bottom, &position->bottom_percent, &position->has_bottom};
+        case CSS_BOX_SIDE_LEFT: return {&position->left, &position->left_percent, &position->has_left};
+    }
+    return {&position->top, &position->top_percent, &position->has_top};
+}
 
 /**
  * MarkerProp - Stores list marker (bullet) properties

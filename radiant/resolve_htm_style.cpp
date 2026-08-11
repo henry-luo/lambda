@@ -64,6 +64,16 @@ static FormControlProp* ensure_form_control_prop(LayoutContext* lycon, ViewBlock
     return form;
 }
 
+static void apply_html_form_state_attributes(LayoutContext* lycon, ViewBlock* block,
+                                             bool read_only, bool checked, bool required) {
+    if (!lycon || !block || !block->form || !lycon->doc) return;
+    DocState* state = (DocState*)lycon->doc->state;
+    if (block->has_attribute("disabled")) form_control_set_disabled(state, block, true);
+    if (read_only && block->has_attribute("readonly")) form_control_set_readonly(state, block, true);
+    if (checked && block->has_attribute("checked")) form_control_set_checked(state, block, true);
+    if (required && block->has_attribute("required")) form_control_set_required(state, block, true);
+}
+
 // Parse HTML color attribute (e.g., "#ff6600" or "ff6600" or named colors like "red")
 static Color parse_html_color(const char* color_str) {
     Color result;
@@ -223,30 +233,24 @@ static BorderProp* apply_html_uniform_border_base(LayoutContext* lycon, ViewBloc
                                                   float width, CssEnum style,
                                                   bool set_specificity) {
     BorderProp* border = ensure_html_border_prop(lycon, block);
-    border->width.top = border->width.right =
-        border->width.bottom = border->width.left = width;
-    if (set_specificity) {
-        border->width.top_specificity = border->width.right_specificity =
-            border->width.bottom_specificity = border->width.left_specificity = -1;
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        RadiantBorderSide refs = radiant_border_side(border, (CssBoxSide)side);
+        *refs.width = width;
+        *refs.style = style;
+        if (set_specificity) *refs.width_specificity = -1;
     }
-    border->top_style = border->right_style =
-        border->bottom_style = border->left_style = style;
     return border;
 }
 
 static void apply_html_uniform_border(LayoutContext* lycon, ViewBlock* block,
-                                      float width, CssEnum style, Color color) {
+                                      float width, CssEnum style, Color color,
+                                      bool set_specificity = true) {
     // HTML UA borders differ on specificity, so callers preserve their original policy.
-    BorderProp* border = apply_html_uniform_border_base(lycon, block, width, style, true);
-    border->top_color = border->right_color =
-        border->bottom_color = border->left_color = color;
-}
-
-static void apply_html_uniform_border_no_specificity(LayoutContext* lycon, ViewBlock* block,
-                                                     float width, CssEnum style, Color color) {
-    BorderProp* border = apply_html_uniform_border_base(lycon, block, width, style, false);
-    border->top_color = border->right_color =
-        border->bottom_color = border->left_color = color;
+    BorderProp* border = apply_html_uniform_border_base(
+        lycon, block, width, style, set_specificity);
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        *radiant_border_side(border, (CssBoxSide)side).color = color;
+    }
 }
 
 static void apply_html_uniform_border_style(LayoutContext* lycon, ViewBlock* block,
@@ -259,65 +263,66 @@ static void apply_html_button_box_defaults(LayoutContext* lycon, ViewBlock* bloc
     // Native button padding and border are UA lengths, so they must follow the
     // same effective zoom as the control's authored used dimensions.
     float zoom = layout_effective_zoom((View*)block);
-    block->boundary_mut()->padding.top = block->boundary_mut()->padding.bottom = FormDefaults::BUTTON_PADDING_V * zoom;
-    block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = FormDefaults::BUTTON_PADDING_H * zoom;
-    block->boundary_mut()->padding.top_specificity = block->boundary_mut()->padding.bottom_specificity =
-        block->boundary_mut()->padding.left_specificity = block->boundary_mut()->padding.right_specificity = -1;
+    radiant_spacing_set_pair(&block->boundary_mut()->padding,
+        CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, FormDefaults::BUTTON_PADDING_V * zoom);
+    radiant_spacing_set_pair(&block->boundary_mut()->padding,
+        CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, FormDefaults::BUTTON_PADDING_H * zoom);
     apply_html_uniform_border_style(
         lycon, block, FormDefaults::BUTTON_BORDER * zoom, CSS_VALUE_OUTSET);
 }
 
-static void apply_html_width_px(LayoutContext* lycon, ViewBlock* block, float width) {
-    BlockProp* blk = ensure_html_block_prop(lycon, block);
-    lycon->block.given_width = width;
-    blk->given_width = width;
-    blk->given_width_percent = NAN;
+static void apply_html_fixed_replaced_size(LayoutContext* lycon, ViewBlock* block,
+                                           float width, float height) {
+    block->display.outer = CSS_VALUE_INLINE_BLOCK;
+    block->display.inner = RDT_DISPLAY_REPLACED;
+    block->ensure_block(lycon);
+    block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+    block->blk->given_width = lycon->block.given_width = width;
+    block->blk->given_height = lycon->block.given_height = height;
 }
 
-static void apply_html_height_px(LayoutContext* lycon, ViewBlock* block, float height) {
-    BlockProp* blk = ensure_html_block_prop(lycon, block);
-    lycon->block.given_height = height;
-    blk->given_height = height;
-    blk->given_height_percent = NAN;
+static void apply_html_axis_px(LayoutContext* lycon, ViewBlock* block,
+                               LayoutAxis axis, float size) {
+    BlockProp* prop = ensure_html_block_prop(lycon, block);
+    LayoutAxisConstraintRefs refs(prop, axis == LAYOUT_AXIS_X);
+    *refs.given = size;
+    *refs.given_percent = NAN;
+    if (axis == LAYOUT_AXIS_X) lycon->block.given_width = size;
+    else lycon->block.given_height = size;
 }
 
-static void apply_html_width_percent(LayoutContext* lycon, ViewBlock* block,
-                                     float percent, float container_width) {
-    BlockProp* blk = ensure_html_block_prop(lycon, block);
+static void apply_html_axis_percent(LayoutContext* lycon, ViewBlock* block,
+                                    LayoutAxis axis, float percent, float base) {
+    BlockProp* prop = ensure_html_block_prop(lycon, block);
+    LayoutAxisConstraintRefs refs(prop, axis == LAYOUT_AXIS_X);
     // keep percentage hints in BlockProp so replaced-layout passes can resolve them later.
-    blk->given_width_percent = percent;
-    blk->given_width = -1.0f;
-    if (container_width > 0.0f) {
-        lycon->block.given_width = container_width * percent / 100.0f;
-    }
-}
-
-static void apply_html_height_percent(LayoutContext* lycon, ViewBlock* block,
-                                      float percent, float container_height) {
-    BlockProp* blk = ensure_html_block_prop(lycon, block);
-    // keep percentage hints in BlockProp so replaced-layout passes can resolve them later.
-    blk->given_height_percent = percent;
-    blk->given_height = -1.0f;
-    if (container_height > 0.0f) {
-        lycon->block.given_height = container_height * percent / 100.0f;
-    }
-}
-
-static void apply_html_deferred_width_percent(LayoutContext* lycon, ViewBlock* block, float percent) {
-    BlockProp* blk = ensure_html_block_prop(lycon, block);
-    blk->given_width_percent = percent;
-    lycon->block.given_width = -1.0f;
-}
-
-static void apply_html_deferred_height_percent(LayoutContext* lycon, ViewBlock* block, float percent) {
-    BlockProp* blk = ensure_html_block_prop(lycon, block);
-    blk->given_height_percent = percent;
-    lycon->block.given_height = -1.0f;
+    *refs.given_percent = percent;
+    *refs.given = -1.0f;
+    float resolved = base > 0.0f ? base * percent / 100.0f : -1.0f;
+    if (axis == LAYOUT_AXIS_X) lycon->block.given_width = resolved;
+    else lycon->block.given_height = resolved;
 }
 
 static void apply_html_context_default_size(LayoutContext* lycon, float width, float height) {
     lycon->block.given_width = width;
     lycon->block.given_height = height;
+}
+
+static void apply_html_body_margin_attribute(LayoutContext* lycon, ViewBlock* block,
+                                             const char* attribute, CssBoxSide first,
+                                             CssBoxSide second, bool pair) {
+    const char* raw = block->as_element()->get_attribute(attribute);
+    if (!raw || raw[0] < '0' || raw[0] > '9') return;
+    StrView view = strview_init(raw, strlen(raw));
+    float value = strview_to_int(&view);
+    if (value < 0.0f) return;
+    BoundaryProp* boundary = block->boundary_mut();
+    if (pair) {
+        radiant_spacing_set_pair(&boundary->margin, first, second, value);
+    } else {
+        *radiant_spacing_value(&boundary->margin, first) = value;
+        *radiant_spacing_specificity(&boundary->margin, first) = -1;
+    }
 }
 
 static float html_pixel_dimension_or_default(DomNode* element, const char* attribute,
@@ -328,6 +333,103 @@ static float html_pixel_dimension_or_default(DomNode* element, const char* attri
         return dimension.value;
     }
     return default_value;
+}
+
+// Replaced elements differ only in their attribute policy; the axis write and
+// percentage bookkeeping must remain one path so later intrinsic sizing sees
+// the same hints for every HTML replaced element.
+struct HtmlDimensionPolicy {
+    float default_width;
+    float default_height;
+    float width_percent_base;
+    float height_percent_base;
+    bool allow_percent;
+    bool require_digit_start;
+    bool default_when_missing;
+    bool default_when_invalid;
+    bool positive_percent_only;
+    bool persist;
+};
+
+static void apply_html_context_axis_px(LayoutContext* lycon, LayoutAxis axis, float size) {
+    if (axis == LAYOUT_AXIS_X) lycon->block.given_width = size;
+    else lycon->block.given_height = size;
+}
+
+static void apply_html_context_axis_percent(LayoutContext* lycon, LayoutAxis axis,
+                                            float percent, float base) {
+    apply_html_context_axis_px(lycon, axis,
+        base > 0.0f ? base * percent / 100.0f : -1.0f);
+}
+
+static void apply_html_dimension_attribute(LayoutContext* lycon, DomNode* element,
+                                           ViewBlock* block, LayoutAxis axis,
+                                           const char* attribute, float default_value,
+                                           const HtmlDimensionPolicy* policy) {
+    const char* attr = element ? element->get_attribute(attribute) : nullptr;
+    if (!attr) {
+        if (policy->default_when_missing) {
+            if (policy->persist) apply_html_axis_px(lycon, block, axis, default_value);
+            else apply_html_context_axis_px(lycon, axis, default_value);
+        }
+        return;
+    }
+
+    HtmlDimensionAttr dimension;
+    if (!parse_html_dimension_attr(attr, policy->allow_percent,
+                                   policy->require_digit_start, &dimension)) {
+        if (policy->default_when_invalid) {
+            if (policy->persist) apply_html_axis_px(lycon, block, axis, default_value);
+            else apply_html_context_axis_px(lycon, axis, default_value);
+        }
+        return;
+    }
+
+    if (dimension.is_percent) {
+        if (policy->positive_percent_only && dimension.value <= 0.0f) return;
+        float base = axis == LAYOUT_AXIS_X
+            ? policy->width_percent_base : policy->height_percent_base;
+        if (policy->persist) apply_html_axis_percent(lycon, block, axis, dimension.value, base);
+        else apply_html_context_axis_percent(lycon, axis, dimension.value, base);
+    } else {
+        if (policy->persist) apply_html_axis_px(lycon, block, axis, dimension.value);
+        else apply_html_context_axis_px(lycon, axis, dimension.value);
+    }
+}
+
+static void apply_html_dimension_attributes(LayoutContext* lycon, DomNode* element,
+                                            ViewBlock* block,
+                                            const HtmlDimensionPolicy* policy) {
+    apply_html_dimension_attribute(lycon, element, block, LAYOUT_AXIS_X, "width",
+                                   policy->default_width, policy);
+    apply_html_dimension_attribute(lycon, element, block, LAYOUT_AXIS_Y, "height",
+                                   policy->default_height, policy);
+}
+
+static void apply_html_table_dimension_attribute(LayoutContext* lycon, DomNode* element,
+                                                 ViewBlock* block, LayoutAxis axis) {
+    const char* name = axis == LAYOUT_AXIS_X ? "width" : "height";
+    const char* raw = element ? element->get_attribute(name) : nullptr;
+    HtmlDimensionAttr dimension;
+    if (!parse_html_dimension_attr(raw, axis == LAYOUT_AXIS_X, false, &dimension) ||
+        dimension.value <= 0.0f || (dimension.is_percent && dimension.value > 100.0f)) {
+        return;
+    }
+    if (dimension.is_percent) {
+        float base = lycon->block.content_width > 0.0f
+            ? lycon->block.content_width : lycon->line.right - lycon->line.left;
+        BlockProp* prop = ensure_html_block_prop(lycon, block);
+        LayoutAxisConstraintRefs refs(prop, axis == LAYOUT_AXIS_X);
+        *refs.given_percent = dimension.value;
+        if (base > 0.0f) {
+            float resolved = base * dimension.value / 100.0f;
+            *refs.given = resolved;
+            if (axis == LAYOUT_AXIS_X) lycon->block.given_width = resolved;
+            else lycon->block.given_height = resolved;
+        }
+    } else {
+        apply_html_axis_px(lycon, block, axis, dimension.value);
+    }
 }
 
 bool layout_canvas_natural_size(ViewBlock* block, float* out_width, float* out_height) {
@@ -349,18 +451,11 @@ static void apply_html_replaced_pixel_size(LayoutContext* lycon, DomNode* elemen
                                            ViewBlock* block, float default_width,
                                            float default_height, bool require_digit_start,
                                            bool persist_in_block) {
-    float width = html_pixel_dimension_or_default(
-        element, "width", default_width, require_digit_start);
-    float height = html_pixel_dimension_or_default(
-        element, "height", default_height, require_digit_start);
-    lycon->block.given_width = width;
-    lycon->block.given_height = height;
-    if (persist_in_block) {
-        // Replaced object dimensions must survive later intrinsic sizing passes.
-        BlockProp* prop = ensure_html_block_prop(lycon, block);
-        prop->given_width = width;
-        prop->given_height = height;
-    }
+    HtmlDimensionPolicy policy = {
+        default_width, default_height, 0.0f, 0.0f, false,
+        require_digit_start, true, true, false, persist_in_block
+    };
+    apply_html_dimension_attributes(lycon, element, block, &policy);
 }
 
 static void initialize_html_media(LayoutContext* lycon, DomNode* element,
@@ -388,11 +483,7 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
     RdtVideo* media = rdt_video_create(&media_callbacks, doc->state);
     if (media) {
         if (!preload_none) {
-            log_debug("media source opening: kind=%s path=%s",
-                      is_video ? "video" : "audio", file_path);
             rdt_video_open_file(media, file_path);
-        } else {
-            log_debug("media source deferred: kind=video path=%s", file_path);
         }
         if (element->has_attribute("loop")) rdt_video_set_loop(media, true);
         if (element->has_attribute("muted")) rdt_video_set_muted(media, true);
@@ -403,9 +494,6 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
             const char* poster_src = element->get_attribute("poster");
             if (poster_src && *poster_src) {
                 block->embed->poster = load_image(lycon->ui_context, poster_src);
-                if (block->embedp()->poster) {
-                    log_debug("video poster loaded: src=%s", poster_src);
-                }
             }
         }
 
@@ -418,59 +506,35 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
     mem_free(file_path);
 }
 
-// Get the border attribute value from the parent TABLE element
-// Returns -1 if no border attribute is found, otherwise returns the pixel value
-// Per WHATWG 15.3.10: table[border] td, table[border] th { border-width: 1px; border-style: inset; border-color: grey; }
-static float get_parent_table_border(DomNode* elmt) {
-    // Traverse up to find the TABLE element (TD -> TR -> TBODY/THEAD/TFOOT -> TABLE, or TD -> TR -> TABLE)
-    DomNode* node = elmt->parent;
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            if (elem->tag_id == MARKUP_NAME_TABLE) {
-                const char* border_attr = elem->get_attribute("border");
-                if (border_attr) {
-                    StrView b_view = strview_init(border_attr, strlen(border_attr));
-                    float border_val = strview_to_int(&b_view);
-                    if (border_val >= 0) {
-                        return border_val;
-                    }
-                }
-                return -1;
-            }
+static DomElement* parent_table_element(DomNode* element) {
+    for (DomNode* node = element ? element->parent : nullptr; node; node = node->parent) {
+        if (node->is_element() && node->as_element()->tag_id == MARKUP_NAME_TABLE) {
+            return node->as_element();
         }
-        node = node->parent;
     }
-    return -1;
+    return nullptr;
+}
+
+// table presentational hints all resolve from the nearest table ancestor.
+static float get_parent_table_border(DomNode* element) {
+    DomElement* table = parent_table_element(element);
+    const char* attr = table ? table->get_attribute("border") : nullptr;
+    if (!attr) return -1.0f;
+    StrView view = strview_init(attr, strlen(attr));
+    float value = strview_to_int(&view);
+    return value >= 0.0f ? value : -1.0f;
 }
 
 // Get the cellpadding attribute value from the parent TABLE element
 // Returns -1 if no cellpadding attribute is found, otherwise returns the pixel value (CSS logical pixels)
 // The HTML spec says: cellpadding on TABLE maps to padding on TD/TH cells
-static float get_parent_table_cellpadding(DomNode* elmt) {
-    // Traverse up to find the TABLE element (TD -> TR -> TBODY/THEAD/TFOOT -> TABLE, or TD -> TR -> TABLE)
-    DomNode* node = elmt->parent;
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            if (elem->tag_id == MARKUP_NAME_TABLE) {
-                const char* cellpadding_attr = elem->get_attribute("cellpadding");
-                if (cellpadding_attr) {
-                    StrView cp_view = strview_init(cellpadding_attr, strlen(cellpadding_attr));
-                    float cellpadding = strview_to_int(&cp_view);
-                    if (cellpadding >= 0) {
-                        log_debug("[HTML] TABLE cellpadding attribute: %.0fpx", cellpadding);
-                        return cellpadding;  // CSS logical pixels
-                    }
-                }
-                // Found parent table but no cellpadding attribute
-                return -1;
-            }
-        }
-        node = node->parent;
-    }
-    // No parent table found
-    return -1;
+static float get_parent_table_cellpadding(DomNode* element) {
+    DomElement* table = parent_table_element(element);
+    const char* attr = table ? table->get_attribute("cellpadding") : nullptr;
+    if (!attr) return -1.0f;
+    StrView view = strview_init(attr, strlen(attr));
+    float value = strview_to_int(&view);
+    return value >= 0.0f ? value : -1.0f;
 }
 
 static float html_font_size_for_level(int level) {
@@ -513,55 +577,31 @@ static bool parse_legacy_font_size_level(const char* input, int* out_level) {
     return true;
 }
 
-static void apply_table_cell_width_attribute(DomElement* elmt, ViewBlock* block) {
+static void apply_table_cell_dimension_attribute(DomElement* elmt, ViewBlock* block,
+                                                 LayoutAxis axis) {
     if (!elmt || !block) return;
-    const char* width_attr = elmt->get_attribute("width");
-    if (!width_attr) return;
+    const char* attribute = axis == LAYOUT_AXIS_X ? "width" : "height";
+    const char* raw = elmt->get_attribute(attribute);
+    if (!raw || !block->blk) return;
 
-    if (!block->blk) return;
-
-    HtmlDimensionAttr width;
-    if (!parse_html_dimension_attr(width_attr, true, true, &width)) return;
-    if (width.is_percent) {
-        block->blk->given_width = -1.0f;
-        block->blk->given_width_percent = width.value;
-        log_debug("[HTML] TABLE CELL width attribute: %.0f%%", width.value);
+    HtmlDimensionAttr dimension;
+    if (!parse_html_dimension_attr(raw, axis == LAYOUT_AXIS_X, true, &dimension)) return;
+    LayoutAxisConstraintRefs refs(block->blk, axis == LAYOUT_AXIS_X);
+    if (dimension.is_percent) {
+        *refs.given = -1.0f;
+        *refs.given_percent = dimension.value;
     } else {
-        block->blk->given_width = width.value;
-        block->blk->given_width_percent = NAN;
-        log_debug("[HTML] TABLE CELL width attribute: %.0fpx", width.value);
+        *refs.given = dimension.value;
+        *refs.given_percent = NAN;
     }
-}
-
-static void apply_table_cell_height_attribute(DomElement* elmt, ViewBlock* block) {
-    if (!elmt || !block) return;
-    const char* height_attr = elmt->get_attribute("height");
-    if (!height_attr) return;
-
-    if (!block->blk) return;
-
-    HtmlDimensionAttr height;
-    if (!parse_html_dimension_attr(height_attr, false, true, &height)) return;
-    block->blk->given_height = height.value;
-    block->blk->given_height_percent = NAN;
-    log_debug("[HTML] TABLE CELL height attribute: %.0fpx", height.value);
 }
 
 // Get the rules attribute from the parent TABLE element.
 // HTML rules presentational hints affect table border conflict resolution and
 // per-cell borders (e.g. rules="cols" creates vertical cell rules).
 static const char* get_parent_table_rules(DomNode* elmt) {
-    DomNode* node = elmt->parent;
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            if (elem->tag_id == MARKUP_NAME_TABLE) {
-                return elem->get_attribute("rules");
-            }
-        }
-        node = node->parent;
-    }
-    return nullptr;
+    DomElement* table = parent_table_element(elmt);
+    return table ? table->get_attribute("rules") : nullptr;
 }
 
 static void apply_html_table_rules_cell_border(LayoutContext* lycon, ViewBlock* block,
@@ -580,19 +620,16 @@ static void apply_html_table_rules_cell_border(LayoutContext* lycon, ViewBlock* 
     grey.g = 128;
     grey.b = 128;
     grey.a = 255;
-    if (rules_cols || rules_all) {
-        border->width.left = border->width.right = 1.0f;
-        border->width.left_specificity = border->width.right_specificity = -1;
-        border->left_style = border->right_style = CSS_VALUE_SOLID;
-        border->left_color = border->right_color = grey;
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        bool is_column_rule = side == CSS_BOX_SIDE_LEFT || side == CSS_BOX_SIDE_RIGHT;
+        bool is_row_rule = side == CSS_BOX_SIDE_TOP || side == CSS_BOX_SIDE_BOTTOM;
+        if (!(rules_all || (is_column_rule && rules_cols) || (is_row_rule && rules_rows))) continue;
+        RadiantBorderSide refs = radiant_border_side(border, (CssBoxSide)side);
+        *refs.width = 1.0f;
+        *refs.width_specificity = -1;
+        *refs.style = CSS_VALUE_SOLID;
+        *refs.color = grey;
     }
-    if (rules_rows || rules_all) {
-        border->width.top = border->width.bottom = 1.0f;
-        border->width.top_specificity = border->width.bottom_specificity = -1;
-        border->top_style = border->bottom_style = CSS_VALUE_SOLID;
-        border->top_color = border->bottom_color = grey;
-    }
-    log_debug("[HTML] %s border from parent TABLE rules=%s", is_header ? "TH" : "TD", rules_attr);
 }
 
 // get parent TR's valign attribute (for TD/TH cells)
@@ -611,16 +648,14 @@ static const char* get_parent_tr_valign(DomNode* elmt) {
 static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_node,
                                            ViewBlock* block, bool is_header) {
     DomElement* cell = cell_node->as_element();
-    const char* tag_name = is_header ? "TH" : "TD";
     if (is_header) {
-        log_debug("apply default TH styles");
         apply_html_font_weight_bold(ensure_html_block_font(lycon, block));
     }
 
     BlockProp* block_prop = ensure_html_block_prop(lycon, block);
     block_prop->text_align = is_header ? CSS_VALUE_CENTER : CSS_VALUE_LEFT;
-    apply_table_cell_width_attribute(cell, block);
-    apply_table_cell_height_attribute(cell, block);
+    apply_table_cell_dimension_attribute(cell, block, LAYOUT_AXIS_X);
+    apply_table_cell_dimension_attribute(cell, block, LAYOUT_AXIS_Y);
 
     block->ensure_inline(lycon);
     block->in_line->vertical_align = CSS_VALUE_MIDDLE;
@@ -628,10 +663,7 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
     float cellpadding = get_parent_table_cellpadding(cell_node);
     float padding = cellpadding >= 0.0f ? cellpadding : 1.0f;
     ensure_html_boundary_prop(lycon, block);
-    block->boundary_mut()->padding.top = block->boundary_mut()->padding.right =
-        block->boundary_mut()->padding.bottom = block->boundary_mut()->padding.left = padding;
-    block->boundary_mut()->padding.top_specificity = block->boundary_mut()->padding.right_specificity =
-        block->boundary_mut()->padding.bottom_specificity = block->boundary_mut()->padding.left_specificity = -1;
+    radiant_spacing_set_all(&block->boundary_mut()->padding, padding);
 
     const char* align_attr = cell->get_attribute("align");
     if (align_attr) {
@@ -664,21 +696,17 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
 
     if (cell->get_attribute("nowrap")) {
         block_prop->white_space = CSS_VALUE_NOWRAP;
-        log_debug("[HTML] %s nowrap attribute -> white-space: nowrap", tag_name);
     }
 
     const char* bgcolor_attr = cell->get_attribute("bgcolor");
     if (bgcolor_attr) {
         Color bg_color = parse_html_color(bgcolor_attr);
         apply_html_background_color(lycon, block, bg_color);
-        log_debug("[HTML] %s bgcolor attribute: #%02x%02x%02x",
-                  tag_name, bg_color.r, bg_color.g, bg_color.b);
     }
 
     if (get_parent_table_border(cell_node) > 0.0f) {
         Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
         apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_INSET, grey);
-        log_debug("[HTML] %s border from parent TABLE: 1px inset grey", tag_name);
     }
     apply_html_table_rules_cell_border(
         lycon, block, get_parent_table_rules(cell_node), is_header);
@@ -732,6 +760,25 @@ static CssEnum resolve_dir_auto(DomElement* elmt) {
     return CSS_VALUE_LTR;  // default to LTR if no strong character found
 }
 
+static void apply_html_heading_default(LayoutContext* lycon, DomNode* element,
+                                       ViewBlock* block, NameId tag) {
+    // HTML heading defaults are a data table: the same font/margin pipeline
+    // applies to every level, so only the level-specific scales stay indexed.
+    static const float font_scales[] = {2.0f, 1.5f, 1.17f, 1.0f, 0.83f, 0.67f};
+    static const float margin_scales[] = {0.67f, 0.83f, 1.0f, 1.33f, 1.67f, 2.33f};
+    size_t level = (size_t)(tag - MARKUP_NAME_H1);
+    if (level >= sizeof(font_scales) / sizeof(font_scales[0])) return;
+
+    FontProp* font = ensure_html_block_font(lycon, block);
+    float heading_size = lycon->font.style->font_size * font_scales[level];
+    apply_html_font_size(font, heading_size, false);
+    apply_html_font_weight_bold(font);
+    ensure_html_boundary_prop(lycon, block);
+    radiant_spacing_set_pair(&block->boundary_mut()->margin,
+        CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, heading_size * margin_scales[level]);
+    apply_html_text_align_attribute(lycon, element, block);
+}
+
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     ViewSpan* span = lam::view_require_element(static_cast<View*>(elmt));
     // Default-style resolution runs for both block and inline elements,
@@ -739,7 +786,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     // Use the shared element storage view so inline elements can still receive
     // boundary/font defaults without asserting on their current view tag.
     ViewBlock* block = lam::unsafe_view_block_api_span(span);
-    float em_size = 0;  NameId elmt_name = elmt->tag();
+    NameId elmt_name = elmt->tag();
     if (elmt->is_element()) {
         DomElement* dom_elem = elmt->as_element();
         if (dom_elem->has_attribute("popover") && dom_elem->is_popover_open()) {
@@ -751,13 +798,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->position->has_top = block->position->has_right =
                 block->position->has_bottom = block->position->has_left = true;
             ensure_html_boundary_prop(lycon, block);
-            block->boundary_mut()->margin.top_type = block->boundary_mut()->margin.right_type =
-                block->boundary_mut()->margin.bottom_type = block->boundary_mut()->margin.left_type = CSS_VALUE_AUTO;
-            block->boundary_mut()->padding.top = block->boundary_mut()->padding.right =
-                block->boundary_mut()->padding.bottom = block->boundary_mut()->padding.left =
-                lycon->font.style->font_size * 0.25f;
-            block->boundary_mut()->padding.top_specificity = block->boundary_mut()->padding.right_specificity =
-                block->boundary_mut()->padding.bottom_specificity = block->boundary_mut()->padding.left_specificity = -1;
+            radiant_margin_set_type_all(&block->boundary_mut()->margin, CSS_VALUE_AUTO);
+            radiant_spacing_set_all(&block->boundary_mut()->padding,
+                                    lycon->font.style->font_size * 0.25f);
             apply_html_uniform_border_base(lycon, block, 3.0f, CSS_VALUE_SOLID, true);
             block->ensure_block(lycon);
             block->blk->given_width = block->blk->given_height = -1.0f;
@@ -770,109 +813,38 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case MARKUP_NAME_BODY: {
         ensure_html_boundary_prop(lycon, block);
         // margin: 8px (CSS logical pixels)
-        block->boundary_mut()->margin.top = block->boundary_mut()->margin.right =
-            block->boundary_mut()->margin.bottom = block->boundary_mut()->margin.left = 8;
-        block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.right_specificity =
-            block->boundary_mut()->margin.bottom_specificity = block->boundary_mut()->margin.left_specificity = -1;
+        radiant_spacing_set_all(&block->boundary_mut()->margin, 8);
         // Handle HTML bgcolor attribute (e.g., <body bgcolor="#fff">)
         const char* bgcolor_attr = elmt->get_attribute("bgcolor");
         if (bgcolor_attr) {
             Color bg_color = parse_html_color(bgcolor_attr);
             apply_html_background_color(lycon, block, bg_color);
-            log_debug("[HTML] BODY bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
         }
         // Legacy HTML body margin attributes are still honored by browsers.
-        // marginwidth controls left/right; marginheight controls top/bottom.
-        const char* marginwidth_attr = elmt->get_attribute("marginwidth");
-        if (marginwidth_attr && marginwidth_attr[0] >= '0' && marginwidth_attr[0] <= '9') {
-            StrView margin_view = strview_init(marginwidth_attr, strlen(marginwidth_attr));
-            float margin = (float)strview_to_int(&margin_view);
-            if (margin >= 0.0f) {
-                block->boundary_mut()->margin.left = block->boundary_mut()->margin.right = margin;
-                block->boundary_mut()->margin.left_specificity = block->boundary_mut()->margin.right_specificity = -1;
-                log_debug("[HTML] BODY marginwidth attribute: %.0fpx", margin);
-            }
-        }
-        const char* marginheight_attr = elmt->get_attribute("marginheight");
-        if (marginheight_attr && marginheight_attr[0] >= '0' && marginheight_attr[0] <= '9') {
-            StrView margin_view = strview_init(marginheight_attr, strlen(marginheight_attr));
-            float margin = (float)strview_to_int(&margin_view);
-            if (margin >= 0.0f) {
-                block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = margin;
-                block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity = -1;
-                log_debug("[HTML] BODY marginheight attribute: %.0fpx", margin);
-            }
-        }
-        const char* leftmargin_attr = elmt->get_attribute("leftmargin");
-        if (leftmargin_attr && leftmargin_attr[0] >= '0' && leftmargin_attr[0] <= '9') {
-            StrView margin_view = strview_init(leftmargin_attr, strlen(leftmargin_attr));
-            float margin = (float)strview_to_int(&margin_view);
-            if (margin >= 0.0f) {
-                block->boundary_mut()->margin.left = margin;
-                block->boundary_mut()->margin.left_specificity = -1;
-                log_debug("[HTML] BODY leftmargin attribute: %.0fpx", margin);
-            }
-        }
-        const char* topmargin_attr = elmt->get_attribute("topmargin");
-        if (topmargin_attr && topmargin_attr[0] >= '0' && topmargin_attr[0] <= '9') {
-            StrView margin_view = strview_init(topmargin_attr, strlen(topmargin_attr));
-            float margin = (float)strview_to_int(&margin_view);
-            if (margin >= 0.0f) {
-                block->boundary_mut()->margin.top = margin;
-                block->boundary_mut()->margin.top_specificity = -1;
-                log_debug("[HTML] BODY topmargin attribute: %.0fpx", margin);
-            }
-        }
+        apply_html_body_margin_attribute(lycon, block, "marginwidth",
+            CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, true);
+        apply_html_body_margin_attribute(lycon, block, "marginheight",
+            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, true);
+        apply_html_body_margin_attribute(lycon, block, "leftmargin",
+            CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_LEFT, false);
+        apply_html_body_margin_attribute(lycon, block, "topmargin",
+            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_TOP, false);
         // overflow: visible (CSS default - no special overflow handling for body)
         break;
     }
     case MARKUP_NAME_H1:
-        em_size = 2;  // 2em font-size
-        goto HEADING_PROP;
     case MARKUP_NAME_H2:
-        em_size = 1.5;  // 1.5em font-size
-        goto HEADING_PROP;
     case MARKUP_NAME_H3:
-        em_size = 1.17;  // 1.17em font-size
-        goto HEADING_PROP;
     case MARKUP_NAME_H4:
-        em_size = 1;  // 1em font-size
-        goto HEADING_PROP;
     case MARKUP_NAME_H5:
-        em_size = 0.83;  // 0.83em font-size
-        goto HEADING_PROP;
     case MARKUP_NAME_H6:
-        em_size = 0.67;  // 0.67em font-size
-        HEADING_PROP: {
-        // Font styles
-        FontProp* font = ensure_html_block_font(lycon, block);
-        float heading_font_size = lycon->font.style->font_size * em_size;
-        apply_html_font_size(font, heading_font_size, false);
-        apply_html_font_weight_bold(font);
-        // Default margins for headings (browser UA stylesheet)
-        // margin: 0.67em 0 for h1, varying for other levels
-        // The margin is relative to the heading's computed font-size
-        ensure_html_boundary_prop(lycon, block);
-        float margin_em;
-        switch (elmt_name) {
-            case MARKUP_NAME_H1: margin_em = 0.67; break;
-            case MARKUP_NAME_H2: margin_em = 0.83; break;
-            case MARKUP_NAME_H3: margin_em = 1.00; break;
-            case MARKUP_NAME_H4: margin_em = 1.33; break;
-            case MARKUP_NAME_H5: margin_em = 1.67; break;
-            case MARKUP_NAME_H6: margin_em = 2.33; break;
-            default: margin_em = 0.67; break;
-        }
-        block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = heading_font_size * margin_em;
-        block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity = -1;
-        apply_html_text_align_attribute(lycon, elmt, block);
+        apply_html_heading_default(lycon, elmt, block, elmt_name);
         break;
-    }
     case MARKUP_NAME_P: {
         ensure_html_boundary_prop(lycon, block);
         // margin: 1em 0;
-        block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = lycon->font.style->font_size;
-        block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity = -1;
+        radiant_spacing_set_pair(&block->boundary_mut()->margin,
+            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size);
         apply_html_text_align_attribute(lycon, elmt, block);
         break;
     }
@@ -911,12 +883,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 block->blk->list_style_type = CSS_VALUE_DECIMAL;
             }
             if (!is_nested) {
-                block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = lycon->font.style->font_size;
-                block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity = -1;
+                radiant_spacing_set_pair(&block->boundary_mut()->margin,
+                    CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size);
             }
         }
-        block->boundary_mut()->padding.left = 40;  // CSS logical pixels
-        block->boundary_mut()->padding.left_specificity = -1;
+        *radiant_spacing_value(&block->boundary_mut()->padding, CSS_BOX_SIDE_LEFT) = 40;
+        *radiant_spacing_specificity(&block->boundary_mut()->padding, CSS_BOX_SIDE_LEFT) = -1;
         break;
     case MARKUP_NAME_CENTER:
         block->ensure_block(lycon);
@@ -944,40 +916,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case MARKUP_NAME_IMG:  { // get html width and height (before the css styles)
-        const char *value;
-        value = elmt->get_attribute("width");
-        if (value) {
-            HtmlDimensionAttr width_attr;
-            if (parse_html_dimension_attr(value, true, true, &width_attr)) {
-                if (width_attr.is_percent) {
-                    // HTML attribute width="50%" — percentage of containing block
-                    float container_width = lycon->block.content_width > 0
-                        ? lycon->block.content_width : 0;
-                    apply_html_width_percent(lycon, block, width_attr.value, container_width);
-                    log_debug("[HTML] IMG width attribute: %.0f%% -> %.1fpx", width_attr.value, lycon->block.given_width);
-                } else {
-                    // HTML spec: non-negative integer must start with ASCII digit; skip "auto" etc.
-                    apply_html_width_px(lycon, block, width_attr.value);
-                }
-            }
-        }
-        value = elmt->get_attribute("height");
-        if (value) {
-            HtmlDimensionAttr height_attr;
-            if (parse_html_dimension_attr(value, true, true, &height_attr)) {
-                if (height_attr.is_percent) {
-                    // HTML attribute height="50%" — percentage of containing block
-                    float container_height = lycon->block.content_height > 0
-                        ? lycon->block.content_height : 0;
-                    apply_html_height_percent(lycon, block, height_attr.value, container_height);
-                    log_debug("[HTML] IMG height attribute: %.0f%% -> %.1fpx", height_attr.value, lycon->block.given_height);
-                } else {
-                    // HTML spec: non-negative integer must start with ASCII digit; skip "auto" etc.
-                    apply_html_height_px(lycon, block, height_attr.value);
-                }
-            }
-        }
+    case MARKUP_NAME_IMG: { // get html width and height (before the css styles)
+        HtmlDimensionPolicy policy = {
+            0.0f, 0.0f,
+            lycon->block.content_width > 0.0f ? lycon->block.content_width : 0.0f,
+            lycon->block.content_height > 0.0f ? lycon->block.content_height : 0.0f,
+            true, true, false, false, false, true
+        };
+        apply_html_dimension_attributes(lycon, elmt, block, &policy);
         // HTML spec §14.3.3: <img align="left|right"> maps to float: left|right
         {
             const char* align_attr = elmt->get_attribute("align");
@@ -1021,82 +967,33 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->scroller->overflow_x = CSS_VALUE_AUTO;
         block->scroller->overflow_y = CSS_VALUE_AUTO;
         block->ensure_block(lycon);
-        // Parse HTML width/height attributes; default 300x150 per HTML spec
-        const char *value;
-        value = elmt->get_attribute("width");
-        if (value) {
-            HtmlDimensionAttr width_attr;
-            if (parse_html_dimension_attr(value, true, false, &width_attr)) {
-                if (width_attr.is_percent) {
-                    if (width_attr.value > 0.0f) {
-                        apply_html_deferred_width_percent(lycon, block, width_attr.value);
-                        log_debug("[HTML] IFRAME width attribute: %.0f%%", width_attr.value);
-                    }
-                } else {
-                    apply_html_width_px(lycon, block, width_attr.value);
-                }
-            }
-        } else {
-            apply_html_width_px(lycon, block, 300.0f);  // default intrinsic width
-        }
-        value = elmt->get_attribute("height");
-        if (value) {
-            HtmlDimensionAttr height_attr;
-            if (parse_html_dimension_attr(value, true, false, &height_attr)) {
-                if (height_attr.is_percent) {
-                    if (height_attr.value > 0.0f) {
-                        apply_html_deferred_height_percent(lycon, block, height_attr.value);
-                        log_debug("[HTML] IFRAME height attribute: %.0f%%", height_attr.value);
-                    }
-                } else {
-                    apply_html_height_px(lycon, block, height_attr.value);
-                }
-            }
-        } else {
-            apply_html_height_px(lycon, block, 150.0f);  // default intrinsic height
-        }
+        // Parse HTML width/height attributes; default 300x150 per HTML spec.
+        HtmlDimensionPolicy policy = {
+            300.0f, 150.0f, 0.0f, 0.0f,
+            true, false, true, false, true, true
+        };
+        apply_html_dimension_attributes(lycon, elmt, block, &policy);
         break;
     }
-    case MARKUP_NAME_EMBED:
+    case MARKUP_NAME_EMBED: {
         // replaced element with default 300x150 per HTML spec
         block->display.inner = RDT_DISPLAY_REPLACED;
         apply_html_context_default_size(lycon, 300.0f, 150.0f);
-        if (const char* w_attr = elmt->get_attribute("width")) {
-            HtmlDimensionAttr width_attr;
-            if (parse_html_dimension_attr(w_attr, false, true, &width_attr)) {
-                // HTML dimension attributes must persist in BlockProp for later replaced layout passes.
-                apply_html_width_px(lycon, block, width_attr.value);
-            }
-        }
-        if (const char* h_attr = elmt->get_attribute("height")) {
-            HtmlDimensionAttr height_attr;
-            if (parse_html_dimension_attr(h_attr, false, true, &height_attr)) {
-                apply_html_height_px(lycon, block, height_attr.value);
-            }
-        }
+        HtmlDimensionPolicy policy = {
+            300.0f, 150.0f, 0.0f, 0.0f,
+            false, true, false, false, false, true
+        };
+        apply_html_dimension_attributes(lycon, elmt, block, &policy);
         break;
+    }
     case MARKUP_NAME_WEBVIEW: {
         // webview: replaced element with default 300x150, supports width/height attributes
         block->ensure_block(lycon);
-        const char *value;
-        value = elmt->get_attribute("width");
-        if (value) {
-            HtmlDimensionAttr width_attr;
-            if (parse_html_dimension_attr(value, false, false, &width_attr)) {
-                apply_html_width_px(lycon, block, width_attr.value);
-            }
-        } else {
-            apply_html_width_px(lycon, block, 300.0f);
-        }
-        value = elmt->get_attribute("height");
-        if (value) {
-            HtmlDimensionAttr height_attr;
-            if (parse_html_dimension_attr(value, false, false, &height_attr)) {
-                apply_html_height_px(lycon, block, height_attr.value);
-            }
-        } else {
-            apply_html_height_px(lycon, block, 150.0f);
-        }
+        HtmlDimensionPolicy policy = {
+            300.0f, 150.0f, 0.0f, 0.0f,
+            false, false, true, false, false, true
+        };
+        apply_html_dimension_attributes(lycon, elmt, block, &policy);
         break;
     }
     case MARKUP_NAME_AUDIO: {
@@ -1155,38 +1052,17 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         hr_border->bottom_color.b = 192; hr_border->bottom_color.a = 255;
         hr_border->right_color = hr_border->bottom_color;
         // 8px margin top/bottom, auto left/right for horizontal centering (browser default)
-        block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = 8;  // CSS logical pixels
-        block->boundary_mut()->margin.left = block->boundary_mut()->margin.right = 0;
-        block->boundary_mut()->margin.left_type = CSS_VALUE_AUTO;
-        block->boundary_mut()->margin.right_type = CSS_VALUE_AUTO;
-        block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity =
-            block->boundary_mut()->margin.left_specificity = block->boundary_mut()->margin.right_specificity = -1;
-        {
-            const char* width_attr = elmt->get_attribute("width");
-            if (width_attr) {
-                size_t value_len = strlen(width_attr);
-                if (value_len > 0 && width_attr[value_len - 1] == '%') {
-                    StrView width_view = strview_init(width_attr, value_len - 1);
-                    float percent = (float)strview_to_int(&width_view);
-                    if (percent >= 0.0f) {
-                        block->ensure_block(lycon);
-                        block->blk->given_width = -1.0f;
-                        block->blk->given_width_percent = percent;
-                        log_debug("[HTML] HR width attribute: %.0f%%", percent);
-                    }
-                } else if (width_attr[0] >= '0' && width_attr[0] <= '9') {
-                    StrView width_view = strview_init(width_attr, value_len);
-                    float width = (float)strview_to_int(&width_view);
-                    if (width >= 0.0f) {
-                        block->ensure_block(lycon);
-                        lycon->block.given_width = width;
-                        block->blk->given_width = width;
-                        block->blk->given_width_percent = NAN;
-                        log_debug("[HTML] HR width attribute: %.0fpx", width);
-                    }
-                }
-            }
-        }
+        radiant_spacing_set_pair(&block->boundary_mut()->margin,
+            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, 8);
+        radiant_spacing_set_pair(&block->boundary_mut()->margin,
+            CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, 0);
+        *radiant_margin_type(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) = CSS_VALUE_AUTO;
+        *radiant_margin_type(&block->boundary_mut()->margin, CSS_BOX_SIDE_RIGHT) = CSS_VALUE_AUTO;
+        HtmlDimensionPolicy policy = {
+            0.0f, 0.0f, 0.0f, 0.0f, true, true, false, false, false, true
+        };
+        apply_html_dimension_attribute(lycon, elmt, block, LAYOUT_AXIS_X,
+                                       "width", 0.0f, &policy);
         break;
     }
     case MARKUP_NAME_B:
@@ -1209,8 +1085,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             span->ensure_inline(lycon);
             span->in_line->color = parse_html_color(color_attr);
             span->in_line->has_color = true;
-            log_debug("MARKUP_NAME_FONT color: %s -> rgb(%d,%d,%d)", color_attr,
-                      span->inl()->color.r, span->inl()->color.g, span->inl()->color.b);
         }
         // Handle font size attribute (deprecated HTML but still supported)
         // size="1" = x-small (10px), size="2" = small (13px), size="3" = medium (16px, default)
@@ -1222,14 +1096,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 // HTML relative font sizes are offsets from legacy level 3, not inherited CSS size
                 float font_size = html_font_size_for_level(level);
                 apply_html_span_font_size(lycon, span, font_size, false);  // CSS logical pixels
-                log_debug("MARKUP_NAME_FONT size='%s' -> %.1fpx", size_attr, span->fontp()->font_size);
             }
         }
         // Handle font face attribute
         const char* face_attr = span->get_attribute("face");
         if (face_attr) {
             radiant_retain_font_family(ensure_html_span_font(lycon, span), lam::PoolPtr<char>((char*)face_attr));  // store font family name
-            log_debug("MARKUP_NAME_FONT face: %s", face_attr);
         }
         break;
     }
@@ -1342,18 +1214,18 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->ensure_block(lycon);
         block->blk->white_space = CSS_VALUE_PRE;
         ensure_html_boundary_prop(lycon, block);
-        block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = pre_font_size;
-        block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity = -1;
+        radiant_spacing_set_pair(&block->boundary_mut()->margin,
+            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, pre_font_size);
         break;
     }
     case MARKUP_NAME_BLOCKQUOTE:
     case MARKUP_NAME_FIGURE:
         // margin: 1em 40px
         ensure_html_boundary_prop(lycon, block);
-        block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = lycon->font.style->font_size;
-        block->boundary_mut()->margin.left = block->boundary_mut()->margin.right = 40;  // CSS logical pixels
-        block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity =
-            block->boundary_mut()->margin.left_specificity = block->boundary_mut()->margin.right_specificity = -1;
+        radiant_spacing_set_pair(&block->boundary_mut()->margin,
+            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size);
+        radiant_spacing_set_pair(&block->boundary_mut()->margin,
+            CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, 40);
         break;
     case MARKUP_NAME_ADDRESS:
         // italic, block display
@@ -1365,14 +1237,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case MARKUP_NAME_DL:
         // definition list: margin 1em 0
         ensure_html_boundary_prop(lycon, block);
-        block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = lycon->font.style->font_size;
-        block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity = -1;
+        radiant_spacing_set_pair(&block->boundary_mut()->margin,
+            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size);
         break;
     case MARKUP_NAME_DD:
         // definition description: margin-left 40px
         ensure_html_boundary_prop(lycon, block);
-        block->boundary_mut()->margin.left = 40;  // CSS logical pixels
-        block->boundary_mut()->margin.left_specificity = -1;
+        *radiant_spacing_value(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) = 40;
+        *radiant_spacing_specificity(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) = -1;
         break;
     case MARKUP_NAME_DT:
         // definition term: browser UA default is normal-weight block text.
@@ -1392,64 +1264,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // HTML UA default: border-spacing: 2px (CSS spec default is 0, but HTML tables use 2px)
         // This is applied at the TableProp level in layout_table.cpp, not here in block props
 
-        // Handle HTML width attribute (e.g., width="85%" or width="600")
-        const char* width_attr = elmt->get_attribute("width");
-        if (width_attr) {
-            size_t value_len = strlen(width_attr);
-            if (value_len > 0) {
-                // Check if it's a percentage value (ends with %)
-                if (width_attr[value_len - 1] == '%') {
-                    // Parse percentage value
-                    StrView width_view = strview_init(width_attr, value_len - 1);
-                    float percent = strview_to_int(&width_view);
-                    if (percent > 0 && percent <= 100) {
-                        block->ensure_block(lycon);
-                        block->blk->given_width_percent = percent;
-                        // Calculate resolved width from container
-                        float container_width = lycon->block.content_width > 0
-                            ? lycon->block.content_width
-                            : (lycon->line.right - lycon->line.left);
-                        if (container_width > 0) {
-                            lycon->block.given_width = container_width * percent / 100.0f;
-                            block->blk->given_width = lycon->block.given_width;
-                            log_debug("[HTML] TABLE width attribute: %.0f%% -> %.1fpx", percent, lycon->block.given_width);
-                        }
-                    }
-                } else {
-                    // Parse pixel value
-                    StrView width_view = strview_init(width_attr, value_len);
-                    float width = strview_to_int(&width_view);
-                    if (width > 0) {
-                        lycon->block.given_width = width;  // CSS logical pixels
-                        block->ensure_block(lycon);
-                        block->blk->given_width = lycon->block.given_width;
-                        log_debug("[HTML] TABLE width attribute: %.0fpx", width);
-                    }
-                }
-            }
-        }
-        // Handle HTML height attribute (e.g., height="200")
-        const char* height_attr = elmt->get_attribute("height");
-        if (height_attr) {
-            size_t value_len = strlen(height_attr);
-            if (value_len > 0) {
-                // Parse pixel value (percentages for table height are less common)
-                StrView height_view = strview_init(height_attr, value_len);
-                float height = strview_to_int(&height_view);
-                if (height > 0) {
-                    lycon->block.given_height = height;  // CSS logical pixels
-                    block->ensure_block(lycon);
-                    block->blk->given_height = lycon->block.given_height;
-                    log_debug("[HTML] TABLE height attribute: %.0fpx", height);
-                }
-            }
-        }
+        apply_html_table_dimension_attribute(lycon, elmt, block, LAYOUT_AXIS_X);
+        apply_html_table_dimension_attribute(lycon, elmt, block, LAYOUT_AXIS_Y);
         // Handle HTML bgcolor attribute (e.g., bgcolor="#f6f6ef")
         const char* bgcolor_attr = elmt->get_attribute("bgcolor");
         if (bgcolor_attr) {
             Color bg_color = parse_html_color(bgcolor_attr);
             apply_html_background_color(lycon, block, bg_color);
-            log_debug("[HTML] TABLE bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
         }
         // Handle HTML border attribute (e.g., border="5")
         // Per WHATWG 15.3.10: table[border] { border-style: outset; border-color: grey; }
@@ -1462,7 +1283,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 // border-color: grey (128, 128, 128)
                 Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
                 apply_html_uniform_border(lycon, block, border_width, CSS_VALUE_OUTSET, grey);
-                log_debug("[HTML] TABLE border attribute: %.0fpx outset grey", border_width);
             }
         }
         // HTML spec §14.3.3: <table align="center"> maps to margin-left: auto; margin-right: auto
@@ -1472,18 +1292,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             size_t alen = strlen(align_attr);
             if (str_ieq_const(align_attr, alen, "center")) {
         ensure_html_boundary_prop(lycon, block);
-                block->boundary_mut()->margin.left_type = CSS_VALUE_AUTO;
-                block->boundary_mut()->margin.right_type = CSS_VALUE_AUTO;
-                block->boundary_mut()->margin.left_specificity = block->boundary_mut()->margin.right_specificity = -1;
-                log_debug("[HTML] TABLE align=center: margin-left/right auto");
+                *radiant_margin_type(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) = CSS_VALUE_AUTO;
+                *radiant_margin_type(&block->boundary_mut()->margin, CSS_BOX_SIDE_RIGHT) = CSS_VALUE_AUTO;
+                *radiant_spacing_specificity(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) = -1;
+                *radiant_spacing_specificity(&block->boundary_mut()->margin, CSS_BOX_SIDE_RIGHT) = -1;
             } else if (str_ieq_const(align_attr, alen, "left")) {
                 block->ensure_position(lycon);
                 block->position->float_prop = CSS_VALUE_LEFT;
-                log_debug("[HTML] TABLE align=left: float left");
             } else if (str_ieq_const(align_attr, alen, "right")) {
                 block->ensure_position(lycon);
                 block->position->float_prop = CSS_VALUE_RIGHT;
-                log_debug("[HTML] TABLE align=right: float right");
             }
         }
         break;
@@ -1500,7 +1318,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (bgcolor_attr) {
             Color bg_color = parse_html_color(bgcolor_attr);
             apply_html_background_color(lycon, block, bg_color);
-            log_debug("[HTML] TR bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
         }
         break;
     }
@@ -1527,19 +1344,22 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Chrome uses groove style with gray color for fieldset borders
         apply_html_uniform_border(lycon, block, 2.0f, CSS_VALUE_GROOVE,
             (Color){ .r=192, .g=192, .b=192, .a=255 });
-        block->boundary_mut()->padding.top = 0.35 * lycon->font.style->font_size;
-        block->boundary_mut()->padding.bottom = 0.625 * lycon->font.style->font_size;
-        block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = 0.75 * lycon->font.style->font_size;
-        block->boundary_mut()->padding.top_specificity = block->boundary_mut()->padding.bottom_specificity =
-            block->boundary_mut()->padding.left_specificity = block->boundary_mut()->padding.right_specificity = -1;
+        *radiant_spacing_value(&block->boundary_mut()->padding, CSS_BOX_SIDE_TOP) =
+            0.35f * lycon->font.style->font_size;
+        *radiant_spacing_value(&block->boundary_mut()->padding, CSS_BOX_SIDE_BOTTOM) =
+            0.625f * lycon->font.style->font_size;
+        radiant_spacing_set_pair(&block->boundary_mut()->padding,
+            CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, 0.75f * lycon->font.style->font_size);
+        *radiant_spacing_specificity(&block->boundary_mut()->padding, CSS_BOX_SIDE_TOP) = -1;
+        *radiant_spacing_specificity(&block->boundary_mut()->padding, CSS_BOX_SIDE_BOTTOM) = -1;
         // HTML Rendering §15.3.12 defines the UA margin as margin-inline;
         // physical left/right is the wrong axis for vertical fieldsets.
         if (layout_element_inline_axis_is_vertical(block->as_element())) {
-            block->boundary_mut()->margin.top = block->boundary_mut()->margin.bottom = 2;
-            block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.bottom_specificity = -1;
+            radiant_spacing_set_pair(&block->boundary_mut()->margin,
+                CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, 2);
         } else {
-            block->boundary_mut()->margin.left = block->boundary_mut()->margin.right = 2;
-            block->boundary_mut()->margin.left_specificity = block->boundary_mut()->margin.right_specificity = -1;
+            radiant_spacing_set_pair(&block->boundary_mut()->margin,
+                CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, 2);
         }
         break;
     case MARKUP_NAME_LEGEND:
@@ -1547,11 +1367,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // on physical left/right makes vertical legends wider instead of taller.
         ensure_html_boundary_prop(lycon, block);
         if (layout_element_inline_axis_is_vertical(block->as_element())) {
-            block->boundary_mut()->padding.top = block->boundary_mut()->padding.bottom = 2;
-            block->boundary_mut()->padding.top_specificity = block->boundary_mut()->padding.bottom_specificity = -1;
+            radiant_spacing_set_pair(&block->boundary_mut()->padding,
+                CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, 2);
         } else {
-            block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = 2;
-            block->boundary_mut()->padding.left_specificity = block->boundary_mut()->padding.right_specificity = -1;
+            radiant_spacing_set_pair(&block->boundary_mut()->padding,
+                CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, 2);
         }
         break;
     case MARKUP_NAME_BUTTON: {
@@ -1560,12 +1380,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
         bool form_created = false;
         ensure_form_control_prop(lycon, block, FORM_CONTROL_BUTTON, &form_created);
-        if (form_created) {
-            if (block->has_attribute("disabled")) {
-                DocState* state = (DocState*)lycon->doc->state;
-                form_control_set_disabled(state, block, true);
-            }
-        }
+        if (form_created) apply_html_form_state_attributes(lycon, block, false, false, false);
 
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->display.inner = CSS_VALUE_FLOW;  // button has flow children
@@ -1588,18 +1403,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             // Parse state attributes and seed canonical StateStore state.
             DocState* state = (DocState*)lycon->doc->state;
             block->form->state_ref = state;
-            if (block->has_attribute("disabled")) {
-                form_control_set_disabled(state, block, true);
-            }
-            if (block->has_attribute("readonly")) {
-                form_control_set_readonly(state, block, true);
-            }
-            if (block->has_attribute("checked")) {
-                form_control_set_checked(state, block, true);
-            }
-            if (block->has_attribute("required")) {
-                form_control_set_required(state, block, true);
-            }
+            apply_html_form_state_attributes(lycon, block, true, true, true);
         }
 
         // JS DOM helpers may create FormControlProp before HTML style resolution
@@ -1641,11 +1445,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             // Default margin: Chrome UA stylesheet
             // checkbox: 3px 3px 3px 4px, radio: 3px 3px 0px 5px
         ensure_html_boundary_prop(lycon, block);
-            block->boundary_mut()->margin.top = 3; block->boundary_mut()->margin.right = FormDefaults::CHECK_MARGIN;
-            block->boundary_mut()->margin.bottom = (block->form->control_type == FORM_CONTROL_RADIO) ? 0 : FormDefaults::CHECK_MARGIN;
-            block->boundary_mut()->margin.left = (block->form->control_type == FORM_CONTROL_RADIO) ? FormDefaults::RADIO_MARGIN_LEFT : FormDefaults::CHECKBOX_MARGIN_LEFT;
-            block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.right_specificity =
-                block->boundary_mut()->margin.bottom_specificity = block->boundary_mut()->margin.left_specificity = -1;
+            radiant_spacing_set_specificity_all(&block->boundary_mut()->margin);
+            *radiant_spacing_value(&block->boundary_mut()->margin, CSS_BOX_SIDE_TOP) = 3;
+            *radiant_spacing_value(&block->boundary_mut()->margin, CSS_BOX_SIDE_RIGHT) = FormDefaults::CHECK_MARGIN;
+            *radiant_spacing_value(&block->boundary_mut()->margin, CSS_BOX_SIDE_BOTTOM) =
+                (block->form->control_type == FORM_CONTROL_RADIO) ? 0 : FormDefaults::CHECK_MARGIN;
+            *radiant_spacing_value(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) =
+                (block->form->control_type == FORM_CONTROL_RADIO) ? FormDefaults::RADIO_MARGIN_LEFT : FormDefaults::CHECKBOX_MARGIN_LEFT;
             break;
         case FORM_CONTROL_BUTTON:
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
@@ -1703,10 +1509,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             lycon->block.given_height = block->form->intrinsic_height;
             // Chrome default margin: 2px all sides
         ensure_html_boundary_prop(lycon, block);
-            block->boundary_mut()->margin.top = block->boundary_mut()->margin.right =
-                block->boundary_mut()->margin.bottom = block->boundary_mut()->margin.left = 2;
-            block->boundary_mut()->margin.top_specificity = block->boundary_mut()->margin.right_specificity =
-                block->boundary_mut()->margin.bottom_specificity = block->boundary_mut()->margin.left_specificity = -1;
+            radiant_spacing_set_all(&block->boundary_mut()->margin, 2);
             // Parse range attributes
             const char* min_attr = block->get_attribute("min");
             const char* max_attr = block->get_attribute("max");
@@ -1755,15 +1558,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                     strcmp(itype, "datetime-local") == 0 || strcmp(itype, "month") == 0 ||
                     strcmp(itype, "week") == 0);
                 if (is_date_time) {
-                    block->boundary_mut()->padding.top = block->boundary_mut()->padding.bottom = 0;
-                    block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = 0;
+                    radiant_spacing_set_all(&block->boundary_mut()->padding, 0);
                 } else {
-                    block->boundary_mut()->padding.top = block->boundary_mut()->padding.bottom = FormDefaults::TEXT_PADDING_V;
-                    block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = FormDefaults::TEXT_PADDING_H;
+                    radiant_spacing_set_pair(&block->boundary_mut()->padding,
+                        CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, FormDefaults::TEXT_PADDING_V);
+                    radiant_spacing_set_pair(&block->boundary_mut()->padding,
+                        CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, FormDefaults::TEXT_PADDING_H);
                 }
             }
-            block->boundary_mut()->padding.top_specificity = block->boundary_mut()->padding.bottom_specificity =
-                block->boundary_mut()->padding.left_specificity = block->boundary_mut()->padding.right_specificity = -1;
             break;
         }
         break;
@@ -1775,10 +1577,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         ensure_form_control_prop(lycon, block, FORM_CONTROL_SELECT, &form_created);
         if (form_created) {
             block->form->name = block->get_attribute("name");
-            if (block->has_attribute("disabled")) {
-                DocState* state = (DocState*)lycon->doc->state;
-                form_control_set_disabled(state, block, true);
-            }
+            apply_html_form_state_attributes(lycon, block, false, false, false);
             // Count options and find selected index
             int option_count = 0;
             int selected_idx = -1;
@@ -1823,12 +1622,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (block->form->appearance_base_select) {
             // Base appearance is CSS-rendered and inherits author font metrics.
             ensure_html_boundary_prop(lycon, block);
-            block->boundary_mut()->padding.top = block->boundary_mut()->padding.bottom =
-                FormDefaults::BASE_SELECT_PADDING_V;
-            block->boundary_mut()->padding.left = block->boundary_mut()->padding.right =
-                FormDefaults::BASE_SELECT_PADDING_H;
-            block->boundary_mut()->padding.top_specificity = block->boundary_mut()->padding.bottom_specificity =
-                block->boundary_mut()->padding.left_specificity = block->boundary_mut()->padding.right_specificity = -1;
+            radiant_spacing_set_pair(&block->boundary_mut()->padding,
+                CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, FormDefaults::BASE_SELECT_PADDING_V);
+            radiant_spacing_set_pair(&block->boundary_mut()->padding,
+                CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, FormDefaults::BASE_SELECT_PADDING_H);
         } else {
             // Native select controls use the platform system font.
             apply_html_form_control_font(lycon, block);
@@ -1846,8 +1643,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->form->intrinsic_height = FormDefaults::SELECT_HEIGHT - 2.0f;
         // Default border (UA): 1px solid #767676, 2px border-radius (Chrome-like)
         ensure_html_boundary_prop(lycon, block);
-        apply_html_uniform_border_no_specificity(lycon, block, 1.0f, CSS_VALUE_SOLID,
-            (Color){ .r=118, .g=118, .b=118, .a=255 });
+        apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_SOLID,
+            (Color){ .r=118, .g=118, .b=118, .a=255 }, false);
         // Border-radius 2px on all four corners (Chrome UA)
         block->boundary_mut()->border->radius.top_left = block->boundary_mut()->border->radius.top_right =
             block->boundary_mut()->border->radius.bottom_left = block->boundary_mut()->border->radius.bottom_right = 2.0f;
@@ -1869,13 +1666,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (form_created) {
             block->form->name = block->get_attribute("name");
             block->form->placeholder = block->get_attribute("placeholder");
-            DocState* state = (DocState*)lycon->doc->state;
-            if (block->has_attribute("disabled")) {
-                form_control_set_disabled(state, block, true);
-            }
-            if (block->has_attribute("readonly")) {
-                form_control_set_readonly(state, block, true);
-            }
+            apply_html_form_state_attributes(lycon, block, true, false, false);
             // Parse cols/rows
             const char* cols_attr = block->get_attribute("cols");
             const char* rows_attr = block->get_attribute("rows");
@@ -1893,36 +1684,21 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // intrinsic size dynamically from cols/rows and font metrics
         // Default border and padding
         ensure_html_boundary_prop(lycon, block);
-        apply_html_uniform_border_no_specificity(lycon, block, FormDefaults::TEXTAREA_BORDER, CSS_VALUE_SOLID,
-            (Color){ .r=118, .g=118, .b=118, .a=255 });
-        block->boundary_mut()->padding.top = block->boundary_mut()->padding.bottom =
-            block->boundary_mut()->padding.left = block->boundary_mut()->padding.right = FormDefaults::TEXTAREA_PADDING;
+        apply_html_uniform_border(lycon, block, FormDefaults::TEXTAREA_BORDER, CSS_VALUE_SOLID,
+            (Color){ .r=118, .g=118, .b=118, .a=255 }, false);
+            radiant_spacing_set_all(&block->boundary_mut()->padding, FormDefaults::TEXTAREA_PADDING);
         break;
     }
-    case MARKUP_NAME_METER: {
-        // Meter: inline-block replaced element, Chrome default 80x16
-        block->display.outer = CSS_VALUE_INLINE_BLOCK;
-        block->display.inner = RDT_DISPLAY_REPLACED;
-        block->ensure_block(lycon);
-        block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
-        block->blk->given_width = FormDefaults::METER_WIDTH;
-        block->blk->given_height = FormDefaults::METER_HEIGHT;
-        lycon->block.given_width = FormDefaults::METER_WIDTH;
-        lycon->block.given_height = FormDefaults::METER_HEIGHT;
+    case MARKUP_NAME_METER:
+        // Meter: inline-block replaced element, Chrome default 80x16.
+        apply_html_fixed_replaced_size(lycon, block,
+            FormDefaults::METER_WIDTH, FormDefaults::METER_HEIGHT);
         break;
-    }
-    case MARKUP_NAME_PROGRESS: {
-        // Progress: inline-block replaced element, Chrome default 160x16
-        block->display.outer = CSS_VALUE_INLINE_BLOCK;
-        block->display.inner = RDT_DISPLAY_REPLACED;
-        block->ensure_block(lycon);
-        block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
-        block->blk->given_width = FormDefaults::PROGRESS_WIDTH;
-        block->blk->given_height = FormDefaults::PROGRESS_HEIGHT;
-        lycon->block.given_width = FormDefaults::PROGRESS_WIDTH;
-        lycon->block.given_height = FormDefaults::PROGRESS_HEIGHT;
+    case MARKUP_NAME_PROGRESS:
+        // Progress: inline-block replaced element, Chrome default 160x16.
+        apply_html_fixed_replaced_size(lycon, block,
+            FormDefaults::PROGRESS_WIDTH, FormDefaults::PROGRESS_HEIGHT);
         break;
-    }
     case MARKUP_NAME_LABEL:
         // label is inline by default, no special styling
         break;
@@ -1969,16 +1745,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->ensure_block(lycon);
         if (str_ieq_const(dir_attr, strlen(dir_attr), "rtl")) {
             block->blk->direction = CSS_VALUE_RTL;
-            log_debug("[HTML] dir attribute: rtl");
         } else if (str_ieq_const(dir_attr, strlen(dir_attr), "ltr")) {
             block->blk->direction = CSS_VALUE_LTR;
-            log_debug("[HTML] dir attribute: ltr");
         } else if (str_ieq_const(dir_attr, strlen(dir_attr), "auto")) {
             // HTML5 §14.3.4: dir="auto" — resolve direction from first strong character
             CssEnum resolved = resolve_dir_auto(lam::dom_require_element(elmt));
             block->blk->direction = resolved;
-            log_debug("[HTML] dir attribute: auto -> %s",
-                      resolved == CSS_VALUE_RTL ? "rtl" : "ltr");
         }
     }
 }

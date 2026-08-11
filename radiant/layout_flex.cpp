@@ -500,16 +500,6 @@ float flex_column_content_contribution(LayoutContext* lycon, ViewElement* contai
     return total;
 }
 
-static int count_potential_flex_items(ViewBlock* container) {
-    int count = 0;
-    DomNode* child = container ? container->first_child : NULL;
-    while (child) {
-        if (child->is_element() || layout_text_node_has_content(child)) count++;
-        child = child->next_sibling;
-    }
-    return count;
-}
-
 // Initialize flex container layout state
 void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     if (!lycon || !container) return;
@@ -868,7 +858,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Immediate children bound the pass-local flex item and line arrays; growing
     // scratch allocations would break the mark/restore lifetime invariant.
-    int item_capacity = count_potential_flex_items(container);
+    int item_capacity = layout_count_potential_items(container, true);
     flex->allocated_items = item_capacity;
     flex->allocated_lines = item_capacity;
     if (item_capacity > 0) {
@@ -2775,27 +2765,12 @@ float apply_stretch_constraint(
     float container_cross_size,
     FlexContainerLayout* flex_layout
 ) {
-    if (!item) return container_cross_size;
-
-    // Route form controls through their widget-aware constraint branch so
-    // cross-axis CSS min-/max- constraints
-    // are honored when stretching, instead of unconditionally taking the
-    // container's full cross size.
-    bool is_form_control = (item->role_kind() == DomElement::ROLE_FORM);
-    if (is_form_control) {
-        float result = apply_flex_constraint(item, container_cross_size, false, flex_layout);
-        return result;
-    }
-
-    // Non-form-controls without fi should use container_cross_size directly
-    if (!has_flex_item_prop(item)) {
+    if (!item || (!has_flex_item_prop(item) &&
+                  item->role_kind() != DomElement::ROLE_FORM)) {
         return container_cross_size;
     }
-
-    // Apply cross-axis constraint
-    float constrained = apply_flex_constraint(item, container_cross_size, false, flex_layout);
-
-    return constrained;
+    // Form controls need the same constraint path even before flex metadata exists.
+    return apply_flex_constraint(item, container_cross_size, false, flex_layout);
 }
 
 static float flex_item_margin_top(ViewElement* item) {

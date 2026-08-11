@@ -14,33 +14,6 @@ bool has_auto_margins(ViewBlock* item);
 void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container);
 extern bool is_only_whitespace(const char* str);
 
-static CssEnum flex_inherited_text_transform(ViewBlock* container) {
-    DomNode* node = container;
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            ViewBlock* view = lam::view_as_block(elem);
-            if (view && view->blk && view->block_mut()->text_transform != 0 &&
-                view->block()->text_transform != CSS_VALUE_INHERIT) {
-                return view->block()->text_transform;
-            }
-            if (elem->specified_style) {
-                CssDeclaration* declaration = style_tree_get_declaration(
-                    elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
-                if (declaration && declaration->value &&
-                    declaration->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                    CssEnum value = declaration->value->data.keyword;
-                    if (value != CSS_VALUE_INHERIT && value != CSS_VALUE_NONE) {
-                        return value;
-                    }
-                }
-            }
-        }
-        node = node->parent;
-    }
-    return CSS_VALUE_NONE;
-}
-
 static bool flex_child_is_br(DomNode* child) {
     if (!child || !child->is_element()) return false;
     DomElement* elem = child->as_element();
@@ -140,7 +113,7 @@ static FlexTextMeasurement flex_measure_text_run(LayoutContext* lycon,
     if (result.length > 0) {
         result.widths = layout_measure_text_intrinsic_widths(
             lycon, measured, result.length,
-            flex_inherited_text_transform(container), CSS_VALUE_NONE,
+            layout_inherited_text_transform(container), CSS_VALUE_NONE,
             CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL,
             log_context);
     }

@@ -976,6 +976,26 @@ size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
     return out_pos;
 }
 
+CssEnum layout_inherited_text_transform(DomNode* start) {
+    for (DomNode* node = start; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* elem = node->as_element();
+        ViewBlock* view = lam::view_as_block(elem);
+        if (view && view->blk && view->block_mut()->text_transform != 0 &&
+            view->block()->text_transform != CSS_VALUE_INHERIT) {
+            return view->block()->text_transform;
+        }
+        if (!elem->specified_style) continue;
+        CssDeclaration* decl = style_tree_get_declaration(
+            elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
+        if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            CssEnum value = decl->value->data.keyword;
+            if (value != CSS_VALUE_INHERIT && value != CSS_VALUE_NONE) return value;
+        }
+    }
+    return CSS_VALUE_NONE;
+}
+
 CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
     // Inherit line height from parent
     INHERIT:

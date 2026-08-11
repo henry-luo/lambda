@@ -12,53 +12,16 @@
 #include <float.h>
 #include <limits.h>
 
-// Helper: Check if whitespace should be collapsed according to white-space property
-// Returns true for: normal, nowrap, pre-line
-static inline bool should_collapse_whitespace(CssEnum ws) {
-    return ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_NOWRAP ||
-           ws == CSS_VALUE_PRE_LINE || ws == 0;  // 0 = undefined, treat as normal
-}
-
-// Helper: Normalize whitespace to a buffer
-// Collapses consecutive whitespace to single space, trims leading/trailing
-// Returns length of normalized text (0 if all whitespace)
-static size_t normalize_whitespace_for_flex(const char* text, size_t length, char* buffer, size_t buffer_size) {
-    if (!text || length == 0 || !buffer || buffer_size == 0) return 0;
-
-    size_t out_pos = 0;
-    bool in_whitespace = true;  // Start as if preceded by whitespace (trims leading)
-
-    for (size_t i = 0; i < length && out_pos < buffer_size - 1; i++) {
-        unsigned char ch = (unsigned char)text[i];
-        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
-            if (!in_whitespace) {
-                buffer[out_pos++] = ' ';  // Collapse to single space
-                in_whitespace = true;
-            }
-        } else {
-            buffer[out_pos++] = (char)ch;
-            in_whitespace = false;
-        }
-    }
-
-    // Trim trailing whitespace
-    while (out_pos > 0 && buffer[out_pos - 1] == ' ') {
-        out_pos--;
-    }
-
-    buffer[out_pos] = '\0';
-    return out_pos;
-}
-
 FlexMeasureTextRun flex_measure_prepare_text_run(DomNode* text_node, const char* text, size_t length) {
     FlexMeasureTextRun run = {text, length};
     if (!text) return run;
 
     CssEnum ws = get_white_space_value(text_node);
-    if (!should_collapse_whitespace(ws)) return run;
+    if (!layout_white_space_collapses(ws)) return run;
 
     static thread_local char normalized_buffer[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
-    run.length = normalize_whitespace_for_flex(text, length, normalized_buffer, sizeof(normalized_buffer));
+    run.length = layout_normalize_collapsible_whitespace(
+        text, length, normalized_buffer, sizeof(normalized_buffer));
     run.text = normalized_buffer;
     log_debug("flex_measure_prepare_text_run: normalized intrinsic text run for ws=%d", ws);
     return run;
@@ -428,28 +391,6 @@ static bool flex_break_has_block_siblings(ViewElement* item) {
     return !previous_inline && !next_inline;
 }
 
-static CssEnum flex_measure_resolve_text_transform(DomNode* start) {
-    for (DomNode* node = start; node; node = node->parent) {
-        if (!node->is_element()) continue;
-        DomElement* elem = node->as_element();
-        ViewBlock* view = lam::view_as_block(elem);
-        if (view && view->blk && view->block_mut()->text_transform != 0 &&
-            view->block()->text_transform != CSS_VALUE_INHERIT) {
-            return view->block()->text_transform;
-        }
-        if (!elem->specified_style) continue;
-        CssDeclaration* decl = style_tree_get_declaration(
-            elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
-        if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-            CssEnum val = decl->value->data.keyword;
-            if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
-                return val;
-            }
-        }
-    }
-    return CSS_VALUE_NONE;
-}
-
 static float flex_measure_normal_line_height_for_font(LayoutContext* lycon,
                                                       FontProp* font,
                                                       float fallback) {
@@ -471,18 +412,15 @@ static float flex_measure_intrinsic_max_height(LayoutContext* lycon, DomNode* no
     if (!block) return calculate_max_content_height(lycon, node, width);
 
     AvailableSpace available = AvailableSpace::make_width_definite(width);
-    IntrinsicSizesBidirectional sizes = {};
     if (percentage_containing_width > 0.0f) {
         // The intrinsic query re-resolves style, so percentages must retain the
         // flex container's definite cross-size instead of the outer block width.
         LayoutContainingBlockScope percentage_parent_scope(
             lycon, LAYOUT_AXIS_X,
             percentage_containing_width);
-        sizes = measure_intrinsic_sizes(lycon, block, available);
-    } else {
-        sizes = measure_intrinsic_sizes(lycon, block, available);
+        return measure_intrinsic_sizes(lycon, block, available).max_content_height;
     }
-    return sizes.max_content_height;
+    return measure_intrinsic_sizes(lycon, block, available).max_content_height;
 }
 
 static float flex_measure_nested_intrinsic_width(ViewElement* elem) {
@@ -1259,7 +1197,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             if (elem->form->control_type == FORM_CONTROL_BUTTON &&
                 elem->form->intrinsic_width <= 0 && elem->first_child) {
                 // Get text-transform from parent element chain
-                CssEnum btn_text_transform = flex_measure_resolve_text_transform(elem);
+                CssEnum btn_text_transform = layout_inherited_text_transform(elem);
 
                 // Measure text content of button
                 // Set up button's own font for measurement (UA default 13.3333px Arial,
@@ -1735,7 +1673,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 FlexMeasureTextRun run = flex_measure_prepare_text_run(child, text, len);
 
                 // Look up the inherited text-transform before measuring text widths.
-                CssEnum text_transform = flex_measure_resolve_text_transform(item);
+                CssEnum text_transform = layout_inherited_text_transform(item);
 
                 // Use accurate backend font measurement
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, run.text, run.length, text_transform);
@@ -1990,7 +1928,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     if (lycon) {
                         FlexMeasureTextRun run = flex_measure_prepare_text_run(c, text, text_len);
 
-                        CssEnum text_transform = flex_measure_resolve_text_transform(item);
+                        CssEnum text_transform = layout_inherited_text_transform(item);
 
                         TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, run.text, run.length, text_transform);
                         text_min_width = widths.min_content;

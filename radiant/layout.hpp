@@ -105,6 +105,7 @@ constexpr int MAX_LAYOUT_NODES = 50000;
 constexpr int MAX_FLEX_DEPTH = 16;
 constexpr int MAX_GRID_DEPTH = 4;
 constexpr int MAX_IFRAME_DEPTH = 3;
+constexpr int MAX_MULTICOL_BLOCKS = 1024;
 
 // browser layout coordinates use a signed 2^25 CSS-pixel range.
 constexpr float MAX_LAYOUT_DIMENSION = 33554432.0f;
@@ -1107,11 +1108,16 @@ float compute_view_last_text_baseline(
 // ============================================================================
 
 CssEnum get_white_space_value(DomNode* node);
+inline bool layout_white_space_collapses(CssEnum white_space) {
+    return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
+           white_space == CSS_VALUE_PRE_LINE || white_space == 0;
+}
 inline bool white_space_preserves_space_advance(CssEnum white_space) {
     return white_space == CSS_VALUE_PRE ||
         white_space == CSS_VALUE_PRE_WRAP ||
         white_space == CSS_VALUE_BREAK_SPACES;
 }
+CssEnum layout_inherited_text_transform(DomNode* node);
 float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
 
@@ -1308,6 +1314,61 @@ typedef struct ColumnFragment {
     float target_height;
     float used_height;
 } ColumnFragment;
+
+// All multicol balancing passes use the same bounded group scratch shape.
+// Keeping allocation and reverse-order release together prevents the nested
+// spanner path and the ordinary container path from drifting in ownership.
+struct MulticolGroupScratch {
+    float* heights;
+    bool* can_fragment;
+    bool* break_before;
+    bool* break_after;
+    ColumnFragment* fragments;
+
+    bool init(ScratchArena* scratch) {
+        heights = (float*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(float));
+        can_fragment = (bool*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(bool));
+        break_before = (bool*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(bool));
+        break_after = (bool*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(bool));
+        fragments = (ColumnFragment*)scratch_calloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(ColumnFragment));
+        return heights && can_fragment && break_before && break_after && fragments;
+    }
+
+    void release(ScratchArena* scratch) {
+        if (fragments) scratch_free(scratch, fragments);
+        if (break_after) scratch_free(scratch, break_after);
+        if (break_before) scratch_free(scratch, break_before);
+        if (can_fragment) scratch_free(scratch, can_fragment);
+        if (heights) scratch_free(scratch, heights);
+        fragments = nullptr;
+        break_after = nullptr;
+        break_before = nullptr;
+        can_fragment = nullptr;
+        heights = nullptr;
+    }
+};
+
+// Keep the bounded flow-item buffer paired with its scratch lifetime; nested
+// and top-level multicol passes otherwise duplicate the same allocation path.
+struct MulticolFlowScratch {
+    MulticolFlowItem* items;
+
+    bool init(ScratchArena* scratch) {
+        items = (MulticolFlowItem*)scratch_calloc(
+            scratch, MAX_MULTICOL_BLOCKS * sizeof(MulticolFlowItem));
+        return items != nullptr;
+    }
+
+    void release(ScratchArena* scratch) {
+        if (items) scratch_free(scratch, items);
+        items = nullptr;
+    }
+};
 
 // tier-3: layout-transient, valid while distributing one multicol group
 typedef struct ColumnGroup {
@@ -2960,6 +3021,20 @@ static inline bool layout_text_node_has_content(DomNode* node) {
     if (!node || !node->is_text()) return false;
     const char* text = (const char*)node->text_data();
     return text && !is_only_whitespace(text);
+}
+
+// Grid ignores text nodes while flex treats non-whitespace text as anonymous
+// items; one counter keeps both scratch-array bounds derived from the same walk.
+static inline int layout_count_potential_items(ViewBlock* container,
+                                                bool include_text) {
+    int count = 0;
+    for (DomNode* child = container ? container->first_child : nullptr;
+         child; child = child->next_sibling) {
+        if (child->is_element() || (include_text && layout_text_node_has_content(child))) {
+            count++;
+        }
+    }
+    return count;
 }
 
 inline bool layout_dom_text_has_non_whitespace(DomText* text) {
