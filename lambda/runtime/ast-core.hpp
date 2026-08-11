@@ -232,6 +232,13 @@ typedef enum Operator {
     OPERATOR_JS_NULLISH_ASSIGN,
     OPERATOR_JS_AND_ASSIGN,
     OPERATOR_JS_OR_ASSIGN,
+    // reserve frontend-specific operator tags as enum members so switch
+    // labels remain constant expressions across Clang's Windows ABI.
+    OPERATOR_PY_MATMUL = 3000,
+    OPERATOR_PY_NOT_IN,
+    OPERATOR_PY_IS_NOT,
+    OPERATOR_PY_FLOOR_DIV_ASSIGN,
+    OPERATOR_PY_MATMUL_ASSIGN,
 } Operator;
 
 typedef enum AstLiteralType {
@@ -240,6 +247,9 @@ typedef enum AstLiteralType {
     AST_LITERAL_BOOLEAN,
     AST_LITERAL_NULL,
     AST_LITERAL_UNDEFINED,
+    // reserve Python-only literal tags in the shared AST domain.
+    AST_LITERAL_PY_INT = 1000,
+    AST_LITERAL_PY_FLOAT,
 } AstLiteralType;
 
 typedef enum ScopeKind {

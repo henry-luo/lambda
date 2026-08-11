@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <inttypes.h>
 
 // Forward declarations for callback functions
 static bool collect_nodes_callback(AvlNode* avl_node, void* context);
@@ -1111,7 +1112,8 @@ void style_node_print_cascade(StyleNode* node) {
     }
 
     const char* prop_name = css_property_spelling_from_code(static_cast<CssPropertyCode>(node->base.property_id));
-    printf("StyleNode for %s (ID: %lu):\n",
+    // property ids use uintptr_t, so diagnostics must follow the active ABI's format.
+    printf("StyleNode for %s (ID: %" PRIuPTR "):\n",
            prop_name ? prop_name : "unknown", node->base.property_id);
 
     if (node->winning_decl) {
@@ -1446,7 +1448,7 @@ static bool collect_computed_callback(AvlNode* avl_node, void* context) {
 
 #ifndef NDEBUG
 static bool print_tree_callback(StyleNode* node, void* context) {
-    printf("  Property %lu: ", node->base.property_id);
+    printf("  Property %" PRIuPTR ": ", node->base.property_id);
 
     if (node->winning_decl) {
         printf("winning ");

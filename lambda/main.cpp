@@ -416,18 +416,6 @@ extern "C" int __intrinsic_setjmpex(jmp_buf env, void* context) {
     return setjmp(env);
 }
 
-// strcasestr is a GNU extension not available on Windows
-static const char* strcasestr(const char* haystack, const char* needle) {
-    if (!needle[0]) return haystack;
-    size_t needle_len = strlen(needle);
-    for (; *haystack; haystack++) {
-        if (_strnicmp(haystack, needle, needle_len) == 0) {
-            return haystack;
-        }
-    }
-    return NULL;
-}
-
 // POSIX sleep() — Windows equivalent using Sleep()
 static inline unsigned int sleep(unsigned int seconds) {
     Sleep(seconds * 1000);
@@ -2178,6 +2166,10 @@ int main(int argc, char *argv[]) {
                 }
             }
 
+#ifdef _WIN32
+            // windows does not emit the POSIX interactive prompt, so this parsed flag has no consumer.
+            (void)force_interactive;
+#endif
             if (tls_min_v13 && tls_max_v12) {
                 fputs("Error: TLS protocol version customizations can not both set minimum v1.3 and maximum v1.2\n", stderr);
                 runtime_cleanup(&runtime);
@@ -3977,7 +3969,9 @@ int main(int argc, char *argv[]) {
         int preamble_var_checkpoint = 0;
         int batch_crash_count = 0;
         int batch_test_count = 0;  // diagnostic: track how many tests processed
+#ifndef _WIN32
         bool batch_in_test = false; // true between BATCH_START and BATCH_END (for crash recovery)
+#endif
         char* saved_harness_src = NULL;  // kept for recompilation after crash recovery
         size_t saved_harness_len = 0;
         char batch_document_path[4096] = {};
@@ -4154,7 +4148,9 @@ int main(int argc, char *argv[]) {
             }
 
             batch_test_count++;
+#ifndef _WIN32
             batch_in_test = true;
+#endif
             printf("\x01" "BATCH_START %s\n", script_path);
             fflush(stdout);
 
@@ -4358,7 +4354,9 @@ int main(int argc, char *argv[]) {
                    phase_timing.imports_us, phase_timing.mir_us, phase_timing.link_us,
                    phase_timing.execute_us, phase_timing.cleanup_us, phase_timing.total_us, cpu_us);
             fflush(stdout);
+#ifndef _WIN32
             batch_in_test = false;
+#endif
 
             // Memory management: each SIGSEGV/SIGBUS crash recovery via longjmp
             // leaks ~55MB (MIR code pages, AST, temporaries that skip cleanup).

@@ -22,7 +22,10 @@ static inline int lambda_mkdir(const char* path, int mode) {
     return _mkdir(path);
 }
 
-// strndup is not available on Windows, provide compatibility implementation
+// mingw's Windows headers already declare strndup; redeclaring it static here
+// conflicts with that external declaration, so keep the fallback for other
+// Windows toolchains only.
+#if !defined(__MINGW32__)
 static inline char* strndup(const char* s, size_t n) {
     size_t len = strlen(s);
     if (n < len) len = n;
@@ -34,6 +37,7 @@ static inline char* strndup(const char* s, size_t n) {
     result[len] = '\0';
     return result;
 }
+#endif
 
 // memmem is not available on Windows, provide compatibility implementation
 static inline void* memmem(const void* haystack, size_t hlen,

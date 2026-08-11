@@ -46,8 +46,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <sys/wait.h>
 #include <unistd.h>
+#else
+#include <io.h>
+#include <direct.h>
+#define popen _popen
+#define pclose _pclose
+// windows mkdir accepts only the path; map the POSIX mode-bearing calls used by this test.
+#define mkdir(path, mode) _mkdir(path)
+// windows pclose returns the process exit code directly, unlike POSIX wait status.
+#define WIFEXITED(status) (1)
+#define WEXITSTATUS(status) (status)
+#endif
 #include <png.h>
 
 extern "C" {

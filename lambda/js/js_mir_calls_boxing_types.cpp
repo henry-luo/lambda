@@ -1084,6 +1084,9 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         case JS_LITERAL_STRING:   return LMD_TYPE_STRING;
         case JS_LITERAL_NULL:     return LMD_TYPE_NULL;
         case JS_LITERAL_UNDEFINED: return LMD_TYPE_UNDEFINED;
+        default:
+            // shared AST tags include frontend-specific Python literals; JS treats unknown tags as dynamic.
+            return LMD_TYPE_ANY;
         }
         return LMD_TYPE_ANY;
     }
