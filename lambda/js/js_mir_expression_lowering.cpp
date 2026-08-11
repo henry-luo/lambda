@@ -249,9 +249,9 @@ static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
 #endif
 }
 
-// The callee probe is purely observational: it logs a non-function target and
-// returns the callee unchanged. Its log_debug compiles out of release, so the
-// emitted call would only add a C-call boundary to every dynamic call site.
+// Disabled because this observational probe added a debug-only C-call boundary
+// to MIR and made debug emission differ from release emission.
+/*
 static void jm_emit_debug_check_callee(JsMirTranspiler* mt, MIR_reg_t callee,
         int64_t site_id) {
 #ifndef NDEBUG
@@ -262,6 +262,7 @@ static void jm_emit_debug_check_callee(JsMirTranspiler* mt, MIR_reg_t callee,
     (void)mt; (void)callee; (void)site_id;
 #endif
 }
+*/
 
 static void jm_emit_pending_call_source(JsMirTranspiler* mt, JsCallNode* call) {
     if (!mt || !call || !mt->tp || !mt->tp->source) return;
@@ -6569,7 +6570,7 @@ static MIR_reg_t jm_emit_optional_function_call(JsMirTranspiler* mt, MIR_reg_t c
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     jm_emit_label(mt, l_call);
-    jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
+    // jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
     MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
     MIR_reg_t call_result;
     if (has_spread) {
@@ -8881,7 +8882,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 log_debug("js-mir: CASCADE-FALLBACK[site=%d] method '%.*s' in func '%s'",
                     cs_id, (int)prop->name->len, prop->name->chars,
                     mt->current_fc ? mt->current_fc->name : "__main__");
-                jm_emit_debug_check_callee(mt, fn, (int64_t)cs_id);
+                // jm_emit_debug_check_callee(mt, fn, (int64_t)cs_id);
                 bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
                 MIR_reg_t r = jm_call_function_into(mt,
                     MIR_new_reg_op(mt->ctx, fn),
@@ -9722,8 +9723,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             fallback_has_spread, callee_spill_slot, "optc", "optk");
     }
 
-    // Debug: emit runtime check with site_id
-    jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
+    // jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
 
     if (fallback_has_spread) {
         MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "Bound-entry wrapper epilogue: pass an activation-local scalar home to the direct body, adopt its result into the incoming caller home, and only then restore the number watermark and return (Stack API #24/#27).",
+  "description": "Bound-entry wrapper epilogue: pass an activation-local scalar home to the direct body, adopt its result into the incoming caller home, and only then restore the number watermark directly and return (Stack API #24/#27).",
   "checks": [
     {
       "in_func": "_inner_b_#",
       "expect_seq": [
         { "pattern": ", _scalar_home" },
-        { "pattern": "call\tlambda_restore_number_frame_top_p" },
+        { "pattern": "mov\ti64:" },
         { "pattern": "ret\t" }
       ],
       "expect": [

@@ -480,7 +480,8 @@
         ]
       },
       "defines": [
-        "UTF8PROC_STATIC"
+        "UTF8PROC_STATIC",
+        "MEMPOOL_RUNTIME_VM_PROVIDER"
       ]
     },
     {
