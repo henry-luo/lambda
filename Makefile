@@ -313,9 +313,10 @@ $(LATEX_PARSER_C) $(LATEX_GRAMMAR_JSON) $(LATEX_NODE_TYPES_JSON): $(LATEX_GRAMMA
 $(TREE_SITTER_LATEX_LIB): $(LATEX_PARSER_C)
 	$(call ts_lib_build,latex,)
 
-# Generate LaTeX Math parser from grammar.js when it changes
+# Generate LaTeX Math parser from grammar.js when it changes.
+# Keep the generated source at ABI 14 so it matches the checked-in header.
 $(LATEX_MATH_PARSER_C): $(LATEX_MATH_GRAMMAR_JS)
-	@out=$$(cd lambda/tree-sitter-latex-math && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+	@out=$$(cd lambda/tree-sitter-latex-math && $(TREE_SITTER_CLI) generate --abi 14 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Build tree-sitter-latex-math library (depends on parser generation)
 $(TREE_SITTER_LATEX_MATH_LIB): $(LATEX_MATH_PARSER_C)
