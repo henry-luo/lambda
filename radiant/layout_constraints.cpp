@@ -73,31 +73,36 @@ float layout_stretch_fit_border_box_size(ViewBlock* block, float available_margi
     float start_margin = 0.0f;
     float end_margin = 0.0f;
     if (block->bound) {
+        LayoutAxis axis = horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+        LayoutAxisPlacementRefs refs(block, axis);
+        CssEnum* start_type = refs.margins.start_type;
+        CssEnum* end_type = refs.margins.end_type;
+        float* start_value = refs.margins.start;
+        float* end_value = refs.margins.end;
         if (horizontal) {
             ViewElement* parent_view = block->parent_view();
             ViewBlock* parent = parent_view && parent_view->is_block()
                 ? lam::view_require_block(parent_view) : nullptr;
-            WritingMode parent_mode = parent
-                ? layout_block_writing_mode(parent) : WM_VERTICAL_LR;
-            CssEnum start_type = parent_mode == WM_VERTICAL_RL
-                ? block->boundary()->margin.right_type
-                : block->boundary()->margin.left_type;
-            CssEnum end_type = parent_mode == WM_VERTICAL_RL
-                ? block->boundary()->margin.left_type
-                : block->boundary()->margin.right_type;
-            if (start_type != CSS_VALUE_AUTO) {
-                start_margin = layout_vertical_flow_block_start_margin(block, parent_mode);
+            if (parent && layout_block_writing_mode(parent) == WM_VERTICAL_RL) {
+                start_type = refs.margins.end_type;
+                end_type = refs.margins.start_type;
+                start_value = refs.margins.end;
+                end_value = refs.margins.start;
             }
-            if (end_type != CSS_VALUE_AUTO) {
-                end_margin = layout_vertical_flow_block_end_margin(block, parent_mode);
+            if (start_type && *start_type != CSS_VALUE_AUTO) {
+                ViewElement* parent_view = block->parent_view();
+                ViewBlock* parent = parent_view && parent_view->is_block()
+                    ? lam::view_require_block(parent_view) : nullptr;
+                start_margin = layout_vertical_flow_block_start_margin(block,
+                    parent ? layout_block_writing_mode(parent) : WM_VERTICAL_LR);
+            }
+            if (end_type && *end_type != CSS_VALUE_AUTO) {
+                end_margin = layout_vertical_flow_block_end_margin(block,
+                    parent ? layout_block_writing_mode(parent) : WM_VERTICAL_LR);
             }
         } else {
-            if (block->boundary()->margin.top_type != CSS_VALUE_AUTO) {
-                start_margin = block->boundary()->margin.top;
-            }
-            if (block->boundary()->margin.bottom_type != CSS_VALUE_AUTO) {
-                end_margin = block->boundary()->margin.bottom;
-            }
+            if (start_type && *start_type != CSS_VALUE_AUTO) start_margin = *start_value;
+            if (end_type && *end_type != CSS_VALUE_AUTO) end_margin = *end_value;
         }
     }
 
@@ -124,14 +129,11 @@ void layout_resolve_stretch_minmax_axis(ViewBlock* block, float available_margin
                                         bool available_size_is_definite, bool horizontal) {
     if (!block || !block->blk) return;
 
-    float* minimum = horizontal ? &block->blk->given_min_width
-                                : &block->blk->given_min_height;
-    float* maximum = horizontal ? &block->blk->given_max_width
-                                : &block->blk->given_max_height;
-    CssEnum minimum_type = horizontal ? block->blk->given_min_width_type
-                                      : block->blk->given_min_height_type;
-    CssEnum maximum_type = horizontal ? block->blk->given_max_width_type
-                                      : block->blk->given_max_height_type;
+    LayoutAxisConstraintRefs axis(block->blk, horizontal);
+    float* minimum = axis.minimum;
+    float* maximum = axis.maximum;
+    CssEnum minimum_type = *axis.minimum_type;
+    CssEnum maximum_type = *axis.maximum_type;
 
     if (minimum_type != CSS_VALUE_STRETCH && maximum_type != CSS_VALUE_STRETCH) return;
 
@@ -225,12 +227,10 @@ float layout_apply_min_max_border_box_axis(ViewBlock* block, float border_size, 
                                            bool ignore_percentage_max) {
     if (!block || !block->blk) return border_size;
 
-    float minimum = horizontal ? block->block()->given_min_width
-                               : block->block()->given_min_height;
-    float maximum = horizontal ? block->block()->given_max_width
-                               : block->block()->given_max_height;
-    if (ignore_percentage_max && horizontal &&
-        !isnan(block->block()->given_max_width_percent)) {
+    LayoutAxisConstraintRefs axis(block->block_mut(), horizontal);
+    float minimum = *axis.minimum;
+    float maximum = *axis.maximum;
+    if (ignore_percentage_max && horizontal && !isnan(*axis.maximum_percent)) {
         // A cyclic shrink-to-fit grid cannot use the provisional percentage max;
         // its intrinsic min-width contribution must win before the grid area exists.
         maximum = -1.0f;

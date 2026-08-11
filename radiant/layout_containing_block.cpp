@@ -81,13 +81,13 @@ bool layout_is_initial_containing_block(LayoutContext* lycon, ViewBlock* block) 
 static void layout_resolve_percent_size_axis(LayoutContext* lycon, ViewBlock* child,
                                              bool horizontal, float base, bool definite,
                                              const char* context) {
-    LayoutAxisConstraintRefs axis(child->block_mut(), horizontal);
-    float percent = *axis.given_percent;
+    LayoutAxisConstraintRefs refs(child->block_mut(), horizontal);
+    float percent = *refs.given_percent;
     if (isnan(percent) || !definite) return;
 
     float value = base * percent / 100.0f;
     float& given = horizontal ? lycon->block.given_width : lycon->block.given_height;
-    float& child_given = *axis.given;
+    float& child_given = *refs.given;
     const char* axis_name = horizontal ? "width" : "height";
     log_debug("[LAYOUT_CB] %s %s %.1f%% of %.1f = %.1f (was %.1f)",
               context, axis_name, percent, base, value, given);
@@ -97,18 +97,14 @@ static void layout_resolve_percent_size_axis(LayoutContext* lycon, ViewBlock* ch
 
 static void layout_resolve_percent_offset_axis(PositionProp* position, bool horizontal,
                                                bool start, float base, const char* context) {
-    bool has_offset = horizontal ? (start ? position->has_left : position->has_right)
-                                 : (start ? position->has_top : position->has_bottom);
-    float percent = horizontal ? (start ? position->left_percent : position->right_percent)
-                               : (start ? position->top_percent : position->bottom_percent);
-    if (!has_offset || isnan(percent)) return;
+    LayoutAxisInsetRefs refs(position, horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y);
+    RadiantInsetSide inset = start ? refs.start : refs.end;
+    if (!*inset.has || isnan(*inset.percent)) return;
 
-    float& offset = horizontal ? (start ? position->left : position->right)
-                               : (start ? position->top : position->bottom);
+    *inset.value = *inset.percent * base / 100.0f;
     const char* side = horizontal ? (start ? "left" : "right") : (start ? "top" : "bottom");
-    offset = percent * base / 100.0f;
     log_debug("[LAYOUT_CB] %s %s %.1f%% of %.1f = %.1f",
-              context, side, percent, base, offset);
+              context, side, *inset.percent, base, *inset.value);
 }
 
 LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, ViewBlock* block) {

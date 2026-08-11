@@ -481,6 +481,22 @@ FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float h
     return space;
 }
 
+float block_context_next_float_boundary(BlockContext* ctx, float y) {
+    if (!ctx) return FLT_MAX;
+    float next_y = FLT_MAX;
+    for (FloatBox* fb = ctx->left_floats; fb; fb = fb->next) {
+        if (fb->margin_box_bottom > y && fb->margin_box_bottom < next_y) {
+            next_y = fb->margin_box_bottom;
+        }
+    }
+    for (FloatBox* fb = ctx->right_floats; fb; fb = fb->next) {
+        if (fb->margin_box_bottom > y && fb->margin_box_bottom < next_y) {
+            next_y = fb->margin_box_bottom;
+        }
+    }
+    return next_y;
+}
+
 float block_context_find_y_for_width(BlockContext* ctx, float required_width, float min_y, float element_height) {
     if (ctx->left_float_count == 0 && ctx->right_float_count == 0) {
         return min_y;
@@ -497,17 +513,7 @@ float block_context_find_y_for_width(BlockContext* ctx, float required_width, fl
         }
 
         // Find next float bottom to step to
-        float next_y = FLT_MAX;
-        for (FloatBox* fb = ctx->left_floats; fb; fb = fb->next) {
-            if (fb->margin_box_bottom > y && fb->margin_box_bottom < next_y) {
-                next_y = fb->margin_box_bottom;
-            }
-        }
-        for (FloatBox* fb = ctx->right_floats; fb; fb = fb->next) {
-            if (fb->margin_box_bottom > y && fb->margin_box_bottom < next_y) {
-                next_y = fb->margin_box_bottom;
-            }
-        }
+        float next_y = block_context_next_float_boundary(ctx, y);
 
         if (next_y <= y || isinf(next_y) || next_y == FLT_MAX) {
             break;

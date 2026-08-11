@@ -11280,6 +11280,15 @@ MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
     return result;
 }
 
+static MIR_reg_t jm_string_chars_ptr(JsMirTranspiler* mt, MIR_reg_t string_ptr) {
+    MIR_reg_t chars = jm_new_reg(mt, "chars", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+        MIR_new_reg_op(mt->ctx, chars),
+        MIR_new_reg_op(mt->ctx, string_ptr),
+        MIR_new_int_op(mt->ctx, offsetof(String, chars))));
+    return chars;
+}
+
 // Template literal
 MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNode* tmpl) {
     // The function frame owns the explicit context register.  Template
@@ -11309,9 +11318,12 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
                     elem->cooked->chars, (int)elem->cooked->len);
                 MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_P,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
+                // `it2s` returns the String header; StringBuf consumes the
+                // flexible-array character payload, not the header's length byte.
+                MIR_reg_t chars = jm_string_chars_ptr(mt, str_ptr);
                 jm_call_void_3(mt, "stringbuf_append_str_n",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sb),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, str_ptr),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, chars),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)elem->cooked->len));
             }
         }
@@ -11343,11 +11355,7 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
                 MIR_new_int_op(mt->ctx, 0)));
             // Compute chars address: str_ptr + offsetof(String, chars)
             // (chars is a flexible array member, not a pointer)
-            MIR_reg_t chars = jm_new_reg(mt, "chars", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-                MIR_new_reg_op(mt->ctx, chars),
-                MIR_new_reg_op(mt->ctx, str_ptr),
-                MIR_new_int_op(mt->ctx, offsetof(String, chars))));
+            MIR_reg_t chars = jm_string_chars_ptr(mt, str_ptr);
             // Load String.len (uint32_t at offset 0)
             MIR_reg_t len = jm_new_reg(mt, "slen", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
