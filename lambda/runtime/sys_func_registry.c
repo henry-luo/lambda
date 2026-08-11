@@ -1314,7 +1314,9 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
 #else
-    {"setjmp", FPTR(setjmp),
+    // MinGW exposes setjmp as a macro that needs the caller frame, so it has
+    // no address for FPTR to take; register its underlying primitive instead.
+    {"setjmp", FPTR(_setjmp),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER)}},
 #endif

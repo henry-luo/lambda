@@ -1095,7 +1095,10 @@
       "output": "lambda.exe",
       "compiler": "clang",
       "exclude_source_files": [
-        "lib/clock_compat.c"
+        "lib/clock_compat.c",
+        "radiant/ime_mac_static.cpp",
+        "radiant/webview_child_mac_static.cpp",
+        "radiant/webview_layer_mac_static.cpp"
       ],
       "libraries": [
         {

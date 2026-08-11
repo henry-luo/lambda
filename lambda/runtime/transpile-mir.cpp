@@ -31,6 +31,7 @@
 #include <errno.h>
 #ifdef _WIN32
 #include <malloc.h>  // alloca on Windows
+#include <windows.h> // QueryPerformanceCounter for MIR timing
 #else
 #include <alloca.h>
 #endif

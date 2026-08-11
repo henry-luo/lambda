@@ -14,6 +14,7 @@
 #include "../lambda.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/file.h"
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
 
@@ -36,6 +37,17 @@ extern __thread EvalContext* context;
 
 #define JS_UTIL_FUNC_FLAG_GENERATOR 1
 #define JS_UTIL_FUNC_FLAG_ASYNC 128
+
+static bool js_util_set_real_filename(const char* path, Item* filename) {
+    if (!path || !filename) return false;
+    // POSIX realpath is unavailable on Windows; the shared file layer preserves
+    // the same absolute-path behavior with the native platform API.
+    char* resolved = file_realpath(path);
+    if (!resolved) return false;
+    *filename = make_string_item(resolved);
+    mem_free(resolved);
+    return true;
+}
 
 // helper: append a string Item without repeating the bounded-copy logic
 static void js_util_append_string(char* buf, int* pos, int capacity, Item value) {
@@ -2492,9 +2504,7 @@ extern "C" Item js_util_getCallSites(Item frame_count_item) {
                 // required helpers can overwrite global __filename; call-site
                 // records for top-level tests must report the entry script.
                 if (ss->chars[0] == '/') {
-                    char resolved[PATH_MAX];
-                    if (realpath(ss->chars, resolved)) filename = make_string_item(resolved);
-                    else filename = script;
+                    if (!js_util_set_real_filename(ss->chars, &filename)) filename = script;
                 } else {
 #ifndef _WIN32
                     char cwd[2048];
@@ -2503,9 +2513,9 @@ extern "C" Item js_util_getCallSites(Item frame_count_item) {
                         int len = snprintf(path, sizeof(path), "%s/%.*s",
                                            cwd, (int)ss->len, ss->chars);
                         if (len > 0 && len < (int)sizeof(path)) {
-                            char resolved[PATH_MAX];
-                            if (realpath(path, resolved)) filename = make_string_item(resolved);
-                            else filename = make_string_item(path, len);
+                            if (!js_util_set_real_filename(path, &filename)) {
+                                filename = make_string_item(path, len);
+                            }
                         }
                     }
 #else

@@ -191,10 +191,15 @@ int js_node_stream_tcp_fd(void* session, uint32_t resource_id, int* out_fd) {
     if (out_fd) *out_fd = -1;
     JubeNodeStreamTcp* stream = js_node_stream_tcp_from_resource(session, resource_id);
     if (!stream || !stream->initialized || stream->close_started || !out_fd) return UV_EINVAL;
+#if defined(_WIN32)
+    // libuv exposes Windows sockets through HANDLE-typed uv_os_fd_t, not int fds.
+    return UV_ENOSYS;
+#else
     uv_os_fd_t descriptor = -1;
     int status = uv_fileno((const uv_handle_t*)&stream->handle, &descriptor);
     if (status == 0) *out_fd = (int)descriptor;
     return status;
+#endif
 }
 
 int js_node_stream_tcp_adopt_fd(void* session, uint32_t resource_id, int* out_fd) {
