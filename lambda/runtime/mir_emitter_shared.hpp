@@ -1029,6 +1029,11 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, adopted)));
     em_emit_label(em, l_done);
+    // Scalar-home adoption creates the carrier that callers keep after an
+    // await; publish it to the async spill tracker just like a raw call result.
+    if (em->after_call_result) {
+        em->after_call_result(em->call_owner, result, MIR_T_I64);
+    }
     return result;
 }
 

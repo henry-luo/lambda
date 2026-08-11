@@ -1635,21 +1635,22 @@ static MIR_reg_t jm_emit_int32_bitwise_binary(JsMirTranspiler* mt,
     return jm_emit_int_to_double(mt, result);
 }
 
+static MIR_reg_t jm_box_bigint_literal(JsMirTranspiler* mt, String* spelling) {
+    // bigint_from_string consumes character bytes, not the String object returned by it2s;
+    // passing that object pointer makes every literal parse as invalid input.
+    return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
+        MIR_T_P, MIR_new_str_op(mt->ctx, {(size_t)spelling->len, spelling->chars}),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)spelling->len));
+}
+
 MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
     switch (lit->literal_type) {
     case JS_LITERAL_NUMBER: {
-        // BigInt literal: store string_value and call bigint_from_string at runtime
+        // bigint literal: store the dedicated digit spelling and parse it at runtime.
         if (lit->is_bigint) {
-            // BigInt literals store their spelling outside the numeric union;
-            // reading value.string_value here passed an unrelated union member.
-            String* s = lit->bigint_str;
-            // Materialize the literal through the context NamePool; a delayed
-            // MIR function must not retain the compiler-pool spelling.
-            return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
-                // BigInt parsing needs the literal bytes, not a temporary JS
-                // String Item; the latter loses the raw-pointer ABI boundary.
-                MIR_T_P, MIR_new_str_op(mt->ctx, {(size_t)s->len, s->chars}),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
+            // bigint AST literals keep their digits in bigint_str; value.string_value is unset,
+            // so reading the generic literal slot turns every n-suffixed literal into bad input.
+            return jm_box_bigint_literal(mt, lit->bigint_str);
         }
         double val = lit->value.number_value;
         return jm_box_float_const(mt, val);
@@ -12316,14 +12317,7 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         case JS_LITERAL_NUMBER: {
             // BigInt literal: store bigint_str and call bigint_from_string at runtime
             if (lit->is_bigint) {
-                // the parser preserves arbitrary-precision digits in bigint_str,
-                // while value.string_value is not initialized for number nodes.
-                String* s = lit->bigint_str;
-                return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
-                    // BigInt parsing needs the literal bytes, not a temporary
-                    // JS String Item; the latter loses the raw-pointer ABI boundary.
-                    MIR_T_P, MIR_new_str_op(mt->ctx, {(size_t)s->len, s->chars}),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
+                return jm_box_bigint_literal(mt, lit->bigint_str);
             }
             double val = lit->value.number_value;
             return jm_box_float_const(mt, val);

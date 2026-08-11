@@ -1144,6 +1144,17 @@ static void async_track_reg(MirTranspiler* mt, MIR_reg_t reg, MIR_type_t type) {
     }
 }
 
+static void async_track_pending_reg(MirTranspiler* mt, MIR_reg_t reg) {
+    if (!mt || !mt->in_async_proc || !reg) return;
+    for (int i = 0; i < mt->async_spill_count; i++) {
+        if (mt->async_spills[i].reg == reg) return;
+    }
+    // Scope cleanup can suspend after the value-producing expression has run;
+    // preserve that final carrier even when it came from a shared MIR helper
+    // that allocated its register outside new_reg().
+    async_track_reg(mt, reg, MIR_reg_type(mt->ctx, reg, mt->em.func));
+}
+
 static MIR_reg_t new_reg(MirTranspiler* mt, const char* prefix, MIR_type_t type) {
     MIR_reg_t reg = em_new_reg(&mt->em, prefix, type);
     async_track_reg(mt, reg, type);
@@ -11817,6 +11828,7 @@ static MIR_reg_t transpile_task_scope_leave(
         return block_result;
     }
 
+    async_track_pending_reg(mt, block_result);
     int spill_count = mt->async_spill_count;
     MIR_label_t invoke = new_label(mt);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
@@ -14556,6 +14568,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             handles = load_gc_root_slot(mt, handles_root, "select_handles");
             MIR_reg_t handles_item = emit_call_1(mt, "array_end", MIR_T_I64,
                 MIR_T_P, MIR_new_reg_op(mt->ctx, handles));
+            async_track_pending_reg(mt, handles_item);
+            async_track_pending_reg(mt, timeout);
             async_emit_invoke_resume_point(mt, call_node);
             return emit_call_2(mt, "pn_select_mir", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, handles_item),
@@ -15117,6 +15131,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             if (sysfunc_params_reject_error(info)) {
                 emit_return_if_item_error(mt, boxed_a1);
             }
+            async_track_pending_reg(mt, boxed_a1);
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = emit_call_1(mt, sys_fn_name, mir_ret_type, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
             POST_PROCESS_DTIME(result);
@@ -15137,6 +15152,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 emit_return_if_item_error(mt, boxed_a1);
                 emit_return_if_item_error(mt, boxed_a2);
             }
+            async_track_pending_reg(mt, boxed_a1);
+            async_track_pending_reg(mt, boxed_a2);
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = emit_call_2(mt, sys_fn_name, mir_ret_type,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
@@ -15158,6 +15175,9 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             arg = arg->next;
             MIR_reg_t boxed_a3 = transpile_box_item(mt, arg);
 
+            async_track_pending_reg(mt, boxed_a1);
+            async_track_pending_reg(mt, boxed_a2);
+            async_track_pending_reg(mt, boxed_a3);
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = emit_call_3(mt, sys_fn_name, mir_ret_type,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
@@ -15183,6 +15203,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             arg = arg->next;
             MIR_reg_t boxed_a4 = transpile_box_item(mt, arg);
 
+            async_track_pending_reg(mt, boxed_a1);
+            async_track_pending_reg(mt, boxed_a2);
+            async_track_pending_reg(mt, boxed_a3);
+            async_track_pending_reg(mt, boxed_a4);
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = emit_call_4(mt, sys_fn_name, mir_ret_type,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
@@ -15202,6 +15226,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             int ai = 0;
             while (arg && ai < LAMBDA_MAX_FUNCTION_ARGS) {
                 MIR_reg_t boxed = transpile_box_item(mt, arg);
+                async_track_pending_reg(mt, boxed);
                 arg_ops[ai++] = MIR_new_reg_op(mt->ctx, boxed);
                 arg = arg->next;
             }
@@ -17013,6 +17038,7 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
         TypeId val_tid = get_effective_type(mt, raise_node->value);
         MIR_reg_t boxed = emit_box(mt, val, val_tid);
         // Return the error value from the function
+        async_track_pending_reg(mt, boxed);
         transpile_task_scope_unwind(mt, true);
         async_complete_frame(mt);
         emit_function_error_return(mt, boxed);
@@ -17026,6 +17052,7 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
     uint64_t ITEM_ERROR_VAL = (uint64_t)LMD_TYPE_ERROR << 56;
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR_VAL)));
+    async_track_pending_reg(mt, r);
     transpile_task_scope_unwind(mt, true);
     async_complete_frame(mt);
     emit_function_error_return(mt, r);
@@ -17136,6 +17163,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
                     mt->current_return_type);
             }
             emit_vargs_restore();
+            async_track_pending_reg(mt, native_val);
             transpile_task_scope_unwind(mt, false);
             async_complete_frame(mt);
             emit_function_return(mt, MIR_new_reg_op(mt->ctx, native_val));
@@ -17144,6 +17172,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
             MIR_reg_t boxed = emit_box(mt, val, val_tid);
             boxed = emit_coerce_boxed_to_declared(mt, boxed, mt->current_return_type);
             emit_vargs_restore();
+            async_track_pending_reg(mt, boxed);
             transpile_task_scope_unwind(mt, false);
             async_complete_frame(mt);
             emit_function_return(mt, MIR_new_reg_op(mt->ctx, boxed));
@@ -19600,6 +19629,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_ok),
                 MIR_new_reg_op(mt->ctx, is_err)));
             // error path: return error from enclosing function
+            async_track_pending_reg(mt, call_result);
             transpile_task_scope_unwind(mt, true);
             async_complete_frame(mt);
             emit_function_error_return(mt, call_result);
