@@ -703,8 +703,6 @@ static bool multicol_apply_spanner_containing_block_anchor(
         changed = true;
     }
 
-    if (changed) {
-    }
     return changed;
 }
 
@@ -2906,6 +2904,8 @@ static bool multicol_view_has_single_text_line(View* view, float* line_y,
     return true;
 }
 
+static float multicol_content_start_y(ViewBlock* block);
+
 static bool multicol_preserve_simple_direct_spanner_flow(
     LayoutContext* lycon,
     ViewBlock* block,
@@ -2967,13 +2967,7 @@ static bool multicol_preserve_simple_direct_spanner_flow(
         child_block->width = available_width;
     }
 
-    float content_start_y = 0.0f;
-    if (block->bound) {
-        if (block->boundary()->border) {
-            content_start_y += block->boundary()->border->width.top;
-        }
-        content_start_y += block->boundary()->padding.top;
-    }
+    float content_start_y = multicol_content_start_y(block);
     float flow_height = total_content_height - content_start_y;
     if (flow_height < 0.0f) flow_height = 0.0f;
     float total_height = flow_height;
@@ -2989,6 +2983,23 @@ static bool multicol_preserve_simple_direct_spanner_flow(
     multicol_finalize_fragmented_inline_continuations(static_cast<View*>(block));
     multicol_store_positioned_baselines(lycon, block);
     return true;
+}
+
+static float multicol_content_start_y(ViewBlock* block) {
+    if (!block || !block->bound) return 0.0f;
+    return (block->boundary()->border ? block->boundary()->border->width.top : 0.0f) +
+        block->boundary()->padding.top;
+}
+
+static void multicol_layout_children(LayoutContext* lycon, ViewBlock* block) {
+    DomNode* child = block ? block->first_child : nullptr;
+    if (!child) return;
+    prescan_and_layout_floats(lycon, child, block);
+    do {
+        layout_flow_node(lycon, child);
+        child = child->next_sibling;
+    } while (child);
+    if (!lycon->line.is_line_start) line_break(lycon);
 }
 
 /**
@@ -3042,17 +3053,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         block->multicol_prop()->computed_column_count = 1;
 
         // Run normal flow layout
-        DomNode* child = block->first_child;
-        if (child) {
-            prescan_and_layout_floats(lycon, child, block);
-            do {
-                layout_flow_node(lycon, child);
-                child = child->next_sibling;
-            } while (child);
-            if (!lycon->line.is_line_start) {
-                line_break(lycon);
-            }
-        }
+        multicol_layout_children(lycon, block);
 
         float max_flow_extent = lycon->block.advance_y;
         View* placed = block->first_placed_child();
@@ -3108,17 +3109,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     lycon->available_space.width = AvailableSize::make_definite(column_width);
 
     // Layout children normally within column width
-    DomNode* child = block->first_child;
-    if (child) {
-        prescan_and_layout_floats(lycon, child, block);
-        do {
-            layout_flow_node(lycon, child);
-            child = child->next_sibling;
-        } while (child);
-        if (!lycon->line.is_line_start) {
-            line_break(lycon);
-        }
-    }
+    multicol_layout_children(lycon, block);
 
     // Get total content height after layout
     float total_content_height = lycon->block.advance_y;
@@ -3149,7 +3140,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     MulticolFlowItem* blocks = flow_scratch.items;
     int block_count = 0;
 
-    child = block->first_child;
+    DomNode* child = block->first_child;
     while (child) {
         if (child->is_element()) {
             DomElement* child_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
@@ -3336,11 +3327,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         block->content_height = final_height + (block->bound ? block->boundary()->padding.bottom : 0);
         block->multicol_prop()->computed_used_column_count = current_col + 1;
 
-        float content_start_y = 0;
-        if (block->bound) {
-            if (block->boundary_mut()->border) content_start_y += block->boundary_mut()->border->width.top;
-            content_start_y += block->boundary()->padding.top;
-        }
+        float content_start_y = multicol_content_start_y(block);
         lycon->block.advance_y = content_start_y + final_height;
 
         flow_scratch.release(&lycon->scratch);
@@ -3368,13 +3355,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         }
     }
 
-    float content_start_y = 0.0f;
-    if (block->bound) {
-        if (block->boundary()->border) {
-            content_start_y += block->boundary()->border->width.top;
-        }
-        content_start_y += block->boundary()->padding.top;
-    }
+    float content_start_y = multicol_content_start_y(block);
 
     float max_column_height = 0;  // running Y offset for the entire container
     float prev_margin_bottom = 0; // for margin collapsing between consecutive spanners

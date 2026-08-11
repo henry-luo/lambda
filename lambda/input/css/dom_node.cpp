@@ -167,6 +167,24 @@ bool DomNode::remove_child(DomNode* child) {
         return false;
     }
 
+    bool child_is_in_current_chain = false;
+    for (DomNode* current = static_cast<DomElement*>(this)->first_child;
+         current; current = current->next_sibling) {
+        if (current == child) {
+            child_is_in_current_chain = true;
+            break;
+        }
+    }
+    if (!child_is_in_current_chain) {
+        // MarkEditor can rebuild a parent's live sibling chain before the old
+        // wrapper is unlinked; stale links must not remove a surviving sibling.
+        child->parent = nullptr;
+        child->prev_sibling = nullptr;
+        child->next_sibling = nullptr;
+        dom_node_schedule_detached(static_cast<DomElement*>(this)->doc, child);
+        return true;
+    }
+
     // Cast to DomElement to access first_child
     DomElement* element = static_cast<DomElement*>(this);
 

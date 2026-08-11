@@ -544,17 +544,9 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
     float cross_axis_size = is_row ? cb.content_height : cb.content_width;
     float item_main = layout_axis_size(static_cast<ViewElement*>(child_block), main_axis);
     float item_cross = layout_axis_size(static_cast<ViewElement*>(child_block), cross_axis);
-    float margin_left = 0.0f, margin_top = 0.0f;
-    float margin_right = 0.0f, margin_bottom = 0.0f;
-    if (child_block->bound) {
-        margin_left = child_block->boundary()->margin.left;
-        margin_top = child_block->boundary()->margin.top;
-        margin_right = child_block->boundary()->margin.right;
-        margin_bottom = child_block->boundary()->margin.bottom;
-    }
     auto axis_margin = [&](LayoutAxis axis, bool start) {
-        if (axis == LAYOUT_AXIS_X) return start ? margin_left : margin_right;
-        return start ? margin_top : margin_bottom;
+        return start ? layout_axis_margin_start(child_block->bound, axis)
+                     : layout_axis_margin_end(child_block->bound, axis);
     };
     auto set_static_position = [&](LayoutAxis axis, float position) {
         layout_axis_set_pos(static_cast<ViewElement*>(child_block), axis, position);
@@ -566,10 +558,8 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
     };
 
     if (is_reverse) {
-        bool has_main_inset = main_axis == LAYOUT_AXIS_X
-            ? child_block->positionp()->has_left || child_block->positionp()->has_right
-            : child_block->positionp()->has_top || child_block->positionp()->has_bottom;
-        if (!has_main_inset) {
+        LayoutAxisPlacementRefs main_refs(child_block, main_axis);
+        if (!main_refs.has_any_inset()) {
             float base = inline_container_position_finalized_later ? 0.0f
                 : (main_axis == LAYOUT_AXIS_X ? cb.content_x : cb.content_y);
             set_static_position(main_axis, base + main_axis_size - item_main -
@@ -578,8 +568,10 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
         return;
     }
 
-    bool adjust_x = !child_block->positionp()->has_left && !child_block->positionp()->has_right;
-    bool adjust_y = !child_block->positionp()->has_top && !child_block->positionp()->has_bottom;
+    LayoutAxisPlacementRefs horizontal_refs(child_block, LAYOUT_AXIS_X);
+    LayoutAxisPlacementRefs vertical_refs(child_block, LAYOUT_AXIS_Y);
+    bool adjust_x = !horizontal_refs.has_any_inset();
+    bool adjust_y = !vertical_refs.has_any_inset();
     if (!adjust_x && !adjust_y) return;
 
     int justify_content = flex ? flex->justify : CSS_VALUE_FLEX_START;
@@ -918,13 +910,12 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
                 // Re-centering main axis here would ignore other items and produce wrong positions.
                 bool is_horizontal = is_main_axis_horizontal(flex_layout);
                 LayoutAxis cross_axis = is_horizontal ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+                LayoutAxisPlacementRefs item_axis(item, cross_axis);
                 float cross_size = is_horizontal ? container_height : container_width;
                 float item_cross_size = is_horizontal ? item->height : item->width;
-                CssEnum cross_start_type = layout_axis_margin_start_type(
-                    &item->boundary()->margin, cross_axis);
-                CssEnum cross_end_type = layout_axis_margin_end_type(
-                    &item->boundary()->margin, cross_axis);
-                if (cross_start_type == CSS_VALUE_AUTO && cross_end_type == CSS_VALUE_AUTO) {
+                if (item_axis.margins.start_type && item_axis.margins.end_type &&
+                    *item_axis.margins.start_type == CSS_VALUE_AUTO &&
+                    *item_axis.margins.end_type == CSS_VALUE_AUTO) {
                     float margin_start = 0.0f, margin_end = 0.0f;
                     layout_resolve_auto_margin_pair(
                         cross_size, item_cross_size, true, true,

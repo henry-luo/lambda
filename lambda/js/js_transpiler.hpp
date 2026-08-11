@@ -156,10 +156,9 @@ struct JsPreambleState {
 
 enum JsMirCacheMode {
     JS_MIR_CACHE_PREAMBLE = 1,
-    JS_MIR_CACHE_LIFECYCLE = 2,
-    JS_MIR_CACHE_EXTERNAL_CLASSIC = 3,
-    JS_MIR_CACHE_INLINE_CLASSIC = 4,
-    JS_MIR_CACHE_MODULE = 5,
+    JS_MIR_CACHE_EXTERNAL_CLASSIC = 2,
+    JS_MIR_CACHE_INLINE_CLASSIC = 3,
+    JS_MIR_CACHE_MODULE = 4,
 };
 
 struct JsMirCache;
@@ -193,14 +192,6 @@ Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const
 Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                       const char* filename, JsPreambleState* out_state,
                                       uint64_t* result_home);
-Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
-                                 const char* filename, JsPreambleState* out_state);
-Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
-                                      size_t js_source_len, const char* filename,
-                                      const JsPreambleState* preamble,
-                                      JsPreambleState* out_state);
-Item execute_compiled_js_in_current_realm(Runtime* runtime,
-                                          const JsPreambleState* compiled_state);
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble, uint64_t* result_home);
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,

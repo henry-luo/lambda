@@ -2394,6 +2394,14 @@ struct FormControlProp {
     // form_control_prop_init / form_control_prop_release for lifecycle.
 };
 
+// Native select popups keep their option-row metric even when author CSS makes
+// the closed control taller. Keeping this in the shared view header prevents
+// event geometry and overlay rendering from deriving different popup sizes.
+inline float form_select_dropdown_row_height(const FormControlProp* form) {
+    return form && form->intrinsic_height > 0.0f
+        ? form->intrinsic_height : FormDefaults::SELECT_HEIGHT;
+}
+
 // Apply the non-zero default field values. Memory pointed to by `f` must be
 // either zeroed (e.g. from pool_calloc / mem_calloc) or freshly-allocated
 // scratch — this function only assigns the non-zero defaults.

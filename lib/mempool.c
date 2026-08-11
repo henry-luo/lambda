@@ -1,4 +1,5 @@
 #include "mempool.h"
+#include "mem_vm.h"
 #define MEMTRACK_NO_LOCATION_MACROS
 #include "memtrack.h"
 #include "log.h"
@@ -46,9 +47,10 @@ MEMPOOL_WEAK void mem_free_loc(void* ptr, int line) {
     free(ptr);
 }
 
-// Some focused library targets intentionally omit the VM provider. These
-// weak fallbacks mark that provider as unavailable; the normal engine target
-// resolves the same symbols to lib/mem_vm.c.
+// Some focused library targets intentionally omit the VM provider. These weak
+// fallbacks preserve that standalone boundary, but the engine library disables
+// them so its real lib/mem_vm.c provider cannot be shadowed by archive order.
+#ifndef MEMPOOL_RUNTIME_VM_PROVIDER
 MEMPOOL_WEAK size_t mem_vm_page_size(void) {
     return 0;
 }
@@ -87,6 +89,7 @@ MEMPOOL_WEAK size_t mem_vm_region_reserved_bytes(const MemVmRegion* region) {
     (void)region;
     return 0;
 }
+#endif
 
 typedef struct PoolBlock PoolBlock;
 typedef struct PoolExtent PoolExtent;
@@ -172,15 +175,23 @@ static size_t block_header_size(void) {
 }
 
 static size_t pool_page_size(void) {
+#ifdef MEMPOOL_RUNTIME_VM_PROVIDER
+    size_t page = mem_vm_page_size();
+#else
     size_t page = mem_vm_page_size ? mem_vm_page_size() : 4096u;
+#endif
     return page != 0 ? page : 4096u;
 }
 
 static bool pool_vm_api_available(void) {
+#ifdef MEMPOOL_RUNTIME_VM_PROVIDER
+    return mem_vm_page_size() != 0;
+#else
     return mem_vm_page_size && mem_vm_page_size() != 0 &&
            mem_vm_region_reserve && mem_vm_region_commit &&
            mem_vm_region_release && mem_vm_region_base &&
            mem_vm_region_reserved_bytes;
+#endif
 }
 
 static void* pool_meta_alloc(Pool* pool, size_t size) {
@@ -383,7 +394,11 @@ static void pool_unlink_extent(Pool* pool, PoolExtent* extent) {
 
 static void pool_release_extent(Pool* pool, PoolExtent* extent) {
     if (!pool || !extent) return;
+#ifdef MEMPOOL_RUNTIME_VM_PROVIDER
+    if (extent->vm_region) {
+#else
     if (extent->vm_region && mem_vm_region_release) {
+#endif
         mem_vm_region_release(extent->vm_region);
         extent->vm_region = NULL;
     } else if (extent->raw_base) {
@@ -426,7 +441,11 @@ static bool pool_append_committed_range(Pool* pool, PoolExtent* extent,
 }
 
 static bool pool_commit_more(Pool* pool, PoolExtent* extent, size_t required) {
+#ifdef MEMPOOL_RUNTIME_VM_PROVIDER
+    if (!pool || !extent || !extent->vm_region) {
+#else
     if (!pool || !extent || !extent->vm_region || !mem_vm_region_commit) {
+#endif
         return false;
     }
     if (extent->reserved <= extent->committed) return false;
@@ -474,7 +493,11 @@ static PoolExtent* pool_create_extent(Pool* pool, size_t required) {
             reserved, page);
         if (!extent->vm_region ||
             !mem_vm_region_commit(extent->vm_region, 0, commit_size)) {
+#ifdef MEMPOOL_RUNTIME_VM_PROVIDER
+            if (extent->vm_region) {
+#else
             if (extent->vm_region && mem_vm_region_release) {
+#endif
                 mem_vm_region_release(extent->vm_region);
             }
             pool_meta_free(extent);

@@ -18080,14 +18080,37 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     return regex_obj_root.get();
 }
 
+static const char* js_regex_copy_stable_span(const char* text, int length) {
+    if (!text || length <= 0) return "";
+    // Regex compilation performs GC allocations before it finishes reading the
+    // span; copy moving JS strings into the input pool at this ABI boundary.
+    char* copy = (char*)pool_calloc(js_input->pool, (size_t)length + 1);
+    memcpy(copy, text, (size_t)length);
+    return copy;
+}
+
 extern "C" Item js_create_regex(const char* pattern, int pattern_len,
         const char* flags, int flags_len) {
-    return js_create_regex_impl(pattern, pattern_len, flags, flags_len, false);
+    return js_create_regex_impl(js_regex_copy_stable_span(pattern, pattern_len),
+        pattern_len, js_regex_copy_stable_span(flags, flags_len), flags_len, false);
 }
 
 extern "C" Item js_create_regex_literal(const char* pattern, int pattern_len,
         const char* flags, int flags_len) {
-    return js_create_regex_impl(pattern, pattern_len, flags, flags_len, true);
+    return js_create_regex_impl(js_regex_copy_stable_span(pattern, pattern_len),
+        pattern_len, js_regex_copy_stable_span(flags, flags_len), flags_len, true);
+}
+
+extern "C" Item js_create_regex_literal_items(Item pattern_item, Item flags_item) {
+    RootFrame regex_roots(2);
+    Rooted<Item> pattern_root(regex_roots, pattern_item);
+    Rooted<Item> flags_root(regex_roots, flags_item);
+    String* pattern = get_type_id(pattern_root.get()) == LMD_TYPE_STRING
+        ? it2s(pattern_root.get()) : NULL;
+    String* flags = get_type_id(flags_root.get()) == LMD_TYPE_STRING
+        ? it2s(flags_root.get()) : NULL;
+    return js_create_regex_literal(pattern ? pattern->chars : "", pattern ? (int)pattern->len : 0,
+        flags ? flags->chars : "", flags ? (int)flags->len : 0);
 }
 
 // Create a RegExp from a source literal string like "/pattern/flags".
@@ -18134,6 +18157,13 @@ extern "C" Item js_create_regexp_from_source(const char* src, size_t len) {
 
 // new RegExp(pattern, flags) — construct regex from string arguments at runtime
 extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
+    RootFrame regex_roots(4);
+    Rooted<Item> pattern_arg_root(regex_roots, pattern_item);
+    Rooted<Item> flags_arg_root(regex_roots, flags_item);
+    Rooted<Item> pattern_text_root(regex_roots, make_js_undefined());
+    Rooted<Item> flags_text_root(regex_roots, make_js_undefined());
+    pattern_item = pattern_arg_root.get();
+    flags_item = flags_arg_root.get();
     const char* pattern = "";
     int pattern_len = 0;
     const char* flags = "";
@@ -18160,8 +18190,7 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
             JS_ASSIGN_OR_RETURN(src_val, js_property_get(pattern_item, src_key));
             JS_ASSIGN_OR_RETURN(src_str, (get_type_id(src_val) == LMD_TYPE_STRING) ? src_val : js_to_string(src_val));
             if (get_type_id(src_str) == LMD_TYPE_STRING) {
-                String* ps = it2s(src_str);
-                if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+                pattern_text_root.set(src_str);
             }
             if (!flags_provided) {
                 Item fl_key = (Item){.item = s2it(heap_create_name("flags", 5))};
@@ -18169,8 +18198,7 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
                 if (get_type_id(fl_val) != LMD_TYPE_UNDEFINED && get_type_id(fl_val) != LMD_TYPE_NULL) {
                     JS_ASSIGN_OR_RETURN(fl_str, (get_type_id(fl_val) == LMD_TYPE_STRING) ? fl_val : js_to_string(fl_val));
                     if (get_type_id(fl_str) == LMD_TYPE_STRING) {
-                        String* fs = it2s(fl_str);
-                        if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+                        flags_text_root.set(fl_str);
                     }
                 }
             }
@@ -18178,30 +18206,38 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
             // Non-regexp object — convert to string
             JS_ASSIGN_OR_RETURN(s, js_to_string(pattern_item));
             if (get_type_id(s) == LMD_TYPE_STRING) {
-                String* ps = it2s(s);
-                if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+                pattern_text_root.set(s);
             }
         }
     } else if (get_type_id(pattern_item) == LMD_TYPE_STRING) {
-        String* ps = it2s(pattern_item);
-        if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+        pattern_text_root.set(pattern_item);
     } else if (get_type_id(pattern_item) != LMD_TYPE_UNDEFINED) {
         // ToString other primitives
         JS_ASSIGN_OR_RETURN(s, js_to_string(pattern_item));
         if (get_type_id(s) == LMD_TYPE_STRING) {
-            String* ps = it2s(s);
-            if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+            pattern_text_root.set(s);
         }
     }
     if (flags_provided && get_type_id(flags_item) == LMD_TYPE_STRING) {
-        String* fs = it2s(flags_item);
-        if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+        flags_text_root.set(flags_item);
     } else if (flags_provided && get_type_id(flags_item) != LMD_TYPE_UNDEFINED) {
         JS_ASSIGN_OR_RETURN(s, js_to_string(flags_item));
         if (get_type_id(s) == LMD_TYPE_STRING) {
-            String* fs = it2s(s);
-            if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+            flags_text_root.set(s);
         }
+    }
+    // RegExp conversion may allocate while converting either argument. Keep both
+    // resulting strings rooted until js_create_regex copies their spans into the
+    // input pool; the compiler then consumes only those stable copies.
+    String* pattern_string = it2s(pattern_text_root.get());
+    if (pattern_string) {
+        pattern_len = (int)pattern_string->len;
+        pattern = pattern_string->chars;
+    }
+    String* flags_string = it2s(flags_text_root.get());
+    if (flags_string) {
+        flags_len = (int)flags_string->len;
+        flags = flags_string->chars;
     }
     return js_create_regex(pattern, pattern_len, flags, flags_len);
 }

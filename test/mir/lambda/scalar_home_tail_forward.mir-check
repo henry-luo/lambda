@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "v5: the `int` parameter uses the i64 lane, so it appears as `i64:`. Tail-home forwarding: the epilogue adopts the result into the incoming _scalar_home, then restores the number watermark, then returns (Stack API #15/#16/#21).",
+  "description": "v5: the `int` parameter uses the i64 lane, so it appears as `i64:`. Tail-home forwarding: the epilogue adopts the result into the incoming _scalar_home, then restores the number watermark directly, then returns (Stack API #15/#16/#21).",
   "checks": [
     {
       "in_func": "_accumulate_#",

@@ -3765,6 +3765,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 // wrapper frame; capture analysis must not mistake the original
                 // wrapper-local declaration for a normal ancestor capture.
                 mce.is_iife_func_decl = true;
+                fc->is_iife_func_decl = true;
                 mce.int_val = mt->module_var_count++;
                 hashmap_set(mt->module_consts, &mce);
                 log_debug("js-mir: iife func '%s' → module_var[%d]", mce.name, (int)mce.int_val);

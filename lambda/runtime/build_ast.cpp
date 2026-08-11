@@ -8611,13 +8611,25 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
 
     ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
+    ast_node->vars->is_proc = tp->current_scope->is_proc;
     tp->current_scope = ast_node->vars;
 
     // Build all clauses (loop, let, where, group, order, limit, offset)
     build_for_clauses(tp, for_node, ast_node);
 
     TSNode then_node = ts_node_child_by_field_id(for_node, FIELD_THEN);
-    ast_node->then = build_expr(tp, then_node);
+    if (ts_node_symbol(then_node) == SYM_CONTENT) {
+        // Keep braced for-expression bodies lexically local to each iteration.
+        NameScope* body_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+        body_scope->parent = tp->current_scope;
+        body_scope->is_proc = tp->current_scope->is_proc;
+        tp->current_scope = body_scope;
+        ast_node->then = build_content(tp, then_node, true, false);
+        tp->current_scope = body_scope->parent;
+    }
+    else {
+        ast_node->then = build_expr(tp, then_node);
+    }
 
     // determine for-expr type
     if (!ast_node->then) {

@@ -76,6 +76,7 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* p
                                      struct CssStylesheet*** stylesheets, int* count, int depth = 0);
 struct SelectorMatcher* selector_matcher_create(Pool* pool);
 static void clear_cascaded_styles_recursive(DomNode* node);
+static void mark_layout_dirty_recursive(DomNode* node);
 static bool radiant_dispatch_simple_event(EventContext* evcon, View* target,
                                           const char* type,
                                           bool bubbles, bool cancelable);
@@ -5488,6 +5489,16 @@ static void clear_cascaded_styles_recursive(DomNode* node) {
     }
 }
 
+static void mark_layout_dirty_recursive(DomNode* node) {
+    if (!node) return;
+    node->layout_dirty = true;
+    if (!node->is_element()) return;
+    DomElement* element = lam::dom_require_element(node);
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        mark_layout_dirty_recursive(child);
+    }
+}
+
 static bool css_simple_selector_uses_hover(CssSimpleSelector* simple) {
     if (!simple) return false;
     if (simple->type == CSS_SELECTOR_PSEUDO_HOVER) return true;
@@ -5606,12 +5617,23 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
 
         recascade_document_for_pseudo_state(doc, state);
 
-        reflow_schedule(state, view, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
+        // Selector combinators can make a pseudo-state change affect siblings
+        // and ancestors, so a subtree-only request leaves `:checked + label`
+        // with stale computed style after a JS IDL write.
+        // The mutation reconciler may run an incremental layout before the
+        // queued reflow. Marking the retained tree prevents its clean subtree
+        // fast path from reusing styles resolved before this state transition.
+        mark_layout_dirty_recursive(static_cast<DomNode*>(doc->root));
+        reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
 
         // Always mark for repaint
-        dirty_mark_element(state, view);
+        dirty_mark_element(state, doc->root);
         doc_state_mark_dirty(state);
     }
+}
+
+void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
+    sync_pseudo_state(view, pseudo_flag, set);
 }
 
 // Resolve the owning document from any view, including non-element views
@@ -6042,8 +6064,8 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, fl
     int max_visible = 10;
     int visible_count = (option_count < max_visible) ? option_count : max_visible;
 
-    // Option height based on select height (each option same height as closed select)
-    float option_height = select->height;
+    // the popup uses the native option row, not an author-sized closed control
+    float option_height = form_select_dropdown_row_height(select->form);
 
     // Calculate popup dimensions
     doc_state_set_dropdown_geometry(state, state->dropdown_x, state->dropdown_y,
@@ -6089,7 +6111,8 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     doc_state_open_dropdown(state, static_cast<View*>(select));
 
     float abs_x = 0.0f, abs_y = 0.0f;
-    view_to_absolute_position(select_view, select->x, select->y + select->height,
+    view_to_absolute_position(select_view, select->x,
+                              select->y + form_select_dropdown_row_height(select->form),
                               0.0f, 0.0f, &abs_x, &abs_y);
 
     doc_state_set_dropdown_geometry(state, abs_x * scale, abs_y * scale,
@@ -6134,7 +6157,7 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
     }
 
     // Calculate which option was clicked
-    float option_height = select->height * scale;
+    float option_height = form_select_dropdown_row_height(select->form) * scale;
     int clicked_index = (int)((mouse_y - state->dropdown_y) / option_height);
 
     log_debug("handle_dropdown_option_click: option_height=%.1f, clicked_index=%d, option_count=%d",
@@ -6173,7 +6196,7 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     }
 
     // Calculate which option is hovered
-    float option_height = select->height * scale;
+    float option_height = form_select_dropdown_row_height(select->form) * scale;
     int hover_index = (int)((mouse_y - state->dropdown_y) / option_height);
 
     if (hover_index >= 0 && hover_index < select->form->option_count) {

@@ -141,9 +141,18 @@ bool js_capture_compiled_name_table(const JsMirTranspiler* mt,
         state->module_property_count = 0;
         state->module_property_bytes_size = 0;
     }
-    state->ic_count = mt ? mt->ic_count : 0;
-    if (!mt || !mt->module_name_specs || mt->module_name_specs->length == 0) return true;
-    return jm_build_property_key_image(NULL, 0, 0, mt->module_name_specs,
+    uint32_t inherited_count = g_jm_preamble_in
+        ? g_jm_preamble_in->module_property_count : 0;
+    uint32_t inherited_bytes = g_jm_preamble_in
+        ? g_jm_preamble_in->module_property_bytes_size : 0;
+    uint32_t inherited_ic = g_jm_preamble_in ? g_jm_preamble_in->ic_count : 0;
+    state->ic_count = inherited_ic + (mt ? mt->ic_count : 0);
+    if ((!mt || !mt->module_name_specs || mt->module_name_specs->length == 0) &&
+            inherited_count == 0) return true;
+    return jm_build_property_key_image(
+        g_jm_preamble_in ? g_jm_preamble_in->module_property_specs : NULL,
+        inherited_count, inherited_bytes,
+        mt ? mt->module_name_specs : NULL,
         &state->module_property_specs, &state->module_property_count,
         &state->module_property_bytes_size);
 }
@@ -1135,8 +1144,15 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         return (Item){.item = ITEM_ERROR};
     }
     if (!g_jm_preamble_compile_only && g_jm_preamble_in) {
-        if (!js_ensure_active_module_var_capacity((uint32_t)mt->module_var_count)) {
-            log_error("js-mir: failed to grow inherited preamble module state");
+        // Each preamble consumer has its own property-key image. Reusing the
+        // previous consumer slab leaves its sealed key count attached to the
+        // next MIR unit, whose local property set is necessarily different.
+        uint32_t source_state_id = js_get_active_module_state_id();
+        if (!js_activate_module_state((uint32_t)mt->module_var_count) ||
+                !js_copy_module_state_var_prefix(
+                    source_state_id, js_get_active_module_state_id(),
+                    (uint32_t)g_jm_preamble_in->module_var_count)) {
+            log_error("js-mir: failed to create preamble consumer module state");
             return (Item){.item = ITEM_ERROR};
         }
     } else if (!g_jm_preamble_compile_only) {
@@ -1448,76 +1464,6 @@ Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, s
     g_js_mir_optimize_level = saved_level;
     g_jm_preamble_mode = false;
     g_jm_preamble_out = NULL;
-    return result;
-}
-
-static Item compile_js_mir_cached_unit_len(
-    Runtime* runtime, const char* js_source, size_t js_source_len,
-    const char* filename, bool preamble_mode,
-    const JsPreambleState* preamble, JsPreambleState* out_state) {
-    // Cached units retain code and declaration metadata only. Execution is a
-    // separate step so no document heap can become part of the cache owner.
-    g_jm_preamble_mode = preamble_mode;
-    g_jm_preamble_compile_only = true;
-    g_jm_preamble_out = out_state;
-    g_jm_preamble_in = preamble;
-    unsigned int saved_level = g_js_mir_optimize_level;
-    g_js_mir_optimize_level = 3;
-    uint64_t compile_result_home = 0;
-    Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename,
-                                                &compile_result_home);
-    g_js_mir_optimize_level = saved_level;
-    g_jm_preamble_out = NULL;
-    g_jm_preamble_in = NULL;
-    g_jm_preamble_compile_only = false;
-    g_jm_preamble_mode = false;
-    return result;
-}
-
-Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
-                                 const char* filename, JsPreambleState* out_state) {
-    // Unlike js262's hot-heap preamble, a browser preamble captures document
-    // globals. Retain only MIR code and declaration metadata, then instantiate
-    // it separately into each document heap.
-    return compile_js_mir_cached_unit_len(runtime, js_source, js_source_len,
-                                          filename, true, NULL, out_state);
-}
-
-Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
-                                      size_t js_source_len, const char* filename,
-                                      const JsPreambleState* preamble,
-                                      JsPreambleState* out_state) {
-    if (!preamble) return ItemError;
-    return compile_js_mir_cached_unit_len(runtime, js_source, js_source_len,
-                                          filename, false, preamble, out_state);
-}
-
-Item execute_compiled_js_in_current_realm(Runtime* runtime,
-                                          const JsPreambleState* compiled_state) {
-    if (!runtime || !runtime->heap || !compiled_state || !compiled_state->entry_func) {
-        return ItemError;
-    }
-
-    EvalContext* runtime_context = runtime_get_eval_context(runtime);
-    if (!runtime_context) return ItemError;
-    runtime_context->heap = runtime->heap;
-    runtime_context->name_pool = runtime->name_pool;
-    runtime_context->type_list = runtime->type_list;
-    runtime_context->pool = runtime->heap->pool;
-    if (!eval_context_thread_initialize(runtime_context) ||
-            !js_runtime_state_thread_initialize(runtime_context)) {
-        return ItemError;
-    }
-    if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
-    if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
-
-    typedef Item (*js_main_func_t)(Context*);
-    js_main_func_t js_main = (js_main_func_t)compiled_state->entry_func;
-    js_mir_reset_last_phase_timing();
-    long execute_start = js_mir_phase_now_us();
-    Item result = js_main((Context*)context);
-    g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - execute_start;
-    g_last_js_mir_phase_timing.total_us = g_last_js_mir_phase_timing.execute_us;
     return result;
 }
 

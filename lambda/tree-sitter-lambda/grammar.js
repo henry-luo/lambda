@@ -1006,7 +1006,10 @@ module.exports = grammar({
       // optional clauses: where → group → order → limit → offset
       optional($.for_clauses),
       ')',
+      choice(
+      prec.dynamic(1, seq('{', field('then', $.content), '}')),
       field('then', $._expr),
+      )
     )),
 
     for_stam: $ => seq(

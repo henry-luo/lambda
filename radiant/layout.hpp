@@ -789,6 +789,28 @@ static inline void layout_resolve_auto_margin_pair(float available_size, float b
     }
 }
 
+// Keep normal-flow horizontal auto margins on one axis path. Floats and inline-level
+// boxes use zero auto margins; ordinary blocks resolve against the float-reduced space.
+static inline void layout_resolve_in_flow_horizontal_margins(ViewBlock* block,
+                                                             float available_size,
+                                                             bool is_rtl,
+                                                             bool zero_auto) {
+    if (!block || !block->bound) return;
+    Margin* margin = &block->boundary_mut()->margin;
+    bool start_auto = margin->left_type == CSS_VALUE_AUTO;
+    bool end_auto = margin->right_type == CSS_VALUE_AUTO;
+    if (zero_auto) {
+        if (start_auto) margin->left = 0.0f;
+        if (end_auto) margin->right = 0.0f;
+    } else if (start_auto || end_auto) {
+        layout_resolve_auto_margin_pair(
+            available_size, block->width, start_auto, end_auto,
+            &margin->left, &margin->right);
+    } else if (is_rtl) {
+        margin->left = available_size - block->width - margin->right;
+    }
+}
+
 // ============================================================================
 // Containing Blocks
 // ============================================================================
@@ -2002,7 +2024,77 @@ typedef struct LayoutAxisConstraintRefs {
         minimum_type = horizontal ? &block->given_min_width_type : &block->given_min_height_type;
         maximum_type = horizontal ? &block->given_max_width_type : &block->given_max_height_type;
     }
+    LayoutAxisConstraintRefs(BlockProp* block, LayoutAxis axis)
+        : LayoutAxisConstraintRefs(block, axis == LAYOUT_AXIS_X) {}
 } LayoutAxisConstraintRefs;
+
+// Keep physical start/end selection in one value object.  Layout algorithms
+// use physical axes after writing-mode resolution, so every caller should use
+// the same left/right or top/bottom mapping for insets and margins.
+inline CssBoxSide layout_axis_side(LayoutAxis axis, bool start) {
+    if (axis == LAYOUT_AXIS_X) return start ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT;
+    return start ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_BOTTOM;
+}
+
+typedef struct LayoutAxisInsetRefs {
+    RadiantInsetSide start;
+    RadiantInsetSide end;
+
+    LayoutAxisInsetRefs(PositionProp* position, LayoutAxis axis)
+        : start{}, end{} {
+        if (!position) return;
+        start = radiant_inset_side(position, layout_axis_side(axis, true));
+        end = radiant_inset_side(position, layout_axis_side(axis, false));
+    }
+} LayoutAxisInsetRefs;
+
+typedef struct LayoutAxisMarginRefs {
+    float* start;
+    float* end;
+    CssEnum* start_type;
+    CssEnum* end_type;
+
+    LayoutAxisMarginRefs(Margin* margin, LayoutAxis axis)
+        : start(nullptr), end(nullptr), start_type(nullptr), end_type(nullptr) {
+        if (!margin) return;
+        start = radiant_spacing_value(margin, layout_axis_side(axis, true));
+        end = radiant_spacing_value(margin, layout_axis_side(axis, false));
+        start_type = radiant_margin_type(margin, layout_axis_side(axis, true));
+        end_type = radiant_margin_type(margin, layout_axis_side(axis, false));
+    }
+} LayoutAxisMarginRefs;
+
+// Keep an absolute/static-position axis as one unit; callers must not mix an
+// inset from one physical axis with margins from the other.
+typedef struct LayoutAxisPlacementRefs {
+    LayoutAxisInsetRefs insets;
+    LayoutAxisMarginRefs margins;
+
+    LayoutAxisPlacementRefs(ViewBlock* block, LayoutAxis axis)
+        : insets(block ? block->position : nullptr, axis),
+          margins(block && block->bound ? &block->boundary_mut()->margin : nullptr, axis) {}
+
+    bool has_start() const { return insets.start.has && *insets.start.has; }
+    bool has_end() const { return insets.end.has && *insets.end.has; }
+    bool has_any_inset() const { return has_start() || has_end(); }
+    float margin_start() const { return margins.start ? *margins.start : 0.0f; }
+    float margin_end() const { return margins.end ? *margins.end : 0.0f; }
+} LayoutAxisPlacementRefs;
+
+inline CssEnum layout_axis_given_type(const BlockProp* block, LayoutAxis axis) {
+    if (!block) return CSS_VALUE_AUTO;
+    return axis == LAYOUT_AXIS_X ? block->given_width_type : block->given_height_type;
+}
+
+inline bool layout_axis_uses_intrinsic_size(const BlockProp* block, LayoutAxis axis) {
+    CssEnum type = layout_axis_given_type(block, axis);
+    return type == CSS_VALUE_MIN_CONTENT || type == CSS_VALUE_MAX_CONTENT ||
+        type == CSS_VALUE_FIT_CONTENT;
+}
+
+inline bool layout_axis_uses_stretch_size(const BlockProp* block, LayoutAxis axis) {
+    return layout_axis_given_type(block, axis) == CSS_VALUE_STRETCH;
+}
 
 inline float layout_axis_given_size(const BlockProp* block, LayoutAxis axis) {
     if (!block) return -1.0f;
@@ -2886,6 +2978,10 @@ void block_context_recompute_lowest_float_bottom(BlockContext* ctx);
 FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height,
                                               bool line_query = false,
                                               bool float_placement_query = false);
+
+// Return the next lower edge of any float strictly below the candidate Y.
+// Float-avoidance and positioned static placement share this boundary rule.
+float block_context_next_float_boundary(BlockContext* ctx, float y);
 
 /**
  * Find the lowest Y where a given width is available

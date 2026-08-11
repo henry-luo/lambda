@@ -14325,7 +14325,9 @@ static void js_window_event_ensure_rooted() {
 }
 
 extern "C" int js_is_window_event_global_property(Item object, Item key) {
-    return js_window_event_intercept_enabled &&
+    // native DOM hit-testing can build JS-shaped objects outside an eval frame;
+    // window.event interception has no meaning until the owning runtime is bound.
+    return js_active_runtime_state && js_window_event_intercept_enabled &&
         js_global_this_obj.item != 0 &&
         object.item == js_global_this_obj.item &&
         js_key_is_event_name(key);

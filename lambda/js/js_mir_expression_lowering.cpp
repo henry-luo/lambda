@@ -249,9 +249,9 @@ static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
 #endif
 }
 
-// The callee probe is purely observational: it logs a non-function target and
-// returns the callee unchanged. Its log_debug compiles out of release, so the
-// emitted call would only add a C-call boundary to every dynamic call site.
+// Disabled because this observational probe added a debug-only C-call boundary
+// to MIR and made debug emission differ from release emission.
+/*
 static void jm_emit_debug_check_callee(JsMirTranspiler* mt, MIR_reg_t callee,
         int64_t site_id) {
 #ifndef NDEBUG
@@ -262,6 +262,7 @@ static void jm_emit_debug_check_callee(JsMirTranspiler* mt, MIR_reg_t callee,
     (void)mt; (void)callee; (void)site_id;
 #endif
 }
+*/
 
 static void jm_emit_pending_call_source(JsMirTranspiler* mt, JsCallNode* call) {
     if (!mt || !call || !mt->tp || !mt->tp->source) return;
@@ -619,11 +620,17 @@ static bool jm_current_function_captures_with_scope(JsMirTranspiler* mt) {
 }
 
 static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
-    if (!mt || mt->current_func_index < 0 || mt->func_count <= 0) return false;
+    if (!mt || !mt->current_fc) return false;
+    // Synthetic/native body lowering can leave current_func_index unset even
+    // though current_fc identifies a direct IIFE declaration. Keep its
+    // promoted lexical bindings visible; otherwise a retained function reads
+    // them as unresolved globals after the original IIFE has returned.
+    if (mt->current_fc->is_iife_func_decl || mt->current_fc->is_iife_body) return true;
+    if (mt->current_func_index < 0 || mt->func_count <= 0) return false;
     int idx = mt->current_func_index;
     while (idx >= 0 && idx < mt->func_count) {
         JsFuncCollected* fc = &mt->func_entries[idx];
-        if (fc->is_iife_body) return true;
+        if (fc->is_iife_func_decl || fc->is_iife_body) return true;
         idx = fc->parent_index;
     }
     return false;
@@ -6564,7 +6571,7 @@ static MIR_reg_t jm_emit_optional_function_call(JsMirTranspiler* mt, MIR_reg_t c
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     jm_emit_label(mt, l_call);
-    jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
+    // jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
     MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
     MIR_reg_t call_result;
     if (has_spread) {
@@ -8876,7 +8883,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 log_debug("js-mir: CASCADE-FALLBACK[site=%d] method '%.*s' in func '%s'",
                     cs_id, (int)prop->name->len, prop->name->chars,
                     mt->current_fc ? mt->current_fc->name : "__main__");
-                jm_emit_debug_check_callee(mt, fn, (int64_t)cs_id);
+                // jm_emit_debug_check_callee(mt, fn, (int64_t)cs_id);
                 bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
                 MIR_reg_t r = jm_call_function_into(mt,
                     MIR_new_reg_op(mt->ctx, fn),
@@ -9717,8 +9724,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             fallback_has_spread, callee_spill_slot, "optc", "optk");
     }
 
-    // Debug: emit runtime check with site_id
-    jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
+    // jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
 
     if (fallback_has_spread) {
         MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
@@ -11284,6 +11290,15 @@ MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
     return result;
 }
 
+static MIR_reg_t jm_string_chars_ptr(JsMirTranspiler* mt, MIR_reg_t string_ptr) {
+    MIR_reg_t chars = jm_new_reg(mt, "chars", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+        MIR_new_reg_op(mt->ctx, chars),
+        MIR_new_reg_op(mt->ctx, string_ptr),
+        MIR_new_int_op(mt->ctx, offsetof(String, chars))));
+    return chars;
+}
+
 // Template literal
 MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNode* tmpl) {
     // The function frame owns the explicit context register.  Template
@@ -11315,13 +11330,9 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
                     elem->cooked->chars, (int)elem->cooked->len);
                 MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_P,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
-                // String stores its bytes after the header; passing the String
-                // object itself made the quasi prefix render header bytes.
-                MIR_reg_t chars = jm_new_reg(mt, "quasi_chars", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-                    MIR_new_reg_op(mt->ctx, chars),
-                    MIR_new_reg_op(mt->ctx, str_ptr),
-                    MIR_new_int_op(mt->ctx, offsetof(String, chars))));
+                // `it2s` returns the String header; StringBuf consumes the
+                // flexible-array character payload, not the header's length byte.
+                MIR_reg_t chars = jm_string_chars_ptr(mt, str_ptr);
                 jm_call_void_3(mt, "stringbuf_append_str_n",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sb),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, chars),
@@ -11358,11 +11369,7 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
                 MIR_new_int_op(mt->ctx, 0)));
             // Compute chars address: str_ptr + offsetof(String, chars)
             // (chars is a flexible array member, not a pointer)
-            MIR_reg_t chars = jm_new_reg(mt, "chars", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-                MIR_new_reg_op(mt->ctx, chars),
-                MIR_new_reg_op(mt->ctx, str_ptr),
-                MIR_new_int_op(mt->ctx, offsetof(String, chars))));
+            MIR_reg_t chars = jm_string_chars_ptr(mt, str_ptr);
             // Load String.len (uint32_t at offset 0)
             MIR_reg_t len = jm_new_reg(mt, "slen", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -12632,20 +12639,16 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         return result;
     }
     case JS_AST_NODE_REGEX: {
-        // Static AST literals have pool-owned spelling, so their compiled form
-        // can be safely retained by the literal cache across evaluations.
+        // Embed literal bytes in MIR; compiler name-pool pointers can be retired
+        // before a later event executes this generated code.
         JsRegexNode* re = (JsRegexNode*)expr;
-        MIR_reg_t pat_ptr = jm_new_reg(mt, "re_pat", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pat_ptr),
-            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)re->pattern)));
-        MIR_reg_t flags_ptr = jm_new_reg(mt, "re_flags", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, flags_ptr),
-            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)re->flags)));
-        return jm_call_4(mt, "js_create_regex_literal", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, pat_ptr),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, re->pattern_len),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, flags_ptr),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, re->flags_len));
+        MIR_reg_t pattern = jm_box_string_literal(mt, re->pattern, re->pattern_len);
+        MIR_reg_t flags = re->flags
+            ? jm_box_string_literal(mt, re->flags, re->flags_len)
+            : jm_box_string_literal(mt, "", 0);
+        return jm_call_2(mt, "js_create_regex_literal_items", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, pattern),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, flags));
     }
     case JS_AST_NODE_YIELD_EXPRESSION: {
         JsYieldNode* yield_node = (JsYieldNode*)expr;

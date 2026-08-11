@@ -47,6 +47,12 @@ extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
 struct DocState;
 struct DomNode;
 
+#ifndef RADIANT_EVENT_CORE_ONLY
+// Re-apply selector-dependent style and schedule layout after a live pseudo
+// state changes outside the native pointer dispatcher (for example JS .checked).
+void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set);
+#endif
+
 typedef enum  {
     RDT_EVENT_NIL = 0,
     RDT_EVENT_MOUSE_DOWN,
@@ -481,6 +487,10 @@ void editing_surface_clear(EditingSurface* out);
 
 bool editing_surface_from_target(View* target, EditingSurface* out);
 bool editing_surface_from_focus(DocState* state, EditingSurface* out);
+
+// resolve an automation or pointer target to the element that owns the
+// editing surface, including block wrappers whose editable host is a child.
+View* editing_focus_target_from_target(View* target);
 
 bool editing_surface_is_rich(const EditingSurface* surface);
 bool editing_surface_is_text_control(const EditingSurface* surface);

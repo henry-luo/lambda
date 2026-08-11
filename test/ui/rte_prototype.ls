@@ -141,8 +141,8 @@ fn click_selection_for_doc(doc, evt, fallback) {
   else { fallback }
 }
 
-fn editor_with_event_selection(ed, evt) => edit_set_selection(ed, event_selection_for_doc(ed.doc, evt, ed.selection))
-fn editor_with_click_selection(ed, evt) => edit_set_selection(ed, click_selection_for_doc(ed.doc, evt, ed.selection))
+fn editor_with_event_selection(ed, evt) map | error => edit_set_selection(ed, event_selection_for_doc(ed.doc, evt, ed.selection))
+fn editor_with_click_selection(ed, evt) map | error => edit_set_selection(ed, click_selection_for_doc(ed.doc, evt, ed.selection))
 
 // ============================================================================
 // Per-tag render templates — markdown Mark tree -> HTML

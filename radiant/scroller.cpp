@@ -412,8 +412,7 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
 
     if (content_width > block->width) { // hz overflow
         block->scroller->has_hz_overflow = true;
-        if (block->scroll()->overflow_x == CSS_VALUE_VISIBLE) {}
-        else if (block->scroll()->overflow_x == CSS_VALUE_SCROLL ||
+        if (block->scroll()->overflow_x == CSS_VALUE_SCROLL ||
             block->scroll()->overflow_x == CSS_VALUE_AUTO) {
             block->scroller->has_hz_scroll = true;
         }
@@ -429,8 +428,8 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
     // handle vertical overflow and determine block->height
     if (content_height > block->height) { // vt overflow
         block->scroller->has_vt_overflow = true;
-        if (block->scroll()->overflow_y == CSS_VALUE_VISIBLE) { }
-        else if (block->scroll()->overflow_y == CSS_VALUE_SCROLL || block->scroll()->overflow_y == CSS_VALUE_AUTO) {
+        if (block->scroll()->overflow_y == CSS_VALUE_SCROLL ||
+            block->scroll()->overflow_y == CSS_VALUE_AUTO) {
             block->scroller->has_vt_scroll = true;
         }
         if (block->scroll()->has_vt_scroll ||

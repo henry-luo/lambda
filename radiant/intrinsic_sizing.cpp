@@ -238,8 +238,8 @@ CssEnum layout_intrinsic_preferred_size_keyword(ViewBlock* block, bool horizonta
     }
     if (keyword != CSS_VALUE__UNDEF) return keyword;
     if (!block->blk) return CSS_VALUE__UNDEF;
-    return layout_intrinsic_size_keyword_from_stored(
-        horizontal ? block->block()->given_width_type : block->block()->given_height_type);
+    LayoutAxisConstraintRefs refs(block->block_mut(), horizontal);
+    return layout_intrinsic_size_keyword_from_stored(*refs.given_type);
 }
 
 static CssEnum layout_intrinsic_minmax_size_keyword(ViewBlock* block, bool horizontal,
@@ -250,15 +250,9 @@ static CssEnum layout_intrinsic_minmax_size_keyword(ViewBlock* block, bool horiz
         layout_specified_physical_minmax_size_declaration(element, horizontal, minimum));
     if (keyword != CSS_VALUE__UNDEF) return keyword;
     if (!block->blk) return CSS_VALUE__UNDEF;
-    CssEnum stored;
-    if (minimum) {
-        stored = horizontal ? block->block()->given_min_width_type
-                            : block->block()->given_min_height_type;
-    } else {
-        stored = horizontal ? block->block()->given_max_width_type
-                            : block->block()->given_max_height_type;
-    }
-    return layout_intrinsic_size_keyword_from_stored(stored);
+    LayoutAxisConstraintRefs refs(block->block_mut(), horizontal);
+    return layout_intrinsic_size_keyword_from_stored(
+        minimum ? *refs.minimum_type : *refs.maximum_type);
 }
 
 CssEnum layout_intrinsic_min_size_keyword(ViewBlock* block, bool horizontal) {
@@ -269,8 +263,8 @@ bool layout_axis_size_is_percentage(ViewBlock* block, bool horizontal) {
     if (!block) return false;
 
     if (block->blk) {
-        float given_percent = horizontal ? block->block()->given_width_percent
-                                        : block->block()->given_height_percent;
+        LayoutAxisConstraintRefs refs(block->block_mut(), horizontal);
+        float given_percent = *refs.given_percent;
         if (!isnan(given_percent)) return true;
     }
 
@@ -769,18 +763,32 @@ static float intrinsic_border_width_from_spacing_value(LayoutContext* lycon, Css
     return resolve_length_value(lycon, property, side_value);
 }
 
-static void get_intrinsic_border_widths_from_css(LayoutContext* lycon, DomElement* element,
-                                                 bool horizontal, float* start, float* end) {
+static float intrinsic_resolve_box_length(LayoutContext* lycon, CssPropertyCode property,
+                                          const CssValue* value, float inline_base) {
+    if (!value) return 0.0f;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        return inline_base > 0.0f ? (float)(value->data.percentage.value / 100.0) * inline_base : 0.0f;
+    }
+    return resolve_length_value(lycon, property, value);
+}
+
+static void get_intrinsic_box_side_widths_from_css(LayoutContext* lycon, DomElement* element,
+                                                   bool horizontal, bool border,
+                                                   float inline_base, float* start, float* end) {
     if (!element || !element->specified_style || !start || !end) return;
 
     float side_width[2] = {*start, *end};
     int64_t priority[2] = {-1, -1};
-    const CssPropertyCode width_property[2] = {
-        horizontal ? CSS_PROPERTY_BORDER_LEFT_WIDTH : CSS_PROPERTY_BORDER_TOP_WIDTH,
-        horizontal ? CSS_PROPERTY_BORDER_RIGHT_WIDTH : CSS_PROPERTY_BORDER_BOTTOM_WIDTH};
-    const CssPropertyCode shorthand_property[2] = {
-        horizontal ? CSS_PROPERTY_BORDER_LEFT : CSS_PROPERTY_BORDER_TOP,
-        horizontal ? CSS_PROPERTY_BORDER_RIGHT : CSS_PROPERTY_BORDER_BOTTOM};
+    const CssPropertyCode side_property[2] = {
+        horizontal ? (border ? CSS_PROPERTY_BORDER_LEFT_WIDTH : CSS_PROPERTY_PADDING_LEFT)
+                   : (border ? CSS_PROPERTY_BORDER_TOP_WIDTH : CSS_PROPERTY_PADDING_TOP),
+        horizontal ? (border ? CSS_PROPERTY_BORDER_RIGHT_WIDTH : CSS_PROPERTY_PADDING_RIGHT)
+                   : (border ? CSS_PROPERTY_BORDER_BOTTOM_WIDTH : CSS_PROPERTY_PADDING_BOTTOM)};
+    const CssPropertyCode side_shorthand[2] = {
+        horizontal ? (border ? CSS_PROPERTY_BORDER_LEFT : CSS_PROPERTY_PADDING_LEFT)
+                   : (border ? CSS_PROPERTY_BORDER_TOP : CSS_PROPERTY_PADDING_TOP),
+        horizontal ? (border ? CSS_PROPERTY_BORDER_RIGHT : CSS_PROPERTY_PADDING_RIGHT)
+                   : (border ? CSS_PROPERTY_BORDER_BOTTOM : CSS_PROPERTY_PADDING_BOTTOM)};
     const int shorthand_index[2] = {
         horizontal ? 3 : 0, horizontal ? 1 : 2};
 
@@ -793,89 +801,34 @@ static void get_intrinsic_border_widths_from_css(LayoutContext* lycon, DomElemen
         }
     };
 
-    CssDeclaration* border_decl = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_BORDER);
-    if (border_decl && border_decl->value) {
-        float width = intrinsic_border_width_from_shorthand_value(
-            lycon, CSS_PROPERTY_BORDER_WIDTH, border_decl->value);
-        apply_width(border_decl, width, 0);
-        apply_width(border_decl, width, 1);
-    }
-
-    CssDeclaration* border_width_decl = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_BORDER_WIDTH);
-    if (border_width_decl && border_width_decl->value) {
-        for (int side = 0; side < 2; side++) {
-            apply_width(border_width_decl,
-                        intrinsic_border_width_from_spacing_value(
-                            lycon, CSS_PROPERTY_BORDER_WIDTH, border_width_decl->value,
-                            shorthand_index[side]), side);
-        }
-    }
-
-    for (int side = 0; side < 2; side++) {
-        CssDeclaration* width_decl = style_tree_get_declaration(
-            element->specified_style, width_property[side]);
-        if (width_decl && width_decl->value) {
-            apply_width(width_decl,
-                        resolve_length_value(lycon, width_property[side], width_decl->value),
-                        side);
-        }
-        CssDeclaration* side_decl = style_tree_get_declaration(
-            element->specified_style, shorthand_property[side]);
-        if (side_decl && side_decl->value) {
-            apply_width(side_decl,
-                        intrinsic_border_width_from_shorthand_value(
-                            lycon, width_property[side], side_decl->value), side);
-        }
-    }
-
-    *start = side_width[0];
-    *end = side_width[1];
-}
-
-static float intrinsic_resolve_box_length(LayoutContext* lycon, CssPropertyCode property,
-                                          const CssValue* value, float inline_base) {
-    if (!value) return 0.0f;
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        return inline_base > 0.0f ? (float)(value->data.percentage.value / 100.0) * inline_base : 0.0f;
-    }
-    return resolve_length_value(lycon, property, value);
-}
-
-static void get_intrinsic_padding_widths_from_css(LayoutContext* lycon, DomElement* element,
-                                                  bool horizontal, float inline_base,
-                                                  float* start, float* end) {
-    if (!element || !element->specified_style || !start || !end) return;
-
-    float side_width[2] = {*start, *end};
-    int64_t priority[2] = {-1, -1};
-    const CssPropertyCode side_property[2] = {
-        horizontal ? CSS_PROPERTY_PADDING_LEFT : CSS_PROPERTY_PADDING_TOP,
-        horizontal ? CSS_PROPERTY_PADDING_RIGHT : CSS_PROPERTY_PADDING_BOTTOM};
-    const int shorthand_index[2] = {
-        horizontal ? 3 : 0, horizontal ? 1 : 2};
-
-    auto apply_width = [&](const CssDeclaration* decl, float width,
-                           int side) {
-        if (!decl || !decl->value) return;
-        int64_t declaration_priority = get_cascade_priority(decl);
-        // A zero-valued longhand still overrides a lower-priority shorthand.
-        if (declaration_priority >= priority[side]) {
-            side_width[side] = width;
-            priority[side] = declaration_priority;
-        }
-    };
-
-    CssDeclaration* padding_decl = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_PADDING);
-    if (padding_decl && padding_decl->value) {
-        for (int side = 0; side < 2; side++) {
-            const CssValue* value = css_box_shorthand_side_value(
-                padding_decl->value, shorthand_index[side]);
-            if (value) {
-                apply_width(padding_decl, intrinsic_resolve_box_length(
+    CssDeclaration* box_decl = style_tree_get_declaration(
+        element->specified_style, border ? CSS_PROPERTY_BORDER : CSS_PROPERTY_PADDING);
+    if (box_decl && box_decl->value) {
+        if (border) {
+            float width = intrinsic_border_width_from_shorthand_value(
+                lycon, CSS_PROPERTY_BORDER_WIDTH, box_decl->value);
+            apply_width(box_decl, width, 0);
+            apply_width(box_decl, width, 1);
+        } else {
+            for (int side = 0; side < 2; side++) {
+                const CssValue* value = css_box_shorthand_side_value(
+                    box_decl->value, shorthand_index[side]);
+                if (!value) continue;
+                apply_width(box_decl, intrinsic_resolve_box_length(
                     lycon, side_property[side], value, inline_base), side);
+            }
+        }
+    }
+
+    if (border) {
+        CssDeclaration* border_width_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_BORDER_WIDTH);
+        if (border_width_decl && border_width_decl->value) {
+            for (int side = 0; side < 2; side++) {
+                apply_width(border_width_decl,
+                    intrinsic_border_width_from_spacing_value(
+                        lycon, CSS_PROPERTY_BORDER_WIDTH, border_width_decl->value,
+                        shorthand_index[side]), side);
             }
         }
     }
@@ -884,8 +837,18 @@ static void get_intrinsic_padding_widths_from_css(LayoutContext* lycon, DomEleme
         CssDeclaration* declaration = style_tree_get_declaration(
             element->specified_style, side_property[side]);
         if (declaration && declaration->value) {
-            apply_width(declaration, intrinsic_resolve_box_length(
-                lycon, side_property[side], declaration->value, inline_base), side);
+            float width = border
+                ? resolve_length_value(lycon, side_property[side], declaration->value)
+                : intrinsic_resolve_box_length(
+                    lycon, side_property[side], declaration->value, inline_base);
+            apply_width(declaration, width, side);
+        }
+        CssDeclaration* side_decl = style_tree_get_declaration(
+            element->specified_style, side_shorthand[side]);
+        if (border && side_decl && side_decl->value) {
+            apply_width(side_decl,
+                intrinsic_border_width_from_shorthand_value(
+                    lycon, side_property[side], side_decl->value), side);
         }
     }
 
@@ -918,8 +881,8 @@ float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* ele
         float padding_end = horizontal ? metrics.padding.right : metrics.padding.bottom;
         float effective_inline_base = intrinsic_percentage_width_is_indefinite(lycon)
             ? -1.0f : inline_base;
-        get_intrinsic_padding_widths_from_css(
-            lycon, element, horizontal, effective_inline_base,
+        get_intrinsic_box_side_widths_from_css(
+            lycon, element, horizontal, false, effective_inline_base,
             &padding_start, &padding_end);
         return padding_start + padding_end + (horizontal ? metrics.border_h : metrics.border_v);
     }
@@ -928,10 +891,12 @@ float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* ele
     float padding_end = 0.0f;
     float border_start = 0.0f;
     float border_end = 0.0f;
-    get_intrinsic_padding_widths_from_css(
-        lycon, element, horizontal, inline_base, &padding_start, &padding_end);
-    get_intrinsic_border_widths_from_css(
-        lycon, element, horizontal, &border_start, &border_end);
+    get_intrinsic_box_side_widths_from_css(
+        lycon, element, horizontal, false, inline_base,
+        &padding_start, &padding_end);
+    get_intrinsic_box_side_widths_from_css(
+        lycon, element, horizontal, true, inline_base,
+        &border_start, &border_end);
     return padding_start + padding_end + border_start + border_end;
 }
 
@@ -2967,10 +2932,10 @@ static float intrinsic_inline_edge(LayoutContext* lycon, DomElement* element,
     } else if (element->specified_style) {
         layout_resolve_intrinsic_horizontal_margins(
             lycon, element, false, &margin_left, &margin_right);
-        get_intrinsic_padding_widths_from_css(
-            lycon, element, true, 0.0f, &padding_left, &padding_right);
-        get_intrinsic_border_widths_from_css(
-            lycon, element, true, &border_left, &border_right);
+        get_intrinsic_box_side_widths_from_css(
+            lycon, element, true, false, 0.0f, &padding_left, &padding_right);
+        get_intrinsic_box_side_widths_from_css(
+            lycon, element, true, true, 0.0f, &border_left, &border_right);
     }
     float margin = inline_start ? margin_left : margin_right;
     float decoration = inline_start ? border_left + padding_left
@@ -4825,8 +4790,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
             // Fallback: read border from specified CSS if bound not yet resolved
             if (bdr_left == 0 && bdr_right == 0) {
-                get_intrinsic_border_widths_from_css(
-                    lycon, element, true, &bdr_left, &bdr_right);
+                get_intrinsic_box_side_widths_from_css(
+                    lycon, element, true, true, 0.0f, &bdr_left, &bdr_right);
             }
             // Fallback: read border from HTML border attribute if still not found
             // WHATWG 15.3.10: table[border] → border-width = N pixels
@@ -6237,14 +6202,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // this replaces stale resolved padding with zero for cyclic sizes.
             float inline_base = lycon->block.parent
                 ? lycon->block.parent->content_width : lycon->block.content_width;
-            get_intrinsic_padding_widths_from_css(
-                lycon, element, true, inline_base, &pad_left, &pad_right);
+            get_intrinsic_box_side_widths_from_css(
+                lycon, element, true, false, inline_base, &pad_left, &pad_right);
         }
     } else if (element->specified_style) {
-        get_intrinsic_padding_widths_from_css(
-            lycon, element, true, lycon->block.content_width, &pad_left, &pad_right);
-        get_intrinsic_border_widths_from_css(
-            lycon, element, true, &border_left, &border_right);
+        get_intrinsic_box_side_widths_from_css(
+            lycon, element, true, false, lycon->block.content_width,
+            &pad_left, &pad_right);
+        get_intrinsic_box_side_widths_from_css(
+            lycon, element, true, true, 0.0f, &border_left, &border_right);
     }
 
     float horiz_padding = pad_left + pad_right;
@@ -7403,10 +7369,12 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     float pad_right = 0.0f;
                     float border_left = 0.0f;
                     float border_right = 0.0f;
-                    get_intrinsic_padding_widths_from_css(
-                        lycon, child_elem, true, content_w, &pad_left, &pad_right);
-                    get_intrinsic_border_widths_from_css(
-                        lycon, child_elem, true, &border_left, &border_right);
+                    get_intrinsic_box_side_widths_from_css(
+                        lycon, child_elem, true, false, content_w,
+                        &pad_left, &pad_right);
+                    get_intrinsic_box_side_widths_from_css(
+                        lycon, child_elem, true, true, 0.0f,
+                        &border_left, &border_right);
                     child_padding_border = pad_left + pad_right + border_left + border_right;
                 }
                 if (child_padding_border > 0.0f && child_content_w > 0.0f) {
