@@ -812,7 +812,10 @@ static void js_props_set_descriptor_attribute(Item object, Item name_item,
                                               const char* name, int name_len,
                                               uint8_t attr_flag, bool enabled) {
     String* key = it2s(name_item);
-    if (key && property_key_id(key) != NAME_ID_NONE) {
+    // array index and length attributes must materialize in the companion map;
+    // the identity-key fast path only updates the array's primary shape.
+    if (get_type_id(object) != LMD_TYPE_ARRAY &&
+        key && property_key_id(key) != NAME_ID_NONE) {
         js_shape_entry_update_flags_name_id(object, property_key_id(key),
             enabled ? 0 : attr_flag, enabled ? attr_flag : 0);
         return;

@@ -9368,6 +9368,9 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
         return true;
     }
     if ((name_len == 9 && strncmp(name, "__proto__", 9) == 0) ||
+        // collection backing data is an internal slot, not a public own key;
+        // exposing it lets generic object clones copy the native table pointer.
+        (name_len == 4 && strncmp(name, "__cd", 4) == 0) ||
         (name_len == 15 && strncmp(name, "__source_text__", 15) == 0) ||
         (name_len == 18 && strncmp(name, "__instance_proto__", 18) == 0) ||
         (name_len == 18 && strncmp(name, "__primitiveValue__", 18) == 0) ||
