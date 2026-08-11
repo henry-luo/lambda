@@ -169,13 +169,11 @@ struct JsWithScopeState {
     bool last_binding_valid = false;
 };
 
-// Generated closures retain their MIR context and the compilation pools that
-// contain baked strings. These are private to one execution context; worker
-// compilation publishes no mutable lifetime state here.
+// Generated closures retain only their MIR context and source buffer. Names
+// and observable strings are materialized through the owning module NameId
+// table, so compiler pools never cross the compile/execute boundary.
 struct JsDeferredMirState {
     void* contexts[JS_DEFERRED_MIR_MAX] = {};
-    void* name_pools[JS_DEFERRED_MIR_MAX] = {};
-    void* ast_pools[JS_DEFERRED_MIR_MAX] = {};
     char* source_buffers[JS_DEFERRED_MIR_MAX] = {};
     int count = 0;
 };
@@ -620,26 +618,26 @@ struct JsRuntimeOperationState {
 // paths never resolve a catalog ID repeatedly and future realm policy stays
 // out of mutable process-global state.
 struct JsWellKnownRefs {
-    PropertyKeyRef constructor = NULL;
-    PropertyKeyRef prototype = NULL;
-    PropertyKeyRef name = NULL;
-    PropertyKeyRef to_string = NULL;
-    PropertyKeyRef value_of = NULL;
-    PropertyKeyRef symbol_iterator = NULL;
-    PropertyKeyRef symbol_to_primitive = NULL;
-    PropertyKeyRef symbol_has_instance = NULL;
-    PropertyKeyRef symbol_to_string_tag = NULL;
-    PropertyKeyRef symbol_async_iterator = NULL;
-    PropertyKeyRef symbol_species = NULL;
-    PropertyKeyRef symbol_match = NULL;
-    PropertyKeyRef symbol_replace = NULL;
-    PropertyKeyRef symbol_search = NULL;
-    PropertyKeyRef symbol_split = NULL;
-    PropertyKeyRef symbol_unscopables = NULL;
-    PropertyKeyRef symbol_is_concat_spreadable = NULL;
-    PropertyKeyRef symbol_match_all = NULL;
-    PropertyKeyRef symbol_async_dispose = NULL;
-    PropertyKeyRef symbol_dispose = NULL;
+    NameId constructor = NAME_ID_NONE;
+    NameId prototype = NAME_ID_NONE;
+    NameId name = NAME_ID_NONE;
+    NameId to_string = NAME_ID_NONE;
+    NameId value_of = NAME_ID_NONE;
+    NameId symbol_iterator = NAME_ID_NONE;
+    NameId symbol_to_primitive = NAME_ID_NONE;
+    NameId symbol_has_instance = NAME_ID_NONE;
+    NameId symbol_to_string_tag = NAME_ID_NONE;
+    NameId symbol_async_iterator = NAME_ID_NONE;
+    NameId symbol_species = NAME_ID_NONE;
+    NameId symbol_match = NAME_ID_NONE;
+    NameId symbol_replace = NAME_ID_NONE;
+    NameId symbol_search = NAME_ID_NONE;
+    NameId symbol_split = NAME_ID_NONE;
+    NameId symbol_unscopables = NAME_ID_NONE;
+    NameId symbol_is_concat_spreadable = NAME_ID_NONE;
+    NameId symbol_match_all = NAME_ID_NONE;
+    NameId symbol_async_dispose = NAME_ID_NONE;
+    NameId symbol_dispose = NAME_ID_NONE;
 };
 
 struct JsDiagnosticsChannelState {

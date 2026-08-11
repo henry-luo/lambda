@@ -29,11 +29,23 @@ static uint64_t js_mir_cache_mix(uint64_t hash, uint64_t value) {
 }
 
 static uint64_t js_mir_cache_preamble_abi_hash(const JsPreambleState* preamble) {
-    if (!preamble || !preamble->entries || preamble->entry_count <= 0) return 0;
+    if (!preamble) return 0;
 
     uint64_t hash = js_mir_cache_mix(0xcbf29ce484222325ULL,
                                      (uint64_t)preamble->module_var_count);
-    for (int i = 0; i < preamble->entry_count; i++) {
+    // The cached MIR contains module-name-table indices. Include the retained
+    // spelling table in the cache key so a relink cannot reuse an old index
+    // layout after the NameId transport changes.
+    hash = js_mir_cache_mix(hash, 0x4e494431u);
+    hash = js_mir_cache_mix(hash, (uint64_t)preamble->ic_count);
+    hash = js_mir_cache_mix(hash, (uint64_t)preamble->module_property_count);
+    hash = js_mir_cache_mix(hash, (uint64_t)preamble->module_property_bytes_size);
+    if (preamble->module_property_specs && preamble->module_property_bytes_size > 0) {
+        hash = js_mir_cache_mix(hash, hashmap_xxhash3(
+            preamble->module_property_specs,
+            preamble->module_property_bytes_size, 0, 0));
+    }
+    for (int i = 0; preamble->entries && i < preamble->entry_count; i++) {
         const JsModuleConstEntry* entry = &preamble->entries[i];
         size_t name_len = entry->name ? strlen(entry->name) : 0;
         hash = js_mir_cache_mix(hash, hashmap_xxhash3(entry->name, name_len, 0, 0));

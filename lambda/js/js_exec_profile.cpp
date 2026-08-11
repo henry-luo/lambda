@@ -1,4 +1,8 @@
 #include "js_exec_profile.h"
+#include "../lambda-data.hpp"
+#include "../core/name_pool.hpp"
+
+extern __thread EvalContext* context;
 
 #ifdef LAMBDA_JS_EXEC_PROFILE
 
@@ -370,21 +374,30 @@ static void js_exec_profile_shape_guard_note(const char* label, void* expected_s
     }
 }
 
-extern "C" void js_profile_shape_guard_hit_site(const char* label,
+extern "C" void js_profile_shape_guard_hit_site(uint32_t label_name_id,
         void* expected_shape, void* actual_shape) {
     js_exec_profile_count(JS_EXEC_PROF_SHAPE_GUARD_HIT);
+    NameRef label_ref = name_pool_resolve_id(context ? context->name_pool : NULL,
+        label_name_id);
+    const char* label = label_ref ? label_ref->chars : "unknown";
     js_exec_profile_shape_guard_note(label, expected_shape, actual_shape, true);
 }
 
-extern "C" void js_profile_shape_guard_miss_site(const char* label,
+extern "C" void js_profile_shape_guard_miss_site(uint32_t label_name_id,
         void* expected_shape, void* actual_shape) {
     js_exec_profile_count(JS_EXEC_PROF_SHAPE_GUARD_MISS);
+    NameRef label_ref = name_pool_resolve_id(context ? context->name_pool : NULL,
+        label_name_id);
+    const char* label = label_ref ? label_ref->chars : "unknown";
     js_exec_profile_shape_guard_note(label, expected_shape, actual_shape, false);
 }
 
-extern "C" void js_profile_property_set_site(const char* label) {
+extern "C" void js_profile_property_set_site(uint32_t label_name_id) {
     int mode = g_js_exec_profile_mode >= 0 ? g_js_exec_profile_mode : js_exec_profile_mode();
     if (mode <= 0) return;
+    NameRef label_ref = name_pool_resolve_id(context ? context->name_pool : NULL,
+        label_name_id);
+    const char* label = label_ref ? label_ref->chars : "unknown";
     const char* safe_label = (label && label[0]) ? label : "unknown";
     for (int i = 0; i < g_js_exec_profile_property_set_site_count; i++) {
         JsExecProfilePropertySetSite* site = &g_js_exec_profile_property_set_sites[i];
@@ -502,24 +515,19 @@ static JsExecProfileEvent js_exec_profile_event_for_runtime_call(const char* fn_
     if (strcmp(fn_name, "js_get_module_var") == 0) return JS_EXEC_PROF_MODULE_VAR_GET;
     if (strcmp(fn_name, "js_property_set") == 0 ||
         strcmp(fn_name, "js_property_set_v") == 0 ||
-        strcmp(fn_name, "js_property_set_named_ic") == 0 ||
+        strcmp(fn_name, "js_property_set_name_id_ic") == 0 ||
         strcmp(fn_name, "js_super_property_set") == 0) {
         return JS_EXEC_PROF_PROPERTY_SET;
     }
     if (strcmp(fn_name, "js_set_module_var") == 0) return JS_EXEC_PROF_MODULE_VAR_SET;
     if (strcmp(fn_name, "js_property_access") == 0 ||
-        strcmp(fn_name, "js_property_access_named_ic") == 0) return JS_EXEC_PROF_PROPERTY_ACCESS;
+        strcmp(fn_name, "js_property_access_name_id_ic") == 0) return JS_EXEC_PROF_PROPERTY_ACCESS;
     if (strcmp(fn_name, "js_array_get_int") == 0) return JS_EXEC_PROF_ARRAY_GET_INT;
     if (strcmp(fn_name, "js_array_set_int") == 0) return JS_EXEC_PROF_ARRAY_SET_INT;
     if (strcmp(fn_name, "js_array_push") == 0) return JS_EXEC_PROF_ARRAY_PUSH;
     if (strcmp(fn_name, "js_call_function") == 0) return JS_EXEC_PROF_CALL_FUNCTION;
     if (strcmp(fn_name, "js_new_object") == 0) return JS_EXEC_PROF_NEW_OBJECT;
-    if (strcmp(fn_name, "js_new_object_with_shape") == 0) return JS_EXEC_PROF_NEW_OBJECT_SHAPE;
-    if (strcmp(fn_name, "js_get_slot_f") == 0) return JS_EXEC_PROF_GET_SLOT_F;
-    if (strcmp(fn_name, "js_get_slot_i") == 0) return JS_EXEC_PROF_GET_SLOT_I;
-    if (strcmp(fn_name, "js_set_slot_f") == 0) return JS_EXEC_PROF_SET_SLOT_F;
-    if (strcmp(fn_name, "js_set_slot_i") == 0) return JS_EXEC_PROF_SET_SLOT_I;
-    if (strcmp(fn_name, "js_shape_slot_guard") == 0) return JS_EXEC_PROF_SHAPE_SLOT_GUARD;
+    if (strcmp(fn_name, "js_new_object_with_typemap") == 0) return JS_EXEC_PROF_NEW_OBJECT_TYPEMAP;
     if (strcmp(fn_name, "js_profile_shape_guard_hit") == 0) return JS_EXEC_PROF_SHAPE_GUARD_HIT;
     if (strcmp(fn_name, "js_profile_shape_guard_miss") == 0) return JS_EXEC_PROF_SHAPE_GUARD_MISS;
     if (strcmp(fn_name, "js_profile_shape_guard_hit_site") == 0) return JS_EXEC_PROF_SHAPE_GUARD_HIT;

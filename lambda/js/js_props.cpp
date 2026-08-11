@@ -8,9 +8,11 @@
 #include "js_function.hpp"
 #include "js_state_guards.h"
 #include "../lambda-data.hpp"
+#include "../core/name_pool.hpp"
 
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern String* heap_create_name(const char* name, size_t len);
+extern __thread EvalContext* context;
 
 // js_runtime.cpp internals we need. Public header counterparts:
 //   js_map_get_fast_ext   — js_runtime.h
@@ -70,19 +72,19 @@ static Map* js_props_storage_map(Item object) {
     return NULL;
 }
 
-extern "C" JsShapeSlotStatus js_own_shape_slot_status(Item object,
-                                                        const char* name,
-                                                        int name_len,
-                                                        Item* out_slot,
-                                                        ShapeEntry** out_se) {
-    JS_PROPS_ASSERT_KEY(name, name_len);
+static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
+        const char* name, int name_len, NameId name_id, bool allow_ext,
+        Item* out_slot, ShapeEntry** out_se) {
+    if (name_id == NAME_ID_NONE) JS_PROPS_ASSERT_KEY(name, name_len);
     if (out_slot) *out_slot = ItemNull;
     if (out_se) *out_se = NULL;
 
     Map* m = js_props_storage_map(object);
     if (!m) return JS_SHAPE_SLOT_ABSENT;
 
-    ShapeEntry* se = js_find_shape_entry(object, name, name_len);
+    ShapeEntry* se = name_id != NAME_ID_NONE
+        ? js_find_shape_entry_name_id(object, name_id)
+        : js_find_shape_entry(object, name, name_len);
     if (out_se) *out_se = se;
 
     if (se && m->data && shape_entry_storage_fits_data(se, m->data_cap)) {
@@ -100,6 +102,7 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status(Item object,
         return JS_SHAPE_SLOT_DATA;
     }
 
+    if (!allow_ext || !name) return JS_SHAPE_SLOT_ABSENT;
     bool found = false;
     Item slot = js_map_get_fast_ext(m, name, name_len, &found);
     if (out_slot) *out_slot = slot;
@@ -111,48 +114,51 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status(Item object,
     return JS_SHAPE_SLOT_DATA;
 }
 
-extern "C" JsShapeSlotStatus js_own_shape_slot_status_key(Item object,
-                                                            PropertyKeyRef key,
-                                                            Item* out_slot,
-                                                            ShapeEntry** out_se) {
-    if (out_slot) *out_slot = ItemNull;
-    if (out_se) *out_se = NULL;
-    if (!key) return JS_SHAPE_SLOT_ABSENT;
+extern "C" JsShapeSlotStatus js_own_shape_slot_status(Item object,
+        const char* name, int name_len, Item* out_slot, ShapeEntry** out_se) {
+    return js_own_shape_slot_status_impl(object, name, name_len,
+        NAME_ID_NONE, true, out_slot, out_se);
+}
 
-    Map* m = js_props_storage_map(object);
-    if (!m) return JS_SHAPE_SLOT_ABSENT;
+extern "C" JsShapeSlotStatus js_own_shape_slot_status_name_id(Item object,
+        NameId name_id, Item* out_slot, ShapeEntry** out_se) {
+    if (name_id == NAME_ID_NONE) return JS_SHAPE_SLOT_ABSENT;
+    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
+        name_id);
+    bool allow_ext = key && property_key_kind(key) == NAME_KEY_STRING;
+    return js_own_shape_slot_status_impl(object,
+        allow_ext ? key->chars : NULL, allow_ext ? (int)key->len : 0,
+        name_id, allow_ext, out_slot, out_se);
+}
 
-    ShapeEntry* se = js_find_shape_entry_key(object, key);
-    if (out_se) *out_se = se;
-    if (se && m->data && shape_entry_storage_fits_data(se, m->data_cap)) {
-        if (get_type_id(object) == LMD_TYPE_MAP &&
-                map_ctor_offset_is_reserved(m, se->byte_offset)) {
-            return JS_SHAPE_SLOT_ABSENT;
-        }
-        Item slot = _map_read_field(se, m->data);
-        if (out_slot) *out_slot = slot;
-        if (jspd_is_deleted(se) || js_props_is_deleted_sentinel(slot)) {
-            return JS_SHAPE_SLOT_DELETED;
-        }
-        return jspd_is_accessor(se) ? JS_SHAPE_SLOT_ACCESSOR : JS_SHAPE_SLOT_DATA;
+extern "C" JsShapeSlotStatus js_own_shape_slot_status_key(Item object, Item key,
+        Item* out_slot, ShapeEntry** out_se) {
+    TypeId type = get_type_id(key);
+    if (type != LMD_TYPE_STRING && type != LMD_TYPE_SYMBOL) {
+        if (out_slot) *out_slot = ItemNull;
+        if (out_se) *out_se = NULL;
+        return JS_SHAPE_SLOT_ABSENT;
     }
-
-    // Extension-map storage is keyed by spelling, so it is valid only for
-    // ordinary STRING records.  Unique keys must never fall through here.
-    if (property_key_requires_identity(key)) return JS_SHAPE_SLOT_ABSENT;
-    return js_own_shape_slot_status(object, key->chars, (int)key->len, out_slot, out_se);
+    String* name = it2s(key);
+    if (!name) return JS_SHAPE_SLOT_ABSENT;
+    NameId name_id = name && string_is_pooled(name) ? name_ref_id(name)
+        : NAME_ID_NONE;
+    return name_id != NAME_ID_NONE
+        ? js_own_shape_slot_status_name_id(object, name_id, out_slot, out_se)
+        : js_own_shape_slot_status(object, name->chars, (int)name->len,
+            out_slot, out_se);
 }
 
 extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
                                               Item Receiver, Item* out_value) {
     // This is the shared property-key boundary for direct and generic gets.
     // Parser/Input STRING records are pooled but not runtime-canonical, so
-    // canonicalize by bytes before a shape performs pointer-key comparison.
+    // canonicalize by bytes before resolving the shape's NameId.
     TypeId kt = key._type_id;
     if (kt == LMD_TYPE_STRING) {
         String* string_key = it2s(key);
-        if (string_key && !property_key_requires_identity(string_key)) {
-            PropertyKeyRef canonical_key = heap_create_name(string_key->chars, string_key->len);
+        if (string_key && property_key_id(string_key) == NAME_ID_NONE) {
+            NameRef canonical_key = heap_create_name(string_key->chars, string_key->len);
             if (!canonical_key) return JS_OWN_NOT_FOUND;
             key = (Item){.item = s2it(canonical_key)};
         }
@@ -165,9 +171,8 @@ extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
         int kl = (int)key.get_len();
         Item slot = ItemNull;
         ShapeEntry* se = NULL;
-        JsShapeSlotStatus status = string_is_pooled(it2s(key))
-            ? js_own_shape_slot_status_key(object, it2s(key), &slot, &se)
-            : js_own_shape_slot_status(object, kc, kl, &slot, &se);
+        JsShapeSlotStatus status = js_own_shape_slot_status_key(object, key,
+            &slot, &se);
         if (status == JS_SHAPE_SLOT_ABSENT) return JS_OWN_NOT_FOUND;
         if (status == JS_SHAPE_SLOT_DELETED) return JS_OWN_DELETED;
         if (status == JS_SHAPE_SLOT_ACCESSOR) {
@@ -213,9 +218,6 @@ extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
 extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
                                                               const char* name,
                                                               int name_len);
-extern "C" JsAccessorPair* js_find_accessor_pair_inheritable_key(Item obj,
-                                                                   PropertyKeyRef key);
-
 static JsSetterDispatchResult js_setter_dispatch_result(
         JsSetterDispatchStatus status, Item error_lane) {
     return {status, error_lane};
@@ -249,12 +251,11 @@ extern "C" JsSetterDispatchResult js_ordinary_set_via_accessor(Item object,
         js_find_accessor_pair_inheritable(object, name, name_len), value, Receiver);
 }
 
-extern "C" JsSetterDispatchResult js_ordinary_set_via_accessor_key(Item object,
-                                                                     PropertyKeyRef key,
-                                                                     Item value,
-                                                                     Item Receiver) {
+extern "C" JsSetterDispatchResult js_ordinary_set_via_accessor_name_id(
+        Item object, NameId name_id, Item value, Item Receiver) {
     return js_dispatch_accessor_setter(object,
-        js_find_accessor_pair_inheritable_key(object, key), value, Receiver);
+        js_find_accessor_pair_inheritable_name_id(object, name_id), value,
+        Receiver);
 }
 
 extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
@@ -433,13 +434,13 @@ static bool js_props_desc_from_storage(Item obj, Map* m,
     return js_props_desc_from_shape_slot(status, slot, se, out);
 }
 
-static bool js_props_desc_from_storage_key(Item obj, Map* m,
-                                            PropertyKeyRef key,
-                                            JsPropertyDescriptor* out) {
-    if (!m || !key) return false;
+static bool js_props_desc_from_storage_name_id(Item obj, Map* m,
+        NameId name_id, JsPropertyDescriptor* out) {
+    if (!m || name_id == NAME_ID_NONE) return false;
     Item slot = ItemNull;
     ShapeEntry* se = NULL;
-    JsShapeSlotStatus status = js_own_shape_slot_status_key(obj, key, &slot, &se);
+    JsShapeSlotStatus status = js_own_shape_slot_status_name_id(obj, name_id,
+        &slot, &se);
     return js_props_desc_from_shape_slot(status, slot, se, out);
 }
 
@@ -450,15 +451,11 @@ static bool js_props_error_standard_field(const char* name, int name_len) {
         (name_len == 5 && memcmp(name, "stack", 5) == 0);
 }
 
-extern "C" bool js_get_own_property_descriptor(Item object,
-                                                const char* name,
-                                                int name_len,
-                                                JsPropertyDescriptor* out) {
-    if (!out) return false;
-    *out = (JsPropertyDescriptor){};
-
+static bool js_get_own_property_descriptor_impl(Item object, NameId name_id,
+        const char* name, int name_len, JsPropertyDescriptor* out,
+        bool include_error_fields) {
     TypeId t = get_type_id(object);
-    if (js_is_resting_error(object)) {
+    if (include_error_fields && js_is_resting_error(object)) {
         Item value = ItemNull;
         if (js_props_error_standard_field(name, name_len)) {
             if (!js_error_own_property(object, name, name_len, &value)) return false;
@@ -472,10 +469,16 @@ extern "C" bool js_get_own_property_descriptor(Item object,
         }
         Item properties = js_error_properties_map(object, false);
         return get_type_id(properties) == LMD_TYPE_MAP &&
-            js_props_desc_from_storage(properties, properties.map, name, name_len, out);
+            (name_id != NAME_ID_NONE
+                ? js_props_desc_from_storage_name_id(properties, properties.map,
+                    name_id, out)
+                : js_props_desc_from_storage(properties, properties.map,
+                    name, name_len, out));
     }
     if (t == LMD_TYPE_MAP) {
-        return js_props_desc_from_storage(object, object.map, name, name_len, out);
+        return name_id != NAME_ID_NONE
+            ? js_props_desc_from_storage_name_id(object, object.map, name_id, out)
+            : js_props_desc_from_storage(object, object.map, name, name_len, out);
     }
     if (t == LMD_TYPE_FUNC) {
         // FUNC: storage lives in fn->properties_map.map. Caller is still
@@ -483,8 +486,11 @@ extern "C" bool js_get_own_property_descriptor(Item object,
         // those are not stored as own properties.
         JsFunction* fn = (JsFunction*)object.function;
         if (!fn || fn->properties_map.item == 0) return false;
-        return js_props_desc_from_storage(object, fn->properties_map.map,
-                                           name, name_len, out);
+        return name_id != NAME_ID_NONE
+            ? js_props_desc_from_storage_name_id(object, fn->properties_map.map,
+                name_id, out)
+            : js_props_desc_from_storage(object, fn->properties_map.map,
+                name, name_len, out);
     }
     if (t == LMD_TYPE_ARRAY) {
         // ARRAY: own properties (named keys + numeric-index accessors) live
@@ -494,7 +500,10 @@ extern "C" bool js_get_own_property_descriptor(Item object,
         if (js_array_has_props(arr)) {
             Map* pm = js_array_props(arr);
             Item pm_item = (Item){.map = pm};
-            if (js_props_desc_from_storage(pm_item, pm, name, name_len, out)) {
+            bool found = name_id != NAME_ID_NONE
+                ? js_props_desc_from_storage_name_id(pm_item, pm, name_id, out)
+                : js_props_desc_from_storage(pm_item, pm, name, name_len, out);
+            if (found) {
                 return true;
             }
         }
@@ -503,32 +512,22 @@ extern "C" bool js_get_own_property_descriptor(Item object,
     return false;
 }
 
-extern "C" bool js_get_own_property_descriptor_key(Item object,
-                                                      PropertyKeyRef key,
-                                                      JsPropertyDescriptor* out) {
-    if (!out || !key) return false;
+extern "C" bool js_get_own_property_descriptor(Item object,
+        const char* name, int name_len, JsPropertyDescriptor* out) {
+    if (!out) return false;
     *out = (JsPropertyDescriptor){};
+    return js_get_own_property_descriptor_impl(object, NAME_ID_NONE,
+        name, name_len, out, true);
+}
 
-    TypeId t = get_type_id(object);
-    if (js_is_resting_error(object)) {
-        return js_get_own_property_descriptor(object, key->chars, (int)key->len, out);
-    }
-    if (t == LMD_TYPE_MAP) {
-        return js_props_desc_from_storage_key(object, object.map, key, out);
-    }
-    if (t == LMD_TYPE_FUNC) {
-        JsFunction* fn = (JsFunction*)object.function;
-        if (!fn || fn->properties_map.item == 0) return false;
-        return js_props_desc_from_storage_key(object, fn->properties_map.map, key, out);
-    }
-    if (t == LMD_TYPE_ARRAY) {
-        Array* arr = object.array;
-        if (!js_array_has_props(arr)) return false;
-        Item props_item = (Item){.map = js_array_props(arr)};
-        return js_props_desc_from_storage_key(props_item, arr ? js_array_props(arr) : NULL,
-                                              key, out);
-    }
-    return false;
+extern "C" bool js_get_own_property_descriptor_name_id(Item object,
+        NameId name_id, JsPropertyDescriptor* out) {
+    if (!out || name_id == NAME_ID_NONE) return false;
+    *out = (JsPropertyDescriptor){};
+    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
+        name_id);
+    return key && js_get_own_property_descriptor_impl(object, name_id,
+        key->chars, (int)key->len, out, false);
 }
 
 // Property-descriptor parser and apply kernel.
@@ -795,8 +794,8 @@ extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* o
 static ShapeEntry* js_props_find_descriptor_shape(Item object, Item name_item,
                                                    const char* name, int name_len) {
     String* key = it2s(name_item);
-    return key && property_key_requires_identity(key)
-        ? js_find_shape_entry_key(object, key)
+    return key && property_key_id(key) != NAME_ID_NONE
+        ? js_find_shape_entry_name_id(object, property_key_id(key))
         : js_find_shape_entry(object, name, name_len);
 }
 
@@ -804,8 +803,8 @@ static int js_props_descriptor_attr_fast_path(Item object, Item name_item,
                                               const char* name, int name_len,
                                               uint8_t attr_flag) {
     String* key = it2s(name_item);
-    return key && property_key_requires_identity(key)
-        ? js_prop_attrs_fast_path_key(object, key, attr_flag)
+    return key && property_key_id(key) != NAME_ID_NONE
+        ? js_prop_attrs_fast_path_name_id(object, property_key_id(key), attr_flag)
         : js_prop_attrs_fast_path(object, name, name_len, attr_flag);
 }
 
@@ -813,8 +812,8 @@ static void js_props_set_descriptor_attribute(Item object, Item name_item,
                                               const char* name, int name_len,
                                               uint8_t attr_flag, bool enabled) {
     String* key = it2s(name_item);
-    if (key && property_key_requires_identity(key)) {
-        js_shape_entry_update_flags_key(object, key,
+    if (key && property_key_id(key) != NAME_ID_NONE) {
+        js_shape_entry_update_flags_name_id(object, property_key_id(key),
             enabled ? 0 : attr_flag, enabled ? attr_flag : 0);
         return;
     }
@@ -830,8 +829,9 @@ static void js_props_set_descriptor_attribute(Item object, Item name_item,
 static void js_props_clear_descriptor_accessor(Item object, Item name_item,
                                                const char* name, int name_len) {
     String* key = it2s(name_item);
-    if (key && property_key_requires_identity(key)) {
-        js_shape_entry_update_flags_key(object, key, 0, JSPD_IS_ACCESSOR);
+    if (key && property_key_id(key) != NAME_ID_NONE) {
+        js_shape_entry_update_flags_name_id(object, property_key_id(key),
+            0, JSPD_IS_ACCESSOR);
     } else {
         js_shape_entry_set_accessor(object, name, name_len, /*is_accessor=*/false);
     }
@@ -857,7 +857,7 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
             name, name_len, pd, is_new_property, existing_accessor);
     }
     String* name_key = it2s(name_item);
-    bool identity_key = name_key && property_key_requires_identity(name_key);
+    bool identity_key = name_key && property_key_id(name_key) != NAME_ID_NONE;
 
     // [[DefineOwnProperty]] — must NOT trigger inherited accessor logic.
     // Stage D: RAII guard restores js_skip_accessor_dispatch on every exit.
@@ -1035,7 +1035,8 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
             // their established setter path.
             if (jspd_is_deleted(value_se)) {
                 if (identity_key) {
-                    js_shape_entry_update_flags_key(object, name_key, 0, JSPD_DELETED);
+                    js_shape_entry_update_flags_name_id(object,
+                        property_key_id(name_key), 0, JSPD_DELETED);
                 } else {
                     js_shape_entry_set_deleted(object, name, name_len, /*is_deleted=*/false);
                 }
@@ -1045,7 +1046,8 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
             ShapeEntry* fn_se = js_props_find_descriptor_shape(object, name_item, name, name_len);
             if (fn_se && jspd_is_deleted(fn_se)) {
                 if (identity_key) {
-                    js_shape_entry_update_flags_key(object, name_key, 0, JSPD_DELETED);
+                    js_shape_entry_update_flags_name_id(object,
+                        property_key_id(name_key), 0, JSPD_DELETED);
                 } else {
                     js_shape_entry_set_deleted(object, name, name_len, /*is_deleted=*/false);
                 }
@@ -1115,14 +1117,12 @@ extern "C" Item js_define_own_property_from_descriptor(Item object,
         is_new_property, existing_accessor);
 }
 
-extern "C" Item js_define_own_property_from_descriptor_key(Item object,
-                                                            PropertyKeyRef key,
-                                                            const JsPropertyDescriptor* pd,
-                                                            bool is_new_property,
-                                                            bool existing_accessor) {
+extern "C" Item js_define_own_property_from_descriptor_name_id(Item object,
+        NameId name_id, const JsPropertyDescriptor* pd, bool is_new_property,
+        bool existing_accessor) {
+    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
+        name_id);
     if (!key) return js_status_ok();
-    // DefineProperty must retain the caller's key record; creating a string
-    // from its diagnostic bytes would publish a different Symbol slot.
     Item key_item = (Item){.item = s2it(key)};
     return js_define_own_property_from_descriptor_impl(object, key_item,
         key->chars, (int)key->len, pd, is_new_property, existing_accessor);

@@ -803,6 +803,8 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         mem_free(source);
         return ItemNull;
     }
+    mt->module_name_base = js_active_module_name_count();
+    mt->module_ic_base = js_active_module_ic_count();
 
     // Inherit outer script's module_consts so eval()/new Function() can
     // resolve var declarations from the calling scope.
@@ -848,6 +850,17 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         return ItemNull;
     }
 
+    // Dynamic functions use the caller's state, so append their sealed local
+    // name image before js_main can execute code that observes a property.
+    if (!js_append_compiled_name_table(mt)) {
+        log_error("js-new-function: failed to append NameId table");
+        jm_destroy_mir_transpiler(mt);
+        MIR_finish(ctx);
+        js_transpiler_destroy(tp);
+        mem_free(source);
+        return ItemNull;
+    }
+
     // Function constructor code resolves the caller's top-level bindings, but
     // its generated inline module slots can exceed that caller's original
     // declaration count (for example a generated class after a batch reset).
@@ -865,10 +878,8 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     // JsFunction captures the caller's expanded module state for later calls.
     Item fn_item = js_main_fn((Context*)context);
 
-    // Cleanup transpiler but KEEP the MIR context alive (function code must persist).
-    // Also keep name_pool and ast_pool alive: JIT code embeds raw String* pointers
-    // interned in the name pool (via jm_box_string_literal). Freeing the pool would
-    // leave dangling pointers in the generated code.
+    // Keep the MIR context alive for returned closures; names are already linked
+    // to the active module table and no compiler pool crosses this boundary.
     jm_destroy_mir_transpiler(mt);
     jm_defer_mir_cleanup(ctx);
     // Attach source/name/AST storage to the deferred entry so they are freed
@@ -876,17 +887,12 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     // and their generated code/source metadata still depends on these buffers.
     if (module_mir_context_count > 0) {
         module_mir_source_buffers[module_mir_context_count - 1] = source;
-        module_mir_name_pools[module_mir_context_count - 1] = tp->name_pool;
-        module_mir_ast_pools[module_mir_context_count - 1] = tp->ast_pool;
         if (cacheable && get_type_id(fn_item) == LMD_TYPE_FUNC) {
             js_dynfunc_cache_insert(source_hash, source, source_len, argc, dynfunc_kind,
                 ctx, js_main_fn);
         }
         source = NULL;
     }
-    // Detach from transpiler so js_transpiler_destroy doesn't free them.
-    tp->name_pool = NULL;
-    tp->ast_pool = NULL;
     js_transpiler_destroy(tp);
 
     log_debug("js-new-function: compiled dynamic function OK (type=%d)", get_type_id(fn_item));
@@ -1798,6 +1804,11 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             js_transpiler_destroy(tp);
             return ItemNull;
         }
+        bool js_eval_fresh_module_scope = (eval_flags & 8) != 0 || !is_direct_eval;
+        mt->module_name_base = js_eval_fresh_module_scope
+            ? 0 : js_active_module_name_count();
+        mt->module_ic_base = js_eval_fresh_module_scope
+            ? 0 : js_active_module_ic_count();
         // This lowering mode describes eval's global var environment. Indirect
         // eval is global-scope too, so Annex-B declaration lowering must keep
         // its eval export path even though it never inherits caller lexicals.
@@ -1888,7 +1899,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         // VM scripts and indirect eval each compile a separate global script.
         // Their own slots begin after the retained harness prefix, preventing
         // either unit from aliasing caller module bindings.
-        bool js_eval_fresh_module_scope = (eval_flags & 8) != 0 || !is_direct_eval;
         uint32_t js_eval_prev_module_state_id = UINT32_MAX;
         if (js_eval_fresh_module_scope) {
             js_eval_prev_module_state_id = js_get_active_module_state_id();
@@ -1905,6 +1915,18 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             return ItemError;
         }
 
+        if (!js_append_compiled_name_table(mt)) {
+            log_error("js-eval: failed to append NameId table");
+            if (js_eval_fresh_module_scope) {
+                js_set_active_module_state_id(js_eval_prev_module_state_id);
+            }
+            js_set_direct_new_target(prev_nt);
+            jm_destroy_mir_transpiler(mt);
+            MIR_finish(eval_ctx);
+            js_transpiler_destroy(tp);
+            return ItemError;
+        }
+
         Item result = js_main_fn((Context*)context);
         if (item_is_error(result)) js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
 
@@ -1916,16 +1938,9 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
 
         // Cleanup
         jm_destroy_mir_transpiler(mt);
-        // Defer MIR context cleanup — eval code may return closures/functions
-        // whose JIT pointers must remain valid, and string literals from the
-        // name_pool/ast_pool may be captured by variables or closures.
+        // Defer MIR context cleanup because eval code may return closures whose
+        // JIT pointers must remain valid.
         jm_defer_mir_cleanup(eval_ctx);
-        if (module_mir_context_count > 0) {
-            module_mir_name_pools[module_mir_context_count - 1] = tp->name_pool;
-            module_mir_ast_pools[module_mir_context_count - 1] = tp->ast_pool;
-        }
-        tp->name_pool = NULL;
-        tp->ast_pool = NULL;
         js_transpiler_destroy(tp);
 
         return result;

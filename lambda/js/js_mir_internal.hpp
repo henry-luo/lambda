@@ -83,8 +83,6 @@ void jm_compile_recovery_state_destroy_context(JsRuntimeState* runtime_state);
 #define g_active_mir_transpiler (jm_compile_recovery_state_ensure()->active_mir_transpiler)
 #define g_active_js_owned_source (jm_compile_recovery_state_ensure()->active_js_owned_source)
 #define module_mir_contexts ((MIR_context_t*)js_runtime_state.deferred_mir.contexts)
-#define module_mir_name_pools ((NamePool**)js_runtime_state.deferred_mir.name_pools)
-#define module_mir_ast_pools ((Pool**)js_runtime_state.deferred_mir.ast_pools)
 #define module_mir_source_buffers (js_runtime_state.deferred_mir.source_buffers)
 #define module_mir_context_count (js_runtime_state.deferred_mir.count)
 void* jm_build_js_debug_info(JsMirTranspiler* mt, const char* filename);
@@ -103,11 +101,9 @@ typedef struct JsMirReference {
     bool uninitialized_this;
     bool is_private;
     bool computed_key;
-    const char* named_key;
-    PropertyKeyRef named_key_ref;
-    int named_key_len;
-    uint64_t named_key_item;
-    const char* profile_label;
+    uint32_t named_key_index;
+    NameId named_key_id;
+    uint32_t named_ic_index;
 } JsMirReference;
 
 typedef struct JsMirLexicalThisRebind {
@@ -167,6 +163,14 @@ JsMirTranspiler* jm_create_mir_transpiler(
     int import_capacity, int local_func_capacity, int var_scope_capacity,
     const char* log_prefix);
 void jm_destroy_mir_transpiler(JsMirTranspiler* mt);
+bool js_link_compiled_name_table(const JsMirTranspiler* mt);
+bool js_append_compiled_name_table(const JsMirTranspiler* mt);
+bool js_capture_compiled_name_table(const JsMirTranspiler* mt, JsPreambleState* state);
+bool jm_build_property_key_image(const PropertyKeySpec* inherited,
+    uint32_t inherited_count, uint32_t inherited_bytes_size,
+    const ArrayList* local_names, PropertyKeySpec** out_specs,
+    uint32_t* out_count, uint32_t* out_bytes_size);
+uint32_t jm_module_ic_index(JsMirTranspiler* mt);
 MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type);
 MIR_label_t jm_new_label(JsMirTranspiler* mt);
 void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn);
@@ -386,7 +390,11 @@ MIR_reg_t jm_box_int_double(JsMirTranspiler* mt, MIR_reg_t d_reg);
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg);
 MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
 MIR_reg_t jm_box_string(JsMirTranspiler* mt, MIR_reg_t ptr_reg);
-NamePool* jm_compiled_name_pool(JsMirTranspiler* mt);
+uint32_t jm_module_name_index(JsMirTranspiler* mt, const char* chars, uint32_t length);
+uint32_t jm_module_name_append(JsMirTranspiler* mt, const char* chars, uint32_t length);
+MIR_reg_t jm_module_name_id(JsMirTranspiler* mt, const char* chars, uint32_t length);
+MIR_reg_t jm_box_property_name_literal(JsMirTranspiler* mt,
+        const char* chars, uint32_t length);
 MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len);
 void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
     MIR_reg_t obj, MIR_reg_t key, MIR_reg_t fn_item,
@@ -422,7 +430,6 @@ void jm_emit_begin_lexical_this_rebind(JsMirTranspiler* mt, MIR_reg_t value,
     JsMirLexicalThisRebind* state, bool restore_binding);
 void jm_emit_end_lexical_this_rebind(JsMirTranspiler* mt,
     const JsMirLexicalThisRebind* state);
-void jm_emit_class_ctor_shape_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
 MIR_reg_t jm_build_error_stack_string(JsMirTranspiler* mt, const char* error_type);
 MIR_reg_t jm_emit_unbox_int(JsMirTranspiler* mt, MIR_reg_t item);
 MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item);
@@ -505,16 +512,10 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
 void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node);
 JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn);
 bool jm_func_has_param_named(JsFunctionNode* fn, const char* name, int name_len);
-int jm_ctor_prop_slot(JsFuncCollected* fc, const char* prop_name, int prop_len);
-void jm_collect_var_fields_walk(JsAstNode* node, const char* varname, int varlen,
-                                       char fields[][64], int* count, int max_fields);
-JsClassEntry* jm_match_class_from_fields(JsMirTranspiler* mt,
-                                                  char fields[][64], int field_count);
 int jm_detect_typed_array_new(JsAstNode* rhs);
 int jm_class_field_ta_type(JsClassEntry* ce, const char* prop_name, int prop_len);
 TypeId jm_detect_ctor_field_type(JsAstNode* rhs);
 void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body);
-void jm_disable_ctor_shape_for_method_overwrite(JsClassEntry* ce);
 JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len);
 void jm_infer_walk(JsAstNode* node, const String* const binding_names[],
                           FnParamEvidence* evidence, int param_count,
@@ -653,8 +654,6 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
 int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has_remapped);
 void jm_p6_reinfer_return_type(JsFuncCollected* fc);
 TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg);
-void jm_p4b_ctor_walk(JsMirTranspiler* mt, JsAstNode* node,
-                              P4bCtorEvidence* evidence);
 void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
                                FnParamEvidence** evidence);
 void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node);
@@ -674,6 +673,8 @@ bool jm_validate_mir_labels(MIR_context_t ctx);
 bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node);
 void* jm_compile_js_worker(void* arg);
 int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char* filename);
+bool js_activate_runtime_name_pool(void);
+bool js_prelink_compiled_name_table(const JsMirTranspiler* mt);
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename);
 extern "C" Item js_new_function_from_string(Item* args, int argc);

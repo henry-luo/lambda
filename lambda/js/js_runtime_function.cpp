@@ -530,7 +530,7 @@ static Item js_private_display_name_item(Item name_item) {
     return name_item;
 }
 
-static int js_function_name_from_symbol_key(PropertyKeyRef key, char* out, int out_size) {
+static int js_function_name_from_symbol_key(NameRef key, char* out, int out_size) {
     if (!key || !property_key_requires_identity(key) ||
             property_key_kind(key) != NAME_KEY_SYMBOL) return -1;
     // SetFunctionName uses an empty name for Symbol(), not the diagnostic

@@ -407,30 +407,166 @@ MIR_reg_t jm_box_string(JsMirTranspiler* mt, MIR_reg_t ptr_reg) {
     return result;
 }
 
-// Create a boxed string Item from a C string literal
-// Calls heap_create_name(chars) -> String*, then boxes with s2it
-NamePool* jm_compiled_name_pool(JsMirTranspiler* mt) {
-    if (!mt || !mt->tp) return NULL;
-    // Compile-only preamble constants execute in later heaps, so their raw
-    // pointers must live beside the retained MIR/AST state, not the setup heap.
-    if (g_jm_preamble_compile_only && mt->tp->name_pool) return mt->tp->name_pool;
-    return (context && context->name_pool) ? context->name_pool : mt->tp->name_pool;
+uint32_t jm_module_name_index(JsMirTranspiler* mt, const char* chars, uint32_t length) {
+    if (!mt || !mt->tp || !mt->tp->name_pool || !chars) return UINT32_MAX;
+    if (!mt->module_name_specs) {
+        mt->module_name_specs = arraylist_new(16);
+        if (!mt->module_name_specs) return UINT32_MAX;
+    }
+    for (int i = 0; i < mt->module_name_specs->length; i++) {
+        NameRef spec = (NameRef)arraylist_get(mt->module_name_specs, i);
+        if (spec && spec->len == length &&
+                memcmp(spec->chars, chars, length) == 0) {
+            return mt->module_name_base + (uint32_t)i;
+        }
+    }
+    String* stable = name_pool_create_len(mt->tp->name_pool, chars, length);
+    if (!stable) return UINT32_MAX;
+    // The compiler list is transient; the sealed PropertyKeySpec image is
+    // built before the transpiler is released, so generated MIR never retains
+    // this pool-owned spelling pointer (D5.4.3, D5.4.4).
+    if (!arraylist_append(mt->module_name_specs, stable)) return UINT32_MAX;
+    return mt->module_name_base + (uint32_t)(mt->module_name_specs->length - 1);
+}
+
+uint32_t jm_module_name_append(JsMirTranspiler* mt, const char* chars, uint32_t length) {
+    if (!mt || !mt->tp || !mt->tp->name_pool || !chars) return UINT32_MAX;
+    if (!mt->module_name_specs) {
+        mt->module_name_specs = arraylist_new(16);
+        if (!mt->module_name_specs) return UINT32_MAX;
+    }
+    String* stable = name_pool_create_len(mt->tp->name_pool, chars, length);
+    if (!stable || !arraylist_append(mt->module_name_specs, stable)) return UINT32_MAX;
+    // Range metadata deliberately preserves duplicate spellings: the table
+    // position is the safe transport for per-entry kind bits (D4.6.2v2).
+    return mt->module_name_base + (uint32_t)(mt->module_name_specs->length - 1);
+}
+
+uint32_t jm_module_ic_index(JsMirTranspiler* mt) {
+    if (!mt || mt->ic_count == UINT32_MAX - mt->module_ic_base) return UINT32_MAX;
+    return mt->module_ic_base + mt->ic_count++;
+}
+
+bool jm_build_property_key_image(const PropertyKeySpec* inherited,
+        uint32_t inherited_count, uint32_t inherited_bytes_size,
+        const ArrayList* local_names, PropertyKeySpec** out_specs,
+        uint32_t* out_count, uint32_t* out_bytes_size) {
+    if (!out_specs || !out_count || !out_bytes_size) return false;
+    *out_specs = NULL;
+    *out_count = 0;
+    *out_bytes_size = 0;
+    uint32_t local_count = local_names ? (uint32_t)local_names->length : 0;
+    if (inherited_count > UINT32_MAX - local_count) return false;
+    uint32_t total = inherited_count + local_count;
+    if (total == 0) return true;
+    size_t spec_bytes = (size_t)total * sizeof(PropertyKeySpec);
+    if (spec_bytes > UINT32_MAX) return false;
+    if (inherited_count > 0 && (!inherited ||
+            inherited_bytes_size < (size_t)inherited_count * sizeof(PropertyKeySpec))) {
+        return false;
+    }
+    size_t total_bytes = spec_bytes;
+    for (uint32_t i = 0; i < inherited_count; i++) {
+        const PropertyKeySpec* spec = &inherited[i];
+        if (spec->predefined_id != NAME_ID_NONE) continue;
+        if (spec->name_offset < (size_t)inherited_count * sizeof(PropertyKeySpec) ||
+                spec->name_offset > inherited_bytes_size ||
+                spec->name_length >= inherited_bytes_size - spec->name_offset) return false;
+        const uint8_t* inherited_bytes = (const uint8_t*)inherited;
+        if (inherited_bytes[spec->name_offset + spec->name_length] != '\0') return false;
+        if (total_bytes >= UINT32_MAX - spec->name_length) return false;
+        total_bytes += spec->name_length + 1;
+    }
+    for (uint32_t i = 0; i < local_count; i++) {
+        NameRef name = (NameRef)arraylist_get((ArrayList*)local_names, (int)i);
+        if (!name || name->len >= UINT32_MAX - total_bytes) return false;
+        NameId id = property_key_kind(name) == NAME_KEY_STRING
+            ? well_known_name_id({name->chars, name->len}) : NAME_ID_NONE;
+        if (id == NAME_ID_NONE) {
+            total_bytes += name->len + 1;
+        }
+    }
+    if (total_bytes > UINT32_MAX) return false;
+    PropertyKeySpec* image = (PropertyKeySpec*)mem_calloc(1, total_bytes,
+        MEM_CAT_JS_RUNTIME);
+    if (!image) return false;
+    uint8_t* image_bytes = (uint8_t*)image;
+    uint32_t cursor = (uint32_t)spec_bytes;
+    for (uint32_t i = 0; i < inherited_count; i++) {
+        const PropertyKeySpec* source = &inherited[i];
+        PropertyKeySpec* target = &image[i];
+        *target = *source;
+        if (source->predefined_id != NAME_ID_NONE) {
+            target->name_offset = 0;
+            target->name_length = 0;
+            continue;
+        }
+        target->name_offset = cursor;
+        const uint8_t* source_bytes = (const uint8_t*)inherited;
+        memcpy(image_bytes + cursor, source_bytes + source->name_offset,
+            source->name_length);
+        cursor += source->name_length;
+        image_bytes[cursor++] = '\0';
+    }
+    for (uint32_t i = 0; i < local_count; i++) {
+        NameRef name = (NameRef)arraylist_get((ArrayList*)local_names, (int)i);
+        PropertyKeySpec* target = &image[inherited_count + i];
+        NameId id = property_key_kind(name) == NAME_KEY_STRING
+            ? well_known_name_id({name->chars, name->len}) : NAME_ID_NONE;
+        if (id != NAME_ID_NONE) {
+            target->predefined_id = id;
+            continue;
+        }
+        target->name_offset = cursor;
+        target->name_length = name->len;
+        memcpy(image_bytes + cursor, name->chars, name->len);
+        cursor += name->len;
+        image_bytes[cursor++] = '\0';
+    }
+    *out_specs = image;
+    *out_count = total;
+    *out_bytes_size = cursor;
+    return true;
+}
+
+MIR_reg_t jm_module_name_id(JsMirTranspiler* mt,
+        const char* chars, uint32_t length) {
+    // Generated catalog names are stable across modules, so keep their NameId
+    // as an immediate. Only arbitrary sealed spellings need the active module
+    // table lookup (D4.6.1v2, D4.6.2v2).
+    NameId generated_id = well_known_name_id({chars, length});
+    if (generated_id != NAME_ID_NONE) {
+        MIR_reg_t id = jm_new_reg(mt, "nameid", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, id),
+            MIR_new_int_op(mt->ctx, (int64_t)generated_id)));
+        return id;
+    }
+    uint32_t index = jm_module_name_index(mt, chars, length);
+    MIR_reg_t id = jm_call_1(mt, "js_active_module_name_id", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)index));
+    return id;
+}
+
+MIR_reg_t jm_box_property_name_literal(JsMirTranspiler* mt,
+        const char* chars, uint32_t length) {
+    MIR_reg_t id = jm_module_name_id(mt, chars, length);
+    return jm_call_1(mt, "lambda_name_id_to_item", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, id));
 }
 
 MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len) {
-    // Intern the string at transpile time (handles embedded NUL bytes correctly).
-    // The boxed Item is baked into JIT code as a raw String* constant. That code
-    // can run after compilation from nested functions, timers, event handlers, or
-    // the synthetic WPT onload path, so the literal must outlive the transpiler.
-    NamePool* np = jm_compiled_name_pool(mt);
-    String* interned = name_pool_create_len(np, str, len);
-    // Box directly: the interned String* is already a valid heap pointer
-    // Use s2it(interned) as a compile-time constant Item value
-    uint64_t item_val = s2it(interned);
-    MIR_reg_t result = jm_new_reg(mt, "strlit", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)item_val)));
-    return result;
+    if (!mt || !str || len < 0) return jm_emit_null(mt);
+    // String values are not property identities. Keep their bytes in the MIR
+    // artifact and allocate an ordinary GC String at evaluation time so source
+    // text, diagnostics, and literals never consume permanent NameIds.
+    MIR_reg_t chars = jm_new_reg(mt, "strlit", MIR_T_P);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, chars),
+        MIR_new_str_op(mt->ctx, {(size_t)len, str})));
+    return jm_call_2(mt, "js_make_string_len", MIR_T_I64,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, chars),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, len));
 }
 
 // Phase-5C: emit either `js_create_data_property(obj, key, fn)` for regular methods or
@@ -528,28 +664,6 @@ void jm_emit_set_class_assignment_name(JsMirTranspiler* mt, JsAssignmentNode* as
         MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
 }
 
-static void jm_emit_ctor_shape_metadata(JsMirTranspiler* mt, MIR_reg_t destination,
-        JsFuncCollected* ctor_fc, const char* setter_name) {
-    if (!mt || !destination || !ctor_fc || ctor_fc->ctor_prop_count <= 0) return;
-    MIR_reg_t names_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-        MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
-    MIR_reg_t lens_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-        MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
-    for (int i = 0; i < ctor_fc->ctor_prop_count; i++) {
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(void*), names_arr, 0, 1),
-            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_ptrs[i])));
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I32, i * (int)sizeof(int), lens_arr, 0, 1),
-            MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_lens[i])));
-    }
-    jm_call_void_4(mt, setter_name,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, destination),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
-}
-
 static bool jm_function_source_span(JsMirTranspiler* mt,
         JsFunctionNode* fn_node, const char** text_out, uint32_t* len_out) {
     if (!mt || !fn_node || !text_out || !len_out || !mt->tp ||
@@ -630,9 +744,6 @@ static bool jm_function_source_span(JsMirTranspiler* mt,
 // Helper: emit js_set_function_source call to store original source text for toString
 void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFunctionNode* fn_node) {
     if (!fn_node) return;
-    JsFuncCollected* fc = jm_find_collected_func(mt, fn_node);
-    jm_emit_ctor_shape_metadata(mt, fn_reg, fc,
-        "js_set_function_ctor_shape_metadata");
     const char* text = NULL;
     uint32_t len = 0;
     if (!jm_function_source_span(mt, fn_node, &text, &len)) return;
@@ -645,8 +756,6 @@ void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFuncti
 void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
         JsFuncCollected* fc, JsFunctionNode* fn_node) {
     if (!mt || !fn_reg || !fc || !fn_node) return;
-    jm_emit_ctor_shape_metadata(mt, fn_reg, fc,
-        "js_set_function_ctor_shape_metadata");
     char display_buffer[256];
     const char* source_name = fn_node->name ? fn_node->name->chars : NULL;
     const char* display_name = jm_function_display_name(source_name,
@@ -704,19 +813,12 @@ void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNod
     while (len > 0 && (text[0] == ' ' || text[0] == '\t' || text[0] == '\n' || text[0] == '\r')) { text++; len--; }
     // Tree-sitter may extend the node end past trailing comments; trim to closing '}'
     while (len > 1 && text[len - 1] != '}') len--;
-    MIR_reg_t key = jm_box_string_literal(mt, "__source_text__", 15);
+    MIR_reg_t key = jm_box_property_name_literal(mt, "__source_text__", 15);
     MIR_reg_t src_reg = jm_box_string_literal(mt, text, len);
     jm_call_3(mt, "js_property_set", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, src_reg));
-}
-
-void jm_emit_class_ctor_shape_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
-    if (!mt || !cls_obj || !ce || !ce->constructor || !ce->constructor->fc) return;
-    JsFuncCollected* ctor_fc = ce->constructor->fc;
-    jm_emit_ctor_shape_metadata(mt, cls_obj, ctor_fc,
-        "js_set_class_ctor_shape_metadata");
 }
 
 // v12: Build a compile-time stack trace string from the lexical function chain.
@@ -964,62 +1066,9 @@ MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
 // A5 forward declaration
 void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body);
 
-// Forward declaration — defined at line ~3786, needed by jm_get_effective_type and jm_transpile_as_native
-int jm_ctor_prop_slot(JsFuncCollected* fc, const char* prop_name, int prop_len);
-
 // Returns the inferred TypeId for a JS AST expression node.
 // LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_STRING → known type
 // LMD_TYPE_ANY → unknown (must use boxed path)
-static bool jm_ts_node_text_equals(JsMirTranspiler* mt, TSNode node,
-                                   const char* text, size_t text_len) {
-    if (!mt || !mt->tp || !mt->tp->source || ts_node_is_null(node)) return false;
-    uint32_t start = ts_node_start_byte(node);
-    uint32_t end = ts_node_end_byte(node);
-    if (end < start || end > mt->tp->source_length ||
-            (size_t)(end - start) != text_len) return false;
-    return memcmp(mt->tp->source + start, text, text_len) == 0;
-}
-
-static bool jm_ts_writes_this_property(JsMirTranspiler* mt, TSNode node,
-                                       String* property) {
-    if (!mt || !property || ts_node_is_null(node)) return false;
-    if (strcmp(ts_node_type(node), "assignment_expression") == 0) {
-        TSNode left = ts_node_child_by_field_name(node, "left", 4);
-        if (!ts_node_is_null(left) &&
-                strcmp(ts_node_type(left), "member_expression") == 0) {
-            TSNode object = ts_node_child_by_field_name(left, "object", 6);
-            TSNode field = ts_node_child_by_field_name(left, "property", 8);
-            if (jm_ts_node_text_equals(mt, object, "this", 4) &&
-                    jm_ts_node_text_equals(mt, field,
-                        property->chars, property->len)) return true;
-        }
-    }
-    uint32_t child_count = ts_node_named_child_count(node);
-    for (uint32_t i = 0; i < child_count; i++) {
-        if (jm_ts_writes_this_property(mt, ts_node_named_child(node, i), property)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool jm_ctor_property_type_is_stable(JsMirTranspiler* mt,
-                                             JsClassEntry* ce,
-                                             String* property) {
-    if (!mt || !ce || !property) return false;
-    for (int i = 0; i < ce->method_count; i++) {
-        JsClassMethodEntry* method = &ce->methods[i];
-        if (method->is_constructor || method->is_static || !method->fc ||
-                !method->fc->node || !method->fc->node->body) continue;
-        // Constructor-only inference cannot remain native when another method
-        // can replace the field with an object or otherwise change its type.
-        if (jm_ts_writes_this_property(mt, method->fc->node->body->node, property)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return LMD_TYPE_ANY;
 
@@ -1250,35 +1299,6 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
                 }
             }
 
-            // P1: Constructor field type lookup — if the object variable was created via
-            // `new ClassName(...)` and the property is a known constructor field, return
-            // the field type detected from the constructor init expression.
-            // Also handles `this.prop` in class methods via mt->current_class.
-            if (mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
-                JsIdentifierNode* obj_id = (JsIdentifierNode*)mem->object;
-                JsClassEntry* ce = nullptr;
-                // Check for `this` in class method context
-                if (mt->current_class &&
-                    obj_id->name->len == 4 && strncmp(obj_id->name->chars, "this", 4) == 0) {
-                    ce = mt->current_class;
-                }
-                // Check for named variable with class_entry
-                if (!ce) {
-                    const char* vname = jm_format_name("_js_%.*s", (int)obj_id->name->len, obj_id->name->chars);
-                    JsMirVarEntry* var = jm_find_var(mt, vname);
-                    if (var && var->class_entry) ce = var->class_entry;
-                }
-                if (ce && ce->constructor && ce->constructor->fc) {
-                    int p1_slot = jm_ctor_prop_slot(ce->constructor->fc,
-                        prop->name->chars, (int)prop->name->len);
-                    if (p1_slot >= 0) {
-                        TypeId ft = ce->constructor->fc->ctor_prop_types[p1_slot];
-                        if ((ft == LMD_TYPE_INT || ft == LMD_TYPE_FLOAT) &&
-                            jm_ctor_property_type_is_stable(mt, ce, prop->name))
-                            return ft;
-                    }
-                }
-            }
         }
         return LMD_TYPE_ANY;
     }
@@ -1505,16 +1525,6 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr);
 MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr);
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 
-static MIR_reg_t jm_get_named_property_boxed(JsMirTranspiler* mt,
-                                              MIR_reg_t object,
-                                              String* property) {
-    MIR_reg_t key = jm_box_string_literal(mt,
-        property->chars, (int)property->len);
-    return jm_call_2(mt, "js_property_get", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-}
-
 // Transpile an expression returning a native register of the target type.
 // Handles literals inline (no boxing), identifiers from typed vars, and
 // recursive expressions. Falls back to unbox from boxed Item when needed.
@@ -1575,7 +1585,8 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                 MIR_reg_t boxed = jm_box_native(mt, var->reg, var->type_id);
                 jm_call_3(mt, "js_check_tdz", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx,
+                        jm_module_name_id(mt, id->name->chars, id->name->len)),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
                 jm_emit_error_lane_propagate_check(mt);
             }
@@ -1599,7 +1610,8 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                 if (mc->var_kind == JS_VAR_LET || mc->var_kind == JS_VAR_CONST) {
                     jm_call_3(mt, "js_check_tdz", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx,
+                            jm_module_name_id(mt, id->name->chars, id->name->len)),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
                     jm_emit_error_lane_propagate_check(mt);
                 }
@@ -1735,127 +1747,6 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
     // P9: MEMBER_EXPRESSION — typed array element access returns native directly
     if (expr && expr->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         JsMemberNode* mem = (JsMemberNode*)expr;
-
-        // P1: Shaped class property access — emit native-returning slot functions.
-        // When `body.x` is used in arithmetic and we know `x` is a float field,
-        // call js_get_slot_f(obj, byte_offset) → native double, no boxing.
-        // Also handles `this.prop` in class methods via mt->current_class.
-        if (!mem->computed && !mem->optional &&
-            mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER &&
-            mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* p1_obj = (JsIdentifierNode*)mem->object;
-            JsIdentifierNode* p1_prop = (JsIdentifierNode*)mem->property;
-            JsClassEntry* p1_ce = nullptr;
-            // Check for `this` in class method context
-            if (mt->current_class &&
-                p1_obj->name->len == 4 && strncmp(p1_obj->name->chars, "this", 4) == 0) {
-                p1_ce = mt->current_class;
-            }
-            // Check for named variable with class_entry
-            if (!p1_ce) {
-                const char* p1_vname = jm_format_name("_js_%.*s",
-                    (int)p1_obj->name->len, p1_obj->name->chars);
-                JsMirVarEntry* p1_var = jm_find_var(mt, p1_vname);
-                if (p1_var && p1_var->class_entry) p1_ce = p1_var->class_entry;
-            }
-            if (p1_ce && p1_ce->constructor && p1_ce->constructor->fc) {
-                JsFuncCollected* p1_fc = p1_ce->constructor->fc;
-                int p1_slot = jm_ctor_prop_slot(p1_fc,
-                    p1_prop->name->chars, (int)p1_prop->name->len);
-                if (p1_slot >= 0) {
-                    TypeId field_type = p1_fc->ctor_prop_types[p1_slot];
-                    int64_t byte_offset = (int64_t)p1_slot * (int64_t)sizeof(void*);
-                    // TRACE: log whenever R property is given a native slot read
-                    if (p1_prop->name->len == 1 && p1_prop->name->chars[0] == 'R') {
-                        log_error("TRACE P1 slot read .R: field_type=%d slot=%d offset=%d class='%s'",
-                            (int)field_type, p1_slot, (int)byte_offset,
-                            p1_ce->constructor && p1_ce->constructor->fc &&
-                                p1_ce->constructor->fc->name && p1_ce->constructor->fc->name[0] ?
-                            p1_ce->constructor->fc->name : "anon");
-                    }
-                    MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
-                    if (field_type == LMD_TYPE_FLOAT || field_type == LMD_TYPE_INT) {
-                        bool field_is_float = field_type == LMD_TYPE_FLOAT;
-                        if (p1_ce->shape_cache_ptr) {
-                            MIR_label_t l_fast = jm_new_label(mt);
-                            MIR_label_t l_slow = jm_new_label(mt);
-                            MIR_label_t l_end = jm_new_label(mt);
-                            MIR_reg_t result = jm_new_reg(mt, field_is_float ? "s7f" : "s7i",
-                                field_is_float ? MIR_T_D : MIR_T_I64);
-                            MIR_reg_t shape_reg = jm_new_reg(mt, "s7s", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, shape_reg),
-                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, obj_reg, 0, 1)));
-                            MIR_reg_t cache_addr_reg = jm_new_reg(mt, "s7a", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, cache_addr_reg),
-                                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)p1_ce->shape_cache_ptr)));
-                            MIR_reg_t expected_reg = jm_new_reg(mt, "s7e", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, expected_reg),
-                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, cache_addr_reg, 0, 1)));
-                            MIR_reg_t match_reg = jm_new_reg(mt, "s7m", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-                                MIR_new_reg_op(mt->ctx, match_reg),
-                                MIR_new_reg_op(mt->ctx, shape_reg),
-                                MIR_new_reg_op(mt->ctx, expected_reg)));
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                                MIR_new_label_op(mt->ctx, l_fast),
-                                MIR_new_reg_op(mt->ctx, match_reg)));
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                                MIR_new_label_op(mt->ctx, l_slow)));
-                            jm_emit_label(mt, l_fast);
-                            MIR_reg_t fast_boxed = jm_call_2(mt, "js_get_shaped_slot", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, p1_slot));
-                            MIR_reg_t fast_native = field_is_float
-                                ? jm_ensure_native_float(mt, fast_boxed, LMD_TYPE_ANY)
-                                : jm_ensure_native_int(mt, fast_boxed, LMD_TYPE_ANY);
-                            jm_emit(mt, MIR_new_insn(mt->ctx,
-                                field_is_float ? MIR_DMOV : MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, result),
-                                MIR_new_reg_op(mt->ctx, fast_native)));
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                                MIR_new_label_op(mt->ctx, l_end)));
-                            jm_emit_label(mt, l_slow);
-                            MIR_reg_t slow_boxed = jm_get_named_property_boxed(mt,
-                                obj_reg, p1_prop->name);
-                            MIR_reg_t slow_native = field_is_float
-                                ? jm_ensure_native_float(mt, slow_boxed, LMD_TYPE_ANY)
-                                : jm_ensure_native_int(mt, slow_boxed, LMD_TYPE_ANY);
-                            jm_emit(mt, MIR_new_insn(mt->ctx,
-                                field_is_float ? MIR_DMOV : MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, result),
-                                MIR_new_reg_op(mt->ctx, slow_native)));
-                            jm_emit_label(mt, l_end);
-                            log_debug("§7: inline shape guard %s %.*s.%.*s → offset %d",
-                                field_is_float ? "float" : "int",
-                                (int)p1_obj->name->len, p1_obj->name->chars,
-                                (int)p1_prop->name->len, p1_prop->name->chars, (int)byte_offset);
-                            if ((field_is_float && target_type == LMD_TYPE_FLOAT) ||
-                                (!field_is_float && target_type == LMD_TYPE_INT)) return result;
-                            return field_is_float
-                                ? jm_emit_double_to_int(mt, result)
-                                : jm_ensure_native_float(mt, result, LMD_TYPE_INT);
-                        }
-                        MIR_reg_t boxed = jm_get_named_property_boxed(mt,
-                            obj_reg, p1_prop->name);
-                        MIR_reg_t native = field_is_float
-                            ? jm_ensure_native_float(mt, boxed, LMD_TYPE_ANY)
-                            : jm_ensure_native_int(mt, boxed, LMD_TYPE_ANY);
-                        log_debug("P1: dynamic %s load %.*s.%.*s (no shape cache)",
-                            field_is_float ? "float" : "int",
-                            (int)p1_obj->name->len, p1_obj->name->chars,
-                            (int)p1_prop->name->len, p1_prop->name->chars);
-                        if ((field_is_float && target_type == LMD_TYPE_FLOAT) ||
-                            (!field_is_float && target_type == LMD_TYPE_INT)) return native;
-                        return field_is_float
-                            ? jm_emit_double_to_int(mt, native)
-                            : jm_ensure_native_float(mt, native, LMD_TYPE_INT);
-                    }
-                }
-            }
-        }
 
         if (mem->computed) {
             JsMirVarEntry* ta_var = jm_get_typed_array_var(mt, mem->object);

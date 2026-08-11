@@ -11,9 +11,12 @@
 #include "js_state_guards.h"
 #include "../lambda.hpp"
 #include "../lambda-data.hpp"
+#include "../core/name_pool.hpp"
 #include "../../lib/log.h"
 #include <string.h>
 #include <stdio.h>
+
+extern __thread EvalContext* context;
 
 String* heap_create_name(const char* name, size_t len);
 extern void map_put(Map* mp, String* key, Item value, Input* input);
@@ -65,18 +68,21 @@ static TypeMap* js_obj_typemap(Item obj) {
 extern "C" ShapeEntry* js_find_shape_entry(Item obj, const char* name, int name_len) {
     TypeMap* tm = js_obj_typemap(obj);
     if (!tm) return nullptr;
-    if (name && name_len >= 0) {
-        PropertyKeyRef key = heap_create_name(name, (size_t)name_len);
-        // Raw callers are an API boundary; canonicalize before probing so they
-        // cannot bypass runtime PropertyKeyRef equality through matching bytes.
-        if (key) return typemap_hash_lookup_key(tm, key);
-    }
     return typemap_hash_lookup(tm, name, name_len);
 }
 
-extern "C" ShapeEntry* js_find_shape_entry_key(Item obj, PropertyKeyRef key) {
+extern "C" ShapeEntry* js_find_shape_entry_name_id(Item obj, NameId name_id) {
     TypeMap* tm = js_obj_typemap(obj);
-    return tm ? typemap_hash_lookup_key(tm, key) : nullptr;
+    if (!tm || name_id == NAME_ID_NONE) return nullptr;
+    ShapeEntry* entry = typemap_hash_lookup_name_id(tm, name_id);
+    if (entry) return entry;
+    // An id-bearing lookup can still address an id-less Input field. The
+    // resolved ordinary spelling is only a byte-seam fallback; it must not
+    // select a different generated property that happens to share its text.
+    NameRef name = name_pool_resolve_id(context ? context->name_pool : NULL,
+        name_id);
+    return name && property_key_kind(name) == NAME_KEY_STRING
+        ? typemap_hash_lookup_idless(tm, name->chars, (int)name->len) : nullptr;
 }
 
 // Locate the underlying Map* whose `type` field would receive a cloned TypeMap
@@ -146,8 +152,8 @@ static TypeMap* js_typemap_clone_for_mutation(Item obj) {
         dst->ns = src->ns;
         dst->default_value = src->default_value;
         dst->name_hash = src->name_hash;
-        dst->predefined_id = src->predefined_id;
-        dst->key_ref = src->key_ref;
+        dst->name_id = src->name_id;
+        dst->key_kind = src->key_kind;
         dst->flags = src->flags;
         if (!first_clone) first_clone = dst;
         if (prev_clone) prev_clone->next = dst;
@@ -182,7 +188,7 @@ static TypeMap* js_typemap_clone_for_mutation(Item obj) {
     return clone;
 }
 
-static void js_shape_entry_update_flags_impl(Item obj, PropertyKeyRef key,
+static void js_shape_entry_update_flags_impl(Item obj, NameId name_id,
         const char* name, int name_len, uint8_t set_mask, uint8_t clear_mask) {
     if (set_mask == 0 && clear_mask == 0) return;
     // Probe first: if the entry doesn't exist or the mutation is a no-op,
@@ -191,9 +197,9 @@ static void js_shape_entry_update_flags_impl(Item obj, PropertyKeyRef key,
     // length==0) — which would later strand map_put because it only
     // initializes mp->data/data_cap when `!mp->type` and our non-null clone
     // bypasses that init path.
-    bool identity_key = key && property_key_requires_identity(key);
-    ShapeEntry* se = identity_key ? js_find_shape_entry_key(obj, key) :
-        js_find_shape_entry(obj, name, name_len);
+    ShapeEntry* se = name_id != NAME_ID_NONE
+        ? js_find_shape_entry_name_id(obj, name_id)
+        : js_find_shape_entry(obj, name, name_len);
     if (!se) return;
     uint8_t new_flags = (uint8_t)((se->flags | set_mask) & ~clear_mask);
     if (new_flags == se->flags) return;
@@ -202,8 +208,9 @@ static void js_shape_entry_update_flags_impl(Item obj, PropertyKeyRef key,
     // mutable underlying Map), fall back to in-place mutation — preserves
     // pre-clone behavior on edge paths.
     if (js_typemap_clone_for_mutation(obj)) {
-        se = identity_key ? js_find_shape_entry_key(obj, key) :
-            js_find_shape_entry(obj, name, name_len);
+        se = name_id != NAME_ID_NONE
+            ? js_find_shape_entry_name_id(obj, name_id)
+            : js_find_shape_entry(obj, name, name_len);
         if (!se) return;
     }
     js_map_promote_descriptor_kind(js_obj_underlying_map(obj));
@@ -212,13 +219,14 @@ static void js_shape_entry_update_flags_impl(Item obj, PropertyKeyRef key,
 
 extern "C" void js_shape_entry_update_flags(Item obj, const char* name, int name_len,
                                             uint8_t set_mask, uint8_t clear_mask) {
-    js_shape_entry_update_flags_impl(obj, NULL, name, name_len, set_mask, clear_mask);
+    js_shape_entry_update_flags_impl(obj, NAME_ID_NONE, name, name_len,
+        set_mask, clear_mask);
 }
 
-extern "C" void js_shape_entry_update_flags_key(Item obj, PropertyKeyRef key,
+extern "C" void js_shape_entry_update_flags_name_id(Item obj, NameId name_id,
         uint8_t set_mask, uint8_t clear_mask) {
-    if (!key) return;
-    js_shape_entry_update_flags_impl(obj, key, key->chars, (int)key->len,
+    if (name_id == NAME_ID_NONE) return;
+    js_shape_entry_update_flags_impl(obj, name_id, NULL, 0,
         set_mask, clear_mask);
 }
 
@@ -230,27 +238,31 @@ extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj) {
 }
 
 static bool js_typemap_transition_matches(const TypeMapTransition* transition,
-        const ShapeEntry* entry, TypeId value_type) {
+        const ShapeEntry* entry, NameId operation_name_id, TypeId value_type) {
     if (!transition || !entry || !entry->name || !entry->name->str ||
-            transition->value_type != value_type ||
-            transition->name_len != entry->name->length) {
+            transition->value_type != value_type) {
         return false;
     }
-    return transition->name == entry->name->str ||
+    if (transition->name_id != NAME_ID_NONE) {
+        return transition->name_id == operation_name_id;
+    }
+    return transition->key_kind == NAME_KEY_STRING &&
+        entry->key_kind == NAME_KEY_STRING &&
+        transition->name_len == entry->name->length &&
         memcmp(transition->name, entry->name->str, transition->name_len) == 0;
 }
 
 static ShapeEntry* js_typemap_transition_entry(TypeMap* target,
         const ShapeEntry* source) {
     if (!target || !source || !source->name || !source->name->str) return NULL;
-    if (source->key_ref && property_key_requires_identity(source->key_ref)) {
-        return typemap_hash_lookup_key(target, source->key_ref);
+    if (source->name_id != NAME_ID_NONE) {
+        return typemap_hash_lookup_name_id(target, source->name_id);
     }
     return typemap_hash_lookup(target, source->name->str, (int)source->name->length);
 }
 
 extern "C" TypeMap* js_typemap_transition_for_type(Item obj,
-        ShapeEntry* entry, TypeId value_type) {
+        ShapeEntry* entry, NameId operation_name_id, TypeId value_type) {
     Map* underlying = js_obj_underlying_map(obj);
     if (!underlying || !entry || !entry->name || !entry->name->str ||
             !js_input || !js_input->pool) {
@@ -273,7 +285,8 @@ extern "C" TypeMap* js_typemap_transition_for_type(Item obj,
 
     for (TypeMapTransition* transition = source->transitions; transition;
             transition = transition->next) {
-        if (js_typemap_transition_matches(transition, entry, value_type) &&
+        if (js_typemap_transition_matches(transition, entry,
+                operation_name_id, value_type) &&
                 transition->target) {
             underlying->type = transition->target;
             return transition->target;
@@ -301,9 +314,12 @@ extern "C" TypeMap* js_typemap_transition_for_type(Item obj,
     target->transitions = NULL;
     target_entry->type = type_info[value_type].type;
 
-    transition->name = entry->name->str;
-    transition->name_len = (uint32_t)entry->name->length;
-    transition->name_hash = entry->name_hash;
+    transition->name_id = operation_name_id != NAME_ID_NONE
+        ? operation_name_id : entry->name_id;
+    transition->key_kind = entry->key_kind;
+    transition->name = transition->name_id == NAME_ID_NONE ? entry->name->str : NULL;
+    transition->name_len = transition->name_id == NAME_ID_NONE
+        ? (uint32_t)entry->name->length : 0;
     transition->value_type = value_type;
     transition->flags = entry->flags;
     transition->target = target;
@@ -595,7 +611,6 @@ extern "C" void js_attr_set_configurable(Item obj, const char* name, int name_le
 extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
                                            Item setter, uint8_t attrs) {
     if (get_type_id(name) != LMD_TYPE_STRING) return;
-    extern __thread EvalContext* context;
     RootFrame roots(5);
     Rooted<Item> obj_root(roots, obj);
     Rooted<Item> name_root(roots, name);
@@ -627,7 +642,8 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
         if (property_key_requires_identity(ns)) {
             // A Symbol/private accessor slot is addressed only by its record;
             // a byte update would leave the raw pair visible to ordinary get.
-            js_shape_entry_update_flags_key(obj_root.get(), ns, set_mask, JSPD_DELETED);
+            js_shape_entry_update_flags_name_id(obj_root.get(),
+                property_key_id(ns), set_mask, JSPD_DELETED);
         } else {
             js_shape_entry_update_flags(obj_root.get(), ns->chars, nl, set_mask, JSPD_DELETED);
         }
@@ -681,7 +697,6 @@ static bool js_accessor_half_same(Item left, Item right) {
 
 extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
                                             int is_setter, uint8_t attrs) {
-    extern __thread EvalContext* context;
     RootFrame roots(4);
     Rooted<Item> obj_root(roots, obj);
     Rooted<Item> name_root(roots, name);
@@ -709,14 +724,18 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     fn = js_accessor_half_storage_value(fn);
 
     // Look up any existing accessor pair under name X.
-    bool identity_key = property_key_requires_identity(ns);
+    // Every pooled NameId, including ordinary static/dynamic spellings, must
+    // remain on the exact-identity path.  Only id-less Input fields may use
+    // bytes to find their descriptor.
+    bool identity_key = property_key_id(ns) != NAME_ID_NONE;
     JsAccessorPair* pair = nullptr;
-    ShapeEntry* se = identity_key ? js_find_shape_entry_key(obj, ns) :
+    NameId identity_id = identity_key ? property_key_id(ns) : NAME_ID_NONE;
+    ShapeEntry* se = identity_key ? js_find_shape_entry_name_id(obj, identity_id) :
         js_find_shape_entry(obj, ns->chars, (int)ns->len);
     if (se && jspd_is_accessor(se)) {
         Item slot_val = ItemNull;
         JsShapeSlotStatus status = identity_key
-            ? js_own_shape_slot_status_key(obj, ns, &slot_val, NULL)
+            ? js_own_shape_slot_status_name_id(obj, identity_id, &slot_val, NULL)
             : js_own_shape_slot_status(obj, ns->chars, (int)ns->len, &slot_val, NULL);
         if (status == JS_SHAPE_SLOT_ACCESSOR && slot_val.item != ItemNull.item) {
             pair = js_item_to_accessor_pair(slot_val);
@@ -757,7 +776,8 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     if (attrs & JSPD_NON_CONFIGURABLE) set_mask |= JSPD_NON_CONFIGURABLE;
     if (identity_key) {
         // Symbol text is diagnostic-only; mutate the exact installed key.
-        js_shape_entry_update_flags_key(obj, ns, set_mask, JSPD_DELETED);
+        js_shape_entry_update_flags_name_id(obj, identity_id, set_mask,
+            JSPD_DELETED);
     } else {
         js_shape_entry_update_flags(obj, ns->chars, (int)ns->len, set_mask, JSPD_DELETED);
         js_attr_mark_array_index_shape(obj, ns->chars, (int)ns->len);
@@ -769,7 +789,6 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
 // can drop the result on the floor without needing a void-returning helper.
 extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
                                           int is_setter) {
-    extern __thread EvalContext* context;
     RootFrame roots(3);
     Rooted<Item> obj_root(roots, obj);
     Rooted<Item> name_root(roots, name);
@@ -785,38 +804,31 @@ extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
 }
 
 
-extern "C" JsAccessorPair* js_find_accessor_pair_inheritable_key(Item obj,
-                                                                   PropertyKeyRef key) {
-    if (!key) return nullptr;
+
+extern "C" JsAccessorPair* js_find_accessor_pair_inheritable_name_id(Item obj,
+        NameId name_id) {
+    if (name_id == NAME_ID_NONE) return nullptr;
     Item cur = obj;
     int depth = 0;
     while (depth < 16) {
-        ShapeEntry* se = js_find_shape_entry_key(cur, key);
+        ShapeEntry* se = js_find_shape_entry_name_id(cur, name_id);
         Map* m = se ? js_obj_underlying_map(cur) : NULL;
-        if (se && m && map_ctor_offset_is_reserved(m, se->byte_offset)) {
-            // Preallocated constructor storage is absent until initialized, so
-            // it cannot terminate OrdinarySet before an inherited setter.
-            se = NULL;
-        }
+        if (se && m && map_ctor_offset_is_reserved(m, se->byte_offset)) se = NULL;
         if (se) {
             if (jspd_is_accessor(se)) {
                 Item slot_val = ItemNull;
-                if (js_own_shape_slot_status_key(cur, key, &slot_val, NULL) ==
-                    JS_SHAPE_SLOT_ACCESSOR && slot_val.item != ItemNull.item) {
+                if (js_own_shape_slot_status_name_id(cur, name_id,
+                        &slot_val, NULL) == JS_SHAPE_SLOT_ACCESSOR &&
+                        slot_val.item != ItemNull.item) {
                     return js_item_to_accessor_pair(slot_val);
                 }
             }
-            // ES OrdinarySet: an own property (data or accessor) terminates
-            // the lookup. Don't walk past an own data property to inherited
-            // accessors — that would route writes through the inherited
-            // setter instead of the receiver's own data slot.
             return nullptr;
         }
         if (get_type_id(cur) != LMD_TYPE_MAP) break;
         Item proto = js_get_prototype_of(cur);
-        if (proto.item == ItemNull.item ||
-            get_type_id(proto) == LMD_TYPE_UNDEFINED ||
-            get_type_id(proto) == LMD_TYPE_NULL) break;
+        if (proto.item == ItemNull.item || get_type_id(proto) == LMD_TYPE_UNDEFINED ||
+                get_type_id(proto) == LMD_TYPE_NULL) break;
         cur = proto;
         depth++;
     }
@@ -827,6 +839,7 @@ extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
                                                               const char* name,
                                                               int name_len) {
     if (!name || name_len < 0) return nullptr;
-    return js_find_accessor_pair_inheritable_key(obj,
-        heap_create_name(name, (size_t)name_len));
+    NameRef key = heap_create_name(name, (size_t)name_len);
+    return key ? js_find_accessor_pair_inheritable_name_id(obj,
+        property_key_id(key)) : nullptr;
 }

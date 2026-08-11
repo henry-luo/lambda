@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.7.0 (2026-08-08)
+**Spec version:** 1.8.0 (2026-08-11)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -421,11 +421,13 @@ that carries them.
   null-safe opt-in (no pool ⇒ per-map chains, no semantic change).
   Runtime-constructed maps do not intern today — they rebuild per
   transition. [Shape_Pool §3–§8]
-- **D3.4.4** ShapeEntry name identity follows the name-identity split
-  (D4.6): `name_hash` is a lookup hash, **never an identity**;
-  `predefined_id` (a NameId) is the generated identity; `key_ref` is the
-  canonical runtime key — and **Input-owned document shapes keep it
-  NULL** (a million-key JSON must not bloat session state). [NI10, NI13]
+- **D3.4.4v2** ShapeEntry name identity is one integer field, `name_id`.
+  `name_hash` is routing metadata only and never identity; a non-zero
+  `name_id` is compared exactly. `NAME_ID_NONE` is reserved for an ordinary
+  id-less Input field and is confirmed by key kind, length, and bytes at the
+  explicit Input seam. Symbol and private entries never enter that byte
+  fallback. Shape copies, descriptor clones, and transitions preserve the
+  field unchanged. [NI10, NI13]
 - **D3.4.5** Shape transitions obey the **map-layout invariant**: the
   exact runtime shape always describes the stored bytes. Type-compatible
   writes stay on the direct path (same type; `int → float`;
@@ -526,19 +528,24 @@ that carries them.
 
 ### D4.6 Name identity
 
-- **D4.6.1*** One address per semantic property key: `NameRef` /
-  `PropertyKeyRef` compare by **pointer equality**; `NameId =
-  [pool16][ordinal16]` is identity, `SectionNameId = [slot16][offset16]`
-  is a **location, never an identity**. Fixed pools (0 markup, 1 Lambda,
-  2 JS/DOM) are **generated from one data module, never hand-maintained**;
-  hot native comparisons are plain integer compares with no pool lookup.
+- **D4.6.1v2** One semantic property identity is a `NameId`, never a
+  `String*` address. `NameId = [pool16][ordinal16]`; `NAME_ID_NONE` is the
+  id-less Input seam, and `SectionNameId = [slot16][offset16]` remains a
+  location rather than identity. Generated ordinary names retain catalog
+  IDs. The existing NamePool owns resolution; pointer equality is not a
+  property, shape, transition, IC, Symbol, or private-name comparison.
+  Observable strings may be materialized at Proxy/reflection boundaries.
   [NI1–NI4, NI16]
-- **D4.6.2*** Evolve NamePool, don't replace it (first definer wins,
-  zero-copy adoption); the FNV `ShapeEntry.name_id` is **not** a NameId —
-  renamed `name_hash`, demoted to hash-only; per-module property-key GOT
-  with MIR-baked dense indices; **Mark/Input never allocates NameIds for
-  document data**; `eval`/REPL use the same pipeline — one pipeline, no
-  special cases. [NI6, NI7, NI10, NI12, NI13]
+- **D4.6.2v2** Evolve NamePool, don't replace it (first definer wins and
+  parent-first lookup). One identity scope has a sealed static root and one
+  owner-thread dynamic child: static segment numbers occupy the lower pool16
+  half and dynamic segments the upper half. Static linking uses the existing
+  `PropertyKeySpec` sealed image and per-context `NameId[]`; arbitrary dynamic
+  IDs are never persisted or emitted as MIR immediates. Mark/Input document
+  fields remain id-less unless they resolve through an explicitly retained
+  schema/static parent. `eval`/REPL use the same module-table and NamePool
+  pipeline; cross-context Input ownership is not inferred from numeric IDs.
+  [NI6, NI7, NI10, NI12, NI13]
 
 ### D4.7 Const pool / MarkPack
 

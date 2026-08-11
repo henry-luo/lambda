@@ -14,6 +14,7 @@
 #include "../lib/log.h"
 #include "../lib/test_utils.h"
 #include <cstring>
+#include <cstdio>
 
 // Test fixture for NamePool tests
 class NamePoolTest : public ::testing::Test {
@@ -49,7 +50,7 @@ TEST_F(NamePoolTest, BasicNameCreation) {
 }
 
 TEST_F(NamePoolTest, NameRecordClassifiesArrayIndexesAndUniqueKeys) {
-    NamePool* name_pool = name_pool_create(pool, nullptr);
+    NamePool* name_pool = name_pool_create_mode(pool, nullptr, NAME_POOL_STATIC);
     ASSERT_NE(name_pool, nullptr);
 
     String* index = name_pool_create_name(name_pool, "4294967294");
@@ -59,14 +60,14 @@ TEST_F(NamePoolTest, NameRecordClassifiesArrayIndexesAndUniqueKeys) {
     EXPECT_EQ(property_key_array_index(index), 0xFFFFFFFEu);
     EXPECT_EQ(property_key_array_index(overflow), NAME_ARRAY_INDEX_NONE);
 
-    PropertyKeyRef first = name_pool_create_unique_symbol(name_pool, {"same", 4});
-    PropertyKeyRef second = name_pool_create_unique_symbol(name_pool, {"same", 4});
-    PropertyKeyRef private_key = name_pool_create_unique_private(name_pool, {"same", 4});
+    NameRef first = name_pool_create_unique_symbol(name_pool, {"same", 4});
+    NameRef second = name_pool_create_unique_symbol(name_pool, {"same", 4});
+    NameRef private_key = name_pool_create_unique_private(name_pool, {"same", 4});
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
     ASSERT_NE(private_key, nullptr);
     EXPECT_NE(first, second);
-    EXPECT_FALSE(property_key_equal(first, second));
+    EXPECT_NE(property_key_id(first), property_key_id(second));
     EXPECT_EQ(property_key_kind(first), NAME_KEY_SYMBOL);
     EXPECT_EQ(property_key_kind(private_key), NAME_KEY_PRIVATE);
     EXPECT_NE(property_key_hash(first), property_key_hash(second));
@@ -93,7 +94,7 @@ TEST_F(NamePoolTest, GeneratedNamesArePinnedAndSharedAcrossPools) {
     StrView spelling = well_known_name_view(MARKUP_NAME_DIV);
     EXPECT_EQ(spelling.length, 3u);
     EXPECT_EQ(memcmp(spelling.str, "div", 3), 0);
-    EXPECT_EQ(well_known_key_ref(MARKUP_NAME_DIV), first);
+    EXPECT_EQ(well_known_name_ref(MARKUP_NAME_DIV), first);
     EXPECT_EQ(name_pool_count(first_pool), 0u);
     EXPECT_EQ(name_pool_lookup(second_pool, "div"), first);
 
@@ -131,20 +132,20 @@ TEST_F(NamePoolTest, GeneratedCatalogRecordsRoundTripAndPreserveKinds) {
     for (const Catalog& catalog : catalogs) {
         for (size_t index = 0; index < catalog.count; index++) {
             const WellKnownNameRecord* record = &catalog.records[index];
-            NameRef ref = well_known_name_ref(record->meta.predefined_id);
+            NameRef ref = well_known_name_ref(record->meta.name_id);
             ASSERT_NE(ref, nullptr);
             EXPECT_TRUE(string_is_pooled(ref));
             EXPECT_FALSE(ref->is_buffer);
             EXPECT_EQ(name_ref_meta_const(ref), &record->meta);
-            EXPECT_EQ(name_ref_id(ref), record->meta.predefined_id);
+            EXPECT_EQ(name_ref_id(ref), record->meta.name_id);
             EXPECT_EQ(property_key_kind(ref), record->meta.key_kind);
             EXPECT_EQ(well_known_name_id({record->chars, record->len}),
-                      record->meta.predefined_id);
+                      record->meta.name_id);
         }
     }
 
-    EXPECT_EQ(property_key_kind(well_known_key_ref(JS_SYMBOL_ITERATOR)), NAME_KEY_SYMBOL);
-    EXPECT_EQ(property_key_kind(well_known_key_ref(JS_NAME_CONSTRUCTOR)), NAME_KEY_STRING);
+    EXPECT_EQ(property_key_kind(well_known_name_ref(JS_SYMBOL_ITERATOR)), NAME_KEY_SYMBOL);
+    EXPECT_EQ(property_key_kind(well_known_name_ref(JS_NAME_CONSTRUCTOR)), NAME_KEY_STRING);
 }
 
 TEST_F(NamePoolTest, OrdinaryStringCannotAliasWellKnownSymbolRecord) {
@@ -152,7 +153,7 @@ TEST_F(NamePoolTest, OrdinaryStringCannotAliasWellKnownSymbolRecord) {
     ASSERT_NE(name_pool, nullptr);
 
     String* ordinary = name_pool_create_name(name_pool, "Symbol.iterator");
-    PropertyKeyRef symbol = well_known_key_ref(JS_SYMBOL_ITERATOR);
+    NameRef symbol = well_known_name_ref(JS_SYMBOL_ITERATOR);
     ASSERT_NE(ordinary, nullptr);
     ASSERT_NE(symbol, nullptr);
     EXPECT_NE(ordinary, symbol);
@@ -231,6 +232,101 @@ TEST_F(NamePoolTest, ParentInheritance) {
 
     name_pool_release(doc_pool);
     name_pool_release(schema_pool);
+}
+
+TEST_F(NamePoolTest, StaticSealThenDynamicNameIds) {
+    NamePool* static_pool = name_pool_create_mode(pool, nullptr, NAME_POOL_STATIC);
+    ASSERT_NE(static_pool, nullptr);
+    EXPECT_EQ(name_pool_id_mode(static_pool), NAME_POOL_STATIC);
+
+    String* static_name = name_pool_create_name(static_pool, "static_field");
+    ASSERT_NE(static_name, nullptr);
+    NameId static_id = name_ref_id(static_name);
+    EXPECT_EQ(static_id >> 16, 3u);
+    EXPECT_NE(static_id & 0xffffu, 0u);
+    EXPECT_EQ(name_pool_resolve_id(static_pool, static_id), static_name);
+    EXPECT_TRUE(name_pool_seal_static(static_pool));
+
+    NamePool* dynamic_pool = name_pool_create_mode(pool, static_pool, NAME_POOL_DYNAMIC);
+    ASSERT_NE(dynamic_pool, nullptr);
+    EXPECT_EQ(name_pool_dynamic_child(static_pool), dynamic_pool);
+    EXPECT_EQ(name_pool_create_name(dynamic_pool, "static_field"), static_name);
+
+    String* dynamic_name = name_pool_create_name(dynamic_pool, "dynamic_field");
+    ASSERT_NE(dynamic_name, nullptr);
+    NameId dynamic_id = name_ref_id(dynamic_name);
+    EXPECT_EQ(dynamic_id >> 16, 0x8000u);
+    EXPECT_NE(dynamic_id & 0xffffu, 0u);
+    EXPECT_EQ(name_pool_resolve_id(dynamic_pool, dynamic_id), dynamic_name);
+    EXPECT_EQ(name_pool_name_id(dynamic_pool, {"dynamic_field", 13}), dynamic_id);
+    EXPECT_FALSE(name_pool_create_mode(pool, static_pool, NAME_POOL_DYNAMIC));
+
+    name_pool_release(dynamic_pool);
+    name_pool_release(static_pool);
+}
+
+TEST_F(NamePoolTest, DynamicNameIdsGrowPastOneSegmentWithoutReuse) {
+    NamePool* static_pool = name_pool_create_mode(pool, nullptr, NAME_POOL_STATIC);
+    ASSERT_NE(static_pool, nullptr);
+    ASSERT_TRUE(name_pool_seal_static(static_pool));
+    NamePool* dynamic_pool = name_pool_create_mode(pool, static_pool, NAME_POOL_DYNAMIC);
+    ASSERT_NE(dynamic_pool, nullptr);
+
+    NameRef first = nullptr;
+    NameRef last_in_first_segment = nullptr;
+    char spelling[32];
+    for (uint32_t index = 0; index < UINT16_MAX; index++) {
+        int length = snprintf(spelling, sizeof(spelling), "dynamic_%u", index);
+        ASSERT_GT(length, 0);
+        NameRef name = name_pool_create_len(dynamic_pool, spelling, (size_t)length);
+        ASSERT_NE(name, nullptr);
+        if (index == 0) first = name;
+        if (index + 1 == UINT16_MAX) last_in_first_segment = name;
+    }
+
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(last_in_first_segment, nullptr);
+    EXPECT_EQ(name_ref_id(first), 0x80000001u);
+    EXPECT_EQ(name_ref_id(last_in_first_segment), 0x8000ffffu);
+
+    NameRef next = name_pool_create_name(dynamic_pool, "dynamic_overflow");
+    ASSERT_NE(next, nullptr);
+    EXPECT_EQ(name_ref_id(next), 0x80010001u);
+    EXPECT_EQ(name_pool_create_name(dynamic_pool, "dynamic_0"), first);
+    EXPECT_EQ(name_pool_create_name(dynamic_pool, "dynamic_overflow"), next);
+    EXPECT_EQ(name_pool_resolve_id(dynamic_pool, name_ref_id(first)), first);
+    EXPECT_EQ(name_pool_resolve_id(dynamic_pool, name_ref_id(last_in_first_segment)),
+        last_in_first_segment);
+    EXPECT_EQ(name_pool_resolve_id(dynamic_pool, name_ref_id(next)), next);
+
+    name_pool_release(dynamic_pool);
+    name_pool_release(static_pool);
+}
+
+TEST_F(NamePoolTest, InputNameParentSeparatesSchemaAndDynamicNames) {
+    NamePool* static_pool = name_pool_create_mode(pool, nullptr, NAME_POOL_STATIC);
+    ASSERT_NE(static_pool, nullptr);
+    String* schema_name = name_pool_create_name(static_pool, "schema_field");
+    ASSERT_NE(schema_name, nullptr);
+    ASSERT_TRUE(name_pool_seal_static(static_pool));
+    NamePool* dynamic_pool = name_pool_create_mode(pool, static_pool, NAME_POOL_DYNAMIC);
+    ASSERT_NE(dynamic_pool, nullptr);
+
+    Input* input = Input::create_with_name_parent(pool, nullptr, nullptr, dynamic_pool);
+    ASSERT_NE(input, nullptr);
+    ASSERT_NE(input->name_pool, nullptr);
+    EXPECT_EQ(name_pool_lookup(input->name_pool, "schema_field"), schema_name);
+    EXPECT_EQ(name_pool_name_id(input->name_pool, {"schema_field", 12}),
+        name_ref_id(schema_name));
+
+    String* input_name = name_pool_create_name(input->name_pool, "input_field");
+    ASSERT_NE(input_name, nullptr);
+    EXPECT_EQ(name_ref_id(input_name), NAME_ID_NONE);
+
+    name_pool_release(input->name_pool);
+    input->name_pool = nullptr;
+    name_pool_release(dynamic_pool);
+    name_pool_release(static_pool);
 }
 
 // Test that child can add its own names without affecting parent
