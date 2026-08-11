@@ -2,7 +2,7 @@
 
 This document describes how to prepare, run, and report Lambda benchmarks across 6 canonical suites and an opt-in text-library suite.
 
-**Canonical snapshot workflow:** use `python3 test/benchmark/run_standard_benchmarks.py` from the project root. It refuses to run on battery power or against a debug build, rebuilds a clean release binary, verifies that JS execution profiling markers are absent from `lambda.exe`, runs the standardized benchmark matrix, writes a matching `benchmark_results_vN.json`, and can generate an `Overall_ResultN.md` report from that JSON. Afterwards, archive the binary into `test/benchmark/exe/` (§5).
+**Canonical snapshot workflow:** use `python3 test/benchmark/run_standard_benchmarks.py --typed` from the project root (a variant flag is required — see [Choosing the Lambda variant](#choosing-the-lambda-variant-required-in-time-mode)). It refuses to run on battery power or against a debug build, rebuilds a clean release binary, verifies that JS execution profiling markers are absent from `lambda.exe`, runs the standardized benchmark matrix, writes a matching `benchmark_results_vN.json`, and can generate an `Overall_ResultN.md` report from that JSON. Afterwards, archive the binary into `test/benchmark/exe/` (§5).
 
 > **Reading results across snapshots:** absolute timings drift systematically
 > between dates — ~10% on every engine between Result12 and Result13, including
@@ -209,7 +209,7 @@ The single unified runner is `test/benchmark/run_benchmarks.py`.
 For checked-in result reports, use the standard workflow script instead of manually assembling commands:
 
 ```bash
-python3 test/benchmark/run_standard_benchmarks.py --report-output test/benchmark/Overall_Result9.md --report-title "Lambda Benchmark Results: Round 9"
+python3 test/benchmark/run_standard_benchmarks.py --report-output test/benchmark/Overall_Result9.md --report-title "Lambda Benchmark Results: Round 9" --typed
 ```
 
 Default behavior, in order:
@@ -240,7 +240,7 @@ Default behavior, in order:
   commit and deliberately omits `.exe`, so broad test cleanup does not remove
   it. A pre-existing cache entry must be byte-identical; otherwise the run
   aborts rather than attaching a report to an ambiguous executable.
-- Runs `test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v9.json --fresh`.
+- Runs `test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v9.json --fresh`, forwarding whichever of `--typed` / `--legacy` you passed (one is required — see [Choosing the Lambda variant](#choosing-the-lambda-variant-required-in-time-mode)).
 - Derives the matching JSON path from `--report-output`; for example, `Overall_Result9.md` pairs with `benchmark_results_v9.json`.
 - Starts snapshot runs from an empty result file by default. Use `--merge` only when intentionally refreshing part of an existing JSON.
 - Writes run logs under `temp/benchmark_vN/`: `power_check.log`,
@@ -284,7 +284,7 @@ measurement engine with an explicit executable and avoid modifying result JSON:
 ```bash
 LAMBDA_EXE=./test/benchmark/exe/lambda-vN-<commit> \
   python3 test/benchmark/run_benchmarks.py \
-  -e lambdajs -s jetstream -b crypto_sha1 -n 5 --no-save
+  -e lambdajs -s jetstream -b crypto_sha1 -n 5 --no-save --typed
 ```
 
 ### Archiving the binary (`test/benchmark/exe/`)
@@ -322,7 +322,7 @@ at run time or lose it.
 To verify the exact command sequence and output pairing without running benchmarks:
 
 ```bash
-python3 test/benchmark/run_standard_benchmarks.py --report-output test/benchmark/Overall_Result9.md --dry-run
+python3 test/benchmark/run_standard_benchmarks.py --report-output test/benchmark/Overall_Result9.md --dry-run --typed
 ```
 
 ### Modes
@@ -338,9 +338,10 @@ The runner supports three benchmark modes via `-m/--mode`:
 ### Exploratory full run (all 6 suites × 6 engines)
 
 ```bash
-python3 test/benchmark/run_benchmarks.py
+python3 test/benchmark/run_benchmarks.py --typed
 ```
 
+- Time mode requires `--typed` or `--legacy`; see [Choosing the Lambda variant](#choosing-the-lambda-variant-required-in-time-mode).
 - Default: 3 runs per benchmark per engine, reports median.
 - Timeout: 120 seconds per run.
 - Results merged into `test/benchmark/benchmark_results_v3.json`.
@@ -352,22 +353,22 @@ python3 test/benchmark/run_benchmarks.py
 
 ```bash
 # Run only JetStream suite
-python3 test/benchmark/run_benchmarks.py -s jetstream
+python3 test/benchmark/run_benchmarks.py -s jetstream --typed
 
 # Run AWFY + BENG suites
-python3 test/benchmark/run_benchmarks.py -s awfy,beng
+python3 test/benchmark/run_benchmarks.py -s awfy,beng --typed
 
 # Run the canonical nbody & richards rows (AWFY)
-python3 test/benchmark/run_benchmarks.py -b nbody,richards
+python3 test/benchmark/run_benchmarks.py -b nbody,richards --typed
 
 # Combine: AWFY mandelbrot + nbody only
-python3 test/benchmark/run_benchmarks.py -s awfy -b mandelbrot,nbody
+python3 test/benchmark/run_benchmarks.py -s awfy -b mandelbrot,nbody --typed
 
 # Only MIR and Node.js engines
-python3 test/benchmark/run_benchmarks.py -e mir,nodejs
+python3 test/benchmark/run_benchmarks.py -e mir,nodejs --typed
 
 # 5 runs per engine instead of default 3
-python3 test/benchmark/run_benchmarks.py -b deltablue -n 5
+python3 test/benchmark/run_benchmarks.py -b deltablue -n 5 --typed
 ```
 
 Filters use **case-insensitive substring matching**: `-b nbody` matches `nbody` in all suites.
@@ -399,16 +400,47 @@ python3 test/benchmark/run_benchmarks.py -m mir-vs-c -s r7rs --typed
 
 Measures wall-clock time in microseconds. Only uses MIR and C2MIR engines.
 
-### Typed and untyped MIR timing
+### Choosing the Lambda variant (required in time mode)
+
+Every benchmark has two Lambda sources: an untyped `<bench>.ls` and a typed
+`<bench>2.ls`. The registry stores only the typed path; the untyped one is
+**derived** by `mir_script_variants()` stripping the `2`. Time mode therefore
+has to be told which of them to measure, and **it will not guess** — running it
+without `--typed` or `--legacy` exits with an error.
 
 ```bash
-# Run both Lambda variants; typed columns fall back to untyped where no typed source exists
+# Recommended: measure BOTH variants
 python3 test/benchmark/run_benchmarks.py -e mir --typed
+
+# Legacy single-column run, for comparability with historical result files
+python3 test/benchmark/run_benchmarks.py -e mir --legacy
 ```
 
-The time-mode result keeps untyped MIR under `mir` and records the typed or
-untyped-fallback result under `mir_typed`. The report generator renders the
-fallback value with `*`.
+| Flag | Scripts run | `mir` key holds | `mir_typed` key holds |
+|---|---|---|---|
+| `--typed` | `<bench>.ls` **and** `<bench>2.ls` | untyped time | typed time (or untyped fallback) |
+| `--legacy` | `<bench>2.ls` only | **typed** time | absent |
+
+Under `--typed`, typed columns fall back to the untyped value where no typed
+source exists; the report generator renders that fallback with `*`.
+
+> **Why the flag is mandatory.** This used to default to the `--legacy`
+> behaviour, which timed the *typed* script and printed it under the **MIR-U**
+> ("untyped") heading, writing it to the same `mir` result key that `--typed`
+> uses for the *untyped* script. The `mir` key therefore meant different things
+> depending on a flag nothing downstream inspected, so diffing a default-run
+> JSON against a `--typed`-run JSON silently compared typed against untyped.
+> Making the choice explicit removes the ambiguity; `--legacy` is retained only
+> so existing `benchmark_results_vN.json` snapshots stay reproducible.
+
+Time-mode runs record the choice in `_metadata`: `typed_variants`,
+`legacy_variants`, and `mir_key_source` (a plain-language statement of which
+script the `mir` key came from). Prefer reading `mir_key_source` over inferring
+the variant from the presence of `mir_typed`.
+
+Memory mode and `mir-vs-c` mode are unaffected and need no variant flag —
+memory mode always measures the registry (typed) path, and `mir-vs-c --typed`
+means something different (include typed R7RS variants).
 
 ### Listing and dry-run
 
@@ -417,10 +449,10 @@ fallback value with `*`.
 python3 test/benchmark/run_benchmarks.py --list
 
 # Preview what would run without executing
-python3 test/benchmark/run_benchmarks.py --dry-run -b nbody -e mir,nodejs
+python3 test/benchmark/run_benchmarks.py --dry-run -b nbody -e mir,nodejs --typed
 
 # Run without saving results to JSON
-python3 test/benchmark/run_benchmarks.py -b fib -s r7rs --no-save
+python3 test/benchmark/run_benchmarks.py -b fib -s r7rs --no-save --typed
 ```
 
 ### CLI reference
@@ -433,7 +465,8 @@ python3 test/benchmark/run_benchmarks.py -b fib -s r7rs --no-save
 | `-e, --engines` | Comma-separated engine filter: `mir,c2mir,lambdajs,quickjs,nodejs,python` |
 | `-n, --runs` | Number of runs per engine (default: 3 for time, 1 for memory) |
 | `-t, --timeout` | Timeout per run in seconds (default: 120) |
-| `--typed` | In time mode, run both MIR variants; in mir-vs-c mode, include typed R7RS variants |
+| `--typed` | In time mode, run both MIR variants (`mir` = untyped, `mir_typed` = typed); in mir-vs-c mode, include typed R7RS variants. **Time mode requires this or `--legacy`** |
+| `--legacy` | Time mode only: legacy single-column run — times ONLY the typed `<bench>2.ls` and reports it under the `MIR-U` heading. Kept for comparability with historical result files |
 | `--list` | List all available benchmarks and exit |
 | `--dry-run` | Show what would run without executing |
 | `--no-save` | Don't write results to JSON/CSV |

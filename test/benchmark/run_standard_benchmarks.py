@@ -327,9 +327,32 @@ def main():
     parser.add_argument("--merge", action="store_true", help="merge into an existing result JSON instead of starting fresh")
     parser.add_argument("--typed", action="store_true",
                         help="run both untyped and typed MIR variants in time mode")
+    parser.add_argument("--legacy", action="store_true",
+                        help="legacy single-column run: time ONLY the typed *2.ls and report it "
+                             "under MIR-U. Kept for comparability with historical result files")
     parser.add_argument("--log-dir", default=None, help="directory for build/benchmark/report logs")
     parser.add_argument("--dry-run", action="store_true", help="print the standardized workflow without executing it")
     args = parser.parse_args()
+
+    # Forwarded to run_benchmarks.py, which requires an explicit variant selection.
+    # Gate it here too so the failure names the workflow flag the user actually typed.
+    if args.typed and args.legacy:
+        print("error: --typed and --legacy are mutually exclusive.", file=sys.stderr)
+        sys.exit(2)
+    if not args.typed and not args.legacy:
+        print(
+            "error: a variant selection is required.\n"
+            "\n"
+            "  --typed   run BOTH Lambda variants (recommended)\n"
+            "              MIR-U = untyped <bench>.ls, MIR-T = typed <bench>2.ls\n"
+            "  --legacy  legacy single-column run: ONLY the typed <bench>2.ls,\n"
+            "            reported under the MIR-U heading\n"
+            "\n"
+            "This used to default to --legacy, which reported a typed measurement\n"
+            "as untyped.\n",
+            file=sys.stderr)
+        sys.exit(2)
+
     results_output = args.results_output or derive_results_output(args.report_output)
     log_dir = args.log_dir or derive_log_dir(args.report_output, results_output)
 
@@ -354,6 +377,8 @@ def main():
         benchmark_cmd.append("--fresh")
     if args.typed:
         benchmark_cmd.append("--typed")
+    if args.legacy:
+        benchmark_cmd.append("--legacy")
     report_cmd = None
     if args.report_output:
         report_cmd = [

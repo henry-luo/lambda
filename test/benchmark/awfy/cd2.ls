@@ -50,7 +50,11 @@ type DrawCtx = {p1x: float, p1y: float, p2x: float, p2y: float, motionIdx: int}
 // 3-level indexed array: 16 x 16 x 32 = 8192 cap
 // =====================================================
 fn arr_new() Arr {
-    { l0: fill(16, null), sz: 0 }
+    // bind through a declared `array` first: the map-contract relation compares the
+    // candidate field's recorded storage descriptor, and an inlined fill() does not
+    // carry one matching the declared `l0: array`, so every construction reified.
+    let init: array = fill(16, null)
+    { l0: init, sz: 0 }
 }
 
 pn arr_get(a, idx: int) any {
