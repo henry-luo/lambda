@@ -213,7 +213,14 @@ MIR_UPSTREAM_COMMIT = 99c65079038f3ba9242ef646f308c266cfd7a8e5
 MIR_SOURCES = $(wildcard $(MIR_BUILD_DIR)/mir*.c $(MIR_BUILD_DIR)/mir*.h $(MIR_BUILD_DIR)/c2mir/*.c $(MIR_BUILD_DIR)/c2mir/*.h)
 
 # JavaScript scanner dependencies
+JS_GRAMMAR_JS = lambda/tree-sitter-javascript/grammar.js
 JS_SCANNER_C = lambda/tree-sitter-javascript/src/scanner.c
+
+# Bash and Ruby grammar dependencies
+BASH_GRAMMAR_JS = lambda/tree-sitter-bash/grammar.js
+BASH_SCANNER_C = lambda/tree-sitter-bash/src/scanner.c
+RUBY_GRAMMAR_JS = lambda/tree-sitter-ruby/grammar.js
+RUBY_SCANNER_C = lambda/tree-sitter-ruby/src/scanner.c
 
 # TypeScript grammar and scanner dependencies
 TS_GRAMMAR_JS = lambda/tree-sitter-typescript/grammar.js
@@ -245,6 +252,11 @@ define ts_lib_build
 echo "✅ tree-sitter-$(1) library built"
 endef
 
+# Generate a grammar with the project CLI before compiling its sub-library.
+define ts_generate
+@out=$$(cd lambda/tree-sitter-$(1) && $(TREE_SITTER_CLI) generate $(2) 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+endef
+
 # Build tree-sitter library (amalgamated build, no ICU dependency)
 # Uses lib.c single-file approach - no external ICU/Unicode library needed
 $(TREE_SITTER_LIB):
@@ -266,17 +278,16 @@ $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
 	# pass the pinned CLI because the sub-make otherwise falls back to an unqualified tree-sitter
 	$(call ts_lib_build,lambda,TS="$(TREE_SITTER_CLI)")
 
-# Build tree-sitter-javascript library (depends on scanner source)
-$(TREE_SITTER_JAVASCRIPT_LIB): $(JS_SCANNER_C)
-	@# regenerate parser.c at ABI 14 (it's gitignored) then build; output is
-	@# captured and shown only on failure so success is a single status line.
-	@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -B -C lambda/tree-sitter-javascript src/parser.c TS="$(TREE_SITTER_CLI)" 2>&1 && \
-		env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" TS="$(TREE_SITTER_CLI)" 2>&1) || { printf '%s\n' "$$out"; exit 1; }
-	@echo "✅ tree-sitter-javascript library built"
+# Build tree-sitter-javascript library (depends on grammar and scanner source)
+# Generate with the project CLI directly; the sub-make only compiles the result.
+$(TREE_SITTER_JAVASCRIPT_LIB): $(JS_GRAMMAR_JS) $(JS_SCANNER_C)
+	$(call ts_generate,javascript,--abi 14)
+	$(call ts_lib_build,javascript,)
 
-# Build tree-sitter-bash library
-$(TREE_SITTER_BASH_LIB):
-	$(call ts_lib_build,bash,TS="$(TREE_SITTER_CLI)")
+# Build tree-sitter-bash library (depends on grammar and scanner source)
+$(TREE_SITTER_BASH_LIB): $(BASH_GRAMMAR_JS) $(BASH_SCANNER_C)
+	$(call ts_generate,bash,--abi 14)
+	$(call ts_lib_build,bash,)
 
 # Regenerate the ignored Python parser before a direct Premake compile.
 # The ABI-14 header cannot compile a stale ABI-15 parser.c from an older CLI.
@@ -301,9 +312,10 @@ $(TS_PARSER_C): $(TS_GRAMMAR_JS)
 $(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C) $(TS_SCANNER_C) $(TS_SCANNER_H)
 	$(call ts_lib_build,typescript,)
 
-# Build tree-sitter-ruby library
-$(TREE_SITTER_RUBY_LIB):
-	$(call ts_lib_build,ruby,TS="$(TREE_SITTER_CLI)")
+# Build tree-sitter-ruby library (depends on grammar and scanner source)
+$(TREE_SITTER_RUBY_LIB): $(RUBY_GRAMMAR_JS) $(RUBY_SCANNER_C)
+	$(call ts_generate,ruby,--abi 14)
+	$(call ts_lib_build,ruby,)
 
 # Generate LaTeX parser from grammar.js when it changes
 $(LATEX_PARSER_C) $(LATEX_GRAMMAR_JSON) $(LATEX_NODE_TYPES_JSON): $(LATEX_GRAMMAR_JS)
