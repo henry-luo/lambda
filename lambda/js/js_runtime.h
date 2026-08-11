@@ -737,6 +737,7 @@ uint32_t js_get_active_module_state_id(void);
 bool js_set_active_module_state_id(uint32_t module_state_id);
 bool js_module_state_is_available(uint32_t module_state_id);
 uint64_t js_active_module_name_id(uint32_t index);
+Item js_active_module_name_item(uint32_t module_name_index, NameId direct_name_id);
 uint32_t js_active_module_name_count(void);
 uint32_t js_active_module_ic_count(void);
 bool js_link_module_ic_table(uint32_t module_state_id, uint32_t count);

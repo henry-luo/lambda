@@ -550,9 +550,12 @@ MIR_reg_t jm_module_name_id(JsMirTranspiler* mt,
 
 MIR_reg_t jm_box_property_name_literal(JsMirTranspiler* mt,
         const char* chars, uint32_t length) {
-    MIR_reg_t id = jm_module_name_id(mt, chars, length);
-    return jm_call_1(mt, "lambda_name_id_to_item", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, id));
+    NameId direct_name_id = well_known_name_id({chars, length});
+    uint32_t module_name_index = direct_name_id == NAME_ID_NONE
+        ? jm_module_name_index(mt, chars, length) : UINT32_MAX;
+    return jm_call_2(mt, "js_active_module_name_item", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)module_name_index),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)direct_name_id));
 }
 
 MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len) {
