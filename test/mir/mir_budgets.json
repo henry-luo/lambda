@@ -9,13 +9,13 @@
       "description": "Caller-donated scalar home, including the reviewed Phase 3 clean-return firewall on the raw function. v5 re-baseline: i64 int arithmetic emits an overflow-aware multiply and band admission before boxing.",
       "budgets": {
         "default": {
-          "module_insns": 326,
+          "module_insns": 251,
           "functions": {
             "_twice_#": {
-              "insns": 103
+              "insns": 75
             },
             "main": {
-              "insns": 96
+              "insns": 73
             }
           },
           "frames": [
@@ -24,9 +24,9 @@
               "occurrence": 0,
               "roots": 3,
               "root_stores": 0,
-              "scalar_homes": 1,
+              "scalar_homes": 0,
               "number_scratch": 0,
-              "safepoints": 3
+              "safepoints": 2
             },
             {
               "name": "main",
@@ -34,7 +34,7 @@
               "root_stores": 0,
               "scalar_homes": 1,
               "number_scratch": 0,
-              "safepoints": 5
+              "safepoints": 4
             }
           ]
         }
@@ -47,10 +47,10 @@
       "description": "Tail-home forwarding, including the recursive body's root reservation, its reviewed Phase 3 clean-return firewall, and v5 i64 int arithmetic admission.",
       "budgets": {
         "default": {
-          "module_insns": 281,
+          "module_insns": 252,
           "functions": {
             "_accumulate_#": {
-              "insns": 144
+              "insns": 115
             },
             "main": {
               "insns": 45
@@ -62,9 +62,9 @@
               "occurrence": 0,
               "roots": 7,
               "root_stores": 0,
-              "scalar_homes": 1,
+              "scalar_homes": 0,
               "number_scratch": 0,
-              "safepoints": 6
+              "safepoints": 5
             },
             {
               "name": "main",
@@ -172,7 +172,7 @@
       "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls.",
       "budgets": {
         "default": {
-          "module_insns": 3850
+          "module_insns": 3138
         }
       }
     },
@@ -227,7 +227,7 @@
       "description": "Stage-1 nested COW relinking: 149 finalized instructions on the reviewed register/root-slot path, with no heap path-array construction.",
       "budgets": {
         "default": {
-          "module_insns": 209
+          "module_insns": 155
         }
       }
     },
@@ -238,7 +238,7 @@
       "description": "Typed numeric-array load guards plus the Tune13 in-place procedure-parameter write guard and checked representation fallback. v5 re-baseline: native int values use the i64 lane and each arithmetic site admits its result to the int53 band. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument.",
       "budgets": {
         "default": {
-          "module_insns": 1568,
+          "module_insns": 1401,
           "functions": {
             "_guarded_load_#": {
               "insns": 57
@@ -275,13 +275,13 @@
       "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail, v5 i64 int admission, and reviewed Phase 3 return-firewall growth. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument.",
       "budgets": {
         "default": {
-          "module_insns": 812,
+          "module_insns": 756,
           "functions": {
             "_closed_gap_#": {
-              "insns": 101
+              "insns": 73
             },
             "_open_gap_#": {
-              "insns": 101
+              "insns": 73
             }
           },
           "frames": [
@@ -289,17 +289,17 @@
               "name": "_closed_gap_#",
               "roots": 3,
               "root_stores": 0,
-              "scalar_homes": 1,
+              "scalar_homes": 0,
               "number_scratch": 0,
-              "safepoints": 3
+              "safepoints": 2
             },
             {
               "name": "_open_gap_#",
               "roots": 3,
               "root_stores": 0,
-              "scalar_homes": 1,
+              "scalar_homes": 0,
               "number_scratch": 0,
-              "safepoints": 3
+              "safepoints": 2
             }
           ]
         }
