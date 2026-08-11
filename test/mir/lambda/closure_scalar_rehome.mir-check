@@ -6,7 +6,7 @@
       "in_func": "_inner_b_#",
       "expect_seq": [
         { "pattern": ", _scalar_home" },
-        { "pattern": "call\tlambda_restore_number_frame_top_p" },
+        { "pattern": "mov\ti64:" },
         { "pattern": "ret\t" }
       ],
       "expect": [
