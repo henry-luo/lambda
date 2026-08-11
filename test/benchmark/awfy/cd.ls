@@ -59,21 +59,11 @@ pn get_old_or_new(old, newp) {
     return old
 }
 
-pn null16() {
-    var a = [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
-    return a
-}
-
-pn null32() {
-    var a = [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
-    return a
-}
-
 // =====================================================
 // 3-level indexed array: 16 x 16 x 32 = 8192 cap
 // =====================================================
 pn arr_new() {
-    var a = { l0: null16(), sz: 0 }
+    var a = { l0: fill(16, null), sz: 0 }
     return a
 }
 
@@ -100,13 +90,13 @@ pn arr_set(a, idx, val) {
     var c1 = l0[i0]
     if (c1 == null) {
         var _d = 0
-        c1 = null16()
+        c1 = fill(16, null)
         l0[i0] = c1
     }
     var c2 = c1[i1]
     if (c2 == null) {
         var _d2 = 0
-        c2 = null32()
+        c2 = fill(32, null)
         c1[i1] = c2
     }
     var _d3 = 0
