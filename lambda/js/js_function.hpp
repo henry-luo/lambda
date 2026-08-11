@@ -34,7 +34,7 @@ struct JsFunction {
     uint8_t call_lane_kind;
     uint8_t special_ctor_kind;
     int16_t formal_length;
-    String* special_ctor_name;
+    NameId special_ctor_name_id;
     JsCallEntry invoke;
     uint32_t module_state_id;
     Item home_global;
@@ -47,10 +47,6 @@ struct JsFunction {
     String* vm_stack_source;
     int64_t vm_stack_line_offset;
     int64_t vm_stack_column_offset;
-    const char** ctor_prop_names;
-    int* ctor_prop_lens;
-    int ctor_prop_count;
-    void* ctor_shape_cache;
     Context* runtime_context;
 };
 
@@ -98,11 +94,9 @@ enum JsFunctionCallLaneKind : uint8_t {
     JS_CALL_LANE_METHOD_HOME = 2,
 };
 
-// Call dispatch used to re-derive "is this one of the name-identified special
-// constructors?" with a strncmp chain on every call, which every 4- or
-// 8-character function name paid for. The answer depends only on fn->name, so
-// it is cached against the name pointer it was computed from: any later rename
-// simply misses the key and reclassifies, with no writer audit to keep in sync.
+// Call dispatch caches the classification against the NameId of fn->name;
+// pointer identity is not stable across the Input/runtime materialization
+// boundary covered by D4.6.1v2.
 enum JsSpecialCtorKind : uint8_t {
     JS_SPECIAL_CTOR_UNCHECKED = 0,
     JS_SPECIAL_CTOR_NONE = 1,
@@ -117,8 +111,11 @@ enum JsSpecialCtorKind : uint8_t {
 // inline on the rare miss; never changes which callees the dispatcher treats
 // as special — the sufficient conditions stay at the use sites.
 static inline uint8_t js_function_special_ctor_kind(JsFunction* fn) {
-    if (fn->special_ctor_kind != JS_SPECIAL_CTOR_UNCHECKED &&
-        fn->special_ctor_name == fn->name) {
+    if (!fn) return JS_SPECIAL_CTOR_NONE;
+    NameId name_id = fn->name ? name_ref_id(fn->name) : NAME_ID_NONE;
+    if (name_id != NAME_ID_NONE &&
+        fn->special_ctor_kind != JS_SPECIAL_CTOR_UNCHECKED &&
+        fn->special_ctor_name_id == name_id) {
         return fn->special_ctor_kind;
     }
     uint8_t kind = JS_SPECIAL_CTOR_NONE;
@@ -146,7 +143,7 @@ static inline uint8_t js_function_special_ctor_kind(JsFunction* fn) {
         default: break;
         }
     }
-    fn->special_ctor_name = name;
+    fn->special_ctor_name_id = name_id;
     fn->special_ctor_kind = kind;
     return kind;
 }

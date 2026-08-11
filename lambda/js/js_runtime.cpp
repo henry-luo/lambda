@@ -120,7 +120,7 @@ extern "C" Item js_get_fs_namespace(void);
 extern "C" Item js_get_fs_promises_namespace(void);
 extern "C" Item js_get_internal_fs_promises_namespace(void);
 extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
-    TypeId value_type);
+    NameId operation_name_id, TypeId value_type);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
 
@@ -644,7 +644,7 @@ static Item js_private_environment_for_class(Item class_item, bool create) {
 }
 
 extern "C" Item js_private_key_for_class(Item class_item, Item source_name) {
-    if (!js_private_source_name(source_name) || !js_input || !js_input->name_pool) {
+    if (!js_private_source_name(source_name) || !context || !context->name_pool) {
         return js_throw_type_error("Invalid private name binding");
     }
     RootFrame roots(4);
@@ -655,7 +655,8 @@ extern "C" Item js_private_key_for_class(Item class_item, Item source_name) {
     Rooted<Item> key_root(roots, ItemNull);
     if (!roots.valid() || get_type_id(environment_root.get()) != LMD_TYPE_MAP) return ItemNull;
     String* source = it2s(source_root.get());
-    NameRef binding_name = name_pool_create_len(js_input->name_pool, source->chars, source->len);
+    NameRef binding_name = name_pool_create_len(context->name_pool,
+        source->chars, source->len);
     if (!binding_name) return ItemNull;
     // Private source literals are distinct heap strings; the class environment
     // must index their shared spelling with the ordinary pooled NameRecord.
@@ -666,7 +667,7 @@ extern "C" Item js_private_key_for_class(Item class_item, Item source_name) {
         property_key_kind(it2s(key)) == NAME_KEY_PRIVATE) {
         return key;
     }
-    PropertyKeyRef private_key = name_pool_create_unique_private(js_input->name_pool,
+    NameRef private_key = name_pool_create_unique_private(context->name_pool,
         {source->chars, source->len});
     if (!private_key) return ItemNull;
     key_root.set((Item){.item = s2it(private_key)});
@@ -950,7 +951,8 @@ static Item js_proxy_get_trap(JsProxyData* pd, const char* trap_name, int trap_l
     if (get_type_id(handler_item) != LMD_TYPE_MAP) return ItemNull;
     // ES §7.3.10 GetMethod: do a proper [[Get]] (must invoke accessors) and
     // then validate callability. js_map_get_fast skips accessor getters.
-    JS_ASSIGN_OR_RETURN(trap, js_property_get_str(handler_item, trap_name, trap_len));
+    JS_ASSIGN_OR_RETURN(trap, js_property_get(handler_item,
+        (Item){.item = s2it(heap_create_name(trap_name, trap_len))}));
     if (trap.item == ItemNull.item) return ItemNull;
     TypeId tt = get_type_id(trap);
     if (tt == LMD_TYPE_UNDEFINED || tt == LMD_TYPE_NULL) return ItemNull;
@@ -1829,43 +1831,19 @@ extern "C" Item js_proxy_trap_construct(Item proxy, Item* args, int arg_count, I
     return result;
 }
 
-static Item js_new_object_with_shape_cached(const char** prop_names,
-    const int* prop_lens, int count, void** shape_cache);
-extern "C" void js_set_function_ctor_shape_metadata(Item fn_item,
-    const char** prop_names, const int* prop_lens, int count);
-
 // Create a new object for a constructor call: sets __proto__ from callee.prototype
 extern "C" Item js_constructor_create_object(Item callee) {
     // Prototype lookup and builtin subclass allocation can compact the
     // unpublished instance; native argument registers are not GC roots.
-    RootFrame roots(7);
+    RootFrame roots(6);
     Rooted<Item> callee_root(roots, callee);
-    Rooted<Item> shape_callee_root(roots,
-        js_bound_function_ultimate_target(callee_root.get()));
     Rooted<Item> proto_source_root(roots, ItemNull);
     Rooted<Item> instance_proto_root(roots, ItemNull);
     Rooted<Item> object_root(roots, ItemNull);
     Rooted<Item> aux_one_root(roots, ItemNull);
     Rooted<Item> aux_two_root(roots, ItemNull);
     if (!roots.valid()) return ItemNull;
-    JsFunction* shape_fn = get_type_id(shape_callee_root.get()) == LMD_TYPE_FUNC
-        ? (JsFunction*)shape_callee_root.get().function : NULL;
-    // Compiled constructor bodies use fixed this.prop slots. A constructor
-    // reached through an alias must receive the same pre-shaped object as a
-    // statically resolved `new`, or those slot writes address an empty layout.
-    // Rebuilding equivalent immutable map metadata for every dynamic call
-    // made allocation-heavy class workloads pay repeated shape-construction cost.
-    object_root.set(shape_fn && shape_fn->ctor_prop_count > 0
-        ? js_new_object_with_shape_cached(shape_fn->ctor_prop_names,
-            shape_fn->ctor_prop_lens, shape_fn->ctor_prop_count,
-            &shape_fn->ctor_shape_cache)
-        : js_new_object());
-    if (shape_fn && shape_fn->ctor_prop_count > 0 &&
-            get_type_id(object_root.get()) == LMD_TYPE_MAP) {
-        uint16_t reserved = shape_fn->ctor_prop_count >= 16 ? UINT16_MAX :
-            (uint16_t)((1u << shape_fn->ctor_prop_count) - 1u);
-        map_ctor_set_reserved_mask(object_root.get().map, reserved);
-    }
+    object_root.set(js_new_object());
     TypeId callee_type = get_type_id(callee_root.get());
     if (callee_type == LMD_TYPE_FUNC || js_is_proxy(callee_root.get())) {
         proto_source_root.set(callee_root.get());
@@ -2031,13 +2009,13 @@ static bool js_private_storage_has_own(Item object, Item private_key) {
         lookup_object = js_proxy_private_slots(object, false);
     }
     if (get_type_id(lookup_object) != LMD_TYPE_MAP) return false;
-    JsShapeSlotStatus status = js_own_shape_slot_status_key(
-        lookup_object, it2s(private_key), NULL, NULL);
+    JsShapeSlotStatus status = js_own_shape_slot_status_name_id(
+        lookup_object, property_key_id(it2s(private_key)), NULL, NULL);
     return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
 }
 
 static Item js_private_brand_key_for_class(Item class_item) {
-    if (get_type_id(class_item) != LMD_TYPE_MAP || !js_input || !js_input->name_pool) {
+    if (get_type_id(class_item) != LMD_TYPE_MAP || !context || !context->name_pool) {
         return ItemNull;
     }
     bool found = false;
@@ -2047,7 +2025,7 @@ static Item js_private_brand_key_for_class(Item class_item) {
         property_key_kind(it2s(brand)) == NAME_KEY_PRIVATE) {
         return brand;
     }
-    PropertyKeyRef brand_key = name_pool_create_unique_private(js_input->name_pool,
+    NameRef brand_key = name_pool_create_unique_private(context->name_pool,
         {"<private brand>", 15});
     if (!brand_key) return ItemNull;
     RootFrame roots(3);
@@ -2085,11 +2063,8 @@ static bool js_private_brand_storage_has_own(Item object, Item class_item) {
 // for a not-yet-installed private member (ES PrivateFieldSet ordering).
 #define js_private_define_active (js_runtime_state.operations.private_define_active)
 
-extern "C" void js_set_class_instance_field_metadata_bulk(Item class_item,
-    const char** field_names, const int* field_lens, const uint8_t* field_kinds,
-    int count) {
-    if (get_type_id(class_item) != LMD_TYPE_MAP || !field_names || !field_lens ||
-        !field_kinds || count <= 0) {
+extern "C" void js_init_class_instance_field_metadata(Item class_item, int count) {
+    if (get_type_id(class_item) != LMD_TYPE_MAP || count <= 0) {
         return;
     }
     RootFrame roots(5);
@@ -2101,17 +2076,9 @@ extern "C" void js_set_class_instance_field_metadata_bulk(Item class_item,
     if (!roots.valid()) return;
 
     for (int i = 0; i < count; i++) {
-        if (!field_names[i] || field_lens[i] <= 0) return;
-        // The arrays are rooted because interning each name may collect before
-        // the class object has published the metadata properties.
-        Item source_key = (Item){.item = s2it(heap_create_name(field_names[i], field_lens[i]))};
-        Item field_key = js_private_source_name(source_key)
-            ? js_private_key_for_class(class_root.get(), source_key)
-            : source_key;
-        if (item_is_error(field_key)) return;
-        keys_root.get().array->items[i] = field_key;
+        keys_root.get().array->items[i] = make_js_undefined();
         values_root.get().array->items[i] = make_js_undefined();
-        kinds_root.get().array->items[i] = (Item){.item = i2it(field_kinds[i] ? 1 : 0)};
+        kinds_root.get().array->items[i] = (Item){.item = i2it(0)};
     }
 
     const char* property_names[] = {"__if_keys__", "__if_values__", "__if_kinds__"};
@@ -2122,6 +2089,43 @@ extern "C" void js_set_class_instance_field_metadata_bulk(Item class_item,
         Item set_result = js_property_set(class_root.get(), key_root.get(), property_values[i]);
         if (item_is_error(set_result)) return;
         js_mark_non_enumerable(class_root.get(), key_root.get());
+    }
+}
+
+extern "C" void js_set_class_instance_field_metadata_name_id_range(
+    Item class_item, int index, uint32_t module_name_base, int count,
+    uint64_t method_mask) {
+    if (get_type_id(class_item) != LMD_TYPE_MAP || index < 0 || count <= 0 ||
+            !context || !context->active_js_module_state) return;
+    LambdaModuleState* state = context->active_js_module_state;
+    if (!state->property_keys || module_name_base > state->property_key_count ||
+            (uint32_t)count > state->property_key_count - module_name_base) return;
+    RootFrame roots(4);
+    Rooted<Item> class_root(roots, class_item);
+    Rooted<Item> source_root(roots, ItemNull);
+    Rooted<Item> key_root(roots, ItemNull);
+    if (!roots.valid()) return;
+    for (int offset = 0; offset < count; offset++) {
+        NameId source_name_id = state->property_keys[module_name_base + (uint32_t)offset];
+        NameRef source_name = name_pool_resolve_id(context->name_pool, source_name_id);
+        if (!source_name) return;
+        source_root.set((Item){.item = s2it(source_name)});
+        Item key = js_private_source_name(source_root.get())
+            ? js_private_key_for_class(class_root.get(), source_root.get())
+            : source_root.get();
+        key_root.set(key);
+        if (item_is_error(key_root.get())) return;
+        bool found = false;
+        Item keys = js_map_get_fast(class_root.get().map, "__if_keys__", 11, &found);
+        if (!found || get_type_id(keys) != LMD_TYPE_ARRAY ||
+                index + offset >= keys.array->length) return;
+        keys.array->items[index + offset] = key_root.get();
+        Item kinds = js_map_get_fast(class_root.get().map, "__if_kinds__", 12, &found);
+        if (found && get_type_id(kinds) == LMD_TYPE_ARRAY &&
+                index + offset < kinds.array->length) {
+            kinds.array->items[index + offset] = (Item){.item = i2it(
+                (method_mask >> offset) & 1u)};
+        }
     }
 }
 
@@ -2351,8 +2355,6 @@ static Item js_apply_constructed_builtin_prototype(Item result, Item callee, Ite
     }
     return result;
 }
-
-static Item js_class_create_shaped_instance_object(Item class_item);
 
 extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
     // Proxy [[Construct]] trap
@@ -2856,7 +2858,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 return result_root.get();
             }
         }
-        object_root.set(js_class_create_shaped_instance_object(callee_root.get()));
+        object_root.set(js_new_object());
         // Subclass builtin detection: walk the prototype chain of instance_proto
         // to find if a builtin class (Array, etc.) is in the ancestor chain.
         // If so, create the appropriate backing object instead of a plain MAP.
@@ -3188,108 +3190,8 @@ extern "C" Item js_typed_array_species_create_from_buffer(Item exemplar, Item bu
     return result;
 }
 
-// A5: Create a new object with pre-built shape for constructor optimization.
-// All property slots are pre-allocated as LMD_TYPE_NULL (8-byte pointer-sized)
-// and initialized to null. When the constructor body sets this.prop = val,
-// js_property_set will find the existing key via hash table and do a fast
-// in-place update instead of extending the shape.
-extern "C" Item js_new_object_with_shape(const char** prop_names, const int* prop_lens, int count) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_NEW_OBJECT_SHAPE);
-    if (!js_input || count <= 0) return js_new_object();
-
-    Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
-    if (!m) return js_new_object();
-    m->type_id = LMD_TYPE_MAP;
-    m->type = &EmptyMap;
-    RootFrame roots(1);
-    Rooted<Map*> rooted_map(roots, m);
-    if (!roots.valid()) return js_new_object();
-
-    // Allocate TypeMap
-    TypeMap* tm = (TypeMap*)alloc_type(js_input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
-    if (!tm) { m->type = &EmptyMap; return (Item){.map = m}; }
-
-    // Build ShapeEntry chain — each slot is LMD_TYPE_NULL (sizeof(void*) = 8 bytes).
-    // This gives correct 8-byte spacing so INT, FLOAT, STRING, MAP, FUNC etc.
-    // all fit in-place via the NULL→same-byte-size fast path in fn_map_set.
-    ShapeEntry* first = NULL;
-    ShapeEntry* prev = NULL;
-    for (int i = 0; i < count; i++) {
-        ShapeEntry* se = (ShapeEntry*)pool_calloc(js_input->pool, sizeof(ShapeEntry) + sizeof(StrView));
-        StrView* nv = (StrView*)((char*)se + sizeof(ShapeEntry));
-        String* key_str = heap_create_name(prop_names[i], (size_t)prop_lens[i]);
-        if (!key_str) return js_new_object();
-        nv->str = key_str->chars;
-        nv->length = key_str->len;
-        se->name = nv;
-        se->name_hash = typemap_name_hash(nv->str, (int)nv->length);
-        se->predefined_id = name_ref_id(key_str);
-        // Constructor shapes are runtime-canonical, so key identity is never
-        // reconstructed from compiler-owned spelling bytes after this point.
-        se->key_ref = key_str;
-        se->type = type_info[LMD_TYPE_NULL].type;
-        se->byte_offset = i * (int)sizeof(void*);  // 8-byte slots
-        se->next = NULL;
-        if (prev) prev->next = se;
-        else first = se;
-        prev = se;
-    }
-    tm->shape = first;
-    tm->last = prev;
-    tm->length = count;
-    tm->byte_size = count * (int)sizeof(void*);
-
-    // Populate/grow hash table.
-    typemap_hash_build(tm, js_input->pool);
-
-    // P1: Build slot_entries array for O(1) slot-indexed access
-    if (count <= 16) {
-        ShapeEntry** entries = (ShapeEntry**)pool_calloc(js_input->pool, count * sizeof(ShapeEntry*));
-        ShapeEntry* se = first;
-        for (int i = 0; i < count && se; i++, se = se->next) {
-            entries[i] = se;
-        }
-        tm->slot_entries = entries;
-        tm->slot_count = count;
-    }
-
-    // Allocate data buffer (pre-sized, zero-initialized = null pointers)
-    int data_size = count * (int)sizeof(void*);
-    int data_cap = data_size < 64 ? 64 : data_size;
-    m = rooted_map.get();
-    m->type = tm;
-    // Shapes are compilation metadata, but each instance buffer is mutable
-    // runtime state. Pool allocation pinned every dead class instance until
-    // script exit and made allocation-heavy benchmarks exhaust memory.
-    void* data = heap_data_calloc(data_cap);
-    m = rooted_map.get();
-    if (!data) {
-        m->type = &EmptyMap;
-        return (Item){.map = m};
-    }
-    m->data = data;
-    m->data_cap = data_cap;
-    // Reserved shape entries accelerate constructor writes but are not JS own
-    // properties until their assignment executes.
-    uint16_t reserved = count >= 16 ? UINT16_MAX : (uint16_t)((1u << count) - 1u);
-    map_ctor_set_reserved_mask(m, reserved);
-
-    return (Item){.map = m};
-}
-
-#if LAMBDA_INLINE_CACHE
-static bool js_shared_ctor_shape_enabled() {
-    static int enabled = -1;
-    if (enabled < 0) {
-        const char* flag = getenv("LAMBDA_JS_SHARED_CTOR_SHAPE");
-        enabled = (!flag || strcmp(flag, "0") != 0) ? 1 : 0;
-    }
-    return enabled != 0;
-}
-#endif
-
 extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_NEW_OBJECT_SHAPE);
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_NEW_OBJECT_TYPEMAP);
     if (!js_input || !tm || !typemap_ptr_is_plausible(tm) || tm == &EmptyMap ||
             tm->byte_size < 0) {
         return js_new_object();
@@ -3321,523 +3223,6 @@ extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
     m->data = data;
     m->data_cap = data_cap;
     return (Item){.map = m};
-}
-
-static Item js_constructor_apply_prototype(Item obj, Item callee) {
-    if (get_type_id(callee) == LMD_TYPE_FUNC) {
-        JsFunction* fn = (JsFunction*)callee.function;
-        if (fn->prototype.item == ItemNull.item) {
-            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-            js_property_get(callee, proto_key);
-        }
-        if (fn->prototype.item != ItemNull.item && get_type_id(fn->prototype) == LMD_TYPE_MAP) {
-            // Subclass builtin detection: walk the prototype chain of fn->prototype
-            // to check if a builtin (Array, etc.) is in the ancestor chain.
-            Item proto = js_get_prototype(fn->prototype);
-            int depth = 0;
-            while (proto.item != ItemNull.item && depth < 16) {
-                TypeId proto_t = get_type_id(proto);
-                if (proto_t == LMD_TYPE_MAP) {
-                    if (js_class_id(proto) == JS_CLASS_ARRAY) {
-                        obj = js_array_new(0);
-                        break;
-                    }
-                    proto = js_get_prototype(proto);
-                } else {
-                    break;
-                }
-                depth++;
-            }
-            js_set_prototype(obj, fn->prototype);
-        } else if (fn->prototype.item != ItemNull.item) {
-            TypeId fpt = get_type_id(fn->prototype);
-            if (fpt == LMD_TYPE_ARRAY || fpt == LMD_TYPE_ELEMENT || fpt == LMD_TYPE_FUNC) {
-                js_set_prototype(obj, fn->prototype);
-            }
-        }
-    }
-    return obj;
-}
-
-// A5: Create pre-shaped object and set __proto__ from constructor's prototype.
-// The cache belongs to the constructor, while the temporary shape list may
-// contain the two prototype-reservation slots added below.
-static Item js_constructor_create_object_shaped_impl(Item callee,
-    const char** prop_names, const int* prop_lens, int count, void** shape_cache) {
-    int ctor_prop_count = count;
-    bool has_proto_marker = false;
-    bool has_proto = false;
-    for (int i = 0; i < count; i++) {
-        if (prop_lens[i] == 18 &&
-            strncmp(prop_names[i], "__json_own_proto__", 18) == 0) {
-            has_proto_marker = true;
-        } else if (prop_lens[i] == 9 &&
-            strncmp(prop_names[i], "__proto__", 9) == 0) {
-            has_proto = true;
-        }
-    }
-    int extra_count = (has_proto_marker ? 0 : 1) + (has_proto ? 0 : 1);
-    const char** use_names = prop_names;
-    int* use_lens = (int*)prop_lens;
-    if (extra_count > 0) {
-        int use_count = count + extra_count;
-        use_names = (const char**)alloca((size_t)use_count * sizeof(const char*));
-        use_lens = (int*)alloca((size_t)use_count * sizeof(int));
-        for (int i = 0; i < count; i++) {
-            use_names[i] = prop_names[i];
-            use_lens[i] = prop_lens[i];
-        }
-        int next = count;
-        // prototype writes must fill reserved fixed-width slots; extending a
-        // constructor shape later repacks heterogeneous fields and invalidates
-        // the slot*8 layout used by compiled property access.
-        if (!has_proto_marker) {
-            use_names[next] = "__json_own_proto__";
-            use_lens[next++] = 18;
-        }
-        if (!has_proto) {
-            use_names[next] = "__proto__";
-            use_lens[next] = 9;
-        }
-        count = use_count;
-    }
-    Item obj = js_new_object_with_shape_cached(use_names, use_lens, count,
-        shape_cache);
-    if (get_type_id(obj) == LMD_TYPE_MAP) {
-        uint16_t reserved = ctor_prop_count >= 16 ? UINT16_MAX :
-            (uint16_t)((1u << ctor_prop_count) - 1u);
-        map_ctor_set_reserved_mask(obj.map, reserved);
-    }
-    return js_constructor_apply_prototype(obj, callee);
-}
-
-extern "C" Item js_constructor_create_object_shaped(Item callee,
-    const char** prop_names, const int* prop_lens, int count) {
-    return js_constructor_create_object_shaped_impl(callee, prop_names, prop_lens,
-        count, NULL);
-}
-
-extern "C" void js_set_class_ctor_shape_metadata(Item class_item,
-    const char** prop_names, const int* prop_lens, int count) {
-    if (get_type_id(class_item) != LMD_TYPE_MAP || !prop_names || !prop_lens || count <= 0) return;
-    Item names = js_array_new(0);
-    for (int i = 0; i < count; i++) {
-        if (!prop_names[i] || prop_lens[i] <= 0) continue;
-        Item name = (Item){.item = s2it(heap_create_name(prop_names[i], prop_lens[i]))};
-        js_array_push(names, name);
-    }
-    Item key = (Item){.item = s2it(heap_create_name("__ctor_shape_names__", 20))};
-    js_property_set(class_item, key, names);
-    js_mark_non_enumerable(class_item, key);
-    bool ctor_own = false;
-    Item ctor = js_map_get_fast(class_item.map, "__ctor__", 8, &ctor_own);
-    if (ctor_own && get_type_id(ctor) == LMD_TYPE_FUNC) {
-        JsFunction* fn = (JsFunction*)ctor.function;
-        if (fn->ctor_prop_count == 0) {
-            // Class metadata used to remain only on the class map, forcing
-            // dynamic `new Class` to rebuild its identical TypeMap each time.
-            js_set_function_ctor_shape_metadata(ctor, prop_names, prop_lens, count);
-        }
-    }
-}
-
-extern "C" void js_set_function_ctor_shape_metadata(Item fn_item,
-    const char** prop_names, const int* prop_lens, int count) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC || !prop_names || !prop_lens ||
-        count <= 0 || !js_input || !js_input->pool) {
-        return;
-    }
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    const char** names_copy = (const char**)pool_alloc(js_input->pool,
-        (size_t)count * sizeof(const char*));
-    int* lens_copy = (int*)pool_alloc(js_input->pool,
-        (size_t)count * sizeof(int));
-    if (!names_copy || !lens_copy) return;
-    memcpy(names_copy, prop_names, (size_t)count * sizeof(const char*));
-    memcpy(lens_copy, prop_lens, (size_t)count * sizeof(int));
-    // A metadata update describes a different slot layout, so it must not
-    // retain the TypeMap cached for the constructor's previous field list.
-    fn->ctor_shape_cache = NULL;
-    fn->ctor_prop_names = names_copy;
-    fn->ctor_prop_lens = lens_copy;
-    fn->ctor_prop_count = count;
-}
-
-static Item js_class_create_shaped_instance_object(Item class_item) {
-    if (get_type_id(class_item) != LMD_TYPE_MAP) return js_new_object();
-    bool found = false;
-    Item names = js_map_get_fast(class_item.map, "__ctor_shape_names__", 20, &found);
-    if (!found || get_type_id(names) != LMD_TYPE_ARRAY) return js_new_object();
-    int64_t raw_count = js_array_length(names);
-    if (raw_count <= 0 || raw_count > 64) return js_new_object();
-    int count = (int)raw_count;
-    bool ctor_own = false;
-    Item ctor = js_map_get_fast(class_item.map, "__ctor__", 8, &ctor_own);
-    if (ctor_own && get_type_id(ctor) == LMD_TYPE_FUNC) {
-        JsFunction* fn = (JsFunction*)ctor.function;
-        bool metadata_matches = fn && fn->ctor_prop_count == count;
-        for (int i = 0; metadata_matches && i < count; i++) {
-            Item name_item = js_array_get(names, (Item){.item = i2it(i)});
-            String* name = get_type_id(name_item) == LMD_TYPE_STRING
-                ? name_item.get_string() : NULL;
-            metadata_matches = name && fn->ctor_prop_lens[i] == (int)name->len &&
-                memcmp(fn->ctor_prop_names[i], name->chars, (size_t)name->len) == 0;
-        }
-        if (metadata_matches) {
-            return js_constructor_create_object_shaped_cached(ItemNull,
-                fn->ctor_prop_names, fn->ctor_prop_lens, fn->ctor_prop_count,
-                &fn->ctor_shape_cache);
-        }
-    }
-    const char** prop_names = LAMBDA_ALLOCA(count, const char*);
-    int* prop_lens = LAMBDA_ALLOCA(count, int);
-    int valid_count = 0;
-    for (int64_t i = 0; i < raw_count; i++) {
-        Item name_item = js_array_get(names, (Item){.item = i2it(i)});
-        if (get_type_id(name_item) != LMD_TYPE_STRING) continue;
-        String* name = name_item.get_string();
-        if (!name || name->len <= 0) continue;
-        prop_names[valid_count] = name->chars;
-        prop_lens[valid_count] = (int)name->len;
-        valid_count++;
-    }
-    if (valid_count <= 0) return js_new_object();
-    return js_constructor_create_object_shaped(ItemNull, prop_names, prop_lens,
-        valid_count);
-}
-
-static Item js_new_object_with_shape_cached(const char** prop_names,
-    const int* prop_lens, int count, void** shape_cache) {
-#if !LAMBDA_INLINE_CACHE
-    (void)shape_cache;
-    return js_new_object_with_shape(prop_names, prop_lens, count);
-#else
-    if (shape_cache && *shape_cache && js_shared_ctor_shape_enabled()) {
-        TypeMap* cached = (TypeMap*)*shape_cache;
-        if (typemap_ptr_is_plausible(cached) && cached->is_shared_constructor_shape) {
-            return js_new_object_with_typemap(cached);
-        }
-    }
-
-    Item obj = js_new_object_with_shape(prop_names, prop_lens, count);
-    if (shape_cache && *shape_cache == NULL && js_shared_ctor_shape_enabled() &&
-            get_type_id(obj) == LMD_TYPE_MAP) {
-        Map* m = (Map*)obj.map;
-        *shape_cache = m->type;
-        if (m && m->type && typemap_ptr_is_plausible(m->type)) {
-            ((TypeMap*)m->type)->is_shared_constructor_shape = true;
-        }
-        log_debug("§7: shape cache populated at %p → TypeMap %p", (void*)shape_cache, m->type);
-    }
-    return obj;
-#endif
-}
-
-// §7: Create pre-shaped object with shape cache for inline shape guard.
-// On first call, captures the TypeMap pointer into *shape_cache.
-// Subsequent calls skip — the cache is already populated.
-extern "C" Item js_constructor_create_object_shaped_cached(Item callee,
-    const char** prop_names, const int* prop_lens, int count, void** shape_cache) {
-    return js_constructor_create_object_shaped_impl(callee, prop_names, prop_lens,
-        count, shape_cache);
-}
-
-// P3/P4: Slot-indexed property access for shaped (constructor-created) objects.
-// These bypass the hash-table lookup in js_property_get/set by walking the
-// ShapeEntry linked list to the N-th slot (O(slot) ≈ O(2-4) for typical classes).
-//
-// js_get_shaped_slot: read property at slot index → returns correctly boxed Item
-// js_set_shaped_slot: write property at slot index, updates ShapeEntry type
-
-static ShapeEntry* js_shape_entry_for_slot_offset(TypeMap* tm, int slot, int64_t byte_offset);
-
-static bool js_shared_ctor_shape_should_detach_for_type(TypeMap* tm,
-        TypeId field_type, TypeId value_type) {
-    if (!tm || !typemap_is_shared_shape(tm)) return false;
-    if (field_type == value_type) return false;
-    if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) return false;
-    return true;
-}
-
-static ShapeEntry* js_detach_shared_ctor_shape_for_slot(Item object, int slot,
-        int64_t byte_offset, ShapeEntry* entry, TypeId value_type) {
-    if (get_type_id(object) != LMD_TYPE_MAP || !entry || !entry->type) return entry;
-    Map* m = (Map*)object.map;
-    if (!m || !m->type || !typemap_ptr_is_plausible(m->type)) return entry;
-    TypeMap* tm = (TypeMap*)m->type;
-    TypeId field_type = entry->type->type_id;
-    if (!js_shared_ctor_shape_should_detach_for_type(tm, field_type, value_type)) return entry;
-    TypeMap* transition = js_typemap_transition_for_type(object, entry, value_type);
-    if (transition) {
-        ShapeEntry* refreshed = js_shape_entry_for_slot_offset(transition, slot, byte_offset);
-        if (refreshed) return refreshed;
-    }
-    TypeMap* clone = js_typemap_clone_for_mutation_pub(object);
-    if (!clone) return entry;
-    return js_shape_entry_for_slot_offset(clone, slot, byte_offset);
-}
-
-extern "C" Item js_get_shaped_slot(Item object, int64_t slot) {
-    if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
-    Map* m = (Map*)object.map;
-    TypeMap* tm = (TypeMap*)m->type;
-    if (!tm || !tm->shape) return ItemNull;
-    // P1: O(1) array lookup when slot_entries is populated
-    if (tm->slot_entries && slot < tm->slot_count) {
-        ShapeEntry* entry = tm->slot_entries[slot];
-        if (map_ctor_offset_is_reserved(m, entry->byte_offset)) {
-            // Reserved slots participate in layout only; reads before the
-            // constructor assignment must continue through the prototype.
-            Item key = (Item){.item = s2it(heap_create_name(
-                entry->name->str, (int)entry->name->length))};
-            return js_property_get(object, key);
-        }
-        Item slot_value = _map_read_field(tm->slot_entries[slot], m->data);
-        return slot_value;
-    }
-    // Fallback: O(n) linked-list walk
-    ShapeEntry* entry = tm->shape;
-    for (int i = 0; i < (int)slot && entry; i++) entry = entry->next;
-    if (!entry) return ItemNull;
-    if (map_ctor_offset_is_reserved(m, entry->byte_offset)) {
-        Item key = (Item){.item = s2it(heap_create_name(
-            entry->name->str, (int)entry->name->length))};
-        return js_property_get(object, key);
-    }
-    return _map_read_field(entry, m->data);
-}
-
-extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
-    if (get_type_id(object) != LMD_TYPE_MAP) return;
-    RootFrame roots(2);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> value_root(roots, value);
-    Map* m = (Map*)object.map;
-    TypeMap* tm = (TypeMap*)m->type;
-    if (!tm || !tm->shape) return;
-    // P1: O(1) array lookup when slot_entries is populated
-    ShapeEntry* entry;
-    if (tm->slot_entries && slot < tm->slot_count) {
-        entry = tm->slot_entries[slot];
-    } else {
-        entry = tm->shape;
-        for (int i = 0; i < (int)slot && entry; i++) entry = entry->next;
-        if (!entry) return;
-    }
-    if (!typemap_entry_uses_fixed_slot(tm, entry)) {
-        // Object literals can use packed static entries; only constructor
-        // prefixes have the 8-byte invariant required by this fast writer.
-        Item key = (Item){.item = s2it(heap_create_name(
-            entry->name->str, (int)entry->name->length))};
-        fn_map_set(object, key, value);
-        return;
-    }
-    TypeId value_type = get_type_id(value);
-    TypeId field_type = entry->type->type_id;
-    entry = js_detach_shared_ctor_shape_for_slot(object, (int)slot, entry->byte_offset,
-        entry, value_type);
-    if (!entry) return;
-    // Shape detachment may collect; reload both operands so a newly-created
-    // container is never written from the stale raw C local held across it.
-    object = object_root.get();
-    value = value_root.get();
-    map_ctor_initialize_offset(m, entry->byte_offset);
-    m = (Map*)object.map;
-    void* field_ptr = (char*)m->data + entry->byte_offset;
-    field_type = entry->type->type_id;
-    // Store with correct type-aware unboxing (all shaped slots are 8 bytes).
-    switch (value_type) {
-    case LMD_TYPE_INT:
-        // Shape int storage is the raw lane; IEEE bits would decode as poison.
-        *(int64_t*)field_ptr = lambda_int_item_to_lane(value.item);
-        break;
-    case LMD_TYPE_FLOAT:
-        *(double*)field_ptr = value.get_double();
-        break;
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
-    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_RANGE:
-        *(Container**)field_ptr = value.container;
-        break;
-    case LMD_TYPE_STRING: {
-        *(String**)field_ptr = value.get_safe_string();
-        break;
-    }
-    case LMD_TYPE_SYMBOL: {
-        *(Symbol**)field_ptr = value.get_safe_symbol();
-        break;
-    }
-    case LMD_TYPE_BINARY: {
-        *(Binary**)field_ptr = value.get_safe_binary();
-        break;
-    }
-    case LMD_TYPE_FUNC: case LMD_TYPE_DECIMAL: case LMD_TYPE_TYPE:
-    case LMD_TYPE_PATH: case LMD_TYPE_VMAP:
-        *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFFULL);
-        break;
-    case LMD_TYPE_BOOL:
-        *(bool*)field_ptr = value.bool_val;
-        break;
-    case LMD_TYPE_NULL:
-        *(void**)field_ptr = NULL;
-        break;
-    case LMD_TYPE_UNDEFINED:
-        *(void**)field_ptr = NULL;
-        break;
-    default:
-        // Unexpected type: skip to prevent slot corruption
-        log_debug("js_set_shaped_slot: unhandled type %d at slot %d", (int)value_type, (int)slot);
-        return;
-    }
-    // Update ShapeEntry type in-place (NULL→type is the common constructor init path).
-    // All shaped slots are 8 bytes so no reshape is needed.
-    // Retag on T→NULL too: the slot now genuinely holds null, and leaving the
-    // old tag makes the null word read back as a zero-valued T. Detachment above
-    // has already given this instance a private entry when the shape was shared.
-    if (field_type != value_type) {
-        entry->type = type_info[value_type].type;
-    }
-}
-
-// P1: Type-specific native slot access — bypass boxing/unboxing entirely.
-// These functions read/write raw native values directly from the data buffer.
-// byte_offset = slot * 8, pre-computed at compile time by the transpiler.
-// Type guards handle runtime type changes (e.g., FLOAT field later written as INT).
-
-static ShapeEntry* js_shape_entry_for_slot_offset(TypeMap* tm, int slot, int64_t byte_offset) {
-    if (!tm) return NULL;
-    if (tm->slot_entries && slot >= 0 && slot < tm->slot_count) {
-        return tm->slot_entries[slot];
-    }
-    for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
-        if (entry->byte_offset == byte_offset) return entry;
-    }
-    return NULL;
-}
-
-extern "C" int64_t js_shape_slot_guard(Item object, const char* name,
-                                         int64_t name_len, int64_t byte_offset) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_SHAPE_SLOT_GUARD);
-    if (!name || name_len <= 0 || byte_offset < 0) return 0;
-    if ((byte_offset % (int64_t)sizeof(void*)) != 0) return 0;
-    if (get_type_id(object) != LMD_TYPE_MAP) return 0;
-
-    Map* m = (Map*)object.map;
-    if (!m || m->map_kind != MAP_KIND_PLAIN || !m->data) return 0;
-    if (byte_offset > (int64_t)m->data_cap - (int64_t)sizeof(void*)) return 0;
-
-    TypeMap* tm = (TypeMap*)m->type;
-    if (!tm || tm == &EmptyMap || !tm->shape) return 0;
-
-    int slot = (int)(byte_offset / (int64_t)sizeof(void*));
-    ShapeEntry* entry = js_shape_entry_for_slot_offset(tm, slot, byte_offset);
-    if (!entry || entry->byte_offset != byte_offset || !entry->name ||
-            !entry->name->str) {
-        return 0;
-    }
-    // Transition shapes may expose slot_entries for lookup, but their packed
-    // fields are not 8-byte storage slots. Treating one as shaped overwrites
-    // the following field when a constructor assignment changes its type.
-    if (!typemap_entry_uses_fixed_slot(tm, entry)) return 0;
-    if (map_ctor_offset_is_reserved(m, entry->byte_offset)) return 0;
-    if (jspd_is_accessor(entry) || jspd_is_deleted(entry)) return 0;
-    if (entry->name->length != (size_t)name_len) return 0;
-    if (entry->name->str == name) return 1;
-    return memcmp(entry->name->str, name, (size_t)name_len) == 0 ? 1 : 0;
-}
-
-extern "C" Item js_set_shaped_slot_guarded(Item object, int64_t slot,
-        const char* name, int64_t name_len, Item value) {
-    // A guarded miss interns `name` and falls back to a potentially allocating
-    // property write. MIR registers are not native GC roots, so preserve both
-    // operands before that miss can compact a just-created constructor value.
-    RootFrame roots(3);
-    Rooted<Item> object_root(roots, object);
-    Rooted<Item> value_root(roots, value);
-    Rooted<Item> key_root(roots, ItemNull);
-    if (!roots.valid()) return ItemNull;
-    int64_t byte_offset = slot * (int64_t)sizeof(void*);
-    bool guard_matches = js_shape_slot_guard(object_root.get(), name, name_len, byte_offset);
-    if (guard_matches) {
-        js_set_shaped_slot(object_root.get(), slot, value_root.get());
-        return value_root.get();
-    }
-    key_root.set((Item){.item = s2it(heap_create_name(name, (int)name_len))});
-    return js_property_set(object_root.get(), key_root.get(), value_root.get());
-}
-
-static double js_get_slot_number(Item object, int64_t byte_offset) {
-    Map* m = (Map*)object.map;
-    void* field_ptr = (char*)m->data + byte_offset;
-    TypeMap* tm = (TypeMap*)m->type;
-    int slot = (int)(byte_offset / (int64_t)sizeof(void*));
-    ShapeEntry* entry = js_shape_entry_for_slot_offset(tm, slot, byte_offset);
-    if (entry && entry->type) {
-        TypeId tid = entry->type->type_id;
-        if (tid == LMD_TYPE_INT) return lambda_int_lane_to_double(*(int64_t*)field_ptr);
-        if (tid == LMD_TYPE_FLOAT) return *(double*)field_ptr;
-    }
-    // Constructor field inference is speculative: a later method can replace
-    // a number with an object, which must use ordinary ToNumber semantics.
-    Item value = js_get_shaped_slot(object, slot);
-    return js_get_number(js_to_number(value));
-}
-
-extern "C" double js_get_slot_f(Item object, int64_t byte_offset) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_GET_SLOT_F);
-    return js_get_slot_number(object, byte_offset);
-}
-
-extern "C" int64_t js_get_slot_i(Item object, int64_t byte_offset) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_GET_SLOT_I);
-    return (int64_t)js_get_slot_number(object, byte_offset);
-}
-
-extern "C" void js_set_slot_f(Item object, int64_t byte_offset, double value) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_SET_SLOT_F);
-    Map* m = (Map*)object.map;
-    TypeMap* tm = (TypeMap*)m->type;
-    int slot = (int)(byte_offset / (int64_t)sizeof(void*));
-    ShapeEntry* entry = js_shape_entry_for_slot_offset(tm, slot, byte_offset);
-    entry = js_detach_shared_ctor_shape_for_slot(object, slot, byte_offset, entry,
-        LMD_TYPE_FLOAT);
-    map_ctor_initialize_offset(m, entry->byte_offset);
-    m = (Map*)object.map;
-    *(double*)((char*)m->data + byte_offset) = value;
-    // Update ShapeEntry type to FLOAT if currently NULL (first write).
-    if (entry && entry->type) {
-        if (entry->type->type_id != LMD_TYPE_FLOAT) {
-            static int _tc_trace = 0;
-            if (js_runtime_trace_enabled() && _tc_trace < 10 && entry->type->type_id == LMD_TYPE_MAP) {
-                log_error("TRACE set_slot_f MAP->FLOAT: slot=%d name='%.*s' total=%d byte_off=%d",
-                    slot, entry->name ? (int)entry->name->length : 0,
-                    entry->name ? entry->name->str : "?",
-                    _trace_total_calls, (int)byte_offset);
-                _tc_trace++;
-            }
-            entry->type = type_info[LMD_TYPE_FLOAT].type;
-        }
-    }
-}
-
-extern "C" void js_set_slot_i(Item object, int64_t byte_offset, int64_t value) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_SET_SLOT_I);
-    Map* m = (Map*)object.map;
-    TypeMap* tm = (TypeMap*)m->type;
-    int slot = (int)(byte_offset / (int64_t)sizeof(void*));
-    ShapeEntry* entry = js_shape_entry_for_slot_offset(tm, slot, byte_offset);
-    entry = js_detach_shared_ctor_shape_for_slot(object, slot, byte_offset, entry,
-        LMD_TYPE_INT);
-    map_ctor_initialize_offset(m, entry->byte_offset);
-    m = (Map*)object.map;
-    // MIR gives this setter an int lane, which is also the map storage form.
-    *(int64_t*)((char*)m->data + byte_offset) = value;
-    // Update ShapeEntry type to INT if currently NULL (first write).
-    if (entry && entry->type) {
-        if (entry->type->type_id != LMD_TYPE_INT) {
-            entry->type = type_info[LMD_TYPE_INT].type;
-        }
-    }
 }
 
 // Forward declaration for prototype chain support
@@ -4338,20 +3723,26 @@ static Item js_private_brand_owner(Item object, String* private_key, bool* out_f
     if (get_type_id(lookup_object) != LMD_TYPE_MAP) return ItemNull;
     TypeMap* type = (TypeMap*)lookup_object.map->type;
     for (ShapeEntry* entry = type ? type->shape : NULL; entry; entry = entry->next) {
-        PropertyKeyRef candidate_brand_key = entry->key_ref;
-        if (!candidate_brand_key || !property_key_requires_identity(candidate_brand_key) ||
-            property_key_kind(candidate_brand_key) != NAME_KEY_PRIVATE) continue;
+        String* candidate_brand_key = (String*)name_pool_resolve_id(
+            context ? context->name_pool : NULL, entry->name_id);
+        if (!candidate_brand_key || entry->key_kind != NAME_KEY_PRIVATE) continue;
         Item candidate = ItemNull;
         Item candidate_key_item = (Item){.item = s2it(candidate_brand_key)};
         if (js_ordinary_get_own(lookup_object, candidate_key_item, lookup_object,
                 &candidate) != JS_OWN_READY || get_type_id(candidate) != LMD_TYPE_MAP) continue;
         Item declared_brand_key = js_private_brand_key_for_class_existing(candidate);
-        if (declared_brand_key.item != candidate_key_item.item) continue;
+        String* declared_key = get_type_id(declared_brand_key) == LMD_TYPE_STRING
+            ? it2s(declared_brand_key) : NULL;
+        // Private display text is not identity: re-evaluated classes can carry
+        // equal spellings with distinct NameIds, so compare the declaration
+        // record rather than the materialized Item address.
+        if (!declared_key || property_key_kind(declared_key) != NAME_KEY_PRIVATE ||
+                property_key_id(declared_key) != entry->name_id) continue;
         bool proto_found = false;
         Item proto = js_map_get_fast(candidate.map, "__instance_proto__", 18, &proto_found);
         if (!proto_found || get_type_id(proto) != LMD_TYPE_MAP) continue;
-        JsShapeSlotStatus member_status = js_own_shape_slot_status_key(
-            proto, private_key, NULL, NULL);
+        JsShapeSlotStatus member_status = js_own_shape_slot_status_name_id(
+            proto, property_key_id(private_key), NULL, NULL);
         if (member_status == JS_SHAPE_SLOT_DATA || member_status == JS_SHAPE_SLOT_ACCESSOR) {
             // A private key is the declaration identity; method brands must
             // verify that exact key instead of the caller's mutable home class.
@@ -5909,15 +5300,6 @@ extern "C" Item js_property_get(Item object, Item key) {
     return make_js_undefined();
 }
 
-static PropertyKeyRef js_canonical_string_key(String* key) {
-    if (!key) return NULL;
-    // Document Input owns syntax names, but JavaScript shapes survive that
-    // boundary. Canonical runtime STRING keys must therefore come from the
-    // isolate NamePool used by every property operation.
-    return heap_create_name(key->chars, key->len);
-}
-
-
 bool js_is_arguments_exotic_array(Item value);
 static Item js_arguments_companion_item(Item arguments);
 
@@ -6372,7 +5754,7 @@ static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr, int64_t n
     }
 }
 
-static bool js_proto_chain_has_nonwritable_data_impl(Item object, PropertyKeyRef identity_key,
+static bool js_proto_chain_has_nonwritable_data_impl(Item object, NameRef identity_key,
                                                      const char* name, int name_len) {
     if (!name || name_len < 0) return false;
     Item proto = js_get_prototype_of(object);
@@ -6381,7 +5763,7 @@ static bool js_proto_chain_has_nonwritable_data_impl(Item object, PropertyKeyRef
         // Symbol/private spelling is not its property identity; use the exact
         // record so inherited non-writable slots cannot be shadowed by writes.
         ShapeEntry* se = identity_key
-            ? js_find_shape_entry_key(proto, identity_key)
+            ? js_find_shape_entry_name_id(proto, property_key_id(identity_key))
             : js_find_shape_entry(proto, name, name_len);
         if (se) {
             if (jspd_is_accessor(se)) return false;
@@ -6397,9 +5779,9 @@ static bool js_proto_chain_has_nonwritable_data(Item object, const char* name, i
     return js_proto_chain_has_nonwritable_data_impl(object, NULL, name, name_len);
 }
 
-static bool js_proto_chain_has_nonwritable_data(Item object, PropertyKeyRef key) {
+static bool js_proto_chain_has_nonwritable_data(Item object, NameRef key) {
     return key && js_proto_chain_has_nonwritable_data_impl(
-        object, property_key_requires_identity(key) ? key : NULL,
+        object, property_key_id(key) != NAME_ID_NONE ? key : NULL,
         key->chars, (int)key->len);
 }
 
@@ -6992,8 +6374,8 @@ static Item js_property_set_map(Item object, Item key, Item value) {
                     !(sk->len > 6 && strncmp(sk->chars, "__sym_", 6) == 0);
                 bool own_accessor_property = false;
                 if (!internal_non_symbol && sk) {
-                    ShapeEntry* shape_entry = property_key_requires_identity(sk)
-                        ? js_find_shape_entry_key(object, sk)
+                    ShapeEntry* shape_entry = property_key_id(sk) != NAME_ID_NONE
+                        ? js_find_shape_entry_name_id(object, property_key_id(sk))
                         : js_find_shape_entry(object, sk->chars, (int)sk->len);
                     own_accessor_property = shape_entry && jspd_is_accessor(shape_entry);
                 }
@@ -7022,8 +6404,8 @@ static Item js_property_set_map(Item object, Item key, Item value) {
             // Private and Symbol keys share source text across unrelated
             // declarations, so their attributes must use the installed record.
             // Empty-description Symbols are valid keys too, not absent names.
-            int fp = property_key_requires_identity(str_key)
-                ? js_prop_attrs_fast_path_key(object, str_key, JSPD_NON_WRITABLE)
+            int fp = property_key_id(str_key) != NAME_ID_NONE
+                ? js_prop_attrs_fast_path_name_id(object, property_key_id(str_key), JSPD_NON_WRITABLE)
                 : js_prop_attrs_fast_path(object, str_key->chars, (int)str_key->len,
                     JSPD_NON_WRITABLE);
             if (fp == 0) {
@@ -7053,9 +6435,14 @@ static Item js_property_set_map(Item object, Item key, Item value) {
                 int _depth = 0;
                 bool own_has = false;
                 {
-                    ShapeEntry* _se_own = js_find_shape_entry(object, str_key->chars, (int)str_key->len);
-                    own_has = js_ordinary_has_own(object, str_key->chars,
-                                                  (int)str_key->len);
+                    NameId _key_id = property_key_id(str_key);
+                    ShapeEntry* _se_own = _key_id != NAME_ID_NONE
+                        ? js_find_shape_entry_name_id(object, _key_id)
+                        : js_find_shape_entry(object, str_key->chars, (int)str_key->len);
+                    own_has = _key_id != NAME_ID_NONE
+                        ? js_own_shape_slot_status_name_id(object, _key_id, NULL, NULL) !=
+                            JS_SHAPE_SLOT_ABSENT
+                        : js_ordinary_has_own(object, str_key->chars, (int)str_key->len);
                     if (own_has && str_key->len == 9 &&
                         strncmp(str_key->chars, "__proto__", 9) == 0 &&
                         !jspd_is_accessor(_se_own)) {
@@ -7076,7 +6463,10 @@ static Item js_property_set_map(Item object, Item key, Item value) {
                         }
                         // Stop walking when we find an own entry on this proto:
                         // either accessor (handled below) or data (no proxy interception needed).
-                        ShapeEntry* _se_p = js_find_shape_entry(_proto, str_key->chars, (int)str_key->len);
+                        NameId _key_id = property_key_id(str_key);
+                        ShapeEntry* _se_p = _key_id != NAME_ID_NONE
+                            ? js_find_shape_entry_name_id(_proto, _key_id)
+                            : js_find_shape_entry(_proto, str_key->chars, (int)str_key->len);
                         if (_se_p) break;
                         _proto = js_get_prototype(_proto);
                         _depth++;
@@ -7096,8 +6486,8 @@ static Item js_property_set_map(Item object, Item key, Item value) {
                     return js_throw_type_error(msg);
                 }
                 Item recv = js_proxy_receiver.item ? js_proxy_receiver : object;
-                JsSetterDispatchResult st = property_key_requires_identity(str_key)
-                    ? js_ordinary_set_via_accessor_key(object, str_key, value, recv)
+                JsSetterDispatchResult st = property_key_id(str_key) != NAME_ID_NONE
+                    ? js_ordinary_set_via_accessor_name_id(object, property_key_id(str_key), value, recv)
                     : js_ordinary_set_via_accessor(
                         object, str_key->chars, (int)str_key->len, value, recv);
                 if (st.status == JS_SET_DISPATCH_ERROR) return st.error_lane;
@@ -7117,12 +6507,12 @@ static Item js_property_set_map(Item object, Item key, Item value) {
                 }
                 // JS_SET_NOT_FOUND: fall through to normal data write below.
             }
-            JsShapeSlotStatus own_key_status = property_key_requires_identity(str_key)
-                ? js_own_shape_slot_status_key(object, str_key, NULL, NULL)
+            JsShapeSlotStatus own_key_status = property_key_id(str_key) != NAME_ID_NONE
+                ? js_own_shape_slot_status_name_id(object, property_key_id(str_key), NULL, NULL)
                 : JS_SHAPE_SLOT_ABSENT;
             // A private or Symbol slot is unnameable by bytes, so its existing
             // own property must be tested by the same record used for the write.
-            bool has_own_before_set = property_key_requires_identity(str_key)
+            bool has_own_before_set = property_key_id(str_key) != NAME_ID_NONE
                 ? own_key_status == JS_SHAPE_SLOT_DATA || own_key_status == JS_SHAPE_SLOT_ACCESSOR
                 : js_ordinary_has_own(object, str_key->chars, (int)str_key->len);
             bool class_intrinsic_define = !has_own_before_set && js_is_class_constructor_map(object) &&
@@ -7166,15 +6556,14 @@ static Item js_property_set_map(Item object, Item key, Item value) {
         if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
         else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
         if (str_key) {
-            bool identity_key = string_is_pooled(str_key) &&
-                property_key_requires_identity(str_key);
+            bool identity_key = property_key_id(str_key) != NAME_ID_NONE;
             ShapeEntry* found_entry = identity_key
-                ? js_find_shape_entry_key(object, str_key)
+                ? js_find_shape_entry_name_id(object, property_key_id(str_key))
                 : js_find_shape_entry(object, str_key->chars, (int)str_key->len);
             if (found_entry) {
                 // v37: If deleted sentinel, move entry to end of list for correct enum order
                 JsShapeSlotStatus slot_status = identity_key
-                    ? js_own_shape_slot_status_key(object, str_key, NULL, NULL)
+                    ? js_own_shape_slot_status_name_id(object, property_key_id(str_key), NULL, NULL)
                     : js_own_shape_slot_status(object, str_key->chars, (int)str_key->len, NULL, NULL);
                 if (m->data) {
                     if (slot_status == JS_SHAPE_SLOT_DELETED) {
@@ -7252,16 +6641,18 @@ static Item js_property_set_map(Item object, Item key, Item value) {
         if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
         else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
         if (str_key) {
-            PropertyKeyRef canonical_key = key_type == LMD_TYPE_STRING &&
-                property_key_requires_identity(str_key) ? str_key :
-                (key_type == LMD_TYPE_STRING ? js_canonical_string_key(str_key) : NULL);
+            NameRef canonical_key = key_type == LMD_TYPE_STRING &&
+                property_key_id(str_key) != NAME_ID_NONE ? str_key :
+                (key_type == LMD_TYPE_STRING
+                    ? heap_create_name(str_key->chars, str_key->len) : NULL);
             map_put(m, canonical_key ? canonical_key : str_key, value, js_input);
             TypeMap* shape = (TypeMap*)m->type;
-            ShapeEntry* entry = canonical_key ? typemap_hash_lookup_key(shape, canonical_key) : NULL;
+            ShapeEntry* entry = canonical_key
+                ? typemap_hash_lookup_name_id(shape, name_ref_id(canonical_key)) : NULL;
             if (entry && canonical_key) {
                 // JS maps own canonical keys; Input shapes deliberately retain NULL.
-                entry->key_ref = canonical_key;
-                entry->predefined_id = name_ref_id(canonical_key);
+                entry->key_kind = property_key_kind(canonical_key);
+                entry->name_id = name_ref_id(canonical_key);
             }
             js_sync_global_var_module_binding(object, key, value);
         }
@@ -7610,6 +7001,19 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     return value;
 }
 
+extern "C" Item js_property_set_cstr(Item object, const char* key, Item value) {
+    if (!key) return value;
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> key_root(roots, ItemNull);
+    // A native caller cannot root a GC key until this call starts. Create it
+    // after rooting the object/value so an allocating property write cannot
+    // collect either argument before js_property_set() sees them.
+    key_root.set(make_string_item(key, (int)strlen(key)));
+    return js_property_set(object_root.get(), key_root.get(), value_root.get());
+}
+
 static Item js_strict_property_set_check(Item object, Item key, Item result) {
     if (item_is_error(result) || !js_is_proxy(object) ||
         result.item != (uint64_t)b2it(false)) return js_status_ok();
@@ -7856,7 +7260,8 @@ static Item js_super_lookup_base(Item receiver) {
         // prototype object; static methods traverse the class object itself.
         Item home_object = js_current_private_home_class;
         if (!js_is_class_object_item(receiver) && js_is_class_object_item(home_object)) {
-            home_object = js_property_get_str(home_object, "prototype", 9);
+            home_object = js_property_get(home_object,
+                (Item){.item = s2it(heap_create_name("prototype", 9))});
         }
         Item home_super = js_get_prototype_of(home_object);
         if (home_super.item == ITEM_JS_UNDEFINED) return ItemNull;
@@ -8055,33 +7460,6 @@ extern "C" Item js_super_property_set(Item receiver, Item key, Item value, int64
     return js_super_property_set_impl(receiver, key, value, strict != 0);
 }
 
-// v23: Property access with raw C-string key — avoids heap string allocation.
-// Used by transpiler when property name is a compile-time constant.
-extern "C" Item js_property_get_str(Item object, const char* key, int key_len) {
-    // null/undefined checks
-    TypeId type = get_type_id(object);
-    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
-        const char* type_str = (type == LMD_TYPE_NULL) ? "null" : "undefined";
-        if (js_runtime_trace_enabled()) {
-            log_error("TRACE js_property_get_str: %s.%.*s", type_str,
-                      key_len, key ? key : "");
-        }
-        // TRACE: log first few .y accesses on undefined for Box2D debugging
-        static int y_trace2 = 0;
-        if (js_runtime_trace_enabled() && y_trace2 < 3 && key_len == 1 && key[0] == 'y') {
-            log_error("TRACE js_property_get_str: .y on %s (trace %d) last_fn='%.*s'", type_str, y_trace2, _trace_last_fn_len, _trace_last_fn);
-            y_trace2++;
-        }
-        char msg[256];
-        snprintf(msg, sizeof(msg), "Cannot read properties of %s (reading '%.*s')",
-                 type_str, key_len, key);
-        return js_throw_type_error(msg);
-    }
-    // create string key and delegate to js_property_get
-    Item str_key = (Item){.item = s2it(heap_create_name(key, key_len))};
-    return js_property_get(object, str_key);
-}
-
 #if LAMBDA_INLINE_CACHE
 static bool js_array_named_ic_enabled() {
     static int enabled = -1;
@@ -8104,16 +7482,17 @@ static inline bool js_load_ic_offset_ok(Map* m, int64_t byte_offset) {
 }
 
 static inline bool js_load_ic_name_matches(ShapeEntry* entry,
-        const char* name, int name_len, uint32_t name_id, PropertyKeyRef key_ref) {
-    if (key_ref) {
-        // A predefined catalog ID is definitive even when an input-owned shape
-        // has no runtime key reference; otherwise use the canonical key pointer
-        // and retain byte matching only for id-less ordinary names (NI10).
-        NameId key_id = property_key_id(key_ref);
-        if (key_id != NAME_ID_NONE && entry && entry->predefined_id == key_id) return true;
-        return typemap_shape_key_equals(entry, key_ref);
+        const char* name, int name_len, NameId name_id) {
+    if (name_id != NAME_ID_NONE) {
+        if (typemap_shape_entry_has_name_id(entry, name_id)) return true;
+        // The only legal byte fallback for a generated key is an id-less
+        // Input field.  Two generated names sharing bytes remain distinct.
+        return entry && entry->name_id == NAME_ID_NONE &&
+            typemap_shape_name_equals_hash(entry, name, name_len,
+                typemap_name_hash(name, name_len));
     }
-    return typemap_shape_name_equals_hash(entry, name, name_len, name_id);
+    return typemap_shape_name_equals_hash(entry, name, name_len,
+        typemap_name_hash(name, name_len));
 }
 
 static inline bool js_named_ic_array_name_allowed(const char* name, int name_len) {
@@ -8148,27 +7527,18 @@ static inline bool js_named_ic_receiver_map_is_fast(Map* m, uint8_t receiver_kin
     return receiver_kind == JS_NAMED_IC_RECEIVER_MAP && m->map_kind == MAP_KIND_PLAIN;
 }
 
-#if LAMBDA_INLINE_CACHE
-static inline bool js_load_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
-        uint8_t receiver_kind, Item* out_value) {
-    if (!m || !cached || !cached->shape || !cached->entry) return false;
-    if (cached->receiver_kind != receiver_kind) return false;
-    if (m->type != cached->shape) return false;
-    if (!js_load_ic_offset_ok(m, cached->byte_offset)) return false;
-    ShapeEntry* entry = (ShapeEntry*)cached->entry;
-    // A shared constructor shape can name storage that is still absent on this
-    // instance; an IC hit must not turn the zero-filled reservation into data.
-    if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
-            map_ctor_offset_is_reserved(m, entry->byte_offset)) return false;
-    if (out_value) *out_value = _map_read_field(entry, m->data);
-    return true;
-}
-
-static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
-        uint32_t name_id, PropertyKeyRef key_ref,
-        JsLoadICEntry* out_entry, Item* out_value, JsLoadICProfileReason* out_reason) {
+// Load/store ICs share the same shape admission policy. Keeping that policy in
+// one kernel prevents the two caches from drifting on Input tombstones,
+// constructor reservations, or NameId-versus-byte matching.
+static bool js_named_ic_find_entry(Item object, const char* name, int name_len,
+        NameId name_id, Map** out_map, ShapeEntry** out_entry,
+        uint8_t* out_receiver_kind, Item* out_old_value, int* out_reason) {
     if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
-    if (!out_entry || !out_value || !name || name_len < 0) return false;
+    if (out_map) *out_map = NULL;
+    if (out_entry) *out_entry = NULL;
+    if (out_old_value) *out_old_value = ItemNull;
+    if (!name || name_len < 0) return false;
+
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
     Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
     if (!m) {
@@ -8185,13 +7555,20 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
         return false;
     }
 
-    ShapeEntry* entry = key_ref ? typemap_hash_lookup_key(tm, key_ref) :
-        typemap_hash_lookup_by_hash(tm, name, name_len, name_id);
+    ShapeEntry* entry = name_id != NAME_ID_NONE
+        ? typemap_hash_lookup_name_id(tm, name_id) : NULL;
+    if (!entry && name_id != NAME_ID_NONE) {
+        entry = typemap_hash_lookup_idless(tm, name, name_len);
+    }
+    if (!entry && name_id == NAME_ID_NONE) {
+        entry = typemap_hash_lookup_by_hash(tm, name, name_len,
+            typemap_name_hash(name, name_len));
+    }
     if (!entry) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
         return false;
     }
-    if (!js_load_ic_name_matches(entry, name, name_len, name_id, key_ref)) {
+    if (!js_load_ic_name_matches(entry, name, name_len, name_id)) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NAME;
         return false;
     }
@@ -8204,99 +7581,118 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_OFFSET;
         return false;
     }
-    // Reserved constructor slots are layout metadata, not own properties, so
-    // cache only the initialized state that ordinary lookup can observe.
     if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
             map_ctor_offset_is_reserved(m, entry->byte_offset)) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
         return false;
     }
 
-    Item value = _map_read_field(entry, m->data);
-    if (js_is_deleted_sentinel(value)) {
+    Item old_value = _map_read_field(entry, m->data);
+    if (js_is_deleted_sentinel(old_value)) {
         if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP) js_map_promote_descriptor_kind(m);
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_DELETED;
+        return false;
+    }
+    if (out_map) *out_map = m;
+    if (out_entry) *out_entry = entry;
+    if (out_receiver_kind) *out_receiver_kind = receiver_kind;
+    if (out_old_value) *out_old_value = old_value;
+    return true;
+}
+
+#if LAMBDA_INLINE_CACHE
+static inline bool js_load_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
+        uint8_t receiver_kind, NameId name_id, Item* out_value) {
+    if (!m || !cached || !cached->shape || !cached->entry) return false;
+    if (cached->name_id != name_id) return false;
+    if (cached->receiver_kind != receiver_kind) return false;
+    if (m->type != cached->shape) return false;
+    if (!js_load_ic_offset_ok(m, cached->byte_offset)) return false;
+    ShapeEntry* entry = (ShapeEntry*)cached->entry;
+    // A shared constructor shape can name storage that is still absent on this
+    // instance; an IC hit must not turn the zero-filled reservation into data.
+    if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
+            map_ctor_offset_is_reserved(m, entry->byte_offset)) return false;
+    if (out_value) *out_value = _map_read_field(entry, m->data);
+    return true;
+}
+
+static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
+        NameId name_id,
+        JsLoadICEntry* out_entry, Item* out_value, JsLoadICProfileReason* out_reason) {
+    if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
+    if (!out_entry || !out_value || !name || name_len < 0) return false;
+    Map* m = NULL;
+    ShapeEntry* entry = NULL;
+    uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
+    Item value = ItemNull;
+    int reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
+    if (!js_named_ic_find_entry(object, name, name_len, name_id, &m, &entry,
+            &receiver_kind, &value, &reason)) {
+        if (out_reason) *out_reason = (JsLoadICProfileReason)reason;
         return false;
     }
 
     out_entry->shape = m->type;
     out_entry->entry = entry;
     out_entry->byte_offset = entry->byte_offset;
-    out_entry->name_id = typemap_shape_entry_name_hash(entry);
+    out_entry->name_id = entry->name_id != NAME_ID_NONE
+        ? entry->name_id : name_id;
     out_entry->receiver_kind = receiver_kind;
     *out_value = value;
     return true;
 }
 
-static inline bool js_load_ic_key_matches(JsLoadIC* ic, const char* name,
-        int name_len, uint32_t* out_name_id) {
-    if (!ic || !name || name_len < 0) return false;
-    if (!ic->name) return true;
-    if (ic->name == name && ic->name_len == name_len) return true;
-    uint32_t name_id = typemap_name_hash(name, name_len);
-    if (out_name_id) *out_name_id = name_id;
-    if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
-    return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
-}
 #endif
 #endif
 
-static Item js_property_access_named_ic_slow(Item object, const char* name,
-        int name_len, JsLoadIC* ic) {
-    if (ic && ic->key_item != 0) {
-        Item key = (Item){.item = ic->key_item};
-        return js_property_access(object, key);
+static Item js_property_access_name_id_ic_slow(Item object, NameId name_id) {
+    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, name_id);
+    return js_property_access(object, key
+        ? (Item){.item = s2it(key)} : make_js_undefined());
+}
+
+static Item js_property_access_name_id_ic_impl(Item object, NameId name_id,
+        JsLoadIC* ic) {
+    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, name_id);
+    if (!key || key->len > 2147483647u) {
+        return js_property_access_name_id_ic_slow(object, name_id);
     }
-    if (!name || name_len < 0) return js_property_access(object, make_js_undefined());
-    Item key = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
-    return js_property_access(object, key);
-}
-
-static Item js_property_access_named_ic_impl(Item object, const char* name,
-        int64_t name_len64, PropertyKeyRef key_ref, JsLoadIC* ic) {
+    const char* name = key->chars;
+    int name_len = (int)key->len;
 #if !LAMBDA_INLINE_CACHE
-    if (!name || name_len64 < 0 || name_len64 > 2147483647LL) {
-        return js_property_access_named_ic_slow(object, name, 0, ic);
-    }
-    return js_property_access_named_ic_slow(object, name, (int)name_len64, ic);
+    return js_property_access_name_id_ic_slow(object, name_id);
 #else
     js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_PROBE);
-    js_profile_load_ic_site(ic ? ic->profile_label : NULL, JS_LOAD_IC_SITE_PROBE);
-    if (!ic || !name || name_len64 < 0 || name_len64 > 2147483647LL) {
-        return js_property_access_named_ic_slow(object, name, 0, ic);
-    }
-    int name_len = (int)name_len64;
-    uint32_t name_id = key_ref ? property_key_id(key_ref) : ic->name_id;
-    if (!key_ref && !js_load_ic_key_matches(ic, name, name_len, &name_id)) {
-        js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_MISS_KEY);
-        return js_property_access_named_ic_slow(object, name, name_len, ic);
-    }
-    if (name_id == 0) name_id = typemap_name_hash(name, name_len);
+    js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_PROBE);
+    if (!ic) return js_property_access_name_id_ic_slow(object, name_id);
 
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
     Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
     if (js_named_ic_receiver_map_is_fast(m, receiver_kind)) {
         Item value = ItemNull;
         if (ic->state == JS_LOAD_IC_MONO) {
-            if (js_load_ic_try_hit_entry(m, &ic->entries[0], receiver_kind, &value)) {
+            if (ic->name_id == name_id && js_load_ic_try_hit_entry(m,
+                    &ic->entries[0], receiver_kind, name_id, &value)) {
                 js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_HIT_MONO);
-                js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_HIT_MONO);
+                js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_HIT_MONO);
                 return value;
             }
         } else if (ic->state == JS_LOAD_IC_POLY) {
             int count = ic->count;
             if (count > JS_LOAD_IC_POLY_MAX) count = JS_LOAD_IC_POLY_MAX;
             for (int i = 0; i < count; i++) {
-                if (js_load_ic_try_hit_entry(m, &ic->entries[i], receiver_kind, &value)) {
+                if (ic->name_id == name_id && js_load_ic_try_hit_entry(m,
+                        &ic->entries[i], receiver_kind, name_id, &value)) {
                     js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_HIT_POLY);
-                    js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_HIT_POLY);
+                    js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_HIT_POLY);
                     return value;
                 }
             }
         } else if (ic->state == JS_LOAD_IC_MEGAMORPHIC) {
             js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_MEGAMORPHIC);
-            js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_MEGAMORPHIC);
-            return js_property_access_named_ic_slow(object, name, name_len, ic);
+            js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_MEGAMORPHIC);
+            return js_property_access_name_id_ic_slow(object, name_id);
         }
     }
 
@@ -8308,13 +7704,10 @@ static Item js_property_access_named_ic_impl(Item object, const char* name,
         memset(&entry, 0, sizeof(entry));
         Item value = ItemNull;
         JsLoadICProfileReason miss_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
-        if (js_load_ic_build_entry(object, name, name_len, name_id, key_ref,
+        if (js_load_ic_build_entry(object, name, name_len, name_id,
                 &entry, &value, &miss_reason)) {
-            if (!ic->name) {
-                ic->name = name;
-                ic->name_len = name_len;
-                ic->name_id = entry.name_id ? entry.name_id : name_id;
-            }
+            if (ic->name_id == NAME_ID_NONE) ic->name_id =
+                entry.name_id ? entry.name_id : name_id;
             for (int i = 0; i < ic->count && i < JS_LOAD_IC_POLY_MAX; i++) {
                 if (ic->entries[i].shape == entry.shape &&
                         ic->entries[i].receiver_kind == entry.receiver_kind) {
@@ -8327,69 +7720,55 @@ static Item js_property_access_named_ic_impl(Item object, const char* name,
                 ic->count = 1;
                 ic->state = JS_LOAD_IC_MONO;
                 js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_INSTALL_MONO);
-                js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_INSTALL_MONO);
+                js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_INSTALL_MONO);
                 return value;
             }
             if (ic->count < JS_LOAD_IC_POLY_MAX) {
                 ic->entries[ic->count++] = entry;
                 ic->state = JS_LOAD_IC_POLY;
                 js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_INSTALL_POLY);
-                js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_INSTALL_POLY);
+                js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_INSTALL_POLY);
                 return value;
             }
             ic->state = JS_LOAD_IC_MEGAMORPHIC;
             js_exec_profile_count(JS_EXEC_PROF_LOAD_IC_MEGAMORPHIC);
-            js_profile_load_ic_site(ic->profile_label, JS_LOAD_IC_SITE_MEGAMORPHIC);
+            js_profile_load_ic_site(NULL, JS_LOAD_IC_SITE_MEGAMORPHIC);
             return value;
         }
-        js_profile_load_ic_site(ic->profile_label, miss_reason);
+        js_profile_load_ic_site(NULL, miss_reason);
     }
 
-    return js_property_access_named_ic_slow(object, name, name_len, ic);
+    return js_property_access_name_id_ic_slow(object, name_id);
 #endif
 }
 
-extern "C" Item js_property_access_named_ic(Item object, const char* name,
-        int64_t name_len64, JsLoadIC* ic) {
-    return js_property_access_named_ic_impl(object, name, name_len64, NULL, ic);
-}
-
-extern "C" Item js_property_access_key_ic(Item object, PropertyKeyRef key,
+extern "C" Item js_property_access_name_id_ic(Item object, NameId name_id,
         JsLoadIC* ic) {
-    // The key-specialized entry is an optimization boundary, not a semantic
-    // filter: an unexpected non-pooled key must retain ordinary named lookup.
-    if (!key || !string_is_pooled(key) || property_key_id(key) == NAME_ID_NONE) {
-        // ordinary pooled names can come from a different string pool; keep
-        // canonical named lookup so key identity cannot change DOM semantics.
-        return js_property_access_named_ic_impl(object,
-            key ? key->chars : NULL, key ? (int64_t)key->len : 0, NULL, ic);
-    }
-    return js_property_access_named_ic_impl(object, key->chars, (int64_t)key->len,
-        key, ic);
+    return js_property_access_name_id_ic_impl(object, name_id, ic);
 }
 
-#if LAMBDA_INLINE_CACHE
-static inline bool js_store_ic_key_matches(JsStoreIC* ic, const char* name,
-        int name_len, uint32_t* out_name_id) {
-    if (!ic || !name || name_len < 0) return false;
-    if (!ic->name) return true;
-    if (ic->name == name && ic->name_len == name_len) return true;
-    uint32_t name_id = typemap_name_hash(name, name_len);
-    if (out_name_id) *out_name_id = name_id;
-    if (ic->name_id != 0 && name_id != 0 && ic->name_id != name_id) return false;
-    return ic->name_len == name_len && memcmp(ic->name, name, (size_t)name_len) == 0;
+extern "C" Item js_property_access_name_id(Item object, NameId name_id) {
+    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
+        name_id);
+    if (!key) return ItemNull;
+    // NameId is the compiler/runtime identity; materialize only at this
+    // existing property-operation boundary (D4.6.1v2).
+    return js_property_access(object, (Item){.item = s2it(key)});
 }
-#endif
 
-static Item js_property_set_named_ic_slow(Item object, const char* name,
-        int name_len, Item value, int64_t strict, JsStoreIC* ic) {
-    if (ic && ic->key_item != 0) {
-        Item key = (Item){.item = ic->key_item};
-        return js_property_set_v(object, key, value, strict);
-    }
-    if (!name || name_len < 0) return js_property_set_v(object, make_js_undefined(), value, strict);
-    Item key = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
-    return js_property_set_v(object, key, value, strict);
+extern "C" Item js_property_set_name_id(Item object, NameId name_id,
+    Item value, int64_t strict) {
+    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
+        name_id);
+    if (!key) return ItemNull;
+    return js_property_set_v(object, (Item){.item = s2it(key)}, value, strict);
+}
+
+static Item js_property_set_name_id_ic_slow(Item object, NameId name_id,
+        Item value, int64_t strict) {
+    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, name_id);
+    return js_property_set_v(object,
+        key ? (Item){.item = s2it(key)} : make_js_undefined(), value, strict);
 }
 
 #if LAMBDA_INLINE_CACHE
@@ -8472,9 +7851,11 @@ static inline bool js_store_ic_write_same_slot(ShapeEntry* entry, void* data,
 }
 
 static inline bool js_store_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
-        uint8_t receiver_kind, Item value, JsStoreICProfileReason* out_reason) {
+        uint8_t receiver_kind, NameId name_id, Item value,
+        JsStoreICProfileReason* out_reason) {
     if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
     if (!m || !cached || !cached->shape || !cached->entry) return false;
+    if (cached->name_id != name_id) return false;
     if (cached->receiver_kind != receiver_kind) {
         if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_MAP;
         return false;
@@ -8503,56 +7884,17 @@ static inline bool js_store_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
 }
 
 static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
-        uint32_t name_id, PropertyKeyRef key_ref,
+        NameId name_id,
         Item value, JsLoadICEntry* out_entry, JsStoreICProfileReason* out_reason) {
     if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
     if (!out_entry || !name || name_len < 0) return false;
+    Map* m = NULL;
+    ShapeEntry* entry = NULL;
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
-    Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
-    if (!m) {
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_MAP;
-        return false;
-    }
-    if (!js_named_ic_receiver_map_is_fast(m, receiver_kind)) {
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_PLAIN;
-        return false;
-    }
-    TypeMap* tm = (TypeMap*)m->type;
-    if (!tm || !typemap_ptr_is_plausible(tm) || !tm->shape) {
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_BAD_TYPEMAP;
-        return false;
-    }
-
-    ShapeEntry* entry = key_ref ? typemap_hash_lookup_key(tm, key_ref) :
-        typemap_hash_lookup_by_hash(tm, name, name_len, name_id);
-    if (!entry) {
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
-        return false;
-    }
-    if (!js_load_ic_name_matches(entry, name, name_len, name_id, key_ref)) {
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NAME;
-        return false;
-    }
-    if (entry->flags != 0) {
-        if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP) js_map_promote_descriptor_kind(m);
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_FLAGS;
-        return false;
-    }
-    if (!js_load_ic_offset_ok(m, entry->byte_offset)) {
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_OFFSET;
-        return false;
-    }
-    // Reserved constructor slots are layout metadata, not own properties, so
-    // cache only the initialized state that ordinary lookup can observe.
-    if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
-            map_ctor_offset_is_reserved(m, entry->byte_offset)) {
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
-        return false;
-    }
-    Item old_value = _map_read_field(entry, m->data);
-    if (js_is_deleted_sentinel(old_value)) {
-        if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP) js_map_promote_descriptor_kind(m);
-        if (out_reason) *out_reason = JS_STORE_IC_SITE_MISS_DELETED;
+    int reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
+    if (!js_named_ic_find_entry(object, name, name_len, name_id, &m, &entry,
+            &receiver_kind, NULL, &reason)) {
+        if (out_reason) *out_reason = (JsStoreICProfileReason)reason;
         return false;
     }
     if (!js_store_ic_can_write_same_slot(entry, value, out_reason)) return false;
@@ -8560,20 +7902,17 @@ static bool js_store_ic_build_entry(Item object, const char* name, int name_len,
     out_entry->shape = m->type;
     out_entry->entry = entry;
     out_entry->byte_offset = entry->byte_offset;
-    out_entry->name_id = typemap_shape_entry_name_hash(entry);
+    out_entry->name_id = entry->name_id != NAME_ID_NONE
+        ? entry->name_id : name_id;
     out_entry->receiver_kind = receiver_kind;
     return true;
 }
 
-static void js_store_ic_install(JsStoreIC* ic, const char* name, int name_len,
-        uint32_t name_id,
+static void js_store_ic_install(JsStoreIC* ic, NameId name_id,
         JsLoadICEntry* entry) {
     if (!ic || !entry || !entry->shape) return;
-    if (!ic->name) {
-        ic->name = name;
-        ic->name_len = name_len;
-        ic->name_id = entry->name_id ? entry->name_id : name_id;
-    }
+    if (ic->name_id == NAME_ID_NONE) ic->name_id =
+        entry->name_id ? entry->name_id : name_id;
     for (int i = 0; i < ic->count && i < JS_STORE_IC_POLY_MAX; i++) {
         if (ic->entries[i].shape == entry->shape &&
                 ic->entries[i].receiver_kind == entry->receiver_kind) {
@@ -8586,57 +7925,53 @@ static void js_store_ic_install(JsStoreIC* ic, const char* name, int name_len,
         ic->count = 1;
         ic->state = JS_STORE_IC_MONO;
         js_exec_profile_count(JS_EXEC_PROF_STORE_IC_INSTALL_MONO);
-        js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_INSTALL_MONO);
+        js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_INSTALL_MONO);
         return;
     }
     if (ic->count < JS_STORE_IC_POLY_MAX) {
         ic->entries[ic->count++] = *entry;
         ic->state = JS_STORE_IC_POLY;
         js_exec_profile_count(JS_EXEC_PROF_STORE_IC_INSTALL_POLY);
-        js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_INSTALL_POLY);
+        js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_INSTALL_POLY);
         return;
     }
     ic->state = JS_STORE_IC_MEGAMORPHIC;
     js_exec_profile_count(JS_EXEC_PROF_STORE_IC_MEGAMORPHIC);
-    js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_MEGAMORPHIC);
+    js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_MEGAMORPHIC);
 }
 #endif
 
-static Item js_property_set_named_ic_impl(Item object, const char* name,
-        int64_t name_len64, PropertyKeyRef key_ref, Item value, int64_t strict,
+static Item js_property_set_name_id_ic_impl(Item object, NameId name_id,
+        Item value, int64_t strict,
         JsStoreIC* ic) {
-#if !LAMBDA_INLINE_CACHE
-    if (!name || name_len64 < 0 || name_len64 > 2147483647LL) {
-        return js_property_set_named_ic_slow(object, name, 0, value, strict, ic);
+    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, name_id);
+    if (!key || key->len > 2147483647u) {
+        return js_property_set_name_id_ic_slow(object, name_id, value, strict);
     }
-    return js_property_set_named_ic_slow(object, name, (int)name_len64,
-        value, strict, ic);
+    const char* name = key->chars;
+    int name_len = (int)key->len;
+#if !LAMBDA_INLINE_CACHE
+    return js_property_set_name_id_ic_slow(object, name_id, value, strict);
 #else
     js_exec_profile_count(JS_EXEC_PROF_STORE_IC_PROBE);
-    js_profile_store_ic_site(ic ? ic->profile_label : NULL, JS_STORE_IC_SITE_PROBE);
-    if (!ic || !name || name_len64 < 0 || name_len64 > 2147483647LL) {
-        return js_property_set_named_ic_slow(object, name, 0, value, strict, ic);
-    }
-    int name_len = (int)name_len64;
-    uint32_t name_id = key_ref ? property_key_id(key_ref) : ic->name_id;
-    if (!key_ref && !js_store_ic_key_matches(ic, name, name_len, &name_id)) {
-        js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_MISS_KEY);
-        return js_property_set_named_ic_slow(object, name, name_len, value, strict, ic);
-    }
-    if (name_id == 0) name_id = typemap_name_hash(name, name_len);
+    js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_PROBE);
+    if (!ic) return js_property_set_name_id_ic_slow(object, name_id, value, strict);
 
     uint8_t receiver_kind = JS_NAMED_IC_RECEIVER_MAP;
     Map* m = js_named_ic_receiver_map(object, name, name_len, &receiver_kind);
     if (js_named_ic_receiver_map_is_fast(m, receiver_kind)) {
         JsStoreICProfileReason hit_miss = JS_STORE_IC_SITE_MISS_NOT_FOUND;
         if (ic->state == JS_STORE_IC_MONO) {
-            if (js_store_ic_try_hit_entry(m, &ic->entries[0], receiver_kind, value, &hit_miss)) {
-                if (ic->key_item != 0) {
-                    Item key = (Item){.item = ic->key_item};
-                    js_sync_global_var_module_binding(object, key, value);
+            if (ic->name_id == name_id && js_store_ic_try_hit_entry(m,
+                    &ic->entries[0], receiver_kind, name_id, value, &hit_miss)) {
+                if (ic->name_id != NAME_ID_NONE) {
+                    NameRef key_ref = name_pool_resolve_id(
+                        context ? context->name_pool : NULL, ic->name_id);
+                    if (key_ref) js_sync_global_var_module_binding(object,
+                        (Item){.item = s2it(key_ref)}, value);
                 }
                 js_exec_profile_count(JS_EXEC_PROF_STORE_IC_HIT_MONO);
-                js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_HIT_MONO);
+                js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_HIT_MONO);
                 js_note_event_handler_property_set(object, name, name_len, value);
                 return value;
             }
@@ -8644,63 +7979,50 @@ static Item js_property_set_named_ic_impl(Item object, const char* name,
             int count = ic->count;
             if (count > JS_STORE_IC_POLY_MAX) count = JS_STORE_IC_POLY_MAX;
             for (int i = 0; i < count; i++) {
-                if (js_store_ic_try_hit_entry(m, &ic->entries[i], receiver_kind, value, &hit_miss)) {
-                    if (ic->key_item != 0) {
-                        Item key = (Item){.item = ic->key_item};
-                        js_sync_global_var_module_binding(object, key, value);
+                if (ic->name_id == name_id && js_store_ic_try_hit_entry(m,
+                        &ic->entries[i], receiver_kind, name_id, value, &hit_miss)) {
+                    if (ic->name_id != NAME_ID_NONE) {
+                        NameRef key_ref = name_pool_resolve_id(
+                            context ? context->name_pool : NULL, ic->name_id);
+                        if (key_ref) js_sync_global_var_module_binding(object,
+                            (Item){.item = s2it(key_ref)}, value);
                     }
                     js_exec_profile_count(JS_EXEC_PROF_STORE_IC_HIT_POLY);
-                    js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_HIT_POLY);
+                    js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_HIT_POLY);
                     js_note_event_handler_property_set(object, name, name_len, value);
                     return value;
                 }
             }
         } else if (ic->state == JS_STORE_IC_MEGAMORPHIC) {
             js_exec_profile_count(JS_EXEC_PROF_STORE_IC_MEGAMORPHIC);
-            js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_MEGAMORPHIC);
-            return js_property_set_named_ic_slow(object, name, name_len, value, strict, ic);
+            js_profile_store_ic_site(NULL, JS_STORE_IC_SITE_MEGAMORPHIC);
+            return js_property_set_name_id_ic_slow(object, name_id, value, strict);
         }
-        js_profile_store_ic_site(ic->profile_label, hit_miss);
+        js_profile_store_ic_site(NULL, hit_miss);
     }
 
     js_exec_profile_count(JS_EXEC_PROF_STORE_IC_MISS);
     if (ic->miss_count != 0xffffu) ic->miss_count++;
 
-    Item result = js_property_set_named_ic_slow(object, name, name_len, value, strict, ic);
+    Item result = js_property_set_name_id_ic_slow(object, name_id, value, strict);
     if (item_is_error(result) || ic->state == JS_STORE_IC_MEGAMORPHIC) return result;
 
     JsLoadICEntry entry;
     memset(&entry, 0, sizeof(entry));
     JsStoreICProfileReason miss_reason = JS_STORE_IC_SITE_MISS_NOT_FOUND;
-    if (js_store_ic_build_entry(object, name, name_len, name_id, key_ref,
+    if (js_store_ic_build_entry(object, name, name_len, name_id,
             value, &entry, &miss_reason)) {
-        js_store_ic_install(ic, name, name_len, name_id, &entry);
+        js_store_ic_install(ic, name_id, &entry);
     } else {
-        js_profile_store_ic_site(ic->profile_label, miss_reason);
+        js_profile_store_ic_site(NULL, miss_reason);
     }
     return result;
 #endif
 }
 
-extern "C" Item js_property_set_named_ic(Item object, const char* name,
-        int64_t name_len64, Item value, int64_t strict, JsStoreIC* ic) {
-    return js_property_set_named_ic_impl(object, name, name_len64, NULL,
-        value, strict, ic);
-}
-
-extern "C" Item js_property_set_key_ic(Item object, PropertyKeyRef key, Item value,
-        int64_t strict, JsStoreIC* ic) {
-    // Preserve the named IC slow path if a caller hands this ABI an ordinary
-    // string; key identity is an optional proof, never a different behavior.
-    if (!key || !string_is_pooled(key) || property_key_id(key) == NAME_ID_NONE) {
-        // ordinary pooled names can come from a different string pool; keep
-        // canonical named lookup so key identity cannot change DOM semantics.
-        return js_property_set_named_ic_impl(object,
-            key ? key->chars : NULL, key ? (int64_t)key->len : 0, NULL,
-            value, strict, ic);
-    }
-    return js_property_set_named_ic_impl(object, key->chars, (int64_t)key->len,
-        key, value, strict, ic);
+extern "C" Item js_property_set_name_id_ic(Item object, NameId name_id,
+        Item value, int64_t strict, JsStoreIC* ic) {
+    return js_property_set_name_id_ic_impl(object, name_id, value, strict, ic);
 }
 
 // Convert a UTF-16 unit index to the corresponding byte offset in a UTF-8 string.
@@ -9050,13 +8372,17 @@ extern "C" Item js_get_length_item(Item object) {
 
 // Direct JS array push shares Lambda's owned-scalar tail representation.
 extern "C" void js_array_push_item_direct(Array* arr, Item value) {
+    if (!arr) return;
     if (arr->length + arr->extra + 2 > arr->capacity) {
         JS_PROPERTY_SET_BRANCH("array_push_direct_expand");
-        // The value must survive the growth allocation before it is stored.
-        RootFrame roots(1);
+        // Growth can compact the Array object as well as its item buffer, so
+        // reload both exact roots before the post-growth length/store access.
+        RootFrame roots(2);
+        Rooted<Item> rooted_array(roots, (Item){.array = arr});
         Rooted<Item> rooted_value(roots, value);
-        int64_t old_capacity = arr->capacity;
-        expand_list((List*)arr);
+        int64_t old_capacity = rooted_array.get().array->capacity;
+        expand_list((List*)rooted_array.get().array);
+        arr = rooted_array.get().array;
         value = rooted_value.get();
         // P8: expand_list copies the old buffer and leaves new slots at the
         // tail uninitialized (heap_data_alloc returns zero-init memory, which
@@ -9787,9 +9113,11 @@ extern "C" Item js_array_push(Item array, Item value) {
         return (Item){.item = i2it(0)};
     }
 
-    Array* arr = array.array;
-    js_array_push_item_direct(arr, value);
-    return (Item){.item = i2it(arr->length)};
+    RootFrame roots(2);
+    Rooted<Item> array_root(roots, array);
+    Rooted<Item> value_root(roots, value);
+    js_array_push_item_direct(array_root.get().array, value_root.get());
+    return (Item){.item = i2it(array_root.get().array->length)};
 }
 
 // =============================================================================
@@ -29268,7 +28596,8 @@ extern "C" void js_mark_non_enumerable(Item object, Item name) {
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
     if (property_key_requires_identity(str)) {
-        js_shape_entry_update_flags_key(object, str, JSPD_NON_ENUMERABLE, 0);
+        js_shape_entry_update_flags_name_id(object, property_key_id(str),
+            JSPD_NON_ENUMERABLE, 0);
     } else {
         js_attr_set_enumerable(object, str->chars, (int)str->len, /*enumerable=*/false);
     }
@@ -29281,7 +28610,8 @@ extern "C" void js_mark_non_writable(Item object, Item name) {
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
     if (property_key_requires_identity(str)) {
-        js_shape_entry_update_flags_key(object, str, JSPD_NON_WRITABLE, 0);
+        js_shape_entry_update_flags_name_id(object, property_key_id(str),
+            JSPD_NON_WRITABLE, 0);
     } else {
         js_attr_set_writable(object, str->chars, (int)str->len, /*writable=*/false);
     }
@@ -29302,7 +28632,8 @@ extern "C" void js_mark_non_configurable(Item object, Item name) {
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
     if (property_key_requires_identity(str)) {
-        js_shape_entry_update_flags_key(object, str, JSPD_NON_CONFIGURABLE, 0);
+        js_shape_entry_update_flags_name_id(object, property_key_id(str),
+            JSPD_NON_CONFIGURABLE, 0);
     } else {
         js_attr_set_configurable(object, str->chars, (int)str->len, /*configurable=*/false);
     }
@@ -29319,8 +28650,9 @@ extern "C" void js_mark_all_non_enumerable(Item object) {
         if (!entry->name) { entry = entry->next; continue; }
         const char* name = entry->name->str;
         int name_len = (int)entry->name->length;
-        if (entry->key_ref && property_key_requires_identity(entry->key_ref)) {
-            js_shape_entry_update_flags_key(object, entry->key_ref, JSPD_NON_ENUMERABLE, 0);
+        if (entry->key_kind != NAME_KEY_STRING) {
+            js_shape_entry_update_flags_name_id(object, entry->name_id,
+                JSPD_NON_ENUMERABLE, 0);
             entry = entry->next;
             continue;
         }
@@ -30119,7 +29451,8 @@ extern "C" Item js_async_iterator_step_result(Item iterator) {
         return js_throw_type_error("iterator next is not a function");
     }
 
-    JS_ASSIGN_OR_RETURN(next_fn, js_property_get_str(iterator, "next", 4));
+    JS_ASSIGN_OR_RETURN(next_fn, js_property_get(iterator,
+        (Item){.item = s2it(heap_create_name("next", 4))}));
     if (get_type_id(next_fn) != LMD_TYPE_FUNC) {
         return js_throw_type_error("iterator next is not a function");
     }
@@ -30458,7 +29791,8 @@ extern "C" Item js_generator_return(Item generator, Item value) {
             }
         }
         if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
-            Item return_fn = js_property_get_str(gen->delegate, "return", 6);
+            Item return_fn = js_property_get(gen->delegate,
+                (Item){.item = s2it(heap_create_name("return", 6))});
             if (item_is_error(return_fn)) {
                 return js_generator_resume_after_delegate_error(generator, gen, return_fn);
             }
@@ -30508,7 +29842,8 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
             return is_async ? js_promise_resolve(result) : result;
         }
         if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
-            Item throw_fn = js_property_get_str(gen->delegate, "throw", 5);
+            Item throw_fn = js_property_get(gen->delegate,
+                (Item){.item = s2it(heap_create_name("throw", 5))});
             if (item_is_error(throw_fn)) {
                 return js_generator_resume_after_delegate_error(generator, gen, throw_fn);
             }
@@ -30800,8 +30135,11 @@ Item js_check_array_sym_iterator() {
     Item array_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY);
     if (get_type_id(array_proto) != LMD_TYPE_MAP) return ItemNull;
     Item sym_iter = ItemNull;
-    JsShapeSlotStatus status =
-        js_own_shape_slot_status_key(array_proto, it2s(js_well_known_symbol_key(1)), &sym_iter, NULL);
+    String* symbol_key = it2s(js_well_known_symbol_key(1));
+    JsShapeSlotStatus status = symbol_key
+        ? js_own_shape_slot_status_name_id(array_proto, property_key_id(symbol_key),
+            &sym_iter, NULL)
+        : JS_SHAPE_SLOT_ABSENT;
     if (status == JS_SHAPE_SLOT_ABSENT) return ItemNull;  // not present on Array.prototype — use default
     if (status == JS_SHAPE_SLOT_DELETED) return make_js_undefined();  // deleted
     if (get_type_id(sym_iter) == LMD_TYPE_FUNC) {
@@ -30831,7 +30169,8 @@ static Item js_iterator_cache_next_method(Item iterator) {
         // hot-reload test262 batches as TypedArray construction failures.
         return ItemNull;
     }
-    next_root.set(js_property_get_str(iterator_root.get(), "next", 4));
+    next_root.set(js_property_get(iterator_root.get(),
+        (Item){.item = s2it(heap_create_name("next", 4))}));
     if (item_is_error(next_root.get())) return next_root.get();
     if (get_type_id(next_root.get()) != LMD_TYPE_FUNC) {
         return js_throw_type_error("iterator next is not a function");

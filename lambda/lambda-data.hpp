@@ -87,11 +87,14 @@ class Input;
 typedef struct LambdaModuleState {
     Item* vars;
     uint64_t* var_payloads;
-    PropertyKeyRef* property_keys;
+    NameId* property_keys;
+    void* ic_cells;
     void* consts;
     void* type_list;
     uint32_t var_count;
     uint32_t property_key_count;
+    uint32_t ic_count;
+    uint32_t ic_cell_size;
     uint32_t module_id;
     bool vars_registered;
 } LambdaModuleState;
@@ -306,8 +309,8 @@ typedef struct ShapeEntry {
     Target* ns;  // namespace target (NULL for unqualified fields)
     struct AstNode* default_value;  // default value expression (NULL if none)
     uint32_t name_hash;  // FNV lookup hash; never an identity.
-    NameId predefined_id;  // generated global identity, NAME_ID_NONE for dynamic names.
-    PropertyKeyRef key_ref;  // canonical runtime key; Input-owned shapes keep this NULL.
+    NameId name_id;  // generated or identity-scope identity; NONE for id-less Input.
+    uint8_t key_kind;  // NAME_KEY_STRING, NAME_KEY_SYMBOL, or NAME_KEY_PRIVATE.
     uint8_t flags;  // JSPD_* flags; 0 = JS default (data, writable/enum/config)
 } ShapeEntry;
 
@@ -336,8 +339,7 @@ typedef struct TypeMap : Type {
     ShapeEntry** field_index_dynamic;  // NULL = use inline field_index
     uint16_t field_count;  // number of hash slots used (0 = not populated)
     uint16_t field_capacity;  // 0 = inline capacity, otherwise dynamic slot count
-    // P1: Slot-indexed array for O(1) shaped property access (used by js_get_slot_fast/js_set_slot_fast).
-    // Populated for constructor-shaped objects. slot_entries[i] points to the i-th ShapeEntry.
+    // Optional fixed-slot index used by ordinary transition shapes.
     ShapeEntry** slot_entries;  // NULL if not populated; else array of slot_count pointers
     int slot_count;             // number of slot_entries (0 = not populated)
     // A2-T1 (JS): true once this TypeMap has been cloned for a single Map's
@@ -370,9 +372,10 @@ typedef struct TypeMap : Type {
 } TypeMap;
 
 typedef struct TypeMapTransition {
-    const char* name;
+    NameId name_id;
+    uint8_t key_kind;
+    const char* name; // retained only for the explicit id-less Input seam
     uint32_t name_len;
-    uint32_t name_hash;  // hash routes transition lookup; spelling remains authoritative.
     TypeId value_type;
     uint8_t flags;
     TypeMap* target;
@@ -487,9 +490,6 @@ static inline uint32_t typemap_shape_entry_name_hash(ShapeEntry* entry) {
 // carry a unique hash, because equal diagnostic spellings are not equal keys.
 static inline uint32_t typemap_shape_entry_key_hash(ShapeEntry* entry) {
     if (!entry) return 0;
-    if (entry->key_ref) {
-        return property_key_hash(entry->key_ref);
-    }
     return typemap_shape_entry_name_hash(entry);
 }
 
@@ -549,42 +549,22 @@ static inline bool typemap_shape_name_equals_hash(ShapeEntry* e, const char* key
     if (!e || !e->name || !e->name->str || !key || key_len < 0) return false;
     // A byte lookup is an explicitly non-canonical boundary.  It must never
     // discover a symbol/private entry merely because its diagnostic bytes match.
-    if (e->key_ref && property_key_requires_identity(e->key_ref)) return false;
+    if (e->key_kind != NAME_KEY_STRING) return false;
     uint32_t entry_hash = typemap_shape_entry_name_hash(e);
     if (entry_hash != 0 && key_hash != 0 && entry_hash != key_hash) return false;
-    if (e->name->str == key && e->name->length == (size_t)key_len) return true;
     return e->name->length == (size_t)key_len &&
            memcmp(e->name->str, key, (size_t)key_len) == 0;
 }
 
-static inline bool typemap_shape_key_equals(ShapeEntry* entry, PropertyKeyRef key) {
-    if (!entry || !key) return false;
-    if (entry->key_ref) {
-        // Runtime shapes must not fall back to spelling equality: an ordinary
-        // key was canonicalized before shape publication just like SYMBOL/PRIVATE.
-        return property_key_equal(entry->key_ref, key);
-    }
-    if (property_key_requires_identity(key)) return false;
-    return entry->name && typemap_shape_name_equals_hash(entry, key->chars,
-        (int)key->len, typemap_name_hash(key->chars, (int)key->len));
-}
-
 static inline bool typemap_shape_entries_equal(ShapeEntry* left, ShapeEntry* right) {
     if (!left || !right) return false;
-    if (left->key_ref && right->key_ref) {
-        return property_key_equal(left->key_ref, right->key_ref);
+    if (left->name_id != NAME_ID_NONE && right->name_id != NAME_ID_NONE) {
+        return left->name_id == right->name_id;
     }
-    if (left->key_ref || right->key_ref) {
-        PropertyKeyRef runtime_key = left->key_ref ? left->key_ref : right->key_ref;
-        ShapeEntry* input_entry = left->key_ref ? right : left;
-        if (property_key_requires_identity(runtime_key)) return false;
-        // Input shapes intentionally have no key_ref. An ordinary runtime key
-        // must merge with that byte-owned field instead of creating a stale slot.
-        return input_entry->name && typemap_shape_name_equals_hash(input_entry,
-            runtime_key->chars, (int)runtime_key->len,
-            property_key_hash(runtime_key));
+    if (left->key_kind != NAME_KEY_STRING || right->key_kind != NAME_KEY_STRING) {
+        return false;
     }
-    if (!left->name || !right->name) return left->name == right->name;
+    if (!left->name || !right->name) return !left->name && !right->name;
     return typemap_shape_name_equals_hash(left, right->name->str,
         (int)right->name->length,
         typemap_name_hash(right->name->str, (int)right->name->length));
@@ -604,15 +584,40 @@ static inline ShapeEntry* typemap_shape_lookup_last_by_hash(TypeMap* tm,
     return found;
 }
 
+// Input-owned fields deliberately have no NameId.  A runtime NameId lookup may
+// confirm those fields by bytes at the Input boundary, but it must never use
+// that seam to select a different runtime-created property with the same
+// spelling.
+static inline ShapeEntry* typemap_shape_lookup_last_idless_by_hash(TypeMap* tm,
+        const char* key, int key_len, uint32_t key_hash) {
+    if (!tm) return NULL;
+    ShapeEntry* found = NULL;
+    for (ShapeEntry* e = tm->shape; e; e = e->next) {
+        if (e->name_id == NAME_ID_NONE &&
+                typemap_shape_name_equals_hash(e, key, key_len, key_hash)) {
+            found = e;
+        }
+    }
+    return found;
+}
+
 static inline ShapeEntry* typemap_shape_lookup_last(TypeMap* tm, const char* key, int key_len) {
     return typemap_shape_lookup_last_by_hash(tm, key, key_len, typemap_name_hash(key, key_len));
 }
 
-static inline ShapeEntry* typemap_shape_lookup_key_last(TypeMap* tm, PropertyKeyRef key) {
-    if (!tm || !key) return NULL;
+// NameId is definitive for runtime-created JS entries. Input-owned entries
+// intentionally carry NAME_ID_NONE and remain on the byte-confirmation path.
+static inline bool typemap_shape_entry_has_name_id(const ShapeEntry* entry,
+        NameId name_id) {
+    return entry && name_id != NAME_ID_NONE && entry->name_id == name_id;
+}
+
+static inline ShapeEntry* typemap_shape_lookup_last_by_name_id(TypeMap* tm,
+        NameId name_id) {
+    if (!tm || name_id == NAME_ID_NONE) return NULL;
     ShapeEntry* found = NULL;
     for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
-        if (typemap_shape_key_equals(entry, key)) found = entry;
+        if (typemap_shape_entry_has_name_id(entry, name_id)) found = entry;
     }
     return found;
 }
@@ -704,22 +709,15 @@ static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int 
     return typemap_hash_lookup_by_hash(tm, key, key_len, typemap_name_hash(key, key_len));
 }
 
-static inline ShapeEntry* typemap_hash_lookup_key(TypeMap* tm, PropertyKeyRef key) {
-    if (!tm || !key) return NULL;
-    uint32_t key_hash = property_key_hash(key);
-    int capacity = typemap_hash_capacity(tm);
-    ShapeEntry** slots = typemap_hash_slots(tm);
-    if (!slots || capacity <= 0 || tm->field_count == 0 ||
-            tm->field_count >= (uint16_t)capacity) {
-        return typemap_shape_lookup_key_last(tm, key);
-    }
-    uint32_t index = key_hash & ((uint32_t)capacity - 1);
-    for (int probe = 0; probe < capacity; probe++) {
-        ShapeEntry* entry = slots[(index + (uint32_t)probe) & ((uint32_t)capacity - 1)];
-        if (!entry) return NULL;
-        if (typemap_shape_key_equals(entry, key)) return entry;
-    }
-    return NULL;
+static inline ShapeEntry* typemap_hash_lookup_name_id(TypeMap* tm,
+        NameId name_id) {
+    return typemap_shape_lookup_last_by_name_id(tm, name_id);
+}
+
+static inline ShapeEntry* typemap_hash_lookup_idless(TypeMap* tm,
+        const char* key, int key_len) {
+    return typemap_shape_lookup_last_idless_by_hash(tm, key, key_len,
+        typemap_name_hash(key, key_len));
 }
 
 typedef struct TypeElmt : TypeMap {
@@ -1109,6 +1107,12 @@ typedef struct Input {
 
     // member functions
     static Input* create(Pool* pool, Url* abs_url = nullptr, Input* parent = nullptr);
+    // A schema-backed input retains this explicit NamePool parent separately
+    // from document-tree ownership. Missing fields remain in the Input-local
+    // id-less child, while schema hits resolve through the existing hierarchy.
+    static Input* create_with_name_parent(Pool* pool, Url* abs_url = nullptr,
+                                           Input* parent = nullptr,
+                                           NamePool* name_parent = nullptr);
 } Input;
 
 #ifdef __cplusplus

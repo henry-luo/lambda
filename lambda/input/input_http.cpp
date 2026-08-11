@@ -383,7 +383,8 @@ int http_prefetch_urls_parallel(const char* const* urls, int count, const char* 
 }
 
 // Returns an Input* for HTTP/HTTPS URL, using memory and file cache
-Input* input_from_http(const char* url, const char* type, const char* flavor, const char* cache_dir) {
+Input* input_from_http_with_name_parent(const char* url, const char* type,
+        const char* flavor, const char* cache_dir, NamePool* name_parent) {
     if (!url) {
         return NULL;
     }
@@ -430,7 +431,8 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
     }
 
     // Parse content using existing input system
-    Input* input = input_from_source(content, abs_url, type_str, flavor_str);
+    Input* input = input_from_source_with_name_parent(content, abs_url,
+        type_str, flavor_str, name_parent);
 
     // Cleanup
     mem_free(content); // from lib - uses mem_alloc
@@ -438,6 +440,11 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
     mem_free(type_str);
     mem_free(flavor_str);
     return input;
+}
+
+Input* input_from_http(const char* url, const char* type, const char* flavor,
+        const char* cache_dir) {
+    return input_from_http_with_name_parent(url, type, flavor, cache_dir, NULL);
 }
 
 // Extended HTTP configuration for fetch operations

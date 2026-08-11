@@ -16,7 +16,9 @@ extern "C" Item make_js_undefined(void) {
 extern "C" Item js_make_string_len(const char* str, int len) {
     if (!str) return ItemNull;
     if (len < 0) len = 0;
-    String* s = heap_create_name(str, (size_t)len);
+    // Observable JS strings are GC values. Property operations canonicalize a
+    // string only at ToPropertyKey, keeping NamePool growth identity-driven.
+    String* s = heap_strcpy(str, len);
     return (Item){.item = s2it(s)};
 }
 
@@ -492,13 +494,13 @@ extern "C" Item js_to_string(Item value) {
 
     switch (type) {
     case LMD_TYPE_NULL:
-        return (Item){.item = s2it(heap_create_name("null"))};
+        return js_make_string("null");
 
     case LMD_TYPE_UNDEFINED:
-        return (Item){.item = s2it(heap_create_name("undefined"))};
+        return js_make_string("undefined");
 
     case LMD_TYPE_BOOL:
-        return (Item){.item = s2it(heap_create_name(it2b(value) ? "true" : "false"))};
+        return js_make_string(it2b(value) ? "true" : "false");
 
     case LMD_TYPE_INT: {
         int64_t v = it2i(value);
@@ -508,7 +510,7 @@ extern "C" Item js_to_string(Item value) {
         }
         char buffer[32];
         snprintf(buffer, sizeof(buffer), "%lld", (long long)v);
-        return (Item){.item = s2it(heap_create_name(buffer))};
+        return js_make_string(buffer);
     }
 
     case LMD_TYPE_INT64:
@@ -522,15 +524,15 @@ extern "C" Item js_to_string(Item value) {
         if (_dec && _dec->unlimited == DECIMAL_BIGINT) {
             char* s = bigint_to_cstring_radix(value, 10);
             if (!s) return ItemNull;
-            Item result = (Item){.item = s2it(heap_create_name(s))};
+            Item result = js_make_string(s);
             mem_free(s);
             return result;
         }
         // regular decimal
         const char* special = decimal_special_literal(value.get_decimal());
-        if (special) return (Item){.item = s2it(heap_create_name(special))};
+        if (special) return js_make_string(special);
         char* s = decimal_to_string(value);
-        Item result = (Item){.item = s2it(heap_create_name(s))};
+        Item result = js_make_string(s);
         decimal_free_string(s);
         return result;
     }
@@ -538,16 +540,16 @@ extern "C" Item js_to_string(Item value) {
     case LMD_TYPE_FLOAT: {
         double d = it2d(value);
         if (isnan(d)) {
-            return (Item){.item = s2it(heap_create_name("NaN"))};
+            return js_make_string("NaN");
         } else if (isinf(d)) {
-            return (Item){.item = s2it(heap_create_name(d > 0 ? "Infinity" : "-Infinity"))};
+            return js_make_string(d > 0 ? "Infinity" : "-Infinity");
         } else if (d == 0.0) {
             // ES spec: Number::toString(-0) and +0 both return "0"
-            return (Item){.item = s2it(heap_create_name("0"))};
+            return js_make_string("0");
         } else {
             char buffer[64];
             js_double_to_string(d, buffer, sizeof(buffer));
-            return (Item){.item = s2it(heap_create_name(buffer))};
+            return js_make_string(buffer);
         }
     }
 
@@ -555,7 +557,7 @@ extern "C" Item js_to_string(Item value) {
         return value;
 
     case LMD_TYPE_ARRAY: {
-        Item to_string_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+        Item to_string_key = js_make_string_len("toString", 8);
         JS_ASSIGN_OR_RETURN(to_string_fn, js_property_get(value, to_string_key));
         if (get_type_id(to_string_fn) == LMD_TYPE_FUNC) {
             JS_ASSIGN_OR_RETURN(result, js_call_function(to_string_fn, value, NULL, 0));
@@ -569,7 +571,7 @@ extern "C" Item js_to_string(Item value) {
         // JS: String([1,2,3]) => "1,2,3" (same as Array.prototype.join(","))
         Array* a = value.array;
         if (!a || a->length == 0) {
-            return (Item){.item = s2it(heap_create_name(""))};
+            return js_make_string_len("", 0);
         }
         StrBuf* sb = strbuf_new();
         for (int i = 0; i < a->length; i++) {
@@ -583,7 +585,7 @@ extern "C" Item js_to_string(Item value) {
                 }
             }
         }
-        String* result = heap_create_name(sb->str, sb->length);
+        String* result = heap_strcpy(sb->str, sb->length);
         strbuf_free(sb);
         return (Item){.item = s2it(result)};
     }
@@ -652,7 +654,7 @@ extern "C" Item js_to_string(Item value) {
                 if (src_s && src_s->len > 0) strbuf_append_str_n(sb, src_s->chars, (int)src_s->len);
                 strbuf_append_str_n(sb, "/", 1);
                 if (flags_s && flags_s->len > 0) strbuf_append_str_n(sb, flags_s->chars, (int)flags_s->len);
-                String* result = heap_create_name(sb->str, sb->length);
+                String* result = heap_strcpy(sb->str, sb->length);
                 strbuf_free(sb);
                 return (Item){.item = s2it(result)};
             }
@@ -667,7 +669,7 @@ extern "C" Item js_to_string(Item value) {
             bool own_ts = false;
             (void)js_map_get_fast(value.map, "toString", 8, &own_ts);
             bool ts_found = own_ts || js_ordinary_has_property(value, "toString", 8);
-            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+            Item ts_key = js_make_string_len("toString", 8);
             JS_ASSIGN_OR_RETURN_INTO(ts_fn, js_property_get(value, ts_key));
             if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
                 JS_ASSIGN_OR_RETURN(result, js_call_function(ts_fn, value, NULL, 0));
@@ -682,7 +684,7 @@ extern "C" Item js_to_string(Item value) {
             if (ts_found || vo_found || bigint_wrapper) {
                 // v90: Use js_property_get for valueOf to handle getter-defined valueOf
                 // (e.g., {toString: null, get valueOf() { throw ... }})
-                Item vo_key = (Item){.item = s2it(heap_create_name("valueOf", 7))};
+                Item vo_key = js_make_string_len("valueOf", 7);
                 JS_ASSIGN_OR_RETURN(vo_fn, js_property_get(value, vo_key));
                 if (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC) {
                     JS_ASSIGN_OR_RETURN(result, js_call_function(vo_fn, value, NULL, 0));
@@ -700,7 +702,7 @@ extern "C" Item js_to_string(Item value) {
                     js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
                     // newer clang does not model this switch fallthrough in the
                     // reverted runtime; return the intended default directly.
-                    return (Item){.item = s2it(heap_create_name("[object Object]"))};
+                    return js_make_string("[object Object]");
                 }
                 return js_throw_type_error("Cannot convert object to primitive value");
             }
@@ -718,7 +720,7 @@ extern "C" Item js_to_string(Item value) {
                 strbuf_append_str_n(sb, name_s->chars, (int)name_s->len);
                 strbuf_append_str_n(sb, ": ", 2);
                 strbuf_append_str_n(sb, msg_s->chars, (int)msg_s->len);
-                String* result = heap_create_name(sb->str, sb->length);
+                String* result = heap_strcpy(sb->str, sb->length);
                 strbuf_free(sb);
                 return (Item){.item = s2it(result)};
             }
@@ -728,7 +730,7 @@ extern "C" Item js_to_string(Item value) {
             !js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
             return js_throw_type_error("Cannot convert object to primitive value");
         }
-        return (Item){.item = s2it(heap_create_name("[object Object]"))};
+        return js_make_string("[object Object]");
     }
 
     case LMD_TYPE_FUNC: {
@@ -741,7 +743,7 @@ extern "C" Item js_to_string(Item value) {
         return js_to_string(prim);
     }
     default:
-        return (Item){.item = s2it(heap_create_name("[object Object]"))};
+        return js_make_string("[object Object]");
     }
 }
 
@@ -794,9 +796,14 @@ extern "C" int64_t js_is_nullish(Item value) {
 // v23 Performance Facades — compound operations returning raw int64_t
 // =============================================================================
 
-// js_typeof_is: returns 1 if typeof(value) matches type_str, 0 otherwise.
-// Avoids heap string allocation that js_typeof() performs.
-extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
+// js_typeof_is: returns 1 if typeof(value) matches the pooled type name.
+// Resolving the NameId here keeps generated MIR independent of compiler-pool
+// pointers while preserving the allocation-free typeof fast path (D5.4.3).
+extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
+    NameRef type_name = name_pool_resolve_id(context ? context->name_pool : NULL,
+        type_name_id);
+    const char* type_str = type_name ? type_name->chars : NULL;
+    if (!type_str || type_name->len == 0) return 0;
     TypeId type = get_type_id(value);
     switch (type_str[0]) {
     case 'n':
@@ -949,8 +956,6 @@ extern "C" int64_t js_eq_raw(Item left, Item right) {
 extern "C" int64_t js_loose_eq_raw(Item left, Item right) {
     return (int64_t)it2b(js_equal(left, right));
 }
-
-// js_property_get_str: property access with C string key (avoids string boxing)
 
 bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero) {
     if (is_negative_zero) *is_negative_zero = false;
@@ -1305,8 +1310,13 @@ extern "C" Item js_string_concat(Item left, Item right) {
 }
 
 extern "C" Item js_add(Item left, Item right) {
-    TypeId left_type = get_type_id(left);
-    TypeId right_type = get_type_id(right);
+    RootFrame roots(4);
+    Rooted<Item> left_root(roots, left);
+    Rooted<Item> right_root(roots, right);
+    Rooted<Item> left_string_root(roots, ItemNull);
+    Rooted<Item> right_string_root(roots, ItemNull);
+    TypeId left_type = get_type_id(left_root.get());
+    TypeId right_type = get_type_id(right_root.get());
 
     // ES spec §13.15.3 / §7.1.1: ApplyStringOrNumericBinaryOperator for `+`
     // 1. lprim = ToPrimitive(left, default).  2. rprim = ToPrimitive(right, default).
@@ -1314,26 +1324,37 @@ extern "C" Item js_add(Item left, Item right) {
     // and throws TypeError on object results / non-callable @@toPrimitive.
     if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY ||
         left_type == LMD_TYPE_ELEMENT || left_type == LMD_TYPE_FUNC) {
-        JS_ASSIGN_OR_RETURN_INTO(left, js_op_to_primitive(left, 0));
-        left_type = get_type_id(left);
+        Item primitive = js_op_to_primitive(left_root.get(), 0);
+        if (item_is_error(primitive)) return primitive;
+        left_root.set(primitive);
+        left_type = get_type_id(left_root.get());
     }
     if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY ||
         right_type == LMD_TYPE_ELEMENT || right_type == LMD_TYPE_FUNC) {
-        JS_ASSIGN_OR_RETURN_INTO(right, js_op_to_primitive(right, 0));
-        right_type = get_type_id(right);
+        Item primitive = js_op_to_primitive(right_root.get(), 0);
+        if (item_is_error(primitive)) return primitive;
+        right_root.set(primitive);
+        right_type = get_type_id(right_root.get());
     }
 
     // String concatenation if either operand is a string
     if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
-        return js_concat_strings_fast(it2s(left), it2s(right));
+        return js_concat_strings_fast(it2s(left_root.get()), it2s(right_root.get()));
     }
     if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
-        JS_ASSIGN_OR_RETURN(left_str, js_to_string(left));
-        JS_ASSIGN_OR_RETURN(right_str, js_to_string(right));
-        return js_concat_strings_fast(it2s(left_str), it2s(right_str));
+        Item left_string = js_to_string(left_root.get());
+        if (item_is_error(left_string)) return left_string;
+        left_string_root.set(left_string);
+        Item right_string = js_to_string(right_root.get());
+        if (item_is_error(right_string)) return right_string;
+        right_string_root.set(right_string);
+        // ToString can allocate twice before concatenation; keep both results
+        // rooted because the second conversion may collect the first string.
+        return js_concat_strings_fast(it2s(left_string_root.get()),
+            it2s(right_string_root.get()));
     }
 
-    return js_numeric_binary(left, right, JS_NUMERIC_ADD);
+    return js_numeric_binary(left_root.get(), right_root.get(), JS_NUMERIC_ADD);
 }
 
 extern "C" Item js_subtract(Item left, Item right) {

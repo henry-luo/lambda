@@ -17,6 +17,7 @@
 #include "js_function.hpp"
 #include "js_builtin_catalog.hpp"
 #include "../lambda-data.hpp"
+#include "../core/name_pool.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../runtime/module_registry.h"
@@ -134,7 +135,6 @@ double js_get_number(Item value);
 Item js_make_number(double d);
 int32_t js_to_int32(double d);
 
-extern "C" Item js_property_get_str(Item object, const char* key, int key_len);
 extern "C" Item js_number_function(Item value);
 extern "C" bool js_typed_array_is_out_of_bounds_item(Item ta_item);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
@@ -202,14 +202,16 @@ static inline bool js_key_is_symbol(Item key) {
     return it2i(key) <= -(int64_t)JS_SYMBOL_BASE;
 }
 
-extern "C" PropertyKeyRef js_symbol_property_key(Item sym);
+extern "C" NameId js_symbol_name_id(Item sym);
 
 static inline Item js_symbol_to_key(Item sym) {
-    PropertyKeyRef semantic_key = js_symbol_property_key(sym);
-    if (semantic_key) {
+    NameId semantic_id = js_symbol_name_id(sym);
+    if (semantic_id != NAME_ID_NONE) {
         // Every Symbol has a registered semantic NameRecord.  Property
         // identity may never depend on the historical diagnostic encoding.
-        return (Item){.item = s2it(semantic_key)};
+        NameRef semantic_key = name_pool_resolve_id(
+            context ? context->name_pool : NULL, semantic_id);
+        if (semantic_key) return (Item){.item = s2it(semantic_key)};
     }
     // An encoded Symbol without a registered NameRecord is invalid runtime
     // state; manufacturing a printable string here would alias a user key.

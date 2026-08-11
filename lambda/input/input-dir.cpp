@@ -20,7 +20,9 @@ using namespace lambda;
 // This mirrors how path iteration works in path.c resolve_directory_children()
 // original_url: the original URL string before resolution (to detect relative paths)
 // directory_path: the resolved absolute path to the directory
-Input* input_from_directory(const char* directory_path, const char* original_url, bool recursive, int max_depth) {
+Input* input_from_directory_with_name_parent(const char* directory_path,
+        const char* original_url, bool recursive, int max_depth,
+        NamePool* name_parent) {
     if (!file_is_dir(directory_path)) {
         log_error("input_from_directory: not a directory: %s", directory_path);
         return NULL;
@@ -33,7 +35,7 @@ Input* input_from_directory(const char* directory_path, const char* original_url
     }
     
     // Create Input
-    Input* input = InputManager::create_input(NULL);
+    Input* input = InputManager::create_input_with_name_parent(NULL, name_parent);
     if (!input) {
         // free entries
         for (int i = 0; i < entries->length; i++) {
@@ -125,4 +127,10 @@ Input* input_from_directory(const char* directory_path, const char* original_url
     arraylist_free(entries);
     input->root.item = (uint64_t)children;
     return input;
+}
+
+Input* input_from_directory(const char* directory_path, const char* original_url,
+        bool recursive, int max_depth) {
+    return input_from_directory_with_name_parent(directory_path, original_url,
+        recursive, max_depth, NULL);
 }

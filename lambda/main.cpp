@@ -339,7 +339,7 @@ static void js_test262_hot_context_create(Runtime* runtime, EvalContext* batch_c
     if (!eval_context_thread_initialize(batch_context)) return;
     heap_init();
     batch_context->pool = batch_context->heap->pool;
-    batch_context->name_pool = name_pool_create(batch_context->pool, nullptr);
+    batch_context->name_pool = name_pool_create_runtime(batch_context->pool);
     batch_context->type_list = arraylist_new(64);
     // Batch recovery replaces the realm in place. Keep Runtime's integration
     // fields on that same canonical EvalContext so JS helpers never retain the

@@ -103,7 +103,7 @@ extern "C" PathScheme path_get_scheme(Path* path);
 extern "C" bool path_is_absolute(Path* path);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
-    TypeId value_type);
+    NameId operation_name_id, TypeId value_type);
 
 // External typeset function
 
@@ -3831,6 +3831,98 @@ extern "C" TypeId item_type_id(Item item) {
 }
 
 extern "C" Input* input_from_target(Target* target, String* type, String* flavor);
+extern "C" Input* input_from_target_with_name_parent(Target* target, String* type,
+    String* flavor, NamePool* name_parent);
+
+static bool input_schema_collect_type(Type* type, NamePool* name_pool,
+        ArrayList* visited) {
+    if (!type || !name_pool || !visited) return true;
+    for (int i = 0; i < visited->length; i++) {
+        if (arraylist_get(visited, i) == type) return true;
+    }
+    if (!arraylist_append(visited, type)) return false;
+
+    // Declarations wrap their semantic type.  Follow that edge before
+    // examining fields so schema names are admitted exactly once regardless
+    // of whether the caller supplied a named declaration or its body.
+    Type* semantic_type = type_field_unwrap_simple_decl(type);
+    if (semantic_type != type) {
+        return input_schema_collect_type(semantic_type, name_pool, visited);
+    }
+
+    if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT ||
+            type->type_id == LMD_TYPE_OBJECT) {
+        TypeMap* map_type = (TypeMap*)type;
+        if (type->type_id == LMD_TYPE_ELEMENT) {
+            TypeElmt* element_type = (TypeElmt*)type;
+            if (element_type->name.str && element_type->name.length > 0 &&
+                    !name_pool_create_len(name_pool, element_type->name.str,
+                        element_type->name.length)) {
+                return false;
+            }
+        }
+        for (ShapeEntry* field = map_type->shape; field; field = field->next) {
+            if (field->name && !name_pool_create_len(name_pool,
+                    field->name->str, field->name->length)) return false;
+            if (!input_schema_collect_type(field->type, name_pool, visited)) return false;
+        }
+        if (type->type_id == LMD_TYPE_OBJECT) {
+            if (!input_schema_collect_type(((TypeObject*)type)->base,
+                    name_pool, visited)) return false;
+        }
+        return true;
+    }
+    if (type->type_id == LMD_TYPE_ARRAY) {
+        return input_schema_collect_type(((TypeArray*)type)->nested,
+            name_pool, visited);
+    }
+    if (type->type_id == LMD_TYPE_TYPE) {
+        switch (type->kind) {
+        case TYPE_KIND_SIMPLE:
+            return input_schema_collect_type(((TypeType*)type)->type,
+                name_pool, visited);
+        case TYPE_KIND_UNARY:
+            return input_schema_collect_type(((TypeUnary*)type)->operand,
+                name_pool, visited);
+        case TYPE_KIND_BINARY:
+            return input_schema_collect_type(((TypeBinary*)type)->left,
+                    name_pool, visited) &&
+                input_schema_collect_type(((TypeBinary*)type)->right,
+                    name_pool, visited);
+        case TYPE_KIND_CONSTRAINED:
+            return input_schema_collect_type(((TypeConstrained*)type)->base,
+                name_pool, visited);
+        case TYPE_KIND_PARAM: {
+            TypeParam* param = (TypeParam*)type;
+            return input_schema_collect_type(param->full_type, name_pool, visited) &&
+                input_schema_collect_type(param->contract_type, name_pool, visited);
+        }
+        default:
+            return true;
+        }
+    }
+    if (type->type_id == LMD_TYPE_FUNC) {
+        TypeFunc* fn = (TypeFunc*)type;
+        if (!input_schema_collect_type(fn->returned, name_pool, visited) ||
+                !input_schema_collect_type(fn->inferred_return, name_pool, visited) ||
+                !input_schema_collect_type(fn->return_contract, name_pool, visited) ||
+                !input_schema_collect_type(fn->error_type, name_pool, visited)) return false;
+        for (TypeParam* param = fn->param; param; param = param->next) {
+            if (!input_schema_collect_type(param->full_type, name_pool, visited) ||
+                    !input_schema_collect_type(param->contract_type, name_pool, visited)) return false;
+        }
+    }
+    return true;
+}
+
+static bool input_schema_prepare_name_parent(Type* schema_type, NamePool* name_pool) {
+    if (!schema_type || !name_pool) return true;
+    ArrayList* visited = arraylist_new(16);
+    if (!visited) return false;
+    bool ok = input_schema_collect_type(schema_type, name_pool, visited);
+    arraylist_free(visited);
+    return ok;
+}
 
 RetItem fn_input2(Item target_item, Item type) {
     GUARD_ERROR_RI2(target_item, type);
@@ -3953,10 +4045,24 @@ RetItem fn_input2(Item target_item, Item type) {
         return item_to_ri(ItemError);
     }
 
+    // Pre-register exact schema fields before parsing so known Input names hit
+    // the retained static/dynamic parent; parser-only misses stay id-less per
+    // D3.4.4v2 and D4.6.2v2.
+    if (schema_type && !input_schema_prepare_name_parent(schema_type,
+            context->name_pool)) {
+        set_runtime_error(ERR_OUT_OF_MEMORY, "input: failed to prepare schema names");
+        target_free(target);
+        return item_to_ri(ItemError);
+    }
+
     log_debug("input type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
 
-    // Use the new target-based input function
-    Input *input = input_from_target(target, type_str, flavor_str);
+    // A schema-backed input inherits the schema/runtime pool; a schemaless
+    // input keeps the existing id-less Input seam required by D4.6.2v2.
+    Input *input = schema_type
+        ? input_from_target_with_name_parent(target, type_str, flavor_str,
+            context->name_pool)
+        : input_from_target(target, type_str, flavor_str);
     if (!input) {
         // input() is a can-raise effect: a loader failure must not become a
         // successful null, or callers cannot distinguish failed execution from
@@ -8024,8 +8130,8 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     name->length = key_length;
     added->name = name;
     added->name_hash = typemap_name_hash(name->str, (int)name->length);
-    added->predefined_id = NAME_ID_NONE;
-    added->key_ref = NULL;
+    added->name_id = NAME_ID_NONE;
+    added->key_kind = NAME_KEY_STRING;
     added->type = type_info[value_type].type;
     added->byte_offset = offset;
     map_field_store((char*)new_data + offset, rooted_value.get(), value_type);
@@ -8453,8 +8559,8 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         nv->length = e->name->length;
         ne->name = nv;
         ne->name_hash = e->name_hash ? e->name_hash : typemap_name_hash(nv->str, (int)nv->length);
-        ne->predefined_id = e->predefined_id;
-        ne->key_ref = e->key_ref;
+        ne->name_id = e->name_id;
+        ne->key_kind = e->key_kind;
         // Retain an unchanged field's full contract. Replacing `number` or a
         // union with its LMD_TYPE_TYPE carrier makes the packed Item look like
         // a Type* and corrupts it on the next validation read.
@@ -8650,8 +8756,7 @@ static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr, size_
     ShapeEntry* entry = tm->shape;
     while (entry) {
         if (entry->name && entry->name->str && entry->name->length == key_len &&
-                (entry->name->str == key_cstr ||
-                    memcmp(entry->name->str, key_cstr, key_len) == 0)) {
+                memcmp(entry->name->str, key_cstr, key_len) == 0) {
             return entry;
         }
         entry = entry->next;
@@ -8962,18 +9067,20 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
 
 static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
         TypeMap** map_type_slot, void** type_slot, const char* key_cstr,
-        size_t key_len, PropertyKeyRef key_ref, ShapeEntry* entry, TypeId value_type) {
+        size_t key_len, NameRef key_ref, ShapeEntry* entry, TypeId value_type) {
     if (!map_type_slot || !*map_type_slot || !entry || !entry->type) return entry;
     TypeId field_type = entry->type->type_id;
     if (!map_shared_ctor_shape_should_detach_for_type(*map_type_slot, field_type, value_type)) {
         return entry;
     }
-    TypeMap* transition = js_typemap_transition_for_type(map_item, entry, value_type);
+    NameId operation_name_id = key_ref ? property_key_id(key_ref) : NAME_ID_NONE;
+    TypeMap* transition = js_typemap_transition_for_type(map_item, entry,
+        operation_name_id, value_type);
     if (transition) {
         *map_type_slot = transition;
         if (type_slot) *type_slot = transition;
-        ShapeEntry* refreshed = key_ref && property_key_requires_identity(key_ref)
-            ? typemap_hash_lookup_key(transition, key_ref)
+        ShapeEntry* refreshed = key_ref && property_key_id(key_ref) != NAME_ID_NONE
+            ? typemap_hash_lookup_name_id(transition, property_key_id(key_ref))
             : map_find_shape_entry(transition, key_cstr, key_len);
         if (refreshed) return refreshed;
     }
@@ -8981,11 +9088,11 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
     if (!clone) return entry;
     *map_type_slot = clone;
     if (type_slot) *type_slot = clone;
-    ShapeEntry* refreshed = key_ref && property_key_requires_identity(key_ref)
-        ? typemap_hash_lookup_key(clone, key_ref)
+    ShapeEntry* refreshed = key_ref && property_key_id(key_ref) != NAME_ID_NONE
+        ? typemap_hash_lookup_name_id(clone, property_key_id(key_ref))
         : map_find_shape_entry(clone, key_cstr, key_len);
-    // Ordinary Input and runtime strings have distinct pool addresses; only
-    // Symbol/private keys may use pointer identity to recover the cloned slot.
+    // Ordinary Input and runtime strings use the id-less byte seam; identity
+    // keys recover the cloned slot by NameId.
     return refreshed ? refreshed : entry;
 }
 
@@ -9060,8 +9167,9 @@ void fn_map_set(Item map_item, Item key, Item value) {
         log_error("fn_map_set: null key string");
         return;
     }
-    PropertyKeyRef key_ref = key_type == LMD_TYPE_STRING &&
+    NameRef key_ref = key_type == LMD_TYPE_STRING &&
         string_is_pooled(key_string) ? key_string : NULL;
+    NameId key_id = key_ref ? property_key_id(key_ref) : NAME_ID_NONE;
     bool identity_key = key_ref && property_key_requires_identity(key_ref);
 
     // find field in shape
@@ -9071,11 +9179,12 @@ void fn_map_set(Item map_item, Item key, Item value) {
         bool name_matches = false;
         if (identity_key) {
             // Symbol/private diagnostic bytes are not property identity.
-            name_matches = entry->key_ref && property_key_equal(entry->key_ref, key_ref);
+            name_matches = entry->name_id != NAME_ID_NONE && entry->name_id == key_id;
         } else if (entry->name && entry->name->str && entry->name->length == key_len) {
-            // A6: pointer comparison first (interned strings share char* pointers)
-            name_matches = (entry->name->str == key_cstr ||
-                memcmp(entry->name->str, key_cstr, key_len) == 0);
+            // Ordinary Input fields have no NameId, so this is the explicit
+            // byte-confirmation seam; pointer equality is never identity.
+            name_matches = entry->key_kind == NAME_KEY_STRING &&
+                memcmp(entry->name->str, key_cstr, key_len) == 0;
         }
         if (name_matches) {
             TypeId field_type = entry->type->type_id;

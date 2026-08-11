@@ -104,26 +104,25 @@ static inline JsAccessorPair* js_item_to_accessor_pair(Item it) {
 // property that was just written or defined.
 ShapeEntry* js_find_shape_entry(Item obj, const char* name, int name_len);
 
-// Canonical JS property lookup.  STRING keys may retain the legacy byte
-// fallback at an API boundary; SYMBOL and PRIVATE keys are pointer-only.
-ShapeEntry* js_find_shape_entry_key(Item obj, PropertyKeyRef key);
+ShapeEntry* js_find_shape_entry_name_id(Item obj, NameId name_id);
 
 // Move a Map with a shared constructor/transition shape to the cached variant
 // whose `entry` stores `value_type`. The returned TypeMap is installed on obj;
 // NULL means callers must use their ordinary private-clone fallback.
 TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
+                                        NameId operation_name_id,
                                         TypeId value_type);
 
 // Identity-preserving accessor lookup used by private and Symbol property
 // writes. Raw spelling lookups remain available for ordinary STRING keys.
-JsAccessorPair* js_find_accessor_pair_inheritable_key(Item obj, PropertyKeyRef key);
+JsAccessorPair* js_find_accessor_pair_inheritable_name_id(Item obj, NameId name_id);
 
 // Convenience: set flags bits on the ShapeEntry for `name` (no-op if not found).
 // `set_mask` bits are OR'd in; `clear_mask` bits are cleared. Apply set first then clear.
 void js_shape_entry_update_flags(Item obj, const char* name, int name_len,
                                  uint8_t set_mask, uint8_t clear_mask);
-void js_shape_entry_update_flags_key(Item obj, PropertyKeyRef key,
-                                     uint8_t set_mask, uint8_t clear_mask);
+void js_shape_entry_update_flags_name_id(Item obj, NameId name_id,
+                                         uint8_t set_mask, uint8_t clear_mask);
 
 // A2-T3: set or clear the JSPD_IS_ACCESSOR bit on the ShapeEntry for `name`.
 // Goes through the same Map-local clone primitive as
@@ -206,9 +205,9 @@ static inline int js_prop_attrs_fast_path(Item obj, const char* name, int name_l
     return (se->flags & attr_flag) ? 0 : 1;
 }
 
-static inline int js_prop_attrs_fast_path_key(Item obj, PropertyKeyRef key,
-                                              uint8_t attr_flag) {
-    ShapeEntry* se = js_find_shape_entry_key(obj, key);
+static inline int js_prop_attrs_fast_path_name_id(Item obj, NameId name_id,
+                                                   uint8_t attr_flag) {
+    ShapeEntry* se = js_find_shape_entry_name_id(obj, name_id);
     if (!se) return -1;
     return (se->flags & attr_flag) ? 0 : 1;
 }

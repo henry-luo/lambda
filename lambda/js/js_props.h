@@ -42,10 +42,15 @@ JsShapeSlotStatus js_own_shape_slot_status(Item object,
                                             Item* out_slot,
                                             ShapeEntry** out_se);
 
-JsShapeSlotStatus js_own_shape_slot_status_key(Item object,
-                                                PropertyKeyRef key,
-                                                Item* out_slot,
-                                                ShapeEntry** out_se);
+JsShapeSlotStatus js_own_shape_slot_status_name_id(Item object, NameId name_id,
+                                                    Item* out_slot,
+                                                    ShapeEntry** out_se);
+
+// Resolve a STRING/SYMBOL property key through the NameId-first matcher. An
+// ordinary id-less Input key remains on the byte-confirmed seam.
+JsShapeSlotStatus js_own_shape_slot_status_key(Item object, Item key,
+                                               Item* out_slot,
+                                               ShapeEntry** out_se);
 
 // Mark a shape entry deleted, optionally materializing a shadowable slot.
 bool js_shape_mark_deleted_own(Item object, const char* name, int name_len,
@@ -81,12 +86,10 @@ JsSetterDispatchResult js_ordinary_set_via_accessor(Item object,
                                                      Item value,
                                                      Item Receiver);
 
-// Identity-bearing keys (Symbols and private names) must not pass through a
-// spelling-only accessor walk, because same-text records are distinct keys.
-JsSetterDispatchResult js_ordinary_set_via_accessor_key(Item object,
-                                                         PropertyKeyRef key,
-                                                         Item value,
-                                                         Item Receiver);
+JsSetterDispatchResult js_ordinary_set_via_accessor_name_id(Item object,
+                                                             NameId name_id,
+                                                             Item value,
+                                                             Item Receiver);
 
 // Read-only own-slot descriptor classification; never invokes a getter.
 typedef enum {
@@ -180,11 +183,8 @@ bool js_get_own_property_descriptor(Item object,
                                      int name_len,
                                      JsPropertyDescriptor* out);
 
-// Identity-bearing keys cannot be reconstructed from their diagnostic text.
-// This variant is required for Symbol and private descriptors.
-bool js_get_own_property_descriptor_key(Item object,
-                                         PropertyKeyRef key,
-                                         JsPropertyDescriptor* out);
+bool js_get_own_property_descriptor_name_id(Item object, NameId name_id,
+                                             JsPropertyDescriptor* out);
 
 // ToPropertyDescriptor. Failures return the D8.4.3 merged ERROR Item.
 Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* out);
@@ -198,11 +198,10 @@ Item js_define_own_property_from_descriptor(Item object,
                                              bool is_new_property,
                                              bool existing_accessor);
 
-Item js_define_own_property_from_descriptor_key(Item object,
-                                                 PropertyKeyRef key,
-                                                 const JsPropertyDescriptor* pd,
-                                                 bool is_new_property,
-                                                 bool existing_accessor);
+Item js_define_own_property_from_descriptor_name_id(Item object, NameId name_id,
+                                                     const JsPropertyDescriptor* pd,
+                                                     bool is_new_property,
+                                                     bool existing_accessor);
 
 #ifdef __cplusplus
 }

@@ -4081,17 +4081,11 @@ static uint32_t module_property_key_index(MirTranspiler* mt, NameRef name) {
 
 static MIR_reg_t emit_module_property_key_load(MirTranspiler* mt, uint32_t index) {
     MIR_reg_t state = emit_module_state_load(mt);
-    MIR_reg_t keys = new_reg(mt, "module_property_keys", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, keys),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, property_keys),
-            state, 0, 1)));
-    MIR_reg_t key = new_reg(mt, "module_property_key", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, key),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64,
-            (MIR_disp_t)index * (MIR_disp_t)sizeof(PropertyKeyRef), keys, 0, 1)));
-    return emit_box_string(mt, key);
+    MIR_reg_t key = emit_call_2(mt, "lambda_module_name_id_at", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, state),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)index));
+    return emit_call_1(mt, "lambda_name_id_to_item", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
 }
 
 // Load a global variable from its context-owned slab into a register.

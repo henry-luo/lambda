@@ -141,16 +141,17 @@ struct JsModuleConstEntry;  // defined in transpile_js_mir.cpp
 
 struct JsPreambleState {
     void* mir_ctx;              // MIR_context_t kept alive for harness function objects
-    void* tp_ast_pool;          // transpiler's ast_pool — kept alive because compiled MIR code
-                                // and map shape entries reference strings from name_pool
-    void* tp_name_pool;         // transpiler's name_pool (allocated from ast_pool)
     char* source_buffer;        // source bytes kept alive for retained AST/source ranges
     void* entry_func;           // compiled js_main, reusable with a fresh EvalContext
     int module_var_count;       // number of harness module vars
     uint32_t module_state_id;   // live realm slab that retains those harness vars
     JsModuleConstEntry* entries;// owned snapshot of harness module_consts
     int entry_count;
-    bool owns_compiled_state;   // clones share the immutable MIR context and pools
+    PropertyKeySpec* module_property_specs; // sealed spelling image for MIR property names
+    uint32_t module_property_count;
+    uint32_t module_property_bytes_size;
+    uint32_t ic_count;        // module-owned named-property IC cells
+    bool owns_compiled_state;   // clones share the immutable MIR context
 };
 
 enum JsMirCacheMode {

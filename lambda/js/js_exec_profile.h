@@ -16,12 +16,7 @@ typedef enum JsExecProfileEvent {
     JS_EXEC_PROF_CALL_FUNCTION,
     JS_EXEC_PROF_DISPATCH_BUILTIN,
     JS_EXEC_PROF_NEW_OBJECT,
-    JS_EXEC_PROF_NEW_OBJECT_SHAPE,
-    JS_EXEC_PROF_GET_SLOT_F,
-    JS_EXEC_PROF_GET_SLOT_I,
-    JS_EXEC_PROF_SET_SLOT_F,
-    JS_EXEC_PROF_SET_SLOT_I,
-    JS_EXEC_PROF_SHAPE_SLOT_GUARD,
+    JS_EXEC_PROF_NEW_OBJECT_TYPEMAP,
     JS_EXEC_PROF_SHAPE_GUARD_HIT,
     JS_EXEC_PROF_SHAPE_GUARD_MISS,
     JS_EXEC_PROF_LOAD_IC_PROBE,
@@ -107,7 +102,7 @@ uint64_t* js_exec_profile_helper_call_counter(const char* fn_name);
 void js_exec_profile_name_lookup(uint64_t probes, int hit, uint32_t owner_pool);
 void js_exec_profile_name_lookup_bypassed(void);
 void js_exec_profile_dump(void);
-void js_profile_property_set_site(const char* label);
+void js_profile_property_set_site(uint32_t label_name_id);
 uint64_t js_profile_property_set_branch_enter(const char* label);
 void js_profile_property_set_branch_leave(const char* label, uint64_t token);
 void js_profile_property_set_branch_add_count(const char* label, uint64_t count);
@@ -142,7 +137,7 @@ static inline void js_exec_profile_name_lookup(uint64_t probes, int hit, uint32_
 }
 static inline void js_exec_profile_name_lookup_bypassed(void) {}
 static inline void js_exec_profile_dump(void) {}
-static inline void js_profile_property_set_site(const char* label) { (void)label; }
+static inline void js_profile_property_set_site(uint32_t label_name_id) { (void)label_name_id; }
 static inline uint64_t js_profile_property_set_branch_enter(const char* label) {
     (void)label;
     return 0;

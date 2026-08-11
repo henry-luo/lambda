@@ -52,11 +52,10 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
         shape_entry->name = nv;
         shape_entry->name_hash = property_key_requires_identity(key)
             ? property_key_hash(key) : typemap_name_hash(nv->str, (int)nv->length);
-        // Input copies spelling for its own lifetime, so it must not publish a runtime key ref.
-        shape_entry->predefined_id = string_is_pooled(key) ? name_ref_id(key) : NAME_ID_NONE;
-        // Runtime-only unique keys retain their identity through the copied
-        // spelling view; document STRING shapes intentionally keep NULL here.
-        shape_entry->key_ref = property_key_requires_identity(key) ? key : NULL;
+        // Input copies spelling for its own lifetime; only an already-owned
+        // generated identity may cross this construction seam.
+        shape_entry->name_id = string_is_pooled(key) ? name_ref_id(key) : NAME_ID_NONE;
+        shape_entry->key_kind = property_key_kind(key);
         shape_entry->type = type_info[type_id].type;
     } else {
         // no key, for nested map
@@ -266,8 +265,8 @@ static ShapeEntry* clone_shape_entries(Pool* pool, ShapeEntry* source,
         dst->ns = src->ns;
         dst->default_value = src->default_value;
         dst->name_hash = src->name_hash;
-        dst->predefined_id = src->predefined_id;
-        dst->key_ref = src->key_ref;
+        dst->name_id = src->name_id;
+        dst->key_kind = src->key_kind;
         dst->flags = src->flags;
         if (!first) first = dst;
         if (prev) prev->next = dst;
@@ -406,18 +405,10 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
         TypeId type_id, Input* input, ShapeEntry** out_entry) {
     if (out_entry) *out_entry = NULL;
     if (!parent || !key || !input || !input->pool || !input->type_list) return NULL;
-    uint32_t key_name_hash = typemap_name_hash(key->chars, (int)key->len);
     for (TypeMapTransition* tr = parent->transitions; tr; tr = tr->next) {
         if (tr->value_type != type_id || tr->flags != 0 || !tr->target) continue;
-        if (tr->name_hash != 0 && key_name_hash != 0 && tr->name_hash != key_name_hash) continue;
-        if (tr->name == key->chars && tr->name_len == (uint32_t)key->len) {
-            if (map_transition_prefix_matches_parent(parent, tr->target)) {
-                if (out_entry) *out_entry = tr->target->last;
-                return tr->target;
-            }
-            continue;
-        }
-        if (tr->name_len == (uint32_t)key->len &&
+        if (tr->key_kind == NAME_KEY_STRING && tr->name &&
+                tr->name_len == (uint32_t)key->len &&
                 memcmp(tr->name, key->chars, key->len) == 0) {
             if (map_transition_prefix_matches_parent(parent, tr->target)) {
                 if (out_entry) *out_entry = tr->target->last;
@@ -478,9 +469,11 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
     TypeMapTransition* tr = (TypeMapTransition*)pool_calloc(input->pool,
         sizeof(TypeMapTransition));
     if (!tr) return child;
-    tr->name = added->name ? added->name->str : NULL;
+    tr->name_id = added->name_id;
+    tr->key_kind = added->key_kind;
+    tr->name = added->name_id == NAME_ID_NONE && added->key_kind == NAME_KEY_STRING &&
+        added->name ? added->name->str : NULL;
     tr->name_len = added->name ? (uint32_t)added->name->length : 0;
-    tr->name_hash = added->name_hash;
     tr->value_type = type_id;
     tr->flags = 0;
     tr->target = child;
@@ -993,7 +986,9 @@ static const char* mime_to_parser_type(const char* mime_type) {
     return "text";
 }
 
-extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url* abs_url, String* type, String* flavor) {
+static Input* input_from_source_n_with_name_parent(const char* source,
+        size_t source_len, Url* abs_url, String* type, String* flavor,
+        NamePool* name_parent) {
     log_debug("input_from_source_n: ENTRY type='%s', flavor='%s', len=%zu",
               type ? type->chars : "null",
               flavor ? flavor->chars : "null",
@@ -1034,7 +1029,7 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
     Input* input = NULL;
     if (!effective_type || strcmp(effective_type, "text") == 0) { // treat as plain text
         // Use InputManager to properly set up the Input with a pool
-        input = InputManager::create_input(abs_url);
+        input = InputManager::create_input_with_name_parent(abs_url, name_parent);
         if (!input) {
             log_error("input_from_source: Failed to create input for plain text");
             return NULL;
@@ -1046,7 +1041,7 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
     else {
         InputAllocationContext allocation_context = {};
         InputAllocationContext* saved_allocation_context = input_allocation_context;
-        input = InputManager::create_input(abs_url);
+        input = InputManager::create_input_with_name_parent(abs_url, name_parent);
         if (!input) {
             log_error("input_from_source: Failed to create input for type '%s'", effective_type);
             return NULL;
@@ -1106,17 +1101,30 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
     return input;
 }
 
+extern "C" Input* input_from_source_n(const char* source, size_t source_len,
+        Url* abs_url, String* type, String* flavor) {
+    return input_from_source_n_with_name_parent(source, source_len, abs_url,
+        type, flavor, NULL);
+}
+
 extern "C" Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor) {
     // Back-compat wrapper: assumes source is a null-terminated string (text only).
     // Binary inputs (e.g. PDF) must call input_from_source_n with the actual byte count.
     return input_from_source_n(source, source ? strlen(source) : 0, abs_url, type, flavor);
 }
 
+extern "C" Input* input_from_source_with_name_parent(const char* source,
+        Url* abs_url, String* type, String* flavor, NamePool* name_parent) {
+    return input_from_source_n_with_name_parent(source,
+        source ? strlen(source) : 0, abs_url, type, flavor, name_parent);
+}
+
 // Read a local file and parse it via input_from_source_n. Detects binary
 // formats (currently PDF) and reads them with read_binary_file so that null
 // bytes in the payload are preserved and the parser receives an accurate
 // byte length instead of strlen() which would truncate at the first null.
-static Input* input_from_local_path(const char* pathname, Url* abs_url, String* type, String* flavor) {
+static Input* input_from_local_path(const char* pathname, Url* abs_url,
+        String* type, String* flavor, NamePool* name_parent = NULL) {
     bool is_binary_pdf = false;
     if (type && strcmp(type->chars, "pdf") == 0) {
         is_binary_pdf = true;
@@ -1136,7 +1144,8 @@ static Input* input_from_local_path(const char* pathname, Url* abs_url, String* 
     }
     if (!is_binary_pdf) src_len = strlen(source);
 
-    Input* input = input_from_source_n(source, src_len, abs_url, type, flavor);
+    Input* input = input_from_source_n_with_name_parent(source, src_len,
+        abs_url, type, flavor, name_parent);
     const bool explicit_structurizr = flavor &&
         (strcmp(flavor->chars, "structurizr") == 0 || strcmp(flavor->chars, "c4") == 0);
     const bool detected_structurizr = !flavor &&
@@ -1253,7 +1262,8 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
  * @param flavor - Optional flavor hint (for markup variants)
  * @return Input* on success, NULL on failure
  */
-Input* input_from_target(Target* target, String* type, String* flavor) {
+static Input* input_from_target_impl(Target* target, String* type,
+        String* flavor, NamePool* name_parent) {
     if (!target) {
         log_error("input_from_target: target is NULL");
         return NULL;
@@ -1266,7 +1276,8 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
         log_debug("input_from_target: directory detected, using directory listing");
         StrBuf* path_buf = (StrBuf*)target_to_local_path(target, NULL);
         if (path_buf) {
-            Input* input = input_from_directory(path_buf->str, target->original, false, 1);
+            Input* input = input_from_directory_with_name_parent(path_buf->str,
+                target->original, false, 1, name_parent);
             strbuf_free(path_buf);
             return input;
         }
@@ -1292,13 +1303,15 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
             const char* rdb_driver = rdb_detect_format(pathname, type_str);
             if (rdb_driver) {
                 log_debug("input_from_target: rdb detected driver '%s' for '%s'", rdb_driver, pathname);
-                return input_rdb_from_path(pathname, rdb_driver);
+                return input_rdb_from_path_with_name_parent(pathname, rdb_driver,
+                    name_parent);
             }
 
             log_debug("input_from_target: reading file from path: %s", pathname ? pathname : "null");
             // Create a copy of the URL for the input (input owns lifecycle of url_copy via Input)
             Url* url_copy = url_parse(url->href->chars);
-            Input* input = input_from_local_path(pathname, url_copy, type, flavor);
+            Input* input = input_from_local_path(pathname, url_copy, type, flavor,
+                name_parent);
             if (!input && url_copy) url_destroy(url_copy);
             return input;
         }
@@ -1306,7 +1319,8 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
             log_debug("input_from_target: HTTP/HTTPS URL detected");
             const char* type_str = type ? type->chars : NULL;
             const char* flavor_str = flavor ? flavor->chars : NULL;
-            return input_from_http(url->href->chars, type_str, flavor_str, "./temp/cache");
+            return input_from_http_with_name_parent(url->href->chars, type_str,
+                flavor_str, "./temp/cache", name_parent);
         }
         else if (target->scheme == TARGET_SCHEME_SYS) {
             log_debug("input_from_target: sys:// URL detected");
@@ -1315,7 +1329,7 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
                 log_error("input_from_target: failed to create pool for sys:// URL");
                 return NULL;
             }
-            Input* input = input_from_sysinfo(url, pool);
+            Input* input = input_from_sysinfo_with_name_parent(url, pool, name_parent);
             if (!input) pool_destroy(pool);
             return input;
         }
@@ -1337,7 +1351,8 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
             path_to_string(path, url_buf);
             const char* type_str = type ? type->chars : NULL;
             const char* flavor_str = flavor ? flavor->chars : NULL;
-            Input* input = input_from_http(url_buf->str, type_str, flavor_str, "./temp/cache");
+            Input* input = input_from_http_with_name_parent(url_buf->str, type_str,
+                flavor_str, "./temp/cache", name_parent);
             strbuf_free(url_buf);
             return input;
         }
@@ -1355,7 +1370,8 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
         Url* file_url = file_url_str ? url_parse(file_url_str) : NULL;
         if (file_url_str) mem_free(file_url_str);
 
-        Input* input = input_from_local_path(pathname, file_url, type, flavor);
+        Input* input = input_from_local_path(pathname, file_url, type, flavor,
+            name_parent);
         strbuf_free(path_buf);
         if (!input && file_url) url_destroy(file_url);
         return input;
@@ -1365,7 +1381,24 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
     return NULL;
 }
 
+Input* input_from_target(Target* target, String* type, String* flavor) {
+    return input_from_target_impl(target, type, flavor, NULL);
+}
+
+Input* input_from_target_with_name_parent(Target* target, String* type,
+        String* flavor, NamePool* name_parent) {
+    // Explicitly carry the retained schema parent down to Input construction;
+    // parser work may yield or run nested loaders, so thread-local ownership
+    // state would bind a document to the wrong runtime context.
+    return input_from_target_impl(target, type, flavor, name_parent);
+}
+
 Input* Input::create(Pool* pool, Url* abs_url, Input* parent) {
+    return Input::create_with_name_parent(pool, abs_url, parent, NULL);
+}
+
+Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
+        NamePool* name_parent) {
     if (!pool) {
         log_error("Input::create: pool is NULL");
         return NULL;
@@ -1390,7 +1423,10 @@ Input* Input::create(Pool* pool, Url* abs_url, Input* parent) {
     }
     input->mem_ctx = dctx;
     input->arena = mem_arena_create(dctx, MEM_ROLE_INPUT, "input.arena");
-    input->name_pool = mem_name_pool_create(dctx, pool, NULL, MEM_ROLE_INPUT, "input.name_pool");  // Initialize name pool for string interning
+    // A schema-backed child reuses only the explicit retained NamePool parent;
+    // document-tree parentage is intentionally unrelated to name identity.
+    input->name_pool = mem_name_pool_create(dctx, pool, name_parent,
+        MEM_ROLE_INPUT, "input.name_pool");
     input->shape_pool = mem_shape_pool_create(dctx, pool, input->arena, NULL, "input.shape_pool");  // Initialize shape pool
     input->type_list = arraylist_new(16);
     input->url = abs_url;
@@ -1424,13 +1460,18 @@ InputManager::~InputManager() {
     if (inputs) {
         for (int i = 0; i < inputs->length; i++) {
             Input* input = (Input*)inputs->data[i];
+            if (input && input->name_pool) {
+                // Input name pools retain schema parents; release that edge
+                // before their backing pool/context is torn down.
+                name_pool_release(input->name_pool);
+                input->name_pool = nullptr;
+            }
             if (input && input->mem_ctx) {
                 // destroy the document-owned allocator context before process
                 // shutdown can walk stale arena or semantic-owner nodes.
                 mem_context_destroy((MemContext*)input->mem_ctx);
                 input->mem_ctx = nullptr;
                 input->arena = nullptr;
-                input->name_pool = nullptr;
                 input->shape_pool = nullptr;
             }
             if (input && input->url) {
@@ -1494,6 +1535,11 @@ mpd_context_t* InputManager::decimal_context() {
 
 // Static method to create input using global manager
 Input* InputManager::create_input(Url* abs_url) {
+    return create_input_with_name_parent(abs_url, NULL);
+}
+
+Input* InputManager::create_input_with_name_parent(Url* abs_url,
+        NamePool* name_parent) {
     // Lazy initialization of singleton
     pthread_mutex_lock(&g_input_manager_mutex);
     if (!g_input_manager) {
@@ -1502,11 +1548,16 @@ Input* InputManager::create_input(Url* abs_url) {
     InputManager* manager = g_input_manager;
     pthread_mutex_unlock(&g_input_manager_mutex);
     if (!manager) return nullptr;
-    return manager->create_input_instance(abs_url);
+    return manager->create_input_instance_with_name_parent(abs_url, name_parent);
 }
 
 // Instance method to create input
 Input* InputManager::create_input_instance(Url* abs_url) {
+    return create_input_instance_with_name_parent(abs_url, NULL);
+}
+
+Input* InputManager::create_input_instance_with_name_parent(Url* abs_url,
+        NamePool* name_parent) {
     pthread_mutex_lock(&g_input_manager_mutex);
 
     Pool* pool = nullptr;
@@ -1525,7 +1576,8 @@ Input* InputManager::create_input_instance(Url* abs_url) {
         g_input_thread_pool = pool;
     }
 
-    Input* input = Input::create(pool, abs_url);
+    Input* input = Input::create_with_name_parent(pool, abs_url, NULL,
+        name_parent);
     if (!input) {
         pthread_mutex_unlock(&g_input_manager_mutex);
         log_error("create_input_instance: Input::create returned NULL");

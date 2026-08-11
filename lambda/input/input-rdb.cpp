@@ -589,7 +589,8 @@ static Item rdb_build_table_schema(MarkBuilder& builder, RdbTable* tbl) {
  * @param type      explicit driver name (e.g. "sqlite"), or NULL to auto-detect
  * @return Input with root = <db name:..., schema:{...}, data:{...}>
  */
-Input* input_rdb_from_path(const char* pathname, const char* type) {
+Input* input_rdb_from_path_with_name_parent(const char* pathname,
+        const char* type, NamePool* name_parent) {
     rdb_ensure_drivers();
 
     if (!pathname) {
@@ -599,7 +600,7 @@ Input* input_rdb_from_path(const char* pathname, const char* type) {
 
     // create Input through InputManager
     Url* abs_url = url_parse(pathname);
-    Input* input = InputManager::create_input(abs_url);
+    Input* input = InputManager::create_input_with_name_parent(abs_url, name_parent);
     if (abs_url) url_destroy(abs_url);
     if (!input) {
         log_error("rdb input: failed to create Input for '%s'", pathname);
@@ -777,6 +778,10 @@ Input* input_rdb_from_path(const char* pathname, const char* type) {
 
     log_debug("rdb input: loaded '%s' with %d tables", pathname, conn->schema.table_count);
     return input;
+}
+
+Input* input_rdb_from_path(const char* pathname, const char* type) {
+    return input_rdb_from_path_with_name_parent(pathname, type, NULL);
 }
 
 /**

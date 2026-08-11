@@ -32,6 +32,7 @@ public:
 
     // Create a new input using the managed pool
     static Input* create_input(Url* abs_url);
+    static Input* create_input_with_name_parent(Url* abs_url, NamePool* name_parent);
 
     // Destroy the global instance (optional cleanup)
     static void destroy_global();
@@ -43,6 +44,7 @@ public:
 
     // Instance methods for direct manager usage
     Input* create_input_instance(Url* abs_url);
+    Input* create_input_instance_with_name_parent(Url* abs_url, NamePool* name_parent);
     Pool* get_pool() const { return global_pool; }
 
     // Audited factory boundary (single construction site) - InputManager has a
@@ -73,13 +75,19 @@ void skip_whitespace(const char** text);
 void skip_tab_pace(const char** text);
 
 Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
+Input* input_from_source_with_name_parent(const char* source, Url* url,
+    String* type, String* flavor, NamePool* name_parent);
 Input* input_from_directory(const char* directory_path, const char* original_url, bool recursive, int max_depth);
+Input* input_from_directory_with_name_parent(const char* directory_path,
+    const char* original_url, bool recursive, int max_depth, NamePool* name_parent);
 Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 
 // Target-based input (unified I/O target handling)
 // Uses Target struct from lambda.h for unified URL/Path handling
 struct Target;  // forward declaration
 Input* input_from_target(struct Target* target, String* type, String* flavor);
+Input* input_from_target_with_name_parent(struct Target* target, String* type,
+    String* flavor, NamePool* name_parent);
 
 // Math parsing functions (from input-math.cpp)
 void parse_math(Input* input, const char* math_string, const char* flavor_str);
@@ -154,6 +162,8 @@ char* download_http_content_cached(const char* url, size_t* content_size, const 
 int http_prefetch_urls_parallel(const char* const* urls, int count, const char* cache_dir, int max_threads);
 
 Input* input_from_http(const char* url, const char* type, const char* flavor, const char* cache_dir);
+Input* input_from_http_with_name_parent(const char* url, const char* type,
+    const char* flavor, const char* cache_dir, NamePool* name_parent);
 FetchResponse* http_fetch(const char* url, const FetchConfig* config);
 void free_fetch_response(FetchResponse* response);
 const char* content_type_to_extension(const char* content_type);
@@ -164,6 +174,7 @@ typedef struct SysInfoManager SysInfoManager;
 SysInfoManager* sysinfo_manager_create(void);
 void sysinfo_manager_destroy(SysInfoManager* manager);
 Input* input_from_sysinfo(Url* url, Pool* pool);
+Input* input_from_sysinfo_with_name_parent(Url* url, Pool* pool, NamePool* name_parent);
 bool is_sys_url(const char* url);
 
 // Graph parsing functions (from input-graph.cpp)

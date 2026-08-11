@@ -19,7 +19,7 @@ static void jm_emit_function_decl_runtime_bindings(JsMirTranspiler* mt,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
     }
     if (mt->is_eval_direct && !mt->is_global_strict) {
-        MIR_reg_t fk = jm_box_string_literal(mt, fn->name->chars, (int)fn->name->len);
+        MIR_reg_t fk = jm_box_property_name_literal(mt, fn->name->chars, fn->name->len);
         MIR_reg_t eval_env_active = jm_call_0(mt, "js_eval_env_is_active", MIR_T_I64);
         MIR_label_t global_export = jm_new_label(mt);
         MIR_label_t export_done = jm_new_label(mt);
@@ -65,7 +65,7 @@ static void jm_emit_function_decl_runtime_bindings(JsMirTranspiler* mt,
         jm_emit_label(mt, export_done);
     }
     if (!mt->is_module && !mt->is_eval_direct) {
-        MIR_reg_t fk = jm_box_string_literal(mt, fn->name->chars, (int)fn->name->len);
+        MIR_reg_t fk = jm_box_property_name_literal(mt, fn->name->chars, fn->name->len);
         jm_call_void_3(mt, "js_define_global_property_v",
             MIR_T_I64, MIR_new_int_op(mt->ctx, 2),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
@@ -995,390 +995,6 @@ static JsFunctionNode* jm_find_iife_function_expr(JsAstNode* expr) {
     return jm_find_iife_function_expr(call->callee);
 }
 
-static int jm_ctor_prop_find_raw(const char** ptrs, const int* lens, int count,
-        const char* name, int name_len) {
-    if (!ptrs || !lens || !name || name_len <= 0) return -1;
-    for (int i = 0; i < count; i++) {
-        if (lens[i] == name_len && ptrs[i] &&
-            strncmp(ptrs[i], name, (size_t)name_len) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-static bool jm_ctor_prop_append_raw(const char** dst_ptrs, int* dst_lens,
-        int* dst_ta_types, TypeId* dst_types, int* dst_param_idx, int* dst_count,
-        const char* name, int name_len, int ta_type, TypeId field_type,
-        int param_idx, bool inherited) {
-    if (!dst_ptrs || !dst_lens || !dst_ta_types || !dst_types || !dst_param_idx ||
-        !dst_count || !name || name_len <= 0) {
-        return true;
-    }
-    int idx = jm_ctor_prop_find_raw(dst_ptrs, dst_lens, *dst_count, name, name_len);
-    if (idx >= 0) {
-        if (ta_type >= 0) dst_ta_types[idx] = ta_type;
-        if (field_type != LMD_TYPE_NULL) dst_types[idx] = field_type;
-        if (!inherited && param_idx >= 0) dst_param_idx[idx] = param_idx;
-        return true;
-    }
-    if (*dst_count >= 16) return false;
-    idx = *dst_count;
-    dst_ptrs[idx] = name;
-    dst_lens[idx] = name_len;
-    dst_ta_types[idx] = ta_type;
-    dst_types[idx] = field_type;
-    dst_param_idx[idx] = inherited ? -1 : param_idx;
-    *dst_count = idx + 1;
-    return true;
-}
-
-static bool jm_ctor_prop_append_from_fc(const char** dst_ptrs, int* dst_lens,
-        int* dst_ta_types, TypeId* dst_types, int* dst_param_idx, int* dst_count,
-        JsFuncCollected* src_fc, bool inherited) {
-    if (!src_fc) return true;
-    for (int i = 0; i < src_fc->ctor_prop_count; i++) {
-        if (!jm_ctor_prop_append_raw(dst_ptrs, dst_lens, dst_ta_types,
-                dst_types, dst_param_idx, dst_count,
-                src_fc->ctor_prop_ptrs[i], src_fc->ctor_prop_lens[i],
-                src_fc->ctor_prop_ta_types[i], src_fc->ctor_prop_types[i],
-                src_fc->ctor_prop_param_idx[i], inherited)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-static JsFuncCollected* jm_nearest_ctor_shape_fc(JsClassEntry* ce) {
-    for (JsClassEntry* p = ce; p; p = p->superclass) {
-        if (p->constructor && p->constructor->fc &&
-            p->constructor->fc->ctor_prop_count > 0) {
-            return p->constructor->fc;
-        }
-    }
-    return NULL;
-}
-
-static void jm_disable_ctor_shape_chain(JsClassEntry* ce) {
-    for (JsClassEntry* p = ce; p; p = p->superclass) {
-        if (p->constructor && p->constructor->fc) {
-            p->constructor->fc->ctor_prop_count = 0;
-        }
-        p->ctor_shape_compose_failed = true;
-    }
-}
-
-static bool jm_compose_derived_ctor_shape(JsClassEntry* ce, int depth) {
-    if (!ce) return true;
-    if (ce->ctor_shape_composed) return !ce->ctor_shape_compose_failed;
-    ce->ctor_shape_composed = true;
-    if (depth > 32) {
-        ce->ctor_shape_compose_failed = true;
-        return false;
-    }
-    if (ce->superclass && !jm_compose_derived_ctor_shape(ce->superclass, depth + 1)) {
-        ce->ctor_shape_compose_failed = true;
-        return false;
-    }
-    if (!ce->superclass) return true;
-
-    JsFuncCollected* parent_fc = jm_nearest_ctor_shape_fc(ce->superclass);
-    if (!parent_fc || parent_fc->ctor_prop_count <= 0) return true;
-
-    if (ce->instance_field_count > 0) {
-        log_debug("Tune11-P5: disabling inherited ctor shape for '%.*s' because instance fields are present",
-            ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "");
-        ce->ctor_shape_compose_failed = true;
-        return false;
-    }
-
-    if (!ce->constructor || !ce->constructor->fc) {
-        log_debug("Tune11-P5: disabling inherited ctor shape for '%.*s' because it has an implicit constructor",
-            ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "");
-        ce->ctor_shape_compose_failed = true;
-        return false;
-    }
-
-    JsFuncCollected* fc = ce->constructor->fc;
-    const char* own_ptrs[16];
-    int own_lens[16];
-    int own_ta_types[16];
-    TypeId own_types[16];
-    int own_param_idx[16];
-    int own_count = fc->ctor_prop_count;
-    if (own_count < 0) own_count = 0;
-    if (own_count > 16) own_count = 16;
-    for (int i = 0; i < own_count; i++) {
-        own_ptrs[i] = fc->ctor_prop_ptrs[i];
-        own_lens[i] = fc->ctor_prop_lens[i];
-        own_ta_types[i] = fc->ctor_prop_ta_types[i];
-        own_types[i] = fc->ctor_prop_types[i];
-        own_param_idx[i] = fc->ctor_prop_param_idx[i];
-    }
-
-    const char* merged_ptrs[16];
-    int merged_lens[16];
-    int merged_ta_types[16];
-    TypeId merged_types[16];
-    int merged_param_idx[16];
-    int merged_count = 0;
-    memset(merged_ptrs, 0, sizeof(merged_ptrs));
-    memset(merged_lens, 0, sizeof(merged_lens));
-    memset(merged_ta_types, -1, sizeof(merged_ta_types));
-    memset(merged_types, 0, sizeof(merged_types));
-    memset(merged_param_idx, -1, sizeof(merged_param_idx));
-
-    bool ok = jm_ctor_prop_append_from_fc(merged_ptrs, merged_lens,
-        merged_ta_types, merged_types, merged_param_idx, &merged_count,
-        parent_fc, true);
-    for (int i = 0; ok && i < own_count; i++) {
-        ok = jm_ctor_prop_append_raw(merged_ptrs, merged_lens,
-            merged_ta_types, merged_types, merged_param_idx, &merged_count,
-            own_ptrs[i], own_lens[i], own_ta_types[i], own_types[i],
-            own_param_idx[i], false);
-    }
-    if (!ok) {
-        log_debug("Tune11-P5: disabling inherited ctor shape for '%.*s' because merged field count exceeds 16",
-            ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "");
-        ce->ctor_shape_compose_failed = true;
-        return false;
-    }
-
-    fc->ctor_prop_count = merged_count;
-    for (int i = 0; i < merged_count; i++) {
-        fc->ctor_prop_ptrs[i] = merged_ptrs[i];
-        fc->ctor_prop_lens[i] = merged_lens[i];
-        fc->ctor_prop_ta_types[i] = merged_ta_types[i];
-        fc->ctor_prop_types[i] = merged_types[i];
-        fc->ctor_prop_param_idx[i] = merged_param_idx[i];
-    }
-    log_debug("Tune11-P5: composed ctor shape for '%.*s' with %d inherited+own props",
-        ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",
-        merged_count);
-    return true;
-}
-
-static void jm_compose_derived_ctor_shapes(JsMirTranspiler* mt) {
-    if (!mt) return;
-    for (int i = 0; i < mt->class_count; i++) {
-        jm_disable_ctor_shape_for_method_overwrite(&mt->class_entries[i]);
-    }
-    for (int i = 0; i < mt->class_count; i++) {
-        JsClassEntry* ce = &mt->class_entries[i];
-        if (ce->superclass && !jm_compose_derived_ctor_shape(ce, 0)) {
-            jm_disable_ctor_shape_chain(ce);
-        }
-    }
-    for (int i = 0; i < mt->class_count; i++) {
-        JsClassEntry* ce = &mt->class_entries[i];
-        if (ce->constructor && ce->constructor->fc &&
-            ce->constructor->fc->ctor_prop_count > 0 &&
-            !ce->shape_cache_ptr) {
-            ce->shape_cache_ptr = jm_alloc_shape_cache_slot(mt);
-        }
-    }
-}
-
-static bool jm_func_ctor_name_matches(JsFuncCollected* fc, const char* name, int name_len) {
-    if (!fc || !fc->node || !fc->node->name || !name || name_len <= 0) return false;
-    return (int)fc->node->name->len == name_len &&
-        strncmp(fc->node->name->chars, name, (size_t)name_len) == 0;
-}
-
-static JsFuncCollected* jm_find_function_ctor_fc(JsMirTranspiler* mt,
-        const char* name, int name_len) {
-    if (!mt || !name || name_len <= 0) return NULL;
-    for (int i = 0; i < mt->func_count; i++) {
-        JsFuncCollected* fc = &mt->func_entries[i];
-        if (!fc->node || fc->is_class_method || fc->is_reassigned) continue;
-        if (fc->node->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
-        if (jm_func_ctor_name_matches(fc, name, name_len)) return fc;
-    }
-    return NULL;
-}
-
-static bool jm_inherits_call_parent_name(JsAstNode* stmt, const char* child,
-        int child_len, const char** out_parent, int* out_parent_len) {
-    if (!stmt || !child || child_len <= 0 || !out_parent || !out_parent_len) return false;
-    if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
-        JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
-        stmt = es->expression;
-    }
-    if (!stmt || stmt->node_type != JS_AST_NODE_CALL_EXPRESSION) return false;
-    JsCallNode* call = (JsCallNode*)stmt;
-    if (!call->callee || call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return false;
-    JsMemberNode* mem = (JsMemberNode*)call->callee;
-    if (mem->computed || !mem->object || !mem->property) return false;
-    if (mem->object->node_type != JS_AST_NODE_IDENTIFIER ||
-            mem->property->node_type != JS_AST_NODE_IDENTIFIER) {
-        return false;
-    }
-    JsIdentifierNode* obj = (JsIdentifierNode*)mem->object;
-    JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
-    if (!obj->name || !prop->name || !call->arguments) return false;
-    if ((int)obj->name->len != child_len ||
-            strncmp(obj->name->chars, child, (size_t)child_len) != 0) {
-        return false;
-    }
-    if (prop->name->len != 12 ||
-            strncmp(prop->name->chars, "inheritsFrom", 12) != 0) {
-        return false;
-    }
-    if (call->arguments->node_type != JS_AST_NODE_IDENTIFIER) return false;
-    JsIdentifierNode* parent = (JsIdentifierNode*)call->arguments;
-    if (!parent->name || parent->name->len <= 0) return false;
-    *out_parent = parent->name->chars;
-    *out_parent_len = (int)parent->name->len;
-    return true;
-}
-
-static bool jm_find_inherits_parent_name(JsMirTranspiler* mt, const char* child,
-        int child_len, const char** out_parent, int* out_parent_len) {
-    if (!mt || !mt->root_node || mt->root_node->node_type != JS_AST_NODE_PROGRAM) return false;
-    JsProgramNode* program = (JsProgramNode*)mt->root_node;
-    for (JsAstNode* stmt = program->body; stmt; stmt = stmt->next) {
-        if (jm_inherits_call_parent_name(stmt, child, child_len, out_parent, out_parent_len)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool jm_resolve_func_ctor_parent_name(JsMirTranspiler* mt, JsFuncCollected* fc,
-        const char** out_parent, int* out_parent_len) {
-    if (!mt || !fc || !out_parent || !out_parent_len || !fc->ctor_has_super_call) return false;
-    if (fc->ctor_super_via_self_prop) {
-        if (!jm_func_ctor_name_matches(fc, fc->ctor_super_name_ptr, fc->ctor_super_name_len)) {
-            return false;
-        }
-        return jm_find_inherits_parent_name(mt, fc->ctor_super_name_ptr,
-            fc->ctor_super_name_len, out_parent, out_parent_len);
-    }
-
-    const char* inherited_parent = NULL;
-    int inherited_parent_len = 0;
-    if (!fc->node || !fc->node->name ||
-            !jm_find_inherits_parent_name(mt, fc->node->name->chars,
-                (int)fc->node->name->len, &inherited_parent, &inherited_parent_len)) {
-        return false;
-    }
-    if (inherited_parent_len != fc->ctor_super_name_len ||
-            strncmp(inherited_parent, fc->ctor_super_name_ptr,
-                (size_t)fc->ctor_super_name_len) != 0) {
-        return false;
-    }
-
-    *out_parent = fc->ctor_super_name_ptr;
-    *out_parent_len = fc->ctor_super_name_len;
-    return *out_parent && *out_parent_len > 0;
-}
-
-static void jm_disable_func_ctor_shape(JsFuncCollected* fc, const char* reason) {
-    if (!fc) return;
-    fc->ctor_prop_count = 0;
-    fc->func_ctor_shape_compose_failed = true;
-    log_debug("Tune12-P2b: disabling function ctor shape for '%s': %s",
-        fc->name, reason ? reason : "unknown");
-}
-
-static bool jm_compose_function_ctor_shape(JsMirTranspiler* mt,
-        JsFuncCollected* fc, int depth) {
-    if (!mt || !fc) return true;
-    if (fc->func_ctor_shape_composed) return !fc->func_ctor_shape_compose_failed;
-    fc->func_ctor_shape_composed = true;
-    if (fc->ctor_has_dynamic_this_call) {
-        jm_disable_func_ctor_shape(fc, "dynamic .call(this) pattern");
-        return false;
-    }
-    if (!fc->ctor_has_super_call) return true;
-    if (depth > 32) {
-        jm_disable_func_ctor_shape(fc, "inheritance depth exceeded");
-        return false;
-    }
-
-    const char* parent_name = NULL;
-    int parent_len = 0;
-    if (!jm_resolve_func_ctor_parent_name(mt, fc, &parent_name, &parent_len)) {
-        jm_disable_func_ctor_shape(fc, "unresolved parent constructor");
-        return false;
-    }
-    JsFuncCollected* parent_fc = jm_find_function_ctor_fc(mt, parent_name, parent_len);
-    if (!parent_fc) {
-        jm_disable_func_ctor_shape(fc, "parent constructor is not a stable function declaration");
-        return false;
-    }
-    if (!jm_compose_function_ctor_shape(mt, parent_fc, depth + 1)) {
-        jm_disable_func_ctor_shape(fc, "parent constructor shape unavailable");
-        return false;
-    }
-
-    const char* own_ptrs[16];
-    int own_lens[16];
-    int own_ta_types[16];
-    TypeId own_types[16];
-    int own_param_idx[16];
-    int own_count = fc->ctor_prop_count;
-    if (own_count < 0) own_count = 0;
-    if (own_count > 16) own_count = 16;
-    for (int i = 0; i < own_count; i++) {
-        own_ptrs[i] = fc->ctor_prop_ptrs[i];
-        own_lens[i] = fc->ctor_prop_lens[i];
-        own_ta_types[i] = fc->ctor_prop_ta_types[i];
-        own_types[i] = fc->ctor_prop_types[i];
-        own_param_idx[i] = fc->ctor_prop_param_idx[i];
-    }
-
-    const char* merged_ptrs[16];
-    int merged_lens[16];
-    int merged_ta_types[16];
-    TypeId merged_types[16];
-    int merged_param_idx[16];
-    int merged_count = 0;
-    memset(merged_ptrs, 0, sizeof(merged_ptrs));
-    memset(merged_lens, 0, sizeof(merged_lens));
-    memset(merged_ta_types, -1, sizeof(merged_ta_types));
-    memset(merged_types, 0, sizeof(merged_types));
-    memset(merged_param_idx, -1, sizeof(merged_param_idx));
-
-    bool ok = jm_ctor_prop_append_from_fc(merged_ptrs, merged_lens,
-        merged_ta_types, merged_types, merged_param_idx, &merged_count,
-        parent_fc, true);
-    for (int i = 0; ok && i < own_count; i++) {
-        ok = jm_ctor_prop_append_raw(merged_ptrs, merged_lens,
-            merged_ta_types, merged_types, merged_param_idx, &merged_count,
-            own_ptrs[i], own_lens[i], own_ta_types[i], own_types[i],
-            own_param_idx[i], false);
-    }
-    if (!ok) {
-        jm_disable_func_ctor_shape(fc, "merged field count exceeds 16");
-        return false;
-    }
-
-    fc->ctor_prop_count = merged_count;
-    for (int i = 0; i < merged_count; i++) {
-        fc->ctor_prop_ptrs[i] = merged_ptrs[i];
-        fc->ctor_prop_lens[i] = merged_lens[i];
-        fc->ctor_prop_ta_types[i] = merged_ta_types[i];
-        fc->ctor_prop_types[i] = merged_types[i];
-        fc->ctor_prop_param_idx[i] = merged_param_idx[i];
-    }
-    log_debug("Tune12-P2b: composed function ctor shape for '%s' with %d inherited+own props",
-        fc->name, merged_count);
-    return true;
-}
-
-static void jm_compose_function_ctor_shapes(JsMirTranspiler* mt) {
-    if (!mt) return;
-    for (int i = 0; i < mt->func_count; i++) {
-        JsFuncCollected* fc = &mt->func_entries[i];
-        if (!fc->node || fc->is_class_method || fc->is_reassigned) continue;
-        if (fc->node->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
-        if (!jm_compose_function_ctor_shape(mt, fc, 0)) {
-            fc->func_ctor_shape_compose_failed = true;
-        }
-    }
-}
-
 static void jm_collect_direct_statement_let_const_names(JsAstNode* stmt, struct hashmap* names) {
     if (!stmt || !names) return;
     if (stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
@@ -2013,8 +1629,6 @@ void jm_compile_recovery_state_destroy_context(JsRuntimeState* runtime_state) {
 
 void jm_defer_mir_cleanup(MIR_context_t ctx) {
     if (module_mir_context_count < JS_DEFERRED_MIR_MAX) {
-        module_mir_name_pools[module_mir_context_count] = NULL;
-        module_mir_ast_pools[module_mir_context_count] = NULL;
         module_mir_source_buffers[module_mir_context_count] = NULL;
         module_mir_contexts[module_mir_context_count++] = ctx;
     } else {
@@ -2032,8 +1646,6 @@ void jm_cleanup_deferred_mir() {
     js_dynfunc_cache_reset();
     for (int i = 0; i < module_mir_context_count; i++) {
         MIR_finish(module_mir_contexts[i]);
-        if (module_mir_name_pools[i]) name_pool_release(module_mir_name_pools[i]);
-        if (module_mir_ast_pools[i]) pool_destroy(module_mir_ast_pools[i]);
         if (module_mir_source_buffers[i]) mem_free(module_mir_source_buffers[i]);
     }
     module_mir_context_count = 0;
@@ -2053,19 +1665,16 @@ void jm_finish_last_deferred_mir() {
     if (module_mir_context_count > 0) {
         module_mir_context_count--;
         MIR_finish(module_mir_contexts[module_mir_context_count]);
-        if (module_mir_name_pools[module_mir_context_count]) {
-            name_pool_release(module_mir_name_pools[module_mir_context_count]);
-            module_mir_name_pools[module_mir_context_count] = NULL;
-        }
-        if (module_mir_ast_pools[module_mir_context_count]) {
-            pool_destroy(module_mir_ast_pools[module_mir_context_count]);
-            module_mir_ast_pools[module_mir_context_count] = NULL;
-        }
         if (module_mir_source_buffers[module_mir_context_count]) {
             mem_free(module_mir_source_buffers[module_mir_context_count]);
             module_mir_source_buffers[module_mir_context_count] = NULL;
         }
     }
+}
+
+static bool jm_path_has_lambda_ext(const char* path) {
+    int len = path ? (int)strlen(path) : 0;
+    return len >= 3 && strcmp(path + len - 3, ".ls") == 0;
 }
 
 static bool jm_path_has_known_js_ext(const char* path) {
@@ -2074,7 +1683,7 @@ static bool jm_path_has_known_js_ext(const char* path) {
            (len >= 4 && strcmp(path + len - 4, ".mjs") == 0) ||
            (len >= 4 && strcmp(path + len - 4, ".cjs") == 0) ||
            (len >= 5 && strcmp(path + len - 5, ".json") == 0) ||
-           (len >= 3 && strcmp(path + len - 3, ".ls") == 0);
+           jm_path_has_lambda_ext(path);
 }
 
 // Resolve a module specifier relative to the importing file's directory
@@ -2161,7 +1770,7 @@ void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
     MIR_reg_t val = jm_transpile_box_item(mt, (JsAstNode*)&temp_id);
     const char* export_key = is_default ? "default" : name;
     int export_key_len = is_default ? 7 : name_len;
-    MIR_reg_t key = jm_box_string_literal(mt, export_key, export_key_len);
+    MIR_reg_t key = jm_box_property_name_literal(mt, export_key, export_key_len);
     jm_call_3(mt, "js_property_set", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
@@ -2179,7 +1788,7 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
     temp_id.name = name_pool_create_len(mt->tp->name_pool, local_name, local_len);
 
     MIR_reg_t val = jm_transpile_box_item(mt, (JsAstNode*)&temp_id);
-    MIR_reg_t key = jm_box_string_literal(mt, export_name, export_len);
+    MIR_reg_t key = jm_box_property_name_literal(mt, export_name, export_len);
     jm_call_3(mt, "js_property_set", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
@@ -2834,225 +2443,6 @@ static TypeId jm_p6_arg_type_with_evidence(JsMirTranspiler* mt, JsAstNode* arg,
     return result != LMD_TYPE_ANY ? result : jm_p6_static_arg_type(mt, arg);
 }
 
-// ============================================================================
-// Phase 1.78: P4b constructor call-site type propagation
-// Walks AST to find new ClassName(args) expressions and accumulates argument
-// type evidence per class constructor, enabling typed slot reads for
-// parameter-assigned fields (this.x ).
-// ============================================================================
-void jm_p4b_ctor_walk(JsMirTranspiler* mt, JsAstNode* node,
-                              P4bCtorEvidence* evidence) {
-    if (!node) return;
-    switch (node->node_type) {
-    case JS_AST_NODE_NEW_EXPRESSION: {
-        JsCallNode* call = (JsCallNode*)node;
-        if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* cid = (JsIdentifierNode*)call->callee;
-            for (int ci = 0; ci < mt->class_count; ci++) {
-                JsClassEntry* ce = &mt->class_entries[ci];
-                if (!ce->name || (int)ce->name->len != (int)cid->name->len) continue;
-                if (strncmp(ce->name->chars, cid->name->chars, ce->name->len) != 0) continue;
-                if (!ce->constructor || !ce->constructor->fc) break;
-                JsFuncCollected* ctor_fc = ce->constructor->fc;
-                if (ctor_fc->ctor_prop_count == 0) break;
-                JsAstNode* arg = call->arguments;
-                for (int pi = 0; arg && pi < 16; pi++, arg = arg->next) {
-                    TypeId at = jm_p6_static_arg_type(mt, arg);
-                    // boolean arguments are control values, not numeric slot evidence.
-                    if (at == LMD_TYPE_INT || at == LMD_TYPE_FLOAT)
-                        evidence[ci * 16 + pi].float_count++;
-                    else
-                        evidence[ci * 16 + pi].other_count++;
-                }
-                break;
-            }
-        }
-        // recurse into arguments (may contain nested new expressions)
-        JsAstNode* a = call->arguments;
-        while (a) { jm_p4b_ctor_walk(mt, a, evidence); a = a->next; }
-        break;
-    }
-    case JS_AST_NODE_CALL_EXPRESSION: {
-        JsCallNode* call = (JsCallNode*)node;
-        JsAstNode* a = call->arguments;
-        while (a) { jm_p4b_ctor_walk(mt, a, evidence); a = a->next; }
-        jm_p4b_ctor_walk(mt, call->callee, evidence);
-        break;
-    }
-    case JS_AST_NODE_BINARY_EXPRESSION: {
-        JsBinaryNode* bin = (JsBinaryNode*)node;
-        jm_p4b_ctor_walk(mt, bin->left, evidence);
-        jm_p4b_ctor_walk(mt, bin->right, evidence);
-        break;
-    }
-    case JS_AST_NODE_UNARY_EXPRESSION: {
-        JsUnaryNode* un = (JsUnaryNode*)node;
-        jm_p4b_ctor_walk(mt, un->operand, evidence);
-        break;
-    }
-    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
-        JsAssignmentNode* asgn = (JsAssignmentNode*)node;
-        jm_p4b_ctor_walk(mt, asgn->right, evidence);
-        jm_p4b_ctor_walk(mt, asgn->left, evidence);
-        break;
-    }
-    case JS_AST_NODE_MEMBER_EXPRESSION: {
-        JsMemberNode* mem = (JsMemberNode*)node;
-        jm_p4b_ctor_walk(mt, mem->object, evidence);
-        if (mem->computed) jm_p4b_ctor_walk(mt, mem->property, evidence);
-        break;
-    }
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
-        JsConditionalNode* cond = (JsConditionalNode*)node;
-        jm_p4b_ctor_walk(mt, cond->test, evidence);
-        jm_p4b_ctor_walk(mt, cond->consequent, evidence);
-        jm_p4b_ctor_walk(mt, cond->alternate, evidence);
-        break;
-    }
-    case JS_AST_NODE_RETURN_STATEMENT: {
-        JsReturnNode* ret = (JsReturnNode*)node;
-        jm_p4b_ctor_walk(mt, ret->argument, evidence);
-        break;
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
-        JsAstNode* d = vd->declarations;
-        while (d) { jm_p4b_ctor_walk(mt, d, evidence); d = d->next; }
-        break;
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATOR: {
-        JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)node;
-        jm_p4b_ctor_walk(mt, vd->init, evidence);
-        break;
-    }
-    case JS_AST_NODE_EXPRESSION_STATEMENT: {
-        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
-        jm_p4b_ctor_walk(mt, es->expression, evidence);
-        break;
-    }
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* ifn = (JsIfNode*)node;
-        jm_p4b_ctor_walk(mt, ifn->test, evidence);
-        jm_p4b_ctor_walk(mt, ifn->consequent, evidence);
-        jm_p4b_ctor_walk(mt, ifn->alternate, evidence);
-        break;
-    }
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        JsAstNode* s = blk->statements;
-        while (s) { jm_p4b_ctor_walk(mt, s, evidence); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* w = (JsWhileNode*)node;
-        jm_p4b_ctor_walk(mt, w->test, evidence);
-        jm_p4b_ctor_walk(mt, w->body, evidence);
-        break;
-    }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* f = (JsForNode*)node;
-        jm_p4b_ctor_walk(mt, f->init, evidence);
-        jm_p4b_ctor_walk(mt, f->test, evidence);
-        jm_p4b_ctor_walk(mt, f->update, evidence);
-        jm_p4b_ctor_walk(mt, f->body, evidence);
-        break;
-    }
-    case JS_AST_NODE_FOR_IN_STATEMENT:
-    case JS_AST_NODE_FOR_OF_STATEMENT: {
-        JsForInNode* fin = (JsForInNode*)node;
-        jm_p4b_ctor_walk(mt, fin->right, evidence);
-        jm_p4b_ctor_walk(mt, fin->body, evidence);
-        break;
-    }
-    case JS_AST_NODE_SWITCH_STATEMENT: {
-        JsSwitchNode* sw = (JsSwitchNode*)node;
-        jm_p4b_ctor_walk(mt, sw->discriminant, evidence);
-        JsAstNode* c = sw->cases;
-        while (c) { jm_p4b_ctor_walk(mt, c, evidence); c = c->next; }
-        break;
-    }
-    case JS_AST_NODE_SWITCH_CASE: {
-        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
-        jm_p4b_ctor_walk(mt, sc->test, evidence);
-        JsAstNode* s = sc->consequent;
-        while (s) { jm_p4b_ctor_walk(mt, s, evidence); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_TRY_STATEMENT: {
-        JsTryNode* t = (JsTryNode*)node;
-        jm_p4b_ctor_walk(mt, t->block, evidence);
-        jm_p4b_ctor_walk(mt, t->handler, evidence);
-        jm_p4b_ctor_walk(mt, t->finalizer, evidence);
-        break;
-    }
-    case JS_AST_NODE_CATCH_CLAUSE: {
-        JsCatchNode* cc = (JsCatchNode*)node;
-        jm_p4b_ctor_walk(mt, cc->body, evidence);
-        break;
-    }
-    case JS_AST_NODE_DO_WHILE_STATEMENT: {
-        JsDoWhileNode* dw = (JsDoWhileNode*)node;
-        jm_p4b_ctor_walk(mt, dw->body, evidence);
-        jm_p4b_ctor_walk(mt, dw->test, evidence);
-        break;
-    }
-    case JS_AST_NODE_ARRAY_EXPRESSION: {
-        JsArrayNode* arr = (JsArrayNode*)node;
-        JsAstNode* e = arr->elements;
-        while (e) { jm_p4b_ctor_walk(mt, e, evidence); e = e->next; }
-        break;
-    }
-    case JS_AST_NODE_OBJECT_EXPRESSION: {
-        JsObjectNode* obj = (JsObjectNode*)node;
-        JsAstNode* p = obj->properties;
-        while (p) { jm_p4b_ctor_walk(mt, p, evidence); p = p->next; }
-        break;
-    }
-    case JS_AST_NODE_PROPERTY: {
-        JsPropertyNode* prop = (JsPropertyNode*)node;
-        jm_p4b_ctor_walk(mt, prop->value, evidence);
-        break;
-    }
-    case JS_AST_NODE_TEMPLATE_LITERAL: {
-        JsTemplateLiteralNode* tl = (JsTemplateLiteralNode*)node;
-        if (tl->expressions) {
-            JsAstNode* e = tl->expressions;
-            while (e) { jm_p4b_ctor_walk(mt, e, evidence); e = e->next; }
-        }
-        break;
-    }
-    case JS_AST_NODE_THROW_STATEMENT: {
-        JsThrowNode* th = (JsThrowNode*)node;
-        jm_p4b_ctor_walk(mt, th->argument, evidence);
-        break;
-    }
-    case JS_AST_NODE_SPREAD_ELEMENT: {
-        JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
-        jm_p4b_ctor_walk(mt, sp->argument, evidence);
-        break;
-    }
-    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
-        JsSequenceNode* seq = (JsSequenceNode*)node;
-        JsAstNode* e = seq->expressions;
-        while (e) { jm_p4b_ctor_walk(mt, e, evidence); e = e->next; }
-        break;
-    }
-    case JS_AST_NODE_LABELED_STATEMENT: {
-        JsLabeledStatementNode* lab = (JsLabeledStatementNode*)node;
-        jm_p4b_ctor_walk(mt, lab->body, evidence);
-        break;
-    }
-    case JS_AST_NODE_WITH_STATEMENT: {
-        JsWithStatementNode* ws = (JsWithStatementNode*)node;
-        jm_p4b_ctor_walk(mt, ws->object, evidence);
-        jm_p4b_ctor_walk(mt, ws->body, evidence);
-        break;
-    }
-    default:
-        break;
-    }
-}
-
 // Per-function, per-param call-site evidence
 // Walk AST collecting call-site argument types for narrowing
 void jm_p6_narrow_walk(JsMirTranspiler* mt, JsAstNode* node,
@@ -3445,7 +2835,7 @@ void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body) {
 
 static void jm_emit_evalscript_global_decl_check_name(JsMirTranspiler* mt, String* name, bool is_func) {
     if (!name || name->len <= 0) return;
-    MIR_reg_t key_reg = jm_box_string_literal(mt, name->chars, (int)name->len);
+    MIR_reg_t key_reg = jm_box_property_name_literal(mt, name->chars, name->len);
     jm_call_1(mt,
         is_func ? "js_evalscript_check_global_function_decl" : "js_evalscript_check_global_var_decl",
         MIR_T_I64,
@@ -3457,7 +2847,7 @@ static void jm_emit_evalscript_global_decl_check_prefixed(JsMirTranspiler* mt, c
     if (!name) return;
     if (strncmp(name, "_js_", 4) == 0) name += 4;
     if (!name[0]) return;
-    MIR_reg_t key_reg = jm_box_string_literal(mt, name, (int)strlen(name));
+    MIR_reg_t key_reg = jm_box_property_name_literal(mt, name, strlen(name));
     jm_call_1(mt, "js_evalscript_check_global_var_decl", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
     jm_emit_error_lane_propagate_check(mt);
@@ -3465,7 +2855,7 @@ static void jm_emit_evalscript_global_decl_check_prefixed(JsMirTranspiler* mt, c
 
 static void jm_emit_evalscript_global_lex_decl_check_name(JsMirTranspiler* mt, String* name) {
     if (!name || name->len <= 0) return;
-    MIR_reg_t key_reg = jm_box_string_literal(mt, name->chars, (int)name->len);
+    MIR_reg_t key_reg = jm_box_property_name_literal(mt, name->chars, name->len);
     jm_call_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
     jm_emit_error_lane_propagate_check(mt);
@@ -3497,7 +2887,7 @@ static void jm_emit_evalscript_global_lex_decl_precheck(JsMirTranspiler* mt, JsA
                 JsNameSetEntry* entry = (JsNameSetEntry*)item;
                 const char* name = entry->name;
                 if (strncmp(name, "_js_", 4) == 0) name += 4;
-                MIR_reg_t key_reg = jm_box_string_literal(mt, name, (int)strlen(name));
+                MIR_reg_t key_reg = jm_box_property_name_literal(mt, name, strlen(name));
                 jm_call_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
                 jm_emit_error_lane_propagate_check(mt);
@@ -6189,70 +5579,6 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
     }
 
-    // Phase 1.78: P4b constructor call-site type propagation.
-    // For this.prop = param patterns where the field type is unknown, propagate
-    // types from new ClassName(arg1, arg2, ...) call-site argument types.
-    if (mt->class_count > 0) {
-        // check if any class has untyped param-assigned properties
-        bool needs_scan = false;
-        for (int ci = 0; ci < mt->class_count && !needs_scan; ci++) {
-            JsClassEntry* ce = &mt->class_entries[ci];
-            if (!ce->constructor || !ce->constructor->fc) continue;
-            JsFuncCollected* ctor_fc = ce->constructor->fc;
-            for (int pi = 0; pi < ctor_fc->ctor_prop_count; pi++) {
-                if (ctor_fc->ctor_prop_types[pi] == LMD_TYPE_NULL &&
-                    ctor_fc->ctor_prop_param_idx[pi] >= 0) {
-                    needs_scan = true; break;
-                }
-            }
-        }
-        if (needs_scan) {
-            P4bCtorEvidence* cevi = (P4bCtorEvidence*)mem_calloc(
-                mt->class_count * 16, sizeof(P4bCtorEvidence), MEM_CAT_JS_RUNTIME);
-            // walk program body
-            jm_p4b_ctor_walk(mt, (JsAstNode*)program->body, cevi);
-            // walk all function bodies
-            for (int i = 0; i < mt->func_count; i++) {
-                JsFuncCollected* fc = &mt->func_entries[i];
-                if (fc->node && fc->node->body)
-                    jm_p4b_ctor_walk(mt, (JsAstNode*)fc->node->body, cevi);
-            }
-            // apply: propagate call-site consensus to ctor_prop_types
-            for (int ci = 0; ci < mt->class_count; ci++) {
-                JsClassEntry* ce = &mt->class_entries[ci];
-                if (!ce->constructor || !ce->constructor->fc) continue;
-                JsFuncCollected* ctor_fc = ce->constructor->fc;
-                for (int pi = 0; pi < ctor_fc->ctor_prop_count; pi++) {
-                    if (ctor_fc->ctor_prop_types[pi] != LMD_TYPE_NULL) continue;
-                    int param_idx = ctor_fc->ctor_prop_param_idx[pi];
-                    if (param_idx < 0) continue;
-                    P4bCtorEvidence* e = &cevi[ci * 16 + param_idx];
-                    int total = e->int_count + e->float_count + e->other_count;
-                    if (total == 0 || e->other_count > 0) continue;
-                    if (e->float_count > 0 || e->int_count > 0) {
-                        ctor_fc->ctor_prop_types[pi] = LMD_TYPE_FLOAT;
-                    }
-                    log_info("P4b: propagated %s.%.*s → %s (param[%d], %d call sites: %d int, %d float)",
-                        ce->name ? ce->name->chars : "?",
-                        ctor_fc->ctor_prop_lens[pi], ctor_fc->ctor_prop_ptrs[pi],
-                        get_type_name(ctor_fc->ctor_prop_types[pi]),
-                        param_idx, total, e->int_count, e->float_count);
-                }
-            }
-            mem_free(cevi);
-        }
-    }
-
-    // Tune12 P2b: prototype-style constructor functions allocate a final
-    // base+derived shape when Ctor.inheritsFrom(Base) and the constructor's
-    // static superConstructor.call(this, ...) pattern agree.
-    jm_compose_function_ctor_shapes(mt);
-
-    // Tune11 P5: derived constructors allocate a final base+derived shape up
-    // front. Parent fields stay first, so super() can use parent slot indices;
-    // derived this.x writes use the composed slot list.
-    jm_compose_derived_ctor_shapes(mt);
-
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
         fc->boxed_return_scalar_class = jm_infer_boxed_return_scalar_class(fc);
@@ -6450,7 +5776,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (!mt->is_module && !mt->is_eval_direct && !mce->is_iife_var && !mce->is_implicit_global) {
                     const char* js_name = mce->name;
                     if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
-                    MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
+                    MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
                     // Global lexical declarations are checked during script
                     // declaration instantiation and tracked separately from
                     // globalThis properties for later evalScript collision checks.
@@ -6480,17 +5806,6 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Initialize declared var module vars to undefined (not implicit globals,
     // and not preamble-inherited entries from outer scope e.g. eval)
     if (mt->module_consts) {
-        int bulk_capacity = (int)hashmap_count(mt->module_consts);
-        int* bulk_indices_no_global = NULL;
-        int* bulk_indices_global = NULL;
-        Item* bulk_keys_global = NULL;
-        int bulk_no_global_count = 0;
-        int bulk_global_count = 0;
-        if (bulk_capacity > 0) {
-            bulk_indices_no_global = (int*)pool_calloc(mt->tp->ast_pool, sizeof(int) * bulk_capacity);
-            bulk_indices_global = (int*)pool_calloc(mt->tp->ast_pool, sizeof(int) * bulk_capacity);
-            bulk_keys_global = (Item*)pool_calloc(mt->tp->ast_pool, sizeof(Item) * bulk_capacity);
-        }
         size_t var_iter = 0; void* var_item;
         while (hashmap_iter(mt->module_consts, &var_iter, &var_item)) {
             JsModuleConstEntry* mce = (JsModuleConstEntry*)var_item;
@@ -6500,25 +5815,11 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 bool needs_eval_bridge = mt->is_eval_direct && mce->is_nested_func_hoist;
                 bool should_define_global = !mt->is_module && !mt->is_eval_direct &&
                     !mce->is_iife_var && !mce->is_implicit_global;
-                if (!needs_eval_bridge && bulk_capacity > 0) {
-                    if (should_define_global) {
-                        const char* js_name = mce->name;
-                        if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
-                        NamePool* np = jm_compiled_name_pool(mt);
-                        String* interned = name_pool_create_len(np, js_name, (int)strlen(js_name));
-                        bulk_indices_global[bulk_global_count] = (int)mce->int_val;
-                        bulk_keys_global[bulk_global_count] = (Item){.item = s2it(interned)};
-                        bulk_global_count++;
-                    } else {
-                        bulk_indices_no_global[bulk_no_global_count++] = (int)mce->int_val;
-                    }
-                    continue;
-                }
                 MIR_reg_t init_val = 0;
                 if (mt->is_eval_direct && mce->is_nested_func_hoist) {
                     const char* js_name = mce->name;
                     if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
-                    MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
+                    MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
                     MIR_reg_t bridged_reg = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
                     MIR_label_t use_undef = jm_new_label(mt);
@@ -6551,7 +5852,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     !mce->is_iife_var && !mce->is_implicit_global) {
                     const char* js_name = mce->name;
                     if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
-                    MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
+                    MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
                     jm_call_void_3(mt, "js_define_global_property_v",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
@@ -6564,20 +5865,6 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val));
                 }
             }
-        }
-        if (bulk_no_global_count > 0) {
-            jm_call_void_4(mt, "js_init_module_vars_undefined_bulk",
-                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)bulk_indices_no_global),
-                MIR_T_P, MIR_new_int_op(mt->ctx, 0),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, bulk_no_global_count),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-        }
-        if (bulk_global_count > 0) {
-            jm_call_void_4(mt, "js_init_module_vars_undefined_bulk",
-                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)bulk_indices_global),
-                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)bulk_keys_global),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, bulk_global_count),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
         }
     }
 
@@ -6630,7 +5917,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
             const char* js_name = mce->name;
             if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
-            MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
+            MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
             MIR_label_t skip_preinit = jm_new_label(mt);
             if (mt->is_eval_direct) {
                 MIR_reg_t bridged_reg = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
@@ -6986,7 +6273,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                     }
                     if (!mt->is_module) {
-                        MIR_reg_t class_key = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
+                        MIR_reg_t class_key = jm_box_property_name_literal(mt,
+                            cls_node->name->chars, cls_node->name->len);
                         if (mt->is_eval_direct) {
                             MIR_reg_t evalscript_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
                             MIR_label_t skip_global_class_lex = jm_new_label(mt);
@@ -7037,7 +6325,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Module mode: handle export default <expression>
         if (current_export && current_export->is_default && mt->is_module) {
             MIR_reg_t val = jm_transpile_box_item(mt, actual_stmt);
-            MIR_reg_t key = jm_box_string_literal(mt, "default", 7);
+            MIR_reg_t key = jm_box_property_name_literal(mt, "default", 7);
             jm_call_3(mt, "js_property_set", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
@@ -7202,7 +6490,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             // Strip _js_ prefix to get the original JS name
             const char* js_name = mce->name;
             if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
-            MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
+            MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
             MIR_reg_t val_reg = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val));
             MIR_reg_t eval_env_active = jm_call_0(mt, "js_eval_env_is_active", MIR_T_I64);
@@ -7382,6 +6670,12 @@ void jm_discover_js_imports_recursive(
         char resolved[512];
         jm_resolve_module_path(parent_path, src_text, src_len, resolved, sizeof(resolved));
 
+        if (jm_path_has_lambda_ext(resolved)) {
+            // Lambda modules use the cross-language loader during the serial
+            // import phase; the JS-only graph cannot parse their .ls syntax.
+            continue;
+        }
+
         // dedup check
         JsPathIndexEntry key = { .path = resolved, .index = 0 };
         const JsPathIndexEntry* existing = (const JsPathIndexEntry*)hashmap_get(path_map, &key);
@@ -7531,6 +6825,17 @@ bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
     }
     jm_set_name_pool_override(NULL);
     node->module_var_count = (uint32_t)mt->module_var_count;
+    node->ic_count = mt->ic_count;
+    if (mt->module_name_specs && mt->module_name_specs->length > 0) {
+        if (!jm_build_property_key_image(NULL, 0, 0, mt->module_name_specs,
+                &node->module_property_specs, &node->module_property_count,
+                &node->module_property_bytes_size)) {
+            jm_destroy_mir_transpiler(mt);
+            js_transpiler_destroy(tp);
+            MIR_finish(ctx);
+            return false;
+        }
+    }
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-parallel: NULL labels detected for '%s'", node->path);
@@ -7547,11 +6852,6 @@ bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
 
     // cleanup transpiler state
     jm_destroy_mir_transpiler(mt);
-    // Detach name_pool and ast_pool from the transpiler so they survive cleanup.
-    // JIT code embeds raw String* pointers interned in the name pool.
-    // Freeing the pool would leave dangling pointers in the generated code.
-    tp->name_pool = NULL;
-    tp->ast_pool = NULL;
     js_transpiler_destroy(tp);
 
     if (!js_main) {
@@ -7638,9 +6938,7 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
     hashmap_free(path_map);
 
     int import_count = count - 1;
-    if (import_count < 2 || graph_contains_await) {
-        // TLA graph evaluation has an order-sensitive async-parent protocol;
-        // the parallel path bypasses that protocol before executing its nodes.
+    if (import_count == 0) {
         for (int i = 0; i < count; i++) {
             mem_free(nodes[i].path);
             mem_free(nodes[i].source);
@@ -7662,12 +6960,10 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
         if (d > max_depth) max_depth = d;
     }
 
-    // compile level by level (leaves first), then execute serially at each level
-    long ncpus = sysconf(_SC_NPROCESSORS_ONLN);
-    if (ncpus < 1) ncpus = 1;
-    if (ncpus > 8) ncpus = 8;
-
-    int precompiled = 0;
+    // The static phase compiles every dependency before any initializer runs.
+    // TLA graphs retain their existing recursive execution path after this
+    // discovery pass; only non-TLA graphs execute these compiled entries.
+    bool parallel_compile = import_count >= 2 && !graph_contains_await;
 
     for (int level = 0; level <= max_depth; level++) {
         // collect modules at this depth
@@ -7679,10 +6975,11 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
         }
         if (batch_count == 0) continue;
 
-        // parallel compile phase
-        if (batch_count == 1) {
-            // single module — compile inline without thread overhead
-            jm_compile_js_module(runtime, &nodes[batch_indices[0]]);
+        // Workers have no runtime realm and only produce sealed key images.
+        if (!parallel_compile || batch_count == 1) {
+            for (int i = 0; i < batch_count; i++) {
+                jm_compile_js_module(runtime, &nodes[batch_indices[i]]);
+            }
         } else {
             JsCompileWorkerArg* args = (JsCompileWorkerArg*)mem_calloc(batch_count, sizeof(JsCompileWorkerArg), MEM_CAT_JS_RUNTIME);
             pthread_t* threads = (pthread_t*)mem_alloc(sizeof(pthread_t) * batch_count, MEM_CAT_JS_RUNTIME);
@@ -7705,31 +7002,102 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
             mem_free(threads);
             mem_free(args);
         }
+    }
 
-        // serial execute phase: run js_main for each compiled module at this level
-        for (int b = 0; b < batch_count; b++) {
-            int idx = batch_indices[b];
-            if (!nodes[idx].compiled) continue;
+    for (int i = 1; i < count; i++) {
+        if (nodes[i].source && !nodes[i].compiled) {
+            log_error("js-name-prelink: failed to compile '%s'", nodes[i].path);
+            for (int j = 0; j < count; j++) {
+                mem_free(nodes[j].path);
+                mem_free(nodes[j].source);
+                mem_free(nodes[j].deps);
+                mem_free(nodes[j].module_property_specs);
+                if (nodes[j].mir_ctx) MIR_finish(nodes[j].mir_ctx);
+            }
+            mem_free(nodes);
+            return -1;
+        }
+        if (nodes[i].compiled && !lambda_property_key_specs_prelink(
+                nodes[i].module_property_specs, nodes[i].module_property_count,
+                nodes[i].module_property_bytes_size)) {
+            log_error("js-name-prelink: invalid property key image for '%s'", nodes[i].path);
+            for (int j = 0; j < count; j++) {
+                mem_free(nodes[j].path);
+                mem_free(nodes[j].source);
+                mem_free(nodes[j].deps);
+                mem_free(nodes[j].module_property_specs);
+                if (nodes[j].mir_ctx) MIR_finish(nodes[j].mir_ctx);
+            }
+            mem_free(nodes);
+            return -1;
+        }
+    }
 
+    if (graph_contains_await) {
+        // TLA evaluation still requires the recursive async-parent protocol.
+        // Its key image is now static; jm_load_imports will execute it only
+        // after the entry point activates the dynamic child.
+        for (int i = 0; i < count; i++) {
+            mem_free(nodes[i].path);
+            mem_free(nodes[i].source);
+            mem_free(nodes[i].deps);
+            mem_free(nodes[i].module_property_specs);
+            if (nodes[i].mir_ctx) MIR_finish(nodes[i].mir_ctx);
+        }
+        mem_free(nodes);
+        return 0;
+    }
+
+    if (!js_activate_runtime_name_pool()) {
+        log_error("js-name-prelink: failed to activate dynamic pool");
+        for (int i = 0; i < count; i++) {
+            mem_free(nodes[i].path);
+            mem_free(nodes[i].source);
+            mem_free(nodes[i].deps);
+            mem_free(nodes[i].module_property_specs);
+            if (nodes[i].mir_ctx) MIR_finish(nodes[i].mir_ctx);
+        }
+        mem_free(nodes);
+        return -1;
+    }
+    // Module initializers can install globals. Realm setup is therefore after
+    // the root is sealed, never part of static spelling collection.
+    (void)js_get_global_this();
+
+    int precompiled = 0;
+    for (int level = 0; level <= max_depth; level++) {
+        for (int idx = 1; idx < count; idx++) {
+            if (nodes[idx].depth != level || !nodes[idx].compiled) continue;
             typedef Item (*js_main_func_t)(Context*);
             js_main_func_t js_main = (js_main_func_t)nodes[idx].js_main_func;
-
             uint32_t prev_module_state_id = js_get_active_module_state_id();
-            if (!js_activate_module_state(nodes[idx].module_var_count)) continue;
+            if (!js_activate_module_state(nodes[idx].module_var_count) ||
+                    !lambda_module_state_link_property_keys(js_get_active_module_state_id(),
+                        nodes[idx].module_property_specs, nodes[idx].module_property_count,
+                        nodes[idx].module_property_bytes_size) ||
+                    !js_link_module_ic_table(js_get_active_module_state_id(), nodes[idx].ic_count)) {
+                js_set_active_module_state_id(prev_module_state_id);
+                log_error("js-name-prelink: failed to link compiled module '%s'",
+                    nodes[idx].path ? nodes[idx].path : "<module>");
+                for (int j = 0; j < count; j++) {
+                    mem_free(nodes[j].path);
+                    mem_free(nodes[j].source);
+                    mem_free(nodes[j].deps);
+                    mem_free(nodes[j].module_property_specs);
+                    if (nodes[j].mir_ctx) MIR_finish(nodes[j].mir_ctx);
+                }
+                mem_free(nodes);
+                return -1;
+            }
             jm_log_module_phase_progress(nodes[idx].path, "parallel-execute-begin");
             Item namespace_obj = js_main((Context*)context);
             jm_log_module_phase_progress(nodes[idx].path, "parallel-execute-end");
             js_set_active_module_state_id(prev_module_state_id);
-
-            // register in module cache
             String* spec_str = heap_create_name(nodes[idx].path, strlen(nodes[idx].path));
             Item spec_item = (Item){.item = s2it(spec_str)};
             js_module_register(spec_item, namespace_obj);
-
-            // defer MIR cleanup (keep function pointers alive)
             jm_defer_mir_cleanup(nodes[idx].mir_ctx);
             nodes[idx].mir_ctx = NULL;
-
             precompiled++;
             log_debug("js-parallel: module '%s' compiled and executed", nodes[idx].path);
         }
@@ -7742,6 +7110,9 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
         mem_free(nodes[i].path);
         mem_free(nodes[i].source);
         mem_free(nodes[i].deps);
+        if (nodes[i].module_property_specs) {
+            mem_free(nodes[i].module_property_specs);
+        }
         if (nodes[i].mir_ctx) MIR_finish(nodes[i].mir_ctx);
     }
     mem_free(nodes);
@@ -7794,12 +7165,6 @@ static void jm_finish_module_transpile(JsTranspiler* tp, JsMirTranspiler* mt,
     jm_clear_active_js_transpile(NULL, mt, NULL);
     jm_destroy_mir_transpiler(mt);
     jm_defer_mir_cleanup(ctx);
-    if (module_mir_context_count > 0) {
-        module_mir_name_pools[module_mir_context_count - 1] = tp->name_pool;
-        module_mir_ast_pools[module_mir_context_count - 1] = tp->ast_pool;
-    }
-    tp->name_pool = NULL;
-    tp->ast_pool = NULL;
     jm_clear_active_js_transpile(tp, NULL, NULL);
     js_transpiler_destroy(tp);
 }
@@ -7817,6 +7182,16 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return ItemError;
     }
     context->runtime = runtime;
+    // js_get_global_this() can run while precompiled dependencies initialize.
+    // It requires an Input owner for its realm-bound names, so install this
+    // module's owner before static imports can initialize the realm (D4.6.2v2).
+    Input* module_input = Input::create(context->pool);
+    if (!module_input) {
+        log_error("js-mir: module: failed to create Input for '%s'",
+            filename ? filename : "<module>");
+        return ItemError;
+    }
+    js_runtime_set_input(module_input);
     extern int js_dynamic_import_suppress_module_drain;
     // Js57 P4 (Track B3): bump depth at the very start so jm_load_imports
     // nested calls see depth >= 2 while the outermost transpile sits at 1;
@@ -7904,36 +7279,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         }
     }
 
-    // Recursively load this module's imports first
-    jm_log_module_phase_progress(filename, "imports-begin");
-#ifndef _WIN32
-    if (js_tla_module_depth_get() == 1 && js_dynamic_import_suppress_module_drain == 0 &&
-            !module_has_top_level_await && jm_module_has_static_imports(js_ast)) {
-        // Module entries bypass the script entry point where the static graph is
-        // normally precompiled.  Preserve one graph-wide dependency pass here;
-        // otherwise a wide browser module graph pays serial parse/link work at
-        // the first document task even though its imports are already known.
-        jm_precompile_js_imports(runtime, js_source, filename);
-    }
-#endif
-    jm_load_imports(runtime, js_ast, filename);
-    jm_log_module_phase_progress(filename, "imports-end");
-
-    RootFrame import_error_roots(1);
-    Rooted<Item> imported_error(import_error_roots,
-        js_module_get_evaluation_error(p7d_self_spec_item));
-    if (get_type_id(imported_error.get()) != LMD_TYPE_NULL) {
-        // A static dependency that failed evaluation rejects this module
-        // before its body runs; compiling the importer would otherwise turn
-        // the failed graph into a successful empty namespace.
-        log_debug("js-mir: module '%s' dependency evaluation failed",
-            filename ? filename : "<module>");
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        js_transpiler_destroy(tp);
-        js_tla_exit_module();
-        return js_throw_value(imported_error.get());
-    }
-
     MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-mir: module: MIR context init failed for '%s'", filename);
@@ -7950,6 +7295,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return ItemNull;
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
+    mt->module_name_base = 0;
+    mt->module_ic_base = 0;
 
     mt->module = MIR_new_module(ctx, "js_module");
 
@@ -7964,6 +7311,74 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return (Item){.item = ITEM_ERROR};
     }
     jm_log_module_phase_progress(filename, "mir-end");
+
+    // Module entry points bypass the script compiler's prelink step.  Its
+    // local spelling image must be collected before imports can run: an entry
+    // module can be compiled directly while the root is still static.
+    if (!js_prelink_compiled_name_table(mt)) {
+        log_error("js-mir: module: failed to prelink property-name table for '%s'",
+            filename ? filename : "<module>");
+        jm_clear_active_js_transpile(NULL, mt, NULL);
+        jm_destroy_mir_transpiler(mt);
+        MIR_finish(ctx);
+        jm_clear_active_js_transpile(tp, NULL, NULL);
+        js_transpiler_destroy(tp);
+        js_tla_exit_module();
+        return (Item){.item = ITEM_ERROR};
+    }
+
+    // This mirrors the source-entry static phase.  In particular, do not let
+    // jm_load_imports create a dynamic child before this module's own names
+    // have joined the static root (D4.6.1v2, D4.6.2v2).
+    jm_log_module_phase_progress(filename, "imports-begin");
+#ifndef _WIN32
+    if (js_tla_module_depth_get() == 1 && js_dynamic_import_suppress_module_drain == 0 &&
+            !module_has_top_level_await && jm_module_has_static_imports(js_ast) &&
+            jm_precompile_js_imports(runtime, js_source, filename) < 0) {
+        log_error("js-mir: module: failed to precompile import closure for '%s'",
+            filename ? filename : "<module>");
+        jm_clear_active_js_transpile(NULL, mt, NULL);
+        jm_destroy_mir_transpiler(mt);
+        MIR_finish(ctx);
+        jm_clear_active_js_transpile(tp, NULL, NULL);
+        js_transpiler_destroy(tp);
+        js_tla_exit_module();
+        return (Item){.item = ITEM_ERROR};
+    }
+#endif
+    if (!js_activate_runtime_name_pool()) {
+        log_error("js-mir: module: failed to activate dynamic NamePool for '%s'",
+            filename ? filename : "<module>");
+        jm_clear_active_js_transpile(NULL, mt, NULL);
+        jm_destroy_mir_transpiler(mt);
+        MIR_finish(ctx);
+        jm_clear_active_js_transpile(tp, NULL, NULL);
+        js_transpiler_destroy(tp);
+        js_tla_exit_module();
+        return (Item){.item = ITEM_ERROR};
+    }
+    // Realm construction is runtime work, after the static root is sealed.
+    (void)js_get_global_this();
+    jm_load_imports(runtime, js_ast, filename);
+    jm_log_module_phase_progress(filename, "imports-end");
+
+    RootFrame import_error_roots(1);
+    Rooted<Item> imported_error(import_error_roots,
+        js_module_get_evaluation_error(p7d_self_spec_item));
+    if (get_type_id(imported_error.get()) != LMD_TYPE_NULL) {
+        // A static dependency that failed evaluation rejects this module
+        // before its body runs; compiling the importer would otherwise turn
+        // the failed graph into a successful empty namespace.
+        log_debug("js-mir: module '%s' dependency evaluation failed",
+            filename ? filename : "<module>");
+        jm_clear_active_js_transpile(NULL, mt, NULL);
+        jm_destroy_mir_transpiler(mt);
+        MIR_finish(ctx);
+        jm_clear_active_js_transpile(tp, NULL, NULL);
+        js_transpiler_destroy(tp);
+        js_tla_exit_module();
+        return js_throw_value(imported_error.get());
+    }
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir: module: NULL labels detected for '%s'", filename);
@@ -7999,13 +7414,15 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     Item spec_item = (Item){.item = s2it(spec_str)};
     Item namespace_obj = js_new_object();
     js_module_register(spec_item, namespace_obj);
-    Input* module_input = Input::create(context->pool);
+    // Nested imports may install their own input owner; restore this module's
+    // owner before its initializer creates values or property names.
     js_runtime_set_input(module_input);
 
     // Allocate per-module variable storage and switch to it.
     uint32_t prev_module_state_id = js_get_active_module_state_id();
     Item prev_namespace = js_set_active_module_namespace(namespace_obj);
     if (!js_activate_module_state((uint32_t)mt->module_var_count)) return ItemNull;
+    if (!js_link_compiled_name_table(mt)) return ItemNull;
     if (js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }

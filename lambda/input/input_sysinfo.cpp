@@ -336,7 +336,8 @@ static bool parse_sys_url(const char* url, char** category, char** subcategory, 
 }
 
 // Main entry point for sys:// URLs
-Input* input_from_sysinfo(Url* url, Pool* pool) {
+Input* input_from_sysinfo_with_name_parent(Url* url, Pool* pool,
+        NamePool* name_parent) {
     if (!url || !pool) {
         log_error("Invalid parameters for system information input");
         return nullptr;
@@ -404,7 +405,7 @@ Input* input_from_sysinfo(Url* url, Pool* pool) {
     }
 
     // Create Input object using the InputManager
-    Input* input = InputManager::create_input(url);
+    Input* input = InputManager::create_input_with_name_parent(url, name_parent);
     if (!input) {
         log_error("Failed to create Input object");
         mem_free(category);
@@ -436,6 +437,10 @@ Input* input_from_sysinfo(Url* url, Pool* pool) {
 
     log_info("Successfully created sys:// input for %s", url->pathname->chars);
     return input;
+}
+
+Input* input_from_sysinfo(Url* url, Pool* pool) {
+    return input_from_sysinfo_with_name_parent(url, pool, NULL);
 }
 
 // Check if URL is a sys:// scheme

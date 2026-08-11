@@ -54,16 +54,15 @@ extern Item js_get_async_iterator(Item iterable);
 extern Item js_async_iterator_step_result(Item iterator);
 extern Item js_iterator_result_done(Item result);
 extern Item js_iterator_result_value(Item result);
-extern int64_t js_shape_slot_guard(Item object, const char* name, int64_t name_len, int64_t byte_offset);
 #ifdef LAMBDA_JS_EXEC_PROFILE
 extern Item js_profiled_push_d(double dval);
 extern double js_profiled_it2d(Item item);
 extern int64_t js_profiled_it2i(Item item);
 extern void js_profile_shape_guard_hit(void);
 extern void js_profile_shape_guard_miss(void);
-extern void js_profile_shape_guard_hit_site(const char* label, void* expected_shape, void* actual_shape);
-extern void js_profile_shape_guard_miss_site(const char* label, void* expected_shape, void* actual_shape);
-extern void js_profile_property_set_site(const char* label);
+extern void js_profile_shape_guard_hit_site(uint32_t label_name_id, void* expected_shape, void* actual_shape);
+extern void js_profile_shape_guard_miss_site(uint32_t label_name_id, void* expected_shape, void* actual_shape);
+extern void js_profile_property_set_site(uint32_t label_name_id);
 #endif
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
@@ -204,6 +203,7 @@ extern Item js_buffer_construct(Item arg, Item encoding);
 // Tune8 §2.5: js_array_indexOf_int fast path retired (0 telemetry emissions);
 // arr.indexOf(int) flows through the generic array method dispatcher now.
 extern Item js_string_concat(Item left, Item right);
+extern Item js_make_string_len(const char* str, int len);
 extern Item js_string_get_int(Item str_item, int64_t index);
 extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
 extern Item js_string_replace_nonws_global_fast_no_dollar(Item str, Item replacement);
@@ -1112,6 +1112,9 @@ extern void lambda_function_mark_mir_context_abi(Function* fn);
 extern void lambda_function_mark_lambda_boxed_function(Function* fn);
 extern void lambda_function_mark_lambda_boxed_procedure(Function* fn);
 extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t index);
+extern Item lambda_name_id_to_item(NameId name_id);
+extern uint64_t lambda_module_name_id_at(void* module_state, uint32_t index);
+extern uint64_t js_active_module_name_id(uint32_t index);
 extern Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 
 // Debug tracing helpers
@@ -1146,9 +1149,9 @@ extern void js_mark_private_method_non_writable(Item object, Item name);
 extern void js_set_method_home_from_target(Item target, Item fn_item);
 extern void js_refresh_prototype_method_homes(Item prototype, Item class_item);
 extern Item js_init_class_instance_fields(Item callee, Item object);
-extern void js_set_class_instance_field_metadata_bulk(Item class_item,
-    const char** field_names, const int* field_lens, const uint8_t* field_kinds,
-    int count);
+extern void js_init_class_instance_field_metadata(Item class_item, int count);
+extern void js_set_class_instance_field_metadata_name_id_range(Item class_item,
+    int index, uint32_t module_name_base, int count, uint64_t method_mask);
 extern void js_set_class_instance_field_metadata_key(Item class_item, int index, Item key);
 extern void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
 extern Item js_private_key_for_class(Item class_item, Item source_name);
@@ -1159,8 +1162,6 @@ extern Item js_private_home_class_leave_result(Item previous_class, Item result)
 extern Item js_private_brand_add(Item object, Item private_key, Item callee);
 extern Item js_private_field_define(Item object, Item private_key, Item value);
 extern void js_set_private_class_index(Item class_item, int index);
-extern void js_set_class_ctor_shape_metadata(Item class_item, const char** prop_names, const int* prop_lens, int count);
-extern void js_set_function_ctor_shape_metadata(Item fn_item, const char** prop_names, const int* prop_lens, int count);
 // Tune8 §2.2: define_global_{var,eval_var,function}_property collapsed into
 // js_define_global_property_v(kind, key, value). C functions kept as named
 // symbols; only the JIT import is unified.
@@ -1190,8 +1191,8 @@ extern void js_eval_private_bind(Item unscoped_key, Item scoped_key);
 extern Item js_eval_private_resolve(Item unscoped_key);
 extern Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
 extern void js_eval_local_export_var(Item key, Item value);
-extern Item js_check_unresolved_capture(Item value, const char* name, int64_t len);
-extern Item js_resolve_unresolved_binding(Item value, const char* name, int64_t len, int64_t in_typeof);
+extern Item js_check_unresolved_capture(Item value, uint32_t name_id, int64_t len);
+extern Item js_resolve_unresolved_binding(Item value, uint32_t name_id, int64_t len, int64_t in_typeof);
 extern int64_t js_262_eval_script_is_active(void);
 
 // Object.groupBy / Map.groupBy (ES2024)
@@ -1231,15 +1232,12 @@ extern Item js_to_property_key(Item key);
 extern Item js_delete_property_strict(Item obj, Item key);
 
 // v23: Performance facade functions (js_runtime.cpp)
-extern int64_t js_typeof_is(Item value, const char* type_str);
-extern Item js_property_get_str(Item object, const char* key, int key_len);
+extern int64_t js_typeof_is(Item value, uint32_t type_name_id);
 #if LAMBDA_INLINE_CACHE
-extern Item js_property_access_named_ic(Item object, const char* name, int64_t name_len, JsLoadIC* ic);
-extern Item js_property_access_key_ic(Item object, PropertyKeyRef key, JsLoadIC* ic);
-extern Item js_property_set_named_ic(Item object, const char* name, int64_t name_len, Item value,
+extern Item js_property_access_name_id_ic(Item object, NameId name_id, JsLoadIC* ic);
+extern Item js_property_set_name_id_ic(Item object, NameId name_id, Item value,
     int64_t strict, JsStoreIC* ic);
-extern Item js_property_set_key_ic(Item object, PropertyKeyRef key, Item value,
-    int64_t strict, JsStoreIC* ic);
+extern void* js_active_module_ic(uint32_t index);
 #endif
 extern Item js_using_dispose(Item resource);
 extern Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value);
@@ -1524,6 +1522,25 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_name_id_to_item", FPTR(lambda_name_id_to_item),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_module_name_id_at", FPTR(lambda_module_name_id_at),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"js_active_module_name_id", FPTR(js_active_module_name_id),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      // Name-id lookup only reads the active module table and cannot publish
+      // an error carrier, so its raw scalar result preserves the lane.
+      JIT_EXCEPTION_PRESERVES}},
     {"push_d_safe", FPTR(push_d_safe),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -1867,6 +1884,12 @@ JitImport jit_runtime_imports[] = {
     {"js_to_number", FPTR(js_to_number)},
     {"js_to_numeric", FPTR(js_to_numeric)},
     {"js_to_string", FPTR(js_to_string)},
+    {"js_make_string_len", FPTR(js_make_string_len),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"js_to_boolean", FPTR(js_to_boolean)},
     {"js_to_object", FPTR(js_to_object)},
     // Truthiness reads only the Item payload (including mpdecimal's zero bit);
@@ -1928,15 +1951,6 @@ JitImport jit_runtime_imports[] = {
     {"js_eq_raw", FPTR(js_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_loose_eq_raw", FPTR(js_loose_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_new_object", FPTR(js_new_object)},
-    {"js_new_object_with_shape", FPTR(js_new_object_with_shape),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
-      0, JIT_EXCEPTION_PRESERVES,
-      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
-      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED) |
-      JIT_ARG_EFFECT(2, JIT_ARG_BORROWED)}},
     {"js_property_get", FPTR(js_property_get)},
     {"js_arguments_mapped_get", FPTR(js_arguments_mapped_get)},
     {"js_arguments_mapped_param_writeback", FPTR(js_arguments_mapped_param_writeback)},
@@ -1949,15 +1963,24 @@ JitImport jit_runtime_imports[] = {
     {"js_private_property_set", FPTR(js_private_property_set)},
     {"js_create_data_property", FPTR(js_create_data_property)},
     {"js_property_access", FPTR(js_property_access)},
+    {"js_property_access_name_id", FPTR(js_property_access_name_id)},
+    {"js_property_set_name_id", FPTR(js_property_set_name_id)},
 #if LAMBDA_INLINE_CACHE
-    {"js_property_access_named_ic", FPTR(js_property_access_named_ic),
+    {"js_property_access_name_id_ic", FPTR(js_property_access_name_id_ic),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
-    {"js_property_access_key_ic", FPTR(js_property_access_key_ic),
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER)}},
+    {"js_property_set_name_id_ic", FPTR(js_property_set_name_id_ic),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
-    {"js_property_set_named_ic", FPTR(js_property_set_named_ic)},
-    {"js_property_set_key_ic", FPTR(js_property_set_key_ic)},
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
+    {"js_active_module_ic", FPTR(js_active_module_ic),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
 #endif
     {"js_super_property_get", FPTR(js_super_property_get)},
     {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
@@ -2054,25 +2077,7 @@ JitImport jit_runtime_imports[] = {
     {"js_writable_stream_new", FPTR(js_writable_stream_new)},
     {"js_new_from_class_object", FPTR(js_new_from_class_object)},
     {"js_new_from_class_object_defer_own_fields", FPTR(js_new_from_class_object_defer_own_fields)},
-    {"js_constructor_create_object_shaped", FPTR(js_constructor_create_object_shaped)},
-    {"js_constructor_create_object_shaped_cached", FPTR(js_constructor_create_object_shaped_cached)},
     {"js_set_internal_class_name", FPTR(js_set_internal_class_name), JIT_IMPORT_VOID_PRESERVES},
-    {"js_get_shaped_slot", FPTR(js_get_shaped_slot)},
-    {"js_set_shaped_slot", FPTR(js_set_shaped_slot),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM),
-      0, JIT_EXCEPTION_PRESERVES,
-      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
-      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED) |
-      JIT_ARG_EFFECT(2, JIT_ARG_PERSISTENT_STORE)}},
-    {"js_set_shaped_slot_guarded", FPTR(js_set_shaped_slot_guarded)},
-    {"js_shape_slot_guard", FPTR(js_shape_slot_guard), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    {"js_get_slot_f", FPTR(js_get_slot_f), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    {"js_get_slot_i", FPTR(js_get_slot_i), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    {"js_set_slot_f", FPTR(js_set_slot_f), JIT_IMPORT_VOID_PRESERVES},
-    {"js_set_slot_i", FPTR(js_set_slot_i), JIT_IMPORT_VOID_PRESERVES},
     {"js_string_concat", FPTR(js_string_concat)},
     {"js_string_get_int", FPTR(js_string_get_int)},
     {"js_array_get_int", FPTR(js_array_get_int)},
@@ -2153,7 +2158,11 @@ JitImport jit_runtime_imports[] = {
     {"js_get_css_object_value", FPTR(js_get_css_object_value)},
     {"js_get_document_object_value", FPTR(js_get_document_object_value)},
     {"js_number_method", FPTR(js_number_method)},
-    {"js_get_length_item", FPTR(js_get_length_item)},
+    {"js_get_length_item", FPTR(js_get_length_item),
+     // .length may return a frame-backed Number, so the MIR caller must adopt
+     // the result into its scalar home before a later allocating expression.
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
     // process I/O
     {"js_process_stdout_write", FPTR(js_process_stdout_write)},
     {"js_get_process_argv", FPTR(js_get_process_argv)},
@@ -2382,7 +2391,8 @@ JitImport jit_runtime_imports[] = {
     {"js_set_global_property_strict_prechecked", FPTR(js_set_global_property_strict_prechecked)},
     {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable), JIT_IMPORT_VOID_PRESERVES},
     {"js_init_class_instance_fields", FPTR(js_init_class_instance_fields)},
-    {"js_set_class_instance_field_metadata_bulk", FPTR(js_set_class_instance_field_metadata_bulk), JIT_IMPORT_VOID_PRESERVES},
+    {"js_init_class_instance_field_metadata", FPTR(js_init_class_instance_field_metadata), JIT_IMPORT_VOID_PRESERVES},
+    {"js_set_class_instance_field_metadata_name_id_range", FPTR(js_set_class_instance_field_metadata_name_id_range), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_class_instance_field_metadata_key", FPTR(js_set_class_instance_field_metadata_key), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_class_instance_field_metadata_value", FPTR(js_set_class_instance_field_metadata_value), JIT_IMPORT_VOID_PRESERVES},
     {"js_private_key_for_class", FPTR(js_private_key_for_class)},
@@ -2393,8 +2403,6 @@ JitImport jit_runtime_imports[] = {
     {"js_private_brand_add", FPTR(js_private_brand_add)},
     {"js_private_field_define", FPTR(js_private_field_define)},
     {"js_set_private_class_index", FPTR(js_set_private_class_index), JIT_IMPORT_VOID_PRESERVES},
-    {"js_set_class_ctor_shape_metadata", FPTR(js_set_class_ctor_shape_metadata), JIT_IMPORT_VOID_PRESERVES},
-    {"js_set_function_ctor_shape_metadata", FPTR(js_set_function_ctor_shape_metadata), JIT_IMPORT_VOID_PRESERVES},
     {"js_define_global_property_v", FPTR(js_define_global_property_v), JIT_IMPORT_VOID_PRESERVES},
     {"js_global_lexical_declare", FPTR(js_global_lexical_declare), JIT_IMPORT_VOID_PRESERVES},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
@@ -3291,6 +3299,9 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_mir_double_bits", "lambda_mir_bits_double",
         "lambda_item_adopt_scalar_home", "lambda_restore_number_frame_top",
         "owned_item_slot_store", "lambda_module_var_store",
+        "lambda_module_name_id_at",
+        "js_active_module_name_id",
+        "js_active_module_ic",
         "lambda_async_frame_get_word",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         // v5 int lane: pure integer arithmetic on lane values, no allocation.

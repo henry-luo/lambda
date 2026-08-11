@@ -115,11 +115,7 @@ typedef struct JsLoadIC {
     uint8_t state;
     uint8_t count;
     uint16_t miss_count;
-    const char* name;
-    const char* profile_label;
-    int name_len;
     uint32_t name_id;
-    uint64_t key_item;
     JsLoadICEntry entries[JS_LOAD_IC_POLY_MAX];
 } JsLoadIC;
 
@@ -127,11 +123,7 @@ typedef struct JsStoreIC {
     uint8_t state;
     uint8_t count;
     uint16_t miss_count;
-    const char* name;
-    const char* profile_label;
-    int name_len;
     uint32_t name_id;
-    uint64_t key_item;
     JsLoadICEntry entries[JS_STORE_IC_POLY_MAX];
 } JsStoreIC;
 
@@ -236,6 +228,7 @@ Item js_typeof(Item value);         // typeof x
 Item js_new_object(void);
 Item js_property_get(Item object, Item key);
 Item js_property_set(Item object, Item key, Item value);
+Item js_property_set_cstr(Item object, const char* key, Item value);
 Item js_using_dispose(Item resource);
 Item js_property_set_strict(Item object, Item key, Item value);
 // Tune8 §2.2: dispatcher for JIT-emitted dynamic-strict property sets.
@@ -246,12 +239,12 @@ Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
 Item js_private_field_define(Item object, Item private_key, Item value);
 Item js_create_data_property(Item object, Item key, Item value);
 Item js_property_access(Item object, Item key);
-Item js_property_access_named_ic(Item object, const char* name, int64_t name_len, JsLoadIC* ic);
-Item js_property_access_key_ic(Item object, PropertyKeyRef key, JsLoadIC* ic);
-Item js_property_set_named_ic(Item object, const char* name, int64_t name_len, Item value,
+Item js_property_access_name_id(Item object, NameId name_id);
+Item js_property_set_name_id(Item object, NameId name_id, Item value, int64_t strict);
+Item js_property_access_name_id_ic(Item object, NameId name_id, JsLoadIC* ic);
+Item js_property_set_name_id_ic(Item object, NameId name_id, Item value,
     int64_t strict, JsStoreIC* ic);
-Item js_property_set_key_ic(Item object, PropertyKeyRef key, Item value, int64_t strict,
-    JsStoreIC* ic);
+void* js_active_module_ic(uint32_t index);
 
 // =============================================================================
 // Array Functions
@@ -321,8 +314,6 @@ enum {
 void js_finalize_function(Item fn_item, Item name_item, Item source_item,
                           int formal_length, int init_flags);
 void js_set_function_home_class(Item fn_item, Item home_class);
-void js_set_function_ctor_shape_metadata(Item fn_item, const char** prop_names,
-                                         const int* prop_lens, int count);
 void js_mark_generator_func(Item fn_item);
 void js_mark_async_generator_func(Item fn_item);
 void js_mark_async_func(Item fn_item);
@@ -715,10 +706,10 @@ Item js_error_set_cause(Item error, Item options);
 Item js_error_captureStackTrace(Item target, Item ctor);
 
 // TDZ (Temporal Dead Zone) check for let/const
-Item js_check_tdz(Item value, const char* name, int name_len);
+Item js_check_tdz(Item value, NameId name_id, int name_len);
 
 // Const assignment error
-Item js_throw_const_assign(const char* name, int name_len);
+Item js_throw_const_assign(NameId name_id, int name_len);
 
 // =============================================================================
 // Runtime Context
@@ -745,6 +736,12 @@ bool js_ensure_active_module_var_capacity(uint32_t required_var_count);
 uint32_t js_get_active_module_state_id(void);
 bool js_set_active_module_state_id(uint32_t module_state_id);
 bool js_module_state_is_available(uint32_t module_state_id);
+uint64_t js_active_module_name_id(uint32_t index);
+uint32_t js_active_module_name_count(void);
+uint32_t js_active_module_ic_count(void);
+bool js_link_module_ic_table(uint32_t module_state_id, uint32_t count);
+bool js_append_module_ic_table(uint32_t module_state_id, uint32_t count);
+void* js_active_module_ic(uint32_t index);
 uint32_t js_get_batch_preamble_var_count(void);
 bool js_copy_module_state_var_prefix(uint32_t source_module_state_id,
                                      uint32_t destination_module_state_id,
@@ -770,32 +767,6 @@ void js_reset_constructor_prototypes(void);
 Item js_constructor_create_object(Item callee);
 Item js_new_from_class_object(Item callee, Item* args, int argc);
 Item js_new_from_class_object_defer_own_fields(Item callee, Item* args, int argc);
-
-// A5: Constructor shape pre-allocation
-// Creates a new object with pre-built shape: all property slots pre-allocated
-// and initialized to null (8-byte slots). Subsequent js_property_set calls for
-// these properties will find existing keys and do fast in-place updates.
-Item js_new_object_with_shape(const char** prop_names, const int* prop_lens, int count);
-// Same as above but also sets __proto__ from callee.prototype
-Item js_constructor_create_object_shaped(Item callee, const char** prop_names, const int* prop_lens, int count);
-// §7: Same as above but captures TypeMap* into shape_cache on first call
-Item js_constructor_create_object_shaped_cached(Item callee, const char** prop_names, const int* prop_lens, int count, void** shape_cache);
-
-// P3/P4: Slot-indexed property access for shaped (constructor-created) objects.
-// Avoids hash-table lookup by walking ShapeEntry chain to the N-th slot index.
-// js_get_shaped_slot: reads and correctly boxes the typed field value.
-// js_set_shaped_slot: writes with correct unboxing, updates ShapeEntry type.
-Item js_get_shaped_slot(Item object, int64_t slot);
-void js_set_shaped_slot(Item object, int64_t slot, Item value);
-Item js_set_shaped_slot_guarded(Item object, int64_t slot, const char* name,
-                                int64_t name_len, Item value);
-
-// P1: Type-specific native slot access — bypass boxing/unboxing entirely.
-// byte_offset = slot * 8, pre-computed at compile time by the transpiler.
-double js_get_slot_f(Item object, int64_t byte_offset);
-int64_t js_get_slot_i(Item object, int64_t byte_offset);
-void js_set_slot_f(Item object, int64_t byte_offset, double value);
-void js_set_slot_i(Item object, int64_t byte_offset, int64_t value);
 
 // =============================================================================
 // v12: Language extensions
@@ -915,9 +886,9 @@ void js_mark_private_method_non_writable(Item object, Item name);
 void js_set_method_home_from_target(Item target, Item fn_item);
 void js_refresh_prototype_method_homes(Item prototype, Item class_item);
 Item js_init_class_instance_fields(Item callee, Item object);
-void js_set_class_instance_field_metadata_bulk(Item class_item,
-    const char** field_names, const int* field_lens, const uint8_t* field_kinds,
-    int count);
+void js_init_class_instance_field_metadata(Item class_item, int count);
+void js_set_class_instance_field_metadata_name_id_range(Item class_item,
+    int index, uint32_t module_name_base, int count, uint64_t method_mask);
 void js_set_class_instance_field_metadata_key(Item class_item, int index, Item key);
 void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
 Item js_private_key_for_class(Item class_item, Item source_name);
@@ -959,8 +930,8 @@ int64_t js_eval_env_is_active(void);
 void js_eval_env_track_global_binding(Item key);
 void js_eval_env_pop_frame(void);
 void js_eval_global_lexical_pop_frame(void);
-Item js_check_unresolved_capture(Item value, const char* name, int64_t len);
-Item js_resolve_unresolved_binding(Item value, const char* name, int64_t len, int64_t in_typeof);
+Item js_check_unresolved_capture(Item value, NameId name_id, int64_t len);
+Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_t len, int64_t in_typeof);
 
 // URL constructor
 Item js_url_construct(Item input);

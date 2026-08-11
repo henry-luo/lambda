@@ -92,12 +92,6 @@ struct JsModuleConstEntry {
     const char* live_binding_specifier; // resolved module path, NamePool-owned
 };
 
-struct P4bCtorEvidence {
-    int int_count;
-    int float_count;
-    int other_count;
-};
-
 struct JsImportGraphNode {
     char* path;            // resolved file path (owned)
     char* source;          // source text (owned)
@@ -108,6 +102,10 @@ struct JsImportGraphNode {
     MIR_context_t mir_ctx;
     void* js_main_func;    // typed as js_main_func_t at call sites
     uint32_t module_var_count;
+    PropertyKeySpec* module_property_specs;
+    uint32_t module_property_count;
+    uint32_t module_property_bytes_size;
+    uint32_t ic_count;
     bool compiled;
 };
 
@@ -232,14 +230,6 @@ struct JsFuncCollected {
     int ctor_prop_ta_types[16];     // typed array type for each prop (-1 = not a typed array)
     TypeId ctor_prop_types[16];     // P1: detected field type from constructor init (LMD_TYPE_NULL = unknown)
     int ctor_prop_param_idx[16];    // P4b: maps property → constructor param index (-1 = not a param)
-    void** ctor_shape_cache_ptr;    // Tune12 P2: per-function constructor shape cache slot
-    bool ctor_has_super_call;       // Tune12 P2b: constructor calls a static parent with this
-    bool ctor_super_via_self_prop;  // true for Ctor.superConstructor.call(this,...)
-    bool ctor_has_dynamic_this_call; // true for unrecognized fn.call(this,...) in ctor body
-    const char* ctor_super_name_ptr; // direct parent name, or self name for self.superConstructor
-    int ctor_super_name_len;
-    bool func_ctor_shape_composed;
-    bool func_ctor_shape_compose_failed;
 };
 
 static inline FnParamTypeInfo* jm_param_info(JsFuncCollected* fc, int index) {
@@ -282,7 +272,6 @@ static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_coun
             func_entries[i].analysis.param_count = 0;
         }
         // shape cache slots are pool-owned because generated MIR embeds their addresses.
-        func_entries[i].ctor_shape_cache_ptr = NULL;
     }
 }
 
@@ -355,9 +344,6 @@ struct JsClassEntry {
     JsAstNode** static_blocks;               // exact-sized, stable for the compile lifetime
     int static_block_capacity;
     int static_block_count;
-    void** shape_cache_ptr;                 // §7: per-class shape cache slot (NULL until allocated)
-    bool ctor_shape_composed;               // Tune11 P5: inherited ctor fields merged
-    bool ctor_shape_compose_failed;         // Tune11 P5: fell back to dynamic parent writes
 };
 
 // Try/catch context for handling return-in-try and exception flow
@@ -463,6 +449,14 @@ struct JsMirTranspiler {
     // Module-level constants: name -> value (for top-level const with literal init)
     struct hashmap* module_consts;   // name -> JsModuleConstEntry
     int module_var_count;            // next index for js_module_vars[]
+
+    // Property-name literals are emitted as module-table lookups. The table
+    // is linked to the active NamePool after the static compilation root is
+    // sealed, so generated MIR never embeds a compiler-owned String*.
+    ArrayList* module_name_specs;
+    uint32_t module_name_base;
+    uint32_t ic_count;
+    uint32_t module_ic_base;
 
     bool in_main;                    // true when transpiling Phase 3 (js_main)
 
@@ -573,20 +567,6 @@ struct JsMirTranspiler {
     bool module_scope_env_active;             // true if module_fc has been initialised and scope_env is live
 };
 
-static inline void** jm_alloc_shape_cache_slot(JsMirTranspiler* mt) {
-#if !LAMBDA_INLINE_CACHE
-    // Shape-cache pointers are embedded in MIR; without ICs no generated site
-    // may acquire one, so all paths select their non-cached lowering.
-    (void)mt;
-    return NULL;
-#else
-    if (!mt || !mt->tp || !mt->tp->ast_pool) return NULL;
-    // compiled MIR embeds this slot address; ast_pool is retained with any
-    // MIR context whose generated code can outlive the current compile pass.
-    return (void**)pool_calloc(mt->tp->ast_pool, sizeof(void*));
-#endif
-}
-
 static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
     if (!mt) return;
     if (mt->em.import_cache) {
@@ -641,11 +621,9 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         arraylist_free(mt->try_ctx_stack);
         mt->try_ctx_stack = NULL;
     }
-    if (mt->class_entries) {
-        for (int i = 0; i < mt->class_count; i++) {
-            // shape cache slots are pool-owned because generated MIR embeds their addresses.
-            mt->class_entries[i].shape_cache_ptr = NULL;
-        }
+    if (mt->module_name_specs) {
+        arraylist_free(mt->module_name_specs);
+        mt->module_name_specs = NULL;
     }
     if (mt->func_entries) jm_free_scope_env_names(mt->func_entries, mt->func_count);
     mt->func_entries = NULL;

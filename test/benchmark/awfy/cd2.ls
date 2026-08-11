@@ -12,77 +12,45 @@ let PROXIMITY_RADIUS = 1
 let GOOD_VOXEL_SIZE = 2
 let RED = 1
 let BLACK = 0
-let NIL = -1
-
-// Node array layout: [key, val, left, right, parent, color]
-let NK = 0
-let NV = 1
-let NL = 2
-let NR = 3
-let NP = 4
-let NC = 5
 
 // =====================================================
 // Helpers (typed float params → native arithmetic)
 // =====================================================
-pn safe_div(a: float, b: float) any {
-    if (b == 0) { return 0.0 }
-    var r: float = a / b
-    return r
+fn safe_div(a: float, b: float) float {
+    if (b == 0) 0.0 else a / b
 }
 
-pn min_f(a: float, b: float) any {
-    if (a <= b) { return a }
-    return b
+fn min_f(a: float, b: float) float {
+    if (a <= b) a else b
 }
 
-pn max_f(a: float, b: float) any {
-    if (a >= b) { return a }
-    return b
+fn max_f(a: float, b: float) float {
+    if (a >= b) a else b
 }
 
-pn check_overlap(low: float, high: float) any {
-    if (low <= 1) {
-        if (1 <= high) { return 1 }
-    }
-    if (low <= 0) {
-        if (0 <= high) { return 1 }
-    }
-    if (0 <= low) {
-        if (high <= 1) { return 1 }
-    }
-    return 0
+fn check_overlap(low: float, high: float) int {
+    if (low <= 1 and 1 <= high) 1
+    else if (low <= 0 and 0 <= high) 1
+    else if (0 <= low and high <= 1) 1
+    else 0
 }
 
-pn get_old_or_new(old, newp) any {
-    if (old == null) { return newp }
-    return old
-}
-
-pn null16() any {
-    var a = [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
-    return a
-}
-
-pn null32() any {
-    var a = [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]
-    return a
+fn get_old_or_new(old, newp) any {
+    if (old == null) newp else old
 }
 
 // =====================================================
 // Type definitions for annotated map field access
 // =====================================================
-type Arr = {l0: list, sz: int}
+type Arr = {l0: array, sz: int}
 type Vec = any
-type RbtTree = {root: int, cnt: int, nd: map}
 type DrawCtx = {p1x: float, p1y: float, p2x: float, p2y: float, motionIdx: int}
 
 // =====================================================
 // 3-level indexed array: 16 x 16 x 32 = 8192 cap
 // =====================================================
-pn arr_new() any {
-    var a: Arr = { l0: null16(), sz: 0 }
-    return a
+fn arr_new() Arr {
+    { l0: fill(16, null), sz: 0 }
 }
 
 pn arr_get(a, idx: int) any {
@@ -99,7 +67,7 @@ pn arr_get(a, idx: int) any {
     return r
 }
 
-pn arr_set(a, idx: int, val) any {
+pn arr_set(a, idx: int, val) int {
     var i2: int = int(idx % 32)
     var mid: int = shr(idx, 5)
     var i1: int = int(mid % 16)
@@ -107,12 +75,12 @@ pn arr_set(a, idx: int, val) any {
     var l0 = (a.l0)
     var c1 = l0[i0]
     if (c1 == null) {
-        c1 = null16()
+        c1 = fill(16, null)
         l0[i0] = c1
     }
     var c2 = c1[i1]
     if (c2 == null) {
-        c2 = null32()
+        c2 = fill(32, null)
         c1[i1] = c2
     }
     c2[i2] = val
@@ -126,536 +94,438 @@ pn vec_new() any {
     return []
 }
 
-pn vec_add(v, item) any {
+pn vec_add(v, item) int {
     push(v, item)
     return 0
 }
 
-pn vec_at(v, idx: int) any {
-    return v[idx]
+fn vec_at(v, idx: int) any {
+    v[idx]
 }
 
 // =====================================================
 // Red-Black Tree (integer keys)
-// Node = array: [key, val, left_id, right_id, parent_id, color]
-// Tree = map: { root, cnt, nd }
+// Node = map: {key, value, left, right, parent, color} — direct node
+//   references, `null` is the absent-node sentinel (mirrors the reference
+//   implementation's Node<K,V> pointers; see ref/are-we-fast-yet Java cd/).
+// Tree = map: {root}
+//
+// Node and tree maps are deliberately left UNTYPED. Admitting a map through a
+// declared map contract runs it through boundary reification, which detaches
+// the map from the object graph — parent/child links would then point at stale
+// copies and mutations through one path would be invisible through the other.
+// Untyped construction costs zero admissions and preserves aliasing.
 // =====================================================
 
+// `==` on maps is structural, not identity: it reports two distinct nodes with
+// equal contents as equal, and diverges outright on the parent/child cycles
+// this tree builds. Node identity therefore goes through `key`, which is unique
+// across the tree by construction (rbt_put replaces in place on a key hit and
+// never inserts a duplicate).
+fn node_eq(a, b) int {
+    if (a == null and b == null) 1
+    else if (a == null) 0
+    else if (b == null) 0
+    else if ((a.key) == (b.key)) 1
+    else 0
+}
+
+// absent nodes count as black, matching `x == null || x.color == BLACK`
+fn is_black(n) int {
+    if (n == null) 1
+    else if ((n.color) == BLACK) 1
+    else 0
+}
+
 pn rbt_new() any {
-    var nd: Arr = arr_new()
-    var t: RbtTree = { root: -1, cnt: 0, nd: nd }
+    var t = { root: null }
     return t
 }
 
-pn rbt_nd(tree, id: int) any {
-    return arr_get(tree.nd, id)
+pn rbt_mk_node(k: int, v) any {
+    var n = { key: k, value: v, left: null, right: null, parent: null, color: RED }
+    return n
 }
 
-pn rbt_mk_node(tree, key: int, val) any {
-    var c: int = (tree.cnt)
-    var n = [key, val, NIL, NIL, NIL, RED]
-    var nd = (tree.nd)
-    arr_set(nd, c, n)
-    var nc: int = c + 1
-    tree.cnt = nc
-    return c
+pn rbt_left_rotate(tree, x) any {
+    var y = (x.right)
+    // turn y's left subtree into x's right subtree
+    var yl = (y.left)
+    x.right = yl
+    if (yl != null) {
+        yl.parent = x
+    }
+    // link x's parent to y
+    var xp = (x.parent)
+    y.parent = xp
+    if (xp == null) {
+        tree.root = y
+    } else {
+        var xpl = (xp.left)
+        if (node_eq(x, xpl) == 1) {
+            xp.left = y
+        } else {
+            xp.right = y
+        }
+    }
+    // put x on y's left
+    y.left = x
+    x.parent = y
+    return y
 }
 
-pn rbt_left_rotate(tree, xId: int) any {
-    var xn = rbt_nd(tree, xId)
-    var yId: int = xn[NR]
-    var yn = rbt_nd(tree, yId)
-    var ylId: int = yn[NL]
-    // x.right = y.left
-    xn[NR] = ylId
-    if (ylId != NIL) {
-        var yln = rbt_nd(tree, ylId)
-        yln[NP] = xId
+pn rbt_right_rotate(tree, y) any {
+    var x = (y.left)
+    // turn x's right subtree into y's left subtree
+    var xr = (x.right)
+    y.left = xr
+    if (xr != null) {
+        xr.parent = y
     }
-    // y.parent = x.parent
-    var xpId: int = xn[NP]
-    yn[NP] = xpId
-    if (xpId == NIL) {
-        tree.root = yId
-    }
-    if (xpId != NIL) {
-        var xpn = rbt_nd(tree, xpId)
-        var xplId: int = xpn[NL]
-        if (xId == xplId) {
-            xpn[NL] = yId
-        }
-        if (xId != xplId) {
-            xpn[NR] = yId
+    // link y's parent to x
+    var yp = (y.parent)
+    x.parent = yp
+    if (yp == null) {
+        tree.root = x
+    } else {
+        var ypl = (yp.left)
+        if (node_eq(y, ypl) == 1) {
+            yp.left = x
+        } else {
+            yp.right = x
         }
     }
-    // y.left = x
-    yn[NL] = xId
-    xn[NP] = yId
-    return yId
-}
-
-pn rbt_right_rotate(tree, yId: int) any {
-    var yn = rbt_nd(tree, yId)
-    var xId: int = yn[NL]
-    var xn = rbt_nd(tree, xId)
-    var xrId: int = xn[NR]
-    // y.left = x.right
-    yn[NL] = xrId
-    if (xrId != NIL) {
-        var xrn = rbt_nd(tree, xrId)
-        xrn[NP] = yId
-    }
-    // x.parent = y.parent
-    var ypId: int = yn[NP]
-    xn[NP] = ypId
-    if (ypId == NIL) {
-        tree.root = xId
-    }
-    if (ypId != NIL) {
-        var ypn = rbt_nd(tree, ypId)
-        var yplId: int = ypn[NL]
-        if (yId == yplId) {
-            ypn[NL] = xId
-        }
-        if (yId != yplId) {
-            ypn[NR] = xId
-        }
-    }
-    // x.right = y
-    xn[NR] = yId
-    yn[NP] = xId
-    return xId
+    // put y on x's right
+    x.right = y
+    y.parent = x
+    return x
 }
 
 pn rbt_put(tree, key: int, value) any {
-    var yId: int = NIL
-    var xId: int = (tree.root)
-    while (xId != NIL) {
-        yId = xId
-        var xn = rbt_nd(tree, xId)
-        var xk: int = xn[NK]
-        if (key < xk) {
-            xId = xn[NL]
-        }
-        if (key > xk) {
-            xId = xn[NR]
-        }
+    // tree insert
+    var y = null
+    var x = (tree.root)
+    while (x != null) {
+        y = x
+        var xk: int = (x.key)
         if (key == xk) {
-            var oldVal = xn[NV]
-            xn[NV] = value
+            var oldVal = (x.value)
+            x.value = value
             return oldVal
+        } else if (key < xk) {
+            x = (x.left)
+        } else {
+            x = (x.right)
         }
     }
-    var zId: int = rbt_mk_node(tree, key, value)
-    var zn = rbt_nd(tree, zId)
-    zn[NP] = yId
-    if (yId == NIL) {
-        tree.root = zId
-    }
-    if (yId != NIL) {
-        var yn = rbt_nd(tree, yId)
-        var yk: int = yn[NK]
+    var z = rbt_mk_node(key, value)
+    z.parent = y
+    if (y == null) {
+        tree.root = z
+    } else {
+        var yk: int = (y.key)
         if (key < yk) {
-            yn[NL] = zId
-        }
-        if (key >= yk) {
-            yn[NR] = zId
+            y.left = z
+        } else {
+            y.right = z
         }
     }
-    // Fix up
-    var curId: int = zId
-    var rootId: int = (tree.root)
-    while (curId != rootId) {
-        var cur = rbt_nd(tree, curId)
-        var pId: int = cur[NP]
-        var parn = rbt_nd(tree, pId)
-        var pcol: int = parn[NC]
+    // fix up
+    var cur = z
+    var root = (tree.root)
+    while (node_eq(cur, root) == 0) {
+        var par = (cur.parent)
+        var pcol: int = (par.color)
         if (pcol != RED) {
-            curId = rootId
-        }
-        if (pcol == RED) {
-            var ppId: int = parn[NP]
-            var ppn = rbt_nd(tree, ppId)
-            var ppLId: int = ppn[NL]
-            if (pId == ppLId) {
-                var uncId: int = ppn[NR]
+            // matches the `x.parent.color == RED` half of the loop guard
+            cur = root
+        } else {
+            var gp = (par.parent)
+            var gpl = (gp.left)
+            if (node_eq(par, gpl) == 1) {
+                var unc = (gp.right)
                 var uncCol: int = BLACK
-                if (uncId != NIL) {
-                    var uncN = rbt_nd(tree, uncId)
-                    uncCol = uncN[NC]
-                }
+                if (unc != null) { uncCol = (unc.color) }
                 if (uncCol == RED) {
-                    parn[NC] = BLACK
-                    var uncN2 = rbt_nd(tree, uncId)
-                    uncN2[NC] = BLACK
-                    ppn[NC] = RED
-                    curId = ppId
-                    rootId = (tree.root)
-                }
-                if (uncCol != RED) {
-                    var curRN = rbt_nd(tree, curId)
-                    var crpId: int = curRN[NP]
-                    var crpN = rbt_nd(tree, crpId)
-                    var crprId: int = crpN[NR]
-                    if (curId == crprId) {
-                        curId = pId
-                        rbt_left_rotate(tree, curId)
+                    // case 1
+                    par.color = BLACK
+                    unc.color = BLACK
+                    gp.color = RED
+                    cur = gp
+                    root = (tree.root)
+                } else {
+                    var pr = (par.right)
+                    if (node_eq(cur, pr) == 1) {
+                        // case 2
+                        cur = par
+                        rbt_left_rotate(tree, cur)
                     }
-                    var cur3 = rbt_nd(tree, curId)
-                    var p3Id: int = cur3[NP]
-                    var p3 = rbt_nd(tree, p3Id)
-                    p3[NC] = BLACK
-                    var pp3Id: int = p3[NP]
-                    var pp3 = rbt_nd(tree, pp3Id)
-                    pp3[NC] = RED
-                    rbt_right_rotate(tree, pp3Id)
-                    rootId = (tree.root)
+                    // case 3 — re-read the parent chain, the rotation moved it
+                    var cp = (cur.parent)
+                    cp.color = BLACK
+                    var cpp = (cp.parent)
+                    cpp.color = RED
+                    rbt_right_rotate(tree, cpp)
+                    root = (tree.root)
                 }
-            }
-            if (pId != ppLId) {
-                var uncId2: int = ppn[NL]
+            } else {
+                // same as the "then" clause with "right" and "left" exchanged
+                var unc2 = (gp.left)
                 var uncCol2: int = BLACK
-                if (uncId2 != NIL) {
-                    var uncN3 = rbt_nd(tree, uncId2)
-                    uncCol2 = uncN3[NC]
-                }
+                if (unc2 != null) { uncCol2 = (unc2.color) }
                 if (uncCol2 == RED) {
-                    parn[NC] = BLACK
-                    var uncN4 = rbt_nd(tree, uncId2)
-                    uncN4[NC] = BLACK
-                    ppn[NC] = RED
-                    curId = ppId
-                    rootId = (tree.root)
-                }
-                if (uncCol2 != RED) {
-                    var cur2N = rbt_nd(tree, curId)
-                    var c2pId: int = cur2N[NP]
-                    var c2pN = rbt_nd(tree, c2pId)
-                    var c2plId: int = c2pN[NL]
-                    if (curId == c2plId) {
-                        curId = pId
-                        rbt_right_rotate(tree, curId)
+                    // case 1
+                    par.color = BLACK
+                    unc2.color = BLACK
+                    gp.color = RED
+                    cur = gp
+                    root = (tree.root)
+                } else {
+                    var pl = (par.left)
+                    if (node_eq(cur, pl) == 1) {
+                        // case 2
+                        cur = par
+                        rbt_right_rotate(tree, cur)
                     }
-                    var cur4 = rbt_nd(tree, curId)
-                    var p4Id: int = cur4[NP]
-                    var p4 = rbt_nd(tree, p4Id)
-                    p4[NC] = BLACK
-                    var pp4Id: int = p4[NP]
-                    var pp4 = rbt_nd(tree, pp4Id)
-                    pp4[NC] = RED
-                    rbt_left_rotate(tree, pp4Id)
-                    rootId = (tree.root)
+                    // case 3
+                    var cp2 = (cur.parent)
+                    cp2.color = BLACK
+                    var cpp2 = (cp2.parent)
+                    cpp2.color = RED
+                    rbt_left_rotate(tree, cpp2)
+                    root = (tree.root)
                 }
             }
         }
     }
-    var rootN = rbt_nd(tree, (tree.root))
-    rootN[NC] = BLACK
+    var rootN = (tree.root)
+    rootN.color = BLACK
     return null
 }
 
 pn rbt_find_node(tree, key: int) any {
-    var curId: int = (tree.root)
-    while (curId != NIL) {
-        var n = rbt_nd(tree, curId)
-        var nk: int = n[NK]
-        if (key == nk) { return curId }
-        if (key < nk) {
-            curId = n[NL]
-        }
-        if (key > nk) {
-            curId = n[NR]
+    var cur = (tree.root)
+    while (cur != null) {
+        var nk: int = (cur.key)
+        if (key == nk) {
+            return cur
+        } else if (key < nk) {
+            cur = (cur.left)
+        } else {
+            cur = (cur.right)
         }
     }
-    return NIL
+    return null
 }
 
 pn rbt_get(tree, key: int) any {
-    var nId: int = rbt_find_node(tree, key)
-    if (nId == NIL) { return null }
-    var n = rbt_nd(tree, nId)
-    var v = n[NV]
+    var n = rbt_find_node(tree, key)
+    if (n == null) { return null }
+    var v = (n.value)
     return v
 }
 
-pn rbt_tree_min(tree, xId: int) any {
-    while (xId != NIL) {
-        var n = rbt_nd(tree, xId)
-        var lId: int = n[NL]
-        if (lId == NIL) { return xId }
-        xId = lId
+pn rbt_tree_min(x) any {
+    var cur = x
+    while (cur != null) {
+        var l = (cur.left)
+        if (l == null) { return cur }
+        cur = l
     }
-    return xId
+    return cur
 }
 
-pn rbt_successor(tree, xId: int) any {
-    var xn = rbt_nd(tree, xId)
-    var rId: int = xn[NR]
-    if (rId != NIL) {
-        var r: int = rbt_tree_min(tree, rId)
-        return r
+pn rbt_successor(x) any {
+    var r = (x.right)
+    if (r != null) {
+        var m = rbt_tree_min(r)
+        return m
     }
-    var yId: int = xn[NP]
-    while (yId != NIL) {
-        var yn = rbt_nd(tree, yId)
-        var yrId: int = yn[NR]
-        if (xId != yrId) { return yId }
-        xId = yId
-        yId = yn[NP]
+    var cur = x
+    var y = (cur.parent)
+    while (y != null) {
+        var yr = (y.right)
+        if (node_eq(cur, yr) == 0) { return y }
+        cur = y
+        y = (y.parent)
     }
-    return NIL
+    return null
 }
 
 pn rbt_first(tree) any {
-    var rId: int = (tree.root)
-    if (rId == NIL) { return NIL }
-    var r: int = rbt_tree_min(tree, rId)
-    return r
+    var r = (tree.root)
+    if (r == null) { return null }
+    var m = rbt_tree_min(r)
+    return m
 }
 
-pn rbt_remove_fixup(tree, xId: int, xParId: int) any {
-    var rootId: int = (tree.root)
-    while (xId != rootId) {
-        var xCol: int = BLACK
-        if (xId != NIL) {
-            var xn = rbt_nd(tree, xId)
-            xCol = xn[NC]
-        }
-        if (xCol != BLACK) {
-            xId = rootId
-        }
-        if (xCol == BLACK) {
-            var xpn = rbt_nd(tree, xParId)
-            var xplId: int = xpn[NL]
-            if (xId == xplId) {
-                var wId: int = xpn[NR]
-                var wn = rbt_nd(tree, wId)
-                var wc: int = wn[NC]
-                if (wc == RED) {
-                    wn[NC] = BLACK
-                    xpn[NC] = RED
-                    rbt_left_rotate(tree, xParId)
-                    xpn = rbt_nd(tree, xParId)
-                    wId = xpn[NR]
-                    wn = rbt_nd(tree, wId)
-                }
-                var wlc: int = BLACK
-                var wlId: int = wn[NL]
-                if (wlId != NIL) {
-                    var wln = rbt_nd(tree, wlId)
-                    wlc = wln[NC]
-                }
-                var wrc: int = BLACK
-                var wrId: int = wn[NR]
-                if (wrId != NIL) {
-                    var wrn = rbt_nd(tree, wrId)
-                    wrc = wrn[NC]
-                }
-                var didCase2: int = 0
-                if (wlc == BLACK) {
-                    if (wrc == BLACK) {
-                        wn[NC] = RED
-                        xId = xParId
-                        var xn2 = rbt_nd(tree, xId)
-                        xParId = xn2[NP]
-                        rootId = (tree.root)
-                        didCase2 = 1
-                    }
-                }
-                if (didCase2 == 0) {
-                    // Refresh
-                    wn = rbt_nd(tree, wId)
-                    wrId = wn[NR]
-                    wrc = BLACK
-                    if (wrId != NIL) {
-                        var wrn2 = rbt_nd(tree, wrId)
-                        wrc = wrn2[NC]
-                    }
-                    if (wrc == BLACK) {
-                        wlId = wn[NL]
-                        if (wlId != NIL) {
-                            var wln2 = rbt_nd(tree, wlId)
-                            wln2[NC] = BLACK
-                        }
-                        wn[NC] = RED
-                        rbt_right_rotate(tree, wId)
-                        xpn = rbt_nd(tree, xParId)
-                        wId = xpn[NR]
-                        wn = rbt_nd(tree, wId)
-                    }
-                    var xpc: int = xpn[NC]
-                    wn[NC] = xpc
-                    xpn[NC] = BLACK
-                    wrId = wn[NR]
-                    if (wrId != NIL) {
-                        var wrn3 = rbt_nd(tree, wrId)
-                        wrn3[NC] = BLACK
-                    }
-                    rbt_left_rotate(tree, xParId)
-                    xId = (tree.root)
-                    rootId = xId
-                    var xn3 = rbt_nd(tree, xId)
-                    xParId = xn3[NP]
-                }
+pn rbt_remove_fixup(tree, x, xParent) any {
+    var cur = x
+    var par = xParent
+    var root = (tree.root)
+    // guard mirrors `x != root && (x == null || x.color == BLACK)`; the
+    // id-based predecessor of this function fell through from the left case
+    // into the right case after it reassigned the cursor, so the two sibling
+    // cases are kept mutually exclusive here.
+    while (node_eq(cur, root) == 0 and is_black(cur) == 1) {
+        var pl = (par.left)
+        if (node_eq(cur, pl) == 1) {
+            // w cannot be null here — it follows from the red-black invariants
+            var w = (par.right)
+            if ((w.color) == RED) {
+                // case 1
+                w.color = BLACK
+                par.color = RED
+                rbt_left_rotate(tree, par)
+                root = (tree.root)
+                w = (par.right)
             }
-            if (xId != xplId) {
-                var wId2: int = xpn[NL]
-                var wn2 = rbt_nd(tree, wId2)
-                var wc2: int = wn2[NC]
-                if (wc2 == RED) {
-                    wn2[NC] = BLACK
-                    xpn[NC] = RED
-                    rbt_right_rotate(tree, xParId)
-                    xpn = rbt_nd(tree, xParId)
-                    wId2 = xpn[NL]
-                    wn2 = rbt_nd(tree, wId2)
+            var wl = (w.left)
+            var wr = (w.right)
+            if (is_black(wl) == 1 and is_black(wr) == 1) {
+                // case 2
+                w.color = RED
+                cur = par
+                par = (cur.parent)
+            } else {
+                if (is_black(wr) == 1) {
+                    // case 3
+                    var wl2 = (w.left)
+                    wl2.color = BLACK
+                    w.color = RED
+                    rbt_right_rotate(tree, w)
+                    root = (tree.root)
+                    w = (par.right)
                 }
-                var wrc2: int = BLACK
-                var wrId2: int = wn2[NR]
-                if (wrId2 != NIL) {
-                    var wrn4 = rbt_nd(tree, wrId2)
-                    wrc2 = wrn4[NC]
+                // case 4
+                w.color = (par.color)
+                par.color = BLACK
+                var wr2 = (w.right)
+                if (wr2 != null) { wr2.color = BLACK }
+                rbt_left_rotate(tree, par)
+                root = (tree.root)
+                cur = root
+                par = (cur.parent)
+            }
+        } else {
+            // same as the "then" clause with "right" and "left" exchanged
+            var w2 = (par.left)
+            if ((w2.color) == RED) {
+                // case 1
+                w2.color = BLACK
+                par.color = RED
+                rbt_right_rotate(tree, par)
+                root = (tree.root)
+                w2 = (par.left)
+            }
+            var w2r = (w2.right)
+            var w2l = (w2.left)
+            if (is_black(w2r) == 1 and is_black(w2l) == 1) {
+                // case 2
+                w2.color = RED
+                cur = par
+                par = (cur.parent)
+            } else {
+                if (is_black(w2l) == 1) {
+                    // case 3
+                    var w2r2 = (w2.right)
+                    w2r2.color = BLACK
+                    w2.color = RED
+                    rbt_left_rotate(tree, w2)
+                    root = (tree.root)
+                    w2 = (par.left)
                 }
-                var wlc2: int = BLACK
-                var wlId2: int = wn2[NL]
-                if (wlId2 != NIL) {
-                    var wln3 = rbt_nd(tree, wlId2)
-                    wlc2 = wln3[NC]
-                }
-                var didCase2b: int = 0
-                if (wrc2 == BLACK) {
-                    if (wlc2 == BLACK) {
-                        wn2[NC] = RED
-                        xId = xParId
-                        var xn4 = rbt_nd(tree, xId)
-                        xParId = xn4[NP]
-                        rootId = (tree.root)
-                        didCase2b = 1
-                    }
-                }
-                if (didCase2b == 0) {
-                    wlId2 = wn2[NL]
-                    wlc2 = BLACK
-                    if (wlId2 != NIL) {
-                        var wln4 = rbt_nd(tree, wlId2)
-                        wlc2 = wln4[NC]
-                    }
-                    if (wlc2 == BLACK) {
-                        wrId2 = wn2[NR]
-                        if (wrId2 != NIL) {
-                            var wrn5 = rbt_nd(tree, wrId2)
-                            wrn5[NC] = BLACK
-                        }
-                        wn2[NC] = RED
-                        rbt_left_rotate(tree, wId2)
-                        xpn = rbt_nd(tree, xParId)
-                        wId2 = xpn[NL]
-                        wn2 = rbt_nd(tree, wId2)
-                    }
-                    var xpc2: int = xpn[NC]
-                    wn2[NC] = xpc2
-                    xpn[NC] = BLACK
-                    wlId2 = wn2[NL]
-                    if (wlId2 != NIL) {
-                        var wln5 = rbt_nd(tree, wlId2)
-                        wln5[NC] = BLACK
-                    }
-                    rbt_right_rotate(tree, xParId)
-                    xId = (tree.root)
-                    rootId = xId
-                    var xn5 = rbt_nd(tree, xId)
-                    xParId = xn5[NP]
-                }
+                // case 4
+                w2.color = (par.color)
+                par.color = BLACK
+                var w2l2 = (w2.left)
+                if (w2l2 != null) { w2l2.color = BLACK }
+                rbt_right_rotate(tree, par)
+                root = (tree.root)
+                cur = root
+                par = (cur.parent)
             }
         }
     }
-    if (xId != NIL) {
-        var xfn = rbt_nd(tree, xId)
-        xfn[NC] = BLACK
+    if (cur != null) {
+        cur.color = BLACK
     }
     return 0
 }
 
 pn rbt_remove(tree, key: int) any {
-    var zId: int = rbt_find_node(tree, key)
-    if (zId == NIL) { return null }
-    var zn = rbt_nd(tree, zId)
-    var zv = zn[NV]
-    var yId: int = zId
-    var zlId: int = zn[NL]
-    var zrId: int = zn[NR]
-    if (zlId != NIL) {
-        if (zrId != NIL) {
-            yId = rbt_successor(tree, zId)
+    var z = rbt_find_node(tree, key)
+    if (z == null) { return null }
+    var zv = (z.value)
+
+    // y is the node to be unlinked from the tree
+    var y = z
+    var zl = (z.left)
+    var zr = (z.right)
+    if (zl != null and zr != null) {
+        y = rbt_successor(z)
+    }
+
+    // x is the child of y which might replace y; it may be null
+    var yl = (y.left)
+    var x = null
+    if (yl != null) {
+        x = yl
+    } else {
+        x = (y.right)
+    }
+
+    var yp = (y.parent)
+    var xParent = null
+    if (x != null) {
+        x.parent = yp
+        xParent = (x.parent)
+    } else {
+        xParent = yp
+    }
+    if (yp == null) {
+        tree.root = x
+    } else {
+        var ypl = (yp.left)
+        if (node_eq(y, ypl) == 1) {
+            yp.left = x
+        } else {
+            yp.right = x
         }
     }
-    var yn = rbt_nd(tree, yId)
-    var ylId: int = yn[NL]
-    var yrId: int = yn[NR]
-    var xId: int = NIL
-    if (ylId != NIL) {
-        xId = ylId
-    }
-    if (ylId == NIL) {
-        xId = yrId
-    }
-    var xParId: int = yn[NP]
-    if (xId != NIL) {
-        var xn = rbt_nd(tree, xId)
-        xn[NP] = xParId
-    }
-    var ypId: int = yn[NP]
-    if (ypId == NIL) {
-        tree.root = xId
-    }
-    if (ypId != NIL) {
-        var ypn = rbt_nd(tree, ypId)
-        var yplId: int = ypn[NL]
-        if (yId == yplId) {
-            ypn[NL] = xId
-        }
-        if (yId != yplId) {
-            ypn[NR] = xId
-        }
-    }
-    if (yId != zId) {
-        var ycol: int = yn[NC]
+
+    if (node_eq(y, z) == 0) {
+        var ycol: int = (y.color)
         if (ycol == BLACK) {
-            rbt_remove_fixup(tree, xId, xParId)
+            rbt_remove_fixup(tree, x, xParent)
         }
-        yn[NP] = zn[NP]
-        yn[NC] = zn[NC]
-        yn[NL] = zn[NL]
-        yn[NR] = zn[NR]
-        var znlId: int = zn[NL]
-        if (znlId != NIL) {
-            var znln = rbt_nd(tree, znlId)
-            znln[NP] = yId
+        y.parent = (z.parent)
+        y.color = (z.color)
+        y.left = (z.left)
+        y.right = (z.right)
+        var znl = (z.left)
+        if (znl != null) {
+            znl.parent = y
         }
-        var znrId: int = zn[NR]
-        if (znrId != NIL) {
-            var znrn = rbt_nd(tree, znrId)
-            znrn[NP] = yId
+        var znr = (z.right)
+        if (znr != null) {
+            znr.parent = y
         }
-        var zpId: int = zn[NP]
-        if (zpId != NIL) {
-            var zpn = rbt_nd(tree, zpId)
-            var zplId: int = zpn[NL]
-            if (zId == zplId) {
-                zpn[NL] = yId
+        var zp = (z.parent)
+        if (zp != null) {
+            var zpl = (zp.left)
+            if (node_eq(z, zpl) == 1) {
+                zp.left = y
+            } else {
+                zp.right = y
             }
-            if (zId != zplId) {
-                zpn[NR] = yId
-            }
+        } else {
+            tree.root = y
         }
-        if (zpId == NIL) {
-            tree.root = yId
-        }
-    }
-    if (yId == zId) {
-        var ycol2: int = yn[NC]
+    } else {
+        var ycol2: int = (y.color)
         if (ycol2 == BLACK) {
-            rbt_remove_fixup(tree, xId, xParId)
+            rbt_remove_fixup(tree, x, xParent)
         }
     }
     return zv
@@ -664,24 +534,23 @@ pn rbt_remove(tree, key: int) any {
 // =====================================================
 // Vector2D key encoding (typed int → native arithmetic)
 // =====================================================
-pn v2d_key(x: int, y: int) any {
-    var kx: int = x + 1000
-    var ky: int = y + 1000
-    var k: int = kx * 100000 + ky
-    return k
+fn v2d_key(x: int, y: int) int {
+    let kx: int = x + 1000
+    let ky: int = y + 1000
+    kx * 100000 + ky
 }
 
 // =====================================================
 // Vector3D operations
 // =====================================================
-pn v3d_new(x, y, z) any {
-    return [x, y, z]
+fn v3d_new(x, y, z) array {
+    [x, y, z]
 }
 
 // =====================================================
 // Voxel hashing (typed float → native division)
 // =====================================================
-pn voxel_hash_xy(px: float, py: float, out) any {
+pn voxel_hash_xy(px: float, py: float, out) int {
     var xdiv: int = int(px / GOOD_VOXEL_SIZE)
     var ydiv: int = int(py / GOOD_VOXEL_SIZE)
     var rx: int = GOOD_VOXEL_SIZE * xdiv
@@ -696,7 +565,7 @@ pn voxel_hash_xy(px: float, py: float, out) any {
 // =====================================================
 // isInVoxel check (typed float → native float arithmetic)
 // =====================================================
-pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float) any {
+pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float) int {
     if (vx > MAX_X) { return 0 }
     if (vx < MIN_X) { return 0 }
     if (vy > MAX_Y) { return 0 }
@@ -921,8 +790,8 @@ pn find_intersection(m1, m2) any {
 // =====================================================
 // Motion: array [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 // =====================================================
-pn motion_new(cs: int, p1x, p1y, p1z, p2x, p2y, p2z) any {
-    return [cs, p1x, p1y, p1z, p2x, p2y, p2z]
+fn motion_new(cs: int, p1x, p1y, p1z, p2x, p2y, p2z) array {
+    [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 }
 
 // =====================================================
@@ -974,15 +843,14 @@ pn handle_new_frame(stateTree, frame: Vec) any {
 
     // Remove aircraft no longer present
     var toRemove: Vec = vec_new()
-    var curId: int = rbt_first(stateTree)
-    while (curId != NIL) {
-        var curN = rbt_nd(stateTree, curId)
-        var ck: int = curN[NK]
+    var curN = rbt_first(stateTree)
+    while (curN != null) {
+        var ck: int = (curN.key)
         var inSeen = arr_get(seenArr, ck)
         if (inSeen == null) {
             vec_add(toRemove, ck)
         }
-        curId = rbt_successor(stateTree, curId)
+        curN = rbt_successor(curN)
     }
     var trSz: int = len(toRemove)
     var ri: int = 0
@@ -999,10 +867,14 @@ pn handle_new_frame(stateTree, frame: Vec) any {
     var mi: int = 0
     while (mi < motionsSz) {
         var mot = vec_at(motions, mi)
-        var mp1x = mot[1]
-        var mp1y = mot[2]
-        var mp2x = mot[4]
-        var mp2y = mot[5]
+        // pin to float here: `mot` is untyped, so these read back as ANY, and an
+        // ANY field has a different packed width/offset than DrawCtx's native
+        // float lane. Building the ctx literal below straight from ANY values
+        // makes the boundary rebuild the map's layout on every construction.
+        var mp1x: float = mot[1]
+        var mp1y: float = mot[2]
+        var mp2x: float = mot[4]
+        var mp2y: float = mot[5]
         voxel_hash_xy(mp1x, mp1y, vxy)
         var vvx: int = vxy[0]
         var vvy: int = vxy[1]
@@ -1015,10 +887,9 @@ pn handle_new_frame(stateTree, frame: Vec) any {
 
     // Collect voxels with >1 motion and check collisions
     var collisionCount: int = 0
-    var vmCur: int = rbt_first(voxelMap)
-    while (vmCur != NIL) {
-        var vmN = rbt_nd(voxelMap, vmCur)
-        var motVec: Vec = vmN[NV]
+    var vmCur = rbt_first(voxelMap)
+    while (vmCur != null) {
+        var motVec: Vec = (vmCur.value)
         var mvsz: int = len(motVec)
         if (mvsz > 1) {
             var ii: int = 0
@@ -1038,7 +909,7 @@ pn handle_new_frame(stateTree, frame: Vec) any {
                 ii = ii + 1
             }
         }
-        vmCur = rbt_successor(voxelMap, vmCur)
+        vmCur = rbt_successor(vmCur)
     }
 
     return collisionCount
@@ -1046,7 +917,7 @@ pn handle_new_frame(stateTree, frame: Vec) any {
 
 pn cd(numAircraft: int) any {
     var numFrames: int = 200
-    var stateTree: RbtTree = rbt_new()
+    var stateTree = rbt_new()
     var actualCollisions: int = 0
     var i: int = 0
     while (i < numFrames) {
@@ -1059,7 +930,7 @@ pn cd(numAircraft: int) any {
     return actualCollisions
 }
 
-pn verify_result(collisions: int, numAircraft: int) any {
+pn verify_result(collisions: int, numAircraft: int) int {
     if (numAircraft == 100) {
         if (collisions == 4305) { return 1 }
     }

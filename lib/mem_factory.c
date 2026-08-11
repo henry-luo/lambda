@@ -29,7 +29,7 @@ static bool pool_stat_fn(void* a, MemStatSample* s) {
     s->bytes_reserved = stats.reserved_bytes;
     s->bytes_in_use = stats.live_bytes;
     s->direct_bytes = stats.live_bytes;
-    s->committed_bytes = stats.reserved_bytes;
+    s->committed_bytes = stats.committed_bytes;
     s->high_water_bytes = stats.high_water_live_bytes;
     s->cumulative_bytes = stats.cumulative_bytes;
     s->alloc_count = stats.allocation_count;
@@ -41,15 +41,22 @@ static void pool_destroy_fn(void* a) {
     pool_destroy((Pool*)a);
 }
 
-Pool* mem_pool_create(MemContext* ctx, MemRole role, const char* label) {
+Pool* mem_pool_create_sized(MemContext* ctx, size_t initial_extent_size,
+                            MemRole role, const char* label) {
     ensure_release_hooks();
-    Pool* p = pool_create();
+    Pool* p = pool_create_sized(initial_extent_size);
     if (!p) return NULL;
-    MemNode* n = mem_register(ctx ? ctx : mem_context_root(),
+    MemContext* owner_context = ctx ? ctx : mem_context_root();
+    pool_set_mem_context(p, owner_context);
+    MemNode* n = mem_register(owner_context,
                               MEM_KIND_POOL, role, label, p, NULL,
                               pool_stat_fn, pool_destroy_fn);
     pool_set_mem_node(p, n);
     return p;
+}
+
+Pool* mem_pool_create(MemContext* ctx, MemRole role, const char* label) {
+    return mem_pool_create_sized(ctx, 0, role, label);
 }
 
 void mem_pool_destroy(Pool* pool) {

@@ -1143,9 +1143,12 @@ void mir_guest_finish_context(Runtime* runtime, bool reusing_context) {
             runtime->name_pool = context->name_pool;
             runtime->type_list = (ArrayList*)context->type_list;
         } else {
-            if (context->name_pool) name_pool_release(context->name_pool);
             if (context->type_list) arraylist_free((ArrayList*)context->type_list);
             if (context->heap) heap_destroy();
+            // D4.2.1v2/RN-NamePool: one-shot GC finalization can traverse
+            // NameRecords, so release the dedicated pool after the heap.
+            if (context->name_pool) name_pool_release(context->name_pool);
+            context->name_pool = NULL;
         }
     }
 }

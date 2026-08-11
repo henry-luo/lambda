@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.9.0 (2026-08-10)
+**Spec version:** 1.13.0 (2026-08-11)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -421,11 +421,13 @@ that carries them.
   null-safe opt-in (no pool ⇒ per-map chains, no semantic change).
   Runtime-constructed maps do not intern today — they rebuild per
   transition. [Shape_Pool §3–§8]
-- **D3.4.4** ShapeEntry name identity follows the name-identity split
-  (D4.6): `name_hash` is a lookup hash, **never an identity**;
-  `predefined_id` (a NameId) is the generated identity; `key_ref` is the
-  canonical runtime key — and **Input-owned document shapes keep it
-  NULL** (a million-key JSON must not bloat session state). [NI10, NI13]
+- **D3.4.4v2** ShapeEntry name identity is one integer field, `name_id`.
+  `name_hash` is routing metadata only and never identity; a non-zero
+  `name_id` is compared exactly. `NAME_ID_NONE` is reserved for an ordinary
+  id-less Input field and is confirmed by key kind, length, and bytes at the
+  explicit Input seam. Symbol and private entries never enter that byte
+  fallback. Shape copies, descriptor clones, and transitions preserve the
+  field unchanged. [NI10, NI13]
 - **D3.4.5** Shape transitions obey the **map-layout invariant**: the
   exact runtime shape always describes the stored bytes. Type-compatible
   writes stay on the direct path (same type; `int → float`;
@@ -460,7 +462,7 @@ that carries them.
 - **D4.1.3** Input/format allocations are pool/arena-owned and **outside GC
   rooting entirely**; any future GC-heap boundary there requires an
   explicit audit. [CR8]
-- **D4.1.4*** Heap bytes are kept by exactly **four mechanisms** — tracked
+- **D4.1.4v4*** Heap bytes are kept by exactly **four mechanisms** — tracked
   raw allocation (`memtrack`), GC heap, arena, pool — and no fifth may be
   added without a new ruling. **Arena = sequential allocation + batch
   free**, where batch free has exactly two variants: whole-arena
@@ -470,8 +472,19 @@ that carries them.
   single-writer/multi-reader: published allocations are readable from any
   thread; all mutation (alloc, free, reset, rewind, destroy) stays on the
   one writer thread. A site needing non-tail free is reclassified to pool —
-  free lists are never added to arena. [Mem_Heap §1.1–§1.2, §4–§5; MP-12,
-  MP-15]
+  free lists are never added to arena. The general variable-size Pool
+  implementation owns growth extents, subdivides them into boundary-tagged
+  blocks, and indexes **free blocks by span** in segregated free lists. Its
+  optional initial reservation is clamped to at least 1 KiB and rounded up to
+  the sequence `1 KiB * 2^n`; each later reservation doubles. Reservations
+  below 4 KiB use the context/memtrack block path, and reservations at or
+  above 4 KiB use page-backed VM. Each VM commit starts at `max(4 KiB,
+  required block bytes)` rounded to the platform page size. A Pool
+  user allocation is carved from one of those blocks; it does not call
+  `mem_alloc_loc`/`mem_free_loc`, use a pointer hashmap, or maintain an
+  allocated-object index. Extent acquisition, release, and context accounting
+  remain outside the per-block hot path. [Mem_Heap §1.1–§1.2, §4–§5; MP-12,
+  MP-15, MP-21]
 
 - **D4.1.5*** Two mechanism-selection corollaries of D4.1.4. **String
   builders** have two legitimate cases: *standalone* (raw `memtrack`, result
@@ -488,15 +501,17 @@ that carries them.
   `MemContext` nodes. [Mem_Heap §2.3, §4.3; MP-19, MP-20]
 ### D4.2 Memory Context
 
-- **D4.2.1v2** `MemContext` is a **factory that owns every allocator** — no
+- **D4.2.1v3** `MemContext` is a **factory that owns every allocator** — no
   allocator exists off-graph; parent/backing edges wire at creation;
   cascade teardown is in reverse-dependency order. System allocations use
   the hardened `memtrack` substrate: direct allocations use its checked
-  `mem_alloc`/`mem_calloc`/`mem_realloc`/`mem_free` contract and residual
-  bulk ownership uses the existing `memtrack_pool_*` integration. The
-  platform VM layer is an opaque region provider below those owners. Hot
-  allocation paths do not take the `MemContext` registry lock; ownership
-  registration and teardown remain centralized. [Memory_Context §2–§7]
+  `mem_alloc`/`mem_calloc`/`mem_realloc`/`mem_free` contract. Pool is a
+  context-owned allocator whose user bytes come from Pool-owned VM extents;
+  `memtrack` may account extent metadata and diagnostics but is not the
+  ownership mechanism for individual Pool blocks. The platform VM layer is an
+  opaque region provider below those owners. Hot allocation paths do not take
+  the `MemContext` registry lock; ownership registration and teardown remain
+  centralized. [Memory_Context §2–§7; Mem_Heap §5]
 - **D4.2.2v2** Per-document sub-contexts key allocators to a document URL,
   with the **attribution/reclamation split**: Radiant documents are
   reclaimable per-document; Lambda `input()` data is GC-coupled and gets
@@ -519,16 +534,19 @@ that carries them.
   rewind of published data — requires exclusivity (`ref_count == 1`,
   debug-checked). Immortal storage (D4.1.2) is the limiting case: a
   permanent reference. [Mem_Heap §1.4; MP-17]
-- **D4.2.5*** Allocation tracking is a **diagnostic, never the mechanism**:
+- **D4.2.5v2*** Allocation tracking is a **diagnostic, never the mechanism**:
   release builds default `memtrack` OFF; STATS is counters-only;
   allocation-level registry records are DEBUG-exclusive — no tracked mode
   may impose a per-allocation global lock on release hot paths, and the
-  pool hot path is registry-free (one inline metadata record, intrusive
-  links). Roadmap: the raw surface splits into `stack_alloc`/`stack_free`
+  Pool hot path is registry-free and mutex-free (fixed-header recovery,
+  boundary tags, and free-list links owned by the Pool). Pool extent
+  reservation/commit and teardown may enter the VM/context slow path, but
+  per-block operations do not. Roadmap: the raw surface splits into
+  `stack_alloc`/`stack_free`
   (function-scoped LIFO temporaries on a thread-confined sidecar stack)
   plus manager-internal use — free-floating `malloc`/`calloc`/`free`
   disappears from application code, enforced by source audit.
-  [Mem_Heap §2.1, §2.4, §5.2; MP-13, MP-14, MP-18]
+  [Mem_Heap §2.1, §2.4, §5.2; MP-13, MP-14, MP-18, MP-21]
 
 ### D4.3 Garbage collection
 
@@ -578,19 +596,24 @@ that carries them.
 
 ### D4.6 Name identity
 
-- **D4.6.1*** One address per semantic property key: `NameRef` /
-  `PropertyKeyRef` compare by **pointer equality**; `NameId =
-  [pool16][ordinal16]` is identity, `SectionNameId = [slot16][offset16]`
-  is a **location, never an identity**. Fixed pools (0 markup, 1 Lambda,
-  2 JS/DOM) are **generated from one data module, never hand-maintained**;
-  hot native comparisons are plain integer compares with no pool lookup.
+- **D4.6.1v2** One semantic property identity is a `NameId`, never a
+  `String*` address. `NameId = [pool16][ordinal16]`; `NAME_ID_NONE` is the
+  id-less Input seam, and `SectionNameId = [slot16][offset16]` remains a
+  location rather than identity. Generated ordinary names retain catalog
+  IDs. The existing NamePool owns resolution; pointer equality is not a
+  property, shape, transition, IC, Symbol, or private-name comparison.
+  Observable strings may be materialized at Proxy/reflection boundaries.
   [NI1–NI4, NI16]
-- **D4.6.2*** Evolve NamePool, don't replace it (first definer wins,
-  zero-copy adoption); the FNV `ShapeEntry.name_id` is **not** a NameId —
-  renamed `name_hash`, demoted to hash-only; per-module property-key GOT
-  with MIR-baked dense indices; **Mark/Input never allocates NameIds for
-  document data**; `eval`/REPL use the same pipeline — one pipeline, no
-  special cases. [NI6, NI7, NI10, NI12, NI13]
+- **D4.6.2v2** Evolve NamePool, don't replace it (first definer wins and
+  parent-first lookup). One identity scope has a sealed static root and one
+  owner-thread dynamic child: static segment numbers occupy the lower pool16
+  half and dynamic segments the upper half. Static linking uses the existing
+  `PropertyKeySpec` sealed image and per-context `NameId[]`; arbitrary dynamic
+  IDs are never persisted or emitted as MIR immediates. Mark/Input document
+  fields remain id-less unless they resolve through an explicitly retained
+  schema/static parent. `eval`/REPL use the same module-table and NamePool
+  pipeline; cross-context Input ownership is not inferred from numeric IDs.
+  [NI6, NI7, NI10, NI12, NI13]
 
 ### D4.7 Const pool / MarkPack
 
@@ -1051,7 +1074,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-10.
+Status of `*`-marked rulings as of 2026-08-11.
 
 | Ruling | Status |
 |---|---|
@@ -1066,13 +1089,13 @@ Status of `*`-marked rulings as of 2026-08-10.
 | D3.1.1 | `Type*` kind-discrimination is code-authoritative only — no design record owns the first-class type-value representation (DO22); the type-graph de-pointering census is deferred to its own doc (CP §6 census C). |
 | D3.2.2 | Constrained-type enforcement is base-only; the `is`/`fn_is`/validator three-way divergence is open (TE-6 P5). |
 | D3.4.3 | Shape pool shipped for `Input` (contrary to its doc's stale "planning" header); the runtime/EvalContext shape pool (Shape_Pool Phase 5) is not implemented — runtime maps rebuild per transition instead of interning. |
-| D4.1.4 | Semantics mostly live; gaps: arena-level `arena_mark`/`arena_rewind` exists only as ScratchArena `scratch_mark`/`scratch_restore` (promotion is Mem_Heap R6), and the 2026-08-10 conformance audit (Mem_Heap §9) found the landed pool layout violating the one-record rule. **Remediation R3a landed 2026-08-10** (`lib/mempool.c`): the `pool_lookup` side index and all its helpers are deleted, `pool_free`/`pool_realloc` resolve the record by fixed header arithmetic validated by magic + owner, `pool_release_block` clears the magic before freeing so double frees are refused, and the record dropped its redundant `base`/`allocated` fields (64 B + ~16 B lookup slot → **48 B**, `_Static_assert`-held). This closes Mem_Heap V1's size half, V2 (no-separate-index) and V8 (latent unbounded probe loop). Measured, same-machine A/B: primes2 145→39.5 ms, splay2 580→305 ms, deltablue2 172→88 ms, all six pool-family rows improved, none regressed; standalone bulk 16 B 59.3→23.9 ns/op. **Residual gap:** the pool record is still *prepended to* memtrack's private header rather than merged into it — that is Mem_Heap R3b, sequenced with R2 because both edit that header. |
-| D4.2.1v2 | MemContext owns allocator identity/lifecycle; hardened memtrack and the VM region provider are the normative system-allocation substrate. |
+| D4.1.4v4 | Semantics remain live; the separate arena-level `arena_mark`/`arena_rewind` promotion is still pending (ScratchArena currently provides `scratch_mark`/`scratch_restore`). Pool v2 core landed in Mem_Heap R7 on 2026-08-11: `pool_alloc` carves user bytes from Pool-owned growth extents, uses boundary-tagged blocks and segregated free lists, and no longer calls `mem_alloc_loc`/`mem_free_loc` per user allocation or uses a pointer index. Growth starts at an optional reservation clamped to 1 KiB and rounded up to `1 KiB * 2^n`, doubles subsequent reservations, uses the context/memtrack path below 4 KiB and page-backed VM at/above 4 KiB, and commits at least `max(4 KiB, required block bytes)` page-rounded. |
+| D4.2.1v3 | MemContext owns allocator identity/lifecycle; hardened memtrack and the VM region provider are the normative system-allocation substrate. Pool is a context-owned VM-extent allocator; its user blocks are not `memtrack_pool_*` allocations. The Pool v2 core migration is landed and verified; the broader every-allocator context-binding audit remains pending. |
 | D4.2.2v2 | Stage 2 page allocation and the single MemContext failure coordinator are implemented as the allocator-retirement foundation. Full cost-based reclaimers remain follow-up work. |
 | D4.1.5 | String-builder two-case model matches the code (`StrBuf` standalone; `StringBuf` owner-backed, pool-backed `realloc` growth). The arena-backed tail-growth variant does not exist yet — it needs the `arena_mark`/`arena_rewind` promotion of D4.1.4 (Mem_Heap R6). Formatters are the first consumer (already structurally ready: destination pool passed in, scratch on a separate pool, no destination allocations during the walk); parsers follow, subject to the tail-ownership hazard. NamePool/ShapePool still take a `Pool*` — conversion is Mem_Heap R4b. |
 | D4.2.3 | MemContext graph exists; the every-arena/pool context-binding audit (Mem_Heap R6) has not run. |
 | D4.2.4 | Ref-counting not implemented; shared-allocator census (Mem_Heap §15 Q7) pending. |
-| D4.2.5 | R1a landed 2026-08-10 (release default `MEMTRACK_MODE_OFF`, measured: primes2 825→155 ms). **R3a landed 2026-08-10** — the pool hot path is now registry-free per MP-14: no side index, ownership by header arithmetic over intrusive links (see D4.1.4 for the measured delta). STATS counters-only (R2), the record/header merge (R3b), and the `stack_alloc` split (MP-18) remain pending. |
+| D4.2.5v2 | R1a landed 2026-08-10 (release default `MEMTRACK_MODE_OFF`, measured: primes2 825→155 ms). R3a removed the historical Pool side index, and R7 landed the Pool-owned boundary-tag/free-list hot path with no global mutex or registry call on block operations. STATS counters-only (R2), the `stack_alloc` split (MP-18), and independent release-performance evidence remain pending. |
 | D4.3.2v2 | GC size classes and data-zone policy are retained; backing storage is owned by MemVmRegion and released by the owning GC heap. |
 | D4.5.1v3 | Radiant and Lambda keep distinct policies over memtrack/VM ownership; legacy Pool/Arena backend wording is superseded; v3 records batch-only arena lifetime (two variants, D4.1.4). |
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
