@@ -39037,7 +39037,10 @@ extern "C" Item js_module_enable_compile_cache(Item arg) {
 
     char abs_dir[4096];
     js_cc_make_absolute(dir, abs_dir, (int)sizeof(abs_dir));
-    if (!js_cc_write_allowed(abs_dir)) {
+    // The permission layer canonicalizes relative paths with its own cwd
+    // representation; checking the original spelling avoids a Windows uv_cwd
+    // versus CRT getcwd mismatch that rejected an explicitly granted directory.
+    if (!js_cc_write_allowed(dir)) {
         const char* msg = "Skipping compile cache because write permission for path is not granted";
         if (js_cc_debug_enabled()) {
             js_cc_debugf("Skipping compile cache because write permission for %s is not granted\n", abs_dir);

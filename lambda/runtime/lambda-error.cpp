@@ -604,8 +604,15 @@ static void get_stack_bounds(void** stack_top, void** stack_bottom) {
     pthread_attr_getstack(&attr, stack_top, &stack_size);
     *stack_bottom = (char*)*stack_top + stack_size;
     pthread_attr_destroy(&attr);
+#elif defined(_WIN32)
+    // Windows needs real thread-stack limits; the broad fallback lets an invalid FP chain fault during Error construction.
+    ULONG_PTR low = 0;
+    ULONG_PTR high = 0;
+    GetCurrentThreadStackLimits(&low, &high);
+    *stack_top = (void*)low;
+    *stack_bottom = (void*)high;
 #else
-    // Fallback: use heuristics
+    // unsupported platforms use a broad range because no stack-bound API is available
     *stack_top = (void*)0x1000;  // avoid NULL region
     *stack_bottom = (void*)((uintptr_t)-1);
 #endif

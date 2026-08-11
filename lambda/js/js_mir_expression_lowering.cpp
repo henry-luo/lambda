@@ -11312,7 +11312,9 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
             mt->em.frame.runtime, 0, 1)));
 
     // Create StringBuf: stringbuf_new(pool)
-    MIR_reg_t sb = jm_call_1(mt, "stringbuf_new", MIR_T_I64,
+    // StringBuf is a pointer-valued helper; using an integer return type here
+    // truncated its address on Windows before the first template fragment.
+    MIR_reg_t sb = jm_call_1(mt, "stringbuf_new", MIR_T_P,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, pool_reg));
 
     JsAstNode* quasi = tmpl->quasis;
@@ -11356,7 +11358,9 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, eval));
             jm_emit_error_lane_propagate_check(mt);
             // Unbox string: it2s(str_item) -> String*
-            MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_I64,
+            // it2s returns a String pointer; declaring an integer return here
+            // truncated the pointer before template interpolation copied it.
+            MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_P,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
             // Guard: if js_to_string threw (e.g. Symbol), str_ptr is null — skip append
             MIR_label_t skip_append = jm_new_label(mt);
@@ -11385,7 +11389,7 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
     }
 
     // stringbuf_to_string(sb) -> String*
-    MIR_reg_t result_str = jm_call_1(mt, "stringbuf_to_string", MIR_T_I64,
+    MIR_reg_t result_str = jm_call_1(mt, "stringbuf_to_string", MIR_T_P,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, sb));
     // Box as string
     return jm_box_string(mt, result_str);

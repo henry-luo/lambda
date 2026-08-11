@@ -817,42 +817,53 @@ build-jube: build build-lang-python
 # of the standard host build, so Python stays absent unless this target is run.
 # Build the matching host first: an exact Jube service-table bump must not
 # leave a freshly stamped module paired with a stale executable.
-build-lang-python: build $(TS_ENUM_H) $(TREE_SITTER_PYTHON_LIB)
+build-lang-python: build build-windows-host-import $(TS_ENUM_H) $(TREE_SITTER_PYTHON_LIB)
 	@echo "Building external lang-python hosted module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
 	$(MAKE) -C build/premake config=debug_native lang-python -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
 	@ls -lh modules/lang-python/lang-python.dylib modules/lang-python/lang-python.so modules/lang-python/lang-python.dll 2>/dev/null || true
 
-build-node-core: build
+build-windows-host-import: build
+	@if [ "$(findstring NT,$(OS))" != "" ]; then \
+		dlltool -D lambda.exe -d lambda_host_exports.def -l modules/lambda-host.lib; \
+	fi
+
+ifneq (,$(findstring NT,$(OS)))
+NODE_MODULE_BUILD_FLAGS = -B
+else
+NODE_MODULE_BUILD_FLAGS =
+endif
+
+build-node-core: build build-windows-host-import
 	@echo "Building external node-core Jube module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	$(MAKE) -C build/premake config=debug_native node-core -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+	$(MAKE) -C build/premake config=debug_native node-core $(NODE_MODULE_BUILD_FLAGS) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-core
 	@ls -lh modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll 2>/dev/null || true
 
-build-node-fs: build
+build-node-fs: build build-windows-host-import
 	@echo "Building external node-fs Jube module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	$(MAKE) -C build/premake config=debug_native node-fs -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+	$(MAKE) -C build/premake config=debug_native node-fs $(NODE_MODULE_BUILD_FLAGS) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-fs
 	@ls -lh modules/node-fs/node-fs.dylib modules/node-fs/node-fs.so modules/node-fs/node-fs.dll 2>/dev/null || true
 
-build-node-net: build
+build-node-net: build build-windows-host-import
 	@echo "Building external node-net Jube module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	$(MAKE) -C build/premake config=debug_native node-net -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+	$(MAKE) -C build/premake config=debug_native node-net $(NODE_MODULE_BUILD_FLAGS) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-net
 	@ls -lh modules/node-net/node-net.dylib modules/node-net/node-net.so modules/node-net/node-net.dll 2>/dev/null || true
 
-build-node-zlib: build
+build-node-zlib: build build-windows-host-import
 	@echo "Building external node-zlib Jube module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	$(MAKE) -C build/premake config=debug_native node-zlib -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+	$(MAKE) -C build/premake config=debug_native node-zlib $(NODE_MODULE_BUILD_FLAGS) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-zlib
 	@ls -lh modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll 2>/dev/null || true
 
@@ -3204,7 +3215,7 @@ check-module-boundary:
 	$(PYTHON) utils/check_module_boundary.py
 	@echo "✅ module-boundary validation completed (Class-F ratcheted deferment)"
 
-build-test: build-lambda-data generate-tree-sitter-python-parser
+build-test: build-lambda-data build-windows-host-import generate-tree-sitter-python-parser
 	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building tests using Premake5..."; fi
 	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building configurations..."; fi
 	@mkdir -p build/premake

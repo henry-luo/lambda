@@ -811,6 +811,21 @@ static int js_props_descriptor_attr_fast_path(Item object, Item name_item,
 static void js_props_set_descriptor_attribute(Item object, Item name_item,
                                               const char* name, int name_len,
                                               uint8_t attr_flag, bool enabled) {
+    // Array dense indices and length have no initial ShapeEntry; routing their
+    // pooled names through the identity path skipped companion-map materialization.
+    bool array_exotic_name = get_type_id(object) == LMD_TYPE_ARRAY && name && name_len > 0 &&
+        ((name_len == 6 && strncmp(name, "length", 6) == 0) ||
+         (name[0] >= '0' && name[0] <= '9'));
+    if (array_exotic_name) {
+        if (attr_flag == JSPD_NON_WRITABLE) {
+            js_attr_set_writable(object, name, name_len, enabled);
+        } else if (attr_flag == JSPD_NON_ENUMERABLE) {
+            js_attr_set_enumerable(object, name, name_len, enabled);
+        } else if (attr_flag == JSPD_NON_CONFIGURABLE) {
+            js_attr_set_configurable(object, name, name_len, enabled);
+        }
+        return;
+    }
     String* key = it2s(name_item);
     // array index and length attributes must materialize in the companion map;
     // the identity-key fast path only updates the array's primary shape.

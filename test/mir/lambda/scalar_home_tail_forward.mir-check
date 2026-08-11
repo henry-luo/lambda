@@ -9,9 +9,8 @@
       ],
       "expect_seq": [
         { "pattern": "call\tlambda_item_adopt_scalar_home_p" },
-        { "pattern": ", _scalar_home" },
-        { "pattern": "mov\ti64:" },
-        { "pattern": "ret\t" }
+        { "pattern": "call\tlambda_restore_number_frame_top_p" },
+        { "pattern": "ret\t", "next_line": true }
       ],
       "count": {
         ", _scalar_home": 1

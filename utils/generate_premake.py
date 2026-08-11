@@ -679,6 +679,11 @@ class PremakeGenerator:
             '        buildoptions { "-fno-omit-frame-pointer" }',
         ])
 
+        # apply the configured Windows stack reserve to the default debug binary;
+        # leaving this filter on debug_profile made recursive scripts start with the PE 1 MB default.
+        if self.use_windows_config:
+            self.premake_content.append('    filter "configurations:debug"')
+
         # Add Windows-specific linker flags to debug configuration
         if self.use_windows_config:
             platforms_config = self.config.get('platforms', {})
