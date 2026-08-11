@@ -8,21 +8,27 @@ extern "C" {
 #include <stdlib.h>
 
 /**
- * Grouped memory ownership facade backed by the hardened memtrack substrate.
- * The legacy Pool API remains for bulk-owner call sites while the implementation
- * uses explicit memtrack-owned blocks.
+ * Pool-owned variable-size allocator. The Pool owns growth extents, block
+ * headers, splitting/coalescing, and free-list reuse; memtrack/VM provide the
+ * extent-level backing and diagnostics.
  */
 
 /**
- * Opaque grouped owner representing a set of memtrack allocations.
+ * Opaque owner of Pool growth extents and variable-size blocks.
  */
 typedef struct Pool Pool;
 
 /**
- * Create a new memory pool (arena)
+ * Create a new memory pool with the default 1 KiB initial growth extent.
  * @return Pointer to new pool, or NULL on failure
  */
 Pool* pool_create(void);
+
+/**
+ * Create a pool with an optional initial growth extent. Values below 1 KiB
+ * clamp to 1 KiB; other values round up to 1 KiB * 2^n.
+ */
+Pool* pool_create_sized(size_t initial_size);
 
 /**
  * Destroy a memory pool and free all associated memory
@@ -104,6 +110,7 @@ void pool_get_stats(Pool* pool, size_t* alloc_bytes, size_t* alloc_count);
 
 typedef struct PoolStats {
     size_t reserved_bytes;
+    size_t committed_bytes;
     size_t live_bytes;
     size_t high_water_live_bytes;
     size_t cumulative_bytes;
@@ -124,6 +131,9 @@ void pool_get_detailed_stats(Pool* pool, PoolStats* out);
 void* pool_get_mem_node(Pool* pool);
 void  pool_set_mem_node(Pool* pool, void* node);
 
+/** Set the MemContext used for VM extent allocation (opaque, may be NULL). */
+void  pool_set_mem_context(Pool* pool, void* context);
+
 /** Set the memtrack category used by subsequent allocations in this pool. */
 void  pool_set_mem_category(Pool* pool, int category);
 
@@ -136,8 +146,8 @@ void pool_set_node_release_hook(void (*fn)(void* node));
 
 /**
  * Get memory-context stats for this pool.
- * @param reserved    bytes reserved by the owner (sum of live memtrack blocks)
- * @param in_use      best-effort live bytes (alloc_bytes)
+ * @param reserved    bytes reserved by the Pool's extents
+ * @param in_use      live requested user bytes
  * @param alloc_count cumulative allocation calls
  * Any out-param may be NULL.
  */

@@ -1672,13 +1672,18 @@ void jm_finish_last_deferred_mir() {
     }
 }
 
+static bool jm_path_has_lambda_ext(const char* path) {
+    int len = path ? (int)strlen(path) : 0;
+    return len >= 3 && strcmp(path + len - 3, ".ls") == 0;
+}
+
 static bool jm_path_has_known_js_ext(const char* path) {
     int len = path ? (int)strlen(path) : 0;
     return (len >= 3 && strcmp(path + len - 3, ".js") == 0) ||
            (len >= 4 && strcmp(path + len - 4, ".mjs") == 0) ||
            (len >= 4 && strcmp(path + len - 4, ".cjs") == 0) ||
            (len >= 5 && strcmp(path + len - 5, ".json") == 0) ||
-           (len >= 3 && strcmp(path + len - 3, ".ls") == 0);
+           jm_path_has_lambda_ext(path);
 }
 
 // Resolve a module specifier relative to the importing file's directory
@@ -6664,6 +6669,12 @@ void jm_discover_js_imports_recursive(
         // resolve module path
         char resolved[512];
         jm_resolve_module_path(parent_path, src_text, src_len, resolved, sizeof(resolved));
+
+        if (jm_path_has_lambda_ext(resolved)) {
+            // Lambda modules use the cross-language loader during the serial
+            // import phase; the JS-only graph cannot parse their .ls syntax.
+            continue;
+        }
 
         // dedup check
         JsPathIndexEntry key = { .path = resolved, .index = 0 };

@@ -7001,6 +7001,19 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     return value;
 }
 
+extern "C" Item js_property_set_cstr(Item object, const char* key, Item value) {
+    if (!key) return value;
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> key_root(roots, ItemNull);
+    // A native caller cannot root a GC key until this call starts. Create it
+    // after rooting the object/value so an allocating property write cannot
+    // collect either argument before js_property_set() sees them.
+    key_root.set(make_string_item(key, (int)strlen(key)));
+    return js_property_set(object_root.get(), key_root.get(), value_root.get());
+}
+
 static Item js_strict_property_set_check(Item object, Item key, Item result) {
     if (item_is_error(result) || !js_is_proxy(object) ||
         result.item != (uint64_t)b2it(false)) return js_status_ok();
@@ -8359,13 +8372,17 @@ extern "C" Item js_get_length_item(Item object) {
 
 // Direct JS array push shares Lambda's owned-scalar tail representation.
 extern "C" void js_array_push_item_direct(Array* arr, Item value) {
+    if (!arr) return;
     if (arr->length + arr->extra + 2 > arr->capacity) {
         JS_PROPERTY_SET_BRANCH("array_push_direct_expand");
-        // The value must survive the growth allocation before it is stored.
-        RootFrame roots(1);
+        // Growth can compact the Array object as well as its item buffer, so
+        // reload both exact roots before the post-growth length/store access.
+        RootFrame roots(2);
+        Rooted<Item> rooted_array(roots, (Item){.array = arr});
         Rooted<Item> rooted_value(roots, value);
-        int64_t old_capacity = arr->capacity;
-        expand_list((List*)arr);
+        int64_t old_capacity = rooted_array.get().array->capacity;
+        expand_list((List*)rooted_array.get().array);
+        arr = rooted_array.get().array;
         value = rooted_value.get();
         // P8: expand_list copies the old buffer and leaves new slots at the
         // tail uninitialized (heap_data_alloc returns zero-init memory, which
@@ -9096,9 +9113,11 @@ extern "C" Item js_array_push(Item array, Item value) {
         return (Item){.item = i2it(0)};
     }
 
-    Array* arr = array.array;
-    js_array_push_item_direct(arr, value);
-    return (Item){.item = i2it(arr->length)};
+    RootFrame roots(2);
+    Rooted<Item> array_root(roots, array);
+    Rooted<Item> value_root(roots, value);
+    js_array_push_item_direct(array_root.get().array, value_root.get());
+    return (Item){.item = i2it(array_root.get().array->length)};
 }
 
 // =============================================================================

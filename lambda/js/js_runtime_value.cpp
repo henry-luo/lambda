@@ -1310,8 +1310,13 @@ extern "C" Item js_string_concat(Item left, Item right) {
 }
 
 extern "C" Item js_add(Item left, Item right) {
-    TypeId left_type = get_type_id(left);
-    TypeId right_type = get_type_id(right);
+    RootFrame roots(4);
+    Rooted<Item> left_root(roots, left);
+    Rooted<Item> right_root(roots, right);
+    Rooted<Item> left_string_root(roots, ItemNull);
+    Rooted<Item> right_string_root(roots, ItemNull);
+    TypeId left_type = get_type_id(left_root.get());
+    TypeId right_type = get_type_id(right_root.get());
 
     // ES spec §13.15.3 / §7.1.1: ApplyStringOrNumericBinaryOperator for `+`
     // 1. lprim = ToPrimitive(left, default).  2. rprim = ToPrimitive(right, default).
@@ -1319,26 +1324,37 @@ extern "C" Item js_add(Item left, Item right) {
     // and throws TypeError on object results / non-callable @@toPrimitive.
     if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY ||
         left_type == LMD_TYPE_ELEMENT || left_type == LMD_TYPE_FUNC) {
-        JS_ASSIGN_OR_RETURN_INTO(left, js_op_to_primitive(left, 0));
-        left_type = get_type_id(left);
+        Item primitive = js_op_to_primitive(left_root.get(), 0);
+        if (item_is_error(primitive)) return primitive;
+        left_root.set(primitive);
+        left_type = get_type_id(left_root.get());
     }
     if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY ||
         right_type == LMD_TYPE_ELEMENT || right_type == LMD_TYPE_FUNC) {
-        JS_ASSIGN_OR_RETURN_INTO(right, js_op_to_primitive(right, 0));
-        right_type = get_type_id(right);
+        Item primitive = js_op_to_primitive(right_root.get(), 0);
+        if (item_is_error(primitive)) return primitive;
+        right_root.set(primitive);
+        right_type = get_type_id(right_root.get());
     }
 
     // String concatenation if either operand is a string
     if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
-        return js_concat_strings_fast(it2s(left), it2s(right));
+        return js_concat_strings_fast(it2s(left_root.get()), it2s(right_root.get()));
     }
     if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
-        JS_ASSIGN_OR_RETURN(left_str, js_to_string(left));
-        JS_ASSIGN_OR_RETURN(right_str, js_to_string(right));
-        return js_concat_strings_fast(it2s(left_str), it2s(right_str));
+        Item left_string = js_to_string(left_root.get());
+        if (item_is_error(left_string)) return left_string;
+        left_string_root.set(left_string);
+        Item right_string = js_to_string(right_root.get());
+        if (item_is_error(right_string)) return right_string;
+        right_string_root.set(right_string);
+        // ToString can allocate twice before concatenation; keep both results
+        // rooted because the second conversion may collect the first string.
+        return js_concat_strings_fast(it2s(left_string_root.get()),
+            it2s(right_string_root.get()));
     }
 
-    return js_numeric_binary(left, right, JS_NUMERIC_ADD);
+    return js_numeric_binary(left_root.get(), right_root.get(), JS_NUMERIC_ADD);
 }
 
 extern "C" Item js_subtract(Item left, Item right) {

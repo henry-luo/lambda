@@ -1537,7 +1537,10 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      // Name-id lookup only reads the active module table and cannot publish
+      // an error carrier, so its raw scalar result preserves the lane.
+      JIT_EXCEPTION_PRESERVES}},
     {"push_d_safe", FPTR(push_d_safe),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -2155,7 +2158,11 @@ JitImport jit_runtime_imports[] = {
     {"js_get_css_object_value", FPTR(js_get_css_object_value)},
     {"js_get_document_object_value", FPTR(js_get_document_object_value)},
     {"js_number_method", FPTR(js_number_method)},
-    {"js_get_length_item", FPTR(js_get_length_item)},
+    {"js_get_length_item", FPTR(js_get_length_item),
+     // .length may return a frame-backed Number, so the MIR caller must adopt
+     // the result into its scalar home before a later allocating expression.
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
     // process I/O
     {"js_process_stdout_write", FPTR(js_process_stdout_write)},
     {"js_get_process_argv", FPTR(js_get_process_argv)},
