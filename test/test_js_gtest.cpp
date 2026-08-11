@@ -177,6 +177,45 @@ char* read_expected_output(const char* expected_file_path) {
     return content;
 }
 
+static bool write_module_source_manifest(const char* source_path,
+        const char* module_name, const char* manifest_path) {
+    FILE* source = fopen(source_path, "rb");
+    if (!source) return false;
+    if (fseek(source, 0, SEEK_END) != 0) {
+        fclose(source);
+        return false;
+    }
+    long source_size = ftell(source);
+    if (source_size <= 0 || fseek(source, 0, SEEK_SET) != 0) {
+        fclose(source);
+        return false;
+    }
+    char* source_bytes = (char*)malloc((size_t)source_size);
+    if (!source_bytes) {
+        fclose(source);
+        return false;
+    }
+    bool read_ok = fread(source_bytes, 1, (size_t)source_size, source) ==
+        (size_t)source_size;
+    fclose(source);
+    if (!read_ok) {
+        free(source_bytes);
+        return false;
+    }
+
+    FILE* manifest = fopen(manifest_path, "wb");
+    if (!manifest) {
+        free(source_bytes);
+        return false;
+    }
+    bool write_ok = fprintf(manifest, "module-source:%s:%s:%ld\n",
+        module_name, source_path, source_size) > 0 &&
+        fwrite(source_bytes, 1, (size_t)source_size, manifest) == (size_t)source_size;
+    fclose(manifest);
+    free(source_bytes);
+    return write_ok;
+}
+
 // Helper function to test JavaScript script against expected output file
 void test_js_script_against_file(const char* script_path, const char* expected_file_path) {
     // Get script name for better error messages
@@ -710,6 +749,29 @@ TEST(JavaScriptRegression, ModuleCompileCacheHonorsPermissionWriteGrants) {
     status = execute_command_status(allowed_command, output, sizeof(output));
     ASSERT_EQ(status, 0) << output;
     ASSERT_NE(strstr(output, "1:true"), nullptr) << output;
+}
+
+TEST(JavaScriptRegression, ModuleEntryPrelinksOwnAndImportNameTables) {
+    const char* source_path = "test/js/module_main.js";
+    char manifest_path[256];
+    snprintf(manifest_path, sizeof(manifest_path),
+        "./temp/js_module_source_%d.txt", (int)getpid());
+    ASSERT_TRUE(write_module_source_manifest(source_path, "module_main", manifest_path));
+
+    const char* args[] = {LAMBDA_EXE, "js-test-batch", "--timeout=60", NULL};
+    ShellOptions options = {};
+    options.stdin_path = manifest_path;
+    options.merge_stderr = true;
+    options.timeout_ms = 65000;
+    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    unlink(manifest_path);
+
+    ASSERT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    ASSERT_NE(result.stdout_buf, nullptr);
+    ASSERT_NE(strstr(result.stdout_buf, "add: 7"), nullptr) << result.stdout_buf;
+    ASSERT_NE(strstr(result.stdout_buf, "Hello, World!"), nullptr) << result.stdout_buf;
+    ASSERT_NE(strstr(result.stdout_buf, "BATCH_END 0"), nullptr) << result.stdout_buf;
+    shell_result_free(&result);
 }
 
 TEST(JavaScriptRegression, DocumentExitCodeAfterContextRestoreDoesNotInternWithNullContext) {

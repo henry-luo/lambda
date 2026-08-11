@@ -21,7 +21,7 @@ static NameId markup_name_id_from_html_tag(const char* tag_name) {
     for (size_t index = 0; index < g_well_known_markup_name_count; index++) {
         const WellKnownNameRecord* record = &g_well_known_markup_names[index];
         if (record->len == length && str_icmp(record->chars, record->len, tag_name, length) == 0) {
-            return record->meta.predefined_id;
+            return record->meta.name_id;
         }
     }
     return NAME_ID_NONE;

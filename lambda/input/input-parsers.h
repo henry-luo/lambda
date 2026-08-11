@@ -29,6 +29,8 @@ void parse_css(Input* input, const char* css_string);
 
 // open a database file and produce a <db> element
 Input* input_rdb_from_path(const char* pathname, const char* type);
+Input* input_rdb_from_path_with_name_parent(const char* pathname,
+    const char* type, NamePool* name_parent);
 // detect whether a path/type should be handled as RDB; returns driver name or NULL
 const char* rdb_detect_format(const char* pathname, const char* type);
 

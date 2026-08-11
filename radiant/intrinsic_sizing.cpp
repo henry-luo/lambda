@@ -357,7 +357,7 @@ static void intrinsic_apply_grid_item_min_content_floor(
         LayoutContext* lycon, DomElement* child_elem, IntrinsicSizes* child_sizes) {
     if (!lycon || !child_elem || !child_sizes) return;
     ViewBlock* child_view = lam::unsafe_view_block_element_storage(child_elem);
-    float explicit_min_width = layout_explicit_min_width_or(child_view, -1.0f);
+    float explicit_min_width = layout_explicit_min_axis_or(child_view, true, -1.0f);
     if (explicit_min_width < 0.0f && child_elem->specified_style) {
         CssDeclaration* min_decl = style_tree_get_declaration(
             child_elem->specified_style, CSS_PROPERTY_MIN_WIDTH);
@@ -520,24 +520,6 @@ static bool intrinsic_style_length_declaration(LayoutContext* lycon, StyleTree* 
     if (!decl || !decl->value || decl->value->type != CSS_VALUE_TYPE_LENGTH) return false;
 
     *out_value = resolve_length_value(lycon, resolve_property, decl->value);
-    return true;
-}
-
-static bool intrinsic_style_flex_direction_is_row(StyleTree* style, bool* is_row) {
-    CssEnum direction = (CssEnum)0;
-    if (!intrinsic_style_keyword_declaration(style, CSS_PROPERTY_FLEX_DIRECTION, &direction)) {
-        return false;
-    }
-    if (is_row) *is_row = (direction == CSS_VALUE_ROW || direction == CSS_VALUE_ROW_REVERSE);
-    return true;
-}
-
-static bool intrinsic_style_flex_wrap_enabled(StyleTree* style, bool* is_wrapping) {
-    CssEnum wrap = (CssEnum)0;
-    if (!intrinsic_style_keyword_declaration(style, CSS_PROPERTY_FLEX_WRAP, &wrap)) {
-        return false;
-    }
-    if (is_wrapping) *is_wrapping = (wrap == CSS_VALUE_WRAP || wrap == CSS_VALUE_WRAP_REVERSE);
     return true;
 }
 
@@ -2653,8 +2635,8 @@ static float intrinsic_resolved_height_limit_or(LayoutContext* lycon,
             }
         }
     }
-    return minimum ? layout_explicit_min_height_or(view, -1.0f)
-                   : layout_explicit_max_height_or(view, -1.0f);
+    return minimum ? layout_explicit_min_axis_or(view, false, -1.0f)
+                   : layout_explicit_max_axis_or(view, false, -1.0f);
 }
 
 static bool intrinsic_element_is_abs_or_fixed(DomElement* element) {
@@ -2778,7 +2760,7 @@ static float intrinsic_replaced_max_height(LayoutContext* lycon, DomElement* ele
             if (!isnan(resolved)) return resolved;
         }
     }
-    return layout_explicit_max_height_or(view, -1.0f);
+    return layout_explicit_max_axis_or(view, false, -1.0f);
 }
 
 static float intrinsic_replaced_width_with_max_height(LayoutContext* lycon,
@@ -3847,7 +3829,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (is_scroll_container) {
                 // A ratio-dependent scroll container has a zero automatic inline
                 // minimum; only an explicit min-width can raise its min-content floor.
-                float explicit_min = layout_explicit_min_width_or(view_block_for_aspect, -1.0f);
+                float explicit_min = layout_explicit_min_axis_or(
+                    view_block_for_aspect, true, -1.0f);
                 sizes.min_content = explicit_min >= 0.0f
                     ? layout_css_size_to_border_box(view_block_for_aspect->bound,
                                                     layout_box_sizing(view_block_for_aspect),
@@ -3901,8 +3884,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // An indefinite percentage height is auto for intrinsic sizing,
                 // but its definite min-height still transfers through the ratio.
                 if (is_scroll_container) {
-                    float explicit_min = layout_explicit_min_width_or(
-                        view_block_for_aspect, -1.0f);
+                    float explicit_min = layout_explicit_min_axis_or(
+                        view_block_for_aspect, true, -1.0f);
                     sizes.min_content = explicit_min >= 0.0f
                         ? layout_css_size_to_border_box(view_block_for_aspect->bound,
                             layout_box_sizing(view_block_for_aspect), explicit_min, true)
@@ -5125,6 +5108,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // Check flex direction for row vs column
     bool is_vertical_wm = false;
     if (is_flex_container) {
+        FlexDeclaredStyleInfo style_info =
+            layout_flex_declared_style_info(lycon, element);
         // Default flex-direction is row
         is_row_flex = true;  // Assume row by default
         if (view_block->embed && view_block->embedp()->flex) {
@@ -5135,16 +5120,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             WritingMode writing_mode = layout_block_writing_mode(view_block);
             is_vertical_wm = writing_mode == WM_VERTICAL_LR ||
                 writing_mode == WM_VERTICAL_RL;
-        } else if (element->specified_style) {
-            intrinsic_style_flex_direction_is_row(element->specified_style, &is_row_flex);
+        } else {
+            if (style_info.has_direction) is_row_flex = style_info.row;
             CssEnum wm = (CssEnum)0;
-            if (intrinsic_style_keyword_declaration(
-                    element->specified_style, CSS_PROPERTY_WRITING_MODE, &wm)) {
+            if (intrinsic_style_keyword_declaration(element->specified_style,
+                                                    CSS_PROPERTY_WRITING_MODE, &wm)) {
                 is_vertical_wm = layout_writing_mode_from_css(wm) != WM_HORIZONTAL_TB;
             }
-            intrinsic_style_length_declaration(
-                lycon, element->specified_style, CSS_PROPERTY_COLUMN_GAP,
-                CSS_PROPERTY_GAP, CSS_PROPERTY_GAP, &flex_gap);
+            if (style_info.has_column_gap) flex_gap = style_info.column_gap;
         }
         // In vertical writing modes, the physical axis mapping swaps:
         // column becomes horizontal, row becomes vertical
@@ -5159,8 +5142,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (view_block->embed && view_block->embedp()->flex) {
                 int wrap = view_block->embedp()->flex->wrap;
                 is_flex_wrap = (wrap == CSS_VALUE_WRAP || wrap == CSS_VALUE_WRAP_REVERSE);
-            } else if (element->specified_style) {
-                intrinsic_style_flex_wrap_enabled(element->specified_style, &is_flex_wrap);
+            } else if (style_info.has_wrap) {
+                is_flex_wrap = style_info.wrapping;
             }
         }
         log_debug("measure_element_intrinsic_widths: %s is_flex=%d, is_row_flex=%d, gap=%.1f, vertical_wm=%d, wrap=%d",
@@ -7066,6 +7049,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         element, view, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX);
 
     if (is_flex_container) {
+        FlexDeclaredStyleInfo style_info =
+            layout_flex_declared_style_info(lycon, element);
         // Default flex direction is row, wrap is nowrap
         is_flex_row = true;
         is_flex_wrap = false;
@@ -7084,22 +7069,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
             flex_row_gap = view->embedp()->flex->row_gap;
             flex_column_gap = view->embedp()->flex->column_gap;
-        } else if (element->specified_style) {
-            intrinsic_style_flex_direction_is_row(element->specified_style, &is_flex_row);
-            intrinsic_style_flex_wrap_enabled(element->specified_style, &is_flex_wrap);
-            float gap = 0.0f;
-            if (intrinsic_style_length_declaration(
-                    lycon, element->specified_style, CSS_PROPERTY_GAP,
-                    CSS_PROPERTY_UNKNOWN, CSS_PROPERTY_GAP, &gap)) {
-                flex_row_gap = gap;
-                flex_column_gap = gap;
-            }
-            intrinsic_style_length_declaration(
-                lycon, element->specified_style, CSS_PROPERTY_ROW_GAP,
-                CSS_PROPERTY_UNKNOWN, CSS_PROPERTY_ROW_GAP, &flex_row_gap);
-            intrinsic_style_length_declaration(
-                lycon, element->specified_style, CSS_PROPERTY_COLUMN_GAP,
-                CSS_PROPERTY_UNKNOWN, CSS_PROPERTY_COLUMN_GAP, &flex_column_gap);
+        } else {
+            if (style_info.has_direction) is_flex_row = style_info.row;
+            if (style_info.has_wrap) is_flex_wrap = style_info.wrapping;
+            if (style_info.has_row_gap) flex_row_gap = style_info.row_gap;
+            if (style_info.has_column_gap) flex_column_gap = style_info.column_gap;
         }
     }
     // content-visibility's auto intrinsic size must see generated block content;

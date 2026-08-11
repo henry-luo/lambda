@@ -2807,7 +2807,7 @@ static int jube_host_execution_activate(void* execution_context, void** out_inpu
         if (!eval_context_thread_initialize(execution->active_context)) return -1;
         heap_init();
         context->pool = context->heap->pool;
-        context->name_pool = name_pool_create(context->pool, NULL);
+        context->name_pool = name_pool_create_runtime(context->pool);
         context->type_list = arraylist_new(64);
     }
     // Generated guests load this execution-owned pointer before their frame

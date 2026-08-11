@@ -94,27 +94,28 @@ extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* state);
 static bool js_runtime_state_init_well_known_refs(JsRuntimeState* state) {
     if (!state) return false;
     JsWellKnownRefs* refs = &state->well_known;
-    refs->constructor = well_known_key_ref(JS_NAME_CONSTRUCTOR);
-    refs->prototype = well_known_key_ref(JS_NAME_PROTOTYPE);
-    refs->name = well_known_key_ref(JS_NAME_NAME);
-    refs->to_string = well_known_key_ref(JS_NAME_TO_STRING);
-    refs->value_of = well_known_key_ref(JS_NAME_VALUE_OF);
-    refs->symbol_iterator = well_known_key_ref(JS_SYMBOL_ITERATOR);
-    refs->symbol_to_primitive = well_known_key_ref(JS_SYMBOL_TO_PRIMITIVE);
-    refs->symbol_has_instance = well_known_key_ref(JS_SYMBOL_HAS_INSTANCE);
-    refs->symbol_to_string_tag = well_known_key_ref(JS_SYMBOL_TO_STRING_TAG);
-    refs->symbol_async_iterator = well_known_key_ref(JS_SYMBOL_ASYNC_ITERATOR);
-    refs->symbol_species = well_known_key_ref(JS_SYMBOL_SPECIES);
-    refs->symbol_match = well_known_key_ref(JS_SYMBOL_MATCH);
-    refs->symbol_replace = well_known_key_ref(JS_SYMBOL_REPLACE);
-    refs->symbol_search = well_known_key_ref(JS_SYMBOL_SEARCH);
-    refs->symbol_split = well_known_key_ref(JS_SYMBOL_SPLIT);
-    refs->symbol_unscopables = well_known_key_ref(JS_SYMBOL_UNSCOPABLES);
-    refs->symbol_is_concat_spreadable = well_known_key_ref(JS_SYMBOL_IS_CONCAT_SPREADABLE);
-    refs->symbol_match_all = well_known_key_ref(JS_SYMBOL_MATCH_ALL);
-    refs->symbol_async_dispose = well_known_key_ref(JS_SYMBOL_ASYNC_DISPOSE);
-    refs->symbol_dispose = well_known_key_ref(JS_SYMBOL_DISPOSE);
-    return refs->constructor && refs->prototype && refs->name && refs->to_string &&
+    refs->constructor = JS_NAME_CONSTRUCTOR;
+    refs->prototype = JS_NAME_PROTOTYPE;
+    refs->name = JS_NAME_NAME;
+    refs->to_string = JS_NAME_TO_STRING;
+    refs->value_of = JS_NAME_VALUE_OF;
+    refs->symbol_iterator = JS_SYMBOL_ITERATOR;
+    refs->symbol_to_primitive = JS_SYMBOL_TO_PRIMITIVE;
+    refs->symbol_has_instance = JS_SYMBOL_HAS_INSTANCE;
+    refs->symbol_to_string_tag = JS_SYMBOL_TO_STRING_TAG;
+    refs->symbol_async_iterator = JS_SYMBOL_ASYNC_ITERATOR;
+    refs->symbol_species = JS_SYMBOL_SPECIES;
+    refs->symbol_match = JS_SYMBOL_MATCH;
+    refs->symbol_replace = JS_SYMBOL_REPLACE;
+    refs->symbol_search = JS_SYMBOL_SEARCH;
+    refs->symbol_split = JS_SYMBOL_SPLIT;
+    refs->symbol_unscopables = JS_SYMBOL_UNSCOPABLES;
+    refs->symbol_is_concat_spreadable = JS_SYMBOL_IS_CONCAT_SPREADABLE;
+    refs->symbol_match_all = JS_SYMBOL_MATCH_ALL;
+    refs->symbol_async_dispose = JS_SYMBOL_ASYNC_DISPOSE;
+    refs->symbol_dispose = JS_SYMBOL_DISPOSE;
+    return refs->constructor != NAME_ID_NONE && refs->prototype != NAME_ID_NONE &&
+        refs->name != NAME_ID_NONE && refs->to_string != NAME_ID_NONE &&
         refs->value_of && refs->symbol_iterator && refs->symbol_to_primitive &&
         refs->symbol_has_instance && refs->symbol_to_string_tag && refs->symbol_async_iterator &&
         refs->symbol_species && refs->symbol_match && refs->symbol_replace && refs->symbol_search &&
@@ -869,33 +870,48 @@ extern "C" Item js_well_known_symbol_key(int64_t symbol_id) {
     JsRuntimeState* state = js_active_runtime_state;
     if (!state) return ItemNull;
     JsWellKnownRefs* refs = &state->well_known;
-    PropertyKeyRef key = NULL;
+    NameId key_id = NAME_ID_NONE;
     switch (symbol_id) {
-    case 1: key = refs->symbol_iterator; break;
-    case 2: key = refs->symbol_to_primitive; break;
-    case 3: key = refs->symbol_has_instance; break;
-    case 4: key = refs->symbol_to_string_tag; break;
-    case 5: key = refs->symbol_async_iterator; break;
-    case 6: key = refs->symbol_species; break;
-    case 7: key = refs->symbol_match; break;
-    case 8: key = refs->symbol_replace; break;
-    case 9: key = refs->symbol_search; break;
-    case 10: key = refs->symbol_split; break;
-    case 11: key = refs->symbol_unscopables; break;
-    case 12: key = refs->symbol_is_concat_spreadable; break;
-    case 13: key = refs->symbol_match_all; break;
-    case 14: key = refs->symbol_async_dispose; break;
-    case 15: key = refs->symbol_dispose; break;
+    case 1: key_id = refs->symbol_iterator; break;
+    case 2: key_id = refs->symbol_to_primitive; break;
+    case 3: key_id = refs->symbol_has_instance; break;
+    case 4: key_id = refs->symbol_to_string_tag; break;
+    case 5: key_id = refs->symbol_async_iterator; break;
+    case 6: key_id = refs->symbol_species; break;
+    case 7: key_id = refs->symbol_match; break;
+    case 8: key_id = refs->symbol_replace; break;
+    case 9: key_id = refs->symbol_search; break;
+    case 10: key_id = refs->symbol_split; break;
+    case 11: key_id = refs->symbol_unscopables; break;
+    case 12: key_id = refs->symbol_is_concat_spreadable; break;
+    case 13: key_id = refs->symbol_match_all; break;
+    case 14: key_id = refs->symbol_async_dispose; break;
+    case 15: key_id = refs->symbol_dispose; break;
     default: return ItemNull;
     }
     // Initialization rejects an incomplete table, so a NULL here means an
     // invalid internal ID rather than a spelling-compatible fallback.
+    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, key_id);
     return key ? (Item){.item = s2it(key)} : ItemNull;
 }
 
 // ES2020 §7.1.14 ToPropertyKey(argument)
 // ToPrimitive(string hint), then Symbols → their unique NameRecord key,
 // strings → as-is, others → ToString.
+static Item js_canonical_property_string(Item value) {
+    if (get_type_id(value) != LMD_TYPE_STRING) return value;
+    String* string_value = it2s(value);
+    if (!string_value || property_key_requires_identity(string_value)) return value;
+    // Input-owned strings may be id-less. Re-interning at the property-key
+    // boundary gives them the context dynamic NameId, while a schema/static
+    // spelling resolves through the NamePool parent before allocation.
+    NameRef canonical = context && context->name_pool
+        ? name_pool_create_len(context->name_pool, string_value->chars,
+            string_value->len)
+        : NULL;
+    return canonical ? (Item){.item = s2it(canonical)} : ItemError;
+}
+
 extern "C" Item js_to_property_key(Item key) {
     if (js_key_is_symbol(key)) {
         js_exec_profile_name_lookup_bypassed();
@@ -904,7 +920,7 @@ extern "C" Item js_to_property_key(Item key) {
     TypeId kt = get_type_id(key);
     if (kt == LMD_TYPE_STRING) {
         js_exec_profile_name_lookup_bypassed();
-        return key;
+        return js_canonical_property_string(key);
     }
     if (key.item == 0 || kt == LMD_TYPE_NULL)
         return (Item){.item = s2it(heap_create_name("null", 4))};
@@ -914,13 +930,15 @@ extern "C" Item js_to_property_key(Item key) {
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_primitive(key, JS_HINT_STRING));
         if (js_key_is_symbol(key)) return js_symbol_to_key(key);
         kt = get_type_id(key);
-        if (kt == LMD_TYPE_STRING) return key;
+        if (kt == LMD_TYPE_STRING) return js_canonical_property_string(key);
         if (key.item == 0 || kt == LMD_TYPE_NULL)
             return (Item){.item = s2it(heap_create_name("null", 4))};
         if (kt == LMD_TYPE_UNDEFINED)
             return (Item){.item = s2it(heap_create_name("undefined", 9))};
     }
-    return js_to_string(key);
+    Item string_value = js_to_string(key);
+    return item_is_error(string_value) ? string_value
+        : js_canonical_property_string(string_value);
 }
 
 // Phase-5C: js_make_getter_key / js_make_setter_key removed.
@@ -1000,6 +1018,80 @@ extern "C" bool js_module_state_is_available(uint32_t module_state_id) {
         module_state_id < context->module_state_capacity &&
         context->module_states[module_state_id] &&
         context->module_states[module_state_id]->vars;
+}
+
+extern "C" uint64_t js_active_module_name_id(uint32_t index) {
+    if (!context || !context->active_js_module_state ||
+            index >= context->active_js_module_state->property_key_count ||
+            !context->active_js_module_state->property_keys) return NAME_ID_NONE;
+    return context->active_js_module_state->property_keys[index];
+}
+
+extern "C" uint32_t js_active_module_name_count(void) {
+    return context && context->active_js_module_state
+        ? context->active_js_module_state->property_key_count : 0;
+}
+
+extern "C" uint32_t js_active_module_ic_count(void) {
+    return context && context->active_js_module_state
+        ? context->active_js_module_state->ic_count : 0;
+}
+
+extern "C" bool js_link_module_ic_table(uint32_t module_state_id,
+        uint32_t count) {
+    if (!context || module_state_id == UINT32_MAX ||
+            module_state_id >= context->module_state_capacity ||
+            !context->module_states[module_state_id]) return false;
+    LambdaModuleState* state = context->module_states[module_state_id];
+    if (state->ic_cells && state->ic_count != count) {
+        log_error("js-ic-table: sealed count changed for module %u",
+                  module_state_id);
+        return false;
+    }
+    if (count == 0) {
+        state->ic_count = 0;
+        state->ic_cell_size = 0;
+        return true;
+    }
+    if (!state->ic_cells) {
+        state->ic_cells = mem_calloc((size_t)count, sizeof(JsLoadIC),
+            MEM_CAT_EVAL);
+        if (!state->ic_cells) return false;
+        state->ic_cell_size = sizeof(JsLoadIC);
+        state->ic_count = count;
+    }
+    return state->ic_count == count;
+}
+
+extern "C" bool js_append_module_ic_table(uint32_t module_state_id,
+        uint32_t count) {
+    if (!context || module_state_id == UINT32_MAX ||
+            module_state_id >= context->module_state_capacity ||
+            !context->module_states[module_state_id]) return false;
+    LambdaModuleState* state = context->module_states[module_state_id];
+    if (count == 0) return true;
+    if (state->ic_cell_size != 0 && state->ic_cell_size != sizeof(JsLoadIC)) {
+        log_error("js-ic-table: incompatible cell size for module %u",
+            module_state_id);
+        return false;
+    }
+    if (state->ic_count > UINT32_MAX - count) return false;
+    uint32_t old_count = state->ic_count;
+    uint32_t total = old_count + count;
+    void* cells = mem_realloc(state->ic_cells,
+        (size_t)total * sizeof(JsLoadIC), MEM_CAT_EVAL);
+    if (!cells) return false;
+    memset((uint8_t*)cells + (size_t)old_count * sizeof(JsLoadIC), 0,
+        (size_t)count * sizeof(JsLoadIC));
+    state->ic_cells = cells;
+    state->ic_cell_size = sizeof(JsLoadIC);
+    state->ic_count = total;
+    return true;
+}
+
+extern "C" void* js_active_module_ic(uint32_t index) {
+    return context && context->active_js_module_state
+        ? lambda_module_ic_at(context->active_js_module_state, index) : NULL;
 }
 
 extern "C" uint32_t js_get_batch_preamble_var_count(void) {
@@ -1134,9 +1226,15 @@ extern "C" void js_error_lane_format(Item lane, char* out, int out_size) {
     }
 }
 
-// TDZ check: throw ReferenceError if variable is still in Temporal Dead Zone
-extern "C" Item js_check_tdz(Item value, const char* name, int name_len) {
+// TDZ check: throw ReferenceError if variable is still in Temporal Dead Zone.
+// Names arrive as module NameIds so delayed MIR never dereferences a compiler
+// pool spelling after that pool has been released (D5.4.3).
+extern "C" Item js_check_tdz(Item value, NameId name_id, int name_len) {
     if (value.item == ITEM_JS_TDZ) {
+        NameRef name_ref = name_pool_resolve_id(context ? context->name_pool : NULL,
+            name_id);
+        const char* name = name_ref ? name_ref->chars : "";
+        if (name_ref) name_len = (int)name_ref->len;
         char buf[256];
         int len = snprintf(buf, sizeof(buf), "Cannot access '%.*s' before initialization", name_len, name);
         return js_throw_named_error_text("ReferenceError", buf);
@@ -1144,8 +1242,12 @@ extern "C" Item js_check_tdz(Item value, const char* name, int name_len) {
     return value;
 }
 
-// Const assignment check: throw TypeError when assigning to a const variable
-extern "C" Item js_throw_const_assign(const char* name, int name_len) {
+// Const assignment check: throw TypeError when assigning to a const variable.
+extern "C" Item js_throw_const_assign(NameId name_id, int name_len) {
+    NameRef name_ref = name_pool_resolve_id(context ? context->name_pool : NULL,
+        name_id);
+    const char* name = name_ref ? name_ref->chars : "";
+    if (name_ref) name_len = (int)name_ref->len;
     char buf[256];
     int len = snprintf(buf, sizeof(buf), "Assignment to constant variable '%.*s'", name_len, name);
     return js_throw_named_error_text("TypeError", buf);

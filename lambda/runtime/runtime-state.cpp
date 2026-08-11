@@ -49,43 +49,99 @@ static uint32_t module_state_capacity_for(uint32_t module_id) {
     return capacity;
 }
 
-static bool lambda_module_state_link_property_keys(LambdaModuleState* state,
-        const PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size) {
-    if (!state) return false;
-    if (state->property_key_count != count) return false;
+static bool lambda_property_key_spec_decode(const PropertyKeySpec* specs,
+        uint32_t count, uint32_t bytes_size, uint32_t index,
+        NameId* out_predefined_id, StrView* out_name) {
+    if (!specs || index >= count ||
+            bytes_size < count * sizeof(PropertyKeySpec)) return false;
+    const PropertyKeySpec* spec = &specs[index];
+    if (spec->reserved != 0) return false;
+    if (out_predefined_id) *out_predefined_id = NAME_ID_NONE;
+    if (out_name) *out_name = {NULL, 0};
+    if (spec->predefined_id != NAME_ID_NONE) {
+        // Sealed images may transport only generated IDs. Context-local static
+        // and dynamic IDs are linked from spelling bytes in this context.
+        NameRef predefined = well_known_name_ref(spec->predefined_id);
+        if (!predefined || property_key_kind(predefined) == NAME_KEY_PRIVATE ||
+                spec->name_offset != 0 || spec->name_length != 0) return false;
+        if (out_predefined_id) *out_predefined_id = spec->predefined_id;
+        return true;
+    }
+    uint32_t header_size = count * (uint32_t)sizeof(PropertyKeySpec);
+    if (spec->name_offset < header_size || spec->name_offset > bytes_size ||
+            spec->name_length >= bytes_size - spec->name_offset) return false;
+    const uint8_t* bytes = (const uint8_t*)specs;
+    if (bytes[spec->name_offset + spec->name_length] != '\0') return false;
+    if (out_name) {
+        *out_name = {(const char*)bytes + spec->name_offset, spec->name_length};
+    }
+    return true;
+}
+
+extern "C" bool lambda_property_key_specs_prelink(const PropertyKeySpec* specs,
+        uint32_t count, uint32_t bytes_size) {
+    if (count == 0) return true;
+    if (!context || !context->name_pool) {
+        log_error("module-key-prelink: missing runtime name pool");
+        return false;
+    }
+    for (uint32_t index = 0; index < count; index++) {
+        NameId predefined_id = NAME_ID_NONE;
+        StrView name = {NULL, 0};
+        if (!lambda_property_key_spec_decode(specs, count, bytes_size, index,
+                &predefined_id, &name)) {
+            log_error("module-key-prelink: invalid property key spec %u", index);
+            return false;
+        }
+        if (predefined_id == NAME_ID_NONE &&
+                !name_pool_create_strview(context->name_pool, name)) {
+            log_error("module-key-prelink: name allocation failed for spec %u", index);
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool lambda_module_state_resolve_property_keys(const PropertyKeySpec* specs,
+        uint32_t count, uint32_t bytes_size, NameId* out_ids) {
     if (count == 0) return true;
     if (!specs || bytes_size < count * sizeof(PropertyKeySpec) ||
-            !context || !context->name_pool) {
+            !context || !context->name_pool || !out_ids) {
         log_error("module-key-link: missing key specs or runtime name pool");
         return false;
     }
-    if (!state->property_keys) {
-        state->property_keys = (PropertyKeyRef*)mem_calloc(count,
-            sizeof(PropertyKeyRef), MEM_CAT_EVAL);
-        if (!state->property_keys) return false;
-    }
-    const uint8_t* spec_bytes = (const uint8_t*)specs;
     for (uint32_t index = 0; index < count; index++) {
-        const PropertyKeySpec* spec = &specs[index];
-        PropertyKeyRef key = NULL;
-        if (spec->predefined_id != NAME_ID_NONE) {
-            key = well_known_key_ref(spec->predefined_id);
-        } else if (spec->name_offset >= count * sizeof(PropertyKeySpec) &&
-                spec->name_offset <= bytes_size &&
-                spec->name_length <= bytes_size - spec->name_offset) {
-            StrView name = {(const char*)spec_bytes + spec->name_offset,
-                spec->name_length};
-            key = name_pool_create_strview(context->name_pool, name);
-        }
-        if (!key) {
-            // The sealed byte image is the only source of ordinary module keys;
-            // reject malformed offsets rather than borrowing compiler-owned names.
+        NameId key_id = NAME_ID_NONE;
+        StrView name = {NULL, 0};
+        if (!lambda_property_key_spec_decode(specs, count, bytes_size, index,
+                &key_id, &name)) {
             log_error("module-key-link: invalid property key spec %u", index);
             return false;
         }
-        state->property_keys[index] = key;
+        if (key_id == NAME_ID_NONE) {
+            String* key = name_pool_create_strview(context->name_pool, name);
+            key_id = name_ref_id(key);
+        }
+        if (key_id == NAME_ID_NONE) {
+            log_error("module-key-link: name allocation failed for property key %u", index);
+            return false;
+        }
+        out_ids[index] = key_id;
     }
     return true;
+}
+
+static bool lambda_module_state_link_property_keys_for_state(LambdaModuleState* state,
+        const PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size) {
+    if (!state || state->property_key_count != count) return false;
+    if (count == 0) return true;
+    if (!state->property_keys) {
+        state->property_keys = (NameId*)mem_calloc(count,
+            sizeof(NameId), MEM_CAT_EVAL);
+        if (!state->property_keys) return false;
+    }
+    return lambda_module_state_resolve_property_keys(specs, count, bytes_size,
+        state->property_keys);
 }
 
 extern "C" bool lambda_module_state_prepare(uint32_t module_id,
@@ -153,8 +209,53 @@ extern "C" bool lambda_module_state_prepare_layout(const LambdaModuleLayout* lay
         log_error("module-key-link: sealed layout changed for module %u", layout->module_id);
         return false;
     }
-    return lambda_module_state_link_property_keys(state, layout->property_key_specs,
+    return lambda_module_state_link_property_keys_for_state(state, layout->property_key_specs,
         layout->property_key_count, layout->property_key_bytes_size);
+}
+
+extern "C" bool lambda_module_state_link_property_keys(uint32_t module_id,
+        const PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size) {
+    EvalContext* owner = context;
+    if (!owner || module_id >= owner->module_state_capacity ||
+            !owner->module_states || !owner->module_states[module_id]) return false;
+    LambdaModuleState* state = owner->module_states[module_id];
+    if (state->property_key_count != 0 && state->property_key_count != count) {
+        log_error("module-key-link: sealed count changed for module %u", module_id);
+        return false;
+    }
+    state->property_key_count = count;
+    return lambda_module_state_link_property_keys_for_state(state, specs,
+        count, bytes_size);
+}
+
+extern "C" bool lambda_module_state_append_property_keys(uint32_t module_id,
+        const PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size) {
+    EvalContext* owner = context;
+    if (!owner || module_id >= owner->module_state_capacity ||
+            !owner->module_states || !owner->module_states[module_id]) return false;
+    LambdaModuleState* state = owner->module_states[module_id];
+    if (count == 0) return true;
+    if (state->property_key_count > UINT32_MAX - count) return false;
+
+    NameId* appended = (NameId*)mem_calloc(count, sizeof(NameId), MEM_CAT_EVAL);
+    if (!appended || !lambda_module_state_resolve_property_keys(specs, count,
+            bytes_size, appended)) {
+        mem_free(appended);
+        return false;
+    }
+    uint32_t old_count = state->property_key_count;
+    uint32_t total = old_count + count;
+    NameId* keys = (NameId*)mem_realloc(state->property_keys,
+        (size_t)total * sizeof(NameId), MEM_CAT_EVAL);
+    if (!keys) {
+        mem_free(appended);
+        return false;
+    }
+    memcpy(keys + old_count, appended, (size_t)count * sizeof(NameId));
+    state->property_keys = keys;
+    state->property_key_count = total;
+    mem_free(appended);
+    return true;
 }
 
 extern "C" bool lambda_module_state_reserve(uint32_t var_count,
@@ -220,6 +321,30 @@ extern "C" bool lambda_module_state_bind_static(uint32_t module_id,
     return true;
 }
 
+extern "C" Item lambda_name_id_to_item(NameId name_id) {
+    if (name_id == NAME_ID_NONE) return ItemNull;
+    NameRef name = name_pool_resolve_id(context ? context->name_pool : NULL,
+        name_id);
+    return name ? (Item){.item = s2it(name)} : ItemNull;
+}
+
+extern "C" uint64_t lambda_module_name_id_at(void* module_state,
+        uint32_t index) {
+    LambdaModuleState* state = (LambdaModuleState*)module_state;
+    if (!state || !state->property_keys || index >= state->property_key_count) {
+        return (uint64_t)NAME_ID_NONE;
+    }
+    return (uint64_t)state->property_keys[index];
+}
+
+extern "C" void* lambda_module_ic_at(void* module_state, uint32_t index) {
+    LambdaModuleState* state = (LambdaModuleState*)module_state;
+    if (!state || !state->ic_cells || index >= state->ic_count ||
+            state->ic_cell_size == 0) return NULL;
+    return (void*)((uint8_t*)state->ic_cells +
+        (size_t)index * state->ic_cell_size);
+}
+
 extern "C" void* lambda_module_const_at(const LambdaModuleLayout* layout,
         uint32_t index) {
     EvalContext* owner = context;
@@ -273,6 +398,10 @@ extern "C" void lambda_module_state_reset(void) {
             memset(state->vars, 0, state->var_count * sizeof(Item));
             memset(state->var_payloads, 0, state->var_count * sizeof(uint64_t));
         }
+        if (state->ic_cells && state->ic_cell_size) {
+            memset(state->ic_cells, 0,
+                (size_t)state->ic_count * state->ic_cell_size);
+        }
     }
 }
 
@@ -289,6 +418,7 @@ extern "C" void lambda_module_state_destroy(void) {
         mem_free(state->vars);
         mem_free(state->var_payloads);
         mem_free(state->property_keys);
+        mem_free(state->ic_cells);
         mem_free(state);
     }
     mem_free(owner->module_states);

@@ -1366,7 +1366,7 @@ void runner_setup_context(Runner* runner) {
         ctx->pool = ctx->heap->pool;
     } else {
         // First evaluation on this Runtime — create fresh resources
-        ctx->name_pool = name_pool_create(ctx->pool, nullptr);
+        ctx->name_pool = name_pool_create_runtime(ctx->pool);
         if (!ctx->name_pool) {
             log_error("Failed to create runtime name_pool");
         }
@@ -1689,13 +1689,6 @@ void runtime_reset_heap(Runtime* runtime) {
         // current; the next module instantiation re-registers once.
         lambda_module_state_reset();
 
-        // Release name_pool BEFORE heap_destroy: the NamePool struct is
-        // pool_calloc'd from the heap's pool, and pool_destroy bulk-frees
-        // all pool memory.  We must free the hashmap inside while accessible.
-        if (runtime->name_pool) {
-            name_pool_release(runtime->name_pool);
-            runtime->name_pool = NULL;
-        }
         if (runtime->type_list) {
             arraylist_free(runtime->type_list);
             runtime->type_list = NULL;
@@ -1705,6 +1698,12 @@ void runtime_reset_heap(Runtime* runtime) {
         heap_destroy();
         runtime->heap = NULL;
         cleanup_context->heap = NULL;
+        // D4.2.1v2/RN-NamePool: GC finalizers may still inspect NameRecords;
+        // release the dedicated runtime pool only after heap destruction.
+        if (runtime->name_pool) {
+            name_pool_release(runtime->name_pool);
+            runtime->name_pool = NULL;
+        }
         cleanup_context->name_pool = NULL;
         cleanup_context->type_list = NULL;
         cleanup_context->scheduler = NULL;
@@ -1788,13 +1787,6 @@ void runtime_cleanup(Runtime* runtime) {
         print_heap_entries();
         check_memory_leak();
 
-        // Release name_pool BEFORE heap_destroy: the NamePool struct is
-        // pool_calloc'd from the heap's pool, and pool_destroy bulk-frees
-        // all pool memory.  We must free the hashmap inside while accessible.
-        if (runtime->name_pool) {
-            name_pool_release(runtime->name_pool);
-            runtime->name_pool = NULL;
-        }
         if (runtime->type_list) {
             arraylist_free(runtime->type_list);
             runtime->type_list = NULL;
@@ -1814,6 +1806,12 @@ void runtime_cleanup(Runtime* runtime) {
         heap_destroy();
         runtime->heap = NULL;
         cleanup_context->heap = NULL;
+        // D4.2.1v2/RN-NamePool: GC finalizers can traverse name-backed
+        // shapes, so the dedicated runtime pool outlives heap teardown.
+        if (runtime->name_pool) {
+            name_pool_release(runtime->name_pool);
+            runtime->name_pool = NULL;
+        }
         cleanup_context->name_pool = NULL;
         cleanup_context->type_list = NULL;
         cleanup_context->scheduler = NULL;

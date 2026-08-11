@@ -5,7 +5,7 @@
     {
       "in_func": "_js_dynamicCaught_#_body",
       "expect": [
-        "call\tjs_property_access_key_ic",
+        "call\tjs_property_access_name_id_ic",
         "call\tjs_error_lane_payload"
       ],
       "count": {

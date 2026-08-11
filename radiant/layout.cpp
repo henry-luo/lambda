@@ -819,6 +819,81 @@ CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
     return declaration->value->data.keyword;
 }
 
+static void layout_apply_flex_declared_keyword(FlexDeclaredStyleInfo* info,
+                                                CssEnum keyword) {
+    if (!info) return;
+    if (keyword == CSS_VALUE_ROW || keyword == CSS_VALUE_ROW_REVERSE ||
+        keyword == CSS_VALUE_COLUMN || keyword == CSS_VALUE_COLUMN_REVERSE) {
+        info->has_direction = true;
+        info->row = keyword == CSS_VALUE_ROW || keyword == CSS_VALUE_ROW_REVERSE;
+    } else if (keyword == CSS_VALUE_NOWRAP ||
+               keyword == CSS_VALUE_WRAP ||
+               keyword == CSS_VALUE_WRAP_REVERSE) {
+        info->has_wrap = true;
+        info->wrapping = keyword == CSS_VALUE_WRAP ||
+            keyword == CSS_VALUE_WRAP_REVERSE;
+    }
+}
+
+static bool layout_flex_declared_length(LayoutContext* lycon, StyleTree* style,
+                                        CssPropertyCode property, float* out) {
+    if (!lycon || !style || !out) return false;
+    CssDeclaration* declaration = style_tree_get_declaration(style, property);
+    if (!declaration || !declaration->value ||
+        declaration->value->type != CSS_VALUE_TYPE_LENGTH) return false;
+    float value = resolve_length_value(lycon, property, declaration->value);
+    if (!isfinite(value)) return false;
+    *out = value;
+    return true;
+}
+
+FlexDeclaredStyleInfo layout_flex_declared_style_info(
+        LayoutContext* lycon, DomElement* element) {
+    FlexDeclaredStyleInfo info = {};
+    if (!element || !element->specified_style) return info;
+    StyleTree* style = element->specified_style;
+
+    CssEnum keyword = layout_specified_keyword(
+        element, CSS_PROPERTY_FLEX_DIRECTION, CSS_VALUE__UNDEF);
+    layout_apply_flex_declared_keyword(&info, keyword);
+
+    CssDeclaration* flow = style_tree_get_declaration(style, CSS_PROPERTY_FLEX_FLOW);
+    if (flow && flow->value) {
+        if (flow->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            layout_apply_flex_declared_keyword(
+                &info, flow->value->data.keyword);
+        } else if (flow->value->type == CSS_VALUE_TYPE_LIST) {
+            for (int i = 0; i < flow->value->data.list.count; i++) {
+                CssValue* value = flow->value->data.list.values[i];
+                if (value && value->type == CSS_VALUE_TYPE_KEYWORD) {
+                    layout_apply_flex_declared_keyword(&info, value->data.keyword);
+                }
+            }
+        }
+    }
+
+    keyword = layout_specified_keyword(
+        element, CSS_PROPERTY_FLEX_WRAP, CSS_VALUE__UNDEF);
+    layout_apply_flex_declared_keyword(&info, keyword);
+
+    float gap = 0.0f;
+    if (layout_flex_declared_length(lycon, style, CSS_PROPERTY_GAP, &gap)) {
+        info.has_row_gap = info.has_column_gap = true;
+        info.row_gap = info.column_gap = gap;
+    }
+    if (layout_flex_declared_length(
+            lycon, style, CSS_PROPERTY_ROW_GAP, &gap)) {
+        info.has_row_gap = true;
+        info.row_gap = gap;
+    }
+    if (layout_flex_declared_length(
+            lycon, style, CSS_PROPERTY_COLUMN_GAP, &gap)) {
+        info.has_column_gap = true;
+        info.column_gap = gap;
+    }
+    return info;
+}
+
 float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* value,
                                        DomElement* owner, float target_font_size) {
     if (!lycon || !value) return 0.0f;
@@ -2113,10 +2188,6 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     }
 }
 
-static bool line_align_view_is_out_of_flow(View* view) {
-    return layout_view_is_out_of_flow(view);
-}
-
 // CSS 2.1 §16.2: Shift current-line text rects inside a span that was laid out
 // on a previous line but has continuation content on the current line.
 static bool shift_text_current_line_rects(float offset, int line_number, ViewText* text) {
@@ -2136,11 +2207,11 @@ static bool shift_text_current_line_rects(float offset, int line_number, ViewTex
 }
 
 static bool shift_span_current_line_rects(float offset, int line_number, ViewSpan* span) {
-    if (line_align_view_is_out_of_flow(static_cast<View*>(span))) return false;
+    if (layout_view_is_out_of_flow(static_cast<View*>(span))) return false;
     bool shifted = false;
     View* child = static_cast<View*>(span->first_child);
     while (child) {
-        if (line_align_view_is_out_of_flow(child)) {
+        if (layout_view_is_out_of_flow(child)) {
             child = child->next();
             continue;
         }
@@ -2369,7 +2440,7 @@ static void place_rtl_initial_letter_line(LayoutContext* lycon) {
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
     while (view) {
         log_debug("view line align: %d", view->view_type);
-        if (line_align_view_is_out_of_flow(view)) {
+        if (layout_view_is_out_of_flow(view)) {
             view = view->next();
             continue;
         }
@@ -2396,7 +2467,7 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
 static int count_spaces_in_view(LayoutContext* lycon, View* view, int line_number) {
     int count = 0;
     while (view) {
-        if (line_align_view_is_out_of_flow(view)) {
+        if (layout_view_is_out_of_flow(view)) {
             view = view->next();
             continue;
         }
@@ -2431,7 +2502,7 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
                                     int line_number, float cumulative_offset,
                                     View** last_view, TextRect** last_rect) {
     while (view) {
-        if (line_align_view_is_out_of_flow(view)) {
+        if (layout_view_is_out_of_flow(view)) {
             view = view->next();
             continue;
         }

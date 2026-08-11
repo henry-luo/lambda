@@ -327,7 +327,8 @@ TEST_F(RuntimeShapeTransition, PackedAssignmentsRebuildWithoutMovingFixedSlots) 
     // `lateFlag` is followed by `afterFlag`; retaining its old one-byte offset
     // for a Map write would overwrite the packed sibling. The cache must defer
     // to the rebuild path instead of publishing a retag-only transition.
-    EXPECT_EQ(js_typemap_transition_for_type(map_item, packed_entry, LMD_TYPE_MAP), nullptr);
+    EXPECT_EQ(js_typemap_transition_for_type(map_item, packed_entry,
+        packed_entry->name_id, LMD_TYPE_MAP), nullptr);
     EXPECT_EQ(map->type, packed_shape);
 
     Map replacement = {};
