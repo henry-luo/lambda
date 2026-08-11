@@ -779,13 +779,8 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
         float max_item_height = flex_auto_container_content_extent(
             lycon, flex_container, flex_layout, item_count, LAYOUT_AXIS_Y, false);
         if (max_item_height > 0) {
-            // Add padding to content height for final container height
-            float padding_top = 0, padding_bottom = 0;
-            if (flex_container->bound) {
-                padding_top = flex_container->boundary()->padding.top;
-                padding_bottom = flex_container->boundary()->padding.bottom;
-            }
-            float total_height = max_item_height + padding_top + padding_bottom;
+            BoxEdges padding = layout_boundary_padding_edges(flex_container->bound);
+            float total_height = max_item_height + padding.top + padding.bottom;
             flex_layout->cross_axis_size = max_item_height;  // Content height
             flex_container->height = total_height;  // Total height including padding
         }
@@ -793,13 +788,8 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
         float total_height = flex_auto_container_content_extent(
             lycon, flex_container, flex_layout, item_count, LAYOUT_AXIS_Y, true);
         if (total_height > 0) {
-            // Add padding to content height for final container height
-            float padding_top = 0, padding_bottom = 0;
-            if (flex_container->bound) {
-                padding_top = flex_container->boundary()->padding.top;
-                padding_bottom = flex_container->boundary()->padding.bottom;
-            }
-            float final_height = total_height + padding_top + padding_bottom;
+            BoxEdges padding = layout_boundary_padding_edges(flex_container->bound);
+            float final_height = total_height + padding.top + padding.bottom;
             // CSS Flexbox: AUTO-HEIGHT must never shrink a container below the height
             // already determined by a parent flex layout. This prevents stale measurement
             // cache values (measured at unconstrained width) from reducing a container's
@@ -846,14 +836,8 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
         float max_item_width = flex_auto_container_content_extent(
             lycon, flex_container, flex_layout, item_count, LAYOUT_AXIS_X, false);
         if (max_item_width > 0) {
-            // Add padding to content width for final container width
-            float padding_left = 0, padding_right = 0;
-            if (flex_container->bound) {
-                BoxMetrics container_box = layout_box_metrics(flex_container);
-                padding_left = container_box.padding.left;
-                padding_right = container_box.padding.right;
-            }
-            float total_width = max_item_width + padding_left + padding_right;
+            BoxEdges padding = layout_boundary_padding_edges(flex_container->bound);
+            float total_width = max_item_width + padding.left + padding.right;
             flex_layout->cross_axis_size = max_item_width;  // Content width
             flex_container->width = total_width;  // Total width including padding
         }
@@ -1554,17 +1538,13 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     if (prev_elem && is_row) {
                         // Position text after the preceding element in row direction
                         // Account for the element's margin-right if it has one
-                        float prev_margin_right = 0;
-                        if (prev_elem->bound) {
-                            prev_margin_right = prev_elem->boundary()->margin.right;
-                        }
+                        float prev_margin_right = layout_axis_margin_end(
+                            prev_elem->bound, LAYOUT_AXIS_X);
                         text_x = prev_elem->x + prev_elem->width + prev_margin_right + flex_gap;
                     } else if (prev_elem && !is_row) {
                         // Position text after the preceding element in column direction
-                        float prev_margin_bottom = 0;
-                        if (prev_elem->bound) {
-                            prev_margin_bottom = prev_elem->boundary()->margin.bottom;
-                        }
+                        float prev_margin_bottom = layout_axis_margin_end(
+                            prev_elem->bound, LAYOUT_AXIS_Y);
                         text_y = prev_elem->y + prev_elem->height + prev_margin_bottom + flex_gap;
                     } else {
                         // No preceding element - apply justify-content on main axis
@@ -2119,8 +2099,10 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                                                  fi->fi->align_self : flex->align_items;
                                 bool will_stretch = (align_type == ALIGN_STRETCH);
                                 if (!has_item_explicit_height && will_stretch) {
-                                    float item_margin_top = fi->bound ? fi->boundary()->margin.top : 0;
-                                    float item_margin_bottom = fi->bound ? fi->boundary()->margin.bottom : 0;
+                                    float item_margin_top = layout_axis_margin_start(
+                                        fi->bound, LAYOUT_AXIS_Y);
+                                    float item_margin_bottom = layout_axis_margin_end(
+                                        fi->bound, LAYOUT_AXIS_Y);
                                     float stretched_height = max_item_height - item_margin_top - item_margin_bottom;
                                     if (stretched_height < 0) stretched_height = 0;
                                     fi->height = stretched_height;

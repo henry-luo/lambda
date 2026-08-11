@@ -907,12 +907,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // HTML spec §15.5.14: iframe { border: 2px inset; }
         BorderProp* iframe_border = apply_html_uniform_border_base(
             lycon, block, 2.0f, CSS_VALUE_INSET, true);
-        iframe_border->top_color.r = iframe_border->top_color.g =
-            iframe_border->top_color.b = 128; iframe_border->top_color.a = 255;
-        iframe_border->left_color = iframe_border->top_color;
-        iframe_border->bottom_color.r = iframe_border->bottom_color.g =
-            iframe_border->bottom_color.b = 192; iframe_border->bottom_color.a = 255;
-        iframe_border->right_color = iframe_border->bottom_color;
+        Color dark = {}; dark.r = dark.g = dark.b = 128; dark.a = 255;
+        Color light = {}; light.r = light.g = light.b = 192; light.a = 255;
+        Color colors[4] = {dark, light, light, dark};
+        for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+            *radiant_border_side(iframe_border, (CssBoxSide)side).color = colors[side];
+        }
         const char* frameborder_attr = elmt->get_attribute("frameborder");
         if (frameborder_attr) {
             size_t frameborder_len = strlen(frameborder_attr);
@@ -920,10 +920,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 str_ieq_const(frameborder_attr, frameborder_len, "no");
             if (no_frameborder) {
                 // Legacy frameborder=0 suppresses the iframe UA border before author CSS overrides.
-                block->boundary_mut()->border->width.top = block->boundary_mut()->border->width.right =
-                    block->boundary_mut()->border->width.bottom = block->boundary_mut()->border->width.left = 0.0f;
-                block->boundary_mut()->border->top_style = block->boundary_mut()->border->right_style =
-                    block->boundary_mut()->border->bottom_style = block->boundary_mut()->border->left_style = CSS_VALUE_NONE;
+                BorderProp* border = block->boundary_mut()->border;
+                for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+                    RadiantBorderSide refs = radiant_border_side(border, (CssBoxSide)side);
+                    *refs.width = 0.0f;
+                    *refs.style = CSS_VALUE_NONE;
+                }
             }
         }
         block->ensure_scroll(lycon);
@@ -980,15 +982,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // This matches browser UA stylesheet behavior (CSS logical pixels)
         BorderProp* hr_border = apply_html_uniform_border_base(
             lycon, block, 1.0f, CSS_VALUE_INSET, true);
-        // Default border colors for inset style: darker gray on top/left, lighter on bottom/right
-        // Top/left: dark gray for 3D inset effect
-        hr_border->top_color.r = 128; hr_border->top_color.g = 128;
-        hr_border->top_color.b = 128; hr_border->top_color.a = 255;
-        hr_border->left_color = hr_border->top_color;
-        // Bottom/right: lighter for 3D inset effect
-        hr_border->bottom_color.r = 192; hr_border->bottom_color.g = 192;
-        hr_border->bottom_color.b = 192; hr_border->bottom_color.a = 255;
-        hr_border->right_color = hr_border->bottom_color;
+        Color dark = {}; dark.r = dark.g = dark.b = 128; dark.a = 255;
+        Color light = {}; light.r = light.g = light.b = 192; light.a = 255;
+        Color colors[4] = {dark, light, light, dark};
+        for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+            *radiant_border_side(hr_border, (CssBoxSide)side).color = colors[side];
+        }
         // 8px margin top/bottom, auto left/right for horizontal centering (browser default)
         radiant_spacing_set_pair(&block->boundary_mut()->margin,
             CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, 8);

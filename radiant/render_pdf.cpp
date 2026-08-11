@@ -1355,41 +1355,21 @@ static bool pdf_paint_fill_radial_gradient(PdfRenderContext* ctx,
 }
 
 static Corner pdf_corner_inset(const Corner* radius, float inset_x, float inset_y) {
-    Corner out = *radius;
-    out.top_left = fmaxf(0.0f, out.top_left - inset_x);
-    out.top_left_y = fmaxf(0.0f, out.top_left_y - inset_y);
-    out.top_right = fmaxf(0.0f, out.top_right - inset_x);
-    out.top_right_y = fmaxf(0.0f, out.top_right_y - inset_y);
-    out.bottom_right = fmaxf(0.0f, out.bottom_right - inset_x);
-    out.bottom_right_y = fmaxf(0.0f, out.bottom_right_y - inset_y);
-    out.bottom_left = fmaxf(0.0f, out.bottom_left - inset_x);
-    out.bottom_left_y = fmaxf(0.0f, out.bottom_left_y - inset_y);
-    return out;
+    return radiant_corner_inset(radius, inset_x, inset_y);
 }
 
 static bool pdf_has_border_radius(const BorderProp* border) {
-    if (!border) return false;
-    const Corner* radius = &border->radius;
-    return radius->top_left > 0.0f || radius->top_right > 0.0f ||
-           radius->bottom_right > 0.0f || radius->bottom_left > 0.0f ||
-           radius->top_left_y > 0.0f || radius->top_right_y > 0.0f ||
-           radius->bottom_right_y > 0.0f || radius->bottom_left_y > 0.0f;
+    return border && radiant_corner_has_radius(&border->radius);
 }
 
 static bool pdf_border_is_uniform_solid(const BorderProp* border) {
-    if (!border || border->width.top <= 0.0f || border->top_color.a == 0) {
-        return false;
+    if (!border || border->width.values[0] <= 0.0f || border->colors[0].a == 0) return false;
+    for (int i = 0; i < 4; i++) {
+        if (border->width.values[i] != border->width.values[0] ||
+            border->styles[i] != CSS_VALUE_SOLID ||
+            border->colors[i].c != border->colors[0].c) return false;
     }
-    return border->width.top == border->width.right &&
-           border->width.right == border->width.bottom &&
-           border->width.bottom == border->width.left &&
-           border->top_style == CSS_VALUE_SOLID &&
-           border->right_style == CSS_VALUE_SOLID &&
-           border->bottom_style == CSS_VALUE_SOLID &&
-           border->left_style == CSS_VALUE_SOLID &&
-           border->top_color.c == border->right_color.c &&
-           border->right_color.c == border->bottom_color.c &&
-           border->bottom_color.c == border->left_color.c;
+    return true;
 }
 
 // Render text view

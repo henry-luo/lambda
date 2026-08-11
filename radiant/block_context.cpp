@@ -301,29 +301,18 @@ BlockContext* block_context_find_bfc(BlockContext* ctx) {
     return ctx;
 }
 
-void block_context_calc_bfc_offset(ViewElement* view, BlockContext* bfc, float* offset_x, float* offset_y) {
-    if (!view || !bfc || !offset_x || !offset_y) {
-        if (offset_x) *offset_x = 0;
-        if (offset_y) *offset_y = 0;
-        return;
-    }
+BlockContextOffset block_context_offset_to_bfc(ViewElement* view, BlockContext* bfc) {
+    BlockContextOffset offset = {0, 0};
+    if (!view || !bfc) return offset;
 
     ViewBlock* bfc_elem = bfc->establishing_element;
-    float ox = 0, oy = 0;
-
-    // Walk up from view to BFC establishing element
-    // Simply accumulate x/y positions since view->x is already relative to parent's content area
-    // (border and padding are NOT added because child x/y already accounts for parent's content area)
     ViewElement* walker = view;
-
     while (walker && walker != bfc_elem) {
-        ox += walker->x;
-        oy += walker->y;
+        offset.x += walker->x;
+        offset.y += walker->y;
         walker = walker->parent_view();
     }
-
-    *offset_x = ox;
-    *offset_y = oy;
+    return offset;
 }
 
 // ============================================================================
@@ -356,10 +345,12 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
     box->next = nullptr;
 
     // Get margins
-    float margin_l = float_elem->bound ? float_elem->boundary()->margin.left : 0;
-    float margin_r = float_elem->bound ? float_elem->boundary()->margin.right : 0;
-    float margin_t = float_elem->bound ? float_elem->boundary()->margin.top : 0;
-    float margin_b = float_elem->bound ? float_elem->boundary()->margin.bottom : 0;
+    BoxEdges margin = layout_boundary_margin_edges(
+        float_elem->bound ? float_elem->boundary() : nullptr);
+    float margin_l = margin.left;
+    float margin_r = margin.right;
+    float margin_t = margin.top;
+    float margin_b = margin.bottom;
 
     // Store border box (parent-relative coords)
     box->x = float_elem->x;

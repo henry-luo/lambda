@@ -791,10 +791,13 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     if (block->is_element() && form->control_type == FORM_CONTROL_SELECT) {
         bool is_listbox = form->multiple || form->select_size > 1;
 
-        float border_left = (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.left : 0;
-        float border_top  = (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.top  : 0;
-        float border_right= (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.right : 0;
-        float option_width = block->width - border_left - border_right - block->boundary()->padding.left - block->boundary()->padding.right;
+        BoxEdges border = layout_boundary_border_edges(block->bound ? block->boundary() : nullptr);
+        BoxEdges padding = layout_boundary_padding_edges(block->bound ? block->boundary() : nullptr);
+        float border_left = border.left;
+        float border_top = border.top;
+        float border_right = border.right;
+        float option_width = block->width - border_left - border_right -
+            padding.left - padding.right;
         if (option_width < 0) option_width = 0;
 
         float row_height = layout_select_listbox_row_height(form);

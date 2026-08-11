@@ -299,12 +299,10 @@ static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
         return false;
     }
 
-    float border_top = block->bound && block->boundary_mut()->border ? block->boundary_mut()->border->width.top : 0.0f;
-    float border_bottom = block->bound && block->boundary_mut()->border ? block->boundary_mut()->border->width.bottom : 0.0f;
-    float padding_top = block->bound ? block->boundary()->padding.top : 0.0f;
-    float padding_bottom = block->bound ? block->boundary()->padding.bottom : 0.0f;
-    if (border_top > 0.0f || border_bottom > 0.0f ||
-        padding_top > 0.0f || padding_bottom > 0.0f) {
+    BoxEdges border = layout_boundary_border_edges(block->bound ? block->boundary() : nullptr);
+    BoxEdges padding = layout_boundary_padding_edges(block->bound ? block->boundary() : nullptr);
+    if (border.top > 0.0f || border.bottom > 0.0f ||
+        padding.top > 0.0f || padding.bottom > 0.0f) {
         return false;
     }
 
@@ -817,6 +815,43 @@ CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
         return fallback;
     }
     return declaration->value->data.keyword;
+}
+
+static bool layout_inline_display(CssEnum display) {
+    return display == CSS_VALUE_INLINE || display == CSS_VALUE_INLINE_BLOCK ||
+        display == CSS_VALUE_INLINE_FLEX || display == CSS_VALUE_INLINE_GRID ||
+        display == CSS_VALUE_INLINE_TABLE;
+}
+
+bool layout_element_was_inline(DomElement* element, bool include_replaced) {
+    if (!element) return false;
+    CssEnum display = layout_specified_keyword(
+        element, CSS_PROPERTY_DISPLAY, CSS_VALUE__UNDEF);
+    if (display != CSS_VALUE__UNDEF) return layout_inline_display(display);
+
+    switch (element->tag_id) {
+        case MARKUP_NAME_SPAN: case MARKUP_NAME_A: case MARKUP_NAME_EM:
+        case MARKUP_NAME_STRONG: case MARKUP_NAME_B: case MARKUP_NAME_I:
+        case MARKUP_NAME_U: case MARKUP_NAME_S: case MARKUP_NAME_SMALL:
+        case MARKUP_NAME_CODE: case MARKUP_NAME_SUB: case MARKUP_NAME_SUP:
+        case MARKUP_NAME_ABBR: case MARKUP_NAME_CITE: case MARKUP_NAME_Q:
+        case MARKUP_NAME_VAR: case MARKUP_NAME_TIME: case MARKUP_NAME_MARK:
+        case MARKUP_NAME_BDO: case MARKUP_NAME_BDI: case MARKUP_NAME_LABEL:
+            return true;
+        default:
+            break;
+    }
+    if (!include_replaced) return false;
+    switch (element->tag_id) {
+        case MARKUP_NAME_IMG: case MARKUP_NAME_INPUT: case MARKUP_NAME_SELECT:
+        case MARKUP_NAME_TEXTAREA: case MARKUP_NAME_BUTTON: case MARKUP_NAME_VIDEO:
+        case MARKUP_NAME_IFRAME: case MARKUP_NAME_CANVAS: case MARKUP_NAME_METER:
+        case MARKUP_NAME_PROGRESS: case MARKUP_NAME_EMBED: case MARKUP_NAME_OBJECT:
+        case MARKUP_NAME_SVG:
+            return true;
+        default:
+            return false;
+    }
 }
 
 LayoutBorderSpacingValue layout_resolve_border_spacing_value(
@@ -3352,19 +3387,12 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
                                                     html->positionp()->position == CSS_VALUE_STICKY);
 
     // Compute border+padding dimensions for the root element
-    float root_bp_left = 0, root_bp_right = 0, root_bp_top = 0, root_bp_bottom = 0;
-    if (html->bound) {
-        if (html->boundary()->border) {
-            root_bp_left += html->boundary()->border->width.left;
-            root_bp_right += html->boundary()->border->width.right;
-            root_bp_top += html->boundary()->border->width.top;
-            root_bp_bottom += html->boundary()->border->width.bottom;
-        }
-        root_bp_left += html->boundary()->padding.left;
-        root_bp_right += html->boundary()->padding.right;
-        root_bp_top += html->boundary()->padding.top;
-        root_bp_bottom += html->boundary()->padding.bottom;
-    }
+    BoxEdges root_border = layout_boundary_border_edges(html->bound ? html->boundary() : nullptr);
+    BoxEdges root_padding = layout_boundary_padding_edges(html->bound ? html->boundary() : nullptr);
+    float root_bp_left = root_border.left + root_padding.left;
+    float root_bp_right = root_border.right + root_padding.right;
+    float root_bp_top = root_border.top + root_padding.top;
+    float root_bp_bottom = root_border.bottom + root_padding.bottom;
 
     // Check for explicit CSS width on the root element
     bool root_has_explicit_width = false;

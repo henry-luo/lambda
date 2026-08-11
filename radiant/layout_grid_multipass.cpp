@@ -1073,13 +1073,12 @@ static bool compute_grid_area_for_absolute(
     // CSS Grid §9.1: For absolutely positioned items, when a start or end is auto,
     // the containing block extends to the outer edge of the padding box at that end.
     // This is the BORDER edge (not the content/padding), so it includes padding but not border.
-    float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
-    if (container->bound && container->boundary_mut()->border) {
-        border_left   = container->boundary()->border->width.left;
-        border_right  = container->boundary()->border->width.right;
-        border_top    = container->boundary()->border->width.top;
-        border_bottom = container->boundary()->border->width.bottom;
-    }
+    BoxEdges border = layout_boundary_border_edges(
+        container->bound ? container->boundary() : nullptr);
+    float border_left = border.left;
+    float border_right = border.right;
+    float border_top = border.top;
+    float border_bottom = border.bottom;
     // Padding-box outer edges in container border-box coordinates
     float col_auto_start_pos = border_left;
     float col_auto_end_pos   = (float)container->width  - border_right;

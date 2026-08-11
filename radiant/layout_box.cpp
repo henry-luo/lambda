@@ -6,22 +6,9 @@ BoxMetrics layout_boundary_metrics(const BoundaryProp* bound) {
     BoxMetrics metrics = {};
     if (!bound) return metrics;
 
-    metrics.margin.left = bound->margin.left;
-    metrics.margin.right = bound->margin.right;
-    metrics.margin.top = bound->margin.top;
-    metrics.margin.bottom = bound->margin.bottom;
-
-    metrics.padding.left = bound->padding.left;
-    metrics.padding.right = bound->padding.right;
-    metrics.padding.top = bound->padding.top;
-    metrics.padding.bottom = bound->padding.bottom;
-
-    if (bound->border) {
-        metrics.border.left = bound->border->width.left;
-        metrics.border.right = bound->border->width.right;
-        metrics.border.top = bound->border->width.top;
-        metrics.border.bottom = bound->border->width.bottom;
-    }
+    metrics.margin = layout_boundary_margin_edges(bound);
+    metrics.padding = layout_boundary_padding_edges(bound);
+    metrics.border = layout_boundary_border_edges(bound);
 
     metrics.margin_h = metrics.margin.left + metrics.margin.right;
     metrics.margin_v = metrics.margin.top + metrics.margin.bottom;
