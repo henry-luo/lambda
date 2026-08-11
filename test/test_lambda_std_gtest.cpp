@@ -275,8 +275,17 @@ static void run_std_sub_batch(
     };
     ShellOptions options = {0};
     options.stdin_path = manifest_path;
+    // the Win32 shell bridge can report a sharing violation when parallel
+    // file-backed CreateProcess calls open batch manifests; serialize only
+    // that boundary while keeping result parsing and progress concurrent.
+#ifdef _WIN32
+    progress_mutex.lock();
+#endif
     // Parallel batches must not serialize through shell stdin redirection.
     ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+#ifdef _WIN32
+    progress_mutex.unlock();
+#endif
     if (shell_result.exit_code < 0) {
         shell_result_free(&shell_result);
         unlink(manifest_path);

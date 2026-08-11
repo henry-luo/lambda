@@ -1633,14 +1633,15 @@ MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
     case JS_LITERAL_NUMBER: {
         // BigInt literal: store string_value and call bigint_from_string at runtime
         if (lit->is_bigint) {
-            String* s = lit->value.string_value;
+            // BigInt literals store their spelling outside the numeric union;
+            // reading value.string_value here passed an unrelated union member.
+            String* s = lit->bigint_str;
             // Materialize the literal through the context NamePool; a delayed
             // MIR function must not retain the compiler-pool spelling.
-            MIR_reg_t str_item = jm_box_string_literal(mt, s->chars, s->len);
-            MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_P,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
             return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, str_ptr),
+                // BigInt parsing needs the literal bytes, not a temporary JS
+                // String Item; the latter loses the raw-pointer ABI boundary.
+                MIR_T_P, MIR_new_str_op(mt->ctx, {(size_t)s->len, s->chars}),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
         }
         double val = lit->value.number_value;
@@ -11295,7 +11296,9 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
             mt->em.frame.runtime, 0, 1)));
 
     // Create StringBuf: stringbuf_new(pool)
-    MIR_reg_t sb = jm_call_1(mt, "stringbuf_new", MIR_T_I64,
+    // StringBuf is a pointer-valued helper; using an integer return type here
+    // truncated its address on Windows before the first template fragment.
+    MIR_reg_t sb = jm_call_1(mt, "stringbuf_new", MIR_T_P,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, pool_reg));
 
     JsAstNode* quasi = tmpl->quasis;
@@ -11312,9 +11315,16 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
                     elem->cooked->chars, (int)elem->cooked->len);
                 MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_P,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
+                // String stores its bytes after the header; passing the String
+                // object itself made the quasi prefix render header bytes.
+                MIR_reg_t chars = jm_new_reg(mt, "quasi_chars", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                    MIR_new_reg_op(mt->ctx, chars),
+                    MIR_new_reg_op(mt->ctx, str_ptr),
+                    MIR_new_int_op(mt->ctx, offsetof(String, chars))));
                 jm_call_void_3(mt, "stringbuf_append_str_n",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sb),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, str_ptr),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, chars),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)elem->cooked->len));
             }
         }
@@ -11336,7 +11346,9 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, eval));
             jm_emit_error_lane_propagate_check(mt);
             // Unbox string: it2s(str_item) -> String*
-            MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_I64,
+            // it2s returns a String pointer; declaring an integer return here
+            // truncated the pointer before template interpolation copied it.
+            MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_P,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
             // Guard: if js_to_string threw (e.g. Symbol), str_ptr is null — skip append
             MIR_label_t skip_append = jm_new_label(mt);
@@ -11369,7 +11381,7 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
     }
 
     // stringbuf_to_string(sb) -> String*
-    MIR_reg_t result_str = jm_call_1(mt, "stringbuf_to_string", MIR_T_I64,
+    MIR_reg_t result_str = jm_call_1(mt, "stringbuf_to_string", MIR_T_P,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, sb));
     // Box as string
     return jm_box_string(mt, result_str);
@@ -12297,12 +12309,13 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         case JS_LITERAL_NUMBER: {
             // BigInt literal: store bigint_str and call bigint_from_string at runtime
             if (lit->is_bigint) {
+                // the parser preserves arbitrary-precision digits in bigint_str,
+                // while value.string_value is not initialized for number nodes.
                 String* s = lit->bigint_str;
-                MIR_reg_t str_item = jm_box_string_literal(mt, s->chars, s->len);
-                MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_P,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
                 return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, str_ptr),
+                    // BigInt parsing needs the literal bytes, not a temporary
+                    // JS String Item; the latter loses the raw-pointer ABI boundary.
+                    MIR_T_P, MIR_new_str_op(mt->ctx, {(size_t)s->len, s->chars}),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
             }
             double val = lit->value.number_value;

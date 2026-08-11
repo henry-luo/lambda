@@ -4730,3 +4730,20 @@ int main(int argc, char *argv[]) {
 
     return lambda_main_finish(ret_code);
 }
+#if defined(_WIN32)
+// Windows PE executables do not publish their host symbols by default; the
+// dynamic Jube modules otherwise receive null import slots for this ABI.
+#pragma comment(linker, "/export:ItemNull")
+#pragma comment(linker, "/export:ItemError")
+#pragma comment(linker, "/export:jube_node_current_module_state")
+#pragma comment(linker, "/export:jube_node_session_module_state_get")
+#pragma comment(linker, "/export:shell_getenv")
+#pragma comment(linker, "/export:file_getcwd")
+#pragma comment(linker, "/export:mem_free_loc")
+#pragma comment(linker, "/export:file_realpath")
+#pragma comment(linker, "/export:log_error")
+#pragma comment(linker, "/export:clock_gettime64")
+#pragma comment(linker, "/export:mem_alloc_loc")
+#pragma comment(linker, "/export:url_decode_component")
+#pragma comment(linker, "/export:mem_realloc_loc")
+#endif
