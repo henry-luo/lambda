@@ -1138,18 +1138,9 @@ static void record_inline_fragment_union(DomNode* text_node, LayoutContext* lyco
             break;
         }
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
-        if (!span->has_inline_fragment_union()) {
-            span->set_has_inline_fragment_union(true);
-            span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_x = fragment_min_x;
-            span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_x = fragment_max_x;
-            span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_y = fragment_min_y;
-            span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_y = fragment_max_y;
-        } else {
-            if (fragment_min_x < span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_x) span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_x = fragment_min_x;
-            if (fragment_max_x > span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_x) span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_x = fragment_max_x;
-            if (fragment_min_y < span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_y) span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_y = fragment_min_y;
-            if (fragment_max_y > span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_y) span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_y = fragment_max_y;
-        }
+        layout_extend_fragment_union(span, FRAGMENT_UNION_INLINE,
+                                     fragment_min_x, fragment_max_x,
+                                     fragment_min_y, fragment_max_y);
         ancestor = ancestor->parent;
     }
 }
@@ -1886,42 +1877,9 @@ static void align_forced_break_rect_to_line_baseline(LayoutContext* lycon) {
     br_view->y = lycon->block.advance_y + baseline_pos - br_ascender;
 }
 
-static bool fixup_span_children_have_no_line_content(ViewSpan* span);
-
-static bool fixup_view_has_line_content(View* view) {
-    if (!view || view->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(view)) {
-        return false;
-    }
-    if (view->view_type == RDT_VIEW_TEXT) {
-        return view->width > 0.0f && view->height > 0.0f;
-    }
-    if (view->view_type == RDT_VIEW_INLINE) {
-        return !fixup_span_children_have_no_line_content(lam::view_require<RDT_VIEW_INLINE>(view));
-    }
-    return true;
-}
-
-static bool fixup_span_children_have_no_line_content(ViewSpan* span) {
-    if (!span) return false;
-    if (!span->first_child) return true;
-    for (View* child = span->first_child; child; child = child->next()) {
-        if (fixup_view_has_line_content(child)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 static float fixup_inline_vertical_decoration_height(ViewSpan* span) {
-    if (!span || !span->bound) return 0.0f;
-    float border_top = 0.0f, border_bottom = 0.0f;
-    if (span->boundary()->border) {
-        border_top = span->boundary()->border->width.top;
-        border_bottom = span->boundary()->border->width.bottom;
-    }
-    float padding_top = span->boundary()->padding.top > 0.0f ? span->boundary()->padding.top : 0.0f;
-    float padding_bottom = span->boundary()->padding.bottom > 0.0f ? span->boundary()->padding.bottom : 0.0f;
-    return border_top + padding_top + padding_bottom + border_bottom;
+    LayoutInlineDecorationEdges edges = layout_inline_decoration_edges(span);
+    return edges.top + edges.bottom;
 }
 
 static FontProp* fixup_inline_effective_font(LayoutContext* lycon, ViewSpan* span) {
@@ -1984,26 +1942,9 @@ static void record_collapsed_line_fragment_for_inline_ancestors(
     while (ancestor && ancestor->is_element()) {
         if (ancestor->view_type != RDT_VIEW_INLINE) break;
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
-        if (!span->has_collapsed_line_fragment_union()) {
-            span->set_has_collapsed_line_fragment_union(true);
-            span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_x = fragment_min_x;
-            span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_x = fragment_max_x;
-            span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_y = fragment_min_y;
-            span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_y = fragment_max_y;
-        } else {
-            if (fragment_min_x < span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_x) {
-                span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_x = fragment_min_x;
-            }
-            if (fragment_max_x > span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_x) {
-                span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_x = fragment_max_x;
-            }
-            if (fragment_min_y < span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_y) {
-                span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_y = fragment_min_y;
-            }
-            if (fragment_max_y > span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_y) {
-                span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_y = fragment_max_y;
-            }
-        }
+        layout_extend_fragment_union(span, FRAGMENT_UNION_COLLAPSED_LINE,
+                                     fragment_min_x, fragment_max_x,
+                                     fragment_min_y, fragment_max_y);
         if (lycon->block.line_height > span->content_height) {
             span->content_height = lycon->block.line_height;
         }
@@ -2033,7 +1974,7 @@ static void fixup_collapsed_inline_spans(LayoutContext* lycon, ViewSpan* span) {
             span->height = fixup_inline_dom_rect_height(lycon, span);
         }
     } else if (span->content_height > 0 &&
-               fixup_span_children_have_no_line_content(span)) {
+               layout_span_children_have_no_line_content(span)) {
         float target_height = fixup_inline_dom_rect_height(lycon, span);
         if (span->height < target_height) {
             span->height = target_height;

@@ -176,6 +176,12 @@ private:
     ValidationOptions options;       // validation configuration
     HashMap* visited_nodes;          // for circular reference detection
     clock_t validation_start_time;   // for timeout tracking
+    // Fast mode answers only true/false and allocates nothing: runtime type
+    // checking is a predicate, and building a detailed report it discards on
+    // success is the dominant cost of the walk. Deliberately not in
+    // ValidationOptions — options are user-facing schema policy, while this is
+    // a per-call ABI choice the caller sets and clears.
+    bool fast_mode;
 
     // Private constructor - use create() factory method
     SchemaValidator(Pool* pool);
@@ -213,6 +219,8 @@ public:
     PathSegment* get_current_path() const { return current_path; }
     void set_current_path(PathSegment* path) { current_path = path; }
     int get_current_depth() const { return current_depth; }
+    bool is_fast_mode() const { return fast_mode; }
+    void set_fast_mode(bool enable) { fast_mode = enable; }
     void set_current_depth(int depth) { current_depth = depth; }
     HashMap* get_visited_nodes() const { return visited_nodes; }
     HashMap* get_type_definitions() const { return type_definitions; }
@@ -371,6 +379,23 @@ ValidationResult* validate_against_occurrence(SchemaValidator* validator, ConstI
  * Create validation result
  */
 ValidationResult* create_validation_result(Pool* pool);
+
+// Fast-mode verdicts. `const` is load-bearing: the full-mode code mutates its
+// result in place at ~44 sites, and one of those reaching a shared singleton
+// would corrupt it process-wide and race across threads. Returning them as
+// const makes any such path a compile error instead.
+// They also carry an empty error list, so they must never reach merge_errors
+// or the `if (error_count == 0) result->valid = true` collection exit idiom —
+// that combination silently turns a failure back into a pass.
+extern const ValidationResult VALIDATION_OK;
+extern const ValidationResult VALIDATION_FAIL;
+
+// Fast-mode verdict helper: returns the shared singleton for `ok`.
+// Callers cast away const only at the ValidationResult* return boundary, which
+// is safe because fast-mode consumers read `->valid` and nothing else.
+static inline ValidationResult* validation_verdict(bool ok) {
+    return (ValidationResult*)(ok ? &VALIDATION_OK : &VALIDATION_FAIL);
+}
 
 /**
  * Create validation error

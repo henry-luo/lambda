@@ -1,0 +1,6 @@
+4 true true
+true false false true
+false true
+true false mixed
+true false
+7 1.5

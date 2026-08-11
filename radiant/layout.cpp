@@ -819,6 +819,81 @@ CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
     return declaration->value->data.keyword;
 }
 
+static void layout_apply_flex_declared_keyword(FlexDeclaredStyleInfo* info,
+                                                CssEnum keyword) {
+    if (!info) return;
+    if (keyword == CSS_VALUE_ROW || keyword == CSS_VALUE_ROW_REVERSE ||
+        keyword == CSS_VALUE_COLUMN || keyword == CSS_VALUE_COLUMN_REVERSE) {
+        info->has_direction = true;
+        info->row = keyword == CSS_VALUE_ROW || keyword == CSS_VALUE_ROW_REVERSE;
+    } else if (keyword == CSS_VALUE_NOWRAP ||
+               keyword == CSS_VALUE_WRAP ||
+               keyword == CSS_VALUE_WRAP_REVERSE) {
+        info->has_wrap = true;
+        info->wrapping = keyword == CSS_VALUE_WRAP ||
+            keyword == CSS_VALUE_WRAP_REVERSE;
+    }
+}
+
+static bool layout_flex_declared_length(LayoutContext* lycon, StyleTree* style,
+                                        CssPropertyCode property, float* out) {
+    if (!lycon || !style || !out) return false;
+    CssDeclaration* declaration = style_tree_get_declaration(style, property);
+    if (!declaration || !declaration->value ||
+        declaration->value->type != CSS_VALUE_TYPE_LENGTH) return false;
+    float value = resolve_length_value(lycon, property, declaration->value);
+    if (!isfinite(value)) return false;
+    *out = value;
+    return true;
+}
+
+FlexDeclaredStyleInfo layout_flex_declared_style_info(
+        LayoutContext* lycon, DomElement* element) {
+    FlexDeclaredStyleInfo info = {};
+    if (!element || !element->specified_style) return info;
+    StyleTree* style = element->specified_style;
+
+    CssEnum keyword = layout_specified_keyword(
+        element, CSS_PROPERTY_FLEX_DIRECTION, CSS_VALUE__UNDEF);
+    layout_apply_flex_declared_keyword(&info, keyword);
+
+    CssDeclaration* flow = style_tree_get_declaration(style, CSS_PROPERTY_FLEX_FLOW);
+    if (flow && flow->value) {
+        if (flow->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            layout_apply_flex_declared_keyword(
+                &info, flow->value->data.keyword);
+        } else if (flow->value->type == CSS_VALUE_TYPE_LIST) {
+            for (int i = 0; i < flow->value->data.list.count; i++) {
+                CssValue* value = flow->value->data.list.values[i];
+                if (value && value->type == CSS_VALUE_TYPE_KEYWORD) {
+                    layout_apply_flex_declared_keyword(&info, value->data.keyword);
+                }
+            }
+        }
+    }
+
+    keyword = layout_specified_keyword(
+        element, CSS_PROPERTY_FLEX_WRAP, CSS_VALUE__UNDEF);
+    layout_apply_flex_declared_keyword(&info, keyword);
+
+    float gap = 0.0f;
+    if (layout_flex_declared_length(lycon, style, CSS_PROPERTY_GAP, &gap)) {
+        info.has_row_gap = info.has_column_gap = true;
+        info.row_gap = info.column_gap = gap;
+    }
+    if (layout_flex_declared_length(
+            lycon, style, CSS_PROPERTY_ROW_GAP, &gap)) {
+        info.has_row_gap = true;
+        info.row_gap = gap;
+    }
+    if (layout_flex_declared_length(
+            lycon, style, CSS_PROPERTY_COLUMN_GAP, &gap)) {
+        info.has_column_gap = true;
+        info.column_gap = gap;
+    }
+    return info;
+}
+
 float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* value,
                                        DomElement* owner, float target_font_size) {
     if (!lycon || !value) return 0.0f;
@@ -1572,26 +1647,20 @@ static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* e
     if (!is_column_marker && !is_empty_caption_marker) return false;
 
     View* marker = static_cast<View*>(elem);
-    View* saved_view = lycon->view;
-    DomNode* saved_elmt = lycon->elmt;
-    BlockContext saved_block = lycon->block;
-    Linebox saved_line = lycon->line;
-    FontBox saved_font = lycon->font;
     ViewType saved_view_type = marker->view_type;
 
     // resolve computed style with the same element/view context normal inline
     // layout provides, then restore layout state because non-rendered table
     // internals do not generate inline boxes or affect siblings.
-    marker->view_type = RDT_VIEW_INLINE;
-    lycon->view = marker;
-    lycon->elmt = elem;
-    dom_node_resolve_style(elem, lycon);
-    marker->view_type = saved_view_type;
-    lycon->view = saved_view;
-    lycon->elmt = saved_elmt;
-    lycon->block = saved_block;
-    lycon->line = saved_line;
-    lycon->font = saved_font;
+    {
+        LayoutContextScope context_scope(lycon);
+        LayoutViewScope view_scope(lycon);
+        marker->view_type = RDT_VIEW_INLINE;
+        lycon->view = marker;
+        lycon->elmt = elem;
+        dom_node_resolve_style(elem, lycon);
+        marker->view_type = saved_view_type;
+    }
 
     elem->display = display;
     if (is_empty_caption_marker && table_caption_has_box_contribution(elem)) {
@@ -2119,10 +2188,6 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     }
 }
 
-static bool line_align_view_is_out_of_flow(View* view) {
-    return layout_view_is_out_of_flow(view);
-}
-
 // CSS 2.1 §16.2: Shift current-line text rects inside a span that was laid out
 // on a previous line but has continuation content on the current line.
 static bool shift_text_current_line_rects(float offset, int line_number, ViewText* text) {
@@ -2142,11 +2207,11 @@ static bool shift_text_current_line_rects(float offset, int line_number, ViewTex
 }
 
 static bool shift_span_current_line_rects(float offset, int line_number, ViewSpan* span) {
-    if (line_align_view_is_out_of_flow(static_cast<View*>(span))) return false;
+    if (layout_view_is_out_of_flow(static_cast<View*>(span))) return false;
     bool shifted = false;
     View* child = static_cast<View*>(span->first_child);
     while (child) {
-        if (line_align_view_is_out_of_flow(child)) {
+        if (layout_view_is_out_of_flow(child)) {
             child = child->next();
             continue;
         }
@@ -2375,7 +2440,7 @@ static void place_rtl_initial_letter_line(LayoutContext* lycon) {
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
     while (view) {
         log_debug("view line align: %d", view->view_type);
-        if (line_align_view_is_out_of_flow(view)) {
+        if (layout_view_is_out_of_flow(view)) {
             view = view->next();
             continue;
         }
@@ -2402,7 +2467,7 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
 static int count_spaces_in_view(LayoutContext* lycon, View* view, int line_number) {
     int count = 0;
     while (view) {
-        if (line_align_view_is_out_of_flow(view)) {
+        if (layout_view_is_out_of_flow(view)) {
             view = view->next();
             continue;
         }
@@ -2437,7 +2502,7 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
                                     int line_number, float cumulative_offset,
                                     View** last_view, TextRect** last_rect) {
     while (view) {
-        if (line_align_view_is_out_of_flow(view)) {
+        if (layout_view_is_out_of_flow(view)) {
             view = view->next();
             continue;
         }
@@ -3120,14 +3185,13 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             elem->height = 0;
 
             // Set lycon->view for style resolution (resolve_css_styles uses it)
-            View* saved_view = lycon->view;
-            lycon->view = (View*)elem;
+            {
+                LayoutViewScope view_scope(lycon);
+                lycon->view = (View*)elem;
 
-            // Resolve CSS styles so counter properties are populated on elem->blk
-            dom_node_resolve_style(node, lycon);
-
-            // Restore view context
-            lycon->view = saved_view;
+                // Resolve CSS styles so counter properties are populated on elem->blk
+                dom_node_resolve_style(node, lycon);
+            }
 
             // CSS Lists 3: "An element that does not generate a box... also does not
             // increment, set, or reset any counters." display:contents does not
@@ -3423,17 +3487,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // CSS 2.1 §12.2: Generate pseudo-elements for the root <html> element
     // Supports html:before and html:after in CSS conformance tests
     if (elmt->is_element()) {
-        html->pseudo = alloc_pseudo_content_prop(lycon, html);
-        generate_pseudo_element_content(lycon, html, true);   // ::before
-        generate_pseudo_element_content(lycon, html, false);  // ::after
-        if (html->pseudo) {
-            if (html->pseudo->before) {
-                insert_pseudo_into_dom(lam::dom_require_element(elmt), html->pseudo->before, true);
-            }
-            if (html->pseudo->after) {
-                insert_pseudo_into_dom(lam::dom_require_element(elmt), html->pseudo->after, false);
-            }
-        }
+        layout_materialize_pseudo_content(lycon, html);
     }
 
     // CSS 2.1 §9.2: Lay out ALL visible children of <html>, not just <body>.

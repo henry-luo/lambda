@@ -252,6 +252,10 @@ static inline bool validator_array_elem_embeds(ArrayNumElemType elem_type, Type*
     case ELEM_UINT32:  return validator_numeric_type_embeds(LMD_TYPE_NUM_SIZED, NUM_UINT32, target);
     case ELEM_FLOAT16: return validator_numeric_type_embeds(LMD_TYPE_NUM_SIZED, NUM_FLOAT16, target);
     case ELEM_FLOAT32: return validator_numeric_type_embeds(LMD_TYPE_NUM_SIZED, NUM_FLOAT32, target);
+    // a packed bool lane holds only true/false by construction, so it embeds
+    // exactly into `bool` (and into `any`, handled above). It is deliberately
+    // not numeric: bool must not silently satisfy an int/float element type.
+    case ELEM_BOOL:    return target && target->type_id == LMD_TYPE_BOOL;
     default:           return false;
     }
 }

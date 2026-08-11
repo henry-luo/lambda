@@ -34,6 +34,25 @@ static bool grid_item_inline_area_is_definite(const GridItemProp* grid_item,
     return true;
 }
 
+static float grid_item_placed_axis_size(ViewBlock* item, float track_size,
+                                        bool horizontal) {
+    if (!item || !item->blk) return track_size;
+
+    LayoutAxisConstraintRefs axis(item->block_mut(), horizontal);
+    if (axis.given_percent && !isnan(*axis.given_percent)) {
+        float content_size = track_size * *axis.given_percent / 100.0f;
+        *axis.given = content_size;
+        return layout_uses_border_box(item)
+            ? layout_floor_border_box_axis(item, content_size, horizontal)
+            : layout_border_size_from_content_box(item, content_size, horizontal);
+    }
+    if (axis.given && *axis.given > 0.0f) {
+        return layout_css_size_to_border_box(
+            item->bound, layout_box_sizing(item), *axis.given, horizontal);
+    }
+    return track_size;
+}
+
 // Position grid items based on computed track sizes
 void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, ScratchArena* sa) {
     if (!grid_layout || !container) return;
@@ -238,35 +257,10 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         float item_width = track_width;
         float item_height = track_height;
 
-        if (item->blk) {
-            // Percentage sizes on grid items resolve against the final grid area,
-            // which is only known after track sizing and placement.
-            if (!isnan(item->block()->given_width_percent)) {
-                float content_width = track_width * item->block()->given_width_percent / 100.0f;
-                item->blk->given_width = content_width;
-                item_width = layout_uses_border_box(item)
-                    ? layout_floor_border_box_width(item, content_width)
-                    : layout_border_width_from_content_box(item, content_width);
-            } else if (item->block()->given_width > 0) {
-                // Grid placement uses border-box geometry, while a content-box
-                // `width` declaration stores only its content dimension.
-                item_width = layout_css_size_to_border_box(
-                    item->bound, layout_box_sizing(item), item->block()->given_width, true);
-            }
-
-            if (!isnan(item->block()->given_height_percent)) {
-                float content_height = track_height * item->block()->given_height_percent / 100.0f;
-                item->blk->given_height = content_height;
-                item_height = layout_uses_border_box(item)
-                    ? layout_floor_border_box_height(item, content_height)
-                    : layout_border_height_from_content_box(item, content_height);
-            } else if (item->block()->given_height > 0) {
-                // Grid placement uses border-box geometry, while a content-box
-                // `height` declaration stores only its content dimension.
-                item_height = layout_css_size_to_border_box(
-                    item->bound, layout_box_sizing(item), item->block()->given_height, false);
-            }
-        }
+        // percentage sizes resolve against the final grid area; definite sizes
+        // use the same border-box conversion for both physical axes.
+        item_width = grid_item_placed_axis_size(item, track_width, true);
+        item_height = grid_item_placed_axis_size(item, track_height, false);
 
         // grid positioning uses border-box geometry; content-box constraints must
         // be converted before clamping rather than compared to a border-box size.

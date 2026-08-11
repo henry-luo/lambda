@@ -155,6 +155,9 @@ SchemaValidator* SchemaValidator::create(Pool* pool) {
     if (!validator) return nullptr;
 
     validator->pool = pool;
+    // reporting mode by default; a runtime predicate caller opts into fast mode
+    // around its own call and clears it afterwards.
+    validator->fast_mode = false;
 
     validator->transpiler = transpiler_create(pool);
     if (!validator->transpiler) {
@@ -362,6 +365,16 @@ Type* SchemaValidator::resolve_type_reference(const char* type_name) {
 }
 
 // ==================== Error Handling ====================
+
+// Fast-mode verdicts (validator.hpp). Immutable and shared: fast mode reads
+// only `->valid`, so one instance of each answer serves every level of the
+// recursion with no allocation.
+const ValidationResult VALIDATION_OK = {
+    /*valid*/ true, /*errors*/ nullptr, /*warnings*/ nullptr,
+    /*error_count*/ 0, /*warning_count*/ 0 };
+const ValidationResult VALIDATION_FAIL = {
+    /*valid*/ false, /*errors*/ nullptr, /*warnings*/ nullptr,
+    /*error_count*/ 0, /*warning_count*/ 0 };
 
 ValidationResult* create_validation_result(Pool* pool) {
     ValidationResult* result;

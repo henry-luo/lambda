@@ -205,6 +205,17 @@ struct MirTranspiler {
     bool in_handler;
     bool in_handler_operand;
 
+    // A direct call routed to the inferred slow body returns a boxed Item even
+    // when the call's inferred static type is a native scalar — the guard miss
+    // means the runtime value may not match the specialization at all, so the
+    // Item cannot be unboxed (inference must stay unobservable, D3.2.1).
+    // get_effective_type cannot see that routing, so the call emitter records
+    // it here, keyed by node identity: nested argument calls overwrite the
+    // record, but the outermost call writes last, and a consumer only trusts
+    // the record when the node matches the expression it just emitted.
+    AstNode* last_call_record_node;
+    bool last_call_returned_boxed_item;
+
     // TCO
     AstFuncNode* tco_func;
     MIR_label_t tco_label;
@@ -10573,6 +10584,10 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     ? mir_unwrap_decl_type(asn->declared_type) : NULL;
                 TypeId predicted_expr_tid;
                 MIR_reg_t val;
+                // stale records from a previous statement's calls must not be
+                // matched against this initializer.
+                mt->last_call_record_node = NULL;
+                mt->last_call_returned_boxed_item = false;
                 if (asn->is_type_definition) {
                     // A type declaration names a Type* contract; evaluating its literal RHS as a data initializer stores the string payload in a native lane and loses the type value at the next identifier read.
                     val = mir_emit_declared_type_value(mt, asn->type);
@@ -10601,6 +10616,17 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 char name_buf[128];
                 snprintf(name_buf, sizeof(name_buf), "%.*s", (int)asn->name->len, asn->name->chars);
                 TypeId expr_tid = predicted_expr_tid;
+                // An initializer call routed to the inferred slow body handed
+                // back a boxed Item, whatever its inferred scalar type says.
+                // Register the binding as a boxed carrier, or the stored Item
+                // is later re-boxed as an int lane and saturates to the inf
+                // sentinel. The slow body may also return a non-int at
+                // runtime, so degrading to Item — never unboxing — is the only
+                // representation that keeps inference unobservable (D3.2.1).
+                if (mt->last_call_returned_boxed_item &&
+                        mt->last_call_record_node == mir_unwrap_primary(asn->as)) {
+                    expr_tid = LMD_TYPE_ANY;
+                }
                 // The AST retains the source annotation explicitly.  Inferring
                 // annotation-ness from a numeric TypeId made `let x: T` and
                 // `let x = e` indistinguishable for maps, unions, and strings.
@@ -15612,12 +15638,37 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     bool nullable_inferred_argument =
                         mir_param_is_inferred_specialization(call_nfi->fn_node, i) &&
                         resolved_args[i] && mir_expr_may_be_null(mt, resolved_args[i]);
+                    // A local whose carrier is a boxed Item cannot feed an
+                    // inferred native lane parameter, whatever its AST type
+                    // says — its own initializer already missed the
+                    // specialization guard (e.g. it holds a slow-body result).
+                    // The argument emitter refuses to pass such a carrier raw;
+                    // the router must agree, or it selects the raw entry the
+                    // emitter then feeds a tagged Item (havlak's CFG ids
+                    // became `inf` exactly this way) (D2.2.2, D3.2.1).
+                    bool boxed_carrier_inferred_argument = false;
+                    if (mir_param_is_inferred_specialization(call_nfi->fn_node, i) &&
+                            mir_native_func_param_uses_lane(call_nfi, i) &&
+                            resolved_args[i]) {
+                        AstNode* carrier_base = mir_unwrap_primary(resolved_args[i]);
+                        if (carrier_base && carrier_base->node_type == AST_NODE_IDENT) {
+                            AstIdentNode* carrier_ident = (AstIdentNode*)carrier_base;
+                            char carrier_name[128];
+                            snprintf(carrier_name, sizeof(carrier_name), "%.*s",
+                                (int)carrier_ident->name->len, carrier_ident->name->chars);
+                            MirVarEntry* carrier_var = find_var(mt, carrier_name);
+                            boxed_carrier_inferred_argument = carrier_var &&
+                                carrier_var->type_id == LMD_TYPE_ANY &&
+                                mir_native_param_type(call_nfi, i) != LMD_TYPE_ANY;
+                        }
+                    }
                     if ((module_binding_boxed &&
                          mir_native_func_param_uses_lane(call_nfi, i)) ||
                             (argument_tid != mir_native_param_type(call_nfi, i) &&
                          !witness_argument_open &&
                          !declared_semantic_match) ||
-                            nullable_inferred_argument) {
+                            nullable_inferred_argument ||
+                            boxed_carrier_inferred_argument) {
                         // A declared native parameter can admit a boxed local
                         // through the call-site boundary; routing it through
                         // the boxed wrapper loses the raw return contract and
@@ -16168,13 +16219,27 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             // may execute arbitrary source semantics, so it must remain Item.
             TypeId call_tid = routed_to_inferred_slow_body ? LMD_TYPE_ANY
                 : get_effective_type(mt, (AstNode*)call_node);
+            // Publish the representation this call actually produces. A
+            // consumer that derives the carrier from get_effective_type alone
+            // (let/var bindings) would register a native lane for what is an
+            // Item, and later box the Item's tag bits as an int lane — outside
+            // int53, saturating to the infinity sentinel (havlak's CFG node
+            // ids all became `inf`).
+            mt->last_call_record_node = (AstNode*)call_node;
+            mt->last_call_returned_boxed_item = routed_to_inferred_slow_body &&
+                mir_is_native_scalar_value_type(
+                    get_effective_type(mt, (AstNode*)call_node));
             if (native_consumer_tid != LMD_TYPE_ANY &&
                     (call_native_return ||
-                     mir_direct_native_return_type(mt, call_node) ==
-                         native_consumer_tid)) {
+                     (!routed_to_inferred_slow_body &&
+                      mir_direct_native_return_type(mt, call_node) ==
+                          native_consumer_tid))) {
                 // The surrounding native arithmetic has already proved this
                 // call's result carrier. Override a conservative slow-entry
                 // type join so the raw result is not boxed before consumption.
+                // The proof must describe the entry this site actually calls:
+                // mir_direct_native_return_type describes the callee's native
+                // entry, which a site routed to the slow body does not use.
                 call_tid = native_consumer_tid;
             }
             bool value_function_scalar_return = call_nfi && fn_def &&
@@ -17094,10 +17159,20 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
     // A compact-loop proof is a consumer fact. Preserve the raw lane only when
     // the existing binding owns an int carrier; an untyped initializer must
     // receive the boxed result produced by the ordinary expression boundary.
+    mt->last_call_record_node = NULL;
+    mt->last_call_returned_boxed_item = false;
     MIR_reg_t val = (compact_loop_native_assignment || native_int_assignment)
         ? transpile_binary_out(mt, (AstBinaryNode*)assign_value, true)
         : transpile_expr(mt, assign->value);
     TypeId val_tid = get_effective_type(mt, assign->value);
+    // Same rule as the declaration site: a RHS call routed to the inferred
+    // slow body produced a boxed Item regardless of its inferred scalar type.
+    // Boxing that Item again as an int lane saturates to the inf sentinel
+    // (havlak's `footer = build_straight(...)` rebinding).
+    if (mt->last_call_returned_boxed_item &&
+            mt->last_call_record_node == assign_value) {
+        val_tid = LMD_TYPE_ANY;
+    }
     if (compact_loop_native_assignment || native_int_assignment) {
         // The loop-specific raw subtraction is an INT register, whereas the
         // ordinary flex-int AST type is conservatively boxed/ANY. The same

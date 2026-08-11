@@ -12,6 +12,14 @@
 #define MAX_FLOAT(a, b) ((a) > (b) ? (a) : (b))
 
 static bool multicol_has_vertical_inline_axis(ViewBlock* block);
+static MulticolFragmentPlacement multicol_place_fragment(
+    float original_offset,
+    float fragment_height,
+    int column_count,
+    float column_width,
+    float column_gap,
+    float row_gap
+);
 
 /**
  * CSS Multi-column Layout Implementation
@@ -132,52 +140,6 @@ void calculate_multicol_dimensions(
     *out_column_width = column_width;
     *out_gap = gap;
 }
-
-/**
- * Structure to track column state during layout
- */
-struct ColumnState {
-    int column_index;           // Current column (0-based)
-    float column_top;           // Y position at column start
-    float column_height;        // Height used in current column
-    float max_column_height;    // Maximum height across all columns (for balancing)
-    float balanced_height;      // Target height for balanced columns
-    bool balancing;             // True if balancing pass
-};
-
-struct ColumnFragment {
-    int fragment_index;
-    int column_index;
-    int row_index;
-    float x;
-    float y;
-    float width;
-    float target_height;
-    float used_height;
-};
-
-struct ColumnGroup {
-    ViewBlock* container;
-    // fragments points into lycon->scratch; allocate with multicol_group_alloc_fragments,
-    // free with scratch_free after multicol_group_finish. Capacity is MAX_MULTICOL_BLOCKS.
-    ColumnFragment* fragments;
-    int fragment_count;
-    int column_count;
-    float column_width;
-    float column_gap;
-    float inline_origin;
-    float row_gap;
-    float target_height;
-    float group_used_height;
-    bool wraps_rows;
-    bool vertical_writing;
-};
-
-struct FragmentedFlowCursor {
-    ColumnGroup* group;
-    int current_fragment;
-    float block_offset;
-};
 
 struct InlineFragmentItem {
     View* view;
@@ -321,7 +283,7 @@ static float multicol_specified_border_height(ViewBlock* block) {
     // must add padding and borders before the later block finalizer sees it.
     return layout_uses_border_box(block)
         ? specified_height
-        : layout_border_height_from_content_box(block, specified_height);
+        : layout_border_size_from_content_box(block, specified_height, false);
 }
 
 static float multicol_row_gap(ViewBlock* block) {
@@ -466,14 +428,11 @@ static void multicol_project_fragmented_text_rects(
     TextRect* rect = text->rect;
     while (rect) {
         float original_y = rect->y - origin_y;
-        int fragment_index = (int)floorf(original_y / fragment_height); // INT_CAST_OK: fragment index from positive height
-        if (fragment_index < 0) fragment_index = 0;
-        int column_index = fragment_index % column_count;
-        int row_index = fragment_index / column_count;
-        float local_y = original_y - fragment_index * fragment_height;
+        MulticolFragmentPlacement placement = multicol_place_fragment(
+            original_y, fragment_height, column_count, column_width, column_gap, row_gap);
 
-        rect->x += column_index * (column_width + column_gap);
-        rect->y = origin_y + row_index * (fragment_height + row_gap) + local_y;
+        rect->x += placement.x_offset;
+        rect->y = origin_y + placement.y_offset;
         if (rect->x < min_x) min_x = rect->x;
         if (rect->y < min_y) min_y = rect->y;
         rect = rect->next;
@@ -486,25 +445,13 @@ static void multicol_project_fragmented_text_rects(
 static void multicol_update_text_bounds(ViewText* text) {
     if (!text || !text->rect) return;
 
-    float min_x = 1e9f;
-    float min_y = 1e9f;
-    float max_x = -1e9f;
-    float max_y = -1e9f;
-    TextRect* rect = text->rect;
-    while (rect) {
-        if (rect->x < min_x) min_x = rect->x;
-        if (rect->y < min_y) min_y = rect->y;
-        float rect_right = rect->x + rect->width;
-        float rect_bottom = rect->y + rect->height;
-        if (rect_right > max_x) max_x = rect_right;
-        if (rect_bottom > max_y) max_y = rect_bottom;
-        rect = rect->next;
-    }
+    LayoutTextRectBounds bounds = layout_text_rect_bounds(text->rect);
 
-    if (min_x < 1e8f) text->x = min_x;
-    if (min_y < 1e8f) text->y = min_y;
-    if (max_x > min_x) text->width = max_x - min_x;
-    if (max_y > min_y) text->height = max_y - min_y;
+    if (!bounds.valid) return;
+    text->x = bounds.min_x;
+    text->y = bounds.min_y;
+    text->width = bounds.max_x - bounds.min_x;
+    text->height = bounds.max_y - bounds.min_y;
 }
 
 static void multicol_reanchor_text_descendants(View* view, float target_x, float target_y) {
@@ -512,16 +459,10 @@ static void multicol_reanchor_text_descendants(View* view, float target_x, float
 
     if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
-        float min_x = 1e9f;
-        float min_y = 1e9f;
-        TextRect* rect = text->rect;
-        while (rect) {
-            if (rect->x < min_x) min_x = rect->x;
-            if (rect->y < min_y) min_y = rect->y;
-            rect = rect->next;
-        }
-        if (min_x < 1e8f && min_y < 1e8f) {
-            multicol_project_text_rect(text->rect, target_x - min_x, target_y - min_y);
+        LayoutTextRectBounds bounds = layout_text_rect_bounds(text->rect);
+        if (bounds.valid) {
+            multicol_project_text_rect(text->rect,
+                target_x - bounds.min_x, target_y - bounds.min_y);
             multicol_update_text_bounds(text);
             text->x = target_x;
             text->y = target_y;
@@ -1071,6 +1012,28 @@ static float multicol_normalize_inline_x(float x, float origin_x, float pitch) {
     return origin_x + local;
 }
 
+static MulticolFragmentPlacement multicol_place_fragment(
+    float original_offset,
+    float fragment_height,
+    int column_count,
+    float column_width,
+    float column_gap,
+    float row_gap
+) {
+    MulticolFragmentPlacement placement = {};
+    if (fragment_height <= 0.0f || column_count <= 0) return placement;
+
+    placement.fragment_index = (int)floorf(original_offset / fragment_height); // INT_CAST_OK: fragment index from positive height
+    if (placement.fragment_index < 0) placement.fragment_index = 0;
+    placement.column_index = placement.fragment_index % column_count;
+    placement.row_index = placement.fragment_index / column_count;
+    placement.local_offset = original_offset - placement.fragment_index * fragment_height;
+    placement.x_offset = placement.column_index * (column_width + column_gap);
+    placement.y_offset = placement.row_index * (fragment_height + row_gap) +
+        placement.local_offset;
+    return placement;
+}
+
 static bool multicol_project_fragmented_inline_descendants(
     LayoutContext* lycon,
     ViewBlock* child,
@@ -1404,13 +1367,14 @@ static void multicol_project_fragmented_descendants(
         }
 
         float original_y = use_subslot_flow ? subslot_flow_y : descendant->y - child->y;
-        int fragment_index = (int)floorf(original_y / fragment_height); // INT_CAST_OK: fragment index from positive height
-        if (fragment_index < 0) fragment_index = 0;
-        int column_index = fragment_index % column_count;
-        int row_index = fragment_index / column_count;
-        float local_y = original_y - fragment_index * fragment_height;
-        float new_x = descendant->x + column_index * (column_width + column_gap);
-        float new_y = child->y + row_index * (fragment_height + row_gap) + local_y;
+        MulticolFragmentPlacement placement = multicol_place_fragment(
+            original_y, fragment_height, column_count, column_width, column_gap, row_gap);
+        int fragment_index = placement.fragment_index;
+        int column_index = placement.column_index;
+        int row_index = placement.row_index;
+        float local_y = placement.local_offset;
+        float new_x = descendant->x + placement.x_offset;
+        float new_y = child->y + placement.y_offset;
         bool descendant_fragmented = false;
 
         if (child_is_multicol) {
@@ -3405,26 +3369,11 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         // Update block height to the max column height (not total content height)
         float final_height = max_col_height;
 
-        // Update text node bounds (x, y, width, height)
+        // Direct text rects were already moved with their line records; only
+        // break views need the corresponding line-coordinate projection.
         child = block->first_child;
         while (child) {
-            if (child->node_type == DOM_NODE_TEXT) {
-                DomText* tnode = lam::dom_require<DOM_NODE_TEXT>(child);
-                // Recalculate text node bounding box from its rects
-                float min_x = 1e9f, min_y = 1e9f, max_x = 0, max_y_val = 0;
-                TextRect* tr = tnode->rect;
-                while (tr) {
-                    if (tr->x < min_x) min_x = tr->x;
-                    if (tr->y < min_y) min_y = tr->y;
-                    float rx = tr->x + tr->width;
-                    float ry = tr->y + tr->height;
-                    if (rx > max_x) max_x = rx;
-                    if (ry > max_y_val) max_y_val = ry;
-                    tr = tr->next;
-                }
-                // DomText doesn't have x/y/width/height directly, but
-                // the parent block uses content_height from advance_y
-            } else if (child->view_type == RDT_VIEW_BR) {
+            if (child->view_type == RDT_VIEW_BR) {
                 View* br = (View*)child;
                 for (int li = 0; li < line_count; li++) {
                     if (fabsf(br->y - lines[li].line_y) <= 1.0f) {

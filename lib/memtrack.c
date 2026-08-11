@@ -35,8 +35,12 @@ typedef struct MemAllocHeader {
     uint16_t category;      // MemCategory
     uint16_t magic;         // MEMTRACK_STATS_MAGIC — validates tracked allocation
     int line;               // allocation source line
-    uint32_t reserved;      // keeps user pointer aligned after the header
 } MemAllocHeader;
+// exactly 16 bytes, so the STATS-mode user pointer stays 16-aligned. The
+// former trailing `reserved` field padded this to 24 and silently broke the
+// 16-byte payload alignment of every STATS allocation (base + 24 ≡ 8 mod 16).
+_Static_assert(sizeof(MemAllocHeader) % 16 == 0,
+    "STATS user pointer must preserve 16-byte alignment");
 #define GUARD_BYTE_TAIL     0xAD
 #define GUARD_SIZE          16          // Bytes of guards on each side
 #define FILL_BYTE_ALLOC     0xCD        // Fill pattern for new allocations
@@ -658,7 +662,6 @@ void* mem_alloc_loc(size_t size, MemCategory category, int line)
         hdr->category = (uint16_t)category;
         hdr->magic = MEMTRACK_STATS_MAGIC;
         hdr->line = line;
-        hdr->reserved = 0;
         user_ptr = (void*)(hdr + 1);
     }
 
@@ -709,6 +712,17 @@ void* mem_calloc_loc(size_t count, size_t size, MemCategory category, int line)
     size_t total = 0;
     if (count == 0 || size == 0 || !checked_mul_size(count, size, &total)) {
         return NULL;
+    }
+    if (!g_memtrack.initialized || g_memtrack.mode == MEMTRACK_MODE_OFF ||
+        !tls_tracking_enabled) {
+        // untracked calloc must be the raw C version: calloc's zeroed pages
+        // arrive from the OS untouched, while malloc+memset dirties every
+        // page of a large allocation up front (D4.2.5). Only the tracked
+        // path below needs malloc+memset, because it prepends a header.
+        if (memtrack_fault_should_fail()) {
+            return NULL;
+        }
+        return calloc(count, size);
     }
     void* ptr = mem_alloc_loc(total, category, line);
     if (ptr) {
