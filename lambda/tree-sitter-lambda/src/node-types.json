@@ -1818,6 +1818,10 @@
             "named": true
           },
           {
+            "type": "content",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -6068,8 +6072,7 @@
   },
   {
     "type": "comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "continue",
@@ -6277,11 +6280,11 @@
   },
   {
     "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "that",
