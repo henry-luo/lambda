@@ -1,8 +1,8 @@
 # Lambda Heap Memory Management Design
 
-**Status**: Architecture implemented (rpmalloc removed); §9 remediation and MP-15..MP-17 implementation pending
-**Version**: 2.5.0
-**Date**: 2026-08-10
+**Status**: Four-mechanism architecture implemented (rpmalloc removed); Pool v2 core implementation landed; §9 remediation and MP-15..MP-18 implementation pending
+**Version**: 2.10.0
+**Date**: 2026-08-11
 **Scope**: **Native heap-based memory management only** — how heap bytes are obtained, owned, shared, and released across Lambda and Radiant. Stack-based memory management (the native C stack, the runtime's side/number stacks, rooting frames, and stack-disciplined value storage) is **out of scope**: see [Lambda_Design_Stack_Frame.md](./Lambda_Design_Stack_Frame.md), [Lambda_Design_Stack_Rooting.md](./Lambda_Design_Stack_Rooting.md), and [Formal Design D5](../doc/Lambda_Formal_Design.md#d5-execution-state-stacks-and-rooting). (ScratchArena, §4.2, remains in scope: its *discipline* is stack-like but its storage is heap-owned arena blocks.)
 **Related**: [Formal Design D4](../doc/Lambda_Formal_Design.md#d4-memory-management), [Memory Context](./Memory_Context.md), [Memory Model](./Lambda_Design_Memory_Model.md), [GC2](./Lambda_Garbage_Collector2.md)
 
@@ -28,6 +28,35 @@ of tail-region free.
 allocate **nothing** (fast predicate mode); the two-mode validator redesign is
 out of scope and moved to `Lambda_Schema_Validator.md`. V7 reframed around the
 allocation itself rather than its mechanism.
+**Revision 2.6** (2026-08-11): Pool corrected from a per-allocation `memtrack`
+owner group to a Pool-owned VM-extent allocator. The target implementation
+subdivides its extents into boundary-tagged blocks and maintains segregated
+free lists; `memtrack` is used only for context/extent diagnostics, never for
+each user allocation. The landed R3a side-index removal is retained as a
+historical cleanup, while R3b is superseded by this design.
+**Revision 2.7** (2026-08-11): Pool growth is made explicit: the optional
+initial extent size defaults to 1 KiB; each subsequent reserved extent doubles
+the previous reservation; reservations at or above 4 KiB use page-backed VM;
+and each VM commit starts at `max(4 KiB, required block bytes)`, rounded to
+the platform page size.
+**Revision 2.8** (2026-08-11): The configured initial reservation is now
+normalized to the geometric sequence `1 KiB, 2 KiB, 4 KiB, 8 KiB, ...` — values
+below 1 KiB clamp to 1 KiB, and other values round up to the next 2x multiple
+of 1 KiB before growth begins.
+**Revision 2.9** (2026-08-11): Pool v2 core implementation landed in
+`lib/mempool.c`. Pools now own extents and boundary-tagged blocks, split and
+coalesce free blocks through segregated bins, grow geometrically, use the VM
+provider at the 4 KiB threshold, and keep per-user allocation operations off
+`mem_alloc_loc`/`mem_free_loc`. Focused Pool, MemFactory, Memtrack, MemVm, and
+ByteStorage tests pass; the aggregate `make build-test` gate completed with
+zero errors.
+**Revision 2.10** (2026-08-11): Pool coverage was expanded with deterministic
+initial-size clamp/oversize, VM commit-extension, string/oversize, wrong-owner,
+stale-pointer/reset, drain/destroy, forced-move/failure-preserving realloc,
+and randomized alloc/free/realloc-model tests. The boundary validator now
+accepts a valid payload pointer in the final header-sized window of committed
+storage; `pool_block_range_valid` remains the authority for the complete block
+span. These tests exercise the D4.2.5v2 registry-free block path directly.
 **Revision 2.4** (2026-08-10): §5.7 call-site census added (54 pools, ~46 are
 arena candidates); MP-19 string-builder two-case model (§2.3) and MP-20
 NamePool/ShapePool are arena users (§4.3); R4b census-driven reclassification.
@@ -62,7 +91,7 @@ without a new design ruling.
    teardown as the safety net). Sharing: read-only, multi-threaded readers
    allowed; writing: single thread (§5).
 
-This is a *mechanism* taxonomy, formalized as **D4.1.4**. Formal **D4.1.1v2**
+This is a *mechanism* taxonomy, formalized as **D4.1.4v4**. Formal **D4.1.1v2**
 enumerates a *content* taxonomy (GC heap / Input arena / AST-const pool /
 NamePool) on a different axis: a content tier states lifetime and collector
 visibility; a mechanism states how bytes are obtained and released. Every
@@ -77,7 +106,7 @@ heap).
 | **raw memtrack** | individual | individual | one explicit owner object | owner | system heap | attributed to owner node | no — ownership is singular |
 | **GC heap** | slab pop / bump per GC policy | trace + sweep | runtime values, collector-visible | runtime's mutator thread | VM regions owned by GC | yes — the runtime/eval context | n/a — collector-owned |
 | **arena** | sequential (bump), grow by linking blocks | **batch only**: whole-arena (reset/destroy) or tail-region (mark/rewind) | read-only, multi-threaded readers | single thread | chunk-granularity memtrack blocks; VM for oversized | **required** (§1.3) | **required when shared** (§1.4) |
-| **pool** | individual | **individual** (+ reset/destroy teardown) | read-only, multi-threaded readers | single thread | one memtrack block per allocation, single inline record | **required** (§1.3) | **required when shared** (§1.4) |
+| **pool** | individual | **individual** (+ reset/destroy teardown) | read-only, multi-threaded readers | single thread | Pool-owned growth extents: memtrack below 4 KiB, page-backed VM at/above 4 KiB; boundary-tagged blocks and segregated free lists | **required** (§1.3) | **required when shared** (§1.4) |
 
 Consequences worth stating once:
 
@@ -194,7 +223,7 @@ hatch.
 | Need to free individual objects? | ✅ | ❌ — reclassify the site |
 | Need `realloc` to grow buffers? | ✅ (allocate-copy-free, §5.3) | ❌ — use raw memtrack (§2) |
 | All objects freed together at end? | ⚠️ works but wasteful | ✅ |
-| High allocation rate, small objects? | ❌ per-alloc record overhead | ✅ O(1) bump |
+| High allocation rate, small objects? | ❌ block-header/free-list overhead and fragmentation | ✅ O(1) bump |
 | Objects survive the parent scope? | ✅ own release point | ❌ |
 | Frame/pass-based reset pattern? | ❌ | ✅ `arena_reset()` / ScratchArena |
 | LIFO scoped lifetime (sidecar stack)? | ❌ | ✅ mark/rewind (§4.1 variant 2) |
@@ -231,9 +260,19 @@ allocation" wrappers may be added (MP-5).
   thread-confinement detection.
 
 `MEMTRACK_MODE=OFF|STATS|DEBUG` overrides the default in any build.
-Allocation-level records exist **only** in DEBUG mode; a tracked mode may
-never impose a per-allocation global lock on release hot paths. (This restates
-the rev 0.2 resolution that the landed implementation violated — §9 V3/V4.)
+`memtrack` allocation-level records exist **only** in DEBUG mode; a tracked
+mode may never impose a per-allocation global lock on release hot paths.
+Pool v2's boundary-tagged `PoolBlock` header is allocator metadata, not a
+memtrack record, and is present in every mode because the Pool needs it to
+split, free, and coalesce its own blocks. (This restates the rev 0.2
+resolution that the landed implementation violated — §9 V3/V4.)
+
+Pool v2 is not a `memtrack` allocation mode. A user allocation is carved from
+an extent already owned by the Pool, so changing `MEMTRACK_MODE` cannot add a
+global `memtrack` registry operation to `pool_alloc` or `pool_free`. Extent
+reservation/commit, Pool metadata, and optional diagnostic accounting may use
+the context and VM/memtrack layers, but those operations occur at extent
+boundaries rather than once per user block.
 
 The mode is selected **once at `memtrack_init`** and the allocation
 representation (raw vs header-backed) is a lifetime invariant of every block:
@@ -558,22 +597,41 @@ release and owner-wide teardown (`pool_drain`/`pool_destroy` as the safety
 net). Public API: the existing `pool_alloc`/`pool_calloc`/`pool_free`/
 `pool_realloc`/`pool_create`/`pool_destroy` family.
 
-Implementation-wise the pool is the `memtrack` **owner group** of MP-6: an
-intrusive ownership layer over tracked raw allocation — *not* a general
-allocator. `memtrack` and the system heap handle variable-size allocation and
-fragmentation; the pool records which allocations share teardown. Required
-behavior:
+Pool v2 adds an optional initial-growth-size configuration. The target
+size-aware constructor is `pool_create_sized(initial_size)`; the existing
+`pool_create()` delegates with a **1 KiB** initial extent target. The configured
+value is normalized as `max(1 KiB, next_power_of_two_multiple(initial_size,
+1 KiB))`, so the effective initial reservation is always `1 KiB * 2^n`. The
+configured value is a growth reservation, not
+the size of an individual user block, and is normalized to hold the Pool
+header, alignment slack, and the minimum payload.
 
-- O(1) allocation insertion; O(1) individual free and unlink; O(n)
-  reset/destroy over allocations still owned.
+The landed implementation is a transitional owner-group wrapper and is
+**incorrect for this contract**: every `pool_alloc` routes through
+`mem_alloc_loc`, and every `pool_free` routes through the global allocation
+substrate. That shape makes Pool a malloc wrapper with ownership bookkeeping;
+it does not manage its own storage. Pool v2 replaces it with a constrained,
+Pool-owned variable-size allocator. The Pool owns its extents, physical block
+layout, free lists, splitting, coalescing, and reset policy. `memtrack` and
+the VM layer provide system bytes and diagnostics at extent boundaries only.
+Required behavior:
+
+- No `mem_alloc_loc`/`mem_free_loc` call for an individual user allocation.
+  Allocation succeeds only by taking or splitting a free block in a
+  Pool-owned extent; freeing returns that block to the Pool.
+- O(1) free-list insertion/removal and boundary-tag coalescing; allocation
+  selects a non-empty starting bin in O(1) and inspects candidates according
+  to the configured bin-search policy. Reset/destroy walks extents, not live
+  allocations.
 - Correct `calloc` overflow checking and zeroing; transactional realloc
   (§5.3).
 - Exact requested live bytes, allocation count, peak bytes, operation counts;
-  aggregate system-heap overhead stays a separate memtrack diagnostic.
+  reserved/committed extent bytes stay separate from user-byte accounting.
 - Debug detection of wrong-owner free, double free, corrupted header, and
-  use-after-reset — the DEBUG path consults memtrack's live registry before
-  reading inline metadata (§2.1); it never inspects a header behind an
-  arbitrary invalid pointer.
+  use-after-reset. The Pool validates block metadata, extent membership,
+  alignment, span bounds, allocation state, and neighbor tags without a Pool
+  hashmap. A debug-only extent/guard registry may diagnose stale pointers, but
+  it is never part of the allocation/free mechanism.
 - No global/TLS initialization beyond the memtrack process lifecycle.
 - Thread confinement by default, stated at creation, checked in debug builds
   (MP-7).
@@ -590,54 +648,142 @@ rpmalloc exit, Appendix A):
 - FreeType-style allocator callbacks formerly served by `pool_realloc` now
   belong to the §2.3 memtrack adapter, not to a pool.
 
-### 5.2 Allocation layout — one record, registry-free hot path (MP-14)
+### 5.2 Pool-owned storage and block layout (MP-14, MP-21)
 
-Each pooled allocation carries **one** inline metadata record extending
-memtrack's aligned private header — owner, requested size, intrusive
-prev/next links, and debug fields (magic, generation, poison state):
+Pool v2 has two layers of storage:
+
+1. **`PoolExtent`** — a Pool-owned growth region obtained through the owning
+   `MemContext`. The Pool owns the extent identity, reserved range, committed
+   range, and linked extent list. The initial reservation is the normalized
+   configured size or **1 KiB** by default. Each subsequent growth reservation
+   doubles
+   the previous reserved size. Reservations below 4 KiB use the normal
+   context/memtrack block path; at 4 KiB and above the Pool uses page-backed
+   VM reservation/commit. A large request may force the current reservation
+   above the doubling target and may receive a dedicated extent so it does
+   not fragment normal small-allocation extents. Extent metadata is
+   context-owned and may be memtracked, but the extent's user bytes are not
+   individual memtrack allocations.
+2. **`PoolBlock`** — a block inside an extent. The physical block chain covers
+   the whole extent, including allocated and free blocks. A free block is also
+   linked into exactly one size-segregated free list; an allocated block is not
+   linked into an allocated-object list.
+
+The target private header is boundary-tagged and 16-byte aligned:
 
 ```text
-+--------------------------------------------------+-------------------+
-| owner | requested_size | prev | next | debug ...  | aligned payload   |
-+--------------------------------------------------+-------------------+
++----------------------+----------------------+-------------------+
+| magic | flags        | span | prev_span    | requested         |
++----------------------+----------------------+-------------------+
+| extent | free_prev | free_next | padding       | aligned payload   |
++---------------------------------------------------------------+
 ```
 
-- The record preserves `max_align_t` payload alignment and checked
-  `header + payload` arithmetic, and is private to the allocator.
-- Grouped allocation must **not** prepend a second tracker header, and must
-  **not** maintain a separate growable index (array or hash map) that could
-  fail after the system allocation succeeded. The ownership list is
-  intrusive; the whole record-plus-payload block is allocated and released as
-  one memtrack unit.
-- `pool_free` resolves the record by **header arithmetic** (fixed offset from
-  the user pointer) validated by magic + owner fields; in DEBUG mode the
-  memtrack registry is consulted first. No mode consults a registry on the
-  release-build hot path.
-- In OFF mode a pooled allocation is: one system malloc + minimal inline
-  record + list link. Nothing else.
+`span` is the total block size, including the header and payload. `prev_span`
+locates the previous physical block without a back-pointer; the first block
+of an extent has a zero/extent-boundary predecessor. `extent` lets validation
+check that the supplied Pool owns the block without a global lookup. `flags`
+distinguishes allocated/free and carries the debug poison/generation state.
+The exact field order is an implementation detail, but the following are
+invariants:
 
-(The landed 1.0 implementation violated both prohibitions — §9 V1/V2. **R3a**
-closed the separate-index prohibition and shrank the record to 48 B; the
-record is still prepended to memtrack's header rather than merged into it —
-**R3b**, sequenced with R2.)
+- every span is aligned, at least the header size, and stays within its
+  extent;
+- `next = block + span`, and `next->prev_span == span` whenever `next` is
+  inside the extent;
+- only free blocks use `free_prev`/`free_next`; allocated blocks use those
+  words as poison/debug storage or leave them null;
+- the payload begins at the same fixed offset from `PoolBlock`, preserving
+  the documented alignment and making `pool_free` header recovery constant
+  time;
+- there is no Pool allocation hashmap, side index, or allocated-block list.
+
+The header is intentionally Pool metadata, not a second `memtrack` header.
+The Pool owns the full extent and therefore has no reason to ask `memtrack` to
+own each block. This is the replacement for the old one-record/R3b discussion;
+R3a's deletion of the historical `pool_lookup` table remains correct but is
+not the final storage design.
+
+### 5.2.1 Free-list organization and allocation
+
+Free blocks are indexed by usable span in a fixed set of segregated bins (for
+example, power-of-two ranges plus a final large-block bin). The bins are an
+internal search index, not size-class object allocation: every request still
+uses its actual variable-size block, and coalescing returns the combined span
+to the appropriate bin. A bin head and each block's `free_prev`/`free_next`
+make insertion and removal O(1).
+
+The allocation transaction is:
+
+1. Check zero size and checked header/payload arithmetic.
+2. Select the first suitable bin and remove one free block.
+3. Split it when the remainder can hold a complete aligned header and the
+   minimum payload; insert the remainder into its bin and repair the next
+   block's `prev_span`.
+4. Mark the selected block allocated, set `requested`, clear free links, and
+   update Pool counters.
+
+Here `required block bytes` means the aligned `PoolBlock` header plus the
+aligned user payload, including any minimum remainder/alignment requirement;
+the Pool never commits only the raw user-byte count.
+
+If no bin contains a suitable block, the Pool first tries to commit more of
+the current reserved VM extent; if that cannot satisfy the request, it
+creates the next doubled reserved extent and retries. For a new or extended
+VM-backed range, each commit request is at least
+`max(4 KiB, required block bytes)` and is rounded up to the platform page
+size. The reserved size must be at least the committed size; a request larger
+than the doubled target raises that reservation to the required page-rounded
+size, and the following growth target doubles that actual reservation.
+Extent growth/commit is the only normal allocation path that enters VM/context
+failure handling.
+
+### 5.2.2 Free, lookup, coalescing, and reset
+
+`pool_free(pool, ptr)` recovers `PoolBlock` by the fixed header offset and
+validates the magic, allocated flag, `extent` ownership, span alignment, and
+extent bounds. It does not hash the pointer. A wrong-owner pointer fails the
+extent-ownership check before any free-list mutation; a repeated free fails
+the allocated-state check. In DEBUG, optional guards and poison strengthen
+the diagnostic, but neither a hashmap nor the global memtrack registry is
+needed for correctness.
+
+After validation, `pool_free`:
+
+1. marks the block free and subtracts its requested bytes from live counters;
+2. checks the physically adjacent previous and next blocks using the boundary
+   tags;
+3. removes any free neighbors from their bins and merges their spans;
+4. repairs the surviving next block's `prev_span`; and
+5. inserts the merged block into the bin selected by its new span.
+
+`pool_reset` invalidates all published blocks, clears the bins, and rebuilds
+one free block per retained extent. It may release dedicated or excess
+extents according to the retention policy, but it never walks a live-object
+list. `pool_destroy` releases every extent through its opaque VM identity and
+then releases Pool metadata through the owning context.
 
 ### 5.3 Reallocation
 
-`pool_realloc` uses allocate-copy-free: allocate and link the replacement,
-copy `min(old, new)`, unlink and release the old block; on failure the old
-allocation is untouched. In-place optimization requires profiling plus
-dedicated list-integrity tests. (Source use is rare — 6 call lines at the
-2026-08-08 census.)
+`pool_realloc` first tries to resize the existing block. Shrinking splits a
+free tail when the remainder is large enough; growing consumes an adjacent
+free block when the combined span fits, with the remainder returned to its
+bin. If neither operation is possible, it uses allocate-copy-free: allocate
+and link the replacement, copy `min(old, new)`, then free the old block. On
+failure the old allocation, free-list links, and accounting are untouched.
+(Source use is rare — 6 call lines at the 2026-08-08 census.)
 
 ### 5.4 Threading
 
-One writer thread per pool; intrusive list operations are lock-free
-(D4.2.1's hot-path intent without TLS heaps). Genuinely shared pools use the
-§1.4 ref-count for *lifetime* — mutation remains single-writer. Remedies for
-cross-thread use remain: per-worker pools merged by copying into the
-destination owner; the subsystem's existing lock above the pool; or direct
-memtrack allocations whose container already synchronizes. A hidden mutex in
-every pool is not the default; an unavoidable shared-mutation pool must make
+One writer thread per pool; block-chain and free-list operations are lock-free
+(D4.2.1's hot-path intent without TLS heaps). Pool v2 has no Pool mutex or
+global allocation lock. Extent growth and teardown may enter the VM or
+`MemContext` substrate, but those are slow-path lifecycle operations, not
+per-allocation synchronization. Genuinely shared pools use the §1.4 ref-count
+for *lifetime* — mutation remains single-writer. Remedies for cross-thread use
+remain: per-worker pools merged by copying into the destination owner; the
+subsystem's existing lock above the pool; or direct memtrack allocations whose
+container already synchronizes. An unavoidable shared-mutation pool must make
 its synchronization mode explicit in constructor, accounting, and tests. v1
 has no owner-transfer operation.
 
@@ -651,10 +797,14 @@ other mutation.
 
 ### 5.6 What a pool must not become
 
-No size classes, per-thread caches, remote-free queues, span maps, huge-page
-policy, or custom coalescing. Those are the signs of rebuilding the general
-allocator Lambda removed (MP-1). The transitional `Pool` API's 1 GiB
-single-allocation limit is retained; changing it requires a call-site audit.
+Pool v2 deliberately has free-block bins and boundary-tag coalescing because
+individual free is its defining semantic. It must still remain a constrained,
+owner-local allocator rather than a replacement process allocator: no
+per-thread caches, remote-free queues, cross-Pool span map, global allocation
+registry, hidden shared-mutation mutex, or general huge-page policy. The Pool
+API's 1 GiB single-allocation limit is retained until an extent-policy and
+call-site audit changes it; large requests above the normal extent threshold
+use dedicated Pool extents rather than bypassing Pool ownership.
 
 ### 5.7 Call-site census (2026-08-10)
 
@@ -764,8 +914,9 @@ every arena and pool.
 ### 7.1 Node model
 
 Nodes exist for at least: `MEM_KIND_GC_HEAP`, `MEM_KIND_ARENA`,
-`MEM_KIND_SCRATCH`, `MEM_KIND_MEMTRACK_OWNER` (pool), `MEM_KIND_TYPE_POOL`,
-optional `MEM_KIND_VM_REGION` diagnostics, and the existing
+`MEM_KIND_SCRATCH`, `MEM_KIND_POOL` (temporarily represented by
+`MEM_KIND_MEMTRACK_OWNER` in the compatibility surface),
+`MEM_KIND_TYPE_POOL`, optional `MEM_KIND_VM_REGION` diagnostics, and the existing
 JIT/cache/external owners. GC and arena have no parent edge to any backing
 pool; their node is parented by the owning context. Shared allocators (§1.4)
 keep their node at the creating context; additional holders appear as
@@ -836,7 +987,9 @@ backing at `gc_data_zone.c:27`; chunk-granularity arena blocks at
 `arena.c:160`; gcbench/binarytrees flat across v26/v27/HEAD). Tracked raw
 allocation conforms mechanically but had a **policy defect** (V3/V4). Pool
 **did not conform** — it collapsed into per-allocation tracked raw allocation
-with duplicated bookkeeping (V1/V2).
+with duplicated bookkeeping (V1/V2), and the R3a cleanup did not change that
+underlying ownership model. The review therefore closes the old side-index
+defect as historical context but keeps Pool v2 implementation open.
 
 ### 9.1 Measured regressions
 
@@ -858,7 +1011,9 @@ MP-9 release-evidence gate never ran on the landing commit.
 | jetstream/raytrace3d2 | 63 | 165 | 2.6x |
 | awfy/cd2 | 560 | 920 | 1.6x |
 
-Profile attribution (primes2, `/usr/bin/sample`): with `MEMTRACK_MODE=OFF`,
+Profile attribution (primes2, `/usr/bin/sample`) is historical evidence from
+the transitional owner-group implementation, not the landed Pool v2 path:
+with `MEMTRACK_MODE=OFF`,
 96% of execution sits inside `pool_alloc`, of which only ~25% is the system
 malloc; the default STATS mode adds a further ~5x (825 → 174 ms after R1a).
 Dominant caller: `lambda_type_check` → validator allocating a
@@ -870,14 +1025,15 @@ global-locked registry delete per live block, dominating wall-clock outside
 
 | ID | Status | Finding | Violates |
 |---|---|---|---|
-| **V1** | **CLOSED** (R3a, 2026-08-10) | `PoolBlock` (64 B) prepended in addition to memtrack's header. *Fixed:* the record is the only pool-side header and is down to **48 B** — `base` (always the record address) and `allocated` (always `requested + block_header_size()`) were removed, and a `_Static_assert` holds the budget. The second-header half of §5.2 (merging into memtrack's own header) stays open as **R3b**, sequenced with R2 | §5.2 one-record rule |
-| **V2** | **CLOSED** (R3a, 2026-08-10) | `pool_lookup` side hash table; insert per alloc (amortized rehash), delete per free; the insert can fail after the system allocation succeeded (`lib/mempool.c:325`). *Fixed:* the table and all `pool_lookup_*` helpers are deleted; `pool_find_block` is fixed header arithmetic validated by magic + owner, and the ownership list is the intrusive one. `pool_alloc` now has no failure mode after the system allocation succeeds | §5.2 no-separate-index rule; intrusive-links requirement |
+| **V1** | **CLOSED as historical defect** (R3a, 2026-08-10) | The transitional owner-group implementation prepended `PoolBlock` to a memtrack allocation. R3a reduced that record to **48 B** and removed redundant fields, but this is superseded by Pool v2's block header inside Pool-owned extents; R3b must not merge the old record into memtrack. | §5.2 Pool-owned block rule |
+| **V2** | **CLOSED as historical defect** (R3a, 2026-08-10) | The transitional `pool_lookup` side hash table and all `pool_lookup_*` helpers were deleted; header arithmetic remains the correct lookup shape for Pool v2. The bins in Pool v2 index **free blocks by span** and never index user pointers or live allocations. | §5.2 no pointer hashmap; free-list requirement |
 | **V3** | open | STATS mode keeps the per-allocation registry authoritative (`lib/memtrack.c:684`) | §2.1 (registry is DEBUG-only); falsifies `memtrack.h` "STATS (minimal overhead)" |
 | **V4** | closed (R1a) | `MEMTRACK_MODE_STATS` release default (`lambda/main.cpp:1962`) — V3's global-mutex hashmap on every release alloc/free; the OFF fast path never engages | §2.1; MP-9 intent |
 | **V5** | open | No release-build performance evidence accompanied the landing | **MP-9** |
 | **V6** | open | No thread-confinement debug check in `lib/mempool.c` | §5.1; MP-7 |
 | **V7** | open (R4) | The runtime type-check path allocates a `ValidationResult` **per element** — on success as well as failure — because it reuses the reporting-oriented `lambda validate` machinery for what is semantically a predicate. The defect is the allocation itself, not its mechanism: no allocator choice makes O(n) discarded records acceptable on a hot boundary | §1.1 (mechanism must fit the need); R4 |
 | **V8** | **CLOSED** (R3a, 2026-08-10) | `pool_lookup` insert/find/remove terminate only at a NULL slot; tombstones never count toward the resize trigger and removal never restores NULLs, so a table whose NULLs are exhausted spins forever. Exact-algorithm simulation: with varied addresses, **247 alloc/free churn cycles** reach 0 NULLs / 44 tombstones on the 64-slot table and the next insert never terminates. Not reproduced in-process (2M cycles) — system-malloc address recycling bounds the landing-slot set — a **latent** unbounded loop whose probability grows with session length and address diversity (2026-08-10 audit addendum). *Fixed:* the whole class is removed with the table — header arithmetic is O(1) by construction, with no probe loop to fail to terminate. Guarded by `temp/pool_hang_repro.c` | correctness; §5.2 |
+| **V9** | **CLOSED (R7, 2026-08-11)** | `lib/mempool.c` now owns growth extents, boundary-tagged blocks, and segregated free lists. User allocation/free operations no longer call `mem_alloc_loc`/`mem_free_loc`; those APIs remain only at Pool metadata and sub-4 KiB extent boundaries. | §5.1–§5.2; D4.1.4v4; D4.2.1v3 |
 
 ### 9.3 Remediation
 
@@ -890,12 +1046,15 @@ delta (MP-9). R1–R3 are independent.
 - **R2 — STATS becomes counters-only**; allocation-level registry becomes
   DEBUG-exclusive; STATS `mem_free` validates via inline
   `MEMTRACK_STATS_MAGIC`.
-- **R3 — pool layout conformance** (§5.2): fold owner/links into the single
-  memtrack record, delete `pool_lookup`, resolve frees by header arithmetic;
-  DEBUG consults the registry first. (Supersedes a reviewed-then-reverted
-  interim edit that removed the table but kept the second header.) Deleting
-  the table also removes the **V8** latent-hang class wholesale — R3 is now a
-  correctness fix, not only a performance one. Split into two slices:
+- **R3 — historical owner-group cleanup** (§5.2): delete `pool_lookup` and
+  resolve frees by header arithmetic. R3a is retained as the landed fix for
+  the old side-index and duplicate-field defects, but it is **not** the Pool
+  v2 implementation. R3b — merging the old record into memtrack's header — is
+  cancelled; it would preserve the incorrect per-user malloc wrapper.
+  Deleting the table also removes the **V8** latent-hang class wholesale.
+  Pool v2 is now implemented by R7; the remaining open items are the
+  separate thread-confinement, ref-count, STATS-mode, and release-evidence
+  remediations listed below.
 
   - **R3a — table deletion and record slimming: IMPLEMENTED 2026-08-10**
     (`lib/mempool.c`). `PoolLookupEntry`, the three `Pool` lookup fields and
@@ -937,11 +1096,18 @@ delta (MP-9). R1–R3 are independent.
     `test_mir_gc_stress_gtest` 59/59, `test_mempool_gtest` 40/40, library
     suite clean, Radiant baseline clean.
 
-  - **R3b — merge the pool record into memtrack's private header** (the
-    remaining half of the §5.2 one-record rule, plus "DEBUG consults the
-    registry first"). Deferred: it edits the same header layout as **R2**, so
-    it is sequenced with R2 rather than landed against a header R2 is about
-    to change.
+- **R7 — Pool v2 implementation** (§5.1–§5.6; MP-21): **IMPLEMENTED
+  2026-08-11**. `lib/mempool.c` now owns VM/memtrack growth extents,
+  boundary-tagged block splitting, segregated free-list insertion/removal,
+  adjacent-block coalescing, geometric growth, reset reconstruction, and
+  in-place realloc growth/shrink. The focused suite covers fragmentation,
+  wrong-owner/double-free diagnostics, extent boundaries, reset reuse, and
+  page-threshold growth. Verified gates: `test_mempool_gtest` 55/55,
+  `test_mem_factory_gtest` 7/7, `test_memtrack_gtest` 27/27,
+  `test_mem_vm_gtest` 3/3, `test_byte_storage_gtest` 9/9, and
+  `make build-test` with 0 errors. Release-performance measurement and the
+  independent MP-7/MP-17 thread/lifetime work remain open; old R3a micro-costs
+  are historical and do not represent Pool v2.
 - **R4 — allocation-free fast validation.** `validate_against_type` must
   support a **fast mode that allocates nothing** and answers only
   true/false. Runtime type checking (`lambda_type_check` at declared
@@ -979,7 +1145,7 @@ Acceptance: every §9.1 row ≤1.1x its v27 value on a verified stripped release
 binary; `make test-lambda-baseline` and `make test262-baseline` green;
 teardown no longer dominated by per-block registry deletes.
 
-### 9.4 Pool micro-costs (2026-08-10, standalone bench, OFF mode, arm64)
+### 9.4 Historical owner-group micro-costs (2026-08-10, standalone bench, OFF mode, arm64)
 
 ns per operation; *churn* = alloc/free one slot repeatedly (address recycled);
 *bulk* = 200k allocations then owner teardown — the validator/engine shape.
@@ -1001,7 +1167,9 @@ medians).
 | **bulk pool (R3a, landed)** | **23.9** | 49.3 | 219 |
 | bulk arena (§4) | **11.6** | 11.1 | 21.5 |
 
-Readings: churn was already benign pre-R3a (~1.4x raw — recycled addresses
+These measurements describe the rejected per-allocation owner-group shape,
+not Pool v2. They remain useful only to explain why deleting the side index
+was insufficient as the final design. Readings: churn was already benign pre-R3a (~1.4x raw — recycled addresses
 land on their own tombstones). The engine-relevant **bulk** shape was 3.5x raw
 at 16 B, driven by lookup inserts with rehash cascades, the 64 B second header,
 and the teardown walk's per-entry probe/remove; **R3a as landed recovers it to
@@ -1010,11 +1178,13 @@ the post-R3a pool at 16 B and 10x at 1 KB — the measured case for R4-style
 reclassification of bulk lifetimes stands, since it is about *how many*
 allocations happen, not how fast each one is. Space: per-allocation overhead
 was ~80 B (64 B `PoolBlock` + ~16 B lookup slot) — 5x the payload for 16 B
-objects — and is now **48 B**, with R3b to fold that into memtrack's own
-header. The rpmalloc-era pool's TLS fast path beat even raw malloc, so
-by design (MP-1) the pool's ceiling is now ~1.2–1.4x raw; consumers that need
-the old speed on bulk lifetimes are reclassified to arena, not re-optimized
-in pool.
+objects — and is now **48 B** in the historical implementation. R3b is
+cancelled because folding that record into memtrack's own header would retain
+the wrong ownership model. The rpmalloc-era pool's TLS fast path beat even raw malloc, so
+by design (MP-1) the transitional pool's ceiling was ~1.2–1.4x raw; Pool v2
+must be measured separately for extent growth, fragmentation, free-list
+search, and coalescing. Consumers that need bulk-lifetime speed are still
+reclassified to arena, not forced into Pool.
 
 ---
 
@@ -1088,7 +1258,10 @@ Geometric growth, oversized dedicated blocks, reset retention cap,
 `arena_owns()` boundaries; arena tail-region rewind across block boundaries,
 warm retention on rewind, and the stale-mark diagnostic; scratch nested
 mark/rewind and misuse diagnostics;
-pool alloc/free/reset/destroy list integrity under randomized sequences;
+pool extent creation/growth/retention, aligned block splitting, exact-bin and
+cross-bin search, free-list unlink/insert, boundary-tag coalescing, randomized
+fragmentation, alloc/free/realloc/reset/destroy integrity, and dedicated
+large-extent behavior;
 shared arena/pool acquire/release lifecycle including
 release-while-reading and reset-at-refcount>1 rejection; `StrBuf` and
 callback-adapter growth/failure through memtrack; per-document Radiant
@@ -1120,7 +1293,7 @@ accepted with data — and the comparison must run **on the landing commit**
 | memtrack/system-heap overhead at formerly pooled hot sites | Move true bulk lifetimes to arena (§1.5); profile release builds; type-stable pool only for measured fixed-size churn. |
 | A second checked-allocation or pressure layer diverges | Improve memtrack in place; `MemContext` sole D4.2.2 coordinator; source checks reject parallel wrappers. |
 | Tracking tax returns to release hot paths | §2.1 mode policy is normative; registry is DEBUG-only; benchmark gate on landing commits (§11.4). |
-| Pool re-grows duplicate bookkeeping | §5.2 one-record rule; emission of a second header or side index is a review-blocking violation. |
+| Pool re-grows duplicate bookkeeping | §5.2 Pool-owned extent/block rule; any per-user memtrack call, pointer hashmap, allocated-object list, or second header is a review-blocking violation. |
 | Arena retains peak block chain | Bounded warm retention; release excess on reset and pressure trim. |
 | Ref-count misuse (leak or premature destroy) | Debug diagnostics for reset-at-refcount>1, release-after-zero, destroy-with-holders; TSan lifecycle tests; context teardown performs release, not destroy. |
 | Shared-allocator accounting double-counts | Bytes counted once at creating node; holders are non-owning edges (§7.1). |
@@ -1129,7 +1302,7 @@ accepted with data — and the comparison must run **on the landing commit**
 | Moving realloc corrupts intrusive links | Allocate-copy-free transaction; optimize only with integrity tests. |
 | Hidden cross-thread pool use | Audit creator/free threads; split ownership or explicit synchronization; confinement check (R5). |
 | Stage 2 OOM callbacks re-enter allocators | Non-allocating reclaimers, lock order, recursion guard, fault injection. |
-| Pool grows into a custom allocator | §5.6 prohibitions; allocator-policy expansion requires a new ruling. |
+| Pool grows into a process-wide custom allocator | §5.6 owner-local policy; no cross-Pool registry, remote-free machinery, or hidden shared-mutation synchronization. |
 
 ---
 
@@ -1163,14 +1336,43 @@ Completed for revisions 2.0–2.3 (formal spec **1.8.0**, 2026-08-10):
 
 No formal language-semantics ruling changes.
 
+Revision 2.6 updates the formal memory rulings to **spec 1.11.0** (2026-08-11):
+
+1. **D4.1.4v2** made Pool-owned VM extents, boundary-tagged variable-size
+   blocks, and segregated free lists the normative implementation shape. The
+   semantic distinction remains unchanged: arena has batch/tail free, Pool has
+   individual free.
+2. **D4.2.1v3** separates direct raw memtrack allocations from Pool extent
+   allocation; Pool user blocks are not `memtrack_pool_*` allocations.
+3. **D4.2.5v2** states that Pool block operations are registry-free and
+   mutex-free on the single-writer hot path; diagnostics and accounting occur
+   at extent/context boundaries.
+
+The Pool v2 code migration is complete for the §5 owner/block contract. The
+remaining §9 items are independent policy and evidence work; they must not
+reintroduce a per-user `memtrack` wrapper or pointer index.
+
+Revision 2.7 updates the same Pool backing ruling to **D4.1.4v3** in formal
+spec **1.12.0**: the initial reservation defaults to 1 KiB, reservations
+double, sub-4 KiB growth uses the context/memtrack path, 4 KiB-and-larger
+growth uses page-backed VM, and each VM commit starts at the page-rounded
+`max(4 KiB, required block bytes)`. Revision 2.8 further revises this to
+**D4.1.4v4** in formal spec **1.13.0**, requiring the configured initial size
+to be clamped and rounded to `1 KiB * 2^n` before doubling begins.
+Revision 2.9 records the R7 implementation: the code now satisfies the
+Pool-owned extent/block/free-list contract, with the verification gates listed
+in §9.3. The formal ruling remains marked partial because D4.1.4 also covers
+the separate arena mark/rewind work, and D4.2.3–D4.2.5 retain their unrelated
+context/ref-count/STATS follow-ups.
+
 ---
 
 ## 14. Decision Ledger
 
-MP-1..MP-11 are the accepted revision-1.0 decisions; MP-12..MP-18 are the
-revision-2.x rulings (MP-12 and MP-15..MP-18 stated by the design owner
-2026-08-10; MP-13/MP-14 from the §9 review, implementing prior resolutions).
-All are formalized in Formal Design 1.8.0 (D4.1.1v2, D4.1.4, D4.2.3–D4.2.5,
+MP-1..MP-11 are the accepted revision-1.0 decisions; MP-12..MP-21 are the
+revision-2.x rulings. MP-21 is the 2026-08-11 correction of the transitional
+owner-group implementation. The memory decisions are formalized in Formal
+Design 1.13.0 (D4.1.1v2, D4.1.4v4, D4.2.1v3, D4.2.3, D4.2.4, D4.2.5v2,
 D4.5.1v3).
 
 | ID | Decision | Formal basis |
@@ -1180,7 +1382,7 @@ D4.5.1v3).
 | **MP-3** | GC owns its VM extents, object slabs, data blocks, and large-object records directly; an extent may hold multiple slabs. | D4.3.1–D4.3.2 |
 | **MP-4** | Ordinary arena owns blocks directly and exposes region lifetime, not arbitrary individual free. | D4.1.1, D4.1.3, D4.5.1 |
 | **MP-5** | Singular resizable buffers and allocator callbacks use the hardened memtrack API; no parallel system-allocation wrapper. | D4.2.1 |
-| **MP-6** | Pool = the existing `memtrack_pool_*` surface implemented as intrusive memtrack owner groups; no separate tracked-pool allocator. | D4.2.1 |
+| **MP-6** | Pool is an owner-local variable-size allocator: it owns its blocks and individual-free policy; `memtrack`/VM provide system bytes and extent-level diagnostics, not per-user allocation ownership. | D4.2.1v3; §5.1–§5.2 |
 | **MP-7** | Pools are thread-confined by default; shared ownership must be explicit. | D4.2.1 |
 | **MP-8** | Specialized type-stable pools only for audited fixed-size workloads. | D4.5.1 |
 | **MP-9** | Correctness migration precedes optimization; new allocator machinery requires release-build evidence **measured on the landing commit**. | D4.2.1 |
@@ -1188,13 +1390,14 @@ D4.5.1v3).
 | **MP-11** | All backends obey the common edge contract (§8). | D4.2.1–D4.2.2 |
 | **MP-12** | The four-mechanism model (§1.1: raw-tracked / GC / arena / pool) is the governing memory-mechanism taxonomy. | D4.1.1v2, D4.1.4 |
 | **MP-13** | Tracked-mode policy: release default OFF; STATS is counters-only; allocation-level records exist only in DEBUG. | D4.2.5 |
-| **MP-14** | The pool hot path is registry-free: one inline metadata record with intrusive links; the memtrack registry is a DEBUG diagnostic, never the ownership mechanism. | D4.2.5; §5.2 |
-| **MP-15** | Semantic split: arena = sequential allocation + batch free only, where batch free has exactly two variants — whole-arena (reset/destroy) and tail-region (mark/rewind, the sidecar-stack pattern); pool = individual allocation + individual free. A non-tail-free need reclassifies the site, never adds free lists to arena. | D4.1.4, D4.5.1v3; §1.2, §4.1 |
+| **MP-14** | The Pool hot path is registry-free and mutex-free: fixed-header recovery plus Pool-owned free-list operations; no pointer hashmap or allocated-block index. Diagnostic registries are DEBUG-only and never the ownership mechanism. | D4.2.5v2; §5.2 |
+| **MP-15** | Semantic split: arena = sequential allocation + batch free only, where batch free has exactly two variants — whole-arena (reset/destroy) and tail-region (mark/rewind, the sidecar-stack pattern); pool = individual allocation + individual free. A non-tail-free need reclassifies the site, never adds free lists to arena. | D4.1.4v4, D4.5.1v3; §1.2, §4.1 |
 | **MP-16** | Every arena and pool is bound at creation to a `MemContext` owner context (document/input, parse, eval, validation, layout/render, JIT, session); no free-floating allocators. | D4.2.3 |
 | **MP-17** | Shared arenas/pools carry an allocator-level atomic `ref_count` (acquire/release; destroy at zero; reset requires exclusivity). Mutation remains single-writer; the count is the only cross-thread-mutable allocator field. | D4.2.4, D4.1.2 |
 | **MP-18** | Roadmap: the raw memtrack surface splits into `stack_alloc`/`stack_free` (function-scoped LIFO temporaries, heap-backed by a thread-confined sidecar stack) and manager-internal use; no free-floating `malloc`/`calloc`/`free` remains in application code, enforced by source audit. | D4.2.5; §2.5 |
 | **MP-19** | String builders have two legitimate cases: standalone (`StrBuf`, raw memtrack) and owner-backed (`StringBuf`, allocated from the destination pool/arena so the finished string needs no copy). Owner-backed splits by growth mechanism: **pool-backed grows by `realloc`** (buffer may move; no ordering discipline), **arena-backed grows by tail extension** (buffer stays put; requires the string to own the arena tail — formatters fit cleanly, parsers must avoid interleaving node allocation), with grow-and-abandon or size-then-build as the fallbacks when it cannot. Never build standalone and copy into an owner merely for API convenience. | D4.1.4; §2.3 |
 | **MP-20** | NamePool and ShapePool are append-only interning stores with no eviction: their entry storage is an **arena**, not a pool. They remain distinct semantic owners and `MemContext` nodes; only the backing mechanism changes. | D4.1.1v2, D4.1.4; §4.3 |
+| **MP-21** | Pool v2 owns growth extents and subdivides them into boundary-tagged variable-size blocks. The optional initial reservation is clamped to 1 KiB and rounded to `1 KiB * 2^n`; each later reservation doubles, reservations below 4 KiB use the context/memtrack block path, and reservations at/above 4 KiB use page-backed VM. Each VM commit starts at `max(4 KiB, required block bytes)`, page-rounded. Segregated free lists index free blocks by span; allocation splits, free coalesces, realloc may resize in place, reset rebuilds extent-wide free blocks, and no user allocation calls `mem_alloc_loc`/`mem_free_loc`. | D4.1.4v4, D4.2.1v3, D4.2.5v2; §5 |
 
 ---
 
@@ -1258,11 +1461,24 @@ Carried and new; each must be resolved before the affected slice lands:
     (e.g. only while the thread owns no live memtrack allocations,
     debug-checked), or remove the API in favor of thread-confined owner
     groups, which already express the intended semantics.
+14. **Pool v2 extent geometry (MP-21):** initial growth defaults to 1 KiB;
+    each subsequent reserved extent doubles; reservations at/above 4 KiB use
+    page-backed VM; each VM commit starts at `max(4 KiB, required block
+    bytes)` rounded to the platform page size. Still open: the measured
+    retention cap and dedicated-extent threshold.
+15. **Pool v2 free-list policy (MP-21):** how many span bins and what search
+    order give stable release-build results under the input, Radiant, and
+    font-pool churn traces without introducing a general allocator policy?
+16. **Pool v2 large-block lifecycle:** should an empty dedicated extent be
+    released immediately or retained until reset/pressure trim, and what
+    committed/reserved-byte threshold governs that decision?
 
-Planning defaults: memtrack-backed arena blocks, conservative bounded
-retention, thread-confined pools with no v1 owner transfer,
-allocate-copy-free realloc, multi-slab GC extents, no new type-stable
-allocator until release profiling supports one.
+Planning defaults: memtrack-backed arena blocks, VM-backed Pool extents,
+conservative bounded retention, thread-confined pools with no v1 owner
+transfer, boundary-tagged blocks with segregated free lists, in-place
+realloc where adjacent free space permits, allocate-copy-free fallback,
+multi-slab GC extents, and no new type-stable allocator until release
+profiling supports one.
 
 ---
 
@@ -1286,21 +1502,23 @@ Revision 2.0 — done when:
 - §9.1 rows restored to ≤1.1x their v27 values on a verified stripped release
   binary, with baselines and Test262 green (R1–R4).
 - §2.1 mode policy implemented and asserted by tests (R1/R2).
-- §5.2 single-record layout implemented; source check rejects a second header
-  or side index (R3). *Side index gone and the record slimmed to 48 B with a
-  `_Static_assert` budget (R3a, 2026-08-10); merge into memtrack's header
-  outstanding (R3b).*
+- §5.2 Pool v2 implemented: user bytes come from Pool-owned VM extents;
+  boundary-tagged blocks split and coalesce; free lists index free blocks by
+  span; no per-user memtrack call, pointer hashmap, or allocated-block list
+  exists. ✅ (R7, 2026-08-11; release-performance and policy follow-ups remain.)
 - Thread-confinement and ref-count diagnostics exist in debug builds (R5,
   §11.1).
 - Context-binding audit complete: every `arena_create`/`pool_create` names its
   owner context (MP-16), and the shared-allocator census (§15 Q7) classifies
   every sharer as immortal or ref-counted (MP-17).
-- Formal D4 reconciliation merged (spec 1.8.0, 2026-08-10): D4.1.1v2, D4.1.4, D4.2.3–D4.2.5, D4.5.1v3. ✅
+- Formal D4 reconciliation merged (spec 1.13.0, 2026-08-11): D4.1.1v2,
+  D4.1.4v4, D4.2.1v3, D4.2.3–D4.2.5v2, D4.5.1v3. ✅ for the design;
+  Pool v2 core implementation ✅ (R7); thread/lifetime/STATS follow-ups remain.
 
 At that point Lambda owns only the policies unique to Lambda: GC allocation,
-region allocation, semantic owner lifetimes, memtrack instrumentation, and
-thin ownership tracking. General-purpose allocation remains the operating
-system and C runtime's responsibility.
+region allocation, Pool extent/block policy, semantic owner lifetimes,
+memtrack instrumentation, and context teardown. The Pool remains owner-local;
+it is not a process-wide replacement for the operating system allocator.
 
 ---
 
@@ -1363,10 +1581,12 @@ released huge span stayed linked from `span_used`, letting
 ownership/teardown defects, and the architectural fact that GC and arena
 already owned their allocation policies. `pool_create_mmap()` was explicitly
 rejected as a blanket replacement (eager mapping, no-op free, full
-retention). Pool became the memtrack owner group of §5; arena took direct
-block ownership (§4); the GC took direct VM-region ownership (§3). The §9
-review then found and remediated the performance non-conformances of the
-first owner-group implementation.
+retention). Arena took direct block ownership (§4), and the GC took direct
+VM-region ownership (§3). The first post-rpmalloc Pool landing became a
+memtrack owner group as an interim compatibility implementation; the §9
+review found that it was still a malloc wrapper, even after R3a removed its
+side hashmap. Revision 2.6 supersedes that interim shape with Pool v2: the
+Pool itself owns VM-backed extents, boundary-tagged blocks, and free lists.
 
 `Memory_Pooling.md` was retired on 2026-08-10 with this revision; its
 surviving design content lives in §1.5, §4.2, §5.1, and this appendix.

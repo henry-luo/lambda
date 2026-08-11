@@ -15443,29 +15443,34 @@ extern "C" Item js_get_global_this() {
 
         // AbortController constructor
         {
-            Item ac_ctor = js_new_function((void*)js_new_AbortController, 0);
-            js_property_set(ac_ctor, make_string_item("prototype"), js_new_object());
+            RootFrame abort_controller_roots(2);
+            Rooted<Item> ac_ctor_root(abort_controller_roots,
+                js_new_function((void*)js_new_AbortController, 0));
+            js_property_set_cstr(ac_ctor_root.get(), "prototype", js_new_object());
             // abort method on instances (set by constructor), but also add as static for access
-            Item ac_proto = js_property_get(ac_ctor, make_string_item("prototype"));
-            js_property_set(ac_proto, make_string_item("abort"),
+            Rooted<Item> ac_proto_root(abort_controller_roots,
+                js_property_get(ac_ctor_root.get(), make_string_item("prototype")));
+            js_property_set_cstr(ac_proto_root.get(), "abort",
                 js_new_function((void*)js_abort_controller_abort, 1));
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("AbortController", 15))},
-                ac_ctor);
+                ac_ctor_root.get());
         }
 
         // AbortSignal — global with static methods abort() and timeout()
         {
             extern Item js_abort_signal_abort(Item reason);
             extern Item js_abort_signal_timeout(Item ms);
-            Item as_ctor = js_new_function((void*)js_make_abort_signal, 0);
-            js_property_set(as_ctor, make_string_item("abort"),
+            RootFrame abort_signal_roots(1);
+            Rooted<Item> as_ctor_root(abort_signal_roots,
+                js_new_function((void*)js_make_abort_signal, 0));
+            js_property_set_cstr(as_ctor_root.get(), "abort",
                 js_new_function((void*)js_abort_signal_abort, 1));
-            js_property_set(as_ctor, make_string_item("timeout"),
+            js_property_set_cstr(as_ctor_root.get(), "timeout",
                 js_new_function((void*)js_abort_signal_timeout, 1));
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("AbortSignal", 11))},
-                as_ctor);
+                as_ctor_root.get());
         }
 
         // TextEncoder / TextDecoder constructors as globals
@@ -15502,22 +15507,22 @@ extern "C" Item js_get_global_this() {
             Rooted<Item> origin_root(performance_roots, ItemNull);
             Rooted<Item> observer_root(performance_roots, ItemNull);
             Rooted<Item> supported_types_root(performance_roots, ItemNull);
-            js_property_set(perf, make_string_item("now"),
+            js_property_set_cstr(perf, "now",
                 js_new_function((void*)js_performance_now, 0));
-            js_property_set(perf, make_string_item("mark"),
+            js_property_set_cstr(perf, "mark",
                 js_new_function((void*)js_performance_noop_1, 1));
-            js_property_set(perf, make_string_item("measure"),
+            js_property_set_cstr(perf, "measure",
                 js_new_function((void*)js_performance_noop_3, 3));
-            js_property_set(perf, make_string_item("getEntries"),
+            js_property_set_cstr(perf, "getEntries",
                 js_new_function((void*)js_performance_empty_entries, 0));
-            js_property_set(perf, make_string_item("getEntriesByName"),
+            js_property_set_cstr(perf, "getEntriesByName",
                 js_new_function((void*)js_performance_empty_entries_2, 2));
-            js_property_set(perf, make_string_item("getEntriesByType"),
+            js_property_set_cstr(perf, "getEntriesByType",
                 js_new_function((void*)js_performance_entries_by_type, 1));
             origin_root.set(push_d(js_performance_time_origin_ms()));
-            js_property_set(perf, make_string_item("timeOrigin"), origin_root.get());
+            js_property_set_cstr(perf, "timeOrigin", origin_root.get());
             timing_root.set(js_new_object());
-            js_property_set(perf, make_string_item("timing"), timing_root.get());
+            js_property_set_cstr(perf, "timing", timing_root.get());
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("performance", 11))}, perf);
             Item perf_observer = js_new_function(
@@ -15526,10 +15531,9 @@ extern "C" Item js_get_global_this() {
             Item supported_types = js_array_new(0);
             supported_types_root.set(supported_types);
             js_array_push(supported_types, make_string_item("layout-shift"));
-            js_property_set(perf_observer, make_string_item("supportedEntryTypes"),
+            js_property_set_cstr(perf_observer, "supportedEntryTypes",
                 supported_types);
-            js_property_set(js_global_this_obj,
-                make_string_item("PerformanceObserver"), perf_observer);
+            js_property_set_cstr(js_global_this_obj, "PerformanceObserver", perf_observer);
         }
 
         // globalThis.MessageChannel / MessagePort stubs
@@ -15561,12 +15565,14 @@ extern "C" Item js_get_global_this() {
         // globalThis.DOMException constructor
         {
             extern Item js_domexception_new(Item message, Item name);
-            Item ctor = js_new_function((void*)js_domexception_new, 2);
-            Item proto = js_new_object();
-            js_property_set(proto, make_string_item("constructor"), ctor);
-            js_property_set(ctor, make_string_item("prototype"), proto);
+            RootFrame domexception_roots(2);
+            Rooted<Item> ctor_root(domexception_roots,
+                js_new_function((void*)js_domexception_new, 2));
+            Rooted<Item> proto_root(domexception_roots, js_new_object());
+            js_property_set_cstr(proto_root.get(), "constructor", ctor_root.get());
+            js_property_set_cstr(ctor_root.get(), "prototype", proto_root.get());
             js_property_set(js_global_this_obj,
-                (Item){.item = s2it(heap_create_name("DOMException", 12))}, ctor);
+                (Item){.item = s2it(heap_create_name("DOMException", 12))}, ctor_root.get());
         }
 
         // globalThis.Option constructor (HTMLOptionElement)

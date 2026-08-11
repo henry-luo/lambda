@@ -2423,6 +2423,11 @@
               "gtest_main"
             ],
             "additional_sources": [
+              "lib/mem_vm.c",
+              "lib/mem_context.c",
+              "lib/memtrack.c",
+              "lib/hashmap.c",
+              "lib/arena.c",
               "lib/mempool.c",
               "lib/str.c",
               "lib/utf.c",
@@ -2616,6 +2621,9 @@
             "additional_sources": [
               "lib/mem_factory.c",
               "lib/mem_context.c",
+              "lib/mem_vm.c",
+              "lib/memtrack.c",
+              "lib/hashmap.c",
               "lib/arena.c",
               "lib/scratch_arena.c",
               "lib/mempool.c",

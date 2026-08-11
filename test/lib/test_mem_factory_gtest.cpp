@@ -30,8 +30,29 @@ TEST_F(MemFactoryTest, PoolCreateDestroyRegisters) {
     ASSERT_EQ(snap->count, 1u);
     EXPECT_EQ(snap->samples[0].kind, MEM_KIND_POOL);
     EXPECT_GE(snap->samples[0].bytes_in_use, 4096u);
+    EXPECT_GE(snap->samples[0].committed_bytes, 4096u);
+    EXPECT_LE(snap->samples[0].committed_bytes,
+              snap->samples[0].bytes_reserved);
     EXPECT_STREQ(snap->samples[0].label, "factory.pool");
     mem_snapshot_free(snap);
+
+    mem_pool_destroy(p);
+    EXPECT_EQ(mem_context_live_count(root), 0u);
+}
+
+TEST_F(MemFactoryTest, SizedPoolUsesNormalizedInitialExtent) {
+    MemContext* root = mem_context_root();
+    Pool* p = mem_pool_create_sized(root, 1500, MEM_ROLE_INPUT,
+                                     "factory.sized.pool");
+    ASSERT_NE(p, nullptr);
+
+    void* buf = pool_alloc(p, 1);
+    ASSERT_NE(buf, nullptr);
+
+    PoolStats stats;
+    pool_get_detailed_stats(p, &stats);
+    EXPECT_EQ(stats.reserved_bytes, 2048u);
+    EXPECT_EQ(stats.live_bytes, 1u);
 
     mem_pool_destroy(p);
     EXPECT_EQ(mem_context_live_count(root), 0u);

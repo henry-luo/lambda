@@ -228,6 +228,7 @@ Item js_typeof(Item value);         // typeof x
 Item js_new_object(void);
 Item js_property_get(Item object, Item key);
 Item js_property_set(Item object, Item key, Item value);
+Item js_property_set_cstr(Item object, const char* key, Item value);
 Item js_using_dispose(Item resource);
 Item js_property_set_strict(Item object, Item key, Item value);
 // Tune8 §2.2: dispatcher for JIT-emitted dynamic-strict property sets.
