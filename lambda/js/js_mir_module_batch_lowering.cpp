@@ -7302,8 +7302,12 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return ItemNull;
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
-    mt->module_name_base = 0;
-    mt->module_ic_base = 0;
+    // A dynamic module compiled while a Test262 preamble is active inherits
+    // that sealed name/IC image; local indexes must start after the inherited
+    // entries or globalThis member loads resolve to another preamble name.
+    mt->module_name_base = g_jm_preamble_in
+        ? g_jm_preamble_in->module_property_count : 0;
+    mt->module_ic_base = g_jm_preamble_in ? g_jm_preamble_in->ic_count : 0;
 
     mt->module = MIR_new_module(ctx, "js_module");
 

@@ -324,7 +324,9 @@
       "-Wl,--allow-shlib-undefined"
     ],
     "link_options_windows": [
-      "-Wl,/force:unresolved"
+      "-Wl,/force:unresolved",
+      "-Wl,--enable-auto-import",
+      "../../modules/lambda-host.lib"
     ]
   },
   "node_modules": [

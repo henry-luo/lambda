@@ -1,0 +1,15 @@
+LIBRARY lambda.exe
+EXPORTS
+    ItemError
+    ItemNull
+    clock_gettime64
+    file_getcwd
+    file_realpath
+    jube_node_current_module_state
+    jube_node_session_module_state_get
+    log_error
+    mem_alloc_loc
+    mem_free_loc
+    mem_realloc_loc
+    shell_getenv
+    url_decode_component

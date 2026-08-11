@@ -643,38 +643,58 @@ static Item js_private_environment_for_class(Item class_item, bool create) {
     return environment_root.get();
 }
 
+static bool js_private_key_item_is_valid(Item key) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* key_string = it2s(key);
+    return key_string && property_key_requires_identity(key_string) &&
+        property_key_kind(key_string) == NAME_KEY_PRIVATE;
+}
+
+static Item js_private_key_for_class_environment(Item environment_item,
+        NameRef source_name) {
+    if (get_type_id(environment_item) != LMD_TYPE_MAP || !source_name) return ItemNull;
+
+    bool found = false;
+    Item cached_key = js_map_get_fast(environment_item.map, source_name->chars,
+        (int)source_name->len, &found);
+    if (found && js_private_key_item_is_valid(cached_key)) return cached_key;
+
+    if (!context || !context->name_pool) return ItemNull;
+    NameRef private_key = name_pool_create_unique_private(context->name_pool,
+        {source_name->chars, source_name->len});
+    if (!private_key) return ItemNull;
+    Item private_key_item = (Item){.item = s2it(private_key)};
+
+    // class metadata resolves thousands of private names in one batch.  The
+    // environment is engine-owned and the source key is already canonical, so
+    // append directly after the own-cache miss instead of rebuilding the full
+    // JS property path for every declaration.
+    if (js_input) {
+        map_put(environment_item.map, source_name, private_key_item, js_input);
+        return private_key_item;
+    }
+    return js_property_set(environment_item, (Item){.item = s2it(source_name)},
+        private_key_item);
+}
+
 extern "C" Item js_private_key_for_class(Item class_item, Item source_name) {
     if (!js_private_source_name(source_name) || !context || !context->name_pool) {
         return js_throw_type_error("Invalid private name binding");
     }
-    RootFrame roots(4);
+    RootFrame roots(3);
     Rooted<Item> class_root(roots, class_item);
     Rooted<Item> source_root(roots, source_name);
     Rooted<Item> environment_root(roots,
         js_private_environment_for_class(class_root.get(), true));
-    Rooted<Item> key_root(roots, ItemNull);
     if (!roots.valid() || get_type_id(environment_root.get()) != LMD_TYPE_MAP) return ItemNull;
     String* source = it2s(source_root.get());
     NameRef binding_name = name_pool_create_len(context->name_pool,
         source->chars, source->len);
     if (!binding_name) return ItemNull;
-    // Private source literals are distinct heap strings; the class environment
-    // must index their shared spelling with the ordinary pooled NameRecord.
+    // private source literals are distinct heap strings; canonicalize their
+    // spelling once before consulting the class-owned identity cache.
     source_root.set((Item){.item = s2it(binding_name)});
-    Item key = js_property_get(environment_root.get(), source_root.get());
-    if (get_type_id(key) == LMD_TYPE_STRING &&
-        property_key_requires_identity(it2s(key)) &&
-        property_key_kind(it2s(key)) == NAME_KEY_PRIVATE) {
-        return key;
-    }
-    NameRef private_key = name_pool_create_unique_private(context->name_pool,
-        {source->chars, source->len});
-    if (!private_key) return ItemNull;
-    key_root.set((Item){.item = s2it(private_key)});
-    // Source spelling resolves a lexical private binding only inside this hidden
-    // environment; the installed object property always uses the unique record.
-    JS_ASSIGN_OR_RETURN(set_result, js_property_set(environment_root.get(), source_root.get(), key_root.get()));
-    return key_root.get();
+    return js_private_key_for_class_environment(environment_root.get(), binding_name);
 }
 
 extern "C" Item js_private_key_for_current_class(Item source_name) {
@@ -2102,26 +2122,30 @@ extern "C" void js_set_class_instance_field_metadata_name_id_range(
             (uint32_t)count > state->property_key_count - module_name_base) return;
     RootFrame roots(4);
     Rooted<Item> class_root(roots, class_item);
-    Rooted<Item> source_root(roots, ItemNull);
-    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> environment_root(roots, ItemNull);
     if (!roots.valid()) return;
+
+    bool keys_found = false;
+    bool kinds_found = false;
+    Item keys = js_map_get_fast(class_root.get().map, "__if_keys__", 11, &keys_found);
+    Item kinds = js_map_get_fast(class_root.get().map, "__if_kinds__", 12, &kinds_found);
+    if (!keys_found || get_type_id(keys) != LMD_TYPE_ARRAY ||
+            index + count > keys.array->length) return;
     for (int offset = 0; offset < count; offset++) {
         NameId source_name_id = state->property_keys[module_name_base + (uint32_t)offset];
         NameRef source_name = name_pool_resolve_id(context->name_pool, source_name_id);
         if (!source_name) return;
-        source_root.set((Item){.item = s2it(source_name)});
-        Item key = js_private_source_name(source_root.get())
-            ? js_private_key_for_class(class_root.get(), source_root.get())
-            : source_root.get();
-        key_root.set(key);
-        if (item_is_error(key_root.get())) return;
-        bool found = false;
-        Item keys = js_map_get_fast(class_root.get().map, "__if_keys__", 11, &found);
-        if (!found || get_type_id(keys) != LMD_TYPE_ARRAY ||
-                index + offset >= keys.array->length) return;
-        keys.array->items[index + offset] = key_root.get();
-        Item kinds = js_map_get_fast(class_root.get().map, "__if_kinds__", 12, &found);
-        if (found && get_type_id(kinds) == LMD_TYPE_ARRAY &&
+        bool private_source = js_private_source_name((Item){.item = s2it(source_name)});
+        if (private_source && get_type_id(environment_root.get()) != LMD_TYPE_MAP) {
+            environment_root.set(js_private_environment_for_class(class_root.get(), true));
+            if (get_type_id(environment_root.get()) != LMD_TYPE_MAP) return;
+        }
+        Item key = private_source
+            ? js_private_key_for_class_environment(environment_root.get(), source_name)
+            : (Item){.item = s2it(source_name)};
+        if (item_is_error(key) || key.item == ItemNull.item) return;
+        keys.array->items[index + offset] = key;
+        if (kinds_found && get_type_id(kinds) == LMD_TYPE_ARRAY &&
                 index + offset < kinds.array->length) {
             kinds.array->items[index + offset] = (Item){.item = i2it(
                 (method_mask >> offset) & 1u)};
@@ -39037,7 +39061,10 @@ extern "C" Item js_module_enable_compile_cache(Item arg) {
 
     char abs_dir[4096];
     js_cc_make_absolute(dir, abs_dir, (int)sizeof(abs_dir));
-    if (!js_cc_write_allowed(abs_dir)) {
+    // The permission layer canonicalizes relative paths with its own cwd
+    // representation; checking the original spelling avoids a Windows uv_cwd
+    // versus CRT getcwd mismatch that rejected an explicitly granted directory.
+    if (!js_cc_write_allowed(dir)) {
         const char* msg = "Skipping compile cache because write permission for path is not granted";
         if (js_cc_debug_enabled()) {
             js_cc_debugf("Skipping compile cache because write permission for %s is not granted\n", abs_dir);

@@ -1635,20 +1635,22 @@ static MIR_reg_t jm_emit_int32_bitwise_binary(JsMirTranspiler* mt,
     return jm_emit_int_to_double(mt, result);
 }
 
+static MIR_reg_t jm_box_bigint_literal(JsMirTranspiler* mt, String* spelling) {
+    // bigint_from_string consumes character bytes, not the String object returned by it2s;
+    // passing that object pointer makes every literal parse as invalid input.
+    return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
+        MIR_T_P, MIR_new_str_op(mt->ctx, {(size_t)spelling->len, spelling->chars}),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)spelling->len));
+}
+
 MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
     switch (lit->literal_type) {
     case JS_LITERAL_NUMBER: {
-        // BigInt literal: store string_value and call bigint_from_string at runtime
+        // bigint literal: store the dedicated digit spelling and parse it at runtime.
         if (lit->is_bigint) {
-            String* s = lit->value.string_value;
-            // Materialize the literal through the context NamePool; a delayed
-            // MIR function must not retain the compiler-pool spelling.
-            MIR_reg_t str_item = jm_box_string_literal(mt, s->chars, s->len);
-            MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_P,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
-            return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, str_ptr),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
+            // bigint AST literals keep their digits in bigint_str; value.string_value is unset,
+            // so reading the generic literal slot turns every n-suffixed literal into bad input.
+            return jm_box_bigint_literal(mt, lit->bigint_str);
         }
         double val = lit->value.number_value;
         return jm_box_float_const(mt, val);
@@ -11310,7 +11312,9 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
             mt->em.frame.runtime, 0, 1)));
 
     // Create StringBuf: stringbuf_new(pool)
-    MIR_reg_t sb = jm_call_1(mt, "stringbuf_new", MIR_T_I64,
+    // StringBuf is a pointer-valued helper; using an integer return type here
+    // truncated its address on Windows before the first template fragment.
+    MIR_reg_t sb = jm_call_1(mt, "stringbuf_new", MIR_T_P,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, pool_reg));
 
     JsAstNode* quasi = tmpl->quasis;
@@ -11354,7 +11358,9 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, eval));
             jm_emit_error_lane_propagate_check(mt);
             // Unbox string: it2s(str_item) -> String*
-            MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_I64,
+            // it2s returns a String pointer; declaring an integer return here
+            // truncated the pointer before template interpolation copied it.
+            MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_P,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
             // Guard: if js_to_string threw (e.g. Symbol), str_ptr is null — skip append
             MIR_label_t skip_append = jm_new_label(mt);
@@ -11383,7 +11389,7 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
     }
 
     // stringbuf_to_string(sb) -> String*
-    MIR_reg_t result_str = jm_call_1(mt, "stringbuf_to_string", MIR_T_I64,
+    MIR_reg_t result_str = jm_call_1(mt, "stringbuf_to_string", MIR_T_P,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, sb));
     // Box as string
     return jm_box_string(mt, result_str);
@@ -12311,13 +12317,7 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         case JS_LITERAL_NUMBER: {
             // BigInt literal: store bigint_str and call bigint_from_string at runtime
             if (lit->is_bigint) {
-                String* s = lit->bigint_str;
-                MIR_reg_t str_item = jm_box_string_literal(mt, s->chars, s->len);
-                MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_P,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
-                return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, str_ptr),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
+                return jm_box_bigint_literal(mt, lit->bigint_str);
             }
             double val = lit->value.number_value;
             return jm_box_float_const(mt, val);
@@ -12781,9 +12781,16 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         // for settled Promises / non-Promises so `export default await
         // Promise.resolve(42)` still unwraps to 42. The chain-pending case is
         // what gives the dynamic-import chain its spec-order property.
+        extern int js_dynamic_import_suppress_module_drain;
+        // Dynamic imports enter module compilation at depth one, but their
+        // pending top-level await still has to suspend the import promise;
+        // otherwise js_await_sync returns an undefined placeholder instead of
+        // preserving the module's evaluation dependency.
+        bool is_dynamic_import_module = js_dynamic_import_suppress_module_drain > 0;
         bool is_p5_module_tla = (mt->is_module && mt->in_main &&
-            mt->current_func_index < 0 && !mt->in_generator && !mt->in_async &&
-            js_tla_module_depth_get() >= 2 && mt->filename);
+            !mt->in_generator && !mt->in_async && mt->filename &&
+            ((mt->current_func_index < 0 && js_tla_module_depth_get() >= 2) ||
+             is_dynamic_import_module));
         if (is_p5_module_tla) {
             MIR_reg_t spec_reg = jm_box_string_literal(mt, mt->filename,
                 (int)strlen(mt->filename));

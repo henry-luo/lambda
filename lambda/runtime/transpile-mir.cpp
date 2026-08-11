@@ -1144,6 +1144,17 @@ static void async_track_reg(MirTranspiler* mt, MIR_reg_t reg, MIR_type_t type) {
     }
 }
 
+static void async_track_pending_reg(MirTranspiler* mt, MIR_reg_t reg) {
+    if (!mt || !mt->in_async_proc || !reg) return;
+    for (int i = 0; i < mt->async_spill_count; i++) {
+        if (mt->async_spills[i].reg == reg) return;
+    }
+    // Scope cleanup can suspend after the value-producing expression has run;
+    // preserve that final carrier even when it came from a shared MIR helper
+    // that allocated its register outside new_reg().
+    async_track_reg(mt, reg, MIR_reg_type(mt->ctx, reg, mt->em.func));
+}
+
 static MIR_reg_t new_reg(MirTranspiler* mt, const char* prefix, MIR_type_t type) {
     MIR_reg_t reg = em_new_reg(&mt->em, prefix, type);
     async_track_reg(mt, reg, type);
@@ -6998,7 +7009,8 @@ static MIR_reg_t transpile_native_int_expr(MirTranspiler* mt, AstNode* node) {
 static bool mir_index_expr_is_native_int(MirTranspiler* mt, AstNode* node);
 static bool mir_index_expr_nonnegative(MirTranspiler* mt, AstNode* node);
 static LaneReg emit_int_lane_arith(MirTranspiler* mt, Operator op,
-        LaneReg left_lane, LaneReg right_lane, bool nullable);
+        LaneReg left_lane, LaneReg right_lane, bool nullable,
+        bool literal_mul_overflow);
 
 struct MirNativeIndexValue {
     MIR_reg_t value;
@@ -7212,6 +7224,38 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
     return transpile_binary_out(mt, bi, false);
 }
 
+static bool mir_literal_int_value(AstNode* node, int64_t* value) {
+    if (!node || !value) return false;
+    node = mir_unwrap_primary(node);
+    bool negative = false;
+    if (node && node->node_type == AST_NODE_UNARY) {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op != OPERATOR_NEG && unary->op != OPERATOR_POS) return false;
+        negative = unary->op == OPERATOR_NEG;
+        node = mir_unwrap_primary(unary->operand);
+    }
+    if (!node || node->node_type != AST_NODE_LITERAL) return false;
+    AstLiteralNode* literal = (AstLiteralNode*)node;
+    if (literal->literal_type != AST_LITERAL_NUMBER ||
+            !isfinite(literal->value.number_value)) return false;
+    long double numeric = negative ? -(long double)literal->value.number_value
+        : (long double)literal->value.number_value;
+    if (numeric < (long double)INT64_MIN || numeric > (long double)INT64_MAX ||
+            numeric != (long double)(int64_t)numeric) return false;
+    *value = (int64_t)numeric;
+    return true;
+}
+
+static bool mir_literal_mul_overflows_i64(AstBinaryNode* bi) {
+    if (!bi || bi->op != OPERATOR_MUL) return false;
+    int64_t left = 0;
+    int64_t right = 0;
+    if (!mir_literal_int_value(bi->left, &left) ||
+            !mir_literal_int_value(bi->right, &right)) return false;
+    long double product = (long double)left * (long double)right;
+    return product > (long double)INT64_MAX || product < (long double)INT64_MIN;
+}
+
 // Bring either scalar lane into the double lane for mixed arithmetic.
 static MIR_reg_t emit_int_or_float_to_double(MirTranspiler* mt, MIR_reg_t reg, TypeId tid) {
     if (tid == LMD_TYPE_INT) {
@@ -7227,7 +7271,8 @@ static MIR_reg_t emit_int_or_float_to_double(MirTranspiler* mt, MIR_reg_t reg, T
 // reach ~2^106, so it must branch on MIR's signed-overflow flag before a
 // wrapped product is compared with the band.
 static LaneReg emit_int_lane_arith(MirTranspiler* mt, Operator op,
-        LaneReg left_lane, LaneReg right_lane, bool nullable) {
+        LaneReg left_lane, LaneReg right_lane, bool nullable,
+        bool literal_mul_overflow) {
     MIR_reg_t left = left_lane.r, right = right_lane.r;
     MIR_reg_t raw = new_reg(mt, "ia_raw", MIR_T_I64);
     MIR_reg_t out = new_reg(mt, "ia_res", MIR_T_I64);
@@ -7258,36 +7303,47 @@ static LaneReg emit_int_lane_arith(MirTranspiler* mt, Operator op,
             MIR_new_label_op(mt->ctx, l_null), MIR_new_reg_op(mt->ctx, has_null)));
     }
 
-    emit_insn(mt, MIR_new_insn(mt->ctx,
-        op == OPERATOR_ADD ? MIR_ADD : op == OPERATOR_SUB ? MIR_SUB : MIR_MULO,
-        MIR_new_reg_op(mt->ctx, raw),
-        MIR_new_reg_op(mt->ctx, left), MIR_new_reg_op(mt->ctx, right)));
-    if (op == OPERATOR_MUL) {
-        // The v5 band check must not inspect a wrapped 64-bit product: e.g.
-        // 2^52 * 2^18 wraps to zero, which would otherwise launder to int 0.
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BO,
-            MIR_new_label_op(mt->ctx, l_slow)));
-    }
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, lo_ok),
-        MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, INT53_MIN)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, hi_ok),
-        MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, INT53_MAX)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_band),
-        MIR_new_reg_op(mt->ctx, lo_ok), MIR_new_reg_op(mt->ctx, hi_ok)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_slow),
-        MIR_new_reg_op(mt->ctx, in_band)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
-        MIR_new_reg_op(mt->ctx, raw)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+    if (op == OPERATOR_MUL && literal_mul_overflow) {
+        // constant products beyond i64 must skip MIR's wrapped mulo; the
+        // saturating helper receives the original operands and preserves sign.
+        MIR_reg_t slow = emit_call_2(mt, "lambda_int_lane_mul_slow", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+            MIR_new_reg_op(mt->ctx, slow)));
+    } else {
+        emit_insn(mt, MIR_new_insn(mt->ctx,
+            op == OPERATOR_ADD ? MIR_ADD : op == OPERATOR_SUB ? MIR_SUB : MIR_MULO,
+            MIR_new_reg_op(mt->ctx, raw),
+            MIR_new_reg_op(mt->ctx, left), MIR_new_reg_op(mt->ctx, right)));
+        if (op == OPERATOR_MUL) {
+            // The v5 band check must not inspect a wrapped 64-bit product: e.g.
+            // 2^52 * 2^18 wraps to zero, which would otherwise launder to int 0.
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BO,
+                MIR_new_label_op(mt->ctx, l_slow)));
+        }
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, lo_ok),
+            MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, INT53_MIN)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, hi_ok),
+            MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, INT53_MAX)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_band),
+            MIR_new_reg_op(mt->ctx, lo_ok), MIR_new_reg_op(mt->ctx, hi_ok)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_slow),
+            MIR_new_reg_op(mt->ctx, in_band)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+            MIR_new_reg_op(mt->ctx, raw)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+            MIR_new_label_op(mt->ctx, l_done)));
 
-    emit_label(mt, l_slow);
-    const char* helper = op == OPERATOR_ADD ? "lambda_int_lane_add_slow"
-        : op == OPERATOR_SUB ? "lambda_int_lane_sub_slow" : "lambda_int_lane_mul_slow";
-    MIR_reg_t slow = emit_call_2(mt, helper, MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
-        MIR_new_reg_op(mt->ctx, slow)));
+        emit_label(mt, l_slow);
+        const char* helper = op == OPERATOR_ADD ? "lambda_int_lane_add_slow"
+            : op == OPERATOR_SUB ? "lambda_int_lane_sub_slow" : "lambda_int_lane_mul_slow";
+        MIR_reg_t slow = emit_call_2(mt, helper, MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+            MIR_new_reg_op(mt->ctx, slow)));
+    }
     if (nullable) {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
             MIR_new_label_op(mt->ctx, l_done)));
@@ -7495,7 +7551,8 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
             transpile_native_int_expr(mt, bi->right), right_tid);
         bool nullable = mir_expr_may_be_null(mt, bi->left) ||
             mir_expr_may_be_null(mt, bi->right);
-        LaneReg res = emit_int_lane_arith(mt, bi->op, left, right, nullable);
+        LaneReg res = emit_int_lane_arith(mt, bi->op, left, right, nullable,
+            mir_literal_mul_overflows_i64(bi));
         if (native_int_out) return res.r;
         return emit_box_int_lane(mt, res).r;
     }
@@ -7779,8 +7836,9 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
     // IEEE NaN check: expr is nan
     if (bi->op == OPERATOR_IS_NAN) {
         MIR_reg_t boxl = transpile_box_item(mt, bi->left);
-        return emit_call_1(mt, "fn_is_nan", MIR_T_I64,
+        MIR_reg_t result = emit_call_1(mt, "fn_is_nan", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl));
+        return emit_uext8(mt, result);
     }
 
     // Type operators
@@ -7869,23 +7927,32 @@ static MIR_reg_t transpile_binary_out(MirTranspiler* mt, AstBinaryNode* bi,
         // Standard fn_is call for non-constrained types
         MIR_reg_t boxl = transpile_box_item(mt, bi->left);
         MIR_reg_t boxr = transpile_box_item(mt, bi->right);
-        return emit_call_2(mt, "fn_is", MIR_T_I64,
+        MIR_reg_t result = emit_call_2(mt, "fn_is", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
+        // c Bool returns only define the low byte; normalize the imported i64
+        // before a native branch observes unspecified upper return bits.
+        return emit_uext8(mt, result);
     }
     if (bi->op == OPERATOR_IN) {
         MIR_reg_t boxl = transpile_box_item(mt, bi->left);
         MIR_reg_t boxr = transpile_box_item(mt, bi->right);
-        return emit_call_2(mt, "fn_in", MIR_T_I64,
+        MIR_reg_t result = emit_call_2(mt, "fn_in", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
+        // c Bool returns only define the low byte; normalize the imported i64
+        // before a native branch observes unspecified upper return bits.
+        return emit_uext8(mt, result);
     }
     if (bi->op == OPERATOR_AT) {
         MIR_reg_t boxl = transpile_box_item(mt, bi->left);
         MIR_reg_t boxr = transpile_box_item(mt, bi->right);
-        return emit_call_2(mt, "fn_at", MIR_T_I64,
+        MIR_reg_t result = emit_call_2(mt, "fn_at", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
+        // c Bool returns only define the low byte; normalize the imported i64
+        // before a native branch observes unspecified upper return bits.
+        return emit_uext8(mt, result);
     }
 
     // ======================================================================
@@ -10371,7 +10438,12 @@ static MIR_reg_t transpile_local_fault_expression(MirTranspiler* mt,
         MIR_new_reg_op(mt->ctx, jump_buffer), MIR_new_reg_op(mt->ctx, frame),
         MIR_new_int_op(mt->ctx, LAMBDA_RECOVERY_FRAME_JUMP_BUFFER_OFFSET)));
     MIR_var_t checkpoint_args[2] = {
-        {MIR_T_P, "jump_buffer", 0}, {MIR_T_I64, "save_mask", 0},
+        {MIR_T_P, "jump_buffer", 0},
+#if defined(_WIN32)
+        {MIR_T_P, "frame", 0},
+#else
+        {MIR_T_I64, "save_mask", 0},
+#endif
     };
     MirImportEntry* checkpoint_import = ensure_import(mt,
         LAMBDA_RECOVERY_FRAME_MIR_CHECKPOINT_NAME, MIR_T_I64, 2,
@@ -10383,7 +10455,15 @@ static MIR_reg_t transpile_local_fault_expression(MirTranspiler* mt,
         MIR_new_ref_op(mt->ctx, checkpoint_import->proto),
         MIR_new_ref_op(mt->ctx, checkpoint_import->import),
         MIR_new_reg_op(mt->ctx, checkpoint),
-        MIR_new_reg_op(mt->ctx, jump_buffer), MIR_new_int_op(mt->ctx, 1)));
+        MIR_new_reg_op(mt->ctx, jump_buffer),
+#if defined(_WIN32)
+        // mingw's _setjmp expects a frame pointer here; the POSIX save-mask
+        // value 1 corrupts its SEH state and makes longjmp report STATUS_BAD_STACK.
+        MIR_new_int_op(mt->ctx, 0)
+#else
+        MIR_new_int_op(mt->ctx, 1)
+#endif
+        ));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
         MIR_new_label_op(mt->ctx, landing),
         MIR_new_reg_op(mt->ctx, checkpoint), MIR_new_int_op(mt->ctx, 0)));
@@ -11748,6 +11828,7 @@ static MIR_reg_t transpile_task_scope_leave(
         return block_result;
     }
 
+    async_track_pending_reg(mt, block_result);
     int spill_count = mt->async_spill_count;
     MIR_label_t invoke = new_label(mt);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
@@ -14487,6 +14568,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             handles = load_gc_root_slot(mt, handles_root, "select_handles");
             MIR_reg_t handles_item = emit_call_1(mt, "array_end", MIR_T_I64,
                 MIR_T_P, MIR_new_reg_op(mt->ctx, handles));
+            async_track_pending_reg(mt, handles_item);
+            async_track_pending_reg(mt, timeout);
             async_emit_invoke_resume_point(mt, call_node);
             return emit_call_2(mt, "pn_select_mir", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, handles_item),
@@ -14628,9 +14711,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             if (a1_tid == LMD_TYPE_STRING && a2_tid == LMD_TYPE_STRING) {
                 MIR_reg_t a1 = emit_text_pointer_lane(mt, transpile_expr(mt, arg), a1_tid);
                 MIR_reg_t a2 = emit_text_pointer_lane(mt, transpile_expr(mt, arg2), a2_tid);
-                return emit_call_2(mt, "fn_starts_with_str", MIR_T_I64,
+                MIR_reg_t result = emit_call_2(mt, "fn_starts_with_str", MIR_T_I64,
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a1),
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a2));
+                return emit_uext8(mt, result);
             }
         }
         if (info->fn == SYSFUNC_ENDS_WITH && arg_count == 2) {
@@ -14641,9 +14725,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             if (a1_tid == LMD_TYPE_STRING && a2_tid == LMD_TYPE_STRING) {
                 MIR_reg_t a1 = emit_text_pointer_lane(mt, transpile_expr(mt, arg), a1_tid);
                 MIR_reg_t a2 = emit_text_pointer_lane(mt, transpile_expr(mt, arg2), a2_tid);
-                return emit_call_2(mt, "fn_ends_with_str", MIR_T_I64,
+                MIR_reg_t result = emit_call_2(mt, "fn_ends_with_str", MIR_T_I64,
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a1),
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a2));
+                return emit_uext8(mt, result);
             }
         }
 
@@ -14969,6 +15054,9 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
         #define POST_PROCESS_DTIME(result) \
             if (c_ret_tid == LMD_TYPE_DTIME) { result = emit_box_dtime_value(mt, result); }
 
+        #define POST_PROCESS_BOOL(result) \
+            if (c_ret_tid == LMD_TYPE_BOOL) { result = emit_uext8(mt, result); }
+
         // Helper: when a sys func returns a boxed Item (c_ret_tid=ANY) but the
         // call expression has a specific native type, unbox to native format.
         // This ensures consistency with local/dynamic calls which also unbox
@@ -15031,6 +15119,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = emit_call_0(mt, sys_fn_name, mir_ret_type);
             POST_PROCESS_DTIME(result);
+            POST_PROCESS_BOOL(result);
             POST_PROCESS_UNBOX(result);
             return result;
         }
@@ -15042,9 +15131,11 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             if (sysfunc_params_reject_error(info)) {
                 emit_return_if_item_error(mt, boxed_a1);
             }
+            async_track_pending_reg(mt, boxed_a1);
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = emit_call_1(mt, sys_fn_name, mir_ret_type, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
             POST_PROCESS_DTIME(result);
+            POST_PROCESS_BOOL(result);
             POST_PROCESS_UNBOX(result);
             return result;
         }
@@ -15061,11 +15152,14 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 emit_return_if_item_error(mt, boxed_a1);
                 emit_return_if_item_error(mt, boxed_a2);
             }
+            async_track_pending_reg(mt, boxed_a1);
+            async_track_pending_reg(mt, boxed_a2);
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = emit_call_2(mt, sys_fn_name, mir_ret_type,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2));
             POST_PROCESS_DTIME(result);
+            POST_PROCESS_BOOL(result);
             POST_PROCESS_UNBOX(result);
             return result;
         }
@@ -15081,12 +15175,16 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             arg = arg->next;
             MIR_reg_t boxed_a3 = transpile_box_item(mt, arg);
 
+            async_track_pending_reg(mt, boxed_a1);
+            async_track_pending_reg(mt, boxed_a2);
+            async_track_pending_reg(mt, boxed_a3);
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = emit_call_3(mt, sys_fn_name, mir_ret_type,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3));
             POST_PROCESS_DTIME(result);
+            POST_PROCESS_BOOL(result);
             POST_PROCESS_UNBOX(result);
             return result;
         }
@@ -15105,6 +15203,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             arg = arg->next;
             MIR_reg_t boxed_a4 = transpile_box_item(mt, arg);
 
+            async_track_pending_reg(mt, boxed_a1);
+            async_track_pending_reg(mt, boxed_a2);
+            async_track_pending_reg(mt, boxed_a3);
+            async_track_pending_reg(mt, boxed_a4);
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = emit_call_4(mt, sys_fn_name, mir_ret_type,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
@@ -15112,6 +15214,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a4));
             POST_PROCESS_DTIME(result);
+            POST_PROCESS_BOOL(result);
             POST_PROCESS_UNBOX(result);
             return result;
         }
@@ -15123,6 +15226,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             int ai = 0;
             while (arg && ai < LAMBDA_MAX_FUNCTION_ARGS) {
                 MIR_reg_t boxed = transpile_box_item(mt, arg);
+                async_track_pending_reg(mt, boxed);
                 arg_ops[ai++] = MIR_new_reg_op(mt->ctx, boxed);
                 arg = arg->next;
             }
@@ -15148,6 +15252,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             async_emit_invoke_resume_point(mt, call_node);
             emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
             POST_PROCESS_DTIME(result);
+            POST_PROCESS_BOOL(result);
             POST_PROCESS_UNBOX(result);
             return result;
         }
@@ -16933,6 +17038,7 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
         TypeId val_tid = get_effective_type(mt, raise_node->value);
         MIR_reg_t boxed = emit_box(mt, val, val_tid);
         // Return the error value from the function
+        async_track_pending_reg(mt, boxed);
         transpile_task_scope_unwind(mt, true);
         async_complete_frame(mt);
         emit_function_error_return(mt, boxed);
@@ -16946,6 +17052,7 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
     uint64_t ITEM_ERROR_VAL = (uint64_t)LMD_TYPE_ERROR << 56;
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR_VAL)));
+    async_track_pending_reg(mt, r);
     transpile_task_scope_unwind(mt, true);
     async_complete_frame(mt);
     emit_function_error_return(mt, r);
@@ -17056,6 +17163,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
                     mt->current_return_type);
             }
             emit_vargs_restore();
+            async_track_pending_reg(mt, native_val);
             transpile_task_scope_unwind(mt, false);
             async_complete_frame(mt);
             emit_function_return(mt, MIR_new_reg_op(mt->ctx, native_val));
@@ -17064,6 +17172,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
             MIR_reg_t boxed = emit_box(mt, val, val_tid);
             boxed = emit_coerce_boxed_to_declared(mt, boxed, mt->current_return_type);
             emit_vargs_restore();
+            async_track_pending_reg(mt, boxed);
             transpile_task_scope_unwind(mt, false);
             async_complete_frame(mt);
             emit_function_return(mt, MIR_new_reg_op(mt->ctx, boxed));
@@ -17720,6 +17829,19 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // the val is a dummy register and any further boxing would be dead code.
     // Skip boxing to avoid type mismatches (e.g. trying to box an I64 dummy as FLOAT).
     if (mt->block_returned) return val;
+
+    if (tid == LMD_TYPE_DTIME && node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* dtime_call = (AstCallNode*)node;
+        AstNode* dtime_callee = mir_unwrap_primary(dtime_call->function);
+        if (dtime_callee && dtime_callee->node_type == AST_NODE_SYS_FUNC) {
+            SysFuncInfo* dtime_info = ((AstSysFuncNode*)dtime_callee)->fn_info;
+            if (dtime_info && dtime_info->c_ret_type == C_RET_DTIME) {
+                // datetime system calls are boxed at their raw-value boundary;
+                // treating that Item as a pointer would double-box and dereference its tag.
+                return val;
+            }
+        }
+    }
 
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
@@ -19507,6 +19629,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_ok),
                 MIR_new_reg_op(mt->ctx, is_err)));
             // error path: return error from enclosing function
+            async_track_pending_reg(mt, call_result);
             transpile_task_scope_unwind(mt, true);
             async_complete_frame(mt);
             emit_function_error_return(mt, call_result);
