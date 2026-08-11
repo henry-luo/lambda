@@ -180,10 +180,10 @@
       "name": "lambda_corpus_array_float",
       "script": "test/lambda/array_float.ls",
       "language": "lambda",
-      "description": "Picked corpus script (array-heavy), whole-module total only. v5 re-baseline: int array elements use the i64 lane and box only at an Item boundary.",
+      "description": "Picked corpus script (array-heavy), whole-module total only. v5 re-baseline: int array elements use the i64 lane and box only at an Item boundary; two uext8 instructions normalize C bool results used by is-null checks.",
       "budgets": {
         "default": {
-          "module_insns": 1990
+          "module_insns": 1992
         }
       }
     },
