@@ -1960,26 +1960,23 @@ static void record_collapsed_line_fragment_for_inline_ancestors(
  * visual border-box height after the line is known to contain real content.
  */
 static void fixup_collapsed_inline_spans(LayoutContext* lycon, ViewSpan* span) {
-    // recurse into children first (depth-first)
-    View* child = span->first_child;
-    while (child) {
-        if (child->view_type == RDT_VIEW_INLINE) {
-            fixup_collapsed_inline_spans(lycon, lam::view_require<RDT_VIEW_INLINE>(child));
+    if (!lycon || !span) return;
+    auto visit = [](View* view) -> bool {
+        return view->view_type == RDT_VIEW_INLINE;
+    };
+    auto finish = [&](View* view) {
+        ViewSpan* current = lam::view_require<RDT_VIEW_INLINE>(view);
+        if (current->height == 0.0f) {
+            if (current->content_height > 0.0f) {
+                current->height = fixup_inline_dom_rect_height(lycon, current);
+            }
+        } else if (current->content_height > 0.0f &&
+                   layout_span_children_have_no_line_content(current)) {
+            float target_height = fixup_inline_dom_rect_height(lycon, current);
+            if (current->height < target_height) current->height = target_height;
         }
-        child = child->next();
-    }
-    // fix this span if collapsed
-    if (span->height == 0) {
-        if (span->content_height > 0.0f) {
-            span->height = fixup_inline_dom_rect_height(lycon, span);
-        }
-    } else if (span->content_height > 0 &&
-               layout_span_children_have_no_line_content(span)) {
-        float target_height = fixup_inline_dom_rect_height(lycon, span);
-        if (span->height < target_height) {
-            span->height = target_height;
-        }
-    }
+    };
+    layout_walk_inline_views(static_cast<View*>(span), visit, finish, false);
 }
 
 static bool view_is_non_rendered_table_marker(View* view) {
@@ -1993,26 +1990,22 @@ static bool view_is_non_rendered_table_marker(View* view) {
 
 static void finalize_non_rendered_table_markers_walk(View* view, float line_top,
                                                      float baseline_y) {
-    while (view) {
-        if (view_is_non_rendered_table_marker(view)) {
-            float line_delta = view->y - line_top;
+    auto finalize = [&](View* current) -> bool {
+        if (view_is_non_rendered_table_marker(current)) {
+            float line_delta = current->y - line_top;
             if (line_delta < 0.0f) line_delta = -line_delta;
             if (line_delta <= 0.5f) {
-                view->y = baseline_y;
-                view->width = 0.0f;
-                view->height = 0.0f;
+                current->y = baseline_y;
+                current->width = 0.0f;
+                current->height = 0.0f;
                 log_debug("%s non-rendered table marker finalized: x=%.1f, y=%.1f",
-                          view->source_loc(), view->x, view->y);
-            }
-        } else if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-            if (span->first_child) {
-                finalize_non_rendered_table_markers_walk(span->first_child,
-                                                         line_top, baseline_y);
+                          current->source_loc(), current->x, current->y);
             }
         }
-        view = view->next();
-    }
+        return false;
+    };
+    auto no_finish = [](View*) {};
+    layout_walk_inline_views(view, finalize, no_finish, false);
 }
 
 static void finalize_non_rendered_table_markers_for_line(LayoutContext* lycon) {
@@ -2078,7 +2071,7 @@ static bool line_trailing_space_is_vertical_atomic_gap(ViewText* text_view,
     // that break is the column transition and the whitespace remains the gap
     // between the two inline-blocks.
     DomNode* next = static_cast<DomNode*>(text_view)->next_sibling;
-    while (next && !next->view_type) next = next->next_sibling;
+    next = layout_first_view_with_type(next);
     return next && (next->view_type == RDT_VIEW_INLINE_BLOCK ||
                     next->view_type == RDT_VIEW_TABLE);
 }

@@ -32,19 +32,6 @@ static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view,
 static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view,
                                   ConicGradient* gradient, Rect rect);
 
-static Corner background_corner_scaled(const Corner* radius, float scale) {
-    Corner out = *radius;
-    out.top_left *= scale;
-    out.top_right *= scale;
-    out.bottom_right *= scale;
-    out.bottom_left *= scale;
-    out.top_left_y *= scale;
-    out.top_right_y *= scale;
-    out.bottom_right_y *= scale;
-    out.bottom_left_y *= scale;
-    return out;
-}
-
 static bool background_rounded_radius(ViewBlock* view, Rect rect, Corner* out_radius) {
     BorderProp* border = (view && view->bound) ? view->boundary()->border : nullptr;
     if (!border || !corner_has_radius(&border->radius)) return false;
@@ -80,7 +67,7 @@ static Corner background_corner_inset_box(const Corner* radius, CssEnum box,
                                           const BorderProp* border,
                                           const Spacing* padding,
                                           float scale) {
-    Corner out = background_corner_scaled(radius, scale);
+    Corner out = radiant_corner_scaled(radius, scale);
     float top = 0.0f, right = 0.0f, bottom = 0.0f, left = 0.0f;
     if (box == CSS_VALUE_PADDING_BOX || box == CSS_VALUE_CONTENT_BOX) {
         top += border ? border->width.top * scale : 0.0f;
@@ -692,22 +679,16 @@ void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, in
             for (int k = -box_r; k <= box_r; k++) {
                 int sx = rx + 0 + k;
                 if (sx >= rx && sx < rx + rw) {
-                    uint32_t p = src_row[sx];
-                    sum_r += (p >> 24) & 0xFF;
-                    sum_g += (p >> 16) & 0xFF;
-                    sum_b += (p >> 8) & 0xFF;
-                    sum_a += p & 0xFF;
+                    radiant_blur_adjust(src_row[sx], true,
+                        &sum_r, &sum_g, &sum_b, &sum_a);
                     count++;
                 }
             }
 
             for (int col = 0; col < rw; col++) {
                 if (count > 0) {
-                    uint32_t avg_r = sum_r / count;
-                    uint32_t avg_g = sum_g / count;
-                    uint32_t avg_b = sum_b / count;
-                    uint32_t avg_a = sum_a / count;
-                    temp[row * rw + col] = (avg_r << 24) | (avg_g << 16) | (avg_b << 8) | avg_a;
+                    temp[row * rw + col] = radiant_blur_average(
+                        sum_r, sum_g, sum_b, sum_a, count);
                 } else {
                     temp[row * rw + col] = 0;
                 }
@@ -717,19 +698,13 @@ void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, in
                 int add_x = rx + col + box_r + 1;
 
                 if (remove_x >= rx && remove_x < rx + rw) {
-                    uint32_t p = src_row[remove_x];
-                    sum_r -= (p >> 24) & 0xFF;
-                    sum_g -= (p >> 16) & 0xFF;
-                    sum_b -= (p >> 8) & 0xFF;
-                    sum_a -= p & 0xFF;
+                    radiant_blur_adjust(src_row[remove_x], false,
+                        &sum_r, &sum_g, &sum_b, &sum_a);
                     count--;
                 }
                 if (add_x >= rx && add_x < rx + rw) {
-                    uint32_t p = src_row[add_x];
-                    sum_r += (p >> 24) & 0xFF;
-                    sum_g += (p >> 16) & 0xFF;
-                    sum_b += (p >> 8) & 0xFF;
-                    sum_a += p & 0xFF;
+                    radiant_blur_adjust(src_row[add_x], true,
+                        &sum_r, &sum_g, &sum_b, &sum_a);
                     count++;
                 }
             }
@@ -744,41 +719,29 @@ void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, in
             for (int k = -box_r; k <= box_r; k++) {
                 int tr = 0 + k;
                 if (tr >= 0 && tr < rh) {
-                    uint32_t p = temp[tr * rw + col];
-                    sum_r += (p >> 24) & 0xFF;
-                    sum_g += (p >> 16) & 0xFF;
-                    sum_b += (p >> 8) & 0xFF;
-                    sum_a += p & 0xFF;
+                    radiant_blur_adjust(temp[tr * rw + col], true,
+                        &sum_r, &sum_g, &sum_b, &sum_a);
                     count++;
                 }
             }
 
             for (int row = 0; row < rh; row++) {
                 if (count > 0) {
-                    uint32_t avg_r = sum_r / count;
-                    uint32_t avg_g = sum_g / count;
-                    uint32_t avg_b = sum_b / count;
-                    uint32_t avg_a = sum_a / count;
-                    pixels[(ry + row) * stride + (rx + col)] = (avg_r << 24) | (avg_g << 16) | (avg_b << 8) | avg_a;
+                    pixels[(ry + row) * stride + (rx + col)] = radiant_blur_average(
+                        sum_r, sum_g, sum_b, sum_a, count);
                 }
 
                 int remove_r = row - box_r;
                 int add_r = row + box_r + 1;
 
                 if (remove_r >= 0 && remove_r < rh) {
-                    uint32_t p = temp[remove_r * rw + col];
-                    sum_r -= (p >> 24) & 0xFF;
-                    sum_g -= (p >> 16) & 0xFF;
-                    sum_b -= (p >> 8) & 0xFF;
-                    sum_a -= p & 0xFF;
+                    radiant_blur_adjust(temp[remove_r * rw + col], false,
+                        &sum_r, &sum_g, &sum_b, &sum_a);
                     count--;
                 }
                 if (add_r >= 0 && add_r < rh) {
-                    uint32_t p = temp[add_r * rw + col];
-                    sum_r += (p >> 24) & 0xFF;
-                    sum_g += (p >> 16) & 0xFF;
-                    sum_b += (p >> 8) & 0xFF;
-                    sum_a += p & 0xFF;
+                    radiant_blur_adjust(temp[add_r * rw + col], true,
+                        &sum_r, &sum_g, &sum_b, &sum_a);
                     count++;
                 }
             }

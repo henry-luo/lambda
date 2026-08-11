@@ -33,17 +33,7 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
     }
 
     if (rule_height <= 0) {
-        View* child = static_cast<View*>(block->first_child);
-        float max_bottom = 0;
-        while (child) {
-            if (child->is_element()) {
-                ViewBlock* child_block = lam::view_require_block(child);
-                float child_bottom = child_block->y + child_block->height;
-                if (child_bottom > max_bottom) max_bottom = child_bottom;
-            }
-            child = child->next();
-        }
-        rule_height = max_bottom;
+        rule_height = layout_view_children_bottom(block, false);
         log_debug("[MULTICOL] Rule height computed from children: %.1f", rule_height);
     }
 

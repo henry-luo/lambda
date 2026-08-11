@@ -693,6 +693,19 @@ typedef struct Corner {
     bool tl_percent_y, tr_percent_y, br_percent_y, bl_percent_y;  // true if vertical radius is a percentage (0-100)
 } Corner;
 
+inline Corner radiant_corner_scaled(const Corner* radius, float scale) {
+    Corner out = *radius;
+    out.top_left *= scale;
+    out.top_right *= scale;
+    out.bottom_right *= scale;
+    out.bottom_left *= scale;
+    out.top_left_y *= scale;
+    out.top_right_y *= scale;
+    out.bottom_right_y *= scale;
+    out.bottom_left_y *= scale;
+    return out;
+}
+
 // Gradient types for CSS background and border-image gradients
 typedef enum {
     GRADIENT_NONE = 0,
@@ -1267,33 +1280,12 @@ typedef struct MarkerProp {
  * is resolved, and laid out as part of normal block layout flow.
  */
 
-// Content value types for pseudo-elements (CSS 2.1 Section 12.2)
-enum ContentType {
-    CONTENT_TYPE_NONE = 0,      // no content
-    CONTENT_TYPE_STRING = 1,     // string literal
-    CONTENT_TYPE_URI = 2,        // url()
-    CONTENT_TYPE_COUNTER = 3,    // counter()
-    CONTENT_TYPE_COUNTERS = 4,   // counters()
-    CONTENT_TYPE_ATTR = 5,       // attr()
-    CONTENT_TYPE_OPEN_QUOTE = 6,
-    CONTENT_TYPE_CLOSE_QUOTE = 7
-};
-
 // tier-2: view-pool, rebuilt each relayout
 typedef struct PseudoContentProp {
     DomElement* before;    // ::before pseudo-element (NULL if none)
     DomElement* after;     // ::after pseudo-element (NULL if none)
     DomElement* marker;    // ::marker pseudo-element (NULL if none)
 
-    // Content value storage for generation
-    char* before_content;         // Parsed content string/template (or counter name for counters)
-    char* after_content;
-    char* before_separator;       // Separator for counters() function
-    char* after_separator;
-    uint32_t before_counter_style;  // CSS enum value for counter style
-    uint32_t after_counter_style;
-    uint8_t before_content_type;  // ContentType enum
-    uint8_t after_content_type;
     bool before_generated;         // True if before element created
     bool after_generated;          // True if after element created
     bool marker_generated;         // True if marker element created
@@ -1634,6 +1626,16 @@ typedef struct ViewTable : ViewBlock {
     // Usage: for (auto row = table->first_row(); row; row = table->next_row(row))
     ViewTableRow* next_row(ViewTableRow* current);
 
+    // Table traversal belongs to the table view because anonymous wrappers and
+    // direct-child rows are part of the table's structural contract.
+    template <typename Fn> void each_row(Fn fn);
+    template <typename Fn> void each_cell(Fn fn);
+    template <typename Fn> void each_direct_block(Fn fn);
+    template <typename Fn> void each_row_group(Fn fn);
+    template <typename Fn> void each_body_row(Fn fn);
+    template <typename Fn> void each_column_source(Fn fn);
+    template <typename Predicate> ViewTableCell* find_cell(Predicate predicate);
+
     // Get first cell when table acts as its own row (is_annoy_tr)
     // Returns nullptr if table doesn't act as a row
     ViewTableCell* first_direct_cell();
@@ -1668,6 +1670,8 @@ typedef struct ViewTableRowGroup : ViewBlock {
 
     // Get next row in this group
     ViewTableRow* next_row(ViewTableRow* current);
+
+    template <typename Fn> void each_row_with_block(Fn fn);
 } ViewTableRowGroup;
 
 // tier-2: view-pool, rebuilt each relayout
@@ -1679,6 +1683,8 @@ typedef struct ViewTableRow : ViewBlock {
 
     // Get next cell in this row
     ViewTableCell* next_cell(ViewTableCell* current);
+
+    template <typename Fn> void each_cell(Fn fn);
 
     // Get parent row group (or table if row is direct child)
     ViewBlock* parent_row_group();
@@ -1741,6 +1747,86 @@ struct TableCellProp {
 typedef struct ViewTableCell : ViewBlock {
     TableCellProp* cell() const { return role_kind() == ROLE_CELL ? td : nullptr; }
 } ViewTableCell;
+
+template <typename Fn>
+inline void ViewTable::each_row(Fn fn) {
+    for (ViewTableRow* row = first_row(); row; row = next_row(row)) fn(row);
+}
+
+template <typename Fn>
+inline void ViewTableRowGroup::each_row_with_block(Fn fn) {
+    for (ViewTableRow* row = first_row(); row; row = next_row(row)) {
+        fn(row, static_cast<ViewBlock*>(row));
+    }
+}
+
+template <typename Fn>
+inline void ViewTableRow::each_cell(Fn fn) {
+    for (ViewTableCell* cell = first_cell(); cell; cell = next_cell(cell)) fn(cell);
+}
+
+template <typename Fn>
+inline void ViewTable::each_cell(Fn fn) {
+    each_row([&](ViewTableRow* row) {
+        row->each_cell([&](ViewTableCell* cell) { fn(row, cell); });
+    });
+}
+
+template <typename Fn>
+inline void ViewTable::each_direct_block(Fn fn) {
+    for (View* child = static_cast<View*>(first_child); child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (child->is_block()) fn(static_cast<ViewBlock*>(child));
+    }
+}
+
+template <typename Fn>
+inline void ViewTable::each_row_group(Fn fn) {
+    each_direct_block([&](ViewBlock* child) {
+        if (child->view_type != RDT_VIEW_TABLE_ROW_GROUP) return;
+        fn(static_cast<ViewTableRowGroup*>(child), child);
+    });
+}
+
+template <typename Fn>
+inline void ViewTable::each_body_row(Fn fn) {
+    each_row_group([&](ViewTableRowGroup* group, ViewBlock*) {
+        if (group->get_section_type() != TABLE_SECTION_TBODY) return;
+        group->each_row_with_block([&](ViewTableRow* row, ViewBlock*) { fn(group, row); });
+    });
+}
+
+template <typename Fn>
+inline void radiant_each_table_colgroup_column(ViewElement* colgroup, Fn fn) {
+    if (!colgroup) return;
+    for (View* child = static_cast<View*>(colgroup->first_child); child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (child->view_type == RDT_VIEW_TABLE_COLUMN) fn(static_cast<ViewElement*>(child));
+    }
+}
+
+template <typename Fn>
+inline void ViewTable::each_column_source(Fn fn) {
+    for (View* child = static_cast<View*>(first_child); child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP ||
+            child->view_type == RDT_VIEW_TABLE_COLUMN) {
+            fn(static_cast<ViewElement*>(child));
+        }
+    }
+}
+
+template <typename Predicate>
+inline ViewTableCell* ViewTable::find_cell(Predicate predicate) {
+    ViewTableCell* result = nullptr;
+    each_row([&](ViewTableRow* row) {
+        if (result) return;
+        row->each_cell([&](ViewTableCell* cell) {
+            if (!result && predicate(row, cell)) result = cell;
+        });
+    });
+    return result;
+}
 
 // Direct fi/gi/tb/td/form reads outside these tag-checking accessors are invalid;
 // parent-item role and the element's own role occupy separate tagged unions.
@@ -2032,6 +2118,8 @@ struct CssStylesheet;
 
 // Parse and register @font-face rules from a CSS rule node
 void parse_font_face_rule(struct LayoutContext* lycon, void* rule);
+
+bool radiant_is_supported_web_font_source(const char* url, const char* format);
 
 // Register a font face descriptor with UiContext (and bridge to unified FontContext)
 void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor);

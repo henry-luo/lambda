@@ -21,19 +21,6 @@
 // Static helpers: extract counter property values from element CSS
 // ============================================================================
 
-static bool marker_image_orientation_uses_from_image(DomElement* element) {
-    for (DomElement* cur = element; cur; cur = cur->parent_element()) {
-        CssDeclaration* decl = dom_element_get_specified_value(cur, CSS_PROPERTY_IMAGE_ORIENTATION);
-        if (!decl || !decl->value) continue;
-        if (decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-            decl->value->data.keyword == CSS_VALUE_NONE) {
-            return false;
-        }
-        return true;
-    }
-    return true;
-}
-
 static const char* counter_name_from_css_value(CssValue* item) {
     if (!item) return nullptr;
     if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
@@ -472,7 +459,7 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     // For text markers, measure actual text width; for bullets, use fixed bullet size + padding
     if (marker_prop->loaded_image) {
         ImageSurface* img = marker_prop->loaded_image;
-        bool from_image_orientation = marker_image_orientation_uses_from_image(parent_elem);
+        bool from_image_orientation = layout_image_orientation_uses_from_image(parent_elem);
         float image_width = (from_image_orientation || img->encoded_width <= 0) ?
             (float)img->width : (float)img->encoded_width;
         float image_height = (from_image_orientation || img->encoded_height <= 0) ?

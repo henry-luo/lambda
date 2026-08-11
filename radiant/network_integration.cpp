@@ -1,4 +1,5 @@
 #include "network_integration.h"
+#include "view.hpp"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/network_thread_pool.h"
 #include "../lambda/network/enhanced_file_cache.h"
@@ -10,38 +11,7 @@
 #include "../lib/mem.h"
 #include "../lib/time_util.h"
 #include "../lambda/input/css/css_font_face.hpp"
-#include <strings.h>
 #include <time.h>
-
-static bool is_supported_web_font_source(const char* url, const char* format) {
-    if (format && *format) {
-        if (strcasecmp(format, "woff2") == 0 ||
-            strcasecmp(format, "woff") == 0 ||
-            strcasecmp(format, "truetype") == 0 ||
-            strcasecmp(format, "opentype") == 0 ||
-            strcasecmp(format, "ttf") == 0 ||
-            strcasecmp(format, "otf") == 0) {
-            return true;
-        }
-        return false;
-    }
-
-    if (!url) return false;
-    const char* clean_end = url + strlen(url);
-    const char* query = strchr(url, '?');
-    const char* fragment = strchr(url, '#');
-    if (query && query < clean_end) clean_end = query;
-    if (fragment && fragment < clean_end) clean_end = fragment;
-
-    size_t len = (size_t)(clean_end - url);
-    // Browser font selection skips fallback formats this loader cannot decode;
-    // downloading them first turns ordinary legacy src lists into hard 404s.
-    return (len >= 6 && strncasecmp(clean_end - 6, ".woff2", 6) == 0) ||
-           (len >= 5 && strncasecmp(clean_end - 5, ".woff", 5) == 0) ||
-           (len >= 4 && strncasecmp(clean_end - 4, ".ttf", 4) == 0) ||
-           (len >= 4 && strncasecmp(clean_end - 4, ".otf", 4) == 0) ||
-           (len >= 4 && strncasecmp(clean_end - 4, ".ttc", 4) == 0);
-}
 
 static bool is_http_resource_url(const char* url) {
     return url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
@@ -342,7 +312,8 @@ static void discover_document_font_resources(DomDocument* doc) {
             for (int u = 0; u < faces[f]->src_count; u++) {
                 const char* font_url = faces[f]->src_urls[u].url;
                 if (!font_url) continue;
-                if (!is_supported_web_font_source(font_url, faces[f]->src_urls[u].format)) {
+                if (!radiant_is_supported_web_font_source(
+                        font_url, faces[f]->src_urls[u].format)) {
                     log_debug("network: skipping unsupported @font-face source: %s (format: %s)",
                               font_url, faces[f]->src_urls[u].format ? faces[f]->src_urls[u].format : "?");
                     continue;

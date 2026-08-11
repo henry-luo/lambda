@@ -1015,19 +1015,8 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
 
     // Ensure minimum rule height - compute from children if needed
     if (rule_height <= 0) {
-        View* child = static_cast<View*>(block->first_child);
-        float max_bottom = 0;
-        while (child) {
-            if (child->is_block()) {
-                // multicol rule geometry only uses block boxes; inline element
-                // children can appear here before inline layout wraps them.
-                ViewBlock* child_block = lam::view_require_block(child);
-                float child_bottom = child_block->y + child_block->height;
-                if (child_bottom > max_bottom) max_bottom = child_bottom;
-            }
-            child = child->next();
-        }
-        rule_height = max_bottom;
+        // SVG rule geometry only uses block boxes before inline wrapping.
+        rule_height = layout_view_children_bottom(block, true);
     }
 
     if (rule_height <= 0) return;
@@ -1617,17 +1606,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     trace.paint_ir_unsupported = ctx.paint_svg_stats.unsupported_count;
     const RenderExportTargetCaps* caps =
         render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG);
-    if (caps) {
-        trace.backend_vector_paths = caps->paths;
-        trace.backend_gradients = caps->gradients;
-        trace.backend_nested_clips = caps->clips;
-        trace.backend_picture_svg = true;
-        trace.backend_opacity_group = caps->opacity_groups;
-        trace.backend_blend_modes = caps->blend_modes;
-        trace.backend_gaussian_blur = caps->filters;
-        trace.backend_color_matrix_filters = caps->filters;
-        trace.backend_native_text_runs = caps->glyph_runs;
-    }
+    radiant_apply_export_caps(&trace, caps);
     render_profiler_emit_path_trace(nullptr, uicon, state, &trace);
 
     // Extract the final SVG string

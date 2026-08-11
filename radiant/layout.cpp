@@ -819,6 +819,69 @@ CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
     return declaration->value->data.keyword;
 }
 
+LayoutBorderSpacingValue layout_resolve_border_spacing_value(
+        LayoutContext* lycon, const CssValue* value) {
+    LayoutBorderSpacingValue result = {0.0f, 0.0f, false, false};
+    if (!value) return result;
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        result.horizontal = result.vertical = resolve_length_value(
+            lycon, CSS_PROPERTY_BORDER_SPACING, value);
+        result.resolved = true;
+        return result;
+    }
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+        const CssValue* horizontal = value->data.list.values[0];
+        const CssValue* vertical = value->data.list.count > 1
+            ? value->data.list.values[1] : horizontal;
+        if (!horizontal) return result;
+        result.horizontal = resolve_length_value(
+            lycon, CSS_PROPERTY_BORDER_SPACING, horizontal);
+        result.vertical = vertical
+            ? resolve_length_value(lycon, CSS_PROPERTY_BORDER_SPACING, vertical)
+            : result.horizontal;
+        result.resolved = true;
+        return result;
+    }
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        result.horizontal = result.vertical = (float)value->data.number.value;
+        result.resolved = true;
+        return result;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) {
+            result.keep_inheriting = true;
+        } else if (keyword == CSS_VALUE_INITIAL) {
+            result.resolved = true;
+        }
+    }
+    return result;
+}
+
+bool layout_image_orientation_uses_from_image(DomElement* element) {
+    for (DomElement* current = element; current; current = current->parent_element()) {
+        CssDeclaration* declaration = dom_element_get_specified_value(
+            current, CSS_PROPERTY_IMAGE_ORIENTATION);
+        if (!declaration || !declaration->value) continue;
+        return !(declaration->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                 declaration->value->data.keyword == CSS_VALUE_NONE);
+    }
+    return true;
+}
+
+float layout_view_children_bottom(ViewBlock* block, bool block_only) {
+    if (!block) return 0.0f;
+    float bottom = 0.0f;
+    for (View* child = static_cast<View*>(block->first_child);
+         child; child = child->next()) {
+        if (!(block_only ? child->is_block() : child->is_element())) continue;
+        ViewBlock* child_block = lam::view_require_block(child);
+        float child_bottom = child_block->y + child_block->height;
+        if (child_bottom > bottom) bottom = child_bottom;
+    }
+    return bottom;
+}
+
 static void layout_apply_flex_declared_keyword(FlexDeclaredStyleInfo* info,
                                                 CssEnum keyword) {
     if (!info) return;
@@ -1281,38 +1344,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                     dom_elem->ensure_font(lycon);
                 }
                 if (dom_elem->font) {
-                    if (!dom_elem->fontp()->family)
-                        radiant_retain_font_family(dom_elem->font, lam::PoolPtr<char>(lycon->font.style->family));
-                    if (dom_elem->fontp()->font_size <= 0)
-                        dom_elem->font->font_size = lycon->font.style->font_size;
-                    if (dom_elem->fontp()->font_style == 0 && lycon->font.style->font_style != 0)
-                        dom_elem->font->font_style = lycon->font.style->font_style;
-                    if (dom_elem->fontp()->font_weight == 0)
-                        dom_elem->font->font_weight = lycon->font.style->font_weight;
-                    if (dom_elem->fontp()->font_weight_numeric == 0 && lycon->font.style->font_weight_numeric != 0)
-                        dom_elem->font->font_weight_numeric = lycon->font.style->font_weight_numeric;
-                    if (dom_elem->fontp()->font_variant == 0)
-                        dom_elem->font->font_variant = lycon->font.style->font_variant;
-                    if (dom_elem->fontp()->text_deco == 0)
-                        dom_elem->font->text_deco = lycon->font.style->text_deco;
-                    if (dom_elem->fontp()->text_deco_color.a == 0 && lycon->font.style->text_deco_color.a > 0)
-                        dom_elem->font->text_deco_color = lycon->font.style->text_deco_color;
-                    if (dom_elem->fontp()->text_deco_style == 0 && lycon->font.style->text_deco_style != 0)
-                        dom_elem->font->text_deco_style = lycon->font.style->text_deco_style;
-                    if (dom_elem->fontp()->text_deco_thickness == 0 && lycon->font.style->text_deco_thickness > 0)
-                        dom_elem->font->text_deco_thickness = lycon->font.style->text_deco_thickness;
-                    if (dom_elem->fontp()->text_underline_offset == 0 && lycon->font.style->text_underline_offset != 0)
-                        dom_elem->font->text_underline_offset = lycon->font.style->text_underline_offset;
-                    if (dom_elem->fontp()->letter_spacing == 0) {
-                        dom_elem->font->letter_spacing = lycon->font.style->letter_spacing;
-                        dom_elem->font->letter_spacing_percent = lycon->font.style->letter_spacing_percent;
-                        dom_elem->font->letter_spacing_is_percent = lycon->font.style->letter_spacing_is_percent;
-                    }
-                    if (dom_elem->fontp()->word_spacing == 0) {
-                        dom_elem->font->word_spacing = lycon->font.style->word_spacing;
-                        dom_elem->font->word_spacing_percent = lycon->font.style->word_spacing_percent;
-                        dom_elem->font->word_spacing_is_percent = lycon->font.style->word_spacing_is_percent;
-                    }
+                    radiant_fill_missing_font_values(
+                        dom_elem->font, lycon->font.style, false);
                 }
             }
         }
@@ -2228,22 +2261,21 @@ static bool shift_text_current_line_rects(float offset, int line_number, ViewTex
 
 static bool shift_span_current_line_rects(float offset, int line_number, ViewSpan* span) {
     if (layout_view_is_out_of_flow(static_cast<View*>(span))) return false;
-    bool shifted = false;
-    View* child = static_cast<View*>(span->first_child);
-    while (child) {
-        if (layout_view_is_out_of_flow(child)) {
-            child = child->next();
-            continue;
-        }
-        if (child->view_type == RDT_VIEW_TEXT) {
-            shifted |= shift_text_current_line_rects(
-                offset, line_number, lam::view_require_text(child));
-        } else if (child->view_type == RDT_VIEW_INLINE) {
-            shifted |= shift_span_current_line_rects(
-                offset, line_number, lam::view_require<RDT_VIEW_INLINE>(child));
-        }
-        child = child->next();
-    }
+    auto shift_view = [&](View* view) -> bool {
+        return view->view_type == RDT_VIEW_TEXT &&
+            shift_text_current_line_rects(
+                offset, line_number, lam::view_require_text(view));
+    };
+    auto finish_span = [&](View* view) {
+        if (view->view_type != RDT_VIEW_INLINE) return;
+        ViewSpan* changed_span = lam::view_require<RDT_VIEW_INLINE>(view);
+        FontHandle* fallback_fh = changed_span->font
+            ? changed_span->fontp()->font_handle : nullptr;
+        recompute_span_bounding_box_after_line_layout(
+            changed_span, inline_span_has_multiple_line_fragments(changed_span), fallback_fh);
+    };
+    bool shifted = layout_walk_inline_views(
+        static_cast<View*>(span->first_child), shift_view, finish_span);
     if (shifted) {
         FontHandle* fallback_fh = span->font ? span->fontp()->font_handle : nullptr;
         // A multi-line inline exposes the union of its shifted line fragments,
@@ -2308,20 +2340,18 @@ static void align_wrapped_continuation(LayoutContext* lycon, float offset, View*
 
 static void find_text_line_membership(View* view, int line_number,
                                       bool* has_prior, bool* has_current) {
-    if (!view || (*has_prior && *has_current)) return;
-    if (view->view_type == RDT_VIEW_TEXT) {
-        ViewText* text = lam::view_require_text(view);
+    if (!view || !has_prior || !has_current) return;
+    auto inspect_text = [&](View* candidate) -> bool {
+        if (candidate->view_type != RDT_VIEW_TEXT) return false;
+        ViewText* text = lam::view_require_text(candidate);
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (rect->line_number < line_number) *has_prior = true;
             else if (rect->line_number == line_number) *has_current = true;
         }
-        return;
-    }
-    if (view->view_type != RDT_VIEW_INLINE) return;
-    ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-    for (View* child = span->first_child; child; child = child->next()) {
-        find_text_line_membership(child, line_number, has_prior, has_current);
-    }
+        return *has_prior && *has_current;
+    };
+    auto no_finish = [](View*) {};
+    layout_walk_inline_views(view, inspect_text, no_finish);
 }
 
 static bool view_is_wrapped_continuation(View* view, int line_number) {
@@ -2459,12 +2489,8 @@ void place_rtl_initial_letter_line(LayoutContext* lycon) {
 }
 
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
-    while (view) {
+    auto align_view = [&](View* view) -> bool {
         log_debug("view line align: %d", view->view_type);
-        if (layout_view_is_out_of_flow(view)) {
-            view = view->next();
-            continue;
-        }
         view->x += offset;
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
@@ -2477,21 +2503,19 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
         else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
             shift_span_line_fragment_unions(sp, offset);
-            if (sp->first_child) view_line_align(lycon, offset, sp->first_child);
         }
-        view = view->next();
-    }
+        return false;
+    };
+    auto no_finish = [](View*) {};
+    (void)lycon;
+    layout_walk_inline_views(view, align_view, no_finish);
 }
 
 // Count justification opportunities in a text view for justify alignment.
 // CSS Text 3 §7.3: counts word spaces AND CJK inter-character gaps.
 static int count_spaces_in_view(LayoutContext* lycon, View* view, int line_number) {
     int count = 0;
-    while (view) {
-        if (layout_view_is_out_of_flow(view)) {
-            view = view->next();
-            continue;
-        }
+    auto count_view = [&](View* view) -> bool {
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
             TextRect* rect = text->rect;
@@ -2505,14 +2529,11 @@ static int count_spaces_in_view(LayoutContext* lycon, View* view, int line_numbe
                 rect = rect->next;
             }
         }
-        else if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
-            if (sp->first_child) {
-                count += count_spaces_in_view(lycon, sp->first_child, line_number);
-            }
-        }
-        view = view->next();
-    }
+        return false;
+    };
+    auto no_finish = [](View*) {};
+    (void)lycon;
+    layout_walk_inline_views(view, count_view, no_finish);
     return count;
 }
 
@@ -2522,11 +2543,12 @@ static int count_spaces_in_view(LayoutContext* lycon, View* view, int line_numbe
 static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, View* view,
                                     int line_number, float cumulative_offset,
                                     View** last_view, TextRect** last_rect) {
-    while (view) {
-        if (layout_view_is_out_of_flow(view)) {
-            view = view->next();
-            continue;
-        }
+    struct JustifyState {
+        float offset;
+        View** last_view;
+        TextRect** last_rect;
+    } state = {cumulative_offset, last_view, last_rect};
+    auto justify_view = [&](View* view) -> bool {
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
             TextRect* rect = text->rect;
@@ -2535,9 +2557,9 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
                 // Only mutate this line; y-based filtering also captures all
                 // later fragments of a wrapped text node.
                 if (rect->line_number == line_number) {
-                    rect->x += cumulative_offset;
-                    *last_rect = rect;
-                    *last_view = view;
+                    rect->x += state.offset;
+                    *state.last_rect = rect;
+                    *state.last_view = view;
                     any_on_line = true;
 
                     // count justification opportunities (spaces + CJK inter-char gaps)
@@ -2547,7 +2569,7 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
                     if (gap_count > 0) {
                         float added_space = gap_count * space_per_gap;
                         rect->width += added_space;
-                        cumulative_offset += added_space;
+                        state.offset += added_space;
                     }
                 }
                 rect = rect->next;
@@ -2557,25 +2579,19 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
             // shift inline span's x by accumulated offset (it sits on the current line)
-            view->x += cumulative_offset;
-            *last_view = view;
-            ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
-            if (sp->first_child) {
-                // recurse into inline children, propagating cumulative_offset so
-                // child rects get shifted along with the parent span
-                cumulative_offset = view_line_justify_walk(lycon, space_per_gap,
-                    sp->first_child, line_number, cumulative_offset, last_view, last_rect);
-            }
+            view->x += state.offset;
+            *state.last_view = view;
         }
         else {
-            // other view types on the current line: shift by cumulative_offset
-            view->x += cumulative_offset;
-            *last_view = view;
+            view->x += state.offset;
+            *state.last_view = view;
         }
-
-        view = view->next();
-    }
-    return cumulative_offset;
+        return false;
+    };
+    auto no_finish = [](View*) {};
+    (void)lycon;
+    layout_walk_inline_views(view, justify_view, no_finish);
+    return state.offset;
 }
 
 static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* view) {
@@ -3056,13 +3072,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                           node->node_name(), display.outer, float_value);
                 display.outer = CSS_VALUE_BLOCK;
                 // Keep inner display but treat as flow for layout purposes if it's a table type
-                if (display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
-                    display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
-                    display.inner == CSS_VALUE_TABLE_FOOTER_GROUP ||
-                    display.inner == CSS_VALUE_TABLE_ROW ||
-                    display.inner == CSS_VALUE_TABLE_COLUMN ||
-                    display.inner == CSS_VALUE_TABLE_COLUMN_GROUP ||
-                    display.inner == CSS_VALUE_TABLE_CAPTION) {
+                if (is_table_internal_display(display.inner)) {
                     display.inner = CSS_VALUE_FLOW;
                 }
             }

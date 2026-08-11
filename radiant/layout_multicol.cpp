@@ -774,17 +774,14 @@ static float multicol_line_advance_from_items(InlineFragmentItem* items, int ite
 
 template <typename Callback>
 static void multicol_for_each_inline_leaf(View* view, Callback&& callback) {
-    while (view) {
-        if (view->view_type == RDT_VIEW_TEXT || view->view_type == RDT_VIEW_BR) {
-            callback(view);
-        } else if (view->view_type == RDT_VIEW_INLINE) {
-            // Inline descendants share the containing block's line coordinate
-            // space and must remain in source order with their sibling text.
-            multicol_for_each_inline_leaf(
-                lam::view_require<RDT_VIEW_INLINE>(view)->first_placed_child(), callback);
+    auto visit = [&](View* candidate) -> bool {
+        if (candidate->view_type == RDT_VIEW_TEXT || candidate->view_type == RDT_VIEW_BR) {
+            callback(candidate);
         }
-        view = view->next();
-    }
+        return false;
+    };
+    auto no_finish = [](View*) {};
+    layout_walk_inline_views(view, visit, no_finish, false);
 }
 
 static bool multicol_inline_line_metrics(

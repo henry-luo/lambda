@@ -185,18 +185,11 @@ static bool css_content_replacement_image(const CssValue* value, CssContentImage
 }
 
 static bool css_content_value_is_image_set(const CssValue* value) {
-    if (!value) return false;
-    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-        (css_function_name_is(value->data.function, "image-set") ||
-         css_function_name_is(value->data.function, "-webkit-image-set"))) {
-        return true;
-    }
-    if (value->type == CSS_VALUE_TYPE_LIST) {
-        for (int i = 0; i < value->data.list.count; i++) {
-            if (css_content_value_is_image_set(value->data.list.values[i])) return true;
-        }
-    }
-    return false;
+    return layout_css_value_any(value, [](const CssValue* item) {
+        return item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function &&
+            (css_function_name_is(item->data.function, "image-set") ||
+             css_function_name_is(item->data.function, "-webkit-image-set"));
+    });
 }
 
 static bool block_has_auto_content_image_set(ViewBlock* block) {
@@ -266,19 +259,6 @@ static int collect_object_view_box_args(CssFunction* func, CssValue** args, int 
         }
     }
     return count;
-}
-
-static bool image_orientation_uses_from_image(DomElement* element) {
-    for (DomElement* cur = element; cur; cur = cur->parent_element()) {
-        CssDeclaration* decl = dom_element_get_specified_value(cur, CSS_PROPERTY_IMAGE_ORIENTATION);
-        if (!decl || !decl->value) continue;
-        if (decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-            decl->value->data.keyword == CSS_VALUE_NONE) {
-            return false;
-        }
-        return true;
-    }
-    return true;
 }
 
 static bool image_is_generated_content_child(ViewBlock* block) {
@@ -1459,8 +1439,6 @@ static void shift_descendant_float_boxes(BlockContext* bfc, ViewBlock* ancestor,
     block_context_recompute_lowest_float_bottom(bfc);
 }
 
-// DEBUG: Global for tracking table height between calls
-// WORKAROUND: Table height gets corrupted between layout_block_content return and caller
 static bool radiant_verify_incremental_layout_enabled() {
     static int cached = -1;
     if (cached < 0) {
@@ -1488,7 +1466,6 @@ static void verify_incremental_layout_skip(LayoutContext* lycon, DomNode* child,
     }
 }
 
-// External timing accumulators from layout.cpp
 extern double g_table_layout_time;
 extern double g_flex_layout_time;
 extern double g_grid_layout_time;
@@ -1496,7 +1473,6 @@ extern double g_block_layout_time;
 extern int64_t g_block_layout_count;
 
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
-// void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);  // Removed: lexbor dependency
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
@@ -1504,9 +1480,7 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block);
 void layout_form_control(LayoutContext* lycon, ViewBlock* block);
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 
-// CSS 2.1 Section 17.2.1: Wrap orphaned table-internal children in anonymous table structures
 bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent);
-bool is_table_internal_display(CssEnum display);
 
 
 // Forward declaration for self-collapsing block check (used by compute_collapsible_bottom_margin)
@@ -1514,30 +1488,12 @@ static bool is_block_self_collapsing(ViewBlock* vb);
 
 
 
-// ============================================================================
-// Pseudo-element (::before/::after) Layout Support
-// ============================================================================
-
-/**
- * Create a pseudo-element DomElement with a DomText child for the content
- *
- * @param lycon Layout context
- * @param parent The parent element
- * @param content The content string for the pseudo-element
- * @param is_before true for ::before, false for ::after
- * @return The created DomElement or NULL on failure
- */
 static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* parent,
                                           const char* content, bool is_before,
                                           FontProp* parent_font) {
-    // Allow empty content - pseudo-elements with display:block and clear:both still need to be created
     if (!lycon || !parent) return nullptr;
-    // Create the pseudo DomElement
-    // Per CSS spec: pseudo-element is child of defining element,
-    // text node is child of pseudo-element
     DomElement* pseudo_elem = DomElement::create(parent->doc, is_before ? "::before" : "::after", nullptr);
     if (!pseudo_elem) return nullptr;
-    // Pseudo-element is child of defining element
     pseudo_elem->parent = parent;
     pseudo_elem->first_child = nullptr;
     pseudo_elem->last_child = nullptr;
@@ -1551,7 +1507,6 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     // allocate a new FontProp via alloc_font_prop(), which properly copies from
     // lycon->font.style (the parent's computed font values).
     pseudo_elem->font = nullptr;
-    // Log that font will be allocated during style resolution
     log_debug("[PSEUDO FONT] %s font=nullptr (will be allocated during style resolution)",
               is_before ? "::before" : "::after");
     // DON'T copy bound - pseudo-element should have its own BoundaryProp
@@ -1560,11 +1515,8 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     // DON'T copy in_line - pseudo-element should have its own InlineProp
     // pseudo_elem->in_line = parent->in_line;  // BUG: causes shared opacity
     pseudo_elem->in_line = nullptr;  // Will be allocated when CSS properties are applied
-    // Get display value from pseudo-element's styles (before_styles or after_styles)
-    // Default to inline for pseudo-elements per CSS spec
     pseudo_elem->display.outer = CSS_VALUE_INLINE;
     pseudo_elem->display.inner = CSS_VALUE_FLOW;
-    // Check for explicit display in pseudo-element styles
     StyleTree* pseudo_styles = is_before ? parent->pseudo_style(PSEUDO_STYLE_BEFORE) : parent->pseudo_style(PSEUDO_STYLE_AFTER);
     if (pseudo_styles && pseudo_styles->tree) {
         AvlNode* display_node = avl_tree_search(pseudo_styles->tree, CSS_PROPERTY_DISPLAY);
@@ -1606,8 +1558,6 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     }
     bool materialized_children = has_counter_content ? false :
         pseudo_materialize_content_children(lycon, parent, pseudo_elem, is_before);
-    // Fallback for simple-content paths when no structured children were produced.
-    // Empty content pseudo-elements still participate in layout (e.g., clearfix).
     if (!materialized_children && content && *content) {
         log_info("%s [PSEUDO] Creating fallback text node for pseudo-element, content_len=%zu, first_byte=0x%02x", parent->source_loc(),
             strlen(content), (unsigned char)*content);
@@ -1651,45 +1601,28 @@ static const char* resolve_pseudo_generated_content(LayoutContext* lycon,
     return content;
 }
 
-/**
- * Allocate PseudoContentProp and create pseudo-elements if needed
- *
- * On first layout: creates pseudo-elements and inserts them into DOM tree
- * On reflow: reuses existing pseudo-elements (already in DOM tree)
- *
- * @param lycon Layout context
- * @param block The block element to check
- * @return PseudoContentProp pointer or NULL if no pseudo content
- */
 PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block) {
     if (!block || !block->is_element()) return nullptr;
     DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(block);
-    // Check if pseudo-elements already exist (reflow case)
-    // But if the pseudo was created by marker code, ::before/::after may still need creation
     if (block->pseudo && block->pseudo->before_generated && block->pseudo->after_generated) {
         log_debug("[PSEUDO] Reusing existing pseudo-elements for <%s>",
                   elem->tag_name ? elem->tag_name : "unknown");
         return block->pseudo;
     }
-    // Check if element has ::before or ::after content
     bool has_before = dom_element_has_before_content(elem);
     bool has_after = dom_element_has_after_content(elem);
     log_debug("[PSEUDO] Checking <%s>: has_before=%d, has_after=%d, before_styles=%p",
               elem->tag_name ? elem->tag_name : "?", has_before, has_after, (void*)elem->pseudo_style(PSEUDO_STYLE_BEFORE));
     if (!has_before && !has_after) return block->pseudo;  // Return existing (may have marker) or nullptr
-    // Reuse existing PseudoContentProp if already allocated (e.g., by marker creation code)
     PseudoContentProp* pseudo = block->pseudo;
     if (!pseudo) {
         pseudo = (PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp));
         if (!pseudo) return nullptr;
         memset(pseudo, 0, sizeof(PseudoContentProp));
     }
-    // Create ::before pseudo-element if needed and not already created
-    // Note: Even empty content "" creates a pseudo-element for layout purposes (e.g., clearfix)
     if (has_before && !pseudo->before_generated) {
         log_info("%s [PSEUDO] Getting before content for <%s>", block->source_loc(), elem->tag_name ? elem->tag_name : "?");
         const char* before_content = resolve_pseudo_generated_content(lycon, elem, true);
-        // Debug: log what font we're passing to pseudo-element
         log_debug("%s [PSEUDO ALLOC] block->font=%p, elem->font=%p", block->source_loc(), (void*)block->font, (void*)elem->font);
         if (block->font && block->fontp()->family) {
             log_debug("%s [PSEUDO ALLOC] Passing font '%s' (size %.1f) from ViewBlock", block->source_loc(),
@@ -1699,18 +1632,13 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
         } else {
             log_debug("%s [PSEUDO ALLOC] block->font is NULL", block->source_loc());
         }
-        // Create pseudo-element even for empty content if display/clear properties are set
-        // Pass block->font (from ViewBlock) for accurate font-family inheritance
         pseudo->before = create_pseudo_element(lycon, elem, before_content ? before_content : "", true, block->font);
         pseudo->before_generated = true;
         log_debug("%s [PSEUDO] Created ::before for <%s> with content='%s'", block->source_loc(),
                   elem->tag_name ? elem->tag_name : "?", before_content ? before_content : "(empty)");
     }
-    // Create ::after pseudo-element if needed and not already created
-    // Note: Even empty content "" creates a pseudo-element for layout purposes
     if (has_after && !pseudo->after_generated) {
         const char* after_content = resolve_pseudo_generated_content(lycon, elem, false);
-        // Pass block->font (from ViewBlock) for accurate font-family inheritance
         pseudo->after = create_pseudo_element(lycon, elem, after_content ? after_content : "", false, block->font);
         pseudo->after_generated = true;
         log_debug("%s [PSEUDO] Created ::after for <%s> with content='%s'", block->source_loc(),
@@ -1719,15 +1647,6 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     return pseudo;
 }
 
-// ============================================================================
-// ::first-letter Pseudo-element Support (CSS 2.1 §5.12.2)
-// ============================================================================
-
-/**
- * Check if a Unicode codepoint is in the punctuation classes that should be
- * included in ::first-letter (CSS 2.1 §5.12.2):
- * Ps (open), Pe (close), Pi (initial quote), Pf (final quote), Po (other)
- */
 static bool is_first_letter_punctuation(utf8proc_int32_t codepoint) {
     utf8proc_category_t cat = utf8proc_category(codepoint);
     return cat == UTF8PROC_CATEGORY_PS ||  // open punctuation: ( [ {
@@ -1737,11 +1656,6 @@ static bool is_first_letter_punctuation(utf8proc_int32_t codepoint) {
            cat == UTF8PROC_CATEGORY_PO;    // other punctuation: ! @ # % & * , . / : ; ? \ etc.
 }
 
-/**
- * Find the byte length of the ::first-letter content in a UTF-8 string.
- * CSS 2.1 §5.12.2: first letter plus any preceding/following punctuation.
- * Returns 0 if no letter is found.
- */
 static int find_first_letter_boundary(const unsigned char* text, int text_len) {
     if (!text || text_len <= 0) return 0;
     const unsigned char* p = text;
@@ -1787,10 +1701,6 @@ static int find_first_letter_boundary(const unsigned char* text, int text_len) {
     return (int)(after_letter - content_start);
 }
 
-/**
- * Check if a text node's content is entirely whitespace.
- * Returns true for empty or whitespace-only content.
- */
 static bool is_text_all_whitespace(const unsigned char* data) {
     if (!data) return true;
     while (*data) {
@@ -1803,16 +1713,6 @@ static bool is_text_all_whitespace(const unsigned char* data) {
     return true;
 }
 
-/**
- * Find the first text node descendant of an element that contains letter content.
- * Walks depth-first, following inline elements.
- * Skips whitespace-only text nodes (CSS 2.1 §5.12.2: first-letter applies to
- * the first letter of the first formatted line, ignoring preceding whitespace).
- * Returns NULL if no text content is found.
- * Sets *suppressed = true if a replaced element or other non-text inline content
- * precedes the first text (CSS 2.1 §5.12.2: ::first-letter must not be created
- * if preceded by non-eligible content such as images on the first formatted line).
- */
 static DomText* find_first_text_node(DomNode* node, bool* suppressed) {
     if (!node) return nullptr;
     if (node->is_text()) {
@@ -1862,12 +1762,6 @@ static DomText* find_first_text_node(DomNode* node, bool* suppressed) {
     return nullptr;
 }
 
-/**
- * Create and insert a ::first-letter pseudo-element for a block element.
- * This extracts the first letter (+ punctuation) from the first text node,
- * wraps it in an inline pseudo-element with the first-letter styles,
- * and adjusts the original text node to skip those characters.
- */
 static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(block);
     if (!elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER)) return;
@@ -3233,7 +3127,7 @@ static bool block_has_vertical_flow_child(ViewBlock* parent) {
 static float layout_vertical_inline_gap_before(ViewBlock* child) {
     if (!child) return 0.0f;
     DomNode* previous = child->prev_sibling;
-    while (previous && !previous->view_type) previous = previous->prev_sibling;
+    previous = layout_previous_view_with_type(previous);
     if (!previous || previous->view_type != RDT_VIEW_TEXT) return 0.0f;
     ViewText* text = lam::view_require_text(static_cast<View*>(previous));
     float gap = 0.0f;
@@ -3927,7 +3821,7 @@ static bool vertical_break_anchor_x(View* view, float* anchor_x) {
         for (View* child = span->last_placed_child(); child; ) {
             if (vertical_break_anchor_x(child, anchor_x)) return true;
             DomNode* previous = child->prev_sibling;
-            while (previous && !previous->view_type) previous = previous->prev_sibling;
+            previous = layout_previous_view_with_type(previous);
             child = previous ? static_cast<View*>(previous) : nullptr;
         }
     }
@@ -3943,9 +3837,7 @@ void layout_normalize_vertical_breaks(ViewBlock* block) {
         ViewElement* child_view = lam::view_require_element(static_cast<View*>(child));
         if (child->tag() == MARKUP_NAME_BR && child_view->view_type) {
             DomNode* previous = child->prev_sibling;
-            while (previous && !previous->view_type) {
-                previous = previous->prev_sibling;
-            }
+            previous = layout_previous_view_with_type(previous);
             View* previous_view = previous ? static_cast<View*>(previous) : nullptr;
             float anchor_x = 0.0f;
             if (previous_view && vertical_break_anchor_x(previous_view, &anchor_x)) {
@@ -5087,109 +4979,12 @@ void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_befo
     }
 }
 
-/**
- * Generate pseudo-element content based on content property
- * CSS 2.1 Section 12.2
- */
-void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before) {
-    if (!block || !block->pseudo) return;
-    log_debug("[Pseudo-Generate] Called for %s, block=%p, pseudo=%p",
-              is_before ? "::before" : "::after", (void*)block, (void*)block->pseudo);
-    PseudoContentProp* pseudo = block->pseudo;
-    // Check if already generated
-    if ((is_before && pseudo->before_generated) || (!is_before && pseudo->after_generated)) {
-        return;
-    }
-    // Get content string and type
-    char* content = is_before ? pseudo->before_content : pseudo->after_content;
-    uint8_t content_type = is_before ? pseudo->before_content_type : pseudo->after_content_type;
-    // Skip if no content or content is none
-    if (content_type == CONTENT_TYPE_NONE || !content) {
-        return;
-    }
-    log_debug("[Pseudo-Element] Generating %s content, type=%d",
-              is_before ? "::before" : "::after", content_type);
-    // Cast block to DomElement to access DOM fields
-    DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(block);
-    // Create pseudo-element DomElement
-    DomElement* pseudo_elem = DomElement::create(parent_elem->doc,
-                                                  is_before ? "::before" : "::after",
-                                                  nullptr);
-    if (!pseudo_elem) {
-        log_error("[Pseudo-Element] Failed to create DomElement");
-        return;
-    }
-    // Set pseudo-element properties - tag_name already set by DomElement::create
-    pseudo_elem->parent = parent_elem;
-    // IMPORTANT: Do NOT share parent's FontProp pointer with pseudo-element!
-    // If we set pseudo_elem->font = parent_elem->font, then when the pseudo-element's
-    // font-size (e.g., 1.2em) is resolved, it would modify the shared FontProp,
-    // incorrectly changing the parent's font-size as well.
-    // Instead, leave pseudo_elem->font = nullptr so that style resolution will
-    // allocate a new FontProp via alloc_font_prop(), which properly copies from
-    // lycon->font.style (the parent's computed font values).
-    pseudo_elem->font = nullptr;
-    // DON'T copy in_line - pseudo-element should have its own InlineProp
-    // pseudo_elem->in_line = parent_elem->in_line;  // BUG: causes shared opacity
-    pseudo_elem->in_line = nullptr;  // Will be allocated when CSS properties are applied
-    // Log font inheritance for debugging
-    log_debug("[Pseudo-Element] font=nullptr for %s (will be allocated during style resolution)",
-              is_before ? "::before" : "::after");
-    // Copy pseudo-element-specific styles (::before or ::after styles)
-    dom_element_borrow_specified_style(
-        pseudo_elem, is_before ? parent_elem->pseudo_style(PSEUDO_STYLE_BEFORE)
-                               : parent_elem->pseudo_style(PSEUDO_STYLE_AFTER));
-    // Handle different content types
-    switch (content_type) {
-        case CONTENT_TYPE_COUNTER:
-        case CONTENT_TYPE_COUNTERS:
-            // Counter content already resolved to string by
-            // dom_element_get_pseudo_element_content_with_counters()
-            // in alloc_pseudo_content_prop(). Fall through to STRING handling.
-        case CONTENT_TYPE_ATTR:
-            // attr() content already resolved to string by the same path.
-            // Fall through to STRING handling.
-        case CONTENT_TYPE_STRING: {
-            size_t content_len = strlen(content);
-            DomText* text_node = DomText::create_copy(content, content_len, pseudo_elem);
-            if (text_node) {
-                pseudo_elem->first_child = text_node;
-                log_debug("[Pseudo-Element] Created text content: \"%s\"", content);
-            }
-            break;
-        }
-        case CONTENT_TYPE_URI:
-            // TODO: Implement image content (Phase 5)
-            log_debug("[Pseudo-Element] url() content not yet implemented");
-            break;
-        default:
-            log_debug("[Pseudo-Element] Unknown content type: %d", content_type);
-            break;
-    }
-    // Insert pseudo-element into DOM
-    insert_pseudo_into_dom(parent_elem, pseudo_elem, is_before);
-    // Store pseudo-element reference
-    if (is_before) {
-        pseudo->before = pseudo_elem;
-        pseudo->before_generated = true;
-    } else {
-        pseudo->after = pseudo_elem;
-        pseudo->after_generated = true;
-    }
-    log_debug("[Pseudo-Element] %s pseudo-element inserted", is_before ? "::before" : "::after");
-}
-
 void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
-                                       bool generate_before, bool generate_after,
                                        bool include_marker, bool create_first_letter) {
     if (!lycon || !block || !block->is_element()) return;
     block->pseudo = alloc_pseudo_content_prop(lycon, block);
     DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(block);
     if (block->pseudo) {
-        // Generation inserts newly-created nodes, while allocation can return
-        // an already-created marker/content node that still needs this guard.
-        if (generate_before) generate_pseudo_element_content(lycon, block, true);
-        if (generate_after) generate_pseudo_element_content(lycon, block, false);
         if (block->pseudo->before) {
             insert_pseudo_into_dom(element, block->pseudo->before, true);
         }
@@ -5652,7 +5447,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         return;
     }
     if (block->is_element()) {
-        layout_materialize_pseudo_content(lycon, block, true, true, true, true);
+        layout_materialize_pseudo_content(lycon, block, true, true);
     }
     if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe, hr, form controls, SVG
         NameId elmt_name = block->tag();
@@ -5772,14 +5567,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             // inside non-table contexts should be treated as block+flow for layout purposes.
             // This handles cases like floated table-row-group containing table-row/table-cell.
             bool is_orphaned_table_internal =
-                block->display.inner == CSS_VALUE_TABLE_ROW ||
-                block->display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
-                block->display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
-                block->display.inner == CSS_VALUE_TABLE_FOOTER_GROUP ||
-                block->display.inner == CSS_VALUE_TABLE_COLUMN ||
-                block->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP ||
-                block->display.inner == CSS_VALUE_TABLE_CELL ||
-                block->display.inner == CSS_VALUE_TABLE_CAPTION;
+                is_table_internal_display(block->display.inner);
             // CSS 2.1 §17.2.1: Before flow layout, check if any children are orphaned
             // table-internal elements (table-cell, table-row, etc.) that need wrapping
             // in anonymous table structures. This must happen before layout.
@@ -6438,7 +6226,7 @@ static bool layout_vertical_whitespace_inline_anchor(ViewText* text,
     if (!text || !rect || !inline_offset ||
         layout_text_rect_has_painted_codepoint(text, rect)) return false;
     DomNode* next = static_cast<DomNode*>(text)->next_sibling;
-    while (next && !next->view_type) next = next->next_sibling;
+    next = layout_first_view_with_type(next);
     if (!next || (next->view_type != RDT_VIEW_INLINE_BLOCK &&
                   next->view_type != RDT_VIEW_TABLE)) return false;
     ViewBlock* next_block = lam::view_require_block(static_cast<View*>(next));
@@ -6690,7 +6478,7 @@ static bool is_inline_substantial(ViewElement* ve) {
             return true;
         }
         View* next = static_cast<View*>(c->next_sibling);
-        while (next && !next->view_type) next = static_cast<View*>(next->next_sibling);
+        next = layout_first_view_with_type(next);
         c = next;
     }
     return false;
@@ -6762,7 +6550,7 @@ static bool is_block_self_collapsing(ViewBlock* vb) {
             if (is_substantial) return false;
         }
         View* next = static_cast<View*>(child->next_sibling);
-        while (next && !next->view_type) next = static_cast<View*>(next->next_sibling);
+        next = layout_first_view_with_type(next);
         child = next;
     }
     return true;
@@ -7055,6 +6843,28 @@ static BlockFloatFitResult find_block_float_fit(
     }
     result.y = current_y;
     return result;
+}
+
+static float layout_ratio_transfer_block_to_inline(ViewBlock* block, float block_size,
+                                                    float preferred_aspect_ratio,
+                                                    bool apply_block_constraints) {
+    if (!block || preferred_aspect_ratio <= 0.0f) return 0.0f;
+    bool ratio_uses_border_box = !layout_aspect_ratio_uses_content_box(block) &&
+        layout_uses_border_box(block);
+    float ratio_block_size = ratio_uses_border_box
+        ? layout_css_size_to_border_box(block->bound, layout_box_sizing(block), block_size, false)
+        : block_size;
+    if (apply_block_constraints) {
+        ratio_block_size = layout_apply_min_max_axis(
+            block, ratio_block_size, false, layout_uses_border_box(block));
+    }
+    float transferred_width = layout_apply_min_max_axis(
+        block, ratio_block_size * preferred_aspect_ratio, true,
+        layout_uses_border_box(block));
+    if (layout_uses_border_box(block)) {
+        transferred_width = layout_content_size_from_border_box(block, transferred_width, true);
+    }
+    return transferred_width;
 }
 
 __attribute__((noinline))
@@ -7589,7 +7399,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         if (block->embed && block->embedp()->img) {
             ImageSurface* img = block->embedp()->img;
             // Image intrinsic dimensions are in CSS logical pixels
-            bool from_image_orientation = image_orientation_uses_from_image(block->as_element());
+            bool from_image_orientation = layout_image_orientation_uses_from_image(block->as_element());
             float w = (from_image_orientation || img->encoded_width <= 0) ? img->width : img->encoded_width;
             float h = (from_image_orientation || img->encoded_height <= 0) ? img->height : img->encoded_height;
             bool image_has_ratio_without_natural_size =
@@ -8331,19 +8141,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     if (width_is_auto && height_is_auto && preferred_aspect_ratio > 0.0f) {
         float min_height = layout_explicit_min_axis_or(block, false, -1.0f);
         if (min_height >= 0.0f) {
-            bool ratio_uses_border_box = !layout_aspect_ratio_uses_content_box(block) &&
-                layout_uses_border_box(block);
-            float ratio_height = ratio_uses_border_box
-                ? layout_css_size_to_border_box(block->bound, layout_box_sizing(block),
-                                                min_height, false)
-                : min_height;
-            float transferred_width = layout_apply_min_max_axis(
-                block, ratio_height * preferred_aspect_ratio, true,
-                layout_uses_border_box(block));
-            if (layout_uses_border_box(block)) {
-                transferred_width = layout_content_size_from_border_box(
-                    block, transferred_width, true);
-            }
+            float transferred_width = layout_ratio_transfer_block_to_inline(
+                block, min_height, preferred_aspect_ratio, false);
             // A definite minimum block size transfers through the preferred ratio;
             // applying it before child layout prevents auto width from under-sizing
             // the ratio box when its containing block is narrower.
@@ -8355,21 +8154,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         }
         float max_height = layout_explicit_max_axis_or(block, false, -1.0f);
         if (max_height >= 0.0f) {
-            bool ratio_uses_border_box = !layout_aspect_ratio_uses_content_box(block) &&
-                layout_uses_border_box(block);
-            float ratio_height = ratio_uses_border_box
-                ? layout_css_size_to_border_box(block->bound, layout_box_sizing(block),
-                                                max_height, false)
-                : max_height;
-            ratio_height = layout_apply_min_max_axis(
-                block, ratio_height, false, layout_uses_border_box(block));
-            float transferred_width = layout_apply_min_max_axis(
-                block, ratio_height * preferred_aspect_ratio, true,
-                layout_uses_border_box(block));
-            if (layout_uses_border_box(block)) {
-                transferred_width = layout_content_size_from_border_box(
-                    block, transferred_width, true);
-            }
+            float transferred_width = layout_ratio_transfer_block_to_inline(
+                block, max_height, preferred_aspect_ratio, true);
             // A definite maximum block size transfers through the preferred ratio;
             // applying it before child layout prevents auto width from filling past
             // the ratio box's maximum inline size.
@@ -8624,7 +8410,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                         if (fvb->view_type == RDT_VIEW_MARKER ||
                             (fvb->position && element_has_float(fvb))) {
                             View* next = static_cast<View*>(first->next_sibling);
-                            while (next && !next->view_type) next = static_cast<View*>(next->next_sibling);
+                            next = layout_first_view_with_type(next);
                             first = next;
                             continue;
                         }
@@ -8809,8 +8595,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 ViewBlock* vb = lam::view_require_block(first_in_flow);
                 if (vb->position && element_has_float(vb)) {
                     first_in_flow = static_cast<View*>(first_in_flow->next_sibling);
-                    while (first_in_flow && !first_in_flow->view_type)
-                        first_in_flow = static_cast<View*>(first_in_flow->next_sibling);
+                    first_in_flow = layout_first_view_with_type(first_in_flow);
                     continue;
                 }
                 break;
@@ -9477,7 +9262,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     }
                 }
                 View* next = static_cast<View*>(sc_child->next_sibling);
-                while (next && !next->view_type) next = static_cast<View*>(next->next_sibling);
+                next = layout_first_view_with_type(next);
                 sc_child = next;
             }
             if (has_any_in_flow && all_self_collapsing) {
@@ -9515,7 +9300,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                         }
                     }
                     View* next = static_cast<View*>(fix_child->next_sibling);
-                    while (next && !next->view_type) next = static_cast<View*>(next->next_sibling);
+                    next = layout_first_view_with_type(next);
                     fix_child = next;
                 }
                 // CSS 2.1 §8.3.1: Floats inside this block were positioned in
@@ -10640,7 +10425,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         while (first) {
                             if (first->view_type == RDT_VIEW_MARKER) {
                                 first = static_cast<View*>(first->next_sibling);
-                                while (first && !first->view_type) first = static_cast<View*>(first->next_sibling);
+                                first = layout_first_view_with_type(first);
                                 continue;
                             }
                             if (!first->is_block()) {
@@ -10651,13 +10436,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                     is_inline_substantial(lam::view_require_element(first))) break;
                                 // Non-substantial (zero-height whitespace, empty inline)
                                 first = static_cast<View*>(first->next_sibling);
-                                while (first && !first->view_type) first = static_cast<View*>(first->next_sibling);
+                                first = layout_first_view_with_type(first);
                                 continue;
                             }
                             ViewBlock* fvb = lam::view_require_block(first);
                             if (fvb->position && element_has_float(fvb)) {
                                 first = static_cast<View*>(first->next_sibling);
-                                while (first && !first->view_type) first = static_cast<View*>(first->next_sibling);
+                                first = layout_first_view_with_type(first);
                                 continue;
                             }
                             break;
@@ -10707,9 +10492,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // don't participate in margin collapsing (CSS Lists 3 §4)
                     if (first_in_flow_child->view_type == RDT_VIEW_MARKER) {
                         View* next = static_cast<View*>(first_in_flow_child->next_sibling);
-                        while (next && !next->view_type) {
-                            next = static_cast<View*>(next->next_sibling);
-                        }
+                        next = layout_first_view_with_type(next);
                         first_in_flow_child = next;
                         continue;
                     }
@@ -10721,7 +10504,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         if (first_in_flow_child->view_type == RDT_VIEW_INLINE &&
                             !is_inline_substantial(lam::view_require_element(first_in_flow_child))) {
                             View* next = static_cast<View*>(first_in_flow_child->next_sibling);
-                            while (next && !next->view_type) next = static_cast<View*>(next->next_sibling);
+                            next = layout_first_view_with_type(next);
                             first_in_flow_child = next;
                             continue;
                         }
@@ -10733,9 +10516,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // parent-child margin collapsing
                     if (layout_block_is_out_of_flow(vb)) {
                         View* next = static_cast<View*>(first_in_flow_child->next_sibling);
-                        while (next && !next->view_type) {
-                            next = static_cast<View*>(next->next_sibling);
-                        }
+                        next = layout_first_view_with_type(next);
                         first_in_flow_child = next;
                         continue;
                     }
@@ -10776,9 +10557,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             && margin_top_val == 0 && margin_bottom_val == 0 && !has_chain_margins) {
                             log_debug("%s skipping empty zero-height block (no margins) for margin collapsing", elmt->source_loc());
                             View* next = static_cast<View*>(first_in_flow_child->next_sibling);
-                            while (next && !next->view_type) {
-                                next = static_cast<View*>(next->next_sibling);
-                            }
+                            next = layout_first_view_with_type(next);
                             first_in_flow_child = next;
                             continue;
                         }

@@ -453,11 +453,11 @@
         "turbojpeg",
         "gif",
         "ThorVG",
-        "dwrite",
         "pthread"
       ],
       "windows": {
         "additional_libraries": [
+          "dwrite",
           "ole32",
           "dbghelp",
           "iphlpapi",

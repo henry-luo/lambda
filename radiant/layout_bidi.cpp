@@ -84,10 +84,8 @@ static bool bidi_is_line_text_rect(ViewText* text, TextRect* rect, int line_numb
 
 static void bidi_count_views(View* view, int line_number, int depth,
                              BidiLineCounts* counts) {
-    for (View* current = view; current; current = current->next()) {
-        if (current->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(current)) {
-            continue;
-        }
+    auto visit = [&](View* current, int current_depth) -> bool {
+        if (current->view_type == RDT_VIEW_NONE) return false;
         if (current->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(current);
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
@@ -107,17 +105,18 @@ static void bidi_count_views(View* view, int line_number, int depth,
                 }
                 counts->rects++;
             }
-            continue;
+            return false;
         }
         if (current->view_type == RDT_VIEW_INLINE) {
             counts->spans++;
-            if (depth > counts->max_depth) counts->max_depth = depth;
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(current);
-            bidi_count_views(span->first_child, line_number, depth + 1, counts);
-            continue;
+            if (current_depth > counts->max_depth) counts->max_depth = current_depth;
+            return true;
         }
         if (current->view_type != RDT_VIEW_BR) counts->has_atomic = true;
-    }
+        return false;
+    };
+    auto no_leave = [](View*, int) {};
+    layout_walk_view_tree(view, visit, no_leave, true, depth);
 }
 
 static float bidi_span_edge_width(ViewSpan* span, bool left) {
@@ -356,7 +355,7 @@ static void bidi_place_visual_line(LayoutContext* lycon,
 
 static void bidi_refresh_bounds(View* view, int line_number,
                                 BidiSpanInfo* spans, int span_count) {
-    for (View* current = view; current; current = current->next()) {
+    auto visit = [&](View* current, int) -> bool {
         if (current->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(current);
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
@@ -365,11 +364,11 @@ static void bidi_refresh_bounds(View* view, int line_number,
                     break;
                 }
             }
-        } else if (current->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(current);
-            bidi_refresh_bounds(span->first_child, line_number, spans, span_count);
         }
-    }
+        return current->view_type == RDT_VIEW_INLINE;
+    };
+    auto no_leave = [](View*, int) {};
+    layout_walk_view_tree(view, visit, no_leave, false);
     (void)spans;
     (void)span_count;
 }
