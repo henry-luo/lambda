@@ -179,7 +179,7 @@ extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
             JsAccessorPair* pair = js_item_to_accessor_pair(slot);
             if (pair && pair->getter.item != ItemNull.item) {
                 Item this_val = (Receiver.item ? Receiver : object);
-                Item getter_result = js_call_function(pair->getter, this_val, NULL, 0);
+                Item getter_result = js_call_accessor_getter(pair->getter, this_val);
                 *out_value = getter_result;
                 return JS_OWN_READY;
             }
@@ -229,8 +229,7 @@ static JsSetterDispatchResult js_dispatch_accessor_setter(Item object,
                                                           Item Receiver) {
     if (!ap) return js_setter_dispatch_result(JS_SET_NOT_FOUND, ItemNull);
 
-    if (ap->setter.item != ItemNull.item &&
-        get_type_id(ap->setter) == LMD_TYPE_FUNC) {
+    if (ap->setter.item != ItemNull.item && js_is_callable(ap->setter)) {
         Item args[1] = { value };
         Item this_val = (Receiver.item ? Receiver : object);
         Item setter_result = js_call_function(ap->setter, this_val, args, 1);
@@ -367,7 +366,7 @@ extern "C" JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
     if (jspd_is_accessor(e)) {
         JsAccessorPair* pair = js_item_to_accessor_pair(slot);
         if (pair && pair->getter.item != ItemNull.item) {
-            Item v = js_call_function(pair->getter, receiver, NULL, 0);
+            Item v = js_call_accessor_getter(pair->getter, receiver);
             if (item_is_error(v)) return JS_RESOLVE_THREW;
             if (out_value) *out_value = v;
             return JS_RESOLVE_VALUE;
@@ -481,9 +480,8 @@ static bool js_get_own_property_descriptor_impl(Item object, NameId name_id,
             : js_props_desc_from_storage(object, object.map, name, name_len, out);
     }
     if (t == LMD_TYPE_FUNC) {
-        // FUNC: storage lives in fn->properties_map.map. Caller is still
-        // responsible for the synthetic length/name/prototype intrinsics —
-        // those are not stored as own properties.
+        // D6.2.2v2: every public FUNC property lives in properties_map; the
+        // executable payload supplies behavior, never synthetic descriptors.
         JsFunction* fn = (JsFunction*)object.function;
         if (!fn || fn->properties_map.item == 0) return false;
         return name_id != NAME_ID_NONE
@@ -761,20 +759,22 @@ extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* o
     if (has_get) {
         JS_ASSIGN_OR_RETURN(getter, js_property_get(desc_obj, k_get));
         TypeId gt = get_type_id(getter);
-        if (gt != LMD_TYPE_FUNC && gt != LMD_TYPE_UNDEFINED) {
+        if (gt != LMD_TYPE_UNDEFINED && !js_is_callable(getter)) {
+            // ToPropertyDescriptor uses IsCallable, so callable Proxy accessors
+            // must retain their exotic [[Call]] entry (D6.2.2v2).
             return js_props_throw_type("Getter must be a function");
         }
         out->flags |= JS_PD_HAS_GET;
-        out->getter = (gt == LMD_TYPE_FUNC) ? getter : js_props_undefined();
+        out->getter = js_is_callable(getter) ? getter : js_props_undefined();
     }
     if (has_set) {
         JS_ASSIGN_OR_RETURN(setter, js_property_get(desc_obj, k_set));
         TypeId st = get_type_id(setter);
-        if (st != LMD_TYPE_FUNC && st != LMD_TYPE_UNDEFINED) {
+        if (st != LMD_TYPE_UNDEFINED && !js_is_callable(setter)) {
             return js_props_throw_type("Setter must be a function");
         }
         out->flags |= JS_PD_HAS_SET;
-        out->setter = (st == LMD_TYPE_FUNC) ? setter : js_props_undefined();
+        out->setter = js_is_callable(setter) ? setter : js_props_undefined();
     }
     if (has_enum) {
         out->flags |= JS_PD_HAS_ENUMERABLE;
@@ -812,11 +812,15 @@ static void js_props_set_descriptor_attribute(Item object, Item name_item,
                                               const char* name, int name_len,
                                               uint8_t attr_flag, bool enabled) {
     String* key = it2s(name_item);
-    if (key && property_key_id(key) != NAME_ID_NONE) {
+    if (key && property_key_id(key) != NAME_ID_NONE &&
+        get_type_id(object) != LMD_TYPE_ARRAY) {
         js_shape_entry_update_flags_name_id(object, property_key_id(key),
             enabled ? 0 : attr_flag, enabled ? attr_flag : 0);
         return;
     }
+    // Dense Array indices and `length` acquire descriptor entries in their
+    // companion map. A NameId update against the Array itself finds no shape,
+    // silently dropping every attribute requested by DefineProperty (D3.4.4v2).
     if (attr_flag == JSPD_NON_WRITABLE) {
         js_attr_set_writable(object, name, name_len, enabled);
     } else if (attr_flag == JSPD_NON_ENUMERABLE) {

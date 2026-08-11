@@ -71,11 +71,25 @@ static inline void* memmem(const void* haystack, size_t hlen, const void* needle
 
 extern "C" Item js_get_generator_shared_proto(bool is_async);
 extern "C" JsFunction* js_alloc_gc_function_object(void);
-void js_function_call_lane_recompute(JsFunction* fn);
-// The generic dispatcher in its call-entry form; the classifier's fallback and
-// the force-generic oracle both stamp this.
+void js_function_finalize_capabilities(JsFunction* fn);
+// The generic dispatcher in its call-entry form; the classifier's fallback
+// stamps this when no narrower finalized protocol covers the function.
 Item js_call_entry_generic(Item fn_item, Item this_val, Item* args, int argc,
         uint64_t* result_home, bool args_prerooted);
+Item js_call_entry_bound(Item fn_item, Item this_val, Item* args, int argc,
+        uint64_t* result_home, bool args_prerooted);
+Item js_construct_entry_ordinary(Item fn_item, Item* args, int argc,
+        Item new_target, uint64_t* result_home, bool args_prerooted);
+Item js_construct_entry_native(Item fn_item, Item* args, int argc,
+        Item new_target, uint64_t* result_home, bool args_prerooted);
+Item js_construct_entry_bound(Item fn_item, Item* args, int argc,
+        Item new_target, uint64_t* result_home, bool args_prerooted);
+Item js_native_construct_via_call_body(Item callee, Item* args, int argc,
+    Item new_target, uint64_t* result_home);
+Item js_typed_array_base_call_body(Item callee, Item this_value,
+    Item* args, int argc, uint64_t* result_home);
+Item js_typed_array_base_construct_body(Item callee, Item* args, int argc,
+    Item new_target, uint64_t* result_home);
 // Pick the thinnest entry whose protocol still covers this callee's shape.
 // Only the classifier above may call this.
 JsCallEntry js_function_select_call_entry(JsFunction* fn);
@@ -96,7 +110,7 @@ extern "C" char* normalize_utf8proc_nfkd(const char* str, int len, int* out_len)
 extern TypeMap EmptyMap;
 
 extern "C" bool js_func_is_builtin_ctor(Item fn);
-extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len);
+extern "C" bool js_function_has_own_prototype(Item fn);
 extern "C" Item js_array_get_custom_proto(Item arr);
 extern "C" void js_child_process_reset();
 extern "C" void js_fs_reset();
@@ -136,6 +150,17 @@ Item js_make_number(double d);
 int32_t js_to_int32(double d);
 
 extern "C" Item js_number_function(Item value);
+enum JsNumericPrototypeOp {
+    JS_NUMERIC_TO_STRING,
+    JS_NUMERIC_VALUE_OF,
+    JS_NUMERIC_TO_FIXED,
+    JS_NUMERIC_TO_PRECISION,
+    JS_NUMERIC_TO_EXPONENTIAL,
+    JS_NUMERIC_TO_LOCALE_STRING,
+};
+Item js_numeric_prototype_algorithm(Item number, JsNumericPrototypeOp operation,
+    Item* args, int arg_count);
+Item js_iterator_prototype_for_object(Item object);
 extern "C" bool js_typed_array_is_out_of_bounds_item(Item ta_item);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" Item js_has_own_property(Item obj, Item key);

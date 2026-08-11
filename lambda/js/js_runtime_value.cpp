@@ -28,7 +28,7 @@ extern "C" Item js_make_string(const char* str) {
 }
 
 extern "C" bool js_is_callable(Item value) {
-    return get_type_id(value) == LMD_TYPE_FUNC;
+    return js_has_call_capability(value);
 }
 
 extern "C" bool is_callable(Item value) {
@@ -559,7 +559,7 @@ extern "C" Item js_to_string(Item value) {
     case LMD_TYPE_ARRAY: {
         Item to_string_key = js_make_string_len("toString", 8);
         JS_ASSIGN_OR_RETURN(to_string_fn, js_property_get(value, to_string_key));
-        if (get_type_id(to_string_fn) == LMD_TYPE_FUNC) {
+        if (js_is_callable(to_string_fn)) {
             JS_ASSIGN_OR_RETURN(result, js_call_function(to_string_fn, value, NULL, 0));
             TypeId result_type = get_type_id(result);
             if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY ||
@@ -598,7 +598,7 @@ extern "C" Item js_to_string(Item value) {
             TypeId tp_type = get_type_id(to_prim);
             bool tp_present = (to_prim.item != ItemNull.item && tp_type != LMD_TYPE_UNDEFINED && tp_type != LMD_TYPE_NULL);
             // ES spec §7.1.1 step 2.b.i: If exoticToPrim is not undefined AND not callable, throw TypeError.
-            if (tp_present && tp_type != LMD_TYPE_FUNC) {
+            if (tp_present && !js_is_callable(to_prim)) {
                 return js_throw_type_error("@@toPrimitive is not a function");
             }
             if (tp_present) {
@@ -671,7 +671,7 @@ extern "C" Item js_to_string(Item value) {
             bool ts_found = own_ts || js_ordinary_has_property(value, "toString", 8);
             Item ts_key = js_make_string_len("toString", 8);
             JS_ASSIGN_OR_RETURN_INTO(ts_fn, js_property_get(value, ts_key));
-            if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+            if (ts_fn.item != ItemNull.item && js_is_callable(ts_fn)) {
                 JS_ASSIGN_OR_RETURN(result, js_call_function(ts_fn, value, NULL, 0));
                 TypeId rt = get_type_id(result);
                 if (rt == LMD_TYPE_STRING) return result;
@@ -686,7 +686,7 @@ extern "C" Item js_to_string(Item value) {
                 // (e.g., {toString: null, get valueOf() { throw ... }})
                 Item vo_key = js_make_string_len("valueOf", 7);
                 JS_ASSIGN_OR_RETURN(vo_fn, js_property_get(value, vo_key));
-                if (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC) {
+                if (vo_fn.item != ItemNull.item && js_is_callable(vo_fn)) {
                     JS_ASSIGN_OR_RETURN(result, js_call_function(vo_fn, value, NULL, 0));
                     TypeId rt = get_type_id(result);
                     if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC) return js_to_string(result);
@@ -1284,11 +1284,18 @@ static inline Item js_try_concat_percent_hex(String* left, String* right) {
 
 static inline Item js_concat_strings_fast(String* left, String* right) {
     if (!left || !right) return ItemNull;
+    RootFrame roots(2);
+    Rooted<Item> left_root(roots, (Item){.item = s2it(left)});
+    Rooted<Item> right_root(roots, (Item){.item = s2it(right)});
     int64_t left_len = left->len;
     int64_t right_len = right->len;
     Item percent_hex = js_try_concat_percent_hex(left, right);
     if (percent_hex.item != ItemNull.item) return percent_hex;
     String* result = (String*)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
+    // D5.4.3: result allocation may collect both borrowed operands; reload
+    // them from exact roots before copying their payloads.
+    left = it2s(left_root.get());
+    right = it2s(right_root.get());
     result->len = left_len + right_len;
     result->flags = 0;
     result->is_ascii = left->is_ascii && right->is_ascii;
@@ -1310,6 +1317,11 @@ extern "C" Item js_string_concat(Item left, Item right) {
 }
 
 extern "C" Item js_add(Item left, Item right) {
+    RootFrame roots(4);
+    Rooted<Item> left_root(roots, left);
+    Rooted<Item> right_root(roots, right);
+    Rooted<Item> left_string_root(roots, ItemNull);
+    Rooted<Item> right_string_root(roots, ItemNull);
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
 
@@ -1319,12 +1331,18 @@ extern "C" Item js_add(Item left, Item right) {
     // and throws TypeError on object results / non-callable @@toPrimitive.
     if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY ||
         left_type == LMD_TYPE_ELEMENT || left_type == LMD_TYPE_FUNC) {
-        JS_ASSIGN_OR_RETURN_INTO(left, js_op_to_primitive(left, 0));
+        Item primitive = js_op_to_primitive(left_root.get(), 0);
+        if (item_is_error(primitive)) return primitive;
+        left_root.set(primitive);
+        left = left_root.get();
         left_type = get_type_id(left);
     }
     if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY ||
         right_type == LMD_TYPE_ELEMENT || right_type == LMD_TYPE_FUNC) {
-        JS_ASSIGN_OR_RETURN_INTO(right, js_op_to_primitive(right, 0));
+        Item primitive = js_op_to_primitive(right_root.get(), 0);
+        if (item_is_error(primitive)) return primitive;
+        right_root.set(primitive);
+        right = right_root.get();
         right_type = get_type_id(right);
     }
 
@@ -1333,12 +1351,19 @@ extern "C" Item js_add(Item left, Item right) {
         return js_concat_strings_fast(it2s(left), it2s(right));
     }
     if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
-        JS_ASSIGN_OR_RETURN(left_str, js_to_string(left));
-        JS_ASSIGN_OR_RETURN(right_str, js_to_string(right));
-        return js_concat_strings_fast(it2s(left_str), it2s(right_str));
+        Item left_string = js_to_string(left_root.get());
+        if (item_is_error(left_string)) return left_string;
+        left_string_root.set(left_string);
+        Item right_string = js_to_string(right_root.get());
+        if (item_is_error(right_string)) return right_string;
+        right_string_root.set(right_string);
+        // D5.4.3: the first conversion result is otherwise a native local while
+        // the second conversion allocates, which poisoned chained `+` output.
+        return js_concat_strings_fast(it2s(left_string_root.get()),
+            it2s(right_string_root.get()));
     }
 
-    return js_numeric_binary(left, right, JS_NUMERIC_ADD);
+    return js_numeric_binary(left_root.get(), right_root.get(), JS_NUMERIC_ADD);
 }
 
 extern "C" Item js_subtract(Item left, Item right) {
@@ -2068,15 +2093,6 @@ extern "C" Item js_typeof(Item value) {
         if (own_ip) {
             result = "function";
             goto done;
-        }
-        // Function.prototype is callable per spec, typeof should return "function"
-        if (js_class_id(value) == JS_CLASS_FUNCTION) {
-            bool own_proto = false;
-            js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
-            if (own_proto) {
-                result = "function";
-                goto done;
-            }
         }
         result = "object";
         break;

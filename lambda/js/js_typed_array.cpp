@@ -827,7 +827,8 @@ extern "C" int js_typed_array_raw_index_of(Item ta_item, Item search_value,
     return -1;
 }
 
-static Item js_to_index_int(Item value, int* out_index, const char* error_message) {
+static Item js_to_index_i64(Item value, int64_t* out_index,
+        const char* error_message) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
         *out_index = 0;
@@ -850,11 +851,40 @@ static Item js_to_index_int(Item value, int* out_index, const char* error_messag
     if (dval < 0 || !std::isfinite(dval) || dval > 9007199254740991.0) {
         return js_throw_range_error(error_message);
     }
+    *out_index = (int64_t)dval;
+    return js_status_ok();
+}
+
+static Item js_to_index_int(Item value, int* out_index,
+        const char* error_message) {
+    int64_t index = 0;
+    JS_ASSIGN_OR_RETURN(validation, js_to_index_i64(
+        value, &index, error_message));
+    // Fixed-width runtime views use int indices. The host allocation cap is
+    // applied only after spec ToIndex succeeds.
+    double dval = (double)index;
     if (dval > 1073741824.0) {
         return js_throw_range_error(error_message);
     }
     *out_index = (int)dval;
     return js_status_ok();
+}
+
+extern "C" Item js_typed_array_validate_constructor_argument(Item argument,
+        int argc) {
+    if (argc <= 0) return js_status_ok();
+    TypeId type = get_type_id(argument);
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
+            type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT ||
+            type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
+        return js_status_ok();
+    }
+    int element_length = 0;
+    // TypedArray's primitive-length branch performs ToIndex before entering
+    // AllocateTypedArray. Validating here prevents an observable
+    // newTarget.prototype Get from replacing Symbol/BigInt/range errors.
+    return js_to_index_int(argument, &element_length,
+        "Invalid typed array length");
 }
 
 static bool js_atomics_is_integer_type(JsTypedArrayType type) {
@@ -1131,7 +1161,7 @@ static Item js_atomics_timeout_waiter(Item waiter_id_item) {
 
 static void js_atomics_schedule_timeout_waiter(int waiter_id, double timeout_ms) {
     if (waiter_id <= 0 || !std::isfinite(timeout_ms)) return;
-    Item callback_fn = js_new_function((void*)js_atomics_timeout_waiter, 1);
+    Item callback_fn = js_new_native_function(js_atomics_timeout_waiter);
     Item waiter_id_item = (Item){.item = i2it(waiter_id)};
     Item callback = js_bind_function(callback_fn, ItemNull, &waiter_id_item, 1);
     int64_t delay_ms = (int64_t)std::trunc(timeout_ms);
@@ -1563,18 +1593,28 @@ static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
     }
 }
 
-static Item js_arraybuffer_wrap_item(JsArrayBuffer* ab) {
+static Item js_arraybuffer_wrap_item_with_prototype(JsArrayBuffer* ab,
+        Item prototype, bool use_provided_prototype) {
     if (!ab) return (Item){.item = ITEM_NULL};
+    RootFrame roots(2);
+    Rooted<Item> prototype_root(roots, prototype);
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_ARRAYBUFFER;
     m->type = js_arraybuffer_shared(ab) ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
     m->data = ab;
     m->data_cap = 0;
-    RootFrame roots(1);
     Rooted<Item> result_root(roots, (Item){.map = m});
-    js_arraybuffer_link_prototype(result_root.get(), js_arraybuffer_shared(ab));
+    if (use_provided_prototype) {
+        js_set_prototype(result_root.get(), prototype_root.get());
+    } else {
+        js_arraybuffer_link_prototype(result_root.get(), js_arraybuffer_shared(ab));
+    }
     return result_root.get();
+}
+
+static Item js_arraybuffer_wrap_item(JsArrayBuffer* ab) {
+    return js_arraybuffer_wrap_item_with_prototype(ab, ItemNull, false);
 }
 
 extern "C" Item js_arraybuffer_new(int byte_length) {
@@ -1592,32 +1632,87 @@ extern "C" Item js_arraybuffer_construct(Item length_arg) {
     return js_arraybuffer_construct_resizable(length_arg, (Item){.item = ITEM_JS_UNDEFINED});
 }
 
-extern "C" Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg) {
-    // ToIndex: undefined/null → 0
-    int byte_length = 0;
-    JS_ASSIGN_OR_RETURN(validation, js_to_index_int(length_arg, &byte_length, "Invalid array buffer length"));
+struct JsArrayBufferConstructOptions {
+    int64_t byte_length;
+    int64_t max_byte_length;
+    bool resizable;
+};
 
-    int max_byte_length = byte_length;
-    bool resizable = false;
+static Item js_arraybuffer_parse_construct_options(Item length_arg,
+        Item options_arg, const char* length_error, const char* max_error,
+        JsArrayBufferConstructOptions* out) {
+    out->byte_length = 0;
+    JS_ASSIGN_OR_RETURN(validation, js_to_index_i64(
+        length_arg, &out->byte_length, length_error));
+    out->max_byte_length = out->byte_length;
+    out->resizable = false;
     if (get_type_id(options_arg) == LMD_TYPE_MAP) {
         Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength"))};
         JS_ASSIGN_OR_RETURN(max_item, js_property_get(options_arg, max_key));
         if (get_type_id(max_item) != LMD_TYPE_UNDEFINED && max_item.item != ITEM_NULL) {
-            JS_ASSIGN_OR_RETURN_INTO(validation, js_to_index_int(max_item, &max_byte_length, "Invalid array buffer maxByteLength"));
-            if (max_byte_length < byte_length) return js_throw_range_error("Invalid array buffer maxByteLength");
-            resizable = true;
+            JS_ASSIGN_OR_RETURN_INTO(validation, js_to_index_i64(
+                max_item, &out->max_byte_length, max_error));
+            if (out->max_byte_length < out->byte_length) {
+                return js_throw_range_error(max_error);
+            }
+            out->resizable = true;
         }
     }
+    return js_status_ok();
+}
 
-    Item result = js_arraybuffer_new(byte_length);
+static Item js_arraybuffer_allocate_constructed(
+        const JsArrayBufferConstructOptions* options, Item prototype,
+        bool use_provided_prototype) {
+    // OrdinaryCreateFromConstructor is observable before the backing-store
+    // allocation. Keep the host's 1 GiB cap here rather than in ToIndex so a
+    // throwing newTarget.prototype getter wins over allocation RangeError.
+    if (options->byte_length > 1073741824LL) {
+        return js_throw_range_error("Invalid array buffer length");
+    }
+    if (options->max_byte_length > 1073741824LL) {
+        return js_throw_range_error("Invalid array buffer maxByteLength");
+    }
+    JsArrayBuffer* ab = js_arraybuffer_alloc((int)options->byte_length);
+    if (!ab) return ItemError;
+    Item result = js_arraybuffer_wrap_item_with_prototype(
+        ab, prototype, use_provided_prototype);
     if (js_is_arraybuffer(result)) {
-        JsArrayBuffer* ab = js_get_arraybuffer_ptr(result.map);
-        if (ab) {
-            ab->handle.max_byte_length = (size_t)max_byte_length;
-            if (resizable) ab->handle.flags |= BYTE_BUFFER_FLAG_RESIZABLE;
-        }
+        ab->handle.max_byte_length = (size_t)options->max_byte_length;
+        if (options->resizable) ab->handle.flags |= BYTE_BUFFER_FLAG_RESIZABLE;
     }
     return result;
+}
+
+extern "C" Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg) {
+    RootFrame roots(2);
+    Rooted<Item> length_root(roots, length_arg);
+    Rooted<Item> options_root(roots, options_arg);
+    JsArrayBufferConstructOptions options = {0, 0, false};
+    JS_ASSIGN_OR_RETURN(validation, js_arraybuffer_parse_construct_options(
+        length_root.get(), options_root.get(), "Invalid array buffer length",
+        "Invalid array buffer maxByteLength", &options));
+    return js_arraybuffer_allocate_constructed(&options, ItemNull, false);
+}
+
+extern "C" Item js_arraybuffer_construct_resizable_target(Item length_arg,
+        Item options_arg, Item new_target) {
+    RootFrame roots(4);
+    Rooted<Item> length_root(roots, length_arg);
+    Rooted<Item> options_root(roots, options_arg);
+    Rooted<Item> target_root(roots, new_target);
+    Rooted<Item> prototype_root(roots, ItemNull);
+    JsArrayBufferConstructOptions options = {0, 0, false};
+    // ToIndex precedes AllocateArrayBuffer, but its object creation precedes
+    // the fallible backing-store allocation. Keep those two phases separate.
+    JS_ASSIGN_OR_RETURN(validation, js_arraybuffer_parse_construct_options(
+        length_root.get(), options_root.get(), "Invalid array buffer length",
+        "Invalid array buffer maxByteLength", &options));
+    prototype_root.set(js_get_prototype_from_constructor_default(
+        target_root.get(), JS_CLASS_ARRAY_BUFFER, -1));
+    if (item_is_error(prototype_root.get())) return prototype_root.get();
+    return js_arraybuffer_allocate_constructed(
+        &options, prototype_root.get(), true);
 }
 
 extern "C" bool js_is_arraybuffer(Item val) {
@@ -1840,16 +1935,15 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
         if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
             use_default_ctor = true;
         } else {
-            // A subclass class object is a constructable MAP (has __instance_proto__),
-            // not a FUNC — accept it as the species constructor.
-            bool species_is_class_object = false;
-            if (species_type == LMD_TYPE_MAP && species.map)
-                js_map_get_fast_ext(species.map, "__instance_proto__", 18, &species_is_class_object);
-            if (species_type != LMD_TYPE_FUNC && !js_is_proxy(species) && !species_is_class_object) {
+            if (!js_has_construct_capability(species)) {
+                // ArrayBuffer species uses the finalized [[Construct]] entry;
+                // carrier TypeId cannot distinguish a class map from a Proxy
+                // or an ordinary object (D6.2.2v2).
                 return js_throw_type_error("ArrayBuffer species is not a constructor");
             }
             Item len_arg = (Item){.item = i2it(new_len)};
-            JS_ASSIGN_OR_RETURN_INTO(result_item, js_new_from_class_object(species, &len_arg, 1));
+            JS_ASSIGN_OR_RETURN_INTO(result_item, js_construct_value(species,
+                &len_arg, 1, species, NULL, false));
         }
     }
     if (use_default_ctor) {
@@ -1907,81 +2001,58 @@ extern "C" Item js_sharedarraybuffer_construct(Item length_arg) {
     return js_sharedarraybuffer_construct_with_options(length_arg, (Item){.item = ITEM_JS_UNDEFINED});
 }
 
-extern "C" Item js_sharedarraybuffer_construct_with_options(Item length_arg, Item options_arg) {
-    // ToIndex: undefined/null → 0
-    TypeId type = get_type_id(length_arg);
-    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
-        length_arg = (Item){.item = i2it(0)};
-        type = LMD_TYPE_INT;
-    }
-
-    // Symbol → TypeError (cannot convert to number)
-    if (type == LMD_TYPE_INT && it2i(length_arg) <= -(int64_t)JS_SYMBOL_BASE) {
-        return js_throw_type_error("Cannot convert a Symbol value to a number");
-    }
-
-    // Convert to number
-    JS_ASSIGN_OR_RETURN(num, js_to_number(length_arg));
-    type = get_type_id(num);
-
-    double dval;
-    if (type == LMD_TYPE_FLOAT) {
-        // self-tagged floats do not have a boxed payload; all numeric Items
-        // must decode through the shared Item reader.
-        dval = it2d(num);
-    } else {
-        dval = (double)it2i(num);
-    }
-
-    if (std::isnan(dval)) dval = 0;
-    dval = std::trunc(dval);
-
-    if (dval < 0 || !std::isfinite(dval) || dval > 9007199254740991.0) {
+static Item js_sharedarraybuffer_allocate_constructed(
+        const JsArrayBufferConstructOptions* options, Item prototype,
+        bool use_provided_prototype) {
+    if (options->byte_length > 1073741824LL) {
         return js_throw_range_error("Invalid shared array buffer length");
     }
-
-    int64_t ival = (int64_t)dval;
-    if (ival > 1073741824) {
-        return js_throw_range_error("Shared array buffer allocation failed");
+    if (options->max_byte_length > 1073741824LL) {
+        return js_throw_range_error("Invalid shared array buffer maxByteLength");
     }
-
-    int byte_length = (int)ival;
-    int max_byte_length = byte_length;
-    bool growable = false;
-    if (get_type_id(options_arg) == LMD_TYPE_MAP) {
-        Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength"))};
-        JS_ASSIGN_OR_RETURN(max_item, js_property_get(options_arg, max_key));
-        if (get_type_id(max_item) != LMD_TYPE_UNDEFINED && max_item.item != ITEM_NULL) {
-            JS_ASSIGN_OR_RETURN(validation, js_to_index_int(max_item, &max_byte_length, "Invalid shared array buffer maxByteLength"));
-            if (max_byte_length < byte_length) return js_throw_range_error("Invalid shared array buffer maxByteLength");
-            growable = true;
-        }
-    }
-
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     if (!ab) return ItemError;
     uint32_t handle_flags = BYTE_BUFFER_FLAG_SHARED;
-    if (growable) handle_flags |= BYTE_BUFFER_FLAG_RESIZABLE;
-    if (!byte_buffer_init(&ab->handle, (size_t)byte_length, (size_t)max_byte_length,
+    if (options->resizable) handle_flags |= BYTE_BUFFER_FLAG_RESIZABLE;
+    if (!byte_buffer_init(&ab->handle, (size_t)options->byte_length,
+            (size_t)options->max_byte_length,
             handle_flags, MEM_CAT_JS_RUNTIME)) {
         mem_free(ab);
         return ItemError;
     }
+    return js_arraybuffer_wrap_item_with_prototype(
+        ab, prototype, use_provided_prototype);
+}
 
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
-    m->type_id = LMD_TYPE_MAP;
-    m->map_kind = MAP_KIND_ARRAYBUFFER;
-    m->type = (void*)&js_sharedarraybuffer_type_marker;
-    m->data = ab;
-    m->data_cap = 0;
+extern "C" Item js_sharedarraybuffer_construct_with_options(Item length_arg, Item options_arg) {
+    RootFrame roots(2);
+    Rooted<Item> length_root(roots, length_arg);
+    Rooted<Item> options_root(roots, options_arg);
+    JsArrayBufferConstructOptions options = {0, 0, false};
+    JS_ASSIGN_OR_RETURN(validation, js_arraybuffer_parse_construct_options(
+        length_root.get(), options_root.get(), "Invalid shared array buffer length",
+        "Invalid shared array buffer maxByteLength", &options));
+    return js_sharedarraybuffer_allocate_constructed(&options, ItemNull, false);
+}
 
-    Item result = (Item){.map = m};
-    Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name("SharedArrayBuffer"))});
-    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
-        Item proto = js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype"))});
-        if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
-    }
-    return result;
+extern "C" Item js_sharedarraybuffer_construct_with_options_target(
+        Item length_arg, Item options_arg, Item new_target) {
+    RootFrame roots(4);
+    Rooted<Item> length_root(roots, length_arg);
+    Rooted<Item> options_root(roots, options_arg);
+    Rooted<Item> target_root(roots, new_target);
+    Rooted<Item> prototype_root(roots, ItemNull);
+    JsArrayBufferConstructOptions options = {0, 0, false};
+    // SharedArrayBuffer uses the same ToIndex/object-creation/allocation order
+    // as ArrayBuffer; keep both constructor targets on one parser.
+    JS_ASSIGN_OR_RETURN(validation, js_arraybuffer_parse_construct_options(
+        length_root.get(), options_root.get(), "Invalid shared array buffer length",
+        "Invalid shared array buffer maxByteLength", &options));
+    prototype_root.set(js_get_prototype_from_constructor_default(
+        target_root.get(), JS_CLASS_SHARED_ARRAY_BUFFER, -1));
+    if (item_is_error(prototype_root.get())) return prototype_root.get();
+    return js_sharedarraybuffer_allocate_constructed(
+        &options, prototype_root.get(), true);
 }
 
 extern "C" bool js_is_sharedarraybuffer(Item val) {
@@ -1993,16 +2064,14 @@ extern "C" bool js_is_sharedarraybuffer(Item val) {
     return js_arraybuffer_shared(ab);
 }
 
-extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* args, int argc) {
+extern "C" Item js_sharedarraybuffer_operation(Item sab,
+        JsSharedArrayBufferOperation operation, Item* args, int argc) {
     if (!js_is_sharedarraybuffer(sab)) return js_throw_type_error("SharedArrayBuffer method requires a SharedArrayBuffer receiver");
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(sab.map);
     if (!ab) return ItemNull;
 
-    String* mname = it2s(method_name);
-    if (!mname) return ItemNull;
-
     // slice(begin, end)
-    if (mname->len == 5 && strncmp(mname->chars, "slice", 5) == 0) {
+    if (operation == JS_SHARED_ARRAY_BUFFER_SLICE) {
         int source_length = js_arraybuffer_length(ab);
         int begin = 0, end = source_length;
         if (argc > 0) {
@@ -2040,7 +2109,8 @@ extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* ar
                 use_default_ctor = true;
             } else {
                 Item len_arg = (Item){.item = i2it(new_len)};
-                JS_ASSIGN_OR_RETURN_INTO(result_item, js_new_from_class_object(species, &len_arg, 1));
+                JS_ASSIGN_OR_RETURN_INTO(result_item, js_construct_value(species,
+                    &len_arg, 1, species, NULL, false));
             }
         }
         if (use_default_ctor) {
@@ -2064,7 +2134,7 @@ extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* ar
         return result_item;
     }
 
-    if (mname->len == 4 && strncmp(mname->chars, "grow", 4) == 0) {
+    if (operation == JS_SHARED_ARRAY_BUFFER_GROW) {
         if (!js_arraybuffer_resizable(ab)) return js_throw_type_error("SharedArrayBuffer is not growable");
         Item new_length_item = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
         int new_length = 0;
@@ -2080,7 +2150,9 @@ extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* ar
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
 
-    return ItemNull;
+    log_error("shared-array-buffer-operation: unknown operation %d",
+        (int)operation);
+    return ItemError;
 }
 
 // ============================================================================
@@ -2448,7 +2520,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
         bool has_iter = iter_type != LMD_TYPE_UNDEFINED && iter_type != LMD_TYPE_NULL &&
             iter_method.item != ITEM_JS_UNDEFINED;
         if (has_iter) {
-            if (iter_type != LMD_TYPE_FUNC) {
+            if (!js_is_callable(iter_method)) {
                 return js_throw_type_error("@@iterator is not callable");
             }
             JS_ASSIGN_OR_RETURN(values, js_iterable_to_array(arg_root.get()));
@@ -2468,7 +2540,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
         TypeId iter_type = get_type_id(iter_method);
         bool has_iter = iter_type != LMD_TYPE_UNDEFINED && iter_type != LMD_TYPE_NULL && iter_method.item != ITEM_JS_UNDEFINED;
         if (has_iter) {
-            if (iter_type != LMD_TYPE_FUNC) {
+            if (!js_is_callable(iter_method)) {
                 return js_throw_type_error("@@iterator is not callable");
             }
             JS_ASSIGN_OR_RETURN(values, js_iterable_to_array(arg_root.get()));
@@ -2760,7 +2832,8 @@ extern "C" int js_typed_array_byte_offset(Item ta_item) {
     return js_typed_array_current_byte_offset(ta);
 }
 
-extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end) {
+extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start,
+        int end, bool array_semantics) {
     if (!js_is_typed_array(ta_item)) return ta_item;
 
     Map* m = ta_item.map;
@@ -2793,7 +2866,7 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
     // Js54 P6: gate the TA-spec OOB throw on the dispatch mode. When invoked
     // via Array.prototype.fill.call(ta_oob, ...) the spec uses LengthOfArrayLike
     // (which yields 0 for an OOB TA) and the method silently no-ops.
-    if (!js_dispatch_as_array_method && js_typed_array_is_out_of_bounds(ta)) {
+    if (!array_semantics && js_typed_array_is_out_of_bounds(ta)) {
         return js_throw_type_error("Cannot perform %TypedArray%.prototype.fill on an out-of-bounds ArrayBuffer");
     }
 
@@ -2898,7 +2971,7 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
     if (ta_set_stats_enabled) g_js_ta_set_stats.calls_total++;
     JsTypedArray* dst = js_get_typed_array_ptr(ta_item.map);
     // Js54 P6: gate the TA-spec OOB throw on dispatch mode (see fill).
-    if (!js_dispatch_as_array_method && (!dst || js_typed_array_is_out_of_bounds(dst))) {
+    if (!dst || js_typed_array_is_out_of_bounds(dst)) {
         return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
     }
     if (!dst) return (Item){.item = ITEM_JS_UNDEFINED};
@@ -2908,8 +2981,8 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
     if (js_is_typed_array(source)) {
         JsTypedArray* src = js_get_typed_array_ptr(source.map);
         // Js54 P6: gate the TA-spec OOB throw on dispatch mode.
-        if (!js_dispatch_as_array_method &&
-            (!src || js_typed_array_is_out_of_bounds(src) || js_typed_array_is_out_of_bounds(dst))) {
+        if (!src || js_typed_array_is_out_of_bounds(src) ||
+            js_typed_array_is_out_of_bounds(dst)) {
             return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
         }
         if (!src) return (Item){.item = ITEM_JS_UNDEFINED};
@@ -3014,12 +3087,13 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
 }
 
 // .slice(begin, end) — creates a copy
-extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
+extern "C" Item js_typed_array_slice(Item ta_item, int start, int end,
+        bool array_semantics) {
     if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
     JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
 
     // Js54 P6: gate the TA-spec OOB throw on dispatch mode.
-    if (!js_dispatch_as_array_method && js_typed_array_is_out_of_bounds(ta)) {
+    if (!array_semantics && js_typed_array_is_out_of_bounds(ta)) {
         return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on an out-of-bounds ArrayBuffer");
     }
 
@@ -3035,7 +3109,7 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
 
     int new_length = end - start;
     JS_ASSIGN_OR_RETURN(result, js_typed_array_species_create(ta_item, new_length));
-    if (new_length > 0 && !js_dispatch_as_array_method) {
+    if (new_length > 0 && !array_semantics) {
         if (ta->buffer && js_arraybuffer_detached(ta->buffer)) {
             return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on a detached ArrayBuffer");
         }
@@ -3151,9 +3225,13 @@ extern "C" JsDataView* js_get_dataview_ptr(Item val) {
     return js_get_dataview_ptr_from_map(val.map);
 }
 
-extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item) {
-    RootFrame roots(2);
+static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
+        Item new_target) {
+    RootFrame roots(4);
     Rooted<Item> buffer_root(roots, buffer);
+    Rooted<Item> new_target_root(roots, new_target);
+    Rooted<Item> prototype_root(roots, ItemNull);
+    Rooted<Item> view_root(roots, ItemNull);
     buffer = buffer_root.get();
     if (!js_is_arraybuffer(buffer)) {
         return js_throw_type_error("First argument to DataView constructor must be an ArrayBuffer");
@@ -3189,6 +3267,35 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
         return js_throw_range_error("Invalid DataView length");
     }
 
+    if (new_target_root.get().item != ItemNull.item) {
+        // DataView converts and initially validates its arguments before
+        // OrdinaryCreateFromConstructor, then revalidates the buffer after the
+        // observable prototype lookup. Fetching the prototype in the generic
+        // constructor wrapper ran user code before byteOffset.valueOf.
+        prototype_root.set(js_get_prototype_from_constructor_default(
+            new_target_root.get(), JS_CLASS_DATA_VIEW, -1));
+        if (item_is_error(prototype_root.get())) return prototype_root.get();
+        buffer = buffer_root.get();
+        ab = js_get_arraybuffer_ptr(buffer.map);
+        if (!ab || js_arraybuffer_detached(ab)) {
+            return js_throw_type_error("DataView buffer is detached");
+        }
+        buffer_length = js_arraybuffer_length(ab);
+        if (byte_offset < 0 || byte_offset > buffer_length) {
+            return js_throw_range_error(
+                "Start offset is outside the bounds of the buffer");
+        }
+        if (length_tracking) {
+            // A resizable-buffer DataView with omitted byteLength tracks the
+            // post-prototype-lookup buffer extent. Retaining the pre-getter
+            // length incorrectly turned a still-valid end offset into OOB.
+            byte_length = buffer_length - byte_offset;
+        } else if (byte_length < 0 ||
+                (int64_t)byte_offset + (int64_t)byte_length > buffer_length) {
+            return js_throw_range_error("Invalid DataView length");
+        }
+    }
+
     JsDataView* dv = (JsDataView*)mem_alloc(sizeof(JsDataView), MEM_CAT_JS_RUNTIME);
     // mem_alloc can collect; refresh the rooted backing Item before storing
     // the native references that must remain coherent with the GC owner.
@@ -3207,12 +3314,26 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     m->type = (void*)&js_dataview_type_marker;
     m->data = dv;
     m->data_cap = 0;
-    Rooted<Item> view_root(roots, (Item){.map = m});
+    view_root.set((Item){.map = m});
     // Class stamping and prototype linking allocate; without this root a
     // forced collection could reclaim the newly allocated native-backed map.
     js_class_stamp(view_root.get(), JS_CLASS_DATA_VIEW);
-    js_dataview_link_prototype(view_root.get());
+    if (new_target_root.get().item != ItemNull.item) {
+        js_set_prototype(view_root.get(), prototype_root.get());
+    } else {
+        js_dataview_link_prototype(view_root.get());
+    }
     return view_root.get();
+}
+
+extern "C" Item js_dataview_new(Item buffer, Item offset_item,
+        Item length_item) {
+    return js_dataview_create(buffer, offset_item, length_item, ItemNull);
+}
+
+extern "C" Item js_dataview_construct(Item buffer, Item offset_item,
+        Item length_item, Item new_target) {
+    return js_dataview_create(buffer, offset_item, length_item, new_target);
 }
 
 // Js54 P2: current byte_length honoring length-tracking views over resizable
@@ -3283,44 +3404,18 @@ static bool is_little_endian_system() {
     return *((uint8_t*)&test) == 1;
 }
 
-// DataView method dispatch
-extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, int argc) {
+// D6.2.2v2: the published callable fixes this operation; display spelling
+// must never select DataView semantics after function creation.
+extern "C" Item js_dataview_operation(Item dv_item,
+        JsDataViewOperation operation, Item* args, int argc) {
     if (!js_is_dataview(dv_item)) return (Item){.item = ITEM_NULL};
     JsDataView* dv = js_get_dataview_ptr_from_map(dv_item.map);
     if (!dv) return (Item){.item = ITEM_NULL};
 
-    String* mname = it2s(method_name);
-    if (!mname) return (Item){.item = ITEM_NULL};
-    const char* mn = mname->chars;
-    int ml = (int)mname->len;
-
-    bool is_view_method =
-        (ml == 7 && strncmp(mn, "getInt8", 7) == 0) ||
-        (ml == 8 && strncmp(mn, "getUint8", 8) == 0) ||
-        (ml == 8 && strncmp(mn, "getInt16", 8) == 0) ||
-        (ml == 9 && strncmp(mn, "getUint16", 9) == 0) ||
-        (ml == 8 && strncmp(mn, "getInt32", 8) == 0) ||
-        (ml == 9 && strncmp(mn, "getUint32", 9) == 0) ||
-        (ml == 10 && strncmp(mn, "getFloat32", 10) == 0) ||
-        (ml == 10 && strncmp(mn, "getFloat64", 10) == 0) ||
-        (ml == 11 && strncmp(mn, "getBigInt64", 11) == 0) ||
-        (ml == 12 && strncmp(mn, "getBigUint64", 12) == 0) ||
-        (ml == 7 && strncmp(mn, "setInt8", 7) == 0) ||
-        (ml == 8 && strncmp(mn, "setUint8", 8) == 0) ||
-        (ml == 8 && strncmp(mn, "setInt16", 8) == 0) ||
-        (ml == 9 && strncmp(mn, "setUint16", 9) == 0) ||
-        (ml == 8 && strncmp(mn, "setInt32", 8) == 0) ||
-        (ml == 9 && strncmp(mn, "setUint32", 9) == 0) ||
-        (ml == 10 && strncmp(mn, "setFloat32", 10) == 0) ||
-        (ml == 10 && strncmp(mn, "setFloat64", 10) == 0) ||
-        (ml == 11 && strncmp(mn, "setBigInt64", 11) == 0) ||
-        (ml == 12 && strncmp(mn, "setBigUint64", 12) == 0);
-    if (!is_view_method) return (Item){.item = ITEM_NULL};
-
     int offset = 0;
     Item offset_item = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
     JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(offset_item, &offset));
-    bool is_set_method = (ml >= 3 && mn[0] == 's' && mn[1] == 'e' && mn[2] == 't');
+    bool is_set_method = operation >= JS_DATAVIEW_SET_INT8;
     // Js54 P2: get-methods validate up front (spec: TypeError on detached or OOB).
     // set-methods perform ToNumber/ToBigInt on the value first (those calls can
     // observe side effects that resize the buffer), so per spec the OOB check
@@ -3331,17 +3426,17 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     bool sys_le = is_little_endian_system();
 
     // Getter methods
-    if (ml == 7 && strncmp(mn, "getInt8", 7) == 0) {
+    if (operation == JS_DATAVIEW_GET_INT8) {
         const uint8_t* p = dv_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         return (Item){.item = i2it((int64_t)(int8_t)*p)};
     }
-    if (ml == 8 && strncmp(mn, "getUint8", 8) == 0) {
+    if (operation == JS_DATAVIEW_GET_UINT8) {
         const uint8_t* p = dv_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         return (Item){.item = i2it((int64_t)*p)};
     }
-    if (ml == 8 && strncmp(mn, "getInt16", 8) == 0) {
+    if (operation == JS_DATAVIEW_GET_INT16) {
         const uint8_t* p = dv_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
@@ -3350,7 +3445,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         if (little_endian != sys_le) raw = swap16(raw);
         return (Item){.item = i2it((int64_t)(int16_t)raw)};
     }
-    if (ml == 9 && strncmp(mn, "getUint16", 9) == 0) {
+    if (operation == JS_DATAVIEW_GET_UINT16) {
         const uint8_t* p = dv_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
@@ -3359,7 +3454,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         if (little_endian != sys_le) raw = swap16(raw);
         return (Item){.item = i2it((int64_t)raw)};
     }
-    if (ml == 8 && strncmp(mn, "getInt32", 8) == 0) {
+    if (operation == JS_DATAVIEW_GET_INT32) {
         const uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
@@ -3368,7 +3463,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         if (little_endian != sys_le) raw = swap32(raw);
         return (Item){.item = i2it((int64_t)(int32_t)raw)};
     }
-    if (ml == 9 && strncmp(mn, "getUint32", 9) == 0) {
+    if (operation == JS_DATAVIEW_GET_UINT32) {
         const uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
@@ -3377,7 +3472,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         if (little_endian != sys_le) raw = swap32(raw);
         return (Item){.item = i2it((int64_t)raw)};
     }
-    if (ml == 10 && strncmp(mn, "getFloat32", 10) == 0) {
+    if (operation == JS_DATAVIEW_GET_FLOAT32) {
         const uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
@@ -3388,7 +3483,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         memcpy(&f, &raw, 4);
         return js_make_number((double)f);
     }
-    if (ml == 10 && strncmp(mn, "getFloat64", 10) == 0) {
+    if (operation == JS_DATAVIEW_GET_FLOAT64) {
         const uint8_t* p = dv_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
@@ -3399,7 +3494,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         memcpy(&d, &raw, 8);
         return js_make_number(d);
     }
-    if (ml == 11 && strncmp(mn, "getBigInt64", 11) == 0) {
+    if (operation == JS_DATAVIEW_GET_BIGINT64) {
         const uint8_t* p = dv_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
@@ -3408,7 +3503,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         if (little_endian != sys_le) raw = swap64(raw);
         return bigint_from_int64((int64_t)raw);
     }
-    if (ml == 12 && strncmp(mn, "getBigUint64", 12) == 0) {
+    if (operation == JS_DATAVIEW_GET_BIGUINT64) {
         const uint8_t* p = dv_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
@@ -3419,7 +3514,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     }
 
     // Setter methods
-    if (ml == 7 && strncmp(mn, "setInt8", 7) == 0) {
+    if (operation == JS_DATAVIEW_SET_INT8) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
@@ -3430,7 +3525,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         *p = (uint8_t)(int8_t)raw_val;
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    if (ml == 8 && strncmp(mn, "setUint8", 8) == 0) {
+    if (operation == JS_DATAVIEW_SET_UINT8) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
@@ -3441,7 +3536,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         *p = (uint8_t)raw_val;
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    if (ml == 8 && strncmp(mn, "setInt16", 8) == 0) {
+    if (operation == JS_DATAVIEW_SET_INT16) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
@@ -3454,7 +3549,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         memcpy(p, &val, 2);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    if (ml == 9 && strncmp(mn, "setUint16", 9) == 0) {
+    if (operation == JS_DATAVIEW_SET_UINT16) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
@@ -3467,7 +3562,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         memcpy(p, &val, 2);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    if (ml == 8 && strncmp(mn, "setInt32", 8) == 0) {
+    if (operation == JS_DATAVIEW_SET_INT32) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
@@ -3480,7 +3575,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         memcpy(p, &val, 4);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    if (ml == 9 && strncmp(mn, "setUint32", 9) == 0) {
+    if (operation == JS_DATAVIEW_SET_UINT32) {
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
@@ -3493,7 +3588,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         memcpy(p, &val, 4);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    if (ml == 10 && strncmp(mn, "setFloat32", 10) == 0) {
+    if (operation == JS_DATAVIEW_SET_FLOAT32) {
         Item val_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         double number_value = 0.0;
         JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(val_item, &number_value));
@@ -3508,7 +3603,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         memcpy(p, &raw, 4);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    if (ml == 10 && strncmp(mn, "setFloat64", 10) == 0) {
+    if (operation == JS_DATAVIEW_SET_FLOAT64) {
         Item val_item2 = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         double d = 0.0;
         JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(val_item2, &d));
@@ -3522,7 +3617,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         memcpy(p, &raw, 8);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    if (ml == 11 && strncmp(mn, "setBigInt64", 11) == 0) {
+    if (operation == JS_DATAVIEW_SET_BIGINT64) {
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         Item bigint_value;
         JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_bigint_value(value_item, &bigint_value));
@@ -3536,7 +3631,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         memcpy(p, &raw, 8);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    if (ml == 12 && strncmp(mn, "setBigUint64", 12) == 0) {
+    if (operation == JS_DATAVIEW_SET_BIGUINT64) {
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         Item bigint_value;
         JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_bigint_value(value_item, &bigint_value));
@@ -3551,6 +3646,6 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
 
-    log_error("DataView: unknown method '%.*s'", ml, mn);
+    log_error("dataview-operation: unknown operation %d", (int)operation);
     return (Item){.item = ITEM_NULL};
 }

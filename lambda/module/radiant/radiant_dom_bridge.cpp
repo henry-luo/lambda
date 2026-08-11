@@ -42,7 +42,6 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_document_proxy_for_doc_bridge radiant_host_api->dom->document_proxy_for_doc_bridge
 #define js_dom_unwrap_element_impl radiant_host_api->dom->unwrap_element_impl
 #define js_dom_initialize_node_wrapper radiant_host_api->dom->initialize_node_wrapper
-#define js_is_css_namespace radiant_host_api->dom->is_css_namespace
 #define js_is_inline_style_item radiant_host_api->dom->is_inline_style_item
 #define js_is_computed_style_item radiant_host_api->dom->is_computed_style_item
 #define js_is_stylesheet radiant_host_api->dom->is_stylesheet
@@ -50,7 +49,7 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_is_rule_style_decl radiant_host_api->dom->is_rule_style_decl
 #define js_dom_get_property_impl radiant_host_api->dom->dom_get_property_impl
 #define js_dom_set_property_impl radiant_host_api->dom->dom_set_property_impl
-#define js_dom_element_method_impl radiant_host_api->dom->dom_element_method_impl
+#define js_dom_element_operation_impl radiant_host_api->dom->dom_element_operation_impl
 #define js_computed_style_get_property radiant_host_api->dom->computed_style_get_property
 #define js_dom_style_resource_has_property radiant_host_api->dom->style_resource_has_property
 #define js_dom_get_prototype_value radiant_host_api->dom->dom_get_prototype_value
@@ -62,14 +61,12 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_restore_active_document radiant_host_api->dom->restore_active_document
 #define js_document_proxy_get_property radiant_host_api->dom->document_proxy_get_property
 #define js_document_proxy_set_property radiant_host_api->dom->document_proxy_set_property
-#define js_document_proxy_method radiant_host_api->dom->document_proxy_method
 #define js_dom_range_get_prototype_value radiant_host_api->dom->range_get_prototype_value
 #define js_dom_selection_get_prototype_value radiant_host_api->dom->selection_get_prototype_value
 #define js_dom_expando_has_property radiant_host_api->dom->expando_has_property
 #define js_dom_expando_get_own_property_descriptor radiant_host_api->dom->expando_get_own_property_descriptor
 #define js_dom_expando_delete_property radiant_host_api->dom->expando_delete_property
 #define js_dom_expando_own_property_names radiant_host_api->dom->expando_own_property_names
-#define js_css_namespace_method radiant_host_api->dom->css_namespace_method
 #define js_dom_owner_document_for_node radiant_host_api->dom->owner_document_for_node
 #define js_dom_to_attribute_cstr radiant_host_api->dom->to_attribute_cstr
 #define js_is_truthy radiant_host_api->script->is_truthy
@@ -111,7 +108,7 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_get_bounding_client_rect_bridge radiant_host_api->dom->get_bounding_client_rect_bridge
 #define js_dom_get_client_rects_bridge radiant_host_api->dom->get_client_rects_bridge
 #define js_dom_scroll_into_view_bridge radiant_host_api->dom->scroll_into_view_bridge
-#define js_dom_scroll_method_bridge radiant_host_api->dom->scroll_method_bridge
+#define js_dom_scroll_operation_bridge radiant_host_api->dom->scroll_operation_bridge
 #define js_dom_text_control_caret_bounds_bridge radiant_host_api->dom->text_control_caret_bounds_bridge
 #define js_dom_text_control_boundary_from_point_bridge radiant_host_api->dom->text_control_boundary_from_point_bridge
 #define js_dom_boundary_from_point_bridge radiant_host_api->dom->boundary_from_point_bridge
@@ -127,7 +124,7 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_insert_before_bridge radiant_host_api->dom->insert_before_bridge
 #define js_dom_remove_bridge radiant_host_api->dom->remove_bridge
 #define js_dom_adopt_node_bridge radiant_host_api->dom->adopt_node_bridge
-#define js_dom_location_method_bridge radiant_host_api->dom->location_method_bridge
+#define js_dom_location_navigate_bridge radiant_host_api->dom->location_navigate_bridge
 #define js_dom_document_open_bridge radiant_host_api->dom->document_open_bridge
 #define js_dom_document_write_bridge radiant_host_api->dom->document_write_bridge
 #define js_dom_document_element_from_point_bridge radiant_host_api->dom->document_element_from_point_bridge
@@ -161,7 +158,8 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_notify_mutation_detail radiant_host_api->dom->notify_mutation_detail
 #define js_dom_get_ui_context radiant_host_api->dom->get_ui_context
 #define js_dom_has_committed_geometry_snapshot radiant_host_api->dom->has_committed_geometry_snapshot
-#define js_call_function radiant_host_api->script->call_function
+#define js_dom_create_tree_walker_bridge radiant_host_api->dom->document_create_tree_walker_bridge
+#define js_dom_document_create_event_bridge radiant_host_api->dom->document_create_event_bridge
 
 static const int RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE = 4096;
 static const char s_radiant_dom_vmap_type_marker = 0;
@@ -196,7 +194,6 @@ static __thread pthread_t s_radiant_dom_cache_owner;
 static void* radiant_dom_cache_malloc(size_t size) {
     return mem_alloc(size, MEM_CAT_JS_RUNTIME);
 }
-
 static void* radiant_dom_cache_realloc(void* ptr, size_t size) {
     return mem_realloc(ptr, size, MEM_CAT_JS_RUNTIME);
 }
@@ -312,6 +309,14 @@ static bool radiant_dom_is_attr_name_projection(const char* name) {
 
 static bool radiant_dom_is_tag(DomElement* elem, const char* tag) {
     return elem && elem->tag_name && tag && strcasecmp(elem->tag_name, tag) == 0;
+}
+
+static bool radiant_dom_node_is_dom_element(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    // Document/fragment shells share DomElement storage internally but are
+    // not Elements in the DOM type hierarchy.
+    return elem && elem->tag_name && elem->tag_name[0] != '#';
 }
 
 static const char* radiant_dom_item_to_html_bool_string(Item value) {
@@ -1270,9 +1275,15 @@ static bool radiant_dom_get_text_property(DomText* text_node, const char* prop, 
         *out = radiant_dom_string_item("#text");
         return true;
     }
-    if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
+    if (strcmp(prop, "parentNode") == 0) {
         DomNode* parent = text_node->parent;
         *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
+        return true;
+    }
+    if (strcmp(prop, "parentElement") == 0) {
+        DomNode* parent = text_node->parent;
+        *out = radiant_dom_node_is_dom_element(parent)
+            ? radiant_dom_node_item(parent) : ItemNull;
         return true;
     }
     if (strcmp(prop, "isConnected") == 0) {
@@ -1323,9 +1334,15 @@ static bool radiant_dom_get_comment_property(DomComment* comment_node, const cha
         *out = radiant_dom_int_item((int64_t)comment_node->length);
         return true;
     }
-    if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
+    if (strcmp(prop, "parentNode") == 0) {
         DomNode* parent = comment_node->parent;
         *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
+        return true;
+    }
+    if (strcmp(prop, "parentElement") == 0) {
+        DomNode* parent = comment_node->parent;
+        *out = radiant_dom_node_is_dom_element(parent)
+            ? radiant_dom_node_item(parent) : ItemNull;
         return true;
     }
     if (strcmp(prop, "isConnected") == 0) {
@@ -2680,10 +2697,9 @@ RADIANT_C_API int radiant_dom_m4c_get_form(Item r, Item* out) {
 }
 
 
-// ---- DOM3 Phase 4d: method members (dispatch conversion) ----
-// Call handlers delegate into radiant_dom_element_method so every arm keeps
-// its exact behavior; body extraction is the 4e engine sweep. Method-name
-// property reads now return real cached function objects (D0d).
+// ---- DOM3 Phase 4d: direct method capabilities ----
+// Each record target fixes its executable operation at publication; observable
+// property names never select the method body after Get (D6.2.2v2).
 RADIANT_C_API int radiant_dom_guard_node(Item receiver) {
     return radiant_dom_unwrap_node(receiver) != nullptr;
 }
@@ -2695,6 +2711,15 @@ RADIANT_C_API int radiant_dom_guard_text(Item receiver) {
 RADIANT_C_API int radiant_dom_guard_character_data(Item receiver) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
     return node && (node->is_text() || node->is_comment());
+}
+
+RADIANT_C_API int radiant_dom_guard_svg(Item receiver) {
+    if (!radiant_dom_member_is_element(receiver)) return 0;
+    Item namespace_value = js_dom_get_property_impl(receiver,
+        (Item){.item = s2it(heap_create_name("namespaceURI"))});
+    const char* namespace_uri = fn_to_cstr(namespace_value);
+    return namespace_uri &&
+        strcmp(namespace_uri, "http://www.w3.org/2000/svg") == 0;
 }
 
 static int radiant_dom_member_character_data_property(Item receiver,
@@ -2758,6 +2783,17 @@ RADIANT_C_API int radiant_dom_member_parent_node_any(Item receiver, Item* out) {
     return 1;
 }
 
+RADIANT_C_API int radiant_dom_member_parent_element_any(Item receiver, Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !out) return 0;
+    // parentElement is narrower than parentNode: an internal Document or
+    // DocumentFragment shell must terminate the Element ancestor walk.
+    DomNode* parent = node->parent;
+    *out = radiant_dom_node_is_dom_element(parent)
+        ? radiant_dom_node_item(parent) : ItemNull;
+    return 1;
+}
+
 RADIANT_C_API int radiant_dom_member_is_connected_any(Item receiver, Item* out) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
     if (!node || !out) return 0;
@@ -2818,336 +2854,93 @@ RADIANT_C_API int radiant_dom_member_child_nodes_any(Item receiver, Item* out) {
         : radiant_dom_array_item();
     return 1;
 }
-RADIANT_C_API int radiant_dom_m4d_named_item(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("namedItem"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_add(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("add"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_remove(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("remove"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_contains(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("contains"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_compare_document_position(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("compareDocumentPosition"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_get_root_node(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("getRootNode"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_remove2(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("remove"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_replace_with(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("replaceWith"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_has_child_nodes(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("hasChildNodes"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_clone_node(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("cloneNode"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_replace_data(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("replaceData"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_insert_data(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("insertData"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_append_data(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("appendData"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_delete_data(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("deleteData"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_substring_data(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("substringData"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_get_attribute(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("getAttribute"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_set_attribute(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("setAttribute"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_remove_attribute(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("removeAttribute"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_toggle_attribute(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("toggleAttribute"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_has_attribute(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("hasAttribute"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_get_attribute_names(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("getAttributeNames"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_matches(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("matches"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_query_selector(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("querySelector"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_query_selector_all(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("querySelectorAll"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_closest(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("closest"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_get_elements_by_tag_name(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("getElementsByTagName"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_get_elements_by_class_name(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("getElementsByClassName"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_get_element_by_id(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("getElementById"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_add_event_listener(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("addEventListener"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_remove_event_listener(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("removeEventListener"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_dispatch_event(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("dispatchEvent"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_append_child(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("appendChild"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_remove_child(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("removeChild"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_insert_before(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("insertBefore"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_replace_child(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("replaceChild"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_normalize(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("normalize"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_append(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("append"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_prepend(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("prepend"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_insert_adjacent_element(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("insertAdjacentElement"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_insert_adjacent_html(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("insertAdjacentHTML"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_get_bounding_client_rect(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("getBoundingClientRect"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_get_client_rects(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("getClientRects"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_scroll_into_view(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("scrollIntoView"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_scroll(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("scroll"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_scroll_to(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("scrollTo"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_scroll_by(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("scrollBy"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_focus(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("focus"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_blur(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("blur"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_click(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("click"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_reset(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("reset"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_submit(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("submit"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_request_submit(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("requestSubmit"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_check_validity(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("checkValidity"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_report_validity(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("reportValidity"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_set_custom_validity(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("setCustomValidity"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_set_selection_range(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("setSelectionRange"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_set_range_text(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("setRangeText"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_select(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("select"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_item(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("item"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_toggle(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("toggle"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_replace(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("replace"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_attach_shadow(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("attachShadow"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d_to_string(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("toString"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d___lambda_boundary_from_point(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("__lambdaBoundaryFromPoint"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d___lambda_text_control_boundary_from_point(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("__lambdaTextControlBoundaryFromPoint"))}, args, argc);
-    return 1;
-}
-RADIANT_C_API int radiant_dom_m4d___lambda_text_control_caret_bounds(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_dom_element_method(r,
-        (Item){.item = s2it(heap_create_name("__lambdaTextControlCaretBounds"))}, args, argc);
-    return 1;
-}
+
+#define RADIANT_DOM_OPERATION_BINDING(name, operation) \
+    RADIANT_C_API int name(Item receiver, Item* args, int argc, Item* out) { \
+        *out = radiant_dom_element_operation(receiver, operation, args, argc); \
+        return 1; \
+    }
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_named_item, JUBE_DOM_NAMED_ITEM)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_add, JUBE_DOM_ADD)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove, JUBE_DOM_REMOVE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_contains, JUBE_DOM_CONTAINS)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_compare_document_position, JUBE_DOM_COMPARE_DOCUMENT_POSITION)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_root_node, JUBE_DOM_GET_ROOT_NODE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove2, JUBE_DOM_REMOVE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_replace_with, JUBE_DOM_REPLACE_WITH)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_after, JUBE_DOM_AFTER)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_has_child_nodes, JUBE_DOM_HAS_CHILD_NODES)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_clone_node, JUBE_DOM_CLONE_NODE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_replace_data, JUBE_DOM_REPLACE_DATA)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_insert_data, JUBE_DOM_INSERT_DATA)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_append_data, JUBE_DOM_APPEND_DATA)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_delete_data, JUBE_DOM_DELETE_DATA)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_substring_data, JUBE_DOM_SUBSTRING_DATA)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_attribute, JUBE_DOM_GET_ATTRIBUTE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_set_attribute, JUBE_DOM_SET_ATTRIBUTE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove_attribute, JUBE_DOM_REMOVE_ATTRIBUTE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_toggle_attribute, JUBE_DOM_TOGGLE_ATTRIBUTE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_has_attribute, JUBE_DOM_HAS_ATTRIBUTE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_attribute_names, JUBE_DOM_GET_ATTRIBUTE_NAMES)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_matches, JUBE_DOM_MATCHES)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_query_selector, JUBE_DOM_QUERY_SELECTOR)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_query_selector_all, JUBE_DOM_QUERY_SELECTOR_ALL)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_closest, JUBE_DOM_CLOSEST)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_elements_by_tag_name, JUBE_DOM_GET_ELEMENTS_BY_TAG_NAME)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_elements_by_class_name, JUBE_DOM_GET_ELEMENTS_BY_CLASS_NAME)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_element_by_id, JUBE_DOM_GET_ELEMENT_BY_ID)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_add_event_listener, JUBE_DOM_ADD_EVENT_LISTENER)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove_event_listener, JUBE_DOM_REMOVE_EVENT_LISTENER)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_dispatch_event, JUBE_DOM_DISPATCH_EVENT)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_append_child, JUBE_DOM_APPEND_CHILD)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove_child, JUBE_DOM_REMOVE_CHILD)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_insert_before, JUBE_DOM_INSERT_BEFORE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_replace_child, JUBE_DOM_REPLACE_CHILD)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_normalize, JUBE_DOM_NORMALIZE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_append, JUBE_DOM_APPEND)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_prepend, JUBE_DOM_PREPEND)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_insert_adjacent_element, JUBE_DOM_INSERT_ADJACENT_ELEMENT)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_insert_adjacent_html, JUBE_DOM_INSERT_ADJACENT_HTML)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_bounding_client_rect, JUBE_DOM_GET_BOUNDING_CLIENT_RECT)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_client_rects, JUBE_DOM_GET_CLIENT_RECTS)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_scroll_into_view, JUBE_DOM_SCROLL_INTO_VIEW)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_scroll, JUBE_DOM_SCROLL)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_scroll_to, JUBE_DOM_SCROLL_TO)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_scroll_by, JUBE_DOM_SCROLL_BY)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_focus, JUBE_DOM_FOCUS)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_blur, JUBE_DOM_BLUR)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_click, JUBE_DOM_CLICK)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_reset, JUBE_DOM_RESET)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_submit, JUBE_DOM_SUBMIT)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_request_submit, JUBE_DOM_REQUEST_SUBMIT)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_check_validity, JUBE_DOM_CHECK_VALIDITY)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_report_validity, JUBE_DOM_REPORT_VALIDITY)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_set_custom_validity, JUBE_DOM_SET_CUSTOM_VALIDITY)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_set_selection_range, JUBE_DOM_SET_SELECTION_RANGE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_set_range_text, JUBE_DOM_SET_RANGE_TEXT)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_select, JUBE_DOM_SELECT)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_item, JUBE_DOM_ITEM)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_toggle, JUBE_DOM_TOGGLE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_replace, JUBE_DOM_REPLACE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_attach_shadow, JUBE_DOM_ATTACH_SHADOW)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_to_string, JUBE_DOM_TO_STRING)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d___lambda_boundary_from_point, JUBE_DOM_BOUNDARY_FROM_POINT)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d___lambda_text_control_boundary_from_point, JUBE_DOM_TEXT_CONTROL_BOUNDARY_FROM_POINT)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d___lambda_text_control_caret_bounds, JUBE_DOM_TEXT_CONTROL_CARET_BOUNDS)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_attribute_ns, JUBE_DOM_GET_ATTRIBUTE_NS)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_set_attribute_ns, JUBE_DOM_SET_ATTRIBUTE_NS)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove_attribute_ns, JUBE_DOM_REMOVE_ATTRIBUTE_NS)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_is_equal_node, JUBE_DOM_IS_EQUAL_NODE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_is_same_node, JUBE_DOM_IS_SAME_NODE)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_create_svg_point, JUBE_DOM_CREATE_SVG_POINT)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_create_svg_matrix, JUBE_DOM_CREATE_SVG_MATRIX)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_create_svg_transform, JUBE_DOM_CREATE_SVG_TRANSFORM)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_create_svg_transform_from_matrix, JUBE_DOM_CREATE_SVG_TRANSFORM_FROM_MATRIX)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_bbox, JUBE_DOM_GET_BBOX)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_ctm, JUBE_DOM_GET_CTM)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_screen_ctm, JUBE_DOM_GET_SCREEN_CTM)
+
+#undef RADIANT_DOM_OPERATION_BINDING
 
 static bool radiant_dom_get_element_property(Item receiver, DomElement* elem,
                                              const char* prop, Item* out) {
@@ -3306,59 +3099,56 @@ static Item radiant_dom_attribute_names_item(DomElement* elem) {
     return arr_item;
 }
 
-static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, Item* args, int argc, Item* out) {
+static bool radiant_dom_element_operation_basic(Item elem_item, JubeDomElementOperation operation, Item* args, int argc, Item* out) {
     if (!out) return false;
-    const char* method = fn_to_cstr(method_name);
-    if (!method) return false;
-
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
     if (!node) return false;
 
     if (node->is_element()) {
         DomElement* method_elem = node->as_element();
         if (radiant_dom_is_tag(method_elem, "select") &&
-            (strcmp(method, "namedItem") == 0 ||
-             strcmp(method, "add") == 0 ||
-             strcmp(method, "remove") == 0)) {
+            (operation == JUBE_DOM_NAMED_ITEM ||
+             operation == JUBE_DOM_ADD ||
+             operation == JUBE_DOM_REMOVE)) {
             // HTMLSelectElement overrides ChildNode.remove(); dispatch this
             // before generic node removal so select.remove(index) and
             // select.remove() keep the legacy option-list semantics.
-            *out = js_dom_element_method_impl(elem_item, method_name, args, argc);
+            *out = js_dom_element_operation_impl(elem_item, operation, args, argc);
             return true;
         }
     }
 
-    if (strcmp(method, "contains") == 0) {
+    if (operation == JUBE_DOM_CONTAINS) {
         DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;
         *out = (Item){.item = b2it(radiant_dom_node_contains(node, other) ? 1 : 0)};
         return true;
     }
 
-    if (strcmp(method, "compareDocumentPosition") == 0) {
+    if (operation == JUBE_DOM_COMPARE_DOCUMENT_POSITION) {
         DomNode* other = (argc >= 1) ? (DomNode*)radiant_dom_unwrap_node(args[0]) : nullptr;
         *out = radiant_dom_int_item(radiant_dom_compare_document_position(node, other));
         return true;
     }
 
-    if (strcmp(method, "getRootNode") == 0) {
+    if (operation == JUBE_DOM_GET_ROOT_NODE) {
         // Shadow DOM is deferred, so composed and non-composed roots coincide.
         *out = radiant_dom_node_root_item(node);
         return true;
     }
 
-    if (strcmp(method, "remove") == 0) {
+    if (operation == JUBE_DOM_REMOVE) {
         *out = js_dom_remove_bridge((void*)node);
         return true;
     }
 
-    if (strcmp(method, "replaceWith") == 0) {
+    if (operation == JUBE_DOM_REPLACE_WITH) {
         *out = js_dom_replace_with_bridge((void*)node, args, argc);
         return true;
     }
 
     if (node->is_text()) {
         DomText* text = node->as_text();
-        if (strcmp(method, "cloneNode") == 0) {
+        if (operation == JUBE_DOM_CLONE_NODE) {
             DomNode* ancestor = text->parent;
             DomDocument* doc = nullptr;
             while (ancestor && !ancestor->is_element()) ancestor = ancestor->parent;
@@ -3370,31 +3160,31 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = radiant_dom_node_item((DomNode*)clone);
             return true;
         }
-        if (strcmp(method, "replaceData") == 0) {
+        if (operation == JUBE_DOM_REPLACE_DATA) {
             *out = js_dom_text_replace_data_bridge((void*)text,
                 argc >= 1 ? args[0] : radiant_dom_undefined_item(),
                 argc >= 2 ? args[1] : radiant_dom_undefined_item(),
                 argc >= 3 ? args[2] : radiant_dom_undefined_item());
             return true;
         }
-        if (strcmp(method, "insertData") == 0) {
+        if (operation == JUBE_DOM_INSERT_DATA) {
             *out = js_dom_text_insert_data_bridge((void*)text,
                 argc >= 1 ? args[0] : radiant_dom_undefined_item(),
                 argc >= 2 ? args[1] : radiant_dom_undefined_item());
             return true;
         }
-        if (strcmp(method, "appendData") == 0) {
+        if (operation == JUBE_DOM_APPEND_DATA) {
             *out = js_dom_text_append_data_bridge((void*)text,
                 argc >= 1 ? args[0] : radiant_dom_undefined_item());
             return true;
         }
-        if (strcmp(method, "deleteData") == 0) {
+        if (operation == JUBE_DOM_DELETE_DATA) {
             *out = js_dom_text_delete_data_bridge((void*)text,
                 argc >= 1 ? args[0] : radiant_dom_undefined_item(),
                 argc >= 2 ? args[1] : radiant_dom_undefined_item());
             return true;
         }
-        if (strcmp(method, "substringData") == 0) {
+        if (operation == JUBE_DOM_SUBSTRING_DATA) {
             *out = js_dom_text_substring_data_bridge((void*)text,
                 argc >= 1 ? args[0] : radiant_dom_undefined_item(),
                 argc >= 2 ? args[1] : radiant_dom_undefined_item());
@@ -3402,10 +3192,33 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         }
     }
 
+    // EventTarget is inherited by every Node, including CharacterData. Keep
+    // these capabilities before the Element-only boundary (D6.2.2v2).
+    if (operation == JUBE_DOM_ADD_EVENT_LISTENER) {
+        *out = argc >= 2
+            ? js_dom_add_event_listener_bridge(elem_item, args[0], args[1],
+                argc >= 3 ? args[2] : ItemNull)
+            : radiant_dom_undefined_item();
+        return true;
+    }
+    if (operation == JUBE_DOM_REMOVE_EVENT_LISTENER) {
+        *out = argc >= 2
+            ? js_dom_remove_event_listener_bridge(elem_item, args[0], args[1],
+                argc >= 3 ? args[2] : ItemNull)
+            : radiant_dom_undefined_item();
+        return true;
+    }
+    if (operation == JUBE_DOM_DISPATCH_EVENT) {
+        *out = argc >= 1
+            ? js_dom_dispatch_event_bridge(elem_item, args[0])
+            : (Item){.item = b2it(0)};
+        return true;
+    }
+
     if (!node->is_element()) return false;
     DomElement* elem = node->as_element();
 
-    if (strcmp(method, "getAttribute") == 0) {
+    if (operation == JUBE_DOM_GET_ATTRIBUTE) {
         if (argc < 1) {
             *out = ItemNull;
             return true;
@@ -3424,7 +3237,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "hasAttribute") == 0) {
+    if (operation == JUBE_DOM_HAS_ATTRIBUTE) {
         if (argc < 1) {
             *out = (Item){.item = b2it(0)};
             return true;
@@ -3436,12 +3249,12 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "getAttributeNames") == 0) {
+    if (operation == JUBE_DOM_GET_ATTRIBUTE_NAMES) {
         *out = radiant_dom_attribute_names_item(elem);
         return true;
     }
 
-    if (strcmp(method, "getElementsByTagName") == 0) {
+    if (operation == JUBE_DOM_GET_ELEMENTS_BY_TAG_NAME) {
         if (argc < 1) {
             *out = ItemNull;
             return true;
@@ -3450,7 +3263,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "getElementsByClassName") == 0) {
+    if (operation == JUBE_DOM_GET_ELEMENTS_BY_CLASS_NAME) {
         if (argc < 1) {
             *out = ItemNull;
             return true;
@@ -3459,7 +3272,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "querySelector") == 0) {
+    if (operation == JUBE_DOM_QUERY_SELECTOR) {
         if (argc < 1) {
             *out = ItemNull;
             return true;
@@ -3488,7 +3301,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "querySelectorAll") == 0) {
+    if (operation == JUBE_DOM_QUERY_SELECTOR_ALL) {
         if (argc < 1) {
             *out = ItemNull;
             return true;
@@ -3522,7 +3335,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "matches") == 0) {
+    if (operation == JUBE_DOM_MATCHES) {
         if (argc < 1) {
             *out = (Item){.item = b2it(0)};
             return true;
@@ -3544,7 +3357,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "closest") == 0) {
+    if (operation == JUBE_DOM_CLOSEST) {
         if (argc < 1) {
             *out = ItemNull;
             return true;
@@ -3574,7 +3387,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "getElementById") == 0) {
+    if (operation == JUBE_DOM_GET_ELEMENT_BY_ID) {
         if (argc < 1) {
             *out = ItemNull;
             return true;
@@ -3588,7 +3401,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "appendChild") == 0) {
+    if (operation == JUBE_DOM_APPEND_CHILD) {
         if (argc < 1) {
             *out = ItemNull;
             return true;
@@ -3597,7 +3410,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "removeChild") == 0) {
+    if (operation == JUBE_DOM_REMOVE_CHILD) {
         if (argc < 1) {
             *out = ItemNull;
             return true;
@@ -3606,7 +3419,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "insertBefore") == 0) {
+    if (operation == JUBE_DOM_INSERT_BEFORE) {
         if (argc < 2) {
             *out = ItemNull;
             return true;
@@ -3615,18 +3428,18 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "normalize") == 0) {
+    if (operation == JUBE_DOM_NORMALIZE) {
         *out = js_dom_normalize_bridge((void*)elem);
         return true;
     }
 
-    if (strcmp(method, "cloneNode") == 0) {
+    if (operation == JUBE_DOM_CLONE_NODE) {
         *out = js_dom_clone_node_bridge((void*)elem,
             argc >= 1 ? args[0] : radiant_dom_undefined_item(), argc >= 1);
         return true;
     }
 
-    if (strcmp(method, "replaceChild") == 0) {
+    if (operation == JUBE_DOM_REPLACE_CHILD) {
         if (argc < 2) {
             *out = ItemNull;
             return true;
@@ -3635,7 +3448,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "insertAdjacentElement") == 0) {
+    if (operation == JUBE_DOM_INSERT_ADJACENT_ELEMENT) {
         if (argc < 2) {
             *out = ItemNull;
             return true;
@@ -3644,7 +3457,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "insertAdjacentHTML") == 0) {
+    if (operation == JUBE_DOM_INSERT_ADJACENT_HTML) {
         if (argc < 2) {
             *out = ItemNull;
             return true;
@@ -3653,77 +3466,54 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "append") == 0) {
+    if (operation == JUBE_DOM_APPEND) {
         *out = js_dom_append_variadic_bridge((void*)elem, args, argc);
         return true;
     }
 
-    if (strcmp(method, "prepend") == 0) {
+    if (operation == JUBE_DOM_PREPEND) {
         *out = js_dom_prepend_variadic_bridge((void*)elem, args, argc);
         return true;
     }
 
-    if (strcmp(method, "addEventListener") == 0) {
-        *out = argc >= 2
-            ? js_dom_add_event_listener_bridge(elem_item, args[0], args[1],
-                argc >= 3 ? args[2] : ItemNull)
-            : radiant_dom_undefined_item();
-        return true;
-    }
-
-    if (strcmp(method, "removeEventListener") == 0) {
-        *out = argc >= 2
-            ? js_dom_remove_event_listener_bridge(elem_item, args[0], args[1],
-                argc >= 3 ? args[2] : ItemNull)
-            : radiant_dom_undefined_item();
-        return true;
-    }
-
-    if (strcmp(method, "dispatchEvent") == 0) {
-        *out = argc >= 1
-            ? js_dom_dispatch_event_bridge(elem_item, args[0])
-            : (Item){.item = b2it(0)};
-        return true;
-    }
-
-    if (strcmp(method, "getBoundingClientRect") == 0) {
+    if (operation == JUBE_DOM_GET_BOUNDING_CLIENT_RECT) {
         radiant_dom_has_committed_geometry_snapshot(elem->doc);
         *out = js_dom_get_bounding_client_rect_bridge((void*)elem);
         return true;
     }
 
-    if (strcmp(method, "getClientRects") == 0) {
+    if (operation == JUBE_DOM_GET_CLIENT_RECTS) {
         radiant_dom_has_committed_geometry_snapshot(elem->doc);
         *out = js_dom_get_client_rects_bridge((void*)elem);
         return true;
     }
 
-    if (strcmp(method, "scrollIntoView") == 0) {
+    if (operation == JUBE_DOM_SCROLL_INTO_VIEW) {
         radiant_dom_has_committed_geometry_snapshot(elem->doc);
         *out = js_dom_scroll_into_view_bridge((void*)elem);
         return true;
     }
 
-    if (strcmp(method, "scroll") == 0 ||
-        strcmp(method, "scrollTo") == 0 ||
-        strcmp(method, "scrollBy") == 0) {
-        *out = js_dom_scroll_method_bridge(elem_item, method_name, args, argc);
+    if (operation == JUBE_DOM_SCROLL ||
+        operation == JUBE_DOM_SCROLL_TO ||
+        operation == JUBE_DOM_SCROLL_BY) {
+        *out = js_dom_scroll_operation_bridge(elem_item, operation, args, argc);
         return true;
     }
 
-    if (strcmp(method, "__lambdaTextControlCaretBounds") == 0) {
+    if (operation == JUBE_DOM_TEXT_CONTROL_CARET_BOUNDS) {
         *out = js_dom_text_control_caret_bounds_bridge((void*)elem);
         return true;
     }
 
-    if (strcmp(method, "__lambdaTextControlBoundaryFromPoint") == 0) {
+    if (operation == JUBE_DOM_TEXT_CONTROL_BOUNDARY_FROM_POINT) {
         *out = js_dom_text_control_boundary_from_point_bridge((void*)elem,
             argc >= 1 ? args[0] : radiant_dom_undefined_item(),
             argc >= 2 ? args[1] : radiant_dom_undefined_item());
         return true;
     }
 
-    if (strcmp(method, "__lambdaBoundaryFromPoint") == 0) {
+    if (operation == JUBE_DOM_BOUNDARY_FROM_POINT) {
         *out = js_dom_boundary_from_point_bridge((void*)elem,
             argc >= 1 ? args[0] : radiant_dom_undefined_item(),
             argc >= 2 ? args[1] : radiant_dom_undefined_item(),
@@ -3731,42 +3521,42 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
-        *out = js_dom_focus_method_bridge((void*)elem, strcmp(method, "focus") == 0);
+    if (operation == JUBE_DOM_FOCUS || operation == JUBE_DOM_BLUR) {
+        *out = js_dom_focus_method_bridge((void*)elem, operation == JUBE_DOM_FOCUS);
         return true;
     }
 
-    if (strcmp(method, "click") == 0) {
+    if (operation == JUBE_DOM_CLICK) {
         *out = js_dom_click_method_bridge(elem_item);
         return true;
     }
 
     if (radiant_dom_is_tag(elem, "form")) {
-        if (strcmp(method, "submit") == 0) {
+        if (operation == JUBE_DOM_SUBMIT) {
             *out = js_dom_form_submit_bridge(elem_item);
             return true;
         }
-        if (strcmp(method, "requestSubmit") == 0) {
+        if (operation == JUBE_DOM_REQUEST_SUBMIT) {
             *out = js_dom_form_request_submit_bridge(elem_item,
                 argc >= 1 ? args[0] : radiant_dom_undefined_item());
             return true;
         }
-        if (strcmp(method, "reset") == 0) {
+        if (operation == JUBE_DOM_RESET) {
             *out = js_dom_form_reset_bridge(elem_item);
             return true;
         }
-        if (strcmp(method, "checkValidity") == 0) {
+        if (operation == JUBE_DOM_CHECK_VALIDITY) {
             *out = js_dom_check_validity_bridge(elem_item);
             return true;
         }
-        if (strcmp(method, "reportValidity") == 0) {
+        if (operation == JUBE_DOM_REPORT_VALIDITY) {
             *out = js_dom_report_validity_bridge(elem_item);
             return true;
         }
     }
 
     if (tc_is_text_control(elem)) {
-        if (strcmp(method, "setSelectionRange") == 0) {
+        if (operation == JUBE_DOM_SET_SELECTION_RANGE) {
             // preserve the legacy DOM fallback no-op when required offsets are absent.
             if (argc < 2) {
                 *out = radiant_dom_undefined_item();
@@ -3778,7 +3568,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
                 argc >= 3 ? args[2] : radiant_dom_undefined_item());
             return true;
         }
-        if (strcmp(method, "setRangeText") == 0) {
+        if (operation == JUBE_DOM_SET_RANGE_TEXT) {
             *out = js_dom_text_control_set_range_text_bridge((void*)elem,
                 argc >= 1 ? args[0] : radiant_dom_undefined_item(),
                 argc >= 2 ? args[1] : radiant_dom_undefined_item(),
@@ -3786,13 +3576,13 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
                 argc >= 4 ? args[3] : radiant_dom_undefined_item());
             return true;
         }
-        if (strcmp(method, "select") == 0) {
+        if (operation == JUBE_DOM_SELECT) {
             *out = js_dom_text_control_select_bridge((void*)elem);
             return true;
         }
     }
 
-    if (strcmp(method, "setAttribute") == 0) {
+    if (operation == JUBE_DOM_SET_ATTRIBUTE) {
         if (argc < 2) {
             *out = ItemNull;
             return true;
@@ -3813,7 +3603,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "removeAttribute") == 0) {
+    if (operation == JUBE_DOM_REMOVE_ATTRIBUTE) {
         if (argc < 1) {
             *out = ItemNull;
             return true;
@@ -3833,7 +3623,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "toggleAttribute") == 0) {
+    if (operation == JUBE_DOM_TOGGLE_ATTRIBUTE) {
         if (argc < 1) {
             *out = (Item){.item = b2it(0)};
             return true;
@@ -3860,7 +3650,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
-    if (strcmp(method, "hasChildNodes") == 0) {
+    if (operation == JUBE_DOM_HAS_CHILD_NODES) {
         *out = (Item){.item = b2it(radiant_dom_first_script_visible_child(elem) ? 1 : 0)};
         return true;
     }
@@ -3893,12 +3683,14 @@ RADIANT_C_API Item radiant_dom_set_property(Item elem_item, Item prop_name, Item
     return js_dom_set_property_impl(elem_item, prop_name, value);
 }
 
-RADIANT_C_API Item radiant_dom_element_method(Item elem_item, Item method_name, Item* args, int argc) {
+RADIANT_C_API Item radiant_dom_element_operation(Item elem_item,
+                                                 JubeDomElementOperation operation,
+                                                 Item* args, int argc) {
     Item result = ItemNull;
-    if (radiant_dom_element_method_basic(elem_item, method_name, args, argc, &result)) {
+    if (radiant_dom_element_operation_basic(elem_item, operation, args, argc, &result)) {
         return result;
     }
-    return js_dom_element_method_impl(elem_item, method_name, args, argc);
+    return js_dom_element_operation_impl(elem_item, operation, args, argc);
 }
 
 static bool radiant_dom_key_equals(Item key, const char* name, uint32_t name_len) {
@@ -4004,16 +3796,6 @@ RADIANT_C_API int radiant_dom_node_prototype(Item object, Item* out) {
     return 1;
 }
 
-RADIANT_C_API int radiant_dom_host_call_method(Item object,
-                                            Item method_name,
-                                            Item* args,
-                                            int argc,
-                                            Item* out) {
-    if (!out) return 0;
-    *out = radiant_dom_element_method(object, method_name, args, argc);
-    return 1;
-}
-
 RADIANT_C_API int radiant_dom_host_has_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     Item projected = ItemNull;
@@ -4108,27 +3890,6 @@ RADIANT_C_API void radiant_dom_host_invalidate(Item object) {
 
 
 
-static Item radiant_dom_call_foreign_window_global_method(Item object,
-                                                          void* foreign_doc,
-                                                          Item method_name,
-                                                          Item* args,
-                                                          int argc) {
-    if (!foreign_doc || !js_doc_has_browsing_context(foreign_doc)) return ItemNull;
-    Item fn = radiant_host_api->script->global_property(method_name);
-    if (get_type_id(fn) != LMD_TYPE_FUNC) return ItemNull;
-
-    Item global = radiant_host_api->script->global_this();
-    Item window_key = (Item){.item = s2it(heap_create_name("window"))};
-    Item old_window = radiant_host_api->value->property_get(global, window_key);
-
-    void* prev_doc = js_dom_swap_active_document(foreign_doc);
-    radiant_host_api->value->property_set(global, window_key, object);
-    Item result = js_call_function(fn, object, args, argc);
-    radiant_host_api->value->property_set(global, window_key, old_window);
-    js_dom_restore_active_document(prev_doc);
-    return result;
-}
-
 static Item radiant_dom_foreign_get_computed_style(Item elem_item, Item pseudo_item) {
     (void)elem_item; (void)pseudo_item;
     return ItemNull;
@@ -4145,15 +3906,11 @@ RADIANT_C_API int radiant_dom_foreign_document_get_property(Item object, Item ke
             *out = object;
             return 1;
         }
-        if (radiant_dom_key_equals(key, "getSelection", 12)) {
-            *out = js_dom_get_selection_function_for_document(foreign_doc);
-            return 1;
-        }
         if (radiant_dom_key_equals(key, "getComputedStyle", 16)) {
             // iframe contentWindow is modeled as a document wrapper; do not let
             // the main-window getComputedStyle binding leak into foreign docs.
-            *out = radiant_host_api->script->new_function(
-                (void*)radiant_dom_foreign_get_computed_style, 2);
+            *out = jube_new_function(radiant_host_api->script,
+                radiant_dom_foreign_get_computed_style, 2);
             return 1;
         }
     }
@@ -4177,37 +3934,6 @@ RADIANT_C_API int radiant_dom_foreign_document_set_property(Item object,
     void* prev = js_dom_swap_active_document(foreign_doc);
     *out = js_document_proxy_set_property(key, value);
     js_dom_restore_active_document(prev);
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_foreign_document_method(Item object,
-                                                   Item method_name,
-                                                   Item* args,
-                                                   int argc,
-                                                   Item* out) {
-    if (!out) return 0;
-    void* foreign_doc = js_get_foreign_doc(object);
-    if (!foreign_doc) return 0;
-
-    // run document methods against the foreign doc first, then fall back to
-    // window-global methods for iframe contentWindow compatibility.
-    if (js_doc_has_browsing_context(foreign_doc) &&
-        radiant_dom_key_equals(method_name, "getComputedStyle", 16)) {
-        *out = ItemNull;
-        return 1;
-    }
-    void* prev = js_dom_swap_active_document(foreign_doc);
-    Item result = js_document_proxy_method(method_name, args, argc);
-    js_dom_restore_active_document(prev);
-    if (result.item == ItemNull.item) {
-        Item fallback = radiant_dom_call_foreign_window_global_method(
-            object, foreign_doc, method_name, args, argc);
-        if (fallback.item != ItemNull.item || item_is_error(fallback)) {
-            *out = fallback;
-            return 1;
-        }
-    }
-    *out = result;
     return 1;
 }
 
@@ -4241,25 +3967,6 @@ RADIANT_C_API int radiant_dom_document_host_set_property(Item object,
         return 1;
     }
     *out = js_document_proxy_set_property(key, value);
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_document_host_call_method(Item object,
-                                                     Item method_name,
-                                                     Item* args,
-                                                     int argc,
-                                                     Item* out) {
-    if (!out) return 0;
-    if (js_get_foreign_doc(object)) {
-        return radiant_dom_foreign_document_method(object, method_name, args, argc, out);
-    }
-    if (get_type_id(object) == LMD_TYPE_VMAP && object.vmap && object.vmap->host_data) {
-        void* prev = js_dom_swap_active_document(object.vmap->host_data);
-        *out = js_document_proxy_method(method_name, args, argc);
-        js_dom_restore_active_document(prev);
-        return 1;
-    }
-    *out = js_document_proxy_method(method_name, args, argc);
     return 1;
 }
 
@@ -4532,34 +4239,35 @@ RADIANT_C_API int radiant_dom_document_get_property(Item prop_name, Item* out) {
         *out = js_dom_live_document_forms_bridge((void*)doc);
         return 1;
     }
-    if (strcmp(prop, "getSelection") == 0) {
-        *out = js_dom_get_selection_function_for_document((void*)doc);
-        return 1;
-    }
-
     return 0;
 }
 
-RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out) {
-    const char* method = fn_to_cstr(method_name);
-    if (!method || !out) return 0;
+static int radiant_dom_document_operation_active(RadiantDocumentOperation operation,
+                                                   Item* args, int argc, Item* out) {
+    if (!out) return 0;
 
     DomDocument* doc = (DomDocument*)js_dom_get_document();
     DomElement* root = doc ? doc->root : nullptr;
 
-    if (strcmp(method, "assign") == 0 ||
-        strcmp(method, "replace") == 0 ||
-        strcmp(method, "reload") == 0) {
-        *out = js_dom_location_method_bridge((void*)doc, method_name, args, argc);
+    if (operation == RADIANT_DOCUMENT_ASSIGN ||
+        operation == RADIANT_DOCUMENT_REPLACE) {
+        *out = argc >= 1
+            ? js_dom_location_navigate_bridge((void*)doc, args[0],
+                operation == RADIANT_DOCUMENT_REPLACE)
+            : radiant_dom_undefined_item();
         return 1;
     }
-
-    if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
+    if (operation == RADIANT_DOCUMENT_RELOAD) {
         *out = radiant_dom_undefined_item();
         return 1;
     }
 
-    if (strcmp(method, "hasFocus") == 0) {
+    if (operation == RADIANT_DOCUMENT_FOCUS || operation == RADIANT_DOCUMENT_BLUR) {
+        *out = radiant_dom_undefined_item();
+        return 1;
+    }
+
+    if (operation == RADIANT_DOCUMENT_HAS_FOCUS) {
         // A focused descendant means this retained browsing-context document
         // owns keyboard focus. Editor view observers use this predicate while
         // reconciling native contenteditable mutations.
@@ -4568,17 +4276,17 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "open") == 0) {
+    if (operation == RADIANT_DOCUMENT_OPEN) {
         *out = js_dom_document_open_bridge((void*)doc);
         return 1;
     }
 
-    if (strcmp(method, "close") == 0) {
+    if (operation == RADIANT_DOCUMENT_CLOSE) {
         *out = radiant_dom_undefined_item();
         return 1;
     }
 
-    if (strcmp(method, "write") == 0 || strcmp(method, "writeln") == 0) {
+    if (operation == RADIANT_DOCUMENT_WRITE || operation == RADIANT_DOCUMENT_WRITELN) {
         if (argc < 1) {
             *out = ItemNull;
             return 1;
@@ -4587,7 +4295,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "elementFromPoint") == 0) {
+    if (operation == RADIANT_DOCUMENT_ELEMENT_FROM_POINT) {
         Item x_arg = argc >= 1 ? args[0] : radiant_dom_int_item(0);
         Item y_arg = argc >= 2 ? args[1] : radiant_dom_int_item(0);
         *out = js_dom_document_element_from_point_bridge((void*)doc, x_arg, y_arg);
@@ -4597,17 +4305,17 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
     // Legacy editing commands remain unsupported. Advertising inert member
     // stubs bypasses the document feature gate and makes `typeof` report them.
 
-    if (strcmp(method, "createRange") == 0) {
+    if (operation == RADIANT_DOCUMENT_CREATE_RANGE) {
         *out = js_dom_create_range();
         return 1;
     }
 
-    if (strcmp(method, "getSelection") == 0) {
+    if (operation == RADIANT_DOCUMENT_GET_SELECTION) {
         *out = js_doc_has_browsing_context((void*)doc) ? js_dom_get_selection() : ItemNull;
         return 1;
     }
 
-    if (strcmp(method, "contains") == 0) {
+    if (operation == RADIANT_DOCUMENT_CONTAINS) {
         if (argc < 1 || !doc) {
             *out = (Item){.item = b2it(0)};
             return 1;
@@ -4622,12 +4330,19 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "getRootNode") == 0) {
+    if (operation == RADIANT_DOCUMENT_COMPARE_DOCUMENT_POSITION) {
+        // The document is an ancestor of every attached node; keep the legacy
+        // Node bitmask while making the callable target independent of its name.
+        *out = radiant_dom_int_item(20);
+        return 1;
+    }
+
+    if (operation == RADIANT_DOCUMENT_GET_ROOT_NODE) {
         *out = doc ? js_dom_document_proxy_for_doc_bridge((void*)doc) : ItemNull;
         return 1;
     }
 
-    if (strcmp(method, "getElementById") == 0) {
+    if (operation == RADIANT_DOCUMENT_GET_ELEMENT_BY_ID) {
         if (argc < 1) {
             *out = ItemNull;
             return 1;
@@ -4642,7 +4357,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "getElementsByClassName") == 0) {
+    if (operation == RADIANT_DOCUMENT_GET_ELEMENTS_BY_CLASS_NAME) {
         if (argc < 1) {
             *out = ItemNull;
             return 1;
@@ -4651,7 +4366,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "getElementsByTagName") == 0) {
+    if (operation == RADIANT_DOCUMENT_GET_ELEMENTS_BY_TAG_NAME) {
         if (argc < 1) {
             *out = ItemNull;
             return 1;
@@ -4660,7 +4375,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "getElementsByName") == 0) {
+    if (operation == RADIANT_DOCUMENT_GET_ELEMENTS_BY_NAME) {
         if (argc < 1) {
             *out = ItemNull;
             return 1;
@@ -4669,7 +4384,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "querySelector") == 0) {
+    if (operation == RADIANT_DOCUMENT_QUERY_SELECTOR) {
         if (argc < 1) {
             *out = ItemNull;
             return 1;
@@ -4695,7 +4410,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "querySelectorAll") == 0) {
+    if (operation == RADIANT_DOCUMENT_QUERY_SELECTOR_ALL) {
         if (argc < 1) {
             *out = ItemNull;
             return 1;
@@ -4726,7 +4441,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "createElement") == 0) {
+    if (operation == RADIANT_DOCUMENT_CREATE_ELEMENT) {
         if (argc < 1 || !doc || !doc->input) {
             *out = ItemNull;
             return 1;
@@ -4743,7 +4458,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "createElementNS") == 0) {
+    if (operation == RADIANT_DOCUMENT_CREATE_ELEMENT_NS) {
         if (argc < 2 || !doc || !doc->input) {
             *out = ItemNull;
             return 1;
@@ -4765,7 +4480,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "createTextNode") == 0) {
+    if (operation == RADIANT_DOCUMENT_CREATE_TEXT_NODE) {
         if (argc < 1 || !doc) {
             *out = ItemNull;
             return 1;
@@ -4781,7 +4496,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "createDocumentFragment") == 0) {
+    if (operation == RADIANT_DOCUMENT_CREATE_DOCUMENT_FRAGMENT) {
         if (!doc || !doc->input) {
             *out = ItemNull;
             return 1;
@@ -4793,7 +4508,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "createComment") == 0) {
+    if (operation == RADIANT_DOCUMENT_CREATE_COMMENT) {
         if (!doc || !doc->input) {
             *out = ItemNull;
             return 1;
@@ -4807,7 +4522,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "createProcessingInstruction") == 0) {
+    if (operation == RADIANT_DOCUMENT_CREATE_PROCESSING_INSTRUCTION) {
         if (!doc || !doc->input) {
             *out = ItemNull;
             return 1;
@@ -4823,7 +4538,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "importNode") == 0) {
+    if (operation == RADIANT_DOCUMENT_IMPORT_NODE) {
         if (argc < 1) {
             *out = ItemNull;
             return 1;
@@ -4835,23 +4550,23 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         }
         Item source_item = radiant_dom_node_item(source);
         Item deep_arg = (Item){.item = b2it((argc >= 2 && js_is_truthy(args[1])) ? 1 : 0)};
-        Item clone_method = (Item){.item = s2it(heap_create_name("cloneNode"))};
-        *out = radiant_dom_element_method(source_item, clone_method, &deep_arg, 1);
+        *out = radiant_dom_element_operation(source_item, JUBE_DOM_CLONE_NODE,
+            &deep_arg, 1);
         return 1;
     }
 
-    if (strcmp(method, "normalize") == 0) {
+    if (operation == RADIANT_DOCUMENT_NORMALIZE) {
         if (root) {
             Item root_item = radiant_dom_node_item((DomNode*)root);
-            Item normalize_method = (Item){.item = s2it(heap_create_name("normalize"))};
-            *out = radiant_dom_element_method(root_item, normalize_method, nullptr, 0);
+            *out = radiant_dom_element_operation(root_item, JUBE_DOM_NORMALIZE,
+                nullptr, 0);
         } else {
             *out = ItemNull;
         }
         return 1;
     }
 
-    if (strcmp(method, "adoptNode") == 0) {
+    if (operation == RADIANT_DOCUMENT_ADOPT_NODE) {
         if (argc < 1) {
             *out = ItemNull;
             return 1;
@@ -4860,7 +4575,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "appendChild") == 0) {
+    if (operation == RADIANT_DOCUMENT_APPEND_CHILD) {
         if (argc < 1 || !doc) {
             *out = ItemNull;
             return 1;
@@ -4888,7 +4603,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
     }
 
     Item doc_item = js_get_document_object_value();
-    if (strcmp(method, "addEventListener") == 0) {
+    if (operation == RADIANT_DOCUMENT_ADD_EVENT_LISTENER) {
         // document EventTarget storage is keyed by the singleton document wrapper.
         *out = argc >= 2
             ? js_dom_add_event_listener_bridge(doc_item, args[0], args[1],
@@ -4897,7 +4612,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "removeEventListener") == 0) {
+    if (operation == RADIANT_DOCUMENT_REMOVE_EVENT_LISTENER) {
         // document EventTarget storage is keyed by the singleton document wrapper.
         *out = argc >= 2
             ? js_dom_remove_event_listener_bridge(doc_item, args[0], args[1],
@@ -4906,7 +4621,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
-    if (strcmp(method, "dispatchEvent") == 0) {
+    if (operation == RADIANT_DOCUMENT_DISPATCH_EVENT) {
         // dispatch must use the same wrapper identity listeners were registered with.
         *out = argc >= 1
             ? js_dom_dispatch_event_bridge(doc_item, args[0])
@@ -4914,7 +4629,33 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
+    if (operation == RADIANT_DOCUMENT_CREATE_TREE_WALKER) {
+        *out = argc >= 2
+            ? js_dom_create_tree_walker_bridge(args[0], args[1])
+            : ItemNull;
+        return 1;
+    }
+
+    if (operation == RADIANT_DOCUMENT_CREATE_EVENT) {
+        Item interface_name = argc >= 1 ? args[0] : radiant_dom_undefined_item();
+        *out = js_dom_document_create_event_bridge(interface_name);
+        return 1;
+    }
+
     return 0;
+}
+
+RADIANT_C_API int radiant_dom_document_operation(Item object,
+                                                  RadiantDocumentOperation operation,
+                                                  Item* args, int argc, Item* out) {
+    void* target_doc = js_get_foreign_doc(object);
+    if (!target_doc && get_type_id(object) == LMD_TYPE_VMAP && object.vmap) {
+        target_doc = object.vmap->host_data;
+    }
+    void* previous_doc = target_doc ? js_dom_swap_active_document(target_doc) : nullptr;
+    int handled = radiant_dom_document_operation_active(operation, args, argc, out);
+    if (target_doc) js_dom_restore_active_document(previous_doc);
+    return handled;
 }
 
 RADIANT_C_API Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts) {
@@ -5005,25 +4746,5 @@ RADIANT_C_API int radiant_dom_window_get_property(Item object, Item key, Item* o
         *out = screen;
         return 1;
     }
-    return 0;
-}
-
-
-RADIANT_C_API int radiant_dom_cssom_method(Item obj, Item method_name, Item* args, int argc, Item* out) {
-    // Map-method dispatch probes CSSOM for every ordinary object method call;
-    // keep that probe callback-free until the Radiant module is activated.
-    if (!out || !radiant_host_api || !radiant_host_api->dom ||
-            !radiant_host_api->dom->is_css_namespace ||
-            !radiant_host_api->dom->css_namespace_method) {
-        return 0;
-    }
-
-    if (js_is_css_namespace(obj)) {
-        // CSSOM parsing and mutation internals remain in js_cssom.cpp.
-        *out = js_css_namespace_method(obj, method_name, args, argc);
-        return 1;
-    }
-
-
     return 0;
 }

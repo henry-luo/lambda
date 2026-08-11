@@ -790,14 +790,14 @@ static void tls_socket_emit(Item obj, const char* event, Item* args, int argc) {
     char key[64];
     snprintf(key, sizeof(key), "__on_%s__", event);
     Item listeners = js_property_get(obj, make_string_item(key));
-    if (get_type_id(listeners) == LMD_TYPE_FUNC) {
+    if (js_is_callable(listeners)) {
         js_call_function(listeners, obj, args, argc);
         js_microtask_flush();
     } else if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
         int64_t count = js_array_length(listeners);
         for (int64_t i = 0; i < count; i++) {
             Item cb = js_array_get_int(listeners, i);
-            if (get_type_id(cb) == LMD_TYPE_FUNC) {
+            if (js_is_callable(cb)) {
                 js_call_function(cb, obj, args, argc);
             }
         }
@@ -933,7 +933,7 @@ static void tls_server_emit_new_session(JsTlsServer* srv) {
     }
     Item* env = js_alloc_env(1);
     env[0] = (Item){.item = i2it((int64_t)(uintptr_t)srv)};
-    Item callback = js_new_closure((void*)tls_server_new_session_done, 0, env, 1);
+    Item callback = js_new_native_closure(tls_server_new_session_done, 0, env, 1);
     Item args[3] = {
         tls_server_session_id_item(),
         tls_server_session_data_item(),
@@ -976,7 +976,7 @@ static void tls_server_emit_session_events(JsTlsSocket* sock) {
 
     Item* env = js_alloc_env(1);
     env[0] = (Item){.item = i2it((int64_t)(uintptr_t)srv)};
-    Item callback = js_new_closure((void*)tls_server_resume_session_done, 2, env, 1);
+    Item callback = js_new_native_closure(tls_server_resume_session_done, 2, env, 1);
     Item args[2] = { tls_server_session_id_item(), callback };
     tls_socket_emit(srv->js_object, "resumeSession", args, 2);
 }
@@ -1070,7 +1070,7 @@ extern "C" Item js_tls_socket_on(Item event_item, Item callback) {
     snprintf(key, sizeof(key), "__on_%.*s__", (int)ev->len, ev->chars);
     Item key_item = make_string_item(key);
     Item existing = js_property_get(self, key_item);
-    if (get_type_id(existing) == LMD_TYPE_FUNC) {
+    if (js_is_callable(existing)) {
         Item arr = js_array_new(0);
         js_array_push(arr, existing);
         js_array_push(arr, callback);
@@ -1465,7 +1465,7 @@ static Item tls_socket_shutdown_when_flushed_later(Item env_item) {
     if (queued > 0) {
         Item* next_env = js_alloc_env(1);
         next_env[0] = env[0];
-        Item tick = js_new_closure((void*)tls_socket_shutdown_when_flushed_later, 0, next_env, 1);
+        Item tick = js_new_native_closure(tls_socket_shutdown_when_flushed_later, 0, next_env, 1);
         sock->shutdown_check_scheduled = true;
         js_setTimeout(tick, (Item){.item = i2it(1)});
         return make_js_undefined();
@@ -1479,7 +1479,7 @@ static void tls_socket_schedule_shutdown_when_flushed(Item obj) {
     if (!sock || sock->shutdown_check_scheduled) return;
     Item* env = js_alloc_env(1);
     env[0] = obj;
-    Item tick = js_new_closure((void*)tls_socket_shutdown_when_flushed_later, 0, env, 1);
+    Item tick = js_new_native_closure(tls_socket_shutdown_when_flushed_later, 0, env, 1);
     sock->shutdown_check_scheduled = true;
     js_setTimeout(tick, (Item){.item = i2it(1)});
 }
@@ -1497,7 +1497,7 @@ static Item tls_socket_close_when_flushed_later(Item env_item) {
     if (queued > 0 || (sock->pending_write_data && sock->pending_write_len > 0)) {
         Item* next_env = js_alloc_env(1);
         next_env[0] = env[0];
-        Item tick = js_new_closure((void*)tls_socket_close_when_flushed_later, 0, next_env, 1);
+        Item tick = js_new_native_closure(tls_socket_close_when_flushed_later, 0, next_env, 1);
         sock->close_check_scheduled = true;
         js_setTimeout(tick, (Item){.item = i2it(1)});
         return make_js_undefined();
@@ -1514,7 +1514,7 @@ static void tls_socket_schedule_close_when_flushed(Item obj, bool had_error) {
     sock->close_had_error = had_error;
     Item* env = js_alloc_env(1);
     env[0] = obj;
-    Item tick = js_new_closure((void*)tls_socket_close_when_flushed_later, 0, env, 1);
+    Item tick = js_new_native_closure(tls_socket_close_when_flushed_later, 0, env, 1);
     sock->close_check_scheduled = true;
     js_setTimeout(tick, (Item){.item = i2it(1)});
 }
@@ -1551,7 +1551,7 @@ static void tls_socket_schedule_deferred_io(Item obj) {
     if (!sock || sock->plaintext_flush_scheduled) return;
     Item* env = js_alloc_env(1);
     env[0] = obj;
-    Item tick = js_new_closure((void*)tls_socket_flush_deferred_io_later, 0, env, 1);
+    Item tick = js_new_native_closure(tls_socket_flush_deferred_io_later, 0, env, 1);
     sock->plaintext_flush_scheduled = true;
     js_setTimeout(tick, (Item){.item = i2it(1)});
 }
@@ -1569,7 +1569,7 @@ static Item tls_socket_drain_check_later(Item env_item) {
     if ((int64_t)write_queue_size > sock->high_water_mark) {
         Item* next_env = js_alloc_env(1);
         next_env[0] = env[0];
-        Item next_tick = js_new_closure((void*)tls_socket_drain_check_later, 0, next_env, 1);
+        Item next_tick = js_new_native_closure(tls_socket_drain_check_later, 0, next_env, 1);
         sock->drain_check_scheduled = true;
         js_setTimeout(next_tick, (Item){.item = i2it(0)});
         return make_js_undefined();
@@ -1587,7 +1587,7 @@ static void tls_socket_schedule_drain_check(Item obj) {
     if (!sock || sock->drain_check_scheduled) return;
     Item* env = js_alloc_env(1);
     env[0] = obj;
-    Item tick = js_new_closure((void*)tls_socket_drain_check_later, 0, env, 1);
+    Item tick = js_new_native_closure(tls_socket_drain_check_later, 0, env, 1);
     sock->drain_check_scheduled = true;
     js_setTimeout(tick, (Item){.item = i2it(0)});
 }
@@ -1878,41 +1878,41 @@ static Item make_tls_socket_object(JsTlsSocket* sock) {
     js_property_set(obj, make_string_item("__handle__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)sock)});
     js_property_set(obj, make_string_item("on"),
-                    js_new_function((void*)js_tls_socket_on, 2));
+                    js_new_native_function(js_tls_socket_on));
     js_property_set(obj, make_string_item("once"),
-                    js_new_function((void*)js_tls_socket_once, 2));
+                    js_new_native_function(js_tls_socket_once));
     js_property_set(obj, make_string_item("resume"),
-                    js_new_function((void*)js_tls_socket_resume, 0));
+                    js_new_native_function(js_tls_socket_resume));
     js_property_set(obj, make_string_item("pause"),
-                    js_new_function((void*)js_tls_socket_pause, 0));
+                    js_new_native_function(js_tls_socket_pause));
     js_property_set(obj, make_string_item("ref"),
-                    js_new_function((void*)js_tls_socket_ref, 0));
+                    js_new_native_function(js_tls_socket_ref));
     js_property_set(obj, make_string_item("unref"),
-                    js_new_function((void*)js_tls_socket_unref, 0));
+                    js_new_native_function(js_tls_socket_unref));
     js_property_set(obj, make_string_item("write"),
-                    js_new_function((void*)js_tls_socket_write, -1));
+                    js_new_native_rest_function(js_tls_socket_write));
     js_property_set(obj, make_string_item("end"),
-                    js_new_function((void*)js_tls_socket_end, -1));
+                    js_new_native_rest_function(js_tls_socket_end));
     js_property_set(obj, make_string_item("read"),
-                    js_new_function((void*)js_tls_socket_read, 0));
+                    js_new_native_function(js_tls_socket_read));
     js_property_set(obj, make_string_item("destroy"),
-                    js_new_function((void*)js_tls_socket_destroy, 0));
+                    js_new_native_function(js_tls_socket_destroy));
     js_property_set(obj, make_string_item("pipe"),
-                    js_new_function((void*)js_tls_socket_pipe, 1));
+                    js_new_native_function(js_tls_socket_pipe));
     js_property_set(obj, make_string_item("getPeerCertificate"),
-                    js_new_function((void*)js_tls_socket_getPeerCert, 0));
+                    js_new_native_function(js_tls_socket_getPeerCert));
     js_property_set(obj, make_string_item("getCipher"),
-                    js_new_function((void*)js_tls_socket_getCipher, 0));
+                    js_new_native_function(js_tls_socket_getCipher));
     js_property_set(obj, make_string_item("getEphemeralKeyInfo"),
-                    js_new_function((void*)js_tls_socket_getEphemeralKeyInfo, 0));
+                    js_new_native_function(js_tls_socket_getEphemeralKeyInfo));
     js_property_set(obj, make_string_item("getProtocol"),
-                    js_new_function((void*)js_tls_socket_getProtocol, 0));
+                    js_new_native_function(js_tls_socket_getProtocol));
     js_property_set(obj, make_string_item("getSession"),
-                    js_new_function((void*)js_tls_socket_getSession, 0));
+                    js_new_native_function(js_tls_socket_getSession));
     js_property_set(obj, make_string_item("getTLSTicket"),
-                    js_new_function((void*)js_tls_socket_getTLSTicket, 0));
+                    js_new_native_function(js_tls_socket_getTLSTicket));
     js_property_set(obj, make_string_item("isSessionReused"),
-                    js_new_function((void*)js_tls_socket_isSessionReused, 0));
+                    js_new_native_function(js_tls_socket_isSessionReused));
     js_property_set(obj, make_string_item("encrypted"), (Item){.item = b2it(true)});
     js_property_set(obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
     js_property_set(obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
@@ -2022,7 +2022,7 @@ static void tls_socket_finish_secure(JsTlsSocket* sock) {
         js_property_set(sock->js_object, make_string_item("authorized"),
                         (Item){.item = b2it(true)});
         tls_server_emit_session_events(sock);
-        if (sock->owner_server && get_type_id(sock->owner_server->connection_handler) == LMD_TYPE_FUNC) {
+        if (sock->owner_server && js_is_callable(sock->owner_server->connection_handler)) {
             Item client_obj = sock->js_object;
             js_call_function(sock->owner_server->connection_handler,
                              sock->owner_server->js_object, &client_obj, 1);
@@ -2173,7 +2173,7 @@ static Item tls_emit_error_close_later(Item env_item) {
 static void schedule_tls_secure_event(Item obj) {
     Item* env = js_alloc_env(1);
     env[0] = obj;
-    Item callback = js_new_closure((void*)tls_emit_secure_later, 0, env, 1);
+    Item callback = js_new_native_closure(tls_emit_secure_later, 0, env, 1);
     js_next_tick_enqueue(callback);
 }
 
@@ -2181,7 +2181,7 @@ static void schedule_tls_error_close(Item obj, Item err) {
     Item* env = js_alloc_env(2);
     env[0] = obj;
     env[1] = err;
-    Item callback = js_new_closure((void*)tls_emit_error_close_later, 0, env, 2);
+    Item callback = js_new_native_closure(tls_emit_error_close_later, 0, env, 2);
     js_setTimeout(callback, (Item){.item = i2it(0)});
 }
 
@@ -2234,7 +2234,7 @@ static void schedule_tls_attach_existing_socket(Item tls_obj, Item socket_obj) {
     Item* env = js_alloc_env(2);
     env[0] = tls_obj;
     env[1] = socket_obj;
-    Item attach = js_new_closure((void*)tls_attach_existing_socket_now, 0, env, 2);
+    Item attach = js_new_native_closure(tls_attach_existing_socket_now, 0, env, 2);
 
     Item on_fn = js_property_get(socket_obj, make_string_item("on"));
     if (is_callable(on_fn)) {
@@ -2323,7 +2323,7 @@ extern "C" Item js_tls_connect(Item options_item) {
         int64_t argc = js_array_length(rest_args);
         options_item = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
         Item last = argc > 0 ? js_array_get_int(rest_args, argc - 1) : make_js_undefined();
-        if (get_type_id(last) == LMD_TYPE_FUNC) callback = last;
+        if (js_is_callable(last)) callback = last;
     }
 
     int port = 443;
@@ -2379,7 +2379,7 @@ extern "C" Item js_tls_connect(Item options_item) {
         tls_copy_cipher_option(ciphers_item, requested_cipher, sizeof(requested_cipher),
                                NULL, 0);
         Item lookup = js_property_get(options_item, make_string_item("lookup"));
-        if (get_type_id(lookup) == LMD_TYPE_FUNC) {
+        if (js_is_callable(lookup)) {
             Item lookup_options = js_new_object();
             js_property_set(lookup_options, make_string_item("family"), make_js_undefined());
             Item hints = js_property_get(options_item, make_string_item("hints"));
@@ -2469,7 +2469,7 @@ extern "C" Item js_tls_connect(Item options_item) {
     tls_client_apply_ticket_model(sock, has_session);
 
     Item obj = make_tls_socket_object(sock);
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         js_property_set(obj, make_string_item("__on_secureConnect__"), callback);
     }
 
@@ -2595,10 +2595,10 @@ static Item js_tls_server_listening_tick(Item env_item) {
     Item self = env[0];
     Item callback = env[1];
     Item on_listening = js_property_get(self, make_string_item("__on_listening__"));
-    if (get_type_id(on_listening) == LMD_TYPE_FUNC) {
+    if (js_is_callable(on_listening)) {
         js_call_function(on_listening, self, NULL, 0);
     }
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         js_call_function(callback, self, NULL, 0);
     }
     js_microtask_flush();
@@ -2615,7 +2615,7 @@ extern "C" Item js_tls_server_listen(Item port_item, Item host_item, Item callba
 
     int port = (int)it2i(port_item);
     char host_buf[256] = "0.0.0.0";
-    if (get_type_id(host_item) == LMD_TYPE_FUNC) {
+    if (js_is_callable(host_item)) {
         callback = host_item;
     } else if (get_type_id(host_item) == LMD_TYPE_STRING) {
         String* h = it2s(host_item);
@@ -2640,7 +2640,7 @@ extern "C" Item js_tls_server_listen(Item port_item, Item host_item, Item callba
     Item* env = js_alloc_env(2);
     env[0] = self;
     env[1] = callback;
-    Item tick = js_new_closure((void*)js_tls_server_listening_tick, 0, env, 2);
+    Item tick = js_new_native_closure(js_tls_server_listening_tick, 0, env, 2);
     js_next_tick_enqueue(tick);
     return self;
 }
@@ -2843,27 +2843,27 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
     js_property_set(obj, make_string_item("__server__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)srv)});
     js_property_set(obj, make_string_item("listen"),
-                    js_new_function((void*)js_tls_server_listen, 3));
+                    js_new_native_function(js_tls_server_listen));
     js_property_set(obj, make_string_item("close"),
-                    js_new_function((void*)js_tls_server_close, 1));
+                    js_new_native_function(js_tls_server_close));
     js_property_set(obj, make_string_item("on"),
-                    js_new_function((void*)js_tls_server_on, 2));
+                    js_new_native_function(js_tls_server_on));
     js_property_set(obj, make_string_item("once"),
-                    js_new_function((void*)js_tls_server_once, 2));
+                    js_new_native_function(js_tls_server_once));
     js_property_set(obj, make_string_item("emit"),
-                    js_new_function((void*)js_tls_server_emit, 2));
+                    js_new_native_function(js_tls_server_emit));
     js_property_set(obj, make_string_item("getTicketKeys"),
-                    js_new_function((void*)js_tls_server_getTicketKeys, 0));
+                    js_new_native_function(js_tls_server_getTicketKeys));
     js_property_set(obj, make_string_item("setTicketKeys"),
-                    js_new_function((void*)js_tls_server_setTicketKeys, 1));
+                    js_new_native_function(js_tls_server_setTicketKeys));
     js_property_set(obj, make_string_item("address"),
-                    js_new_function((void*)js_tls_server_address, 0));
+                    js_new_native_function(js_tls_server_address));
     js_property_set(obj, make_string_item("ref"),
-                    js_new_function((void*)js_tls_server_ref, 0));
+                    js_new_native_function(js_tls_server_ref));
     js_property_set(obj, make_string_item("unref"),
-                    js_new_function((void*)js_tls_server_unref, 0));
+                    js_new_native_function(js_tls_server_unref));
     js_property_set(obj, make_string_item("getConnections"),
-                    js_new_function((void*)js_tls_server_getConnections, 1));
+                    js_new_native_function(js_tls_server_getConnections));
 
     srv->js_object = obj;
     return obj;
@@ -2957,11 +2957,10 @@ extern "C" Item js_tls_convertALPNProtocols(Item protocols_item, Item out_item) 
 // tls Module Namespace
 // =============================================================================
 
-static Item tls_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    Item key = make_string_item(name);
-    Item fn = js_new_function(func_ptr, param_count);
-    js_property_set(ns, key, fn);
-    return fn;
+template <typename Target>
+static Item tls_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
+    return js_install_native_method(ns, name, target, adapter_arity);
 }
 
 static Item tls_constructor_prototype(Item ctor, JsClass cls) {
@@ -2988,14 +2987,16 @@ extern "C" Item js_get_tls_namespace(void) {
     tls_ca_register_roots();
     tls_namespace = js_new_object();
 
-    tls_set_method(tls_namespace, "connect",             (void*)js_tls_connect, -1);
-    tls_set_method(tls_namespace, "createServer",        (void*)js_tls_createServer, 2);
-    tls_set_method(tls_namespace, "createSecureContext",  (void*)js_tls_createSecureContext, 1);
-    tls_set_method(tls_namespace, "convertALPNProtocols", (void*)js_tls_convertALPNProtocols, 2);
-    tls_set_method(tls_namespace, "getCACertificates",   (void*)js_tls_getCACertificates, 1);
-    tls_set_method(tls_namespace, "setDefaultCACertificates", (void*)js_tls_setDefaultCACertificates, 1);
-    Item server_fn = tls_set_method(tls_namespace, "Server", (void*)js_tls_createServer, 2); // alias
-    Item tls_socket_fn = tls_set_method(tls_namespace, "TLSSocket", (void*)js_tls_TLSSocket, 2);
+    tls_set_method(tls_namespace, "connect",             js_tls_connect, -1);
+    tls_set_method(tls_namespace, "createServer",        js_tls_createServer, 2);
+    tls_set_method(tls_namespace, "createSecureContext",  js_tls_createSecureContext, 1);
+    tls_set_method(tls_namespace, "convertALPNProtocols", js_tls_convertALPNProtocols, 2);
+    tls_set_method(tls_namespace, "getCACertificates",   js_tls_getCACertificates, 1);
+    tls_set_method(tls_namespace, "setDefaultCACertificates", js_tls_setDefaultCACertificates, 1);
+    Item server_fn = js_install_native_constructor(tls_namespace, "Server",
+        js_tls_createServer, 2); // alias
+    Item tls_socket_fn = js_install_native_constructor(tls_namespace,
+        "TLSSocket", js_tls_TLSSocket, 2);
 
     Item tls_socket_proto = tls_constructor_prototype(tls_socket_fn, JS_CLASS_TLS_SOCKET);
     Item net_ns = js_get_net_namespace();

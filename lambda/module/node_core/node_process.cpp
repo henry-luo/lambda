@@ -524,7 +524,9 @@ static Item node_process_getgroups(void) {
 }
 #endif
 
-static bool node_process_install_method(Item process, const char* name, void* function, int arity) {
+template <typename Target>
+static bool node_process_install_method(Item process, const char* name,
+        Target target, int adapter_arity) {
     if (!node_process_host || !node_process_host->value || !node_process_host->script ||
             !node_process_host->value->string_from_utf8_n || !node_process_host->value->property_set ||
             !node_process_host->script->new_function) return false;
@@ -540,7 +542,8 @@ static bool node_process_install_method(Item process, const char* name, void* fu
     *process_root = process.item;
     Item key = node_process_host->value->string_from_utf8_n(name, strlen(name));
     *key_root = key.item;
-    Item callback = node_process_host->script->new_function(function, arity);
+    Item callback = jube_new_function(node_process_host->script, target,
+        adapter_arity);
     *function_root = callback.item;
     // Both key and callback allocation can move process before publication.
     node_process_host->value->property_set((Item){.item = *process_root},
@@ -567,11 +570,13 @@ static bool node_process_install_hrtime(Item process) {
     *process_root = process.item;
     Item hrtime_key = node_process_host->value->string_from_utf8_n("hrtime", 6);
     *hrtime_key_root = hrtime_key.item;
-    Item hrtime = node_process_host->script->new_function((void*)node_process_hrtime, 1);
+    Item hrtime = jube_new_function(node_process_host->script,
+        node_process_hrtime, 1);
     *hrtime_root = hrtime.item;
     Item bigint_key = node_process_host->value->string_from_utf8_n("bigint", 6);
     *bigint_key_root = bigint_key.item;
-    Item bigint = node_process_host->script->new_function((void*)node_process_hrtime_bigint, 0);
+    Item bigint = jube_new_function(node_process_host->script,
+        node_process_hrtime_bigint, 0);
     *bigint_root = bigint.item;
     // Both functions and their keys can allocate before the nested method is published.
     node_process_host->value->property_set((Item){.item = *hrtime_root},
@@ -616,39 +621,39 @@ void node_process_runtime_attach(void* session) {
     Item process = node_process_host->node->runtime->session_process(session);
     if (process.item == ItemNull.item) return;
     node_process_session = session;
-    node_process_install_method(process, "memoryUsage", (void*)node_process_memory_usage, 0);
-    node_process_install_method(process, "cwd", (void*)node_process_cwd, 0);
-    node_process_install_method(process, "chdir", (void*)node_process_chdir, 1);
-    node_process_install_method(process, "uptime", (void*)node_process_uptime, 0);
+    node_process_install_method(process, "memoryUsage", node_process_memory_usage, 0);
+    node_process_install_method(process, "cwd", node_process_cwd, 0);
+    node_process_install_method(process, "chdir", node_process_chdir, 1);
+    node_process_install_method(process, "uptime", node_process_uptime, 0);
     node_process_install_hrtime(process);
-    node_process_install_method(process, "cpuUsage", (void*)node_process_cpu_usage, 0);
-    node_process_install_method(process, "constrainedMemory", (void*)node_process_constrained_memory, 0);
-    node_process_install_method(process, "availableMemory", (void*)node_process_available_memory, 0);
-    node_process_install_method(process, "umask", (void*)node_process_umask, 1);
+    node_process_install_method(process, "cpuUsage", node_process_cpu_usage, 0);
+    node_process_install_method(process, "constrainedMemory", node_process_constrained_memory, 0);
+    node_process_install_method(process, "availableMemory", node_process_available_memory, 0);
+    node_process_install_method(process, "umask", node_process_umask, 1);
     node_process_install_method(process, "setSourceMapsEnabled",
-        (void*)node_process_set_source_maps_enabled, 1);
+        node_process_set_source_maps_enabled, 1);
     node_process_install_method(process, "getActiveResourcesInfo",
-        (void*)node_process_get_active_resources_info, 0);
+        node_process_get_active_resources_info, 0);
     node_process_install_method(process, "_getActiveHandles",
-        (void*)node_process_get_active_handles, 0);
+        node_process_get_active_handles, 0);
     node_process_install_method(process, "hasUncaughtExceptionCaptureCallback",
-        (void*)node_process_has_uncaught_exception_capture_callback, 0);
+        node_process_has_uncaught_exception_capture_callback, 0);
     node_process_install_method(process, "setUncaughtExceptionCaptureCallback",
-        (void*)node_process_set_uncaught_exception_capture_callback, 1);
-    node_process_install_method(process, "abort", (void*)node_process_abort, 0);
+        node_process_set_uncaught_exception_capture_callback, 1);
+    node_process_install_method(process, "abort", node_process_abort, 0);
 #ifndef _WIN32
-    node_process_install_method(process, "kill", (void*)node_process_kill, 2);
-    node_process_install_method(process, "setuid", (void*)node_process_setuid, 1);
-    node_process_install_method(process, "setgid", (void*)node_process_setgid, 1);
-    node_process_install_method(process, "seteuid", (void*)node_process_seteuid, 1);
-    node_process_install_method(process, "setegid", (void*)node_process_setegid, 1);
-    node_process_install_method(process, "initgroups", (void*)node_process_initgroups, 2);
-    node_process_install_method(process, "setgroups", (void*)node_process_setgroups, 1);
-    node_process_install_method(process, "getuid", (void*)node_process_getuid, 0);
-    node_process_install_method(process, "getgid", (void*)node_process_getgid, 0);
-    node_process_install_method(process, "geteuid", (void*)node_process_geteuid, 0);
-    node_process_install_method(process, "getegid", (void*)node_process_getegid, 0);
-    node_process_install_method(process, "getgroups", (void*)node_process_getgroups, 0);
+    node_process_install_method(process, "kill", node_process_kill, 2);
+    node_process_install_method(process, "setuid", node_process_setuid, 1);
+    node_process_install_method(process, "setgid", node_process_setgid, 1);
+    node_process_install_method(process, "seteuid", node_process_seteuid, 1);
+    node_process_install_method(process, "setegid", node_process_setegid, 1);
+    node_process_install_method(process, "initgroups", node_process_initgroups, 2);
+    node_process_install_method(process, "setgroups", node_process_setgroups, 1);
+    node_process_install_method(process, "getuid", node_process_getuid, 0);
+    node_process_install_method(process, "getgid", node_process_getgid, 0);
+    node_process_install_method(process, "geteuid", node_process_geteuid, 0);
+    node_process_install_method(process, "getegid", node_process_getegid, 0);
+    node_process_install_method(process, "getgroups", node_process_getgroups, 0);
 #endif
 }
 

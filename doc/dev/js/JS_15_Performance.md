@@ -28,7 +28,41 @@ Grouped by tier. Each entry gives the mechanism (with a code anchor), the doc th
 
 - **Transient call-argument stack.** Call lowering reserves argument slots from a single bump stack — `js_args_push` / `js_args_save` / `js_args_restore` (`js_runtime_function.cpp:65`, `:86`, `:92`) over a fixed 256K-Item region registered with the GC exactly once (`:59`, `:72`), with a fall-back to the old per-call `js_alloc_env` only on pathological depth (`:77`). This replaced a per-call pool allocation that registered a permanent GC root range and was never freed, which made call-heavy loops O(n²) in both registration and GC marking. *Owner:* [JS_04 §8](JS_04_MIR_Lowering.md), [JS_03](JS_03_Value_Model.md). *Measured (Tune1):* a 160k-iteration dynamic-call loop fell from 6008 ms to 12.5 ms and call-loop scaling went from quadratic to linear; an `assert.sameValue` ×65536 loop fell from 4154 ms to 83 ms (≈50×); a regex character-class test from 9.6 s to 0.22 s.
 - **Const-bound static dispatch.** The resolver in `jm_transpile_call` emits a direct MIR call (skipping the dynamic `js_call_function` path and the args buffer) not only for `function f(){}` declarations but also for a `const`-bound function expression or arrow whose call site is textually after the initializer — gated on the binding being immutable and the call being past its TDZ window. *Owner:* [JS_04 §8](JS_04_MIR_Lowering.md), [JS_05 — Functions & Closures](JS_05_Functions_Closures.md). *Measured (Tune1):* a 2M-iteration 1-arg call dropped from ≈99 ms to ≈63 ms on const-bound forms (≈50 ns → ≈31 ns/call), matching the `function`-declaration baseline; the full test262 baseline summed elapsed fell ≈34%.
-- **Direct method dispatch for known classes.** `obj.method(...)` on a receiver whose class is known at compile time (a `this` inside a class method, or a variable from `new ClassName()`) resolves the method by walking the class/superclass chain at transpile time and emits a direct `MIR_CALL`, bypassing the property-fetch-then-`js_call_function` chain. Falls back to runtime dispatch when a subclass overrides the method. *Owner:* [JS_07 — Classes](JS_07_Classes.md), [JS_05](JS_05_Functions_Closures.md). *Measured (Js26 "P3"):* the AWFY OOP suite geometric-mean ratio versus V8 improved from 16.27× to 4.52×; permute, queens, list, and json each dropped roughly 11–41×; deeply polymorphic richards/deltablue saw little change because the override check correctly falls back.
+- **Per-callee callable entries.** Dynamic calls and construction enter one ownership-aware kernel, then the stored `invoke` or optional `construct` capability. Native ABI selection and intrinsic target selection happen when the function is created, so repeated calls do not interpret a builtin ID, mutable `.name`, receiver category, or constructor spelling. Caller result homes and pre-rooted argument spans are adapters to the same entries (**D5.2–D5.3, D6.2.2v2**). *Owner:* [JS_04 §8](JS_04_MIR_Lowering.md), [JS_05 — Functions & Closures](JS_05_Functions_Closures.md). Tune4 removed the large builtin dispatcher and name-selected constructor path; exact lexical user-function calls may still inline/direct-call.
+- **Historical P3 receiver/name lane — retired.** The Js26 measurements found large gains by resolving `obj.method(...)` from an inferred class and property spelling, but that route skipped observable `Get` under replacement, accessors, prototype mutation, and Proxy. Tune4 removed it under **D6.2.2v2**. The figures in §4 remain historical evidence of the potential upside for a future guarded callee-identity feedback design, not a description of current semantics.
+
+#### Tune4 callable release A/B (2026-08-12)
+
+The final C8 comparison used clean release binaries, an interleaved C0/C8
+corpus, 11 measured repetitions per side, and medians. Lower is better.
+
+| Workload | C0 median | C8 median | Delta | C8 slower runs / 11 |
+|---|---:|---:|---:|---:|
+| Ordinary dynamic call | 51.684 ms | 48.791 ms | −5.60% | 0 |
+| Intrinsic target | 345.869 ms | 235.358 ms | −31.95% | 0 |
+| Static source method | 116.126 ms | 371.868 ms | +220.23% | 11 |
+| Computed source method | 87.166 ms | 82.396 ms | −5.47% | 0 |
+| Dynamic `Date` construction | 99.495 ms | 130.793 ms | +31.46% | 11 |
+| Bound call | 125.277 ms | 110.306 ms | −11.95% | 0 |
+| Bound construction | 82.232 ms | 80.952 ms | −1.56% | 6 |
+| Empty-realm startup | 14.244 ms | 14.345 ms | +0.71% | 9 |
+
+The static-method C0 lane was the retired receiver/spelling shortcut: it did
+not perform observable property `Get`, so its timing is not a valid
+**D6.2.2v2** semantic baseline. The computed-method control exercises the
+canonical path on both sides and improves 5.47%. Dynamic C0 construction
+likewise skipped the observable `Get(newTarget, "prototype")` when
+`newTarget === callee`; C8 must preserve replacement/accessor/Proxy effects.
+The bound-construction control improves 1.56%, so the remaining `Date` delta
+is the measured cost of restored semantics rather than an unexplained entry
+protocol regression.
+
+Lazy transactional construction of the complete `process`, `Buffer`, and
+`crypto` namespace objects keeps empty-realm startup within the 5% review
+threshold. C8 creates 42 GC `JsFunction`s (11,424 requested bytes) before one
+of those namespaces is observed; the same trace before lazy publication
+created 202 (54,944 bytes). Whole-process peak RSS in the matched startup
+capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
 
 ### 2.2 Value & codegen tier
 
@@ -47,7 +81,7 @@ Grouped by tier. Each entry gives the mechanism (with a code anchor), the doc th
 
 ### 2.4 Runtime builtin tier
 
-- **TypedArray raw bulk paths.** Same-type bulk copy uses `memmove`/`memcpy` and cross-type conversion hoists the element-type switch out of the loop — `js_typed_array_try_raw_set_same_type` (`js_typed_array.cpp:230`), `js_typed_array_raw_copy_same_type` (`:430`), `js_typed_array_raw_copy_reversed` (`:469`), and the constructor memcpy path (`:1916`), gated by `LAMBDA_JS_TA_RAW_FAST` (`:224`). Detach/out-of-bounds is validated once where no user code can run between check and access; callback methods revalidate at the spec points. *Owner:* [JS_12 — TypedArrays](JS_12_TypedArrays.md). *Measured (Tune4 T4-P2):* compliance suites are neutral (tiny arrays, runner overhead dominates), but a bulk workload over 200k-element arrays went 0.80–1.09 s → 0.16–0.17 s, and a 400k-element numeric search 30.0 s → 0.11 s — the lever targets large data movement, not the small arrays in conformance tests.
+- **TypedArray ArrayNum bulk paths.** Same-type bulk copy uses the shared ArrayNum byte kernels and cross-type conversion hoists element policy out of the loop — `js_typed_array_try_raw_set_same_type`, `js_typed_array_raw_copy_same_type`, and `js_typed_array_raw_copy_reversed`. The former private env-gated raw family is retired; detach/out-of-bounds is validated once where no user code can run between check and access, and callback methods revalidate at the spec points. *Owner:* [JS_12 — TypedArrays](JS_12_TypedArrays.md). *Measured (earlier Tune4 T4-P2, unrelated to callable Tune4):* compliance suites were neutral, while large bulk workloads improved materially.
 - **Regex property-walk cursor.** `js_regexp_test_property_all` (`js_runtime.cpp:15653`) threads a resumable range cursor (`js_regex_sorted_range_contains_cursor`, `:12656`) through the generated-property walk for `^\p{X}+$` / `^\P{X}+$` forms; near-monotonic input advances the cursor in O(1), collapsing a per-code-point binary search to near-linear. The cursor is engaged only for the generated gc/script/scx/binary kinds (`:15674`); other kinds keep the flat binary search. *Owner:* [JS_11 — RegExp](JS_11_RegExp.md). *Measured (Tune3 §2.5, kept):* the generated-property test cluster (439 tests) fell 61.84 s → 37.67 s (−39%) on a quiet machine, with zero flipped exit codes across 583 property tests.
 - **Sys-func registry reduction.** The JIT import table in `sys_func_registry.c` currently holds 476 `js_*` entries (down from a peak past 547). Tune8 removed entries that telemetry confirmed were never emitted by any lowering file and were never folded into a dispatcher (the C functions stay linked; only the `{"name", FPTR(name)}` rows go), plus inverse-pair folds (`js_ne_raw` → `js_eq_raw` + an inline `MIR_XOR`). A smaller import table means shorter `import_cache` probe chains during JIT compile. *Owner:* [JS_04 §8](JS_04_MIR_Lowering.md), [JS_10](JS_10_Builtins.md). *Measured (Tune8):* −91 entries from the telemetry pass alone moved aggregate test262 per-test wall-clock −7.24% versus the same-HEAD baseline, at 0 regressions; the win is in compile time, not run time. MIR cannot inline through native-C imports (`process_inlines` only inlines `MIR_func_item`s), so a wide single dispatcher would pay its `switch` on every call — which is why hot entries (`js_property_set`, `js_property_get`, `js_add`) deliberately stay direct.
 
@@ -69,9 +103,9 @@ A correctness caveat: the MIR interpreter does **not** perform tail-call optimiz
 
 ## 4. Benchmark results vs V8/Node (development-time)
 
-The table below summarizes the AWFY/R7RS/JetStream-style suite comparison against V8 (Node.js) from the Js26 log, as a geometric-mean LambdaJS/V8 ratio (lower is better; <1× means LambdaJS was faster). **These are development-time figures on Apple Silicon from a specific commit window; they are not a current guarantee.** The progression columns show how the property-access (P1/P2/P4) and method-dispatch (P3) work moved the numbers.
+The table below summarizes the AWFY/R7RS/JetStream-style suite comparison against V8 (Node.js) from the Js26 log, as a geometric-mean LambdaJS/V8 ratio (lower is better; <1× means LambdaJS was faster). **These are development-time figures on Apple Silicon from a specific commit window; they are not a current guarantee.** The P3 column measured a receiver/name optimization later retired by Tune4 for violating observable `Get`; it is retained only as historical input to a future guarded identity IC.
 
-| Suite | Original | After P1+P2+P4b | After P3 method dispatch | Representative wins (vs V8) |
+| Suite | Original | After P1+P2+P4b | Historical P3 (retired) | Representative wins (vs V8) |
 |---|---:|---:|---:|---|
 | AWFY | 25.82× | 16.27× | ≈4.52× | sieve 0.26×, permute 0.59×, queens 0.50×, list 0.89× |
 | R7RS | 3.12× | 2.26× | — | fannkuch 0.15×, pidigits 0.17×, ack 0.44×, tak 0.79× |
@@ -88,8 +122,8 @@ The pattern across all suites: **pure integer/float arithmetic in locals, and si
 Grounded in the tuning logs; these are known-open or accepted-cost, not claims of a bug.
 
 1. **Float boxing in hot loops.** Shaped float fields round-trip through boxed `Item`s on every read/write (`jm_box_float` → `push_d` — now an inline-double encode, with only the out-of-band residue taking a frame-reclaimed number-side-stack slot; the old GC-nursery allocation is retired). The remaining cost is the boxing *traffic* itself: values bounce between native registers and Item-typed storage instead of staying register-resident across iterations. This is the dominant residual on float-field-in-loop benchmarks (nbody, matmul, mandelbrot, spectralnorm) — the class-based nbody variant is ≈2× faster than the object-literal one precisely because the shaped-slot path removes some boxing, and eliminating the remaining boxing round-trips is the next target (Js27 §7.11, Js26 §6b; tracked as JO13 in `vibe/Lambda_Design_Stack_Frame_JS.md`). Native multiply also routes INT×INT through doubles to match JS semantics (JS_04 §4), so a pure-integer hot loop pays `I2D`/`DMUL`/`D2I` rather than an integer multiply.
-2. **`arr.push` override-check re-intern.** `arr.push(x)` runs a per-call override check (`js_property_get` for "push" then a builtin compare) before dispatching, and `js_property_get` → `js_get_prototype_of` re-interns "Array"/"prototype" into the name pool every call — the profiled hot path of base64 (Tune5 §6a). The safe fix (skip the check when `arr->extra == 0` and `Array.prototype` is pristine, with a tamper flag) and a realm-scoped intrinsic-prototype cache are both deferred; a process-global proto cache was tried and reverted because it leaked one realm's prototype to another (test262 multi-realm).
-3. **Polymorphic devirtualization fallback.** Direct method dispatch (§2.1) falls back to full runtime dispatch whenever a subclass overrides the target method, so deeply polymorphic hierarchies (richards, deltablue) keep the slow path; shape-based polymorphic dispatch ("P3b") is unimplemented (Js26 §P3).
+2. **Observable `Get -> Call` has no feedback cache.** Every ordinary method call now performs the required property lookup before invoking the resulting function. This removed the unsound receiver/name shortcut, but hot pristine-prototype calls such as `arr.push(x)` currently pay the full lookup. JR8 may add a realm/shape/callee-identity guard with an ordinary fallback; a process-global intrinsic cache is forbidden by **D5.4**.
+3. **Polymorphic callee feedback is unimplemented.** Rich object-oriented workloads need a bounded mono/poly call-site cache keyed by the observed property result and relevant shape/prototype guards. It must optimize after `Get` semantics are proven, never infer a target from class plus spelling (Js26 P3 historical evidence; JR8).
 4. **Conservative ADD inference loses native typing.** A correctness fix made `+` inference conservative (a param used in `x + y` is no longer inferred numeric, since `+` is overloaded add/concat), which boxed arithmetic in additive/recursive numeric functions — ack went ≈12 ns/call → ≈208 ns/call (Tune5 §6c). The safe fix (infer ADD numeric only when both operands are provably non-string, plus fixed-point return-type inference for self-recursion) is deferred behind a 0-regression gate.
 5. **Destination-passing lowering deferred.** A per-opcode histogram showed emitted MIR is 66–88% data-movement MOVs (lodash 88%), from the value-returning "materialize into a temp, then MOV into the destination" style. A destination-passing rewrite (caller names the target register) could roughly halve MOVs but touches every expression-lowering path and is a deep codegen project, explicitly not scheduled (Tune6 §3.3, JS_04 "Known Issues" #1).
 6. **Lazy per-function generation is non-viable.** As in §3, MIR's native lazy-gen interface is ≈80× costlier per function and ≈O(n²) at opt≥2; coarse batched deferral at opt=0 is the only redesign worth revisiting, and only for compute-heavy apps that call part of their code (Tune6 §0.2b–c).
@@ -156,13 +190,13 @@ Caveats: Octane needs a hand-rolled synchronous driver because no in-repo Lambda
 Still-open performance work, distilled from the logs:
 
 1. **Inline float fields without boxing** — the single biggest remaining gap (§5.1). Keep shaped float fields in native registers across a loop iteration (scalar replacement of aggregates), or store doubles unboxed in shaped slots, to remove per-access boxing traffic on float-heavy loops (the allocation half is already retired by the side-stack architecture).
-2. **Pristine-prototype guard + realm-scoped intrinsic cache** (§5.2) — to retire the per-call `arr.push` override check and the per-call name re-interning that feeds a broad ≈2× regression. Must be realm-scoped, not process-global.
-3. **Shape-based polymorphic method dispatch ("P3b")** (§5.3) — a bounded polymorphic inline cache so richards/deltablue stop falling back to runtime dispatch.
+2. **Realm-scoped property/call feedback** (§5.2) — cache an observed callee only with shape/prototype/identity guards and ordinary fallback; never restore receiver/name dispatch.
+3. **Bounded polymorphic call IC (JR8)** (§5.3) — let richards/deltablue retain correct `Get -> Call` semantics without paying the uncached path at every stable site.
 4. **Two-operand-non-string ADD inference + fixed-point return types** (§5.4) — recover native integer typing for additive/recursive numeric functions without resurrecting the string-concat unsoundness.
 5. **Destination-passing lowering** (§5.5) — the structural fix for the 66–88% MOV volume; a scoped codegen-quality project, gated on full test262 + Radiant re-validation.
 6. **De-pointered relocatable MIR + module cache** (§6) — unblock cross-compile/cross-realm artifact reuse for the repeated-vendor-JS workload.
 7. **Sys-func registry: production-only gate** (Tune8 §4) — wrap the 15 test262-only fast-path emit sites so a `JS_TEST262_FAST_PATHS=0` build actually links and drops them; currently registry-side only.
-8. **Grow the `TypeMap` hash / sort the method-spec tables** ([JS_06 §11](JS_06_Objects_Properties_Prototypes.md)) — the capacity-32 hash silently stops inserting and builtin-method lookup is a linear `strncmp`; both degrade objects/classes with many members.
+8. **Profile large-shape and catalog construction indexes** ([JS_06 §11](JS_06_Objects_Properties_Prototypes.md)) — ordinary reads use the TypeMap hash; intrinsic catalog indexes are construction-time only and should be optimized only from release startup evidence.
 
 ---
 
@@ -171,14 +205,14 @@ Still-open performance work, distilled from the logs:
 | File | Responsibility (this doc) |
 |---|---|
 | `lambda/js/js_runtime_function.cpp` | Transient call-argument stack (`js_args_push`/`_save`/`_restore`, `js_alloc_env` fallback). |
-| `lambda/js/js_mir_expression_lowering.cpp` | Constant folding (`jm_try_fold_const`, `jm_emit_folded_at_value_site`), native arithmetic, const-bound dispatch, method-dispatch devirtualization. |
+| `lambda/js/js_mir_expression_lowering.cpp` | Constant folding (`jm_try_fold_const`, `jm_emit_folded_at_value_site`), native arithmetic, exact const-bound dispatch, observable member Get→Call lowering. |
 | `lambda/js/js_mir_calls_boxing_types.cpp` | `jm_is_native_type`, `jm_box_native`, boxing/unboxing, the `import_cache`. |
 | `lambda/js/js_mir_function_collection_class_inference.cpp` | Dual native-version inference (`has_native_version`, `native_func_item`, `param_types`). |
 | `lambda/js/js_runtime.cpp` | `js_map_get_fast`, shaped-slot read/cache (`js_get_shaped_slot`, `js_constructor_create_object_shaped_cached`), MapKind dispatch, regex property cursor, 1-char ASCII fast path. |
 | `lambda/js/js_globals.cpp` | `g_ascii_char_pool` / `js_intern_ascii_char`. |
 | `lambda/lambda-data.hpp` | `TypeMap` hash table + `slot_entries[]`, `MapKind`. |
 | `lambda/js/js_mir_entrypoints_require.cpp` | Interpreter-vs-JIT selection, insn-count thresholds, link interface. |
-| `lambda/js/js_typed_array.cpp` | TypedArray raw bulk copy/convert paths (`LAMBDA_JS_TA_RAW_FAST`). |
+| `lambda/js/js_typed_array.cpp` | TypedArray ArrayNum bulk copy/convert paths. |
 | `lambda/sys_func_registry.c` | JIT import table (registry size). |
 | `lambda/js/js_mir_internal.hpp`, `transpile_js_mir.cpp` | `JM_LARGE_MODULE_INSN_THRESHOLD`, `JM_RADIANT_INTERP_INSN_THRESHOLD`, opt level. |
 
@@ -189,9 +223,9 @@ Still-open performance work, distilled from the logs:
 - [JS_04 — MIR Lowering, Code Generation & Exceptions](JS_04_MIR_Lowering.md) — native fast paths, dual versions, constant folding, call emission, eval tiers.
 - [JS_05 — Functions, Closures & Scope](JS_05_Functions_Closures.md) — direct/static call dispatch, scope-env reload.
 - [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) — MapKind dispatch, shape caching, fast map lookup, `TypeMap` hash.
-- [JS_07 — Classes](JS_07_Classes.md) — constructor shape scan, method devirtualization.
+- [JS_07 — Classes](JS_07_Classes.md) — constructor shape scan and the exact-binding-only direct-call boundary.
 - [JS_08 — Iterators & Generators](JS_08_Iterators_Generators.md) — `MAP_KIND_ITERATOR` fast path, generator spill.
-- [JS_10 — Standard Built-in Library](JS_10_Builtins.md) — ASCII interning, builtin method dispatch.
+- [JS_10 — Standard Built-in Library](JS_10_Builtins.md) — ASCII interning and direct realm-local intrinsic targets.
 - [JS_11 — RegExp](JS_11_RegExp.md) — property-walk cursor.
 - [JS_12 — TypedArrays, Binary Data & Atomics](JS_12_TypedArrays.md) — raw bulk paths.
 - [JS_16 — Testing](JS_16_Testing.md) — the test262 harness and benchmark drivers behind these numbers.

@@ -131,8 +131,8 @@ static Item lambda_wait_js_promise(Item promise, LambdaTask* waiter) {
             "Promise reaction allocation failed", NULL));
     }
     fulfilled_env[0] = lambda_task_handle(waiter);
-    Item on_fulfilled = js_new_closure(
-        (void*)lambda_promise_fulfilled, 1, fulfilled_env, 1);
+    Item on_fulfilled = js_new_native_closure(
+        lambda_promise_fulfilled, 1, fulfilled_env, 1);
     Rooted<Item> fulfilled_root(roots, on_fulfilled);
     Item* rejected_env = js_alloc_env(1);
     if (!rejected_env) {
@@ -140,8 +140,8 @@ static Item lambda_wait_js_promise(Item promise, LambdaTask* waiter) {
             "Promise reaction allocation failed", NULL));
     }
     rejected_env[0] = lambda_task_handle(waiter);
-    Item on_rejected = js_new_closure(
-        (void*)lambda_promise_rejected, 1, rejected_env, 1);
+    Item on_rejected = js_new_native_closure(
+        lambda_promise_rejected, 1, rejected_env, 1);
     Rooted<Item> rejected_root(roots, on_rejected);
     // These reactions are unowned until Promise.then publishes them.
     js_promise_then(promise_root.get(), fulfilled_root.get(), rejected_root.get());
@@ -152,22 +152,24 @@ static Item lambda_wait_js_promise(Item promise, LambdaTask* waiter) {
 
 static Item lambda_js_procedure_call(Item env_item, Item rest_args) {
     RootFrame roots(3);
-    Rooted<Item> env_root(roots, env_item);
     Rooted<Item> args_root(roots, rest_args);
-    Item* env = (Item*)(uintptr_t)env_root.get().item;
-    Item function = env ? env[0] : ItemNull;
-    if (get_type_id(function) != LMD_TYPE_FUNC) {
+    Rooted<Item> function_root(roots, ItemNull);
+    Rooted<Item> handle_root(roots, ItemNull);
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    function_root.set(env ? env[0] : ItemNull);
+    if (get_type_id(function_root.get()) != LMD_TYPE_FUNC) {
         return js_promise_reject(js_error_message("invalid Lambda procedure"));
     }
+    // D5.4.3: the captured Lambda Function is an Item edge, whereas env_item is
+    // only an adapter ABI pointer. Root the function itself across list growth.
     List* args = list();
     int64_t count = get_type_id(args_root.get()) == LMD_TYPE_ARRAY
         ? js_array_length(args_root.get()) : 0;
     for (int64_t i = 0; i < count; i++) {
         list_push(args, js_array_get_int(args_root.get(), i));
     }
-    Item handle = lambda_task_start_function(function, args);
-    Rooted<Item> handle_root(roots, handle);
-    if (!lambda_task_handle_is(handle)) {
+    handle_root.set(lambda_task_start_function(function_root.get(), args));
+    if (!lambda_task_handle_is(handle_root.get())) {
         Item error = lambda_error_to_js(handle_root.get());
         return js_promise_reject(error);
     }
@@ -183,14 +185,17 @@ extern "C" void lambda_concurrency_js_init(void) {
 extern "C" Item lambda_js_wrap_procedure(
     Function* function, int arity, const char* name) {
     lambda_concurrency_js_init();
+    RootFrame roots(2);
+    Rooted<Item> function_root(roots, (Item){.function = function});
+    Rooted<Item> wrapper_root(roots, ItemNull);
+    // D5.4.3: the raw closure environment has no tracing owner until the JS
+    // wrapper is attached, so retain the Lambda Function across both allocations.
     Item* env = js_alloc_env(1);
     if (!env) return ItemNull;
-    env[0] = (Item){.function = function};
+    env[0] = function_root.get();
     // A negative one-parameter signature gives the adapter one JS rest array,
     // preserving the procedure's source arity without fixed C trampolines.
-    Item wrapper = js_new_closure((void*)lambda_js_procedure_call, -1, env, 1);
-    RootFrame roots(1);
-    Rooted<Item> wrapper_root(roots, wrapper);
+    wrapper_root.set(js_new_native_closure(lambda_js_procedure_call, -1, env, 1));
     js_set_formal_length(wrapper_root.get(), arity);
     if (name) {
         js_set_function_name(wrapper_root.get(),

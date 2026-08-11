@@ -253,7 +253,7 @@ static void readline_output_write(Item rl, Item data) {
     Item output = readline_get(rl, "output");
     if (output.item == ITEM_NULL || get_type_id(output) == LMD_TYPE_UNDEFINED) return;
     Item write_fn = readline_get(output, "write");
-    if (get_type_id(write_fn) == LMD_TYPE_FUNC) {
+    if (js_is_callable(write_fn)) {
         js_call_function(write_fn, output, &data, 1);
         js_stream_flush_data_now(output);
     }
@@ -263,7 +263,7 @@ static void readline_enqueue_output_write(Item rl, Item data) {
     Item output = readline_get(rl, "output");
     if (output.item == ITEM_NULL || get_type_id(output) == LMD_TYPE_UNDEFINED) return;
     Item write_fn = readline_get(output, "write");
-    if (get_type_id(write_fn) != LMD_TYPE_FUNC) return;
+    if (!js_is_callable(write_fn)) return;
     Item args[1] = {data};
     Item job = js_bind_function(write_fn, output, args, 1);
     js_enqueue_promise_job(job);
@@ -311,7 +311,7 @@ static Item readline_error_with_code(const char* code, const char* message) {
 }
 
 static void readline_reject_later(Item reject, Item err) {
-    if (get_type_id(reject) != LMD_TYPE_FUNC) return;
+    if (!js_is_callable(reject)) return;
     Item args[1] = {err};
     Item job = js_bind_function(reject, ItemNull, args, 1);
     js_enqueue_promise_job(job);
@@ -327,9 +327,9 @@ static Item readline_rejected_promise(Item err) {
 static void readline_clear_question(Item rl) {
     Item signal = readline_get(rl, "__question_signal__");
     Item listener = readline_get(rl, "__question_abort_listener__");
-    if (get_type_id(signal) == LMD_TYPE_MAP && get_type_id(listener) == LMD_TYPE_FUNC) {
+    if (get_type_id(signal) == LMD_TYPE_MAP && js_is_callable(listener)) {
         Item remove_fn = readline_get(signal, "removeEventListener");
-        if (get_type_id(remove_fn) == LMD_TYPE_FUNC) {
+        if (js_is_callable(remove_fn)) {
             Item args[2] = {make_string_item("abort"), listener};
             js_call_function(remove_fn, signal, args, 2);
         }
@@ -346,7 +346,7 @@ extern "C" Item js_readline_question_on_abort(Item rl_item) {
     Item reject = readline_get(rl_item, "__question_reject__");
     Item signal = readline_get(rl_item, "__question_signal__");
     readline_clear_question(rl_item);
-    if (get_type_id(reject) == LMD_TYPE_FUNC) {
+    if (js_is_callable(reject)) {
         Item err = readline_abort_error_from_signal(signal);
         js_call_function(reject, ItemNull, &err, 1);
     }
@@ -354,13 +354,13 @@ extern "C" Item js_readline_question_on_abort(Item rl_item) {
 }
 
 static bool readline_abort_pending_question(Item rl, bool close_interface) {
-    bool pending = get_type_id(readline_get(rl, "__question_callback__")) == LMD_TYPE_FUNC ||
-                   get_type_id(readline_get(rl, "__question_resolve__")) == LMD_TYPE_FUNC;
+    bool pending = js_is_callable(readline_get(rl, "__question_callback__")) ||
+                   js_is_callable(readline_get(rl, "__question_resolve__"));
     if (!pending) return false;
     Item reject = readline_get(rl, "__question_reject__");
     Item signal = readline_get(rl, "__question_signal__");
     readline_clear_question(rl);
-    if (get_type_id(reject) == LMD_TYPE_FUNC) {
+    if (js_is_callable(reject)) {
         Item err = readline_abort_error_from_signal(signal);
         js_call_function(reject, ItemNull, &err, 1);
     }
@@ -382,9 +382,9 @@ static bool readline_register_question_signal(Item rl, Item signal) {
     Item aborted = readline_get(signal, "aborted");
     if (aborted.item == ITEM_TRUE) return false;
     Item add_fn = readline_get(signal, "addEventListener");
-    if (get_type_id(add_fn) == LMD_TYPE_FUNC) {
+    if (js_is_callable(add_fn)) {
         Item bound_arg = rl;
-        Item listener = js_bind_function(js_new_function((void*)js_readline_question_on_abort, 1),
+        Item listener = js_bind_function(js_new_native_function(js_readline_question_on_abort),
                                          ItemNull, &bound_arg, 1);
         js_set_function_name(listener, make_string_item("onAbort"));
         Item args[2] = {make_string_item("abort"), listener};
@@ -397,26 +397,26 @@ static bool readline_register_question_signal(Item rl, Item signal) {
 
 static void readline_emit_line(Item rl, Item line) {
     Item question_cb = readline_get(rl, "__question_callback__");
-    if (get_type_id(question_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(question_cb)) {
         readline_clear_question(rl);
         js_call_function(question_cb, rl, &line, 1);
         return;
     }
     Item question_resolve = readline_get(rl, "__question_resolve__");
-    if (get_type_id(question_resolve) == LMD_TYPE_FUNC) {
+    if (js_is_callable(question_resolve)) {
         readline_clear_question(rl);
         js_call_function(question_resolve, ItemNull, &line, 1);
         return;
     }
     Item cb = readline_get(rl, "__on_line__");
-    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(cb)) {
         js_call_function(cb, rl, &line, 1);
     }
 }
 
 static void readline_emit_history(Item rl, Item history) {
     Item cb = readline_get(rl, "__on_history__");
-    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(cb)) {
         js_call_function(cb, rl, &history, 1);
     }
 }
@@ -949,9 +949,9 @@ static void readline_handle_tab(Item rl) {
     readline_set(rl, "__tab_count__", (Item){.item = i2it(tab_count)});
 
     Item completer = readline_get(rl, "completer");
-    if (get_type_id(completer) == LMD_TYPE_FUNC) {
+    if (js_is_callable(completer)) {
         Item completion_args[2] = {rl, (Item){.item = i2it(tab_count)}};
-        Item cb = js_bind_function(js_new_function((void*)js_readline_completion_callback_bound, 4),
+        Item cb = js_bind_function(js_new_native_function(js_readline_completion_callback_bound),
                                    ItemNull, completion_args, 2);
         Item args[2] = {make_string_item(chars, len), cb};
         Item result = js_call_function(completer, rl, args, 2);
@@ -959,9 +959,9 @@ static void readline_handle_tab(Item rl) {
             js_readline_completion_callback_bound(rl, completion_args[1],
                 (Item){.item = ITEM_JS_UNDEFINED}, result);
         } else if (get_type_id(result) == LMD_TYPE_MAP) {
-            Item on_fulfilled = js_bind_function(js_new_function((void*)js_readline_completion_fulfilled_bound, 3),
+            Item on_fulfilled = js_bind_function(js_new_native_function(js_readline_completion_fulfilled_bound),
                                                  ItemNull, completion_args, 2);
-            Item on_rejected = js_bind_function(js_new_function((void*)js_readline_completion_rejected_bound, 3),
+            Item on_rejected = js_bind_function(js_new_native_function(js_readline_completion_rejected_bound),
                                                 ItemNull, completion_args, 2);
             js_promise_then(result, on_fulfilled, on_rejected);
         }
@@ -1079,7 +1079,7 @@ extern "C" Item js_readline_question(Item prompt_item, Item options_or_callback,
     Item self = js_get_current_this();
     Item callback = callback_item;
     Item signal = (Item){.item = ITEM_JS_UNDEFINED};
-    if (get_type_id(options_or_callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(options_or_callback)) {
         callback = options_or_callback;
     } else if (get_type_id(options_or_callback) == LMD_TYPE_MAP) {
         signal = readline_get(options_or_callback, "signal");
@@ -1097,12 +1097,12 @@ extern "C" Item js_readline_question(Item prompt_item, Item options_or_callback,
         readline_set(self, "__question_prompt__", prompt_item);
     }
 
-    if (get_type_id(readline_get(self, "__question_callback__")) == LMD_TYPE_FUNC ||
-        get_type_id(readline_get(self, "__question_resolve__")) == LMD_TYPE_FUNC) {
+    if (js_is_callable(readline_get(self, "__question_callback__")) ||
+        js_is_callable(readline_get(self, "__question_resolve__"))) {
         return self;
     }
 
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         if (!readline_register_question_signal(self, signal)) {
             readline_clear_question(self);
             return self;
@@ -1138,8 +1138,8 @@ extern "C" Item js_readline_question_promisified(Item prompt_item, Item options_
         readline_reject_later(reject, err);
         return promise;
     }
-    if (get_type_id(readline_get(self, "__question_callback__")) == LMD_TYPE_FUNC ||
-        get_type_id(readline_get(self, "__question_resolve__")) == LMD_TYPE_FUNC) {
+    if (js_is_callable(readline_get(self, "__question_callback__")) ||
+        js_is_callable(readline_get(self, "__question_resolve__"))) {
         return promise;
     }
     if (get_type_id(prompt_item) == LMD_TYPE_STRING) {
@@ -1167,7 +1167,7 @@ extern "C" Item js_readline_close(void) {
     readline_set(self, "closed", (Item){.item = ITEM_TRUE});
     // emit 'close' event
     Item on_close = js_property_get(self, make_string_item("__on_close__"));
-    if (get_type_id(on_close) == LMD_TYPE_FUNC) {
+    if (js_is_callable(on_close)) {
         js_call_function(on_close, ItemNull, NULL, 0);
     }
     return self;
@@ -1398,7 +1398,7 @@ static Item js_readline_write_impl(Item self, Item data_item, Item key_item) {
         }
         if (c == '\t') {
             readline_set(self, "__saw_cr__", (Item){.item = ITEM_FALSE});
-            if (get_type_id(readline_get(self, "completer")) != LMD_TYPE_FUNC) {
+            if (!js_is_callable(readline_get(self, "completer"))) {
                 continue;
             }
             if (i > start) {
@@ -1482,12 +1482,12 @@ extern "C" Item js_readline_deferred_input_data(Item rl, Item data_item) {
 static void readline_enqueue_input_data(Item rl, Item data_item) {
     Item write_fn = readline_get(rl, "write");
     Item job = ItemNull;
-    if (get_type_id(write_fn) == LMD_TYPE_FUNC) {
+    if (js_is_callable(write_fn)) {
         Item args[1] = {data_item};
         job = js_bind_function(write_fn, rl, args, 1);
     } else {
         Item args[2] = {rl, data_item};
-        job = js_bind_function(js_new_function((void*)js_readline_deferred_input_data, 2),
+        job = js_bind_function(js_new_native_function(js_readline_deferred_input_data),
                                ItemNull, args, 2);
     }
     js_enqueue_promise_job(job);
@@ -1577,7 +1577,7 @@ extern "C" Item js_readline_createInterface(Item options_item) {
         if (terminal.item != ITEM_NULL) readline_set(rl, "terminal", terminal);
         Item completer = js_property_get(options_item, make_string_item("completer"));
         if (readline_has_own(options_item, "completer") && get_type_id(completer) != LMD_TYPE_UNDEFINED) {
-            if (get_type_id(completer) != LMD_TYPE_FUNC) {
+            if (!js_is_callable(completer)) {
                 return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
                     "The \"completer\" argument must be of type function");
             }
@@ -1643,7 +1643,7 @@ extern "C" Item js_readline_createInterface(Item options_item) {
             Item aborted = js_property_get(signal, make_string_item("aborted"));
             Item add_event_listener = js_property_get(signal, make_string_item("addEventListener"));
             if (get_type_id(aborted) == LMD_TYPE_UNDEFINED ||
-                get_type_id(add_event_listener) != LMD_TYPE_FUNC) {
+                !js_is_callable(add_event_listener)) {
                 return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
                     "The \"signal\" argument must be an instance of AbortSignal");
             }
@@ -1687,24 +1687,24 @@ extern "C" Item js_readline_createInterface(Item options_item) {
     }
 
     // methods
-    Item question_fn = js_new_function((void*)js_readline_question, 3);
+    Item question_fn = js_new_native_function(js_readline_question);
     js_property_set(question_fn, js_symbol_for(make_string_item("nodejs.util.promisify.custom")),
-                    js_new_function((void*)js_readline_question_promisified, 2));
+                    js_new_native_function(js_readline_question_promisified));
     js_property_set(rl, make_string_item("question"), question_fn);
     js_property_set(rl, make_string_item("close"),
-                    js_new_function((void*)js_readline_close, 0));
+                    js_new_native_function(js_readline_close));
     js_property_set(rl, make_string_item("on"),
-                    js_new_function((void*)js_readline_on, 2));
+                    js_new_native_function(js_readline_on));
     js_property_set(rl, make_string_item("write"),
-                    js_new_function((void*)js_readline_write, 2));
+                    js_new_native_function(js_readline_write));
     js_property_set(rl, make_string_item("getCursorPos"),
-                    js_new_function((void*)js_readline_getCursorPos, 0));
+                    js_new_native_function(js_readline_getCursorPos));
     js_property_set(rl, make_string_item("setPrompt"),
-                    js_new_function((void*)js_readline_setPrompt, 1));
+                    js_new_native_function(js_readline_setPrompt));
     js_property_set(rl, make_string_item("getPrompt"),
-                    js_new_function((void*)js_readline_getPrompt, 0));
+                    js_new_native_function(js_readline_getPrompt));
     js_property_set(rl, make_string_item("prompt"),
-                    js_new_function((void*)js_readline_prompt, 0));
+                    js_new_native_function(js_readline_prompt));
 
     Item input = readline_get(rl, "input");
     if (input.item != ITEM_NULL && get_type_id(input) != LMD_TYPE_UNDEFINED) {
@@ -1713,10 +1713,10 @@ extern "C" Item js_readline_createInterface(Item options_item) {
         bool promises_mode = readline_get(rl, "__promises_mode__").item == ITEM_TRUE;
         Item listener = ItemNull;
         if (promises_mode) {
-            Item listener_base = js_new_function((void*)js_readline_bound_input_data, 2);
+            Item listener_base = js_new_native_function(js_readline_bound_input_data);
             listener = js_bind_function(listener_base, ItemNull, bound_args, 1);
         } else {
-            Item listener_base = js_new_function((void*)js_readline_bound_input_data, 2);
+            Item listener_base = js_new_native_function(js_readline_bound_input_data);
             listener = js_bind_function(listener_base, ItemNull, bound_args, 1);
         }
         bool input_event_hooked = false;
@@ -1725,10 +1725,10 @@ extern "C" Item js_readline_createInterface(Item options_item) {
             input_event_hooked = true;
         } else {
             Item on_fn = readline_get(input, "on");
-            if (get_type_id(on_fn) == LMD_TYPE_FUNC) {
+            if (js_is_callable(on_fn)) {
                 Item on_args[2] = {make_string_item("data"), listener};
                 js_call_function(on_fn, input, on_args, 2);
-                Item keypress_listener = js_bind_function(js_new_function((void*)js_readline_bound_keypress, 3),
+                Item keypress_listener = js_bind_function(js_new_native_function(js_readline_bound_keypress),
                                                            ItemNull, bound_args, 1);
                 Item keypress_args[2] = {make_string_item("keypress"), keypress_listener};
                 js_call_function(on_fn, input, keypress_args, 2);
@@ -1739,19 +1739,19 @@ extern "C" Item js_readline_createInterface(Item options_item) {
         if (output.item != input.item) {
             Item write_fn = ItemNull;
             if (promises_mode) {
-                Item write_base = js_new_function((void*)js_readline_bound_input_data, 2);
+                Item write_base = js_new_native_function(js_readline_bound_input_data);
                 write_fn = js_bind_function(write_base, ItemNull, bound_args, 1);
             } else {
-                Item write_base = js_new_function((void*)js_readline_bound_input_data, 2);
+                Item write_base = js_new_native_function(js_readline_bound_input_data);
                 write_fn = js_bind_function(write_base, ItemNull, bound_args, 1);
             }
-            Item end_fn = js_bind_function(js_new_function((void*)js_readline_bound_input_end, 2),
+            Item end_fn = js_bind_function(js_new_native_function(js_readline_bound_input_end),
                                            ItemNull, bound_args, 1);
             readline_set(input, "write", write_fn);
             readline_set(input, "end", end_fn);
         }
         if (!input_event_hooked) {
-            Item emit_fn = js_bind_function(js_new_function((void*)js_readline_bound_input_emit, 3),
+            Item emit_fn = js_bind_function(js_new_native_function(js_readline_bound_input_emit),
                                             ItemNull, bound_args, 1);
             readline_set(input, "emit", emit_fn);
         }
@@ -1811,10 +1811,10 @@ extern "C" Item js_get_readline_namespace(void) {
     readline_namespace = js_new_object();
 
     Item key = make_string_item("createInterface");
-    Item fn = js_new_function((void*)js_readline_createInterface, 1);
+    Item fn = js_new_native_function(js_readline_createInterface);
     js_property_set(readline_namespace, key, fn);
     js_property_set(readline_namespace, make_string_item("Interface"),
-                    js_new_function((void*)js_readline_interface_constructor, 4));
+                    js_new_native_constructor(js_readline_interface_constructor));
 
     Item default_key = make_string_item("default");
     js_property_set(readline_namespace, default_key, readline_namespace);
@@ -1829,10 +1829,10 @@ extern "C" Item js_get_readline_promises_namespace(void) {
     readline_promises_namespace = js_new_object();
 
     Item key = make_string_item("createInterface");
-    Item fn = js_new_function((void*)js_readline_promises_createInterface, 1);
+    Item fn = js_new_native_function(js_readline_promises_createInterface);
     js_property_set(readline_promises_namespace, key, fn);
     js_property_set(readline_promises_namespace, make_string_item("Interface"),
-                    js_new_function((void*)js_readline_promises_interface_constructor, 4));
+                    js_new_native_constructor(js_readline_promises_interface_constructor));
 
     Item default_key = make_string_item("default");
     js_property_set(readline_promises_namespace, default_key, readline_promises_namespace);

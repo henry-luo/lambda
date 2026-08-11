@@ -18,6 +18,7 @@
 #include "js_props.h"
 #include "js_property_attrs.h"
 #include "js_runtime_state.hpp"
+#include "js_function.hpp"
 #include "js_event_loop.h"
 #include "js_dom_platform.h"
 #include "js_dom_observers.h"
@@ -112,21 +113,31 @@ extern "C" const char* js_dom_to_attribute_cstr(Item value) {
 }
 
 // Forward declarations
-extern "C" Item js_eventtarget_add_listener(Item type, Item callback, Item opts);
-extern "C" Item js_eventtarget_remove_listener(Item type, Item callback, Item opts);
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html);
-extern "C" Item js_eventtarget_dispatch(Item event_item);
 extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type,
                                                  Item callback, Item opts);
 extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type,
                                                     Item callback, Item opts);
 extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
-extern "C" int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out);
+extern "C" Item radiant_dom_element_operation(Item elem_item,
+                                                JubeDomElementOperation operation,
+                                                Item* args, int argc);
 extern "C" int radiant_dom_document_get_property(Item prop_name, Item* out);
-extern "C" Item js_dom_get_selection_function_for_document(void* doc);
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
+
+static Item js_dom_element_prototype_operation_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    (void)result_home;
+    JsFunction* fn = get_type_id(callee) == LMD_TYPE_FUNC
+        ? (JsFunction*)callee.function : NULL;
+    JubeDomElementOperation operation = fn
+        ? (JubeDomElementOperation)fn->native_target.bits
+        : (JubeDomElementOperation)0;
+    return radiant_dom_element_operation(this_value, operation, args, argc);
+}
+
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 void js_dom_register_named_elements(DomElement* root);
@@ -212,9 +223,6 @@ static DomElement* js_dom_offset_parent_element(DomElement* elem);
 static int64_t js_dom_offset_coordinate(DomElement* elem, bool x_axis);
 static Item js_dom_svg_create_matrix(void);
 static Item js_dom_svg_create_point(void);
-static Item js_dom_svg_get_ctm(void);
-static Item js_dom_svg_get_screen_ctm(void);
-static Item js_dom_svg_get_bbox(void);
 extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem);
 
 // ============================================================================
@@ -246,7 +254,7 @@ extern "C" bool js_dom_is_host_driven_loop(void) {
 #define _js_main_document (js_runtime_state.dom.main_document)
 
 static Item js_font_face_set_ready_then(Item callback) {
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         js_call_function(callback, make_js_undefined(), NULL, 0);
     }
     return get_type_id(js_document_fonts_value) == LMD_TYPE_MAP
@@ -256,7 +264,7 @@ static Item js_font_face_set_ready_then(Item callback) {
 static Item js_create_document_fonts_object(void) {
     Item fonts = js_new_object();
     Item ready = js_new_object();
-    Item then_fn = js_new_function((void*)js_font_face_set_ready_then, 1);
+    Item then_fn = js_new_native_function(js_font_face_set_ready_then);
     js_property_set(ready, js_string_key("then"), then_fn);
     js_property_set(fonts, js_string_key("ready"), ready);
     return fonts;
@@ -1257,7 +1265,7 @@ extern "C" bool js_dom_set_event_handler_function(void* dom_elem,
                                                   const char* attr_name,
                                                   Item fn) {
     DomElement* elem = (DomElement*)dom_elem;
-    if (!elem || !attr_name || get_type_id(fn) != LMD_TYPE_FUNC) return false;
+    if (!elem || !attr_name || !js_is_callable(fn)) return false;
 
     char prop_name[64];
     if (!js_dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return false;
@@ -1559,9 +1567,9 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         js_history_install_globals();
         Item global = js_get_global_this();
         js_property_set(global, js_string_key("__lambda_testdriver_key"),
-            js_new_function((void*)js_dom_testdriver_key, 5));
+            js_new_native_function(js_dom_testdriver_key));
         js_property_set(global, js_string_key("__lambda_set_editing_behavior"),
-            js_new_function((void*)js_dom_set_editing_behavior, 1));
+            js_new_native_function(js_dom_set_editing_behavior));
     }
     log_debug("js_dom_set_document: set document=%p", dom_doc);
 }
@@ -2212,17 +2220,16 @@ static Item _options_collection_add(Item element_arg, Item before_arg) {
     DomElement* owner = _select_options_owner(self, &kind);
     if (!owner || kind != SELECT_COLLECTION_OPTIONS || !_is_tag(owner, "select")) return ItemNull;
 
-    Item method = (Item){.item = s2it(heap_create_name("add"))};
     Item args[2] = { element_arg, before_arg };
-    return js_dom_element_method(js_dom_wrap_element(owner), method, args, 2);
+    return radiant_dom_element_operation(js_dom_wrap_element(owner), JUBE_DOM_ADD, args, 2);
 }
 
 static void _decorate_dom_collection(Item collection, const char* ctor_name) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !ctor_name) return;
     Item named_key = (Item){.item = s2it(heap_create_name("namedItem"))};
     Item existing = js_property_get(collection, named_key);
-    if (get_type_id(existing) != LMD_TYPE_FUNC) {
-        js_property_set(collection, named_key, js_new_function((void*)_collection_named_item, 1));
+    if (!js_is_callable(existing)) {
+        js_property_set(collection, named_key, js_new_native_function(_collection_named_item));
     }
     Item ctor = js_property_get(js_get_global_this(),
         (Item){.item = s2it(heap_create_name(ctor_name))});
@@ -2237,10 +2244,10 @@ static void _decorate_options_collection(Item collection) {
 
     Item add_key = (Item){.item = s2it(heap_create_name("add"))};
     Item existing = js_property_get(collection, add_key);
-    if (get_type_id(existing) == LMD_TYPE_FUNC) return;
+    if (js_is_callable(existing)) return;
 
     // select.options is a live collection object, so install add() on the collection and delegate to the owning select.
-    Item add_fn = js_new_function((void*)_options_collection_add, 2);
+    Item add_fn = js_new_native_function(_options_collection_add);
     js_set_function_name(add_fn, add_key);
     js_property_set(collection, add_key, add_fn);
 }
@@ -2498,154 +2505,6 @@ static void js_dom_refresh_live_lookup_collections_for_mutation(DomNode* target,
     }
 }
 
-static Item js_dom_matches_method(Item selector) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("matches"))};
-    return js_dom_element_method(self, method, &selector, 1);
-}
-
-// Trampolines so property access to these method names returns a real,
-// callable function instead of the ITEM_TRUE feature-detection sentinel.
-// Direct calls (`el.querySelector(sel)`) are handled by the interpreter's
-// method-invocation shortcut in js_dom_element_method; without a callable
-// property, optional-chaining calls (`el?.querySelector(sel)`) fall through
-// to `(true)(sel)` and throw "is not a function".
-static Item js_dom_query_selector_method(Item selector) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("querySelector"))};
-    return js_dom_element_method(self, method, &selector, 1);
-}
-static Item js_dom_query_selector_all_method(Item selector) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("querySelectorAll"))};
-    return js_dom_element_method(self, method, &selector, 1);
-}
-static Item js_dom_closest_method(Item selector) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("closest"))};
-    return js_dom_element_method(self, method, &selector, 1);
-}
-static Item js_dom_get_attribute_method(Item name) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("getAttribute"))};
-    return js_dom_element_method(self, method, &name, 1);
-}
-static Item js_dom_has_attribute_method(Item name) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("hasAttribute"))};
-    return js_dom_element_method(self, method, &name, 1);
-}
-static Item js_dom_set_attribute_ns_method(Item namespace_uri,
-                                           Item qualified_name,
-                                           Item value) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("setAttributeNS"))};
-    Item args[3] = {namespace_uri, qualified_name, value};
-    return js_dom_element_method(self, method, args, 3);
-}
-static Item js_dom_get_attribute_ns_method(Item namespace_uri, Item local_name) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("getAttributeNS"))};
-    Item args[2] = {namespace_uri, local_name};
-    return js_dom_element_method(self, method, args, 2);
-}
-static Item js_dom_remove_attribute_ns_method(Item namespace_uri, Item local_name) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("removeAttributeNS"))};
-    Item args[2] = {namespace_uri, local_name};
-    return js_dom_element_method(self, method, args, 2);
-}
-static Item js_dom_contains_method(Item other) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("contains"))};
-    return js_dom_element_method(self, method, &other, 1);
-}
-static Item js_dom_is_equal_node_method(Item other) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("isEqualNode"))};
-    return js_dom_element_method(self, method, &other, 1);
-}
-
-static Item js_dom_focus_method(Item elem_item) {
-    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("focus"))};
-    return js_dom_element_method(self, method, NULL, 0);
-}
-
-static Item js_dom_blur_method(Item elem_item) {
-    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("blur"))};
-    return js_dom_element_method(self, method, NULL, 0);
-}
-
-static Item js_dom_select_method(Item elem_item) {
-    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("select"))};
-    return js_dom_element_method(self, method, NULL, 0);
-}
-
-static Item js_dom_get_bounding_client_rect_method(Item elem_item) {
-    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("getBoundingClientRect"))};
-    return js_dom_element_method(self, method, NULL, 0);
-}
-
-static Item js_dom_scroll_into_view_method(Item elem_item) {
-    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("scrollIntoView"))};
-    return js_dom_element_method(self, method, NULL, 0);
-}
-
-static Item js_dom_scroll_method(Item x_arg, Item y_arg) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("scroll"))};
-    Item args[2] = { x_arg, y_arg };
-    return js_dom_element_method(self, method, args, 2);
-}
-
-static Item js_dom_scroll_to_method(Item x_arg, Item y_arg) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("scrollTo"))};
-    Item args[2] = { x_arg, y_arg };
-    return js_dom_element_method(self, method, args, 2);
-}
-
-static Item js_dom_scroll_by_method(Item x_arg, Item y_arg) {
-    Item self = js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("scrollBy"))};
-    Item args[2] = { x_arg, y_arg };
-    return js_dom_element_method(self, method, args, 2);
-}
-
-static Item js_dom_get_client_rects_method(Item elem_item) {
-    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("getClientRects"))};
-    return js_dom_element_method(self, method, NULL, 0);
-}
-
-static Item js_dom_text_control_caret_bounds_method(Item elem_item) {
-    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("__lambdaTextControlCaretBounds"))};
-    return js_dom_element_method(self, method, NULL, 0);
-}
-
-static Item js_dom_text_control_boundary_from_point_method(Item elem_item,
-                                                           Item x,
-                                                           Item y) {
-    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("__lambdaTextControlBoundaryFromPoint"))};
-    Item args[2] = { x, y };
-    return js_dom_element_method(self, method, args, 2);
-}
-
-static Item js_dom_boundary_from_point_method(Item elem_item, Item x, Item y,
-                                              Item behavior) {
-    Item self = js_dom_unwrap_element(elem_item) ? elem_item : js_get_this();
-    Item method = (Item){.item = s2it(heap_create_name("__lambdaBoundaryFromPoint"))};
-    Item args[3] = { x, y, behavior };
-    return js_dom_element_method(self, method, args, 3);
-}
-
 // ============================================================================
 // Document Proxy Object
 // ============================================================================
@@ -2721,23 +2580,6 @@ extern "C" Item js_get_document_object_value() {
     js_document_proxy_item.vmap->host_type = radiant_dom_document_host_type();
     js_document_proxy_item.vmap->host_data = _js_main_document;
     return js_document_proxy_item;
-}
-
-// Dispatch method calls on the document proxy object.
-// Routes to js_document_method which handles getElementById, querySelector, etc.
-extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc) {
-    const char* method = fn_to_cstr(method_name);
-    if (method) {
-        Item module_result = ItemNull;
-        if (radiant_dom_document_method(method_name, args, argc, &module_result)) {
-            return module_result;
-        }
-        Item fn = js_document_get_property(method_name);
-        if (get_type_id(fn) == LMD_TYPE_FUNC) {
-            return js_call_function(fn, js_get_document_object_value(), args, argc);
-        }
-    }
-    return js_document_method(method_name, args, argc);
 }
 
 // Dispatch property access on the document proxy object.
@@ -3086,8 +2928,20 @@ static Item js_dom_owner_document_from_node(DomNode* node) {
 
 static Item js_dom_parent_element_or_null(DomNode* node) {
     DomNode* parent = node ? node->parent : nullptr;
-    if (parent && parent->is_element()) return js_dom_wrap_element(parent->as_element());
+    if (parent && parent->is_element()) {
+        DomElement* elem = parent->as_element();
+        // Document and fragment nodes reuse DomElement storage but cannot be
+        // exposed through the Element-only parentElement relation.
+        if (elem && elem->tag_name && elem->tag_name[0] != '#') {
+            return js_dom_wrap_element(elem);
+        }
+    }
     return ItemNull;
+}
+
+static Item js_dom_parent_node_or_null(DomNode* node) {
+    DomNode* parent = node ? node->parent : nullptr;
+    return parent ? js_dom_wrap_element((void*)parent) : ItemNull;
 }
 
 extern "C" Item js_dom_owner_document_for_node(void* node_ptr) {
@@ -3317,15 +3171,27 @@ static Item js_dom_parser_parse_from_string(Item source_item, Item type_item) {
 }
 
 static void js_dom_install_dom_parser_global(void) {
-    Item global = js_get_global_this();
-    Item ctor = js_new_function((void*)js_dom_parser_constructor, 0);
-    js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("DOMParser"))});
-    Item proto = js_new_object();
-    js_property_set(proto, js_string_key("constructor"), ctor);
-    js_property_set(proto, js_string_key("parseFromString"),
-        js_new_function((void*)js_dom_parser_parse_from_string, 2));
-    js_property_set(ctor, js_string_key("prototype"), proto);
-    js_property_set(global, js_string_key("DOMParser"), ctor);
+    RootFrame roots(4);
+    Rooted<Item> global_root(roots, js_get_global_this());
+    Rooted<Item> ctor_root(roots,
+        js_new_native_constructor(js_dom_parser_constructor));
+    Rooted<Item> proto_root(roots, ItemNull);
+    Rooted<Item> method_root(roots, ItemNull);
+    js_set_function_name(ctor_root.get(),
+        (Item){.item = s2it(heap_create_name("DOMParser"))});
+    proto_root.set(js_new_object());
+    js_property_set(proto_root.get(), js_string_key("constructor"),
+        ctor_root.get());
+    method_root.set(js_new_native_function(js_dom_parser_parse_from_string));
+    // D6.2.2v2: the prototype is now the sole owner of this capability. Keep
+    // it rooted while allocating the method or a nursery move drops the real
+    // parseFromString property and leaves only the old name-dispatch illusion.
+    js_property_set(proto_root.get(), js_string_key("parseFromString"),
+        method_root.get());
+    js_initialize_native_constructor_prototype(ctor_root.get(),
+        proto_root.get());
+    js_property_set(global_root.get(), js_string_key("DOMParser"),
+        ctor_root.get());
 }
 
 // iframe.contentDocument / contentWindow accessors.
@@ -3452,7 +3318,7 @@ static Item js_window_prompt(Item message_item, Item default_item) {
 
 static void js_dom_install_window_dialog_globals(void) {
     Item global = js_get_global_this();
-    Item fn = js_new_function((void*)js_window_prompt, 2);
+    Item fn = js_new_native_function(js_window_prompt);
     js_property_set(global, js_string_key("prompt"), fn);
     Item window = js_property_get(global, js_string_key("window"));
     if (get_type_id(window) == LMD_TYPE_MAP) {
@@ -3514,7 +3380,7 @@ static void _schedule_iframe_load(DomElement* iframe) {
     s_pending_iframe_docs[pending_index] = iframe->doc;
     if (!s_iframe_load_drain_scheduled) {
         s_iframe_load_drain_scheduled = true;
-        Item cb = js_new_function((void*)_iframe_load_drain, 0);
+        Item cb = js_new_native_this_span_function(_iframe_load_drain);
         js_setTimeout(cb, (Item){.item = i2it(0)});
     }
 }
@@ -3685,37 +3551,39 @@ extern "C" void js_dom_restore_active_document(void* prev_doc) {
 
 
 static Item js_dom_impl_create_html_document_method(Item title) {
-    Item method = (Item){.item = s2it(heap_create_name("createHTMLDocument"))};
-    Item args[1] = { title };
-    Item out = ItemNull;
-    return js_dom_implementation_method(method, args, 1, &out) ? out : ItemNull;
+    const char* title_text = fn_to_cstr(title);
+    return js_create_foreign_html_doc(title_text ? title_text : "");
 }
 
 static Item js_dom_impl_create_document_method(Item namespace_uri, Item qualified_name, Item doctype) {
-    Item method = (Item){.item = s2it(heap_create_name("createDocument"))};
-    Item args[3] = { namespace_uri, qualified_name, doctype };
-    Item out = ItemNull;
-    return js_dom_implementation_method(method, args, 3, &out) ? out : ItemNull;
+    (void)namespace_uri;
+    (void)doctype;
+    const char* qualified_text = fn_to_cstr(qualified_name);
+    return js_create_foreign_xml_doc(qualified_text);
 }
 
 static Item js_dom_impl_create_document_type_method(Item name, Item public_id, Item system_id) {
-    Item method = (Item){.item = s2it(heap_create_name("createDocumentType"))};
-    Item args[3] = { name, public_id, system_id };
-    Item out = ItemNull;
-    return js_dom_implementation_method(method, args, 3, &out) ? out : ItemNull;
+    const char* name_text = fn_to_cstr(name);
+    const char* public_text = fn_to_cstr(public_id);
+    const char* system_text = fn_to_cstr(system_id);
+    return js_create_doctype_node(name_text ? name_text : "",
+        public_text ? public_text : "", system_text ? system_text : "");
 }
 
 static Item js_dom_impl_has_feature_method(Item feature, Item version) {
-    Item method = (Item){.item = s2it(heap_create_name("hasFeature"))};
-    Item args[2] = { feature, version };
-    Item out = ItemNull;
-    return js_dom_implementation_method(method, args, 2, &out) ? out : ItemNull;
+    (void)feature;
+    (void)version;
+    // WHATWG requires hasFeature() to return true; the direct callable owns
+    // that invariant without re-selecting it from its property spelling.
+    return (Item){.item = ITEM_TRUE};
 }
 
-static void js_dom_set_implementation_method(Item implementation, const char* name,
-                                             void* func_ptr, int param_count) {
+template <typename Target>
+static void js_dom_set_implementation_method(Item implementation,
+        const char* name, Target target, int adapter_arity) {
     Item key = (Item){.item = s2it(heap_create_name(name))};
-    js_property_set(implementation, key, js_new_function(func_ptr, param_count));
+    js_property_set(implementation, key,
+        js_new_native_function(target, adapter_arity));
     js_mark_non_enumerable(implementation, key);
 }
 
@@ -3734,46 +3602,14 @@ extern "C" Item js_get_dom_implementation(void) {
     // DOMImplementation is a plain sentinel map, so property reads cannot
     // reach the native method-call dispatcher unless callable members exist.
     js_dom_set_implementation_method(js_dom_implementation_item, "createHTMLDocument",
-        (void*)js_dom_impl_create_html_document_method, 1);
+        js_dom_impl_create_html_document_method, 1);
     js_dom_set_implementation_method(js_dom_implementation_item, "createDocument",
-        (void*)js_dom_impl_create_document_method, 3);
+        js_dom_impl_create_document_method, 3);
     js_dom_set_implementation_method(js_dom_implementation_item, "createDocumentType",
-        (void*)js_dom_impl_create_document_type_method, 3);
+        js_dom_impl_create_document_type_method, 3);
     js_dom_set_implementation_method(js_dom_implementation_item, "hasFeature",
-        (void*)js_dom_impl_has_feature_method, 2);
+        js_dom_impl_has_feature_method, 2);
     return js_dom_implementation_item;
-}
-
-// Dispatch a method call on the document.implementation singleton.
-// Returns true and sets *out if the method was handled.
-extern "C" bool js_dom_implementation_method(Item method_name, Item* args, int argc, Item* out) {
-    const char* m = fn_to_cstr(method_name);
-    if (!m) return false;
-    if (strcmp(m, "createHTMLDocument") == 0) {
-        const char* title = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        if (!title) title = "";
-        *out = js_create_foreign_html_doc(title);
-        return true;
-    }
-    if (strcmp(m, "createDocument") == 0) {
-        // (namespaceURI, qualifiedName, doctype)
-        const char* qname = (argc >= 2) ? fn_to_cstr(args[1]) : nullptr;
-        *out = js_create_foreign_xml_doc(qname);
-        return true;
-    }
-    if (strcmp(m, "createDocumentType") == 0) {
-        const char* name      = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        const char* public_id = (argc >= 2) ? fn_to_cstr(args[1]) : "";
-        const char* system_id = (argc >= 3) ? fn_to_cstr(args[2]) : "";
-        *out = js_create_doctype_node(name ? name : "", public_id ? public_id : "", system_id ? system_id : "");
-        return true;
-    }
-    if (strcmp(m, "hasFeature") == 0) {
-        // Per WHATWG: always returns true.
-        *out = (Item){.item = ITEM_TRUE};
-        return true;
-    }
-    return false;
 }
 
 // ============================================================================
@@ -3852,29 +3688,34 @@ static Item js_classlist_value_item(DomElement* elem) {
     return result;
 }
 
-static Item js_classlist_proxy_invoke(Item rest_args) {
-    if (get_type_id(rest_args) != LMD_TYPE_ARRAY || !rest_args.array ||
-        rest_args.array->length < 2) {
-        return ItemNull;
-    }
-    Item* items = rest_args.array->items;
-    return js_classlist_method(items[0], items[1], items + 2,
-        (int)rest_args.array->length - 2);
-}
+typedef enum JsClassListOperation {
+    JS_CLASSLIST_ADD = 1,
+    JS_CLASSLIST_REMOVE,
+    JS_CLASSLIST_TOGGLE,
+    JS_CLASSLIST_CONTAINS,
+    JS_CLASSLIST_ITEM,
+    JS_CLASSLIST_REPLACE,
+    JS_CLASSLIST_TO_STRING,
+    JS_CLASSLIST_ITERATOR,
+} JsClassListOperation;
 
-static Item js_classlist_iterator_proxy(Item rest_args) {
-    if (get_type_id(rest_args) != LMD_TYPE_ARRAY || !rest_args.array ||
-        rest_args.array->length < 1) {
-        return js_array_new(0);
-    }
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(rest_args.array->items[0]);
-    if (!elem) return js_array_new(0);
+typedef struct JsClassListMethodSpec {
+    const char* name;
+    JsClassListOperation operation;
+    int formal_length;
+} JsClassListMethodSpec;
 
-    Item values = js_array_new(0);
-    for (int i = 0; i < elem->class_count; i++) {
-        js_array_push(values, (Item){.item = s2it(heap_create_name(elem->class_names[i]))});
-    }
-    return js_get_iterator(values);
+static Item js_classlist_operation(Item elem_item, JsClassListOperation operation,
+                                   Item* args, int argc);
+
+static Item js_classlist_operation_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    (void)result_home;
+    JsFunction* fn = get_type_id(callee) == LMD_TYPE_FUNC
+        ? (JsFunction*)callee.function : NULL;
+    JsClassListOperation operation = fn
+        ? (JsClassListOperation)fn->native_target.bits : (JsClassListOperation)0;
+    return js_classlist_operation(this_value, operation, args, argc);
 }
 
 static Item js_dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
@@ -3882,34 +3723,49 @@ static Item js_dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     Item cache_key = (Item){.item = s2it(heap_create_name("__classListWrapper"))};
     Item wrapper = exp_map.item != ITEM_NULL ? js_property_get(exp_map, cache_key) : ItemNull;
-    if (get_type_id(wrapper) != LMD_TYPE_MAP && get_type_id(wrapper) != LMD_TYPE_VMAP) {
-        wrapper = js_new_object();
-        const char* methods[] = {"add", "remove", "toggle", "contains", "item", "replace", "toString"};
-        for (int i = 0; i < 7; i++) {
-            Item bound_args[2] = {
-                elem_item,
-                (Item){.item = s2it(heap_create_name(methods[i]))}
-            };
-            Item method = js_bind_function(
-                js_new_function((void*)js_classlist_proxy_invoke, -1),
-                make_js_undefined(), bound_args, 2);
-            js_property_set(wrapper,
-                (Item){.item = s2it(heap_create_name(methods[i]))}, method);
+    RootFrame roots(4);
+    Rooted<Item> elem_root(roots, elem_item);
+    Rooted<Item> expando_root(roots, exp_map);
+    Rooted<Item> wrapper_root(roots, wrapper);
+    Rooted<Item> method_root(roots, ItemNull);
+    if (get_type_id(wrapper_root.get()) != LMD_TYPE_MAP &&
+            get_type_id(wrapper_root.get()) != LMD_TYPE_VMAP) {
+        wrapper_root.set(js_new_object());
+        static const JsClassListMethodSpec methods[] = {
+            {"add", JS_CLASSLIST_ADD, 0},
+            {"remove", JS_CLASSLIST_REMOVE, 0},
+            {"toggle", JS_CLASSLIST_TOGGLE, 1},
+            {"contains", JS_CLASSLIST_CONTAINS, 1},
+            {"item", JS_CLASSLIST_ITEM, 1},
+            {"replace", JS_CLASSLIST_REPLACE, 2},
+            {"toString", JS_CLASSLIST_TO_STRING, 0},
+        };
+        for (int i = 0; i < (int)(sizeof(methods) / sizeof(methods[0])); i++) {
+            method_root.set(js_new_native_payload_function(
+                js_classlist_operation_body, (uint64_t)methods[i].operation,
+                methods[i].formal_length));
+            method_root.set(js_bind_function(method_root.get(), elem_root.get(), NULL, 0));
+            js_property_set(wrapper_root.get(),
+                (Item){.item = s2it(heap_create_name(methods[i].name))},
+                method_root.get());
         }
-        Item iterator_args[1] = {elem_item};
-        Item iterator = js_bind_function(
-            js_new_function((void*)js_classlist_iterator_proxy, -1),
-            make_js_undefined(), iterator_args, 1);
+        method_root.set(js_new_native_payload_function(
+            js_classlist_operation_body, (uint64_t)JS_CLASSLIST_ITERATOR, 0));
+        method_root.set(js_bind_function(method_root.get(), elem_root.get(), NULL, 0));
         // DOMTokenList is iterable; delegated UI event routers commonly spread
         // classList while resolving their target before invoking callbacks.
-        js_property_set(wrapper, js_well_known_symbol_key(1), iterator);
-        if (exp_map.item != ITEM_NULL) js_property_set(exp_map, cache_key, wrapper);
+        js_property_set(wrapper_root.get(), js_well_known_symbol_key(1), method_root.get());
+        if (expando_root.get().item != ITEM_NULL) {
+            // The wrapper and owner must remain rooted while function creation
+            // allocates; otherwise precise GC can publish a stale cache edge.
+            js_property_set(expando_root.get(), cache_key, wrapper_root.get());
+        }
     }
-    js_property_set(wrapper, (Item){.item = s2it(heap_create_name("length"))},
+    js_property_set(wrapper_root.get(), (Item){.item = s2it(heap_create_name("length"))},
         (Item){.item = i2it((int64_t)elem->class_count)});
-    js_property_set(wrapper, (Item){.item = s2it(heap_create_name("value"))},
+    js_property_set(wrapper_root.get(), (Item){.item = s2it(heap_create_name("value"))},
         js_classlist_value_item(elem));
-    return wrapper;
+    return wrapper_root.get();
 }
 
 struct JsComputedStyleHost {
@@ -3964,8 +3820,8 @@ static void js_dom_install_window_computed_style_global(void) {
     Item global = js_get_global_this();
     Item key = js_string_key("getComputedStyle");
     Item existing = js_property_get(global, key);
-    if (get_type_id(existing) == LMD_TYPE_FUNC) return;
-    Item fn = js_new_function((void*)js_window_get_computed_style, 2);
+    if (js_is_callable(existing)) return;
+    Item fn = js_new_native_function(js_window_get_computed_style);
     js_set_function_name(fn, key);
     // getComputedStyle is a Window/global function now; direct MIR DOM shims
     // were removed so calls resolve through ordinary property dispatch.
@@ -5613,12 +5469,12 @@ static Item js_dom_xml_serializer_serialize_to_string(Item node_item) {
 
 static void js_dom_install_xml_serializer_global(void) {
     Item global = js_get_global_this();
-    Item ctor = js_new_function((void*)js_dom_xml_serializer_constructor, 0);
+    Item ctor = js_new_native_constructor(js_dom_xml_serializer_constructor);
     js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("XMLSerializer"))});
     Item proto = js_new_object();
     js_property_set(proto, js_string_key("constructor"), ctor);
     js_property_set(proto, js_string_key("serializeToString"),
-        js_new_function((void*)js_dom_xml_serializer_serialize_to_string, 1));
+        js_new_native_function(js_dom_xml_serializer_serialize_to_string));
     js_property_set(ctor, js_string_key("prototype"), proto);
     js_property_set(global, js_string_key("XMLSerializer"), ctor);
 }
@@ -5926,7 +5782,7 @@ static Item js_dom_tree_walker_next_sibling_method(Item walker_item) {
     return js_dom_tree_walker_advance(walker_item, JS_TREE_WALKER_STEP_NEXT_SIBLING);
 }
 
-static Item js_dom_create_tree_walker(Item root_item, Item what_to_show_item) {
+extern "C" Item js_dom_create_tree_walker_bridge(Item root_item, Item what_to_show_item) {
     if (!js_dom_unwrap_element(root_item)) return ItemNull;
     RootFrame roots(4);
     Rooted<Item> root_root(roots, root_item);
@@ -5940,20 +5796,32 @@ static Item js_dom_create_tree_walker(Item root_item, Item what_to_show_item) {
                     (Item){.item = i2it((int64_t)what_to_show)});
     Item bound_args[1] = {walker_root.get()};
     method_root.set(js_bind_function(
-        js_new_function((void*)js_dom_tree_walker_next_node_method, 1),
+        js_new_native_function(js_dom_tree_walker_next_node_method),
         make_js_undefined(), bound_args, 1));
     js_property_set(walker_root.get(), js_string_key("nextNode"), method_root.get());
     bound_args[0] = walker_root.get();
     method_root.set(js_bind_function(
-        js_new_function((void*)js_dom_tree_walker_first_child_method, 1),
+        js_new_native_function(js_dom_tree_walker_first_child_method),
         make_js_undefined(), bound_args, 1));
     js_property_set(walker_root.get(), js_string_key("firstChild"), method_root.get());
     bound_args[0] = walker_root.get();
     method_root.set(js_bind_function(
-        js_new_function((void*)js_dom_tree_walker_next_sibling_method, 1),
+        js_new_native_function(js_dom_tree_walker_next_sibling_method),
         make_js_undefined(), bound_args, 1));
     js_property_set(walker_root.get(), js_string_key("nextSibling"), method_root.get());
     return walker_root.get();
+}
+
+extern "C" Item js_dom_document_create_event_bridge(Item interface_name) {
+    const char* interface_text = fn_to_cstr(interface_name);
+    if (!interface_text) interface_text = "";
+    if (strcmp(interface_text, "CustomEvent") == 0) {
+        return js_create_custom_event_init("", false, false, false, ItemNull);
+    }
+    if (strcmp(interface_text, "TextEvent") == 0) {
+        return js_create_text_event_init("", false, false, false, ItemNull, "");
+    }
+    return js_create_event_init("", false, false, false);
 }
 
 static bool js_dom_append_document_text(DomDocument* doc, const char* text) {
@@ -5992,415 +5860,6 @@ static bool js_dom_append_document_text(DomDocument* doc, const char* text) {
         cursor = br_end ? br_end + 1 : br + 3;
     }
     return true;
-}
-
-extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
-    const char* method = fn_to_cstr(method_name);
-    if (!method) {
-        log_error("js_document_method: invalid method name");
-        return ItemNull;
-    }
-
-    // createEvent is document-independent — handle before document presence check
-    // so that JS scripts without an associated HTML document can still construct
-    // events.
-    if (strcmp(method, "createEvent") == 0) {
-        const char* iface = (argc > 0) ? fn_to_cstr(args[0]) : NULL;
-        if (!iface) iface = "";
-        if (strcmp(iface, "CustomEvent") == 0) {
-            return js_create_custom_event_init("", false, false, false, ItemNull);
-        }
-        if (strcmp(iface, "TextEvent") == 0) {
-            return js_create_text_event_init("", false, false, false, ItemNull, "");
-        }
-        return js_create_event_init("", false, false, false);
-    }
-
-    if (!_js_current_document) {
-        log_error("js_document_method: no document set");
-        return ItemNull;
-    }
-
-    DomDocument* doc = _js_current_document;
-    DomElement* root = doc->root; // may be null for foreign docs without a root
-
-    log_debug("js_document_method: '%s' with %d args", method, argc);
-
-    Item module_result = ItemNull;
-    // MIR lowers direct document.method() calls here, bypassing the proxy entry.
-    if (radiant_dom_document_method(method_name, args, argc, &module_result)) {
-        return module_result;
-    }
-
-    if (strcmp(method, "createTreeWalker") == 0) {
-        if (argc < 2) return ItemNull;
-        return js_dom_create_tree_walker(args[0], args[1]);
-    }
-
-    // Location methods on document.location/window.location proxy.
-    if (strcmp(method, "assign") == 0 || strcmp(method, "replace") == 0) {
-        if (argc < 1) return make_js_undefined();
-        const char* next_url = fn_to_cstr(args[0]);
-        if (next_url && next_url[0]) {
-            if (doc->pending_navigation_url) {
-                mem_free(doc->pending_navigation_url);
-            }
-            doc->pending_navigation_url = mem_strdup(next_url, MEM_CAT_DOM);
-            log_info("js_location_%s: pending navigation to %s", method, next_url);
-        }
-        return make_js_undefined();
-    }
-    if (strcmp(method, "reload") == 0) {
-        return make_js_undefined();
-    }
-    if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
-        return make_js_undefined();
-    }
-
-    if (strcmp(method, "open") == 0) {
-        DocState* state = doc->state ? doc->state : js_dom_current_state();
-        if (state) {
-            const char* exc = nullptr;
-            if (!state_store_set_selection(state, NULL, NULL, &exc)) {
-                log_debug("js_document_open: selection clear rejected: %s",
-                          exc ? exc : "?");
-            }
-        }
-        DomElement* body = document_body_element(doc);
-        if (body) {
-            clear_element_children_for_navigation(body);
-            js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
-                                   (DomNode*)body,
-                                   (DomNode*)body->parent);
-        }
-        return js_get_document_object_value();
-    }
-    if (strcmp(method, "close") == 0) {
-        return make_js_undefined();
-    }
-
-    // getElementById(id)
-    if (strcmp(method, "getElementById") == 0) {
-        if (argc < 1) return ItemNull;
-        const char* id = fn_to_cstr(args[0]);
-        if (!id) return ItemNull;
-        DomElement* found = js_dom_find_element_by_id(root, id);
-        return found ? js_dom_wrap_element(found) : ItemNull;
-    }
-
-    if (strcmp(method, "elementFromPoint") == 0) {
-        Item x_arg = argc >= 1 ? args[0] : (Item){.item = i2it(0)};
-        Item y_arg = argc >= 2 ? args[1] : (Item){.item = i2it(0)};
-        return js_dom_document_element_from_point(doc, x_arg, y_arg);
-    }
-
-    // getElementsByClassName(className)
-    if (strcmp(method, "getElementsByClassName") == 0) {
-        if (argc < 1) return ItemNull;
-        return js_dom_live_document_get_elements_by_class_name_bridge((void*)doc, args[0]);
-    }
-
-    // getElementsByTagName(tagName)
-    if (strcmp(method, "getElementsByTagName") == 0) {
-        if (argc < 1) return ItemNull;
-        return js_dom_live_document_get_elements_by_tag_name_bridge((void*)doc, args[0]);
-    }
-
-    // getElementsByName(name)
-    if (strcmp(method, "getElementsByName") == 0) {
-        if (argc < 1) return ItemNull;
-        return js_dom_live_document_get_elements_by_name_bridge((void*)doc, args[0]);
-    }
-
-    // querySelector(selector)
-    if (strcmp(method, "querySelector") == 0) {
-        if (argc < 1) return ItemNull;
-        const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
-        if (!sel_text) return ItemNull;
-
-        Pool* pool = doc->document_pool;
-        CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-        if (!selector_group) {
-            // per DOM spec, throw SyntaxError for invalid selectors
-            return js_throw_syntax_error(make_string_item("is not a valid selector"));
-        }
-
-        SelectorMatcher* matcher = js_dom_create_selector_matcher(doc);
-        DomElement* found = js_dom_selector_group_find_first(
-            matcher, selector_group, root, true);
-        return found ? js_dom_wrap_element(found) : ItemNull;
-    }
-
-    // querySelectorAll(selector)
-    if (strcmp(method, "querySelectorAll") == 0) {
-        if (argc < 1) return ItemNull;
-        const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
-        if (!sel_text) return ItemNull;
-
-        Pool* pool = doc->document_pool;
-        CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-        if (!selector_group) {
-            // return empty array
-            Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-            arr->type_id = LMD_TYPE_ARRAY;
-            arr->items = nullptr;
-            arr->length = 0;
-            arr->capacity = 0;
-            return (Item){.array = arr};
-        }
-
-        SelectorMatcher* matcher = js_dom_create_selector_matcher(doc);
-        ArrayList* results = arraylist_new(16);
-        if (!results) return ItemNull;
-        js_dom_selector_group_collect_all(
-            matcher, selector_group, root, results, true);
-
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        for (int i = 0; i < results->length; i++) {
-            array_push(arr, js_dom_wrap_element((DomElement*)results->data[i]));
-        }
-        arraylist_free(results);
-        return (Item){.array = arr};
-    }
-
-    // createElement(tagName)
-    if (strcmp(method, "createElement") == 0) {
-        if (argc < 1) return ItemNull;
-        const char* tag = fn_to_cstr(args[0]);
-        if (!tag) return ItemNull;
-
-        // use MarkBuilder to create a proper Lambda Element
-        MarkBuilder builder(doc->input);
-        Item elem_item = builder.element(tag).final();
-
-        // build DomElement wrapper
-        Element* elem = elem_item.element;
-        DomElement* dom_elem = dom_element_create(doc, tag, elem);
-        return js_dom_wrap_element(dom_elem);
-    }
-
-    // createElementNS(namespace, tagName). We create the element the same way
-    // as createElement but remember the requested namespace URI so that
-    // `element.namespaceURI` reads back the caller's value (e.g. the SVG ns).
-    // Stored as a reserved internal attribute — filtered from user-visible
-    // attribute enumeration/lookup (see JM_NS_INTERNAL_ATTR below).
-    if (strcmp(method, "createElementNS") == 0) {
-        if (argc < 2) return ItemNull;
-        const char* ns  = fn_to_cstr(args[0]);
-        const char* tag = fn_to_cstr(args[1]);
-        if (!tag) return ItemNull;
-
-        MarkBuilder builder(doc->input);
-        Item elem_item = builder.element(tag).final();
-
-        Element* elem = elem_item.element;
-        DomElement* dom_elem = dom_element_create(doc, tag, elem);
-        if (dom_elem && ns && ns[0] != '\0') {
-            dom_elem->set_attribute("__lambda_ns_uri", ns);
-        }
-        return js_dom_wrap_element(dom_elem);
-    }
-
-    // createTextNode(text)
-    if (strcmp(method, "createTextNode") == 0) {
-        if (argc < 1) return ItemNull;
-        const char* text = fn_to_cstr(args[0]);
-        if (!text) return ItemNull;
-
-        // create a detached String-backed DomText node (no parent yet)
-        DomText* text_node = DomText::create_detached_copy(doc, text, strlen(text));
-        if (!text_node) {
-            log_error("js_document_method: createTextNode failed for '%s'", text);
-            return ItemNull;
-        }
-        return js_dom_wrap_element(text_node);
-    }
-
-    // normalize() — delegate to root element's normalize
-    if (strcmp(method, "normalize") == 0) {
-        if (doc->root) {
-            Item root_item = js_dom_wrap_element(doc->root);
-            js_dom_element_method(root_item, (Item){.item = s2it(heap_create_name("normalize"))}, nullptr, 0);
-        }
-        return ItemNull;
-    }
-
-    // document.write(text) / document.writeln(text)
-    // Appends the text content to the document body as a text node.
-    // Note: real document.write parses HTML and inserts at the current parse point,
-    // but for CSS2.1 tests this simplified approach works since tests only write
-    // simple text ("PASS", "FAIL", CSS property values, etc.)
-    if (strcmp(method, "write") == 0 || strcmp(method, "writeln") == 0) {
-        if (argc < 1) return ItemNull;
-        const char* text = fn_to_cstr(args[0]);
-        if (!text) return ItemNull;
-
-        if (!js_dom_append_document_text(doc, text)) {
-            log_debug("js_document_method: write - no body element found");
-            return ItemNull;
-        }
-        log_debug("js_document_method: write '%s' appended to body", text);
-
-        return ItemNull;
-    }
-
-    // v12b: createDocumentFragment()
-    if (strcmp(method, "createDocumentFragment") == 0) {
-        return js_dom_create_document_fragment(doc);
-    }
-
-    // v12b: createComment(data)
-    if (strcmp(method, "createComment") == 0) {
-        const char* text = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        if (!text) text = "";
-
-        // create a Lambda Element with comment tag for backing
-        MarkBuilder builder(doc->input);
-        Item comment_item = builder.element("!--").text(text).final();
-        Element* comment_elem = comment_item.element;
-
-        DomComment* comment_node = dom_comment_create_detached(comment_elem, doc);
-        if (!comment_node) return ItemNull;
-        return js_dom_wrap_element(comment_node);
-    }
-
-    // createProcessingInstruction(target, data) — model as a comment-like node
-    // tagged "?target" so node ops still work. Used heavily in WPT XML tests.
-    if (strcmp(method, "createProcessingInstruction") == 0) {
-        const char* target = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        const char* data   = (argc >= 2) ? fn_to_cstr(args[1]) : "";
-        if (!target) target = "";
-        if (!data) data = "";
-        MarkBuilder builder(doc->input);
-        Item pi_item = builder.element("?").text(data).final();
-        Element* pi_elem = pi_item.element;
-        DomElement* pi_node = dom_element_create(doc, target, pi_elem);
-        if (!pi_node) return ItemNull;
-        return js_dom_wrap_element(pi_node);
-    }
-
-    // v12b: importNode(node [, deep]) — deep clone a node
-    if (strcmp(method, "importNode") == 0) {
-        if (argc < 1) return ItemNull;
-        DomNode* source = (DomNode*)js_dom_unwrap_element(args[0]);
-        if (!source || !source->is_element()) return ItemNull;
-        bool deep = (argc >= 2) ? js_is_truthy(args[1]) : false;
-        Item source_item = js_dom_wrap_element(source);
-        Item deep_arg = (Item){.item = b2it(deep ? 1 : 0)};
-        Item method_str = (Item){.item = s2it(heap_create_name("cloneNode"))};
-        return js_dom_element_method(source_item, method_str, &deep_arg, 1);
-    }
-
-    // v12b: adoptNode(node) — detach from current parent
-    if (strcmp(method, "adoptNode") == 0) {
-        if (argc < 1) return ItemNull;
-        DomNode* node = (DomNode*)js_dom_unwrap_element(args[0]);
-        if (!node) return ItemNull;
-        if (node->parent) {
-            dom_pre_remove(node);
-            node->parent->remove_child(node);
-        }
-        return args[0];
-    }
-
-    // EventTarget interface on document
-    if (strcmp(method, "addEventListener") == 0) {
-        if (argc >= 2) {
-            js_dom_add_event_listener_bridge(js_get_document_object_value(), args[0], args[1], argc > 2 ? args[2] : ItemNull);
-        }
-        return (Item){.item = ITEM_JS_UNDEFINED};
-    }
-    if (strcmp(method, "removeEventListener") == 0) {
-        if (argc >= 2) {
-            js_dom_remove_event_listener_bridge(js_get_document_object_value(), args[0], args[1], argc > 2 ? args[2] : ItemNull);
-        }
-        return (Item){.item = ITEM_JS_UNDEFINED};
-    }
-    if (strcmp(method, "dispatchEvent") == 0) {
-        if (argc >= 1) {
-            return js_dom_dispatch_event_bridge(js_get_document_object_value(), args[0]);
-        }
-        return (Item){.item = ITEM_FALSE};
-    }
-
-    // document.contains(node) — true iff node is document or a descendant.
-    if (strcmp(method, "contains") == 0) {
-        if (argc >= 1) {
-            Item arg = args[0];
-            // self → true (per DOM spec, node.contains(node) is true)
-            Item doc_self = js_get_document_object_value();
-            if (arg.item == doc_self.item) return (Item){.item = ITEM_TRUE};
-            // synthesized doctype (and any other direct child of the document
-            // stub other than the documentElement) — true.
-            DomDocument* doc = _js_current_document;
-            if (doc) {
-                void* stub_v = js_dom_get_or_create_doc_node(doc);
-                DomElement* stub = (DomElement*)stub_v;
-                void* nv = js_dom_unwrap_element(arg);
-                if (stub && nv) {
-                    DomNode* n = (DomNode*)nv;
-                    DomNode* cur = n;
-                    while (cur) {
-                        if (cur == (DomNode*)stub) return (Item){.item = ITEM_TRUE};
-                        cur = cur->parent;
-                    }
-                }
-            }
-            Item doc_elem = js_document_get_property((Item){.item = s2it(heap_create_name("documentElement"))});
-            if (doc_elem.item != ITEM_NULL && doc_elem.item != ITEM_JS_UNDEFINED) {
-                // also: documentElement itself is a descendant, contains(documentElement) → true
-                if (arg.item == doc_elem.item) return (Item){.item = ITEM_TRUE};
-                return js_dom_contains(doc_elem, arg);
-            }
-        }
-        return (Item){.item = ITEM_TRUE};
-    }
-    // document.compareDocumentPosition(node) — return CONTAINS|FOLLOWING (20) for all nodes
-    if (strcmp(method, "compareDocumentPosition") == 0) {
-        return (Item){.item = i2it(20)};
-    }
-    // document.createDocumentFragment() — return a dummy element
-    if (strcmp(method, "createDocumentFragment") == 0) {
-        return ItemNull;
-    }
-
-    // Selection / Range API
-    if (strcmp(method, "createRange") == 0) {
-        return js_dom_create_range();
-    }
-    if (strcmp(method, "getSelection") == 0) {
-        // Per HTML spec: document.getSelection() returns null when defaultView
-        // is null (i.e., document has no associated browsing context).
-        // Main doc and iframe content docs have a browsing context; foreign
-        // docs from document.implementation.create*Document do not.
-        if (!js_doc_has_browsing_context(_js_current_document)) {
-            return ItemNull;
-        }
-        return js_dom_get_selection();
-    }
-
-    // document.appendChild(node) — for documents without a root, set the
-    // node as the root; otherwise append to the existing root. (WPT
-    // setupRangeTests appends elements/comments to the foreign XML doc.)
-    if (strcmp(method, "appendChild") == 0) {
-        if (argc < 1) return ItemNull;
-        DomNode* child = (DomNode*)js_dom_unwrap_element(args[0]);
-        if (!child) return ItemNull;
-        if (!doc->root && child->is_element()) {
-            doc->root = child->as_element();
-        } else if (doc->root) {
-            ((DomNode*)doc->root)->append_child(child);
-            dom_post_insert((DomNode*)doc->root, child);
-        }
-        return args[0];
-    }
-
-    log_debug("js_document_method: unknown method '%s'", method);
-    return ItemNull;
 }
 
 // ============================================================================
@@ -6466,9 +5925,7 @@ extern "C" Item js_dom_document_active_element_bridge(void* doc_ptr) {
     return root ? js_dom_wrap_element(root) : ItemNull;
 }
 
-static bool js_dom_document_method_feature_name(const char* prop);
 static bool js_dom_form_named_getter_reserved_name(const char* prop);
-static bool js_dom_node_method_feature_name(const char* prop);
 
 extern "C" Item js_document_get_property(Item prop_name) {
     if (!_js_current_document) {
@@ -6721,17 +6178,6 @@ extern "C" Item js_document_get_property(Item prop_name) {
         return ItemNull;
     }
 
-    // EventTarget methods must be callable even when MIR takes the generic
-    // property-call fallback instead of the document method dispatcher.
-    if (strcmp(prop, "addEventListener") == 0)
-        return js_new_function((void*)js_eventtarget_add_listener, 3);
-    if (strcmp(prop, "removeEventListener") == 0)
-        return js_new_function((void*)js_eventtarget_remove_listener, 3);
-    if (strcmp(prop, "dispatchEvent") == 0)
-        return js_new_function((void*)js_eventtarget_dispatch, 1);
-    if (strcmp(prop, "getSelection") == 0)
-        return js_dom_get_selection_function_for_document((void*)doc);
-
     DomDocument* expando_doc = _js_current_document ? _js_current_document : _js_main_document;
     void* stub_v = js_dom_get_or_create_doc_node(expando_doc);
     if (stub_v) {
@@ -6741,12 +6187,6 @@ extern "C" Item js_document_get_property(Item prop_name) {
                 return js_property_get(exp_map, prop_name);
             }
         }
-    }
-
-    // Document method names accessed as properties return ITEM_TRUE for feature
-    // detection; CE-6 legacy editing APIs stay inert when called.
-    if (js_dom_document_method_feature_name(prop)) {
-        return (Item){.item = ITEM_TRUE};
     }
 
     // designMode is the legacy whole-document edit toggle. This first cut
@@ -6835,39 +6275,6 @@ extern "C" Item js_dom_text_control_set_range_text_bridge(void* dom_elem,
                                                           Item end_arg,
                                                           Item mode_arg);
 
-static bool js_dom_document_method_feature_name(const char* prop) {
-    if (!prop) return false;
-    return strcmp(prop, "getElementById") == 0 ||
-        strcmp(prop, "getElementsByTagName") == 0 ||
-        strcmp(prop, "getElementsByClassName") == 0 ||
-        strcmp(prop, "getElementsByName") == 0 ||
-        strcmp(prop, "elementFromPoint") == 0 ||
-        strcmp(prop, "querySelector") == 0 ||
-        strcmp(prop, "querySelectorAll") == 0 ||
-        strcmp(prop, "createElement") == 0 ||
-        strcmp(prop, "createElementNS") == 0 ||
-        strcmp(prop, "createTextNode") == 0 ||
-        strcmp(prop, "createComment") == 0 ||
-        strcmp(prop, "createDocumentFragment") == 0 ||
-        strcmp(prop, "importNode") == 0 ||
-        strcmp(prop, "adoptNode") == 0 ||
-        strcmp(prop, "open") == 0 ||
-        strcmp(prop, "close") == 0 ||
-        strcmp(prop, "write") == 0 ||
-        strcmp(prop, "writeln") == 0 ||
-        strcmp(prop, "addEventListener") == 0 ||
-        strcmp(prop, "removeEventListener") == 0 ||
-        strcmp(prop, "focus") == 0 ||
-        strcmp(prop, "blur") == 0 ||
-        // Keep legacy editing commands out of this feature list: the editable
-        // contract requires feature detection to see an absent API, not a stub.
-        strcmp(prop, "hasFocus") == 0 ||
-        strcmp(prop, "createRange") == 0 ||
-        strcmp(prop, "createTreeWalker") == 0 ||
-        strcmp(prop, "getSelection") == 0 ||
-        strcmp(prop, "createEvent") == 0;
-}
-
 static bool js_dom_form_named_getter_reserved_name(const char* prop) {
     if (!prop) return true;
     return strcmp(prop, "elements") == 0 ||
@@ -6886,62 +6293,6 @@ static bool js_dom_form_named_getter_reserved_name(const char* prop) {
         strcmp(prop, "checkValidity") == 0 ||
         strcmp(prop, "reportValidity") == 0 ||
         strcmp(prop, "requestSubmit") == 0;
-}
-
-static bool js_dom_node_method_feature_name(const char* prop) {
-    if (!prop) return false;
-    return strcmp(prop, "getAttribute") == 0 ||
-        strcmp(prop, "setAttribute") == 0 ||
-        strcmp(prop, "removeAttribute") == 0 ||
-        strcmp(prop, "hasAttribute") == 0 ||
-        strcmp(prop, "toggleAttribute") == 0 ||
-        strcmp(prop, "getAttributeNames") == 0 ||
-        strcmp(prop, "querySelector") == 0 ||
-        strcmp(prop, "querySelectorAll") == 0 ||
-        strcmp(prop, "closest") == 0 ||
-        strcmp(prop, "matches") == 0 ||
-        strcmp(prop, "appendChild") == 0 ||
-        strcmp(prop, "removeChild") == 0 ||
-        strcmp(prop, "replaceChild") == 0 ||
-        strcmp(prop, "replaceWith") == 0 ||
-        strcmp(prop, "insertBefore") == 0 ||
-        strcmp(prop, "insertAdjacentElement") == 0 ||
-        strcmp(prop, "insertAdjacentHTML") == 0 ||
-        strcmp(prop, "attachShadow") == 0 ||
-        strcmp(prop, "cloneNode") == 0 ||
-        strcmp(prop, "contains") == 0 ||
-        strcmp(prop, "isEqualNode") == 0 ||
-        strcmp(prop, "hasChildNodes") == 0 ||
-        strcmp(prop, "normalize") == 0 ||
-        strcmp(prop, "addEventListener") == 0 ||
-        strcmp(prop, "removeEventListener") == 0 ||
-        strcmp(prop, "dispatchEvent") == 0 ||
-        strcmp(prop, "remove") == 0 ||
-        strcmp(prop, "getBoundingClientRect") == 0 ||
-        strcmp(prop, "getElementsByTagName") == 0 ||
-        strcmp(prop, "getElementsByClassName") == 0 ||
-        strcmp(prop, "compareDocumentPosition") == 0 ||
-        strcmp(prop, "append") == 0 ||
-        strcmp(prop, "prepend") == 0 ||
-        strcmp(prop, "getClientRects") == 0 ||
-        strcmp(prop, "scrollIntoView") == 0 ||
-        strcmp(prop, "scroll") == 0 ||
-        strcmp(prop, "scrollTo") == 0 ||
-        strcmp(prop, "scrollBy") == 0 ||
-        strcmp(prop, "focus") == 0 ||
-        strcmp(prop, "blur") == 0 ||
-        strcmp(prop, "__lambdaTextControlCaretBounds") == 0 ||
-        strcmp(prop, "__lambdaTextControlBoundaryFromPoint") == 0 ||
-        strcmp(prop, "__lambdaBoundaryFromPoint") == 0 ||
-        strcmp(prop, "toString") == 0 ||
-        strcmp(prop, "setSelectionRange") == 0 ||
-        strcmp(prop, "select") == 0 ||
-        strcmp(prop, "submit") == 0 ||
-        strcmp(prop, "reset") == 0 ||
-        strcmp(prop, "checkValidity") == 0 ||
-        strcmp(prop, "reportValidity") == 0 ||
-        strcmp(prop, "requestSubmit") == 0 ||
-        strcmp(prop, "setCustomValidity") == 0;
 }
 
 static Item js_text_control_set_selection_range(Item start_arg, Item end_arg, Item dir_arg) {
@@ -9232,7 +8583,10 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         if (strcmp(prop, "nodeName") == 0) {
             return (Item){.item = s2it(heap_create_name("#text"))};
         }
-        if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
+        if (strcmp(prop, "parentNode") == 0) {
+            return js_dom_parent_node_or_null((DomNode*)text_node);
+        }
+        if (strcmp(prop, "parentElement") == 0) {
             return js_dom_parent_element_or_null((DomNode*)text_node);
         }
         if (strcmp(prop, "isConnected") == 0) {
@@ -9262,23 +8616,23 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return js_dom_owner_document_from_node(text_node->parent);
         }
         if (strcmp(prop, "replaceData") == 0) {
-            return js_bind_function(js_new_function((void*)js_text_replace_data_method, 3),
+            return js_bind_function(js_new_native_function(js_text_replace_data_method),
                 elem_item, NULL, 0);
         }
         if (strcmp(prop, "insertData") == 0) {
-            return js_bind_function(js_new_function((void*)js_text_insert_data_method, 2),
+            return js_bind_function(js_new_native_function(js_text_insert_data_method),
                 elem_item, NULL, 0);
         }
         if (strcmp(prop, "appendData") == 0) {
-            return js_bind_function(js_new_function((void*)js_text_append_data_method, 1),
+            return js_bind_function(js_new_native_function(js_text_append_data_method),
                 elem_item, NULL, 0);
         }
         if (strcmp(prop, "deleteData") == 0) {
-            return js_bind_function(js_new_function((void*)js_text_delete_data_method, 2),
+            return js_bind_function(js_new_native_function(js_text_delete_data_method),
                 elem_item, NULL, 0);
         }
         if (strcmp(prop, "substringData") == 0) {
-            return js_bind_function(js_new_function((void*)js_text_substring_data_method, 2),
+            return js_bind_function(js_new_native_function(js_text_substring_data_method),
                 elem_item, NULL, 0);
         }
         Item expando_value = ItemNull;
@@ -9306,7 +8660,10 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         if (strcmp(prop, "length") == 0) {
             return (Item){.item = i2it((int64_t)comment_node->length)};
         }
-        if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
+        if (strcmp(prop, "parentNode") == 0) {
+            return js_dom_parent_node_or_null((DomNode*)comment_node);
+        }
+        if (strcmp(prop, "parentElement") == 0) {
             return js_dom_parent_element_or_null((DomNode*)comment_node);
         }
         if (strcmp(prop, "isConnected") == 0) {
@@ -9368,7 +8725,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // namespaceURI. Prefer the URI recorded by createElementNS (kept as a
     // reserved internal attribute); otherwise HTML elements live in the XHTML
-    // namespace. See createElementNS in js_document_method.
+    // namespace. The direct createElementNS Document binding records this URI.
     if (strcmp(prop, "namespaceURI") == 0) {
         const char* ns = elem->get_attribute("__lambda_ns_uri");
         if (ns && ns[0] != '\0') {
@@ -9505,7 +8862,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // parentNode (includes text nodes — returns any parent)
     if (strcmp(prop, "parentNode") == 0) {
-        return js_dom_parent_element_or_null((DomNode*)elem);
+        return js_dom_parent_node_or_null((DomNode*)elem);
     }
 
     // isConnected — true iff the shadow-inclusive root is the Document.
@@ -9995,11 +9352,11 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it((int64_t)elem->form->current_value_u16_len)};
         }
         if (strcmp(prop, "setSelectionRange") == 0)
-            return js_new_function((void*)js_text_control_set_selection_range, 3);
+            return js_new_native_function(js_text_control_set_selection_range);
         if (strcmp(prop, "select") == 0)
-            return js_new_function((void*)js_text_control_select, 0);
+            return js_new_native_function(js_text_control_select);
         if (strcmp(prop, "setRangeText") == 0)
-            return js_new_function((void*)js_text_control_set_range_text, 4);
+            return js_new_native_function(js_text_control_set_range_text);
     }
 
     // ------------------------------------------------------------------
@@ -10444,120 +9801,6 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         if (attr_val) {
             return (Item){.item = s2it(heap_create_name(attr_val))};
         }
-    }
-
-    // EventTarget methods must be callable even when MIR takes the generic
-    // property-call fallback instead of the DOM method dispatcher.
-    if (strcmp(prop, "addEventListener") == 0)
-        return js_new_function((void*)js_eventtarget_add_listener, 3);
-    if (strcmp(prop, "removeEventListener") == 0)
-        return js_new_function((void*)js_eventtarget_remove_listener, 3);
-    if (strcmp(prop, "dispatchEvent") == 0)
-        return js_new_function((void*)js_eventtarget_dispatch, 1);
-    if (strcmp(prop, "focus") == 0) {
-        Item bound_args[1] = { elem_item };
-        return js_bind_function(js_new_function((void*)js_dom_focus_method, 1),
-            make_js_undefined(), bound_args, 1);
-    }
-    if (strcmp(prop, "blur") == 0) {
-        Item bound_args[1] = { elem_item };
-        return js_bind_function(js_new_function((void*)js_dom_blur_method, 1),
-            make_js_undefined(), bound_args, 1);
-    }
-    if (strcmp(prop, "select") == 0) {
-        Item bound_args[1] = { elem_item };
-        return js_bind_function(js_new_function((void*)js_dom_select_method, 1),
-            make_js_undefined(), bound_args, 1);
-    }
-    if (strcmp(prop, "getBoundingClientRect") == 0) {
-        Item bound_args[1] = { elem_item };
-        return js_bind_function(js_new_function((void*)js_dom_get_bounding_client_rect_method, 1),
-            make_js_undefined(), bound_args, 1);
-    }
-    if (js_dom_element_is_svg(elem) && strcmp(prop, "createSVGMatrix") == 0)
-        return js_new_function((void*)js_dom_svg_create_matrix, 0);
-    if (js_dom_element_is_svg(elem) && strcmp(prop, "createSVGPoint") == 0)
-        return js_new_function((void*)js_dom_svg_create_point, 0);
-    if (js_dom_element_is_svg(elem) && strcmp(prop, "createSVGTransform") == 0)
-        return js_new_function((void*)js_dom_svg_create_transform, 0);
-    if (js_dom_element_is_svg(elem) && strcmp(prop, "createSVGTransformFromMatrix") == 0)
-        return js_new_function((void*)js_dom_svg_create_transform_from_matrix, 1);
-    if (js_dom_element_is_svg(elem) && strcmp(prop, "getBBox") == 0)
-        return js_new_function((void*)js_dom_svg_get_bbox, 0);
-    if (js_dom_element_is_svg(elem) && strcmp(prop, "getCTM") == 0)
-        return js_new_function((void*)js_dom_svg_get_ctm, 0);
-    if (js_dom_element_is_svg(elem) && strcmp(prop, "getScreenCTM") == 0)
-        return js_new_function((void*)js_dom_svg_get_screen_ctm, 0);
-    if (strcmp(prop, "setAttributeNS") == 0)
-        return js_new_function((void*)js_dom_set_attribute_ns_method, 3);
-    if (strcmp(prop, "getAttributeNS") == 0)
-        return js_new_function((void*)js_dom_get_attribute_ns_method, 2);
-    if (strcmp(prop, "removeAttributeNS") == 0)
-        return js_new_function((void*)js_dom_remove_attribute_ns_method, 2);
-    if (strcmp(prop, "scrollIntoView") == 0) {
-        Item bound_args[1] = { elem_item };
-        return js_bind_function(js_new_function((void*)js_dom_scroll_into_view_method, 1),
-            make_js_undefined(), bound_args, 1);
-    }
-    if (strcmp(prop, "scroll") == 0) {
-        // Browser pages call Element.scroll* before Radiant has layout panes;
-        // expose real callables so unsupported timing degrades to pending state.
-        return js_new_function((void*)js_dom_scroll_method, 2);
-    }
-    if (strcmp(prop, "scrollTo") == 0)
-        return js_new_function((void*)js_dom_scroll_to_method, 2);
-    if (strcmp(prop, "scrollBy") == 0)
-        return js_new_function((void*)js_dom_scroll_by_method, 2);
-    if (strcmp(prop, "getClientRects") == 0) {
-        Item bound_args[1] = { elem_item };
-        return js_bind_function(js_new_function((void*)js_dom_get_client_rects_method, 1),
-            make_js_undefined(), bound_args, 1);
-    }
-    if (strcmp(prop, "__lambdaTextControlCaretBounds") == 0) {
-        Item bound_args[1] = { elem_item };
-        return js_bind_function(js_new_function((void*)js_dom_text_control_caret_bounds_method, 1),
-            make_js_undefined(), bound_args, 1);
-    }
-    if (strcmp(prop, "__lambdaTextControlBoundaryFromPoint") == 0) {
-        Item bound_args[1] = { elem_item };
-        return js_bind_function(js_new_function((void*)js_dom_text_control_boundary_from_point_method, 3),
-            make_js_undefined(), bound_args, 1);
-    }
-    if (strcmp(prop, "__lambdaBoundaryFromPoint") == 0) {
-        Item bound_args[1] = { elem_item };
-        return js_bind_function(js_new_function((void*)js_dom_boundary_from_point_method, 4),
-            make_js_undefined(), bound_args, 1);
-    }
-    if (strcmp(prop, "setSelectionRange") == 0)
-        return js_bind_function(js_new_function((void*)js_text_control_set_selection_range, 3),
-            elem_item, NULL, 0);
-    if (strcmp(prop, "matches") == 0 ||
-        strcmp(prop, "webkitMatchesSelector") == 0 ||
-        strcmp(prop, "msMatchesSelector") == 0) {
-        return js_new_function((void*)js_dom_matches_method, 1);
-    }
-    // Return callable trampolines for common query/inspection methods so that
-    // optional-chaining calls (`el?.querySelector(sel)`) work — see the ITEM_TRUE
-    // feature-detection note below.
-    if (strcmp(prop, "querySelector") == 0)
-        return js_new_function((void*)js_dom_query_selector_method, 1);
-    if (strcmp(prop, "querySelectorAll") == 0)
-        return js_new_function((void*)js_dom_query_selector_all_method, 1);
-    if (strcmp(prop, "closest") == 0)
-        return js_new_function((void*)js_dom_closest_method, 1);
-    if (strcmp(prop, "getAttribute") == 0)
-        return js_new_function((void*)js_dom_get_attribute_method, 1);
-    if (strcmp(prop, "hasAttribute") == 0)
-        return js_new_function((void*)js_dom_has_attribute_method, 1);
-    if (strcmp(prop, "contains") == 0)
-        return js_new_function((void*)js_dom_contains_method, 1);
-    if (strcmp(prop, "isEqualNode") == 0)
-        return js_new_function((void*)js_dom_is_equal_node_method, 1);
-
-    // DOM method names accessed as properties (not calls) return ITEM_TRUE
-    // only for names not already declared by the Jube record table.
-    if (js_dom_node_method_feature_name(prop)) {
-        return (Item){.item = ITEM_TRUE};
     }
 
     // check expando properties (arbitrary JS values stored on this DOM node)
@@ -11530,19 +10773,19 @@ static Item js_dom_svg_make_matrix_with_interface(RdtMatrix matrix,
     js_dom_set_number_property(result, "e", matrix.e13);
     js_dom_set_number_property(result, "f", matrix.e23);
     js_property_set(result, js_string_key("multiply"),
-        js_new_function((void*)js_dom_svg_matrix_multiply, 1));
+        js_new_native_function(js_dom_svg_matrix_multiply));
     js_property_set(result, js_string_key("inverse"),
-        js_new_function((void*)js_dom_svg_matrix_inverse, 0));
+        js_new_native_function(js_dom_svg_matrix_inverse));
     js_property_set(result, js_string_key("translate"),
-        js_new_function((void*)js_dom_svg_matrix_translate, 2));
+        js_new_native_function(js_dom_svg_matrix_translate));
     js_property_set(result, js_string_key("scale"),
-        js_new_function((void*)js_dom_svg_matrix_scale, 1));
+        js_new_native_function(js_dom_svg_matrix_scale));
     js_property_set(result, js_string_key("rotate"),
-        js_new_function((void*)js_dom_svg_matrix_rotate, 1));
+        js_new_native_function(js_dom_svg_matrix_rotate));
     js_property_set(result, js_string_key("flipX"),
-        js_new_function((void*)js_dom_svg_matrix_flip_x, 0));
+        js_new_native_function(js_dom_svg_matrix_flip_x));
     js_property_set(result, js_string_key("flipY"),
-        js_new_function((void*)js_dom_svg_matrix_flip_y, 0));
+        js_new_native_function(js_dom_svg_matrix_flip_y));
     Item global = js_get_global_this();
     Item ctor = js_property_get(global, js_string_key(interface_name));
     Item proto = js_property_get(ctor, js_string_key("prototype"));
@@ -11610,13 +10853,13 @@ static Item js_dom_svg_make_transform(Item matrix) {
                     js_dom_svg_make_matrix(js_dom_svg_matrix_from_item(matrix)));
     js_property_set(transform, js_string_key("type"), (Item){.item = i2it(1)});
     js_property_set(transform, js_string_key("setMatrix"),
-                    js_new_function((void*)js_dom_svg_transform_set_matrix, 1));
+                    js_new_native_function(js_dom_svg_transform_set_matrix));
     js_property_set(transform, js_string_key("setTranslate"),
-                    js_new_function((void*)js_dom_svg_transform_set_translate, 2));
+                    js_new_native_function(js_dom_svg_transform_set_translate));
     js_property_set(transform, js_string_key("setScale"),
-                    js_new_function((void*)js_dom_svg_transform_set_scale, 1));
+                    js_new_native_function(js_dom_svg_transform_set_scale));
     js_property_set(transform, js_string_key("setRotate"),
-                    js_new_function((void*)js_dom_svg_transform_set_rotate, 3));
+                    js_new_native_function(js_dom_svg_transform_set_rotate));
     Item global = js_get_global_this();
     Item ctor = js_property_get(global, js_string_key("SVGTransform"));
     Item proto = js_property_get(ctor, js_string_key("prototype"));
@@ -11677,18 +10920,18 @@ static Item js_dom_svg_get_transform_list(DomElement* elem) {
     Item list = js_new_object();
     js_property_set(list, js_string_key("__lambda_svg_owner"), js_dom_wrap_element(elem));
     js_install_native_accessor(list, js_string_key("numberOfItems"),
-        js_new_function((void*)js_dom_svg_transform_list_count_get, 0), ItemNull,
+        js_new_native_function(js_dom_svg_transform_list_count_get), ItemNull,
         JSPD_NON_ENUMERABLE);
     js_property_set(list, js_string_key("clear"),
-                    js_new_function((void*)js_dom_svg_transform_list_clear, 0));
+                    js_new_native_function(js_dom_svg_transform_list_clear));
     js_property_set(list, js_string_key("appendItem"),
-                    js_new_function((void*)js_dom_svg_transform_list_append, 1));
+                    js_new_native_function(js_dom_svg_transform_list_append));
     js_property_set(list, js_string_key("initialize"),
-                    js_new_function((void*)js_dom_svg_transform_list_initialize, 1));
+                    js_new_native_function(js_dom_svg_transform_list_initialize));
     js_property_set(list, js_string_key("consolidate"),
-                    js_new_function((void*)js_dom_svg_transform_list_consolidate, 0));
+                    js_new_native_function(js_dom_svg_transform_list_consolidate));
     js_property_set(list, js_string_key("getItem"),
-                    js_new_function((void*)js_dom_svg_transform_list_get_item, 1));
+                    js_new_native_function(js_dom_svg_transform_list_get_item));
     Item animated = js_new_object();
     js_property_set(animated, js_string_key("baseVal"), list);
     js_property_set(animated, js_string_key("animVal"), list);
@@ -11714,11 +10957,11 @@ static Item js_dom_svg_get_animated_class_name(DomElement* elem) {
     Item animated = js_new_object();
     js_property_set(animated, js_string_key("__lambda_svg_owner"), js_dom_wrap_element(elem));
     js_install_native_accessor(animated, js_string_key("baseVal"),
-        js_new_function((void*)js_dom_svg_class_name_get_base_val, 0),
-        js_new_function((void*)js_dom_svg_class_name_set_base_val, 1),
+        js_new_native_function(js_dom_svg_class_name_get_base_val),
+        js_new_native_function(js_dom_svg_class_name_set_base_val),
         JSPD_NON_ENUMERABLE);
     js_install_native_accessor(animated, js_string_key("animVal"),
-        js_new_function((void*)js_dom_svg_class_name_get_base_val, 0), ItemNull,
+        js_new_native_function(js_dom_svg_class_name_get_base_val), ItemNull,
         JSPD_NON_ENUMERABLE);
     return animated;
 }
@@ -11743,7 +10986,7 @@ static Item js_dom_svg_make_point(float x, float y, const char* interface_name) 
     js_dom_set_number_property(result, "z", 0.0f);
     js_dom_set_number_property(result, "w", 1.0f);
     js_property_set(result, js_string_key("matrixTransform"),
-        js_new_function((void*)js_dom_svg_point_matrix_transform, 1));
+        js_new_native_function(js_dom_svg_point_matrix_transform));
     Item global = js_get_global_this();
     Item ctor = js_property_get(global, js_string_key(interface_name));
     Item proto = js_property_get(ctor, js_string_key("prototype"));
@@ -11993,11 +11236,6 @@ static Item js_dom_svg_get_bbox_for_element(DomElement* elem) {
                                    bounds.bottom - bounds.top);
 }
 
-static Item js_dom_svg_get_bbox(void) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(js_get_this());
-    return js_dom_svg_get_bbox_for_element(elem);
-}
-
 static bool js_dom_svg_parse_viewbox(const char* value, float* min_x, float* min_y,
                                      float* width, float* height) {
     if (!value || !min_x || !min_y || !width || !height) return false;
@@ -12098,16 +11336,6 @@ static RdtMatrix js_dom_svg_ctm(DomElement* elem, bool screen_space) {
         matrix = rdt_matrix_multiply(&layout_transform, &matrix);
     }
     return matrix;
-}
-
-static Item js_dom_svg_get_ctm(void) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(js_get_this());
-    return js_dom_svg_make_matrix(js_dom_svg_ctm(elem, false));
-}
-
-static Item js_dom_svg_get_screen_ctm(void) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(js_get_this());
-    return js_dom_svg_make_matrix(js_dom_svg_ctm(elem, true));
 }
 
 static bool js_dom_svg_matrix_unproject_point(const RdtMatrix* matrix,
@@ -13792,10 +13020,9 @@ extern "C" Item js_dom_scroll_into_view_bridge(void* dom_elem) {
     return make_js_undefined();
 }
 
-extern "C" Item js_dom_scroll_method_bridge(Item elem_item, Item method_name,
-                                            Item* args, int argc) {
-    const char* method = fn_to_cstr(method_name);
-    if (!method) return make_js_undefined();
+extern "C" Item js_dom_scroll_operation_bridge(Item elem_item,
+                                                JubeDomElementOperation operation,
+                                                Item* args, int argc) {
     float x = 0.0f;
     float y = 0.0f;
     if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
@@ -13809,7 +13036,7 @@ extern "C" Item js_dom_scroll_method_bridge(Item elem_item, Item method_name,
     }
     if (x != x) x = 0.0f;
     if (y != y) y = 0.0f;
-    if (strcmp(method, "scrollBy") == 0) {
+    if (operation == JUBE_DOM_SCROLL_BY) {
         x += js_dom_item_to_float(js_dom_get_property(elem_item, js_string_key("scrollLeft")));
         y += js_dom_item_to_float(js_dom_get_property(elem_item, js_string_key("scrollTop")));
     }
@@ -13916,6 +13143,19 @@ static bool js_dom_append_backed_element(DomElement* parent, DomNode* child) {
     return true;
 }
 
+static int64_t js_dom_backed_insertion_index(DomElement* parent,
+                                              DomNode* ref_child) {
+    if (!parent) return -1;
+    int64_t insert_index = dom_element_to_element(parent)->length;
+    for (DomNode* candidate = ref_child; candidate;
+         candidate = candidate->next_sibling) {
+        insert_index = js_dom_backed_node_index(parent, candidate);
+        if (insert_index >= 0) break;
+    }
+    if (insert_index < 0) insert_index = dom_element_to_element(parent)->length;
+    return insert_index;
+}
+
 static bool js_dom_insert_backed_element(DomElement* parent, DomNode* child,
                                          DomNode* ref_child) {
     if (!parent || !child || !child->is_element()) return false;
@@ -13944,13 +13184,8 @@ static bool js_dom_insert_backed_element(DomElement* parent, DomNode* child,
         }
     }
 
-    int64_t insert_index = dom_element_to_element(parent)->length;
-    for (DomNode* candidate = ref_child; candidate;
-         candidate = candidate->next_sibling) {
-        insert_index = js_dom_backed_node_index(parent, candidate);
-        if (insert_index >= 0) break;
-    }
-    if (insert_index < 0) insert_index = dom_element_to_element(parent)->length;
+    int64_t insert_index = js_dom_backed_insertion_index(parent, ref_child);
+    if (insert_index < 0) return false;
 
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Element* parent_backing = dom_element_to_element(parent);
@@ -13983,6 +13218,61 @@ static bool js_dom_insert_before_child(DomElement* parent, DomNode* child,
 
     dom_post_insert((DomNode*)parent, child);
     js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child, (DomNode*)parent);
+    return true;
+}
+
+static bool js_dom_insert_text_before_child(DomElement* parent, Item text_item,
+                                            DomNode* ref_child) {
+    if (!parent || get_type_id(text_item) != LMD_TYPE_STRING) return false;
+    String* source = it2s(text_item);
+    if (!source) return false;
+
+    if (parent->is_synthetic()) {
+        DomText* text = DomText::create_detached_copy(
+            parent->doc, source->chars, source->len);
+        if (!text || !((DomNode*)parent)->insert_before(text, ref_child)) return false;
+        dom_post_insert((DomNode*)parent, text);
+        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, text,
+                               (DomNode*)parent);
+        return true;
+    }
+    if (!parent->doc || !parent->doc->input) return false;
+
+    int64_t insert_index = js_dom_backed_insertion_index(parent, ref_child);
+    if (insert_index < 0) return false;
+    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    Element* parent_backing = dom_element_to_element(parent);
+    Item result = editor.elmt_insert_child({.element = parent_backing},
+                                            (int)insert_index, text_item);
+    if (get_type_id(result) != LMD_TYPE_ELEMENT ||
+        result.element != parent_backing ||
+        insert_index >= parent_backing->length) {
+        log_error("js_dom_insert_text_before_child: inline insert changed backing identity");
+        return false;
+    }
+
+    String* inserted_string = parent_backing->items[insert_index].get_string();
+    DomText* inserted_text = nullptr;
+    if (parent->doc->input->ui_mode) {
+        for (DomNode* candidate = parent->first_child; candidate;
+             candidate = candidate->next_sibling) {
+            if (candidate->is_text() &&
+                candidate->as_text()->native_string == inserted_string) {
+                inserted_text = candidate->as_text();
+                break;
+            }
+        }
+    } else {
+        inserted_text = DomText::create(inserted_string, parent);
+        if (inserted_text &&
+            !((DomNode*)parent)->insert_before(inserted_text, ref_child)) {
+            inserted_text = nullptr;
+        }
+    }
+    if (!inserted_text) return false;
+    dom_post_insert((DomNode*)parent, inserted_text);
+    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, inserted_text,
+                           (DomNode*)parent);
     return true;
 }
 
@@ -14194,21 +13484,17 @@ extern "C" Item js_dom_adopt_node_bridge(Item node_arg) {
     return node_arg;
 }
 
-extern "C" Item js_dom_location_method_bridge(void* doc_ptr, Item method_name,
-                                              Item* args, int argc) {
+extern "C" Item js_dom_location_navigate_bridge(void* doc_ptr, Item next_url_item,
+                                                 bool replace) {
     DomDocument* doc = (DomDocument*)doc_ptr;
-    const char* method = fn_to_cstr(method_name);
-    if (!method) return make_js_undefined();
-    if (strcmp(method, "assign") == 0 || strcmp(method, "replace") == 0) {
-        if (argc < 1) return make_js_undefined();
-        const char* next_url = fn_to_cstr(args[0]);
-        if (doc && next_url && next_url[0]) {
-            if (doc->pending_navigation_url) {
-                mem_free(doc->pending_navigation_url);
-            }
-            doc->pending_navigation_url = mem_strdup(next_url, MEM_CAT_DOM);
-            log_info("js_location_%s: pending navigation to %s", method, next_url);
+    const char* next_url = fn_to_cstr(next_url_item);
+    if (doc && next_url && next_url[0]) {
+        if (doc->pending_navigation_url) {
+            mem_free(doc->pending_navigation_url);
         }
+        doc->pending_navigation_url = mem_strdup(next_url, MEM_CAT_DOM);
+        log_info("js-location-navigate: %s navigation to %s",
+            replace ? "replace" : "assign", next_url);
     }
     return make_js_undefined();
 }
@@ -14423,43 +13709,113 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
     return old_child_arg;
 }
 
-extern "C" Item js_dom_replace_with_bridge(void* node_ptr, Item* args, int argc) {
-    DomNode* node = (DomNode*)node_ptr;
-    if (!node) return ItemNull;
-    DomNode* parent = node->parent;
-    if (!parent) return ItemNull;
+typedef enum JsDomChildNodePlacement {
+    JS_DOM_CHILD_NODE_REPLACE,
+    JS_DOM_CHILD_NODE_AFTER,
+} JsDomChildNodePlacement;
+
+typedef struct JsDomRelativeArgument {
+    DomNode* node;
+    Item text;
+    uint64_t* text_root;
+} JsDomRelativeArgument;
+
+static Item js_dom_child_node_insert_relative(DomNode* node, Item* args, int argc,
+                                               JsDomChildNodePlacement placement) {
+    if (!node) return (Item){.item = ITEM_JS_UNDEFINED};
+    DomNode* parent_node = node->parent;
+    DomElement* parent = parent_node ? parent_node->as_element() : nullptr;
+    if (!parent || !parent->doc) return (Item){.item = ITEM_JS_UNDEFINED};
+
+    JsDomRelativeArgument* insertion_args = nullptr;
+    if (argc > 0) {
+        insertion_args = (JsDomRelativeArgument*)mem_calloc(
+            (size_t)argc, sizeof(JsDomRelativeArgument), MEM_CAT_JS_RUNTIME);
+        if (!insertion_args) return ItemNull;
+    }
+    RootFrame text_roots((size_t)argc);
+    if (argc > 0 && !text_roots.valid()) {
+        mem_free(insertion_args);
+        return ItemError;
+    }
+
+    // Web IDL converts every non-Node argument before changing the tree.  In
+    // particular, a later throwing ToString must not leave earlier arguments
+    // inserted into the document.
+    for (int i = 0; i < argc; i++) {
+        DomNode* insertion = (DomNode*)js_dom_unwrap_element(args[i]);
+        if (!insertion) {
+            Item text_item = js_to_string(args[i]);
+            if (item_is_error(text_item)) {
+                mem_free(insertion_args);
+                return text_item;
+            }
+            insertion_args[i].text = text_item;
+            insertion_args[i].text_root = text_roots.take_slot();
+            if (insertion_args[i].text_root) {
+                *insertion_args[i].text_root = text_item.item;
+            }
+        }
+        insertion_args[i].node = insertion;
+    }
+
     DomNode* viable_next = node->next_sibling;
-    for (;;) {
-        bool in_args = false;
-        if (!viable_next) break;
+    while (viable_next) {
+        bool moved_by_arguments = false;
         for (int i = 0; i < argc; i++) {
-            if ((DomNode*)js_dom_unwrap_element(args[i]) == viable_next) {
-                in_args = true;
+            if (insertion_args[i].node == viable_next) {
+                moved_by_arguments = true;
                 break;
             }
         }
-        if (!in_args) break;
+        if (!moved_by_arguments) break;
         viable_next = viable_next->next_sibling;
     }
-    // replaceWith first removes the receiver so ranges anchored inside it
-    // collapse to the original parent/index before replacements are inserted.
-    dom_pre_remove(node);
-    parent->remove_child(node);
-    for (int i = 0; i < argc; i++) {
-        DomNode* a = (DomNode*)js_dom_unwrap_element(args[i]);
-        if (!a) continue;
-        if (!js_dom_prepare_cross_document_insertion(a, parent->as_element())) {
-            return ItemNull;
+
+    if (placement == JS_DOM_CHILD_NODE_REPLACE) {
+        // Remove through the backing-aware path so replaceWith() cannot leave
+        // a stale Mark child that a later UI relink resurrects.
+        dom_pre_remove(node);
+        if (!js_dom_remove_backed_child(parent, node)) {
+            mem_free(insertion_args);
+            return (Item){.item = ITEM_JS_UNDEFINED};
         }
-        if (viable_next && viable_next->parent == parent) {
-            parent->insert_before(a, viable_next);
-        } else {
-            parent->append_child(a);
-        }
-        dom_post_insert(parent, a);
     }
+
+    for (int i = 0; i < argc; i++) {
+        DomNode* insertion = insertion_args[i].node;
+        if (!insertion) {
+            Item text = insertion_args[i].text_root
+                ? (Item){.item = *insertion_args[i].text_root}
+                : insertion_args[i].text;
+            if (!js_dom_insert_text_before_child(parent, text, viable_next)) {
+                mem_free(insertion_args);
+                return (Item){.item = ITEM_JS_UNDEFINED};
+            }
+            continue;
+        }
+        DomDocument* source = js_dom_node_owner_document(insertion);
+        if (source && source != parent->doc &&
+            !js_dom_prepare_cross_document_insertion(insertion, parent)) {
+            mem_free(insertion_args);
+            return (Item){.item = ITEM_JS_UNDEFINED};
+        }
+        if (!js_dom_insert_before_child(parent, insertion, viable_next)) {
+            mem_free(insertion_args);
+            return (Item){.item = ITEM_JS_UNDEFINED};
+        }
+    }
+
+    mem_free(insertion_args);
+    _select_refresh_cached_selected_options_for_node(parent_node);
     js_dom_mutation_notify();
-    return ItemNull;
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+extern "C" Item js_dom_replace_with_bridge(void* node_ptr, Item* args, int argc) {
+    DomNode* node = (DomNode*)node_ptr;
+    return js_dom_child_node_insert_relative(
+        node, args, argc, JS_DOM_CHILD_NODE_REPLACE);
 }
 
 extern "C" Item js_dom_insert_adjacent_element_bridge(void* elem_ptr, Item position_arg,
@@ -14619,54 +13975,19 @@ extern "C" Item js_dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int a
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-extern "C" Item radiant_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
-
-extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc) {
-    // Jube POC: keep the public JS entry point while Radiant takes ownership
-    // of progressively larger DOM method dispatch clusters.
-    return radiant_dom_element_method(elem_item, method_name, args, argc);
-}
-
-extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Item* args, int argc) {
+extern "C" Item js_dom_element_operation_impl(Item elem_item,
+        JubeDomElementOperation operation, Item* args, int argc) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
     if (!node) {
-        log_error("js_dom_element_method: not a DOM element");
+        log_error("js-dom-operation: receiver is not a DOM node");
         return ItemNull;
     }
     DomElement* elem = node->as_element(); // may be nullptr for text/comment nodes
 
-    const char* method = fn_to_cstr(method_name);
-    if (!method) {
-        log_error("js_dom_element_method: invalid method name");
-        return ItemNull;
-    }
-
-    log_debug("js_dom_element_method: '%s' on <%s>", method,
-              node->node_name() ? node->node_name() : "?");
-
-    Item expando_method = ItemNull;
-    if (expando_get_property(node, method_name, &expando_method) &&
-        get_type_id(expando_method) == LMD_TYPE_FUNC) {
-        // Member-call lowering reaches this native dispatcher directly; own
-        // DOM expandos must still shadow prototype methods so widget callbacks
-        // such as Alpine's `_x_doHide()` remain callable.
-        return js_call_function(expando_method, elem_item, args, argc);
-    }
-
-    bool prototype_method_found = false;
-    Item prototype_method = js_prototype_lookup_ex(elem_item, method_name,
-                                                    &prototype_method_found);
-    if (prototype_method_found && get_type_id(prototype_method) == LMD_TYPE_FUNC) {
-        // DOM calls bypass generic property access, so preserve prototype
-        // dispatch here; otherwise Element.prototype extensions such as
-        // Alpine's `_x_toggleAndCascadeWithTransitions` become no-op methods.
-        return js_call_function(prototype_method, elem_item, args, argc);
-    }
-
     // HTMLSelectElement.remove(index) must be tested before generic
     // ChildNode.remove(); otherwise the select overload is shadowed and
     // remove(index) silently becomes node self-removal.
-    if (strcmp(method, "remove") == 0 && elem && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
+    if (operation == JUBE_DOM_REMOVE && elem && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
         // remove() with no args: spec calls ChildNode.remove(); but
         // HTMLSelectElement overrides — with no arg, do nothing per WPT.
         if (argc < 1) return ItemNull;
@@ -14697,7 +14018,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // v12b: remove() — self-removal from parent (works on any node type)
-    if (strcmp(method, "remove") == 0) {
+    if (operation == JUBE_DOM_REMOVE) {
         if (node->parent) {
             DomElement* owner_select = nullptr;
             if (node->is_element() && node->as_element()->tag() == MARKUP_NAME_OPTION) {
@@ -14713,48 +14034,72 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // v12: contains(other) → boolean (works on any node type)
-    if (strcmp(method, "contains") == 0) {
+    if (operation == JUBE_DOM_CONTAINS) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         return js_dom_contains(elem_item, args[0]);
     }
 
     // Structural equality is a Node operation, so it must remain available to
     // text and comment wrappers before the Element-only method handling below.
-    if (strcmp(method, "isEqualNode") == 0) {
+    if (operation == JUBE_DOM_IS_EQUAL_NODE) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         return js_dom_is_equal_node(elem_item, args[0]);
     }
 
+    // Node identity is a published capability, not a name-selected host call;
+    // keep wrapper identity tied to the underlying node (D6.2.2v2).
+    if (operation == JUBE_DOM_IS_SAME_NODE) {
+        if (argc < 1) return (Item){.item = ITEM_FALSE};
+        return js_dom_is_same_node(elem_item, args[0]);
+    }
+
     // CharacterData.replaceData(offset, count, data) — text nodes only.
-    if (node->is_text() && strcmp(method, "replaceData") == 0) {
+    if (node->is_text() && operation == JUBE_DOM_REPLACE_DATA) {
         Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
         Item count_arg = argc >= 2 ? args[1] : make_js_undefined();
         Item data_arg = argc >= 3 ? args[2] : make_js_undefined();
         return js_dom_text_replace_data_method(node->as_text(), offset_arg, count_arg, data_arg);
     }
-    if (node->is_text() && strcmp(method, "insertData") == 0) {
+    if (node->is_text() && operation == JUBE_DOM_INSERT_DATA) {
         Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
         Item data_arg = argc >= 2 ? args[1] : make_js_undefined();
         return js_dom_text_insert_data_method(node->as_text(), offset_arg, data_arg);
     }
-    if (node->is_text() && strcmp(method, "appendData") == 0) {
+    if (node->is_text() && operation == JUBE_DOM_APPEND_DATA) {
         Item data_arg = argc >= 1 ? args[0] : make_js_undefined();
         return js_dom_text_append_data_method(node->as_text(), data_arg);
     }
-    if (node->is_text() && strcmp(method, "deleteData") == 0) {
+    if (node->is_text() && operation == JUBE_DOM_DELETE_DATA) {
         Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
         Item count_arg = argc >= 2 ? args[1] : make_js_undefined();
         return js_dom_text_delete_data_method(node->as_text(), offset_arg, count_arg);
     }
-    if (node->is_text() && strcmp(method, "substringData") == 0) {
+    if (node->is_text() && operation == JUBE_DOM_SUBSTRING_DATA) {
         Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
         Item count_arg = argc >= 2 ? args[1] : make_js_undefined();
         return js_dom_text_substring_data_method(node->as_text(), offset_arg, count_arg);
     }
 
+    // EventTarget is a Node capability, so text/comment nodes must reach the
+    // same typed call targets before Element-only operations begin (D6.2.2v2).
+    if (operation == JUBE_DOM_ADD_EVENT_LISTENER) {
+        return argc >= 2
+            ? js_dom_add_event_listener_bridge(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull)
+            : make_js_undefined();
+    }
+    if (operation == JUBE_DOM_REMOVE_EVENT_LISTENER) {
+        return argc >= 2
+            ? js_dom_remove_event_listener_bridge(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull)
+            : make_js_undefined();
+    }
+    if (operation == JUBE_DOM_DISPATCH_EVENT) {
+        if (argc >= 1) return js_dom_dispatch_event_bridge(elem_item, args[0]);
+        return (Item){.item = ITEM_FALSE};
+    }
+
     // All remaining methods require an element node
     if (!elem) {
-        log_debug("js_dom_element_method: '%s' called on non-element node, ignored", method);
+        log_debug("js-dom-operation: operation %d called on non-element node", (int)operation);
         return ItemNull;
     }
 
@@ -14762,7 +14107,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // Radiant does not render a full shadow tree yet, but WPT focus/editing
     // tests need a stable root object that supports appendChild/activeElement
     // while light DOM stays addressable.
-    if (strcmp(method, "attachShadow") == 0) {
+    if (operation == JUBE_DOM_ATTACH_SHADOW) {
         const char* mode = "open";
         bool delegates_focus = false;
         if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
@@ -14803,7 +14148,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // getAttribute(name) → string or null
-    if (strcmp(method, "getAttribute") == 0) {
+    if (operation == JUBE_DOM_GET_ATTRIBUTE) {
         if (argc < 1) return ItemNull;
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return ItemNull;
@@ -14816,7 +14161,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // setAttribute(name, value)
-    if (strcmp(method, "setAttribute") == 0) {
+    if (operation == JUBE_DOM_SET_ATTRIBUTE) {
         if (argc < 2) return ItemNull;
         const char* attr_name = fn_to_cstr(args[0]);
         const char* attr_val = js_dom_to_attr_cstr(args[1]);
@@ -14839,7 +14184,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // their qualified name into the shared DOM attribute store used by the SVG
     // renderer. The legacy XLink branch is the only non-null namespace traced
     // by the drawing probes; other namespaces keep ordinary DOM semantics.
-    if (strcmp(method, "setAttributeNS") == 0) {
+    if (operation == JUBE_DOM_SET_ATTRIBUTE_NS) {
         if (argc < 3) return ItemNull;
         const char* namespace_uri = fn_to_cstr(args[0]);
         const char* qualified_name = fn_to_cstr(args[1]);
@@ -14862,7 +14207,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         return ItemNull;
     }
 
-    if (strcmp(method, "getAttributeNS") == 0) {
+    if (operation == JUBE_DOM_GET_ATTRIBUTE_NS) {
         if (argc < 2) return ItemNull;
         const char* namespace_uri = fn_to_cstr(args[0]);
         const char* local_name = fn_to_cstr(args[1]);
@@ -14877,7 +14222,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         return value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull;
     }
 
-    if (strcmp(method, "removeAttributeNS") == 0) {
+    if (operation == JUBE_DOM_REMOVE_ATTRIBUTE_NS) {
         if (argc < 2) return ItemNull;
         const char* namespace_uri = fn_to_cstr(args[0]);
         const char* local_name = fn_to_cstr(args[1]);
@@ -14896,7 +14241,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // hasAttribute(name) → boolean
-    if (strcmp(method, "hasAttribute") == 0) {
+    if (operation == JUBE_DOM_HAS_ATTRIBUTE) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return (Item){.item = ITEM_FALSE};
@@ -14906,7 +14251,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // getAttributeNames() → array of attribute name strings (DOM §4.9)
-    if (strcmp(method, "getAttributeNames") == 0) {
+    if (operation == JUBE_DOM_GET_ATTRIBUTE_NAMES) {
         Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         arr->type_id = LMD_TYPE_ARRAY;
         arr->items = nullptr;
@@ -14923,7 +14268,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // removeAttribute(name)
-    if (strcmp(method, "removeAttribute") == 0) {
+    if (operation == JUBE_DOM_REMOVE_ATTRIBUTE) {
         if (argc < 1) return ItemNull;
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return ItemNull;
@@ -14940,19 +14285,19 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // getElementsByTagName(tagName) — descendants of this element
-    if (strcmp(method, "getElementsByTagName") == 0) {
+    if (operation == JUBE_DOM_GET_ELEMENTS_BY_TAG_NAME) {
         if (argc < 1) return ItemNull;
         return js_dom_live_element_get_elements_by_tag_name_bridge((void*)elem, args[0]);
     }
 
     // getElementsByClassName(className) — descendants of this element
-    if (strcmp(method, "getElementsByClassName") == 0) {
+    if (operation == JUBE_DOM_GET_ELEMENTS_BY_CLASS_NAME) {
         if (argc < 1) return ItemNull;
         return js_dom_live_element_get_elements_by_class_name_bridge((void*)elem, args[0]);
     }
 
     // querySelector(selector) — from this element
-    if (strcmp(method, "querySelector") == 0) {
+    if (operation == JUBE_DOM_QUERY_SELECTOR) {
         if (argc < 1) return ItemNull;
         const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return ItemNull;
@@ -14971,7 +14316,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // querySelectorAll(selector) — from this element
-    if (strcmp(method, "querySelectorAll") == 0) {
+    if (operation == JUBE_DOM_QUERY_SELECTOR_ALL) {
         if (argc < 1) return ItemNull;
         const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return ItemNull;
@@ -15002,7 +14347,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // matches(selector) → boolean
-    if (strcmp(method, "matches") == 0) {
+    if (operation == JUBE_DOM_MATCHES) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return (Item){.item = ITEM_FALSE};
@@ -15018,7 +14363,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // closest(selector) → element or null
-    if (strcmp(method, "closest") == 0) {
+    if (operation == JUBE_DOM_CLOSEST) {
         if (argc < 1) return ItemNull;
         const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return ItemNull;
@@ -15040,36 +14385,36 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         return ItemNull;
     }
 
-    if (strcmp(method, "appendChild") == 0) {
+    if (operation == JUBE_DOM_APPEND_CHILD) {
         return js_dom_append_child_bridge((void*)elem, argc > 0 ? args[0] : ItemNull);
     }
 
-    if (strcmp(method, "removeChild") == 0) {
+    if (operation == JUBE_DOM_REMOVE_CHILD) {
         return js_dom_remove_child_bridge((void*)elem, argc > 0 ? args[0] : ItemNull);
     }
 
-    if (strcmp(method, "insertBefore") == 0) {
+    if (operation == JUBE_DOM_INSERT_BEFORE) {
         return js_dom_insert_before_bridge((void*)elem,
             argc > 0 ? args[0] : ItemNull, argc > 1 ? args[1] : ItemNull);
     }
 
     // hasChildNodes() → boolean
-    if (strcmp(method, "hasChildNodes") == 0) {
+    if (operation == JUBE_DOM_HAS_CHILD_NODES) {
         bool has = (js_dom_first_script_visible_child(elem) != nullptr);
         return (Item){.item = b2it(has ? 1 : 0)};
     }
 
-    if (strcmp(method, "normalize") == 0) {
+    if (operation == JUBE_DOM_NORMALIZE) {
         return js_dom_normalize_bridge((void*)elem);
     }
 
-    if (strcmp(method, "cloneNode") == 0) {
+    if (operation == JUBE_DOM_CLONE_NODE) {
         return js_dom_clone_node_bridge((void*)elem,
             argc > 0 ? args[0] : ItemNull, argc > 0);
     }
 
     // v12b: replaceChild(newChild, oldChild)
-    if (strcmp(method, "replaceChild") == 0) {
+    if (operation == JUBE_DOM_REPLACE_CHILD) {
         if (argc < 2) return ItemNull;
         return js_dom_replace_child_bridge(elem, args[0], args[1]);
     }
@@ -15079,12 +14424,17 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // Per spec this performs a removal + (pre-)insert, which is observably
     // distinct from a no-op for live ranges anchored inside `node` even when
     // the only argument is `node` itself.
-    if (strcmp(method, "replaceWith") == 0) {
+    if (operation == JUBE_DOM_REPLACE_WITH) {
         return js_dom_replace_with_bridge((void*)node, args, argc);
     }
 
+    if (operation == JUBE_DOM_AFTER) {
+        return js_dom_child_node_insert_relative(
+            node, args, argc, JS_DOM_CHILD_NODE_AFTER);
+    }
+
     // v12b: toggleAttribute(name [, force])
-    if (strcmp(method, "toggleAttribute") == 0) {
+    if (operation == JUBE_DOM_TOGGLE_ATTRIBUTE) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return (Item){.item = ITEM_FALSE};
@@ -15112,76 +14462,60 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // v12b: insertAdjacentElement(position, newElement)
-    if (strcmp(method, "insertAdjacentElement") == 0) {
+    if (operation == JUBE_DOM_INSERT_ADJACENT_ELEMENT) {
         if (argc < 2) return ItemNull;
         return js_dom_insert_adjacent_element_bridge((void*)elem, args[0], args[1]);
     }
 
     // v12b: insertAdjacentHTML(position, text)
-    if (strcmp(method, "insertAdjacentHTML") == 0) {
+    if (operation == JUBE_DOM_INSERT_ADJACENT_HTML) {
         if (argc < 2) return ItemNull;
         return js_dom_insert_adjacent_html_bridge((void*)elem, args[0], args[1]);
     }
 
-    // EventTarget interface
-    if (strcmp(method, "addEventListener") == 0) {
-        return argc >= 2
-            ? js_dom_add_event_listener_bridge(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull)
-            : make_js_undefined();
-    }
-    if (strcmp(method, "removeEventListener") == 0) {
-        return argc >= 2
-            ? js_dom_remove_event_listener_bridge(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull)
-            : make_js_undefined();
-    }
-    if (strcmp(method, "dispatchEvent") == 0) {
-        if (argc >= 1) return js_dom_dispatch_event_bridge(elem_item, args[0]);
-        return (Item){.item = ITEM_FALSE};
-    }
-
-    // SVG libraries invoke these through the direct DOM method dispatcher,
-    // whereas feature detection reads the callable properties above. Keep both
-    // paths on the same native objects so renderfix never receives null CTMs.
-    if (js_dom_element_is_svg(elem) && strcmp(method, "createSVGMatrix") == 0) {
+    // SVG member records land here with an explicit operation; keeping their
+    // native-object construction in this one target prevents property reads
+    // and calls from diverging (D6.2.2v2).
+    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_MATRIX) {
         return js_dom_svg_create_matrix();
     }
-    if (js_dom_element_is_svg(elem) && strcmp(method, "createSVGPoint") == 0) {
+    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_POINT) {
         return js_dom_svg_create_point();
     }
-    if (js_dom_element_is_svg(elem) && strcmp(method, "createSVGTransform") == 0) {
+    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_TRANSFORM) {
         return js_dom_svg_create_transform();
     }
-    if (js_dom_element_is_svg(elem) && strcmp(method, "createSVGTransformFromMatrix") == 0) {
+    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_TRANSFORM_FROM_MATRIX) {
         return argc >= 1 ? js_dom_svg_create_transform_from_matrix(args[0]) : ItemNull;
     }
-    if (js_dom_element_is_svg(elem) && strcmp(method, "getBBox") == 0) {
+    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_GET_BBOX) {
         return js_dom_svg_get_bbox_for_element(elem);
     }
-    if (js_dom_element_is_svg(elem) && strcmp(method, "getCTM") == 0) {
+    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_GET_CTM) {
         return js_dom_svg_make_matrix(js_dom_svg_ctm(elem, false));
     }
-    if (js_dom_element_is_svg(elem) && strcmp(method, "getScreenCTM") == 0) {
+    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_GET_SCREEN_CTM) {
         return js_dom_svg_make_matrix(js_dom_svg_ctm(elem, true));
     }
 
     // getBoundingClientRect() — returns {top, left, right, bottom, width, height}
     // Walks parent chain to compute absolute position.
-    if (strcmp(method, "getBoundingClientRect") == 0) {
+    if (operation == JUBE_DOM_GET_BOUNDING_CLIENT_RECT) {
         return js_dom_get_bounding_client_rect_bridge((void*)elem);
     }
 
-    if (strcmp(method, "scrollIntoView") == 0) {
+    if (operation == JUBE_DOM_SCROLL_INTO_VIEW) {
         return js_dom_scroll_into_view_bridge((void*)elem);
     }
 
-    if (strcmp(method, "scroll") == 0 ||
-        strcmp(method, "scrollTo") == 0 ||
-        strcmp(method, "scrollBy") == 0) {
-        return js_dom_scroll_method_bridge(elem_item, method_name, args, argc);
+    if (operation == JUBE_DOM_SCROLL ||
+        operation == JUBE_DOM_SCROLL_TO ||
+        operation == JUBE_DOM_SCROLL_BY) {
+        return js_dom_scroll_operation_bridge(elem_item, operation, args, argc);
     }
 
     // compareDocumentPosition(otherNode) — returns bitmask per W3C DOM spec
-    if (strcmp(method, "compareDocumentPosition") == 0) {
+    if (operation == JUBE_DOM_COMPARE_DOCUMENT_POSITION) {
         if (argc < 1) return (Item){.item = i2it(0)};
         DomNode* other = (DomNode*)js_dom_unwrap_element(args[0]);
         if (!other) return (Item){.item = i2it(1)}; // disconnected
@@ -15218,31 +14552,31 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // append(...nodes) — ParentNode.append(), accepts multiple args and strings
-    if (strcmp(method, "append") == 0) {
+    if (operation == JUBE_DOM_APPEND) {
         return js_dom_append_variadic_bridge((void*)elem, args, argc);
     }
 
     // prepend(...nodes) — ParentNode.prepend()
-    if (strcmp(method, "prepend") == 0) {
+    if (operation == JUBE_DOM_PREPEND) {
         return js_dom_prepend_variadic_bridge((void*)elem, args, argc);
     }
 
     // getClientRects() — returns array containing single DOMRect (same as getBoundingClientRect)
-    if (strcmp(method, "getClientRects") == 0) {
+    if (operation == JUBE_DOM_GET_CLIENT_RECTS) {
         return js_dom_get_client_rects_bridge((void*)elem);
     }
 
-    if (strcmp(method, "__lambdaTextControlCaretBounds") == 0 &&
+    if (operation == JUBE_DOM_TEXT_CONTROL_CARET_BOUNDS &&
         tc_is_text_control_elem(elem)) {
         return js_dom_text_control_caret_bounds(elem);
     }
-    if (strcmp(method, "__lambdaTextControlBoundaryFromPoint") == 0 &&
+    if (operation == JUBE_DOM_TEXT_CONTROL_BOUNDARY_FROM_POINT &&
         tc_is_text_control_elem(elem)) {
         Item x_arg = argc >= 1 ? args[0] : (Item){.item = i2it(0)};
         Item y_arg = argc >= 2 ? args[1] : (Item){.item = i2it(0)};
         return js_dom_text_control_boundary_from_point(elem, x_arg, y_arg);
     }
-    if (strcmp(method, "__lambdaBoundaryFromPoint") == 0) {
+    if (operation == JUBE_DOM_BOUNDARY_FROM_POINT) {
         Item x_arg = argc >= 1 ? args[0] : (Item){.item = i2it(0)};
         Item y_arg = argc >= 2 ? args[1] : (Item){.item = i2it(0)};
         Item behavior_arg = argc >= 3 ? args[2] : make_js_undefined();
@@ -15250,14 +14584,14 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // focus() / blur() — stubs for headless mode
-    if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
-        return js_dom_focus_method_bridge((void*)elem, strcmp(method, "focus") == 0);
+    if (operation == JUBE_DOM_FOCUS || operation == JUBE_DOM_BLUR) {
+        return js_dom_focus_method_bridge((void*)elem, operation == JUBE_DOM_FOCUS);
     }
 
     // HTMLElement.click() — synthesise and dispatch a `click` MouseEvent
     // (bubbles, cancelable, composed). Per the HTML spec §6.4.4, calling
     // click() on a disabled form control is a no-op (no event fires).
-    if (strcmp(method, "click") == 0) {
+    if (operation == JUBE_DOM_CLICK) {
         return js_dom_click_method_bridge(elem_item);
     }
 
@@ -15266,7 +14600,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // every other element it is undefined; we still implement it as a
     // tree-scoped lookup since several WPT tests use the synthetic
     // `#document-fragment` element returned by `createDocumentFragment`.
-    if (strcmp(method, "getElementById") == 0) {
+    if (operation == JUBE_DOM_GET_ELEMENT_BY_ID) {
         if (argc < 1) return ItemNull;
         const char* id = fn_to_cstr(args[0]);
         if (!id) return ItemNull;
@@ -15275,7 +14609,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // setSelectionRange(start, end [, direction]) — text controls only.
-    if (strcmp(method, "setSelectionRange") == 0 && tc_is_text_control_elem(elem)) {
+    if (operation == JUBE_DOM_SET_SELECTION_RANGE && tc_is_text_control_elem(elem)) {
         // preserve the legacy DOM fallback no-op when required offsets are absent.
         if (argc < 2) return make_js_undefined();
         return js_dom_text_control_set_selection_range_bridge((void*)elem,
@@ -15285,7 +14619,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // setRangeText(replacement [, start, end, selectionMode]) — text controls only.
-    if (strcmp(method, "setRangeText") == 0 && tc_is_text_control_elem(elem)) {
+    if (operation == JUBE_DOM_SET_RANGE_TEXT && tc_is_text_control_elem(elem)) {
         return js_dom_text_control_set_range_text_bridge((void*)elem,
             argc >= 1 ? args[0] : make_js_undefined(),
             argc >= 2 ? args[1] : make_js_undefined(),
@@ -15294,7 +14628,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // select() — text controls only. Selects the entire value and focuses.
-    if (strcmp(method, "select") == 0 && tc_is_text_control_elem(elem)) {
+    if (operation == JUBE_DOM_SELECT && tc_is_text_control_elem(elem)) {
         return js_dom_text_control_select_bridge((void*)elem);
     }
 
@@ -15303,7 +14637,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // ----------------------------------------------------------------
 
     // setCustomValidity(message): store custom validity message
-    if (strcmp(method, "setCustomValidity") == 0) {
+    if (operation == JUBE_DOM_SET_CUSTOM_VALIDITY) {
         FormControlProp* f = tc_get_or_create_form(elem);
         const char* msg = (argc > 0) ? fn_to_cstr(args[0]) : "";
         if (!msg) msg = "";
@@ -15316,22 +14650,22 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // F-3: form.reset() — fire `reset` event (cancelable), then run reset
     // algorithm on all listed form controls.
     // ----------------------------------------------------------------
-    if (strcmp(method, "reset") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+    if (operation == JUBE_DOM_RESET && elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
         return js_dom_form_reset_bridge(elem_item);
     }
 
     // checkValidity(): fire invalid event if not valid, return bool
-    if (strcmp(method, "checkValidity") == 0) {
+    if (operation == JUBE_DOM_CHECK_VALIDITY) {
         return js_dom_check_validity_bridge(elem_item);
     }
 
     // reportValidity(): same as checkValidity() in headless (no UI feedback)
-    if (strcmp(method, "reportValidity") == 0) {
+    if (operation == JUBE_DOM_REPORT_VALIDITY) {
         return js_dom_report_validity_bridge(elem_item);
     }
 
     // HTMLSelectElement.namedItem(name) — search options by id/name.
-    if (strcmp(method, "namedItem") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
+    if (operation == JUBE_DOM_NAMED_ITEM && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
         if (argc < 1) return ItemNull;
         const char* name = fn_to_cstr(args[0]);
         if (!name || !*name) return ItemNull;
@@ -15351,7 +14685,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     }
 
     // HTMLSelectElement.add(element, before) — insert option/optgroup
-    if (strcmp(method, "add") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
+    if (operation == JUBE_DOM_ADD && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
         if (argc < 1) return ItemNull;
         DomElement* new_opt = (DomElement*)js_dom_unwrap_element(args[0]);
         if (!new_opt || !new_opt->tag_name) return ItemNull;
@@ -15445,7 +14779,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         js_dom_mutation_notify();
         return ItemNull;
     }
-    log_debug("js_dom_element_method: unknown method '%s'", method);
+    log_debug("js-dom-operation: unsupported operation %d", (int)operation);
     return ItemNull;
 }
 
@@ -15453,21 +14787,16 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
 // classList API (v12)
 // ============================================================================
 
-extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args, int argc) {
+static Item js_classlist_operation(Item elem_item, JsClassListOperation operation,
+                                   Item* args, int argc) {
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem) {
-        log_error("js_classlist_method: not a DOM element");
+        log_error("js-classlist-operation: not a DOM element");
         return ItemNull;
     }
 
-    const char* method = fn_to_cstr(method_name);
-    if (!method) return ItemNull;
-
-    log_debug("js_classlist_method: '%s' on <%s>", method,
-              elem->tag_name ? elem->tag_name : "?");
-
     // add(className, ...)
-    if (strcmp(method, "add") == 0) {
+    if (operation == JS_CLASSLIST_ADD) {
         for (int i = 0; i < argc; i++) {
             const char* cls = fn_to_cstr(args[i]);
             if (cls) elem->add_class(cls);
@@ -15477,7 +14806,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
     }
 
     // remove(className, ...)
-    if (strcmp(method, "remove") == 0) {
+    if (operation == JS_CLASSLIST_REMOVE) {
         for (int i = 0; i < argc; i++) {
             const char* cls = fn_to_cstr(args[i]);
             if (cls) elem->remove_class(cls);
@@ -15487,7 +14816,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
     }
 
     // toggle(className [, force]) → boolean
-    if (strcmp(method, "toggle") == 0) {
+    if (operation == JS_CLASSLIST_TOGGLE) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         const char* cls = fn_to_cstr(args[0]);
         if (!cls) return (Item){.item = ITEM_FALSE};
@@ -15512,7 +14841,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
     }
 
     // contains(className) → boolean
-    if (strcmp(method, "contains") == 0) {
+    if (operation == JS_CLASSLIST_CONTAINS) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         const char* cls = fn_to_cstr(args[0]);
         if (!cls) return (Item){.item = ITEM_FALSE};
@@ -15521,7 +14850,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
     }
 
     // item(index) → string or null
-    if (strcmp(method, "item") == 0) {
+    if (operation == JS_CLASSLIST_ITEM) {
         if (argc < 1) return ItemNull;
         int64_t idx = it2i(args[0]);
         if (idx < 0 || idx >= elem->class_count) return ItemNull;
@@ -15529,7 +14858,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
     }
 
     // replace(oldClass, newClass) → boolean
-    if (strcmp(method, "replace") == 0) {
+    if (operation == JS_CLASSLIST_REPLACE) {
         if (argc < 2) return (Item){.item = ITEM_FALSE};
         const char* old_cls = fn_to_cstr(args[0]);
         const char* new_cls = fn_to_cstr(args[1]);
@@ -15542,21 +14871,21 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
     }
 
     // toString() → space-separated class string
-    if (strcmp(method, "toString") == 0) {
+    if (operation == JS_CLASSLIST_TO_STRING) {
         return js_classlist_value_item(elem);
     }
 
-    log_debug("js_classlist_method: unknown method '%s'", method);
-    return ItemNull;
-}
-
-extern "C" Item js_classlist_method_apply(Item elem_item, Item method_name,
-                                            Item args_array) {
-    if (get_type_id(args_array) != LMD_TYPE_ARRAY || !args_array.array) {
-        return js_classlist_method(elem_item, method_name, NULL, 0);
+    if (operation == JS_CLASSLIST_ITERATOR) {
+        Item values = js_array_new(0);
+        for (int i = 0; i < elem->class_count; i++) {
+            js_array_push(values,
+                (Item){.item = s2it(heap_create_name(elem->class_names[i]))});
+        }
+        return js_get_iterator(values);
     }
-    return js_classlist_method(elem_item, method_name, args_array.array->items,
-                               (int)args_array.array->length);
+
+    log_error("js-classlist-operation: invalid operation %d", (int)operation);
+    return ItemNull;
 }
 
 extern "C" Item js_classlist_get_property(Item elem_item, Item prop_name) {
@@ -15839,6 +15168,12 @@ extern "C" Item js_dom_is_equal_node(Item node_item, Item other_item) {
     return (Item){.item = b2it(js_dom_nodes_are_equal(node, other))};
 }
 
+extern "C" Item js_dom_is_same_node(Item node_item, Item other_item) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(node_item);
+    DomNode* other = (DomNode*)js_dom_unwrap_element(other_item);
+    return (Item){.item = b2it(node && node == other)};
+}
+
 // ============================================================================
 // style.setProperty() / style.removeProperty() (v12b)
 // ============================================================================
@@ -15944,22 +15279,34 @@ static void _set_iface_to_string_tag(Item proto, const char* name) {
 }
 
 static void _install_iface(Item global, const char* name) {
-    Item key = (Item){.item = s2it(heap_create_name(name))};
-    Item existing = js_property_get(global, key);
-    if (get_type_id(existing) == LMD_TYPE_FUNC) {
-        Item proto = js_property_get(existing, js_string_key("prototype"));
-        _set_iface_to_string_tag(proto, name);
+    RootFrame roots(4);
+    Rooted<Item> global_root(roots, global);
+    Rooted<Item> key_root(roots,
+        (Item){.item = s2it(heap_create_name(name))});
+    Rooted<Item> ctor_root(roots,
+        js_property_get(global_root.get(), key_root.get()));
+    Rooted<Item> proto_root(roots, ItemNull);
+    if (js_is_callable(ctor_root.get())) {
+        proto_root.set(js_property_get(ctor_root.get(),
+            js_string_key("prototype")));
+        _set_iface_to_string_tag(proto_root.get(), name);
         return;
     }
     // Interface constructors share one native illegal-constructor callback but
     // must not share a cached JsFunction: each owns a distinct `.prototype`.
-    Item ctor = js_new_distinct_function((void*)_coll_illegal_constructor, 0);
-    js_set_function_name(ctor, (Item){.item = s2it(heap_create_name(name))});
-    Item proto = js_new_object();
-    _set_iface_to_string_tag(proto, name);
-    js_property_set(proto, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
-    js_property_set(ctor, (Item){.item = s2it(heap_create_name("prototype"))}, proto);
-    js_property_set(global, key, ctor);
+    // WebIDL illegal constructors still have [[Construct]]; their body, rather
+    // than a missing capability, supplies the required TypeError (D6.2.2v2).
+    ctor_root.set(js_new_distinct_native_constructor(
+        _coll_illegal_constructor));
+    js_set_function_name(ctor_root.get(), key_root.get());
+    proto_root.set(js_new_object());
+    _set_iface_to_string_tag(proto_root.get(), name);
+    js_property_set(proto_root.get(),
+        (Item){.item = s2it(heap_create_name("constructor"))},
+        ctor_root.get());
+    js_initialize_native_constructor_prototype(ctor_root.get(),
+        proto_root.get());
+    js_property_set(global_root.get(), key_root.get(), ctor_root.get());
 }
 
 static Item _document_fragment_ctor(void) {
@@ -15969,18 +15316,24 @@ static Item _document_fragment_ctor(void) {
 }
 
 static void _install_document_fragment_iface(Item global) {
-    Item ctor = js_new_distinct_function((void*)_document_fragment_ctor, 0);
-    js_set_function_name(ctor, js_string_key("DocumentFragment"));
-    Item proto = js_new_object();
-    _set_iface_to_string_tag(proto, "DocumentFragment");
-    js_property_set(proto, js_string_key("constructor"), ctor);
-    js_property_set(ctor, js_string_key("prototype"), proto);
-    js_property_set(global, js_string_key("DocumentFragment"), ctor);
+    RootFrame roots(3);
+    Rooted<Item> global_root(roots, global);
+    Rooted<Item> ctor_root(roots,
+        js_new_distinct_native_constructor(_document_fragment_ctor));
+    Rooted<Item> proto_root(roots, js_new_object());
+    js_set_function_name(ctor_root.get(), js_string_key("DocumentFragment"));
+    _set_iface_to_string_tag(proto_root.get(), "DocumentFragment");
+    js_property_set(proto_root.get(), js_string_key("constructor"),
+        ctor_root.get());
+    js_initialize_native_constructor_prototype(ctor_root.get(),
+        proto_root.get());
+    js_property_set(global_root.get(), js_string_key("DocumentFragment"),
+        ctor_root.get());
 }
 
 static Item _iface_proto(Item global, const char* name) {
     Item ctor = js_property_get(global, (Item){.item = s2it(heap_create_name(name))});
-    if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
+    if (!js_is_callable(ctor)) return ItemNull;
     Item proto = js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype"))});
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
@@ -15991,7 +15344,7 @@ static void _install_nodelist_for_each(Item global) {
     Item array_proto = js_property_get(array_ctor, js_string_key("prototype"));
     Item array_for_each = js_property_get(array_proto, js_string_key("forEach"));
     if (get_type_id(node_list_proto) == LMD_TYPE_MAP &&
-        get_type_id(array_for_each) == LMD_TYPE_FUNC) {
+        js_is_callable(array_for_each)) {
         // Query APIs return Arrays, but libraries feature-detect the WebIDL
         // NodeList prototype before choosing their iteration path.
         js_property_set(node_list_proto, js_string_key("forEach"), array_for_each);
@@ -16006,15 +15359,21 @@ static void _link_iface_proto(Item global, const char* name, const char* base_na
     }
 }
 
-static void js_dom_install_svg_value_constructor(Item global, const char* name,
-                                                  void* callback, int arity) {
-    Item ctor = js_new_distinct_function(callback, arity);
-    js_set_function_name(ctor, js_string_key(name));
-    Item proto = js_new_object();
-    _set_iface_to_string_tag(proto, name);
-    js_property_set(proto, js_string_key("constructor"), ctor);
-    js_property_set(ctor, js_string_key("prototype"), proto);
-    js_property_set(global, js_string_key(name), ctor);
+template <typename Target>
+static void js_dom_install_svg_value_constructor(Item global,
+        const char* name, Target target) {
+    RootFrame roots(3);
+    Rooted<Item> global_root(roots, global);
+    Rooted<Item> ctor_root(roots,
+        js_new_distinct_native_constructor(target));
+    Rooted<Item> proto_root(roots, js_new_object());
+    js_set_function_name(ctor_root.get(), js_string_key(name));
+    _set_iface_to_string_tag(proto_root.get(), name);
+    js_property_set(proto_root.get(), js_string_key("constructor"),
+        ctor_root.get());
+    js_initialize_native_constructor_prototype(ctor_root.get(),
+        proto_root.get());
+    js_property_set(global_root.get(), js_string_key(name), ctor_root.get());
 }
 
 static void _set_ctor_int_constant(Item ctor, const char* name, int64_t value) {
@@ -16092,7 +15451,7 @@ static Item _xpath_expression_evaluate(Item context_node, Item /*result_type*/,
     js_property_set(result, js_string_key("__lambda_xpath_items"), matches);
     js_property_set(result, js_string_key("__lambda_xpath_index"),
                     (Item){.item = i2it(0)});
-    Item iterate_next = js_new_distinct_function((void*)_xpath_result_iterate_next, 0);
+    Item iterate_next = js_new_distinct_native_function(_xpath_result_iterate_next);
     js_set_function_name(iterate_next, js_string_key("iterateNext"));
     js_property_set(result, js_string_key("iterateNext"), iterate_next);
     return result;
@@ -16102,7 +15461,7 @@ static Item _xpath_evaluator_create_expression(Item expression, Item /*resolver*
     Item compiled = js_new_object();
     js_property_set(compiled, js_string_key("__lambda_xpath_source"),
                     js_to_string(expression));
-    Item evaluate = js_new_distinct_function((void*)_xpath_expression_evaluate, 3);
+    Item evaluate = js_new_distinct_native_function(_xpath_expression_evaluate);
     js_set_function_name(evaluate, js_string_key("evaluate"));
     js_property_set(compiled, js_string_key("evaluate"), evaluate);
     return compiled;
@@ -16110,8 +15469,8 @@ static Item _xpath_evaluator_create_expression(Item expression, Item /*resolver*
 
 static Item _xpath_evaluator_ctor(void) {
     Item evaluator = js_new_object();
-    Item create_expression = js_new_distinct_function(
-        (void*)_xpath_evaluator_create_expression, 2);
+    Item create_expression = js_new_distinct_native_function(
+        _xpath_evaluator_create_expression);
     js_set_function_name(create_expression, js_string_key("createExpression"));
     js_property_set(evaluator, js_string_key("createExpression"), create_expression);
 
@@ -16123,34 +15482,48 @@ static Item _xpath_evaluator_ctor(void) {
 }
 
 static void _install_xpath_evaluator(Item global) {
-    Item ctor = js_new_distinct_function((void*)_xpath_evaluator_ctor, 0);
-    js_set_function_name(ctor, js_string_key("XPathEvaluator"));
-    Item proto = js_new_object();
-    js_property_set(proto, js_string_key("constructor"), ctor);
-    js_property_set(ctor, js_string_key("prototype"), proto);
-    js_property_set(global, js_string_key("XPathEvaluator"), ctor);
+    RootFrame roots(3);
+    Rooted<Item> global_root(roots, global);
+    Rooted<Item> ctor_root(roots,
+        js_new_distinct_native_constructor(_xpath_evaluator_ctor));
+    Rooted<Item> proto_root(roots, js_new_object());
+    js_set_function_name(ctor_root.get(), js_string_key("XPathEvaluator"));
+    js_property_set(proto_root.get(), js_string_key("constructor"),
+        ctor_root.get());
+    js_initialize_native_constructor_prototype(ctor_root.get(),
+        proto_root.get());
+    js_property_set(global_root.get(), js_string_key("XPathEvaluator"),
+        ctor_root.get());
 }
 
 static void _install_node_iface(Item global) {
-    Item ctor = js_new_distinct_function((void*)_coll_illegal_constructor, 0);
-    js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("Node"))});
-    Item proto = js_new_object();
-    _set_iface_to_string_tag(proto, "Node");
-    js_property_set(proto, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
-    js_property_set(ctor, (Item){.item = s2it(heap_create_name("prototype"))}, proto);
-    _set_ctor_int_constant(ctor, "ELEMENT_NODE", 1);
-    _set_ctor_int_constant(ctor, "ATTRIBUTE_NODE", 2);
-    _set_ctor_int_constant(ctor, "TEXT_NODE", 3);
-    _set_ctor_int_constant(ctor, "CDATA_SECTION_NODE", 4);
-    _set_ctor_int_constant(ctor, "ENTITY_REFERENCE_NODE", 5);
-    _set_ctor_int_constant(ctor, "ENTITY_NODE", 6);
-    _set_ctor_int_constant(ctor, "PROCESSING_INSTRUCTION_NODE", 7);
-    _set_ctor_int_constant(ctor, "COMMENT_NODE", 8);
-    _set_ctor_int_constant(ctor, "DOCUMENT_NODE", 9);
-    _set_ctor_int_constant(ctor, "DOCUMENT_TYPE_NODE", 10);
-    _set_ctor_int_constant(ctor, "DOCUMENT_FRAGMENT_NODE", 11);
-    _set_ctor_int_constant(ctor, "NOTATION_NODE", 12);
-    js_property_set(global, (Item){.item = s2it(heap_create_name("Node"))}, ctor);
+    RootFrame roots(3);
+    Rooted<Item> global_root(roots, global);
+    Rooted<Item> ctor_root(roots,
+        js_new_distinct_native_constructor(_coll_illegal_constructor));
+    Rooted<Item> proto_root(roots, js_new_object());
+    js_set_function_name(ctor_root.get(),
+        (Item){.item = s2it(heap_create_name("Node"))});
+    _set_iface_to_string_tag(proto_root.get(), "Node");
+    js_property_set(proto_root.get(),
+        (Item){.item = s2it(heap_create_name("constructor"))},
+        ctor_root.get());
+    js_initialize_native_constructor_prototype(ctor_root.get(),
+        proto_root.get());
+    _set_ctor_int_constant(ctor_root.get(), "ELEMENT_NODE", 1);
+    _set_ctor_int_constant(ctor_root.get(), "ATTRIBUTE_NODE", 2);
+    _set_ctor_int_constant(ctor_root.get(), "TEXT_NODE", 3);
+    _set_ctor_int_constant(ctor_root.get(), "CDATA_SECTION_NODE", 4);
+    _set_ctor_int_constant(ctor_root.get(), "ENTITY_REFERENCE_NODE", 5);
+    _set_ctor_int_constant(ctor_root.get(), "ENTITY_NODE", 6);
+    _set_ctor_int_constant(ctor_root.get(), "PROCESSING_INSTRUCTION_NODE", 7);
+    _set_ctor_int_constant(ctor_root.get(), "COMMENT_NODE", 8);
+    _set_ctor_int_constant(ctor_root.get(), "DOCUMENT_NODE", 9);
+    _set_ctor_int_constant(ctor_root.get(), "DOCUMENT_TYPE_NODE", 10);
+    _set_ctor_int_constant(ctor_root.get(), "DOCUMENT_FRAGMENT_NODE", 11);
+    _set_ctor_int_constant(ctor_root.get(), "NOTATION_NODE", 12);
+    js_property_set(global_root.get(),
+        (Item){.item = s2it(heap_create_name("Node"))}, ctor_root.get());
 }
 
 static JsWebAnimationHost* js_web_animation_host(Item value) {
@@ -16324,10 +15697,10 @@ static Item js_dom_element_animate(Item keyframes_item, Item options_item) {
     js_property_set(animation, js_string_key("__lambda_web_animation_host"),
                     holder);
     js_property_set(animation, js_string_key("pause"),
-                    js_new_function((void*)js_web_animation_pause, 0));
+                    js_new_native_function(js_web_animation_pause));
     js_install_native_accessor(animation, js_string_key("currentTime"),
-        js_new_function((void*)js_web_animation_current_time_get, 0),
-        js_new_function((void*)js_web_animation_current_time_set, 1),
+        js_new_native_function(js_web_animation_current_time_get),
+        js_new_native_function(js_web_animation_current_time_set),
         JSPD_NON_ENUMERABLE);
     return animation;
 }
@@ -16371,9 +15744,9 @@ extern "C" void js_dom_install_collection_globals(void) {
     _install_iface(global, "SVGTransform");
     _install_iface(global, "SVGPoint");
     js_dom_install_svg_value_constructor(global, "DOMMatrix",
-                                         (void*)js_dom_matrix_constructor, 1);
+        js_dom_matrix_constructor);
     js_dom_install_svg_value_constructor(global, "DOMPoint",
-                                         (void*)js_dom_point_constructor, 4);
+        js_dom_point_constructor);
     int html_interface_count = (int)(sizeof(s_js_dom_html_interfaces) /
         sizeof(s_js_dom_html_interfaces[0]));
     for (int i = 0; i < html_interface_count; i++) {
@@ -16391,12 +15764,23 @@ extern "C" void js_dom_install_collection_globals(void) {
     if (get_type_id(element_proto) == LMD_TYPE_MAP) {
         // Bootstrap deliberately calls these WebIDL methods through
         // Element.prototype.querySelector(All).call(element, selector).
-        js_property_set(element_proto, js_string_key("querySelector"),
-            js_new_function((void*)js_dom_query_selector_method, 1));
-        js_property_set(element_proto, js_string_key("querySelectorAll"),
-            js_new_function((void*)js_dom_query_selector_all_method, 1));
-        js_property_set(element_proto, js_string_key("animate"),
-            js_new_function((void*)js_dom_element_animate, 2));
+        RootFrame method_roots(2);
+        Rooted<Item> element_proto_root(method_roots, element_proto);
+        Rooted<Item> method_root(method_roots,
+            js_new_native_payload_function(js_dom_element_prototype_operation_body,
+                (uint64_t)JUBE_DOM_QUERY_SELECTOR, 1));
+        // Bootstrap needs these WebIDL prototype aliases before any instance
+        // exists. Each carries its direct operation payload; populating every
+        // Jube prototype here would mutate the sealed NameId module table.
+        js_property_set(element_proto_root.get(), js_string_key("querySelector"),
+            method_root.get());
+        method_root.set(js_new_native_payload_function(
+            js_dom_element_prototype_operation_body,
+            (uint64_t)JUBE_DOM_QUERY_SELECTOR_ALL, 1));
+        js_property_set(element_proto_root.get(), js_string_key("querySelectorAll"),
+            method_root.get());
+        js_property_set(element_proto_root.get(), js_string_key("animate"),
+            js_new_native_function(js_dom_element_animate));
     }
     _install_iface(global, "Range");
     _install_iface(global, "Selection");
@@ -16452,7 +15836,7 @@ static Item _option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item s
 
 extern "C" void js_dom_install_option_constructor(void) {
     Item global = js_get_global_this();
-    Item ctor = js_new_function((void*)_option_ctor, 4);
+    Item ctor = js_new_native_constructor(_option_ctor);
     js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("Option"))});
     Item proto = js_new_object();
     js_property_set(proto, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);

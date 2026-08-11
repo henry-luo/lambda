@@ -376,42 +376,6 @@ extern "C" Item js_canvas_measure_text(Item ctx_obj, Item text_arg) {
 }
 
 // ============================================================================
-// Method dispatch — called from js_map_method in js_runtime.cpp
-// ============================================================================
-
-extern "C" bool js_canvas_method_dispatch(Item obj, Item method_name, Item* args, int argc, Item* result) {
-    // only handle MAP objects
-    if (get_type_id(obj) != LMD_TYPE_MAP) return false;
-    JsClass cls = js_class_id(obj);
-    if (cls != JS_CLASS_OFFSCREEN_CANVAS && cls != JS_CLASS_CANVAS_RENDERING_CONTEXT_2D)
-        return false;
-
-    String* method = it2s(method_name);
-    if (!method) return false;
-
-    // OffscreenCanvas.getContext("2d")
-    if (cls == JS_CLASS_OFFSCREEN_CANVAS) {
-        if (method->len == 10 && memcmp(method->chars, "getContext", 10) == 0) {
-            *result = js_canvas_get_context(obj);
-            return true;
-        }
-        return false;
-    }
-
-    // CanvasRenderingContext2D methods
-    if (cls == JS_CLASS_CANVAS_RENDERING_CONTEXT_2D) {
-        if (method->len == 11 && memcmp(method->chars, "measureText", 11) == 0) {
-            Item text = argc > 0 ? args[0] : ItemNull;
-            *result = js_canvas_measure_text(obj, text);
-            return true;
-        }
-        return false;
-    }
-
-    return false;
-}
-
-// ============================================================================
 // Property set interception — for ctx.font = "..."
 // ============================================================================
 

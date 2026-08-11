@@ -2632,8 +2632,12 @@ static inline int em_finalize_scalar_homes(MirEmitter* em) {
         (size_t)reg_count * (size_t)word_count, sizeof(uint64_t), MEM_CAT_TEMP);
     uint64_t* reg_def_homes = (uint64_t*)mem_calloc(
         (size_t)reg_count * (size_t)word_count, sizeof(uint64_t), MEM_CAT_TEMP);
+    uint8_t* escaped_homes = (uint8_t*)mem_calloc(
+        (size_t)home_count, sizeof(uint8_t), MEM_CAT_TEMP);
+    uint8_t* owned_env_regs = (uint8_t*)mem_calloc(
+        (size_t)reg_count, sizeof(uint8_t), MEM_CAT_TEMP);
     if (!instructions || !blocks || !labels || !label_blocks || !reg_homes ||
-            !reg_def_homes) {
+            !reg_def_homes || !escaped_homes || !owned_env_regs) {
         log_error("mir-scalar-homes: CFG allocation failed");
         abort();
     }
@@ -2648,6 +2652,15 @@ static inline int em_finalize_scalar_homes(MirEmitter* em) {
         em_scalar_set_bit(homes, binding->logical_home_id);
         em_scalar_set_bit(definitions, binding->logical_home_id);
     }
+    for (int i = 0; i < frame->env_binding_count; i++) {
+        MirEnvBinding* binding = &frame->env_bindings[i];
+        if (binding->source_reg > 0 && binding->source_reg < (MIR_reg_t)reg_count) {
+            owned_env_regs[binding->source_reg] = 1;
+        }
+        if (binding->reg > 0 && binding->reg < (MIR_reg_t)reg_count) {
+            owned_env_regs[binding->reg] = 1;
+        }
+    }
     bool propagated = true;
     while (propagated) {
         propagated = false;
@@ -2658,6 +2671,10 @@ static inline int em_finalize_scalar_homes(MirEmitter* em) {
                     insn->ops[1].mode != MIR_OP_REG) continue;
             int destination = (int)insn->ops[0].u.reg;
             int source = (int)insn->ops[1].u.reg;
+            if (owned_env_regs[source] && !owned_env_regs[destination]) {
+                owned_env_regs[destination] = 1;
+                propagated = true;
+            }
             uint64_t* dst = reg_homes +
                 (size_t)destination * (size_t)word_count;
             const uint64_t* src = reg_homes +
@@ -2668,6 +2685,26 @@ static inline int em_finalize_scalar_homes(MirEmitter* em) {
                     dst[word] = merged;
                     propagated = true;
                 }
+            }
+        }
+    }
+    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns);
+            insn; insn = DLIST_NEXT(MIR_insn_t, insn)) {
+        if (insn->code != MIR_MOV || insn->nops < 2 ||
+                insn->ops[0].mode != MIR_OP_MEM ||
+                insn->ops[1].mode != MIR_OP_REG) continue;
+        int base = (int)insn->ops[0].u.mem.base;
+        if (base <= 0 || base >= reg_count || !owned_env_regs[base]) continue;
+        int source = (int)insn->ops[1].u.reg;
+        if (source <= 0 || source >= reg_count) continue;
+        const uint64_t* stored_homes = reg_homes +
+            (size_t)source * (size_t)word_count;
+        for (int word = 0; word < word_count; word++) {
+            uint64_t pending = stored_homes[word];
+            while (pending) {
+                int bit = em_root_take_lowest_set_bit(&pending);
+                int home = word * 64 + bit;
+                if (home < home_count) escaped_homes[home] = 1;
             }
         }
     }
@@ -2790,6 +2827,17 @@ static inline int em_finalize_scalar_homes(MirEmitter* em) {
             }
         }
     }
+    // D5.2/D5.3.3: an Item scalar pointer stored in an owned environment can
+    // remain live after its MIR register dies. Register-only liveness cannot
+    // see closure aliases, so that home must remain dedicated until the
+    // epilogue transfers the environment's scalar payloads to durable storage.
+    for (int escaped = 0; escaped < home_count; escaped++) {
+        if (!escaped_homes[escaped]) continue;
+        for (int other = 0; other < home_count; other++) {
+            em_scalar_add_interference(interference, word_count,
+                escaped, other);
+        }
+    }
     int color_count = 0;
     for (int home = 0; home < home_count; home++) {
         memset(used, 0, (size_t)home_count * sizeof(uint8_t));
@@ -2836,6 +2884,7 @@ static inline int em_finalize_scalar_homes(MirEmitter* em) {
         frame->plan.fixed_number_scratch_slots;
     mem_free(instructions); mem_free(blocks); mem_free(labels);
     mem_free(label_blocks); mem_free(reg_homes); mem_free(reg_def_homes);
+    mem_free(escaped_homes); mem_free(owned_env_regs);
     mem_free(block_uses); mem_free(block_defs); mem_free(live_in);
     mem_free(live_out); mem_free(uses); mem_free(definitions);
     mem_free(scratch); mem_free(interference); mem_free(set_homes);
@@ -3462,4 +3511,14 @@ static inline void em_call_void_5(MirEmitter* em, const char* fn_name,
     MIR_type_t types[5] = {a1t, a2t, a3t, a4t, a5t};
     MIR_op_t ops[5] = {a1, a2, a3, a4, a5};
     em_call_void_with_args(em, fn_name, 5, types, ops, include_signature);
+}
+
+static inline void em_call_void_6(MirEmitter* em, const char* fn_name,
+        MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
+        MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4,
+        MIR_type_t a5t, MIR_op_t a5, MIR_type_t a6t, MIR_op_t a6,
+        bool include_signature) {
+    MIR_type_t types[6] = {a1t, a2t, a3t, a4t, a5t, a6t};
+    MIR_op_t ops[6] = {a1, a2, a3, a4, a5, a6};
+    em_call_void_with_args(em, fn_name, 6, types, ops, include_signature);
 }

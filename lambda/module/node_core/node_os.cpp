@@ -51,7 +51,6 @@ static bool node_os_roots_begin(JubeRootFrame* frame, size_t count) {
 #define js_new_object() node_os_host->value->new_object()
 #define js_property_get(OBJECT, KEY) node_os_host->value->property_get(OBJECT, KEY)
 #define js_property_set(OBJECT, KEY, VALUE) node_os_host->value->property_set(OBJECT, KEY, VALUE)
-#define js_new_function(FUNCTION, COUNT) node_os_host->script->new_function(FUNCTION, COUNT)
 #define js_object_freeze(OBJECT) node_os_host->script->object_freeze(OBJECT)
 #define js_mark_non_writable(OBJECT, KEY) node_os_host->script->mark_non_writable(OBJECT, KEY)
 
@@ -783,7 +782,9 @@ extern "C" Item js_os_setPriority(Item pid_or_priority, Item priority_item) {
 // os Module Namespace Object
 // =============================================================================
 
-static void js_os_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+template <typename Target>
+static void js_os_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
     JubeRootFrame frame = {};
     if (!node_os_roots_begin(&frame, 2)) return;
     uint64_t* key_root = node_os_host->node->roots->root_frame_take_slot(&frame);
@@ -794,7 +795,8 @@ static void js_os_set_method(Item ns, const char* name, void* func_ptr, int para
     }
     Item key = make_string_item(name);
     *key_root = key.item;
-    Item fn = js_new_function(func_ptr, param_count);
+    Item fn = jube_new_function(node_os_host->script, target,
+        adapter_arity);
     *function_root = fn.item;
     js_property_set(ns, key, fn);
     node_os_host->node->roots->root_frame_end(&frame);
@@ -817,26 +819,26 @@ Item node_os_namespace(void) {
         return os_namespace;
     }
 
-    js_os_set_method(os_namespace, "platform",          (void*)js_os_platform, 0);
-    js_os_set_method(os_namespace, "arch",              (void*)js_os_arch, 0);
-    js_os_set_method(os_namespace, "type",              (void*)js_os_type, 0);
-    js_os_set_method(os_namespace, "hostname",          (void*)js_os_hostname, 0);
-    js_os_set_method(os_namespace, "homedir",           (void*)js_os_homedir, 0);
-    js_os_set_method(os_namespace, "tmpdir",            (void*)js_os_tmpdir, 0);
-    js_os_set_method(os_namespace, "totalmem",          (void*)js_os_totalmem, 0);
-    js_os_set_method(os_namespace, "freemem",           (void*)js_os_freemem, 0);
-    js_os_set_method(os_namespace, "cpus",              (void*)js_os_cpus, 0);
-    js_os_set_method(os_namespace, "uptime",            (void*)js_os_uptime, 0);
-    js_os_set_method(os_namespace, "endianness",        (void*)js_os_endianness, 0);
-    js_os_set_method(os_namespace, "release",           (void*)js_os_release, 0);
-    js_os_set_method(os_namespace, "version",           (void*)js_os_version, 0);
-    js_os_set_method(os_namespace, "networkInterfaces", (void*)js_os_networkInterfaces, 0);
-    js_os_set_method(os_namespace, "userInfo",          (void*)js_os_userInfo, 1);
-    js_os_set_method(os_namespace, "loadavg",           (void*)js_os_loadavg, 0);
-    js_os_set_method(os_namespace, "machine",           (void*)js_os_machine, 0);
-    js_os_set_method(os_namespace, "availableParallelism", (void*)js_os_availableParallelism, 0);
-    js_os_set_method(os_namespace, "getPriority",        (void*)js_os_getPriority, 1);
-    js_os_set_method(os_namespace, "setPriority",        (void*)js_os_setPriority, 2);
+    js_os_set_method(os_namespace, "platform",          js_os_platform, 0);
+    js_os_set_method(os_namespace, "arch",              js_os_arch, 0);
+    js_os_set_method(os_namespace, "type",              js_os_type, 0);
+    js_os_set_method(os_namespace, "hostname",          js_os_hostname, 0);
+    js_os_set_method(os_namespace, "homedir",           js_os_homedir, 0);
+    js_os_set_method(os_namespace, "tmpdir",            js_os_tmpdir, 0);
+    js_os_set_method(os_namespace, "totalmem",          js_os_totalmem, 0);
+    js_os_set_method(os_namespace, "freemem",           js_os_freemem, 0);
+    js_os_set_method(os_namespace, "cpus",              js_os_cpus, 0);
+    js_os_set_method(os_namespace, "uptime",            js_os_uptime, 0);
+    js_os_set_method(os_namespace, "endianness",        js_os_endianness, 0);
+    js_os_set_method(os_namespace, "release",           js_os_release, 0);
+    js_os_set_method(os_namespace, "version",           js_os_version, 0);
+    js_os_set_method(os_namespace, "networkInterfaces", js_os_networkInterfaces, 0);
+    js_os_set_method(os_namespace, "userInfo",          js_os_userInfo, 1);
+    js_os_set_method(os_namespace, "loadavg",           js_os_loadavg, 0);
+    js_os_set_method(os_namespace, "machine",           js_os_machine, 0);
+    js_os_set_method(os_namespace, "availableParallelism", js_os_availableParallelism, 0);
+    js_os_set_method(os_namespace, "getPriority",        js_os_getPriority, 1);
+    js_os_set_method(os_namespace, "setPriority",        js_os_setPriority, 2);
 
     // constants
 #ifdef _WIN32

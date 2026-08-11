@@ -41,7 +41,7 @@ static Item js_buffer_resolve_object_url(Item id_item) {
     }
     Item url_ctor = js_property_get(url_namespace, make_string_item("URL"));
     Item resolver = js_property_get(url_ctor, make_string_item("resolveObjectURL"));
-    if (get_type_id(resolver) != LMD_TYPE_FUNC) return make_js_undefined();
+    if (!js_is_callable(resolver)) return make_js_undefined();
     Item args[1] = {id_item};
     return js_call_function(resolver, url_ctor, args, 1);
 }
@@ -2111,10 +2111,10 @@ static bool buffer_ensure_roots(void) {
         js_root_range_ensure_registered(&js_runtime_state.buffer.roots);
 }
 
-static void buf_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    Item key = make_string_item(name);
-    Item fn = js_new_function(func_ptr, param_count);
-    js_property_set(ns, key, fn);
+template <typename Target>
+static void buf_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
+    js_install_native_method(ns, name, target, adapter_arity);
 }
 
 static Item buffer_iterator_key(const char* name, int len) {
@@ -2195,8 +2195,8 @@ static Item js_buffer_iterator_new(Item target, int kind) {
     js_property_set(iter, buffer_iterator_key("__index__", 9), (Item){.item = i2it(0)});
     js_property_set(iter, buffer_iterator_key("__kind__", 8), (Item){.item = i2it(kind)});
     js_property_set(iter, buffer_iterator_key("__done__", 8), (Item){.item = b2it(false)});
-    js_property_set(iter, make_string_item("next"), js_new_function((void*)js_buffer_iterator_next, 0));
-    js_property_set(iter, js_well_known_symbol_key(1), js_new_function((void*)js_buffer_iterator_identity, 0));
+    js_property_set(iter, make_string_item("next"), js_new_native_function(js_buffer_iterator_next));
+    js_property_set(iter, js_well_known_symbol_key(1), js_new_native_function(js_buffer_iterator_identity));
     return iter;
 }
 
@@ -2512,84 +2512,88 @@ extern "C" Item js_get_buffer_prototype(void) {
 
     buffer_prototype = js_new_object();
 
-    buf_set_method(buffer_prototype, "toString",   (void*)js_buf_inst_toString, 3);
-    buf_set_method(buffer_prototype, "write",      (void*)js_buf_inst_write, 4);
-    buf_set_method(buffer_prototype, "copy",       (void*)js_buf_inst_copy, 4);
-    buf_set_method(buffer_prototype, "equals",     (void*)js_buf_inst_equals, 1);
-    buf_set_method(buffer_prototype, "compare",    (void*)js_buf_inst_compare, 1);
-    buf_set_method(buffer_prototype, "indexOf",    (void*)js_buf_inst_indexOf, 3);
-    buf_set_method(buffer_prototype, "lastIndexOf",(void*)js_buf_inst_lastIndexOf, 3);
-    buf_set_method(buffer_prototype, "includes",   (void*)js_buf_inst_includes, 3);
-    buf_set_method(buffer_prototype, "slice",      (void*)js_buf_inst_slice, 2);
-    buf_set_method(buffer_prototype, "subarray",   (void*)js_buf_inst_subarray, 2);
-    buf_set_method(buffer_prototype, "fill",       (void*)js_buf_inst_fill, 1);
-    buf_set_method(buffer_prototype, "keys",       (void*)js_buf_inst_keys, 0);
-    Item values_fn = js_new_function((void*)js_buf_inst_values, 0);
-    js_property_set(buffer_prototype, make_string_item("values"), values_fn);
-    js_property_set(buffer_prototype, js_well_known_symbol_key(1), values_fn);
-    buf_set_method(buffer_prototype, "entries",    (void*)js_buf_inst_entries, 0);
+    buf_set_method(buffer_prototype, "toString",   js_buf_inst_toString, 3);
+    buf_set_method(buffer_prototype, "write",      js_buf_inst_write, 4);
+    buf_set_method(buffer_prototype, "copy",       js_buf_inst_copy, 4);
+    buf_set_method(buffer_prototype, "equals",     js_buf_inst_equals, 1);
+    buf_set_method(buffer_prototype, "compare",    js_buf_inst_compare, 1);
+    buf_set_method(buffer_prototype, "indexOf",    js_buf_inst_indexOf, 3);
+    buf_set_method(buffer_prototype, "lastIndexOf",js_buf_inst_lastIndexOf, 3);
+    buf_set_method(buffer_prototype, "includes",   js_buf_inst_includes, 3);
+    buf_set_method(buffer_prototype, "slice",      js_buf_inst_slice, 2);
+    buf_set_method(buffer_prototype, "subarray",   js_buf_inst_subarray, 2);
+    buf_set_method(buffer_prototype, "fill",       js_buf_inst_fill, 1);
+    buf_set_method(buffer_prototype, "keys",       js_buf_inst_keys, 0);
+    RootFrame values_roots(1);
+    Rooted<Item> values_root(values_roots,
+        js_new_native_function(js_buf_inst_values));
+    // D5.4.3: both aliases are published after allocating keys, so the shared
+    // callable must remain precisely rooted until the second store owns it.
+    js_property_set(buffer_prototype, make_string_item("values"), values_root.get());
+    js_property_set(buffer_prototype, js_well_known_symbol_key(1), values_root.get());
+    buf_set_method(buffer_prototype, "entries",    js_buf_inst_entries, 0);
 
     // endian-aware reads (1 arg: offset)
-    buf_set_method(buffer_prototype, "readUInt8",     (void*)js_buf_inst_readUInt8, 1);
-    buf_set_method(buffer_prototype, "readUInt16BE",  (void*)js_buf_inst_readUInt16BE, 1);
-    buf_set_method(buffer_prototype, "readUInt16LE",  (void*)js_buf_inst_readUInt16LE, 1);
-    buf_set_method(buffer_prototype, "readUInt32BE",  (void*)js_buf_inst_readUInt32BE, 1);
-    buf_set_method(buffer_prototype, "readUInt32LE",  (void*)js_buf_inst_readUInt32LE, 1);
-    buf_set_method(buffer_prototype, "readInt8",      (void*)js_buf_inst_readInt8, 1);
-    buf_set_method(buffer_prototype, "readInt16BE",   (void*)js_buf_inst_readInt16BE, 1);
-    buf_set_method(buffer_prototype, "readInt16LE",   (void*)js_buf_inst_readInt16LE, 1);
-    buf_set_method(buffer_prototype, "readInt32BE",   (void*)js_buf_inst_readInt32BE, 1);
-    buf_set_method(buffer_prototype, "readInt32LE",   (void*)js_buf_inst_readInt32LE, 1);
-    buf_set_method(buffer_prototype, "readFloatBE",   (void*)js_buf_inst_readFloatBE, 1);
-    buf_set_method(buffer_prototype, "readFloatLE",   (void*)js_buf_inst_readFloatLE, 1);
-    buf_set_method(buffer_prototype, "readDoubleBE",  (void*)js_buf_inst_readDoubleBE, 1);
-    buf_set_method(buffer_prototype, "readDoubleLE",  (void*)js_buf_inst_readDoubleLE, 1);
+    buf_set_method(buffer_prototype, "readUInt8",     js_buf_inst_readUInt8, 1);
+    buf_set_method(buffer_prototype, "readUInt16BE",  js_buf_inst_readUInt16BE, 1);
+    buf_set_method(buffer_prototype, "readUInt16LE",  js_buf_inst_readUInt16LE, 1);
+    buf_set_method(buffer_prototype, "readUInt32BE",  js_buf_inst_readUInt32BE, 1);
+    buf_set_method(buffer_prototype, "readUInt32LE",  js_buf_inst_readUInt32LE, 1);
+    buf_set_method(buffer_prototype, "readInt8",      js_buf_inst_readInt8, 1);
+    buf_set_method(buffer_prototype, "readInt16BE",   js_buf_inst_readInt16BE, 1);
+    buf_set_method(buffer_prototype, "readInt16LE",   js_buf_inst_readInt16LE, 1);
+    buf_set_method(buffer_prototype, "readInt32BE",   js_buf_inst_readInt32BE, 1);
+    buf_set_method(buffer_prototype, "readInt32LE",   js_buf_inst_readInt32LE, 1);
+    buf_set_method(buffer_prototype, "readFloatBE",   js_buf_inst_readFloatBE, 1);
+    buf_set_method(buffer_prototype, "readFloatLE",   js_buf_inst_readFloatLE, 1);
+    buf_set_method(buffer_prototype, "readDoubleBE",  js_buf_inst_readDoubleBE, 1);
+    buf_set_method(buffer_prototype, "readDoubleLE",  js_buf_inst_readDoubleLE, 1);
 
     // variable-width reads (2 args: offset, byteLength)
-    buf_set_method(buffer_prototype, "readUIntBE",    (void*)js_buf_inst_readUIntBE, 2);
-    buf_set_method(buffer_prototype, "readUIntLE",    (void*)js_buf_inst_readUIntLE, 2);
-    buf_set_method(buffer_prototype, "readIntBE",     (void*)js_buf_inst_readIntBE, 2);
-    buf_set_method(buffer_prototype, "readIntLE",     (void*)js_buf_inst_readIntLE, 2);
+    buf_set_method(buffer_prototype, "readUIntBE",    js_buf_inst_readUIntBE, 2);
+    buf_set_method(buffer_prototype, "readUIntLE",    js_buf_inst_readUIntLE, 2);
+    buf_set_method(buffer_prototype, "readIntBE",     js_buf_inst_readIntBE, 2);
+    buf_set_method(buffer_prototype, "readIntLE",     js_buf_inst_readIntLE, 2);
 
     // BigInt64 reads (1 arg: offset)
-    buf_set_method(buffer_prototype, "readBigInt64BE",  (void*)js_buf_inst_readBigInt64BE, 1);
-    buf_set_method(buffer_prototype, "readBigInt64LE",  (void*)js_buf_inst_readBigInt64LE, 1);
-    buf_set_method(buffer_prototype, "readBigUInt64BE", (void*)js_buf_inst_readBigUInt64BE, 1);
-    buf_set_method(buffer_prototype, "readBigUInt64LE", (void*)js_buf_inst_readBigUInt64LE, 1);
+    buf_set_method(buffer_prototype, "readBigInt64BE",  js_buf_inst_readBigInt64BE, 1);
+    buf_set_method(buffer_prototype, "readBigInt64LE",  js_buf_inst_readBigInt64LE, 1);
+    buf_set_method(buffer_prototype, "readBigUInt64BE", js_buf_inst_readBigUInt64BE, 1);
+    buf_set_method(buffer_prototype, "readBigUInt64LE", js_buf_inst_readBigUInt64LE, 1);
 
     // endian-aware writes (2 args: value, offset)
-    buf_set_method(buffer_prototype, "writeUInt8",    (void*)js_buf_inst_writeUInt8, 2);
-    buf_set_method(buffer_prototype, "writeUInt16BE", (void*)js_buf_inst_writeUInt16BE, 2);
-    buf_set_method(buffer_prototype, "writeUInt16LE", (void*)js_buf_inst_writeUInt16LE, 2);
-    buf_set_method(buffer_prototype, "writeUInt32BE", (void*)js_buf_inst_writeUInt32BE, 2);
-    buf_set_method(buffer_prototype, "writeUInt32LE", (void*)js_buf_inst_writeUInt32LE, 2);
-    buf_set_method(buffer_prototype, "writeInt8",     (void*)js_buf_inst_writeInt8, 2);
-    buf_set_method(buffer_prototype, "writeInt16BE",  (void*)js_buf_inst_writeInt16BE, 2);
-    buf_set_method(buffer_prototype, "writeInt16LE",  (void*)js_buf_inst_writeInt16LE, 2);
-    buf_set_method(buffer_prototype, "writeInt32BE",  (void*)js_buf_inst_writeInt32BE, 2);
-    buf_set_method(buffer_prototype, "writeInt32LE",  (void*)js_buf_inst_writeInt32LE, 2);
-    buf_set_method(buffer_prototype, "writeFloatBE",  (void*)js_buf_inst_writeFloatBE, 2);
-    buf_set_method(buffer_prototype, "writeFloatLE",  (void*)js_buf_inst_writeFloatLE, 2);
-    buf_set_method(buffer_prototype, "writeDoubleBE", (void*)js_buf_inst_writeDoubleBE, 2);
-    buf_set_method(buffer_prototype, "writeDoubleLE", (void*)js_buf_inst_writeDoubleLE, 2);
+    buf_set_method(buffer_prototype, "writeUInt8",    js_buf_inst_writeUInt8, 2);
+    buf_set_method(buffer_prototype, "writeUInt16BE", js_buf_inst_writeUInt16BE, 2);
+    buf_set_method(buffer_prototype, "writeUInt16LE", js_buf_inst_writeUInt16LE, 2);
+    buf_set_method(buffer_prototype, "writeUInt32BE", js_buf_inst_writeUInt32BE, 2);
+    buf_set_method(buffer_prototype, "writeUInt32LE", js_buf_inst_writeUInt32LE, 2);
+    buf_set_method(buffer_prototype, "writeInt8",     js_buf_inst_writeInt8, 2);
+    buf_set_method(buffer_prototype, "writeInt16BE",  js_buf_inst_writeInt16BE, 2);
+    buf_set_method(buffer_prototype, "writeInt16LE",  js_buf_inst_writeInt16LE, 2);
+    buf_set_method(buffer_prototype, "writeInt32BE",  js_buf_inst_writeInt32BE, 2);
+    buf_set_method(buffer_prototype, "writeInt32LE",  js_buf_inst_writeInt32LE, 2);
+    buf_set_method(buffer_prototype, "writeFloatBE",  js_buf_inst_writeFloatBE, 2);
+    buf_set_method(buffer_prototype, "writeFloatLE",  js_buf_inst_writeFloatLE, 2);
+    buf_set_method(buffer_prototype, "writeDoubleBE", js_buf_inst_writeDoubleBE, 2);
+    buf_set_method(buffer_prototype, "writeDoubleLE", js_buf_inst_writeDoubleLE, 2);
 
     // variable-width writes (3 args: value, offset, byteLength)
-    buf_set_method(buffer_prototype, "writeUIntBE",   (void*)js_buf_inst_writeUIntBE, 3);
-    buf_set_method(buffer_prototype, "writeUIntLE",   (void*)js_buf_inst_writeUIntLE, 3);
-    buf_set_method(buffer_prototype, "writeIntBE",    (void*)js_buf_inst_writeIntBE, 3);
-    buf_set_method(buffer_prototype, "writeIntLE",    (void*)js_buf_inst_writeIntLE, 3);
+    buf_set_method(buffer_prototype, "writeUIntBE",   js_buf_inst_writeUIntBE, 3);
+    buf_set_method(buffer_prototype, "writeUIntLE",   js_buf_inst_writeUIntLE, 3);
+    buf_set_method(buffer_prototype, "writeIntBE",    js_buf_inst_writeIntBE, 3);
+    buf_set_method(buffer_prototype, "writeIntLE",    js_buf_inst_writeIntLE, 3);
 
     // BigInt64 writes (2 args: value, offset)
-    buf_set_method(buffer_prototype, "writeBigInt64BE",  (void*)js_buf_inst_writeBigInt64BE, 2);
-    buf_set_method(buffer_prototype, "writeBigInt64LE",  (void*)js_buf_inst_writeBigInt64LE, 2);
-    buf_set_method(buffer_prototype, "writeBigUInt64BE", (void*)js_buf_inst_writeBigUInt64BE, 2);
-    buf_set_method(buffer_prototype, "writeBigUInt64LE", (void*)js_buf_inst_writeBigUInt64LE, 2);
+    buf_set_method(buffer_prototype, "writeBigInt64BE",  js_buf_inst_writeBigInt64BE, 2);
+    buf_set_method(buffer_prototype, "writeBigInt64LE",  js_buf_inst_writeBigInt64LE, 2);
+    buf_set_method(buffer_prototype, "writeBigUInt64BE", js_buf_inst_writeBigUInt64BE, 2);
+    buf_set_method(buffer_prototype, "writeBigUInt64LE", js_buf_inst_writeBigUInt64LE, 2);
 
     // other instance methods
-    buf_set_method(buffer_prototype, "toJSON",  (void*)js_buf_inst_toJSON, 0);
-    buf_set_method(buffer_prototype, "swap16",  (void*)js_buf_inst_swap16, 0);
-    buf_set_method(buffer_prototype, "swap32",  (void*)js_buf_inst_swap32, 0);
-    buf_set_method(buffer_prototype, "swap64",  (void*)js_buf_inst_swap64, 0);
+    buf_set_method(buffer_prototype, "toJSON",  js_buf_inst_toJSON, 0);
+    buf_set_method(buffer_prototype, "swap16",  js_buf_inst_swap16, 0);
+    buf_set_method(buffer_prototype, "swap32",  js_buf_inst_swap32, 0);
+    buf_set_method(buffer_prototype, "swap64",  js_buf_inst_swap64, 0);
 
     return buffer_prototype;
 }
@@ -2601,97 +2605,108 @@ extern "C" Item js_get_buffer_namespace(void) {
     if (buffer_namespace.item != 0) return buffer_namespace;
 
     // Buffer is both a callable function (deprecated Buffer(arg, enc)) and a namespace
-    buffer_namespace = js_new_function((void*)js_buffer_construct, 3);
+    buffer_namespace = js_new_native_function(js_buffer_construct);
+    RootFrame namespace_roots(5);
+    Rooted<Item> namespace_root(namespace_roots, buffer_namespace);
+    Rooted<Item> prototype_root(namespace_roots, ItemNull);
+    Rooted<Item> has_instance_root(namespace_roots, ItemNull);
+    Rooted<Item> blob_ctor_root(namespace_roots, ItemNull);
+    Rooted<Item> constants_root(namespace_roots, ItemNull);
 
     // static methods (Buffer.alloc, Buffer.from, etc.)
-    buf_set_method(buffer_namespace, "alloc",      (void*)js_buffer_alloc, 2);
-    buf_set_method(buffer_namespace, "allocUnsafe", (void*)js_buffer_allocUnsafe, 1);
-    buf_set_method(buffer_namespace, "from",       (void*)js_buffer_from, 3);
-    buf_set_method(buffer_namespace, "of",         (void*)js_buffer_of, 3);
-    buf_set_method(buffer_namespace, "concat",     (void*)js_buffer_concat, 2);
-    buf_set_method(buffer_namespace, "isBuffer",   (void*)js_buffer_isBuffer, 1);
-    buf_set_method(buffer_namespace, "isEncoding", (void*)js_buffer_isEncoding, 1);
-    buf_set_method(buffer_namespace, "isUtf8",     (void*)js_buffer_isUtf8, 1);
-    buf_set_method(buffer_namespace, "isAscii",    (void*)js_buffer_isAscii, 1);
-    buf_set_method(buffer_namespace, "copyBytesFrom", (void*)js_buffer_copyBytesFrom, 3);
-    buf_set_method(buffer_namespace, "byteLength", (void*)js_buffer_byteLength, 2);
-    buf_set_method(buffer_namespace, "allocUnsafeSlow", (void*)js_buffer_allocUnsafeSlow, 1);
-    buf_set_method(buffer_namespace, "compare",    (void*)js_buffer_compare_static, 2);
-    buf_set_method(buffer_namespace, "toString",   (void*)js_buffer_toString, 4);
-    buf_set_method(buffer_namespace, "write",      (void*)js_buffer_write, 5);
-    buf_set_method(buffer_namespace, "copy",       (void*)js_buffer_copy, 5);
-    buf_set_method(buffer_namespace, "equals",     (void*)js_buffer_equals, 2);
-    buf_set_method(buffer_namespace, "compare",    (void*)js_buffer_compare, 2);
-    buf_set_method(buffer_namespace, "indexOf",    (void*)js_buffer_indexOf, 4);
-    buf_set_method(buffer_namespace, "lastIndexOf",(void*)js_buffer_lastIndexOf, 4);
-    buf_set_method(buffer_namespace, "includes",   (void*)js_buffer_includes, 4);
-    buf_set_method(buffer_namespace, "slice",      (void*)js_buffer_slice, 3);
-    buf_set_method(buffer_namespace, "subarray",   (void*)js_buffer_subarray, 3);
-    buf_set_method(buffer_namespace, "fill",       (void*)js_buffer_fill, 2);
+    buf_set_method(buffer_namespace, "alloc",      js_buffer_alloc, 2);
+    buf_set_method(buffer_namespace, "allocUnsafe", js_buffer_allocUnsafe, 1);
+    buf_set_method(buffer_namespace, "from",       js_buffer_from, 3);
+    buf_set_method(buffer_namespace, "of",         js_buffer_of, 3);
+    buf_set_method(buffer_namespace, "concat",     js_buffer_concat, 2);
+    buf_set_method(buffer_namespace, "isBuffer",   js_buffer_isBuffer, 1);
+    buf_set_method(buffer_namespace, "isEncoding", js_buffer_isEncoding, 1);
+    buf_set_method(buffer_namespace, "isUtf8",     js_buffer_isUtf8, 1);
+    buf_set_method(buffer_namespace, "isAscii",    js_buffer_isAscii, 1);
+    buf_set_method(buffer_namespace, "copyBytesFrom", js_buffer_copyBytesFrom, 3);
+    buf_set_method(buffer_namespace, "byteLength", js_buffer_byteLength, 2);
+    buf_set_method(buffer_namespace, "allocUnsafeSlow", js_buffer_allocUnsafeSlow, 1);
+    buf_set_method(buffer_namespace, "compare",    js_buffer_compare_static, 2);
+    buf_set_method(buffer_namespace, "toString",   js_buffer_toString, 4);
+    buf_set_method(buffer_namespace, "write",      js_buffer_write, 5);
+    buf_set_method(buffer_namespace, "copy",       js_buffer_copy, 5);
+    buf_set_method(buffer_namespace, "equals",     js_buffer_equals, 2);
+    buf_set_method(buffer_namespace, "compare",    js_buffer_compare, 2);
+    buf_set_method(buffer_namespace, "indexOf",    js_buffer_indexOf, 4);
+    buf_set_method(buffer_namespace, "lastIndexOf",js_buffer_lastIndexOf, 4);
+    buf_set_method(buffer_namespace, "includes",   js_buffer_includes, 4);
+    buf_set_method(buffer_namespace, "slice",      js_buffer_slice, 3);
+    buf_set_method(buffer_namespace, "subarray",   js_buffer_subarray, 3);
+    buf_set_method(buffer_namespace, "fill",       js_buffer_fill, 2);
 
     // endian-aware read methods
-    buf_set_method(buffer_namespace, "readUInt8",     (void*)js_buffer_readUInt8, 2);
-    buf_set_method(buffer_namespace, "readUInt16BE",  (void*)js_buffer_readUInt16BE, 2);
-    buf_set_method(buffer_namespace, "readUInt16LE",  (void*)js_buffer_readUInt16LE, 2);
-    buf_set_method(buffer_namespace, "readUInt32BE",  (void*)js_buffer_readUInt32BE, 2);
-    buf_set_method(buffer_namespace, "readUInt32LE",  (void*)js_buffer_readUInt32LE, 2);
-    buf_set_method(buffer_namespace, "readInt8",      (void*)js_buffer_readInt8, 2);
-    buf_set_method(buffer_namespace, "readInt16BE",   (void*)js_buffer_readInt16BE, 2);
-    buf_set_method(buffer_namespace, "readInt16LE",   (void*)js_buffer_readInt16LE, 2);
-    buf_set_method(buffer_namespace, "readInt32BE",   (void*)js_buffer_readInt32BE, 2);
-    buf_set_method(buffer_namespace, "readInt32LE",   (void*)js_buffer_readInt32LE, 2);
-    buf_set_method(buffer_namespace, "readFloatBE",   (void*)js_buffer_readFloatBE, 2);
-    buf_set_method(buffer_namespace, "readFloatLE",   (void*)js_buffer_readFloatLE, 2);
-    buf_set_method(buffer_namespace, "readDoubleBE",  (void*)js_buffer_readDoubleBE, 2);
-    buf_set_method(buffer_namespace, "readDoubleLE",  (void*)js_buffer_readDoubleLE, 2);
+    buf_set_method(buffer_namespace, "readUInt8",     js_buffer_readUInt8, 2);
+    buf_set_method(buffer_namespace, "readUInt16BE",  js_buffer_readUInt16BE, 2);
+    buf_set_method(buffer_namespace, "readUInt16LE",  js_buffer_readUInt16LE, 2);
+    buf_set_method(buffer_namespace, "readUInt32BE",  js_buffer_readUInt32BE, 2);
+    buf_set_method(buffer_namespace, "readUInt32LE",  js_buffer_readUInt32LE, 2);
+    buf_set_method(buffer_namespace, "readInt8",      js_buffer_readInt8, 2);
+    buf_set_method(buffer_namespace, "readInt16BE",   js_buffer_readInt16BE, 2);
+    buf_set_method(buffer_namespace, "readInt16LE",   js_buffer_readInt16LE, 2);
+    buf_set_method(buffer_namespace, "readInt32BE",   js_buffer_readInt32BE, 2);
+    buf_set_method(buffer_namespace, "readInt32LE",   js_buffer_readInt32LE, 2);
+    buf_set_method(buffer_namespace, "readFloatBE",   js_buffer_readFloatBE, 2);
+    buf_set_method(buffer_namespace, "readFloatLE",   js_buffer_readFloatLE, 2);
+    buf_set_method(buffer_namespace, "readDoubleBE",  js_buffer_readDoubleBE, 2);
+    buf_set_method(buffer_namespace, "readDoubleLE",  js_buffer_readDoubleLE, 2);
 
     // endian-aware write methods
-    buf_set_method(buffer_namespace, "writeUInt8",    (void*)js_buffer_writeUInt8, 3);
-    buf_set_method(buffer_namespace, "writeUInt16BE", (void*)js_buffer_writeUInt16BE, 3);
-    buf_set_method(buffer_namespace, "writeUInt16LE", (void*)js_buffer_writeUInt16LE, 3);
-    buf_set_method(buffer_namespace, "writeUInt32BE", (void*)js_buffer_writeUInt32BE, 3);
-    buf_set_method(buffer_namespace, "writeUInt32LE", (void*)js_buffer_writeUInt32LE, 3);
-    buf_set_method(buffer_namespace, "writeInt8",     (void*)js_buffer_writeInt8, 3);
-    buf_set_method(buffer_namespace, "writeInt16BE",  (void*)js_buffer_writeInt16BE, 3);
-    buf_set_method(buffer_namespace, "writeInt16LE",  (void*)js_buffer_writeInt16LE, 3);
-    buf_set_method(buffer_namespace, "writeInt32BE",  (void*)js_buffer_writeInt32BE, 3);
-    buf_set_method(buffer_namespace, "writeInt32LE",  (void*)js_buffer_writeInt32LE, 3);
-    buf_set_method(buffer_namespace, "writeFloatBE",  (void*)js_buffer_writeFloatBE, 3);
-    buf_set_method(buffer_namespace, "writeFloatLE",  (void*)js_buffer_writeFloatLE, 3);
-    buf_set_method(buffer_namespace, "writeDoubleBE", (void*)js_buffer_writeDoubleBE, 3);
-    buf_set_method(buffer_namespace, "writeDoubleLE", (void*)js_buffer_writeDoubleLE, 3);
-    buf_set_method(buffer_namespace, "toJSON",        (void*)js_buffer_toJSON, 1);
-    buf_set_method(buffer_namespace, "swap16",        (void*)js_buffer_swap16, 1);
-    buf_set_method(buffer_namespace, "swap32",        (void*)js_buffer_swap32, 1);
-    buf_set_method(buffer_namespace, "swap64",        (void*)js_buffer_swap64, 1);
+    buf_set_method(buffer_namespace, "writeUInt8",    js_buffer_writeUInt8, 3);
+    buf_set_method(buffer_namespace, "writeUInt16BE", js_buffer_writeUInt16BE, 3);
+    buf_set_method(buffer_namespace, "writeUInt16LE", js_buffer_writeUInt16LE, 3);
+    buf_set_method(buffer_namespace, "writeUInt32BE", js_buffer_writeUInt32BE, 3);
+    buf_set_method(buffer_namespace, "writeUInt32LE", js_buffer_writeUInt32LE, 3);
+    buf_set_method(buffer_namespace, "writeInt8",     js_buffer_writeInt8, 3);
+    buf_set_method(buffer_namespace, "writeInt16BE",  js_buffer_writeInt16BE, 3);
+    buf_set_method(buffer_namespace, "writeInt16LE",  js_buffer_writeInt16LE, 3);
+    buf_set_method(buffer_namespace, "writeInt32BE",  js_buffer_writeInt32BE, 3);
+    buf_set_method(buffer_namespace, "writeInt32LE",  js_buffer_writeInt32LE, 3);
+    buf_set_method(buffer_namespace, "writeFloatBE",  js_buffer_writeFloatBE, 3);
+    buf_set_method(buffer_namespace, "writeFloatLE",  js_buffer_writeFloatLE, 3);
+    buf_set_method(buffer_namespace, "writeDoubleBE", js_buffer_writeDoubleBE, 3);
+    buf_set_method(buffer_namespace, "writeDoubleLE", js_buffer_writeDoubleLE, 3);
+    buf_set_method(buffer_namespace, "toJSON",        js_buffer_toJSON, 1);
+    buf_set_method(buffer_namespace, "swap16",        js_buffer_swap16, 1);
+    buf_set_method(buffer_namespace, "swap32",        js_buffer_swap32, 1);
+    buf_set_method(buffer_namespace, "swap64",        js_buffer_swap64, 1);
 
     // variable-width read/write (static, buf as first arg)
-    buf_set_method(buffer_namespace, "readUIntBE",    (void*)js_buffer_readUIntBE, 3);
-    buf_set_method(buffer_namespace, "readUIntLE",    (void*)js_buffer_readUIntLE, 3);
-    buf_set_method(buffer_namespace, "readIntBE",     (void*)js_buffer_readIntBE, 3);
-    buf_set_method(buffer_namespace, "readIntLE",     (void*)js_buffer_readIntLE, 3);
-    buf_set_method(buffer_namespace, "writeUIntBE",   (void*)js_buffer_writeUIntBE, 4);
-    buf_set_method(buffer_namespace, "writeUIntLE",   (void*)js_buffer_writeUIntLE, 4);
-    buf_set_method(buffer_namespace, "writeIntBE",    (void*)js_buffer_writeIntBE, 4);
-    buf_set_method(buffer_namespace, "writeIntLE",    (void*)js_buffer_writeIntLE, 4);
+    buf_set_method(buffer_namespace, "readUIntBE",    js_buffer_readUIntBE, 3);
+    buf_set_method(buffer_namespace, "readUIntLE",    js_buffer_readUIntLE, 3);
+    buf_set_method(buffer_namespace, "readIntBE",     js_buffer_readIntBE, 3);
+    buf_set_method(buffer_namespace, "readIntLE",     js_buffer_readIntLE, 3);
+    buf_set_method(buffer_namespace, "writeUIntBE",   js_buffer_writeUIntBE, 4);
+    buf_set_method(buffer_namespace, "writeUIntLE",   js_buffer_writeUIntLE, 4);
+    buf_set_method(buffer_namespace, "writeIntBE",    js_buffer_writeIntBE, 4);
+    buf_set_method(buffer_namespace, "writeIntLE",    js_buffer_writeIntLE, 4);
 
     // BigInt64 read/write (static, buf as first arg)
-    buf_set_method(buffer_namespace, "readBigInt64BE",   (void*)js_buffer_readBigInt64BE, 2);
-    buf_set_method(buffer_namespace, "readBigInt64LE",   (void*)js_buffer_readBigInt64LE, 2);
-    buf_set_method(buffer_namespace, "readBigUInt64BE",  (void*)js_buffer_readBigUInt64BE, 2);
-    buf_set_method(buffer_namespace, "readBigUInt64LE",  (void*)js_buffer_readBigUInt64LE, 2);
-    buf_set_method(buffer_namespace, "writeBigInt64BE",  (void*)js_buffer_writeBigInt64BE, 3);
-    buf_set_method(buffer_namespace, "writeBigInt64LE",  (void*)js_buffer_writeBigInt64LE, 3);
-    buf_set_method(buffer_namespace, "writeBigUInt64BE", (void*)js_buffer_writeBigUInt64BE, 3);
-    buf_set_method(buffer_namespace, "writeBigUInt64LE", (void*)js_buffer_writeBigUInt64LE, 3);
+    buf_set_method(buffer_namespace, "readBigInt64BE",   js_buffer_readBigInt64BE, 2);
+    buf_set_method(buffer_namespace, "readBigInt64LE",   js_buffer_readBigInt64LE, 2);
+    buf_set_method(buffer_namespace, "readBigUInt64BE",  js_buffer_readBigUInt64BE, 2);
+    buf_set_method(buffer_namespace, "readBigUInt64LE",  js_buffer_readBigUInt64LE, 2);
+    buf_set_method(buffer_namespace, "writeBigInt64BE",  js_buffer_writeBigInt64BE, 3);
+    buf_set_method(buffer_namespace, "writeBigInt64LE",  js_buffer_writeBigInt64LE, 3);
+    buf_set_method(buffer_namespace, "writeBigUInt64BE", js_buffer_writeBigUInt64BE, 3);
+    buf_set_method(buffer_namespace, "writeBigUInt64LE", js_buffer_writeBigUInt64LE, 3);
 
     // set up prototype (lazy, cached)
-    js_property_set(buffer_namespace, make_string_item("prototype"), js_get_buffer_prototype());
+    prototype_root.set(js_get_buffer_prototype());
+    // D5.4.3: prototype construction allocates before the outer property call
+    // establishes ownership, so retain the returned object in this root frame.
+    js_property_set(namespace_root.get(), make_string_item("prototype"),
+        prototype_root.get());
     {
         Item has_instance_key = js_well_known_symbol_key(3);
-        js_create_data_property(buffer_namespace, has_instance_key,
-                                js_new_function((void*)js_buffer_has_instance, 1));
-        js_mark_non_enumerable(buffer_namespace, has_instance_key);
+        has_instance_root.set(js_new_native_function(js_buffer_has_instance));
+        js_create_data_property(namespace_root.get(), has_instance_key,
+                                has_instance_root.get());
+        js_mark_non_enumerable(namespace_root.get(), has_instance_key);
     }
 
     // Buffer is the default export
@@ -2699,25 +2714,31 @@ extern "C" Item js_get_buffer_namespace(void) {
     js_property_set(buffer_namespace, make_string_item("default"), buffer_namespace);
 
     // Node.js: buffer module also exports atob/btoa
-    buf_set_method(buffer_namespace, "atob", (void*)js_atob, 1);
-    buf_set_method(buffer_namespace, "btoa", (void*)js_btoa, 1);
+    buf_set_method(buffer_namespace, "atob", js_atob, 1);
+    buf_set_method(buffer_namespace, "btoa", js_btoa, 1);
     {
-        Item blob_ctor = js_new_function((void*)js_blob_new, 2);
-        js_set_function_name(blob_ctor, make_string_item("Blob"));
-        js_property_set(buffer_namespace, make_string_item("Blob"), blob_ctor);
+        blob_ctor_root.set(js_new_native_constructor(js_blob_new));
+        // D5.4.3: naming allocates before namespace publication owns the
+        // constructor; keep the intermediate callable in the enclosing frame.
+        js_set_function_name(blob_ctor_root.get(), make_string_item("Blob"));
+        js_property_set(namespace_root.get(), make_string_item("Blob"),
+            blob_ctor_root.get());
     }
     // Resolve through the registry so the host never imports a node-core
     // implementation symbol after the URL leaf moves behind Jube.
-    buf_set_method(buffer_namespace, "resolveObjectURL", (void*)js_buffer_resolve_object_url, 1);
+    buf_set_method(buffer_namespace, "resolveObjectURL", js_buffer_resolve_object_url, 1);
 
     // Buffer.constants — MAX_LENGTH and MAX_STRING_LENGTH
     {
-        Item constants_obj = js_new_object();
-        js_property_set(constants_obj, make_string_item("MAX_LENGTH"),
+        constants_root.set(js_new_object());
+        // D5.4.3: the constants object is not owned by the namespace until all
+        // of its fields are installed, so each allocating store needs this root.
+        js_property_set(constants_root.get(), make_string_item("MAX_LENGTH"),
             (Item){.item = i2it(JS_BUFFER_MAX_LENGTH)});
-        js_property_set(constants_obj, make_string_item("MAX_STRING_LENGTH"),
+        js_property_set(constants_root.get(), make_string_item("MAX_STRING_LENGTH"),
             (Item){.item = i2it(JS_BUFFER_MAX_STRING_LENGTH)});
-        js_property_set(buffer_namespace, make_string_item("constants"), constants_obj);
+        js_property_set(namespace_root.get(), make_string_item("constants"),
+            constants_root.get());
     }
 
     // buffer.kMaxLength, buffer.kStringMaxLength — legacy aliases
@@ -2727,14 +2748,15 @@ extern "C" Item js_get_buffer_namespace(void) {
         (Item){.item = i2it(JS_BUFFER_MAX_STRING_LENGTH)});
 
     // buffer.SlowBuffer — legacy, alias for allocUnsafeSlow
-    js_property_set(buffer_namespace, make_string_item("SlowBuffer"),
-        js_new_function((void*)js_buffer_allocUnsafeSlow, 1));
+    // D5.4.3: inline function creation could be collected while a later call
+    // argument was evaluated; the common installer roots the publication triple.
+    buf_set_method(buffer_namespace, "SlowBuffer", js_buffer_allocUnsafeSlow, 1);
 
     // Buffer.poolSize — default 8192
     js_property_set(buffer_namespace, make_string_item("poolSize"),
         (Item){.item = i2it(8192)});
 
-    return buffer_namespace;
+    return namespace_root.get();
 }
 
 extern "C" void js_reset_buffer_module(void) {

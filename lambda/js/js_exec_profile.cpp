@@ -96,11 +96,8 @@ static JsExecProfileSlot g_js_exec_profile_slots[JS_EXEC_PROF_EVENT_COUNT] = {
     {"dispatch_builtin", 0, 0, 0, 0},
     {"new_object", 0, 0, 0, 0},
     {"new_object_shape", 0, 0, 0, 0},
-    {"get_slot_f", 0, 0, 0, 0},
-    {"get_slot_i", 0, 0, 0, 0},
-    {"set_slot_f", 0, 0, 0, 0},
-    {"set_slot_i", 0, 0, 0, 0},
-    {"shape_slot_guard", 0, 0, 0, 0},
+    // The profile table is positional; retired slot events must not shift the
+    // surviving JsExecProfileEvent counters onto unrelated names.
     {"shape_guard_hit", 0, 0, 0, 0},
     {"shape_guard_miss", 0, 0, 0, 0},
     {"load_ic_probe", 0, 0, 0, 0},

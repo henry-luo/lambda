@@ -2,9 +2,11 @@
 
 **Date**: 2026-08-11
 
-**Status**: PROPOSED — formal adoption and implementation not started
+**Status**: IMPLEMENTED — formal ruling D6.2.2v2
 
-**Tree anchor**: `2bfb9bdfa4` plus the in-progress NameId migration
+**Tree anchor**: master `88aa5556c8` plus the Tune4 implementation worktree;
+the reproducible C0 snapshot and C8 evidence are recorded in
+`JS_Tune4_Callable.md`
 
 **Companions**: `JS_Runtime_Redesign.md` (JR1/JR5/JR6),
 `JS_Runtime_Name.md` (RN1–RN16), `JS_Tune2_Exception.md` (JR3.3–JR3.9),
@@ -13,9 +15,8 @@
 
 Decisions introduced here use **JC#** ledger ids only where the formal design
 does not already rule the point. Existing formal rulings are cited first, per
-repository rule 17. This is a proposal: the implementation phase must revise
-`doc/Lambda_Formal_Design.md` and this document together where §14 requires
-formal adoption.
+repository rule 17. The design is implemented; D6.2.2v2 was adopted in
+`doc/Lambda_Formal_Design.md` before the callable ABI landed.
 
 ---
 
@@ -188,7 +189,7 @@ as one fused name-dispatch operation instead of the ECMAScript `Get` plus
 - Moving promises to VMap/GC-native storage; JR7 follows the object/class
   work.
 - Adding feedback vectors or speculative direct-call optimization; JR8 owns
-  that. This proposal only leaves a single target for JR8 to cache.
+  that. This design leaves a single implemented target for JR8 to cache.
 - Changing MIR Direct, `Item`, the GC algorithm, or scalar-home ABI.
 - Converting legacy C2MIR. It is frozen by repository rule 14.
 - Reorganizing all of `js_runtime.cpp` before obsolete dispatch code is
@@ -225,11 +226,11 @@ Libraries that intend a method call already evaluate the `call` property.
 | **D5.3.1–D5.3.5** | Arguments are caller-rooted borrows; native boundary adapters establish one exact rooted span where required. Callees do not invent conservative scans or permanent per-call roots. |
 | **D5.4.1–D5.4.4** | Callable objects and alias caches are context/realm-owned. Immutable catalog tables may be global; no context-dependent function object or IC address is baked into shared MIR. |
 | **D6.2.1** | A function value owns its executable entries and closure environment. A builtin is therefore a function value with entries, not an ID requiring external interpretation. |
-| **D6.2.2** | Dynamic calls dispatch through per-callee `fn->invoke`. Ownership adapters must funnel into that entry rather than becoming competing dispatch mechanisms. |
+| **D6.2.2v2** | Dynamic calls and construction dispatch through distinct per-callee executable entries; `newTarget` is explicit. Ownership adapters funnel into those entries rather than becoming competing mechanisms. |
 | **D8.4.2** | `Item* + argc` remains the JavaScript dynamic boundary. Core Lambda direct-call ABI is not replaced by the JS convention. |
 | **D8.4.3** | Every fallible callable returns success or an ERROR-tagged `Item`; call/construct entries never set a pending exception flag. |
 
-No S-layer behavior changes. This proposal corrects the implementation of
+No S-layer behavior changes. This design corrects the implementation of
 ECMAScript `[[Call]]`, `[[Construct]]`, property access, bound functions, and
 `new.target`; it does not define new language semantics.
 
@@ -764,8 +765,9 @@ accepted.
 
 ### C0 — Formal adoption, census, and fixtures
 
-1. Adopt the proposed D6.2.2v2 text in §14, bump the formal-design version,
-   and revise JR5 in `JS_Runtime_Redesign.md` in the same change.
+1. Adopt D6.2.2v2 from §14, bump the formal-design version, and revise JR5 in
+   `JS_Runtime_Redesign.md` in the same change. This landed in formal-design
+   version 1.11.0.
 2. Freeze structural census scripts for:
    `js_dispatch_builtin`, builtin case labels, runtime `builtin_id` semantic
    reads, constructor spelling branches, pending `new.target`, public
@@ -924,8 +926,8 @@ body does.
   moving them intact to another file fails JC12.
 - No third near-identical native adapter is handwritten; the shared typed
   family is extracted first (rule 13).
-- `sizeof(JsFunction)` remains within its verified size class or the proposal
-  records measured justification for a change.
+- `sizeof(JsFunction)` remains within its verified size class or the
+  implementation records measured justification for a change.
 - No new permanent root range is allocated per callable or per call.
 - No NameId is treated as a GC root, and no context-owned target address is
   embedded in shared MIR.
@@ -952,7 +954,8 @@ At minimum, focused tests cover:
 - builtin subclassing for Array, TypedArray, ArrayBuffer, DataView, Date,
   RegExp, Error, Promise, Map/Set, and DOM constructors;
 - `Date()` versus `new Date()`, primitive wrapper call versus construct,
-  Symbol/BigInt non-constructability, and construct-only collections;
+  Symbol/BigInt rejecting `[[Construct]]` entries, and construct-only
+  collections;
 - constructor ERROR returns leaving no active/pending state for the next call;
 - recursive/nested construction and `super()` across ERROR/finally paths;
 - GC during argument adaptation, bound-argument merge, prototype access,
@@ -1023,13 +1026,13 @@ Performance gates:
 | Catalog direct entries conflict with shared MIR/cache | Store target objects per context; use symbolic imports/relocation and catalog fingerprints. Stop if any generated instruction asks for a context-owned function-object pointer immediate. |
 | LOC target is met only by moving code | Count all `lambda/js` source and inspect semantic switch/body census. A file move without deletion fails. |
 
-## 14. Formal-spec impact
+## 14. Formal-spec adoption
 
-The direct-call portion is already required by D6.2.1–D6.2.2. Separate
-construct capability and explicit `newTarget` should be adopted by revising
-D6.2.2 in place before C1 lands.
+The direct-call portion was already required by D6.2.1–D6.2.2. Separate
+construct capability and explicit `newTarget` were adopted as D6.2.2v2 in
+`doc/Lambda_Formal_Design.md` version 1.11.0 before C1 implementation began.
 
-### Proposed D6.2.2v2 — per-callee call and construct entries
+### Adopted D6.2.2v2 — per-callee call and construct entries
 
 > **D6.2.2v2** Dynamic calls dispatch through per-callee executable entries.
 > LambdaJS function values carry distinct `[[Call]]` and
@@ -1154,3 +1157,21 @@ entry/capability their value supplies.
 After this gate, the next redesign is JR6: consolidate property access around
 the now-clean `Get -> Call` boundary, followed by JR4 shape-carried class and
 exotic metadata.
+
+### 16.1 Implemented outcome
+
+Tune4 closes this criterion under **D6.2.2v2**. `JsFunction` carries distinct
+`invoke` and optional `construct` protocol entries; typed target/factory
+families bind MIR, fixed-native, span-native, intrinsic, bound, Proxy, class,
+and host behavior at publication. The central builtin semantic dispatcher,
+name-selected constructor chain, pending `newTarget`, ambiguous `void*`
+factory, receiver/name method APIs, and miss-time intrinsic synthesis are
+deleted. Catalog bindings are realm-local real properties, and static and
+computed member calls both observe `Get -> Call`.
+
+The final structural census is zero for every retired mechanism. One named
+`js_construct_entry_legacy_class_map` bridge remains at the JR4 boundary, with
+one definition and two total references; it is deleted when JR4 moves legacy
+class-map construction onto ordinary function capabilities. Exact C0/C8 LOC,
+layout, startup, performance, conformance, GC, and embedding results are in
+`JS_Tune4_Callable.md` §14.

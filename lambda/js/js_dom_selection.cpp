@@ -1333,14 +1333,14 @@ static Item js_bound_document_get_selection(Item env_item) {
 
 extern "C" Item js_dom_get_selection_function_for_document(void* doc) {
     Item* env = js_alloc_env(1);
-    if (!env) return js_new_function((void*)js_global_get_selection, 0);
+    if (!env) return js_new_native_function(js_global_get_selection);
     env[0] = (Item){.item = (uint64_t)(uintptr_t)doc};
-    return js_new_closure((void*)js_bound_document_get_selection, 0, env, 1);
+    return js_new_native_closure(js_bound_document_get_selection, 0, env, 1);
 }
 
 extern "C" void js_dom_selection_install_globals(void) {
     Item global = js_get_global_this();
-    Item fn = js_new_function((void*)js_global_get_selection, 0);
+    Item fn = js_new_native_function(js_global_get_selection);
     js_property_set(global, make_key("getSelection"), fn);
     // Ensure `window` resolves to globalThis so `window.getSelection()` works.
     Item window_key = make_key("window");
@@ -1365,7 +1365,8 @@ extern "C" void js_dom_selection_install_globals(void) {
     if (get_type_id(existing) == LMD_TYPE_MAP)
         js_property_set(existing, make_key("document"), doc_proxy);
 
-    Item flush_fn = js_new_function((void*)js_dom_flush_selectionchange, 0);
+    Item flush_fn = js_new_native_this_span_function(
+        js_dom_flush_selectionchange);
     js_property_set(global, make_key("__lambdaFlushSelectionChange"), flush_fn);
     if (get_type_id(existing) == LMD_TYPE_MAP)
         js_property_set(existing, make_key("__lambdaFlushSelectionChange"), flush_fn);
@@ -1375,8 +1376,8 @@ extern "C" void js_dom_selection_install_globals(void) {
     // never actually invoked by typical WPT code (which uses document.createRange
     // / getSelection); identity comes from their function names plus DOM host
     // fast paths in js_instanceof_classname.
-    Item sel_ctor   = js_new_function((void*)js_global_get_selection, 0);
-    Item range_ctor = js_new_function((void*)js_dom_create_range, 0);
+    Item sel_ctor   = js_new_native_function(js_global_get_selection);
+    Item range_ctor = js_new_native_constructor(js_dom_create_range);
     js_set_function_name(sel_ctor, make_key("Selection"));
     js_set_function_name(range_ctor, make_key("Range"));
     js_property_set(global, make_key("Selection"), sel_ctor);
@@ -1460,7 +1461,7 @@ extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
     JsDocRuntimeScope scope;
     if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;
     state->selectionchange_pending = true;
-    Item cb = js_new_function((void*)_wpt_selectionchange_fire, 0);
+    Item cb = js_new_native_this_span_function(_wpt_selectionchange_fire);
     js_setTimeout(cb, (Item){.item = i2it(0)});
     js_doc_runtime_exit(&scope);
 }
@@ -1550,7 +1551,7 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
         return;
     }
     state->tc_selectionchange_drain_scheduled = true;
-    Item cb = js_new_function((void*)_tc_selectionchange_drain, 0);
+    Item cb = js_new_native_this_span_function(_tc_selectionchange_drain);
     js_setTimeout(cb, (Item){.item = i2it(0)});
     js_doc_runtime_exit(&scope);
 }

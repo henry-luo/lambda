@@ -12,6 +12,15 @@
     document.getElementById("result").textContent = isolated
       ? "js-cache-realm-isolated"
       : "js-cache-realm-leaked";
+    const tune4LifecycleUserNames = { tune4OnlyInConsumerTable: true };
+    document.addEventListener("DOMContentLoaded", function () {
+      document.getElementById("result").textContent += tune4LifecycleUserNames.tune4OnlyInConsumerTable
+        ? "|dom"
+        : "|bad-dom";
+    });
+    window.addEventListener("load", function () {
+      document.getElementById("result").textContent += "|load";
+    });
   </script>
 </body>
 </html>

@@ -164,7 +164,8 @@ Item js_get_css_object_value(void);
  * Call method on the CSS namespace object.
  * Supported: supports(property, value), supports(conditionText), escape(ident)
  */
-Item js_css_namespace_method(Item obj, Item method_name, Item* args, int argc);
+Item js_css_supports_operation(Item* args, int argc);
+Item js_css_escape_operation(Item* args, int argc);
 
 /** Reset the CSS namespace object (for cleanup between tests) */
 void js_reset_css_namespace_object(void);

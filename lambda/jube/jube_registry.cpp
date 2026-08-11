@@ -16,6 +16,7 @@
 #include "../js/js_fs_service.h"
 #include "../js/js_network_service.h"
 #include "../js/js_zlib_codec.hpp"
+#include "../js/js_runtime.h"
 #include "../module/node_core/node_events.hpp"
 #include "../module/node_core/node_url.hpp"
 #include "../core/lambda-decimal.hpp"
@@ -822,6 +823,7 @@ static Item jube_host_value_property_set_own(Item object, Item key, Item value);
 static bool jube_host_value_property_has_own(Item object, Item key);
 static bool jube_host_value_property_get_own_data(Item object, Item key, Item* out_value);
 static bool jube_host_value_is_array(Item value);
+static Item jube_host_script_new_function(JubeNativeFunctionSpec spec);
 extern "C" Item vmap_new(void);
 extern "C" Item js_new_object(void);
 extern "C" Item js_array_new(int capacity);
@@ -832,7 +834,6 @@ extern "C" Item js_property_get(Item object, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_has_own_property(Item object, Item key);
 extern "C" Item js_map_get_fast_ext(Map* map, const char* key, int key_length, bool* out_found);
-extern "C" Item js_new_function(void* func_ptr, int param_count);
 extern "C" Item js_make_string_len(const char* str, int len);
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" void js_set_function_name(Item fn_item, Item name_item);
@@ -862,7 +863,6 @@ extern "C" Item js_to_string(Item value);
 extern "C" Item js_typeof(Item value);
 extern "C" Item js_object_create(Item prototype);
 extern "C" Item* js_alloc_env(int count);
-extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
 extern "C" Item js_get_prototype(Item object);
 extern "C" void js_set_prototype(Item object, Item prototype);
 extern "C" Item js_promise_with_resolvers(void);
@@ -898,7 +898,11 @@ extern "C" bool js_is_css_rule(Item item);
 extern "C" bool js_is_rule_style_decl(Item item);
 extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name);
 extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item value);
-extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Item* args, int argc);
+extern "C" Item js_dom_element_operation_impl(Item elem_item,
+                                                JubeDomElementOperation operation,
+                                                Item* args, int argc);
+extern "C" Item js_dom_create_tree_walker_bridge(Item root, Item what_to_show);
+extern "C" Item js_dom_document_create_event_bridge(Item interface_name);
 extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name);
 extern "C" Item js_dom_get_prototype_value(Item obj);
 extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
@@ -908,7 +912,6 @@ extern "C" void* js_dom_swap_active_document(void* new_doc);
 extern "C" void js_dom_restore_active_document(void* prev_doc);
 extern "C" Item js_document_proxy_get_property(Item prop_name);
 extern "C" Item js_document_proxy_set_property(Item prop_name, Item value);
-extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc);
 extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" Item js_dom_range_get_prototype_value(void);
@@ -917,7 +920,6 @@ extern "C" bool js_dom_expando_has_property(Item obj, Item key);
 extern "C" Item js_dom_expando_get_own_property_descriptor(Item obj, Item key);
 extern "C" Item js_dom_expando_delete_property(Item obj, Item key);
 extern "C" Item js_dom_expando_own_property_names(Item obj);
-extern "C" Item js_css_namespace_method(Item obj, Item method_name, Item* args, int argc);
 extern "C" Item js_dom_owner_document_for_node(void* node);
 extern "C" const char* js_dom_to_attribute_cstr(Item value);
 extern "C" void js_dom_after_set_attribute(void* elem, const char* attr_name, const char* attr_value);
@@ -958,7 +960,9 @@ extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
 extern "C" Item js_dom_get_bounding_client_rect_bridge(void* elem);
 extern "C" Item js_dom_get_client_rects_bridge(void* elem);
 extern "C" Item js_dom_scroll_into_view_bridge(void* elem);
-extern "C" Item js_dom_scroll_method_bridge(Item elem_item, Item method_name, Item* args, int argc);
+extern "C" Item js_dom_scroll_operation_bridge(Item elem_item,
+                                                 JubeDomElementOperation operation,
+                                                 Item* args, int argc);
 extern "C" Item js_dom_text_control_caret_bounds_bridge(void* elem);
 extern "C" Item js_dom_text_control_boundary_from_point_bridge(void* elem, Item x, Item y);
 extern "C" Item js_dom_boundary_from_point_bridge(void* elem, Item x, Item y, Item behavior);
@@ -975,7 +979,8 @@ extern "C" Item js_dom_remove_child_bridge(void* parent, Item child);
 extern "C" Item js_dom_insert_before_bridge(void* parent, Item new_child, Item ref_child);
 extern "C" Item js_dom_remove_bridge(void* node);
 extern "C" Item js_dom_adopt_node_bridge(Item node);
-extern "C" Item js_dom_location_method_bridge(void* doc, Item method_name, Item* args, int argc);
+extern "C" Item js_dom_location_navigate_bridge(void* doc, Item next_url,
+                                                  bool replace);
 extern "C" Item js_dom_document_open_bridge(void* doc);
 extern "C" Item js_dom_document_write_bridge(void* doc, Item text);
 extern "C" Item js_dom_document_element_from_point_bridge(void* doc, Item x, Item y);
@@ -1113,10 +1118,9 @@ static void jube_host_dom_notify_mutation_detail(int kind, void* target, void* p
                                   attribute_name, old_value);
 }
 
-static void jube_host_node_function_install_promisify_custom(Item function, void* func_ptr,
-                                                              int parameter_count) {
-    if (!func_ptr) return;
-    Item custom = js_new_function(func_ptr, parameter_count);
+static void jube_host_node_function_install_promisify_custom(Item function,
+        JubeNativeFunctionSpec spec) {
+    Item custom = jube_host_script_new_function(spec);
     js_property_set(function, js_util_promisify_custom_symbol(), custom);
 }
 
@@ -1349,8 +1353,61 @@ static const JubeHostValueAPI jube_host_value_api = {
     jube_host_value_native_object_data,
 };
 
+static Item jube_host_script_new_function(JubeNativeFunctionSpec spec) {
+#define JUBE_NATIVE_FUNCTION_CASE(arity, member) \
+    case arity: \
+        if (spec.constructable) { \
+            if (spec.adapter_arity != arity) { \
+                log_error("jube-callable: construct target arity %d mismatches adapter %d", \
+                    arity, spec.adapter_arity); \
+                return ItemError; \
+            } \
+            return js_new_native_constructor(spec.target.member); \
+        } \
+        return js_new_native_function(spec.target.member, spec.adapter_arity)
+    switch (spec.target_arity) {
+    JUBE_NATIVE_FUNCTION_CASE(0, p0);
+    JUBE_NATIVE_FUNCTION_CASE(1, p1);
+    JUBE_NATIVE_FUNCTION_CASE(2, p2);
+    JUBE_NATIVE_FUNCTION_CASE(3, p3);
+    JUBE_NATIVE_FUNCTION_CASE(4, p4);
+    JUBE_NATIVE_FUNCTION_CASE(5, p5);
+    JUBE_NATIVE_FUNCTION_CASE(6, p6);
+    JUBE_NATIVE_FUNCTION_CASE(7, p7);
+    JUBE_NATIVE_FUNCTION_CASE(8, p8);
+    default:
+        log_error("jube-callable: unsupported native target arity %d",
+            spec.target_arity);
+        return ItemError;
+    }
+#undef JUBE_NATIVE_FUNCTION_CASE
+}
+
+static Item jube_host_script_new_closure(JubeNativeFunctionSpec spec,
+        Item* env, int env_size) {
+    if (spec.constructable) {
+        log_error("jube-callable: native closure cannot be constructable");
+        return ItemError;
+    }
+#define JUBE_NATIVE_CLOSURE_CASE(arity, member) \
+    case arity: return js_new_native_closure(spec.target.member, \
+        spec.adapter_arity, env, env_size)
+    switch (spec.target_arity) {
+    JUBE_NATIVE_CLOSURE_CASE(1, p1);
+    JUBE_NATIVE_CLOSURE_CASE(2, p2);
+    JUBE_NATIVE_CLOSURE_CASE(3, p3);
+    JUBE_NATIVE_CLOSURE_CASE(4, p4);
+    JUBE_NATIVE_CLOSURE_CASE(5, p5);
+    default:
+        log_error("jube-callable: unsupported native closure target arity %d",
+            spec.target_arity);
+        return ItemError;
+    }
+#undef JUBE_NATIVE_CLOSURE_CASE
+}
+
 static const JubeHostScriptAPI jube_host_script_api = {
-    js_new_function,
+    jube_host_script_new_function,
     js_function_set_prototype,
     js_set_function_name,
     js_mark_non_enumerable,
@@ -1382,7 +1439,7 @@ static const JubeHostScriptAPI jube_host_script_api = {
     jube_host_script_class_is,
     js_typeof,
     js_alloc_env,
-    js_new_closure,
+    jube_host_script_new_closure,
     js_get_prototype,
     js_set_prototype,
     js_promise_with_resolvers,
@@ -1405,7 +1462,7 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_is_rule_style_decl,
     js_dom_get_property_impl,
     js_dom_set_property_impl,
-    js_dom_element_method_impl,
+    js_dom_element_operation_impl,
     js_computed_style_get_property,
     NULL,  // js_dom_style_resource_has_property retired: style hosts are record-driven (DOM3)
     NULL,  // js_dom_style_method retired: style hosts are record-driven (DOM3)
@@ -1421,7 +1478,7 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_dom_restore_active_document,
     js_document_proxy_get_property,
     js_document_proxy_set_property,
-    js_document_proxy_method,
+    NULL,  // receiver/name document invocation retired by Tune4 (D6.2.2v2)
     js_dom_item_is_range,
     js_dom_item_is_selection,
     NULL,  // js_dom_range_get_property retired: range/selection are record-driven (DOM3)
@@ -1444,7 +1501,7 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_dom_expando_own_property_names,
     NULL,  // js_dom_range_expando_own_property_names retired: range/selection are record-driven (DOM3)
     NULL,  // js_dom_selection_expando_own_property_names retired: range/selection are record-driven (DOM3)
-    js_css_namespace_method,
+    NULL,  // CSS namespace invocation is intrinsic-target-owned (D6.2.2v2)
     NULL,  // js_cssom_stylesheet_method retired: CSSOM types are record-driven (DOM3)
     NULL,  // js_cssom_rule_decl_method retired: CSSOM types are record-driven (DOM3)
     js_dom_owner_document_for_node,
@@ -1486,7 +1543,7 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_dom_get_bounding_client_rect_bridge,
     js_dom_get_client_rects_bridge,
     js_dom_scroll_into_view_bridge,
-    js_dom_scroll_method_bridge,
+    js_dom_scroll_operation_bridge,
     js_dom_text_control_caret_bounds_bridge,
     js_dom_text_control_boundary_from_point_bridge,
     js_dom_boundary_from_point_bridge,
@@ -1502,7 +1559,7 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_dom_insert_before_bridge,
     js_dom_remove_bridge,
     js_dom_adopt_node_bridge,
-    js_dom_location_method_bridge,
+    js_dom_location_navigate_bridge,
     js_dom_document_open_bridge,
     js_dom_document_write_bridge,
     js_dom_document_element_from_point_bridge,
@@ -1611,6 +1668,8 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_cssom_decl_css_has,
     js_dom_get_ui_context,
     js_dom_has_committed_geometry_snapshot,
+    js_dom_create_tree_walker_bridge,
+    js_dom_document_create_event_bridge,
 };
 
 // H7A source records are intentionally plain C data.  A language can retain
@@ -3493,7 +3552,7 @@ static void jube_host_node_next_tick_callback(void* session, Item callback, Item
     env[0] = callback_root.get();
     env[1] = error_root.get();
     env[2] = result_root.get();
-    js_next_tick_enqueue(js_new_closure((void*)jube_host_node_emit_callback, 0, env, 3));
+    js_next_tick_enqueue(js_new_native_closure(jube_host_node_emit_callback, 0, env, 3));
 }
 
 static void jube_node_async_work_remove(JubeNodeAsyncWork* job) {
@@ -3691,7 +3750,7 @@ static int jube_host_data_map_set(void* session, Item map, Item key, Item value)
     Map* target = it2map(map);
     String* name = it2s(key);
     if (!target || !name) return -1;
-    map_put(target, name, value, input);
+    map_put_heap(target, name, value, input);
     return 0;
 }
 
@@ -4493,7 +4552,6 @@ static int jube_host_ops_count(const JubeHostObjectOps* ops) {
     int count = 0;
     if (ops->get_property) count++;
     if (ops->set_property) count++;
-    if (ops->call_method) count++;
     if (ops->has_property) count++;
     if (ops->delete_property) count++;
     if (ops->get_own_property_descriptor) count++;
@@ -4511,7 +4569,7 @@ static void jube_log_module_type_ops(const JubeModuleDef* module) {
         if (!type || !(type->flags & (JUBE_TYPE_NON_OWNING_HOST | JUBE_TYPE_OWNING_NATIVE))) {
             continue;
         }
-        log_info("JUBE_REG: type %s.%s host_ops=%d/10",
+        log_info("JUBE_REG: type %s.%s host_ops=%d/9",
                  module->name ? module->name : "(module)",
                  type->name ? type->name : "(type)",
                  jube_host_ops_count(type->host_ops));
@@ -4553,7 +4611,7 @@ static void jube_install_module_globals(const JubeModuleDef* module, void* sessi
         Item existing = ItemNull;
         if (jube_host_api.value->property_get_own_data(
                 (Item){.item = *global_root}, (Item){.item = *key_root}, &existing) &&
-                existing.item != ITEM_JS_JUBE_LAZY_SENTINEL) {
+                existing.item != ITEM_JS_LAZY_GLOBAL_SENTINEL) {
             // A script may replace a writable lazy global before first read.
             // Activating another surface of the module must preserve that write.
             continue;
@@ -4795,7 +4853,7 @@ bool jube_resolve_global(const char* name, size_t name_length, Item* out_value) 
             Item value = ItemNull;
             Item global = jube_host_node_session_global_this(jube_active_node_runtime_session);
             if (!jube_host_api.value->property_get_own_data(global, key, &value) ||
-                    value.item == ITEM_JS_JUBE_LAZY_SENTINEL) {
+                    value.item == ITEM_JS_LAZY_GLOBAL_SENTINEL) {
                 return false;
             }
             if (out_value) *out_value = value;

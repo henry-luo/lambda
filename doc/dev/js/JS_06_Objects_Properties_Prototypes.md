@@ -1,8 +1,8 @@
 # LambdaJS — Objects, Properties & Prototypes
 
-> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how JS objects are represented (Lambda `Map` + `TypeMap` shape), how property attributes are stored, the `[[Get]]`/`[[Set]]` dispatch pipelines, `Object.defineProperty`, the prototype chain, built-in method dispatch, symbol-keyed properties, and constructor shape pre-allocation.
+> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how JS objects are represented (Lambda `Map` + `TypeMap` shape), how property attributes are stored, the `[[Get]]`/`[[Set]]` dispatch pipelines, `Object.defineProperty`, the prototype chain, realm-local intrinsic properties, symbol-keyed properties, and constructor shape pre-allocation.
 >
-> **Primary sources:** `lambda/js/js_props.{h,cpp}` (ordinary kernels), `lambda/js/js_property_attrs.{h,cpp}` (shape-flag descriptors, accessor pairs, shape clone), `lambda/js/js_class.h` (`JsClass`), `lambda/lambda-data.hpp` / `lambda.h` (`Map`, `TypeMap`, `ShapeEntry`, `Container`, `MapKind`), `lambda/js/js_runtime.cpp` (`js_property_get`/`js_property_set`/prototype walk), `lambda/js/js_globals.cpp` (`Object.defineProperty`), `lambda/js/js_runtime_builtin_registry.cpp` (method specs).
+> **Primary sources:** `lambda/js/js_props.{h,cpp}` (ordinary kernels), `lambda/js/js_property_attrs.{h,cpp}` (shape-flag descriptors, accessor pairs, shape clone), `lambda/js/js_class.h` (`JsClass`), `lambda/lambda-data.hpp` / `lambda.h` (`Map`, `TypeMap`, `ShapeEntry`, `Container`, `MapKind`), `lambda/js/js_runtime.cpp` (`js_property_get`/`js_property_set`/prototype walk), `lambda/js/js_globals.cpp` (`Object.defineProperty`), `lambda/js/js_builtin_catalog.def` and `js_runtime_builtin_registry.cpp` (intrinsic target/binding installation).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against symbol names.
 
 ---
@@ -77,12 +77,11 @@ Because `pool_calloc` zeroes the header, **all ordinary objects are `MAP_KIND_PL
    - **own lookup + accessor dispatch** via `js_ordinary_get_own` (`js_props.cpp:77`), which delegates storage state to `js_own_shape_slot_status` then dispatches `JSPD_IS_ACCESSOR` pairs with the receiver (setter-only public -> undefined; setter-only private -> TypeError);
    - string-wrapper indexed access + virtual `length` for `JS_CLASS_STRING`;
    - **prototype walk** `js_prototype_lookup_ex` (`:3592`);
-   - top-of-chain deletion guard (don't resurrect a deleted Object.prototype builtin);
-   - **builtin-method fallback** via `js_map_builtin_fallback_get`: `js_class_id`, `js_lookup_builtin_method`, `.constructor`, and collection methods;
+   - ordinary prototype exhaustion after the last real own property;
    - else `make_js_undefined()`.
 3. **ARRAY / ELEMENT branches** handle index/length/companion-map access, including `JSPD_IS_ACCESSOR` slots on the companion map.
 
-**Prototype walk** `js_prototype_lookup_ex` (`:26343`): per level, FUNC props + Function builtins, ARRAY/ELEMENT delegation, Proxy `get` trap forward (with receiver), MAP own slot via `js_ordinary_get_own`, and class-method dispatch — bounded to **depth 32**. `js_get_implicit_proto` (`:26220`) returns the own `__proto__` slot or synthesizes one from class identity; `js_get_prototype` (`:26165`) special-cases an accessor-redefined `__proto__` and the `Object.create(null)` sentinel.
+**Prototype walk** `js_prototype_lookup_ex`: per level, FUNC properties, ARRAY/ELEMENT delegation, Proxy `get` trap forward (with receiver), and MAP own slots via `js_ordinary_get_own` — bounded to **depth 32**. Builtin methods and accessors participate because realm construction installed them as real properties; a miss never fabricates a callable. `js_get_implicit_proto` returns the own `__proto__` slot or resolves the realm-local intrinsic prototype from class identity; `js_get_prototype` special-cases an accessor-redefined `__proto__` and the `Object.create(null)` sentinel.
 
 ---
 
@@ -116,15 +115,16 @@ The spec-named kernels `js_ordinary_set` / `js_ordinary_set_via_accessor` live i
 
 ---
 
-## 8. Prototype chain & built-in method dispatch
+## 8. Prototype chain & realm-local intrinsic properties
 
-Built-in methods are not stored on every object; they are resolved on demand at the end of the GET path.
+Per **D6.2.2v2**, intrinsic methods and accessors are ordinary realm-local function values installed as real properties before publication of their owner object.
 
-- **Class identity** - `TypeMap::js_class` (a 1-byte `JsClass`, `js_class.h:39`) is the typed identity. `js_class_id(Item)` is byte-only for built-in dispatch. `js_class_stamp` clones the TypeMap before stamping.
-- **Method specs** — `JsBuiltinMethodSpec { name, len, builtin_id, param_count, display_name }` (`js_runtime_internal.hpp:547`); per-class static tables (e.g. `JS_ARRAY_PROTOTYPE_METHOD_SPECS`). Lookup is a **linear `strncmp` scan** (`js_runtime_builtin_registry.cpp:20`).
-- **Resolution** — `js_proto_class_method_dispatch` (`js_runtime.cpp:26316`) and `js_lookup_builtin_method` (`js_runtime_builtin_registry.cpp:1060`) map (class, name) to a singleton `JsFunction` via `js_get_or_create_builtin` (cached by `builtin_id`). Installation (`js_install_builtin_method_specs`) also marks methods non-enumerable.
+- **Class identity** — `TypeMap::js_class` (a 1-byte `JsClass`) selects storage/prototype/exotic policy. It does not select a method body at call time. `js_class_stamp` clones the TypeMap before stamping.
+- **Target specs** — `JsIntrinsicTargetSpec` binds a catalog ID to typed call and optional construct bodies plus compiler metadata. The target is copied into the `JsFunction` when the binding is created; the ID remains diagnostic/catalog metadata.
+- **Binding specs** — `JsBuiltinMethodSpec` records owner, NameId spelling, descriptors, formal length, and an explicit identity-alias key. `js_create_builtin_function_from_spec` creates one function per realm binding (or declared alias), finalizes its call/construct capabilities, and caches that identity in context-owned rooted state under **D5.4.1–D5.4.4**.
+- **Installation** — `js_install_builtin_method_specs`, `js_install_builtin_accessor_specs`, and owner-binding population store those values on constructors/prototypes/namespaces with the required descriptors. Ordinary `Get` and the normal prototype walk then find them. Replacement, deletion, accessors, extraction, and Proxy traps are therefore observed before `Call`.
 
-This registry is the single source of truth for method install/lookup/descriptor synthesis; the broader builtin catalog (which classes, which methods) is in [JS_10 — Standard Built-in Library](JS_10_Builtins.md).
+The catalog is the single construction-time source of target and binding metadata; it is not a property-miss oracle or a runtime semantic dispatcher. See [JS_10 — Standard Built-in Library](JS_10_Builtins.md).
 
 ---
 
@@ -152,8 +152,8 @@ Because instances **share** the cached `TypeMap`, any per-instance attribute cha
 
 1. **Dense array hole sentinel remains.** `JS_DELETED_SENTINEL_VAL` (`js_runtime.h:26`) now uses unused tag `0x7E` and marks dense `Array::items` holes, not ordinary descriptor metadata. Ordinary map/FUNC/ARRAY companion-map deletes use `JSPD_DELETED`; readers that may inspect dense array items still preserve a raw-hole check, while ordinary property readers use `js_own_shape_slot_status`.
 2. **Property dispatch decomposition status.** The post-Js59 cleanup split MAP built-in fallback out of `js_property_get`, ordinary MAP tombstone/configurable/frozen handling plus ARRAY/FUNC/string-exotic branches out of `js_delete_property`, ARRAY/MAP/FUNC branches out of `js_property_set`, and the validation/apply phases out of `ValidateAndApplyPropertyDescriptor`. Sparse array accessor hole-fill now lives in the descriptor write kernel (`js_define_own_property_from_descriptor`), so no Js59-specific dispatch cleanup remains.
-3. **Built-in registry lookup.** Built-in method lookup uses a small positive cache before falling back to the spec-table scan (`js_runtime_builtin_registry.cpp:18`). Cold misses and first hits still scan the table. *Improvement:* add sorted table indexes or a miss cache only if release profiling shows the fallback is hot.
-4. **TypeMap pointer guard is defensive.** The TypeMap plausibility guard is centralized as `typemap_ptr_is_plausible` (`lambda-data.hpp:283`), so JS property/class readers share one safety net. The `lib_marked.js` corrupt-`type` crash family traced to captured block-scoped lets is fixed in MIR last-closure environment tracking; keep the guard as a defensive invariant check, not as the primary fix for that bug family.
+3. **Catalog construction lookup.** The catalog builds fixed owner/name and ID indexes when the realm's intrinsic bindings are populated. Ordinary property reads never consult those indexes. Further indexing is justified only if release startup profiling shows catalog construction is material.
+4. **TypeMap pointer guard — JR6 migration pending.** The current implementation centralizes a release recovery guard as `typemap_ptr_is_plausible` (`lambda-data.hpp`), but JR6 has resolved the target contract in favor of the hard invariant required by **D3.4.1/D3.4.5**. Internal ordinary property/class readers will replace `if (!plausible) return miss` with a standard C `assert` compiled only in debug builds; release builds will contain no plausibility predicate or recovery branch. Invalid metadata must not become a missing property or `JS_CLASS_NONE`. Null/no-shape and explicitly non-TypeMap exotic storage must be classified before the assertion. The `lib_marked.js` corrupt-`type` family was fixed at its MIR last-closure environment root cause; its focused block-shadow regressions remain the correctness gate. This paragraph records the adopted design only—the source guard remains until JR6 implementation.
 
 ---
 

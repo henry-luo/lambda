@@ -394,7 +394,7 @@ extern "C" Item js_https_agent_createConnection(Item rest_args) {
     if (https_is_object_like(socket)) {
         Item* env = js_alloc_env(1);
         env[0] = callback;
-        Item bridge = js_new_closure((void*)https_agent_secure_connect_bridge, 0, env, 1);
+        Item bridge = js_new_native_closure(https_agent_secure_connect_bridge, 0, env, 1);
         Item on_fn = js_property_get(socket, make_string_item("on"));
         if (is_callable(on_fn)) {
             Item on_args[2] = { make_string_item("secureConnect"), bridge };
@@ -507,7 +507,7 @@ static Item https_parse_url_string(Item url_item) {
 
 static Item https_normalize_options(Item url_or_options, Item maybe_options, Item* callback) {
     Item normalized = url_or_options;
-    if (get_type_id(maybe_options) == LMD_TYPE_FUNC) {
+    if (js_is_callable(maybe_options)) {
         if (callback) *callback = maybe_options;
         maybe_options = make_js_undefined();
     }
@@ -535,9 +535,9 @@ extern "C" Item js_https_Agent(Item options) {
         js_set_prototype(agent, https_agent_prototype);
     }
     js_property_set(agent, make_string_item("getName"),
-                    js_new_function((void*)js_https_agent_getName, 1));
+                    js_new_native_function(js_https_agent_getName));
     js_property_set(agent, make_string_item("createConnection"),
-                    js_new_function((void*)js_https_agent_createConnection, -1));
+                    js_new_native_rest_function(js_https_agent_createConnection));
     return agent;
 }
 
@@ -559,10 +559,10 @@ static Item js_https_server_listeners(Item event_item) {
     if (!https_string_equals(event_item, "request")) return result;
 
     Item listener = js_property_get(self, make_string_item("__https_request_listener__"));
-    if (get_type_id(listener) == LMD_TYPE_FUNC) js_array_push(result, listener);
+    if (js_is_callable(listener)) js_array_push(result, listener);
 
     Item on_request = js_property_get(self, make_string_item("__on_request__"));
-    if (get_type_id(on_request) == LMD_TYPE_FUNC && on_request.item != listener.item) {
+    if (js_is_callable(on_request) && on_request.item != listener.item) {
         js_array_push(result, on_request);
     }
     return result;
@@ -608,13 +608,13 @@ extern "C" Item js_https_createServer(Item options, Item handler) {
                         (Item){.item = b2it(true)});
         // store TLS options for later use in listen()
         js_property_set(server, make_string_item("__tls_options__"), options);
-        if (get_type_id(options) == LMD_TYPE_FUNC) {
+        if (js_is_callable(options)) {
             js_property_set(server, make_string_item("__https_request_listener__"), options);
-        } else if (get_type_id(handler) == LMD_TYPE_FUNC) {
+        } else if (js_is_callable(handler)) {
             js_property_set(server, make_string_item("__https_request_listener__"), handler);
         }
         js_property_set(server, make_string_item("listeners"),
-                        js_new_function((void*)js_https_server_listeners, 1));
+                        js_new_native_function(js_https_server_listeners));
         https_server_apply_alpn_options(server, options);
     }
     return server;
@@ -652,27 +652,27 @@ extern "C" Item js_get_https_namespace(void) {
     https_namespace = js_new_object();
 
     js_property_set(https_namespace, make_string_item("createServer"),
-                    js_new_function((void*)js_https_createServer, 2));
+                    js_new_native_function(js_https_createServer));
     js_property_set(https_namespace, make_string_item("Server"),
-                    js_new_function((void*)js_https_createServer, 2)); // alias
+                    js_new_native_constructor(js_https_createServer)); // alias
     js_property_set(https_namespace, make_string_item("request"),
-                    js_new_function((void*)js_https_request, 3));
+                    js_new_native_function(js_https_request));
     js_property_set(https_namespace, make_string_item("get"),
-                    js_new_function((void*)js_https_get, 3));
+                    js_new_native_function(js_https_get));
 
     // Agent — share HTTP agent storage, but use HTTPS constructor/prototype and
     // TLS-specific cache key formatting.
-    Item agent_ctor = js_new_function((void*)js_https_Agent, 1);
+    Item agent_ctor = js_new_native_constructor(js_https_Agent);
     https_agent_prototype = js_new_object();
     js_class_stamp(https_agent_prototype, JS_CLASS_AGENT);
     js_property_set(https_agent_prototype, make_string_item("constructor"), agent_ctor);
     js_mark_non_enumerable(https_agent_prototype, make_string_item("constructor"));
     js_property_set(https_agent_prototype, make_string_item("getName"),
-                    js_new_function((void*)js_https_agent_getName, 1));
+                    js_new_native_function(js_https_agent_getName));
     js_property_set(https_agent_prototype, make_string_item("destroy"),
-                    js_new_function((void*)js_http_agent_destroy, 0));
+                    js_new_native_function(js_http_agent_destroy));
     js_property_set(https_agent_prototype, make_string_item("createConnection"),
-                    js_new_function((void*)js_https_agent_createConnection, -1));
+                    js_new_native_rest_function(js_https_agent_createConnection));
     js_function_set_prototype(agent_ctor, https_agent_prototype);
     js_property_set(https_namespace, make_string_item("Agent"), agent_ctor);
 

@@ -427,6 +427,10 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_TRANSFORM: return "Transform";
         case JS_CLASS_PASS_THROUGH: return "PassThrough";
         case JS_CLASS_IMMEDIATE: return "Immediate";
+        // Constructable CSS event classes participate in intrinsic prototype
+        // materialization, so their class-name mapping must be total (D6.2.2v2).
+        case JS_CLASS_TRANSITION_EVENT: return "TransitionEvent";
+        case JS_CLASS_ANIMATION_EVENT: return "AnimationEvent";
         default: return NULL;
     }
 }

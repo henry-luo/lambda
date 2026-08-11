@@ -10,20 +10,60 @@
 
 struct DomDocument;
 
+typedef enum RadiantDocumentOperation {
+    RADIANT_DOCUMENT_ASSIGN = 0,
+    RADIANT_DOCUMENT_REPLACE,
+    RADIANT_DOCUMENT_RELOAD,
+    RADIANT_DOCUMENT_FOCUS,
+    RADIANT_DOCUMENT_BLUR,
+    RADIANT_DOCUMENT_HAS_FOCUS,
+    RADIANT_DOCUMENT_OPEN,
+    RADIANT_DOCUMENT_CLOSE,
+    RADIANT_DOCUMENT_WRITE,
+    RADIANT_DOCUMENT_WRITELN,
+    RADIANT_DOCUMENT_ELEMENT_FROM_POINT,
+    RADIANT_DOCUMENT_CREATE_RANGE,
+    RADIANT_DOCUMENT_GET_SELECTION,
+    RADIANT_DOCUMENT_CONTAINS,
+    RADIANT_DOCUMENT_COMPARE_DOCUMENT_POSITION,
+    RADIANT_DOCUMENT_GET_ROOT_NODE,
+    RADIANT_DOCUMENT_GET_ELEMENT_BY_ID,
+    RADIANT_DOCUMENT_GET_ELEMENTS_BY_CLASS_NAME,
+    RADIANT_DOCUMENT_GET_ELEMENTS_BY_TAG_NAME,
+    RADIANT_DOCUMENT_GET_ELEMENTS_BY_NAME,
+    RADIANT_DOCUMENT_QUERY_SELECTOR,
+    RADIANT_DOCUMENT_QUERY_SELECTOR_ALL,
+    RADIANT_DOCUMENT_CREATE_ELEMENT,
+    RADIANT_DOCUMENT_CREATE_ELEMENT_NS,
+    RADIANT_DOCUMENT_CREATE_TEXT_NODE,
+    RADIANT_DOCUMENT_CREATE_DOCUMENT_FRAGMENT,
+    RADIANT_DOCUMENT_CREATE_COMMENT,
+    RADIANT_DOCUMENT_CREATE_PROCESSING_INSTRUCTION,
+    RADIANT_DOCUMENT_IMPORT_NODE,
+    RADIANT_DOCUMENT_NORMALIZE,
+    RADIANT_DOCUMENT_ADOPT_NODE,
+    RADIANT_DOCUMENT_APPEND_CHILD,
+    RADIANT_DOCUMENT_ADD_EVENT_LISTENER,
+    RADIANT_DOCUMENT_REMOVE_EVENT_LISTENER,
+    RADIANT_DOCUMENT_DISPATCH_EVENT,
+    RADIANT_DOCUMENT_CREATE_TREE_WALKER,
+    RADIANT_DOCUMENT_CREATE_EVENT,
+} RadiantDocumentOperation;
+
 RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
 RADIANT_C_API Item radiant_dom_lookup_cached_node(void* dom_elem);
 RADIANT_C_API void* radiant_dom_unwrap_node(Item item);
 RADIANT_C_API bool radiant_dom_is_node(Item item);
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 RADIANT_C_API Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value);
-RADIANT_C_API Item radiant_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
+RADIANT_C_API Item radiant_dom_element_operation(Item elem_item,
+                                                 JubeDomElementOperation operation,
+                                                 Item* args, int argc);
 RADIANT_C_API void radiant_dom_invalidate_document(DomDocument* doc);
 RADIANT_C_API void radiant_dom_reset_wrapper_cache(void);
 
 RADIANT_C_API int radiant_dom_host_get_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_host_set_property(Item object, Item key, Item value, Item* out);
-RADIANT_C_API int radiant_dom_host_call_method(Item object, Item method_name,
-                                               Item* args, int argc, Item* out);
 RADIANT_C_API int radiant_dom_host_has_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_host_delete_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_host_own_property_descriptor(Item object, Item key, Item* out);
@@ -39,8 +79,6 @@ RADIANT_C_API int radiant_dom_node_prototype(Item object, Item* out);
 
 RADIANT_C_API int radiant_dom_document_host_get_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_document_host_set_property(Item object, Item key, Item value, Item* out);
-RADIANT_C_API int radiant_dom_document_host_call_method(Item object, Item method_name,
-                                                        Item* args, int argc, Item* out);
 RADIANT_C_API int radiant_dom_document_host_has_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_document_host_delete_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_document_host_own_property_descriptor(Item object, Item key, Item* out);
@@ -49,15 +87,14 @@ RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
 RADIANT_C_API int radiant_dom_document_prototype(Item object, Item* out);
 
 RADIANT_C_API int radiant_dom_document_get_property(Item prop_name, Item* out);
-RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int argc, Item* out);
+RADIANT_C_API int radiant_dom_document_operation(Item object,
+                                                 RadiantDocumentOperation operation,
+                                                 Item* args, int argc, Item* out);
 RADIANT_C_API Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 RADIANT_C_API Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 RADIANT_C_API Item radiant_dom_window_dispatch_event(Item event_item);
 RADIANT_C_API int radiant_dom_window_get_property(Item object, Item key, Item* out);
 RADIANT_C_API bool radiant_dom_has_committed_geometry_snapshot(DomDocument* doc);
-RADIANT_C_API int radiant_dom_cssom_method(Item obj, Item method_name, Item* args,
-                                           int argc, Item* out);
-
 RADIANT_C_API const void* radiant_dom_node_host_type(void);
 RADIANT_C_API const void* radiant_dom_range_host_type(void);
 RADIANT_C_API const void* radiant_dom_selection_host_type(void);

@@ -353,16 +353,17 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
         int arg_count, MIR_reg_t* arg_regs, bool discard_result = false);
 MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
+MIR_reg_t jm_call_constructor_body_into(JsMirTranspiler* mt, MIR_op_t func,
+        MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count,
+        MIR_op_t new_target);
+MIR_reg_t jm_construct_value_into(JsMirTranspiler* mt, MIR_op_t callee,
+        MIR_op_t args, MIR_op_t arg_count, MIR_op_t new_target);
 MIR_reg_t jm_apply_function_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_op_t this_value, MIR_op_t args);
 MIR_reg_t jm_super_call_class_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
 MIR_reg_t jm_super_apply_class_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_op_t this_value, MIR_op_t args);
-MIR_reg_t jm_array_method_direct_into(JsMirTranspiler* mt, MIR_op_t array,
-        MIR_op_t method_name, MIR_op_t args, MIR_op_t arg_count);
-MIR_reg_t jm_map_method_into(JsMirTranspiler* mt, MIR_op_t object,
-        MIR_op_t method_name, MIR_op_t args, MIR_op_t arg_count);
 MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
         int arg_count, MIR_reg_t* arg_regs);
 MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
@@ -377,6 +378,8 @@ MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_4(&(mt)->em, fn, __VA_ARGS__, true))
 #define jm_call_void_5(mt, fn, ...) \
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_5(&(mt)->em, fn, __VA_ARGS__, true))
+#define jm_call_void_6(mt, fn, ...) \
+    (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_6(&(mt)->em, fn, __VA_ARGS__, true))
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt);
@@ -390,6 +393,7 @@ MIR_reg_t jm_box_int_double(JsMirTranspiler* mt, MIR_reg_t d_reg);
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg);
 MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
 MIR_reg_t jm_box_string(JsMirTranspiler* mt, MIR_reg_t ptr_reg);
+MIR_reg_t jm_string_literal_chars(JsMirTranspiler* mt, const char* str, int len);
 uint32_t jm_module_name_index(JsMirTranspiler* mt, const char* chars, uint32_t length);
 uint32_t jm_module_name_append(JsMirTranspiler* mt, const char* chars, uint32_t length);
 MIR_reg_t jm_module_name_id(JsMirTranspiler* mt, const char* chars, uint32_t length);
@@ -439,8 +443,6 @@ MIR_reg_t jm_ensure_native_int(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_ty
 MIR_reg_t jm_ensure_native_float(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_type);
 MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg, TypeId type_id);
 MIR_reg_t jm_ensure_boxed(JsMirTranspiler* mt, MIR_reg_t reg);
-MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
-                                            String* method, TypeId target_type);;
 MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, int ta_type,
                                                MIR_reg_t h_data = 0, MIR_reg_t h_len = 0);;
@@ -549,13 +551,6 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
 void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR_reg_t src);
 void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR_reg_t src);
 MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn);
-bool jm_is_console_log(JsCallNode* call);
-bool jm_is_math_call(JsCallNode* call);
-MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* method);
-TypeId jm_math_return_type(String* method, JsMirTranspiler* mt, JsAstNode* arg0);
-MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
-                                            String* method, TypeId target_type);
-String* jm_get_math_method(JsCallNode* call);
 void jm_readback_closure_env(JsMirTranspiler* mt);
 bool jm_resolve_transitive_capture_env(JsMirVarEntry* var,
     MIR_reg_t* env_reg, int* env_slot);
@@ -609,7 +604,8 @@ void jm_scope_env_reload_vars(JsMirTranspiler* mt);
 void jm_env_reload_shared_captures(JsMirTranspiler* mt);
 void jm_emit_error_lane_propagate_check(JsMirTranspiler* mt);
 void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf);
-void jm_emit_class_static_block(JsMirTranspiler* mt, JsClassEntry* ce, JsAstNode* block);
+void jm_emit_class_static_block(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+    JsClassEntry* ce, JsAstNode* block);
 void jm_emit_class_static_initializers(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce,
     MIR_reg_t ctor_super_val);
 typedef struct JsMirClassSetup {
@@ -703,6 +699,7 @@ Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
                                       const JsPreambleState* preamble,
                                       JsPreambleState* out_state);
 Item execute_compiled_js_in_current_realm(Runtime* runtime,
+                                          const JsPreambleState* base_preamble,
                                           const JsPreambleState* compiled_state);
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble, uint64_t* result_home);

@@ -1,0 +1,14 @@
+left:right
+true
+true
+r:c
+true
+true
+n:m
+true
+p:x
+true
+true
+true
+stop
+true

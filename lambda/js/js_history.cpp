@@ -113,7 +113,7 @@ static Item js_history_drain_events(void) {
 
     if (js_history_event_tasks->length > 0) {
         js_history_drain_scheduled = true;
-        Item callback = js_new_function((void*)js_history_drain_events, 0);
+        Item callback = js_new_native_function(js_history_drain_events);
         js_setTimeout(callback, (Item){.item = i2it(0)});
     }
     return make_js_undefined();
@@ -145,7 +145,7 @@ static bool js_history_queue_events(const RadiantHistoryTraversal* traversal,
 
     if (!js_history_drain_scheduled) {
         js_history_drain_scheduled = true;
-        Item callback = js_new_function((void*)js_history_drain_events, 0);
+        Item callback = js_new_native_function(js_history_drain_events);
         js_setTimeout(callback, (Item){.item = i2it(0)});
     }
     return true;
@@ -237,22 +237,22 @@ extern "C" void js_history_install_globals(void) {
 
     Item history = js_new_object();
     js_property_set(history, make_string_item("pushState"),
-                    js_new_function((void*)js_history_push, 3));
+                    js_new_native_function(js_history_push));
     js_property_set(history, make_string_item("replaceState"),
-                    js_new_function((void*)js_history_replace, 3));
+                    js_new_native_function(js_history_replace));
     js_property_set(history, make_string_item("back"),
-                    js_new_function((void*)js_history_back, 0));
+                    js_new_native_function(js_history_back));
     js_property_set(history, make_string_item("forward"),
-                    js_new_function((void*)js_history_forward, 0));
+                    js_new_native_function(js_history_forward));
     js_property_set(history, make_string_item("go"),
-                    js_new_function((void*)js_history_go, 1));
+                    js_new_native_function(js_history_go));
     js_property_set(history, make_string_item("scrollRestoration"),
                     make_string_item(radiant_history_scroll_restoration(document)));
     js_property_set(global, make_string_item("history"), history);
     js_property_set(global, make_string_item("focus"),
-                    js_new_function((void*)js_history_window_noop, 0));
+                    js_new_native_function(js_history_window_noop));
     js_property_set(global, make_string_item("blur"),
-                    js_new_function((void*)js_history_window_noop, 0));
+                    js_new_native_function(js_history_window_noop));
     js_history_refresh_object();
 }
 

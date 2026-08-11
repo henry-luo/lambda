@@ -660,7 +660,7 @@ extern "C" Item js_crypto_randomBytes(Item size_item, Item callback_item) {
     JS_RETURN_IF_ERROR(crypto_size_to_int(size_item, &size));
 
     bool has_callback = !crypto_item_is_undefined(callback_item);
-    if (has_callback && get_type_id(callback_item) != LMD_TYPE_FUNC) {
+    if (has_callback && !js_is_callable(callback_item)) {
         return js_throw_invalid_arg_type("callback", "Function", callback_item);
     }
 
@@ -815,16 +815,16 @@ extern "C" Item js_crypto_randomFill(Item target_item, Item offset_item, Item si
     Item offset = offset_item;
     Item size = size_item;
 
-    if (get_type_id(offset_item) == LMD_TYPE_FUNC) {
+    if (js_is_callable(offset_item)) {
         callback = offset_item;
         offset = make_js_undefined_crypto();
         size = make_js_undefined_crypto();
-    } else if (get_type_id(size_item) == LMD_TYPE_FUNC) {
+    } else if (js_is_callable(size_item)) {
         callback = size_item;
         size = make_js_undefined_crypto();
     }
 
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "Function", callback);
     }
 
@@ -1080,7 +1080,7 @@ extern "C" Item js_crypto_randomInt(Item min_item, Item max_item, Item callback_
     Item callback = callback_item;
     bool one_arg_form = true;
 
-    if (get_type_id(max_item) == LMD_TYPE_FUNC && crypto_item_is_undefined(callback_item)) {
+    if (js_is_callable(max_item) && crypto_item_is_undefined(callback_item)) {
         callback = max_item;
     } else if (!crypto_item_is_undefined(max_item)) {
         min_arg = min_item;
@@ -1089,7 +1089,7 @@ extern "C" Item js_crypto_randomInt(Item min_item, Item max_item, Item callback_
     }
 
     bool has_callback = !crypto_item_is_undefined(callback);
-    if (has_callback && get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (has_callback && !js_is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "Function", callback);
     }
 
@@ -1568,13 +1568,13 @@ extern "C" Item js_crypto_createHmac(Item alg_item, Item key_item) {
     js_property_set(obj, make_string_item_crypto("__hmac_ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
     js_property_set(obj, make_string_item_crypto("update"),
-                    js_new_function((void*)js_hmac_update, 1));
+                    js_new_native_function(js_hmac_update));
     js_property_set(obj, make_string_item_crypto("digest"),
-                    js_new_function((void*)js_hmac_digest, 1));
+                    js_new_native_function(js_hmac_digest));
     js_property_set(obj, make_string_item_crypto("end"),
-                    js_new_function((void*)js_hmac_end, 1));
+                    js_new_native_function(js_hmac_end));
     js_property_set(obj, make_string_item_crypto("read"),
-                    js_new_function((void*)js_hmac_read, 0));
+                    js_new_native_function(js_hmac_read));
     return obj;
 }
 
@@ -1752,7 +1752,7 @@ extern "C" Item js_hash_end(Item data_item) {
     }
 
     Item data_cb = js_property_get(self, make_string_item_crypto("__hash_stream_data_cb__"));
-    if (get_type_id(data_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(data_cb)) {
         Item args[1] = {emit_value};
         JS_ASSIGN_OR_RETURN(callback_result, js_call_function(data_cb, self, args, 1));
     }
@@ -1800,7 +1800,7 @@ extern "C" Item js_hash_copy(Item options_item) {
 
 extern "C" Item js_hash_on(Item event_item, Item listener_item) {
     Item self = js_get_current_this();
-    if (get_type_id(event_item) == LMD_TYPE_STRING && get_type_id(listener_item) == LMD_TYPE_FUNC) {
+    if (get_type_id(event_item) == LMD_TYPE_STRING && js_is_callable(listener_item)) {
         String* event = it2s(event_item);
         if (event->len == 4 && memcmp(event->chars, "data", 4) == 0) {
             js_property_set(self, make_string_item_crypto("__hash_stream_data_cb__"), listener_item);
@@ -1824,23 +1824,23 @@ static Item js_hash_make_object(HashCtx* ctx) {
     js_property_set(obj, make_string_item_crypto("__hash_ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
     js_property_set(obj, make_string_item_crypto("update"),
-                    js_new_function((void*)js_hash_update, 2));
+                    js_new_native_function(js_hash_update));
     js_property_set(obj, make_string_item_crypto("write"),
-                    js_new_function((void*)js_hash_update, 2));
+                    js_new_native_function(js_hash_update));
     js_property_set(obj, make_string_item_crypto("digest"),
-                    js_new_function((void*)js_hash_digest, 1));
+                    js_new_native_function(js_hash_digest));
     js_property_set(obj, make_string_item_crypto("end"),
-                    js_new_function((void*)js_hash_end, 1));
+                    js_new_native_function(js_hash_end));
     js_property_set(obj, make_string_item_crypto("read"),
-                    js_new_function((void*)js_hash_read, 0));
+                    js_new_native_function(js_hash_read));
     js_property_set(obj, make_string_item_crypto("copy"),
-                    js_new_function((void*)js_hash_copy, 1));
+                    js_new_native_function(js_hash_copy));
     js_property_set(obj, make_string_item_crypto("on"),
-                    js_new_function((void*)js_hash_on, 2));
+                    js_new_native_function(js_hash_on));
     js_property_set(obj, make_string_item_crypto("once"),
-                    js_new_function((void*)js_hash_on, 2));
+                    js_new_native_function(js_hash_on));
     js_property_set(obj, make_string_item_crypto("setEncoding"),
-                    js_new_function((void*)js_hash_setEncoding, 1));
+                    js_new_native_function(js_hash_setEncoding));
     return obj;
 }
 
@@ -2691,15 +2691,15 @@ static Item js_crypto_create_sign_verify(Item alg_item, bool verify_mode) {
     js_property_set(obj, make_string_item_crypto("__sign_verify_ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
     js_property_set(obj, make_string_item_crypto("update"),
-                    js_new_function((void*)js_sign_verify_update, 2));
+                    js_new_native_function(js_sign_verify_update));
     js_property_set(obj, make_string_item_crypto("write"),
-                    js_new_function((void*)js_sign_verify_update, 2));
+                    js_new_native_function(js_sign_verify_update));
     js_property_set(obj, make_string_item_crypto("end"),
-                    js_new_function((void*)js_sign_verify_end, 1));
+                    js_new_native_function(js_sign_verify_end));
     js_property_set(obj, make_string_item_crypto("sign"),
-                    js_new_function((void*)js_sign_verify_sign, 2));
+                    js_new_native_function(js_sign_verify_sign));
     js_property_set(obj, make_string_item_crypto("verify"),
-                    js_new_function((void*)js_sign_verify_verify, 3));
+                    js_new_native_function(js_sign_verify_verify));
     return obj;
 }
 
@@ -2801,7 +2801,7 @@ static Item js_crypto_verify_eddsa(Item data_item, Item key_item, Item signature
 
 extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Item callback_item) {
     bool has_callback = !crypto_item_is_undefined(callback_item);
-    if (has_callback && get_type_id(callback_item) != LMD_TYPE_FUNC) {
+    if (has_callback && !js_is_callable(callback_item)) {
         return js_throw_invalid_arg_type("callback", "Function", callback_item);
     }
 
@@ -2811,7 +2811,7 @@ extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Ite
             Item* env = js_alloc_env(2);
             env[0] = callback_item;
             env[1] = result;
-            Item fn = js_new_closure((void*)js_crypto_sign_verify_emit, 0, env, 2);
+            Item fn = js_new_native_closure(js_crypto_sign_verify_emit, 0, env, 2);
             js_next_tick_enqueue(fn);
             return make_js_undefined_crypto();
         }
@@ -2832,7 +2832,7 @@ extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Ite
         Item* env = js_alloc_env(2);
         env[0] = callback_item;
         env[1] = result;
-        Item fn = js_new_closure((void*)js_crypto_sign_verify_emit, 0, env, 2);
+        Item fn = js_new_native_closure(js_crypto_sign_verify_emit, 0, env, 2);
         js_next_tick_enqueue(fn);
         return make_js_undefined_crypto();
     }
@@ -2842,7 +2842,7 @@ extern "C" Item js_crypto_sign(Item alg_item, Item data_item, Item key_item, Ite
 extern "C" Item js_crypto_verify(Item alg_item, Item data_item, Item key_item,
                                   Item signature_item, Item callback_item) {
     bool has_callback = !crypto_item_is_undefined(callback_item);
-    if (has_callback && get_type_id(callback_item) != LMD_TYPE_FUNC) {
+    if (has_callback && !js_is_callable(callback_item)) {
         return js_throw_invalid_arg_type("callback", "Function", callback_item);
     }
 
@@ -2852,7 +2852,7 @@ extern "C" Item js_crypto_verify(Item alg_item, Item data_item, Item key_item,
             Item* env = js_alloc_env(2);
             env[0] = callback_item;
             env[1] = result;
-            Item fn = js_new_closure((void*)js_crypto_sign_verify_emit, 0, env, 2);
+            Item fn = js_new_native_closure(js_crypto_sign_verify_emit, 0, env, 2);
             js_next_tick_enqueue(fn);
             return make_js_undefined_crypto();
         }
@@ -2873,7 +2873,7 @@ extern "C" Item js_crypto_verify(Item alg_item, Item data_item, Item key_item,
         Item* env = js_alloc_env(2);
         env[0] = callback_item;
         env[1] = result;
-        Item fn = js_new_closure((void*)js_crypto_sign_verify_emit, 0, env, 2);
+        Item fn = js_new_native_closure(js_crypto_sign_verify_emit, 0, env, 2);
         js_next_tick_enqueue(fn);
         return make_js_undefined_crypto();
     }
@@ -3490,21 +3490,21 @@ static Item crypto_create_dh_object(const uint8_t* prime, int prime_len,
     js_property_set(obj, make_string_item_crypto("verifyError"),
         (Item){.item = i2it(prime_len <= 1 ? 1 : 0)});
     js_property_set(obj, make_string_item_crypto("getPrime"),
-        js_new_function((void*)js_dh_getPrime, 1));
+        js_new_native_function(js_dh_getPrime));
     js_property_set(obj, make_string_item_crypto("getGenerator"),
-        js_new_function((void*)js_dh_getGenerator, 1));
+        js_new_native_function(js_dh_getGenerator));
     js_property_set(obj, make_string_item_crypto("generateKeys"),
-        js_new_function((void*)js_dh_generateKeys, 1));
+        js_new_native_function(js_dh_generateKeys));
     js_property_set(obj, make_string_item_crypto("computeSecret"),
-        js_new_function((void*)js_dh_computeSecret, 3));
+        js_new_native_function(js_dh_computeSecret));
     js_property_set(obj, make_string_item_crypto("getPublicKey"),
-        js_new_function((void*)js_dh_getPublicKey, 1));
+        js_new_native_function(js_dh_getPublicKey));
     js_property_set(obj, make_string_item_crypto("getPrivateKey"),
-        js_new_function((void*)js_dh_getPrivateKey, 1));
+        js_new_native_function(js_dh_getPrivateKey));
     js_property_set(obj, make_string_item_crypto("setPublicKey"),
-        js_new_function((void*)js_dh_setPublicKey, 2));
+        js_new_native_function(js_dh_setPublicKey));
     js_property_set(obj, make_string_item_crypto("setPrivateKey"),
-        js_new_function((void*)js_dh_setPrivateKey, 2));
+        js_new_native_function(js_dh_setPrivateKey));
     return obj;
 }
 
@@ -4084,17 +4084,17 @@ extern "C" Item js_crypto_createECDH(Item curve_item) {
     js_property_set(obj, make_string_item_crypto("__ecdh_private__"), ItemNull);
     js_property_set(obj, make_string_item_crypto("__ecdh_public__"), ItemNull);
     js_property_set(obj, make_string_item_crypto("generateKeys"),
-        js_new_function((void*)js_ecdh_generateKeys, 2));
+        js_new_native_function(js_ecdh_generateKeys));
     js_property_set(obj, make_string_item_crypto("computeSecret"),
-        js_new_function((void*)js_ecdh_computeSecret, 3));
+        js_new_native_function(js_ecdh_computeSecret));
     js_property_set(obj, make_string_item_crypto("getPublicKey"),
-        js_new_function((void*)js_ecdh_getPublicKey, 2));
+        js_new_native_function(js_ecdh_getPublicKey));
     js_property_set(obj, make_string_item_crypto("getPrivateKey"),
-        js_new_function((void*)js_ecdh_getPrivateKey, 1));
+        js_new_native_function(js_ecdh_getPrivateKey));
     js_property_set(obj, make_string_item_crypto("setPrivateKey"),
-        js_new_function((void*)js_ecdh_setPrivateKey, 2));
+        js_new_native_function(js_ecdh_setPrivateKey));
     js_property_set(obj, make_string_item_crypto("setPublicKey"),
-        js_new_function((void*)js_ecdh_setPublicKey, 2));
+        js_new_native_function(js_ecdh_setPublicKey));
     return obj;
 }
 
@@ -6133,7 +6133,7 @@ static Item crypto_secret_key_object_from_bytes(const uint8_t* key, int key_len)
     js_property_set(obj, make_string_item_crypto("type"), make_string_item_crypto("secret"));
     js_property_set(obj, make_string_item_crypto("symmetricKeySize"), (Item){.item = i2it(key_len)});
     Item export_key = make_string_item_crypto("export");
-    js_property_set(obj, export_key, js_new_function((void*)js_crypto_secretKeyExport, 1));
+    js_property_set(obj, export_key, js_new_native_function(js_crypto_secretKeyExport));
     // KeyObject methods are shared API surface, not structural key material;
     // enumerable per-instance functions make equal keys compare by pointer.
     js_mark_non_enumerable(obj, export_key);
@@ -6348,7 +6348,7 @@ static Item crypto_asymmetric_key_object_from_bytes(const uint8_t* key, int key_
         }
     }
     Item export_key = make_string_item_crypto("export");
-    js_property_set(obj, export_key, js_new_function((void*)js_crypto_asymmetricKeyExport, 1));
+    js_property_set(obj, export_key, js_new_native_function(js_crypto_asymmetricKeyExport));
     // KeyObject methods are shared API surface, not structural key material;
     // enumerable per-instance functions make equal keys compare by pointer.
     js_mark_non_enumerable(obj, export_key);
@@ -6850,7 +6850,7 @@ static Item js_crypto_generateKeyPair_emit(Item env_item) {
 }
 
 extern "C" Item js_crypto_generateKeyPair(Item type_item, Item options_item, Item callback_item) {
-    if (get_type_id(callback_item) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback_item)) {
         return js_throw_invalid_arg_type("callback", "Function", callback_item);
     }
 
@@ -6863,7 +6863,7 @@ extern "C" Item js_crypto_generateKeyPair(Item type_item, Item options_item, Ite
     env[0] = callback_item;
     env[1] = public_key;
     env[2] = private_key;
-    Item fn = js_new_closure((void*)js_crypto_generateKeyPair_emit, 0, env, 3);
+    Item fn = js_new_native_closure(js_crypto_generateKeyPair_emit, 0, env, 3);
     js_next_tick_enqueue(fn);
     return make_js_undefined_crypto();
 }
@@ -6872,14 +6872,14 @@ extern "C" Item js_crypto_generateKey(Item type_item, Item options_item, Item ca
     JS_ASSIGN_OR_RETURN(result, js_crypto_generateKeySync(type_item, options_item));
     if (result.item == ITEM_NULL) return ItemNull;
 
-    if (get_type_id(callback_item) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback_item)) {
         return js_throw_invalid_arg_type("callback", "Function", callback_item);
     }
 
     Item* env = js_alloc_env(2);
     env[0] = callback_item;
     env[1] = result;
-    Item fn = js_new_closure((void*)js_crypto_generateKey_emit, 0, env, 2);
+    Item fn = js_new_native_closure(js_crypto_generateKey_emit, 0, env, 2);
     js_next_tick_enqueue(fn);
     return make_js_undefined_crypto();
 }
@@ -7264,23 +7264,23 @@ static Item create_cipher_object(const char* alg, bool encrypting,
     js_property_set(obj, make_string_item_crypto("__cipher_ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
     js_property_set(obj, make_string_item_crypto("update"),
-                    js_new_function((void*)js_cipher_update, 3));
+                    js_new_native_function(js_cipher_update));
     js_property_set(obj, make_string_item_crypto("final"),
-                    js_new_function((void*)js_cipher_final, 1));
+                    js_new_native_function(js_cipher_final));
     js_property_set(obj, make_string_item_crypto("end"),
-                    js_new_function((void*)js_cipher_end, 1));
+                    js_new_native_function(js_cipher_end));
     js_property_set(obj, make_string_item_crypto("setAutoPadding"),
-                    js_new_function((void*)js_cipher_setAutoPadding, 1));
+                    js_new_native_function(js_cipher_setAutoPadding));
     js_property_set(obj, make_string_item_crypto("read"),
-                    js_new_function((void*)js_cipher_read, 1));
+                    js_new_native_function(js_cipher_read));
     js_property_set(obj, make_string_item_crypto("readableLength"),
                     (Item){.item = i2it(0)});
     js_property_set(obj, make_string_item_crypto("getAuthTag"),
-                    js_new_function((void*)js_cipher_getAuthTag, 0));
+                    js_new_native_function(js_cipher_getAuthTag));
     js_property_set(obj, make_string_item_crypto("setAuthTag"),
-                    js_new_function((void*)js_cipher_setAuthTag, 1));
+                    js_new_native_function(js_cipher_setAuthTag));
     js_property_set(obj, make_string_item_crypto("setAAD"),
-                    js_new_function((void*)js_cipher_setAAD, 1));
+                    js_new_native_function(js_cipher_setAAD));
     return obj;
 }
 
@@ -7472,13 +7472,13 @@ extern "C" Item js_crypto_pbkdf2Sync(Item pass_item, Item salt_item, Item iter_i
 // async variant calls callback with (err, derivedKey)
 extern "C" Item js_crypto_pbkdf2(Item pass_item, Item salt_item, Item iter_item,
                                   Item keylen_item, Item digest_item, Item callback_item) {
-    if (get_type_id(digest_item) == LMD_TYPE_FUNC && crypto_item_is_undefined(callback_item)) {
+    if (js_is_callable(digest_item) && crypto_item_is_undefined(callback_item)) {
         return js_throw_invalid_arg_type("digest", "string", make_js_undefined_crypto());
     }
     if (get_type_id(digest_item) != LMD_TYPE_STRING) {
         return js_throw_invalid_arg_type("digest", "string", digest_item);
     }
-    if (get_type_id(callback_item) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback_item)) {
         return js_throw_invalid_arg_type("callback", "Function", callback_item);
     }
 
@@ -7649,14 +7649,14 @@ extern "C" Item js_crypto_hkdf(Item digest_item, Item ikm_item, Item salt_item,
     JS_ASSIGN_OR_RETURN(result, js_crypto_hkdfSync(digest_item, ikm_item, salt_item, info_item, length_item));
     if (result.item == ITEM_NULL) return ItemNull;
 
-    if (get_type_id(callback_item) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback_item)) {
         return js_throw_invalid_arg_type("callback", "Function", callback_item);
     }
 
     Item* env = js_alloc_env(2);
     env[0] = callback_item;
     env[1] = result;
-    Item fn = js_new_closure((void*)js_crypto_hkdf_emit, 0, env, 2);
+    Item fn = js_new_native_closure(js_crypto_hkdf_emit, 0, env, 2);
     js_next_tick_enqueue(fn);
     return make_js_undefined_crypto();
 }
@@ -8259,19 +8259,23 @@ extern "C" Item js_subtle_decrypt(Item alg_item, Item key_item, Item data_item) 
 // crypto Module Namespace
 // ============================================================================
 
-static void crypto_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+template <typename Target>
+static void crypto_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
     RootFrame roots(3);
     Rooted<Item> ns_root(roots, ns);
     Rooted<Item> key_root(roots, make_string_item_crypto(name));
-    Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
+    Rooted<Item> fn_root(roots, js_new_native_function(target, adapter_arity));
     js_property_set(ns_root.get(), key_root.get(), fn_root.get());
 }
 
-static void crypto_set_hidden_method(Item ns, const char* name, void* func_ptr, int param_count) {
+template <typename Target>
+static void crypto_set_hidden_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
     RootFrame roots(3);
     Rooted<Item> ns_root(roots, ns);
     Rooted<Item> key_root(roots, make_string_item_crypto(name));
-    Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
+    Rooted<Item> fn_root(roots, js_new_native_function(target, adapter_arity));
     js_property_set(ns_root.get(), key_root.get(), fn_root.get());
     js_mark_non_enumerable(ns_root.get(), key_root.get());
 }
@@ -8294,58 +8298,58 @@ extern "C" Item js_get_crypto_namespace(void) {
     Rooted<Item> default_key_root(roots, ItemNull);
     Rooted<Item> temporary_root(roots, ItemNull);
 
-    crypto_set_method(crypto_namespace, "createHash",         (void*)js_crypto_createHash, 2);
-    crypto_set_method(crypto_namespace, "hash",               (void*)js_crypto_hash, 3);
-    crypto_set_method(crypto_namespace, "createHmac",         (void*)js_crypto_createHmac, 2);
-    crypto_set_method(crypto_namespace, "createSign",         (void*)js_crypto_createSign, 1);
-    crypto_set_method(crypto_namespace, "createVerify",       (void*)js_crypto_createVerify, 1);
-    crypto_set_method(crypto_namespace, "sign",               (void*)js_crypto_sign, 4);
-    crypto_set_method(crypto_namespace, "verify",             (void*)js_crypto_verify, 5);
-    crypto_set_method(crypto_namespace, "publicEncrypt",      (void*)js_crypto_publicEncrypt, 2);
-    crypto_set_method(crypto_namespace, "privateDecrypt",     (void*)js_crypto_privateDecrypt, 2);
-    crypto_set_method(crypto_namespace, "createCipheriv",     (void*)js_crypto_createCipheriv, 3);
-    crypto_set_method(crypto_namespace, "createDecipheriv",   (void*)js_crypto_createDecipheriv, 3);
-    crypto_set_method(crypto_namespace, "argon2",             (void*)js_crypto_argon2_unsupported, 0);
-    crypto_set_method(crypto_namespace, "argon2Sync",         (void*)js_crypto_argon2_unsupported, 0);
-    crypto_set_method(crypto_namespace, "randomBytes",        (void*)js_crypto_randomBytes, 2);
-    crypto_set_hidden_method(crypto_namespace, "pseudoRandomBytes", (void*)js_crypto_pseudoRandomBytes, 2);
-    crypto_set_hidden_method(crypto_namespace, "prng",              (void*)js_crypto_randomBytes, 2);
-    crypto_set_hidden_method(crypto_namespace, "rng",               (void*)js_crypto_randomBytes, 2);
-    crypto_set_method(crypto_namespace, "randomFillSync",     (void*)js_crypto_randomFillSync, 3);
-    crypto_set_method(crypto_namespace, "randomFill",         (void*)js_crypto_randomFill, 4);
-    crypto_set_method(crypto_namespace, "getRandomValues",    (void*)js_crypto_getRandomValues, 1);
-    crypto_set_method(crypto_namespace, "randomUUID",         (void*)js_crypto_randomUUID, 1);
-    crypto_set_method(crypto_namespace, "randomUUIDv7",       (void*)js_crypto_randomUUIDv7, 1);
-    crypto_set_method(crypto_namespace, "randomInt",          (void*)js_crypto_randomInt, 3);
-    crypto_set_method(crypto_namespace, "getFips",            (void*)js_crypto_getFips, 0);
-    crypto_set_method(crypto_namespace, "getHashes",          (void*)js_crypto_getHashes, 0);
-    crypto_set_method(crypto_namespace, "getCurves",          (void*)js_crypto_getCurves, 0);
-    crypto_set_method(crypto_namespace, "getCiphers",         (void*)js_crypto_getCiphers, 0);
-    crypto_set_method(crypto_namespace, "getCipherInfo",      (void*)js_crypto_getCipherInfo, 2);
-    crypto_set_method(crypto_namespace, "createDiffieHellman", (void*)js_crypto_createDiffieHellman, 4);
-    crypto_set_method(crypto_namespace, "createDiffieHellmanGroup", (void*)js_crypto_createDiffieHellmanGroup, 1);
-    crypto_set_method(crypto_namespace, "getDiffieHellman",   (void*)js_crypto_getDiffieHellman, 1);
-    crypto_set_method(crypto_namespace, "createECDH",         (void*)js_crypto_createECDH, 1);
-    crypto_set_method(crypto_namespace, "timingSafeEqual",    (void*)js_crypto_timingSafeEqual, 2);
-    crypto_set_method(crypto_namespace, "pbkdf2Sync",         (void*)js_crypto_pbkdf2Sync, 5);
-    crypto_set_method(crypto_namespace, "pbkdf2",             (void*)js_crypto_pbkdf2, 6);
-    crypto_set_method(crypto_namespace, "hkdfSync",           (void*)js_crypto_hkdfSync, 5);
-    crypto_set_method(crypto_namespace, "hkdf",               (void*)js_crypto_hkdf, 6);
-    crypto_set_method(crypto_namespace, "scryptSync",         (void*)js_crypto_scryptSync, 4);
-    crypto_set_method(crypto_namespace, "createSecretKey",    (void*)js_crypto_createSecretKey, 2);
-    crypto_set_method(crypto_namespace, "createPrivateKey",   (void*)js_crypto_createPrivateKey, 1);
-    crypto_set_method(crypto_namespace, "createPublicKey",    (void*)js_crypto_createPublicKey, 1);
-    crypto_set_method(crypto_namespace, "generateKeySync",    (void*)js_crypto_generateKeySync, 2);
-    crypto_set_method(crypto_namespace, "generateKey",        (void*)js_crypto_generateKey, 3);
-    crypto_set_method(crypto_namespace, "generateKeyPair",    (void*)js_crypto_generateKeyPair, 3);
-    crypto_set_method(crypto_namespace, "generateKeyPairSync", (void*)js_crypto_generateKeyPairSync, 2);
+    crypto_set_method(crypto_namespace, "createHash",         js_crypto_createHash, 2);
+    crypto_set_method(crypto_namespace, "hash",               js_crypto_hash, 3);
+    crypto_set_method(crypto_namespace, "createHmac",         js_crypto_createHmac, 2);
+    crypto_set_method(crypto_namespace, "createSign",         js_crypto_createSign, 1);
+    crypto_set_method(crypto_namespace, "createVerify",       js_crypto_createVerify, 1);
+    crypto_set_method(crypto_namespace, "sign",               js_crypto_sign, 4);
+    crypto_set_method(crypto_namespace, "verify",             js_crypto_verify, 5);
+    crypto_set_method(crypto_namespace, "publicEncrypt",      js_crypto_publicEncrypt, 2);
+    crypto_set_method(crypto_namespace, "privateDecrypt",     js_crypto_privateDecrypt, 2);
+    crypto_set_method(crypto_namespace, "createCipheriv",     js_crypto_createCipheriv, 3);
+    crypto_set_method(crypto_namespace, "createDecipheriv",   js_crypto_createDecipheriv, 3);
+    crypto_set_method(crypto_namespace, "argon2",             js_crypto_argon2_unsupported, 0);
+    crypto_set_method(crypto_namespace, "argon2Sync",         js_crypto_argon2_unsupported, 0);
+    crypto_set_method(crypto_namespace, "randomBytes",        js_crypto_randomBytes, 2);
+    crypto_set_hidden_method(crypto_namespace, "pseudoRandomBytes", js_crypto_pseudoRandomBytes, 2);
+    crypto_set_hidden_method(crypto_namespace, "prng",              js_crypto_randomBytes, 2);
+    crypto_set_hidden_method(crypto_namespace, "rng",               js_crypto_randomBytes, 2);
+    crypto_set_method(crypto_namespace, "randomFillSync",     js_crypto_randomFillSync, 3);
+    crypto_set_method(crypto_namespace, "randomFill",         js_crypto_randomFill, 4);
+    crypto_set_method(crypto_namespace, "getRandomValues",    js_crypto_getRandomValues, 1);
+    crypto_set_method(crypto_namespace, "randomUUID",         js_crypto_randomUUID, 1);
+    crypto_set_method(crypto_namespace, "randomUUIDv7",       js_crypto_randomUUIDv7, 1);
+    crypto_set_method(crypto_namespace, "randomInt",          js_crypto_randomInt, 3);
+    crypto_set_method(crypto_namespace, "getFips",            js_crypto_getFips, 0);
+    crypto_set_method(crypto_namespace, "getHashes",          js_crypto_getHashes, 0);
+    crypto_set_method(crypto_namespace, "getCurves",          js_crypto_getCurves, 0);
+    crypto_set_method(crypto_namespace, "getCiphers",         js_crypto_getCiphers, 0);
+    crypto_set_method(crypto_namespace, "getCipherInfo",      js_crypto_getCipherInfo, 2);
+    crypto_set_method(crypto_namespace, "createDiffieHellman", js_crypto_createDiffieHellman, 4);
+    crypto_set_method(crypto_namespace, "createDiffieHellmanGroup", js_crypto_createDiffieHellmanGroup, 1);
+    crypto_set_method(crypto_namespace, "getDiffieHellman",   js_crypto_getDiffieHellman, 1);
+    crypto_set_method(crypto_namespace, "createECDH",         js_crypto_createECDH, 1);
+    crypto_set_method(crypto_namespace, "timingSafeEqual",    js_crypto_timingSafeEqual, 2);
+    crypto_set_method(crypto_namespace, "pbkdf2Sync",         js_crypto_pbkdf2Sync, 5);
+    crypto_set_method(crypto_namespace, "pbkdf2",             js_crypto_pbkdf2, 6);
+    crypto_set_method(crypto_namespace, "hkdfSync",           js_crypto_hkdfSync, 5);
+    crypto_set_method(crypto_namespace, "hkdf",               js_crypto_hkdf, 6);
+    crypto_set_method(crypto_namespace, "scryptSync",         js_crypto_scryptSync, 4);
+    crypto_set_method(crypto_namespace, "createSecretKey",    js_crypto_createSecretKey, 2);
+    crypto_set_method(crypto_namespace, "createPrivateKey",   js_crypto_createPrivateKey, 1);
+    crypto_set_method(crypto_namespace, "createPublicKey",    js_crypto_createPublicKey, 1);
+    crypto_set_method(crypto_namespace, "generateKeySync",    js_crypto_generateKeySync, 2);
+    crypto_set_method(crypto_namespace, "generateKey",        js_crypto_generateKey, 3);
+    crypto_set_method(crypto_namespace, "generateKeyPair",    js_crypto_generateKeyPair, 3);
+    crypto_set_method(crypto_namespace, "generateKeyPairSync", js_crypto_generateKeyPairSync, 2);
 
     // subtle Web Crypto API (subset)
     subtle_root.set(js_new_object());
-    crypto_set_method(subtle_root.get(), "digest",  (void*)js_subtle_digest, 2);
-    crypto_set_method(subtle_root.get(), "importKey", (void*)js_subtle_importKey, 5);
-    crypto_set_method(subtle_root.get(), "encrypt", (void*)js_subtle_encrypt, 3);
-    crypto_set_method(subtle_root.get(), "decrypt", (void*)js_subtle_decrypt, 3);
+    crypto_set_method(subtle_root.get(), "digest",  js_subtle_digest, 2);
+    crypto_set_method(subtle_root.get(), "importKey", js_subtle_importKey, 5);
+    crypto_set_method(subtle_root.get(), "encrypt", js_subtle_encrypt, 3);
+    crypto_set_method(subtle_root.get(), "decrypt", js_subtle_decrypt, 3);
     js_property_set(crypto_namespace, make_string_item_crypto("subtle"), subtle_root.get());
 
     // crypto.constants — OpenSSL-compatible constants
@@ -8370,24 +8374,34 @@ extern "C" Item js_get_crypto_namespace(void) {
     js_property_set(crypto_namespace, make_string_item_crypto("constants"), constants_root.get());
 
     // class constructors as stubs (for typeof/instanceof checks)
-    crypto_set_method(crypto_namespace, "Hash", (void*)js_crypto_createHash, 2);
-    crypto_set_method(crypto_namespace, "Hmac", (void*)js_crypto_createHmac, 2);
-    crypto_set_method(crypto_namespace, "Sign", (void*)js_crypto_createSign, 1);
-    crypto_set_method(crypto_namespace, "Verify", (void*)js_crypto_createVerify, 1);
-    crypto_set_method(crypto_namespace, "Cipher", (void*)js_crypto_createCipheriv, 3);
-    crypto_set_method(crypto_namespace, "Decipher", (void*)js_crypto_createDecipheriv, 3);
-    crypto_set_method(crypto_namespace, "Cipheriv", (void*)js_crypto_createCipheriv, 3);
-    crypto_set_method(crypto_namespace, "Decipheriv", (void*)js_crypto_createDecipheriv, 3);
-    crypto_set_method(crypto_namespace, "DiffieHellman", (void*)js_crypto_createDiffieHellman, 4);
-    crypto_set_method(crypto_namespace, "DiffieHellmanGroup", (void*)js_crypto_createDiffieHellmanGroup, 1);
-    ecdh_ctor_root.set(js_new_function((void*)js_crypto_createECDH, 1));
-    temporary_root.set(js_new_function((void*)js_ecdh_convertKey, 5));
+    js_install_native_constructor(crypto_namespace, "Hash",
+        js_crypto_createHash, 2);
+    js_install_native_constructor(crypto_namespace, "Hmac",
+        js_crypto_createHmac, 2);
+    js_install_native_constructor(crypto_namespace, "Sign",
+        js_crypto_createSign, 1);
+    js_install_native_constructor(crypto_namespace, "Verify",
+        js_crypto_createVerify, 1);
+    js_install_native_constructor(crypto_namespace, "Cipher",
+        js_crypto_createCipheriv, 3);
+    js_install_native_constructor(crypto_namespace, "Decipher",
+        js_crypto_createDecipheriv, 3);
+    js_install_native_constructor(crypto_namespace, "Cipheriv",
+        js_crypto_createCipheriv, 3);
+    js_install_native_constructor(crypto_namespace, "Decipheriv",
+        js_crypto_createDecipheriv, 3);
+    js_install_native_constructor(crypto_namespace, "DiffieHellman",
+        js_crypto_createDiffieHellman, 4);
+    js_install_native_constructor(crypto_namespace, "DiffieHellmanGroup",
+        js_crypto_createDiffieHellmanGroup, 1);
+    ecdh_ctor_root.set(js_new_native_function(js_crypto_createECDH));
+    temporary_root.set(js_new_native_function(js_ecdh_convertKey));
     js_property_set(ecdh_ctor_root.get(), make_string_item_crypto("convertKey"), temporary_root.get());
     js_property_set(crypto_namespace, make_string_item_crypto("ECDH"), ecdh_ctor_root.get());
-    keyobject_ctor_root.set(js_new_function((void*)js_crypto_KeyObject, 0));
+    keyobject_ctor_root.set(js_new_native_function(js_crypto_KeyObject));
     keyobject_proto_root.set(js_property_get(keyobject_ctor_root.get(), make_string_item_crypto("prototype")));
     if (get_type_id(keyobject_proto_root.get()) == LMD_TYPE_MAP) {
-        temporary_root.set(js_new_function((void*)js_crypto_keyObjectEquals, 1));
+        temporary_root.set(js_new_native_function(js_crypto_keyObjectEquals));
         js_property_set(keyobject_proto_root.get(), make_string_item_crypto("equals"), temporary_root.get());
     }
     js_property_set(crypto_namespace, make_string_item_crypto("KeyObject"),

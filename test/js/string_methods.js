@@ -44,6 +44,8 @@ console.log("hello".concat(" ", "world"));
 // length property
 console.log("hello".length);
 console.log("".length);
+console.log("😀".length);
+console.log("A😀B".length);
 
 // trimStart / trimEnd
 console.log("  hello  ".trimStart());

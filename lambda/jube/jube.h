@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define JUBE_ABI_VERSION 2
+#define JUBE_ABI_VERSION 3
 #define JUBE_ABI_VERSION_LEGACY 1
 #define JUBE_HOST_API_VERSION 1
 #define JUBE_HOST_LANG_API_VERSION 1
@@ -20,7 +20,7 @@ extern "C" {
 // Bump this exact-build compiler contract whenever an opaque hosted-compiler
 // service table changes; struct-size checks alone cannot identify stale module
 // binaries built against a prior same-day table shape.
-#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260807-tune1"
+#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260811-tune4-callable"
 
 typedef struct JubeHostAPI JubeHostAPI;
 typedef struct JubeTypeDef JubeTypeDef;
@@ -287,10 +287,96 @@ typedef enum JubeTypeFlags {
     JUBE_TYPE_OWNING_NATIVE = 1u << 1,
 } JubeTypeFlags;
 
+// Executable DOM host capabilities are selected when a member function is
+// published. Property spellings remain metadata and never cross the call ABI
+// as semantic selectors (D6.2.2v2).
+typedef enum JubeDomElementOperation {
+    JUBE_DOM_NAMED_ITEM = 0,
+    JUBE_DOM_ADD,
+    JUBE_DOM_REMOVE,
+    JUBE_DOM_CONTAINS,
+    JUBE_DOM_COMPARE_DOCUMENT_POSITION,
+    JUBE_DOM_GET_ROOT_NODE,
+    JUBE_DOM_REPLACE_WITH,
+    JUBE_DOM_HAS_CHILD_NODES,
+    JUBE_DOM_CLONE_NODE,
+    JUBE_DOM_REPLACE_DATA,
+    JUBE_DOM_INSERT_DATA,
+    JUBE_DOM_APPEND_DATA,
+    JUBE_DOM_DELETE_DATA,
+    JUBE_DOM_SUBSTRING_DATA,
+    JUBE_DOM_GET_ATTRIBUTE,
+    JUBE_DOM_SET_ATTRIBUTE,
+    JUBE_DOM_REMOVE_ATTRIBUTE,
+    JUBE_DOM_TOGGLE_ATTRIBUTE,
+    JUBE_DOM_HAS_ATTRIBUTE,
+    JUBE_DOM_GET_ATTRIBUTE_NAMES,
+    JUBE_DOM_MATCHES,
+    JUBE_DOM_QUERY_SELECTOR,
+    JUBE_DOM_QUERY_SELECTOR_ALL,
+    JUBE_DOM_CLOSEST,
+    JUBE_DOM_GET_ELEMENTS_BY_TAG_NAME,
+    JUBE_DOM_GET_ELEMENTS_BY_CLASS_NAME,
+    JUBE_DOM_GET_ELEMENT_BY_ID,
+    JUBE_DOM_ADD_EVENT_LISTENER,
+    JUBE_DOM_REMOVE_EVENT_LISTENER,
+    JUBE_DOM_DISPATCH_EVENT,
+    JUBE_DOM_APPEND_CHILD,
+    JUBE_DOM_REMOVE_CHILD,
+    JUBE_DOM_INSERT_BEFORE,
+    JUBE_DOM_REPLACE_CHILD,
+    JUBE_DOM_NORMALIZE,
+    JUBE_DOM_APPEND,
+    JUBE_DOM_PREPEND,
+    JUBE_DOM_INSERT_ADJACENT_ELEMENT,
+    JUBE_DOM_INSERT_ADJACENT_HTML,
+    JUBE_DOM_GET_BOUNDING_CLIENT_RECT,
+    JUBE_DOM_GET_CLIENT_RECTS,
+    JUBE_DOM_SCROLL_INTO_VIEW,
+    JUBE_DOM_SCROLL,
+    JUBE_DOM_SCROLL_TO,
+    JUBE_DOM_SCROLL_BY,
+    JUBE_DOM_FOCUS,
+    JUBE_DOM_BLUR,
+    JUBE_DOM_CLICK,
+    JUBE_DOM_RESET,
+    JUBE_DOM_SUBMIT,
+    JUBE_DOM_REQUEST_SUBMIT,
+    JUBE_DOM_CHECK_VALIDITY,
+    JUBE_DOM_REPORT_VALIDITY,
+    JUBE_DOM_SET_CUSTOM_VALIDITY,
+    JUBE_DOM_SET_SELECTION_RANGE,
+    JUBE_DOM_SET_RANGE_TEXT,
+    JUBE_DOM_SELECT,
+    JUBE_DOM_ITEM,
+    JUBE_DOM_TOGGLE,
+    JUBE_DOM_REPLACE,
+    JUBE_DOM_ATTACH_SHADOW,
+    JUBE_DOM_TO_STRING,
+    JUBE_DOM_BOUNDARY_FROM_POINT,
+    JUBE_DOM_TEXT_CONTROL_BOUNDARY_FROM_POINT,
+    JUBE_DOM_TEXT_CONTROL_CARET_BOUNDS,
+    JUBE_DOM_GET_ATTRIBUTE_NS,
+    JUBE_DOM_SET_ATTRIBUTE_NS,
+    JUBE_DOM_REMOVE_ATTRIBUTE_NS,
+    JUBE_DOM_IS_EQUAL_NODE,
+    JUBE_DOM_IS_SAME_NODE,
+    JUBE_DOM_CREATE_SVG_POINT,
+    JUBE_DOM_CREATE_SVG_MATRIX,
+    JUBE_DOM_CREATE_SVG_TRANSFORM,
+    JUBE_DOM_CREATE_SVG_TRANSFORM_FROM_MATRIX,
+    JUBE_DOM_GET_BBOX,
+    JUBE_DOM_GET_CTM,
+    JUBE_DOM_GET_SCREEN_CTM,
+    JUBE_DOM_AFTER,
+} JubeDomElementOperation;
+
 struct JubeHostObjectOps {
     int (*get_property)(Item receiver, Item key, Item* out);
     int (*set_property)(Item receiver, Item key, Item value, Item* out);
-    int (*call_method)(Item receiver, Item method_name, Item* args, int argc, Item* out);
+    // D6.2.2v2 retired receiver/name host calls. Preserve this ABI slot until
+    // the next Jube major version; modules must initialize it to NULL.
+    void* reserved_callable_slot;
     int (*has_property)(Item receiver, Item key, Item* out);
     int (*delete_property)(Item receiver, Item key, Item* out);
     int (*get_own_property_descriptor)(Item receiver, Item key, Item* out);
@@ -408,7 +494,8 @@ typedef struct JubeTypeBinding {
     // object-operation hooks for large WebIDL surfaces whose descriptor,
     // own-key, delete, and prototype semantics are receiver-specific. These
     // are record-owned hooks, not legacy host_ops fallbacks.
-    int (*object_call)(Item receiver, Item method_name, Item* args, int argc, Item* out);
+    // ABI-preserving hole for the retired receiver/name object-call hook.
+    void* reserved_callable_slot;
     int (*object_has)(Item receiver, Item key, Item* out);
     int (*object_delete)(Item receiver, Item key, Item* out);
     int (*object_descriptor)(Item receiver, Item key, Item* out);
@@ -525,8 +612,38 @@ struct JubeHostValueAPI {
     void* (*native_object_data)(Item object, const JubeTypeDef* type);
 };
 
+typedef Item (*JubeNativeP0)(void);
+typedef Item (*JubeNativeP1)(Item);
+typedef Item (*JubeNativeP2)(Item, Item);
+typedef Item (*JubeNativeP3)(Item, Item, Item);
+typedef Item (*JubeNativeP4)(Item, Item, Item, Item);
+typedef Item (*JubeNativeP5)(Item, Item, Item, Item, Item);
+typedef Item (*JubeNativeP6)(Item, Item, Item, Item, Item, Item);
+typedef Item (*JubeNativeP7)(Item, Item, Item, Item, Item, Item, Item);
+typedef Item (*JubeNativeP8)(Item, Item, Item, Item, Item, Item, Item, Item);
+
+typedef union JubeNativeTarget {
+    JubeNativeP0 p0;
+    JubeNativeP1 p1;
+    JubeNativeP2 p2;
+    JubeNativeP3 p3;
+    JubeNativeP4 p4;
+    JubeNativeP5 p5;
+    JubeNativeP6 p6;
+    JubeNativeP7 p7;
+    JubeNativeP8 p8;
+} JubeNativeTarget;
+
+typedef struct JubeNativeFunctionSpec {
+    JubeNativeTarget target;
+    int8_t target_arity;
+    int8_t adapter_arity;
+    uint8_t constructable;
+    uint8_t reserved;
+} JubeNativeFunctionSpec;
+
 struct JubeHostScriptAPI {
-    Item (*new_function)(void* func_ptr, int param_count);
+    Item (*new_function)(JubeNativeFunctionSpec spec);
     void (*function_set_prototype)(Item fn_item, Item proto);
     void (*set_function_name)(Item fn_item, Item name_item);
     void (*mark_non_enumerable)(Item object, Item name);
@@ -566,7 +683,7 @@ struct JubeHostScriptAPI {
     // Closure environments remain host-owned GC objects; a module may fill
     // the returned slots only before handing them to new_closure().
     Item* (*closure_env_new)(int count);
-    Item (*new_closure)(void* func_ptr, int param_count, Item* env, int env_size);
+    Item (*new_closure)(JubeNativeFunctionSpec spec, Item* env, int env_size);
     Item (*get_prototype)(Item object);
     void (*set_prototype)(Item object, Item prototype);
     Item (*promise_with_resolvers)(void);
@@ -593,10 +710,12 @@ struct JubeHostDomAPI {
     bool (*is_rule_style_decl)(Item item);
     Item (*dom_get_property_impl)(Item elem_item, Item prop_name);
     Item (*dom_set_property_impl)(Item elem_item, Item prop_name, Item value);
-    Item (*dom_element_method_impl)(Item elem_item, Item method_name, Item* args, int argc);
+    Item (*dom_element_operation_impl)(Item elem_item,
+                                       JubeDomElementOperation operation,
+                                       Item* args, int argc);
     Item (*computed_style_get_property)(Item style_item, Item prop_name);
     bool (*style_resource_has_property)(Item style_item, Item prop_name);
-    Item (*style_method)(Item elem_item, Item method_name, Item* args, int argc);
+    void* reserved_style_callable_slot;
     Item (*dom_get_prototype_value)(Item obj);
     bool (*cssom_resource_has_property)(Item item, Item prop_name);
     Item (*cssom_stylesheet_get_property)(Item sheet_item, Item prop_name);
@@ -609,7 +728,8 @@ struct JubeHostDomAPI {
     void (*restore_active_document)(void* prev_doc);
     Item (*document_proxy_get_property)(Item prop_name);
     Item (*document_proxy_set_property)(Item prop_name, Item value);
-    Item (*document_proxy_method)(Item method_name, Item* args, int argc);
+    // Frozen slot: Tune4 retired receiver/name document invocation (D6.2.2v2).
+    void* reserved_document_callable_slot;
     bool (*item_is_range)(Item item);
     bool (*item_is_selection)(Item item);
     Item (*range_get_property)(Item obj, Item key);
@@ -632,9 +752,11 @@ struct JubeHostDomAPI {
     Item (*expando_own_property_names)(Item obj);
     Item (*range_expando_own_property_names)(Item obj);
     Item (*selection_expando_own_property_names)(Item obj);
-    Item (*css_namespace_method)(Item obj, Item method_name, Item* args, int argc);
-    Item (*cssom_stylesheet_method)(Item sheet_item, Item method_name, Item* args, int argc);
-    Item (*cssom_rule_decl_method)(Item decl_item, Item method_name, Item* args, int argc);
+    // Frozen callable slots: property records and intrinsic targets now carry
+    // direct operations, so no receiver/name engines cross this ABI (D6.2.2v2).
+    void* reserved_css_namespace_callable_slot;
+    void* reserved_stylesheet_callable_slot;
+    void* reserved_rule_decl_callable_slot;
     Item (*owner_document_for_node)(void* node);
     const char* (*to_attribute_cstr)(Item value);
     void (*after_set_attribute)(void* elem, const char* attr_name, const char* attr_value);
@@ -675,7 +797,9 @@ struct JubeHostDomAPI {
     Item (*get_bounding_client_rect_bridge)(void* elem);
     Item (*get_client_rects_bridge)(void* elem);
     Item (*scroll_into_view_bridge)(void* elem);
-    Item (*scroll_method_bridge)(Item elem_item, Item method_name, Item* args, int argc);
+    Item (*scroll_operation_bridge)(Item elem_item,
+                                    JubeDomElementOperation operation,
+                                    Item* args, int argc);
     Item (*text_control_caret_bounds_bridge)(void* elem);
     Item (*text_control_boundary_from_point_bridge)(void* elem, Item x, Item y);
     Item (*boundary_from_point_bridge)(void* elem, Item x, Item y, Item behavior);
@@ -692,7 +816,7 @@ struct JubeHostDomAPI {
     Item (*insert_before_bridge)(void* parent, Item new_child, Item ref_child);
     Item (*remove_bridge)(void* node);
     Item (*adopt_node_bridge)(Item node);
-    Item (*location_method_bridge)(void* doc, Item method_name, Item* args, int argc);
+    Item (*location_navigate_bridge)(void* doc, Item next_url, bool replace);
     Item (*document_open_bridge)(void* doc);
     Item (*document_write_bridge)(void* doc, Item text);
     Item (*document_element_from_point_bridge)(void* doc, Item x, Item y);
@@ -817,6 +941,11 @@ struct JubeHostDomAPI {
     // module owns DOM-facing window semantics without reaching into js_dom.cpp.
     void* (*get_ui_context)(void);
     bool (*has_committed_geometry_snapshot)(void* doc);
+
+    // -- Tune4 additive tail: document callables cross the host boundary as
+    // direct operations; property names are resolved before invocation (D6.2.2v2).
+    Item (*document_create_tree_walker_bridge)(Item root, Item what_to_show);
+    Item (*document_create_event_bridge)(Item interface_name);
 };
 
 // Each hosted service table evolves independently. A module checks both the
@@ -1171,7 +1300,8 @@ struct JubeHostAsyncAPI {
     void (*timer_install_promisify_custom)(Item function);
     // Installs a custom promisify implementation without exposing the
     // host-owned well-known Symbol to a compatibility module.
-    void (*function_install_promisify_custom)(Item function, void* func_ptr, int parameter_count);
+    void (*function_install_promisify_custom)(Item function,
+                                               JubeNativeFunctionSpec spec);
     // Publishes callback result field names under the same host-owned Symbol.
     void (*function_install_promisify_args)(Item function, const char* first, const char* second);
     // Posts Node's conventional (err, result) callback shape through the
@@ -1737,4 +1867,42 @@ struct JubeModuleDef {
 
 #ifdef __cplusplus
 }
+
+#define JUBE_DEFINE_NATIVE_SPEC(arity, type, member) \
+    static inline JubeNativeFunctionSpec jube_native_function_spec( \
+            type target, int adapter_arity, bool constructable = false) { \
+        JubeNativeFunctionSpec spec = {}; \
+        spec.target.member = target; \
+        spec.target_arity = arity; \
+        spec.adapter_arity = (int8_t)adapter_arity; \
+        spec.constructable = constructable ? 1 : 0; \
+        return spec; \
+    } \
+    static inline Item jube_new_function(const JubeHostScriptAPI* api, \
+            type target, int adapter_arity) { \
+        return api->new_function(jube_native_function_spec( \
+            target, adapter_arity)); \
+    } \
+    static inline Item jube_new_constructor(const JubeHostScriptAPI* api, \
+            type target, int adapter_arity) { \
+        return api->new_function(jube_native_function_spec( \
+            target, adapter_arity, true)); \
+    } \
+    static inline Item jube_new_closure(const JubeHostScriptAPI* api, \
+            type target, int adapter_arity, Item* env, int env_size) { \
+        return api->new_closure(jube_native_function_spec( \
+            target, adapter_arity), env, env_size); \
+    }
+
+JUBE_DEFINE_NATIVE_SPEC(0, JubeNativeP0, p0)
+JUBE_DEFINE_NATIVE_SPEC(1, JubeNativeP1, p1)
+JUBE_DEFINE_NATIVE_SPEC(2, JubeNativeP2, p2)
+JUBE_DEFINE_NATIVE_SPEC(3, JubeNativeP3, p3)
+JUBE_DEFINE_NATIVE_SPEC(4, JubeNativeP4, p4)
+JUBE_DEFINE_NATIVE_SPEC(5, JubeNativeP5, p5)
+JUBE_DEFINE_NATIVE_SPEC(6, JubeNativeP6, p6)
+JUBE_DEFINE_NATIVE_SPEC(7, JubeNativeP7, p7)
+JUBE_DEFINE_NATIVE_SPEC(8, JubeNativeP8, p8)
+
+#undef JUBE_DEFINE_NATIVE_SPEC
 #endif

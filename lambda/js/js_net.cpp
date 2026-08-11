@@ -806,7 +806,7 @@ static void socket_sync_no_half_open_listener(Item obj) {
         return;
     }
     if (is_callable(existing)) return;
-    Item listener = js_new_function((void*)js_socket_no_half_open_listener, 0);
+    Item listener = js_new_native_function(js_socket_no_half_open_listener);
     js_property_set(obj, make_string_item("__no_half_open_listener__"), listener);
     socket_add_listener_cstr(obj, "end", listener, false);
 }
@@ -851,7 +851,7 @@ static void socket_schedule_error_event(JsSocket* sock, Item err) {
     Item* env = js_alloc_env(2);
     env[0] = sock->js_object;
     env[1] = err;
-    Item fn = js_new_closure((void*)socket_emit_error_scheduled, 0, env, 2);
+    Item fn = js_new_native_closure(socket_emit_error_scheduled, 0, env, 2);
     js_next_tick_enqueue(fn);
 }
 
@@ -860,7 +860,7 @@ static void socket_schedule_error_close_event(JsSocket* sock, Item err) {
     Item* env = js_alloc_env(2);
     env[0] = sock->js_object;
     env[1] = err;
-    Item fn = js_new_closure((void*)socket_emit_error_close_scheduled, 0, env, 2);
+    Item fn = js_new_native_closure(socket_emit_error_close_scheduled, 0, env, 2);
     js_next_tick_enqueue(fn);
 }
 
@@ -1098,7 +1098,7 @@ static void socket_schedule_abort(JsSocket* sock) {
     sock->abort_scheduled = true;
     Item* env = js_alloc_env(1);
     env[0] = sock->js_object;
-    Item fn = js_new_closure((void*)js_socket_abort_scheduled, 0, env, 1);
+    Item fn = js_new_native_closure(js_socket_abort_scheduled, 0, env, 1);
     js_next_tick_enqueue(fn);
 }
 
@@ -1145,7 +1145,7 @@ static bool socket_configure_abort_signal(JsSocket* sock, Item signal) {
 
     Item* env = js_alloc_env(1);
     env[0] = sock->js_object;
-    Item handler = js_new_closure((void*)js_socket_abort_signal_event, 1, env, 1);
+    Item handler = js_new_native_closure(js_socket_abort_signal_event, 1, env, 1);
     Item args[2] = { make_string_item("abort"), handler };
     js_call_function(add_fn, signal, args, 2);
     js_microtask_flush();
@@ -1520,7 +1520,7 @@ static Item js_socket_setTimeout(Item msecs, Item callback) {
     if (delay > 0) {
         Item* env = js_alloc_env(1);
         env[0] = self;
-        Item fn = js_new_closure((void*)js_socket_timeout_fire, 0, env, 1);
+        Item fn = js_new_native_closure(js_socket_timeout_fire, 0, env, 1);
         Item timer = js_setTimeout(fn, (Item){.item = i2it((int64_t)delay)});
         if (sock) {
             sock->timeout_timer = timer;
@@ -1806,7 +1806,7 @@ static Item js_socket_js_handle_onread(void) {
 
     Item* env = js_alloc_env(1);
     env[0] = self;
-    Item close_done = js_new_closure((void*)js_socket_js_handle_close_done, 0, env, 1);
+    Item close_done = js_new_native_closure(js_socket_js_handle_close_done, 0, env, 1);
     Item close_fn = js_property_get(handle, make_string_item("close"));
     if (is_callable(close_fn)) {
         js_call_function(close_fn, handle, &close_done, 1);
@@ -1973,11 +1973,11 @@ static Item make_socket_handle_object(JsSocket* sock) {
     js_property_set(handle_root.get(), make_string_item("__socket_handle__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)sock)});
     js_property_set(handle_root.get(), make_string_item("setKeepAlive"),
-                    js_new_function((void*)js_socket_handle_setKeepAlive, 2));
+                    js_new_native_function(js_socket_handle_setKeepAlive));
     js_property_set(handle_root.get(), make_string_item("setNoDelay"),
-                    js_new_function((void*)js_socket_handle_setNoDelay, 1));
+                    js_new_native_function(js_socket_handle_setNoDelay));
     js_property_set(handle_root.get(), make_string_item("close"),
-                    js_new_function((void*)js_socket_handle_close, 0));
+                    js_new_native_function(js_socket_handle_close));
     return handle_root.get();
 }
 
@@ -1997,27 +1997,27 @@ static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     js_property_set(obj_root.get(), make_string_item("__handle__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)sock)});
     js_property_set(obj_root.get(), make_string_item("on"),
-                    js_new_function((void*)js_socket_on, 2));
+                    js_new_native_function(js_socket_on));
     js_property_set(obj_root.get(), make_string_item("once"),
-                    js_new_function((void*)js_socket_once, 2));
+                    js_new_native_function(js_socket_once));
     js_property_set(obj_root.get(), make_string_item("listeners"),
-                    js_new_function((void*)js_socket_listeners, 1));
+                    js_new_native_function(js_socket_listeners));
     js_property_set(obj_root.get(), make_string_item("listenerCount"),
-                    js_new_function((void*)js_socket_listenerCount, 1));
+                    js_new_native_function(js_socket_listenerCount));
     js_property_set(obj_root.get(), make_string_item("removeListener"),
-                    js_new_function((void*)js_socket_removeListener, 2));
+                    js_new_native_function(js_socket_removeListener));
     js_property_set(obj_root.get(), make_string_item("off"),
-                    js_new_function((void*)js_socket_removeListener, 2));
+                    js_new_native_function(js_socket_removeListener));
     js_property_set(obj_root.get(), make_string_item("removeAllListeners"),
-                    js_new_function((void*)js_socket_removeAllListeners, 1));
+                    js_new_native_function(js_socket_removeAllListeners));
     js_property_set(obj_root.get(), make_string_item("write"),
-                    js_new_function((void*)js_socket_write, -1));
+                    js_new_native_rest_function(js_socket_write));
     js_property_set(obj_root.get(), make_string_item("end"),
-                    js_new_function((void*)js_socket_end, -1));
+                    js_new_native_rest_function(js_socket_end));
     js_property_set(obj_root.get(), make_string_item("destroy"),
-                    js_new_function((void*)js_socket_destroy, 1));
+                    js_new_native_function(js_socket_destroy));
     js_property_set(obj_root.get(), make_string_item("resetAndDestroy"),
-                    js_new_function((void*)js_socket_resetAndDestroy, 1));
+                    js_new_native_function(js_socket_resetAndDestroy));
     // Additional Socket properties
     js_property_set(obj_root.get(), make_string_item("readable"), (Item){.item = ITEM_TRUE});
     js_property_set(obj_root.get(), make_string_item("writable"), (Item){.item = ITEM_TRUE});
@@ -2049,35 +2049,35 @@ static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     js_property_set(obj_root.get(), make_string_item("allowHalfOpen"), (Item){.item = ITEM_FALSE});
     // Additional Socket methods
     js_property_set(obj_root.get(), make_string_item("setTimeout"),
-                    js_new_function((void*)js_socket_setTimeout, 2));
+                    js_new_native_function(js_socket_setTimeout));
     js_property_set(obj_root.get(), make_string_item("connect"),
-                    js_new_function((void*)js_socket_connect, -1));
+                    js_new_native_rest_function(js_socket_connect));
     js_property_set(obj_root.get(), make_string_item("setKeepAlive"),
-                    js_new_function((void*)js_socket_setKeepAlive, -1));
+                    js_new_native_rest_function(js_socket_setKeepAlive));
     js_property_set(obj_root.get(), make_string_item("setNoDelay"),
-                    js_new_function((void*)js_socket_setNoDelay, 1));
+                    js_new_native_function(js_socket_setNoDelay));
     js_property_set(obj_root.get(), make_string_item("setEncoding"),
-                    js_new_function((void*)js_socket_setEncoding, 1));
+                    js_new_native_function(js_socket_setEncoding));
     js_property_set(obj_root.get(), make_string_item("setTypeOfService"),
-                    js_new_function((void*)js_socket_setTypeOfService, 1));
+                    js_new_native_function(js_socket_setTypeOfService));
     js_property_set(obj_root.get(), make_string_item("getTypeOfService"),
-                    js_new_function((void*)js_socket_getTypeOfService, 0));
+                    js_new_native_function(js_socket_getTypeOfService));
     js_property_set(obj_root.get(), make_string_item("pipe"),
-                    js_new_function((void*)js_socket_pipe, 1));
+                    js_new_native_function(js_socket_pipe));
     js_property_set(obj_root.get(), make_string_item("ref"),
-                    js_new_function((void*)js_socket_ref, 0));
+                    js_new_native_function(js_socket_ref));
     js_property_set(obj_root.get(), make_string_item("unref"),
-                    js_new_function((void*)js_socket_unref, 0));
+                    js_new_native_function(js_socket_unref));
     js_property_set(obj_root.get(), make_string_item("cork"),
-                    js_new_function((void*)js_socket_cork, 0));
+                    js_new_native_function(js_socket_cork));
     js_property_set(obj_root.get(), make_string_item("uncork"),
-                    js_new_function((void*)js_socket_uncork, 0));
+                    js_new_native_function(js_socket_uncork));
     js_property_set(obj_root.get(), make_string_item("resume"),
-                    js_new_function((void*)js_socket_resume, 0));
+                    js_new_native_function(js_socket_resume));
     js_property_set(obj_root.get(), make_string_item("pause"),
-                    js_new_function((void*)js_socket_pause, 0));
+                    js_new_native_function(js_socket_pause));
     js_property_set(obj_root.get(), make_string_item("address"),
-                    js_new_function((void*)js_socket_address, 0));
+                    js_new_native_function(js_socket_address));
     sock->js_object = obj_root.get();
     sock->active_resource_id = net_active_add(obj_root.get(), "TCPSocketWrap");
     return obj_root.get();
@@ -2652,11 +2652,11 @@ extern "C" Item js_net_BoundSocket(Item options) {
     js_property_set(obj, make_string_item("__bound_socket_handle__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)bound)});
     js_property_set(obj, make_string_item("address"),
-                    js_new_function((void*)js_bound_socket_address, 0));
+                    js_new_native_function(js_bound_socket_address));
     js_property_set(obj, make_string_item("fd"),
-                    js_new_function((void*)js_bound_socket_fd, 0));
+                    js_new_native_function(js_bound_socket_fd));
     js_property_set(obj, make_string_item("close"),
-                    js_new_function((void*)js_bound_socket_close, 0));
+                    js_new_native_function(js_bound_socket_close));
     bound->js_object = obj;
     return obj;
 }
@@ -3393,7 +3393,7 @@ static void net_connect_lookup_fail(NetResolveReq* nr, Item err) {
     env[0] = sock->js_object;
     env[1] = err;
     env[2] = make_string_item(nr->host);
-    Item fn = js_new_closure((void*)net_connect_lookup_fail_scheduled, 0, env, 3);
+    Item fn = js_new_native_closure(net_connect_lookup_fail_scheduled, 0, env, 3);
     js_next_tick_enqueue(fn);
 }
 
@@ -3690,7 +3690,7 @@ static int socket_start_connect(JsSocket* sock, const NetConnectOptions* options
         }
         Item* env = js_alloc_env(1);
         env[0] = (Item){.item = i2it((int64_t)(uintptr_t)nr)};
-        Item callback = js_new_closure((void*)net_lookup_complete, -1, env, 1);
+        Item callback = js_new_native_closure(net_lookup_complete, -1, env, 1);
         Item args[3] = { make_string_item(options->host), lookup_options, callback };
         Item lookup_result = js_call_function(options->lookup, make_undefined_item(), args, 3);
         if (item_is_error(lookup_result)) {
@@ -4258,7 +4258,7 @@ static void server_capture_connection_rejection(Item result, Item client_obj) {
     if (get_type_id(result) != LMD_TYPE_MAP || js_class_id(result) != JS_CLASS_PROMISE) return;
     Item* env = js_alloc_env(1);
     env[0] = client_obj;
-    Item reject = js_new_closure((void*)server_connection_rejection, 1, env, 1);
+    Item reject = js_new_native_closure(server_connection_rejection, 1, env, 1);
     js_promise_then(result, make_undefined_item(), reject);
 }
 
@@ -4323,7 +4323,7 @@ static Item server_accept_client(JsServer* srv, JsSocket* client, Item client_ha
     socket_update_state_properties(client);
     socket_update_address_properties(client);
 
-    if (get_type_id(srv->connection_handler) == LMD_TYPE_FUNC) {
+    if (js_is_callable(srv->connection_handler)) {
         Item result = js_call_function(srv->connection_handler, srv->js_object, &client_obj, 1);
         server_capture_connection_rejection(result, client_obj);
         js_microtask_flush();
@@ -4350,7 +4350,7 @@ static Item make_server_handle_object(JsServer* srv) {
     js_property_set(handle, make_string_item("__server_handle__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)srv)});
     js_property_set(handle, make_string_item("onconnection"),
-                    js_new_function((void*)js_server_handle_onconnection, 2));
+                    js_new_native_function(js_server_handle_onconnection));
     return handle;
 }
 
@@ -4570,7 +4570,7 @@ static void server_schedule_listening(Item self, JsServer* srv, Item callback) {
     Item* env = js_alloc_env(2);
     env[0] = self;
     env[1] = callback;
-    Item fn = js_new_closure((void*)js_server_emit_listening_scheduled, 0, env, 2);
+    Item fn = js_new_native_closure(js_server_emit_listening_scheduled, 0, env, 2);
     // listen callbacks must run after the current JS stack, not inside the
     // listen() native call; cluster setup assigns workers immediately after it.
     js_setTimeout(fn, (Item){.item = i2it(0)});
@@ -4589,7 +4589,7 @@ static void server_schedule_error(Item self, Item err) {
     Item* env = js_alloc_env(2);
     env[0] = self;
     env[1] = err;
-    Item fn = js_new_closure((void*)js_server_emit_error_scheduled, 0, env, 2);
+    Item fn = js_new_native_closure(js_server_emit_error_scheduled, 0, env, 2);
     js_next_tick_enqueue(fn);
 }
 
@@ -4648,7 +4648,7 @@ static Item server_configure_listen_signal(Item self, Item signal, bool* out_abo
     if (is_callable(add_fn)) {
         Item* env = js_alloc_env(1);
         env[0] = self;
-        Item handler = js_new_closure((void*)js_server_abort_signal_event, 0, env, 1);
+        Item handler = js_new_native_closure(js_server_abort_signal_event, 0, env, 1);
         Item args[2] = { make_string_item("abort"), handler };
         js_call_function(add_fn, signal, args, 2);
         js_microtask_flush();
@@ -4974,7 +4974,7 @@ static Item js_server_getConnections(Item callback) {
         env[2] = (Item){.item = i2it(connections)};
         // getConnections is asynchronous in Node; calling the callback inside
         // an IPC message listener reenters teardown before transfer accounting settles.
-        js_next_tick_enqueue(js_new_closure((void*)js_server_getConnections_later, 0, env, 3));
+        js_next_tick_enqueue(js_new_native_closure(js_server_getConnections_later, 0, env, 3));
     }
     return self;
 }
@@ -5119,27 +5119,27 @@ extern "C" Item js_net_createServer(Item rest_args) {
                     (Item){.item = i2it((int64_t)(uintptr_t)srv)});
     js_property_set(obj_root.get(), make_string_item("_handle"), make_server_handle_object(srv));
     js_property_set(obj_root.get(), make_string_item("listen"),
-                    js_new_function((void*)js_server_listen, 3));
+                    js_new_native_function(js_server_listen));
     js_property_set(obj_root.get(), make_string_item("close"),
-                    js_new_function((void*)js_server_close, 1));
+                    js_new_native_function(js_server_close));
     js_property_set(obj_root.get(), make_string_item("on"),
-                    js_new_function((void*)js_server_on, 2));
+                    js_new_native_function(js_server_on));
     js_property_set(obj_root.get(), make_string_item("once"),
-                    js_new_function((void*)js_server_once, 2));
+                    js_new_native_function(js_server_once));
     js_property_set(obj_root.get(), make_string_item("listeners"),
-                    js_new_function((void*)js_server_listeners, 1));
+                    js_new_native_function(js_server_listeners));
     js_property_set(obj_root.get(), make_string_item("removeListener"),
-                    js_new_function((void*)js_server_removeListener, 2));
+                    js_new_native_function(js_server_removeListener));
     js_property_set(obj_root.get(), make_string_item("off"),
-                    js_new_function((void*)js_server_removeListener, 2));
+                    js_new_native_function(js_server_removeListener));
     js_property_set(obj_root.get(), make_string_item("address"),
-                    js_new_function((void*)js_server_address, 0));
+                    js_new_native_function(js_server_address));
     js_property_set(obj_root.get(), make_string_item("ref"),
-                    js_new_function((void*)js_server_ref, 0));
+                    js_new_native_function(js_server_ref));
     js_property_set(obj_root.get(), make_string_item("unref"),
-                    js_new_function((void*)js_server_unref, 0));
+                    js_new_native_function(js_server_unref));
     js_property_set(obj_root.get(), make_string_item("getConnections"),
-                    js_new_function((void*)js_server_getConnections, 1));
+                    js_new_native_function(js_server_getConnections));
     js_property_set(obj_root.get(), make_string_item("allowHalfOpen"),
                     (Item){.item = b2it(srv->allow_half_open)});
     js_property_set(obj_root.get(), make_string_item("keepAlive"),
@@ -5266,7 +5266,7 @@ extern "C" Item js_net_Socket(Item options) {
             if (get_type_id(native_handle) != LMD_TYPE_INT) {
                 js_property_set(handle, make_string_item("__socket_object__"), obj);
                 js_property_set(handle, make_string_item("onread"),
-                                js_new_function((void*)js_socket_js_handle_onread, 0));
+                                js_new_native_function(js_socket_js_handle_onread));
             }
             sock->handle_exposed = true;
         }
@@ -5348,11 +5348,11 @@ extern "C" Item js_net_BlockList(Item options) {
                         (Item){.item = i2it((int64_t)(uintptr_t)list)});
     }
     js_property_set(obj, make_string_item("addAddress"),
-                    js_new_function((void*)js_block_list_addAddress, 2));
+                    js_new_native_function(js_block_list_addAddress));
     js_property_set(obj, make_string_item("addSubnet"),
-                    js_new_function((void*)js_block_list_addSubnet, 3));
+                    js_new_native_function(js_block_list_addSubnet));
     js_property_set(obj, make_string_item("check"),
-                    js_new_function((void*)js_block_list_check, 2));
+                    js_new_native_function(js_block_list_check));
     return obj;
 }
 
@@ -5429,7 +5429,7 @@ static void js_stream_wrap_queue_terminal_replay(Item self, Item event_item,
     env[3] = (Item){.item = b2it(once)};
     // Underlying sockets can emit EOF/close while JSStreamSocket is being
     // constructed; replay terminal state to listeners attached just after new.
-    js_next_tick_enqueue(js_new_closure((void*)js_stream_wrap_replay_terminal_listener, 0, env, 4));
+    js_next_tick_enqueue(js_new_native_closure(js_stream_wrap_replay_terminal_listener, 0, env, 4));
 }
 
 static Item js_stream_wrap_on(Item event_item, Item callback) {
@@ -5471,13 +5471,13 @@ extern "C" Item js_internal_js_stream_socket_constructor(Item stream) {
     js_property_set(wrap, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
     js_property_set(wrap, make_string_item("__stream_wrap_ended__"), (Item){.item = ITEM_FALSE});
     js_property_set(wrap, make_string_item("__stream_wrap_closed__"), (Item){.item = ITEM_FALSE});
-    js_property_set(wrap, make_string_item("on"), js_new_function((void*)js_stream_wrap_on, 2));
-    js_property_set(wrap, make_string_item("once"), js_new_function((void*)js_stream_wrap_once, 2));
+    js_property_set(wrap, make_string_item("on"), js_new_native_function(js_stream_wrap_on));
+    js_property_set(wrap, make_string_item("once"), js_new_native_function(js_stream_wrap_once));
     js_property_set(wrap, make_string_item("removeListener"),
-                    js_new_function((void*)js_socket_removeListener, 2));
+                    js_new_native_function(js_socket_removeListener));
     js_property_set(wrap, make_string_item("off"),
-                    js_new_function((void*)js_socket_removeListener, 2));
-    js_property_set(wrap, make_string_item("destroy"), js_new_function((void*)js_stream_wrap_destroy, 0));
+                    js_new_native_function(js_socket_removeListener));
+    js_property_set(wrap, make_string_item("destroy"), js_new_native_function(js_stream_wrap_destroy));
 
     Item on = js_property_get(stream, make_string_item("on"));
     if (is_callable(on)) {
@@ -5486,13 +5486,13 @@ extern "C" Item js_internal_js_stream_socket_constructor(Item stream) {
         // JSStreamSocket is a view over a real stream; missing these mirrors
         // leaves destroy EOF/close tests waiting on unobservable terminal events.
         Item args[2] = { make_string_item("error"),
-                         js_new_closure((void*)js_stream_wrap_emit_error, 1, env, 1) };
+                         js_new_native_closure(js_stream_wrap_emit_error, 1, env, 1) };
         js_call_function(on, stream, args, 2);
         args[0] = make_string_item("end");
-        args[1] = js_new_closure((void*)js_stream_wrap_emit_end, 0, env, 1);
+        args[1] = js_new_native_closure(js_stream_wrap_emit_end, 0, env, 1);
         js_call_function(on, stream, args, 2);
         args[0] = make_string_item("close");
-        args[1] = js_new_closure((void*)js_stream_wrap_emit_close, 0, env, 1);
+        args[1] = js_new_native_closure(js_stream_wrap_emit_close, 0, env, 1);
         js_call_function(on, stream, args, 2);
     }
 
@@ -5504,7 +5504,7 @@ extern "C" Item js_get_internal_js_stream_socket_constructor(void) {
     if (!net_ensure_roots()) return ItemError;
     if (internal_js_stream_socket_ctor.item != 0) return internal_js_stream_socket_ctor;
     internal_js_stream_socket_ctor =
-        js_new_function((void*)js_internal_js_stream_socket_constructor, 1);
+        js_new_native_constructor(js_internal_js_stream_socket_constructor);
     js_property_set(internal_js_stream_socket_ctor, make_string_item("StreamWrap"),
                     internal_js_stream_socket_ctor);
     js_property_set(internal_js_stream_socket_ctor, make_string_item("default"),
@@ -5516,15 +5516,10 @@ extern "C" Item js_get_internal_js_stream_socket_constructor(void) {
 // net Module Namespace
 // =============================================================================
 
-static Item net_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    RootFrame roots(3);
-    Rooted<Item> namespace_root(roots, ns);
-    Rooted<Item> key_root(roots, make_string_item(name));
-    Rooted<Item> function_root(roots, js_new_function(func_ptr, param_count));
-    // Key/function allocation can compact before the namespace property owns
-    // the constructor, so all three values stay exact-rooted until publish.
-    js_property_set(namespace_root.get(), key_root.get(), function_root.get());
-    return function_root.get();
+template <typename Target>
+static Item net_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
+    return js_install_native_method(ns, name, target, adapter_arity);
 }
 
 static Item net_constructor_prototype(Item ctor, JsClass cls) {
@@ -5589,16 +5584,21 @@ extern "C" Item js_get_net_namespace(void) {
     Rooted<Item> stream_root(roots, ItemNull);
     Rooted<Item> server_root(roots, ItemNull);
 
-    create_server_root.set(net_set_method(namespace_root.get(), "createServer", (void*)js_net_createServer, -1));
-    net_set_method(namespace_root.get(), "createConnection", (void*)js_net_createConnection, -1);
-    net_set_method(namespace_root.get(), "connect",          (void*)js_net_createConnection, -1); // alias
-    socket_root.set(net_set_method(namespace_root.get(), "Socket", (void*)js_net_Socket, 1));
-    block_list_root.set(net_set_method(namespace_root.get(), "BlockList", (void*)js_net_BlockList, 1));
-    bound_socket_root.set(net_set_method(namespace_root.get(), "BoundSocket", (void*)js_net_BoundSocket, 1));
-    stream_root.set(net_set_method(namespace_root.get(), "Stream", (void*)js_net_Socket, 1)); // legacy alias
-    server_root.set(net_set_method(namespace_root.get(), "Server", (void*)js_net_createServer, -1)); // alias
+    create_server_root.set(net_set_method(namespace_root.get(), "createServer", js_net_createServer, -1));
+    net_set_method(namespace_root.get(), "createConnection", js_net_createConnection, -1);
+    net_set_method(namespace_root.get(), "connect",          js_net_createConnection, -1); // alias
+    socket_root.set(js_install_native_constructor(namespace_root.get(),
+        "Socket", js_net_Socket, 1));
+    block_list_root.set(js_install_native_constructor(namespace_root.get(),
+        "BlockList", js_net_BlockList, 1));
+    bound_socket_root.set(js_install_native_constructor(namespace_root.get(),
+        "BoundSocket", js_net_BoundSocket, 1));
+    stream_root.set(js_install_native_constructor(namespace_root.get(),
+        "Stream", js_net_Socket, 1)); // legacy alias
+    server_root.set(js_install_native_constructor(namespace_root.get(),
+        "Server", js_net_createServer, -1)); // alias
     js_property_set(block_list_root.get(), make_string_item("isBlockList"),
-                    js_new_function((void*)js_block_list_isBlockList, 1));
+                    js_new_native_function(js_block_list_isBlockList));
     net_constructor_prototype(bound_socket_root.get(), JS_CLASS_OBJECT);
 
     Item default_key = make_string_item("default");
@@ -5606,7 +5606,7 @@ extern "C" Item js_get_net_namespace(void) {
 
     bound_socket_root.set(net_constructor_prototype(socket_root.get(), JS_CLASS_SOCKET));
     net_socket_prototype = bound_socket_root.get();
-    socket_root.set(js_new_function((void*)js_socket_connect, -1));
+    socket_root.set(js_new_native_rest_function(js_socket_connect));
     net_socket_connect_fn = socket_root.get();
     js_property_set(bound_socket_root.get(), make_string_item("connect"), socket_root.get());
     js_property_set(stream_root.get(), make_string_item("prototype"), bound_socket_root.get());

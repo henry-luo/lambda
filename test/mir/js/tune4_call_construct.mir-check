@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "description": "D6.2.2v2: member calls perform observable property Get before the ordinary call kernel, while construction passes callee and newTarget explicitly to the distinct construct kernel.",
+  "checks": [
+    {
+      "in_func": "_js_callMember_#_body",
+      "expect_seq": [
+        { "pattern": "call\tjs_property_access_p_r6_n1_a2, js_property_access" },
+        { "pattern": "call\tjs_call_function_prerooted_args_into_p_r6_n1_a5, js_call_function_prerooted_args_into" }
+      ],
+      "forbid": [
+        "js_string_method",
+        "js_number_method",
+        "js_map_method",
+        "js_array_method",
+        "js_array_method_direct"
+      ]
+    },
+    {
+      "in_func": "_js_constructWith_#_body",
+      "expect": [
+        "call\tjs_construct_value_p_r6_n1_a6, js_construct_value, {{r}}, {{r}}, {{r}}, 1, {{r}}, {{r}}, 1"
+      ],
+      "forbid": [
+        "js_pending_new_target",
+        "js_has_pending_new_target",
+        "special_ctor"
+      ]
+    },
+    {
+      "in_func": "*",
+      "forbid": [
+        "js_dispatch_builtin",
+        "js_pending_new_target",
+        "js_has_pending_new_target"
+      ]
+    }
+  ]
+}

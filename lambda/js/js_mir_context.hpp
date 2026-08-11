@@ -212,6 +212,7 @@ struct JsFuncCollected {
     bool is_derived_constructor;    // true if class constructor has [[ConstructorKind]] derived
     bool is_class_method;           // true for any class method/accessor/constructor
     bool is_class_static_method;    // true for static class methods/accessors
+    bool is_class_field_initializer; // synthetic per-instance field capability
     JsClassEntry* owner_class;       // innermost class whose lexical body contains this function
     bool has_rest_param;            // true if last param is ...rest
     bool uses_arguments;            // v18q: true if function body references 'arguments'
@@ -318,6 +319,7 @@ struct JsInstanceFieldEntry {
     String* name;                   // source field name (#name if private, NULL if computed)
     JsAstNode* key_expr;            // key expression for computed fields
     JsAstNode* initializer;         // initializer expression (NULL if no initializer)
+    JsFuncCollected* initializer_fc; // internal per-instance initializer capability
     int key_module_var_index;       // class-evaluation computed key slot (-1 if not computed)
     bool computed;                  // whether this is a computed property name
 };
@@ -424,6 +426,7 @@ struct JsMirTranspiler {
 
     // Current class being transpiled (for super resolution)
     JsClassEntry* current_class;
+    MIR_reg_t current_private_home_class_reg; // exact evaluated class during inline initialization
 
     // Try/catch context stack (for return-in-try and exception flow). Entries
     // are JsTryContext* owned by the ArrayList.

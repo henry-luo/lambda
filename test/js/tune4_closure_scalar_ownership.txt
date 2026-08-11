@@ -1,0 +1,3 @@
+captured-scalar-env:8
+captured-declaration-env:14
+escaped-scalar-home:3.25:9.5:12.75

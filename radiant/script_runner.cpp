@@ -1712,7 +1712,7 @@ static bool execute_lifecycle_snippet(Runtime* runtime, JsPreambleState* preambl
                                       DocumentScriptPhaseTiming* timing) {
     Item result;
     if (cached) {
-        result = execute_compiled_js_in_current_realm(runtime, cached);
+        result = execute_compiled_js_in_current_realm(runtime, preamble, cached);
         js_mir_cache_record_instantiation(s_js_mir_cache);
         if (timing) timing->cache_instantiations++;
         js_mir_accumulate_last_phase_timing(false);

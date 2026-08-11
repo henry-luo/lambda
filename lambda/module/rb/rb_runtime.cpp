@@ -555,7 +555,7 @@ extern "C" void rb_setattr(Item object, Item name, Item value) {
     }
     String* str_key = it2s(name);
     if (str_key) {
-        map_put(m, str_key, value, input);
+        map_put_heap(m, str_key, value, input);
     }
 }
 
