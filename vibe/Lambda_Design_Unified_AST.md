@@ -1,8 +1,8 @@
 # Unified AST & Compiler Design — Lambda + LambdaJS (and beyond)
 
-**Date:** 2026-07-11 (rev 7 — §12 AST-interpreter question resolved: no execution interpreter, const-folder yes, reference interpreter KIV)
-**Status:** Design settled — ledger U1–U26 in §9; U4, U11, U13–U26 user-confirmed
-**Related:** `vibe/Lambda_Semantics_Features.md` Part 1 (J1–J6, G1–G8), `vibe/Lambda_Design_Concurrency.md` (K17), `vibe/Lambda_Design_Native_Module.md`, `vibe/Lambda_Code_Clean_Up.md` §6, `vibe/Lambda_GC_Root_Issue.md`, `vibe/Lambda_Expr_For_Clauses2.md` (FC1–FC9)
+**Date:** 2026-08-12 (rev 8 — live convergence checkpoint, indexed facts/pass pipeline, demand-driven lowering, and measurable efficiency gates)
+**Status:** Design settled — ledger U1–U36 in §9; continuation decisions U27–U36 are implementation requirements
+**Related:** `vibe/Lambda_Impl_Tune_Ast.md`, `vibe/Lambda_Impl_Unified_AST (done).md`, `vibe/Lambda_Semantics_Features.md` Part 1 (J1–J6, G1–G8), `vibe/Lambda_Design_Concurrency.md` (K17), `vibe/Lambda_Design_Native_Module.md`, `vibe/Lambda_Code_Clean_Up.md` §6, `vibe/Lambda_GC_Root_Issue.md`, `vibe/Lambda_Expr_For_Clauses2.md` (FC1–FC9)
 
 ---
 
@@ -48,6 +48,21 @@ The research pass found that far more is already unified than the code layout su
 | Scope/binding pass | Divergent: Lambda binds authoritatively at build time; JS has a coarse build-time `JsScope` + authoritative MIR-time side tables (`JsFuncCollected`) |
 
 The unification surface is therefore: **(a) the node-kind space and leaf structs, (b) the analysis passes, (c) the MIR lowering core, (d) four substrate systems (shape pool, const pool, var lookup, module import binding).**
+
+### 1.3 Live checkpoint and the remaining problem
+
+The table above records the discovery baseline. The live tree has since completed much of the structural convergence: `lambda/runtime/ast-core.hpp` owns the core catalog, Lambda and JS share `AstNode`, `FnAnalysis`, and `MirEmitter`, and `lambda/js/js_ast.hpp` aliases 53 core node kinds while retaining only the genuinely JS/TS-specific range. This satisfies the structural direction of **D8.2.1–D8.2.3**; it does not yet produce one structured compiler process.
+
+The remaining cost is concentrated at the seams between those shared structures:
+
+- `lambda/runtime/build_ast.cpp` is 12,472 physical lines and `lambda/js/build_js_ast.cpp` is 4,786. Both allocate the same core shapes, but repeat traversal, list construction, diagnostics, binding, and source-location mechanics. Grammar-specific CST decoding remains intentionally separate; these mechanics do not.
+- Lambda still performs substantial binding, validation, and inference while building. JS builds coarse facts and reconstructs authoritative facts during MIR analysis/lowering. The same question can therefore be answered at different stages depending on language.
+- Core nodes are walked by dozens of independent switches. Each new field or form must be remembered by every walker, and repeated whole-tree scans make work proportional to `passes × nodes` even where a single index could answer the query.
+- `AstNode.type` is still asked to represent both source contract and inferred implementation choice. That conflicts with **D3.2.3** and makes invalidation and differential boxed testing harder.
+- JS function/class lookup and several propagation steps still use repeated linear searches; strict propagation and duplicate-function discovery contain quadratic forms. Reference binding may be repaired again during lowering after AST scopes have become stale.
+- Release profiling of representative large JS fixtures shows MIR construction dominates source-to-MIR compilation, not AST allocation. The measured share was 83–94% for Underscore, Ramda, Lodash, AJV, Yup, and Acorn. Therefore the continuation must reduce lowering work and emitted work as well as builder duplication; an AST-only cleanup cannot meet the performance goal.
+
+The continuation target is consequently **one indexed compilation unit, one explicit fact graph, one scheduled pass pipeline, and one demand-driven MIR lowering contract**, while preserving separate grammars and separate language semantics.
 
 ---
 
@@ -343,6 +358,63 @@ This preserves each language's number model (a semantic property) while sharing 
 
 Both engines' hard-won fixes carry over once, not twice: the pn-param float-div rule (INFER_FLOAT_CONTEXT on division), the "comparisons aren't int evidence" rule, the container/reassignment demotions.
 
+### 3.5 One compilation unit, stable identities, and one AST index
+
+**D8.2.4** requires one indexed compilation unit. The implementation must make the compilation unit—not a loose collection of builder/transpiler globals—the owner of all compiler state:
+
+```c
+struct CompilationUnit {
+    Script* script;
+    const LangProfile* profile;
+    AstNode* root;
+    AstIndex index;
+    CompilationFacts facts;
+    MirEmitter emitter;
+    CompilerPhaseTiming timing;
+    DiagnosticSink diagnostics;
+};
+```
+
+Every core node receives a dense, stable `NodeId`; scopes, bindings, functions, and classes receive `ScopeId`, `BindingId`, `FunctionId`, and `ClassId`. Pointers remain useful while the arena is alive, but cross-pass references and side tables use IDs. This removes pointer-key reconstruction, makes facts dense arrays rather than scattered maps, and gives dumps/tests stable identities.
+
+Immediately after binding, one common indexing pass walks the tree once and constructs:
+
+- parent, owning-function, and lexical-scope relations;
+- declaration/reference → `BindingId` links, including hoisted JS bindings and Lambda bindings;
+- per-function child functions, calls, returns, awaits/yields, and captured references;
+- `FunctionId → AstFuncNode*` and `ClassId → AstClassNode*` direct indexes;
+- compact use/def, call-graph, and effect-input lists consumed by later worklists.
+
+All core traversal goes through one authoritative `visit_core_children()` definition. A profile contributes `visit_ext_children()` only for its language-range nodes and clause extensions. Builders may use CST-specific helpers, but semantic passes may not grow private core-child switches. A node-catalog completeness test constructs every core form and asserts that the common visitor exposes every owned child exactly once. This enforces **D8.2.4** and the variance rules of **D8.2.2** in executable form.
+
+References are resolved once during binding/indexing. Lowering consumes `BindingId` and never performs a second name search or repairs a shadow decision. Function/class collection becomes O(1) lookup after the index pass; call-graph and strict/effect propagation use indexed adjacency lists and worklists rather than repeated scans.
+
+### 3.6 Explicit facts and a typed pass manager
+
+**D8.2.5** defines the typed pass/fact process; **D2.4.1** assigns each compiler fact one authority; **D3.2.3** separates declared and inferred types; **D3.3.1** requires inference to be unobservable. The AST therefore retains syntax and semantic contracts, while optimization results live in `CompilationFacts` side tables keyed by stable IDs:
+
+| Fact | Authority / lifetime |
+|---|---|
+| source-declared `Type*`, declaration kind, syntax form | AST; immutable after build/bind |
+| resolved binding and owning scope/function | `AstIndex`; immutable after indexing |
+| inferred/effective type | `NodeFacts`/`BindingFacts`; erasable optimization fact |
+| representation plan and conversion provenance | lowering facts; never reconstructed from MIR register type |
+| capture/effect/call-graph facts | indexed function facts; worklist-produced |
+| constant result | const-analysis fact; valid only under the profile's pure-fold policy |
+| requested value demand | lowering input, not stored as semantic truth |
+
+Pass order and dependencies are explicit:
+
+```
+build → bind → validate → index/call graph → captures/effects
+      → type + representation inference → function planning
+      → MIR lowering → emitter finalization → module finalization/link
+```
+
+Each pass descriptor declares `requires`, `produces`, and—where incremental compilation is later introduced—`invalidates`. The pass manager asserts prerequisites in debug/test builds and records per-pass timing. Profile hooks are attached to a typed stage (`validate`, `classify_effect`, `resolve_evidence`, `plan_call`, `lower_ext_node`); a generic `void` hook that silently does nothing is not an acceptable extension contract. A language may explicitly return `PASS_NOT_APPLICABLE`, but the pass manager still records that decision.
+
+The shared scheduler is a worklist over indexed functions/bindings. The common engine performs graph propagation and convergence; the profile classifies semantic evidence and resolves the result. This shares process without conflating Lambda and JavaScript semantics.
+
 ---
 
 ## 4. Handling Semantic / Language Differences — the `LangProfile`
@@ -362,33 +434,39 @@ The heart of the design. The shared transpiler lowers core nodes by delegating *
 ```c
 struct LangProfile {
     const char* name;                       // "lambda", "js", ...
-    // operator lowering: given op + operand static types, either emit inline MIR
-    // (via shared emitter) or return the runtime helper symbol to call
-    LowerAction (*lower_binary)(MirEmitter*, Operator, AstNode* l, AstNode* r);
-    LowerAction (*lower_unary)(MirEmitter*, Operator, AstNode*);
+    // the common driver lowers children; profiles decide source semantics
+    MirValue (*lower_binary)(MirEmitter*, Operator, MirValue l, MirValue r,
+                             ValueDemand demand);
+    MirValue (*lower_unary)(MirEmitter*, Operator, MirValue value,
+                            ValueDemand demand);
     // coercions & tests
-    void (*emit_truthy_test)(MirEmitter*, Reg val, Label if_true, Label if_false);
-    Reg  (*emit_to_number)(MirEmitter*, Reg val);
+    void (*emit_truthy_branch)(MirEmitter*, MirValue value,
+                               Label if_true, Label if_false);
+    MirValue (*emit_to_number)(MirEmitter*, MirValue value,
+                               ValueDemand demand);
     // member/index access semantics
-    Reg  (*emit_member_get)(MirEmitter*, Reg obj, ...);   // shape walk vs prototype chain + IC
+    MirValue (*emit_member_get)(MirEmitter*, MirValue obj, ...); // map vs prototype + IC
     void (*emit_member_set)(MirEmitter*, ...);
     // calls & errors
-    Reg  (*emit_call)(MirEmitter*, ...);                   // arity/this/spread policy
-    void (*emit_error_check)(MirEmitter*, Reg result);     // T^E propagation vs JS throw-completion
+    MirValue (*emit_call)(MirEmitter*, ...);               // arity/this/spread policy
+    void (*emit_error_check)(MirEmitter*, MirValue result);// T^E vs JS completion
     // inference policy (§3.4)
     Type* (*resolve_param_evidence)(const ParamEvidence*);
     // validation, clause & extension-node lowering
-    int  (*validate)(Script*, AstNode* root);
-    Reg  (*lower_clause)(MirEmitter*, AstNode* clause, ...); // language clauses on core nodes
-    Reg  (*lower_ext_node)(MirEmitter*, AstNode*);           // language-range nodes
+    PassStatus (*validate)(CompilationUnit*);
+    MirValue (*lower_clause)(MirEmitter*, AstNode* clause, ValueDemand demand);
+    MirValue (*lower_ext_node)(MirEmitter*, AstNode*, ValueDemand demand);
+    void (*visit_ext_children)(AstNode*, ChildVisitor*);
 };
 ```
+
+The live `LangProfile` currently has several coarse/no-op pass hooks. The target interface is intentionally narrower and typed: profiles answer semantic questions and handle true extension nodes; they do not own an alternate traversal or alternate pass schedule. A hook receives the relevant fact/index view and returns an explicit status/result. This keeps the shared pass manager responsible for ordering, diagnostics, timing, and invalidation while preserving the language boundary required by **D8.2.1–D8.2.2**.
 
 Concrete divergences and where they land:
 
 | Divergence | Resolution |
 |---|---|
-| `==` (JS coercing vs Lambda structural), `+` (JS string-concat overload), truthiness (`""`/`0` falsy in JS; Lambda's own rules per Formal_Semantics) | `lower_binary` / `emit_truthy_test` per profile |
+| `==` (JS coercing vs Lambda structural), `+` (JS string-concat overload), truthiness (`""`/`0` falsy in JS; Lambda's own rules per Formal_Semantics) | `lower_binary` / `emit_truthy_branch` per profile |
 | Number models (Lambda int/int64/float/decimal vs JS all-float64 + BigInt→decimal per N1–N9) | inference resolution policy + `emit_to_number`; the Item encoding already carries both |
 | `null` vs `undefined` | already solved in the value model (`LMD_TYPE_UNDEFINED`); Lambda code simply never produces it |
 | Object access: Lambda map field vs JS prototype chain + descriptors + ICs | `emit_member_get/set`; JS profile keeps its IC machinery (`JsLoadIC`/`JsStoreIC`), Lambda profile keeps direct shape access. `map_kind` already discriminates at runtime |
@@ -430,12 +508,14 @@ Concrete divergences and where they land:
 └────────────────────────────────────────────────────────┘
 ```
 
-### 5.2 `MirEmitter` (bottom layer — extract first)
+### 5.2 `MirEmitter` (shared bottom layer — landed; tighten ownership)
 
-Already identified in Clean_Up §6.4: `new_reg/emit_insn/emit_label/emit_call_N/ensure_import` are line-for-line duplicated between `transpile-mir.cpp:434–490` and `js_mir_internal.hpp:96–204`. Extract into one struct holding `MIR_context_t, current_func, reg counter, import cache, rt_reg/gc_reg, root-slot allocator, consts/type-list BSS regs`. Both existing transpilers adopt it **before** any AST change — it's independently a cleanup win (~300–500 LOC) and creates the single home for:
+The common emitter extraction has landed. The continuation makes its ownership strict: register/label allocation, import calls, representation conversion primitives, root-slot policy, final root stores, scalar-home finalization, and module data finalization have one implementation. Language lowerers report semantic events and requested representations; they do not insert parallel final stores or infer rootability from `MIR_T_I64`.
 
 - **GC rooting (G1).** The honest-local-typing fix from `vibe/Lambda_GC_Root_Issue.md` must be implemented *in the emitter*, once, as part of this extraction. Rooting is currently the highest-priority foundation gap and re-plumbing register allocation without fixing it would entrench the blanket-`MIR_T_I64` hack in shared code. **Prerequisite, not afterthought.**
 - **Double-boxing v2.** The inline-doubles proposal (`vibe/Lambda_Type_Double_Boxing.md`) changes boxing sequences; with one emitter, it lands in one place for both languages instead of two.
+
+This is required by **D5.3.4**: rooting policy and final store insertion live only in `MirEmitter`. MIR-size changes remain subject to the zero-slack ratchet in **D8.6.1**, and liveness remains subject to the forced-GC dynamic oracles in **D8.6.3**.
 
 ### 5.3 Unified variable model
 
@@ -449,13 +529,55 @@ The shared driver owns the `switch(node_type)` over core nodes, delegating seman
 
 **Native specialization** (JS's boxed+native dual emission, `has_native_version`) generalizes: it's the same mechanism as Lambda's unboxed-param path; the shared driver emits native variants when the profile's inference policy typed the params natively.
 
-### 5.5 C2MIR path (decision needed — U11)
+### 5.5 C2MIR path (frozen — U11)
 
-`transpile.cpp` (C-text backend) is Lambda-only, Jube-build-only, kept for debugging/regression. Options:
-- **(a) Freeze:** it keeps consuming Lambda AST nodes; the unified enum keeps Lambda node values stable (or the renumber is mechanically applied to its switches once). It never learns core-node semantics for other languages. Low cost, keeps the debug tool.
-- **(b) Retire** after the unified MIR path is proven, per the J1 spirit ("one spec level").
+`transpile.cpp` (C-text backend) stays Lambda-only and frozen. The common pass/index/lowering work evolves MIR Direct only; C2MIR receives neither JS support nor new runtime/ABI/design features. A mechanical compatibility edit is permitted only if a shared AST representation change would otherwise stop the legacy path from building.
 
-**Recommendation: (a) freeze now, revisit retirement after Phase 4** — it's load-bearing for transpiler-diff debugging during exactly this migration.
+### 5.6 `MirValue` everywhere and demand-driven lowering
+
+The common expression boundary follows **D8.2.6** and the full **D2.4.2** contract:
+
+```c
+struct MirValue {
+    MIR_reg_t reg;
+    MIR_type_t mir_type;
+    ValueRep rep;
+    Type* contract;
+    ValueProvenance provenance;
+};
+```
+
+No core lowering API returns a bare register. `contract` is the complete `Type*`, not only a `TypeId`; `rep` distinguishes Item, Lambda numeric lanes, machine quantities, and raw pointers. All carrier changes go through `em_require_rep()` and obey **D2.4.3**; language coercion remains a profile semantic operation.
+
+The lowering driver also receives an explicit demand:
+
+```c
+enum ValueDemandKind {
+    VALUE_DISCARD,
+    VALUE_ANY,
+    VALUE_REQUIRED_REP,
+    VALUE_DEST_REG,
+    VALUE_BRANCH
+};
+```
+
+This permits one-pass destination passing and removes predictable temporary/boxing work:
+
+- expression statements use `VALUE_DISCARD` but still preserve effects and error checks;
+- assignments, returns, scalar homes, and fixed call arguments pass their destination/required representation down;
+- conditions use `VALUE_BRANCH` and emit control flow without materializing an intermediate boolean Item;
+- literals and simple operators emit directly into a requested register when legal;
+- unknown/dynamic cases fall back to `VALUE_ANY`, followed by the one checked representation conversion.
+
+Demand is an implementation choice, never a semantic fact. A debug differential mode erases inferred types and specialized demands, forces boxed `VALUE_ANY`, and must produce the same result, enforcing **D3.3.1**.
+
+### 5.7 Compiler-time observability is part of the compiler contract
+
+Optimization cannot use whole-test wall time as a proxy for compiler work. Both pipelines expose the same machine-readable `CompilerPhaseTiming` fields: parse, AST build, bind, validate, index, analysis/inference, function planning, MIR lowering, emitter finalization, module finalization, link, execution, and cleanup. `build_transpile_us` is the sum from parse through link; execution, process startup, cleanup, and test scheduling are recorded separately and are excluded from compiler gates.
+
+The batch protocols emit one timing/volume record per compiled test/module, and both GTest harnesses persist the same TSV schema. For JS, the code counts each test's top-level module after MIR finalization and prints its function count and finalized instruction count; the count uses the same definition as MT7 (`test_mir_ratchet_gtest`: labels and declarations are excluded). This is a compact size record, not a full textual MIR dump, so measurement does not add dump-I/O cost. Missing, duplicate, retried, or differently named samples make a comparison invalid. The older Lambda `LAMBDA_PROFILE` shared-file path may remain for ad-hoc diagnostics during migration, but it is not a gate because concurrent batch processes can overwrite it.
+
+The **D8.6.4** hard exit metrics and capture protocol are specified in `vibe/Lambda_Impl_Tune_Ast.md`: at least 10% lower median aggregate `build_transpile_us` for `test_lambda_gtest`, at least 20% for `test_js_gtest`, at least 15% fewer finalized MIR instructions for the frozen JS large-library cohort with no growth over the complete JS corpus, and at least 2,000 net physical C/C++ LOC removed from the Lambda/JS runtime scope. Scheduler improvements are welcome and reported separately, but cannot satisfy the compiler-time or MIR-volume gates.
 
 ---
 
@@ -523,7 +645,9 @@ Porting order: **Python first** (most complete, already wired into Lambda's impo
 
 ## 8. Migration Plan
 
-Method: K17's extract-after-convergence — never a big-bang rewrite; every phase keeps both pipelines green. Gates throughout: `make test-lambda-baseline` (100%), lambda gtest suite, editor Phase-A 1931 JS tests, UI-automation 5714, node-baseline (1492/3517, no regression), test262-linked early-error behavior.
+**Live status, 2026-08-12:** the numbered phases below are the historical structural migration plan. The common AST, common node aliases, `FnAnalysis`, and `MirEmitter` are substantially landed. The remaining implementation is now governed by `vibe/Lambda_Impl_Tune_Ast.md`, whose continuation sequence is: measurement → common traversal/index → explicit facts/pass manager → demand-driven `MirValue` lowering → duplicate-path deletion → hard-gate closeout. The old phase text remains as design provenance; it is not the current checklist.
+
+Historical method: K17's extract-after-convergence — never a big-bang rewrite; every phase keeps both pipelines green. The current continuation gates are the hard contracts in `vibe/Lambda_Impl_Tune_Ast.md` §2 and the closeout matrix in §11; the numbered phase record below is not used to substitute older corpus counts or looser wall-time measurements.
 
 **Track interleaving with concurrency work (U21, user-confirmed):** Phase 0 lands first — it is the shared prerequisite of *both* this project and the concurrency plan (Stage A runs JIT'd frames concurrently and must not be built on the G1 rooting hack). Then **concurrency Stage A proceeds in parallel with Phases 1–3** (Stage A works against the new emitter API in `transpile-mir.cpp`; Phases 1–3 live mostly in `ast-core`/builders/analysis — low contention). Phase 4's resumable-function-transform extraction then has **two green clients** (JS async/generators + Lambda's Stage-B transform), honoring K17's two-client rule; Stage B ships on the shared transform.
 
@@ -598,6 +722,16 @@ Risk register:
 | **U24** | **`AST_YIELD`/`AST_AWAIT` are statement-level (L2)**, not function-level — expression-position capable like `AST_ASSIGN`; their per-function counts stay in `FnAnalysis` (L4) feeding the resumable-function transform                                                                                                                                                                                                                                                                                                                            | **confirmed** |
 | **U25** | **`AST_METHOD` is function-level (L4) and extends `AST_FUNC`** (struct inheritance: adds `key; MethodKind; is_static; is_private; computed`) — a method *is* a function node, so every shared function pass (captures, inference, resumable transform) sees methods with zero special-casing; `AST_CLASS` members reference `AST_METHOD`/`AST_FIELD` directly, no wrapper                                                                                                                                                                          | **confirmed** |
 | **U26** | **No AST-walking execution interpreter** (§12): MIR-interp mode (`g_mir_interp_mode`) stays the no-JIT execution path; a **const-folder over the pure L1 core subset** (profile-dispatched `fold_*` hooks, fn/pn purity as the soundness gate) is added to the shared analysis passes; a slow reference interpreter is **KIV** — future, and only for semantic analysis / executable-spec goals MIR cannot serve, never wired into `eval`/REPL execution                                                                                          | **confirmed** |
+| **U27** | **D8.2.4 compilation-unit ownership becomes concrete**: one `CompilationUnit` owns profile, AST root, stable IDs, index, facts, diagnostics, timing, and emitter state; cross-pass references use dense `NodeId`/`ScopeId`/`BindingId`/`FunctionId`/`ClassId` rather than rediscovery                                                                                                                                        | **confirmed** |
+| **U28** | **D8.2.4 one authoritative core-child traversal**: shared passes use `visit_core_children()`; profiles expose only extension children. A catalog-completeness test covers every core form. Private semantic-pass switches over core ownership are deleted as clients migrate                                                                                                                                            | **confirmed** |
+| **U29** | **D8.2.5 one typed pass manager** runs build → bind → validate → index/call graph → captures/effects → type/representation inference → function planning → lowering → emitter/module finalization → link. Every pass declares required/produced facts and records its own timing; profiles answer typed semantic questions rather than owning alternate schedules                                                                 | **confirmed** |
+| **U30** | **D8.2.5, D2.4.1, D3.2.3, and D3.3.1 fact separation is mandatory**: AST stores source contracts; `AstIndex` stores resolved identity; side tables store erasable inference, effect, const, and representation facts. `AstNode.type` must not be mutated into an inferred source contract                                                                                                                               | **confirmed** |
+| **U31** | **D8.2.6 and D2.4.2–D2.4.3 complete at every expression boundary**: lowering returns `MirValue` with full `Type*`, representation, MIR type, and provenance. Explicit demand (`DISCARD`, `ANY`, `REQUIRED_REP`, `DEST_REG`, `BRANCH`) enables destination passing and avoids unnecessary materialization; semantic coercion remains profile-owned                                                                      | **confirmed** |
+| **U32** | **D5.3.4 emitter exclusivity is a hard invariant**: all root policy/final stores and common scalar/module finalization live in `MirEmitter`; language lowering cannot reconstruct representation from MIR register classes. D8.6.1 zero-slack MIR budgets and D8.6.3 forced-GC oracles gate every migration slice                                                                                                 | **confirmed** |
+| **U33** | **D8.6.4 compiler efficiency is measured internally, per test/module**: common machine-readable phase timing, identical sample manifests, release builds, one warm-up plus five measured runs, median aggregate comparison. Final hard gates are ≥10% lower `test_lambda_gtest` build/transpile time and ≥20% lower `test_js_gtest`; execution/process/scheduler time cannot satisfy them                                                         | **confirmed** |
+| **U34** | **D8.6.4 requires at least 2,000 net physical C/C++ runtime LOC deleted** from the anchored `lambda/runtime` + `lambda/js` scope (new shared code included; moving code out of scope invalidates the gate). The 2026-08-12 anchor is `e66e5b5c71bc7ee7fe2d1e2b2a9afe27dc6825a3`, measured at 319,606 lines; candidate must be ≤317,606. Reformatting/comment stripping is not accepted as the reduction rationale | **confirmed** |
+| **U35** | **D8.6.4 optimizes measured work before cache complexity**: eliminate repeated walks, linear rediscovery, duplicate lowering, temporaries, boxing, and excess emission first. D8.5 caches/lazy compilation are optional only after phase attribution proves the remaining gate cannot be reached directly; cached/skipped samples are reported separately and cannot silently disappear from the corpus                                                                             | **confirmed** |
+| **U36** | **D8.6.4 adds a numeric finalized-MIR-volume gate over `test_js_gtest`**: Phase 0 freezes the discovered `lib_*` plus `underscore_lib` large-library manifest; the candidate must emit ≥15% fewer finalized top-level-module MIR instructions in aggregate and must not increase the complete-suite aggregate. The batch protocol prints per-test module/function/instruction counts, using MT7's instruction definition; each library's before/after count remains review-visible | **confirmed** |
 
 ## 10. Resolved Questions (decision record)
 
