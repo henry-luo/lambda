@@ -1856,7 +1856,7 @@ typedef struct LayoutFlexStyleInfo {
 LayoutFlexStyleInfo layout_flex_declared_style_info(LayoutContext* lycon,
                                                     DomElement* element);
 CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
-                                 CssEnum fallback);
+                                 CssEnum fallback = (CssEnum)0);
 
 inline FlexProp* layout_embedded_flex(ViewElement* element) {
     if (!element || (element->view_type != RDT_VIEW_BLOCK &&
@@ -3769,6 +3769,7 @@ static inline bool layout_block_is_out_of_flow_positioned(const ViewBlock* block
     return block && layout_position_is_abs_fixed(block->position);
 }
 
+bool layout_block_is_self_collapsing(ViewBlock* block);
 static inline bool layout_block_is_out_of_flow(const ViewBlock* block) {
     return block &&
            (layout_position_is_abs_fixed(block->position) ||
@@ -3818,8 +3819,6 @@ float calc_normal_line_height(struct FontHandle* handle);
 float layout_br_line_box_extent(LayoutContext* lycon, struct FontHandle* handle);
 bool layout_quirky_container_ignores_child_margin_bottom(
     LayoutContext* lycon, ViewBlock* container, ViewBlock* child);
-CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
-                                 CssEnum fallback = (CssEnum)0);
 bool layout_element_was_inline(DomElement* element, bool include_replaced = true);
 
 struct LayoutBorderSpacingValue {

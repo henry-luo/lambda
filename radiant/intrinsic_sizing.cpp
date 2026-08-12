@@ -1665,7 +1665,6 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     result.min_content = longest_word;   // Keep float precision
     result.max_content = total_width;    // Keep float precision
 
-
     return result;
 }
 
@@ -2206,7 +2205,6 @@ static bool intrinsic_node_ends_with_forced_break(DomNode* node) {
     return false;
 }
 
-
 static bool intrinsic_node_has_collapsible_space_at_edge(DomNode* node, bool end) {
     if (!node) return false;
     if (node->is_text()) {
@@ -2633,36 +2631,40 @@ void layout_resolve_intrinsic_horizontal_margins(
         LayoutContext* lycon, DomElement* element, bool include_logical,
         float* margin_left, float* margin_right, bool include_shorthand) {
     if (!element || !element->specified_style || !margin_left || !margin_right) return;
+    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    StyleTree* style = element->specified_style;
+    const Margin* resolved = view && view->bound ? &view->boundary()->margin : nullptr;
+    if (resolved && resolved->left_type != CSS_VALUE__PERCENTAGE &&
+        resolved->left_type != CSS_VALUE_AUTO) *margin_left = resolved->left;
+    if (resolved && resolved->right_type != CSS_VALUE__PERCENTAGE &&
+        resolved->right_type != CSS_VALUE_AUTO) *margin_right = resolved->right;
     auto resolve_decl = [&](CssPropertyCode property, const CssValue* value,
                             float* output) {
         if (value && value->type != CSS_VALUE_TYPE_PERCENTAGE) {
             *output = intrinsic_resolve_horizontal_margin_value(lycon, property, value);
         }
     };
-    CssDeclaration* decl = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_MARGIN_LEFT);
+    CssDeclaration* decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_LEFT);
     if (decl) resolve_decl(CSS_PROPERTY_MARGIN_LEFT, decl->value, margin_left);
-    decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
+    decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_RIGHT);
     if (decl) resolve_decl(CSS_PROPERTY_MARGIN_RIGHT, decl->value, margin_right);
     if (include_logical && *margin_left == 0.0f) {
-        decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_MARGIN_INLINE_START);
+        decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_INLINE_START);
         if (decl) resolve_decl(CSS_PROPERTY_MARGIN_INLINE_START, decl->value, margin_left);
     }
     if (include_logical && *margin_right == 0.0f) {
-        decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_MARGIN_INLINE_END);
+        decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_INLINE_END);
         if (decl) resolve_decl(CSS_PROPERTY_MARGIN_INLINE_END, decl->value, margin_right);
     }
     if (include_logical && *margin_left == 0.0f && *margin_right == 0.0f) {
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_INLINE);
+        decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_INLINE);
         if (decl) {
             resolve_decl(CSS_PROPERTY_MARGIN_INLINE, decl->value, margin_left);
             *margin_right = *margin_left;
         }
     }
     if (!include_shorthand || *margin_left != 0.0f || *margin_right != 0.0f) return;
-    decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN);
+    decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN);
     if (!decl || !decl->value) return;
     resolve_decl(CSS_PROPERTY_MARGIN, css_box_shorthand_side_value(decl->value, 1), margin_right);
     resolve_decl(CSS_PROPERTY_MARGIN, css_box_shorthand_side_value(decl->value, 3), margin_left);
@@ -3025,7 +3027,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
         (lam::unsafe_view_block_element_storage(element))->display = resolve_display_value((void*)element);
     }
-
 
     {
         ViewBlock* check_none = lam::unsafe_view_block_element_storage(element);
@@ -4391,7 +4392,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     sizes.max_content = max(total_specified, sizes.min_content);
                 }
 
-
                 return sizes;
             }
             // No table structure found — fall through to generic measurement
@@ -4583,7 +4583,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             total_min += pad_left + pad_right + border_left + border_right;
             total_max += pad_left + pad_right + border_left + border_right;
 
-
             // Apply max-width constraint (same logic as the generic path below).
             // The grid early-return bypasses the generic constraint code, so we apply it here.
             {
@@ -4636,13 +4635,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // largest flex item's min-content contribution (not the sum).
         is_flex_wrap = is_row_flex && flex_style.wrapping;
     }
-
     // Determine if this element has a definite height to propagate
     float element_definite_height = -1;
     bool hidden_auto_height = view_block->blk &&
         view_block->block()->content_visibility_hidden &&
         view_block->block()->contain_intrinsic_height_auto;
-
 
     // First check for explicit height from CSS (length value)
     if (!hidden_auto_height && view_block->blk && view_block->block_mut()->given_height > 0) {
@@ -5001,7 +4998,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         child_sizes.max_content);
                 }
             }
-
 
             // For inline elements, also add horizontal margins
             // CSS Sizing 3 §4: Negative margins reduce the element's outer size contribution
@@ -6056,7 +6052,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 	    DomElement* element = node->as_element();
 	    if (!element) return 0;
 
-
     {
         IntrinsicFontScope style_font_scope(lycon, lycon->font);
         LayoutViewScope style_view_scope(lycon);
@@ -6899,7 +6894,6 @@ IntrinsicSizesBidirectional measure_intrinsic_sizes(
     // This matches the original grid behavior where both heights are computed at the same width
     result.min_content_height = calculate_min_content_height(lycon, node, width_for_height);
     result.max_content_height = calculate_max_content_height(lycon, node, width_for_height);
-
 
     return result;
 }

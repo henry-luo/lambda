@@ -446,9 +446,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         }
     }
 
-    // Phase 5.5: Auto-fit empty track collapsing is deferred until proper gutter
-    // collapsing is implemented (CSS Grid §7.2.3.2 requires collapsed gutters too).
-
     // Phase 5.6: CSS Grid §11.7.1 — Adjust orthogonal flow items' width contributions.
     // For grid items with a vertical writing mode, the physical min-content width
     // (block size) depends on the available inline size (physical height from row tracks).
