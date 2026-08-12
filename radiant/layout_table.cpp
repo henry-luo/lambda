@@ -3148,6 +3148,13 @@ static void reparent_node(DomNode* node, DomElement* new_parent) {
     append_detached_table_node(new_parent, node);
 }
 
+static void reparent_run(ArrayList* run, DomElement* new_parent) {
+    if (!run || !new_parent) return;
+    for (int i = 0; i < run->length; i++) {
+        reparent_node(static_cast<DomNode*>(run->data[i]), new_parent);
+    }
+}
+
 static void insert_node_before(DomElement* parent, DomNode* new_node, DomNode* ref_node) {
     if (!parent || !new_node) return;
     if (!ref_node) {
@@ -3172,18 +3179,6 @@ static bool table_text_node_has_preserved_whitespace_content(DomNode* node) {
     if (layout_dom_text_has_non_whitespace(
             lam::dom_require<DOM_NODE_TEXT>(node))) return false;
     return white_space_preserves_space_advance(get_white_space_value(node));
-}
-
-static bool table_text_node_is_whitespace_only(DomNode* node) {
-    if (!node || !node->is_text()) return false;
-    const unsigned char* text = node->text_data();
-    if (!text) return true;
-    for (const unsigned char* p = text; *p; p++) {
-        if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f') {
-            return false;
-        }
-    }
-    return true;
 }
 
 static bool table_anonymous_run_allows_preserved_whitespace(ArrayList* run) {
@@ -3280,9 +3275,7 @@ static void flush_anonymous_row_run(LayoutContext* lycon, DomElement* table,
     if (!run || run->length == 0) return;
     DomElement* row_group = create_anonymous_table_element(
         lycon, table, CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
-    for (int i = 0; i < run->length; i++) {
-        reparent_node(static_cast<DomNode*>(run->data[i]), row_group);
-    }
+    reparent_run(run, row_group);
     place_anonymous_table_child(table, row_group, before);
     arraylist_clear(run);
 }
@@ -3293,11 +3286,8 @@ static void flush_anonymous_noncell_run(LayoutContext* lycon, DomElement* row,
     DomElement* cell = create_anonymous_table_element(
         lycon, row, CSS_VALUE_TABLE_CELL, "::anon-td");
     if (!cell) return;
-    for (int i = 0; i < run->length; i++) {
-        reparent_node(static_cast<DomNode*>(run->data[i]), cell);
-    }
-    if (before) insert_node_before(row, static_cast<DomNode*>(cell), before);
-    else append_child_to_element(row, cell);
+    reparent_run(run, cell);
+    place_anonymous_table_child(row, cell, before);
     arraylist_clear(run);
 }
 
@@ -6357,10 +6347,11 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
             } else if (next->is_text()) {
                 // CSS 2.1 §17.2.1: whitespace adjacent to table-internal boxes is
                 // orphaned table-internal run even when another table-cell follows.
-                if (table_text_node_is_whitespace_only(next)) {
+                if (!layout_dom_text_has_non_whitespace(next->as_text())) {
                     run_end = next;  // absorb trailing whitespace
                     DomNode* after_text = next->next_sibling;
-                    while (table_text_node_is_whitespace_only(after_text)) {
+                    while (after_text && after_text->is_text() &&
+                           !layout_dom_text_has_non_whitespace(after_text->as_text())) {
                         after_text = after_text->next_sibling;
                     }
                     if (after_text && after_text->is_element()) {

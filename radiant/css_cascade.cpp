@@ -2,6 +2,8 @@
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
+#include "../lambda/input/css/style_epoch.hpp"
+#include "../lib/tagged.hpp"
 
 static void apply_rule_to_element(DomElement* element, CssRule* rule,
                                   SelectorMatcher* matcher, Pool* pool,
@@ -75,6 +77,57 @@ void radiant_apply_css_rule_to_element(DomElement* element, CssRule* rule,
                                        SelectorMatcher* matcher, Pool* pool,
                                        CssEngine* engine) {
     apply_rule_to_element(element, rule, matcher, pool, engine);
+}
+
+static void apply_stylesheet_to_tree(DomElement* root, CssStylesheet* stylesheet,
+                                     SelectorMatcher* matcher, Pool* pool,
+                                     CssEngine* engine, int depth) {
+    if (!root || !stylesheet || !matcher || !pool || depth > MAX_RADIANT_CSS_TREE_DEPTH) {
+        return;
+    }
+
+    for (size_t i = 0; i < stylesheet->rule_count; i++) {
+        CssRule* rule = stylesheet->rules[i];
+        if (rule) apply_rule_to_element(root, rule, matcher, pool, engine);
+    }
+
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+        if (child->is_element()) {
+            apply_stylesheet_to_tree(lam::dom_require_element(child), stylesheet,
+                                     matcher, pool, engine, depth + 1);
+        }
+    }
+}
+
+void radiant_apply_css_stylesheet_to_tree(DomElement* root,
+                                          CssStylesheet* stylesheet,
+                                          SelectorMatcher* matcher, Pool* pool,
+                                          CssEngine* engine) {
+    if (!root || !stylesheet || stylesheet->rule_count == 0 ||
+        !matcher || !pool || !engine) {
+        return;
+    }
+
+    // One shared walker keeps the style epoch open for the complete subtree;
+    // separate layout and event walkers previously allowed ownership to diverge.
+    bool epoch_scope = style_epoch_cascade_begin(root->doc, root, engine, false);
+    apply_stylesheet_to_tree(root, stylesheet, matcher, pool, engine, 0);
+    if (epoch_scope) style_epoch_cascade_end(root->doc);
+}
+
+void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
+                                           CssStylesheet** stylesheets, int count,
+                                           Pool* pool, CssEngine* engine,
+                                           SelectorMatcher* matcher) {
+    if (!doc || !root || !stylesheets || count <= 0 || !pool || !engine) return;
+    if (!matcher) matcher = selector_matcher_create(pool);
+    if (!matcher) return;
+
+    bool epoch_scope = style_epoch_cascade_begin(doc, root, engine, false);
+    for (int i = 0; i < count; i++) {
+        radiant_apply_css_stylesheet_to_tree(root, stylesheets[i], matcher, pool, engine);
+    }
+    if (epoch_scope) style_epoch_cascade_end(doc);
 }
 
 void radiant_cascade_styles_for_element(DomElement* element) {

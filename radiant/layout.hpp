@@ -1965,6 +1965,50 @@ typedef struct FlexDeclaredStyleInfo {
 FlexDeclaredStyleInfo layout_flex_declared_style_info(
     LayoutContext* lycon, DomElement* element);
 
+inline FlexProp* layout_embedded_flex(ViewElement* element) {
+    if (!element || (element->view_type != RDT_VIEW_BLOCK &&
+                    element->view_type != RDT_VIEW_INLINE_BLOCK)) return nullptr;
+    ViewBlock* block = lam::view_as_block(element);
+    return block && block->embed ? block->embedp()->flex : nullptr;
+}
+
+inline bool layout_flex_declares_display(ViewElement* element,
+                                         CssEnum display, CssEnum inline_display) {
+    if (!element) return false;
+    CssEnum value = layout_specified_keyword(
+        element->as_element(), CSS_PROPERTY_DISPLAY, CSS_VALUE__UNDEF);
+    return value == display || value == inline_display;
+}
+
+inline bool layout_is_flex_container(ViewElement* element) {
+    return element && (element->display.inner == CSS_VALUE_FLEX ||
+        layout_flex_declares_display(element, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX) ||
+        layout_embedded_flex(element));
+}
+
+inline bool layout_flex_direction_is_row(ViewElement* element) {
+    if (!element) return true;
+    FlexDeclaredStyleInfo info = layout_flex_declared_style_info(
+        nullptr, element->as_element());
+    if (info.has_direction) return info.row;
+    FlexProp* flex = layout_embedded_flex(element);
+    return !flex || flex->direction == DIR_ROW || flex->direction == DIR_ROW_REVERSE;
+}
+
+inline float layout_flex_column_gap(ViewElement* element) {
+    FlexProp* flex = layout_embedded_flex(element);
+    return flex ? flex->column_gap : 0.0f;
+}
+
+inline bool layout_flex_wraps(ViewElement* element) {
+    if (!element) return false;
+    FlexProp* flex = layout_embedded_flex(element);
+    if (flex && (flex->wrap == WRAP_WRAP || flex->wrap == WRAP_WRAP_REVERSE)) return true;
+    FlexDeclaredStyleInfo info = layout_flex_declared_style_info(
+        nullptr, element->as_element());
+    return info.has_wrap && info.wrapping;
+}
+
 // tier-3: layout-transient, valid within pass
 typedef struct FlexLineInfo {
     View** items;

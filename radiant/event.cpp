@@ -70,8 +70,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
 // Forward declarations for HTML event handler post-rebuild
 struct CssEngine;
-void apply_stylesheet_to_dom_tree_fast(DomElement* root, struct CssStylesheet* stylesheet,
-                                        struct SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* pool,
                                      struct CssStylesheet*** stylesheets, int* count, int depth = 0);
 struct SelectorMatcher* selector_matcher_create(Pool* pool);
@@ -4281,7 +4279,7 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
     if (pool && css_engine && matcher) {
         for (int i = 0; i < doc->stylesheet_count; i++) {
             if (doc->stylesheets[i]) {
-                apply_stylesheet_to_dom_tree_fast(root, doc->stylesheets[i],
+                radiant_apply_css_stylesheet_to_tree(root, doc->stylesheets[i],
                                                   matcher, pool, css_engine);
             }
         }
@@ -4570,24 +4568,16 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Re-collect inline stylesheets in case JS added/removed/disabled <style> elements
     Pool* pool = doc->document_pool;
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
-    SelectorMatcher* matcher = selector_matcher_create(pool);
-    state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     // Clear previously cascaded declarations so removed classes/attributes cannot
     // keep stale winning CSS declarations in specified_style.
     clear_cascaded_styles_recursive(static_cast<DomNode*>(doc->root));
-
-    bool epoch_scope = style_epoch_cascade_begin(
-        doc, doc->root, css_engine, false);
-
-    // Apply all cached stylesheets
-    for (int i = 0; i < doc->stylesheet_count; i++) {
-        if (doc->stylesheets[i]) {
-            apply_stylesheet_to_dom_tree_fast(doc->root, doc->stylesheets[i], matcher, pool, css_engine);
-        }
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    if (matcher) {
+        state_configure_selector_matcher((DocState*)doc->state, matcher);
+        radiant_apply_css_stylesheets_to_tree(
+            doc, doc->root, doc->stylesheets, doc->stylesheet_count, pool, css_engine, matcher);
     }
-
-    if (epoch_scope) style_epoch_cascade_end(doc);
 
     auto t1 = high_resolution_clock::now();
 
@@ -5583,19 +5573,13 @@ static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* stat
         // `.parent:hover .child`, so clear and re-apply the full cascade once
         // after the StateStore pseudo bits have been updated.
         clear_cascaded_styles_recursive(static_cast<DomNode*>(doc->root));
-
-        bool epoch_scope = style_epoch_cascade_begin(
-            doc, doc->root, css_engine, false);
-
         SelectorMatcher* matcher = selector_matcher_create(pool);
-        state_configure_selector_matcher(state, matcher);
-        for (int i = 0; i < doc->stylesheet_count; i++) {
-            if (doc->stylesheets[i]) {
-                apply_stylesheet_to_dom_tree_fast(doc->root, doc->stylesheets[i],
-                                                  matcher, pool, css_engine);
-            }
+        if (matcher) {
+            state_configure_selector_matcher(state, matcher);
+            radiant_apply_css_stylesheets_to_tree(
+                doc, doc->root, doc->stylesheets, doc->stylesheet_count,
+                pool, css_engine, matcher);
         }
-        if (epoch_scope) style_epoch_cascade_end(doc);
     }
 }
 
