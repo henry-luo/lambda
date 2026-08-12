@@ -1964,11 +1964,13 @@ typedef struct FlexDeclaredStyleInfo {
 
 FlexDeclaredStyleInfo layout_flex_declared_style_info(
     LayoutContext* lycon, DomElement* element);
+CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
+                                 CssEnum fallback = (CssEnum)0);
 
 inline FlexProp* layout_embedded_flex(ViewElement* element) {
     if (!element || (element->view_type != RDT_VIEW_BLOCK &&
                     element->view_type != RDT_VIEW_INLINE_BLOCK)) return nullptr;
-    ViewBlock* block = lam::view_as_block(element);
+    ViewBlock* block = static_cast<ViewBlock*>(element); // type check above guarantees the view layout subtype.
     return block && block->embed ? block->embedp()->flex : nullptr;
 }
 
@@ -3913,8 +3915,6 @@ float calc_normal_line_height(struct FontHandle* handle);
 float layout_br_line_box_extent(LayoutContext* lycon, struct FontHandle* handle);
 bool layout_quirky_container_ignores_child_margin_bottom(
     LayoutContext* lycon, ViewBlock* container, ViewBlock* child);
-CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
-                                 CssEnum fallback = (CssEnum)0);
 bool layout_element_was_inline(DomElement* element, bool include_replaced = true);
 
 struct LayoutBorderSpacingValue {
