@@ -113,6 +113,16 @@ class LayoutDevTool {
       return this.projectRoot;
     });
 
+    // Struct census: load the generated CSV report
+    ipcMain.handle('load-struct-census', async () => {
+      return await this.loadStructCensus();
+    });
+
+    // Struct census: re-run utils/struct_census.py (incremental unless full)
+    ipcMain.handle('regen-struct-census', async (event, full) => {
+      return await this.regenStructCensus(full);
+    });
+
     // Get recent tests
     ipcMain.handle('get-recent-tests', async () => {
       return this.recentTests;
@@ -222,6 +232,46 @@ class LayoutDevTool {
       console.error('Failed to load test tree:', error);
       return [];
     }
+  }
+
+  // Struct census report lives in vibe/meta/ds/. The CSV is the feed for the
+  // viewer; the sibling JSON is the census's own incremental cache and is far
+  // larger, so it is deliberately not read here. The CSV's mtime is the run
+  // time, since the script writes both files at the end of a run.
+  async loadStructCensus() {
+    const csvPath = path.join(this.projectRoot, 'vibe/meta/ds/struct_census.csv');
+    try {
+      const [csv, stat] = await Promise.all([
+        fs.readFile(csvPath, 'utf8'),
+        fs.stat(csvPath)
+      ]);
+      return { csv, generated: stat.mtime.toISOString() };
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return { csv: null, generated: null, missing: true };
+      }
+      throw error;
+    }
+  }
+
+  regenStructCensus(full = false) {
+    return new Promise((resolve, reject) => {
+      const args = ['utils/struct_census.py'];
+      if (full) args.push('--full');
+      const proc = spawn('python3', args, { cwd: this.projectRoot });
+
+      let stderr = '';
+      proc.stdout.on('data', (data) => {
+        this.mainWindow?.webContents.send('terminal-output', data.toString());
+      });
+      proc.stderr.on('data', (data) => {
+        const text = data.toString();
+        stderr += text;
+        this.mainWindow?.webContents.send('terminal-output', text);
+      });
+      proc.on('close', (code) => resolve({ exitCode: code, stderr }));
+      proc.on('error', reject);
+    });
   }
 
   async runTest(testPath, options = {}) {

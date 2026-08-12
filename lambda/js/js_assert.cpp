@@ -595,11 +595,7 @@ static bool js_assert_is_function_like_value(Item value) {
     if (js_is_callable(value)) return true;
     TypeId type = get_type_id(value);
     if (type != LMD_TYPE_MAP) return false;
-    if (js_class_id(value) == JS_CLASS_FUNCTION) return true;
-    Item super_class = js_get_key_default(value, assert_make_string("__super_class__"));
-    return get_type_id(super_class) == LMD_TYPE_FUNC ||
-           (get_type_id(super_class) == LMD_TYPE_MAP &&
-            js_class_id(super_class) == JS_CLASS_FUNCTION);
+    return js_class_id(value) == JS_CLASS_FUNCTION;
 }
 
 static bool js_assert_is_tiny_structural_value(Item value) {
@@ -2922,13 +2918,13 @@ static bool js_assert_function_is_constructor_expectation(Item fn) {
     }
     Item error_ctor = js_get_constructor(assert_make_string("Error"));
     Item error_proto = js_get_key_default(error_ctor, assert_make_string("prototype"));
-    Item super_class = js_get_key_default(fn, assert_make_string("__super_class__"));
+    Item super_class = js_get_class_superclass(fn);
     for (int i = 0; i < 64 && js_assert_is_function_like_value(super_class); i++) {
         if (super_class.item == error_ctor.item) return true;
         if (js_get_key_default(super_class, assert_make_string("prototype")).item == error_proto.item) return true;
-        // Lambda class constructors carry their extends chain on __super_class__;
+        // Source-class heritage is carried by the function constructor record;
         // checking it keeps Error subclasses from being misused as validators.
-        super_class = js_get_key_default(super_class, assert_make_string("__super_class__"));
+        super_class = js_get_class_superclass(super_class);
     }
     Item cur = proto;
     for (int i = 0; i < 64 && get_type_id(cur) == LMD_TYPE_MAP; i++) {
@@ -3030,11 +3026,6 @@ static Item js_assert_throw_constructor_mismatch(Item thrown, Item expected_ctor
         }
     }
     Item actual_ctor = ItemNull;
-    if (get_type_id(thrown) == LMD_TYPE_MAP) {
-        // Class instances may expose Error as .constructor while retaining the
-        // real subclass constructor in the internal slot used by instanceof.
-        actual_ctor = map_get(thrown.map, assert_make_string("__ctor__"));
-    }
     if (actual_ctor.item == 0 || actual_ctor.item == ItemNull.item ||
             get_type_id(actual_ctor) == LMD_TYPE_UNDEFINED) {
         actual_ctor = js_get_key_default(thrown, assert_make_string("constructor"));
@@ -4038,10 +4029,7 @@ static void js_assert_partial_deep_leave(JsAssertPartialContext* ctx) {
 
 static bool js_assert_is_real_regexp(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
-    if (js_class_id(value) == JS_CLASS_REGEXP) return true;
-    bool found = false;
-    (void)js_map_shape_lookup_ext(value.map, "__rd", 4, &found);
-    return found;
+    return js_class_id(value) == JS_CLASS_REGEXP;
 }
 
 static bool js_assert_is_regexp_like(Item value) {
@@ -4775,10 +4763,7 @@ static bool js_assert_constructor_name(Item value, char* out, int out_size) {
     if (out_size <= 0) return false;
     out[0] = '\0';
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
-    Item ctor = map_get(value.map, assert_make_string("__ctor__"));
-    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) {
-        ctor = js_get_key_default(value, assert_make_string("constructor"));
-    }
+    Item ctor = js_get_key_default(value, assert_make_string("constructor"));
     if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) {
         Item proto = js_get_prototype_of(value);
         if (get_type_id(proto) == LMD_TYPE_MAP) {

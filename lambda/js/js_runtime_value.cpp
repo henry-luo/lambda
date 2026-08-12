@@ -1,4 +1,5 @@
 #include "js_runtime_internal.hpp"
+#include "js_object_meta.h"
 #include "../core/lambda-decimal.hpp"
 
 extern __thread EvalContext* context;
@@ -639,14 +640,12 @@ extern "C" Item js_to_string(Item value) {
                 }
             }
         }
-        // Check for regex objects (have __rd hidden property)
+        // RegExp instances use the immutable native carrier identity.
         // JS: String(/pattern/flags) => "/pattern/flags"
-        {
-            bool own_rd = false;
-            js_map_shape_lookup(value.map, "__rd", 4, &own_rd);
+        if (js_class_id(value) == JS_CLASS_REGEXP) {
             bool own_to_string = false;
             js_map_shape_lookup(value.map, "toString", 8, &own_to_string);
-            if (own_rd && !own_to_string) {
+            if (!own_to_string) {
                 bool own_src = false, own_flags = false;
                 Item src_val = js_map_shape_lookup(value.map, "source", 6, &own_src);
                 Item flags_val = js_map_shape_lookup(value.map, "flags", 5, &own_flags);
@@ -702,7 +701,7 @@ extern "C" Item js_to_string(Item value) {
                 // toString/valueOf placeholders — fall through to default string conversion
                 // instead of throwing.
                 if (value.map &&
-                    js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
+                    js_object_uses_default_object_to_primitive(value)) {
                     // newer clang does not model this switch fallthrough in the
                     // reverted runtime; return the intended default directly.
                     return js_make_string("[object Object]");
@@ -730,7 +729,7 @@ extern "C" Item js_to_string(Item value) {
             return name_val;
         }
         if (js_get_prototype(value).item == ITEM_JS_UNDEFINED &&
-            !js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
+            !js_object_uses_default_object_to_primitive(value)) {
             return js_throw_type_error("Cannot convert object to primitive value");
         }
         return js_make_string("[object Object]");
@@ -838,9 +837,6 @@ extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
                 String* ts = it2s(t);
                 return (ts && ts->len == 6 && memcmp(ts->chars, "object", 6) == 0) ? 1 : 0;
             }
-            bool own_ip = false;
-            js_map_shape_lookup_ext(value.map, "__instance_proto__", 18, &own_ip);
-            if (own_ip) return 0;  // class objects are "function"
             // Function.prototype is callable per spec
             if (js_class_id(value) == JS_CLASS_FUNCTION) {
                 bool own_proto = false;
@@ -864,9 +860,6 @@ extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
                 String* ts = it2s(t);
                 return (ts && ts->len == 8 && memcmp(ts->chars, "function", 8) == 0) ? 1 : 0;
             }
-            bool own_ip = false;
-            js_map_shape_lookup_ext(value.map, "__instance_proto__", 18, &own_ip);
-            if (own_ip) return 1;
             // Function.prototype is callable per spec
             if (js_class_id(value) == JS_CLASS_FUNCTION) {
                 bool own_proto = false;
@@ -1043,7 +1036,7 @@ bool js_ta_proto_chain_set(Item object, Item key, Item value, Item receiver,
     TypeId object_type = get_type_id(object);
     if (object_type != LMD_TYPE_MAP && object_type != LMD_TYPE_ARRAY) return false;
     if (js_is_proxy(object)) return false;
-    if (object_type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_TYPED_ARRAY) return false;
+    if (object_type == LMD_TYPE_MAP && js_object_has_class(object, JS_CLASS_TYPED_ARRAY)) return false;
 
     double numeric_index = 0;
     bool is_negative_zero = false;
@@ -1056,7 +1049,7 @@ bool js_ta_proto_chain_set(Item object, Item key, Item value, Item receiver,
         // Proxy prototypes own the [[Set]] dispatch; probing them here would
         // invoke unrelated descriptor traps before OrdinarySet can forward.
         if (js_is_proxy(proto)) return false;
-        if (get_type_id(proto) == LMD_TYPE_MAP && proto.map && proto.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        if (get_type_id(proto) == LMD_TYPE_MAP && js_object_has_class(proto, JS_CLASS_TYPED_ARRAY)) {
             int idx = 0;
             if (!js_ta_numeric_index_valid(proto, numeric_index, is_negative_zero, &idx)) return true;
 
@@ -1087,7 +1080,7 @@ bool js_array_ta_proto_numeric_set(Item array, Item key, bool* no_op) {
     if (it2b(js_has_own_property(array, key))) return false;
 
     Item proto = js_get_prototype_of(array);
-    if (get_type_id(proto) != LMD_TYPE_MAP || !proto.map || proto.map->map_kind != MAP_KIND_TYPED_ARRAY) {
+    if (get_type_id(proto) != LMD_TYPE_MAP || !js_object_has_class(proto, JS_CLASS_TYPED_ARRAY)) {
         return false;
     }
     int idx = 0;
@@ -2089,14 +2082,6 @@ extern "C" Item js_typeof(Item value) {
         // Proxy: typeof is "function" if target is callable
         if (js_is_proxy(value)) {
             result = js_proxy_has_callable_target(value) ? "function" : "object";
-            goto done;
-        }
-        // v18h: class objects (MAPs with __instance_proto__) should return "function"
-        // Use direct property lookup instead of shape walking for GC safety
-        bool own_ip = false;
-        js_map_shape_lookup_ext(value.map, "__instance_proto__", 18, &own_ip);
-        if (own_ip) {
-            result = "function";
             goto done;
         }
         result = "object";

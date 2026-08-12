@@ -2,14 +2,20 @@
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the Web-platform host objects: the DOM bridge to Radiant's `DomNode`/`DomElement` tree, element/document API dispatch, CSS selector queries and layout-metric reads, the 3-phase event system, the CSSOM, OffscreenCanvas text measurement, XHR/fetch/FormData/clipboard, and Selection/Range.
 >
-> **Primary sources:** `lambda/js/js_dom.{h,cpp}` (DOM wrap/unwrap, element & document dispatch, layout metrics, computed style, classList/dataset), `lambda/js/js_dom_events.{h,cpp}` (EventTarget, listener storage, dispatch), `lambda/js/js_cssom.{h,cpp}` (CSSOM wrappers, CSS namespace), `lambda/js/js_canvas.cpp` (OffscreenCanvas/`measureText`), `lambda/js/js_xhr.{h,cpp}`, `lambda/js/js_fetch.cpp`, `lambda/js/js_formdata.cpp`, `lambda/js/js_clipboard.cpp`, `lambda/js/js_dom_selection.{h,cpp}`. Exotic-dispatch gate in `lambda/js/js_runtime.cpp`.
+> **Primary sources:** `lambda/js/js_dom.{h,cpp}` (DOM wrap/unwrap, element & document dispatch, layout metrics, computed style, classList/dataset), `lambda/js/js_dom_events.{h,cpp}` (EventTarget, listener storage, dispatch), `lambda/js/js_cssom.{h,cpp}` (CSSOM wrappers, CSS namespace), `lambda/js/js_canvas.cpp` (OffscreenCanvas/`measureText`), `lambda/js/js_xhr.{h,cpp}`, `lambda/js/js_fetch.cpp`, `lambda/js/js_formdata.cpp`, `lambda/js/js_clipboard.cpp`, `lambda/js/js_dom_selection.{h,cpp}`, and `lambda/js/js_object_meta.{h,cpp}` (host metadata/ops bridge). The property kernel is in `lambda/js/js_runtime.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against symbol names.
 
 ---
 
 ## 1. Purpose & scope
 
-Current Web-platform host objects are native VMaps branded by the Radiant/JS DOM bridges, with remaining legacy `MapKind` dispatch reserved for non-DOM JS internals and transitional CSS/style resources. The `MapKind` enum and the single fast-path gate (`if (m->map_kind != MAP_KIND_PLAIN …)`) are **owned by JS_06**; this document describes the Web-platform bridge surface, including DOM-node VMaps, document/foreign-document VMaps, CSSOM/style host resources, and the `MAP_KIND_CSS_NAMESPACE` global object.
+Current Web-platform host objects are native VMaps branded by the
+Radiant/JS DOM bridges. Under **D3.4.7/D7.4.1–D7.4.3**, the property kernel
+resolves their host-family metadata and delegates through the single VMap/Jube
+bridge; `JubeTypeDef.host_ops` remains authoritative. Physical `MapKind` tags
+are not DOM semantic classifiers. This document describes DOM-node VMaps,
+document/foreign-document VMaps, CSSOM/style host resources, and the
+the metadata-qualified CSS namespace ordinary object.
 
 The DOM/CSSOM layers are **views over Radiant's structures**: a wrapper Map never owns layout state, it points at a `DomNode`/`DomElement`, `CssStylesheet`, `CssRule`, or `DomRange`/`DomSelection` living in Radiant's pools. The layout engine itself (block/inline/flex/grid/table) is documented in `doc/dev/Radiant_*` and is **out of scope here** — we only describe the JS-visible surface and the dirty/lazy-layout contract between them.
 
@@ -19,7 +25,7 @@ The DOM/CSSOM layers are **views over Radiant's structures**: a wrapper Map neve
 
 <img alt="DOM bridge & lazy layout" src="diagram/d13_dom_bridge.svg" width="720">
 
-**Native VMap wrapping.** `js_dom_wrap_element` returns a branded native VMap whose `host_type` identifies the Radiant DOM-node carrier and whose `host_data` points at the `DomNode`. `js_dom_unwrap_element` and `js_is_dom_node` now test the VMap host brand through the Radiant bridge instead of relying on sentinel `Map::type` markers. This keeps O(1) wrap/unwrap while allowing native host-object hooks for property lookup, enumeration, descriptors, prototype behavior, and expandos.
+**Native VMap wrapping.** `js_dom_wrap_element` returns a branded native VMap whose `host_type` identifies the Radiant DOM-node carrier and whose `host_data` points at the `DomNode`. `js_dom_unwrap_element` and `js_is_dom_node` test the VMap host brand through the Radiant bridge, while property lookup, enumeration, descriptors, prototype behavior, and expandos enter the shared host `JsPropertyOps` bridge.
 
 **Identity cache.** So that `el === el` holds across repeated wraps, `cache_dom_wrapper`/`lookup_dom_wrapper` (`:846`,`:820`) keep a thread-local linked list of `DomWrapperCacheChunk` (4096 entries each, `:807`); each cached `Item` is registered as a GC root (`:856`) and torn down by `reset_dom_wrapper_cache` (`:859`) between documents. Lookup is a **linear scan over all chunks** — see [Known Issues](#known-issues--future-improvements). A `DomNode` that is the document stub is re-wrapped as the document proxy instead, so `range.startContainer === document` works (`:885`).
 
@@ -29,7 +35,15 @@ The DOM/CSSOM layers are **views over Radiant's structures**: a wrapper Map neve
 
 ## 3. Element & document API dispatch
 
-The VMap host-object gate in `js_property_get`/`js_property_set` is the primary entry from the ordinary pipeline. DOM nodes, Range/Selection, inline/computed style, CSSOM, and document/foreign-document proxies are recognized by native host brands before ordinary map property access. Their type prototypes and property hooks publish callable method values; an ordinary source method call still performs observable property `Get` followed by the stored function's `[[Call]]`, as required by **D6.2.2v2**. Host dispatch helpers implement the selected method body after lookup; they are not compiler receiver/name call routes.
+The VMap host-object bridge in `js_property_get`/`js_property_set` is the
+primary entry from the ordinary pipeline. DOM nodes, Range/Selection,
+inline/computed style, CSSOM, and document/foreign-document proxies are
+recognized by host metadata before ordinary map property access. Their type
+prototypes and property hooks publish callable method values; an ordinary
+source method call still performs observable property `Get` followed by the
+stored function's `[[Call]]`, as required by **D6.2.2v2**. Host dispatch helpers
+implement the selected method body after lookup; they are not compiler
+receiver/name call routes.
 
 - **`js_dom_get_property`** (`js_dom.cpp`) handles DOM-node property reads after native host predicates have separated Range/Selection, style, CSSOM, and document resources. It dispatches the property name for `tagName`, `id`, `className`, `textContent`, tree navigation (`parentNode`, `firstElementChild`, `childNodes`, ...), `nodeType`, layout metrics ([§4](#4-css-selector-queries--lazy-layout)), `innerHTML`/`outerHTML` serialization, and falls back to `getAttribute`.
 - **`js_dom_set_property`** handles `className`/`id`/`textContent`/`data` and the **`innerHTML` setter** (`:6959`): it removes existing children, runs the Radiant HTML5 *fragment* parser (`html5_fragment_parser_create`/`html5_fragment_parse`, `:6987`), converts the parsed Lambda `Element`s into `DomNode`s via `build_dom_tree_from_element`, re-registers element ids on the Window, and marks the subtree dirty.
@@ -84,7 +98,7 @@ CSSOM wrappers are branded native VMaps with host data pointing at the styleshee
 
 `insertRule`/`deleteRule` mutate the **live** `CssStylesheet` in place: `insertRule` range-checks the index, re-tokenizes and re-parses the rule text into a `CssRule`, and splices it into the sheet's rule array (`js_cssom.cpp:690`); `deleteRule` range-checks and removes (`:743`). Because wrappers hold the underlying pointer (not a copy), subsequent `cssRules` reads observe the change.
 
-`document.styleSheets` returns an array of wrapped sheets (`js_cssom_get_document_stylesheets`, `:1228`); `HTMLStyleElement.sheet` finds the sheet parsed from that `<style>` element. The **CSS namespace** object (`CSS.supports`/`CSS.escape`) is *not* a CSSOM wrapper: `js_get_css_object_value` creates an ordinary `Object.create(null)` Map, tags only `map_kind = MAP_KIND_CSS_NAMESPACE` so its real shape is preserved, and installs realm-local methods as real non-enumerable properties; its get-gate case returns `false` to keep ordinary property reads.
+`document.styleSheets` returns an array of wrapped sheets (`js_cssom_get_document_stylesheets`, `:1228`); `HTMLStyleElement.sheet` finds the sheet parsed from that `<style>` element. The **CSS namespace** object (`CSS.supports`/`CSS.escape`) is *not* a CSSOM wrapper: `js_get_css_object_value` creates a metadata-qualified ordinary `Object.create(null)` Map and installs realm-local methods as real non-enumerable properties. Physical `map_kind` is not consulted for ordinary property reads.
 
 ---
 

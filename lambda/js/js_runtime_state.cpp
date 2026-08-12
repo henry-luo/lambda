@@ -909,21 +909,28 @@ extern "C" Item js_to_property_key(Item key) {
     TypeId kt = get_type_id(key);
     if (kt == LMD_TYPE_STRING) {
         js_exec_profile_name_lookup_bypassed();
-        return js_canonical_property_string(key);
+        Item result = js_canonical_property_string(key);
+        return result;
     }
     if (key.item == 0 || kt == LMD_TYPE_NULL)
-        return (Item){.item = s2it(heap_create_name("null", 4))};
+        return js_canonical_property_string(
+            (Item){.item = s2it(heap_create_name("null", 4))});
     if (kt == LMD_TYPE_UNDEFINED)
-        return (Item){.item = s2it(heap_create_name("undefined", 9))};
+        return js_canonical_property_string(
+            (Item){.item = s2it(heap_create_name("undefined", 9))});
     if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT || kt == LMD_TYPE_FUNC) {
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_primitive(key, JS_HINT_STRING));
         if (js_key_is_symbol(key)) return js_symbol_to_key(key);
         kt = get_type_id(key);
-        if (kt == LMD_TYPE_STRING) return js_canonical_property_string(key);
+        if (kt == LMD_TYPE_STRING) {
+            return js_canonical_property_string(key);
+        }
         if (key.item == 0 || kt == LMD_TYPE_NULL)
-            return (Item){.item = s2it(heap_create_name("null", 4))};
+            return js_canonical_property_string(
+                (Item){.item = s2it(heap_create_name("null", 4))});
         if (kt == LMD_TYPE_UNDEFINED)
-            return (Item){.item = s2it(heap_create_name("undefined", 9))};
+            return js_canonical_property_string(
+                (Item){.item = s2it(heap_create_name("undefined", 9))});
     }
     Item string_value = js_to_string(key);
     return item_is_error(string_value) ? string_value
@@ -1176,8 +1183,9 @@ extern "C" Item js_error_lane_payload(Item lane) {
     if (error && error->is_static) {
         // Fault records have no shape while signals are being recovered; this
         // is the first safe boundary at which their Map-compatible view exists.
-        error->prologue_reserved = MAP_KIND_ERROR;
+        error->type = js_error_carrier_type_map();
     }
+    if (error) error->type = js_error_carrier_type_map();
     Item result = error ? js_error_as_object(error) : lane;
     return result;
 }
@@ -1398,6 +1406,10 @@ extern "C" Item js_new_aggregate_error(Item errors, Item message) {
     Rooted<Item> errors_array_root(roots, ItemNull);
     Item err_name = (Item){.item = s2it(heap_create_name("AggregateError", 14))};
     err_root.set(js_new_error_with_name(err_name, message_root.get()));
+    // ToString(message) is evaluated while allocating the error carrier; an
+    // abrupt completion must escape before IterableToList attempts to mutate
+    // that completion as if it were the new AggregateError (D8.3.2).
+    if (item_is_error(err_root.get())) return err_root.get();
     // AggregateError requires IterableToList. Array.from's no-argument
     // compatibility path returned [] for undefined and hid GetIterator's
     // required TypeError; use the iterator primitive directly (D6.2.2v2).
@@ -1743,6 +1755,7 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
     const char* message_chars = message_string ? message_string->chars : "";
     LambdaError* error = err_create_heap(ERR_RUNTIME_ERROR, message_chars, NULL);
     if (!error) return ItemError;
+    error->type = js_error_carrier_type_map();
     error->js_class_id = (uint8_t)error_class;
     error->js_name_item = name_string
         ? error_name_root.get().item

@@ -1309,9 +1309,10 @@ extern "C" Item js_event_init_text_event(Item type_arg, Item b_arg,
 // returnValue setter — assigning false sets defaultPrevented.
 // Same approach: mutable own property. Applied during dispatch.
 
-Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool composed) {
+static Item js_create_event_init_with_class(const char* type, bool bubbles,
+        bool cancelable, bool composed, JsClass class_id) {
     RootFrame roots(2);
-    Rooted<Item> event_root(roots, js_new_object());
+    Rooted<Item> event_root(roots, js_new_object_with_class(class_id));
     Rooted<Item> descriptor_root(roots, ItemNull);
     // Event construction performs many allocating property writes; keep the
     // partially initialized receiver precise until it is returned to JS.
@@ -1402,10 +1403,14 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
             (Item){.item = s2it(heap_create_name("defaultPrevented"))}, dp_desc);
     }
 
-    js_class_stamp(event, JS_CLASS_EVENT);
     event_apply_new_target_prototype(event);
 
     return event_root.get();
+}
+
+Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool composed) {
+    return js_create_event_init_with_class(type, bubbles, cancelable, composed,
+        JS_CLASS_EVENT);
 }
 
 Item js_create_event(const char* type, bool bubbles, bool cancelable) {
@@ -1416,8 +1421,8 @@ Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
                                bool composed, Item view, const char* data) {
     RootFrame roots(2);
     Rooted<Item> view_root(roots, view);
-    Rooted<Item> event_root(
-        roots, js_create_event_init(type, bubbles, cancelable, composed));
+    Rooted<Item> event_root(roots, js_create_event_init_with_class(type, bubbles,
+        cancelable, composed, JS_CLASS_EVENT));
     event_set_item(event_root.get(), "view", view_root.get().item ? view_root.get() : ItemNull);
     event_set_str(event_root.get(), "data", data ? data : "");
     event_set_int(event_root.get(), "inputMethod", 0);
@@ -1432,13 +1437,12 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
                                  bool composed, Item detail) {
     RootFrame roots(2);
     Rooted<Item> detail_root(roots, detail);
-    Rooted<Item> event_root(
-        roots, js_create_event_init(type, bubbles, cancelable, composed));
+    Rooted<Item> event_root(roots, js_create_event_init_with_class(type, bubbles,
+        cancelable, composed, JS_CLASS_CUSTOM_EVENT));
     event_set_item(event_root.get(), "detail", detail_root.get());
     Item ice_key = (Item){.item = s2it(heap_create_name("initCustomEvent"))};
     js_set_key_default(event_root.get(), ice_key,
         js_new_native_function(js_event_init_custom_event));
-    js_class_stamp(event_root.get(), JS_CLASS_CUSTOM_EVENT);
     return event_root.get();
 }
 
@@ -1469,14 +1473,13 @@ extern "C" Item js_eventtarget_dispatch(Item event_item) {
 }
 
 Item js_create_event_target(void) {
-    Item et = js_new_object();
+    Item et = js_new_object_with_class(JS_CLASS_EVENT_TARGET);
     Item ael = (Item){.item = s2it(heap_create_name("addEventListener"))};
     Item rel = (Item){.item = s2it(heap_create_name("removeEventListener"))};
     Item dis = (Item){.item = s2it(heap_create_name("dispatchEvent"))};
     js_set_key_default(et, ael, js_new_native_function(js_eventtarget_add_listener));
     js_set_key_default(et, rel, js_new_native_function(js_eventtarget_remove_listener));
     js_set_key_default(et, dis, js_new_native_function(js_eventtarget_dispatch));
-    js_class_stamp(et, JS_CLASS_EVENT_TARGET);
     return et;
 }
 
@@ -1551,11 +1554,6 @@ static Item init_item(Item init, const char* key) {
     return v;
 }
 
-static void stamp_class(Item ev, const char* name) {
-    JsClass cls = js_class_from_name(name, (int)strlen(name));
-    if (cls != JS_CLASS_NONE) js_class_stamp(ev, cls);
-}
-
 // EventModifierInit dict members shared by Mouse/Keyboard.
 static void stamp_modifiers(Item ev, Item init) {
     event_set_bool(ev, "ctrlKey",  init_bool(init, "ctrlKey", false));
@@ -1593,10 +1591,12 @@ extern "C" Item js_event_get_modifier_state(Item key_arg) {
 // Build a UIEvent base. `view` is constrained to be Window, null, or undefined
 // (per IDL); throws TypeError if a non-Window/non-null value is supplied.
 static Item build_ui_event(const char* type, Item init, const char* class_name) {
-    Item ev = js_create_event_init(type ? type : "",
+    JsClass class_id = js_class_from_name(class_name,
+        class_name ? (int)strlen(class_name) : 0);
+    Item ev = js_create_event_init_with_class(type ? type : "",
         init_bool(init, "bubbles", false),
         init_bool(init, "cancelable", false),
-        init_bool(init, "composed", false));
+        init_bool(init, "composed", false), class_id);
     Item view = init_item(init, "view");
     // Per IDL view is Window? — we accept null/undefined or a value that looks
     // like the global window object. Reject other types with TypeError.
@@ -1613,7 +1613,6 @@ static Item build_ui_event(const char* type, Item init, const char* class_name) 
         event_set_item(ev, "view", ItemNull);
     }
     event_set_int(ev, "detail", init_int(init, "detail", 0));
-    stamp_class(ev, class_name);
     return ev;
 }
 
@@ -1627,8 +1626,9 @@ extern "C" Item js_ctor_focus_event_fn(Item type_arg, Item init_arg) {
     return ev;
 }
 
-extern "C" Item js_ctor_mouse_event_fn(Item type_arg, Item init_arg) {
-    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, "MouseEvent"));
+static Item js_ctor_mouse_event_with_class(Item type_arg, Item init_arg,
+        const char* class_name) {
+    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, class_name));
     stamp_modifiers(ev, init_arg);
     event_set_int(ev, "screenX", init_int(init_arg, "screenX", 0));
     event_set_int(ev, "screenY", init_int(init_arg, "screenY", 0));
@@ -1650,9 +1650,12 @@ extern "C" Item js_ctor_mouse_event_fn(Item type_arg, Item init_arg) {
     return ev;
 }
 
+extern "C" Item js_ctor_mouse_event_fn(Item type_arg, Item init_arg) {
+    return js_ctor_mouse_event_with_class(type_arg, init_arg, "MouseEvent");
+}
+
 extern "C" Item js_ctor_wheel_event_fn(Item type_arg, Item init_arg) {
-    JS_ASSIGN_OR_RETURN(ev, js_ctor_mouse_event_fn(type_arg, init_arg));
-    stamp_class(ev, "WheelEvent");
+    JS_ASSIGN_OR_RETURN(ev, js_ctor_mouse_event_with_class(type_arg, init_arg, "WheelEvent"));
     event_set_double(ev, "deltaX", init_double(init_arg, "deltaX", 0.0));
     event_set_double(ev, "deltaY", init_double(init_arg, "deltaY", 0.0));
     event_set_double(ev, "deltaZ", init_double(init_arg, "deltaZ", 0.0));
@@ -1714,7 +1717,9 @@ extern "C" Item js_create_native_composition_event(const char* type,
 // `collapsed` directly on the constructed object, then mark those data
 // properties non-writable so script cannot mutate the snapshot.
 extern "C" Item js_ctor_static_range_fn(Item init) {
-    Item obj = js_new_object();
+    // StaticRange has a branded immutable snapshot lane; leaving it as a plain
+    // map makes InputEvent treat script-created boundaries as live DOM nodes.
+    Item obj = js_new_object_with_class(JS_CLASS_STATIC_RANGE);
     Item start_container = init_item(init, "startContainer");
     Item end_container = init_item(init, "endContainer");
     int start_offset = init_int(init, "startOffset", 0);
@@ -1731,7 +1736,6 @@ extern "C" Item js_ctor_static_range_fn(Item init) {
     event_mark_non_writable(obj, "endContainer");
     event_mark_non_writable(obj, "endOffset");
     event_mark_non_writable(obj, "collapsed");
-    stamp_class(obj, "StaticRange");
     return obj;
 }
 
@@ -1807,8 +1811,8 @@ extern "C" Item js_ctor_input_event_fn(Item type_arg, Item init_arg) {
 }
 
 extern "C" Item js_ctor_pointer_event_fn(Item type_arg, Item init_arg) {
-    JS_ASSIGN_OR_RETURN(ev, js_ctor_mouse_event_fn(type_arg, init_arg));
-    stamp_class(ev, "PointerEvent");
+    JS_ASSIGN_OR_RETURN(ev, js_ctor_mouse_event_with_class(type_arg, init_arg,
+        "PointerEvent"));
     event_set_int(ev, "pointerId", init_int(init_arg, "pointerId", 0));
     event_set_double(ev, "width",  init_double(init_arg, "width", 1.0));
     event_set_double(ev, "height", init_double(init_arg, "height", 1.0));
@@ -1826,17 +1830,16 @@ extern "C" Item js_ctor_transition_event_fn(Item type_arg, Item init_arg) {
     RootFrame roots(3);
     Rooted<Item> type_root(roots, type_arg);
     Rooted<Item> init_root(roots, init_arg);
-    Rooted<Item> event_root(roots, js_create_event_init(fn_to_cstr(type_root.get()),
+    Rooted<Item> event_root(roots, js_create_event_init_with_class(fn_to_cstr(type_root.get()),
         init_bool(init_root.get(), "bubbles", false),
         init_bool(init_root.get(), "cancelable", false),
-        init_bool(init_root.get(), "composed", false)));
+        init_bool(init_root.get(), "composed", false), JS_CLASS_TRANSITION_EVENT));
     // Subclass property writes allocate after the Event initializer's root
     // frame closes, so the partially built receiver needs its own precise root (D5.4.3).
     Item ev = event_root.get();
     event_set_str(ev, "propertyName", init_str(init_root.get(), "propertyName", ""));
     event_set_double(ev, "elapsedTime", init_double(init_root.get(), "elapsedTime", 0.0));
     event_set_str(ev, "pseudoElement", init_str(init_root.get(), "pseudoElement", ""));
-    stamp_class(ev, "TransitionEvent");
     return ev;
 }
 
@@ -1844,17 +1847,16 @@ extern "C" Item js_ctor_animation_event_fn(Item type_arg, Item init_arg) {
     RootFrame roots(3);
     Rooted<Item> type_root(roots, type_arg);
     Rooted<Item> init_root(roots, init_arg);
-    Rooted<Item> event_root(roots, js_create_event_init(fn_to_cstr(type_root.get()),
+    Rooted<Item> event_root(roots, js_create_event_init_with_class(fn_to_cstr(type_root.get()),
         init_bool(init_root.get(), "bubbles", false),
         init_bool(init_root.get(), "cancelable", false),
-        init_bool(init_root.get(), "composed", false)));
+        init_bool(init_root.get(), "composed", false), JS_CLASS_ANIMATION_EVENT));
     // AnimationEvent has the same post-base-initialization allocation window
     // as TransitionEvent and must preserve the receiver precisely (D5.4.3).
     Item ev = event_root.get();
     event_set_str(ev, "animationName", init_str(init_root.get(), "animationName", ""));
     event_set_double(ev, "elapsedTime", init_double(init_root.get(), "elapsedTime", 0.0));
     event_set_str(ev, "pseudoElement", init_str(init_root.get(), "pseudoElement", ""));
-    stamp_class(ev, "AnimationEvent");
     return ev;
 }
 

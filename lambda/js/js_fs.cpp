@@ -3137,8 +3137,7 @@ static bool fs_signal_aborted(Item signal) {
 }
 
 static Item fs_make_abort_error(Item signal) {
-    Item err = js_new_object();
-    js_class_stamp(err, JS_CLASS_ABORT_ERROR);
+    Item err = js_new_object_with_class(JS_CLASS_ABORT_ERROR);
     js_set_key_default(err, make_string_item("name"), make_string_item("AbortError"));
     js_set_key_default(err, make_string_item("code"), make_string_item("ABORT_ERR"));
     js_set_key_default(err, make_string_item("message"), make_string_item("The operation was aborted"));

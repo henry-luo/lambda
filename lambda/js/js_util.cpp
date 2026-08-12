@@ -1702,10 +1702,7 @@ static bool js_util_is_real_regexp(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
     Item target = js_util_deep_dispatch_value(value);
     if (get_type_id(target) != LMD_TYPE_MAP) return false;
-    if (js_class_id(target) == JS_CLASS_REGEXP) return true;
-    bool found = false;
-    (void)js_map_shape_lookup_ext(target.map, "__rd", 4, &found);
-    return found;
+    return js_class_id(target) == JS_CLASS_REGEXP;
 }
 
 static bool js_util_is_regexp_like_value(Item value) {

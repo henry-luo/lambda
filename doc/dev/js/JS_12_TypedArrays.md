@@ -2,20 +2,34 @@
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the twelve TypedArray element types, `ArrayBuffer`/`SharedArrayBuffer` (including resizable buffers and `transfer`), `DataView`, `Atomics` with its cooperative waiter simulation, and the Node `Buffer` subclass. It describes how each is represented as a Lambda `Map` fronting a native struct, how typed-array element storage is unified with Lambda's `ArrayNum` numeric-array core via an external view, and how the exotic gate routes string-keyed access.
 >
-> **Primary sources:** `lambda/js/js_typed_array.{h,cpp}` (`JsTypedArray`/`JsArrayBuffer`/`JsDataView`/`JsAtomicsWaiter`, constructors, ArrayNum-routed element and bulk paths, Atomics), `lambda/lambda-data-runtime.cpp` (`array_num_new_external_view`, the `array_num_*` element/bulk kernels), `lambda/js/js_runtime.cpp` (the exotic gates, direct TypedArray call/construct bodies, species create, `$262.agent`), `lambda/js/js_runtime_value.cpp` (`js_ta_key_canonical_numeric`, `js_ta_numeric_index_valid`), `lambda/lambda-mem.cpp` (GC trace/finalizers), `lambda/js/js_mir_expression_lowering.cpp` (JIT inline fast paths), `lambda/js/js_builtin_catalog.def` / `js_runtime_builtin_registry.cpp` (intrinsic target and binding specs), `lambda/js/js_buffer.cpp` (Node `Buffer`).
+> **Primary sources:** `lambda/js/js_typed_array.{h,cpp}` (`JsTypedArray`/`JsArrayBuffer`/`JsDataView`/`JsAtomicsWaiter`, metadata-qualified constructors, ArrayNum-routed element and bulk paths, Atomics), `lambda/js/js_object_meta.{h,cpp}` (TypedArray/ArrayBuffer/DataView metadata and ops), `lambda/lambda-data-runtime.cpp` (`array_num_new_external_view`, the `array_num_*` element/bulk kernels), `lambda/js/js_runtime.cpp` (the property kernel, direct TypedArray call/construct bodies, species create, `$262.agent`), `lambda/js/js_runtime_value.cpp` (`js_ta_key_canonical_numeric`, `js_ta_numeric_index_valid`), `lambda/lambda-mem.cpp` (GC trace/finalizers), `lambda/js/js_mir_expression_lowering.cpp` (JIT inline fast paths), `lambda/js/js_builtin_catalog.def` / `js_runtime_builtin_registry.cpp` (intrinsic target and binding specs), and `lambda/js/js_buffer.cpp` (Node `Buffer`).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against symbol names.
 
-The **property-dispatch machinery** — the `Container.map_kind` discriminator, the single fast-path guard `if (m->map_kind != MAP_KIND_PLAIN && !private_internal_key)`, and the `[[Get]]`/`[[Set]]` pipelines that call into the exotic gate — is owned by [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md). This document picks up at the TypedArray/ArrayBuffer/DataView arms of that gate.
+The **property-dispatch machinery** is owned by [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md). Under **D3.4.7**, TypedArray, ArrayBuffer, and DataView behavior is selected by immutable `JsClassMeta` and one `JsPropertyOps` table; physical `map_kind` is used only by allocation, tracing, finalization, and checked payload accessors. This document picks up at those metadata-selected operations.
 
 ---
 
 ## 1. Purpose & scope
 
-A TypedArray, ArrayBuffer, or DataView is **not** a bespoke heap type — it is an ordinary Lambda `Map` (`LMD_TYPE_MAP`) whose `Container.map_kind` nibble is stamped with one of `MAP_KIND_TYPED_ARRAY=1`, `MAP_KIND_ARRAYBUFFER=2`, or `MAP_KIND_DATAVIEW=3` (`lambda.h:564`). The `Map.data` slot points at a native C struct (`JsTypedArray`/`JsArrayBuffer`/`JsDataView`) instead of a packed field buffer, and `Map.data_cap == 0` flags this "native-backed" arrangement. This is the same zero-overhead wrapper pattern DOM nodes use ([JS_13 — Web Platform](JS_13_Web_DOM.md)): the object reads as a Map everywhere, so the GC, prototype walk, and `instanceof` all work without special cases, while the exotic gate intercepts element and metadata access.
+A TypedArray, ArrayBuffer, or DataView is **not** a bespoke heap type — it is
+an ordinary Lambda `Map` (`LMD_TYPE_MAP`) with immutable family metadata and a
+typed trailing native carrier. `Map.type` and `Map.data` retain the ordinary
+shape/layout contract of **D3.4.1/D3.4.5**; the physical `map_kind` nibble
+(`MAP_KIND_TYPED_ARRAY=1`, `MAP_KIND_ARRAYBUFFER=2`, or
+`MAP_KIND_DATAVIEW=3`) is checked only at the carrier boundary. This is the
+same wrapper pattern DOM nodes use ([JS_13 — Web Platform](JS_13_Web_DOM.md)):
+the object remains a Map for shared runtime representation, while its metadata
+table intercepts element and binary-data operations.
 
 Since the ArrayNum-unification series, a TypedArray's element storage is additionally described by a **Lambda `ArrayNum` external view** over the ArrayBuffer's bytes — the same descriptor Lambda script uses for its numeric arrays and mutable views. Element reads, coercing writes, and the bulk copy/reverse/search kernels route through the shared `array_num_*` core in `lambda/lambda-data-runtime.cpp`, so JS typed arrays and Lambda numeric arrays exercise one implementation of lane storage. A small set of deliberate carve-outs stays raw: Float16 bit handling, the BigInt lanes, DataView, Node `Buffer`, and the MIR JIT's inline load/store path (§4, §8).
 
-This doc covers: the storage structs, the ArrayNum view discipline, and the upgrade-on-user-property dance; the twelve element types and the carve-out lanes; element access (inline fast path, the JIT path, and the exotic gate with canonical-numeric-index rules); buffer construction including resizable and `transfer`; DataView endianness and BigInt views; detach/out-of-bounds validation; the ArrayNum bulk fast paths; Atomics and the cooperative waiter simulation; and a brief tour of the Node `Buffer`.
+This doc covers: the storage structs, the ArrayNum view discipline, and
+ordinary expando ownership; the twelve element types and the carve-out lanes;
+element access (inline fast path, the JIT path, and the metadata-selected
+operations with canonical-numeric-index rules); buffer construction including
+resizable and `transfer`; DataView endianness and BigInt views;
+detach/out-of-bounds validation; the ArrayNum bulk fast paths; Atomics and the
+cooperative waiter simulation; and a brief tour of the Node `Buffer`.
 
 ---
 
@@ -27,13 +41,22 @@ This doc covers: the storage structs, the ArrayNum view discipline, and the upgr
 - **`JsTypedArray`** (`js_typed_array.h:55`) — `JsTypedArrayType element_type`, `JsArrayBuffer* buffer`, `uint64_t buffer_item` (the original ArrayBuffer `Item`, kept so `.buffer` returns the identical object), `bool length_tracking`, `bool is_buffer` (set only for Node `Buffer`), and `ArrayNum* view` — the ArrayNum descriptor over the buffer's bytes. There are **no** cached `length`/`byte_length`/`byte_offset`/`data` fields anymore: all of those derive from the view (below).
 - **`JsDataView`** (`js_typed_array.h:45`) — `JsArrayBuffer* buffer`, `int byte_offset`, `int byte_length`, `uint64_t buffer_item`, and `bool length_tracking`. DataView keeps plain fields; it does not carry an ArrayNum view.
 
-The wrapper `Map` is built the same way in each constructor: `heap_calloc(sizeof(Map), LMD_TYPE_MAP)`, set `map_kind`, point `m->type` at a per-kind sentinel marker (`js_typed_array_type_marker`, `js_arraybuffer_type_marker`, `js_sharedarraybuffer_type_marker`, `js_dataview_type_marker`, `js_typed_array.cpp:173`), set `m->data` to the native struct, and leave `m->data_cap = 0` (e.g. `js_typed_array_new` `:2096`, `js_arraybuffer_new` `:1528`, `js_dataview_new` `:2991`).
+Each constructor selects its metadata-qualified TypeMap before publishing the
+Map and allocates the native carrier in typed trailing storage. No fake
+TypeMap marker or native pointer in `Map.data` is used.
 
 **The ArrayNum view.** Every TypedArray constructor calls `array_num_new_buffer_view`: it allocates an `ArrayNum` marked `is_view`/`is_mutable_view` whose `ArrayNumShape` explicitly tags `ARRAY_NUM_BACKING_BUFFER_HANDLE`, stores the element offset and last resolved generation, and keeps the ArrayBuffer wrapper `Map` as its GC base. JS-visible geometry remains derived from the view. Reads resolve the handle's current allocation; non-shared writes use `js_typed_array_prepare_write`/`js_typed_array_prepare_write_ptr`, which first COWs a shared immutable snapshot when necessary. Resize, detach, transfer, and COW increment the handle generation, so refresh re-floors length-tracking geometry and re-resolves `view->data`. The MIR path calls the same live read/prepare-write accessors and does not hoist a raw typed-array pointer across storage-invalidating operations.
 
-**GC.** The typed-array `Map` trace recovers the `JsTypedArray*` from either native `Map.data` or the upgraded `__ta__` key, then marks `buffer_item` and the `view`. The ArrayNum descriptor also traces its semantic base. Finalization frees the TypedArray record and destroys the ArrayBuffer handle, which releases exactly one storage reference; storage retained by a Binary snapshot remains alive.
+**GC.** The typed-array carrier trace marks `buffer_item` and the `view` from
+the typed payload; the ArrayNum descriptor also traces its semantic base.
+Finalization frees the TypedArray record and destroys the ArrayBuffer handle,
+which releases exactly one storage reference; storage retained by a Binary
+snapshot remains alive.
 
-**Native-backed → upgraded.** Because `Map.data` is occupied by the native pointer, there is nowhere to store ordinary user properties (`ta.foo = 1`). On the **set** path the exotic gate calls `js_upgrade_native_backed_map_for_properties` (`js_runtime.cpp:3210`): it repoints `m->type` at `EmptyMap`, clears `m->data`/`m->data_cap`, then `map_put`s the native pointer back under a non-enumerable internal key — `__ta__`, `__ab__`, or `__dv__` — as an `int64`, and returns `false` so the ordinary Map set proceeds. From then on, accessors fetch the native struct through `js_get_typed_array_ptr` (`js_typed_array.cpp:2084`), `js_get_arraybuffer_ptr` (`:1589`), or `js_get_dataview_ptr_from_map` (`:2977`), each of which checks `data_cap`/`type` and falls back to the internal key. The upgrade is one-way and lazy: a TypedArray that never receives a user property stays in the cheap `data_cap == 0` form.
+Ordinary expandos are stored directly in the valid shape/data area; there is
+no native-backed upgrade that hides a pointer in `__ta__`, `__ab__`, or
+`__dv__`. The typed carrier remains available through checked accessors while
+the object gains ordinary properties without changing its semantic metadata.
 
 ---
 
@@ -57,9 +80,17 @@ There are three doors into a TypedArray element. The **inline fast path** is tak
 
 The **MIR JIT path** goes further: when type inference has pinned a variable to a typed-array kind, `jm_transpile_typed_array_get_native` (`js_mir_expression_lowering.cpp:10941`) and `jm_transpile_typed_array_set` (`:11024`) emit **raw width-typed loads/stores** over the same storage — they fetch the live element pointer via `js_typed_array_current_data_ptr` (`js_typed_array.cpp:2570`, which refreshes the view and returns NULL for OOB/detached, so a resize realloc cannot leave the JIT reading a freed block), compute `data + idx * elem_size`, and load/store natively without touching the ArrayNum accessors. `FLOAT16` is excluded — it falls back to a boxed `js_typed_array_get` call (`js_mir_expression_lowering.cpp:10945`). See [JS_04 — MIR Lowering](JS_04_MIR_Lowering.md).
 
-The **general path** flows through `js_property_get`/`js_property_set`, hits the [JS_06](JS_06_Objects_Properties_Prototypes.md) exotic gate, and lands in the `MAP_KIND_TYPED_ARRAY` arm of `js_try_exotic_property_get` (`js_runtime.cpp:3227`). For string keys this arm resolves, in order: `@@toStringTag` (`__sym_4` → the type name, `:3230`); upgraded user properties when `data_cap > 0` (`:3236`); the virtual metadata `length`/`byteLength`/`byteOffset`/`buffer`/`parent`/`BYTES_PER_ELEMENT` (each returning 0 on a detached buffer, `:3252`+); a **canonical numeric index** lookup (`:3321`); and finally a prototype walk (including the Node `Buffer` prototype when `is_buffer`, `:3343`). A non-string arm below handles raw INT/FLOAT keys through the same canonical-index validation (`:3367`).
+The **general path** flows through `js_property_get`/`js_property_set` and the
+TypedArray `JsPropertyOps` table. For string keys it resolves
+`@@toStringTag`, ordinary expandos, virtual metadata (`length`, `byteLength`,
+`byteOffset`, `buffer`, `parent`, `BYTES_PER_ELEMENT`), canonical numeric
+indices, and then the prototype walk. A non-string arm uses the same
+canonical-index validation. Physical carrier tags are not read by this
+semantic path.
 
-The **set** side is short: the gate's `MAP_KIND_TYPED_ARRAY` case (`js_runtime.cpp:3523`) calls `js_upgrade_native_backed_map_for_properties(m, "__ta__", 6)` and returns `false`. Numeric-index writes never reach here — a dense fast path near the top of `js_property_set` (`:6556`) intercepts a canonical numeric index first and routes straight to `js_typed_array_set`; only string keys (e.g. `__proto__`, user properties) fall through to trigger the upgrade.
+The **set** side uses the same table. Numeric-index writes route directly to
+`js_typed_array_set` after canonical-index validation; string keys use the
+ordinary expando path or the typed operation as appropriate.
 
 **Canonical numeric index rules** are the spec's exotic-integer-index gate, implemented by `js_ta_key_canonical_numeric` (`js_runtime_value.cpp:948`) and `js_ta_numeric_index_valid` (`:1009`). The former accepts an INT or FLOAT key directly, and for a string key only if it **round-trips** through the canonical number→string algorithm (covering `"-0"`, `"NaN"`, `"Infinity"`, fractional forms, etc.); a non-canonical string like `"01"` is rejected and treated as an ordinary property. The latter then rejects negative zero, non-finite, non-integer, and negative values, rejects an out-of-bounds typed array, and bounds-checks against the **current** length. A reject yields `undefined` on read and a silent no-op on write (the spec's IntegerIndexedElementSet for OOB), per `js_typed_array_get`/`set` returning early when `idx >= current_length` (`js_typed_array.cpp:2431`, `:2522`).
 
@@ -83,9 +114,13 @@ A plain `ArrayBuffer(length)` runs through `js_arraybuffer_construct_resizable` 
 
 DataView is a deliberate **carve-out from the ArrayNum operation layer**: it is a byte-oriented, endianness-aware window, so it keeps plain geometry fields. It still follows the same ArrayBuffer handle and COW ownership rules.
 
-`new DataView(buffer, offset?, length?)` is `js_dataview_new` (`js_typed_array.cpp:2991`): it requires an ArrayBuffer, ToIndex-validates the offset against the buffer, and — when called without an explicit length over a **resizable** buffer — sets `length_tracking = true` (`:3017`). The view is stamped with `js_class_stamp(view, JS_CLASS_DATA_VIEW)` (`:3043`).
+`new DataView(buffer, offset?, length?)` is `js_dataview_new` (`js_typed_array.cpp:2991`): it requires an ArrayBuffer, ToIndex-validates the offset against the buffer, and — when called without an explicit length over a **resizable** buffer — sets `length_tracking = true` (`:3017`). The view is published with DataView metadata selected before construction under **D3.4.7**.
 
-**Accessor reads** of `byteLength`/`byteOffset` go through the `MAP_KIND_DATAVIEW` arm of the exotic gate (`js_runtime.cpp:3414`): a detached or shrunk-out-of-bounds buffer throws TypeError; a length-tracking view returns the live `buffer->byte_length - byte_offset`; a fixed view returns its recorded `byte_length` after confirming the window still fits.
+**Accessor reads** of `byteLength`/`byteOffset` go through the DataView
+`JsPropertyOps` callback: a detached or shrunk-out-of-bounds buffer throws
+TypeError; a length-tracking view returns the live
+`buffer->byte_length - byte_offset`; a fixed view returns its recorded
+`byte_length` after confirming the window still fits.
 
 **The get/set methods** (`getInt8`…`getFloat64`, `getBigInt64`/`getBigUint64`, and the matching setters) dispatch by name in `js_dataview_method`. Reads use a checked const pointer; setters use the separate checked `dv_write_ptr`, which prepares the ArrayBuffer handle before returning mutable bytes. This split is load-bearing: a DataView write must COW the handle shared with an immutable Binary while remaining visible to every sibling JS view. Endianness conversion and detached/OOB validation remain unchanged.
 
@@ -140,8 +175,11 @@ LambdaJS is single-threaded, so `Atomics.wait`/`waitAsync`/`notify` are **simula
 3. **Duplicated scalar-store semantics.** The scalar write path (`js_typed_array_set` `js_typed_array.cpp:2526`) narrows and clamps with an inline switch, while the bulk paths store through `js_typed_array_arraynum_store_number` → `array_num_set_*_value`; ToUint8Clamp's round-half-even in particular is implemented twice (`:2529` and `array_num_clamp_uint8_even` `lambda-data-runtime.cpp:29`). The two must be kept in agreement by hand. *Improvement:* route the scalar path through the ArrayNum store helper once the JIT-visible cost is measured.
 4. **The refresh discipline is convention, not construction.** Every entry point must call `js_typed_array_refresh_arraynum_view` before touching `ta->view`; a new code path that forgets the call reads a stale `view->data` after a resizable-buffer `resize` reallocs. Nothing enforces this statically — the invariant lives in review.
 5. **Subclass species-resize coverage.** `js_typed_array_species_create` now tests construct capability and invokes `js_construct_value`; concrete TypedArray constructors carry their immutable element policy on the function object, so renamed or shadowing constructors cannot change allocation selection (**D6.2.2v2**). Resizable-buffer corner cases still need broader species/resize conformance coverage.
-6. **Freeze on a resizable-buffer-backed TypedArray is under-specified.** The exotic gate has no dedicated handling for `Object.freeze` over a length-tracking TypedArray; freezing interacts with the `__frozen__` reject in the ordinary set path ([JS_06](JS_06_Objects_Properties_Prototypes.md)) only after the native-backed upgrade, so a frozen-then-resized array's observable length and integer-index writability are not guaranteed to track the spec's IntegerIndexed invariants.
-7. **TypedArray construction policy is split from active binding state.** Concrete constructors store `typed_array_element_type_plus_one` as immutable allocation policy, while `js_construct_value` passes an explicit `newTarget` and scopes the active binding. The construct body applies `newTarget.prototype` at the allocation boundary; there is no pending construction state. Source-class maps still cross the single JR4 bridge described in [JS_07 — Classes](JS_07_Classes.md).
+6. **Freeze on a resizable-buffer-backed TypedArray is under-specified.** The
+   metadata ops table still needs dedicated `Object.freeze` handling for a
+   length-tracking TypedArray; a frozen-then-resized array's observable length
+   and integer-index writability are not yet covered by the full spec matrix.
+7. **TypedArray construction policy is split from active binding state.** Concrete constructors store `typed_array_element_type_plus_one` as immutable allocation policy, while `js_construct_value` passes an explicit `newTarget` and scopes the active binding. The construct body applies `newTarget.prototype` at the allocation boundary; there is no pending construction state. Source-class constructors are `JsFunction` values as described in [JS_07 — Classes](JS_07_Classes.md).
 8. **Linear name dispatch in `js_dataview_method`.** Every DataView accessor call walks a chain of `strncmp` comparisons (`js_typed_array.cpp:3120`+) rather than a sorted/hashed table; on a hot serialization loop this is measurable. *Improvement:* dispatch on a small perfect hash of name length + first char.
 9. **The NULL-buffer `.buffer` synthesis path is vestigial.** `js_typed_array_new` now always allocates and wraps a backing `JsArrayBuffer` eagerly (`:2100`), so the exotic-gate fallback that lazily synthesizes a buffer for a `ta->buffer == NULL` array (`js_runtime.cpp:3283`) should be unreachable for engine-constructed arrays; it survives as a guard for exotic construction paths and could be demoted to an assert.
 
@@ -154,7 +192,7 @@ LambdaJS is single-threaded, so `Atomics.wait`/`waitAsync`/`notify` are **simula
 | `lambda/js/js_typed_array.h` | `JsTypedArray` (with its `ArrayNum* view`)/`JsArrayBuffer`/`JsDataView` structs, `JsTypedArrayType`/`JsAtomicsOp` enums, public API. |
 | `lambda/js/js_typed_array.cpp` | Constructors and view creation, view refresh + derived geometry, element get/set, ArrayNum bulk paths, ArrayBuffer/SharedArrayBuffer/resize/transfer, DataView methods, Atomics + waiter simulation, `js_get_*_ptr` accessors. |
 | `lambda/lambda-data-runtime.cpp` | `array_num_new_external_view`, `array_num_get_number_value`/`set_int64_value`/`set_double_value`, the byte kernels (`copy_same_type`/`copy_equal_size`/`reverse`/`copy_reversed`), `array_num_clamp_uint8_even`. |
-| `lambda/js/js_runtime.cpp` | Exotic gates `js_try_exotic_property_get`/`set` (TA/AB/DV arms), `js_upgrade_native_backed_map_for_properties`, inline element fast paths, species create, `$262.agent`. |
+| `lambda/js/js_runtime.cpp` | Shared property-kernel entry, inline element fast paths, species create, `$262.agent`. |
 | `lambda/js/js_runtime_value.cpp` | `js_ta_key_canonical_numeric`, `js_ta_numeric_index_valid`, `js_make_number`. |
 | `lambda/js/js_mir_expression_lowering.cpp` | JIT inline typed-array get/set/length lowering (raw loads over the shared storage). |
 | `lambda/lambda-mem.cpp` | `js_native_map_gc_trace` (marks `buffer_item` + `view`), native-map finalizers. |
@@ -164,7 +202,7 @@ LambdaJS is single-threaded, so `Atomics.wait`/`waitAsync`/`notify` are **simula
 
 ## Appendix B — Related documents
 
-- [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) — `map_kind` dispatch, the exotic gate, native-backed upgrade, ordinary `[[Get]]`/`[[Set]]`.
+- [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) — immutable metadata/ops dispatch, physical carrier boundary, ordinary `[[Get]]`/`[[Set]]`.
 - [JS_03 — Value Model, Memory & GC Interop](JS_03_Value_Model.md) — `Item`, `Map`, heap allocation, BigInt/Decimal representation.
 - [JS_04 — MIR Lowering](JS_04_MIR_Lowering.md) — how `obj[i]` lowers to `js_array_get_int`/`set_int` and the native typed-array load/store path.
 - [JS_10 — Standard Built-in Library](JS_10_Builtins.md) — BigInt, Symbol, Proxy, and the broader builtin catalog.

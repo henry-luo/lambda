@@ -807,7 +807,9 @@ extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* o
     // Reject primitive descriptors per ES §6.2.5.5 step 1 (Type(Obj) is Object).
     TypeId dt = get_type_id(desc_obj);
     if (dt != LMD_TYPE_MAP && dt != LMD_TYPE_FUNC &&
-        dt != LMD_TYPE_ARRAY && dt != LMD_TYPE_ELEMENT) {
+        !js_props_is_array(desc_obj) && dt != LMD_TYPE_ELEMENT) {
+        // Packed numeric arrays use their scalar carrier TypeId, but remain
+        // ordinary ECMAScript objects when used as property descriptors.
         return js_props_throw_type("Property description must be an object");
     }
 
@@ -1355,6 +1357,17 @@ extern "C" Item js_delete(Item target, JsPropertyLane lane,
     Rooted<Item> key_root(roots,
         js_property_lane_bridge_key_or_error(lane, observable_key));
     if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
+    TypeId target_type = get_type_id(target_root.get());
+    bool object_like = target_type == LMD_TYPE_MAP ||
+        js_props_is_array(target_root.get()) || target_type == LMD_TYPE_FUNC ||
+        target_type == LMD_TYPE_ELEMENT || target_type == LMD_TYPE_OBJECT ||
+        target_type == LMD_TYPE_VMAP || target_type == LMD_TYPE_ERROR;
+    if (!object_like && target_type != LMD_TYPE_NULL &&
+            target_type != LMD_TYPE_UNDEFINED) {
+        // DeleteProperty on a primitive property reference succeeds after the
+        // reference base has been evaluated; only nullish bases throw (D8.4.3).
+        return (Item){.item = b2it(true)};
+    }
     return js_reflect_delete_property(target_root.get(), key_root.get());
 }
 

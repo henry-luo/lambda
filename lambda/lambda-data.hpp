@@ -322,6 +322,10 @@ typedef struct ShapeEntry {
 #define TYPEMAP_HASH_CAPACITY 32
 #define TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY 32768
 
+// JS adds an immutable semantic refinement without coupling core shapes to
+// the JS runtime's metadata and operation-table definitions.
+struct JsClassMeta;
+
 typedef struct TypeMap : Type {
     int64_t length;  // no. of items in the map
     int64_t byte_size;  // byte size of the struct that the map is transpiled to
@@ -357,12 +361,10 @@ typedef struct TypeMap : Type {
     // rules before descriptor or incompatible type mutation.
     bool is_transition_shared_shape;
     struct TypeMapTransition* transitions;
-    // A3-T1 (JS): typed class identity (JsClass enum, declared in js/js_class.h).
-    // Zero-init = JS_CLASS_NONE so existing TypeMaps stay opaque to the new
-    // dispatch path. Stamped via `js_class_set_for_map` (which clones the
-    // TypeMap first to avoid cross-instance contamination via the per-callsite
-    // shape cache). Read via `js_class_get(Item)`.
-    uint8_t js_class;
+    // Tune6: immutable JS semantic metadata. Null is reserved for foreign or
+    // Input TypeMaps; runtime JS families select it before publication and
+    // shape transitions preserve it exactly.
+    const JsClassMeta* js_meta;
     // Tune12 P1b: true when an array companion map contains numeric own shape
     // entries. Pure named companions can still use direct dense element writes.
     bool has_array_index_shape;

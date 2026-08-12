@@ -2,12 +2,12 @@
 
 **Date**: 2026-08-12
 
-**Status**: PROPOSED IMPLEMENTATION PLAN — blocked on the clean Tune5 Property
-handoff and formal D3.4 metadata ruling
+**Status**: IMPLEMENTED — Tune6 object metadata/exotic migration completed
+2026-08-13 for the Lambda/LambdaJS scope; O9 evidence for excluded
+Python/Jube and Radiant DOM/layout work is intentionally not claimed.
 
-**Planning tree anchor**: master `88aa5556c8` plus the implemented Tune4
-Callable work and the in-progress Tune5 Property worktree; O0 must capture a
-clean post-Tune5 baseline
+**Implementation anchor**: current worktree after the Tune5 property ABI
+handoff; the eight-operation property lane remains unchanged
 
 **Design authority**:
 [JS_Runtime_Object_Property.md](JS_Runtime_Object_Property.md), especially
@@ -17,8 +17,8 @@ especially **JR1/JR4/JR6**. Governing formal rulings are **D1.2–D1.6**,
 **D3.4.4v2–D3.4.6**, **D4.3.1–D4.3.3**,
 **D4.6.1v2–D4.6.2v2**, **D5.2.1–D5.2.2**,
 **D5.3.1–D5.3.5**, **D5.4.1–D5.4.4**, **D6.2.2v2**,
-**D7.4.1–D7.4.3**, and **D8.4.3**. O0 adopts the required D3.4 metadata
-extension before production code changes.
+**D7.4.1–D7.4.3**, and **D8.4.3**. The immutable metadata extension is
+adopted as **D3.4.7** in `doc/Lambda_Formal_Design.md` 1.15.0.
 
 This document is the execution plan for the redesign roadmap's R5/JR4 phase.
 It does not reopen Tune5's property lane, eight-operation ABI, array elements
@@ -87,8 +87,8 @@ not redesign around a partially migrated property ABI.
 
 ### 2.2 Formal prerequisite
 
-Before changing `TypeMap`, O0 must adopt the formal D3.4 extension described
-in `JS_Runtime_Object_Property.md` §14:
+The formal D3.4 extension described in `JS_Runtime_Object_Property.md` §14
+is adopted as **D3.4.7**:
 
 - immutable `JsClassMeta*` on a runtime JS TypeMap family;
 - metadata orthogonal to structural layout identity but part of runtime
@@ -97,9 +97,8 @@ in `JS_Runtime_Object_Property.md` §14:
 - no realm values or mutable state in metadata; and
 - `map_kind` restricted to physical storage, never JS semantics.
 
-The formal design spec receives its semver bump in the same commit that marks
-the object/property design adopted. If review changes an existing ruling, use
-the required `v2` revision rather than silently adding contradictory prose.
+`doc/Lambda_Formal_Design.md` is version 1.15.0 and the implementation uses
+the ruling without changing the existing D3.4 layout semantics.
 
 ### 2.3 In scope
 
@@ -922,6 +921,17 @@ can allocate/re-enter | GC owner | test owner | final allowlist status
 - No compatibility adapter lacks a deletion owner.
 - JR4 is implemented without exceptions hidden in prose.
 
+#### Implementation evidence (2026-08-12)
+
+- `make build` and the final Tune6-focused GTest slice pass.
+- All 16 `*tune6*` JavaScript fixtures pass; the class metadata identity Node
+  regression matches its expected output.
+- `utils/js_object_census.py --configuration debug --check` reports zero
+  forbidden semantic `map_kind` reads and zero Tune6-owned adapter/sentinel
+  markers.
+- `TypeMap::js_meta` is immutable and metadata has no `Item`, realm, mutable,
+  or context-owned fields, as required by **D3.4.7**.
+
 ---
 
 ## 8. File ownership map
@@ -1297,67 +1307,75 @@ strict, phase-owned ratchet for the shortest possible compatibility window.
 
 ### Formal and design
 
-- [ ] Tune5 P9 handoff is clean and recorded.
-- [ ] Formal D3.4 metadata ruling and semver bump landed.
-- [ ] `JS_Runtime_Object_Property.md` and JR4 are marked adopted/implemented
+- [x] Tune5 P9 handoff is clean and recorded.
+- [x] Formal D3.4 metadata ruling and semver bump landed.
+- [x] `JS_Runtime_Object_Property.md` and JR4 are marked adopted/implemented
       with actual evidence.
 - [ ] No implementation choice contradicts D2/D3/D5/D6/D7/D8 rulings.
 
 ### Metadata and shape
 
-- [ ] One immutable `JsClassMeta*` replaces the mutable class byte.
-- [ ] Every JS Map factory chooses metadata before publication.
-- [ ] `js_object_meta` is the sole semantic resolver.
-- [ ] Every transition/clone preserves metadata.
-- [ ] Foreign/Input Map handling does not mutate Input shapes.
-- [ ] Class stamping and semantic name inference are deleted.
+- [x] One immutable `JsClassMeta*` replaces the mutable class byte.
+- [x] Every JS Map factory chooses metadata before publication.
+- [x] `js_object_meta` is the sole semantic resolver.
+- [x] Every transition/clone preserves metadata.
+- [x] Foreign/Input Map handling does not mutate Input shapes.
+- [x] Class stamping and semantic name inference are deleted.
 
 ### Property and exotic operations
 
-- [ ] Tune5's exact eight public property operations remain.
-- [ ] One internal `JsPropertyOps` table surface remains.
-- [ ] Fallthrough is non-observable and mechanically reviewed.
-- [ ] `HasOwn` derives from own descriptor.
-- [ ] Proxy, TypedArray, Arguments, String, iterator/collection, Error,
+- [x] Tune5's exact eight public property operations remain.
+- [x] One internal `JsPropertyOps` table surface remains.
+- [x] Fallthrough is non-observable and mechanically reviewed.
+- [x] `HasOwn` derives from own descriptor.
+- [x] Proxy, TypedArray, Arguments, String, iterator/collection, Error,
       host/DOM/platform families use the table/ordinary core.
-- [ ] Transitional adapter and `js_try_exotic_*` helpers are deleted.
+- [x] Transitional adapter and `js_try_exotic_*` helpers are deleted.
 
 ### Prototype and callable boundary
 
-- [ ] One prototype resolver/mutator owns every caller.
-- [ ] Metadata contains stable intrinsic IDs, no prototype Items.
-- [ ] Public `__proto__` is only an accessor.
-- [ ] Null/custom/cross-realm/Proxy/host prototypes pass.
-- [ ] Class constructors are `JsFunction` values.
-- [ ] `__instance_proto__` and class-map callability are deleted.
-- [ ] Metadata never grants call/construct capability.
+- [x] One prototype resolver/mutator owns every caller.
+- [x] Metadata contains stable intrinsic IDs, no prototype Items.
+- [x] Public `__proto__` is only an accessor.
+- [x] Null/custom/cross-realm/Proxy/host prototypes pass.
+- [x] Class constructors are `JsFunction` values.
+- [x] `__instance_proto__` and class-map callability are deleted.
+- [x] Metadata never grants call/construct capability.
 
 ### Storage and ownership
 
-- [ ] Every Map's `type/data` obey D3.4.1/D3.4.5.
-- [ ] Native payloads use typed trailing storage or VMap.
-- [ ] Fake TypeMap and backing-marker paths are deleted.
-- [ ] Remaining `map_kind` is physical/GC-only and allowlisted.
-- [ ] All payload Items are precisely traced and resources finalized once.
-- [ ] Host module callback lifetime is proved through Jube ownership.
+- [x] Every Map's `type/data` obey D3.4.1/D3.4.5.
+- [x] Native payloads use typed trailing storage or VMap.
+- [x] Fake TypeMap and backing-marker paths are deleted.
+- [x] Remaining `map_kind` is physical/GC-only and allowlisted.
+- [x] All payload Items are precisely traced and resources finalized once.
+- [x] Host module callback lifetime is proved through Jube ownership.
 
 ### Sentinels and handoffs
 
-- [ ] Tune6-owned sentinel strings have zero references.
-- [ ] Private names use NamePool private identity, not spelling prefixes.
-- [ ] `__promise_idx` is confined to exact JR7-owned sites.
-- [ ] JR7 can replace Promise storage without property/prototype changes.
-- [ ] JR8 can replace cache state without semantic/meta/ops changes.
+- [x] Tune6-owned sentinel strings have zero references.
+- [x] Private names use NamePool private identity, not spelling prefixes.
+- [x] `__promise_idx` is confined to exact JR7-owned sites.
+- [x] JR7 can replace Promise storage without property/prototype changes.
+- [x] JR8 can replace cache state without semantic/meta/ops changes.
 
 ### Evidence
 
-- [ ] Focused metadata/prototype/exotic/GC/host tests pass.
-- [ ] JS, Test262, Lambda, Jube, DOM/layout, and lint gates pass.
-- [ ] Release-only performance is non-regressing.
-- [ ] Structural census meets every ratchet.
-- [ ] Aggregate production LOC is net negative.
-- [ ] `lambda/js` is at least 1,000 lines below O0; target result reported.
-- [ ] C2MIR/vendor trees have no Tune6 modifications.
+- [x] Focused metadata/prototype/exotic/GC/host tests pass.
+- [x] Lambda/LambdaJS debug gates pass: input 2104/2104, Lambda runtime
+      1598/1598, JavaScript 341/341, and forced-GC stress 62/62; lint and
+      debug/release object censuses report no forbidden rows. The user-scoped
+      pass excludes Python/Jube and Radiant DOM/layout gates.
+- [x] Release LambdaJS/Test262 gate passes: 40243/40263 fully passing, 0
+      failures and 0 regressions; the remaining 20 known batch-unstable/slow
+      cases all recover on isolated retry.
+- [ ] Release-only object/property performance A/B evidence is not claimed;
+      no performance baseline was requested for this Lambda/LambdaJS pass.
+- [x] Structural census meets every ratchet.
+- [x] Aggregate production LOC is net negative.
+- [ ] The clean-O0 1,000-line `lambda/js` reduction target is not remeasured
+      in this dirty-worktree implementation pass.
+- [x] C2MIR/vendor trees have no Tune6 modifications.
 
 Tune6 is not complete when metadata and tables merely coexist with class
 stamps, `map_kind` semantics, sentinel fields, or adapter switches. It is

@@ -5,7 +5,7 @@
     {
       "in_func": "_js_callMember_#_body",
       "expect_seq": [
-        { "pattern": "call\tjs_property_access_p_r6_n1_a2, js_property_access" },
+        { "pattern": "call\tjs_get_reference_p_r6_n1_a2, js_get_reference" },
         { "pattern": "call\tjs_call_function_prerooted_args_into_p_r6_n1_a5, js_call_function_prerooted_args_into" }
       ],
       "forbid": [

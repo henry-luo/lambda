@@ -163,23 +163,15 @@ static DocState* get_or_create_state() {
 
 // ============================================================================
 // Range / Selection wrappers — native host VMaps carry the native pointer.
-// Property reads/writes still route through js_dom_get_property /
-// js_dom_set_property, which dispatch by wrapper brand into
-// js_dom_range_get_property / js_dom_selection_get_property.
-// No JS-visible "private" properties; no shape allocations on the wrapper.
+// Property reads/writes route through the Jube declared-interface records for
+// the wrapper's host type. No JS-visible private properties or Map markers are
+// needed on the wrapper.
 // ============================================================================
 
 extern "C" Item vmap_new(void);
 
-static const char js_dom_range_vmap_type_marker = 0;
-static const char js_dom_selection_vmap_type_marker = 0;
 extern "C" const void* radiant_dom_range_host_type(void);
 extern "C" const void* radiant_dom_selection_host_type(void);
-
-// Legacy map marker addresses — kept so older resource-map callers fail closed
-// through the same unwrap helpers during this migration window.
-TypeMap js_dom_range_marker     = {};
-TypeMap js_dom_selection_marker = {};
 
 // Forward decls
 static Item build_range_object(DomRange* r);
@@ -195,28 +187,20 @@ extern "C" bool js_dom_item_is_range(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_VMAP) {
         return item.vmap &&
-            (item.vmap->host_type == (const void*)&js_dom_range_vmap_type_marker ||
-             item.vmap->host_type == radiant_dom_range_host_type()) &&
+            item.vmap->host_type == radiant_dom_range_host_type() &&
             item.vmap->host_data != nullptr;
     }
-    if (type != LMD_TYPE_MAP) return false;
-    Map* m = item.map;
-    return m && m->map_kind == MAP_KIND_WEB_API_RESOURCE &&
-           m->type == (void*)&js_dom_range_marker;
+    return false;
 }
 
 extern "C" bool js_dom_item_is_selection(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_VMAP) {
         return item.vmap &&
-            (item.vmap->host_type == (const void*)&js_dom_selection_vmap_type_marker ||
-             item.vmap->host_type == radiant_dom_selection_host_type()) &&
+            item.vmap->host_type == radiant_dom_selection_host_type() &&
             item.vmap->host_data != nullptr;
     }
-    if (type != LMD_TYPE_MAP) return false;
-    Map* m = item.map;
-    return m && m->map_kind == MAP_KIND_WEB_API_RESOURCE &&
-           m->type == (void*)&js_dom_selection_marker;
+    return false;
 }
 
 static inline DomRange* range_from(Item obj) {

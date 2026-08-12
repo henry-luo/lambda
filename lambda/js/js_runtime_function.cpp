@@ -12,13 +12,13 @@ extern __thread EvalContext* context;
 // Function object wrappers
 // =============================================================================
 
-#define JS_FUNCTION_SIZE_CLASS 6
-static_assert(sizeof(JsFunction) == 256,
-              "JsFunction must exactly fill its GC object-zone size class");
+#define JS_FUNCTION_SIZE_CLASS 7
+static_assert(sizeof(JsFunction) <= 384,
+              "JsFunction must fit its GC object-zone size class");
 
 extern "C" JsFunction* js_alloc_gc_function_object(void) {
-    // The callable layout fits the 256-byte class exactly; selecting the next
-    // class would waste 128 bytes for every GC-managed function object.
+    // Source-class capabilities extend the callable carrier beyond the old
+    // 256-byte class; keep the GC allocation class explicit with the layout.
     JsFunction* fn = (JsFunction*)heap_calloc_class(
         sizeof(JsFunction), LMD_TYPE_FUNC, JS_FUNCTION_SIZE_CLASS);
     if (!fn) return NULL;
@@ -239,6 +239,9 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     }
     gc_mark_object_ptr(gc, fn->vm_stack_filename);
     gc_mark_object_ptr(gc, fn->vm_stack_source);
+    gc_mark_item(gc, fn->class_constructor.item);
+    gc_mark_item(gc, fn->class_instance_prototype.item);
+    gc_mark_item(gc, fn->class_superclass.item);
     return 1;
 }
 
@@ -1277,6 +1280,23 @@ extern "C" void js_set_function_name_from_property_key_if_anonymous(Item fn_item
 }
 
 extern "C" void js_set_class_name(Item cls_item, Item name_item) {
+    if (get_type_id(cls_item) == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)cls_item.function;
+        if (!fn || !(fn->flags & JS_FUNC_FLAG_CLASS_CONSTRUCTOR) ||
+                get_type_id(name_item) != LMD_TYPE_STRING) return;
+        Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
+        Item current = js_get_key_default(cls_item, name_key);
+        // A static `name` method is an own callable property; inferred class
+        // naming must not replace it with the constructor's display string.
+        if (get_type_id(current) != LMD_TYPE_STRING) return;
+        String* current_name = it2s(current);
+        if (current_name && current_name->len != 0) return;
+        // Class constructors are JsFunction values after Tune6; keeping this
+        // setter Map-only silently erased every inferred class name.
+        fn->name = it2s(name_item);
+        js_function_refresh_name_property(fn);
+        return;
+    }
     if (get_type_id(cls_item) != LMD_TYPE_MAP) return;
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
     ShapeEntry* existing = js_find_shape_entry(cls_item, "name", 4);

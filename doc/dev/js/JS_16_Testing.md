@@ -2,7 +2,7 @@
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how LambdaJS conformance and unit tests run: the test262 batch runner (GTest orchestrator → `posix_spawn` worker pool → persistent hot-reload process → wire protocol), batch execution phases and slowest-first dispatch, the three-layer crash recovery, batch-state reset, baseline management, the async/`$DONE` runner, diagnose mode, the Node.js official-test harness and shims, and the GTest unit suites.
 >
-> **Primary sources:** `test/test_js_test262_gtest.cpp` (orchestrator), `lambda/main.cpp` (`js-test-batch` worker + crash recovery), `lambda/js/js_runtime_state.cpp` (`js_batch_reset`/`js_batch_reset_to`), `test/test_node_gtest.cpp` + `lambda/js/test_shim/` (Node harness), `test/test_js_gtest.cpp`, `test/test_js_coerce_gtest.cpp`, `test/test_js_bt_regex_gtest.cpp`, `test/test_jsx_roundtrip{,_new}_gtest.cpp`, `test/test_js_transpile_timing_gtest.cpp`, baseline data under `test/js262/`.
+> **Primary sources:** `test/test_js_test262_gtest.cpp` (orchestrator), `lambda/main.cpp` (`js-test-batch` worker + crash recovery), `lambda/js/js_runtime_state.cpp` (`js_batch_reset`/`js_batch_reset_to`), `utils/js_object_census.py` (Tune6 object-architecture ratchet), `test/test_node_gtest.cpp` + `lambda/js/test_shim/` (Node harness), `test/test_js_gtest.cpp`, `test/test_js_coerce_gtest.cpp`, `test/test_js_bt_regex_gtest.cpp`, `test/test_jsx_roundtrip{,_new}_gtest.cpp`, `test/test_js_transpile_timing_gtest.cpp`, baseline data under `test/js262/`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -12,6 +12,13 @@
 LambdaJS validates correctness against three independent corpora: the **TC39 test262** suite (tens of thousands of spec-conformance tests, the primary gate), the **official Node.js parallel tests** (`ref/node/test/parallel/`, host-API compatibility), and a set of **focused GTest suites** for individual kernels (coercion, the backtracking regex matcher, JSX round-trip, transpile timing). The throughput-critical piece is the test262 runner, which compiles a shared harness once per batch and streams test sources to a long-lived worker — the preamble/batch entry points it depends on are defined in [JS_01 — Compilation Pipeline §3 and §8](JS_01_Compilation_Pipeline.md). This document owns the test *infrastructure*: process orchestration, the wire protocol, crash recovery, batch reset, and baseline gating. Lowering and runtime semantics that the tests exercise live in their owning docs.
 
 The runner enforces a **zero-crash policy**: any crash or lost test is treated as a regression that blocks a baseline update (`test_js_test262_gtest.cpp:19`). Absolute pass counts in the baseline header are configuration-dependent (build type, opt level, interpreter vs JIT, host CPU count) and are not reproduced here.
+
+Tune6 adds an architecture gate alongside behavior testing. The structural
+census checks immutable `TypeMap::js_meta` ownership under **D3.4.7**, the
+physical-only `map_kind` allowlist, typed native payload boundaries, removal of
+the old exotic adapter/class/prototype sentinels, and the exact Promise
+exception owned by JR7. Run it for both debug and release source scopes before
+declaring an object-runtime change complete.
 
 ---
 

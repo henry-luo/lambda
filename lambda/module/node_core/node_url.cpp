@@ -249,7 +249,8 @@ extern "C" void js_blob_url_reset(void) {
 static Item url_to_js_object(Url* url) {
     if (!url) return ItemNull;
 
-    Item obj = js_new_object();
+    Item obj = node_url_host->script->new_object_with_class(
+        JUBE_SCRIPT_CLASS_URL);
     JubeRootFrame frame = {};
     if (!node_url_roots_begin(&frame, 3)) return obj;
     uint64_t* object_root = node_url_host->node->roots->root_frame_take_slot(&frame);
@@ -263,8 +264,6 @@ static Item url_to_js_object(Url* url) {
     *params_root = ItemNull.item;
     *key_root = ItemNull.item;
 
-    // T5b: legacy `__class_name__` string write retired.
-    node_url_host->script->class_stamp(node_url_root_value(object_root), JUBE_SCRIPT_CLASS_URL);
 
     const char* href = url_get_href(url);
     const char* origin_str = url_get_origin(url);
@@ -394,7 +393,8 @@ static Item node_url_legacy_set_defaults(Item object) {
 }
 
 static Item node_url_legacy_new(void) {
-    Item object = js_new_object();
+    Item object = node_url_host->script->new_object_with_class(
+        JUBE_SCRIPT_CLASS_URL);
     JubeRootFrame frame = {};
     if (!node_url_roots_begin(&frame, 1)) return object;
     uint64_t* object_root = node_url_host->node->roots->root_frame_take_slot(&frame);
@@ -403,7 +403,6 @@ static Item node_url_legacy_new(void) {
         return object;
     }
     *object_root = object.item;
-    node_url_host->script->class_stamp(object, JUBE_SCRIPT_CLASS_URL);
     object = node_url_legacy_set_defaults(object);
     Item result = node_url_root_value(object_root);
     node_url_host->node->roots->root_frame_end(&frame);
@@ -1275,7 +1274,8 @@ extern "C" Item js_usp_size(void) {
 // new URLSearchParams([init])
 extern "C" Item js_url_search_params_new(Item init) {
     if (!node_url_ensure_host()) return ItemNull;
-    Item obj = js_new_object();
+    Item obj = node_url_host->script->new_object_with_class(
+        JUBE_SCRIPT_CLASS_URL_SEARCH_PARAMS);
     JubeRootFrame frame = {};
     if (!node_url_roots_begin(&frame, 2)) return obj;
     uint64_t* object_root = node_url_host->node->roots->root_frame_take_slot(&frame);
@@ -1285,8 +1285,6 @@ extern "C" Item js_url_search_params_new(Item init) {
         return obj;
     }
     *object_root = obj.item;
-    // T5b: legacy `__class_name__` string write retired.
-    node_url_host->script->class_stamp(obj, JUBE_SCRIPT_CLASS_URL_SEARCH_PARAMS);
 
     Item entries;
     int init_type = get_type_id(init);
@@ -1459,7 +1457,7 @@ int node_url_init(const JubeHostAPI* host) {
             !host->script->current_this || !host->script->to_string ||
             !host->script->object_keys || !host->script->call_function ||
             !host->script->strict_equal || !host->script->is_truthy ||
-            !host->script->class_stamp || !host->script->class_is ||
+            !host->script->new_object_with_class || !host->script->class_is ||
             !host->script->make_number || !host->script->object_create ||
             !host->script->type_of) return -1;
     node_url_host = host;

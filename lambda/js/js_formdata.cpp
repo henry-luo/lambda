@@ -776,7 +776,6 @@ static void fd_install_methods(Item fd_obj) {
     prop_set(fd_obj, "forEach", js_new_native_function(js_fd_forEach));
     // Symbol.iterator → same as entries()
     js_set_key_default(fd_obj, make_sym_iterator_key(), js_new_native_function(js_fd_entries));
-    js_class_stamp(fd_obj, JS_CLASS_FORM_DATA);
 }
 
 // ============================================================================
@@ -819,8 +818,7 @@ static const char* blob_options_type(Item options) {
 
 // new Blob([parts], { type })
 static Item js_blob_construct(Item parts, Item options) {
-    Item obj = js_new_object();
-    js_class_stamp(obj, JS_CLASS_BLOB);
+    Item obj = js_new_object_with_class(JS_CLASS_BLOB);
     int64_t size = (get_type_id(parts) == LMD_TYPE_UNDEFINED) ? 0 : blob_compute_size(parts);
     prop_set(obj, "size", make_int_item(size));
     prop_set(obj, "type", make_str(blob_options_type(options)));
@@ -838,8 +836,7 @@ static int64_t now_epoch_ms() {
 
 // new File([parts], name, { type, lastModified })
 static Item js_file_construct(Item parts, Item name, Item options) {
-    Item obj = js_new_object();
-    js_class_stamp(obj, JS_CLASS_FILE);
+    Item obj = js_new_object_with_class(JS_CLASS_FILE);
 
     int64_t size = (get_type_id(parts) == LMD_TYPE_UNDEFINED) ? 0 : blob_compute_size(parts);
     prop_set(obj, "size", make_int_item(size));
@@ -870,8 +867,7 @@ static Item fd_blob_to_file(Item value, Item filename_item) {
     bool has_filename = (get_type_id(filename_item) != LMD_TYPE_UNDEFINED);
     bool is_file = (js_class_id(value) == JS_CLASS_FILE);
 
-    Item file = js_new_object();
-    js_class_stamp(file, JS_CLASS_FILE);
+    Item file = js_new_object_with_class(JS_CLASS_FILE);
 
     Item sz = prop_get(value, "size");
     prop_set(file, "size", get_type_id(sz) == LMD_TYPE_INT ? sz : make_int_item(0));
@@ -901,8 +897,7 @@ static Item fd_blob_to_file(Item value, Item filename_item) {
 
 // Create a File stub for an empty file input.
 static Item fd_make_file_stub() {
-    Item obj = js_new_object();
-    js_class_stamp(obj, JS_CLASS_FILE);
+    Item obj = js_new_object_with_class(JS_CLASS_FILE);
     prop_set(obj, "size",           make_int_item(0));
     prop_set(obj, "name",           make_str(""));
     prop_set(obj, "type",           make_str("application/octet-stream"));
@@ -977,7 +972,7 @@ static Item js_formdata_construct(Item first, Item submitter) {
     }
 
     // Create the FormData object
-    Item fd_obj = js_new_object();
+    Item fd_obj = js_new_object_with_class(JS_CLASS_FORM_DATA);
     Item entries = js_array_new(0);
     prop_set(fd_obj, FD_ENTRIES_KEY, entries);
     fd_install_methods(fd_obj);

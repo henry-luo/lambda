@@ -278,9 +278,9 @@ static LambdaError* err_init(LambdaError* error, LambdaErrorCode code, const cha
     error->type_id = LMD_TYPE_MAP;
     error->flags = 0;
     error->array_flags = 0;
-    // the shared error prologue is a resting-state Map; reserve its map-kind
-    // byte so JS property paths can recognize the struct without probing data.
-    error->prologue_reserved = MAP_KIND_ERROR;
+    // the shared error prologue is classified by the JS carrier TypeMap when
+    // it crosses into the observable object lane.
+    error->prologue_reserved = 0;
     error->type = NULL;
     error->code = code;
     error->is_heap = is_heap;

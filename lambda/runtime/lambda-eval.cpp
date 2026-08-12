@@ -8250,7 +8250,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_mt->is_shared_constructor_shape = false;
         new_mt->is_transition_shared_shape = false;
         new_mt->transitions = NULL;
-        new_mt->js_class = old_map_type->js_class;
+        new_mt->js_meta = old_map_type->js_meta;
 
         // Populate/grow hash table for O(1) property lookup.
         typemap_hash_build(new_mt, context->pool);

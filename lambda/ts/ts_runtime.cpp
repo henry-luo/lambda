@@ -302,7 +302,12 @@ extern "C" Item ts_type_info(Item value) {
     case LMD_TYPE_STRING:    ts_name = "string"; break;
     case LMD_TYPE_SYMBOL:    ts_name = "symbol"; break;
     case LMD_TYPE_FUNC:      ts_name = "function"; break;
-    case LMD_TYPE_ARRAY:     ts_name = "array"; break;
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_NUM:
+        // numeric arrays share the JavaScript/TypeScript array surface; the
+        // packed numeric carrier is an internal Lambda representation.
+        ts_name = "array";
+        break;
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT:
     case LMD_TYPE_OBJECT:    ts_name = "object"; break;

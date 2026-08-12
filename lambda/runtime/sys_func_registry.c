@@ -1244,6 +1244,11 @@ extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter
 extern void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
 extern void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 extern void js_set_class_name(Item cls_item, Item name_item);
+extern Item js_new_class_function(void);
+extern void js_set_class_constructor(Item class_function, Item constructor_body);
+extern void js_set_class_instance_prototype(Item class_function, Item prototype);
+extern void js_set_class_superclass(Item class_function, Item superclass);
+extern Item js_get_class_superclass(Item class_function);
 extern void js_set_default_constructor_property(Item proto_item, Item cls_item);
 extern Item js_prepare_class_prototype_property(Item cls_item);
 extern Item js_check_class_static_field_key(Item key_item);
@@ -2308,6 +2313,11 @@ JitImport jit_runtime_imports[] = {
     {"js_set_function_name_if_anonymous", FPTR(js_set_function_name_if_anonymous), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_function_name_from_property_key_if_anonymous", FPTR(js_set_function_name_from_property_key_if_anonymous), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_class_name", FPTR(js_set_class_name), JIT_IMPORT_VOID_PRESERVES},
+    {"js_new_class_function", FPTR(js_new_class_function)},
+    {"js_set_class_constructor", FPTR(js_set_class_constructor), JIT_IMPORT_VOID_PRESERVES},
+    {"js_set_class_instance_prototype", FPTR(js_set_class_instance_prototype), JIT_IMPORT_VOID_PRESERVES},
+    {"js_set_class_superclass", FPTR(js_set_class_superclass), JIT_IMPORT_VOID_PRESERVES},
+    {"js_get_class_superclass", FPTR(js_get_class_superclass)},
     {"js_set_default_constructor_property", FPTR(js_set_default_constructor_property), JIT_IMPORT_VOID_PRESERVES},
     {"js_prepare_class_prototype_property", FPTR(js_prepare_class_prototype_property)},
     {"js_check_class_static_field_key", FPTR(js_check_class_static_field_key)},

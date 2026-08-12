@@ -739,6 +739,7 @@ enum MapKind {
     MAP_KIND_DESC       = 13, // regular JS/Lambda object with descriptor metadata
     MAP_KIND_ARRAY_SPARSE = 14, // array companion map plus numeric sparse hash table
     MAP_KIND_ERROR       = 15, // resting-state LambdaError presented as a JS object
+    MAP_KIND_REGEXP      = 16, // RegExp carrier with typed trailing native payload
 };
 
 #define CONTAINER_FLAG_IMMORTAL (1u << 5)

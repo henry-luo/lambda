@@ -3,6 +3,7 @@ import TestTree from './components/TestTree';
 import ComparisonPanel from './components/ComparisonPanel';
 import RenderComparisonPanel from './components/RenderComparisonPanel';
 import BottomPanel from './components/BottomPanel';
+import StructCensusPanel from './components/StructCensusPanel';
 
 function App() {
   const [selectedTest, setSelectedTest] = useState(null);
@@ -72,7 +73,10 @@ function App() {
     setSelectedTest(test);
     setTestResults(null);
     setLambdaRenderPath(null);
-    
+
+    // tool panels (struct census) are not tests — keep them out of Recent
+    if (test.testType === 'struct-census') return;
+
     // Add to recent tests
     window.electronAPI.addRecentTest(test).then(updated => {
       setRecentTests(updated || []);
@@ -81,6 +85,8 @@ function App() {
 
   const handleRunTest = async () => {
     if (!selectedTest || isRunning) return;
+    // tool panels drive their own actions (the census has its own Regen button)
+    if (selectedTest.testType === 'struct-census') return;
 
     // PDF render test flow
     if (selectedTest.testType === 'pdf-render') {
@@ -284,7 +290,11 @@ function App() {
     };
   }, []);
 
-  const selectedTestPath = selectedTest?.testType === 'render'
+  const isToolPanel = selectedTest?.testType === 'struct-census';
+
+  const selectedTestPath = isToolPanel
+    ? null
+    : selectedTest?.testType === 'render'
     ? `test/render/${selectedTest.renderDir || 'page'}/${selectedTest.testFile}.html`
     : selectedTest?.testType === 'pdf-render'
       ? `test/pdf/${selectedTest.testFile}`
@@ -306,7 +316,7 @@ function App() {
           <span className="menu-item">Help</span>
         </div>
         <div className="toolbar">
-          {(!selectedTest || selectedTest?.testType === 'layout') && (
+          {(!selectedTest || selectedTest?.testType === 'layout') && !isToolPanel && (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginRight: '12px' }}>
             <label style={{ fontSize: '13px', color: '#ccc' }}>Viewport:</label>
             <select 
@@ -344,7 +354,7 @@ function App() {
           <button
             className="btn btn-primary"
             onClick={handleRunTest}
-            disabled={!selectedTest || isRunning}
+            disabled={!selectedTest || isRunning || isToolPanel}
             title="Run test (Cmd+R)"
           >
             {isRunning ? 'Running...' : '▶ Run Test'}
@@ -404,7 +414,9 @@ function App() {
 
         <div className="right-content">
           <div className="top-panel">
-            {selectedTest?.testType === 'render' ? (
+            {selectedTest?.testType === 'struct-census' ? (
+              <StructCensusPanel />
+            ) : selectedTest?.testType === 'render' ? (
               <RenderComparisonPanel
                 ref={renderPanelRef}
                 test={selectedTest}

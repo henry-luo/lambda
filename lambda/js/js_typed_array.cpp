@@ -5,6 +5,7 @@
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_class.h"
+#include "js_object_meta.h"
 #include "js_coerce.h"
 #include "js_event_loop.h"
 #include "../core/binary.h"
@@ -20,6 +21,21 @@
 #include <limits.h>
 #include "../../lib/mem.h"
 #include <cmath>
+
+typedef struct JsArrayBufferMapCarrier {
+    Map base;
+    JsArrayBuffer* payload;
+} JsArrayBufferMapCarrier;
+
+typedef struct JsTypedArrayMapCarrier {
+    Map base;
+    JsTypedArray payload;
+} JsTypedArrayMapCarrier;
+
+typedef struct JsDataViewMapCarrier {
+    Map base;
+    JsDataView payload;
+} JsDataViewMapCarrier;
 
 extern __thread EvalContext* context;
 extern Item js_make_number(double d);
@@ -153,13 +169,6 @@ static void js_dataview_link_prototype(Item view) {
     Item proto = js_get_key_default(ctor, proto_key);
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(view, proto);
 }
-
-// Sentinel markers for type identification
-static TypeMap js_typed_array_type_marker = {};
-static TypeMap js_arraybuffer_type_marker = {};
-static int js_sharedarraybuffer_type_marker = 0;
-static TypeMap js_dataview_type_marker = {};
-char js_typed_array_marker = 'T';
 
 typedef struct JsTypedArraySetCounters {
     long calls_total;
@@ -1527,10 +1536,8 @@ extern "C" Item js_atomics_is_lock_free(Item size) {
 
 // Returns the JS type name for a typed array element type (e.g. "Uint8Array")
 extern "C" const char* js_typed_array_type_name(Item val) {
-    if (get_type_id(val) != LMD_TYPE_MAP) return NULL;
-    Map* m = val.map;
-    if (!m || m->map_kind != MAP_KIND_TYPED_ARRAY) return NULL;
-    JsTypedArray* ta = js_get_typed_array_ptr(m);
+    if (!js_object_has_class(val, JS_CLASS_TYPED_ARRAY)) return NULL;
+    JsTypedArray* ta = js_get_typed_array_ptr(val.map);
     if (!ta) return NULL;
     switch (ta->element_type) {
     case JS_TYPED_INT8:          return "Int8Array";
@@ -1596,14 +1603,21 @@ static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
 static Item js_arraybuffer_wrap_item_with_prototype(JsArrayBuffer* ab,
         Item prototype, bool use_provided_prototype) {
     if (!ab) return (Item){.item = ITEM_NULL};
+    bool shared = js_arraybuffer_shared(ab);
     RootFrame roots(2);
     Rooted<Item> prototype_root(roots, prototype);
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    JsArrayBufferMapCarrier* carrier = (JsArrayBufferMapCarrier*)heap_calloc(
+        sizeof(JsArrayBufferMapCarrier), LMD_TYPE_MAP);
+    if (!carrier) return ItemNull;
+    Map* m = &carrier->base;
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_ARRAYBUFFER;
-    m->type = js_arraybuffer_shared(ab) ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
-    m->data = ab;
+    m->type = js_object_type_for_class(shared
+        ? JS_CLASS_SHARED_ARRAY_BUFFER : JS_CLASS_ARRAY_BUFFER);
+    if (!m->type) m->type = &EmptyMap;
+    m->data = NULL;
     m->data_cap = 0;
+    carrier->payload = ab;
     Rooted<Item> result_root(roots, (Item){.map = m});
     if (use_provided_prototype) {
         js_set_prototype(result_root.get(), prototype_root.get());
@@ -1716,24 +1730,19 @@ extern "C" Item js_arraybuffer_construct_resizable_target(Item length_arg,
 }
 
 extern "C" bool js_is_arraybuffer(Item val) {
-    TypeId type = get_type_id(val);
-    if (type != LMD_TYPE_MAP) return false;
-    Map* m = val.map;
-    return m && m->map_kind == MAP_KIND_ARRAYBUFFER;
+    if (get_type_id(val) != LMD_TYPE_MAP || !val.map ||
+            val.map->map_kind != MAP_KIND_ARRAYBUFFER) return false;
+    // The intrinsic prototype carries ArrayBuffer metadata for ordinary
+    // lookup, but only the trailing carrier owns [[ArrayBufferData]]; branding
+    // by class alone made prototype accessors return a fake zero length.
+    return js_object_has_class(val, JS_CLASS_ARRAY_BUFFER) ||
+           js_object_has_class(val, JS_CLASS_SHARED_ARRAY_BUFFER);
 }
 
-// Get the JsArrayBuffer* from a Map, handling both original and upgraded layouts.
-// Original: m->data holds JsArrayBuffer* directly (m->type == &js_arraybuffer_type_marker).
-// Upgraded: JsArrayBuffer* is stored as __ab__ int64 property (after first user property write).
+// Get the typed trailing payload after validating the physical carrier.
 static JsArrayBuffer* js_get_arraybuffer_ptr(Map* m) {
-    if (m->type == (void*)&js_arraybuffer_type_marker ||
-        m->type == (void*)&js_sharedarraybuffer_type_marker)
-        return (JsArrayBuffer*)m->data;
-    // Upgraded: retrieve from __ab__ internal property
-    bool found = false;
-    Item ab_val = js_map_shape_lookup_ext(m, "__ab__", 6, &found);
-    if (found) return (JsArrayBuffer*)(uintptr_t)it2i(ab_val);
-    return NULL;
+    if (!m || (m->map_kind != MAP_KIND_ARRAYBUFFER)) return NULL;
+    return ((JsArrayBufferMapCarrier*)m)->payload;
 }
 
 extern "C" JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val) {
@@ -2056,11 +2065,8 @@ extern "C" Item js_sharedarraybuffer_construct_with_options_target(
 }
 
 extern "C" bool js_is_sharedarraybuffer(Item val) {
-    TypeId type = get_type_id(val);
-    if (type != LMD_TYPE_MAP) return false;
-    Map* m = val.map;
-    if (!m || m->map_kind != MAP_KIND_ARRAYBUFFER) return false;
-    JsArrayBuffer* ab = js_get_arraybuffer_ptr(m);
+    if (!js_object_has_class(val, JS_CLASS_SHARED_ARRAY_BUFFER)) return false;
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     return js_arraybuffer_shared(ab);
 }
 
@@ -2160,27 +2166,17 @@ extern "C" Item js_sharedarraybuffer_operation(Item sab,
 // ============================================================================
 
 extern "C" bool js_is_typed_array(Item val) {
-    TypeId type = get_type_id(val);
-    if (type != LMD_TYPE_MAP) return false;
-    Map* m = val.map;
-    // %TypedArray%.prototype carries the typed-array map kind for native
-    // property dispatch but has no [[ViewedArrayBuffer]] internal slot.
-    JsTypedArray* ptr = m && m->map_kind == MAP_KIND_TYPED_ARRAY
-        ? js_get_typed_array_ptr(m) : NULL;
+    if (!js_object_has_class(val, JS_CLASS_TYPED_ARRAY)) return false;
+    // The class identity selects the semantic lane; the checked accessor
+    // rejects %TypedArray%.prototype, which has no trailing payload.
+    JsTypedArray* ptr = js_get_typed_array_ptr(val.map);
     return ptr != NULL;
 }
 
-// Get the JsTypedArray* from a Map, handling both original and upgraded layouts.
-// Original: m->data holds JsTypedArray* directly (data_cap == 0).
-// Upgraded: JsTypedArray* is stored as __ta__ int64 property (after first user property write).
+// Get the typed trailing payload after validating the physical carrier.
 extern "C" JsTypedArray* js_get_typed_array_ptr(Map* m) {
-    if (m->data_cap == 0)
-        return (JsTypedArray*)m->data;
-    // upgraded: retrieve from __ta__ internal property
-    bool found = false;
-    Item ta_val = js_map_shape_lookup_ext(m, "__ta__", 6, &found);
-    if (found) return (JsTypedArray*)(uintptr_t)it2i(ta_val);
-    return NULL;
+    if (!m || m->map_kind != MAP_KIND_TYPED_ARRAY) return NULL;
+    return &((JsTypedArrayMapCarrier*)m)->payload;
 }
 
 // Create a standalone typed array (owns its buffer)
@@ -2194,8 +2190,10 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     Rooted<Item> view_root(roots, ItemNull);
     if (!js_is_arraybuffer(buffer_root.get())) return ItemNull;
 
-    JsTypedArray* ta = (JsTypedArray*)mem_alloc(sizeof(JsTypedArray), MEM_CAT_JS_RUNTIME);
-    if (!ta) return ItemNull;
+    JsTypedArrayMapCarrier* carrier = (JsTypedArrayMapCarrier*)heap_calloc(
+        sizeof(JsTypedArrayMapCarrier), LMD_TYPE_MAP);
+    if (!carrier) return ItemNull;
+    JsTypedArray* ta = &carrier->payload;
     ta->element_type = arr_type;
     ta->buffer = ab;
     ta->buffer_item = ItemNull.item;
@@ -2206,18 +2204,18 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
         js_typed_array_elem_type(arr_type), 0, length, true)});
     if (get_type_id(view_root.get()) != LMD_TYPE_ARRAY_NUM) return ItemNull;
 
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    Map* m = &carrier->base;
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_TYPED_ARRAY;
-    m->type = (void*)&js_typed_array_type_marker;
-    m->data = ta;
+    m->type = js_object_type_for_class(JS_CLASS_TYPED_ARRAY);
+    if (!m->type) m->type = &EmptyMap;
+    m->data = NULL;
     m->data_cap = 0;
     // The backing ArrayBuffer may move while its view is allocated; store the
     // refreshed rooted Item only after the final typed-array Map allocation.
     ta->view = view_root.get().array_num;
     js_typed_array_refresh_arraynum_view(ta);
     ta->buffer_item = buffer_root.get().item;
-
     return (Item){.map = m};
 }
 
@@ -2365,7 +2363,10 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
         return js_throw_range_error("Invalid typed array length");
     }
 
-    JsTypedArray* ta = (JsTypedArray*)mem_alloc(sizeof(JsTypedArray), MEM_CAT_JS_RUNTIME);
+    JsTypedArrayMapCarrier* carrier = (JsTypedArrayMapCarrier*)heap_calloc(
+        sizeof(JsTypedArrayMapCarrier), LMD_TYPE_MAP);
+    if (!carrier) return ItemNull;
+    JsTypedArray* ta = &carrier->payload;
     // Native view setup and the wrapper-map allocation can collect before the
     // map trace owns this edge, so keep both transient GC values exact-rooted.
     buffer_item = buffer_root.get();
@@ -2382,11 +2383,12 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     ta->view = view_root.get().array_num;
     js_typed_array_refresh_arraynum_view(ta);
 
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    Map* m = &carrier->base;
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_TYPED_ARRAY;
-    m->type = (void*)&js_typed_array_type_marker;
-    m->data = ta;
+    m->type = js_object_type_for_class(JS_CLASS_TYPED_ARRAY);
+    if (!m->type) m->type = &EmptyMap;
+    m->data = NULL;
     m->data_cap = 0;
 
     ta->buffer_item = buffer_root.get().item;
@@ -3214,20 +3216,17 @@ extern "C" Item js_typed_array_subarray(Item ta_item, int start, int end, bool e
 // ============================================================================
 
 extern "C" bool js_is_dataview(Item val) {
-    TypeId type = get_type_id(val);
-    if (type != LMD_TYPE_MAP) return false;
-    Map* m = val.map;
-    return m && m->map_kind == MAP_KIND_DATAVIEW;
+    if (get_type_id(val) != LMD_TYPE_MAP || !val.map ||
+            val.map->map_kind != MAP_KIND_DATAVIEW) return false;
+    // DataView.prototype is metadata-branded so its methods are discoverable,
+    // but it has no [[DataView]] carrier and must fail the accessor brand check.
+    return js_object_has_class(val, JS_CLASS_DATA_VIEW);
 }
 
-// Get JsDataView* from a Map, handling both original and upgraded layouts.
+// Get the typed trailing DataView payload after validating the carrier.
 static JsDataView* js_get_dataview_ptr_from_map(Map* m) {
-    if (m->type == (void*)&js_dataview_type_marker)
-        return (JsDataView*)m->data;
-    bool found = false;
-    Item dv_val = js_map_shape_lookup_ext(m, "__dv__", 6, &found);
-    if (found) return (JsDataView*)(uintptr_t)it2i(dv_val);
-    return NULL;
+    if (!m || m->map_kind != MAP_KIND_DATAVIEW) return NULL;
+    return &((JsDataViewMapCarrier*)m)->payload;
 }
 
 extern "C" JsDataView* js_get_dataview_ptr(Item val) {
@@ -3306,7 +3305,10 @@ static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
         }
     }
 
-    JsDataView* dv = (JsDataView*)mem_alloc(sizeof(JsDataView), MEM_CAT_JS_RUNTIME);
+    JsDataViewMapCarrier* carrier = (JsDataViewMapCarrier*)heap_calloc(
+        sizeof(JsDataViewMapCarrier), LMD_TYPE_MAP);
+    if (!carrier) return ItemNull;
+    JsDataView* dv = &carrier->payload;
     // mem_alloc can collect; refresh the rooted backing Item before storing
     // the native references that must remain coherent with the GC owner.
     buffer = buffer_root.get();
@@ -3318,16 +3320,14 @@ static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
     dv->buffer_item = buffer.item;
     dv->length_tracking = length_tracking;
 
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    Map* m = &carrier->base;
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_DATAVIEW;
-    m->type = (void*)&js_dataview_type_marker;
-    m->data = dv;
+    m->type = js_object_type_for_class(JS_CLASS_DATA_VIEW);
+    if (!m->type) m->type = &EmptyMap;
+    m->data = NULL;
     m->data_cap = 0;
     view_root.set((Item){.map = m});
-    // Class stamping and prototype linking allocate; without this root a
-    // forced collection could reclaim the newly allocated native-backed map.
-    js_class_stamp(view_root.get(), JS_CLASS_DATA_VIEW);
     if (new_target_root.get().item != ItemNull.item) {
         js_set_prototype(view_root.get(), prototype_root.get());
     } else {

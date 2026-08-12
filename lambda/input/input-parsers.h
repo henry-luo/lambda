@@ -78,11 +78,13 @@ Item input_markup_commonmark(Input* input, const char* content);
 }
 #endif
 
-// C++ only — old markup parser and format-aware entry point
+// C++ only — markup entry points
 #ifdef __cplusplus
 Item input_markup(Input* input, const char* content);
 
-#include "markup-parser.h"
+// markup-format.h, not markup_parser.hpp: only the MarkupFormat enum is needed
+// here, and it is deliberately split out to break the input.hpp include cycle
+#include "markup-format.h"
 Item input_markup_with_format(Input* input, const char* content, MarkupFormat format);
 #endif
 

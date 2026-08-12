@@ -1998,12 +1998,10 @@ static Item make_socket_handle_object(JsSocket* sock) {
 static Item make_socket_object(JsSocket* sock, bool expose_handle) {
     if (sock->high_water_mark < 0) sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
     RootFrame roots(4);
-    Rooted<Item> obj_root(roots, js_new_object());
+    Rooted<Item> obj_root(roots, js_new_object_with_class(JS_CLASS_SOCKET));
     Rooted<Item> hwm_root(roots, ItemNull);
     Rooted<Item> readable_state_root(roots, ItemNull);
     Rooted<Item> writable_state_root(roots, ItemNull);
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(obj_root.get(), JS_CLASS_SOCKET);  // A3-T3b
     if (get_type_id(net_socket_prototype) == LMD_TYPE_MAP) {
         js_set_prototype(obj_root.get(), net_socket_prototype);
     }
@@ -5122,9 +5120,7 @@ extern "C" Item js_net_createServer(Item rest_args) {
     }
 
     RootFrame roots(1);
-    Rooted<Item> obj_root(roots, js_new_object());
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(obj_root.get(), JS_CLASS_SERVER);  // A3-T3b
+    Rooted<Item> obj_root(roots, js_new_object_with_class(JS_CLASS_SERVER));
     if (get_type_id(net_server_prototype) == LMD_TYPE_MAP) {
         js_set_prototype(obj_root.get(), net_server_prototype);
     }
@@ -5542,10 +5538,9 @@ static Item net_constructor_prototype(Item ctor, JsClass cls) {
     Rooted<Item> prototype_root(roots,
         js_get_key_default(constructor_root.get(), key_root.get()));
     if (get_type_id(prototype_root.get()) != LMD_TYPE_MAP) {
-        prototype_root.set(js_new_object());
+        prototype_root.set(js_new_object_with_class(cls));
         js_set_key_default(constructor_root.get(), key_root.get(), prototype_root.get());
     }
-    js_class_stamp(prototype_root.get(), cls);
     key_root.set(make_string_item("constructor"));
     js_set_key_default(prototype_root.get(), key_root.get(), constructor_root.get());
     js_mark_non_enumerable(prototype_root.get(), key_root.get());

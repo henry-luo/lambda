@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.14.0 (2026-08-12)
+**Spec version:** 1.15.0 (2026-08-12)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -440,6 +440,15 @@ that carries them.
   full `Type*` via the one shared descriptor resolver (D2.6.1); changing
   a field's *contract* re-derives layout, writing a null into a `T?`
   field does not. [Nullable §6]
+- **D3.4.7** A runtime JavaScript `TypeMap` may carry one immutable
+  `const JsClassMeta*` refinement selected before publication. The metadata
+  contains only stable IDs, flags, policies, and static operation-table
+  pointers: no `Item`, realm prototype, mutable cache, or context-owned
+  pointer. It is orthogonal to D3.4.2's structural field-layout identity but
+  qualifies runtime TypeMap, transition, and cache identity; TypeMaps from
+  different metadata families are never interchangeable runtime blueprints.
+  Foreign/Input TypeMaps may retain null metadata until the explicit JS
+  boundary creates a runtime family. [JS_Runtime_Object_Property JOP1–JOP5]
 
 ## D4 Memory Management
 

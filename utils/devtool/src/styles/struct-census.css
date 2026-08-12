@@ -1,0 +1,184 @@
+/* Struct census panel — reuses the app's light VS Code-ish palette */
+
+.struct-census {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.census-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #eef2f7;
+  border-bottom: 1px solid #dde3ea;
+  flex-shrink: 0;
+}
+
+.census-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.census-title h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333333;
+}
+
+.census-meta {
+  font-size: 12px;
+  color: #777777;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Module rollup strip: click a chip to pin the table to that module */
+.census-modules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e8e8e8;
+  flex-shrink: 0;
+}
+
+.census-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid #d4dae1;
+  border-radius: 12px;
+  background: #f8f9fb;
+  color: #444444;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.census-chip:hover {
+  background: #e8eef6;
+}
+
+.census-chip.active {
+  background: #cce5ff;
+  border-color: #7fb4e8;
+  color: #004085;
+}
+
+.chip-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.chip-count {
+  color: #888888;
+  font-variant-numeric: tabular-nums;
+}
+
+.census-chip.active .chip-count {
+  color: #00509e;
+}
+
+.census-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e8e8e8;
+  flex-shrink: 0;
+}
+
+.census-filters select,
+.census-search {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #c7c7c7;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #333333;
+  font-size: 13px;
+}
+
+.census-search {
+  flex: 1 1 220px;
+  min-width: 160px;
+}
+
+.census-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: #777777;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.census-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.census-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+.census-table th,
+.census-table td {
+  text-align: left;
+  padding: 3px 10px;
+  border-bottom: 1px solid #eeeeee;
+  white-space: nowrap;
+}
+
+.census-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f3f3f3;
+  border-bottom: 1px solid #dddddd;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  color: #333333;
+}
+
+.census-table th:hover {
+  background: #e8e8e8;
+}
+
+.census-table th.asc::after { content: ' \2191'; color: #0e639c; }
+.census-table th.desc::after { content: ' \2193'; color: #0e639c; }
+
+.census-table tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+
+.census-table tbody tr:hover {
+  background: #eef4fb;
+}
+
+.census-table td.num,
+.census-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.census-table td.name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #0b6b4f;
+}
+
+.census-table td.loc {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #777777;
+}

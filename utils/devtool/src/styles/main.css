@@ -3,6 +3,7 @@
 @import './comparison.css';
 @import './terminal.css';
 @import './bottom-panel.css';
+@import './struct-census.css';
 
 * {
   margin: 0;

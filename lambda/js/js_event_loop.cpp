@@ -783,7 +783,7 @@ extern "C" Item js_timeout_toPrimitive(Item this_val) {
 }
 
 static Item make_timer_object(int64_t id, JsClass cls) {
-    Item obj = js_new_object();
+    Item obj = js_new_object_with_class(cls);
     js_set_key_default(obj, (Item){.item = s2it(heap_create_name("_timerId", 8))},
                     (Item){.item = i2it(id)});
     js_set_key_default(obj, (Item){.item = s2it(heap_create_name("_destroyed", 10))},
@@ -809,10 +809,6 @@ static Item make_timer_object(int64_t id, JsClass cls) {
     // function as P0 while it recovers the Timeout receiver from `this`.
     Item toPrim_fn = js_new_native_function(js_timeout_toPrimitive);
     js_set_key_default(obj, js_well_known_symbol_key(2), toPrim_fn);
-
-    // class identity (T5b: typed JsClass byte; legacy `__class_name__`
-    // string write retired).
-    js_class_stamp(obj, cls);  // A3-T3b
 
     return obj;
 }
@@ -1134,9 +1130,7 @@ extern "C" Item js_setInterval_args(Item callback, Item delay, Item args_array) 
 
 // helper: create an AbortError for promise rejection
 static Item make_abort_error(Item signal) {
-    Item err = js_new_object();
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(err, JS_CLASS_ABORT_ERROR);  // A3-T3b
+    Item err = js_new_object_with_class(JS_CLASS_ABORT_ERROR);
     js_set_key_default(err, (Item){.item = s2it(heap_create_name("name", 4))},
                     (Item){.item = s2it(heap_create_name("AbortError", 10))});
     js_set_key_default(err, (Item){.item = s2it(heap_create_name("code", 4))},

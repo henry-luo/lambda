@@ -1017,10 +1017,8 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
         MIR_T_I64, MIR_new_int_op(mt->ctx, flags));
 }
 
-// Helper: emit js_set_key_default(cls_obj, "__source_text__", source) so that
-// Function.prototype.toString on the class returns the original source text
-// (per ES spec: Function.prototype.toString on a class returns its source).
-// Avoids the slow validateNativeFunctionSource fallback in test262 harness.
+// Publish a class's source in the callable carrier so Function.prototype
+// toString does not need an observable backing property or a name-based probe.
 void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNode* cls_node) {
     if (!cls_node || !mt->tp || !mt->tp->source) return;
     TSNode node = cls_node->node;
@@ -1035,11 +1033,9 @@ void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNod
     while (len > 0 && (text[0] == ' ' || text[0] == '\t' || text[0] == '\n' || text[0] == '\r')) { text++; len--; }
     // Tree-sitter may extend the node end past trailing comments; trim to closing '}'
     while (len > 1 && text[len - 1] != '}') len--;
-    MIR_reg_t key = jm_box_property_name_literal(mt, "__source_text__", 15);
     MIR_reg_t src_reg = jm_box_string_literal(mt, text, len);
-    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
+    jm_call_void_2(mt, "js_set_function_source",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, src_reg));
 }
 

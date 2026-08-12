@@ -675,7 +675,9 @@ struct JubeHostScriptAPI {
     Item (*object_freeze)(Item object);
     Item (*current_this)(void);
     Item (*strict_equal)(Item left, Item right);
-    bool (*class_stamp)(Item object, int class_id);
+    // Host factories select immutable JS metadata before publication; callers
+    // must not reclassify an already-published object.
+    Item (*new_object_with_class)(int class_id);
     bool (*class_is)(Item object, int class_id);
     // Preserves the engine's observable typeof distinction when a compact
     // host value category intentionally groups multiple internal variants.

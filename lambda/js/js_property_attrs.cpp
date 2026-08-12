@@ -134,9 +134,9 @@ static TypeMap* js_typemap_clone_for_mutation(Item obj) {
     clone->is_shared_constructor_shape = false;
     clone->is_transition_shared_shape = false;
     clone->transitions = NULL;
-    // A3-T1: propagate JsClass tag onto the private clone so attribute
-    // mutations after a class stamp don't lose class identity.
-    clone->js_class = tm->js_class;
+    // Tune6: descriptor cloning preserves the immutable semantic family; a
+    // shape mutation must never silently turn an instance into another class.
+    clone->js_meta = tm->js_meta;
     clone->has_array_index_shape = tm->has_array_index_shape;
 
     // Clone the shape chain: per-entry shallow copy with `next` rewired and
@@ -234,9 +234,8 @@ extern "C" void js_shape_entry_update_flags_name_id(Item obj, NameId name_id,
         set_mask, clear_mask);
 }
 
-// Public wrapper around the file-static js_typemap_clone_for_mutation. Exposed
-// so js_class.h's inline writer (js_class_stamp) can clone the TypeMap before
-// stamping the JsClass byte without pulling in this whole TU's surface.
+// Public wrapper around the file-static TypeMap clone primitive. Exposed so
+// metadata selection can detach a shared shape without duplicating it here.
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj) {
     return js_typemap_clone_for_mutation(obj);
 }

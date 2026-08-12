@@ -21,7 +21,7 @@ This document owns promises, the job/microtask queue, the event loop, async/awai
 
 A promise is a `JsPromise` struct (`js_runtime.cpp:28143`): `JsPromiseState state` (PENDING/FULFILLED/REJECTED), an `Item result`, fixed parallel arrays `on_fulfilled[8]` / `on_rejected[8]` / `next_promise[8]` / `is_finally[8]` for registered reactions, a stable `wrapper` Item, and `int then_count`. Records live in a **fixed static pool** `js_promises[JS_MAX_PROMISES]` with `JS_MAX_PROMISES == 1024` (`:28156`); `js_alloc_promise` (`:28175`) bump-allocates from it and logs once on overflow. The whole pool is registered with the GC root scanner once via `js_promise_register_roots_once` (`:28160`), so every slot's `result`/handlers/`next_promise`/`wrapper` survive collection.
 
-The user-visible Promise object is a **separate Lambda `Map`** carrying a `__promise_idx` INT back into the pool (`js_promise_to_item`, `:28198`); `js_get_promise` (`:28216`) reverses the mapping. The wrapper also gets `__class_name__ = "Promise"` and a `Promise.prototype` `__proto__` for `instanceof` and method dispatch.
+The user-visible Promise object is a **separate metadata-qualified Lambda `Map`** carrying the JR7-allowlisted `__promise_idx` INT back into the pool (`js_promise_to_item`); `js_get_promise` reverses the mapping. Its `Promise.prototype` is linked through the ordinary internal prototype slot for `instanceof` and method dispatch; no class-name marker is used.
 
 ### Resolution procedure & thenable assimilation
 
@@ -136,7 +136,7 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 5. **Vestigial `js_save_module_vars`/`js_restore_module_vars`.** Defined in `js_runtime_state.cpp:145`/`:152` but the per-module `js_alloc_module_vars` + active-pointer swap is the live mechanism; the whole-array memcpy helpers appear unused on the current require/module paths. *Improvement:* confirm and delete.
 6. **`js_await_sync` cannot suspend.** Without a state machine (e.g. some TLA shapes), a pending await falls back to a bounded busy-drain (`js_event_loop.cpp:1158`) and returns `undefined` if it cannot settle in-turn — a deliberate divergence from real suspension, documented against the Js55 1675 s regression (`:1146`). Anything depending on a cross-thread/cross-event settlement that needs more than 64 turns silently observes `undefined`.
 7. **SIGSEGV guard around the drain is a band-aid.** `js_event_loop_drain` installs a SIGSEGV handler + `setjmp` to survive heap corruption in timer callbacks (`:1076` comment: "Heap corruption in timer callbacks (pre-existing bug)"). This masks an underlying memory-safety bug rather than fixing it.
-8. **Promise wrapper still uses legacy `__class_name__`.** `js_promise_to_item` (`:28206`) writes the `__class_name__` string marker for `instanceof Promise`, against the migration to the typed `JsClass` byte described in [JS_06](JS_06_Objects_Properties_Prototypes.md).
+8. **Promise wrapper uses the bounded JR7 adapter.** The `__promise_idx` expando remains a deliberately allowlisted bridge to the fixed Promise record pool; it is not a general object-class or native-payload protocol.
 
 ---
 
@@ -157,6 +157,6 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 
 - [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md) — module entry point, drain-before-`MIR_finish` step.
 - [JS_03 — Value Model, Memory & GC Interop](JS_03_Value_Model.md) — `js_module_vars[]` storage, GC roots.
-- [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) — `JsClass` byte vs `__class_name__` migration.
+- [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) — immutable `TypeMap::js_meta`, ordinary prototypes, and the JR7 Promise adapter boundary.
 - [JS_08 — Iterators & Generators](JS_08_Iterators_Generators.md) — generator state machine reused by async functions; iterator protocol used by promise combinators.
 - [JS_14 — Node Compatibility](JS_14_Node_Compat.md) — built-in module resolution, Node built-in modules, and the external package boundary.

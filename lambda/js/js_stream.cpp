@@ -6186,13 +6186,13 @@ static bool js_stream_called_as_constructor(void) {
            type != LMD_TYPE_UNDEFINED && js_stream_is_object_like(new_target);
 }
 
-static Item js_stream_create_instance(Item prototype) {
+static Item js_stream_create_instance(Item prototype, JsClass class_id) {
     Item self = js_get_this();
     if (js_stream_called_as_constructor() && js_stream_is_object_like(self)) {
         return self;
     }
 
-    Item obj = js_new_object();
+    Item obj = js_new_object_with_class(class_id);
     if (js_stream_is_object_like(prototype)) {
         js_set_prototype(obj, prototype);
     }
@@ -6565,20 +6565,20 @@ static void js_stream_set_method(Item object, Item key, Target target,
 }
 
 // Readable constructor
-extern "C" Item js_readable_new(Item opts) {
+static Item js_readable_new_internal(Item opts, JsClass class_id) {
     RootFrame roots(4);
     Rooted<Item> options_root(roots, opts);
     Rooted<Item> readable_root(roots, ItemNull);
     Rooted<Item> listeners_root(roots, ItemNull);
     Rooted<Item> off_root(roots, ItemNull);
     ensure_keys();
-    readable_root.set(js_stream_create_instance(stream_readable_prototype));
+    readable_root.set(js_stream_create_instance(stream_readable_prototype,
+        class_id));
     // Readable construction creates properties, callbacks, and helper objects;
     // retain both the instance and options across every compacting allocation.
 #define obj readable_root.get()
 #define opts options_root.get()
 
-    js_class_stamp(obj, JS_CLASS_READABLE);
     js_set_key_default(obj, key_readable, js_bool_item(true));
     js_set_key_default(obj, key_readable_side_enabled, js_bool_item(true));
     js_stream_set_flowing(obj, false);
@@ -7006,9 +7006,9 @@ extern "C" Item js_writable_uncork(Item self) {
 // Writable constructor
 extern "C" Item js_writable_new(Item opts) {
     ensure_keys();
-    Item obj = js_stream_create_instance(stream_writable_prototype);
+    Item obj = js_stream_create_instance(stream_writable_prototype,
+        JS_CLASS_WRITABLE);
 
-    js_class_stamp(obj, JS_CLASS_WRITABLE);
     js_set_key_default(obj, key_writable, js_bool_item(true));
     js_set_key_default(obj, key_writable_side_enabled, js_bool_item(true));
     js_set_key_default(obj, key_finished, js_bool_item(false));
@@ -7054,12 +7054,19 @@ extern "C" Item js_writable_new(Item opts) {
     return obj;
 }
 
+extern "C" Item js_readable_new(Item opts) {
+    return js_readable_new_internal(opts, JS_CLASS_READABLE);
+}
+
+extern "C" Item js_readable_new_with_class(Item opts, int class_id) {
+    return js_readable_new_internal(opts, (JsClass)class_id);
+}
+
 // =============================================================================
 // Duplex stream (Readable + Writable)
 // =============================================================================
 
-static void js_stream_init_duplex_like(Item obj, JsClass class_id, bool transform) {
-    js_class_stamp(obj, class_id);
+static void js_stream_init_duplex_like(Item obj, bool transform) {
     js_set_key_default(obj, key_readable, js_bool_item(true));
     js_set_key_default(obj, key_writable, js_bool_item(true));
     js_set_key_default(obj, key_readable_side_enabled, js_bool_item(true));
@@ -7132,8 +7139,9 @@ static void js_stream_init_duplex_like(Item obj, JsClass class_id, bool transfor
 
 extern "C" Item js_duplex_new(Item opts) {
     ensure_keys();
-    Item obj = js_stream_create_instance(stream_duplex_prototype);
-    js_stream_init_duplex_like(obj, JS_CLASS_DUPLEX, false);
+    Item obj = js_stream_create_instance(stream_duplex_prototype,
+        JS_CLASS_DUPLEX);
+    js_stream_init_duplex_like(obj, false);
 
     JS_RETURN_IF_ERROR(propagate_stream_options(obj, opts));
     js_stream_call_construct(obj);
@@ -7742,14 +7750,18 @@ extern "C" Item js_transform_end(Item self, Item chunk, Item callback) {
     return self;
 }
 
-extern "C" Item js_transform_new(Item opts) {
+static Item js_transform_new_internal(Item opts, JsClass class_id) {
     ensure_keys();
-    Item obj = js_stream_create_instance(stream_transform_prototype);
-    js_stream_init_duplex_like(obj, JS_CLASS_TRANSFORM, true);
+    Item obj = js_stream_create_instance(stream_transform_prototype, class_id);
+    js_stream_init_duplex_like(obj, true);
 
     JS_RETURN_IF_ERROR(propagate_stream_options(obj, opts));
     js_stream_call_construct(obj);
     return obj;
+}
+
+extern "C" Item js_transform_new(Item opts) {
+    return js_transform_new_internal(opts, JS_CLASS_TRANSFORM);
 }
 
 // =============================================================================
@@ -7768,8 +7780,7 @@ extern "C" Item js_passthrough_transform(Item chunk, Item encoding, Item callbac
 }
 
 extern "C" Item js_passthrough_new(Item opts) {
-    Item obj = js_transform_new(opts);
-    js_class_stamp(obj, JS_CLASS_PASS_THROUGH);
+    Item obj = js_transform_new_internal(opts, JS_CLASS_PASS_THROUGH);
     if (!js_stream_called_as_constructor() && js_stream_is_object_like(stream_passthrough_prototype)) {
         js_set_prototype(obj, stream_passthrough_prototype);
     }
@@ -9222,18 +9233,24 @@ extern "C" Item js_stream_isDestroyed(Item stream) {
                         js_item_is_true(js_get_key_default(stream, make_string_item("destroyed"))));
 }
 
-static Item js_stream_constructor_prototype(Item ctor) {
+static Item js_stream_constructor_prototype(Item ctor, JsClass class_id) {
     Item proto_key = make_string_item("prototype");
     Item proto = js_get_key_default(ctor, proto_key);
     if (get_type_id(proto) != LMD_TYPE_MAP) {
-        proto = js_new_object();
+        proto = js_new_object_with_class(class_id);
         js_set_key_default(ctor, proto_key, proto);
     }
     return proto;
 }
 
-static void js_stream_mark_constructor_prototype(Item ctor, Item proto, JsClass cls) {
-    js_class_stamp(proto, cls);
+static Item js_stream_constructor_prototype(Item ctor) {
+    Item proto = js_get_key_default(ctor, make_string_item("prototype"));
+    JsClass class_id = get_type_id(proto) == LMD_TYPE_MAP
+        ? js_class_id(proto) : JS_CLASS_READABLE;
+    return js_stream_constructor_prototype(ctor, class_id);
+}
+
+static void js_stream_mark_constructor_prototype(Item ctor, Item proto) {
     js_set_key_default(proto, make_string_item("constructor"), ctor);
     js_mark_non_enumerable(proto, make_string_item("constructor"));
     if (get_type_id(ctor) == LMD_TYPE_FUNC) {
@@ -9751,13 +9768,12 @@ static Item js_readable_toWeb(Item readable, Item options) {
         return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
                                         "The property 'options.type' is invalid");
     }
-    Item web = js_new_object();
+    Item web = js_new_object_with_class(JS_CLASS_READABLE_STREAM);
     Item ctor = js_get_global_property(make_string_item("ReadableStream"));
     Item proto = js_get_key_default(ctor, make_string_item("prototype"));
     if (get_type_id(proto) == LMD_TYPE_MAP || get_type_id(proto) == LMD_TYPE_ELEMENT) {
         js_set_prototype(web, proto);
     }
-    js_class_stamp(web, JS_CLASS_READABLE_STREAM);
     js_set_key_default(web, make_string_item("__node_readable__"), readable);
     js_set_key_default(web, make_string_item("getReader"),
                     js_new_native_function(js_readable_to_web_get_reader));
@@ -9852,7 +9868,6 @@ extern "C" Item js_get_stream_namespace(void) {
     js_mark_non_enumerable(stream_base_proto, make_string_item("constructor"));
     js_set_function_name(stream_base, make_string_item("Stream"));
     js_set_key_default(stream_base, make_string_item("prototype"), stream_base_proto);
-    js_set_key_default(stream_base, make_string_item("__instance_proto__"), stream_base_proto);
     js_function_set_prototype(stream_base, stream_base_proto);
     js_set_key_default(stream_namespace, make_string_item("Stream"), stream_base);
 
@@ -9876,22 +9891,26 @@ extern "C" Item js_get_stream_namespace(void) {
         get_type_id(duplex_constructor) == LMD_TYPE_FUNC &&
         get_type_id(transform_constructor) == LMD_TYPE_FUNC &&
         get_type_id(passthrough_constructor) == LMD_TYPE_FUNC) {
-        stream_readable_prototype = js_stream_constructor_prototype(readable_constructor);
-        stream_writable_prototype = js_stream_constructor_prototype(writable_constructor);
-        stream_duplex_prototype = js_stream_constructor_prototype(duplex_constructor);
-        stream_transform_prototype = js_stream_constructor_prototype(transform_constructor);
-        stream_passthrough_prototype = js_stream_constructor_prototype(passthrough_constructor);
+        stream_readable_prototype = js_stream_constructor_prototype(readable_constructor,
+            JS_CLASS_READABLE);
+        stream_writable_prototype = js_stream_constructor_prototype(writable_constructor,
+            JS_CLASS_WRITABLE);
+        stream_duplex_prototype = js_stream_constructor_prototype(duplex_constructor,
+            JS_CLASS_DUPLEX);
+        stream_transform_prototype = js_stream_constructor_prototype(transform_constructor,
+            JS_CLASS_TRANSFORM);
+        stream_passthrough_prototype = js_stream_constructor_prototype(passthrough_constructor,
+            JS_CLASS_PASS_THROUGH);
         js_stream_install_async_iterator(stream_readable_prototype);
         js_set_key_default(stream_readable_prototype, make_string_item("iterator"),
                         js_new_native_function(js_readable_inst_iterator));
         js_stream_install_readable_helpers(stream_readable_prototype);
 
-        js_stream_mark_constructor_prototype(readable_constructor, stream_readable_prototype, JS_CLASS_READABLE);
-        js_stream_mark_constructor_prototype(writable_constructor, stream_writable_prototype, JS_CLASS_WRITABLE);
-        js_stream_mark_constructor_prototype(duplex_constructor, stream_duplex_prototype, JS_CLASS_DUPLEX);
-        js_stream_mark_constructor_prototype(transform_constructor, stream_transform_prototype, JS_CLASS_TRANSFORM);
-        js_stream_mark_constructor_prototype(passthrough_constructor, stream_passthrough_prototype,
-                                             JS_CLASS_PASS_THROUGH);
+        js_stream_mark_constructor_prototype(readable_constructor, stream_readable_prototype);
+        js_stream_mark_constructor_prototype(writable_constructor, stream_writable_prototype);
+        js_stream_mark_constructor_prototype(duplex_constructor, stream_duplex_prototype);
+        js_stream_mark_constructor_prototype(transform_constructor, stream_transform_prototype);
+        js_stream_mark_constructor_prototype(passthrough_constructor, stream_passthrough_prototype);
         js_set_key_default(stream_readable_prototype, make_string_item("destroyed"), js_bool_item(false));
         js_set_key_default(stream_writable_prototype, make_string_item("destroyed"), js_bool_item(false));
         js_set_key_default(stream_duplex_prototype, make_string_item("destroyed"), js_bool_item(false));

@@ -1,0 +1,93 @@
+{
+  "_comment": "Configuration for utils/struct_census.py. Paths are repo-relative. All exclude entries are matched as path PREFIXES, so 'lambda/tree-sitter' covers every tree-sitter-* sibling. See utils/Struct_Census.md.",
+
+  "source_dirs": ["lambda", "lib", "radiant"],
+
+  "exclude_dirs": [
+    "lambda/mir",
+    "lambda/tree-sitter",
+    "lambda/module",
+    "lambda/bash",
+    "lib/sqlite",
+    "lib/font/woff2",
+    "lib/font/freetype",
+    "lib/mem-pool/test",
+    "lambda/input/pdf/pdfium",
+    "build_temp",
+    "node_modules"
+  ],
+
+  "_exclude_files_comment": "Windows-only shim: unparsable off Windows because it includes <windows.h> unguarded.",
+  "exclude_files": ["lib/clock_compat.c"],
+
+  "_objcxx_comment": "These .cpp wrappers #include a .mm, so they only parse as Objective-C++.",
+  "objcxx_files": [
+    "radiant/ime_mac_static.cpp",
+    "radiant/webview_child_mac_static.cpp",
+    "radiant/webview_layer_mac_static.cpp"
+  ],
+
+  "tu_extensions": [".cpp", ".c"],
+
+  "kinds": ["struct", "class", "union", "enum"],
+
+  "_module_rules_comment": "Static-module split per vibe/Lambda_Design_Static_Modules.md SM2/SM3 (§6): lib -> lambda-data -> lambda-rt -> radiant -> lambda.exe, with lambda-rt further split into lmd-rt and js-rt. Keys are plain path prefixes; longest match wins. '*' is the fallback and is deliberately 'unmapped' so a new source dir surfaces here instead of being silently absorbed.",
+  "module_rules": {
+    "*": "unmapped",
+
+    "lib": "lib",
+
+    "lambda/core": "lambda-data",
+    "lambda/io": "lambda-data",
+    "lambda/input": "lambda-data",
+    "lambda/format": "lambda-data",
+    "lambda/network": "lambda-data",
+    "lambda/lambda": "lambda-data",
+
+    "lambda/runtime": "lmd-rt",
+    "lambda/validator": "lmd-rt",
+    "lambda/jube": "lmd-rt",
+    "lambda/serve": "lmd-rt",
+
+    "lambda/js": "js-rt",
+    "lambda/ts": "js-rt",
+
+    "radiant": "radiant",
+
+    "lambda/main": "lambda.exe"
+  },
+
+  "clang": {
+    "cxx_std": "c++17",
+    "c_std": "c11",
+    "defines": ["DEBUG"],
+    "c_flags": ["-fms-extensions"],
+    "include_dirs": [
+      ".",
+      "lambda/mir",
+      "build_temp/re2-noabsl",
+      "lambda/tree-sitter/lib/include",
+      "lambda/tree-sitter-lambda/bindings/c",
+      "lambda/tree-sitter-typescript/bindings/c",
+      "lambda/tree-sitter-javascript/bindings/c",
+      "lambda/tree-sitter-python/bindings/c",
+      "lambda/tree-sitter-bash/bindings/c",
+      "lib/font/woff2/include",
+      "mac-deps/thorvg/src/bindings/capi",
+      "mac-deps/thorvg/inc",
+      "build_temp/utf8proc",
+      "/opt/homebrew/include",
+      "/opt/homebrew/include/libpng16",
+      "/usr/local/include"
+    ],
+    "libclang_search": [
+      "/opt/homebrew/opt/llvm",
+      "/usr/local/opt/llvm",
+      "/usr/lib/llvm-18",
+      "/usr/lib/llvm-17"
+    ]
+  },
+
+  "output_dir": "vibe/meta/ds",
+  "output_stem": "struct_census"
+}

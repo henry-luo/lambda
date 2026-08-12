@@ -69,11 +69,11 @@ Item js_typed_array_base_call_body(Item callee, Item this_value,
     Item* args, int argc, uint64_t* result_home);
 Item js_typed_array_base_construct_body(Item callee, Item* args, int argc,
     Item new_target, uint64_t* result_home);
-bool js_try_exotic_has_property(Item object, Item key, TypeId type,
+bool js_property_ops_has_property(Item object, Item key, TypeId type,
                                 Item* out_result);
-bool js_try_exotic_delete_property(Item object, Item key, Item* out_result);
-bool js_try_exotic_own_property_names(Item object, Item* out_result);
-bool js_try_exotic_own_property_descriptor(Item object, Item name,
+bool js_property_ops_delete_property(Item object, Item key, Item* out_result);
+bool js_property_ops_own_property_names(Item object, Item* out_result);
+bool js_property_ops_own_property_descriptor(Item object, Item name,
     String* name_str, TypeId type, Item* out_result);
 bool js_ta_define_own_numeric_index(Item object, Item key, Item desc,
     bool* out_handled, Item* out_error);

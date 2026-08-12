@@ -29,16 +29,6 @@ typedef Item (*JsNativeEnvSpan)(Item, Item*, int);
 typedef Item (*JsNativeCallBody)(Item, Item, Item*, int, uint64_t*);
 typedef Item (*JsNativeConstructBody)(Item, Item*, int, Item, uint64_t*);
 
-static inline bool js_map_kind_uses_default_object_to_primitive(uint8_t map_kind) {
-    return map_kind == MAP_KIND_WEB_API_RESOURCE ||
-           map_kind == MAP_KIND_CSS_NAMESPACE ||
-           map_kind == MAP_KIND_CSSOM;
-}
-
-static inline bool js_map_kind_is_ordinary_shape(uint8_t map_kind) {
-    return map_kind == MAP_KIND_PLAIN || map_kind == MAP_KIND_DESC;
-}
-
 void js_map_promote_descriptor_kind(Map* m);
 
 Item js_undefined(void);
@@ -245,6 +235,18 @@ Item js_typeof(Item value);         // typeof x
 // =============================================================================
 
 Item js_new_object(void);
+// Allocate a JS object with its immutable semantic metadata selected before
+// the object is returned to any caller. The class ID is a stable JsClass value.
+Item js_new_object_with_class(int class_id);
+struct TypeMap;
+// Native carriers use the same pre-publication metadata-qualified empty shape.
+struct TypeMap* js_object_type_for_class(int class_id);
+Item js_new_class_function(void);
+void js_set_class_constructor(Item class_function, Item constructor_body);
+void js_set_class_instance_prototype(Item class_function, Item prototype);
+void js_set_class_superclass(Item class_function, Item superclass);
+Item js_get_class_superclass(Item class_function);
+bool js_is_class_constructor_value(Item value);
 // Shared numeric property-key materialization for JS element/descriptor code.
 Item js_property_index_key(int64_t index);
 String* js_property_index_name(int64_t index);
@@ -258,6 +260,7 @@ Item js_set_key_core(Item object, Item key, Item value,
                                    Item receiver);
 Item js_set_completion_with_key(Item target, Item key, Item value,
                                 Item receiver);
+Item js_set_primitive_completion(Item object, Item key, Item value);
 // Internal DefineOwn storage write; it never dispatches inherited accessors.
 Item js_define_own_key_storage(Item object, Item key, Item value);
 Item js_set_key_cstr(Item object, const char* key, Item value);
@@ -286,6 +289,9 @@ void* js_active_module_ic(uint32_t index);
 // =============================================================================
 
 Item js_array_new(int length);
+// Allocate an array with an explicit immutable JS class carrier for branded
+// array-backed host objects such as FileList.
+Item js_array_new_with_class(int length, int class_id);
 Item js_array_new_numeric(int length);
 Item js_elements_set_numeric_direct(Item array, int64_t index, Item value);
 bool js_is_ordinary_numeric_array(Item value);
@@ -852,6 +858,9 @@ void js_mir_end_document_phase_timing(JsMirPhaseTiming* out);
 bool js_unicode_id_is_start(uint32_t cp);
 bool js_unicode_id_is_continue(uint32_t cp);
 
+bool js_regexp_virtual_property_is_overridden(Item regex, const char* name, int name_len);
+void js_regexp_mark_virtual_property_overridden(Item regex, const char* name, int name_len);
+
 // Tune6 diagnostics: scope-lookup counters. Used by the JS transpile timing
 // benchmark to test whether the linear-scan scope lookup is the AST-build
 // bottleneck on large/minified libraries. Counting is gated by an enable flag so
@@ -1059,6 +1068,7 @@ Item js_iterable_to_array(Item iterable);
 Item js_get_iterator(Item iterable);
 Item js_get_async_iterator(Item iterable);
 Item js_get_iterator_lazy(Item iterable);
+bool js_is_fixed_layout_iterator(Item object);
 Item js_iterator_step(Item iterator);
 Item js_iterator_close(Item iterator);
 Item js_iterator_collect_rest(Item iterator);
@@ -1125,7 +1135,6 @@ bool js_is_set_instance(Item obj);
 // ES6 Proxy
 // =============================================================================
 
-// Proxy internal data stored in Map.data when map_kind == MAP_KIND_PROXY
 typedef struct JsProxyData {
     uint64_t target;   // [[ProxyTarget]] — Item stored as uint64_t for C/C++ header compat
     uint64_t handler;  // [[ProxyHandler]] — Item stored as uint64_t for C/C++ header compat
@@ -1144,6 +1153,7 @@ bool js_is_proxy(Item obj);
 JsProxyData* js_get_proxy_data(Item obj);
 // Get the ultimate non-proxy target (unwrap nested proxies)
 Item js_proxy_get_target(Item obj);
+Item js_set_private_proxy_property(Item proxy, Item key, Item value);
 
 bool js_proxy_has_callable_target(Item obj);
 
@@ -1220,6 +1230,7 @@ Item js_get_live_binding_default(Item specifier);
 void js_tla_register_continuation(Item func);
 void js_tla_enter_module(void);
 void js_tla_exit_module(void);
+void js_tla_flush_for_dynamic_import(void);
 int js_tla_module_depth_get(void);
 
 /**
@@ -1386,6 +1397,7 @@ Item js_new_native_payload_function(JsNativeCallBody call_body,
                                     uint64_t payload,
                                     int formal_length);
 Item js_new_native_constructor(JsNativeP0 target);
+Item js_new_distinct_native_constructor(JsNativeP0 target);
 Item js_new_native_constructor(JsNativeP1 target);
 Item js_new_native_constructor(JsNativeP2 target);
 Item js_new_native_constructor(JsNativeP3 target);

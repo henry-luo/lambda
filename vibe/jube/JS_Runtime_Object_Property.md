@@ -2,11 +2,11 @@
 
 **Date**: 2026-08-12
 
-**Status**: PROPOSED DESIGN — JR4 refinement; formal D3.4 extension must land
-before implementation
+**Status**: IMPLEMENTED — JR4/Tune6 object metadata and exotic operations
+landed 2026-08-12
 
-**Tree anchor**: master `88aa5556c8` plus the Tune4 implementation and
-in-progress Tune5 Property worktree
+**Implementation anchor**: current worktree after the Tune5 property ABI
+handoff
 
 **Companions**: [JS_Runtime_Redesign.md](JS_Runtime_Redesign.md) (JR1, JR4,
 JR6), [JS_Runtime_Name.md](JS_Runtime_Name.md) (RN1–RN16),
@@ -20,9 +20,9 @@ first whenever they cover the point. The design applies **D1.2–D1.3**,
 **D3.4.4v2–D3.4.6**, **D4.3.1–D4.3.3**,
 **D4.6.1v2–D4.6.2v2**, **D5.2.1–D5.2.2**,
 **D5.3.1–D5.3.5**, **D5.4.1–D5.4.4**, **D6.2.2v2**,
-**D7.4.1–D7.4.3**, and **D8.4.3**. Section 14 identifies the one formal
-extension that must be adopted before implementation: immutable JavaScript
-class metadata on a runtime `TypeMap` family.
+**D7.4.1–D7.4.3**, and **D8.4.3**. The immutable JavaScript class metadata
+extension is adopted as **D3.4.7** in the formal design specification
+(version 1.15.0).
 
 Per **D1.6**, this design evolves MIR Direct and the current runtime only.
 The frozen C2MIR implementation is not modified, wrapped, or used as an
@@ -326,9 +326,9 @@ language layout identity = ordered field/type structure
 runtime TypeMap identity  = layout instance + immutable metadata family
 ```
 
-This distinction must be added to the formal D3.4 rulings before Tune6 code
-lands. ICs may guard a TypeMap pointer; they must not assume two structurally
-equal TypeMaps have the same exotic behavior.
+This distinction is the adopted **D3.4.7** contract. ICs may guard a TypeMap
+pointer; they must not assume two structurally equal TypeMaps have the same
+exotic behavior.
 
 ---
 
@@ -852,10 +852,9 @@ it does not pin modules through leaked JS metadata.
 
 ## 14. Formal-spec impact
 
-### 14.1 Required D3.4 extension
+### 14.1 Adopted D3.4.7 extension
 
-Before implementation, add a new formal ruling after **D3.4.6** with this
-substance:
+The formal design adds the following ruling after **D3.4.6**:
 
 > A runtime JavaScript `TypeMap` may carry one immutable `JsClassMeta*` that
 > selects class/brand, realm-relative default-prototype policy, and an optional
@@ -867,10 +866,8 @@ substance:
 > blueprint. `map_kind` remains physical storage information and cannot select
 > JS property/prototype semantics.
 
-The formal spec version must be bumped in the same change that marks this
-design adopted. If review changes an existing D3.4 ruling rather than adding
-an application/extension, revise that ruling in place with a `v2` suffix per
-repository rule 17.
+The formal spec is version 1.15.0. Tune6 applies this additive ruling and does
+not alter the existing structural D3.4 rulings.
 
 ### 14.2 Existing rulings applied without change
 
@@ -952,13 +949,13 @@ broad file decomposition after JR4/JR6/JR7/JR8 deletions so code moves once.
 
 ## 17. Design acceptance checklist
 
-- [ ] Formal D3.4 metadata ruling adopted and spec semver bumped.
-- [ ] `JsClassMeta` has no mutable/realm/GC fields.
-- [ ] Every JS-created Map chooses metadata before publication.
-- [ ] Shape and descriptor transitions preserve metadata exactly.
-- [ ] `map_kind` is documented and enforced as storage-only.
-- [ ] `Map.data` always agrees with `Map.type`.
-- [ ] One `JsPropertyOps` table surface covers exotic property/prototype/
+- [x] Formal D3.4 metadata ruling adopted and spec semver bumped.
+- [x] `JsClassMeta` has no mutable/realm/GC fields.
+- [x] Every JS-created Map chooses metadata before publication.
+- [x] Shape and descriptor transitions preserve metadata exactly.
+- [x] `map_kind` is documented and enforced as storage-only.
+- [x] `Map.data` always agrees with `Map.type`.
+- [x] One `JsPropertyOps` table surface covers exotic property/prototype/
       extensibility behavior.
 - [ ] Tune5's eight public semantic operations are unchanged.
 - [ ] Callback fallthrough is explicitly non-observable.

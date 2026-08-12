@@ -72,7 +72,7 @@ Catalog owner `JS_BUILTIN_OWNER_JSON_METHOD` supplies `parse`, `stringify`, plus
 
 ## 7. Date
 
-A Date instance is an **ordinary `MAP_KIND_PLAIN` object** carrying a string-keyed `__time__` slot that stores epoch-milliseconds as a FLOAT (`js_date_new`, `js_globals.cpp:1522`); `js_class_stamp(obj, JS_CLASS_DATE)` plus a legacy `__class_name__` give it `instanceof` identity, and its prototype is linked to `Date.prototype` (`js_date_set_instance_prototype`, `:1514`). Construction from a value/string/component-list is `js_date_new_from` (`:1542`) and friends, all applying `TimeClip` (`|v| > 8.64e15` → NaN, `js_date_time_clip`).
+A Date instance is an **ordinary metadata-qualified `MAP_KIND_PLAIN` object** carrying a string-keyed `__time__` slot that stores epoch-milliseconds as a FLOAT (`js_date_new`, `js_globals.cpp:1821`); immutable `TypeMap::js_meta` gives it `instanceof` identity, and its prototype is linked to `Date.prototype`. Construction from a value/string/component-list is `js_date_new_from` and friends, all applying `TimeClip` (`|v| > 8.64e15` → NaN, `js_date_time_clip`).
 
 All instance target bodies reuse **`js_date_method(date_obj, method_id)`**: it reads `__time__`, TypeErrors on a non-Date receiver, then a lower algorithm ID computes getters/`toString`/`toISOString` and Invalid-Date cases. This algorithm ID is fixed by the selected typed target and is not derived from a property name. Setters route through `js_date_setter`; prototype/static bindings use `JS_BUILTIN_OWNER_DATE_PROTOTYPE_METHOD` and `JS_BUILTIN_OWNER_DATE_STATIC_METHOD` (`now`, `parse`, `UTC`).
 
@@ -98,7 +98,7 @@ All four collections share one backing structure, `JsCollectionData` (`js_runtim
 
 ## 10. Proxy & Reflect
 
-A Proxy is a `MAP_KIND_PROXY` object whose `Map.data` is a `JsProxyData {uint64_t target; uint64_t handler; uint64_t private_slots; bool revoked;}` (`js_runtime.h:815`; Items stored as `uint64_t` for C-header compatibility, unpacked via the `PD_TARGET`/`PD_HANDLER` macros, `js_runtime.cpp:347`). `js_proxy_get_target` unwraps nested proxies up to depth 32 (`:360`).
+A Proxy is a metadata-qualified Map-prefix carrier with physical `MAP_KIND_PROXY` storage and trailing `JsProxyData {uint64_t target; uint64_t handler; uint64_t private_slots; bool revoked;}` in its typed `JsProxyMapCarrier`. Items remain stored as `uint64_t` for C-header compatibility; `js_proxy_get_target` unwraps nested proxies up to depth 32.
 
 <img alt="Proxy trap dispatch" src="diagram/d10_proxy_traps.svg" width="720">
 
@@ -143,7 +143,7 @@ The **`$262` host object** (`js_runtime.cpp:25189`+) is created on demand for th
 3. **WeakMap/WeakSet/WeakRef have no real weak semantics.** `is_weak` only gates a key-eligibility check; entries are retained strongly by the same hashmap + order list as strong collections (`js_runtime.cpp:32476`, `:17201`), and `WeakRef.deref` never clears (`:32496`). This is a correctness gap for finalization-observing code, accepted because it requires GC-integrated ephemeron support.
 4. **`js_globals.cpp` remains large.** Many lower algorithms (Date operations, JSON serialization, descriptor validation) remain hand-written switches or ladders. These are selected by typed target bodies rather than catalog/name dispatch, but coherent algorithm-family extraction would improve ownership and reviewability.
 5. **Host functions can terminate the process.** `process.exit` calls `exit(code)` (`js_globals.cpp:2360`) and `process.abort` calls `abort()` (`:2809`) directly — there is no embedder hook to intercept, so a script can hard-kill the host. *Improvement:* route through an injectable termination callback.
-6. **Date carries duplicate identity metadata.** Instances keep both a `js_class` stamp and a legacy `__class_name__` string (`js_globals.cpp:1528`), the same dual-bookkeeping debt catalogued in JS_06 §11.
+6. **Date stores a visible engine value.** The `__time__` slot is implementation state for Date algorithms, while class identity is selected once by immutable TypeMap metadata; it is not a public brand marker.
 7. **Fixed-size string-registry keys.** `JsSymbolEntry.key`/`JsSymbolDesc.desc` are `char[128]` (`js_globals.cpp:16518`, `:16528`); symbol descriptions longer than 127 bytes are truncated in the `Symbol.for`/description registries.
 
 ---
