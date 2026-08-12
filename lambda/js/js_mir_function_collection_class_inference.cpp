@@ -2790,7 +2790,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             // Box through the funnel: an int Item is not a tagged payload, so
             // OR-ing the tag onto a raw index no longer produces that index.
             MIR_reg_t idx_boxed = jm_box_int_reg(mt, i_reg);
-            MIR_reg_t elem = jm_call_2(mt, "js_array_get", MIR_T_I64,
+            MIR_reg_t elem = jm_call_2(mt, "js_elements_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
             jm_emit_error_lane_propagate_check(mt);

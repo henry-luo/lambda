@@ -314,8 +314,8 @@ bool js_is_truthy(Item value);
 // Object and property functions
 Item js_new_object();
 Item js_new_array(int length);
-Item js_property_access(Item object, Item key);
-Item js_property_set(Item object, Item key, Item value);
+Item js_get_reference(Item object, Item key);
+Item js_set_key_default(Item object, Item key, Item value);
 Item js_property_delete(Item object, Item key);
 bool js_property_has(Item object, Item key);
 
@@ -337,8 +337,8 @@ Item js_construct_value_defer_own_fields(Item callee, Item* args, int arg_count,
 Item js_init_class_instance_fields_after_super(Item callee, Item object);
 
 // Array functions
-Item js_array_get(Item array, Item index);
-Item js_array_set(Item array, Item index, Item value);
+Item js_elements_get(Item array, Item index);
+Item js_elements_set(Item array, Item index, Item value);
 int64_t js_array_length(Item array);
 Item js_array_push(Item array, Item value);
 Item js_array_pop(Item array);

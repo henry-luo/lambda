@@ -504,23 +504,23 @@ extern "C" void js_profile_store_ic_site(const char* label, JsStoreICProfileReas
 
 static JsExecProfileEvent js_exec_profile_event_for_runtime_call(const char* fn_name) {
     if (!fn_name) return JS_EXEC_PROF_OTHER_RUNTIME_CALL;
-    if (strcmp(fn_name, "js_property_get") == 0 ||
+    if (strcmp(fn_name, "js_get_key_default") == 0 ||
         strcmp(fn_name, "js_super_property_get") == 0 ||
         strcmp(fn_name, "js_get_global_property") == 0) {
         return JS_EXEC_PROF_PROPERTY_GET;
     }
     if (strcmp(fn_name, "js_get_module_var") == 0) return JS_EXEC_PROF_MODULE_VAR_GET;
-    if (strcmp(fn_name, "js_property_set") == 0 ||
-        strcmp(fn_name, "js_property_set_v") == 0 ||
-        strcmp(fn_name, "js_property_set_name_id_ic") == 0 ||
+    if (strcmp(fn_name, "js_set_key_default") == 0 ||
+        strcmp(fn_name, "js_set_key_policy") == 0 ||
+        strcmp(fn_name, "js_set_name_id_ic") == 0 ||
         strcmp(fn_name, "js_super_property_set") == 0) {
         return JS_EXEC_PROF_PROPERTY_SET;
     }
     if (strcmp(fn_name, "js_set_module_var") == 0) return JS_EXEC_PROF_MODULE_VAR_SET;
-    if (strcmp(fn_name, "js_property_access") == 0 ||
-        strcmp(fn_name, "js_property_access_name_id_ic") == 0) return JS_EXEC_PROF_PROPERTY_ACCESS;
-    if (strcmp(fn_name, "js_array_get_int") == 0) return JS_EXEC_PROF_ARRAY_GET_INT;
-    if (strcmp(fn_name, "js_array_set_int") == 0) return JS_EXEC_PROF_ARRAY_SET_INT;
+    if (strcmp(fn_name, "js_get_reference") == 0 ||
+        strcmp(fn_name, "js_get_name_id_ic") == 0) return JS_EXEC_PROF_PROPERTY_ACCESS;
+    if (strcmp(fn_name, "js_elements_get_int") == 0) return JS_EXEC_PROF_ARRAY_GET_INT;
+    if (strcmp(fn_name, "js_elements_set_int") == 0) return JS_EXEC_PROF_ARRAY_SET_INT;
     if (strcmp(fn_name, "js_array_push") == 0) return JS_EXEC_PROF_ARRAY_PUSH;
     if (strcmp(fn_name, "js_call_function") == 0) return JS_EXEC_PROF_CALL_FUNCTION;
     if (strcmp(fn_name, "js_new_object") == 0) return JS_EXEC_PROF_NEW_OBJECT;

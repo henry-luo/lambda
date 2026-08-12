@@ -1867,7 +1867,7 @@ void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
     const char* export_key = is_default ? "default" : name;
     int export_key_len = is_default ? 7 : name_len;
     MIR_reg_t key = jm_box_property_name_literal(mt, export_key, export_key_len);
-    jm_call_3(mt, "js_property_set", MIR_T_I64,
+    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -1885,7 +1885,7 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
 
     MIR_reg_t val = jm_transpile_box_item(mt, (JsAstNode*)&temp_id);
     MIR_reg_t key = jm_box_property_name_literal(mt, export_name, export_len);
-    jm_call_3(mt, "js_property_set", MIR_T_I64,
+    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -6127,7 +6127,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Js57 P3 (Track B2): no namespace pre-init is needed. The live-binding
         // runtime helper detects "default not yet exported" via the absence of
         // the `default` own property (see js_get_live_binding_default). The
-        // existing `js_property_set` at the `export default <expr>` site is
+        // existing `js_set_key_default` at the `export default <expr>` site is
         // what publishes the binding.
     }
 
@@ -6483,7 +6483,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         if (current_export && current_export->is_default && mt->is_module) {
             MIR_reg_t val = jm_transpile_box_item(mt, actual_stmt);
             MIR_reg_t key = jm_box_property_name_literal(mt, "default", 7);
-            jm_call_3(mt, "js_property_set", MIR_T_I64,
+            jm_call_3(mt, "js_set_key_default", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));

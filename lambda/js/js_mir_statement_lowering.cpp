@@ -2292,7 +2292,7 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
                 tmp_sid.name = super_id->name;
                 MIR_reg_t super_ctor = jm_transpile_box_item(mt, (JsAstNode*)&tmp_sid);
                 MIR_reg_t sp_key = jm_box_property_name_literal(mt, "prototype", 9);
-                MIR_reg_t err_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                MIR_reg_t err_proto = jm_call_2(mt, "js_get_key_default", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
                 jm_call_1(mt, "js_check_class_prototype_parent", MIR_T_I64,
@@ -2305,7 +2305,7 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
             } else {
                 MIR_reg_t super_val = jm_transpile_box_item(mt, (JsAstNode*)super_id);
                 MIR_reg_t sp_key = jm_box_property_name_literal(mt, "prototype", 9);
-                MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                MIR_reg_t sp_proto = jm_call_2(mt, "js_get_key_default", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
                 jm_call_1(mt, "js_check_class_prototype_parent", MIR_T_I64,
@@ -2331,7 +2331,7 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
             jm_emit_error_lane_propagate_check(mt);
         }
         MIR_reg_t sp_key = jm_box_property_name_literal(mt, "prototype", 9);
-        MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
+        MIR_reg_t sp_proto = jm_call_2(mt, "js_get_key_default", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
         jm_call_1(mt, "js_check_class_prototype_parent", MIR_T_I64,
@@ -2370,7 +2370,7 @@ void jm_emit_class_length_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, len_val),
         MIR_new_int_op(mt->ctx, (int64_t)i2it(ctor_len))));
-    jm_call_3(mt, "js_property_set", MIR_T_I64,
+    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, len_key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, len_val));
@@ -2396,7 +2396,7 @@ void jm_emit_class_setup(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* c
     setup->class_proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
     jm_create_gc_root_slot(mt, setup->class_proto_obj);
     MIR_reg_t early_pt_key = jm_box_property_name_literal(mt, "prototype", 9);
-    jm_call_3(mt, "js_property_set", MIR_T_I64,
+    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, early_pt_key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, setup->class_proto_obj));
@@ -2460,7 +2460,7 @@ void jm_emit_class_instance_setup_tail(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         jm_emit_class_method_install(mt, &policy);
     }
     MIR_reg_t ip_key = jm_box_property_name_literal(mt, "__instance_proto__", 18);
-    jm_call_3(mt, "js_property_set", MIR_T_I64,
+    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, ip_key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
@@ -2473,7 +2473,7 @@ void jm_emit_class_instance_setup_tail(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
     if (ctor_super_val) {
         MIR_reg_t super_key = jm_box_property_name_literal(mt, "__super_class__", 15);
-        jm_call_3(mt, "js_property_set", MIR_T_I64,
+        jm_call_3(mt, "js_set_key_default", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, super_key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_super_val));
@@ -2728,7 +2728,7 @@ static void jm_precreate_loop_binding(JsMirTranspiler* mt, const char* vname,
 }
 
 // for-of / for-in statement
-// Uses fn_len + js_property_access for arrays, or js_object_keys for objects
+// Uses fn_len + js_get_reference for arrays, or js_object_keys for objects
 void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Js55 P19: save and reset last-closure tracking so a prior loop's closure
     // (still referenced via mt->last_closure_env_reg) cannot capture this loop's
@@ -2991,7 +2991,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             MIR_new_reg_op(mt->ctx, cmp)));
 
         MIR_reg_t idx_item = jm_box_int_reg(mt, idx);
-        MIR_reg_t elem = jm_call_2(mt, "js_property_access", MIR_T_I64,
+        MIR_reg_t elem = jm_call_2(mt, "js_get_reference", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, collection),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_item));
         MIR_reg_t live_key = jm_call_2(mt, "js_for_in_key_is_live", MIR_T_I64,
@@ -3885,7 +3885,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 ctor_super_val = super_val;
                                 MIR_reg_t super_ctor_key = jm_box_property_name_literal(mt,
                                     "__super_ctor__", 14);
-                                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                jm_call_3(mt, "js_set_key_default", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor_key),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val));
@@ -3905,7 +3905,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 jm_emit_error_lane_propagate_check(mt);
                                 MIR_reg_t sp_key = jm_box_property_name_literal(mt,
                                     "prototype", 9);
-                                MIR_reg_t sp_obj = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                                MIR_reg_t sp_obj = jm_call_2(mt, "js_get_key_default", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
                                 jm_call_1(mt, "js_check_class_prototype_parent", MIR_T_I64,
@@ -3917,7 +3917,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 ctor_super_val = super_val;
                                 MIR_reg_t super_ctor_key = jm_box_property_name_literal(mt,
                                     "__super_ctor__", 14);
-                                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                jm_call_3(mt, "js_set_key_default", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor_key),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val));
@@ -4515,7 +4515,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 }
             } else {
                 MIR_reg_t key = jm_box_property_name_literal(mt, "default", 7);
-                MIR_reg_t val = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                MIR_reg_t val = jm_call_2(mt, "js_get_key_default", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, ns),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                 MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
@@ -4560,10 +4560,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             while (spec) {
                 if (spec->node_type == JS_AST_NODE_IMPORT_SPECIFIER) {
                     JsImportSpecifierNode* isp = (JsImportSpecifierNode*)spec;
-                    // Get exported value: val = js_property_get(ns, remote_name)
+                    // Get exported value: val = js_get_key_default(ns, remote_name)
                     MIR_reg_t key = jm_box_property_name_literal(mt,
                         isp->remote_name->chars, isp->remote_name->len);
-                    MIR_reg_t val = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                    MIR_reg_t val = jm_call_2(mt, "js_get_key_default", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, ns),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                     // Bind to local name

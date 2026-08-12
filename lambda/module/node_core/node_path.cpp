@@ -78,10 +78,10 @@ static void node_path_describe_invalid_object(Item value, char* out, int out_siz
 #define LMD_TYPE_FUNC JUBE_VALUE_FUNCTION
 #define make_string_item node_path_string
 #define js_array_length(ARG_ITEM) node_path_host->value->array_length(ARG_ITEM)
-#define js_array_get_int(ARG_ITEM, ARG_INDEX) node_path_host->value->array_get(ARG_ITEM, ARG_INDEX)
+#define js_elements_get_int(ARG_ITEM, ARG_INDEX) node_path_host->value->array_get(ARG_ITEM, ARG_INDEX)
 #define js_new_object() node_path_host->value->new_object()
-#define js_property_get(ARG_OBJECT, ARG_KEY) node_path_host->value->property_get(ARG_OBJECT, ARG_KEY)
-#define js_property_set(ARG_OBJECT, ARG_KEY, ARG_VALUE) node_path_host->value->property_set(ARG_OBJECT, ARG_KEY, ARG_VALUE)
+#define js_get_key_default(ARG_OBJECT, ARG_KEY) node_path_host->value->property_get(ARG_OBJECT, ARG_KEY)
+#define js_set_key_default(ARG_OBJECT, ARG_KEY, ARG_VALUE) node_path_host->value->property_set(ARG_OBJECT, ARG_KEY, ARG_VALUE)
 #define js_throw_type_error_code(ARG_CODE, ARG_MESSAGE) node_path_throw_type_error(ARG_CODE, ARG_MESSAGE)
 
 // Helper: get JS type name for error messages
@@ -244,7 +244,7 @@ extern "C" Item js_path_join(Item args_item) {
 
     // validate all arguments are strings
     for (int i = 0; i < argc; i++) {
-        Item seg_item = js_array_get_int(args_item, i);
+        Item seg_item = js_elements_get_int(args_item, i);
         if (!validate_path_string(seg_item, "path")) return ItemNull;
     }
 
@@ -252,7 +252,7 @@ extern "C" Item js_path_join(Item args_item) {
     int result_len = 0;
 
     for (int i = 0; i < argc; i++) {
-        Item seg_item = js_array_get_int(args_item, i);
+        Item seg_item = js_elements_get_int(args_item, i);
         char seg_buf[1024];
         const char* seg = item_to_cstr(seg_item, seg_buf, sizeof(seg_buf));
         if (!seg || seg[0] == '\0') continue;
@@ -298,7 +298,7 @@ extern "C" Item js_path_resolve(Item args_item) {
 
     // validate all arguments are strings
     for (int i = 0; i < argc; i++) {
-        Item seg_item = js_array_get_int(args_item, i);
+        Item seg_item = js_elements_get_int(args_item, i);
         if (!validate_path_string(seg_item, "path")) return ItemNull;
     }
 
@@ -314,7 +314,7 @@ extern "C" Item js_path_resolve(Item args_item) {
     }
 
     for (int i = 0; i < argc; i++) {
-        Item seg_item = js_array_get_int(args_item, i);
+        Item seg_item = js_elements_get_int(args_item, i);
         char seg_buf[1024];
         const char* seg = item_to_cstr(seg_item, seg_buf, sizeof(seg_buf));
         if (!seg || seg[0] == '\0') continue;
@@ -410,11 +410,11 @@ extern "C" Item js_path_parse(Item path_item) {
     Item obj = js_new_object();
 
     if (!path || path[0] == '\0') {
-        js_property_set(obj, make_string_item("root"), make_string_item(""));
-        js_property_set(obj, make_string_item("dir"), make_string_item(""));
-        js_property_set(obj, make_string_item("base"), make_string_item(""));
-        js_property_set(obj, make_string_item("ext"), make_string_item(""));
-        js_property_set(obj, make_string_item("name"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("root"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("dir"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("base"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("ext"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("name"), make_string_item(""));
         return obj;
     }
 
@@ -455,11 +455,11 @@ extern "C" Item js_path_parse(Item path_item) {
     if (name_len < 0) name_len = 0;
     const char* base = stripped + base_start;
 
-    js_property_set(obj, make_string_item("root"), make_string_item(root));
-    js_property_set(obj, make_string_item("dir"), has_dir ? make_string_item(stripped, dir_len) : make_string_item(""));
-    js_property_set(obj, make_string_item("base"), make_string_item(base, base_len));
-    js_property_set(obj, make_string_item("ext"), ext_len > 0 ? make_string_item(stripped + ext_start, ext_len) : make_string_item(""));
-    js_property_set(obj, make_string_item("name"), make_string_item(base, name_len));
+    js_set_key_default(obj, make_string_item("root"), make_string_item(root));
+    js_set_key_default(obj, make_string_item("dir"), has_dir ? make_string_item(stripped, dir_len) : make_string_item(""));
+    js_set_key_default(obj, make_string_item("base"), make_string_item(base, base_len));
+    js_set_key_default(obj, make_string_item("ext"), ext_len > 0 ? make_string_item(stripped + ext_start, ext_len) : make_string_item(""));
+    js_set_key_default(obj, make_string_item("name"), make_string_item(base, name_len));
 
     return obj;
 }
@@ -477,11 +477,11 @@ extern "C" Item js_path_format(Item obj_item) {
         return ItemNull;
     }
 
-    Item dir = js_property_get(obj_item, make_string_item("dir"));
-    Item root = js_property_get(obj_item, make_string_item("root"));
-    Item base = js_property_get(obj_item, make_string_item("base"));
-    Item name = js_property_get(obj_item, make_string_item("name"));
-    Item ext = js_property_get(obj_item, make_string_item("ext"));
+    Item dir = js_get_key_default(obj_item, make_string_item("dir"));
+    Item root = js_get_key_default(obj_item, make_string_item("root"));
+    Item base = js_get_key_default(obj_item, make_string_item("base"));
+    Item name = js_get_key_default(obj_item, make_string_item("name"));
+    Item ext = js_get_key_default(obj_item, make_string_item("ext"));
 
     char result[4096];
     int pos = 0;
@@ -750,11 +750,11 @@ static Item js_path_win32_parse(Item path_item) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     Item obj = js_new_object();
     if (!path || !path[0]) {
-        js_property_set(obj, make_string_item("root"), make_string_item(""));
-        js_property_set(obj, make_string_item("dir"), make_string_item(""));
-        js_property_set(obj, make_string_item("base"), make_string_item(""));
-        js_property_set(obj, make_string_item("ext"), make_string_item(""));
-        js_property_set(obj, make_string_item("name"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("root"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("dir"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("base"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("ext"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("name"), make_string_item(""));
         return obj;
     }
 
@@ -764,11 +764,11 @@ static Item js_path_win32_parse(Item path_item) {
     }
     if (only_separators) {
         Item root = make_string_item(path, 1);
-        js_property_set(obj, make_string_item("root"), root);
-        js_property_set(obj, make_string_item("dir"), root);
-        js_property_set(obj, make_string_item("base"), make_string_item(""));
-        js_property_set(obj, make_string_item("ext"), make_string_item(""));
-        js_property_set(obj, make_string_item("name"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("root"), root);
+        js_set_key_default(obj, make_string_item("dir"), root);
+        js_set_key_default(obj, make_string_item("base"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("ext"), make_string_item(""));
+        js_set_key_default(obj, make_string_item("name"), make_string_item(""));
         return obj;
     }
 
@@ -807,11 +807,11 @@ static Item js_path_win32_parse(Item path_item) {
     if (base_is_all_dots) ext_at = -1;
     int ext_len = ext_at >= 0 ? end - ext_at : 0;
     int name_len = base_len - ext_len;
-    js_property_set(obj, make_string_item("root"), make_string_item(path, root_len));
-    js_property_set(obj, make_string_item("dir"), dir_len ? make_string_item(path, dir_len) : make_string_item(""));
-    js_property_set(obj, make_string_item("base"), make_string_item(path + base_start, base_len));
-    js_property_set(obj, make_string_item("ext"), ext_len ? make_string_item(path + ext_at, ext_len) : make_string_item(""));
-    js_property_set(obj, make_string_item("name"), make_string_item(path + base_start, name_len));
+    js_set_key_default(obj, make_string_item("root"), make_string_item(path, root_len));
+    js_set_key_default(obj, make_string_item("dir"), dir_len ? make_string_item(path, dir_len) : make_string_item(""));
+    js_set_key_default(obj, make_string_item("base"), make_string_item(path + base_start, base_len));
+    js_set_key_default(obj, make_string_item("ext"), ext_len ? make_string_item(path + ext_at, ext_len) : make_string_item(""));
+    js_set_key_default(obj, make_string_item("name"), make_string_item(path + base_start, name_len));
     return obj;
 }
 
@@ -945,7 +945,7 @@ static void js_path_set_method(Item ns, const char* name, Target target,
     Item key = make_string_item(name);
     Item fn = jube_new_function(node_path_host->script, target,
         adapter_arity);
-    js_property_set(ns, key, fn);
+    js_set_key_default(ns, key, fn);
 }
 
 Item node_path_namespace(void) {
@@ -968,11 +968,11 @@ Item node_path_namespace(void) {
     js_path_set_method(path_namespace, "toNamespacedPath", js_path_toNamespacedPath, 1);
 
     // properties
-    js_property_set(path_namespace, make_string_item("sep"), js_path_get_sep());
-    js_property_set(path_namespace, make_string_item("delimiter"), js_path_get_delimiter());
+    js_set_key_default(path_namespace, make_string_item("sep"), js_path_get_sep());
+    js_set_key_default(path_namespace, make_string_item("delimiter"), js_path_get_delimiter());
 
     // path.posix = path (on POSIX systems, posix is the same as the default)
-    js_property_set(path_namespace, make_string_item("posix"), path_namespace);
+    js_set_key_default(path_namespace, make_string_item("posix"), path_namespace);
 
     // path.win32 — win32-specific path implementations
     Item win32_ns = js_new_object();
@@ -988,13 +988,13 @@ Item node_path_namespace(void) {
     js_path_set_method(win32_ns, "format",     js_path_win32_format, 1);
     js_path_set_method(win32_ns, "matchesGlob", js_path_win32_matches_glob, 2);
     js_path_set_method(win32_ns, "toNamespacedPath", js_path_win32_toNamespacedPath, 1);
-    js_property_set(win32_ns, make_string_item("sep"), make_string_item("\\"));
-    js_property_set(win32_ns, make_string_item("delimiter"), make_string_item(";"));
-    js_property_set(path_namespace, make_string_item("win32"), win32_ns);
+    js_set_key_default(win32_ns, make_string_item("sep"), make_string_item("\\"));
+    js_set_key_default(win32_ns, make_string_item("delimiter"), make_string_item(";"));
+    js_set_key_default(path_namespace, make_string_item("win32"), win32_ns);
 
     // default export
     Item default_key = make_string_item("default");
-    js_property_set(path_namespace, default_key, path_namespace);
+    js_set_key_default(path_namespace, default_key, path_namespace);
 
     return path_namespace;
 }
@@ -1006,7 +1006,7 @@ static void node_path_cache_reset(void) {
 Item node_path_win32_namespace(void) {
     // ensure path namespace is initialized
     Item ns = node_path_namespace();
-    return js_property_get(ns, make_string_item("win32"));
+    return js_get_key_default(ns, make_string_item("win32"));
 }
 
 int node_path_init(const JubeHostAPI* host) {

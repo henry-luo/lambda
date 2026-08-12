@@ -69,6 +69,14 @@ Item js_typed_array_base_call_body(Item callee, Item this_value,
     Item* args, int argc, uint64_t* result_home);
 Item js_typed_array_base_construct_body(Item callee, Item* args, int argc,
     Item new_target, uint64_t* result_home);
+bool js_try_exotic_has_property(Item object, Item key, TypeId type,
+                                Item* out_result);
+bool js_try_exotic_delete_property(Item object, Item key, Item* out_result);
+bool js_try_exotic_own_property_names(Item object, Item* out_result);
+bool js_try_exotic_own_property_descriptor(Item object, Item name,
+    String* name_str, TypeId type, Item* out_result);
+bool js_ta_define_own_numeric_index(Item object, Item key, Item desc,
+    bool* out_handled, Item* out_error);
 // Pick the thinnest entry whose protocol still covers this callee's shape.
 // Only the classifier above may call this.
 JsCallEntry js_function_select_call_entry(JsFunction* fn);
@@ -90,7 +98,7 @@ extern TypeMap EmptyMap;
 
 extern "C" bool js_func_is_builtin_ctor(Item fn);
 extern "C" bool js_function_has_own_prototype(Item fn);
-extern "C" Item js_array_get_custom_proto(Item arr);
+extern "C" Item js_elements_get_custom_proto(Item arr);
 extern "C" void js_child_process_reset();
 extern "C" void js_fs_reset();
 extern "C" void js_util_reset();
@@ -100,9 +108,8 @@ Item _map_read_field(ShapeEntry* field, void* map_data);
 Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found);
 
 bool js_runtime_trace_enabled();
-Item js_strict_throw_property_error(const char* reason, const char* prop_name, int prop_len);
 Map* js_resolve_object_prototype();
-Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found = nullptr);
+Item js_map_shape_lookup(Map* m, const char* key_str, int key_len, bool* out_found = nullptr);
 Item js_check_array_sym_iterator();
 extern "C" void js_intrinsic_note_property_mutation(Item object, Item key);
 void js_regex_cache_reset();
@@ -149,7 +156,8 @@ extern "C" Item js_object_prototype_has_own_property(Item this_val, Item key);
 void js_double_to_string(double d, char* out, int out_size);
 bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero);
 bool js_ta_numeric_index_valid(Item object, double numeric_index, bool is_negative_zero, int* out_index);
-bool js_ta_proto_chain_set(Item object, Item key, Item value, Item* out_result);
+bool js_ta_proto_chain_set(Item object, Item key, Item value, Item receiver,
+                           bool bypass_accessor_dispatch, Item* out_result);
 bool js_array_ta_proto_numeric_set(Item array, Item key, bool* no_op);
 
 static inline bool js_is_symbol(Item v) {
@@ -221,19 +229,5 @@ static inline Item js_symbol_to_key(Item sym) {
     // state; manufacturing a printable string here would alias a user key.
     return ItemNull;
 }
-
-namespace {
-class ScopedProxyReceiver {
-public:
-    explicit ScopedProxyReceiver(Item recv) : prev_(js_proxy_receiver) {
-        if (!js_proxy_receiver.item) js_proxy_receiver = recv;
-    }
-    ~ScopedProxyReceiver() { js_proxy_receiver = prev_; }
-    ScopedProxyReceiver(const ScopedProxyReceiver&) = delete;
-    ScopedProxyReceiver& operator=(const ScopedProxyReceiver&) = delete;
-private:
-    Item prev_;
-};
-} // namespace
 
 #endif

@@ -84,7 +84,7 @@ bool js_array_has_props(const Array* arr) {
 
 Map* js_array_props(const Array* arr) {
     if (!js_array_has_props(arr) || !arr->items || arr->capacity <= 0) return NULL;
-    Item props_item = arr->items[arr->capacity - 1];
+    Item props_item = ((Item*)arr->items)[arr->capacity - 1];
     return get_type_id(props_item) == LMD_TYPE_MAP ? props_item.map : NULL;
 }
 
@@ -96,10 +96,26 @@ int64_t container_dense_capacity(const Array* arr) {
     return arr && arr->capacity > arr->extra ? arr->capacity - arr->extra : 0;
 }
 
-void js_array_set_props(Array* arr, Map* props) {
+void js_elements_set_props(Array* arr, Map* props) {
     if (!arr || !props) return;
+
+    if (arr->type_id == LMD_TYPE_ARRAY_NUM) {
+        // Tune5 P5: ordinary numeric arrays reserve one raw eight-byte tail
+        // slot for the companion map; installing a named property must not
+        // reinterpret the numeric payload or force a representation promotion.
+        if (arr->extra < 1 || arr->capacity <= 0 || !arr->items) return;
+        RootFrame roots(2);
+        Rooted<ArrayNum*> rooted_arr(roots, (ArrayNum*)arr);
+        Rooted<Map*> rooted_props(roots, props);
+        arr = (Array*)rooted_arr.get();
+        props = rooted_props.get();
+        ((Item*)arr->items)[arr->capacity - 1] = {.map = props};
+        arr->has_js_props = 1;
+        return;
+    }
+
     if (js_array_has_props(arr)) {
-        arr->items[arr->capacity - 1] = {.map = props};
+        ((Item*)arr->items)[arr->capacity - 1] = {.map = props};
         return;
     }
 

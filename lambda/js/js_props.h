@@ -7,12 +7,107 @@
 
 #include "../lambda-data.hpp"
 
+// Tune5 §4.1: a property lookup carries one scalar identity.  The observable
+// key Item is deliberately kept separate so ordinary paths do not need to
+// allocate or intern a string merely to perform a lookup.
+typedef uint64_t JsPropertyLane;
+
+#define JS_PROPERTY_LANE_INDEX_BIT ((JsPropertyLane)1u << 32)
+#define JS_PROPERTY_LANE_PAYLOAD_MASK ((JsPropertyLane)0xffffffffu)
+#define JS_PROPERTY_INDEX_MAX UINT32_C(0xfffffffe)
+
+static inline JsPropertyLane js_property_lane_from_name_id(NameId name_id) {
+    return (JsPropertyLane)name_id;
+}
+
+static inline JsPropertyLane js_property_lane_from_index(uint32_t index) {
+    return JS_PROPERTY_LANE_INDEX_BIT | (JsPropertyLane)index;
+}
+
+static inline bool js_property_lane_is_index(JsPropertyLane lane) {
+    return (lane & JS_PROPERTY_LANE_INDEX_BIT) != 0;
+}
+
+static inline uint32_t js_property_lane_payload(JsPropertyLane lane) {
+    return (uint32_t)(lane & JS_PROPERTY_LANE_PAYLOAD_MASK);
+}
+
+static inline bool js_property_lane_is_valid(JsPropertyLane lane) {
+    uint32_t payload = js_property_lane_payload(lane);
+    return js_property_lane_is_index(lane)
+        ? payload <= JS_PROPERTY_INDEX_MAX
+        : payload != NAME_ID_NONE;
+}
+
+// ItemNull is not a result of ToPropertyKey (which returns a String or
+// Symbol), so it is the empty observable-materialization marker.
+static inline Item js_property_observable_key_empty(void) {
+    return ItemNull;
+}
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // ES §7.1.19 ToPropertyKey. Non-symbol keys become canonical strings.
 Item js_to_property_key(Item key);
+
+// Tune5 §2.4: the ordinary array-index classifier is shared by every
+// ordinary property consumer.  TypedArray CanonicalNumericIndexString stays
+// on its separate exotic classifier.
+bool js_property_name_to_array_index(const char* name, int name_len,
+                                     uint32_t* out_index);
+bool js_property_key_to_array_index(Item key, uint32_t* out_index);
+bool js_property_lane_from_key(Item key, JsPropertyLane* out_lane);
+// `key` is already the single ToPropertyKey result; this helper only classifies
+// it and therefore cannot perform a second coercion or allocation.
+JsPropertyLane js_property_lane_for_canonical_key(Item key);
+Item js_property_key_from_lane(JsPropertyLane lane);
+// Numeric array algorithms carry an index Item through the semantic kernels;
+// only descriptor/shape code that must address the companion map asks for the
+// canonical pooled spelling.
+Item js_property_index_key(int64_t index);
+String* js_property_index_name(int64_t index);
+const char* js_property_index_chars(int64_t index, int* out_len);
+
+// Tune5 §4.3: final semantic operation ABI.  The legacy runtime entry points
+// may delegate to these shells while migration is staged, but new semantic
+// callers use only these eight operations.
+Item js_get(Item target, JsPropertyLane lane, Item observable_key,
+            Item receiver);
+Item js_set(Item target, JsPropertyLane lane, Item observable_key,
+            Item value, Item receiver);
+Item js_define_own(Item target, JsPropertyLane lane, Item observable_key,
+                   uint32_t descriptor_bits, Item value, Item getter,
+                   Item setter);
+Item js_delete(Item target, JsPropertyLane lane, Item observable_key);
+Item js_has_property(Item target, JsPropertyLane lane, Item observable_key);
+Item js_has_own(Item target, JsPropertyLane lane, Item observable_key);
+Item js_get_own_property_descriptor_lane(Item target, JsPropertyLane lane,
+                                         Item observable_key);
+Item js_own_keys(Item target);
+
+// Tune5 P3: one operation-tagged seam for all non-ordinary receivers.  The
+// adapter reports handled/not-handled through its return value and carries the
+// operation completion in out_result, so false, ordinary fallback, and ERROR
+// remain distinct.
+typedef enum JsPropertyExoticOperation {
+    JS_EXOTIC_GET = 0,
+    JS_EXOTIC_SET = 1,
+    JS_EXOTIC_DEFINE_OWN = 2,
+    JS_EXOTIC_DELETE = 3,
+    JS_EXOTIC_HAS_PROPERTY = 4,
+    JS_EXOTIC_HAS_OWN = 5,
+    JS_EXOTIC_GET_OWN_PROPERTY_DESCRIPTOR = 6,
+    JS_EXOTIC_OWN_KEYS = 7,
+} JsPropertyExoticOperation;
+
+bool js_property_exotic_adapter(JsPropertyExoticOperation operation,
+                                Item target, JsPropertyLane lane,
+                                Item observable_key, Item receiver,
+                                Item descriptor, Item value,
+                                bool bypass_accessor_dispatch,
+                                Item* out_result);
 
 int64_t js_key_is_symbol_c(Item key);
 
@@ -162,6 +257,7 @@ JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
 #define JS_PD_ENUMERABLE       0x80u  // [[Enumerable]] bit (when HAS_ENUMERABLE)
 // [[Configurable]] uses bit in `flags2` to keep this a single byte. Use
 // helper functions below.
+#define JS_PD_CONFIGURABLE_VALUE (1u << 8)
 
 typedef struct JsPropertyDescriptor {
     uint8_t flags;     // JS_PD_HAS_* + JS_PD_WRITABLE / JS_PD_ENUMERABLE

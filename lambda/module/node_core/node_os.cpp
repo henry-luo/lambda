@@ -49,8 +49,8 @@ static bool node_os_roots_begin(JubeRootFrame* frame, size_t count) {
 #define js_array_new(CAPACITY) node_os_host->value->array_new(CAPACITY)
 #define js_array_push(ARRAY, VALUE) node_os_host->value->array_push(ARRAY, VALUE)
 #define js_new_object() node_os_host->value->new_object()
-#define js_property_get(OBJECT, KEY) node_os_host->value->property_get(OBJECT, KEY)
-#define js_property_set(OBJECT, KEY, VALUE) node_os_host->value->property_set(OBJECT, KEY, VALUE)
+#define js_get_key_default(OBJECT, KEY) node_os_host->value->property_get(OBJECT, KEY)
+#define js_set_key_default(OBJECT, KEY, VALUE) node_os_host->value->property_set(OBJECT, KEY, VALUE)
 #define js_object_freeze(OBJECT) node_os_host->script->object_freeze(OBJECT)
 #define js_mark_non_writable(OBJECT, KEY) node_os_host->script->mark_non_writable(OBJECT, KEY)
 
@@ -632,25 +632,25 @@ extern "C" Item js_os_networkInterfaces(void) {
 
         // build the entry object
         Item entry = js_new_object();
-        js_property_set(entry, make_string_item("address"), make_string_item(addr));
-        js_property_set(entry, make_string_item("netmask"), make_string_item(netmask));
-        js_property_set(entry, make_string_item("family"), make_string_item(fam_str));
-        js_property_set(entry, make_string_item("mac"), make_string_item(mac));
-        js_property_set(entry, make_string_item("internal"), (Item){.item = b2it(internal)});
-        js_property_set(entry, make_string_item("cidr"),
+        js_set_key_default(entry, make_string_item("address"), make_string_item(addr));
+        js_set_key_default(entry, make_string_item("netmask"), make_string_item(netmask));
+        js_set_key_default(entry, make_string_item("family"), make_string_item(fam_str));
+        js_set_key_default(entry, make_string_item("mac"), make_string_item(mac));
+        js_set_key_default(entry, make_string_item("internal"), (Item){.item = b2it(internal)});
+        js_set_key_default(entry, make_string_item("cidr"),
             make_string_item(addr)); // will build full cidr below
 
         // build cidr string: "addr/prefix"
         char cidr_str[INET6_ADDRSTRLEN + 8];
         snprintf(cidr_str, sizeof(cidr_str), "%s/%d", addr, cidr);
-        js_property_set(entry, make_string_item("cidr"), make_string_item(cidr_str));
+        js_set_key_default(entry, make_string_item("cidr"), make_string_item(cidr_str));
 
         // get or create array for this interface name
         Item iface_key = make_string_item(ifa->ifa_name);
-        Item iface_arr = js_property_get(result, iface_key);
+        Item iface_arr = js_get_key_default(result, iface_key);
         if (iface_arr.item == 0 || get_type_id(iface_arr) == LMD_TYPE_UNDEFINED) {
             iface_arr = js_array_new(0);
-            js_property_set(result, iface_key, iface_arr);
+            js_set_key_default(result, iface_key, iface_arr);
         }
         js_array_push(iface_arr, entry);
     }
@@ -663,25 +663,25 @@ extern "C" Item js_os_networkInterfaces(void) {
 // os.userInfo() — returns user information
 extern "C" Item js_os_userInfo(Item options) {
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item encoding = js_property_get(options, make_string_item("encoding"));
+        Item encoding = js_get_key_default(options, make_string_item("encoding"));
         if (item_is_error(encoding)) return encoding;
     }
     Item obj = js_new_object();
 #ifdef _WIN32
     const char* username = shell_getenv("USERNAME");
     const char* homedir = shell_getenv("USERPROFILE");
-    js_property_set(obj, make_string_item("uid"), (Item){.item = i2it(-1)});
-    js_property_set(obj, make_string_item("gid"), (Item){.item = i2it(-1)});
-    js_property_set(obj, make_string_item("username"), make_string_item(username ? username : ""));
-    js_property_set(obj, make_string_item("homedir"), make_string_item(homedir ? homedir : ""));
-    js_property_set(obj, make_string_item("shell"), ItemNull);
+    js_set_key_default(obj, make_string_item("uid"), (Item){.item = i2it(-1)});
+    js_set_key_default(obj, make_string_item("gid"), (Item){.item = i2it(-1)});
+    js_set_key_default(obj, make_string_item("username"), make_string_item(username ? username : ""));
+    js_set_key_default(obj, make_string_item("homedir"), make_string_item(homedir ? homedir : ""));
+    js_set_key_default(obj, make_string_item("shell"), ItemNull);
 #else
     struct passwd* pw = getpwuid(getuid());
-    js_property_set(obj, make_string_item("uid"), (Item){.item = i2it((int64_t)getuid())});
-    js_property_set(obj, make_string_item("gid"), (Item){.item = i2it((int64_t)getgid())});
-    js_property_set(obj, make_string_item("username"), make_string_item(pw ? pw->pw_name : ""));
-    js_property_set(obj, make_string_item("homedir"), make_string_item(pw ? pw->pw_dir : ""));
-    js_property_set(obj, make_string_item("shell"), make_string_item(pw ? pw->pw_shell : ""));
+    js_set_key_default(obj, make_string_item("uid"), (Item){.item = i2it((int64_t)getuid())});
+    js_set_key_default(obj, make_string_item("gid"), (Item){.item = i2it((int64_t)getgid())});
+    js_set_key_default(obj, make_string_item("username"), make_string_item(pw ? pw->pw_name : ""));
+    js_set_key_default(obj, make_string_item("homedir"), make_string_item(pw ? pw->pw_dir : ""));
+    js_set_key_default(obj, make_string_item("shell"), make_string_item(pw ? pw->pw_shell : ""));
 #endif
     return obj;
 }
@@ -798,7 +798,7 @@ static void js_os_set_method(Item ns, const char* name, Target target,
     Item fn = jube_new_function(node_os_host->script, target,
         adapter_arity);
     *function_root = fn.item;
-    js_property_set(ns, key, fn);
+    js_set_key_default(ns, key, fn);
     node_os_host->node->roots->root_frame_end(&frame);
 }
 
@@ -842,11 +842,11 @@ Item node_os_namespace(void) {
 
     // constants
 #ifdef _WIN32
-    js_property_set(os_namespace, make_string_item("EOL"), make_string_item("\r\n"));
-    js_property_set(os_namespace, make_string_item("devNull"), make_string_item("\\\\.\\NUL"));
+    js_set_key_default(os_namespace, make_string_item("EOL"), make_string_item("\r\n"));
+    js_set_key_default(os_namespace, make_string_item("devNull"), make_string_item("\\\\.\\NUL"));
 #else
-    js_property_set(os_namespace, make_string_item("EOL"), make_string_item("\n"));
-    js_property_set(os_namespace, make_string_item("devNull"), make_string_item("/dev/null"));
+    js_set_key_default(os_namespace, make_string_item("EOL"), make_string_item("\n"));
+    js_set_key_default(os_namespace, make_string_item("devNull"), make_string_item("/dev/null"));
 #endif
     js_mark_non_writable(os_namespace, make_string_item("EOL"));
 
@@ -860,44 +860,44 @@ Item node_os_namespace(void) {
 
     // POSIX signals (use system constants for correct platform values)
 #ifndef _WIN32
-    js_property_set(signals, make_string_item("SIGHUP"),  (Item){.item = i2it(SIGHUP)});
-    js_property_set(signals, make_string_item("SIGINT"),  (Item){.item = i2it(SIGINT)});
-    js_property_set(signals, make_string_item("SIGQUIT"), (Item){.item = i2it(SIGQUIT)});
-    js_property_set(signals, make_string_item("SIGILL"),  (Item){.item = i2it(SIGILL)});
-    js_property_set(signals, make_string_item("SIGTRAP"), (Item){.item = i2it(SIGTRAP)});
-    js_property_set(signals, make_string_item("SIGABRT"), (Item){.item = i2it(SIGABRT)});
-    js_property_set(signals, make_string_item("SIGBUS"),  (Item){.item = i2it(SIGBUS)});
-    js_property_set(signals, make_string_item("SIGFPE"),  (Item){.item = i2it(SIGFPE)});
-    js_property_set(signals, make_string_item("SIGKILL"), (Item){.item = i2it(SIGKILL)});
-    js_property_set(signals, make_string_item("SIGUSR1"), (Item){.item = i2it(SIGUSR1)});
-    js_property_set(signals, make_string_item("SIGSEGV"), (Item){.item = i2it(SIGSEGV)});
-    js_property_set(signals, make_string_item("SIGUSR2"), (Item){.item = i2it(SIGUSR2)});
-    js_property_set(signals, make_string_item("SIGPIPE"), (Item){.item = i2it(SIGPIPE)});
-    js_property_set(signals, make_string_item("SIGALRM"), (Item){.item = i2it(SIGALRM)});
-    js_property_set(signals, make_string_item("SIGTERM"), (Item){.item = i2it(SIGTERM)});
-    js_property_set(signals, make_string_item("SIGCHLD"), (Item){.item = i2it(SIGCHLD)});
-    js_property_set(signals, make_string_item("SIGCONT"), (Item){.item = i2it(SIGCONT)});
-    js_property_set(signals, make_string_item("SIGSTOP"), (Item){.item = i2it(SIGSTOP)});
-    js_property_set(signals, make_string_item("SIGTSTP"), (Item){.item = i2it(SIGTSTP)});
-    js_property_set(signals, make_string_item("SIGTTIN"), (Item){.item = i2it(SIGTTIN)});
-    js_property_set(signals, make_string_item("SIGTTOU"), (Item){.item = i2it(SIGTTOU)});
-    js_property_set(signals, make_string_item("SIGURG"),  (Item){.item = i2it(SIGURG)});
-    js_property_set(signals, make_string_item("SIGXCPU"), (Item){.item = i2it(SIGXCPU)});
-    js_property_set(signals, make_string_item("SIGXFSZ"), (Item){.item = i2it(SIGXFSZ)});
-    js_property_set(signals, make_string_item("SIGVTALRM"), (Item){.item = i2it(SIGVTALRM)});
-    js_property_set(signals, make_string_item("SIGPROF"), (Item){.item = i2it(SIGPROF)});
-    js_property_set(signals, make_string_item("SIGWINCH"), (Item){.item = i2it(SIGWINCH)});
-    js_property_set(signals, make_string_item("SIGIO"),   (Item){.item = i2it(SIGIO)});
-    js_property_set(signals, make_string_item("SIGSYS"),  (Item){.item = i2it(SIGSYS)});
+    js_set_key_default(signals, make_string_item("SIGHUP"),  (Item){.item = i2it(SIGHUP)});
+    js_set_key_default(signals, make_string_item("SIGINT"),  (Item){.item = i2it(SIGINT)});
+    js_set_key_default(signals, make_string_item("SIGQUIT"), (Item){.item = i2it(SIGQUIT)});
+    js_set_key_default(signals, make_string_item("SIGILL"),  (Item){.item = i2it(SIGILL)});
+    js_set_key_default(signals, make_string_item("SIGTRAP"), (Item){.item = i2it(SIGTRAP)});
+    js_set_key_default(signals, make_string_item("SIGABRT"), (Item){.item = i2it(SIGABRT)});
+    js_set_key_default(signals, make_string_item("SIGBUS"),  (Item){.item = i2it(SIGBUS)});
+    js_set_key_default(signals, make_string_item("SIGFPE"),  (Item){.item = i2it(SIGFPE)});
+    js_set_key_default(signals, make_string_item("SIGKILL"), (Item){.item = i2it(SIGKILL)});
+    js_set_key_default(signals, make_string_item("SIGUSR1"), (Item){.item = i2it(SIGUSR1)});
+    js_set_key_default(signals, make_string_item("SIGSEGV"), (Item){.item = i2it(SIGSEGV)});
+    js_set_key_default(signals, make_string_item("SIGUSR2"), (Item){.item = i2it(SIGUSR2)});
+    js_set_key_default(signals, make_string_item("SIGPIPE"), (Item){.item = i2it(SIGPIPE)});
+    js_set_key_default(signals, make_string_item("SIGALRM"), (Item){.item = i2it(SIGALRM)});
+    js_set_key_default(signals, make_string_item("SIGTERM"), (Item){.item = i2it(SIGTERM)});
+    js_set_key_default(signals, make_string_item("SIGCHLD"), (Item){.item = i2it(SIGCHLD)});
+    js_set_key_default(signals, make_string_item("SIGCONT"), (Item){.item = i2it(SIGCONT)});
+    js_set_key_default(signals, make_string_item("SIGSTOP"), (Item){.item = i2it(SIGSTOP)});
+    js_set_key_default(signals, make_string_item("SIGTSTP"), (Item){.item = i2it(SIGTSTP)});
+    js_set_key_default(signals, make_string_item("SIGTTIN"), (Item){.item = i2it(SIGTTIN)});
+    js_set_key_default(signals, make_string_item("SIGTTOU"), (Item){.item = i2it(SIGTTOU)});
+    js_set_key_default(signals, make_string_item("SIGURG"),  (Item){.item = i2it(SIGURG)});
+    js_set_key_default(signals, make_string_item("SIGXCPU"), (Item){.item = i2it(SIGXCPU)});
+    js_set_key_default(signals, make_string_item("SIGXFSZ"), (Item){.item = i2it(SIGXFSZ)});
+    js_set_key_default(signals, make_string_item("SIGVTALRM"), (Item){.item = i2it(SIGVTALRM)});
+    js_set_key_default(signals, make_string_item("SIGPROF"), (Item){.item = i2it(SIGPROF)});
+    js_set_key_default(signals, make_string_item("SIGWINCH"), (Item){.item = i2it(SIGWINCH)});
+    js_set_key_default(signals, make_string_item("SIGIO"),   (Item){.item = i2it(SIGIO)});
+    js_set_key_default(signals, make_string_item("SIGSYS"),  (Item){.item = i2it(SIGSYS)});
 #else
-    js_property_set(signals, make_string_item("SIGHUP"),  (Item){.item = i2it(1)});
-    js_property_set(signals, make_string_item("SIGINT"),  (Item){.item = i2it(2)});
-    js_property_set(signals, make_string_item("SIGILL"),  (Item){.item = i2it(4)});
-    js_property_set(signals, make_string_item("SIGFPE"),  (Item){.item = i2it(8)});
-    js_property_set(signals, make_string_item("SIGKILL"), (Item){.item = i2it(9)});
-    js_property_set(signals, make_string_item("SIGSEGV"), (Item){.item = i2it(11)});
-    js_property_set(signals, make_string_item("SIGTERM"), (Item){.item = i2it(15)});
-    js_property_set(signals, make_string_item("SIGABRT"), (Item){.item = i2it(22)});
+    js_set_key_default(signals, make_string_item("SIGHUP"),  (Item){.item = i2it(1)});
+    js_set_key_default(signals, make_string_item("SIGINT"),  (Item){.item = i2it(2)});
+    js_set_key_default(signals, make_string_item("SIGILL"),  (Item){.item = i2it(4)});
+    js_set_key_default(signals, make_string_item("SIGFPE"),  (Item){.item = i2it(8)});
+    js_set_key_default(signals, make_string_item("SIGKILL"), (Item){.item = i2it(9)});
+    js_set_key_default(signals, make_string_item("SIGSEGV"), (Item){.item = i2it(11)});
+    js_set_key_default(signals, make_string_item("SIGTERM"), (Item){.item = i2it(15)});
+    js_set_key_default(signals, make_string_item("SIGABRT"), (Item){.item = i2it(22)});
 #endif
 
     // POSIX errno codes (use system values)
@@ -932,23 +932,23 @@ Item node_os_namespace(void) {
         {NULL, 0}
     };
     for (int i = 0; errcodes[i].name; i++) {
-        js_property_set(errno_obj, make_string_item(errcodes[i].name),
+        js_set_key_default(errno_obj, make_string_item(errcodes[i].name),
             (Item){.item = i2it((int64_t)errcodes[i].value)});
     }
 
     // os.constants.priority
     Item priority_obj = js_new_object();
     *priority_root = priority_obj.item;
-    js_property_set(priority_obj, make_string_item("PRIORITY_LOW"), (Item){.item = i2it(19)});
-    js_property_set(priority_obj, make_string_item("PRIORITY_BELOW_NORMAL"), (Item){.item = i2it(10)});
-    js_property_set(priority_obj, make_string_item("PRIORITY_NORMAL"), (Item){.item = i2it(0)});
-    js_property_set(priority_obj, make_string_item("PRIORITY_ABOVE_NORMAL"), (Item){.item = i2it(-7)});
-    js_property_set(priority_obj, make_string_item("PRIORITY_HIGH"), (Item){.item = i2it(-14)});
-    js_property_set(priority_obj, make_string_item("PRIORITY_HIGHEST"), (Item){.item = i2it(-20)});
+    js_set_key_default(priority_obj, make_string_item("PRIORITY_LOW"), (Item){.item = i2it(19)});
+    js_set_key_default(priority_obj, make_string_item("PRIORITY_BELOW_NORMAL"), (Item){.item = i2it(10)});
+    js_set_key_default(priority_obj, make_string_item("PRIORITY_NORMAL"), (Item){.item = i2it(0)});
+    js_set_key_default(priority_obj, make_string_item("PRIORITY_ABOVE_NORMAL"), (Item){.item = i2it(-7)});
+    js_set_key_default(priority_obj, make_string_item("PRIORITY_HIGH"), (Item){.item = i2it(-14)});
+    js_set_key_default(priority_obj, make_string_item("PRIORITY_HIGHEST"), (Item){.item = i2it(-20)});
 
-    js_property_set(constants, make_string_item("signals"), signals);
-    js_property_set(constants, make_string_item("errno"), errno_obj);
-    js_property_set(constants, make_string_item("priority"), priority_obj);
+    js_set_key_default(constants, make_string_item("signals"), signals);
+    js_set_key_default(constants, make_string_item("errno"), errno_obj);
+    js_set_key_default(constants, make_string_item("priority"), priority_obj);
 
     // Freeze constants and sub-objects to match Node.js behavior
     js_object_freeze(signals);
@@ -956,11 +956,11 @@ Item node_os_namespace(void) {
     js_object_freeze(priority_obj);
     js_object_freeze(constants);
 
-    js_property_set(os_namespace, make_string_item("constants"), constants);
+    js_set_key_default(os_namespace, make_string_item("constants"), constants);
 
     // default export
     Item default_key = make_string_item("default");
-    js_property_set(os_namespace, default_key, os_namespace);
+    js_set_key_default(os_namespace, default_key, os_namespace);
 
     node_os_host->node->roots->root_frame_end(&roots);
 

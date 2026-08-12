@@ -42,15 +42,24 @@ static TypeMap* js_obj_typemap(Item obj) {
         Map* m = obj.map;
         if (!m) return nullptr;
         TypeMap* tm = (TypeMap*)m->type;
-        return typemap_ptr_is_plausible(tm) ? tm : nullptr;
+#ifndef NDEBUG
+        // ordinary Map storage owns a valid TypeMap whenever it publishes one;
+        // recovering as an absent shape would turn an internal lifetime bug
+        // into an observable property miss.
+        assert(!tm || typemap_ptr_is_plausible(tm));
+#endif
+        return tm;
     }
-    if (t == LMD_TYPE_ARRAY) {
+    if (t == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(obj)) {
         Array* arr = obj.array;
         if (!js_array_has_props(arr)) return nullptr;
         Map* m = js_array_props(arr);
         if (!m) return nullptr;
         TypeMap* tm = (TypeMap*)m->type;
-        return typemap_ptr_is_plausible(tm) ? tm : nullptr;
+#ifndef NDEBUG
+        assert(!tm || typemap_ptr_is_plausible(tm));
+#endif
+        return tm;
     }
     if (t == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)obj.function;
@@ -59,7 +68,10 @@ static TypeMap* js_obj_typemap(Item obj) {
         Map* m = fn->properties_map.map;
         if (!m) return nullptr;
         TypeMap* tm = (TypeMap*)m->type;
-        return typemap_ptr_is_plausible(tm) ? tm : nullptr;
+#ifndef NDEBUG
+        assert(!tm || typemap_ptr_is_plausible(tm));
+#endif
+        return tm;
     }
     return nullptr;
 }
@@ -384,7 +396,7 @@ static Map* js_attr_ensure_array_props_map(Array* arr) {
     if (!js_array_has_props(arr)) {
         Item obj = js_new_object();
         obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-        js_array_set_props(arr, obj.map);
+        js_elements_set_props(arr, obj.map);
     }
     return js_array_props(arr);
 }
@@ -392,7 +404,8 @@ static Map* js_attr_ensure_array_props_map(Array* arr) {
 static void js_attr_mark_array_index_shape(Item target, const char* name, int name_len) {
     if (!js_attrs_name_is_digits(name, name_len)) return;
     Map* props = NULL;
-    if (get_type_id(target) == LMD_TYPE_ARRAY) {
+    if (get_type_id(target) == LMD_TYPE_ARRAY ||
+            js_is_ordinary_numeric_array(target)) {
         Array* arr = target.array;
         if (!js_array_has_props(arr)) return;
         props = js_array_props(arr);
@@ -414,7 +427,7 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
     Item target = ItemNull;
     Array* arr = nullptr;
     TypeId type = get_type_id(obj);
-    if (type == LMD_TYPE_ARRAY) {
+    if (type == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(obj)) {
         arr = obj.array;
         Map* pm = js_attr_ensure_array_props_map(arr);
         if (!pm) return false;
@@ -453,7 +466,7 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
     if (get_type_id(target) == LMD_TYPE_MAP && js_input) {
         map_put_heap(target.map, it2s(name_item), slot_value, js_input);
     } else {
-        js_property_set(target, name_item, slot_value);
+        js_define_own_key_storage(target, name_item, slot_value);
     }
     if (!js_find_shape_entry(target, name, name_len)) return false;
     js_attr_mark_array_index_shape(target, name, name_len);
@@ -499,7 +512,7 @@ static Map* js_obj_resolve_map(Item obj) {
         if (get_type_id(fn->properties_map) != LMD_TYPE_MAP) return nullptr;
         return fn->properties_map.map;
     }
-    if (t == LMD_TYPE_ARRAY) {
+    if (t == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(obj)) {
         Array* arr = obj.array;
         if (!js_array_has_props(arr)) return nullptr;
         return js_array_props(arr);
@@ -508,7 +521,8 @@ static Map* js_obj_resolve_map(Item obj) {
 }
 
 extern "C" bool js_props_obj_query_enumerable(Item obj, const char* name, int name_len) {
-    if (get_type_id(obj) == LMD_TYPE_ARRAY && name_len == 6 &&
+    if ((get_type_id(obj) == LMD_TYPE_ARRAY ||
+            js_is_ordinary_numeric_array(obj)) && name_len == 6 &&
         strncmp(name, "length", 6) == 0) {
         return false;
     }
@@ -518,7 +532,8 @@ extern "C" bool js_props_obj_query_enumerable(Item obj, const char* name, int na
 }
 
 extern "C" bool js_props_obj_query_writable(Item obj, const char* name, int name_len) {
-    if (get_type_id(obj) == LMD_TYPE_ARRAY && name_len == 6 &&
+    if ((get_type_id(obj) == LMD_TYPE_ARRAY ||
+            js_is_ordinary_numeric_array(obj)) && name_len == 6 &&
         strncmp(name, "length", 6) == 0) {
         ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
         Map* m = js_obj_resolve_map(obj);
@@ -530,7 +545,8 @@ extern "C" bool js_props_obj_query_writable(Item obj, const char* name, int name
 }
 
 extern "C" bool js_props_obj_query_configurable(Item obj, const char* name, int name_len) {
-    if (get_type_id(obj) == LMD_TYPE_ARRAY && name_len == 6 &&
+    if ((get_type_id(obj) == LMD_TYPE_ARRAY ||
+            js_is_ordinary_numeric_array(obj)) && name_len == 6 &&
         strncmp(name, "length", 6) == 0) {
         return false;
     }
@@ -593,7 +609,7 @@ static Item js_store_accessor_pair_slot(Item obj, Item name, Item pair) {
         js_func_init_property(obj, name, pair);
         return js_status_ok();
     }
-    return js_property_set(obj, name, pair);
+    return js_define_own_key_storage(obj, name, pair);
 }
 
 // =============================================================================
@@ -602,7 +618,7 @@ static Item js_store_accessor_pair_slot(Item obj, Item name, Item pair) {
 //
 // Stage C: single-mode storage. Writes ONLY a JsAccessorPair Item under the
 // actual property name X, with JSPD_IS_ACCESSOR + JSPD_NON_ENUMERABLE bits on
-// the shape entry. Reader fast-paths in js_property_get / js_prototype_lookup
+// the shape entry. Reader fast-paths in js_get_key_default / js_prototype_lookup
 // / js_object_get_own_property_descriptor detect IS_ACCESSOR and dispatch via
 // pair->getter directly (no snprintf, no separate slot, no legacy magic keys).
 //
@@ -672,7 +688,7 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
 extern "C" Map* js_obj_underlying_map(Item obj) {
     TypeId t = get_type_id(obj);
     if (t == LMD_TYPE_MAP) return obj.map;
-    if (t == LMD_TYPE_ARRAY) {
+    if (t == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(obj)) {
         Array* arr = obj.array;
         return js_array_props(arr);
     }
@@ -711,13 +727,6 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     if (get_type_id(name) != LMD_TYPE_STRING) return js_status_ok();
     String* ns = it2s(name);
     if (!ns) return js_status_ok();
-
-    // Bypass setter accessor-dispatch in our own recursive js_property_set call:
-    // we are storing the pair Item literally under name X, not invoking the
-    // existing accessor (which would call pair->setter(pair_item) — wrong).
-    // Stage D: RAII guard restores on all exits, including the early
-    // `if (!pair) return;` path below.
-    ScopedSkipAccessorDispatch _skip_guard;
 
     // Normalize "absent half" to ItemNull so read paths that gate on
     // `pair->getter.item != ItemNull.item` correctly treat an explicit-undefined

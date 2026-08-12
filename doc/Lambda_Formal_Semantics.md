@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 1.2.0 (2026-08-07)
+**Spec version:** 2.0.0 (2026-08-12)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -546,19 +546,33 @@ it.* [TE-13, C14]
 
 ### S7.6 Discharge: the handler and postfix `^`
 
-- **S7.6.1*** **`e ^ { … ~ … }` handles the error locally and is
+- **S7.6.1v2*** **`e ^ { … ^ … }` handles the error locally and is
   channel-agnostic** — it receives soft values, raised errors, and (at `pn`
-  boundaries) system faults alike, binding the error to `~` (innermost-wins).
+  boundaries) system faults alike, binding the error to handler-local `^`
+  (innermost-wins). It introduces no `~` binding; `~` retains the current-value
+  meaning supplied by an enclosing pipe, match, constraint, or view context.
   Typing mirrors `or`: `type(e ^ h) = (type(e) \ error) | type(h)`. The
   handler produces a value of the expected type or does not complete normally
   (`raise` / `return`); either way the binding it feeds is **statically
   clean** — *sound by construction*, no flow analysis: *a binding's static
   type is never a lie* (SI14). [TE-16]
-- **S7.6.2** The handler is brace-delimited, mandatorily: `^` followed by `{`
-  is the handler; `^` followed by anything else is propagation — a purely
-  lexical discriminator (`f()^ - 1` propagates then subtracts). [TE-16]
-- **S7.6.3*** **Postfix `e^` propagates**: it yields the error-free success
-  type (a type-narrowing operator — `let b = a()^` gives `b : T`,
+- **S7.6.2v2*** The handler is the left-associative postfix-primary form
+  `primary ^ { body }`, at the same precedence tier as member (`.`) and query
+  (`?`) access. Consequently `a + b ^ { h }` means `a + (b ^ { h })`; handling
+  the complete binary expression requires `(a + b) ^ { h }`. The handled
+  result is primary-like, so postfix operations continue left-to-right:
+  `e ^ { h }.field` means `(e ^ { h }).field`, and handler chains associate as
+  `(e ^ { h1 }) ^ { h2 }`. The handler is brace-delimited mandatorily: `^`
+  followed by `{` is the handler; `^` followed by anything else is
+  propagation (`f()^ - 1` propagates then subtracts). There is no prefix
+  `^ { h } e` shorthand. The caret belongs to the handler or propagation
+  construct, never to `call_expr`. [TE-16]
+- **S7.6.3v2*** **Postfix `e^` propagates** and occupies the same
+  left-associative postfix-primary tier as the handler, member access, and
+  query access. Its operand is a primary expression; parentheses admit a
+  wider expression. The propagation construct owns its caret — a call has no
+  optional trailing caret. Propagation yields the error-free success type (a
+  type-narrowing operator — `let b = a()^` gives `b : T`,
   lane-eligible) and forwards the combined error set to the enclosing
   function's declared channel. In a declared plain-`T` function it is a
   compile error. `^` on an operand whose *explicit* type excludes error is a
@@ -567,11 +581,13 @@ it.* [TE-13, C14]
 - **S7.6.4** **`?` is not propagation.** Postfix `?` is the query operator;
   `T?` is the nullable type marker. The propagation spelling is `^` — a
   deliberate divergence from Rust/Swift habits. [TE-13]
-- **S7.6.5** The retired forms `let a^err = e` and prefix `^err` /
+- **S7.6.5v2** The retired forms `let a^err = e` and prefix `^err` /
   `if (^err)` do not exist: the destructure was Go's `(v, err)` product with
   a typing hole (`a` claimed `T` while holding null), and the test is spelled
-  `e is error`. `^` has exactly three roles — postfix propagate, infix
-  handler, type-level channel — all meaning "the error channel".* [TE-16]
+  `e is error`. `^` appears in four syntactic contexts — postfix propagation,
+  postfix braced-handler delimitation, the type-level channel, and the
+  handler-local current-error atom — all meaning "the error channel". There
+  is no general prefix error test or prefix braced-handler shorthand.* [TE-16]
 - **S7.6.6** Division of labor: `or` catches all falsy without access;
   `^ { }` catches errors only, with access; `e^` catches errors only,
   propagating. `or` and `^` are *not* a soft/hard split — both work on both
@@ -1178,8 +1194,8 @@ word.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concu
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-06. Conformance plans:
-[`Lambda_Impl_Error_Handling.md`](../vibe/Lambda_Impl_Error_Handling.md),
+Status of `*`-marked rulings as of 2026-08-12. Conformance plans:
+[`Lambda_Impl_Error_Handling (done).md`](../vibe/Lambda_Impl_Error_Handling%20(done).md),
 [`Lambda_Impl_Int_Total (done).md`](../vibe/Lambda_Impl_Int_Total%20(done).md).
 
 | Ruling | Status |
@@ -1194,7 +1210,7 @@ Status of `*`-marked rulings as of 2026-08-06. Conformance plans:
 | S7.2.2–S7.2.4 | `last` keyword, `limit last N`, and `{limit:}/{last:}` options not implemented; ArrayNum negative-index audit outstanding. |
 | S7.3.1 | Strict null propagation + `skip_null` option pending. |
 | S7.4.4 | Skip-edge errors currently surface the bare `ITEM_ERROR` singleton — rich payload pending. |
-| S7.6.1, S7.6.3 | `e ^ { … }` is specified but not parsed; postfix `^` propagation implemented. System-fault capture by the handler under-specified in impl plan. |
+| S7.6.1–S7.6.3 | The handler/runtime slice is partially landed, but the grammar does not conform to S7.6.2v2/S7.6.3v2: `call_expr` still owns an optional caret; separate call/literal/binary/member and prefix-handler productions implement maximal-left rather than postfix-primary binding. System-fault capture remains incomplete. |
 | S7.6.5 | Grammar still contains the retired `^err` destructure and prefix `^`; ~240 occurrences across ~121 `.ls` files await migration; E228 diagnostic text still advertises the retired form. |
 | S7.6.7 | May-suspend handler rejection: predicate machinery exists but silently degrades instead of diagnosing. |
 | S7.7.1–S7.7.6 | TE-18 declaration-boundary skip pending (routing, case-7 tiers, edge sites). `for x: T in e` does not parse yet — case 1 is `let`/`var`-only until the grammar is extended. |

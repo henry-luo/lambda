@@ -183,6 +183,9 @@ static inline void em_normalize_import_call(MirImportEntry* entry,
     entry->call.normal_result.value.value_class = ret_class;
     entry->call.normal_result.transport = nres > 0
         ? JIT_RETURN_MIR_RESULT : JIT_RETURN_NONE;
+    // Only audited boxed-Item imports may return a transient number-home
+    // pointer; UNKNOWN also covers ordinary containers, whose values must not
+    // be misclassified as scalar homes at later retaining calls (D5.4.3).
     entry->call.normal_result.scalar_class =
         ret_class == JIT_VALUE_BOXED_ITEM &&
         !(entry->audit.flags & JIT_IMPORT_RESULT_SCALAR_STABLE)

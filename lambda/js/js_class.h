@@ -30,9 +30,15 @@
 #pragma once
 
 #include <string.h>
+#include <assert.h>
 #include "../lambda.h"
 #include "../lambda-data.hpp"
 #include "../runtime/lambda-error.h"
+
+// Ordinary numeric arrays retain Array's brand while their physical TypeId is
+// still ARRAY_NUM; class consumers must not mistake that storage transition for
+// a different observable object kind.
+extern "C" bool js_is_ordinary_numeric_array(Item value);
 
 // JsClass — typed identity for built-in classes. Order is FROZEN once shipped
 // (the byte is stored on TypeMap; renumbering would corrupt existing maps).
@@ -146,13 +152,6 @@ enum JsClass : uint8_t {
     JS_CLASS__COUNT  // sentinel
 };
 
-// P0 safety: central TypeMap pointer plausibility guard. This is a runtime
-// safety net for the known lib_marked/MIR scope-env corruption path, not the
-// root-cause fix.
-static inline bool js_typemap_ptr_is_plausible(void* p) {
-    return typemap_ptr_is_plausible(p);
-}
-
 // Read the JsClass tag carried by an object. Returns JS_CLASS_NONE for
 // non-MAP items, for MAPs without a TypeMap (`type==NULL`), and for MAPs
 // whose TypeMap was zero-init'd (the common case until a writer stamps it).
@@ -160,7 +159,10 @@ static inline bool js_typemap_ptr_is_plausible(void* p) {
 static inline JsClass js_class_get(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return JS_CLASS_NONE;
     Map* m = obj.map;
-    if (!m || !js_typemap_ptr_is_plausible(m->type)) return JS_CLASS_NONE;
+    if (!m || !m->type) return JS_CLASS_NONE;
+#ifndef NDEBUG
+    assert(typemap_ptr_is_plausible(m->type));
+#endif
     return (JsClass)((TypeMap*)m->type)->js_class;
 }
 
@@ -536,6 +538,7 @@ Item js_error_properties_map(Item obj, bool create);
 // ordinary JS properties and cannot spoof built-in brands.
 static inline JsClass js_class_id(Item obj) {
     TypeId type = get_type_id(obj);
+    if (js_is_ordinary_numeric_array(obj)) return JS_CLASS_ARRAY;
     Map* m = NULL;
     if (type == LMD_TYPE_MAP && !js_is_resting_error(obj)) {
         m = obj.map;
@@ -549,8 +552,9 @@ static inline JsClass js_class_id(Item obj) {
         return JS_CLASS_NONE;
     }
     if (!m) return JS_CLASS_NONE;
-    if (js_typemap_ptr_is_plausible(m->type)) {
-        return (JsClass)((TypeMap*)m->type)->js_class;
-    }
-    return JS_CLASS_NONE;
+    if (!m->type) return JS_CLASS_NONE;
+#ifndef NDEBUG
+    assert(typemap_ptr_is_plausible(m->type));
+#endif
+    return (JsClass)((TypeMap*)m->type)->js_class;
 }

@@ -205,8 +205,8 @@ static Item make_zlib_error(const char* method, int zret, const char* detail) {
     char msg[256];
     snprintf(msg, sizeof(msg), "%s: %s failed: %s", code, method ? method : "zlib", reason);
     Item error = js_new_error(make_string_item(msg));
-    js_property_set(error, make_string_item("code"), make_string_item(code));
-    js_property_set(error, make_string_item("errno"), (Item){.item = i2it(zret)});
+    js_set_key_default(error, make_string_item("code"), make_string_item(code));
+    js_set_key_default(error, make_string_item("errno"), (Item){.item = i2it(zret)});
     return error;
 }
 
@@ -332,7 +332,7 @@ static bool zlib_option_number_value(Item value, double* out_value);
 
 static int zlib_option_int(Item options_item, const char* name, int fallback) {
     if (get_type_id(options_item) != LMD_TYPE_MAP) return fallback;
-    Item value = js_property_get(options_item, make_string_item(name));
+    Item value = js_get_key_default(options_item, make_string_item(name));
     double number = 0.0;
     // Stream options are user JS Numbers, now boxed as FLOAT even when integral.
     if (!zlib_option_number_value(value, &number)) return fallback;
@@ -474,7 +474,7 @@ static bool zlib_validate_int_option(Item options_item, const char* key_name,
                                      const char* prop_name,
                                      int min_value, int max_value, bool allow_zero) {
     if (get_type_id(options_item) != LMD_TYPE_MAP) return true;
-    Item value = js_property_get(options_item, make_string_item(key_name));
+    Item value = js_get_key_default(options_item, make_string_item(key_name));
     if (zlib_item_is_undefined(value)) return true;
 
     double number = 0.0;
@@ -592,12 +592,12 @@ static JsZlibStreamState* zlib_stream_state_from_item(Item item) {
 }
 
 static JsZlibStreamState* zlib_stream_state_from_stream(Item stream) {
-    return zlib_stream_state_from_item(js_property_get(stream, zlib_state_key()));
+    return zlib_stream_state_from_item(js_get_key_default(stream, zlib_state_key()));
 }
 
 static void zlib_stream_clear_state(Item stream) {
     JsZlibStreamState* state = zlib_stream_state_from_stream(stream);
-    js_property_set(stream, zlib_state_key(), ItemNull);
+    js_set_key_default(stream, zlib_state_key(), ItemNull);
     zlib_stream_state_free(state);
 }
 
@@ -732,7 +732,7 @@ static const char* zlib_mode_name(int mode) {
 static Item js_zlib_transform_chunk(Item chunk, Item encoding, Item callback) {
     (void)encoding;
     Item self = js_get_this();
-    Item mode_item = js_property_get(self, make_string_item("__zlib_mode__"));
+    Item mode_item = js_get_key_default(self, make_string_item("__zlib_mode__"));
     int mode = get_type_id(mode_item) == LMD_TYPE_INT ? (int)it2i(mode_item) : 0;
     JsZlibStreamState* state = zlib_stream_state_from_stream(self);
     if (!state) {
@@ -771,7 +771,7 @@ static Item js_zlib_transform_chunk(Item chunk, Item encoding, Item callback) {
 
 static Item js_zlib_transform_flush(Item callback) {
     Item self = js_get_this();
-    Item mode_item = js_property_get(self, make_string_item("__zlib_mode__"));
+    Item mode_item = js_get_key_default(self, make_string_item("__zlib_mode__"));
     int mode = get_type_id(mode_item) == LMD_TYPE_INT ? (int)it2i(mode_item) : 0;
     JsZlibStreamState* state = zlib_stream_state_from_stream(self);
     if (!state) {
@@ -832,7 +832,7 @@ static Item js_zlib_stream_flush_method(Item kind_item, Item callback_item) {
         }
     }
 
-    Item mode_item = js_property_get(self, make_string_item("__zlib_mode__"));
+    Item mode_item = js_get_key_default(self, make_string_item("__zlib_mode__"));
     int mode = get_type_id(mode_item) == LMD_TYPE_INT ? (int)it2i(mode_item) : 0;
     JsZlibStreamState* state = zlib_stream_state_from_stream(self);
     if (!state) {
@@ -871,16 +871,16 @@ static Item js_zlib_create_transform(int mode, Item options_item) {
     JsZlibStreamState* state = zlib_stream_state_new(mode, options_item);
     if (!state) return ItemNull;
 
-    js_property_set(stream, make_string_item("__zlib_mode__"), (Item){.item = i2it(mode)});
-    js_property_set(stream, zlib_state_key(), zlib_stream_state_item(state));
+    js_set_key_default(stream, make_string_item("__zlib_mode__"), (Item){.item = i2it(mode)});
+    js_set_key_default(stream, zlib_state_key(), zlib_stream_state_item(state));
     js_mark_non_enumerable(stream, zlib_state_key());
-    js_property_set(stream, make_string_item("_transform"),
+    js_set_key_default(stream, make_string_item("_transform"),
                     js_new_native_function(js_zlib_transform_chunk));
-    js_property_set(stream, make_string_item("_flush"),
+    js_set_key_default(stream, make_string_item("_flush"),
                     js_new_native_function(js_zlib_transform_flush));
-    js_property_set(stream, make_string_item("_destroy"),
+    js_set_key_default(stream, make_string_item("_destroy"),
                     js_new_native_function(js_zlib_transform_destroy));
-    js_property_set(stream, make_string_item("flush"),
+    js_set_key_default(stream, make_string_item("flush"),
                     js_new_native_function(js_zlib_stream_flush_method));
 
     if (mode >= ZLIB_TRANSFORM_GZIP && mode <= ZLIB_TRANSFORM_UNZIP) {
@@ -957,15 +957,15 @@ static Item zlib_set_constructor(Item ns, const char* name, Target target,
     if (get_type_id(transform_proto_root.get()) == LMD_TYPE_MAP) {
         js_set_prototype(proto_root.get(), transform_proto_root.get());
     }
-    js_property_set(proto_root.get(), make_string_item("constructor"), ctor_root.get());
+    js_set_key_default(proto_root.get(), make_string_item("constructor"), ctor_root.get());
     js_mark_non_enumerable(proto_root.get(), make_string_item("constructor"));
-    js_property_set(ctor_root.get(), make_string_item("prototype"), proto_root.get());
+    js_set_key_default(ctor_root.get(), make_string_item("prototype"), proto_root.get());
     js_function_set_prototype(ctor_root.get(), proto_root.get());
     js_set_function_name(ctor_root.get(), make_string_item(name));
     if (mode >= ZLIB_TRANSFORM_GZIP && mode <= ZLIB_TRANSFORM_UNZIP) {
         zlib_constructor_prototypes[mode] = proto_root.get();
     }
-    js_property_set(ns_root.get(), make_string_item(name), ctor_root.get());
+    js_set_key_default(ns_root.get(), make_string_item(name), ctor_root.get());
     return ctor_root.get();
 }
 
@@ -985,8 +985,8 @@ extern "C" Item js_get_zlib_namespace(void) {
     // two frozen tables remain unpublished during allocating initialization.
 
     stream_root.set(js_get_stream_namespace());
-    transform_ctor_root.set(js_property_get(stream_root.get(), make_string_item("Transform")));
-    transform_proto_root.set(js_property_get(transform_ctor_root.get(), make_string_item("prototype")));
+    transform_ctor_root.set(js_get_key_default(stream_root.get(), make_string_item("Transform")));
+    transform_proto_root.set(js_get_key_default(transform_ctor_root.get(), make_string_item("prototype")));
 
     zlib_set_constructor(ns_root.get(), "Gzip",       js_zlib_createGzip,
                          ZLIB_TRANSFORM_GZIP, transform_proto_root.get());
@@ -1032,79 +1032,79 @@ extern "C" Item js_get_zlib_namespace(void) {
     Item constants = js_new_object();
     constants_root.set(constants);
     // flush modes
-    js_property_set(constants, make_string_item("Z_NO_FLUSH"),      (Item){.item = i2it(Z_NO_FLUSH)});
-    js_property_set(constants, make_string_item("Z_PARTIAL_FLUSH"), (Item){.item = i2it(Z_PARTIAL_FLUSH)});
-    js_property_set(constants, make_string_item("Z_SYNC_FLUSH"),    (Item){.item = i2it(Z_SYNC_FLUSH)});
-    js_property_set(constants, make_string_item("Z_FULL_FLUSH"),    (Item){.item = i2it(Z_FULL_FLUSH)});
-    js_property_set(constants, make_string_item("Z_FINISH"),        (Item){.item = i2it(Z_FINISH)});
-    js_property_set(constants, make_string_item("Z_BLOCK"),         (Item){.item = i2it(Z_BLOCK)});
-    js_property_set(constants, make_string_item("Z_TREES"),         (Item){.item = i2it(Z_TREES)});
+    js_set_key_default(constants, make_string_item("Z_NO_FLUSH"),      (Item){.item = i2it(Z_NO_FLUSH)});
+    js_set_key_default(constants, make_string_item("Z_PARTIAL_FLUSH"), (Item){.item = i2it(Z_PARTIAL_FLUSH)});
+    js_set_key_default(constants, make_string_item("Z_SYNC_FLUSH"),    (Item){.item = i2it(Z_SYNC_FLUSH)});
+    js_set_key_default(constants, make_string_item("Z_FULL_FLUSH"),    (Item){.item = i2it(Z_FULL_FLUSH)});
+    js_set_key_default(constants, make_string_item("Z_FINISH"),        (Item){.item = i2it(Z_FINISH)});
+    js_set_key_default(constants, make_string_item("Z_BLOCK"),         (Item){.item = i2it(Z_BLOCK)});
+    js_set_key_default(constants, make_string_item("Z_TREES"),         (Item){.item = i2it(Z_TREES)});
     // error codes
-    js_property_set(constants, make_string_item("Z_OK"),            (Item){.item = i2it(Z_OK)});
-    js_property_set(constants, make_string_item("Z_STREAM_END"),    (Item){.item = i2it(Z_STREAM_END)});
-    js_property_set(constants, make_string_item("Z_NEED_DICT"),     (Item){.item = i2it(Z_NEED_DICT)});
-    js_property_set(constants, make_string_item("Z_ERRNO"),         (Item){.item = i2it(Z_ERRNO)});
-    js_property_set(constants, make_string_item("Z_STREAM_ERROR"),  (Item){.item = i2it(Z_STREAM_ERROR)});
-    js_property_set(constants, make_string_item("Z_DATA_ERROR"),    (Item){.item = i2it(Z_DATA_ERROR)});
-    js_property_set(constants, make_string_item("Z_MEM_ERROR"),     (Item){.item = i2it(Z_MEM_ERROR)});
-    js_property_set(constants, make_string_item("Z_BUF_ERROR"),     (Item){.item = i2it(Z_BUF_ERROR)});
-    js_property_set(constants, make_string_item("Z_VERSION_ERROR"), (Item){.item = i2it(Z_VERSION_ERROR)});
+    js_set_key_default(constants, make_string_item("Z_OK"),            (Item){.item = i2it(Z_OK)});
+    js_set_key_default(constants, make_string_item("Z_STREAM_END"),    (Item){.item = i2it(Z_STREAM_END)});
+    js_set_key_default(constants, make_string_item("Z_NEED_DICT"),     (Item){.item = i2it(Z_NEED_DICT)});
+    js_set_key_default(constants, make_string_item("Z_ERRNO"),         (Item){.item = i2it(Z_ERRNO)});
+    js_set_key_default(constants, make_string_item("Z_STREAM_ERROR"),  (Item){.item = i2it(Z_STREAM_ERROR)});
+    js_set_key_default(constants, make_string_item("Z_DATA_ERROR"),    (Item){.item = i2it(Z_DATA_ERROR)});
+    js_set_key_default(constants, make_string_item("Z_MEM_ERROR"),     (Item){.item = i2it(Z_MEM_ERROR)});
+    js_set_key_default(constants, make_string_item("Z_BUF_ERROR"),     (Item){.item = i2it(Z_BUF_ERROR)});
+    js_set_key_default(constants, make_string_item("Z_VERSION_ERROR"), (Item){.item = i2it(Z_VERSION_ERROR)});
     // compression levels
-    js_property_set(constants, make_string_item("Z_NO_COMPRESSION"),      (Item){.item = i2it(Z_NO_COMPRESSION)});
-    js_property_set(constants, make_string_item("Z_BEST_SPEED"),          (Item){.item = i2it(Z_BEST_SPEED)});
-    js_property_set(constants, make_string_item("Z_BEST_COMPRESSION"),    (Item){.item = i2it(Z_BEST_COMPRESSION)});
-    js_property_set(constants, make_string_item("Z_DEFAULT_COMPRESSION"), (Item){.item = i2it(Z_DEFAULT_COMPRESSION)});
+    js_set_key_default(constants, make_string_item("Z_NO_COMPRESSION"),      (Item){.item = i2it(Z_NO_COMPRESSION)});
+    js_set_key_default(constants, make_string_item("Z_BEST_SPEED"),          (Item){.item = i2it(Z_BEST_SPEED)});
+    js_set_key_default(constants, make_string_item("Z_BEST_COMPRESSION"),    (Item){.item = i2it(Z_BEST_COMPRESSION)});
+    js_set_key_default(constants, make_string_item("Z_DEFAULT_COMPRESSION"), (Item){.item = i2it(Z_DEFAULT_COMPRESSION)});
     // strategies
-    js_property_set(constants, make_string_item("Z_FILTERED"),         (Item){.item = i2it(Z_FILTERED)});
-    js_property_set(constants, make_string_item("Z_HUFFMAN_ONLY"),     (Item){.item = i2it(Z_HUFFMAN_ONLY)});
-    js_property_set(constants, make_string_item("Z_RLE"),              (Item){.item = i2it(Z_RLE)});
-    js_property_set(constants, make_string_item("Z_FIXED"),            (Item){.item = i2it(Z_FIXED)});
-    js_property_set(constants, make_string_item("Z_DEFAULT_STRATEGY"), (Item){.item = i2it(Z_DEFAULT_STRATEGY)});
+    js_set_key_default(constants, make_string_item("Z_FILTERED"),         (Item){.item = i2it(Z_FILTERED)});
+    js_set_key_default(constants, make_string_item("Z_HUFFMAN_ONLY"),     (Item){.item = i2it(Z_HUFFMAN_ONLY)});
+    js_set_key_default(constants, make_string_item("Z_RLE"),              (Item){.item = i2it(Z_RLE)});
+    js_set_key_default(constants, make_string_item("Z_FIXED"),            (Item){.item = i2it(Z_FIXED)});
+    js_set_key_default(constants, make_string_item("Z_DEFAULT_STRATEGY"), (Item){.item = i2it(Z_DEFAULT_STRATEGY)});
     // window bits / mem level
-    js_property_set(constants, make_string_item("Z_MIN_WINDOWBITS"),  (Item){.item = i2it(8)});
-    js_property_set(constants, make_string_item("Z_MAX_WINDOWBITS"),  (Item){.item = i2it(15)});
-    js_property_set(constants, make_string_item("Z_DEFAULT_WINDOWBITS"), (Item){.item = i2it(15)});
-    js_property_set(constants, make_string_item("Z_MIN_CHUNK"),       (Item){.item = i2it(64)});
-    js_property_set(constants, make_string_item("Z_MAX_CHUNK"),       (Item){.item = i2it(INT_MAX)}); // INT_CAST_OK: zlib constant
-    js_property_set(constants, make_string_item("Z_DEFAULT_CHUNK"),   (Item){.item = i2it(16384)});
-    js_property_set(constants, make_string_item("Z_MIN_MEMLEVEL"),    (Item){.item = i2it(1)});
-    js_property_set(constants, make_string_item("Z_MAX_MEMLEVEL"),    (Item){.item = i2it(9)});
-    js_property_set(constants, make_string_item("Z_DEFAULT_MEMLEVEL"),(Item){.item = i2it(8)});
-    js_property_set(constants, make_string_item("Z_MIN_LEVEL"),       (Item){.item = i2it(-1)});
-    js_property_set(constants, make_string_item("Z_MAX_LEVEL"),       (Item){.item = i2it(9)});
-    js_property_set(constants, make_string_item("DEFLATE"),           (Item){.item = i2it(1)});
-    js_property_set(constants, make_string_item("INFLATE"),           (Item){.item = i2it(2)});
-    js_property_set(constants, make_string_item("GZIP"),              (Item){.item = i2it(3)});
-    js_property_set(constants, make_string_item("GUNZIP"),            (Item){.item = i2it(4)});
-    js_property_set(constants, make_string_item("DEFLATERAW"),        (Item){.item = i2it(5)});
-    js_property_set(constants, make_string_item("INFLATERAW"),        (Item){.item = i2it(6)});
-    js_property_set(constants, make_string_item("UNZIP"),             (Item){.item = i2it(7)});
+    js_set_key_default(constants, make_string_item("Z_MIN_WINDOWBITS"),  (Item){.item = i2it(8)});
+    js_set_key_default(constants, make_string_item("Z_MAX_WINDOWBITS"),  (Item){.item = i2it(15)});
+    js_set_key_default(constants, make_string_item("Z_DEFAULT_WINDOWBITS"), (Item){.item = i2it(15)});
+    js_set_key_default(constants, make_string_item("Z_MIN_CHUNK"),       (Item){.item = i2it(64)});
+    js_set_key_default(constants, make_string_item("Z_MAX_CHUNK"),       (Item){.item = i2it(INT_MAX)}); // INT_CAST_OK: zlib constant
+    js_set_key_default(constants, make_string_item("Z_DEFAULT_CHUNK"),   (Item){.item = i2it(16384)});
+    js_set_key_default(constants, make_string_item("Z_MIN_MEMLEVEL"),    (Item){.item = i2it(1)});
+    js_set_key_default(constants, make_string_item("Z_MAX_MEMLEVEL"),    (Item){.item = i2it(9)});
+    js_set_key_default(constants, make_string_item("Z_DEFAULT_MEMLEVEL"),(Item){.item = i2it(8)});
+    js_set_key_default(constants, make_string_item("Z_MIN_LEVEL"),       (Item){.item = i2it(-1)});
+    js_set_key_default(constants, make_string_item("Z_MAX_LEVEL"),       (Item){.item = i2it(9)});
+    js_set_key_default(constants, make_string_item("DEFLATE"),           (Item){.item = i2it(1)});
+    js_set_key_default(constants, make_string_item("INFLATE"),           (Item){.item = i2it(2)});
+    js_set_key_default(constants, make_string_item("GZIP"),              (Item){.item = i2it(3)});
+    js_set_key_default(constants, make_string_item("GUNZIP"),            (Item){.item = i2it(4)});
+    js_set_key_default(constants, make_string_item("DEFLATERAW"),        (Item){.item = i2it(5)});
+    js_set_key_default(constants, make_string_item("INFLATERAW"),        (Item){.item = i2it(6)});
+    js_set_key_default(constants, make_string_item("UNZIP"),             (Item){.item = i2it(7)});
     js_object_freeze(constants);
     Item constants_key = make_string_item("constants");
-    js_property_set(zlib_namespace, constants_key, constants);
+    js_set_key_default(zlib_namespace, constants_key, constants);
     js_mark_non_writable(zlib_namespace, constants_key);
     js_mark_non_configurable(zlib_namespace, constants_key);
 
     // codes — error code map (frozen)
     Item codes = js_new_object();
     codes_root.set(codes);
-    js_property_set(codes, make_string_item("Z_OK"),              (Item){.item = i2it(Z_OK)});
-    js_property_set(codes, make_string_item("Z_STREAM_END"),      (Item){.item = i2it(Z_STREAM_END)});
-    js_property_set(codes, make_string_item("Z_NEED_DICT"),       (Item){.item = i2it(Z_NEED_DICT)});
-    js_property_set(codes, make_string_item("Z_ERRNO"),           (Item){.item = i2it(Z_ERRNO)});
-    js_property_set(codes, make_string_item("Z_STREAM_ERROR"),    (Item){.item = i2it(Z_STREAM_ERROR)});
-    js_property_set(codes, make_string_item("Z_DATA_ERROR"),      (Item){.item = i2it(Z_DATA_ERROR)});
-    js_property_set(codes, make_string_item("Z_MEM_ERROR"),       (Item){.item = i2it(Z_MEM_ERROR)});
-    js_property_set(codes, make_string_item("Z_BUF_ERROR"),       (Item){.item = i2it(Z_BUF_ERROR)});
-    js_property_set(codes, make_string_item("Z_VERSION_ERROR"),   (Item){.item = i2it(Z_VERSION_ERROR)});
+    js_set_key_default(codes, make_string_item("Z_OK"),              (Item){.item = i2it(Z_OK)});
+    js_set_key_default(codes, make_string_item("Z_STREAM_END"),      (Item){.item = i2it(Z_STREAM_END)});
+    js_set_key_default(codes, make_string_item("Z_NEED_DICT"),       (Item){.item = i2it(Z_NEED_DICT)});
+    js_set_key_default(codes, make_string_item("Z_ERRNO"),           (Item){.item = i2it(Z_ERRNO)});
+    js_set_key_default(codes, make_string_item("Z_STREAM_ERROR"),    (Item){.item = i2it(Z_STREAM_ERROR)});
+    js_set_key_default(codes, make_string_item("Z_DATA_ERROR"),      (Item){.item = i2it(Z_DATA_ERROR)});
+    js_set_key_default(codes, make_string_item("Z_MEM_ERROR"),       (Item){.item = i2it(Z_MEM_ERROR)});
+    js_set_key_default(codes, make_string_item("Z_BUF_ERROR"),       (Item){.item = i2it(Z_BUF_ERROR)});
+    js_set_key_default(codes, make_string_item("Z_VERSION_ERROR"),   (Item){.item = i2it(Z_VERSION_ERROR)});
     js_object_freeze(codes);
     Item codes_key = make_string_item("codes");
-    js_property_set(zlib_namespace, codes_key, codes);
+    js_set_key_default(zlib_namespace, codes_key, codes);
     js_mark_non_writable(zlib_namespace, codes_key);
     js_mark_non_configurable(zlib_namespace, codes_key);
 
     Item default_key = make_string_item("default");
-    js_property_set(zlib_namespace, default_key, zlib_namespace);
+    js_set_key_default(zlib_namespace, default_key, zlib_namespace);
 
     return zlib_namespace;
 }

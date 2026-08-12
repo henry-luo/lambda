@@ -125,12 +125,12 @@ static char* node_querystring_percent_decode(const char* text, size_t length,
 #define LMD_TYPE_FUNC JUBE_VALUE_FUNCTION
 #define LMD_TYPE_SYMBOL JUBE_VALUE_SYMBOL
 #define make_string_item node_querystring_string
-#define js_property_get(ARG_OBJECT, ARG_KEY) node_querystring_host->value->property_get(ARG_OBJECT, ARG_KEY)
-#define js_property_set(ARG_OBJECT, ARG_KEY, ARG_VALUE) node_querystring_host->value->property_set_own(ARG_OBJECT, ARG_KEY, ARG_VALUE)
+#define js_get_key_default(ARG_OBJECT, ARG_KEY) node_querystring_host->value->property_get(ARG_OBJECT, ARG_KEY)
+#define js_set_key_default(ARG_OBJECT, ARG_KEY, ARG_VALUE) node_querystring_host->value->property_set_own(ARG_OBJECT, ARG_KEY, ARG_VALUE)
 #define js_array_new(ARG_CAPACITY) node_querystring_host->value->array_new(ARG_CAPACITY)
 #define js_array_push(ARG_ARRAY, ARG_VALUE) node_querystring_host->value->array_push(ARG_ARRAY, ARG_VALUE)
 #define js_array_length(ARG_ARRAY) node_querystring_host->value->array_length(ARG_ARRAY)
-#define js_array_get_int(ARG_ARRAY, ARG_INDEX) node_querystring_host->value->array_get(ARG_ARRAY, ARG_INDEX)
+#define js_elements_get_int(ARG_ARRAY, ARG_INDEX) node_querystring_host->value->array_get(ARG_ARRAY, ARG_INDEX)
 #define js_new_object() node_querystring_host->value->new_object()
 #define js_object_keys(ARG_OBJECT) node_querystring_host->script->object_keys(ARG_OBJECT)
 #define js_call_function(ARG_FUNCTION, ARG_THIS, ARG_ARGS, ARG_COUNT) node_querystring_host->script->call_function(ARG_FUNCTION, ARG_THIS, ARG_ARGS, ARG_COUNT)
@@ -472,7 +472,7 @@ static int64_t qs_parse_max_keys(Item options_item) {
     if (options_type != LMD_TYPE_MAP) {
         return max_keys;
     }
-    Item value = js_property_get(options_item, make_string_item("maxKeys"));
+    Item value = js_get_key_default(options_item, make_string_item("maxKeys"));
     if (get_type_id(value) == LMD_TYPE_INT && node_querystring_host &&
             node_querystring_host->script && node_querystring_host->script->get_number) {
         double n = node_querystring_host->script->get_number(value);
@@ -501,12 +501,12 @@ extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item, Item opt
     *object_root = obj.item;
     Item decoder = node_querystring_undefined();
     if (get_type_id(options_item) == LMD_TYPE_MAP) {
-        decoder = js_property_get(options_item, make_string_item("decodeURIComponent"));
+        decoder = js_get_key_default(options_item, make_string_item("decodeURIComponent"));
     }
     if (get_type_id(decoder) != LMD_TYPE_FUNC && qs_namespace.item != 0) {
         // querystring.parse observes replacement of the public unescape hook;
         // caching the original native function would make the namespace lie.
-        decoder = js_property_get(qs_namespace, make_string_item("unescape"));
+        decoder = js_get_key_default(qs_namespace, make_string_item("unescape"));
     }
     *decoder_root = decoder.item;
     if (get_type_id(str_item) != LMD_TYPE_STRING) {
@@ -592,7 +592,7 @@ extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item, Item opt
             if (get_type_id(key) == LMD_TYPE_STRING &&
                     get_type_id(decoded_value) == LMD_TYPE_STRING) {
                 *key_root = key.item;
-                Item existing = js_property_get(obj, key);
+                Item existing = js_get_key_default(obj, key);
                 *existing_root = existing.item;
                 // Query values may use a zero payload, so presence must use
                 // the host's own-property predicate rather than Item bits.
@@ -604,10 +604,10 @@ extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item, Item opt
                         *array_root = arr.item;
                         js_array_push(arr, existing);
                         js_array_push(arr, decoded_value);
-                        js_property_set(obj, key, arr);
+                        js_set_key_default(obj, key, arr);
                     }
                 } else {
-                    js_property_set(obj, key, decoded_value);
+                    js_set_key_default(obj, key, decoded_value);
                 }
             }
         } else if (pair_len > 0) {
@@ -623,7 +623,7 @@ extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item, Item opt
                 *key_root = key.item;
                 Item value = make_string_item("");
                 *value_root = value.item;
-                Item existing = js_property_get(obj, key);
+                Item existing = js_get_key_default(obj, key);
                 *existing_root = existing.item;
                 if (node_querystring_host->value->property_has_own(obj, key)) {
                     if (node_querystring_host->value->is_array(existing)) {
@@ -633,10 +633,10 @@ extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item, Item opt
                         *array_root = arr.item;
                         js_array_push(arr, existing);
                         js_array_push(arr, value);
-                        js_property_set(obj, key, arr);
+                        js_set_key_default(obj, key, arr);
                     }
                 } else {
-                    js_property_set(obj, key, value);
+                    js_set_key_default(obj, key, value);
                 }
             }
         }
@@ -767,7 +767,7 @@ extern "C" Item js_qs_stringify(Item obj_item, Item sep_item, Item eq_item, Item
     if (get_type_id(node_querystring_root_value(options_root)) == LMD_TYPE_MAP) {
         Item encoder_key = make_string_item("encodeURIComponent");
         *key_root = encoder_key.item;
-        encoder = js_property_get(node_querystring_root_value(options_root),
+        encoder = js_get_key_default(node_querystring_root_value(options_root),
             node_querystring_root_value(key_root));
     }
     *encoder_root = encoder.item;
@@ -825,9 +825,9 @@ extern "C" Item js_qs_stringify(Item obj_item, Item sep_item, Item eq_item, Item
     }
 
     for (int64_t i = 0; i < key_count; i++) {
-        Item key = js_array_get_int(node_querystring_root_value(keys_root), i);
+        Item key = js_elements_get_int(node_querystring_root_value(keys_root), i);
         *key_root = key.item;
-        Item val = js_property_get(node_querystring_root_value(object_root),
+        Item val = js_get_key_default(node_querystring_root_value(object_root),
             node_querystring_root_value(key_root));
         *value_root = val.item;
 
@@ -847,7 +847,7 @@ extern "C" Item js_qs_stringify(Item obj_item, Item sep_item, Item eq_item, Item
                         key_enc, (size_t)klen) ||
                         !node_querystring_append(&result, &result_capacity, &result_length,
                                 eq, (size_t)eq_len)) break;
-                Item elem = js_array_get_int(node_querystring_root_value(value_root), j);
+                Item elem = js_elements_get_int(node_querystring_root_value(value_root), j);
                 char* value_encoded = node_querystring_encode_value(elem,
                     node_querystring_root_value(encoder_root));
                 if (value_encoded) {
@@ -908,7 +908,7 @@ static void qs_set_method(Item ns, const char* name, Target target,
     Item fn = jube_new_function(node_querystring_host->script, target,
         adapter_arity);
     *function_root = fn.item;
-    js_property_set(ns, key, fn);
+    js_set_key_default(ns, key, fn);
     node_querystring_host->node->roots->root_frame_end(&frame);
 }
 
@@ -933,7 +933,7 @@ Item node_querystring_namespace(void) {
         if (key_root) {
             Item key = make_string_item("default");
             *key_root = key.item;
-            js_property_set(qs_namespace, key, qs_namespace);
+            js_set_key_default(qs_namespace, key, qs_namespace);
         }
         node_querystring_host->node->roots->root_frame_end(&frame);
     }

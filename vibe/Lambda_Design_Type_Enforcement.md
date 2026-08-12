@@ -6,11 +6,14 @@ firewall, E228 acknowledgment forms, `or`-narrowing, fault channel), tracked in
 [`vibe/Lambda_Impl_Type_Enforce.md`](Lambda_Impl_Type_Enforce.md). The annotation-performance
 work explicitly deferred by §1/§9 remains a separate follow-on. TE-15 (soft-error containment:
 skip to the closest safe boundary) and TE-16 (the `^ { }` handler; `let a^err` and `if (^err)`
-planned separately) decided 2026-08-01; the handler grammar/runtime slice is now landed. Rev 5
-(2026-08-06)
-assigns the handler-local error to `^`
+planned separately) decided 2026-08-01; the initial handler grammar/runtime slice is landed and
+the Rev 6 grammar-conformance migration remains pending. Rev 6
+(2026-08-12) adopts the S7.6.2v2/S7.6.3v2 postfix-primary grammar: handlers and
+propagation own their mandatory carets, prefix-handler shorthand is retired, and `call_expr`
+no longer owns an optional caret. Rev 5 (2026-08-06) assigns the handler-local error to `^`
 (`^`, `^.field`, `^[index]`) and leaves `~` under its existing current-value rules.
-**Date:** 2026-07-29; revised 2026-07-30; TE-15 and TE-16 added 2026-08-01
+**Date:** 2026-07-29; revised 2026-07-30; TE-15 and TE-16 added 2026-08-01;
+postfix grammar revised 2026-08-12
 **Scope:** making declared types *binding* — statically checked where provable, runtime-enforced
 where not, never silently dropped or lossy. This document is **only about enforcement
 (correctness)**. Leveraging annotations for faster code is the explicit *next* stage and is
@@ -1468,7 +1471,7 @@ ANY-poisoning this design exists to remove), or a polled side-flag (cost on ever
   is compile-time gated at the immediate expression and therefore never reaches the skip
   machinery; TE-15 governs defects and boundary-rejected soft errors only.
 
-### TE-16 — The `^ { }` error handler; `let a^err` and `if (^err)` retired (decided 2026-08-01, user)
+### TE-16 — The `^ { }` error handler; `let a^err` and `if (^err)` retired (decided 2026-08-01, revised 2026-08-12, user)
 
 **Decision.** Local error handling uses one braced syntax with two
 context-selected forms:
@@ -1482,9 +1485,10 @@ pn_call() ^ {               // statement form: handle, then continue
 
 The planned retirement of `let a^err = e` and the old prefix error test `if (^err)` remains a
 separate migration pass; the current implementation keeps those legacy forms for compatibility.
-A bare `^`, `^.field`, or `^[index]` is now a current-error reference only inside an active handler body; `^ { … }`
-inside that body always starts a nested prefix handler. This keeps the error channel consistently
-spelled with `^` while leaving `~` available for its existing current-value contexts.
+A bare `^`, `^.field`, or `^[index]` is now a current-error reference only inside an active
+handler body. A handler always has an operand on its left; the prefix `^ { … } e` shorthand does
+not exist. This keeps the error channel consistently spelled with `^` while leaving `~` available
+for its existing current-value contexts. The formal authority is **S7.6.2v2/S7.6.3v2**.
 
 #### Why the destructure had to go
 
@@ -1549,8 +1553,8 @@ then resumes after the handled statement.
 - **`^` binds the handler error.** Bare `^`, `^.field`, and `^[index]` are valid only inside an
   active handler body and resolve to the innermost handler's error. The handler introduces no
   `~` binding: `~` remains the current item/index or object model supplied by its enclosing
-  pipe, match, constraint, or view context. A nested `^ { ... }` is always a nested prefix
-  handler; it is never parsed as current-error `^` followed by a block.
+  pipe, match, constraint, or view context. Nested handling is written
+  `operand ^ { ... }`; a leading `^ { ... }` is not a handler.
 - **Channel-agnostic**, per TE-13: `^ { }` discharges both raised (`T^E`) and soft
   (`T | error`) errors.
 
@@ -1559,6 +1563,28 @@ then resumes after the handled statement.
 The handler **must** be braced. `^` followed by `{` is the handler; `^` followed by anything
 else (or nothing) is postfix propagate. This is the lexical discriminator for both the
 expression and statement forms; the surrounding AST context selects which form applies.
+
+Per **S7.6.2v2/S7.6.3v2**, both forms are left-associative postfix-primary operations at the
+same logical precedence tier as member (`.`) and query (`?`) access. Their operand is a primary
+expression; parentheses explicitly widen it. The handler result is itself primary-like, so
+postfix operations continue left-to-right. The mandatory caret is owned by the handler or
+propagation construct, never by `call_expr`:
+
+| Source | Required parse |
+|---|---|
+| `a + b ^ { h }` | `a + (b ^ { h })` |
+| `(a + b) ^ { h }` | handle the complete addition |
+| `a |> f() ^ { h }` | `a |> (f() ^ { h })` |
+| `(a |> f()) ^ { h }` | handle the complete pipe expression |
+| `e ^ { h }.field` | `(e ^ { h }).field` |
+| `e.field ^ { h }` | `(e.field) ^ { h }` |
+| `e ^ { h1 } ^ { h2 }` | `(e ^ { h1 }) ^ { h2 }` |
+| `f()^ - 1` | `(f()^) - 1` |
+
+The implementation must therefore use one postfix handler production over `primary_expr`, make
+the handler result available to the ordinary postfix chain, and remove the call/literal/binary/
+member and prefix-handler special cases. Postfix propagation follows the same ownership and
+precedence model. This supersedes TE-16's earlier maximal-left binding and prefix shorthand.
 
 The rejected alternative was the terser `e ^ expr` with "any expression after `^` is the
 handler, EOL means propagate." Two measured problems: (1) `f(5)^ - 1` **parses today and
@@ -1590,7 +1616,7 @@ real distinction is coalescing-without-access versus error-specific-with-access 
 The migration spelling **`err is error`** is available for new code (verified 2026-08-01), while
 the legacy destructure and prefix test remain accepted until their separate retirement pass. The
 handler-local current-error atom adds a distinct scoped use of `^`: postfix propagation, braced
-handler delimitation/prefix shorthand, the type-level channel, and the handler-local current error
+handler delimitation, the type-level channel, and the handler-local current error
 remain separate contexts. Outside a handler body, a bare `^` is not a value expression.
 
 #### Acknowledgement taxonomy for the enforcing channel
@@ -1657,9 +1683,11 @@ error to allowed is backward-compatible, so no code written under the rejection 
   `pn_call() ^ { H }`; its handler may complete and execution continues afterward.
 - Rewrite `if (^err)` as `if (err is error)`.
 - Grammar: in the future retirement pass, remove the legacy prefix-unary error test and old
-  destructure production; the landed slice adds the braced handler plus `current_error_expr` (`^`,
-  `^.field`, `^[index]`) with handler-body scope. Run `make generate-grammar` (never hand-edit
-  `parser.c`).
+  destructure production; replace the split call/literal/binary/member handler productions with
+  one postfix `handler_expr` over `primary_expr`; retire every prefix-handler production; make the
+  handler result primary-like; and remove the optional caret from `call_expr` so only handler and
+  propagation constructs own it. Preserve `current_error_expr` (`^`, `^.field`, `^[index]`) with
+  handler-body scope. Run `make generate-grammar` (never hand-edit `parser.c`).
 - **E228 diagnostics advertise the retired form verbatim** — "use `d(...)^` to propagate,
   `let result^err = d(...)` to capture, or `d(...) or default` to recover"
   (`build_ast.cpp:5199`, `:9017`). They must be updated in the same change or they will

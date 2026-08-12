@@ -552,7 +552,7 @@ static void timer_mark_object_destroyed(JsTimerHandle* th) {
     if (!th || !th->object.item) return;
     // The JS Timeout object is separate from the libuv handle; update it on
     // observable clear/fire paths, not during process-exit cleanup of unref'd intervals.
-    js_property_set(th->object, (Item){.item = s2it(heap_create_name("_destroyed", 10))},
+    js_set_key_default(th->object, (Item){.item = s2it(heap_create_name("_destroyed", 10))},
 	                    (Item){.item = b2it(true)});
 }
 
@@ -664,10 +664,10 @@ static void timer_emit_duration_warning(const char* name, const char* first_line
     if (len >= (int)sizeof(message)) len = (int)sizeof(message) - 1;
 
     Item warning = js_new_object();
-    js_property_set(warning,
+    js_set_key_default(warning,
         (Item){.item = s2it(heap_create_name("name", 4))},
         (Item){.item = s2it(heap_create_name(name, (int)strlen(name)))});
-    js_property_set(warning,
+    js_set_key_default(warning,
         (Item){.item = s2it(heap_create_name("message", 7))},
         (Item){.item = s2it(heap_create_name(message, len))});
     js_process_emit(
@@ -771,15 +771,15 @@ extern "C" Item js_timeout_toPrimitive(Item this_val) {
     Item self = timeout_this_or_arg(this_val);
     // Native method calls pass the coercion hint in the first ABI slot; recover
     // the receiver so numeric timer-handle coercion cannot yield undefined.
-    Item id = js_property_get(self, (Item){.item = s2it(heap_create_name("_timerId", 8))});
+    Item id = js_get_key_default(self, (Item){.item = s2it(heap_create_name("_timerId", 8))});
     return id;
 }
 
 static Item make_timer_object(int64_t id, JsClass cls) {
     Item obj = js_new_object();
-    js_property_set(obj, (Item){.item = s2it(heap_create_name("_timerId", 8))},
+    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("_timerId", 8))},
                     (Item){.item = i2it(id)});
-    js_property_set(obj, (Item){.item = s2it(heap_create_name("_destroyed", 10))},
+    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("_destroyed", 10))},
                     (Item){.item = b2it(false)});
 
     // bind methods
@@ -791,17 +791,17 @@ static Item make_timer_object(int64_t id, JsClass cls) {
     Item hasRef_fn = js_new_native_function(js_timeout_hasRef);
     Item refresh_fn = js_new_native_function(js_timeout_refresh);
 
-    js_property_set(obj, (Item){.item = s2it(heap_create_name("ref", 3))}, ref_fn);
-    js_property_set(obj, (Item){.item = s2it(heap_create_name("unref", 5))}, unref_fn);
-    js_property_set(obj, (Item){.item = s2it(heap_create_name("hasRef", 6))}, hasRef_fn);
-    js_property_set(obj, (Item){.item = s2it(heap_create_name("refresh", 7))}, refresh_fn);
+    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("ref", 3))}, ref_fn);
+    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("unref", 5))}, unref_fn);
+    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("hasRef", 6))}, hasRef_fn);
+    js_set_key_default(obj, (Item){.item = s2it(heap_create_name("refresh", 7))}, refresh_fn);
 
     // Symbol.toPrimitive uses its realm-local identity key.
     // @@toPrimitive receives the coercion hint. Declaring that ABI argument
     // prevents the generic call trampoline from invoking this one-argument C
     // function as P0 while it recovers the Timeout receiver from `this`.
     Item toPrim_fn = js_new_native_function(js_timeout_toPrimitive);
-    js_property_set(obj, js_well_known_symbol_key(2), toPrim_fn);
+    js_set_key_default(obj, js_well_known_symbol_key(2), toPrim_fn);
 
     // class identity (T5b: typed JsClass byte; legacy `__class_name__`
     // string write retired).
@@ -818,7 +818,7 @@ static int64_t extract_timer_id(Item timer_id) {
     } else if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_OBJECT || tid == LMD_TYPE_VMAP) {
         // Timeout objects may be class-stamped object shapes; clearInterval
         // must still recover _timerId or the active interval survives throws.
-        Item id = js_property_get(timer_id, (Item){.item = s2it(heap_create_name("_timerId", 8))});
+        Item id = js_get_key_default(timer_id, (Item){.item = s2it(heap_create_name("_timerId", 8))});
         if (get_type_id(id) == LMD_TYPE_INT) return it2i(id);
     }
     return -1;
@@ -1130,17 +1130,17 @@ static Item make_abort_error(Item signal) {
     Item err = js_new_object();
     // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(err, JS_CLASS_ABORT_ERROR);  // A3-T3b
-    js_property_set(err, (Item){.item = s2it(heap_create_name("name", 4))},
+    js_set_key_default(err, (Item){.item = s2it(heap_create_name("name", 4))},
                     (Item){.item = s2it(heap_create_name("AbortError", 10))});
-    js_property_set(err, (Item){.item = s2it(heap_create_name("code", 4))},
+    js_set_key_default(err, (Item){.item = s2it(heap_create_name("code", 4))},
                     (Item){.item = s2it(heap_create_name("ABORT_ERR", 9))});
-    js_property_set(err, (Item){.item = s2it(heap_create_name("message", 7))},
+    js_set_key_default(err, (Item){.item = s2it(heap_create_name("message", 7))},
                     (Item){.item = s2it(heap_create_name("The operation was aborted", 25))});
     // propagate cause from signal.reason if available
     if (get_type_id(signal) == LMD_TYPE_MAP) {
-        Item reason = js_property_get(signal, (Item){.item = s2it(heap_create_name("reason", 6))});
+        Item reason = js_get_key_default(signal, (Item){.item = s2it(heap_create_name("reason", 6))});
         if (get_type_id(reason) != LMD_TYPE_UNDEFINED && get_type_id(reason) != LMD_TYPE_NULL) {
-            js_property_set(err, (Item){.item = s2it(heap_create_name("cause", 5))}, reason);
+            js_set_key_default(err, (Item){.item = s2it(heap_create_name("cause", 5))}, reason);
         }
     }
     return err;
@@ -1167,7 +1167,7 @@ static Item check_timer_options(Item options, Item* reject_out, int* result_code
         return js_status_ok();
     }
     // validate signal if present
-    Item signal = js_property_get(options, (Item){.item = s2it(heap_create_name("signal", 6))});
+    Item signal = js_get_key_default(options, (Item){.item = s2it(heap_create_name("signal", 6))});
     if (item_is_error(signal)) {
         if (result_code) *result_code = reject_reason(signal);
         return js_status_ok();
@@ -1181,7 +1181,7 @@ static Item check_timer_options(Item options, Item* reject_out, int* result_code
             return js_status_ok();
         }
         // check if already aborted
-        Item aborted = js_property_get(signal, (Item){.item = s2it(heap_create_name("aborted", 7))});
+        Item aborted = js_get_key_default(signal, (Item){.item = s2it(heap_create_name("aborted", 7))});
         if (item_is_error(aborted)) {
             if (result_code) *result_code = reject_reason(aborted);
             return js_status_ok();
@@ -1193,7 +1193,7 @@ static Item check_timer_options(Item options, Item* reject_out, int* result_code
         }
     }
     // validate ref if present
-    Item ref = js_property_get(options, (Item){.item = s2it(heap_create_name("ref", 3))});
+    Item ref = js_get_key_default(options, (Item){.item = s2it(heap_create_name("ref", 3))});
     if (item_is_error(ref)) {
         if (result_code) *result_code = reject_reason(ref);
         return js_status_ok();
@@ -1231,7 +1231,7 @@ extern "C" void js_mock_scheduler_tick(Item delay) {
         wait->active = false;
         if (get_type_id(wait->signal) == LMD_TYPE_MAP ||
             get_type_id(wait->signal) == LMD_TYPE_OBJECT) {
-            Item aborted = js_property_get(wait->signal,
+            Item aborted = js_get_key_default(wait->signal,
                 (Item){.item = s2it(heap_create_name("aborted", 7))});
             if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
                 Item err = make_abort_error(wait->signal);
@@ -1254,13 +1254,13 @@ static Item js_mock_scheduler_wait(Item delay, Item options) {
     if (opt_rc != 0) return reject_out;
 
     Item resolvers = js_promise_with_resolvers();
-    Item promise = js_property_get(resolvers, (Item){.item = s2it(heap_create_name("promise", 7))});
-    Item resolve_fn = js_property_get(resolvers, (Item){.item = s2it(heap_create_name("resolve", 7))});
-    Item reject_fn = js_property_get(resolvers, (Item){.item = s2it(heap_create_name("reject", 6))});
+    Item promise = js_get_key_default(resolvers, (Item){.item = s2it(heap_create_name("promise", 7))});
+    Item resolve_fn = js_get_key_default(resolvers, (Item){.item = s2it(heap_create_name("resolve", 7))});
+    Item reject_fn = js_get_key_default(resolvers, (Item){.item = s2it(heap_create_name("reject", 6))});
 
     Item signal = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
     if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT) {
-        signal = js_property_get(options, (Item){.item = s2it(heap_create_name("signal", 6))});
+        signal = js_get_key_default(options, (Item){.item = s2it(heap_create_name("signal", 6))});
     }
 
     for (int i = 0; i < MAX_MOCK_SCHEDULER_WAITS; i++) {
@@ -1306,9 +1306,9 @@ static Item js_set_promise_timer(Item delay, Item value, Item options,
     Item k_promise = (Item){.item = s2it(heap_create_name("promise", 7))};
     Item k_resolve = (Item){.item = s2it(heap_create_name("resolve", 7))};
     Item k_reject = (Item){.item = s2it(heap_create_name("reject", 6))};
-    Item promise = js_property_get(resolvers, k_promise);
-    Item resolve_fn = js_property_get(resolvers, k_resolve);
-    Item reject_fn = js_property_get(resolvers, k_reject);
+    Item promise = js_get_key_default(resolvers, k_promise);
+    Item resolve_fn = js_get_key_default(resolvers, k_resolve);
+    Item reject_fn = js_get_key_default(resolvers, k_reject);
 
     // store resolve_fn as callback, value as extra_arg
     uv_loop_t *loop = lambda_uv_loop();
@@ -1337,23 +1337,23 @@ static Item js_set_promise_timer(Item delay, Item value, Item options,
 
     // if signal present, add abort listener to reject promise and clear timer
     if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT) {
-        Item signal = js_property_get(options, (Item){.item = s2it(heap_create_name("signal", 6))});
+        Item signal = js_get_key_default(options, (Item){.item = s2it(heap_create_name("signal", 6))});
         if (get_type_id(signal) == LMD_TYPE_MAP || get_type_id(signal) == LMD_TYPE_OBJECT) {
             // create an abort handler closure that captures timer id and reject_fn
             // we store timer_id and reject_fn in a wrapper object on the signal
             Item timer_id_item = (Item){.item = i2it(th->id)};
             // add 'abort' event listener — when aborted, reject the promise
-            Item listeners = js_property_get(signal, (Item){.item = s2it(heap_create_name("__listeners__", 13))});
+            Item listeners = js_get_key_default(signal, (Item){.item = s2it(heap_create_name("__listeners__", 13))});
             if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
                 // store reject_fn and timer_id in the abort entry for manual dispatch
                 Item entry = js_new_object();
-                js_property_set(entry, (Item){.item = s2it(heap_create_name("type", 4))},
+                js_set_key_default(entry, (Item){.item = s2it(heap_create_name("type", 4))},
                                 (Item){.item = s2it(heap_create_name("abort", 5))});
-                js_property_set(entry, (Item){.item = s2it(heap_create_name("__timer_reject__", 16))}, reject_fn);
-                js_property_set(entry, (Item){.item = s2it(heap_create_name("__timer_id__", 12))}, timer_id_item);
-                js_property_set(entry, (Item){.item = s2it(heap_create_name("__timer_signal__", 16))}, signal);
+                js_set_key_default(entry, (Item){.item = s2it(heap_create_name("__timer_reject__", 16))}, reject_fn);
+                js_set_key_default(entry, (Item){.item = s2it(heap_create_name("__timer_id__", 12))}, timer_id_item);
+                js_set_key_default(entry, (Item){.item = s2it(heap_create_name("__timer_signal__", 16))}, signal);
                 // the abort dispatcher handles the stored rejection path
-                js_property_set(entry, (Item){.item = s2it(heap_create_name("handler", 7))}, reject_fn);
+                js_set_key_default(entry, (Item){.item = s2it(heap_create_name("handler", 7))}, reject_fn);
                 js_array_push(listeners, entry);
             }
         }
@@ -1375,7 +1375,7 @@ extern "C" Item js_setTimeout_promisified(Item delay, Item value) {
 extern "C" void js_timer_install_promisify_custom(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     Item custom_fn = js_new_native_function(js_setTimeout_promisified);
-    js_property_set(fn_item, js_util_promisify_custom_symbol(), custom_fn);
+    js_set_key_default(fn_item, js_util_promisify_custom_symbol(), custom_fn);
 }
 
 extern "C" Item js_setImmediate_promise(Item value, Item options) {

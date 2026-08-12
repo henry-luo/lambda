@@ -45,7 +45,7 @@ static Item js_require_module_not_found(const char* specifier) {
     char message[640];
     snprintf(message, sizeof(message), "Cannot find module '%s'", name);
     Item error = js_new_error_with_name(make_string_item("Error"), make_string_item(message));
-    js_property_set(error, make_string_item("code"), make_string_item("MODULE_NOT_FOUND"));
+    js_set_key_default(error, make_string_item("code"), make_string_item("MODULE_NOT_FOUND"));
     // the returned error must stay attached to the call result; there is no
     // pending side channel for require callers to recover.
     return js_throw_value(error);
@@ -1983,7 +1983,7 @@ static char* js_require_read_package_main(char* path_buf, int path_buf_size,
     if (item_is_error(package_obj)) return NULL;
 
     Item main_key = (Item){.item = s2it(heap_create_name("main", 4))};
-    Item main_value = js_property_get(package_obj, main_key);
+    Item main_value = js_get_key_default(package_obj, main_key);
     if (item_is_error(main_value) || get_type_id(main_value) != LMD_TYPE_STRING) return NULL;
 
     String* main_str = it2s(main_value);
@@ -2130,20 +2130,20 @@ static void js_cjs_store_module(Item filename, Item module) {
 
 static Item js_cjs_exports(Item module) {
     Item exports_key = js_cjs_key("exports");
-    Item exports = js_property_get(module, exports_key);
+    Item exports = js_get_key_default(module, exports_key);
     if (get_type_id(exports) == LMD_TYPE_NULL || get_type_id(exports) == LMD_TYPE_UNDEFINED) {
         exports = js_new_object();
-        js_property_set(module, exports_key, exports);
+        js_set_key_default(module, exports_key, exports);
     }
     return exports;
 }
 
 static Item js_cjs_children(Item module) {
     Item children_key = js_cjs_key("children");
-    Item children = js_property_get(module, children_key);
+    Item children = js_get_key_default(module, children_key);
     if (get_type_id(children) != LMD_TYPE_ARRAY) {
         children = js_array_new(0);
-        js_property_set(module, children_key, children);
+        js_set_key_default(module, children_key, children);
     }
     return children;
 }
@@ -2151,7 +2151,7 @@ static Item js_cjs_children(Item module) {
 static void js_cjs_update_cached_default(Item filename, Item module) {
     Item ns = js_module_get(filename);
     if (get_type_id(ns) != LMD_TYPE_MAP && get_type_id(ns) != LMD_TYPE_OBJECT) return;
-    js_property_set(ns, js_cjs_key("default"), js_cjs_exports(module));
+    js_set_key_default(ns, js_cjs_key("default"), js_cjs_exports(module));
 }
 
 extern "C" Item js_cjs_enter(Item module, Item filename) {
@@ -2159,13 +2159,13 @@ extern "C" Item js_cjs_enter(Item module, Item filename) {
     if (get_type_id(module) != LMD_TYPE_MAP && get_type_id(module) != LMD_TYPE_OBJECT) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    js_property_set(module, js_cjs_key("id"), filename);
-    js_property_set(module, js_cjs_key("filename"), filename);
-    js_property_set(module, js_cjs_key("loaded"), (Item){.item = ITEM_FALSE});
+    js_set_key_default(module, js_cjs_key("id"), filename);
+    js_set_key_default(module, js_cjs_key("filename"), filename);
+    js_set_key_default(module, js_cjs_key("loaded"), (Item){.item = ITEM_FALSE});
     js_cjs_exports(module);
     js_cjs_children(module);
     Item parent = js_cjs_current_module();
-    js_property_set(module, js_cjs_key("parent"), parent);
+    js_set_key_default(module, js_cjs_key("parent"), parent);
     if (get_type_id(filename) == LMD_TYPE_STRING) {
         js_cjs_store_module(filename, module);
         js_cjs_update_cached_default(filename, module);
@@ -2180,7 +2180,7 @@ extern "C" Item js_cjs_enter(Item module, Item filename) {
 
 extern "C" Item js_cjs_complete(Item module) {
     if (get_type_id(module) == LMD_TYPE_MAP || get_type_id(module) == LMD_TYPE_OBJECT) {
-        js_property_set(module, js_cjs_key("loaded"), (Item){.item = ITEM_TRUE});
+        js_set_key_default(module, js_cjs_key("loaded"), (Item){.item = ITEM_TRUE});
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -2207,12 +2207,12 @@ extern "C" Item js_cjs_leave(Item module) {
 
 static Item js_cjs_create_module_metadata(Item child_filename, Item exports) {
     Item module = js_new_object();
-    js_property_set(module, js_cjs_key("id"), child_filename);
-    js_property_set(module, js_cjs_key("filename"), child_filename);
-    js_property_set(module, js_cjs_key("exports"), exports);
-    js_property_set(module, js_cjs_key("loaded"), (Item){.item = ITEM_TRUE});
-    js_property_set(module, js_cjs_key("children"), js_array_new(0));
-    js_property_set(module, js_cjs_key("parent"), ItemNull);
+    js_set_key_default(module, js_cjs_key("id"), child_filename);
+    js_set_key_default(module, js_cjs_key("filename"), child_filename);
+    js_set_key_default(module, js_cjs_key("exports"), exports);
+    js_set_key_default(module, js_cjs_key("loaded"), (Item){.item = ITEM_TRUE});
+    js_set_key_default(module, js_cjs_key("children"), js_array_new(0));
+    js_set_key_default(module, js_cjs_key("parent"), ItemNull);
     js_cjs_store_module(child_filename, module);
     return module;
 }
@@ -2246,7 +2246,7 @@ static void js_cjs_note_child(Item child_filename, Item child_exports) {
     Item children = js_cjs_children(parent);
     int64_t len = js_array_length(children);
     for (int64_t i = 0; i < len; i++) {
-        Item existing = js_array_get_int(children, i);
+        Item existing = js_elements_get_int(children, i);
         if (existing.item == child.item) return;
     }
     js_array_push(children, child);
@@ -2311,7 +2311,7 @@ extern "C" Item js_require(Item specifier) {
         // For CJS modules, the cached value is the namespace.
         // Extract the default export (which is module.exports)
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
-        Item def_val = js_property_get(existing, def_key);
+        Item def_val = js_get_key_default(existing, def_key);
         TypeId dt = get_type_id(def_val);
         if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
             if (js_cjs_specifier_is_file_path(specifier)) js_cjs_note_child(specifier, def_val);
@@ -2345,7 +2345,7 @@ extern "C" Item js_require(Item specifier) {
         jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
-        Item def_val = js_property_get(existing, def_key);
+        Item def_val = js_get_key_default(existing, def_key);
         TypeId dt = get_type_id(def_val);
         if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
             if (js_is_cjs_file(path_buf)) js_cjs_note_child(resolved_spec, def_val);
@@ -2404,7 +2404,7 @@ extern "C" Item js_require(Item specifier) {
     // For CJS, extract the default export (module.exports)
     if (js_is_cjs_file(path_buf)) {
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
-        Item def_val = js_property_get(ns, def_key);
+        Item def_val = js_get_key_default(ns, def_key);
         TypeId dt = get_type_id(def_val);
         if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
             js_cjs_note_child(resolved_spec, def_val);

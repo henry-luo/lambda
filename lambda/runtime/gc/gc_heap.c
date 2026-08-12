@@ -1358,7 +1358,18 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // Owned 1-D arrays have no outgoing pointers; views (is_view bit 5) hold
         // a base reference via the shape side-table in `extra` (offset 24).
         uint8_t* p = (uint8_t*)obj;
+        uint8_t flags = p[1];
         uint8_t array_flags = p[2];
+        // Tune5 P5: the ordinary numeric representation reserves its final
+        // eight-byte lane for the companion Map once named properties exist.
+        if ((array_flags & 0xe0u) == 0x20u && (flags & 0x40u)) {
+            void* items_ptr = *(void**)(p + 8);
+            int64_t capacity = *(int64_t*)(p + 32);
+            if (items_ptr && capacity > 0) {
+                uint64_t companion = ((uint64_t*)items_ptr)[capacity - 1];
+                gc_mark_possible_item(gc, companion);
+            }
+        }
         if (array_flags & 0x02) {  // Container.is_view in array_flags byte
             void* shape_ptr = (void*)(uintptr_t)(*(int64_t*)(p + 24));
             if (shape_ptr) {

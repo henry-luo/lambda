@@ -44,11 +44,11 @@ static bool readline_ensure_roots(void) {
 }
 
 static Item readline_get(Item obj, const char* name) {
-    return js_property_get(obj, make_string_item(name));
+    return js_get_key_default(obj, make_string_item(name));
 }
 
 static void readline_set(Item obj, const char* name, Item value) {
-    js_property_set(obj, make_string_item(name), value);
+    js_set_key_default(obj, make_string_item(name), value);
 }
 
 static bool readline_has_own(Item obj, const char* name) {
@@ -162,12 +162,12 @@ static Item readline_decode_input_text(Item rl, Item data_item) {
         }
     }
 
-    Item length_item = js_property_get(data_item, make_string_item("length"));
+    Item length_item = js_get_key_default(data_item, make_string_item("length"));
     int64_t len = get_type_id(length_item) == LMD_TYPE_INT ? it2i(length_item) : js_array_length(data_item);
     for (int64_t i = 0; i < len && pos < (int)sizeof(buf); i++) {
-        Item byte_item = js_array_get_int(data_item, i);
+        Item byte_item = js_elements_get_int(data_item, i);
         if (get_type_id(byte_item) != LMD_TYPE_INT) {
-            byte_item = js_property_get(data_item, (Item){.item = i2it(i)});
+            byte_item = js_get_key_default(data_item, (Item){.item = i2it(i)});
         }
         if (get_type_id(byte_item) != LMD_TYPE_INT) continue;
         buf[pos++] = (char)(it2i(byte_item) & 0xff);
@@ -660,10 +660,10 @@ static Item readline_stack_pop(Item rl, const char* name) {
     if (get_type_id(stack) != LMD_TYPE_ARRAY) return (Item){.item = ITEM_JS_UNDEFINED};
     int64_t len = js_array_length(stack);
     if (len <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
-    Item value = js_array_get_int(stack, len - 1);
+    Item value = js_elements_get_int(stack, len - 1);
     Item next = js_array_new(0);
     for (int64_t i = 0; i < len - 1; i++) {
-        js_array_push(next, js_array_get_int(stack, i));
+        js_array_push(next, js_elements_get_int(stack, i));
     }
     readline_set(rl, name, next);
     return value;
@@ -736,7 +736,7 @@ static void readline_history_add(Item rl, Item line) {
     bool remove_duplicates = readline_get(rl, "removeHistoryDuplicates").item == ITEM_TRUE;
     int64_t old_len = js_array_length(history);
     for (int64_t i = 0; i < old_len && js_array_length(next) < limit; i++) {
-        Item old_line = js_array_get_int(history, i);
+        Item old_line = js_elements_get_int(history, i);
         if (remove_duplicates && readline_string_items_equal(old_line, entry)) continue;
         if (get_type_id(old_line) == LMD_TYPE_STRING) js_array_push(next, old_line);
     }
@@ -759,14 +759,14 @@ static void readline_history_move(Item rl, int delta) {
         int start = index < 0 ? 0 : index + 1;
         int found = -1;
         for (int i = start; i < len; i++) {
-            if (readline_string_item_starts_with(js_array_get_int(history, i), search_item)) {
+            if (readline_string_item_starts_with(js_elements_get_int(history, i), search_item)) {
                 found = i;
                 break;
             }
         }
         if (found >= 0) {
             index = found;
-            readline_set_line_item(rl, js_array_get_int(history, index));
+            readline_set_line_item(rl, js_elements_get_int(history, index));
         } else {
             index = (int)len;
             readline_set_line_item(rl, search_item);
@@ -784,7 +784,7 @@ static void readline_history_move(Item rl, int delta) {
         if (index + 1 < len) index++;
         Item current_line = readline_get(rl, "line");
         while (index + 1 < len &&
-               readline_string_items_equal(js_array_get_int(history, index), current_line)) {
+               readline_string_items_equal(js_elements_get_int(history, index), current_line)) {
             index++;
         }
     } else if (delta > 0) {
@@ -796,7 +796,7 @@ static void readline_history_move(Item rl, int delta) {
     }
     readline_set(rl, "__history_index__", (Item){.item = i2it(index)});
     readline_set(rl, "historyIndex", (Item){.item = i2it(index)});
-    if (index >= 0 && index < len) readline_set_line_item(rl, js_array_get_int(history, index));
+    if (index >= 0 && index < len) readline_set_line_item(rl, js_elements_get_int(history, index));
 }
 
 static bool readline_emit_keypress(Item rl, char c) {
@@ -841,10 +841,10 @@ static bool readline_render_completion_matches(Item rl) {
         line_item = readline_get(rl, "line");
         line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
     }
-    String* title = get_type_id(js_array_get_int(matches, 0)) == LMD_TYPE_STRING ? it2s(js_array_get_int(matches, 0)) : NULL;
-    String* first = get_type_id(js_array_get_int(matches, 2)) == LMD_TYPE_STRING ? it2s(js_array_get_int(matches, 2)) : NULL;
-    String* second = get_type_id(js_array_get_int(matches, 3)) == LMD_TYPE_STRING ? it2s(js_array_get_int(matches, 3)) : NULL;
-    String* third = get_type_id(js_array_get_int(matches, 4)) == LMD_TYPE_STRING ? it2s(js_array_get_int(matches, 4)) : NULL;
+    String* title = get_type_id(js_elements_get_int(matches, 0)) == LMD_TYPE_STRING ? it2s(js_elements_get_int(matches, 0)) : NULL;
+    String* first = get_type_id(js_elements_get_int(matches, 2)) == LMD_TYPE_STRING ? it2s(js_elements_get_int(matches, 2)) : NULL;
+    String* second = get_type_id(js_elements_get_int(matches, 3)) == LMD_TYPE_STRING ? it2s(js_elements_get_int(matches, 3)) : NULL;
+    String* third = get_type_id(js_elements_get_int(matches, 4)) == LMD_TYPE_STRING ? it2s(js_elements_get_int(matches, 4)) : NULL;
     if (!title || !first || !second || !third || !line) return false;
 
     int char_width = readline_display_width(line, -1);
@@ -883,12 +883,12 @@ static int readline_common_prefix_len(Item matches) {
     if (get_type_id(matches) != LMD_TYPE_ARRAY) return 0;
     int64_t count = js_array_length(matches);
     if (count <= 0) return 0;
-    Item first_item = js_to_string(js_array_get_int(matches, 0));
+    Item first_item = js_to_string(js_elements_get_int(matches, 0));
     if (get_type_id(first_item) != LMD_TYPE_STRING) return 0;
     String* first = it2s(first_item);
     int prefix_len = (int)first->len;
     for (int64_t i = 1; i < count && prefix_len > 0; i++) {
-        Item current_item = js_to_string(js_array_get_int(matches, i));
+        Item current_item = js_to_string(js_elements_get_int(matches, i));
         if (get_type_id(current_item) != LMD_TYPE_STRING) {
             prefix_len = 0;
             break;
@@ -911,7 +911,7 @@ static bool readline_apply_common_completion(Item rl, Item matches, String* line
     if (!line) return false;
     int prefix_len = readline_common_prefix_len(matches);
     if (prefix_len <= (int)line->len) return false;
-    Item first_item = js_to_string(js_array_get_int(matches, 0));
+    Item first_item = js_to_string(js_elements_get_int(matches, 0));
     if (get_type_id(first_item) != LMD_TYPE_STRING) return false;
     String* first = it2s(first_item);
     if (!readline_string_starts_with(first, line)) return false;
@@ -928,7 +928,7 @@ static void readline_render_simple_completion_matches(Item rl, Item matches) {
     char buf[4096];
     int pos = 0;
     for (int64_t i = 0; i < count; i++) {
-        Item match_item = js_to_string(js_array_get_int(matches, i));
+        Item match_item = js_to_string(js_elements_get_int(matches, i));
         if (get_type_id(match_item) != LMD_TYPE_STRING) continue;
         String* match = it2s(match_item);
         if (pos > 0) readline_append_chars(buf, sizeof(buf), &pos, "\r\n", 2);
@@ -994,21 +994,21 @@ static Item readline_completion_callback_impl(Item rl, Item err_item, Item resul
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
 
-    Item matches = js_array_get_int(result_item, 0);
+    Item matches = js_elements_get_int(result_item, 0);
     if (get_type_id(matches) != LMD_TYPE_ARRAY) return (Item){.item = ITEM_JS_UNDEFINED};
     int64_t match_count = js_array_length(matches);
     readline_set(rl, "__completion_matches__", matches);
     if (js_array_length(result_item) > 1) {
-        readline_set(rl, "__completion_line__", js_array_get_int(result_item, 1));
+        readline_set(rl, "__completion_line__", js_elements_get_int(result_item, 1));
     }
     Item line_item = js_array_length(result_item) > 1 ?
-        js_array_get_int(result_item, 1) : readline_get(rl, "line");
+        js_elements_get_int(result_item, 1) : readline_get(rl, "line");
     String* line = get_type_id(line_item) == LMD_TYPE_STRING ? it2s(line_item) : NULL;
     if (match_count > 1 && readline_apply_common_completion(rl, matches, line)) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (match_count == 1) {
-        Item match = js_array_get_int(matches, 0);
+        Item match = js_elements_get_int(matches, 0);
         Item match_str = js_to_string(match);
         String* s = get_type_id(match_str) == LMD_TYPE_STRING ? it2s(match_str) : NULL;
         if (s) {
@@ -1166,7 +1166,7 @@ extern "C" Item js_readline_close(void) {
     Item self = js_get_current_this();
     readline_set(self, "closed", (Item){.item = ITEM_TRUE});
     // emit 'close' event
-    Item on_close = js_property_get(self, make_string_item("__on_close__"));
+    Item on_close = js_get_key_default(self, make_string_item("__on_close__"));
     if (js_is_callable(on_close)) {
         js_call_function(on_close, ItemNull, NULL, 0);
     }
@@ -1547,7 +1547,7 @@ extern "C" Item js_readline_on(Item event_item, Item callback_item) {
     String* ev = it2s(event_item);
     char key[64];
     snprintf(key, sizeof(key), "__on_%.*s__", (int)ev->len, ev->chars);
-    js_property_set(self, make_string_item(key), callback_item);
+    js_set_key_default(self, make_string_item(key), callback_item);
     return self;
 }
 
@@ -1567,15 +1567,15 @@ extern "C" Item js_readline_createInterface(Item options_item) {
     // extract prompt from options if available
     Item prompt_val = make_string_item("> ");
     if (get_type_id(options_item) == LMD_TYPE_MAP) {
-        Item p = js_property_get(options_item, make_string_item("prompt"));
+        Item p = js_get_key_default(options_item, make_string_item("prompt"));
         if (get_type_id(p) == LMD_TYPE_STRING) prompt_val = p;
-        Item input = js_property_get(options_item, make_string_item("input"));
+        Item input = js_get_key_default(options_item, make_string_item("input"));
         if (input.item != ITEM_NULL) readline_set(rl, "input", input);
-        Item output = js_property_get(options_item, make_string_item("output"));
+        Item output = js_get_key_default(options_item, make_string_item("output"));
         if (output.item != ITEM_NULL) readline_set(rl, "output", output);
-        Item terminal = js_property_get(options_item, make_string_item("terminal"));
+        Item terminal = js_get_key_default(options_item, make_string_item("terminal"));
         if (terminal.item != ITEM_NULL) readline_set(rl, "terminal", terminal);
-        Item completer = js_property_get(options_item, make_string_item("completer"));
+        Item completer = js_get_key_default(options_item, make_string_item("completer"));
         if (readline_has_own(options_item, "completer") && get_type_id(completer) != LMD_TYPE_UNDEFINED) {
             if (!js_is_callable(completer)) {
                 return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
@@ -1583,7 +1583,7 @@ extern "C" Item js_readline_createInterface(Item options_item) {
             }
             readline_set(rl, "completer", completer);
         }
-        Item history = js_property_get(options_item, make_string_item("history"));
+        Item history = js_get_key_default(options_item, make_string_item("history"));
         if (readline_has_own(options_item, "history") && get_type_id(history) != LMD_TYPE_UNDEFINED &&
             get_type_id(history) != LMD_TYPE_ARRAY) {
             return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
@@ -1592,11 +1592,11 @@ extern "C" Item js_readline_createInterface(Item options_item) {
         if (get_type_id(history) == LMD_TYPE_ARRAY) {
             readline_set(rl, "history", history);
         }
-        Item remove_history_duplicates = js_property_get(options_item, make_string_item("removeHistoryDuplicates"));
+        Item remove_history_duplicates = js_get_key_default(options_item, make_string_item("removeHistoryDuplicates"));
         if (get_type_id(remove_history_duplicates) == LMD_TYPE_BOOL) {
             readline_set(rl, "removeHistoryDuplicates", remove_history_duplicates);
         }
-        Item history_size = js_property_get(options_item, make_string_item("historySize"));
+        Item history_size = js_get_key_default(options_item, make_string_item("historySize"));
         if (readline_has_own(options_item, "historySize") && get_type_id(history_size) != LMD_TYPE_UNDEFINED) {
             TypeId history_size_type = get_type_id(history_size);
             if (js_key_is_symbol_c(history_size)) {
@@ -1621,7 +1621,7 @@ extern "C" Item js_readline_createInterface(Item options_item) {
                 readline_set(rl, "historySize", history_size);
             }
         }
-        Item tab_size = js_property_get(options_item, make_string_item("tabSize"));
+        Item tab_size = js_get_key_default(options_item, make_string_item("tabSize"));
         if (readline_has_own(options_item, "tabSize") && get_type_id(tab_size) != LMD_TYPE_UNDEFINED) {
             TypeId tab_size_type = get_type_id(tab_size);
             if (tab_size_type == LMD_TYPE_INT) {
@@ -1638,17 +1638,17 @@ extern "C" Item js_readline_createInterface(Item options_item) {
             }
             readline_set(rl, "tabSize", tab_size);
         }
-        Item signal = js_property_get(options_item, make_string_item("signal"));
+        Item signal = js_get_key_default(options_item, make_string_item("signal"));
         if (readline_has_own(options_item, "signal") && get_type_id(signal) != LMD_TYPE_UNDEFINED) {
-            Item aborted = js_property_get(signal, make_string_item("aborted"));
-            Item add_event_listener = js_property_get(signal, make_string_item("addEventListener"));
+            Item aborted = js_get_key_default(signal, make_string_item("aborted"));
+            Item add_event_listener = js_get_key_default(signal, make_string_item("addEventListener"));
             if (get_type_id(aborted) == LMD_TYPE_UNDEFINED ||
                 !js_is_callable(add_event_listener)) {
                 return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
                     "The \"signal\" argument must be an instance of AbortSignal");
             }
         }
-        Item crlf_delay = js_property_get(options_item, make_string_item("crlfDelay"));
+        Item crlf_delay = js_get_key_default(options_item, make_string_item("crlfDelay"));
         Item delay_item = (Item){.item = i2it(100)};
         if (get_type_id(crlf_delay) == LMD_TYPE_INT) {
             int v = it2i(crlf_delay);
@@ -1663,7 +1663,7 @@ extern "C" Item js_readline_createInterface(Item options_item) {
         }
         readline_set(rl, "crlfDelay", delay_item);
     }
-    js_property_set(rl, make_string_item("__prompt__"), prompt_val);
+    js_set_key_default(rl, make_string_item("__prompt__"), prompt_val);
     readline_set_line(rl, "", 0);
     readline_set(rl, "__tab_count__", (Item){.item = i2it(0)});
     if (get_type_id(readline_get(rl, "history")) != LMD_TYPE_ARRAY) {
@@ -1688,22 +1688,22 @@ extern "C" Item js_readline_createInterface(Item options_item) {
 
     // methods
     Item question_fn = js_new_native_function(js_readline_question);
-    js_property_set(question_fn, js_symbol_for(make_string_item("nodejs.util.promisify.custom")),
+    js_set_key_default(question_fn, js_symbol_for(make_string_item("nodejs.util.promisify.custom")),
                     js_new_native_function(js_readline_question_promisified));
-    js_property_set(rl, make_string_item("question"), question_fn);
-    js_property_set(rl, make_string_item("close"),
+    js_set_key_default(rl, make_string_item("question"), question_fn);
+    js_set_key_default(rl, make_string_item("close"),
                     js_new_native_function(js_readline_close));
-    js_property_set(rl, make_string_item("on"),
+    js_set_key_default(rl, make_string_item("on"),
                     js_new_native_function(js_readline_on));
-    js_property_set(rl, make_string_item("write"),
+    js_set_key_default(rl, make_string_item("write"),
                     js_new_native_function(js_readline_write));
-    js_property_set(rl, make_string_item("getCursorPos"),
+    js_set_key_default(rl, make_string_item("getCursorPos"),
                     js_new_native_function(js_readline_getCursorPos));
-    js_property_set(rl, make_string_item("setPrompt"),
+    js_set_key_default(rl, make_string_item("setPrompt"),
                     js_new_native_function(js_readline_setPrompt));
-    js_property_set(rl, make_string_item("getPrompt"),
+    js_set_key_default(rl, make_string_item("getPrompt"),
                     js_new_native_function(js_readline_getPrompt));
-    js_property_set(rl, make_string_item("prompt"),
+    js_set_key_default(rl, make_string_item("prompt"),
                     js_new_native_function(js_readline_prompt));
 
     Item input = readline_get(rl, "input");
@@ -1812,12 +1812,12 @@ extern "C" Item js_get_readline_namespace(void) {
 
     Item key = make_string_item("createInterface");
     Item fn = js_new_native_function(js_readline_createInterface);
-    js_property_set(readline_namespace, key, fn);
-    js_property_set(readline_namespace, make_string_item("Interface"),
+    js_set_key_default(readline_namespace, key, fn);
+    js_set_key_default(readline_namespace, make_string_item("Interface"),
                     js_new_native_constructor(js_readline_interface_constructor));
 
     Item default_key = make_string_item("default");
-    js_property_set(readline_namespace, default_key, readline_namespace);
+    js_set_key_default(readline_namespace, default_key, readline_namespace);
 
     return readline_namespace;
 }
@@ -1830,12 +1830,12 @@ extern "C" Item js_get_readline_promises_namespace(void) {
 
     Item key = make_string_item("createInterface");
     Item fn = js_new_native_function(js_readline_promises_createInterface);
-    js_property_set(readline_promises_namespace, key, fn);
-    js_property_set(readline_promises_namespace, make_string_item("Interface"),
+    js_set_key_default(readline_promises_namespace, key, fn);
+    js_set_key_default(readline_promises_namespace, make_string_item("Interface"),
                     js_new_native_constructor(js_readline_promises_interface_constructor));
 
     Item default_key = make_string_item("default");
-    js_property_set(readline_promises_namespace, default_key, readline_promises_namespace);
+    js_set_key_default(readline_promises_namespace, default_key, readline_promises_namespace);
 
     return readline_promises_namespace;
 }
