@@ -1282,11 +1282,14 @@ struct TableMetadata {
     float* col_max_widths;
     float* col_percent_widths;
     float* row_heights;
+    float* row_base_heights;
+    float* row_reference_heights;
     float* row_y_positions;
     bool* row_collapsed;
     bool* col_collapsed;
     float* col_original_widths;
     bool* row_has_percent_height;
+    bool* row_has_specified_height;
     float* col_edge_max_border;
     bool* col_has_explicit_width;
 
@@ -2883,6 +2886,10 @@ typedef struct LayoutContext {
     // Grid-specific nesting depth guard (grid-in-grid multipass recursion)
     int grid_depth;
 
+    // CSS Tables 3 §3.10.2 first cell-content layout uses special handling for
+    // direct percentage-height descendants while row heights are provisional.
+    bool table_cell_first_row_layout;
+
     // Total node count guard against pathological layouts (fuzzer-found timeouts)
     int node_count;
 
@@ -3022,6 +3029,7 @@ struct TableCellContentExtent {
 };
 
 TableCellInsets table_cell_insets(ViewTableCell* cell);
+bool layout_table_has_collapsed_borders(LayoutContext* lycon, DomElement* element);
 void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 struct ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt);
 void table_auto_layout(LayoutContext* lycon, struct ViewTable* table);
@@ -3035,6 +3043,8 @@ void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* 
 void adjust_cell_text_positions_final(struct ViewBlock* cell, float text_abs_x);
 bool wrap_orphaned_table_children(LayoutContext* lycon, struct DomElement* parent);
 bool is_table_internal_display(CssEnum display);
+bool layout_element_is_anonymous_table_fixup(const struct DomElement* element);
+void layout_unwrap_anonymous_table_fixups_for_child_insertion(struct DomElement* parent);
 
 inline bool layout_display_is_table_row_group(CssEnum display) {
     return display == CSS_VALUE_TABLE_ROW_GROUP ||
@@ -3886,6 +3896,7 @@ float layout_br_line_box_extent(LayoutContext* lycon, struct FontHandle* handle)
 bool layout_quirky_container_ignores_child_margin_bottom(
     LayoutContext* lycon, ViewBlock* container, ViewBlock* child);
 bool layout_element_was_inline(DomElement* element, bool include_replaced = true);
+bool layout_element_is_replaced(DomElement* element);
 
 struct LayoutBorderSpacingValue {
     float horizontal;
@@ -3896,6 +3907,8 @@ struct LayoutBorderSpacingValue {
 
 LayoutBorderSpacingValue layout_resolve_border_spacing_value(
     LayoutContext* lycon, const CssValue* value);
+bool layout_inherit_table_border_spacing(LayoutContext* lycon, DomNode* element,
+                                        float* spacing_h, float* spacing_v);
 bool layout_image_orientation_uses_from_image(DomElement* element);
 float layout_view_children_bottom(ViewBlock* block, bool block_only);
 
@@ -4099,12 +4112,15 @@ struct LayoutContextScope {
     BlockContext saved_block;
     Linebox saved_line;
     FontBox saved_font;
+    bool saved_table_cell_first_row_layout;
     explicit LayoutContextScope(LayoutContext* l)
-        : lycon(l), saved_block(l->block), saved_line(l->line), saved_font(l->font) {}
+        : lycon(l), saved_block(l->block), saved_line(l->line), saved_font(l->font),
+          saved_table_cell_first_row_layout(l->table_cell_first_row_layout) {}
     ~LayoutContextScope() {
         lycon->block = saved_block;
         lycon->line  = saved_line;
         lycon->font  = saved_font;
+        lycon->table_cell_first_row_layout = saved_table_cell_first_row_layout;
     }
     LayoutContextScope(const LayoutContextScope&) = delete;
     LayoutContextScope& operator=(const LayoutContextScope&) = delete;

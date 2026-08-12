@@ -748,6 +748,23 @@ bool layout_element_was_inline(DomElement* element, bool include_replaced) {
                               sizeof(replaced_tags) / sizeof(replaced_tags[0]));
 }
 
+bool layout_element_is_replaced(DomElement* element) {
+    if (!element) return false;
+    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    NameId tag = element->tag();
+    // Object and audio become replaced only when they expose external content.
+    return (view && view->display.inner == RDT_DISPLAY_REPLACED) ||
+        tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_VIDEO ||
+        tag == MARKUP_NAME_IFRAME || tag == MARKUP_NAME_HR ||
+        tag == MARKUP_NAME_SVG || tag == MARKUP_NAME_CANVAS ||
+        tag == MARKUP_NAME_EMBED || tag == MARKUP_NAME_INPUT ||
+        tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA ||
+        tag == MARKUP_NAME_METER || tag == MARKUP_NAME_PROGRESS ||
+        (tag == MARKUP_NAME_OBJECT && element->get_attribute(MARKUP_NAME_DATA)) ||
+        (tag == MARKUP_NAME_AUDIO && element->has_attribute(MARKUP_NAME_CONTROLS)) ||
+        (view && view->form_control());
+}
+
 LayoutBorderSpacingValue layout_resolve_border_spacing_value(
         LayoutContext* lycon, const CssValue* value) {
     LayoutBorderSpacingValue result = {0.0f, 0.0f, false, false};
@@ -785,6 +802,52 @@ LayoutBorderSpacingValue layout_resolve_border_spacing_value(
         }
     }
     return result;
+}
+
+bool layout_inherit_table_border_spacing(LayoutContext* lycon, DomNode* element,
+                                        float* spacing_h, float* spacing_v) {
+    if (!spacing_h || !spacing_v) return false;
+    for (DomNode* ancestor = element ? element->parent : nullptr;
+         ancestor; ancestor = ancestor->parent) {
+        if (!ancestor->is_element()) continue;
+
+        DomElement* ancestor_element = ancestor->as_element();
+        if (ancestor_element->specified_style) {
+            CssDeclaration* declaration = style_tree_get_declaration(
+                ancestor_element->specified_style, CSS_PROPERTY_BORDER_SPACING);
+            if (declaration && declaration->value) {
+                LayoutBorderSpacingValue resolved =
+                    layout_resolve_border_spacing_value(lycon, declaration->value);
+                if (resolved.resolved) {
+                    *spacing_h = resolved.horizontal;
+                    *spacing_v = resolved.vertical;
+                    return true;
+                }
+                if (!resolved.keep_inheriting) return false;
+            }
+        }
+
+        if (ancestor_element->table_prop()) {
+            *spacing_h = ancestor_element->tb->border_spacing_h;
+            *spacing_v = ancestor_element->tb->border_spacing_v;
+            return true;
+        }
+        if (ancestor_element->tag() == MARKUP_NAME_TABLE) {
+            // CSS 2.1 §17.6.1 inheritance must retain the HTML table UA value
+            // when display:block prevents the source table from allocating TableProp.
+            float spacing = 2.0f;
+            const char* cellspacing = ancestor_element->get_attribute("cellspacing");
+            if (cellspacing) {
+                spacing = (float)str_to_double_default(
+                    cellspacing, strlen(cellspacing), 0.0);
+                if (spacing < 0.0f) spacing = 0.0f;
+            }
+            *spacing_h = spacing;
+            *spacing_v = spacing;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool layout_image_orientation_uses_from_image(DomElement* element) {
@@ -1538,7 +1601,10 @@ static bool table_caption_has_box_contribution(DomElement* elem) {
 static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* elem,
                                              DisplayValue display) {
     if (!lycon || !elem) return false;
-    bool is_column_marker = display_is_table_column_marker(display);
+    // CSS Tables 3 §2.1 only suppresses a table-column marker's principal box.
+    // Replaced elements retain their intrinsic box even with a table-internal display.
+    bool is_column_marker = display_is_table_column_marker(display) &&
+        !layout_element_is_replaced(elem);
     bool is_empty_caption_marker = table_caption_is_empty_inline_marker(elem, display);
     if (!is_column_marker && !is_empty_caption_marker) return false;
 
@@ -2713,6 +2779,15 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             return;
         }
 
+        bool replaced_table_internal = layout_element_is_replaced(elem) &&
+            is_table_internal_display(display.inner);
+        DisplayValue layout_display = display;
+        if (replaced_table_internal) {
+            // CSS Tables 3 §2.1 preserves the replaced principal box while its
+            // computed table-internal display remains observable to CSSOM.
+            layout_display.inner = RDT_DISPLAY_REPLACED;
+        }
+
         if (elem->tag() == MARKUP_NAME_BR && display.outer != CSS_VALUE_NONE) {
             display.outer = CSS_VALUE_INLINE;
         }
@@ -2720,7 +2795,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         switch (display.outer) {
         case CSS_VALUE_BLOCK:  case CSS_VALUE_INLINE_BLOCK:  case CSS_VALUE_LIST_ITEM:
         case CSS_VALUE_TABLE_CELL:  // CSS display: table-cell on non-table elements
-            layout_block(lycon, node, display);
+            layout_block(lycon, node, layout_display);
+            if (replaced_table_internal) elem->display = display;
             // CSS Text 3 §5.2: Atomic inlines (inline-block, inline-table, replaced
             if (display.outer == CSS_VALUE_INLINE_BLOCK && node->parent && node->parent->is_element()) {
                 DomElement* parent_elem = node->parent->as_element();
@@ -3242,7 +3318,9 @@ static void reset_styles_resolved_recursive(DomNode* node) {
 
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        elem->set_styles_resolved(false);
+        if (!layout_element_is_anonymous_table_fixup(elem)) {
+            elem->set_styles_resolved(false);
+        }
 
         DomNode* child = elem->first_child;
         while (child) {

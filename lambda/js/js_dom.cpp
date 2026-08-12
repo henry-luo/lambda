@@ -52,6 +52,7 @@ extern Item js_make_number(double d);
 #include "../io/input-allocation-context.h"
 #include "../../radiant/view.hpp"
 #include "../../radiant/event.hpp"
+#include "../../radiant/layout.hpp"
 #include "../../radiant/render.hpp"
 #include "../input/html5/html5_parser.h"
 #include "../../lib/hashmap.h"
@@ -287,7 +288,9 @@ static void js_dom_mark_dirty_subtree(DomNode* root) {
     root->layout_dirty = true;
     if (root->is_element()) {
         DomElement* elem = root->as_element();
-        elem->set_styles_resolved(false);
+        // generated table roles survive an ancestor style mutation; no authored
+        // declaration exists from which a later reflow could reconstruct them.
+        if (!elem->is_table_fixup()) elem->set_styles_resolved(false);
         for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
             js_dom_mark_dirty_subtree(child);
         }
@@ -298,7 +301,8 @@ static void js_dom_mark_dirty_ancestors(DomNode* node) {
     for (DomNode* cur = node; cur; cur = cur->parent) {
         cur->layout_dirty = true;
         if (cur->is_element()) {
-            cur->as_element()->set_styles_resolved(false);
+            DomElement* elem = cur->as_element();
+            if (!elem->is_table_fixup()) elem->set_styles_resolved(false);
         }
     }
 }
@@ -392,6 +396,10 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
                                           const char* old_value = nullptr) {
     DomDocument* doc = js_dom_mutation_document(target, parent);
     if (!doc) return;
+
+    if (kind == DOM_JS_MUTATION_CHILD_INSERT && parent && parent->is_element()) {
+        layout_unwrap_anonymous_table_fixups_for_child_insertion(parent->as_element());
+    }
 
     doc->js.mutation_count++;
     doc->js.mutation_sequence++;
@@ -14247,6 +14255,7 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
 typedef enum JsDomChildNodePlacement {
     JS_DOM_CHILD_NODE_REPLACE,
     JS_DOM_CHILD_NODE_AFTER,
+    JS_DOM_CHILD_NODE_BEFORE,
 } JsDomChildNodePlacement;
 
 typedef struct JsDomRelativeArgument {
@@ -14294,7 +14303,10 @@ static Item js_dom_child_node_insert_relative(DomNode* node, Item* args, int arg
         insertion_args[i].node = insertion;
     }
 
-    DomNode* viable_next = node->next_sibling;
+    // before() keeps the receiver as the insertion reference; after() starts
+    // with its following sibling so sibling moves preserve their DOM order.
+    DomNode* viable_next = placement == JS_DOM_CHILD_NODE_BEFORE
+        ? node : node->next_sibling;
     while (viable_next) {
         bool moved_by_arguments = false;
         for (int i = 0; i < argc; i++) {
@@ -14966,6 +14978,11 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     if (operation == JUBE_DOM_AFTER) {
         return js_dom_child_node_insert_relative(
             node, args, argc, JS_DOM_CHILD_NODE_AFTER);
+    }
+
+    if (operation == JUBE_DOM_BEFORE) {
+        return js_dom_child_node_insert_relative(
+            node, args, argc, JS_DOM_CHILD_NODE_BEFORE);
     }
 
     // v12b: toggleAttribute(name [, force])

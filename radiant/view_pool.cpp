@@ -647,7 +647,9 @@ static void view_teardown_clear_element_scalars(DomElement* elem) {
     elem->content_width = 0.0f;
     elem->content_height = 0.0f;
     elem->set_has_cached_intrinsic_widths(false);
-    elem->set_styles_resolved(false);
+    if (!layout_element_is_anonymous_table_fixup(elem)) {
+        elem->set_styles_resolved(false);
+    }
     elem->set_float_prelaid(false);
     elem->reset_view_ext();
 }

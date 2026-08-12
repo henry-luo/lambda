@@ -4795,7 +4795,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
     if (block->is_element()) {
         layout_materialize_pseudo_content(lycon, block, true, true);
     }
-    if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe, hr, form controls, SVG
+    bool is_replaced_element = block->display.inner == RDT_DISPLAY_REPLACED ||
+        layout_element_is_replaced(block->as_element());
+    if (is_replaced_element) {  // image, iframe, hr, form controls, SVG
         NameId elmt_name = block->tag();
         bool canvas_width_is_contained = elmt_name == MARKUP_NAME_CANVAS &&
             layout_block_has_size_containment_in_axis(block, true) &&
@@ -6150,6 +6152,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     apply_canvas_object_view_box_auto_size(lycon, block);
     // CSS 2.1 §10.3.2/§10.6.2: For replaced elements with 'width: auto' or
     if (elmt_name == MARKUP_NAME_IFRAME) {
+        // Table-internal display resolution can skip BlockProp creation, but an
+        // iframe's intrinsic fallback must persist on the box's used-size slots.
+        block->ensure_block(lycon);
         LayoutAxisPair<float> defaults = {300.0f, 150.0f};
         LayoutAxisPair<float> parent_sizes = {
             pa_block ? pa_block->content_width : 0.0f,
@@ -6160,6 +6165,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             LayoutAxisRefs context(&lycon->block, axis);
             LayoutAxisRefs props(block->block_mut(), axis);
             bool has_percent = props.given_percent && !isnan(*props.given_percent);
+            if (context.given && *context.given >= 0.0f &&
+                props.given && *props.given < 0.0f && !has_percent) {
+                // The intrinsic fallback was selected before this table-internal
+                // box allocated BlockProp; retain it for iframe finalization.
+                layout_store_given_axis(lycon, block, *context.given, horizontal, false);
+                layout_clear_auto_axis_type(block, horizontal);
+            }
             if (context.given && *context.given < 0.0f && !has_percent) {
                 layout_store_given_axis(lycon, block, defaults[axis], horizontal, false);
                 layout_clear_auto_axis_type(block, horizontal);
@@ -6305,6 +6317,25 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             block->blk->given_height = -1.0f;
             block->blk->given_height_type = CSS_VALUE_AUTO;
             lycon->block.given_height = -1.0f;
+        }
+    }
+    if (lycon->table_cell_first_row_layout && block->blk &&
+        !isnan(block->block()->given_height_percent)) {
+        ViewElement* parent = block->parent_view();
+        bool is_direct_cell_child = parent && parent->view_type == RDT_VIEW_TABLE_CELL;
+        bool is_replaced = block->display.inner == RDT_DISPLAY_REPLACED;
+        bool non_scrolling_overflow = !block->scroller ||
+            ((block->scroll()->overflow_x == CSS_VALUE_VISIBLE ||
+              block->scroll()->overflow_x == CSS_VALUE_CLIP ||
+              block->scroll()->overflow_x == CSS_VALUE_HIDDEN) &&
+             (block->scroll()->overflow_y == CSS_VALUE_VISIBLE ||
+              block->scroll()->overflow_y == CSS_VALUE_CLIP ||
+              block->scroll()->overflow_y == CSS_VALUE_HIDDEN));
+        if (is_direct_cell_child && !is_replaced && !non_scrolling_overflow) {
+            // CSS Tables 3 §3.10.2: scrolling percentage-height children are
+            // zero-sized for row sizing, leaving min-height as their contribution.
+            layout_store_given_axis(lycon, block, 0.0f, false, false);
+            block->block_mut()->given_height_type = CSS_VALUE__LENGTH;
         }
     }
     // CSS 2.1 §10.4: Track whether image dimensions were auto-derived from intrinsic ratio.
@@ -7913,6 +7944,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         elmt));
     block->display = display;
     dom_node_resolve_style(elmt, lycon);
+    if (display.inner == RDT_DISPLAY_REPLACED &&
+        layout_element_is_replaced(block->as_element()) &&
+        is_table_internal_display(block->display.inner)) {
+        // Preserve replaced layout semantics after style resolution restores the
+        // computed table-internal display (CSS Tables 3 §2.1).
+        block->display.inner = RDT_DISPLAY_REPLACED;
+    }
     if (block->tag() == MARKUP_NAME_FRAMESET && lycon->ui_context) {
         block->ensure_block(lycon);
         if (layout_css_size_is_automatic(block, true) &&

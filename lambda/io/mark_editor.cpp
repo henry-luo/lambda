@@ -74,6 +74,36 @@ static DomNode* mark_editor_take_relinked_ui_child(DomNode* old_first,
     return nullptr;
 }
 
+static bool mark_editor_synthetic_subtree_contains_item(DomNode* node, Item item) {
+    if (!node) return false;
+    TypeId type_id = get_type_id(item);
+    if (node->is_element()) {
+        DomElement* element = node->as_element();
+        if (type_id == LMD_TYPE_ELEMENT && item.element && !element->is_synthetic() &&
+            dom_element_to_element(element) == item.element) {
+            return true;
+        }
+        for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+            if (mark_editor_synthetic_subtree_contains_item(child, item)) return true;
+        }
+        return false;
+    }
+    if (type_id != LMD_TYPE_STRING || !node->is_text()) return false;
+    return node->as_text()->native_string == item.get_safe_string();
+}
+
+static DomNode* mark_editor_find_synthetic_child_proxy(DomNode* old_first,
+                                                        DomElement* parent, Item item) {
+    for (DomNode* candidate = old_first; candidate; candidate = candidate->next_sibling) {
+        if (!candidate->is_element() || candidate->parent != parent ||
+            !candidate->as_element()->is_synthetic()) {
+            continue;
+        }
+        if (mark_editor_synthetic_subtree_contains_item(candidate, item)) return candidate;
+    }
+    return nullptr;
+}
+
 static DomNode* mark_editor_create_relinked_ui_child(DomElement* parent, Item child) {
     if (!parent || !parent->doc) return nullptr;
     TypeId type_id = get_type_id(child);
@@ -241,7 +271,11 @@ void MarkEditor::dom_relink_children(Element* parent_elem) {
     // lets the DOM removal bridge unlink the one deleted wrapper afterwards.
     for (int64_t i = 0; i < parent_elem->length; i++) {
         Item child = parent_elem->items[i];
-        DomNode* node = mark_editor_take_relinked_ui_child(old_first, parent, child);
+        DomNode* node = mark_editor_find_synthetic_child_proxy(old_first, parent, child);
+        if (node && mark_editor_relinked_node_index(relinked_nodes, node) >= 0) {
+            continue;
+        }
+        if (!node) node = mark_editor_take_relinked_ui_child(old_first, parent, child);
         if (!node) {
             node = mark_editor_create_relinked_ui_child(parent, child);
         }
@@ -253,6 +287,8 @@ void MarkEditor::dom_relink_children(Element* parent_elem) {
         }
     }
 
+    // layout-only wrappers own authored descendants in the visual tree. Keeping
+    // them opaque prevents a DOM mutation from duplicating generated table boxes.
     // Mark-backed edits rebuild from Element::items and would otherwise drop
     // DOM-only nodes such as createComment() results from the sibling chain.
     // Reinsert each survivor after its nearest preceding old sibling so new

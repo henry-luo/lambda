@@ -161,13 +161,25 @@ BlockProp* DomElement::ensure_block(LayoutContext* lycon) {
 FontProp* DomElement::ensure_font(LayoutContext* lycon) {
     bool was_absent = !font;
     FontProp* value = ensure_view_prop(prop_pool(lycon), font, FONT_PROP_DEFAULT);
-    if (value && was_absent && lycon && lycon->font.style) {
-        // Font groups inherit as a value snapshot so later cascade mutation remains element-owned.
-        *value = *lycon->font.style;
-        value->owns_font_handle = false;
-        // The inherited FontProp snapshot owns its mutable text-shadow chain;
-        // sharing the parent's list would make retained reset double-free it.
-        value->text_shadow = clone_text_shadows(prop_pool(lycon), lycon->font.style->text_shadow);
+    if (value && was_absent && lycon) {
+        if (lycon->font.style) {
+            // Font groups inherit as a value snapshot so later cascade mutation remains element-owned.
+            *value = *lycon->font.style;
+            value->owns_font_handle = false;
+            // The inherited FontProp snapshot owns its mutable text-shadow chain;
+            // sharing the parent's list would make retained reset double-free it.
+            value->text_shadow = clone_text_shadows(prop_pool(lycon), lycon->font.style->text_shadow);
+        }
+        if (!value->family && lycon->ui_context) {
+            // Rendering falls back to this face already; materialize the CSS initial
+            // family in the computed value before descendants can snapshot it.
+            bool is_html5 = !lycon->doc || !lycon->doc->view_tree ||
+                lycon->doc->view_tree->html_version == HTML5;
+            FontProp* initial_font = is_html5
+                ? &lycon->ui_context->default_font
+                : &lycon->ui_context->legacy_default_font;
+            value->family = initial_font->family;
+        }
         assert(value->font_size >= 0);
     }
     return value;

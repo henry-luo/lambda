@@ -369,6 +369,7 @@ typedef enum JubeDomElementOperation {
     JUBE_DOM_GET_CTM,
     JUBE_DOM_GET_SCREEN_CTM,
     JUBE_DOM_AFTER,
+    JUBE_DOM_BEFORE,
 } JubeDomElementOperation;
 
 struct JubeHostObjectOps {
