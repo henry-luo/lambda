@@ -1,0 +1,726 @@
+# Unified AST Compiler Consolidation and Tuning — Detailed Implementation Plan
+
+**Date:** 2026-08-12  
+**Status:** Ready for implementation; all implementation checkboxes are initially open  
+**Design authority:** `doc/Lambda_Formal_Design.md` D2.4.1–D2.4.3, D3.2.3, D3.3.1, D5.3.4, D8.1.1, D8.2.1–D8.2.6, D8.4.3, D8.5.1–D8.5.3, D8.6.1, D8.6.3–D8.6.4  
+**Working design:** `vibe/Lambda_Design_Unified_AST.md` U27–U36  
+**Predecessor:** `vibe/Lambda_Impl_Unified_AST (done).md` (structural convergence record; not the checklist for this continuation)
+
+---
+
+## 1. Outcome
+
+Finish the Lambda/LambdaJS compiler convergence at the **process** level, not merely at the struct/enum level:
+
+1. both front-ends feed one indexed compilation unit and one explicit pass schedule;
+2. binding, traversal, analysis facts, inference, representation planning, MIR value flow, and final emission use common infrastructure;
+3. language profiles retain only real semantic differences;
+4. repeated scans, linear rediscovery, transient MIR values, redundant boxing, and duplicate lowering paths are removed;
+5. the implementation closes only when it passes all semantic, LOC, and compiler-time gates in §2.
+
+This plan does not unify the Tree-sitter grammars or erase Lambda/JavaScript semantic differences. It shares compiler mechanics and scheduling while keeping coercion, object access, errors, calls, and extension nodes profile-owned, as required by **D8.2.1–D8.2.2**.
+
+---
+
+## 2. Non-negotiable exit gates
+
+Under **D8.6.4**, all gates in this section are hard. A green test suite cannot compensate for a missed LOC or performance gate, and a faster test scheduler cannot compensate for unchanged compiler work.
+
+| Gate | Requirement | Pass condition |
+|---|---|---|
+| **G0 — semantics** | Preserve behavior, error identity, inference transparency, representation/rooting invariants, and MIR budgets | All commands in §11 pass; no baseline ratchet is weakened |
+| **G1 — runtime LOC** | Remove at least 2,000 net physical C/C++ lines from Lambda/JS runtime/compiler code | Candidate count ≤ **317,606**, using the fail-closed scope and anchor below |
+| **G2 — Lambda compiler time** | Reduce build/transpile time of the complete `test_lambda_gtest` compilation corpus by at least 10% | `candidate_median / baseline_median ≤ 0.90` |
+| **G3 — JS compiler time** | Reduce build/transpile time of the complete `test_js_gtest` compilation corpus by at least 20% | `candidate_median / baseline_median ≤ 0.80` |
+| **G4 — JS MIR volume** | Reduce finalized MIR instructions for the frozen large-JS-library cohort by at least 15%; do not grow the complete JS corpus | library `candidate/base ≤ 0.85`; complete-corpus `candidate/base ≤ 1.00` |
+| **G5 — measurement integrity** | Compare identical release-mode compiler work and MIR artifacts | Same timing/volume schema, sample and cohort manifests, cache classification, suite result, and machine conditions; no missing/duplicate/retried samples |
+
+### 2.1 LOC anchor and scope
+
+The LOC anchor is the live pre-plan commit:
+
+```text
+AST_TUNE_LOC_BASE=e66e5b5c71bc7ee7fe2d1e2b2a9afe27dc6825a3
+baseline physical LOC=319606
+required candidate physical LOC<=317606
+```
+
+The count is the total physical lines of every tracked `*.c`, `*.cc`, `*.cpp`, `*.h`, and `*.hpp` file under:
+
+```text
+lambda/runtime/
+lambda/js/
+```
+
+Rules:
+
+- new shared compiler/runtime files remain inside these roots and count against the candidate;
+- a source move outside these roots does not count as deletion and invalidates G1 until the moved path is added to the scope;
+- deleted files count as zero in the candidate; new candidate files count from zero in the baseline;
+- test, documentation, generated-build, and utility-script LOC neither helps nor hurts G1;
+- whitespace reformatting, line joining, minification, or bulk comment stripping is not an acceptable deletion rationale;
+- every phase maintains a deletion ledger naming the duplicate functions/paths removed. The final review must explain at least 2,000 lines as deleted implementation, not formatting.
+
+Phase 0 adds `utils/check_ast_tune_loc.sh`. It computes the union of matching files in the anchor tree and candidate tree, fails if the anchor is unavailable, rejects scope escapes recorded by the build-source audit, and prints baseline/candidate/delta/threshold. The verifier itself is outside the counted runtime scope.
+
+### 2.2 Compiler-time definition
+
+For this plan, **build/transpile time** means the internally measured source-to-linked-MIR compiler interval:
+
+```text
+parse
++ AST build
++ bind
++ validate / early errors
++ index and call graph
++ capture, effect, type, representation, and function planning
++ MIR lowering
++ emitter/root/scalar/module finalization
++ MIR link
+= build_transpile_us
+```
+
+It excludes:
+
+- test discovery and GTest startup;
+- process creation and batch scheduling;
+- program execution;
+- output comparison;
+- cleanup and process teardown.
+
+Those excluded fields remain recorded so scheduler or runtime improvements are visible, but they cannot satisfy G2/G3. Parse is included because the gate represents the complete compiler work performed for a test; phase totals also report `ast_and_analysis_us` and `mir_and_link_us` so a parser change cannot hide a builder/lowering regression.
+
+### 2.3 Finalized MIR-volume definition
+
+G4 uses `test_js_gtest` itself; no separate synthetic MIR benchmark is introduced. With timing/volume mode enabled, the compiler prints one machine-readable record after finalizing each test's top-level MIR module:
+
+```text
+MIR_VOLUME schema=1 sample_id=<id> test_name=<escaped-name> modules=1 functions=<n> insns=<n>
+```
+
+The GTest harness strips this protocol line before expected-output comparison, validates it, and writes the values into the run TSV. Batch, direct, permission, module-profile, and DOM test paths must all emit the same record.
+
+The hard unit is **finalized MIR instruction count**:
+
+- count all instructions in all functions belonging to the test's finalized top-level module;
+- exclude labels, local declarations, module/function headers, terminators, and diagnostic comments, matching `test/test_mir_ratchet_gtest.cpp` and `count_module_instructions()` in `test/test_mir_check_helpers.hpp`;
+- do not use `MirEmitter`'s pre-finish counter, raw MIR text bytes, JIT machine-code bytes, or execution counters as the gate;
+- imported modules are not charged repeatedly to an importing test. Their own compilation samples remain visible separately where applicable;
+- full textual MIR dumping remains available for diagnosis, but the gate prints only the numeric size record so dump formatting and I/O cannot affect performance captures.
+
+Phase 0 freezes two manifests from the instrumentation-only baseline:
+
+1. **complete JS manifest:** every top-level test compiled by the unfiltered `test_js_gtest` run;
+2. **large-library cohort:** every discovered test whose `test_name` begins `lib_`, plus `underscore_lib`. This includes the large Acorn, AJV, Lodash, Ramda, Yup, and other checked-in library fixtures.
+
+G4 passes only when:
+
+```text
+sum(candidate finalized insns for frozen large-library cohort)
+---------------------------------------------------------------- <= 0.85
+sum(baseline finalized insns for frozen large-library cohort)
+
+sum(candidate finalized insns for complete frozen JS manifest)
+---------------------------------------------------------------- <= 1.00
+sum(baseline finalized insns for complete frozen JS manifest)
+```
+
+Every test/library also gets a before/after row with instruction delta and percentage. Individual rows may grow only when the aggregate gates still pass and the MIR diff explains the trade; no sample may be added, removed, cached away, or renamed in the comparison. The instruction count must be identical across all repeated runs of the same commit; any run-to-run MIR-volume difference invalidates the capture as nondeterministic.
+
+### 2.4 Baseline anchor for performance and MIR volume
+
+Current timing support is not suitable for a hard comparison:
+
+- Lambda's `LAMBDA_PROFILE=1` writes `temp/phase_profile.txt`, is capped, and concurrent batch processes can overwrite the same file.
+- JS already emits useful phase fields under `JS_TRANSPILE_TIMING=1`, including its `BATCH_END` line, but `test_js_gtest` currently discards them.
+- Lambda's batch protocol reports status without compiler phases; `test_lambda_gtest` measures end-to-end elapsed time externally.
+
+Therefore Phase 0 first lands **instrumentation only**, with no optimization or pass reordering. The commit containing that behavior-neutral instrumentation becomes `AST_TUNE_PERF_BASE`. Baseline release captures are produced from that exact commit before Phase 1 starts. G2/G3 compare compiler time and G4 compares finalized MIR volume against those captures. The performance/volume anchor may differ from the LOC anchor because the instrumentation is necessary to observe the original compiler faithfully; its runtime LOC still counts against the final G1 result.
+
+---
+
+## 3. Live evidence and optimization priorities
+
+### 3.1 Structural state
+
+- `lambda/runtime/ast-core.hpp` owns the common node catalog.
+- `lambda/js/js_ast.hpp` aliases 53 common node kinds and retains a small JS/TS-specific range.
+- `AstNode`, `FnAnalysis`, and `MirEmitter` are shared foundations.
+- `lambda/runtime/build_ast.cpp` is 12,472 lines; `lambda/js/build_js_ast.cpp` is 4,786 lines.
+- Builder responsibilities remain asymmetric: Lambda performs more binding/type work during build; JS reconstructs more facts in MIR preparation and lowering.
+- Core AST ownership is still encoded in many independent switches/walks.
+- JS has repeated linear function/class lookup and quadratic propagation/duplicate-detection shapes that should become indexed graph operations.
+
+### 3.2 Representative large-JS profile
+
+Release-mode spot measurements on 2026-08-12 used the existing JS timers. They are diagnostic evidence, not the formal G3 baseline:
+
+| Fixture | Source | AST | MIR lower | Link | Compile subtotal | MIR share |
+|---|---:|---:|---:|---:|---:|---:|
+| Underscore | 32 KiB | 3.0 ms | 188 ms | 22 ms | 223 ms | 84% |
+| Ramda min | 53 KiB | 6.5 ms | 771 ms | 75 ms | 865 ms | 89% |
+| Lodash | 78 KiB | 15.4 ms | 2,924 ms | 158 ms | 3,116 ms | 94% |
+| AJV | 125 KiB | 9.9 ms | 491 ms | 52 ms | 574 ms | 86% |
+| Yup | 159 KiB | 6.1 ms | 351 ms | 42 ms | 418 ms | 84% |
+| Acorn | 235 KiB | 9.7 ms | 547 ms | 60 ms | 661 ms | 83% |
+
+The first optimization order is therefore:
+
+1. eliminate repeated analysis and linear/quadratic rediscovery;
+2. eliminate duplicate MIR-lowering preparation and unnecessary MIR values/instructions;
+3. delete superseded language-local walkers/lowerers immediately after migration;
+4. simplify common builder mechanics;
+5. consider lazy/cache work only if the phase profile still proves it necessary.
+
+AST allocation alone is too small to produce G3. Builder consolidation is still required for structure and G1, but MIR lowering must carry most of the time reduction.
+
+---
+
+## 4. Target compiler process
+
+### 4.1 `CompilationUnit`
+
+Introduce one owner passed through every post-CST stage:
+
+```c
+struct CompilationUnit {
+    Script* script;
+    const LangProfile* profile;
+    AstNode* root;
+    AstIndex index;
+    CompilationFacts facts;
+    MirEmitter emitter;
+    CompilerPhaseTiming timing;
+    DiagnosticSink diagnostics;
+};
+```
+
+Use the project `ArrayList`, `HashMap`, arena/pool, and `Str` facilities; do not introduce `std::` containers. Integrate this owner incrementally around the live `Script` and MIR contexts instead of duplicating their storage.
+
+### 4.2 Stable IDs and index
+
+Following **D8.2.4**, assign dense `NodeId`, `ScopeId`, `BindingId`, `FunctionId`, and `ClassId` identities. Build one `AstIndex` immediately after binding. It owns parent/owner/scope links, declaration/reference resolution, function/class direct lookup, call edges, use/def lists, nested functions, returns, and effect inputs.
+
+Lowering never resolves a name for the second time. A reference carries or indexes its final `BindingId`; JS shadow/hoist/TDZ policy is decided during bind/validate. Function/class lookups after indexing are O(1). Graph propagation uses adjacency lists and worklists.
+
+### 4.3 One child-enumeration contract
+
+Add one table or function family that enumerates every owned child of each core node. All common analysis uses it. `LangProfile::visit_ext_children` handles only language-range nodes/extensions.
+
+The traversal contract must support:
+
+- preorder/postorder walking;
+- parent/owner index construction;
+- mutable and read-only visitors without copying the switch;
+- explicit clause/form handling;
+- a completeness test for every core node and form.
+
+Existing language-local walkers are migrated one at a time and deleted in the same slice. Do not leave compatibility copies to be removed “later”; G1 depends on deletion as the migration proceeds.
+
+### 4.4 Explicit facts and pass contracts
+
+Follow **D8.2.5**, **D2.4.1**, **D3.2.3**, and **D3.3.1**:
+
+- AST `Type*` is the source/semantic contract;
+- `AstIndex` is the identity/binding authority;
+- inferred/effective type is a side fact;
+- representation plan is a lowering fact;
+- emitted representation/provenance is `MirValue`;
+- physical MIR type is only `MirValue.mir_type`.
+
+The pass manager runs:
+
+```text
+build → bind → validate → index/call graph → capture/effect
+      → type/representation inference → function plan
+      → MIR lower → emitter finalize → module finalize → link
+```
+
+Each pass declares required and produced fact bits. Debug/test builds assert dependencies. Profiles return explicit typed results or `PASS_NOT_APPLICABLE`; they do not supply an alternate pass schedule or silent no-op traversal.
+
+### 4.5 `MirValue` and demand-driven lowering
+
+Complete **D8.2.6** and **D2.4.2–D2.4.3** on both paths. Every core expression returns `MirValue {reg, mir_type, rep, Type* contract, provenance}`. Bare-register expression APIs are transitional and must be removed before closeout.
+
+Pass one demand into lowering:
+
+- `VALUE_DISCARD` — preserve effects/error routing without materializing an unused result;
+- `VALUE_ANY` — general fallback;
+- `VALUE_REQUIRED_REP` — produce/convert once to the consumer's carrier;
+- `VALUE_DEST_REG` — write directly into a known assignment/return/argument/scalar-home destination;
+- `VALUE_BRANCH` — branch directly without boxing a condition result.
+
+Profile hooks own semantic coercion; `em_require_rep()` owns carrier conversion. `MirEmitter` alone owns rootability and final root stores under **D5.3.4**. JS fallible helpers continue to use the merged Item error ABI under **D8.4.3**.
+
+---
+
+## 5. Phase 0 — measurement and fail-closed guardrails
+
+**Purpose:** make the requested time reductions observable before changing compiler behavior.
+
+### 5.1 Common timing record
+
+- [ ] Add `CompilerPhaseTiming` in the common runtime/compiler layer.
+- [ ] Use a monotonic clock and microsecond integer fields; timer collection is disabled by default.
+- [ ] Add phase scopes for parse, AST build, bind, validate, index, analysis, plan, MIR lower, emitter finalize, module finalize, link, execute, and cleanup.
+- [ ] Make nested/import compilation accounting non-overlapping: the hard top-level record includes imported work once; optional module detail is parent-linked and is not re-summed into the gate.
+- [ ] Keep timing code allocation-free in hot loops; record phase boundaries, not every node.
+- [ ] Add a schema version so stale parsers fail rather than silently shift columns.
+
+Required per-sample TSV fields:
+
+```text
+schema_version suite run_id sample_id test_name status cache_state source_bytes
+parse_us ast_build_us bind_us validate_us index_us analysis_us plan_us
+mir_lower_us emitter_finalize_us module_finalize_us link_us build_transpile_us
+execute_us cleanup_us mir_module_count mir_function_count mir_insn_count
+```
+
+`sample_id` must be deterministic within the suite and identify every actual script/module compilation requested by a GTest case. Tabs/newlines in names are escaped. Failed compilations still emit a status record so missing samples cannot be mistaken for speed.
+
+### 5.2 Batch protocol and GTest integration
+
+- [ ] Add an opt-in `LAMBDA_COMPILER_TIMING=1` control understood by both Lambda and JS.
+- [ ] Extend Lambda `test-batch` output in `lambda/main.cpp` with the common timing record while preserving old parsers when the flag is absent.
+- [ ] Convert the existing JS phase counters/BATCH_END fields to the common schema rather than maintaining a second definition.
+- [ ] After JS top-level module finalization, count functions and finalized instructions with the MT7 definition and print the `MIR_VOLUME` record above.
+- [ ] Parse and validate timing records in `test/test_lambda_helpers.hpp` and `test/test_lambda_gtest.cpp`.
+- [ ] Parse and validate timing records in `test/test_js_gtest.cpp`, including direct/DOM subprocess cases as well as the batch path.
+- [ ] Strip `MIR_VOLUME` protocol lines before golden-output comparison; fail the test on a missing, duplicate, malformed, or mismatched record.
+- [ ] Persist one suite TSV per run under `temp/ast_tune/<label>/`; never write profiling output to `/tmp`.
+- [ ] Print a compact GTest property summary: sample count, compiler total, phase totals, p50, p95, and slowest ten samples.
+- [ ] Keep existing program output/goldens byte-identical; timing records travel on a separately recognized protocol line and are stripped before output comparison.
+- [ ] Retain `LAMBDA_PROFILE`/`JS_TRANSPILE_TIMING` as temporary ad-hoc aliases if useful, but make the common protocol the only hard-gate input.
+
+### 5.3 Capture and compare utilities
+
+- [ ] Add `utils/capture_ast_tune_timing.sh`.
+- [ ] Add `utils/compare_ast_tune_timing.sh`.
+- [ ] Add `utils/check_ast_tune_loc.sh`.
+- [ ] Add focused parser/comparator unit tests, including malformed, duplicate, missing, failed, and schema-mismatch records.
+- [ ] Add a focused finalized-count equivalence test: the runtime-emitted `mir_insn_count` must equal `count_module_instructions()` over the dumped artifact for representative LambdaJS modules.
+- [ ] If a new `.cpp` is required, edit `build_lambda_config.json` and regenerate via `make`; do not edit generated Lua.
+
+Planned capture interface after this phase lands:
+
+```bash
+make release
+utils/capture_ast_tune_timing.sh --suite lambda --label baseline --warmups 1 --runs 5
+utils/capture_ast_tune_timing.sh --suite js --label baseline --warmups 1 --runs 5
+
+utils/capture_ast_tune_timing.sh --suite lambda --label candidate --warmups 1 --runs 5
+utils/capture_ast_tune_timing.sh --suite js --label candidate --warmups 1 --runs 5
+
+utils/compare_ast_tune_timing.sh --baseline temp/ast_tune/baseline --candidate temp/ast_tune/candidate
+utils/check_ast_tune_loc.sh --base e66e5b5c71bc7ee7fe2d1e2b2a9afe27dc6825a3
+```
+
+Until the common capture exists, only single-process diagnosis may use:
+
+```bash
+LAMBDA_PROFILE=1 ./lambda.exe <script.ls> --no-log
+JS_TRANSPILE_TIMING=1 ./lambda.exe js <script.js> --no-log
+```
+
+The legacy Lambda profile file must not be used while running parallel GTests.
+
+### 5.4 Reproducibility protocol
+
+For each baseline/candidate capture:
+
+1. use `make release`; debug builds are invalid for performance;
+2. record commit, dirty-tree status, compiler/build stamp, host, CPU, OS, and timing schema;
+3. use the same machine on AC power with no competing build/benchmark workload;
+4. run one complete warm-up, discard it, then collect five complete suite runs;
+5. require every run to pass, canonical-sort records by `sample_id`, and have the same sorted timing and MIR-volume manifests;
+6. use the median of each run's aggregate `build_transpile_us`;
+7. report per-phase totals, p50/p95, top 20 samples, source bytes, complete/cohort MIR instruction totals, and every large library's MIR delta;
+8. if `(max - min) / median > 5%`, collect four additional runs and use the median of nine; investigate persistent instability rather than widening the gate;
+9. compare cache-state and frozen large-library manifests. A new cache hit, missing compilation, retry, renamed sample, or changed batch corpus invalidates the run unless explicitly reported as a separate experiment;
+10. keep raw TSV, summary Markdown, and manifest under `temp/ast_tune/`; copy final gate numbers into §13 of this checked-in plan.
+
+### 5.5 Phase 0 exit
+
+- [ ] Instrumentation-on versus instrumentation-off wall time differs by ≤1% on both suites.
+- [ ] Instrumentation changes no AST dump, MIR budget, output, or test result.
+- [ ] Every compiled test in both GTests produces exactly one validated top-level timing sample.
+- [ ] Every JS test produces exactly one finalized `MIR_VOLUME` record, and its count agrees with an artifact-dump count in the equivalence test.
+- [ ] Baseline raw captures and summaries exist for five valid runs.
+- [ ] `AST_TUNE_PERF_BASE` is recorded in §13.
+- [ ] Complete-JS and large-library cohort manifests and baseline instruction totals are recorded in §13.
+- [ ] LOC verifier reports 319,606 for the fixed G1 anchor.
+
+No optimization work starts until this exit is green.
+
+---
+
+## 6. Phase 1 — authoritative traversal, binding, and `AstIndex`
+
+**Purpose:** turn repeated rediscovery into one linear indexing step and establish the common substrate for all later deletions.
+
+### 6.1 Stable identity
+
+- [ ] Add compact ID types with an explicit invalid value; assign IDs deterministically in source/preorder order.
+- [ ] Assign node IDs through the common allocation helper used by both builders.
+- [ ] Assign scope/binding/function/class IDs during bind/index without changing source semantics.
+- [ ] Add dump support that prints stable IDs only in an opt-in debug form so existing goldens remain stable.
+- [ ] Assert one owner compilation unit per ID and reject cross-unit accidental reuse.
+
+### 6.2 Common child enumeration
+
+- [ ] Inventory every common core node/form and every owned AST child.
+- [ ] Implement `visit_core_children()` once in the common layer.
+- [ ] Implement JS/Lambda extension-child callbacks only for language-range nodes/clauses.
+- [ ] Add the catalog completeness GTest: every owned child exactly once, no borrowed/back-reference treated as a child.
+- [ ] Port parent assignment, function collection, class collection, return/yield/await discovery, and generic validation walks to it.
+- [ ] Delete each superseded walker/switch in the same commit that migrates its last caller.
+
+### 6.3 Binding and index
+
+- [ ] Define `AstIndex` dense arrays and adjacency lists using project containers/arena allocation.
+- [ ] Store parent, lexical scope, owning function/class, declaration/reference binding, child functions/classes, calls, returns, yields/awaits, and use/def edges.
+- [ ] Make Lambda's existing builder bindings populate the shared binding IDs without semantic change.
+- [ ] Make JS hoist/block/TDZ binding authoritative before MIR analysis; validation remains profile-specific.
+- [ ] Replace lowering-time JS shadow repair and repeated scope-name lookup with resolved binding IDs.
+- [ ] Replace linear `jm_find_collected_func`/`jm_find_class` shapes with direct indexed lookup.
+- [ ] Replace duplicate-function discovery with one index-build hash/set check.
+- [ ] Replace strict/effect propagation full rescans with adjacency-list worklists.
+- [ ] Add debug verification comparing old lookup results with indexed results during migration; delete the old path once equivalence is green.
+
+### 6.4 Phase 1 tests and checkpoint
+
+- [ ] Binding tests cover nested shadowing, JS `var` hoist, `let/const` TDZ, duplicate declarations, methods/classes, Lambda captures, and cross-module names.
+- [ ] Index tests cover deeply nested functions/classes and adversarial broad call graphs.
+- [ ] Complexity microtest demonstrates linear index construction and no quadratic growth at 2×/4× synthetic functions.
+- [ ] Both full GTest compiler-time captures remain no slower than the Phase 0 baseline by more than 2%.
+- [ ] Record cumulative LOC delta and deleted-walker ledger.
+
+Planning checkpoint, not a substitute for final gates: aim for ≥350 cumulative LOC removed, ≥2% Lambda compiler reduction, and ≥4% JS reduction.
+
+---
+
+## 7. Phase 2 — fact separation, typed passes, and shared worklists
+
+**Purpose:** make the compiler stages explicit and remove the duplicated Lambda/JS analysis process.
+
+### 7.1 Fact tables
+
+- [ ] Add `NodeFacts`, `BindingFacts`, and `FunctionFacts` side tables keyed by stable IDs.
+- [ ] Inventory every mutation/read of `AstNode.type` and classify it as declared contract, inferred type, narrowed flow fact, or representation plan.
+- [ ] Keep declared/source contracts on AST/bindings; migrate inferred/effective values into side tables.
+- [ ] Add assertions preventing an inferred fact from overwriting a declared contract.
+- [ ] Add a “facts erased” boxed mode for **D3.3.1** differential testing.
+- [ ] Keep representation/provenance out of `TypeId` shortcuts under **D2.4.1**.
+
+### 7.2 Typed pass manager
+
+- [ ] Define pass IDs and required/produced fact masks.
+- [ ] Wrap current passes in the common order without changing their internals first.
+- [ ] Make missing prerequisites a debug/test failure with the pass and fact name.
+- [ ] Move per-phase timing boundaries to the pass manager.
+- [ ] Replace `void`/silent profile hooks with typed status/result hooks.
+- [ ] Require an explicit `PASS_NOT_APPLICABLE` result for a language that does not use a stage.
+- [ ] Centralize diagnostic collection/order so moving a pass does not reorder user-facing errors unintentionally.
+
+### 7.3 Shared graph worklists and inference
+
+- [ ] Generalize call/capture/effect iteration over `AstIndex` adjacency lists.
+- [ ] Merge the common evidence vocabulary into one `ParamEvidence`/binding evidence record.
+- [ ] Keep Lambda and JS evidence resolution in typed profile policies.
+- [ ] Merge call-site and body evidence through the same worklist; converge only affected functions.
+- [ ] Preserve JS Number semantics and Lambda numeric-lane semantics; inference changes implementation only.
+- [ ] Migrate one language at a time behind an equivalence assertion, then delete its old collector/cache/walk.
+- [ ] Ensure invalidation is explicit even if incremental recompilation is not yet enabled.
+
+### 7.4 Phase 2 tests and checkpoint
+
+- [ ] Pass-order tests deliberately invoke a pass without its prerequisite and assert failure.
+- [ ] Declared-versus-inferred tests cover annotations, aliases, comparisons, reassignment, containers, division, and cross-call evidence.
+- [ ] Boxed-versus-specialized differential tests pass for both languages.
+- [ ] Diagnostics and early-error snapshots are unchanged.
+- [ ] Re-profile both suites and attribute gains/losses by phase.
+- [ ] Record cumulative LOC delta and deleted-analysis ledger.
+
+Planning checkpoint: aim for ≥900 cumulative LOC removed, ≥5% Lambda compiler reduction, and ≥10% JS reduction.
+
+---
+
+## 8. Phase 3 — demand-driven `MirValue` lowering
+
+**Purpose:** attack the dominant MIR-lowering time by avoiding work, not merely moving it.
+
+### 8.1 Complete the expression contract
+
+- [ ] Inventory every Lambda and JS expression-lowering entry/return type.
+- [ ] Extend common `MirValue` to carry the full `Type*` contract and provenance required by **D2.4.2**.
+- [ ] Convert core expression handlers from bare register/`TypeId` results to `MirValue`.
+- [ ] Ban `MIR_reg_type()` as a semantic/representation oracle in expression lowering; keep only named physical-layer helpers permitted by **D2.4.1**.
+- [ ] Route every carrier change through fail-closed `em_require_rep()` under **D2.4.3**.
+- [ ] Keep JS semantic coercions in JS profile hooks and Lambda conversions in Lambda profile hooks.
+
+### 8.2 Add demand, in low-risk slices
+
+Implement and verify in this order:
+
+1. [ ] `VALUE_DISCARD` for expression statements and unused completion values;
+2. [ ] `VALUE_BRANCH` for `if`, loops, logical operators, and conditional expressions;
+3. [ ] `VALUE_DEST_REG` for local assignment and returns;
+4. [ ] required representation for fixed call arguments and scalar homes;
+5. [ ] direct destination emission for literals, identifiers, and simple unary/binary operations;
+6. [ ] destructuring destinations and aggregate element construction;
+7. [ ] extension nodes only where the profile can prove the same invariants.
+
+Every handler may fall back to `VALUE_ANY`. Correctness never depends on satisfying the demand.
+
+### 8.3 Emitter ownership and emitted-work reduction
+
+- [ ] Consolidate final root stores, scalar homes, and module data finalization in `MirEmitter` only (**D5.3.4**).
+- [ ] Delete language-local final-store/rooting copies as each caller migrates.
+- [ ] Count MIR instructions, calls, boxing/unboxing conversions, temporaries, and root stores per timed sample.
+- [ ] For each large JS fixture, compare compiler phase time and emitted instruction categories before/after.
+- [ ] Keep finalized MIR instruction counts deterministic across all repeated runs; investigate any variation before using a capture.
+- [ ] Preserve JS error Item identity and try/finally routing under **D8.4.3**.
+- [ ] Reject any speedup that depends on weakening error checks or precise rooting.
+
+### 8.4 Phase 3 tests and checkpoint
+
+- [ ] Add focused MIR-shape tests for discard, direct branch, direct destination, representation fallback, errors, and GC-visible values.
+- [ ] Run `test_mir_emission_gtest`, `test_js_mir_emission_gtest`, `test_mir_ratchet_gtest`, and `test_mir_gc_stress_gtest` after each demand family.
+- [ ] Preserve **D8.6.1** zero-slack budgets; decreases tighten normally, increases require explicit same-change review and are not justified by this plan alone.
+- [ ] Run **D8.6.3** forced-GC/poison oracles for every change to root/store placement.
+- [ ] Run boxed-demand differential mode for both languages.
+- [ ] Re-profile large JS fixtures and the two full GTest corpora.
+- [ ] Record cumulative LOC delta and deleted-lowering ledger.
+
+Planning checkpoint: aim for ≥1,500 cumulative LOC removed, ≥8% Lambda compiler reduction, and ≥17% JS reduction.
+
+---
+
+## 9. Phase 4 — builder/lowering consolidation and deletion
+
+**Purpose:** finish common-process adoption, reach the LOC gate, and remove compatibility paths.
+
+### 9.1 Builder mechanics
+
+- [ ] Inventory duplicate node allocation, source-span, intrusive-list, diagnostic, identifier, literal, parameter, declarator/pattern, and scope helpers.
+- [ ] Search for an existing common helper before extracting another; at the third near-identical case, parameterize the common shape.
+- [ ] Extract typed core-node construction helpers without accepting grammar-specific `TSNode` interpretation.
+- [ ] Keep Lambda and JS CST switches in their builders; move only mechanics and common validation/fact publication.
+- [ ] Make both builders return/populate the same `CompilationUnit` state and phase boundaries.
+- [ ] Delete superseded helpers immediately.
+
+### 9.2 Common lowering skeleton
+
+- [ ] Inventory core node cases still independently lowered by Lambda and JS.
+- [ ] Move only structural control flow, demand propagation, common call plumbing, binding lookup, and emitter operations into the shared driver.
+- [ ] Keep truthiness, coercion, member access/ICs, iteration protocol, error semantics, calling convention decisions, and language-range nodes in typed profiles.
+- [ ] Remove pass-through profile hooks and replace them with direct common behavior or an explicit semantic hook.
+- [ ] Delete compatibility wrappers after their final caller migrates.
+- [ ] Keep `transpile.cpp`/C2MIR frozen under U11 and project rule 14; it is not extended to JS and is not a source of shared code.
+
+### 9.3 Remaining measured hotspots
+
+Only after the common migrations above, use the new phase and sample reports to address remaining direct costs:
+
+- [ ] replace any remaining repeated function/class/binding scans with index lookups;
+- [ ] reserve lists/maps from indexed counts to avoid growth/re-hash churn;
+- [ ] avoid reconstructing signatures, type keys, or helper imports inside node loops;
+- [ ] intern/reuse immutable lowering descriptors owned by the compilation unit;
+- [ ] collapse repeated finalize/link walks where the emitter can produce the final table once;
+- [ ] inspect the slowest 20 samples, especially Lodash/Ramda and large libraries, rather than tuning only micro-scripts;
+- [ ] separately improve fixed-size alphabetical batch scheduling if desired (weighted/slowest-first bounded workers), but report that only as wall-time improvement, never G2/G3 credit.
+
+### 9.4 Phase 4 exit
+
+- [ ] No semantic pass has a private core-child traversal.
+- [ ] No core expression boundary returns a bare MIR register.
+- [ ] No lowering path repeats binding/function/class discovery.
+- [ ] No language lowerer inserts final roots/stores outside `MirEmitter`.
+- [ ] Old analysis/lowering compatibility paths are deleted, not disabled.
+- [ ] `utils/check_ast_tune_loc.sh` reports candidate ≤317,606 and an audited delta ≤−2,000.
+- [ ] Lambda candidate ratio is ≤0.90.
+- [ ] JS candidate ratio is ≤0.80.
+- [ ] Frozen large-library finalized-MIR ratio is ≤0.85, and complete-JS finalized-MIR ratio is ≤1.00.
+
+If all Phase 4 exit items pass, skip Phase 5.
+
+---
+
+## 10. Phase 5 — measured contingency only
+
+**Entry condition:** G2, G3, or G4 still fails after Phase 4, and phase/sample attribution identifies remaining avoidable compiler or emitted-MIR work. Do not enter based on intuition.
+
+Allowed investigations, in priority order:
+
+1. [ ] eliminate the top remaining repeated analysis/finalization operation proven by counters;
+2. [ ] specialize the common driver dispatch only if profiles show dispatch itself material;
+3. [ ] add function-level lazy MIR lowering for unreachable/unused functions if the full sample record remains present and the top-level `build_transpile_us` honestly reports the skipped work;
+4. [ ] evaluate D8.5-approved lazy/cache work only with explicit hit/miss counters and the required cache correctness rules.
+
+Restrictions:
+
+- persistent cache warm hits are not accepted as the primary G2/G3 proof;
+- a test/module sample may not disappear from the manifest because it was cached or made lazy;
+- do not implement a new AST interpreter (**D8.1.1**);
+- do not patch MIR/vendor code;
+- do not weaken optimization level, validation, early errors, rooting, or link correctness;
+- do not add source-level parallelism until profiler data proves independent work and determinism/diagnostics are preserved.
+
+Every contingency change must include a before/after phase profile showing that its target was material and its reduction survives the full-suite median.
+
+---
+
+## 11. Regression and closeout matrix
+
+Run focused tests after each slice and the complete matrix before declaring the plan done.
+
+### 11.1 Build and focused compiler tests
+
+```bash
+make release
+make build-test
+./test/test_lambda_gtest.exe
+./test/test_js_gtest.exe
+./test/test_mir_emission_gtest.exe
+./test/test_js_mir_emission_gtest.exe
+./test/test_mir_ratchet_gtest.exe
+./test/test_mir_gc_stress_gtest.exe
+```
+
+Use the real executable names produced by `make build-test`; if a target is filtered during development, the unfiltered executable remains the closeout gate.
+
+### 11.2 Runtime baselines
+
+```bash
+make test-lambda-baseline
+make test262-baseline
+```
+
+`make node-baseline` is not part of this plan's default closeout. Run it only if a slice intentionally changes Node compatibility or the user separately requests that gate.
+
+### 11.3 Required semantic invariants
+
+- **D3.3.1:** boxed/facts-erased and specialized execution are observationally identical.
+- **D2.4.1–D2.4.3:** no representation decision is recovered from a MIR register class; conversions fail closed.
+- **D5.3.4:** precise root policy/final stores exist only in `MirEmitter`.
+- **D8.4.3:** JS fallible helpers preserve the merged error Item and its identity through routing.
+- **D8.6.1:** no silent MIR budget slack.
+- **D8.6.3:** forced-GC/poison runs match unstressed runs.
+
+### 11.4 Performance closeout
+
+```bash
+make release
+utils/capture_ast_tune_timing.sh --suite lambda --label candidate --warmups 1 --runs 5
+utils/capture_ast_tune_timing.sh --suite js --label candidate --warmups 1 --runs 5
+utils/compare_ast_tune_timing.sh --baseline temp/ast_tune/baseline --candidate temp/ast_tune/candidate
+utils/check_ast_tune_loc.sh --base e66e5b5c71bc7ee7fe2d1e2b2a9afe27dc6825a3
+```
+
+The comparison must print and the final plan update must record:
+
+- baseline/candidate commits and dirty state;
+- schema and sample-manifest hashes;
+- five (or nine) per-run aggregate values;
+- baseline/candidate medians and ratios;
+- phase totals and changes;
+- p50/p95/top 20 samples;
+- source-byte totals, complete/cohort finalized-MIR totals, and every large library's before/after instruction count;
+- LOC baseline/candidate/delta;
+- all suite results.
+
+---
+
+## 12. Risk controls and rollback rules
+
+| Risk | Control | Rollback rule |
+|---|---|---|
+| binding/TDZ/hoist behavior changes while indexing | dual-run old/new resolver assertions; targeted early-error tests | revert the current binding slice; do not retain a shadow-repair workaround |
+| declared type polluted by inference | separate facts + facts-erased differential mode | revert the mutating migration and classify the fact correctly |
+| MIR speedup changes semantics | per-demand slice tests, boxed differential, MIR shape tests | disable/revert only that demand producer; keep safe `VALUE_ANY` fallback |
+| root liveness regression | emitter-only ownership + forced-GC/poison | revert the store/root consolidation slice; never restore conservative native-stack scanning |
+| JS IC/native specialization cliff | per-sample phase and instruction counters on large libs | preserve profile-owned specialization; do not force generic common lowering |
+| diagnostic order drift | central diagnostic sink and snapshot comparison | preserve source-order stable sort before deleting old pass |
+| timing noise | internal timers, release mode, manifest validation, 5/9-run median | invalidate capture and repeat; never relax percentages |
+| LOC gate gamed by file moves/formatting | anchor-tree union counter + source-scope audit + deletion ledger | add moved path back to scope or reject the claimed reduction |
+| cache/lazy path hides work | cache-state/sample manifest and cold comparison | report separately; it cannot close G2/G3 |
+
+Every implementation slice is independently revertible and leaves one authoritative path. Do not keep two production implementations behind permanent flags. Temporary equivalence flags/assertions are removed in the same phase that deletes the old path.
+
+---
+
+## 13. Progress and evidence ledger
+
+This section is updated as implementation proceeds. A checkbox is changed only with the named evidence.
+
+### 13.1 Anchors
+
+| Item | Value |
+|---|---|
+| LOC base commit | `e66e5b5c71bc7ee7fe2d1e2b2a9afe27dc6825a3` |
+| LOC baseline | 319,606 |
+| LOC hard maximum | 317,606 |
+| Performance base commit | pending Phase 0 instrumentation-only commit |
+| Timing schema version | pending |
+| Lambda sample-manifest hash | pending |
+| JS sample-manifest hash | pending |
+| JS large-library cohort hash | pending |
+| JS complete baseline MIR instructions | pending |
+| JS library-cohort baseline MIR instructions | pending |
+
+### 13.2 Phase status
+
+| Phase | Status | Evidence |
+|---|---|---|
+| 0 — measurement/guardrails | not started | — |
+| 1 — traversal/index/binding | not started | — |
+| 2 — facts/pass manager | not started | — |
+| 3 — demand-driven `MirValue` | not started | — |
+| 4 — consolidation/deletion | not started | — |
+| 5 — measured contingency | not entered | enter only if G2/G3/G4 remain red |
+| closeout | not started | — |
+
+### 13.3 Hard-gate results
+
+| Gate | Baseline | Candidate | Required | Status |
+|---|---:|---:|---:|---|
+| G1 runtime LOC | 319,606 | pending | ≤317,606 | open |
+| G2 Lambda median `build_transpile_us` | pending | pending | candidate/base ≤0.90 | open |
+| G3 JS median `build_transpile_us` | pending | pending | candidate/base ≤0.80 | open |
+| G4 JS large-library finalized MIR | pending | pending | candidate/base ≤0.85 | open |
+| G4 JS complete-corpus finalized MIR | pending | pending | candidate/base ≤1.00 | open |
+| G5 sample/timing/volume integrity | pending | pending | exact match | open |
+| G0 regressions | current baselines | pending | all green | open |
+
+### 13.4 Deletion ledger
+
+| Phase | Deleted implementation | Removed LOC | Replacement |
+|---|---|---:|---|
+| 1 | pending | 0 | common visitor/index |
+| 2 | pending | 0 | fact tables/pass manager/worklists |
+| 3 | pending | 0 | common `MirValue`/demand/emitter paths |
+| 4 | pending | 0 | common builder/lowering mechanics |
+| **Total** | — | **0** | hard requirement ≥2,000 |
+
+---
+
+## 14. Definition of done
+
+This plan is complete only when all statements are true:
+
+- [ ] Lambda and JS compile through one explicit pass manager over one indexed compilation unit (**D8.2.4–D8.2.5**).
+- [ ] Core traversal, binding identity, function/class lookup, facts, and graph scheduling each have one authority (**D8.2.4–D8.2.5**).
+- [ ] Declared contracts and inferred/effective facts are separate (**D3.2.3**).
+- [ ] Both expression pipelines use full-contract `MirValue`; demand-driven lowering has a safe generic fallback (**D8.2.6**, **D2.4.1–D2.4.3**).
+- [ ] Root/final-store policy exists only in `MirEmitter` (**D5.3.4**).
+- [ ] Language profiles contain semantic differences, not duplicate pass schedules or core walks (**D8.2.1–D8.2.5**).
+- [ ] Old walkers, linear rediscovery, quadratic propagation, bare-register core APIs, and compatibility lowering paths are deleted.
+- [ ] G1 reports at least 2,000 net physical runtime/compiler LOC removed (**D8.6.4**).
+- [ ] G2 reports at least 10% lower Lambda GTest compiler time (**D8.6.4**).
+- [ ] G3 reports at least 20% lower JS GTest compiler time (**D8.6.4**).
+- [ ] G4 reports at least 15% fewer finalized MIR instructions for the frozen JS large-library cohort and no complete-corpus MIR growth (**D8.6.4**).
+- [ ] G5 proves identical, complete, deterministic release-mode timing and MIR-volume manifests (**D8.6.4**).
+- [ ] G0 and the entire §11 matrix are green with no weakened ratchets.
+- [ ] §13 contains the final commits, raw-capture locations, medians, phase attribution, LOC ledger, and verified test results.
+
+Until every item is checked, the unified-AST tuning continuation remains open.
