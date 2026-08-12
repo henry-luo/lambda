@@ -975,7 +975,7 @@ static void layout_grid_abs_after_child(LayoutContext* lycon, ViewBlock* contain
             LayoutAxis axis = (LayoutAxis)i;
             LayoutAxisRefs refs(child_block, axis);
             refs.set_position(grid_abs_axis_position(
-                area_start[axis], area_size[axis], refs.get_size(), refs, refs.size));
+                area_start[axis], area_size[axis], refs.get_size(), refs, refs.size_slot));
         }
         return;
     }

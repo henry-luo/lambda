@@ -351,10 +351,10 @@ static float flex_item_explicit_ratio_basis(ViewElement* item, bool main_is_hori
     if (!item || !item->fi || item->fi->aspect_ratio <= 0.0f || !item->blk) return -1.0f;
 
     ViewBlock* block = lam::view_as_block(item);
-    FlexItemAxis cross(item, !main_is_horizontal);
+    LayoutAxisRefs cross(item, !main_is_horizontal);
     if (!layout_axis_has_given_size(block, cross.horizontal())) return -1.0f;
 
-    float cross_border_size = cross.size();
+    float cross_border_size = cross.get_size();
     if (cross_border_size <= 0.0f) {
         float css_size = layout_axis_given_size(
             item->block(), cross.axis);
@@ -1565,7 +1565,7 @@ static float flex_explicit_main_size_basis(ViewElement* item,
     }
 
     const BlockProp* prop = item->block();
-    FlexItemAxis main(item, horizontal);
+    LayoutAxisRefs main(item, horizontal);
     float explicit_size = layout_axis_given_size(prop, main.axis);
     if (explicit_size < 0.0f) return -1.0f;
 
@@ -1573,8 +1573,9 @@ static float flex_explicit_main_size_basis(ViewElement* item,
 
     flex_ensure_explicit_image_loaded(
         item, flex_layout, explicit_size,
-        layout_axis_given_size(prop, main.opposite()));
 
+        layout_axis_given_size(prop,
+            main.axis == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X));
     ViewBlock* block = lam::view_as_block(item);
     float basis = layout_css_size_to_border_box(
         item->bound, layout_box_sizing(block), explicit_size, horizontal);
@@ -1606,12 +1607,8 @@ static bool flex_apply_explicit_aspect_ratio(ViewElement* item) {
 
 static float flex_item_non_auto_margin_size(ViewElement* item, LayoutAxis axis) {
     if (!item || !item->bound) return 0.0f;
-    const Margin* margin = &item->boundary()->margin;
-    float start = layout_axis_margin_start_type(margin, axis) == CSS_VALUE_AUTO
-        ? 0.0f : layout_axis_margin_start(item->bound, axis);
-    float end = layout_axis_margin_end_type(margin, axis) == CSS_VALUE_AUTO
-        ? 0.0f : layout_axis_margin_end(item->bound, axis);
-    return start + end;
+    LayoutAxisRefs refs(item, axis);
+    return refs.non_auto_margin_start() + refs.non_auto_margin_end();
 }
 
 static float flex_item_available_outer_size(ViewElement* item,
@@ -1690,7 +1687,7 @@ static bool flex_item_intrinsic_border_bounds(ViewElement* item,
     if (!item || !flex_layout || !has_flex_item_prop(item) || !minimum || !maximum) {
         return false;
     }
-    FlexItemAxis selected(item, horizontal);
+    LayoutAxisRefs selected(item, horizontal);
     if (!selected.has_intrinsic()) {
         calculate_item_intrinsic_sizes(item, flex_layout);
     }
@@ -1738,7 +1735,7 @@ static bool flex_item_has_explicit_size_in_axis(ViewElement* item, bool horizont
     if (!item) return false;
     ViewBlock* block = lam::view_as_block(item);
     if (!block) return false;
-    FlexItemAxis selected(item, horizontal);
+    LayoutAxisRefs selected(item, horizontal);
     if (layout_intrinsic_preferred_size_keyword(block, selected.horizontal()) != CSS_VALUE__UNDEF) {
         return true;
     }
@@ -1782,7 +1779,7 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
             return basis;
         }
 
-        FlexItemAxis main(item, is_horizontal);
+        LayoutAxisRefs main(item, is_horizontal);
         float basis = main.form_size();
 
         if (basis <= 0 && item->tag() == MARKUP_NAME_BUTTON && flex_layout && flex_layout->lycon) {
@@ -1914,7 +1911,7 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
         }
     }
 
-    FlexItemAxis main(item, is_horizontal);
+    LayoutAxisRefs main(item, is_horizontal);
     if (item->fi && !main.has_intrinsic()) {
             calculate_item_intrinsic_sizes(item, flex_layout);
     }
@@ -1963,7 +1960,7 @@ static float flex_resolve_auto_minimum(ViewElement* item,
         return 0.0f;
     }
 
-    FlexItemAxis selected(item, horizontal);
+    LayoutAxisRefs selected(item, horizontal);
     if (!selected.has_intrinsic()) {
         calculate_item_intrinsic_sizes(item, flex_layout);
     }
@@ -2185,7 +2182,7 @@ float apply_flex_constraint(
         // and cross-axis must apply CSS min-/max- constraints; previously the
         bool axis_is_horizontal = is_main_axis ? is_horizontal : !is_horizontal;
         ViewBlock* item_block = lam::view_as_block(item);
-        FlexItemAxis selected(item, axis_is_horizontal);
+        LayoutAxisRefs selected(item, axis_is_horizontal);
         float min_size = 0;
         float max_size = layout_positive_max_axis_or(item_block, axis_is_horizontal, FLT_MAX);
 
@@ -2216,9 +2213,9 @@ float apply_flex_constraint(
     bool is_horizontal = is_main_axis_horizontal(flex_layout);
 
     bool axis_is_horizontal = is_main_axis == is_horizontal;
-    FlexAxisConstraintValues constraints(item->fi, axis_is_horizontal);
 
-    return flex_clamp_constraint(computed_size, constraints.minimum, constraints.maximum,
+    LayoutAxisRefs constraints(item->fi, axis_is_horizontal);
+    return flex_clamp_constraint(computed_size, *constraints.minimum, *constraints.maximum,
                                  hit_min, hit_max);
 }
 
@@ -2875,7 +2872,7 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
                 // Adjust cross axis size based on aspect ratio
                 if (has_flex_item_prop(item) && item->fi->aspect_ratio > 0) {
                     bool main_horizontal = is_main_axis_horizontal(flex_layout);
-                    FlexItemAxis cross(item, main_horizontal ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X);
+                    LayoutAxisRefs cross(item, main_horizontal ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X);
                     cross.set_size(main_horizontal
                         ? iteration_scratch[i].clamped_size / item->fi->aspect_ratio
                         : iteration_scratch[i].clamped_size * item->fi->aspect_ratio);
@@ -2964,9 +2961,9 @@ static int flex_line_auto_margin_count(FlexContainerLayout* flex_layout,
     for (int i = 0; i < line->item_count; i++) {
         ViewElement* item = lam::view_as_element(line->items[i]);
         if (!item) continue;
+        LayoutAxisRefs refs(item, main_axis);
         auto_margin_count += layout_count_auto_margins(
-            item->bound && layout_axis_margin_start_type(&item->boundary_mut()->margin, main_axis) == CSS_VALUE_AUTO,
-            item->bound && layout_axis_margin_end_type(&item->boundary_mut()->margin, main_axis) == CSS_VALUE_AUTO);
+            refs.margin_start_is_auto(), refs.margin_end_is_auto());
     }
     return auto_margin_count;
 }
@@ -3025,12 +3022,11 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         ViewElement* item = lam::view_as_element(line->items[i]);
         if (!item) continue;
 
-        bool start_auto = item->bound &&
-            layout_axis_margin_start_type(&item->boundary_mut()->margin, main_axis) == CSS_VALUE_AUTO;
-        bool end_auto = item->bound &&
-            layout_axis_margin_end_type(&item->boundary_mut()->margin, main_axis) == CSS_VALUE_AUTO;
-        float margin_start = layout_axis_margin_start(item->bound, main_axis);
-        float margin_end = layout_axis_margin_end(item->bound, main_axis);
+        LayoutAxisRefs main_refs(item, main_axis);
+        bool start_auto = main_refs.margin_start_is_auto();
+        bool end_auto = main_refs.margin_end_is_auto();
+        float margin_start = main_refs.margin_start();
+        float margin_end = main_refs.margin_end();
         if (auto_margin_count > 0) {
             if (start_auto) margin_start = auto_margin_size;
             if (end_auto) margin_end = auto_margin_size;
@@ -3086,10 +3082,9 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
         }
 
         bool is_horizontal_main = is_main_axis_horizontal(flex_layout);
-        bool cross_start_auto = item->bound &&
-            layout_axis_margin_start_type(&item->boundary_mut()->margin, cross_axis) == CSS_VALUE_AUTO;
-        bool cross_end_auto = item->bound &&
-            layout_axis_margin_end_type(&item->boundary_mut()->margin, cross_axis) == CSS_VALUE_AUTO;
+        LayoutAxisRefs cross_refs(item, cross_axis);
+        bool cross_start_auto = cross_refs.margin_start_is_auto();
+        bool cross_end_auto = cross_refs.margin_end_is_auto();
         bool has_cross_auto_margin = cross_start_auto || cross_end_auto;
         bool has_explicit_cross_size_for_auto = flex_item_has_explicit_size_in_axis(
             item, !is_horizontal_main);
@@ -3101,22 +3096,12 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
         }
 
         float line_cross_size = line->cross_size;
-        bool cross_is_horizontal = !is_main_axis_horizontal(flex_layout);
+        LayoutAxisRefs cross_constraints(item->fi, cross_axis);
+        bool cross_is_horizontal = cross_axis == LAYOUT_AXIS_X;
         if (has_flex_item_prop(item)) {
-            float resolved_cross_min = cross_is_horizontal
-                ? item->fi->resolved_min_width : item->fi->resolved_min_height;
-            float resolved_cross_max = cross_is_horizontal
-                ? item->fi->resolved_max_width : item->fi->resolved_max_height;
             flex_resolve_stretch_minmax_border_sizes(item, cross_is_horizontal,
                 line_cross_size, line_cross_size >= 0.0f,
-                &resolved_cross_min, &resolved_cross_max);
-            if (cross_is_horizontal) {
-                item->fi->resolved_min_width = resolved_cross_min;
-                item->fi->resolved_max_width = resolved_cross_max;
-            } else {
-                item->fi->resolved_min_height = resolved_cross_min;
-                item->fi->resolved_max_height = resolved_cross_max;
-            }
+                cross_constraints.minimum, cross_constraints.maximum);
         }
 
         float item_cross_size = get_cross_axis_size(item, flex_layout);
@@ -3153,9 +3138,9 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                 }
             }
             // Per CSS Flexbox §9.5: alignment positions the item's margin edge
-            float margin_cross_start = layout_axis_margin_start(item->bound, cross_axis);
-            float margin_cross_end = layout_axis_margin_end(item->bound, cross_axis);
 
+            float margin_cross_start = cross_refs.margin_start();
+            float margin_cross_end = cross_refs.margin_end();
             if (effective_align == ALIGN_STRETCH) {
                 // For stretch, check if item has explicit cross-axis size from CSS
                 // The blk->given_* fields are ONLY set when CSS explicitly specifies the size
@@ -3393,9 +3378,9 @@ bool flex_item_will_stretch_cross_axis(ViewElement* item, FlexContainerLayout* f
     if (!layout_block_has_automatic_size(block, cross_is_horizontal)) return false;
 
     LayoutAxis cross_axis = flex_cross_axis(flex_layout);
-    bool has_cross_auto_margin = item->bound &&
-        (layout_axis_margin_start_type(&item->boundary()->margin, cross_axis) == CSS_VALUE_AUTO ||
-         layout_axis_margin_end_type(&item->boundary()->margin, cross_axis) == CSS_VALUE_AUTO);
+    LayoutAxisRefs cross_refs(item, cross_axis);
+    bool has_cross_auto_margin = cross_refs.margin_start_is_auto() ||
+        cross_refs.margin_end_is_auto();
     // An auto cross margin makes alignment inapplicable; it must not create the
     // definite cross size that aspect-ratio transfers into the flex main size.
     return !has_cross_auto_margin;
@@ -3410,11 +3395,11 @@ static void flex_apply_intrinsic_cross_size(ViewElement* item,
         calculate_item_intrinsic_sizes(item, flex_layout);
     }
 
-    FlexItemAxis selected(item, flex_cross_axis(flex_layout));
+    LayoutAxisRefs selected(item, flex_cross_axis(flex_layout));
     float intrinsic = selected.intrinsic()->max_content;
     if (intrinsic <= 0.0f) return;
-    if (!overwrite && selected.size() > 0.0f) return;
 
+    if (!overwrite && selected.get_size() > 0.0f) return;
     if (selected.horizontal()) {
         ViewBlock* item_block = lam::view_as_block(item);
         FlexProp* item_flex = item_block && item_block->embed
@@ -3508,9 +3493,9 @@ static float flex_finalize_hypothetical_cross(ViewElement* item,
     hypothetical_cross = max(min_cross, min(hypothetical_cross, max_cross));
     if (item->fi->aspect_ratio > 0.0f && !has_explicit_cross) {
         float ratio = item->fi->aspect_ratio;
-        FlexItemAxis main(item, is_horizontal);
-        FlexItemAxis cross(item, cross_is_horizontal);
-        float main_size = main.size();
+        LayoutAxisRefs main(item, is_horizontal);
+        LayoutAxisRefs cross(item, cross_is_horizontal);
+        float main_size = main.get_size();
         if (main_size > 0.0f) {
             hypothetical_cross = main.horizontal() ? main_size / ratio : main_size * ratio;
             cross.set_size(hypothetical_cross);
@@ -3554,7 +3539,7 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
                 IntrinsicSize form_size = layout_measure_form_control(lycon, item_block,
                                                                       lycon->available_space);
                 bool cross_is_horizontal = !is_horizontal;
-                FlexItemAxis cross(item, cross_is_horizontal);
+                LayoutAxisRefs cross(item, cross_is_horizontal);
                 float cross_size = cross_is_horizontal ? form_size.max_width : form_size.max_height;
                 // (CSS may override UA font-size set during resolve_htm_style)
                 if (is_horizontal && item->form->control_type == FORM_CONTROL_TEXT &&
@@ -3589,17 +3574,17 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
             float intrinsic_preferred_cross = flex_item_intrinsic_border_size(
                 item, flex_layout, cross_is_horizontal, cross_preferred_keyword);
 
-            FlexAxisConstraintValues cross_constraints(item->fi, cross_is_horizontal);
-            float min_cross = cross_constraints.minimum;
-            float max_cross = cross_constraints.maximum > 0.0f
-                ? cross_constraints.maximum : INFINITY;
+            LayoutAxisRefs cross_constraints(item->fi, cross_is_horizontal);
+            float min_cross = *cross_constraints.minimum;
+            float max_cross = *cross_constraints.maximum > 0.0f
+                ? *cross_constraints.maximum : INFINITY;
             LayoutAxis cross_axis = cross_is_horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
             float given_cross = item_block
                 ? layout_axis_given_size(item_block->block(), cross_axis) : -1.0f;
             bool has_given_cross = given_cross >= 0.0f;
             bool has_explicit_cross_size = intrinsic_preferred_cross >= 0.0f || has_given_cross;
 
-            FlexItemAxis cross(item, cross_axis);
+            LayoutAxisRefs cross(item, cross_axis);
             if (intrinsic_preferred_cross >= 0.0f) {
                 hypothetical_cross = intrinsic_preferred_cross;
             } else if (has_given_cross) {
@@ -3616,7 +3601,7 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
                 hypothetical_cross = cross.has_intrinsic() &&
                     cross.intrinsic()->max_content > 0.0f
                     ? cross.intrinsic()->max_content
-                    : cross.size();
+                    : cross.get_size();
                 hypothetical_cross = layout_border_size_from_content_box(
                     item_block, hypothetical_cross, true);
             } else {
@@ -3660,7 +3645,7 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
                         hypothetical_cross = layout_border_size_from_content_box(
                             item_block, cross.intrinsic()->max_content, false);
                     } else {
-                        hypothetical_cross = cross.size();
+                        hypothetical_cross = cross.get_size();
                     }
                 }
             }

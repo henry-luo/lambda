@@ -141,13 +141,10 @@ float layout_preferred_aspect_ratio(ViewBlock* block) {
     return decl ? layout_aspect_ratio_value(decl->value) : 0.0f;
 }
 
-static float intrinsic_element_preferred_aspect_ratio(DomElement* element, ViewBlock* view) {
-    float ratio = view ? layout_preferred_aspect_ratio(view) : 0.0f;
-    if (ratio > 0.0f) return ratio;
-    if (!element || !element->specified_style) return 0.0f;
-    CssDeclaration* declaration = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_ASPECT_RATIO);
-    return declaration ? layout_aspect_ratio_value(declaration->value) : 0.0f;
+static float intrinsic_element_preferred_aspect_ratio(ViewBlock* view) {
+    // The view resolver already falls back to the DOM style before materialization;
+    // re-reading the declaration here used to create two ratio resolution paths.
+    return view ? layout_preferred_aspect_ratio(view) : 0.0f;
 }
 
 float layout_used_preferred_aspect_ratio(ViewBlock* block) {
@@ -410,10 +407,13 @@ static bool intrinsic_specified_display_keyword(DomElement* element, CssEnum* ke
     return element && intrinsic_style_display_keyword(element->specified_style, keyword);
 }
 
-static bool intrinsic_element_display_matches(DomElement* element, ViewBlock* view,
+static bool intrinsic_element_display_matches(DomElement* element,
                                               CssEnum display_inner,
-                                              CssEnum inline_display) {
-    if (view && view->display.inner == display_inner) return true;
+                                              CssEnum inline_display = CSS_VALUE__UNDEF) {
+    if (!element) return false;
+    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    if (view && (view->display.inner == display_inner ||
+                 view->display.outer == display_inner)) return true;
     CssEnum value = (CssEnum)0;
     if (!intrinsic_specified_display_keyword(element, &value)) return false;
     return value == display_inner || value == inline_display;
@@ -1145,42 +1145,34 @@ float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
     return 0.0f;
 }
 
-static bool intrinsic_element_matches_display(DomElement* elem, CssEnum display_value) {
-    if (!elem) return false;
-    if (elem->display.inner == display_value || elem->display.outer == display_value) {
-        return true;
-    }
-    CssEnum value = (CssEnum)0;
-    return intrinsic_specified_display_keyword(elem, &value) && value == display_value;
-}
 
 static bool node_is_table_cell_like(DomNode* node) {
     if (!node || !node->is_element()) return false;
     DomElement* elem = node->as_element();
     return elem->view_type == RDT_VIEW_TABLE_CELL ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_CELL);
+           intrinsic_element_display_matches(elem, CSS_VALUE_TABLE_CELL);
 }
 
 static bool intrinsic_is_table_box(DomElement* elem) {
     if (!elem) return false;
     return elem->tag() == MARKUP_NAME_TABLE ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE) ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_INLINE_TABLE);
+           intrinsic_element_display_matches(elem, CSS_VALUE_TABLE) ||
+           intrinsic_element_display_matches(elem, CSS_VALUE_INLINE_TABLE);
 }
 
 static bool intrinsic_is_table_row_group_box(DomElement* elem) {
     if (!elem) return false;
     NameId tag = elem->tag();
     return tag == MARKUP_NAME_TBODY || tag == MARKUP_NAME_THEAD || tag == MARKUP_NAME_TFOOT ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_ROW_GROUP) ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_HEADER_GROUP) ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_FOOTER_GROUP);
+           intrinsic_element_display_matches(elem, CSS_VALUE_TABLE_ROW_GROUP) ||
+           intrinsic_element_display_matches(elem, CSS_VALUE_TABLE_HEADER_GROUP) ||
+           intrinsic_element_display_matches(elem, CSS_VALUE_TABLE_FOOTER_GROUP);
 }
 
 static bool intrinsic_is_table_row_box(DomElement* elem) {
     if (!elem) return false;
     return elem->tag() == MARKUP_NAME_TR ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_ROW);
+           intrinsic_element_display_matches(elem, CSS_VALUE_TABLE_ROW);
 }
 
 static int intrinsic_table_row_count(DomElement* elem) {
@@ -2067,7 +2059,7 @@ static bool intrinsic_has_cyclic_percentage_descendant(
         }
         bool matches = intrinsic_element_has_percentage_height(child_element) &&
             (!require_ratio || intrinsic_element_preferred_aspect_ratio(
-                child_element, child_view) > 0.0f);
+                child_view) > 0.0f);
         if ((!require_ratio && intrinsic_element_is_replaced(child_element) && matches) ||
             (require_ratio && matches)) {
             return true;
@@ -3049,9 +3041,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     bool is_table_display = false;
     {
-        ViewBlock* tview = lam::unsafe_view_block_element_storage(element);
         if (intrinsic_element_display_matches(
-                element, tview, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE)) {
+                element, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE)) {
             is_table_display = true;
         }
         if (!is_table_display && element->tag() == MARKUP_NAME_TABLE) is_table_display = true;
@@ -3825,7 +3816,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     {
         ViewBlock* tbl_view = lam::unsafe_view_block_element_storage(element);
         bool is_table_element = intrinsic_element_display_matches(
-            element, tbl_view, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE);
+            element, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE);
         if (!is_table_element && element->tag() == MARKUP_NAME_TABLE) is_table_element = true;
 
         if (is_table_element) {
@@ -4526,7 +4517,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     int flex_child_count = 0;  // Count of flex children for gap calculation
     // Check if this is a grid container.
     bool is_grid_container = intrinsic_element_display_matches(
-        element, view_block, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
+        element, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
     if (is_grid_container) {
 
         // CSS Grid §10.1: Grid container intrinsic widths are computed column-by-column.
@@ -4636,7 +4627,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
 
     is_flex_container = intrinsic_element_display_matches(
-        element, view_block, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX);
+        element, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX);
     // Check flex direction for row vs column
     bool is_vertical_wm = false;
     if (is_flex_container) {
@@ -5886,11 +5877,6 @@ float calculate_max_content_width(LayoutContext* lycon, DomNode* node) {
     return calculate_node_intrinsic_widths(lycon, node).max_content;
 }
 
-float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float width) {
-    // For block containers, min-content height == max-content height
-    // (CSS Sizing Level 3: https://www.w3.org/TR/css-sizing-3/#min-content-block-size)
-    return calculate_max_content_height(lycon, node, width);
-}
 
 static bool intrinsic_declared_css_height_is_definite(LayoutContext* lycon,
                                                       DomElement* element) {
@@ -5917,14 +5903,7 @@ static bool intrinsic_has_definite_css_height(LayoutContext* lycon, DomElement* 
     return intrinsic_declared_css_height_is_definite(lycon, element);
 }
 
-static bool intrinsic_height_should_collapse_whitespace(CssEnum white_space) {
-    return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
-           white_space == CSS_VALUE_PRE_LINE || white_space == 0;
-}
 
-static bool intrinsic_is_collapsible_ascii_whitespace(char ch) {
-    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
-}
 
 static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* element,
                                               ViewBlock* view, float width) {
@@ -5939,7 +5918,8 @@ static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* 
             const char* data = reinterpret_cast<const char*>(child->text_data());
             if (data && data[0] != '\0') {
                 for (size_t i = 0; data[i] != '\0'; i++) {
-                    if (intrinsic_is_collapsible_ascii_whitespace(data[i])) {
+                    if (data[i] == ' ' || data[i] == '\t' ||
+                        data[i] == '\n' || data[i] == '\r') {
                         pending_space = true;
                     } else {
                         if (pending_space && text->length > 0 &&
@@ -5986,17 +5966,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         const char* text = (const char*)node->text_data();
         if (!text || *text == '\0') return 0;
 
-        bool is_whitespace_only = true;
-        for (const char* p = text; *p; p++) {
-            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
-                is_whitespace_only = false;
-                break;
-            }
-        }
-        if (is_whitespace_only) {
-            return 0;  // Whitespace-only text doesn't contribute to height
-        }
 
+        if (text_node_is_ascii_whitespace(node)) return 0;
         // Calculate line height
         float font_size = 16.0f;
         if (lycon->font.style && lycon->font.style->font_size > 0) {
@@ -6040,7 +6011,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 	            const char* measure_text = text;
 	            size_t measure_len = text_len;
 	            static thread_local char normalized_text[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
-	            if (intrinsic_height_should_collapse_whitespace(ws_val)) {
+            if (layout_white_space_collapses(ws_val)) {
 	                measure_len = layout_normalize_collapsible_whitespace(text, text_len,
 	                                                              normalized_text,
 	                                                              sizeof(normalized_text));
@@ -6354,7 +6325,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
     // Check if this is a grid container - need to detect column count
     bool is_grid_container = intrinsic_element_display_matches(
-        element, view, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
+        element, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
     int grid_column_count = 1;  // Default: single column = vertical stacking
     float grid_row_gap = 0;
     float empty_grid_fixed_row_extent = -1.0f;
@@ -6400,8 +6371,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     float flex_row_gap = 0;
     float flex_column_gap = 0;
     bool is_flex_container = intrinsic_element_display_matches(
-        element, view, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX);
 
+        element, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX);
     if (is_flex_container) {
         LayoutFlexStyleInfo flex_style = layout_flex_style_info(lycon, view);
         is_flex_row = flex_style.row;
@@ -6722,7 +6693,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 !intrinsic_declared_css_height_is_definite(lycon, element)) {
                 DomElement* child_elem = child->as_element();
                 ViewBlock* child_block = lam::unsafe_view_block_element_storage(child_elem);
-                float child_ratio = intrinsic_element_preferred_aspect_ratio(child_elem, child_block);
+                float child_ratio = intrinsic_element_preferred_aspect_ratio(child_block);
                 cyclic_percentage_ratio_child = intrinsic_element_has_percentage_height(child_elem) &&
                     child_block && child_ratio > 0.0f;
                 if (cyclic_percentage_ratio_child && !element_has_in_flow_intrinsic_content(child_elem)) {
@@ -6921,9 +6892,10 @@ IntrinsicSizesBidirectional measure_intrinsic_sizes(
     // Step 3: Measure height intrinsic sizes at the determined width
     // IMPORTANT: When a definite width is available, use it for BOTH min and max height
     // This matches the original grid behavior where both heights are computed at the same width
-    result.min_content_height = calculate_min_content_height(lycon, node, width_for_height);
-    result.max_content_height = calculate_max_content_height(lycon, node, width_for_height);
 
+    float content_height = calculate_max_content_height(lycon, node, width_for_height);
+    result.min_content_height = content_height;
+    result.max_content_height = content_height;
     return result;
 }
 

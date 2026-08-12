@@ -655,11 +655,8 @@ static void resolve_spacing_sides(LayoutContext* lycon, ViewSpan* span, CssBoxSi
     Margin* margin = is_margin ? &bound->margin : nullptr;
     CssEnum type = is_margin ? css_value_axis_type(value) : CSS_VALUE__UNDEF;
     set_spacing_side(spacing, margin, first_side, resolved, type, specificity);
-    if (second_side == first_side) return;
-    if (is_margin) {
+    if (second_side != first_side) {
         set_spacing_side(spacing, margin, second_side, resolved, type, specificity);
-    } else {
-        set_spacing_side(spacing, nullptr, second_side, resolved, type, specificity);
     }
 }
 
@@ -4552,33 +4549,23 @@ static bool css_property_is_font(CssPropertyCode property) {
     }
 }
 
-// Callback for AVL tree traversal - first pass (font properties only)
-static bool resolve_font_property_callback(AvlNode* node, void* context) {
+static bool resolve_property_callback(AvlNode* node, void* context, bool font_pass) {
     LayoutContext* lycon = (LayoutContext*)context;
     StyleNode* style_node = (StyleNode*)node->declaration;
     CssPropertyCode prop_id = (CssPropertyCode)node->property_id;
-    // Only process font-related properties in first pass
-    // These must be resolved before width/height/etc. which may use em/ex units
-    if (!css_property_is_font(prop_id)) {
-        return true; // skip, will process in second pass
-    }
-    CssDeclaration* decl = style_node ? style_node->winning_decl : NULL;
-    if (!decl) return true;
-    resolve_css_property(prop_id, decl, lycon);
+    if (css_property_is_font(prop_id) != font_pass) return true;
+    CssDeclaration* decl = style_node ? style_node->winning_decl : nullptr;
+    if (decl) resolve_css_property(prop_id, decl, lycon);
     return true;
 }
 
+// Font declarations must resolve before em/ex-dependent properties.
+static bool resolve_font_property_callback(AvlNode* node, void* context) {
+    return resolve_property_callback(node, context, true);
+}
+
 static bool resolve_non_font_property_callback(AvlNode* node, void* context) {
-    LayoutContext* lycon = (LayoutContext*)context;
-    StyleNode* style_node = (StyleNode*)node->declaration;
-    CssPropertyCode prop_id = (CssPropertyCode)node->property_id;
-    if (css_property_is_font(prop_id)) {
-        return true; // already processed
-    }
-    CssDeclaration* decl = style_node ? style_node->winning_decl : NULL;
-    if (!decl) return true;
-    resolve_css_property(prop_id, decl, lycon);
-    return true;
+    return resolve_property_callback(node, context, false);
 }
 
 static const CssPropertyCode kFontProperties[] = {
@@ -5443,12 +5430,59 @@ static void css_set_flex_item_values(DomElement* span,
     span->fi->flex_basis_is_stretch = false;
 }
 
-static void css_set_flex_basis_value(DomElement* span, float basis,
-                                     bool is_percent, bool is_content, bool is_stretch) {
-    span->fi->flex_basis = basis;
-    span->fi->flex_basis_is_percent = is_percent;
-    span->fi->flex_basis_is_content = is_content;
-    span->fi->flex_basis_is_stretch = is_stretch;
+struct CssFlexBasisValue {
+    float value = -1.0f;
+    bool is_percent = false;
+    bool is_content = false;
+    bool is_stretch = false;
+    bool valid = false;
+};
+
+static CssFlexBasisValue css_parse_flex_basis_value(LayoutContext* lycon,
+                                                    CssPropertyCode property,
+                                                    const CssValue* value,
+                                                    bool resolve_length,
+                                                    bool allow_content) {
+    CssFlexBasisValue result;
+    if (!value) return result;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        switch (value->data.keyword) {
+            case CSS_VALUE_AUTO:
+                result.valid = true;
+                break;
+            case CSS_VALUE_CONTENT:
+                result.is_content = allow_content;
+                result.valid = allow_content;
+                break;
+            case CSS_VALUE_STRETCH:
+                result.is_stretch = true;
+                result.valid = true;
+                break;
+            default:
+                break;
+        }
+    } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        result.value = resolve_length
+            ? resolve_length_value(lycon, property, value)
+            : (float)value->data.length.value;
+        result.valid = true;
+    } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        result.value = (float)value->data.percentage.value;
+        result.is_percent = true;
+        result.valid = true;
+    } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        result.value = (float)value->data.number.value;
+        result.valid = true;
+    }
+    return result;
+}
+
+static void css_set_flex_basis_value(DomElement* span,
+                                     const CssFlexBasisValue& basis) {
+    span->fi->flex_basis = basis.value;
+    span->fi->flex_basis_is_percent = basis.is_percent;
+    span->fi->flex_basis_is_content = basis.is_content;
+    span->fi->flex_basis_is_stretch = basis.is_stretch;
 }
 
 static void css_apply_list_style_keyword(LayoutContext* lycon, ViewSpan* span,
@@ -5885,6 +5919,37 @@ static void resolve_font_spacing_property(LayoutContext* lycon, ViewSpan* span,
     }
 }
 
+struct CssKeywordSlotSpec {
+    CssPropertyCode property;
+    size_t offset;
+};
+
+static CssEnum* css_keyword_slot(void* object, const CssKeywordSlotSpec* slots,
+                                 size_t count, CssPropertyCode property) {
+    if (!object) return nullptr;
+    for (size_t i = 0; i < count; i++) {
+        if (slots[i].property == property) {
+            return (CssEnum*)((char*)object + slots[i].offset);
+        }
+    }
+    return nullptr;
+}
+
+static CssEnum* css_simple_keyword_slot(BlockProp* props, CssPropertyCode property) {
+    static const CssKeywordSlotSpec slots[] = {
+        {CSS_PROPERTY_TEXT_TRANSFORM, offsetof(BlockProp, text_transform)},
+        {CSS_PROPERTY_TEXT_WRAP_STYLE, offsetof(BlockProp, text_wrap_style)},
+        {CSS_PROPERTY_TEXT_OVERFLOW, offsetof(BlockProp, text_overflow)},
+        {CSS_PROPERTY_WORD_BREAK, offsetof(BlockProp, word_break)},
+        {CSS_PROPERTY_LINE_BREAK, offsetof(BlockProp, line_break)},
+        {CSS_PROPERTY_WORD_WRAP, offsetof(BlockProp, overflow_wrap)},
+        {CSS_PROPERTY_OVERFLOW_WRAP, offsetof(BlockProp, overflow_wrap)},
+        {CSS_PROPERTY_WHITE_SPACE, offsetof(BlockProp, white_space)},
+        {CSS_PROPERTY_TEXT_SPACING_TRIM, offsetof(BlockProp, text_spacing_trim)}
+    };
+    return css_keyword_slot(props, slots, sizeof(slots) / sizeof(*slots), property);
+}
+
 static void resolve_simple_keyword_property(LayoutContext* lycon, ViewSpan* span,
                                             ViewBlock* block, CssPropertyCode property,
                                             const CssValue* value) {
@@ -5914,7 +5979,7 @@ static void resolve_simple_keyword_property(LayoutContext* lycon, ViewSpan* span
     }
     if (property == CSS_PROPERTY_TEXT_ALIGN_LAST) {
         if (!block) return;
-    block->ensure_block(lycon);
+        block->ensure_block(lycon);
         if (value->type == CSS_VALUE_TYPE_KEYWORD &&
             value->data.keyword != CSS_VALUE_INHERIT &&
             value->data.keyword != CSS_VALUE__UNDEF) {
@@ -5945,19 +6010,8 @@ static void resolve_simple_keyword_property(LayoutContext* lycon, ViewSpan* span
     }
     if (property == CSS_PROPERTY_TEXT_OVERFLOW && !block) return;
     BlockProp* props = span->ensure_block(lycon);
-    CssEnum* slot = nullptr;
-    switch (property) {
-        case CSS_PROPERTY_TEXT_TRANSFORM: slot = &props->text_transform; break;
-        case CSS_PROPERTY_TEXT_WRAP_STYLE: slot = &props->text_wrap_style; break;
-        case CSS_PROPERTY_TEXT_OVERFLOW: slot = &props->text_overflow; break;
-        case CSS_PROPERTY_WORD_BREAK: slot = &props->word_break; break;
-        case CSS_PROPERTY_LINE_BREAK: slot = &props->line_break; break;
-        case CSS_PROPERTY_WORD_WRAP:
-        case CSS_PROPERTY_OVERFLOW_WRAP: slot = &props->overflow_wrap; break;
-        case CSS_PROPERTY_WHITE_SPACE: slot = &props->white_space; break;
-        case CSS_PROPERTY_TEXT_SPACING_TRIM: slot = &props->text_spacing_trim; break;
-        default: return;
-    }
+    CssEnum* slot = css_simple_keyword_slot(props, property);
+    if (!slot) return;
     resolve_keyword_slot(value, slot);
 }
 
@@ -6014,29 +6068,21 @@ static bool resolve_common_keyword_property(LayoutContext* lycon, ViewSpan* span
 }
 
 static bool css_property_is_ignored(CssPropertyCode property) {
-    switch (property) {
-        case CSS_PROPERTY_DISPLAY:
-        case CSS_PROPERTY_MARGIN_TRIM:
-        case CSS_PROPERTY_TRANSFORM_STYLE:
-        case CSS_PROPERTY_BACKFACE_VISIBILITY:
-        case CSS_PROPERTY_BORDER_IMAGE_SLICE:
-        case CSS_PROPERTY_BORDER_IMAGE_OUTSET:
-        case CSS_PROPERTY_BORDER_IMAGE:
-        // clip has no stored geometry yet; allocating scroll state here cannot
-        case CSS_PROPERTY_CLIP:
-        case CSS_PROPERTY_ANIMATION:
-        case CSS_PROPERTY_ANIMATION_NAME:
-        case CSS_PROPERTY_ANIMATION_DURATION:
-        case CSS_PROPERTY_ANIMATION_TIMING_FUNCTION:
-        case CSS_PROPERTY_ANIMATION_DELAY:
-        case CSS_PROPERTY_ANIMATION_ITERATION_COUNT:
-        case CSS_PROPERTY_ANIMATION_DIRECTION:
-        case CSS_PROPERTY_ANIMATION_FILL_MODE:
-        case CSS_PROPERTY_ANIMATION_PLAY_STATE:
-            return true;
-        default:
-            return false;
+    static const CssPropertyCode ignored[] = {
+        CSS_PROPERTY_DISPLAY, CSS_PROPERTY_MARGIN_TRIM,
+        CSS_PROPERTY_TRANSFORM_STYLE, CSS_PROPERTY_BACKFACE_VISIBILITY,
+        CSS_PROPERTY_BORDER_IMAGE_SLICE, CSS_PROPERTY_BORDER_IMAGE_OUTSET,
+        CSS_PROPERTY_BORDER_IMAGE, CSS_PROPERTY_CLIP,
+        CSS_PROPERTY_ANIMATION, CSS_PROPERTY_ANIMATION_NAME,
+        CSS_PROPERTY_ANIMATION_DURATION, CSS_PROPERTY_ANIMATION_TIMING_FUNCTION,
+        CSS_PROPERTY_ANIMATION_DELAY, CSS_PROPERTY_ANIMATION_ITERATION_COUNT,
+        CSS_PROPERTY_ANIMATION_DIRECTION, CSS_PROPERTY_ANIMATION_FILL_MODE,
+        CSS_PROPERTY_ANIMATION_PLAY_STATE
+    };
+    for (CssPropertyCode ignored_property : ignored) {
+        if (ignored_property == property) return true;
     }
+    return false;
 }
 
 static void resolve_background_keyword_property(LayoutContext* lycon, ViewSpan* span,
@@ -6044,15 +6090,15 @@ static void resolve_background_keyword_property(LayoutContext* lycon, ViewSpan* 
                                                 const CssValue* value) {
     layout_ensure_background(lycon, span);
     BackgroundProp* background = span->boundary()->background;
-    CssEnum* slot = nullptr;
-    switch (property) {
-        case CSS_PROPERTY_BACKGROUND_ATTACHMENT: slot = &background->bg_attachment; break;
-        case CSS_PROPERTY_BACKGROUND_ORIGIN: slot = &background->bg_origin; break;
-        case CSS_PROPERTY_BACKGROUND_CLIP: slot = &background->bg_clip; break;
-        case CSS_PROPERTY_BACKGROUND_BLEND_MODE: slot = &background->blend_mode; break;
-        default: return;
-    }
-    resolve_keyword_slot(value, slot);
+    const CssKeywordSlotSpec slots[] = {
+        {CSS_PROPERTY_BACKGROUND_ATTACHMENT, offsetof(BackgroundProp, bg_attachment)},
+        {CSS_PROPERTY_BACKGROUND_ORIGIN, offsetof(BackgroundProp, bg_origin)},
+        {CSS_PROPERTY_BACKGROUND_CLIP, offsetof(BackgroundProp, bg_clip)},
+        {CSS_PROPERTY_BACKGROUND_BLEND_MODE, offsetof(BackgroundProp, blend_mode)}
+    };
+    CssEnum* slot = css_keyword_slot(
+        background, slots, sizeof(slots) / sizeof(*slots), property);
+    if (slot) resolve_keyword_slot(value, slot);
 }
 
 static void resolve_outline_longhand(LayoutContext* lycon, ViewSpan* span,
@@ -6478,6 +6524,25 @@ static CssEnum find_inherited_block_keyword(DomElement* element,
     return fallback;
 }
 
+static CssPropertyCode css_physical_size_alias(CssPropertyCode property,
+                                                bool vertical_inline_axis) {
+    static const CssPropertyCode width[] = {
+        CSS_PROPERTY_WIDTH, CSS_PROPERTY_MIN_WIDTH, CSS_PROPERTY_MAX_WIDTH
+    };
+    static const CssPropertyCode height[] = {
+        CSS_PROPERTY_HEIGHT, CSS_PROPERTY_MIN_HEIGHT, CSS_PROPERTY_MAX_HEIGHT
+    };
+    switch (property) {
+        case CSS_PROPERTY_INLINE_SIZE: return vertical_inline_axis ? height[0] : width[0];
+        case CSS_PROPERTY_BLOCK_SIZE: return vertical_inline_axis ? width[0] : height[0];
+        case CSS_PROPERTY_MIN_INLINE_SIZE: return vertical_inline_axis ? height[1] : width[1];
+        case CSS_PROPERTY_MAX_INLINE_SIZE: return vertical_inline_axis ? height[2] : width[2];
+        case CSS_PROPERTY_MIN_BLOCK_SIZE: return vertical_inline_axis ? width[1] : height[1];
+        case CSS_PROPERTY_MAX_BLOCK_SIZE: return vertical_inline_axis ? width[2] : height[2];
+        default: return property;
+    }
+}
+
 void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
     if (!decl || !lycon || !lycon->view) {
         return;
@@ -6512,27 +6577,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
     bool inline_axis_is_vertical = layout_element_inline_axis_is_vertical(current_element);
     WritingMode current_writing_mode = layout_element_writing_mode(current_element);
     bool vertical_block_start_is_right = current_writing_mode == WM_VERTICAL_RL;
-    switch (prop_id) {
-        case CSS_PROPERTY_INLINE_SIZE:
-            prop_id = inline_axis_is_vertical ? CSS_PROPERTY_HEIGHT : CSS_PROPERTY_WIDTH;
-            break;
-        case CSS_PROPERTY_BLOCK_SIZE:
-            prop_id = inline_axis_is_vertical ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
-            break;
-        case CSS_PROPERTY_MIN_INLINE_SIZE:
-            prop_id = inline_axis_is_vertical ? CSS_PROPERTY_MIN_HEIGHT : CSS_PROPERTY_MIN_WIDTH;
-            break;
-        case CSS_PROPERTY_MAX_INLINE_SIZE:
-            prop_id = inline_axis_is_vertical ? CSS_PROPERTY_MAX_HEIGHT : CSS_PROPERTY_MAX_WIDTH;
-            break;
-        case CSS_PROPERTY_MIN_BLOCK_SIZE:
-            prop_id = inline_axis_is_vertical ? CSS_PROPERTY_MIN_WIDTH : CSS_PROPERTY_MIN_HEIGHT;
-            break;
-        case CSS_PROPERTY_MAX_BLOCK_SIZE:
-            prop_id = inline_axis_is_vertical ? CSS_PROPERTY_MAX_WIDTH : CSS_PROPERTY_MAX_HEIGHT;
-            break;
-        default: break;
-    }
+    prop_id = css_physical_size_alias(prop_id, inline_axis_is_vertical);
     ViewSpan* span = lam::view_require_element(lycon->view);
     ViewBlock* block = lam::view_as_block(span);
     if (css_property_is_ignored(prop_id) ||
@@ -7759,24 +7804,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_FLEX_BASIS: {
             alloc_flex_item_prop(lycon, span);
             if (!span->flex_item()) break;
-            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
-                css_set_flex_basis_value(span, -1.0f, false, false, false);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD &&
-                       value->data.keyword == CSS_VALUE_CONTENT) {
-                css_set_flex_basis_value(span, -1.0f, false, true, false);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD &&
-                       value->data.keyword == CSS_VALUE_STRETCH) {
-                css_set_flex_basis_value(span, -1.0f, false, false, true);
-            } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float basis_value = resolve_length_value(lycon, prop_id, value);
-                css_set_flex_basis_value(span, basis_value, false, false, false);
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                css_set_flex_basis_value(span, (float)value->data.percentage.value,
-                                         true, false, false);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                float basis_value = (float)value->data.number.value;
-                css_set_flex_basis_value(span, basis_value, false, false, false);
-            }
+            CssFlexBasisValue basis = css_parse_flex_basis_value(
+                lycon, prop_id, value, true, true);
+            if (basis.valid) css_set_flex_basis_value(span, basis);
             break;
         }
         case CSS_PROPERTY_ALIGN_SELF:
@@ -7823,25 +7853,23 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             ViewSpan* span = lam::view_require_element(lycon->view);
             float flex_grow = 1.0f;
             float flex_shrink = 1.0f;
-            float flex_basis = -1.0f;
-            bool flex_basis_is_percent = false;
-            bool flex_basis_is_stretch = false;
+            CssFlexBasisValue basis;
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 if (value->data.keyword == CSS_VALUE_NONE) {
                     flex_grow = 0;
                     flex_shrink = 0;
-                    flex_basis = -1;
+                    basis.value = -1;
                 } else if (value->data.keyword == CSS_VALUE_AUTO) {
                     flex_grow = 1;
                     flex_shrink = 1;
-                    flex_basis = -1;
+                    basis.value = -1;
                 } else if (value->data.keyword == CSS_VALUE_INITIAL) {
                     flex_grow = 0;
                     flex_shrink = 1;
-                    flex_basis = -1;
+                    basis.value = -1;
                 }
                 css_set_flex_item_values(span, flex_grow, flex_shrink,
-                                         flex_basis, flex_basis_is_percent);
+                                         basis.value, basis.is_percent);
                 break;
             }
             if (value->type == CSS_VALUE_TYPE_LIST) {
@@ -7859,45 +7887,33 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                             flex_shrink = (float)val->data.number.value;
                             value_index++;
                         } else if (value_index == 2 && val->data.number.value == 0) {
-                            flex_basis = 0;
-                            flex_basis_is_percent = false;
+                            basis.value = 0;
+                            basis.is_percent = false;
                             found_basis = true;
                         }
-                    } else if (val->type == CSS_VALUE_TYPE_LENGTH) {
-                        flex_basis = val->data.length.value;
-                        flex_basis_is_percent = false;
-                        found_basis = true;
-                    } else if (val->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                        flex_basis = val->data.percentage.value;
-                        flex_basis_is_percent = true;
-                        found_basis = true;
-                    } else if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-                        if (val->data.keyword == CSS_VALUE_AUTO) {
-                            flex_basis = -1;
-                            flex_basis_is_percent = false;
-                            found_basis = true;
-                        } else if (val->data.keyword == CSS_VALUE_STRETCH) {
-                            flex_basis = -1;
-                            flex_basis_is_percent = false;
-                            flex_basis_is_stretch = true;
+                    } else {
+                        CssFlexBasisValue parsed = css_parse_flex_basis_value(
+                            lycon, prop_id, val, false, false);
+                        if (parsed.valid) {
+                            basis = parsed;
                             found_basis = true;
                         }
                     }
                 }
                 if (count == 1 && value_index == 1 && !found_basis) {
                     flex_shrink = 1.0f;
-                    flex_basis = 0;
+                    basis.value = 0;
                 }
                 css_set_flex_item_values(span, flex_grow, flex_shrink,
-                                         flex_basis, flex_basis_is_percent);
-                span->fi->flex_basis_is_stretch = flex_basis_is_stretch;
+                                         basis.value, basis.is_percent);
+                span->fi->flex_basis_is_stretch = basis.is_stretch;
             }
             else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 flex_grow = (float)value->data.number.value;
                 flex_shrink = 1.0f;
-                flex_basis = 0;
+                basis.value = 0;
                 css_set_flex_item_values(span, flex_grow, flex_shrink,
-                                         flex_basis, false);
+                                         basis.value, false);
             }
             break;
         }

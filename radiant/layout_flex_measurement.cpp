@@ -100,21 +100,13 @@ float flex_resolve_inherited_line_height(LayoutContext* lycon, DomElement* targe
 
     return 0;
 }
-// Helper to get the resolved CSS margin for a specific side. Percentage
-// margins resolve against the containing block inline size, which may differ
-// from any earlier style-resolution context during intrinsic flex measurement.
-static float get_css_margin(LayoutContext* lycon, ViewElement* elem,
-                            CssPropertyCode property_code, float inline_base) {
-    return layout_resolve_intrinsic_margin_side(
-        lycon, elem, property_code, inline_base);
-}
 
 static float get_child_axis_margins(LayoutContext* lycon, ViewElement* elem,
                                     bool horizontal, float inline_base = -1.0f) {
     CssPropertyCode start = horizontal ? CSS_PROPERTY_MARGIN_LEFT : CSS_PROPERTY_MARGIN_TOP;
     CssPropertyCode end = horizontal ? CSS_PROPERTY_MARGIN_RIGHT : CSS_PROPERTY_MARGIN_BOTTOM;
-    return get_css_margin(lycon, elem, start, inline_base) +
-           get_css_margin(lycon, elem, end, inline_base);
+    return layout_resolve_intrinsic_margin_side(lycon, elem, start, inline_base) +
+           layout_resolve_intrinsic_margin_side(lycon, elem, end, inline_base);
 }
 
 static float flex_item_content_width_for_child_percentages(LayoutContext* lycon,

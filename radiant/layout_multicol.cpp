@@ -295,16 +295,12 @@ float multicol_normal_gap_size(ViewBlock* block) {
     return 16.0f;
 }
 
-static bool multicol_uses_static_x(ViewBlock* block) {
-    return block && block->position &&
-           !block->positionp()->has_left &&
-           !block->positionp()->has_right;
-}
 
-static bool multicol_uses_static_y(ViewBlock* block) {
-    return block && block->position &&
-           !block->positionp()->has_top &&
-           !block->positionp()->has_bottom;
+static bool multicol_uses_static_axis(ViewBlock* block, bool horizontal) {
+    if (!block || !block->position) return false;
+    return horizontal
+        ? !block->positionp()->has_left && !block->positionp()->has_right
+        : !block->positionp()->has_top && !block->positionp()->has_bottom;
 }
 
 static bool multicol_is_spanner_block(ViewBlock* block) {
@@ -430,9 +426,9 @@ static void multicol_finalize_text_for_fragmented_block(View* view, ViewBlock* f
     if (!view || !fragment_owner) return;
 
     if (view->view_type == RDT_VIEW_TEXT) {
-        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
         // Fragment projection already stores rects in the union box's local
         // coordinate space; finalization must preserve their column offsets.
+        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
         adjust_text_bounds(text);
         return;
     }
@@ -537,8 +533,9 @@ static LayoutFragmentBox* multicol_last_layout_fragment(ViewBlock* block) {
 
 static void multicol_apply_static_fragment_anchor(ViewBlock* multicol, ViewBlock* oof) {
     if (!multicol || !oof || !layout_block_is_out_of_flow_positioned(oof)) return;
-    if (!multicol_uses_static_x(oof) && !multicol_uses_static_y(oof)) return;
 
+    if (!multicol_uses_static_axis(oof, true) &&
+        !multicol_uses_static_axis(oof, false)) return;
     ViewBlock* anchor = multicol_in_flow_block_sibling(static_cast<View*>(oof), true);
     bool anchor_is_next = anchor != nullptr;
     if (!anchor) {
@@ -555,7 +552,7 @@ static void multicol_apply_static_fragment_anchor(ViewBlock* multicol, ViewBlock
         multicol_absolute_normal_origin(multicol, &anchor_origin_x, &anchor_origin_y);
     }
 
-    if (multicol_uses_static_x(oof)) {
+    if (multicol_uses_static_axis(oof, true)) {
         LayoutFragmentBox* last_fragment = anchor_is_next ? nullptr : multicol_last_layout_fragment(anchor);
         if (last_fragment) {
             oof->x = anchor_origin_x + anchor->x + last_fragment->x;
@@ -563,7 +560,7 @@ static void multicol_apply_static_fragment_anchor(ViewBlock* multicol, ViewBlock
             oof->x = anchor_origin_x + anchor->x;
         }
     }
-    if (multicol_uses_static_y(oof)) {
+    if (multicol_uses_static_axis(oof, false)) {
         if (anchor_is_next) {
             oof->y = anchor_origin_y + anchor->y;
         } else {

@@ -267,7 +267,6 @@ struct IntrinsicFontScope {
 
 float calculate_min_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
-float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float width);
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
                                    bool ignore_definite_block_size = false);
 bool layout_has_cyclic_percentage_replaced_descendant(DomElement* element);
@@ -1310,6 +1309,56 @@ struct TableMetadata {
     }
 };
 
+// Border-collapse visits the same edge grid in both physical directions;
+// keeping index and winning-border side selection together prevents the two
+// traversals from growing separate row/column coordinate branches.
+struct LayoutTableAxis {
+    bool horizontal;
+    int edge_count;
+    int slot_count;
+    LayoutTableAxis(const TableMetadata* meta, bool horizontal_axis)
+        : horizontal(horizontal_axis),
+          edge_count(meta ? (horizontal ? meta->row_count : meta->column_count) : 0),
+          slot_count(meta ? (horizontal ? meta->column_count : meta->row_count) : 0) {}
+    int row(int edge, int slot) const { return horizontal ? edge : slot; }
+    int col(int edge, int slot) const { return horizontal ? slot : edge; }
+    int fixed_index(bool start) const {
+        return start ? 0 : edge_count - 1;
+    }
+    int edge(int row_value, int col_value) const {
+        return horizontal ? row_value : col_value;
+    }
+    bool has_previous(int row_value, int col_value) const {
+        return edge(row_value, col_value) > 0;
+    }
+    bool has_next(int row_value, int col_value) const {
+        return edge(row_value, col_value) < edge_count;
+    }
+    int previous_row(int row_value, int col_value) const {
+        return horizontal ? row_value - 1 : row_value;
+    }
+    int previous_col(int row_value, int col_value) const {
+        return horizontal ? col_value : col_value - 1;
+    }
+    CssBoxSide previous_side() const {
+        return horizontal ? CSS_BOX_SIDE_BOTTOM : CSS_BOX_SIDE_RIGHT;
+    }
+    CssBoxSide next_side() const {
+        return horizontal ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_LEFT;
+    }
+    CssBoxSide table_side(bool start) const {
+        return horizontal
+            ? (start ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_BOTTOM)
+            : (start ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT);
+    }
+    float* collapsed_edge(TableMetadata* meta, bool start) const {
+        if (!meta) return nullptr;
+        if (horizontal) return start
+            ? &meta->collapsed_border_top : &meta->collapsed_border_bottom;
+        return start ? &meta->collapsed_border_left : &meta->collapsed_border_right;
+    }
+};
+
 TableMetadata* table_metadata_create(ScratchArena* scratch, int cols, int rows);
 void table_metadata_destroy(TableMetadata* meta);
 // tier-3: layout-transient, valid within pass
@@ -1895,21 +1944,6 @@ typedef struct FlexLineInfo {
     float baseline;
 } FlexLineInfo;
 
-typedef struct FlexAxisConstraintValues {
-    float minimum;
-    float maximum;
-    FlexAxisConstraintValues(const FlexItemProp* item, bool horizontal)
-        : minimum(0.0f), maximum(0.0f) {
-        if (!item) return;
-        if (horizontal) {
-            minimum = item->resolved_min_width;
-            maximum = item->resolved_max_width;
-        } else {
-            minimum = item->resolved_min_height;
-            maximum = item->resolved_max_height;
-        }
-    }
-} FlexAxisConstraintValues;
 // tier-3: layout-transient, valid while resolving one flex item
 typedef struct FlexResolvedAxis {
     bool horizontal;
@@ -2049,7 +2083,8 @@ typedef struct LayoutAxisRefs {
     } AxisMargins;
 
     LayoutAxis axis;
-    float* size;
+    ViewElement* item;
+    float* size_slot;
     float* position;
     float* given;
     float* minimum;
@@ -2066,7 +2101,7 @@ typedef struct LayoutAxisRefs {
     AxisMargins margins;
 
     LayoutAxisRefs(LayoutAxis selected)
-        : axis(selected), size(nullptr), position(nullptr), given(nullptr),
+        : axis(selected), item(nullptr), size_slot(nullptr), position(nullptr), given(nullptr),
           minimum(nullptr), maximum(nullptr), given_percent(nullptr),
           minimum_percent(nullptr), maximum_percent(nullptr),
           given_fit_content_limit(nullptr), given_fit_content_percent(nullptr),
@@ -2074,12 +2109,14 @@ typedef struct LayoutAxisRefs {
           insets{}, margins{} {}
 
     void bind_geometry(ViewElement* item) {
+        this->item = item;
         if (!item) return;
+        if (item->bound) bind_margins(&item->boundary_mut()->margin);
         if (axis == LAYOUT_AXIS_X) {
-            size = &item->width;
+            size_slot = &item->width;
             position = &item->x;
         } else {
-            size = &item->height;
+            size_slot = &item->height;
             position = &item->y;
         }
     }
@@ -2123,6 +2160,18 @@ typedef struct LayoutAxisRefs {
         bind_geometry(item);
     }
 
+    LayoutAxisRefs(ViewElement* item, bool horizontal)
+        : LayoutAxisRefs(item, horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y) {}
+    LayoutAxisRefs(FlexItemProp* item, LayoutAxis selected)
+        : LayoutAxisRefs(selected) {
+        if (!item) return;
+        minimum = selected == LAYOUT_AXIS_X
+            ? &item->resolved_min_width : &item->resolved_min_height;
+        maximum = selected == LAYOUT_AXIS_X
+            ? &item->resolved_max_width : &item->resolved_max_height;
+    }
+    LayoutAxisRefs(FlexItemProp* item, bool horizontal)
+        : LayoutAxisRefs(item, horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y) {}
     LayoutAxisRefs(BlockContext* context, LayoutAxis selected)
         : LayoutAxisRefs(selected) {
         if (context) given = selected == LAYOUT_AXIS_X
@@ -2147,44 +2196,15 @@ typedef struct LayoutAxisRefs {
         if (!block) return;
         bind_constraints(block->block_mut());
         bind_insets(block->position);
-        bind_margins(block->bound ? &block->boundary_mut()->margin : nullptr);
     }
 
-    float get_size() const { return size ? *size : 0.0f; }
+    float get_size() const { return size_slot ? *size_slot : 0.0f; }
     float get_position() const { return position ? *position : 0.0f; }
-    void set_size(float value) const { if (size) *size = value; }
+    void set_size(float value) const { if (size_slot) *size_slot = value; }
     void set_position(float value) const { if (position) *position = value; }
-    bool has_start() const { return insets.start.has && *insets.start.has; }
-    bool has_end() const { return insets.end.has && *insets.end.has; }
-    bool has_any_inset() const { return has_start() || has_end(); }
-    float margin_start() const { return margins.start ? *margins.start : 0.0f; }
-    float margin_end() const { return margins.end ? *margins.end : 0.0f; }
-} LayoutAxisRefs;
-// One flex item's physical axis. Flex intrinsic data, used geometry, and form
-// control fallbacks must select the same width/height slot as CSS axis helpers.
-// Keeping that selection here prevents the flex sizing phases from growing
-// paired physical-axis branches again.
-struct FlexItemAxis {
-    ViewElement* item;
-    LayoutAxis axis;
 
-    FlexItemAxis(ViewElement* value, LayoutAxis selected)
-        : item(value), axis(selected) {}
-    FlexItemAxis(ViewElement* value, bool horizontal)
-        : FlexItemAxis(value, horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y) {}
 
     bool horizontal() const { return axis == LAYOUT_AXIS_X; }
-    LayoutAxis opposite() const {
-        return horizontal() ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
-    }
-    float size() const {
-        return item ? (horizontal() ? item->width : item->height) : 0.0f;
-    }
-    void set_size(float value) const {
-        if (!item) return;
-        if (horizontal()) item->width = value;
-        else item->height = value;
-    }
     IntrinsicSizes* intrinsic() const {
         return item && item->fi
             ? (horizontal() ? &item->fi->intrinsic_width : &item->fi->intrinsic_height)
@@ -2209,7 +2229,20 @@ struct FlexItemAxis {
         if (horizontal()) item->form->intrinsic_width = value;
         else item->form->intrinsic_height = value;
     }
-};
+    bool has_start() const { return insets.start.has && *insets.start.has; }
+    bool has_end() const { return insets.end.has && *insets.end.has; }
+    bool has_any_inset() const { return has_start() || has_end(); }
+    bool margin_start_is_auto() const {
+        return margins.start_type && *margins.start_type == CSS_VALUE_AUTO;
+    }
+    bool margin_end_is_auto() const {
+        return margins.end_type && *margins.end_type == CSS_VALUE_AUTO;
+    }
+    float margin_start() const { return margins.start ? *margins.start : 0.0f; }
+    float margin_end() const { return margins.end ? *margins.end : 0.0f; }
+    float non_auto_margin_start() const { return margin_start_is_auto() ? 0.0f : margin_start(); }
+    float non_auto_margin_end() const { return margin_end_is_auto() ? 0.0f : margin_end(); }
+} LayoutAxisRefs;
 // tier-3: layout-transient, describes one child during vertical-flow sizing
 typedef struct LayoutVerticalFlowChild {
     ViewBlock* block;

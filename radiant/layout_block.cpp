@@ -324,34 +324,31 @@ static bool apply_contain_intrinsic_axis(LayoutContext* lycon, ViewBlock* block,
 void layout_apply_preferred_ratio_to_replaced_auto_axes(LayoutContext* lycon,
                                                         ViewBlock* block) {
     if (!lycon || !block) return;
-    bool width_is_automatic = layout_block_has_automatic_size(block, true);
-    bool height_is_automatic = layout_block_has_automatic_size(block, false);
+    LayoutAxisPair<bool> automatic = {
+        layout_block_has_automatic_size(block, true),
+        layout_block_has_automatic_size(block, false)
+    };
     float preferred_aspect_ratio = layout_used_preferred_aspect_ratio(block);
-    if (preferred_aspect_ratio <= 0.0f || (!width_is_automatic && !height_is_automatic)) return;
+    if (preferred_aspect_ratio <= 0.0f || (!automatic.x && !automatic.y)) return;
     bool ratio_uses_content_box = layout_aspect_ratio_uses_content_box(block);
     bool ratio_uses_border_box = !ratio_uses_content_box && layout_uses_border_box(block);
-    float used_width = lycon->block.given_width;
-    float used_height = lycon->block.given_height;
-    if (width_is_automatic && height_is_automatic) {
-        used_height = layout_ratio_transfer_axis(
-            block, used_width, true, preferred_aspect_ratio,
+    LayoutAxisPair<float> used = {lycon->block.given_width, lycon->block.given_height};
+    if (automatic.x && automatic.y) {
+        used.y = layout_ratio_transfer_axis(
+            block, used.x, true, preferred_aspect_ratio,
             ratio_uses_border_box, ratio_uses_border_box, ratio_uses_border_box);
-    } else if (width_is_automatic != height_is_automatic) {
-        bool source_horizontal = width_is_automatic ? false : true;
+    } else if (automatic.x != automatic.y) {
+        LayoutAxis source = automatic.x ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+        LayoutAxis target = source == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
         bool ratio_box = layout_uses_border_box(block);
-        bool ratio_is_border_box = !ratio_uses_content_box && ratio_box;
-        float source_size = source_horizontal ? used_width : used_height;
-        float target_size = layout_ratio_transfer_axis(
-            block, source_size, source_horizontal, preferred_aspect_ratio,
-            ratio_box, ratio_box, ratio_is_border_box);
-        if (width_is_automatic) used_width = target_size;
-        else used_height = target_size;
+        used[target] = layout_ratio_transfer_axis(
+            block, used[source], source == LAYOUT_AXIS_X, preferred_aspect_ratio,
+            ratio_box, ratio_box, !ratio_uses_content_box && ratio_box);
     }
-    if (width_is_automatic) {
-        layout_store_given_axis(lycon, block, used_width, true, true);
-    }
-    if (height_is_automatic) {
-        layout_store_given_axis(lycon, block, used_height, false, true);
+    for (LayoutAxis axis : layout_axes()) {
+        if (automatic[axis]) {
+            layout_store_given_axis(lycon, block, used[axis], axis == LAYOUT_AXIS_X, true);
+        }
     }
 }
 
@@ -425,9 +422,11 @@ static void apply_canvas_last_remembered_size(LayoutContext* lycon, ViewBlock* b
         !block->block()->content_visibility_hidden) {
         return;
     }
-    bool use_width = block->block()->contain_intrinsic_width_auto;
-    bool use_height = block->block()->contain_intrinsic_height_auto;
-    if (!use_width && !use_height) return;
+    LayoutAxisPair<bool> use = {
+        block->block()->contain_intrinsic_width_auto,
+        block->block()->contain_intrinsic_height_auto
+    };
+    if (!use.x && !use.y) return;
     float natural_width = 0.0f;
     float natural_height = 0.0f;
     if (!layout_canvas_natural_size(block, &natural_width, &natural_height) ||
@@ -435,11 +434,11 @@ static void apply_canvas_last_remembered_size(LayoutContext* lycon, ViewBlock* b
         return;
     }
     // visibility skipped the box; the normal replaced fallback otherwise stretches
-    if (use_width) {
-        layout_store_given_axis(lycon, block, natural_width, true, true);
-    }
-    if (use_height) {
-        layout_store_given_axis(lycon, block, natural_height, false, true);
+    LayoutAxisPair<float> natural = {natural_width, natural_height};
+    for (LayoutAxis axis : layout_axes()) {
+        if (use[axis]) {
+            layout_store_given_axis(lycon, block, natural[axis], axis == LAYOUT_AXIS_X, true);
+        }
     }
 }
 
@@ -456,13 +455,25 @@ static void apply_canvas_object_view_box_auto_size(LayoutContext* lycon, ViewBlo
     ObjectViewBoxUsedRect object_view_box = resolve_object_view_box_rect(
         lycon, block->as_element(), lycon->block.given_width, lycon->block.given_height);
     if (!object_view_box.valid) return;
-    if (width_is_auto && height_is_auto) {
-        lycon->block.given_width = object_view_box.width;
-        lycon->block.given_height = object_view_box.height;
-    } else if (width_is_auto && object_view_box.height > 0.0f) {
-        lycon->block.given_width = lycon->block.given_height * object_view_box.width / object_view_box.height;
-    } else if (height_is_auto && object_view_box.width > 0.0f) {
-        lycon->block.given_height = lycon->block.given_width * object_view_box.height / object_view_box.width;
+    LayoutAxisPair<bool> automatic = {width_is_auto, height_is_auto};
+    LayoutAxisPair<float> used = {
+        lycon->block.given_width, lycon->block.given_height
+    };
+    LayoutAxisPair<float> view_box = {object_view_box.width, object_view_box.height};
+    if (automatic.x && automatic.y) {
+        used = view_box;
+    } else {
+        LayoutAxis target = automatic.x ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+        LayoutAxis source = target == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+        if (view_box[source] > 0.0f) {
+            used[target] = used[source] * view_box[target] / view_box[source];
+        }
+    }
+    for (LayoutAxis axis : layout_axes()) {
+        if (automatic[axis]) {
+            LayoutAxisRefs refs(&lycon->block, axis);
+            if (refs.given) *refs.given = used[axis];
+        }
     }
 }
 
@@ -785,13 +796,14 @@ static void layout_block_prepare_canvas_auto_size(
             block, content_width, true, aspect_ratio, false, false,
             ratio_uses_border_box);
     }
-    if (width_is_automatic) {
-        float used_width = layout_border_size_if_content_box(block, content_width, true);
-        layout_store_given_axis(lycon, block, used_width, true, true);
-    }
-    if (height_is_automatic) {
-        float used_height = layout_border_size_if_content_box(block, content_height, false);
-        layout_store_given_axis(lycon, block, used_height, false, true);
+    LayoutAxisPair<bool> automatic = {width_is_automatic, height_is_automatic};
+    LayoutAxisPair<float> content = {content_width, content_height};
+    for (LayoutAxis axis : layout_axes()) {
+        if (automatic[axis]) {
+            bool horizontal = axis == LAYOUT_AXIS_X;
+            float used = layout_border_size_if_content_box(block, content[axis], horizontal);
+            layout_store_given_axis(lycon, block, used, horizontal, true);
+        }
     }
 }
 
@@ -4736,7 +4748,6 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             float natural_height = 0.0f;
             layout_canvas_natural_size(block, &natural_width, &natural_height);
             bool width_is_auto = layout_css_size_is_automatic(block, true);
-            bool height_is_auto = layout_css_size_is_automatic(block, false);
             bool width_is_contained = canvas_width_is_contained;
             bool height_is_contained = canvas_height_is_contained;
             float used_width = natural_width;
@@ -4751,16 +4762,10 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 used_height = lycon->block.given_height >= 0.0f
                     ? lycon->block.given_height : 0.0f;
             } else {
-                if (!width_is_auto && lycon->block.given_width >= 0.0f) {
+                if (lycon->block.given_width >= 0.0f) {
                     used_width = lycon->block.given_width;
                 }
-                if (!height_is_auto && lycon->block.given_height >= 0.0f) {
-                    used_height = lycon->block.given_height;
-                }
-                if (width_is_auto && lycon->block.given_width >= 0.0f) {
-                    used_width = lycon->block.given_width;
-                }
-                if (height_is_auto && lycon->block.given_height >= 0.0f) {
+                if (lycon->block.given_height >= 0.0f) {
                     used_height = lycon->block.given_height;
                 }
             }
@@ -6608,12 +6613,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         layout_css_size_is_automatic(block, true);
     bool canvas_height_is_auto = elmt_name == MARKUP_NAME_CANVAS &&
         layout_css_size_is_automatic(block, false);
+    bool has_canvas_natural_size = block->display.inner == RDT_DISPLAY_REPLACED &&
+        layout_canvas_natural_size(block, &canvas_natural_width, &canvas_natural_height) &&
+        canvas_natural_width > 0.0f && canvas_natural_height > 0.0f;
     if (has_stretch_height_constraint && preferred_aspect_ratio <= 0.0f &&
-        block->display.inner == RDT_DISPLAY_REPLACED &&
-        layout_canvas_natural_size(
-            block, &canvas_natural_width, &canvas_natural_height) &&
-        (canvas_width_is_auto || canvas_height_is_auto || width_is_auto || height_is_auto) &&
-        canvas_natural_width > 0.0f && canvas_natural_height > 0.0f) {
+        has_canvas_natural_size &&
+        (canvas_width_is_auto || canvas_height_is_auto || width_is_auto || height_is_auto)) {
         width_is_auto = canvas_width_is_auto;
         height_is_auto = canvas_height_is_auto;
         if (!width_is_auto && !height_is_auto) {
@@ -6627,18 +6632,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
     if (is_stretch_height && !stretch_height_has_definite_basis &&
         preferred_aspect_ratio <= 0.0f &&
-        block->display.inner == RDT_DISPLAY_REPLACED &&
-        layout_canvas_natural_size(
-            block, &canvas_natural_width, &canvas_natural_height) &&
-        canvas_natural_width > 0.0f && canvas_natural_height > 0.0f) {
+        has_canvas_natural_size) {
         preferred_aspect_ratio = canvas_natural_width / canvas_natural_height;
         uses_replaced_natural_ratio = true;
     }
     if (is_stretch_width && block->tag() == MARKUP_NAME_CANVAS &&
         height_is_auto && preferred_aspect_ratio <= 0.0f &&
-        layout_canvas_natural_size(
-            block, &canvas_natural_width, &canvas_natural_height) &&
-        canvas_natural_width > 0.0f && canvas_natural_height > 0.0f) {
+        has_canvas_natural_size) {
         preferred_aspect_ratio = canvas_natural_width / canvas_natural_height;
         uses_replaced_natural_ratio = true;
     }

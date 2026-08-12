@@ -337,7 +337,6 @@ static float get_cell_css_width(LayoutContext* lycon, ViewTableCell* tcell, floa
         ? style_tree_get_declaration(dom_elem->specified_style, CSS_PROPERTY_WIDTH)
         : nullptr;
     float cell_width = 0.0f;
-    float css_content_width = 0.0f;
     bool html_width_hint = false;
     if (width_decl && width_decl->value &&
         table_cell_calc_width_is_indefinite_constraint(width_decl->value)) {
@@ -347,18 +346,15 @@ static float get_cell_css_width(LayoutContext* lycon, ViewTableCell* tcell, floa
         (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE ||
          width_decl->value->type == CSS_VALUE_TYPE_LENGTH ||
          width_decl->value->type == CSS_VALUE_TYPE_FUNCTION)) {
-        css_content_width = resolve_table_relative_width(lycon, width_decl->value, table_content_width);
-        cell_width = css_content_width;
+        cell_width = resolve_table_relative_width(lycon, width_decl->value, table_content_width);
         if (is_table_relative) *is_table_relative = table_width_value_is_relative(width_decl->value);
     } else if (tcell->blk && !isnan(tcell->block()->given_width_percent) &&
                table_content_width > 0.0f) {
-        css_content_width = table_content_width * tcell->block()->given_width_percent / 100.0f;
-        cell_width = css_content_width;
+        cell_width = table_content_width * tcell->block()->given_width_percent / 100.0f;
         if (is_table_relative) *is_table_relative = true;
         html_width_hint = true;
     } else if (tcell->blk && tcell->block_mut()->given_width >= 0.0f) {
-        css_content_width = tcell->block()->given_width;
-        cell_width = css_content_width;
+        cell_width = tcell->block()->given_width;
         html_width_hint = true;
     }
     if (cell_width <= 0) return 0.0f;
@@ -1103,13 +1099,6 @@ static bool table_cell_is_baseline_aligned(ViewTableCell* tcell) {
 }
 
 static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* trow, float* row_height) {
-    bool has_baseline_cells = false;
-    trow->each_cell( [&](ViewTableCell* tcell) {
-        if (table_cell_is_baseline_aligned(tcell)) {
-            has_baseline_cells = true;
-        }
-    });
-    if (!has_baseline_cells) return 0;
 
     float max_baseline = 0;
     int baseline_cell_count = 0;
@@ -1586,7 +1575,7 @@ static float table_apply_auto_available_width_constraint(
             table_horizontal_overhead += max(table_box.padding.left, 0.0f) +
                 max(table_box.padding.right, 0.0f);
             table_horizontal_overhead += table_box.border_h;
-        } else if (table->tb->border_collapse) {
+        } else {
             table_horizontal_overhead += meta->collapsed_border_left / 2.0f +
                 meta->collapsed_border_right / 2.0f;
         }
@@ -1956,7 +1945,7 @@ static void table_apply_column_limit(LayoutContext* lycon, TableMetadata* meta,
         lycon, col_elem, property, box_value, has_box_value, maximum ? -1.0f : 0.0f);
     // CSS Tables treats a zero column max-size as an omitted cap when a
     // definite column width establishes the used size.
-    if (maximum ? value <= 0.0f : value <= 0.0f) return;
+    if (value <= 0.0f) return;
     float scaled = divisor > 1.0f ? value / divisor : value;
     if (maximum) table_clamp_column_max_width(meta, col_widths, col, scaled);
     else table_raise_column_width_constraints(meta, col_widths, col, scaled);
@@ -2035,14 +2024,12 @@ static void apply_colspan_width_contribution(ViewTable* table, TableMetadata* me
     int col = contribution->col;
     int span = contribution->span;
     if (span <= 1) return;
-    float current_col_total = 0.0f;
-    float current_min_total = 0.0f;
-    float current_max_total = 0.0f;
+    float current[3] = {};
     int actual_span = 0;
     for_each_table_span_column(col, span, columns, [&](int c) {
-        current_col_total += meta->col_widths[c];
-        current_min_total += meta->col_min_widths[c];
-        current_max_total += meta->col_max_widths[c];
+        current[0] += meta->col_min_widths[c];
+        current[1] += meta->col_max_widths[c];
+        current[2] += meta->col_widths[c];
         actual_span++;
     });
     if (actual_span <= 0) return;
@@ -2050,21 +2037,18 @@ static void apply_colspan_width_contribution(ViewTable* table, TableMetadata* me
     if (actual_span < span && internal_spacing > 0.0f) {
         internal_spacing = table->tb->border_spacing_h * (actual_span - 1);
     }
-    // CSS 2.1 §17.5.2.2: After single-column cells establish the column
-    float current_min_span_width = current_min_total + internal_spacing;
-    if (contribution->min_width > current_min_span_width) {
-        table_distribute_span_extra(meta->col_min_widths, col, span, columns, actual_span,
-                                    contribution->min_width - current_min_span_width, meta);
-    }
-    float current_max_span_width = current_max_total + internal_spacing;
-    if (contribution->pref_width > current_max_span_width) {
-        table_distribute_span_extra(meta->col_max_widths, col, span, columns, actual_span,
-                                    contribution->pref_width - current_max_span_width, meta);
-    }
-    float current_col_span_width = current_col_total + internal_spacing;
-    if (contribution->cell_width > current_col_span_width) {
-        table_distribute_span_extra(meta->col_widths, col, span, columns, actual_span,
-                                    contribution->cell_width - current_col_span_width, meta);
+    float required[3] = {
+        contribution->min_width, contribution->pref_width, contribution->cell_width
+    };
+    float* widths[3] = {
+        meta->col_min_widths, meta->col_max_widths, meta->col_widths
+    };
+    for (int i = 0; i < 3; i++) {
+        float deficit = required[i] - current[i] - internal_spacing;
+        if (deficit > 0.0f) {
+            table_distribute_span_extra(widths[i], col, span, columns, actual_span,
+                                        deficit, meta);
+        }
     }
 }
 
@@ -2504,7 +2488,6 @@ static int table_effective_column_count(ViewTable* table, TableMetadata* meta,
         if (column && column->specified_style) {
             CssDeclaration* width = style_tree_get_declaration(
                 column->specified_style, CSS_PROPERTY_WIDTH);
-            active = active && true;
             if (width && width->value &&
                 (width->value->type == CSS_VALUE_TYPE_PERCENTAGE ||
                  width->value->type == CSS_VALUE_TYPE_LENGTH ||
@@ -2545,24 +2528,24 @@ static ViewTableCell* find_cell_at(ViewTable* table, int target_row, int target_
 }
 
 static void apply_collapsed_border_pair(LayoutContext* lycon, ViewTable* table,
-                                        TableMetadata* meta, CollapsedBorderList& candidates,
-                                        int row, int col, bool horizontal) {
+                                        CollapsedBorderList& candidates,
+                                        const LayoutTableAxis& axis, int row, int col) {
     if (candidates.size() == 0) return;
     CollapsedBorder winner = *candidates[0];
     for (size_t i = 1; i < candidates.size(); i++) {
         winner = select_winning_border(winner, *candidates[i]);
     }
-    if (horizontal ? row > 0 : col > 0) {
+    if (axis.has_previous(row, col)) {
         ViewTableCell* previous = find_cell_at(
-            table, horizontal ? row - 1 : row, horizontal ? col : col - 1);
+            table, axis.previous_row(row, col), axis.previous_col(row, col));
         if (previous) {
-            apply_collapsed_border_to_cell(lycon, previous, winner, horizontal ? 2 : 1);
+            apply_collapsed_border_to_cell(lycon, previous, winner, axis.previous_side());
         }
     }
-    if (horizontal ? row < meta->row_count : col < meta->column_count) {
+    if (axis.has_next(row, col)) {
         ViewTableCell* next = find_cell_at(table, row, col);
         if (next) {
-            apply_collapsed_border_to_cell(lycon, next, winner, horizontal ? 0 : 3);
+            apply_collapsed_border_to_cell(lycon, next, winner, axis.next_side());
         }
     }
 }
@@ -2580,15 +2563,13 @@ static CollapsedBorder* table_cell_resolved_border(ViewTableCell* cell, int side
 
 static void table_update_collapsed_edge(ViewTable* table, TableMetadata* meta,
                                         bool horizontal, bool start) {
-    int count = horizontal ? meta->column_count : meta->row_count;
-    int fixed = start ? 0 : (horizontal ? meta->row_count : meta->column_count) - 1;
-    int side = horizontal ? (start ? 0 : 2) : (start ? 3 : 1);
-    float* max_width = horizontal
-        ? (start ? &meta->collapsed_border_top : &meta->collapsed_border_bottom)
-        : (start ? &meta->collapsed_border_left : &meta->collapsed_border_right);
-    for (int index = 0; index < count; index++) {
-        int row = horizontal ? fixed : index;
-        int col = horizontal ? index : fixed;
+    LayoutTableAxis axis(meta, horizontal);
+    int fixed = axis.fixed_index(start);
+    CssBoxSide side = axis.table_side(start);
+    float* max_width = axis.collapsed_edge(meta, start);
+    for (int index = 0; index < axis.slot_count; index++) {
+        int row = axis.row(fixed, index);
+        int col = axis.col(fixed, index);
         CollapsedBorder* border = table_cell_resolved_border(find_cell_at(table, row, col), side);
         if (border && border->width > *max_width) *max_width = border->width;
     }
@@ -2613,33 +2594,27 @@ static void for_each_table_row_cell_slot(ViewTableRow* row, Fn fn) {
     }
 }
 
-static void collect_collapsed_border_candidates(ViewTable* table, TableMetadata* meta,
-                                                int row, int col, bool horizontal,
+static void collect_collapsed_border_candidates(ViewTable* table,
+                                                const LayoutTableAxis& axis, int row, int col,
                                                 CollapsedBorderList& candidates) {
-    int edge = horizontal ? row : col;
-    int edge_count = horizontal ? meta->row_count : meta->column_count;
+    int edge = axis.edge(row, col);
     bool at_start = edge == 0;
-    bool at_end = edge == edge_count;
-    int previous_row = horizontal ? row - 1 : row;
-    int previous_col = horizontal ? col : col - 1;
-    int next_row = row;
-    int next_col = col;
-    int previous_side = horizontal ? 2 : 1;
-    int next_side = horizontal ? 0 : 3;
+    bool at_end = edge == axis.edge_count;
     if (at_start) {
         append_collapsed_border_candidate(candidates,
-            table_view_border(table, horizontal ? 0 : 3));
+            table_view_border(table, axis.table_side(true)));
     } else {
-        table_append_border(candidates, find_cell_at(table, previous_row, previous_col),
-                            previous_side);
+        table_append_border(candidates, find_cell_at(
+            table, axis.previous_row(row, col), axis.previous_col(row, col)),
+            axis.previous_side());
     }
     if (at_end) {
         append_collapsed_border_candidate(candidates,
-            table_view_border(table, horizontal ? 2 : 1));
+            table_view_border(table, axis.table_side(false)));
     } else {
-        table_append_border(candidates, find_cell_at(table, next_row, next_col), next_side);
+        table_append_border(candidates, find_cell_at(table, row, col), axis.next_side());
     }
-    if (horizontal) {
+    if (axis.horizontal) {
         if (!at_start) {
             table_append_border(candidates, table_row_at_index(table, row - 1), 2, true);
         }
@@ -2691,17 +2666,16 @@ static void collect_collapsed_border_candidates(ViewTable* table, TableMetadata*
 static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, TableMetadata* meta) {
     if (!table || !meta || !table->tb->border_collapse) return;
     auto resolve_axis = [&](bool horizontal) {
-        int edge_count = horizontal ? meta->row_count : meta->column_count;
-        int slot_count = horizontal ? meta->column_count : meta->row_count;
-        for (int edge = 0; edge <= edge_count; edge++) {
-            for (int slot = 0; slot < slot_count; slot++) {
-                int row = horizontal ? edge : slot;
-                int col = horizontal ? slot : edge;
+        LayoutTableAxis axis(meta, horizontal);
+        for (int edge = 0; edge <= axis.edge_count; edge++) {
+            for (int slot = 0; slot < axis.slot_count; slot++) {
+                int row = axis.row(edge, slot);
+                int col = axis.col(edge, slot);
                 CollapsedBorderList candidates(MEM_CAT_LAYOUT, 4);
                 collect_collapsed_border_candidates(
-                    table, meta, row, col, horizontal, candidates);
+                    table, axis, row, col, candidates);
                 apply_collapsed_border_pair(
-                    lycon, table, meta, candidates, row, col, horizontal);
+                    lycon, table, candidates, axis, row, col);
             }
         }
     };
