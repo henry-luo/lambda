@@ -160,8 +160,6 @@ int js_module_const_cmp(const void *a, const void *b, void *udata);
 uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t seed1);
 const char* jm_persist_name(const char* name);
 const char* jm_format_name(const char* format, ...);
-uint64_t jm_lexical_path_hash(const void* item, uint64_t seed0, uint64_t seed1);
-int jm_lexical_path_cmp(const void* lhs, const void* rhs, void* udata);
 JsMirTranspiler* jm_create_mir_transpiler(
     JsTranspiler* tp, MIR_context_t ctx, const char* filename, bool is_module,
     int import_capacity, int local_func_capacity, int var_scope_capacity,
