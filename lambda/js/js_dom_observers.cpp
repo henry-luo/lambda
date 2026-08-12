@@ -112,11 +112,11 @@ static Item observer_key(const char* name) {
 }
 
 static Item observer_pending(JsObserverState* observer) {
-    return js_property_get(observer->object, observer_key("__lambdaObserverRecords"));
+    return js_get_key_default(observer->object, observer_key("__lambdaObserverRecords"));
 }
 
 static void observer_replace_pending(JsObserverState* observer) {
-    js_property_set(observer->object, observer_key("__lambdaObserverRecords"), js_array_new(0));
+    js_set_key_default(observer->object, observer_key("__lambdaObserverRecords"), js_array_new(0));
 }
 
 static JsObserverState* observer_from_this(void) {
@@ -192,7 +192,7 @@ static Item observer_create(JsObserverKind kind, Item callback, JsObserverState*
     observer->object = object_root.get();
     // Native state is indexed by object identity; keeping callback and records
     // on that object makes the GC ownership match the observable lifetime.
-    js_property_set(observer->object, observer_key("__lambdaObserverCallback"), callback_root.get());
+    js_set_key_default(observer->object, observer_key("__lambdaObserverCallback"), callback_root.get());
     observer_replace_pending(observer);
     *out_observer = observer;
     return js_status_ok();
@@ -201,7 +201,7 @@ static Item observer_create(JsObserverKind kind, Item callback, JsObserverState*
 static bool observer_option_bool(Item options, const char* name) {
     TypeId type = get_type_id(options);
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return false;
-    return js_is_truthy(js_property_get(options, observer_key(name)));
+    return js_is_truthy(js_get_key_default(options, observer_key(name)));
 }
 
 static Item observer_option(Item options, const char* name) {
@@ -209,7 +209,7 @@ static Item observer_option(Item options, const char* name) {
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) {
         return ItemNull;
     }
-    return js_property_get(options, observer_key(name));
+    return js_get_key_default(options, observer_key(name));
 }
 
 static int observer_parse_root_margin(const char* text, float* values,
@@ -276,7 +276,7 @@ static void observer_parse_thresholds(JsObserverState* observer, Item options) {
     if (get_type_id(threshold) == LMD_TYPE_ARRAY) {
         int64_t count = js_array_length(threshold);
         for (int64_t i = 0; i < count; i++) {
-            Item number = js_to_number(js_array_get_int(threshold, i));
+            Item number = js_to_number(js_elements_get_int(threshold, i));
             if (get_type_id(number) == LMD_TYPE_INT) {
                 observer_add_threshold(observer, (double)it2i(number));
             } else if (get_type_id(number) == LMD_TYPE_FLOAT) {
@@ -360,11 +360,11 @@ static Item js_mutation_observer_observe(Item target_item, Item options) {
     target->attribute_old_value = attribute_old_value;
     target->character_data_old_value = character_data_old_value;
     target->attribute_filter_count = 0;
-    Item filter = js_property_get(options, observer_key("attributeFilter"));
+    Item filter = js_get_key_default(options, observer_key("attributeFilter"));
     if (get_type_id(filter) == LMD_TYPE_ARRAY) {
         int64_t count = js_array_length(filter);
         for (int64_t i = 0; i < count && target->attribute_filter_count < 8; i++) {
-            const char* name = fn_to_cstr(js_array_get_int(filter, i));
+            const char* name = fn_to_cstr(js_elements_get_int(filter, i));
             if (!name) continue;
             size_t len = strlen(name);
             if (len >= sizeof(target->attribute_filter[0])) {
@@ -465,17 +465,17 @@ static void observer_queue_record(JsObserverState* observer, Item record) {
 }
 
 static void observer_install_common_methods(JsObserverState* observer, bool mutation) {
-    js_property_set(observer->object, observer_key("disconnect"),
+    js_set_key_default(observer->object, observer_key("disconnect"),
         js_new_native_function(js_observer_disconnect));
     if (mutation) {
-        js_property_set(observer->object, observer_key("observe"),
+        js_set_key_default(observer->object, observer_key("observe"),
             js_new_native_function(js_mutation_observer_observe));
-        js_property_set(observer->object, observer_key("takeRecords"),
+        js_set_key_default(observer->object, observer_key("takeRecords"),
             js_new_native_function(js_observer_take_records));
     } else {
-        js_property_set(observer->object, observer_key("observe"),
+        js_set_key_default(observer->object, observer_key("observe"),
             js_new_native_function(js_geometry_observer_observe));
-        js_property_set(observer->object, observer_key("unobserve"),
+        js_set_key_default(observer->object, observer_key("unobserve"),
             js_new_native_function(js_observer_unobserve));
     }
 }
@@ -507,7 +507,7 @@ extern "C" Item js_intersection_observer_new(Item callback, Item options) {
         observer_pin_node(observer->root->doc, (DomNode*)observer->root,
                           &observer->root_ref);
     }
-    js_property_set(observer->object, observer_key("root"),
+    js_set_key_default(observer->object, observer_key("root"),
         observer->root ? root_item : ItemNull);
     Item margin_item = observer_option(options, "rootMargin");
     const char* margin = fn_to_cstr(margin_item);
@@ -517,11 +517,11 @@ extern "C" Item js_intersection_observer_new(Item callback, Item options) {
                                    observer->root_margin_percent);
         margin = "0px";
     }
-    js_property_set(observer->object, observer_key("rootMargin"),
+    js_set_key_default(observer->object, observer_key("rootMargin"),
         js_make_string(margin ? margin : "0px"));
     observer_parse_thresholds(observer, options);
-    js_property_set(observer->object, observer_key("thresholds"), js_array_new(0));
-    Item thresholds = js_property_get(observer->object, observer_key("thresholds"));
+    js_set_key_default(observer->object, observer_key("thresholds"), js_array_new(0));
+    Item thresholds = js_get_key_default(observer->object, observer_key("thresholds"));
     for (int i = 0; i < observer->threshold_count; i++) {
         js_array_push(thresholds, js_make_number(observer->thresholds[i]));
     }
@@ -570,19 +570,19 @@ static void observer_queue_child_record(JsObserverState* observer,
                                         DomNode* added,
                                         DomNode* removed) {
     Item record = js_new_object();
-    js_property_set(record, observer_key("type"), js_make_string("childList"));
-    js_property_set(record, observer_key("target"), js_dom_wrap_element(parent));
+    js_set_key_default(record, observer_key("type"), js_make_string("childList"));
+    js_set_key_default(record, observer_key("target"), js_dom_wrap_element(parent));
     Item added_nodes = js_array_new(0);
     Item removed_nodes = js_array_new(0);
     if (added) js_array_push(added_nodes, js_dom_wrap_element(added));
     if (removed) js_array_push(removed_nodes, js_dom_wrap_element(removed));
-    js_property_set(record, observer_key("addedNodes"), added_nodes);
-    js_property_set(record, observer_key("removedNodes"), removed_nodes);
-    js_property_set(record, observer_key("previousSibling"), ItemNull);
-    js_property_set(record, observer_key("nextSibling"), ItemNull);
-    js_property_set(record, observer_key("attributeName"), ItemNull);
-    js_property_set(record, observer_key("attributeNamespace"), ItemNull);
-    js_property_set(record, observer_key("oldValue"), ItemNull);
+    js_set_key_default(record, observer_key("addedNodes"), added_nodes);
+    js_set_key_default(record, observer_key("removedNodes"), removed_nodes);
+    js_set_key_default(record, observer_key("previousSibling"), ItemNull);
+    js_set_key_default(record, observer_key("nextSibling"), ItemNull);
+    js_set_key_default(record, observer_key("attributeName"), ItemNull);
+    js_set_key_default(record, observer_key("attributeNamespace"), ItemNull);
+    js_set_key_default(record, observer_key("oldValue"), ItemNull);
     observer_queue_record(observer, record);
 
     // A removed subtree remains observed through the microtask checkpoint,
@@ -631,21 +631,21 @@ extern "C" void js_dom_observers_mutation_notify(DomJsMutationKind kind,
                 break;
             }
             Item record = js_new_object();
-            js_property_set(record, observer_key("type"),
+            js_set_key_default(record, observer_key("type"),
                 js_make_string(child ? "childList" : attribute ? "attributes" : "characterData"));
-            js_property_set(record, observer_key("target"), js_dom_wrap_element(observed_node));
+            js_set_key_default(record, observer_key("target"), js_dom_wrap_element(observed_node));
             Item added = js_array_new(0);
             Item removed = js_array_new(0);
-            js_property_set(record, observer_key("addedNodes"), added);
-            js_property_set(record, observer_key("removedNodes"), removed);
-            js_property_set(record, observer_key("previousSibling"), ItemNull);
-            js_property_set(record, observer_key("nextSibling"), ItemNull);
-            js_property_set(record, observer_key("attributeName"),
+            js_set_key_default(record, observer_key("addedNodes"), added);
+            js_set_key_default(record, observer_key("removedNodes"), removed);
+            js_set_key_default(record, observer_key("previousSibling"), ItemNull);
+            js_set_key_default(record, observer_key("nextSibling"), ItemNull);
+            js_set_key_default(record, observer_key("attributeName"),
                 attribute_name ? js_make_string(attribute_name) : ItemNull);
-            js_property_set(record, observer_key("attributeNamespace"), ItemNull);
+            js_set_key_default(record, observer_key("attributeNamespace"), ItemNull);
             bool include_old = (attribute && registration->attribute_old_value) ||
                                (character && registration->character_data_old_value);
-            js_property_set(record, observer_key("oldValue"),
+            js_set_key_default(record, observer_key("oldValue"),
                 include_old && old_value ? js_make_string(old_value) : ItemNull);
             observer_queue_record(observer, record);
             break;
@@ -675,7 +675,7 @@ extern "C" void js_dom_observers_child_replace_notify(void* parent_ptr,
 }
 
 static double observer_number_property(Item object, const char* name) {
-    Item number = js_to_number(js_property_get(object, observer_key(name)));
+    Item number = js_to_number(js_get_key_default(object, observer_key(name)));
     TypeId type = get_type_id(number);
     if (type == LMD_TYPE_INT) return (double)it2i(number);
     if (type == LMD_TYPE_FLOAT) return it2d(number);
@@ -694,14 +694,14 @@ static Item observer_rect(Item target_item, float* x, float* y, float* width, fl
 
 static Item observer_make_rect(float x, float y, float width, float height) {
     Item rect = js_new_object();
-    js_property_set(rect, observer_key("x"), js_make_number(x));
-    js_property_set(rect, observer_key("y"), js_make_number(y));
-    js_property_set(rect, observer_key("top"), js_make_number(y));
-    js_property_set(rect, observer_key("left"), js_make_number(x));
-    js_property_set(rect, observer_key("right"), js_make_number(x + width));
-    js_property_set(rect, observer_key("bottom"), js_make_number(y + height));
-    js_property_set(rect, observer_key("width"), js_make_number(width));
-    js_property_set(rect, observer_key("height"), js_make_number(height));
+    js_set_key_default(rect, observer_key("x"), js_make_number(x));
+    js_set_key_default(rect, observer_key("y"), js_make_number(y));
+    js_set_key_default(rect, observer_key("top"), js_make_number(y));
+    js_set_key_default(rect, observer_key("left"), js_make_number(x));
+    js_set_key_default(rect, observer_key("right"), js_make_number(x + width));
+    js_set_key_default(rect, observer_key("bottom"), js_make_number(y + height));
+    js_set_key_default(rect, observer_key("width"), js_make_number(width));
+    js_set_key_default(rect, observer_key("height"), js_make_number(height));
     return rect;
 }
 
@@ -746,15 +746,15 @@ extern "C" void js_dom_observers_post_layout(void) {
                 target->last_width = width;
                 target->last_height = height;
                 Item entry = js_new_object();
-                js_property_set(entry, observer_key("target"), target_item);
-                js_property_set(entry, observer_key("contentRect"), rect);
+                js_set_key_default(entry, observer_key("target"), target_item);
+                js_set_key_default(entry, observer_key("contentRect"), rect);
                 Item box = js_new_object();
-                js_property_set(box, observer_key("inlineSize"), js_make_number(width));
-                js_property_set(box, observer_key("blockSize"), js_make_number(height));
+                js_set_key_default(box, observer_key("inlineSize"), js_make_number(width));
+                js_set_key_default(box, observer_key("blockSize"), js_make_number(height));
                 Item boxes = js_array_new(0);
                 js_array_push(boxes, box);
-                js_property_set(entry, observer_key("contentBoxSize"), boxes);
-                js_property_set(entry, observer_key("borderBoxSize"), boxes);
+                js_set_key_default(entry, observer_key("contentBoxSize"), boxes);
+                js_set_key_default(entry, observer_key("borderBoxSize"), boxes);
                 observer_queue_record(observer, entry);
                 continue;
             }
@@ -790,16 +790,16 @@ extern "C" void js_dom_observers_post_layout(void) {
             target->last_intersecting = intersecting;
             target->last_ratio = ratio;
             Item entry = js_new_object();
-            js_property_set(entry, observer_key("target"), target_item);
-            js_property_set(entry, observer_key("boundingClientRect"), rect);
-            js_property_set(entry, observer_key("intersectionRatio"), js_make_number(ratio));
-            js_property_set(entry, observer_key("isIntersecting"), (Item){.item = b2it(intersecting)});
+            js_set_key_default(entry, observer_key("target"), target_item);
+            js_set_key_default(entry, observer_key("boundingClientRect"), rect);
+            js_set_key_default(entry, observer_key("intersectionRatio"), js_make_number(ratio));
+            js_set_key_default(entry, observer_key("isIntersecting"), (Item){.item = b2it(intersecting)});
             Item intersection = observer_make_rect(left, top,
                 intersection_width, intersection_height);
-            js_property_set(entry, observer_key("intersectionRect"), intersection);
-            js_property_set(entry, observer_key("rootBounds"), observer_make_rect(
+            js_set_key_default(entry, observer_key("intersectionRect"), intersection);
+            js_set_key_default(entry, observer_key("rootBounds"), observer_make_rect(
                 root_left, root_top, root_right - root_left, root_bottom - root_top));
-            js_property_set(entry, observer_key("time"), js_make_number(0.0));
+            js_set_key_default(entry, observer_key("time"), js_make_number(0.0));
             observer_queue_record(observer, entry);
         }
     }

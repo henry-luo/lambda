@@ -170,9 +170,9 @@ static Item storage_object(JsStorageState* storage) {
     Item descriptor = js_new_object();
     descriptor_root.set(descriptor);
     js_install_native_method(descriptor, "get", js_storage_length, 0);
-    js_property_set(descriptor, js_make_string("enumerable"),
+    js_set_key_default(descriptor, js_make_string("enumerable"),
         (Item){.item = ITEM_TRUE});
-    js_property_set(descriptor, js_make_string("configurable"),
+    js_set_key_default(descriptor, js_make_string("configurable"),
         (Item){.item = ITEM_TRUE});
     js_object_define_property(object, js_make_string("length"), descriptor);
     return object;
@@ -247,21 +247,21 @@ extern "C" Item js_match_media(Item query_item) {
 
     RootFrame roots(1);
     Rooted<Item> descriptor_root(roots, ItemNull);
-    js_property_set(state->object, js_make_string("media"),
+    js_set_key_default(state->object, js_make_string("media"),
         js_make_string(state->query));
-    js_property_set(state->object, js_make_string("onchange"), ItemNull);
-    js_property_set(state->object, js_make_string("addListener"),
+    js_set_key_default(state->object, js_make_string("onchange"), ItemNull);
+    js_set_key_default(state->object, js_make_string("addListener"),
         js_new_native_function(js_media_query_add_listener));
-    js_property_set(state->object, js_make_string("removeListener"),
+    js_set_key_default(state->object, js_make_string("removeListener"),
         js_new_native_function(js_media_query_remove_listener));
 
     Item descriptor = js_new_object();
     descriptor_root.set(descriptor);
-    js_property_set(descriptor, js_make_string("get"),
+    js_set_key_default(descriptor, js_make_string("get"),
         js_new_native_function(js_media_query_matches));
-    js_property_set(descriptor, js_make_string("enumerable"),
+    js_set_key_default(descriptor, js_make_string("enumerable"),
         (Item){.item = ITEM_TRUE});
-    js_property_set(descriptor, js_make_string("configurable"),
+    js_set_key_default(descriptor, js_make_string("configurable"),
         (Item){.item = ITEM_TRUE});
     js_object_define_property(state->object, js_make_string("matches"), descriptor);
     return state->object;
@@ -274,12 +274,12 @@ extern "C" void js_match_media_notify_resize(void) {
         if (next == state->matches) continue;
         state->matches = next;
         Item event = js_create_event("change", false, false);
-        js_property_set(event, js_make_string("matches"),
+        js_set_key_default(event, js_make_string("matches"),
             (Item){.item = b2it(next)});
-        js_property_set(event, js_make_string("media"),
+        js_set_key_default(event, js_make_string("media"),
             js_make_string(state->query));
         js_dom_dispatch_event(state->object, event);
-        Item onchange = js_property_get(state->object, js_make_string("onchange"));
+        Item onchange = js_get_key_default(state->object, js_make_string("onchange"));
         if (js_is_callable(onchange)) js_call_function(onchange, state->object, &event, 1);
     }
 }

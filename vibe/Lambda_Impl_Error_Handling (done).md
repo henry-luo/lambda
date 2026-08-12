@@ -1,8 +1,10 @@
 # Lambda — Error Handling Implementation Plan (TE-15 / TE-16 / TE-17 / TE-18)
 
-**Status:** IMPLEMENTATION IN PROGRESS — rev 5, 2026-08-06. **Semantically decision-complete;
-the first handler, fault-frame, typed-lane, and cross-frame-state slices are landed.** Rev 5
-separates value flow from control routing, narrows `may_defect` to
+**Status:** IMPLEMENTATION IN PROGRESS — rev 6, 2026-08-12. **Semantically decision-complete;
+the first handler, fault-frame, typed-lane, and cross-frame-state slices are landed.** Rev 6
+records the S7.6.2v2/S7.6.3v2 postfix-primary handler/propagation grammar and retires the
+prefix-handler and call-owned-caret design. Rev 5 separates value flow from control routing,
+narrows `may_defect` to
 escaping boundary defects, makes signal/recovery ownership an explicit phase, and resolves the
 remaining destination, store, handler-context, precedence, and V1 proof obligations. The
 remaining phases below still cover declaration-boundary routing, corpus migration, and proof
@@ -26,10 +28,14 @@ must reconcile its §7.3, §11.4, and §13 invariant 7 wording with these accept
 `Lambda_Impl_Type_Enforce (done).md` (round-2 enforcement, whose `emit_checked_boundary` choke
 point is where TE-15 attaches).
 
-**Revision history.** Rev 5 (2026-08-06) assigns the handler-local current error to `^`: bare
+**Revision history.** Rev 6 (2026-08-12) makes `e ^ { h }` and `e^` left-associative
+postfix-primary forms at the member/query tier, gives those constructs sole ownership of their
+carets, requires parentheses around a wider operand, and retires prefix-handler shorthand and
+the split call/literal/binary/member handler grammar. Rev 5 (2026-08-06) assigns the
+handler-local current error to `^`: bare
 `^`, `^.field`, and `^[index]` are valid only inside an active handler body, while `~` keeps its
-existing current-value semantics. A `^ { … }` sequence inside a handler body is always a nested
-prefix handler. Rev 4 (2026-08-06) incorporates the remaining review revisions: `SOFT_VALUE`
+existing current-value semantics. Rev 4 (2026-08-06) incorporates the remaining review
+revisions: `SOFT_VALUE`
 is explicitly not a control route; declaration skips, raised errors, and faults use separate
 contexts; function-boundary defect materialization is specified; fixed native stores receive a
 single classification; `may_defect` excludes resource faults; fault-catching is procedural;
@@ -351,19 +357,17 @@ own bisect point. H2/H3/H4 remain the portability/performance audit in §8.3.
 
 ### 6.1 Surface — expression and statement contexts
 
-- **Add the braced handler in two context-selected forms.** `expr ^ { … }` is a value-producing
+- **Add the braced handler in two context-selected forms.** `primary ^ { … }` is a value-producing
   expression. `pn_call() ^ { …; }` in statement position protects a procedural call, executes the
-  statement body on error, and then continues if that body completes normally. The prefix spelling
-  `^ { … } expr` is a shorthand for `expr ^ { … }`. The lexical discriminator is shared — `^`
-  followed by `{` is a handler, `^` followed by anything else is the existing postfix propagate —
-  but **lexical is not a complete grammar specification**: legacy postfix propagation remains an
-  optional `propagate` field on `call_expr` for compatibility, while `propagate_expr` exposes that
-  operation when it must participate in a larger expression. Braced call handlers consume the
-  call's caret; dedicated binary/literal productions cover non-call operands in both postfix
-  and prefix orderings. The prefix form is therefore a true expression shorthand, not a
-  call-only escape hatch. The
-  statement form uses a narrow aliased handler production. The handler's precedence, associativity, and
-  expression-versus-statement AST classification must be stated explicitly and tested (§9).
+  statement body on error, and then continues if that body completes normally. Per
+  **S7.6.2v2/S7.6.3v2**, handler and propagation are left-associative postfix-primary forms at the
+  same logical tier as member (`.`) and query (`?`) access. The prefix spelling `^ { … } expr`
+  does not exist. The handler/propagation construct owns its mandatory caret; `call_expr` has no
+  optional `propagate` field. A wider operand must be parenthesized. The handled result is itself
+  primary-like, so subsequent member, index, query, call, propagation, and handler operations
+  continue through the ordinary postfix chain. The statement form may retain a narrow contextual
+  production, but it must share the same surface grammar. Expression-versus-statement AST
+  classification remains context-selected and must be tested (§9).
   - `f()^ - 1` must still parse as propagate-then-subtract, which **parses today and evaluates
     to 41** (verified 2026-08-01). The bare-expression alternative would silently reinterpret it
     as rescue-with-`-1` and yield 42.
@@ -376,29 +380,34 @@ own bisect point. H2/H3/H4 remain the portability/performance audit in §8.3.
   - Keep the type-level `^` untouched.
   - Add a `current_error_expr` grammar symbol for bare `^`. It is semantically valid only while
     building an active handler body; `^.` and `^[...]` reuse ordinary member/index productions.
-    A `^ { ... }` sequence in that body is always parsed as a nested prefix handler, never as a
-    current-error expression followed by a block. `~` keeps the existing `current_expr` token and
-    is not rebound by the handler.
+    Nested handling is written `operand ^ { ... }`; a leading `^ { ... }` is not a handler.
+    `~` keeps the existing `current_expr` token and is not rebound by the handler.
 - **No contextual boundary fusion.** In `let v: T = e ^ { h }`, lower the complete handler
   expression first and then run the ordinary declaration boundary. A failure of that outer
   `T` check skips exactly like `let v: T = e`; it is not delivered back into `h`. The same rule
   applies to reassignment. The handler is value-level error-match shorthand, not a hidden cast.
-- **Binding rule.** The handler consumes the maximal expression to its left within the current
-  comma/statement/delimiter boundary — below binary operators and pipes, above assignment. The
-  handled result is primary-like for following member/index operations, and handler chains are
-  left-associative. P0 fixtures are normative for the grammar implementation:
+- **Binding rule.** The handler consumes one primary expression on its left and shares the
+  left-associative postfix tier with member/query access. Binary and pipe operators therefore
+  bind outside an unparenthesized handler; parentheses explicitly widen the protected operand.
+  P0 fixtures are normative for the grammar implementation:
 
   | Source | Required parse |
   |---|---|
-  | `a + b ^ { h }` | `(a + b) ^ { h }` |
-  | `a |> f() ^ { h }` | `(a |> f()) ^ { h }` |
-  | `a + (b ^ { h })` | handle `b` only |
+  | `a + b ^ { h }` | `a + (b ^ { h })` |
+  | `(a + b) ^ { h }` | handle the complete addition |
+  | `a |> f() ^ { h }` | `a |> (f() ^ { h })` |
+  | `(a |> f()) ^ { h }` | handle the complete pipe expression |
   | `f(a ^ { h }, b)` | handle first argument only |
-  | `e ^ { h }.field` | member access on the handled result |
+  | `e ^ { h }.field` | `(e ^ { h }).field` |
+  | `e.field ^ { h }` | `(e.field) ^ { h }` |
   | `e ^ { h1 } ^ { h2 }` | `(e ^ { h1 }) ^ { h2 }` |
-  | `f()^ - 1` | existing postfix propagation, then subtraction |
+  | `f()^ - 1` | `(f()^) - 1` |
   | `pn_call() ^ { recover(); }` | statement handler when used as `_statement` |
-- **`make generate-grammar`.** Never hand-edit `parser.c`. Expect `ts-enum.h` churn.
+- **Grammar shape.** Replace the call/literal/binary/member and prefix-handler productions with
+  one `handler_expr` over `primary_expr`; admit its result to the postfix/primary chain; remove
+  the optional caret from `call_expr`; and give propagation the same operand/precedence model.
+  When implementation begins, run `make generate-grammar`; never hand-edit `parser.c`. Expect
+  `ts-enum.h` churn.
 
 ### 6.2 System-fault capture — the gap rev 1 missed
 
@@ -484,6 +493,14 @@ keeps its `*.txt` golden in step.
 - Retire the prefix `^` operator: the unary-operator choice in `grammar.js`
   (`choice('not', '!', '-', '+', '^', '*')`). Removing it is what buys the parse headroom;
   `x is error` is the replacement (verified working 2026-08-01).
+- Conform the braced handler and propagation grammar to **S7.6.2v2/S7.6.3v2** in the same
+  grammar change: remove the optional caret from `call_expr`; make `handler_expr` a mandatory-
+  caret postfix operation over `primary_expr`; make its result available to the ordinary postfix
+  chain; and give `propagate_expr` the same operand and precedence model.
+- Retire `handler_member_expr`, `handler_literal_expr`, `handler_binary_expr`, and every
+  `handler_prefix_*` production. Remove their conflict declarations, generated symbols, AST
+  dispatch cases, and prefix-handler fixtures rather than preserving aliases for syntax that no
+  longer exists. Migrate the nested-handler fixture to `operand ^ { ... }`.
 - Retire the destructure: the `'^', field('error', …)` production in `grammar.js`; the
   `FIELD_ERROR` handling in `build_assign_expr` and the second binding it creates
   (`build_ast.cpp`); `AstNamedNode.error_name` and its emitter uses. **`pub x^err = …`

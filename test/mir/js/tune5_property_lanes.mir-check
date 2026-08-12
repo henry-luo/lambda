@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "D4.6.1v2/D4.6.2v2: direct MIR property reads and writes enter the final public Get and Set lane shells.",
+  "checks": [
+    {
+      "in_func": "_js_lane_#_body",
+      "expect_seq": [
+        { "pattern": "call\tjs_set_p_r6_n1_a5, js_set" },
+        { "pattern": "call\tjs_get_p_r6_n1_a4, js_get" }
+      ],
+      "forbid": [
+        "js_property_access",
+        "js_property_set",
+        "js_array_get",
+        "js_array_set"
+      ]
+    }
+  ]
+}

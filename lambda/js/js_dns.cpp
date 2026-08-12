@@ -121,7 +121,7 @@ static Item throw_invalid_servers_array_type(Item servers_item) {
 
 static Item make_node_error(const char* name, const char* code, const char* message) {
     Item error = js_new_error_with_name(make_string_item(name), make_string_item(message));
-    if (code) js_property_set(error, make_string_item("code"), make_string_item(code));
+    if (code) js_set_key_default(error, make_string_item("code"), make_string_item(code));
     return error;
 }
 
@@ -132,10 +132,10 @@ static Item make_dns_error(int status, const char* hostname) {
     if (!msg) msg = "unknown error";
 
     Item error = js_new_error(make_string_item(msg));
-    js_property_set(error, make_string_item("code"), make_string_item(code));
-    js_property_set(error, make_string_item("errno"), (Item){.item = i2it(status)});
-    js_property_set(error, make_string_item("syscall"), make_string_item("getaddrinfo"));
-    if (hostname) js_property_set(error, make_string_item("hostname"), make_string_item(hostname));
+    js_set_key_default(error, make_string_item("code"), make_string_item(code));
+    js_set_key_default(error, make_string_item("errno"), (Item){.item = i2it(status)});
+    js_set_key_default(error, make_string_item("syscall"), make_string_item("getaddrinfo"));
+    if (hostname) js_set_key_default(error, make_string_item("hostname"), make_string_item(hostname));
     return error;
 }
 
@@ -146,10 +146,10 @@ static Item make_dns_resolve_error(int status, const char* hostname, const char*
     if (!msg) msg = "unknown error";
 
     Item error = js_new_error(make_string_item(msg));
-    js_property_set(error, make_string_item("code"), make_string_item(code));
-    js_property_set(error, make_string_item("errno"), (Item){.item = i2it(status)});
-    js_property_set(error, make_string_item("syscall"), make_string_item(syscall));
-    if (hostname) js_property_set(error, make_string_item("hostname"), make_string_item(hostname));
+    js_set_key_default(error, make_string_item("code"), make_string_item(code));
+    js_set_key_default(error, make_string_item("errno"), (Item){.item = i2it(status)});
+    js_set_key_default(error, make_string_item("syscall"), make_string_item(syscall));
+    if (hostname) js_set_key_default(error, make_string_item("hostname"), make_string_item(hostname));
     return error;
 }
 
@@ -165,17 +165,17 @@ static Item make_dns_lookup_service_error(int status, const char* address) {
     snprintf(msg, sizeof(msg), "getnameinfo %s %s", code, address ? address : "");
 
     Item error = js_new_error(make_string_item(msg));
-    js_property_set(error, make_string_item("code"), make_string_item(code));
-    js_property_set(error, make_string_item("errno"), (Item){.item = i2it(status)});
-    js_property_set(error, make_string_item("syscall"), make_string_item("getnameinfo"));
-    if (address) js_property_set(error, make_string_item("hostname"), make_string_item(address));
+    js_set_key_default(error, make_string_item("code"), make_string_item(code));
+    js_set_key_default(error, make_string_item("errno"), (Item){.item = i2it(status)});
+    js_set_key_default(error, make_string_item("syscall"), make_string_item("getnameinfo"));
+    if (address) js_set_key_default(error, make_string_item("hostname"), make_string_item(address));
     return error;
 }
 
 static Item make_lookup_record(const char* address, int family) {
     Item record = js_new_object();
-    js_property_set(record, make_string_item("address"), make_string_item(address));
-    js_property_set(record, make_string_item("family"), (Item){.item = i2it(family)});
+    js_set_key_default(record, make_string_item("address"), make_string_item(address));
+    js_set_key_default(record, make_string_item("family"), (Item){.item = i2it(family)});
     return record;
 }
 
@@ -385,8 +385,8 @@ static void dns_lookup_service_schedule(Item callback, Item resolve, Item reject
 
 static Item dns_promise_reject_later(Item error) {
     JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
-    JS_ASSIGN_OR_RETURN(promise, js_property_get(capability, make_string_item("promise")));
-    JS_ASSIGN_OR_RETURN(reject, js_property_get(capability, make_string_item("reject")));
+    JS_ASSIGN_OR_RETURN(promise, js_get_key_default(capability, make_string_item("promise")));
+    JS_ASSIGN_OR_RETURN(reject, js_get_key_default(capability, make_string_item("reject")));
     dns_lookup_schedule(make_js_undefined(), make_js_undefined(), reject,
         error, make_js_undefined(), make_js_undefined(), make_js_undefined());
     return promise;
@@ -570,7 +570,7 @@ static Item validate_family_value(Item value, bool object_form, int* out_family)
 }
 
 static Item validate_bool_option(Item options, const char* name, bool* out_value) {
-    JS_ASSIGN_OR_RETURN(value, js_property_get(options, make_string_item(name)));
+    JS_ASSIGN_OR_RETURN(value, js_get_key_default(options, make_string_item(name)));
     if (is_nullish_item(value)) return js_status_ok();
     if (get_type_id(value) != LMD_TYPE_BOOL) {
         char arg_name[64];
@@ -582,7 +582,7 @@ static Item validate_bool_option(Item options, const char* name, bool* out_value
 }
 
 static Item validate_order_option(Item options) {
-    JS_ASSIGN_OR_RETURN(value, js_property_get(options, make_string_item("order")));
+    JS_ASSIGN_OR_RETURN(value, js_get_key_default(options, make_string_item("order")));
     if (is_nullish_item(value)) return js_status_ok();
     if (get_type_id(value) == LMD_TYPE_STRING) {
         String* s = it2s(value);
@@ -611,10 +611,10 @@ static Item normalize_lookup_options(Item options_item, DnsLookupOptions* out) {
         return js_throw_invalid_arg_type("options", "an integer or object", options_item);
     }
 
-    JS_ASSIGN_OR_RETURN(hints, js_property_get(options_item, make_string_item("hints")));
+    JS_ASSIGN_OR_RETURN(hints, js_get_key_default(options_item, make_string_item("hints")));
     JS_RETURN_IF_ERROR(validate_hints(hints));
 
-    JS_ASSIGN_OR_RETURN(family, js_property_get(options_item, make_string_item("family")));
+    JS_ASSIGN_OR_RETURN(family, js_get_key_default(options_item, make_string_item("family")));
     JS_RETURN_IF_ERROR(validate_family_value(family, true, &out->family));
 
     JS_RETURN_IF_ERROR(validate_bool_option(options_item, "all", &out->all));
@@ -638,9 +638,9 @@ static Item normalize_lookup_args(Item rest_args, bool promise_mode, DnsLookupOp
 
     int64_t argc64 = js_array_length(rest_args);
     int argc = argc64 > 8 ? 8 : (int)argc64;
-    Item hostname_item = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
-    Item options_item = argc > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
-    Item callback_item = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
+    Item hostname_item = argc > 0 ? js_elements_get_int(rest_args, 0) : make_js_undefined();
+    Item options_item = argc > 1 ? js_elements_get_int(rest_args, 1) : make_js_undefined();
+    Item callback_item = argc > 2 ? js_elements_get_int(rest_args, 2) : make_js_undefined();
 
     if (!promise_mode) {
         if (argc == 2 && is_callable(options_item)) {
@@ -680,7 +680,7 @@ static Item normalize_lookup_args(Item rest_args, bool promise_mode, DnsLookupOp
 static int dns_call_cares_getaddrinfo_hook(const DnsLookupOptions* options) {
     Item cares = js_internal_binding(make_string_item("cares_wrap"));
     if (get_type_id(cares) != LMD_TYPE_MAP) return 0;
-    Item fn = js_property_get(cares, make_string_item("getaddrinfo"));
+    Item fn = js_get_key_default(cares, make_string_item("getaddrinfo"));
     if (!is_callable(fn)) return 0;
 
     Item args[4] = {
@@ -832,9 +832,9 @@ extern "C" Item js_dns_promises_lookup(Item rest_args) {
     }
 
     JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
-    JS_ASSIGN_OR_RETURN(promise, js_property_get(capability, make_string_item("promise")));
-    JS_ASSIGN_OR_RETURN(resolve, js_property_get(capability, make_string_item("resolve")));
-    JS_ASSIGN_OR_RETURN(reject, js_property_get(capability, make_string_item("reject")));
+    JS_ASSIGN_OR_RETURN(promise, js_get_key_default(capability, make_string_item("promise")));
+    JS_ASSIGN_OR_RETURN(resolve, js_get_key_default(capability, make_string_item("resolve")));
+    JS_ASSIGN_OR_RETURN(reject, js_get_key_default(capability, make_string_item("reject")));
     if (!dns_lookup_start(&options, resolve, reject, false)) {
         Item error = make_dns_error(UV_EAI_FAIL, options.hostname);
         Item args[1] = { error };
@@ -858,9 +858,9 @@ static Item js_dns_cares_query_default(Item hostname) {
 static Item make_dns_resolve_code_error(const char* code, const char* message,
                                         const char* hostname, const char* syscall) {
     Item error = js_new_error(make_string_item(message ? message : "DNS query failed"));
-    js_property_set(error, make_string_item("code"), make_string_item(code));
-    js_property_set(error, make_string_item("syscall"), make_string_item(syscall));
-    if (hostname) js_property_set(error, make_string_item("hostname"), make_string_item(hostname));
+    js_set_key_default(error, make_string_item("code"), make_string_item(code));
+    js_set_key_default(error, make_string_item("syscall"), make_string_item(syscall));
+    if (hostname) js_set_key_default(error, make_string_item("hostname"), make_string_item(hostname));
     return error;
 }
 
@@ -868,16 +868,16 @@ static void dns_ensure_cares_channelwrap(void) {
     Item cares = js_internal_binding(make_string_item("cares_wrap"));
     if (get_type_id(cares) != LMD_TYPE_MAP) return;
 
-    Item ctor = js_property_get(cares, make_string_item("ChannelWrap"));
+    Item ctor = js_get_key_default(cares, make_string_item("ChannelWrap"));
     if (!is_callable(ctor)) {
         ctor = js_new_native_constructor(js_dns_cares_query_default);
-        js_property_set(cares, make_string_item("ChannelWrap"), ctor);
+        js_set_key_default(cares, make_string_item("ChannelWrap"), ctor);
     }
 
-    Item proto = js_property_get(ctor, make_string_item("prototype"));
+    Item proto = js_get_key_default(ctor, make_string_item("prototype"));
     if (!dns_is_object_like(proto)) {
         proto = js_new_object();
-        js_property_set(ctor, make_string_item("prototype"), proto);
+        js_set_key_default(ctor, make_string_item("prototype"), proto);
     }
 
     const char* methods[] = {
@@ -886,8 +886,8 @@ static void dns_ensure_cares_channelwrap(void) {
     };
     for (int i = 0; methods[i]; i++) {
         Item key = make_string_item(methods[i]);
-        if (!is_callable(js_property_get(proto, key))) {
-            js_property_set(proto, key,
+        if (!is_callable(js_get_key_default(proto, key))) {
+            js_set_key_default(proto, key,
                 js_new_native_function(js_dns_cares_query_default));
         }
     }
@@ -951,9 +951,9 @@ static Item normalize_resolve_args(Item rest_args, bool promise_mode, int fixed_
 
     int64_t argc64 = js_array_length(rest_args);
     int argc = argc64 > 8 ? 8 : (int)argc64;
-    Item hostname_item = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
-    Item rrtype_item = argc > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
-    Item callback_item = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
+    Item hostname_item = argc > 0 ? js_elements_get_int(rest_args, 0) : make_js_undefined();
+    Item rrtype_item = argc > 1 ? js_elements_get_int(rest_args, 1) : make_js_undefined();
+    Item callback_item = argc > 2 ? js_elements_get_int(rest_args, 2) : make_js_undefined();
 
     if (!copy_hostname(hostname_item, out->hostname, (int)sizeof(out->hostname))) {
         return js_throw_invalid_arg_type("name", "string", hostname_item);
@@ -1014,12 +1014,12 @@ static bool dns_call_cares_query_hook(const DnsResolveOptions* options,
     Item cares = js_internal_binding(make_string_item("cares_wrap"));
     if (get_type_id(cares) != LMD_TYPE_MAP) return false;
 
-    Item ctor = js_property_get(cares, make_string_item("ChannelWrap"));
+    Item ctor = js_get_key_default(cares, make_string_item("ChannelWrap"));
     Item proto = dns_is_object_like(ctor) ?
-        js_property_get(ctor, make_string_item("prototype")) : make_js_undefined();
+        js_get_key_default(ctor, make_string_item("prototype")) : make_js_undefined();
     if (!dns_is_object_like(proto)) return false;
 
-    Item fn = js_property_get(proto, make_string_item(options->syscall));
+    Item fn = js_get_key_default(proto, make_string_item(options->syscall));
     if (!is_callable(fn)) return false;
 
     Item args[1] = { make_string_item(options->hostname) };
@@ -1095,8 +1095,8 @@ static Item js_dns_resolve_common(Item rest_args, bool promise_mode, int family)
         Item error = js_permission_make_net_error("resolve", options.hostname);
         if (promise_mode) {
             JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
-            JS_ASSIGN_OR_RETURN(promise, js_property_get(capability, make_string_item("promise")));
-            JS_ASSIGN_OR_RETURN(reject, js_property_get(capability, make_string_item("reject")));
+            JS_ASSIGN_OR_RETURN(promise, js_get_key_default(capability, make_string_item("promise")));
+            JS_ASSIGN_OR_RETURN(reject, js_get_key_default(capability, make_string_item("reject")));
             dns_resolve_schedule(make_js_undefined(), make_js_undefined(), reject,
                 error, make_js_undefined());
             return promise;
@@ -1108,9 +1108,9 @@ static Item js_dns_resolve_common(Item rest_args, bool promise_mode, int family)
 
     if (promise_mode) {
         JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
-        JS_ASSIGN_OR_RETURN(promise, js_property_get(capability, make_string_item("promise")));
-        JS_ASSIGN_OR_RETURN(resolve, js_property_get(capability, make_string_item("resolve")));
-        JS_ASSIGN_OR_RETURN(reject, js_property_get(capability, make_string_item("reject")));
+        JS_ASSIGN_OR_RETURN(promise, js_get_key_default(capability, make_string_item("promise")));
+        JS_ASSIGN_OR_RETURN(resolve, js_get_key_default(capability, make_string_item("resolve")));
+        JS_ASSIGN_OR_RETURN(reject, js_get_key_default(capability, make_string_item("reject")));
         if (!dns_resolve_start(&options, resolve, reject)) {
             Item error = make_dns_resolve_error(UV_EAI_FAIL, options.hostname, options.syscall);
             dns_resolve_schedule(make_js_undefined(), make_js_undefined(), reject,
@@ -1223,9 +1223,9 @@ static Item normalize_lookup_service_args(Item rest_args, bool promise_mode,
 
     int64_t argc64 = js_array_length(rest_args);
     int argc = argc64 > 8 ? 8 : (int)argc64;
-    Item address_item = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
-    Item port_item = argc > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
-    Item callback_item = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
+    Item address_item = argc > 0 ? js_elements_get_int(rest_args, 0) : make_js_undefined();
+    Item port_item = argc > 1 ? js_elements_get_int(rest_args, 1) : make_js_undefined();
+    Item callback_item = argc > 2 ? js_elements_get_int(rest_args, 2) : make_js_undefined();
 
     if (!copy_hostname(address_item, out->address, (int)sizeof(out->address))) {
         return js_throw_invalid_arg_type("address", "string", address_item);
@@ -1264,7 +1264,7 @@ static bool dns_call_cares_getnameinfo_hook(const DnsLookupServiceOptions* optio
     *out_status = 0;
     Item cares = js_internal_binding(make_string_item("cares_wrap"));
     if (get_type_id(cares) != LMD_TYPE_MAP) return false;
-    Item fn = js_property_get(cares, make_string_item("getnameinfo"));
+    Item fn = js_get_key_default(cares, make_string_item("getnameinfo"));
     if (!is_callable(fn)) return false;
 
     Item args[2] = {
@@ -1310,8 +1310,8 @@ static bool dns_lookup_service_query(const DnsLookupServiceOptions* options,
 
 static Item make_lookup_service_record(Item hostname, Item service) {
     Item record = js_new_object();
-    js_property_set(record, make_string_item("hostname"), hostname);
-    js_property_set(record, make_string_item("service"), service);
+    js_set_key_default(record, make_string_item("hostname"), hostname);
+    js_set_key_default(record, make_string_item("service"), service);
     return record;
 }
 
@@ -1352,8 +1352,8 @@ static Item js_dns_lookupService_common(Item rest_args, bool promise_mode) {
         Item error = js_permission_make_net_error("lookupService", options.address);
         if (promise_mode) {
             JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
-            JS_ASSIGN_OR_RETURN(promise, js_property_get(capability, make_string_item("promise")));
-            JS_ASSIGN_OR_RETURN(reject, js_property_get(capability, make_string_item("reject")));
+            JS_ASSIGN_OR_RETURN(promise, js_get_key_default(capability, make_string_item("promise")));
+            JS_ASSIGN_OR_RETURN(reject, js_get_key_default(capability, make_string_item("reject")));
             dns_lookup_service_schedule(make_js_undefined(), make_js_undefined(), reject,
                 error, make_js_undefined(), make_js_undefined(), make_js_undefined());
             return promise;
@@ -1372,9 +1372,9 @@ static Item js_dns_lookupService_common(Item rest_args, bool promise_mode) {
 
     if (promise_mode) {
         JS_ASSIGN_OR_RETURN(capability, js_promise_with_resolvers());
-        JS_ASSIGN_OR_RETURN(promise, js_property_get(capability, make_string_item("promise")));
-        JS_ASSIGN_OR_RETURN(resolve, js_property_get(capability, make_string_item("resolve")));
-        JS_ASSIGN_OR_RETURN(reject, js_property_get(capability, make_string_item("reject")));
+        JS_ASSIGN_OR_RETURN(promise, js_get_key_default(capability, make_string_item("promise")));
+        JS_ASSIGN_OR_RETURN(resolve, js_get_key_default(capability, make_string_item("resolve")));
+        JS_ASSIGN_OR_RETURN(reject, js_get_key_default(capability, make_string_item("reject")));
         dns_lookup_service_start(&options, resolve, reject);
         return promise;
     }
@@ -1419,7 +1419,7 @@ static Item dns_array_copy(Item servers) {
     if (get_type_id(servers) != LMD_TYPE_ARRAY) return copy;
     int64_t len = js_array_length(servers);
     for (int64_t i = 0; i < len; i++) {
-        js_array_push(copy, js_array_get_int(servers, i));
+        js_array_push(copy, js_elements_get_int(servers, i));
     }
     return copy;
 }
@@ -1481,7 +1481,7 @@ static Item dns_validated_servers_copy(Item servers_item) {
     Item copy = js_array_new(0);
     int64_t len = js_array_length(servers_item);
     for (int64_t i = 0; i < len; i++) {
-        Item server = js_array_get_int(servers_item, i);
+        Item server = js_elements_get_int(servers_item, i);
         if (get_type_id(server) != LMD_TYPE_STRING) {
             char name[32];
             snprintf(name, sizeof(name), "servers[%lld]", (long long)i);
@@ -1494,7 +1494,7 @@ static Item dns_validated_servers_copy(Item servers_item) {
 
 static Item dns_receiver_servers(Item receiver) {
     if (dns_is_object_like(receiver)) {
-        Item servers = js_property_get(receiver, make_string_item("__dns_servers__"));
+        Item servers = js_get_key_default(receiver, make_string_item("__dns_servers__"));
         if (get_type_id(servers) == LMD_TYPE_ARRAY) return servers;
     }
     return dns_get_default_servers();
@@ -1503,16 +1503,16 @@ static Item dns_receiver_servers(Item receiver) {
 extern "C" Item js_dns_resolver_handle_getServers(void) {
     Item handle = js_get_this();
     Item owner = dns_is_object_like(handle) ?
-        js_property_get(handle, make_string_item("__dns_owner__")) : make_js_undefined();
+        js_get_key_default(handle, make_string_item("__dns_owner__")) : make_js_undefined();
     return dns_array_copy(dns_receiver_servers(owner));
 }
 
 extern "C" Item js_dns_getServers(void) {
     Item receiver = js_get_this();
     if (dns_is_object_like(receiver)) {
-        Item handle = js_property_get(receiver, make_string_item("_handle"));
+        Item handle = js_get_key_default(receiver, make_string_item("_handle"));
         if (dns_is_object_like(handle)) {
-            Item get_servers = js_property_get(handle, make_string_item("getServers"));
+            Item get_servers = js_get_key_default(handle, make_string_item("getServers"));
             if (is_callable(get_servers)) {
                 Item result = js_call_function(get_servers, handle, NULL, 0);
                 if (get_type_id(result) == LMD_TYPE_ARRAY) return dns_array_copy(result);
@@ -1532,13 +1532,13 @@ extern "C" Item js_dns_setServers(Item servers_item) {
         !dns_is_object_like(receiver)) {
         dns_default_servers = copy;
         if (dns_namespace.item != 0) {
-            js_property_set(dns_namespace, make_string_item("__dns_servers__"), copy);
+            js_set_key_default(dns_namespace, make_string_item("__dns_servers__"), copy);
         }
         if (dns_promises_namespace.item != 0) {
-            js_property_set(dns_promises_namespace, make_string_item("__dns_servers__"), copy);
+            js_set_key_default(dns_promises_namespace, make_string_item("__dns_servers__"), copy);
         }
     } else {
-        js_property_set(receiver, make_string_item("__dns_servers__"), copy);
+        js_set_key_default(receiver, make_string_item("__dns_servers__"), copy);
     }
     return make_js_undefined();
 }
@@ -1595,14 +1595,14 @@ extern "C" Item js_dns_setLocalAddress(Item ipv4_item, Item ipv6_item) {
     Item receiver = js_get_this();
     if (dns_is_object_like(receiver)) {
         if (first_family == 4) {
-            js_property_set(receiver, make_string_item("__dns_local_address_ipv4__"), make_string_item(first));
+            js_set_key_default(receiver, make_string_item("__dns_local_address_ipv4__"), make_string_item(first));
             if (second_family == 6) {
-                js_property_set(receiver, make_string_item("__dns_local_address_ipv6__"), make_string_item(second));
+                js_set_key_default(receiver, make_string_item("__dns_local_address_ipv6__"), make_string_item(second));
             }
         } else {
-            js_property_set(receiver, make_string_item("__dns_local_address_ipv6__"), make_string_item(first));
+            js_set_key_default(receiver, make_string_item("__dns_local_address_ipv6__"), make_string_item(first));
             if (second_family == 4) {
-                js_property_set(receiver, make_string_item("__dns_local_address_ipv4__"), make_string_item(second));
+                js_set_key_default(receiver, make_string_item("__dns_local_address_ipv4__"), make_string_item(second));
             }
         }
     }
@@ -1621,7 +1621,7 @@ static void dns_set_method(Item ns, const char* name, Target target,
 }
 
 static void dns_set_constant(Item ns, const char* name, const char* value) {
-    js_property_set(ns, make_string_item(name), make_string_item(value));
+    js_set_key_default(ns, make_string_item(name), make_string_item(value));
 }
 
 static void dns_set_constants(Item ns) {
@@ -1702,14 +1702,14 @@ static Item dns_get_resolver_prototype(bool promise_mode) {
 
 static void dns_init_resolver_state(Item resolver) {
     if (!dns_is_object_like(resolver)) return;
-    js_property_set(resolver, make_string_item("__dns_servers__"),
+    js_set_key_default(resolver, make_string_item("__dns_servers__"),
         dns_array_copy(dns_get_default_servers()));
 
     Item handle = js_new_object();
-    js_property_set(handle, make_string_item("__dns_owner__"), resolver);
-    js_property_set(handle, make_string_item("getServers"),
+    js_set_key_default(handle, make_string_item("__dns_owner__"), resolver);
+    js_set_key_default(handle, make_string_item("getServers"),
         js_new_native_function(js_dns_resolver_handle_getServers));
-    js_property_set(resolver, make_string_item("_handle"), handle);
+    js_set_key_default(resolver, make_string_item("_handle"), handle);
 }
 
 static Item dns_create_resolver(bool promise_mode) {
@@ -1740,8 +1740,8 @@ static Item dns_make_resolver_constructor(bool promise_mode) {
         js_dns_resolver_constructor;
     Item ctor = js_new_native_constructor(target);
     Item proto = dns_get_resolver_prototype(promise_mode);
-    js_property_set(ctor, make_string_item("prototype"), proto);
-    js_property_set(proto, make_string_item("constructor"), ctor);
+    js_set_key_default(ctor, make_string_item("prototype"), proto);
+    js_set_key_default(proto, make_string_item("constructor"), ctor);
     return ctor;
 }
 
@@ -1764,11 +1764,11 @@ extern "C" Item js_get_dns_promises_namespace(void) {
     dns_set_method(dns_promises_namespace, "getServers", js_dns_getServers, 0);
     dns_set_method(dns_promises_namespace, "setServers", js_dns_setServers, 1);
     dns_set_constants(dns_promises_namespace);
-    js_property_set(dns_promises_namespace, make_string_item("__dns_servers__"),
+    js_set_key_default(dns_promises_namespace, make_string_item("__dns_servers__"),
         dns_get_default_servers());
-    js_property_set(dns_promises_namespace, make_string_item("Resolver"),
+    js_set_key_default(dns_promises_namespace, make_string_item("Resolver"),
         dns_make_resolver_constructor(true));
-    js_property_set(dns_promises_namespace, make_string_item("default"), dns_promises_namespace);
+    js_set_key_default(dns_promises_namespace, make_string_item("default"), dns_promises_namespace);
     return dns_promises_namespace;
 }
 
@@ -1792,16 +1792,16 @@ extern "C" Item js_get_dns_namespace(void) {
     dns_set_method(dns_namespace, "getServers", js_dns_getServers, 0);
     dns_set_method(dns_namespace, "setServers", js_dns_setServers, 1);
     dns_set_constants(dns_namespace);
-    js_property_set(dns_namespace, make_string_item("__dns_servers__"),
+    js_set_key_default(dns_namespace, make_string_item("__dns_servers__"),
         dns_get_default_servers());
-    js_property_set(dns_namespace, make_string_item("Resolver"),
+    js_set_key_default(dns_namespace, make_string_item("Resolver"),
         dns_make_resolver_constructor(false));
 
     Item promises = js_get_dns_promises_namespace();
-    js_property_set(dns_namespace, make_string_item("promises"), promises);
+    js_set_key_default(dns_namespace, make_string_item("promises"), promises);
 
     Item default_key = make_string_item("default");
-    js_property_set(dns_namespace, default_key, dns_namespace);
+    js_set_key_default(dns_namespace, default_key, dns_namespace);
 
     return dns_namespace;
 }

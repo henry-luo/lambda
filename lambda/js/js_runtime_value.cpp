@@ -289,11 +289,11 @@ extern "C" Item js_to_number(Item value) {
         if (type == LMD_TYPE_MAP || type == LMD_TYPE_ELEMENT) {
             if (type == LMD_TYPE_MAP && value.map) {
                 bool raw_proto_found = false;
-                Item raw_proto = js_map_get_fast(value.map, "__proto__", 9, &raw_proto_found);
+                Item raw_proto = js_map_shape_lookup(value.map, "__proto__", 9, &raw_proto_found);
                 if (raw_proto_found && raw_proto.item == ITEM_JS_UNDEFINED) {
                     bool has_vo = false, has_ts = false, has_tp = false;
-                    js_map_get_fast(value.map, "valueOf", 7, &has_vo);
-                    js_map_get_fast(value.map, "toString", 8, &has_ts);
+                    js_map_shape_lookup(value.map, "valueOf", 7, &has_vo);
+                    js_map_shape_lookup(value.map, "toString", 8, &has_ts);
                     has_tp = it2b(js_has_own_property(value, js_well_known_symbol_key(2)));
                     if (!has_vo && !has_ts && !has_tp) {
                         return js_throw_type_error("Cannot convert object to primitive value");
@@ -309,7 +309,7 @@ extern "C" Item js_to_number(Item value) {
             return js_to_number(prim);
         }
         // Arrays: ToPrimitive → toString → ToNumber (e.g. +[] → +"" → 0, +[1] → +"1" → 1)
-        if (type == LMD_TYPE_ARRAY) {
+        if (js_is_js_array(value)) {
             Item str = js_to_string(value);
             return js_to_number(str);
         }
@@ -333,7 +333,7 @@ extern "C" Item js_to_numeric(Item value) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     // ToPrimitive for objects (hint: number) — ES spec §7.1.3
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
+    if (type == LMD_TYPE_MAP || js_is_js_array(value) ||
         type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT) {
         // J39-1b: route through unified js_to_primitive (ES §7.1.1).
         JS_ASSIGN_OR_RETURN(prim, js_to_primitive(value, JS_HINT_NUMBER));
@@ -350,7 +350,7 @@ extern "C" Item js_to_numeric(Item value) {
 // helper: apply ToNumeric only when operand is an object type
 static inline Item js_numeric_operand(Item val) {
     TypeId t = get_type_id(val);
-    if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC || t == LMD_TYPE_ELEMENT) return js_to_numeric(val);
+    if (t == LMD_TYPE_MAP || js_is_js_array(val) || t == LMD_TYPE_FUNC || t == LMD_TYPE_ELEMENT) return js_to_numeric(val);
     if (js_is_native_bigint_egress(val)) return js_native_bigint_to_bigint(val);
     return val;
 }
@@ -556,29 +556,31 @@ extern "C" Item js_to_string(Item value) {
     case LMD_TYPE_STRING:
         return value;
 
-    case LMD_TYPE_ARRAY: {
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_NUM: {
         Item to_string_key = js_make_string_len("toString", 8);
-        JS_ASSIGN_OR_RETURN(to_string_fn, js_property_get(value, to_string_key));
+        JS_ASSIGN_OR_RETURN(to_string_fn, js_get_key_default(value, to_string_key));
         if (js_is_callable(to_string_fn)) {
             JS_ASSIGN_OR_RETURN(result, js_call_function(to_string_fn, value, NULL, 0));
             TypeId result_type = get_type_id(result);
-            if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY ||
+            if (result_type == LMD_TYPE_MAP || js_is_js_array(result) ||
                 result_type == LMD_TYPE_FUNC || result_type == LMD_TYPE_ELEMENT) {
                 return js_throw_type_error("Cannot convert object to primitive value");
             }
             return js_to_string(result);
         }
         // JS: String([1,2,3]) => "1,2,3" (same as Array.prototype.join(","))
-        Array* a = value.array;
-        if (!a || a->length == 0) {
+        int64_t length = js_array_length(value);
+        if (length == 0) {
             return js_make_string_len("", 0);
         }
         StrBuf* sb = strbuf_new();
-        for (int i = 0; i < a->length; i++) {
+        for (int64_t i = 0; i < length; i++) {
             if (i > 0) strbuf_append_str_n(sb, ",", 1);
-            TypeId etype = get_type_id(a->items[i]);
-            if (etype != LMD_TYPE_NULL && etype != LMD_TYPE_UNDEFINED && a->items[i].item != JS_DELETED_SENTINEL_VAL) {
-                JS_ASSIGN_OR_RETURN(elem_str, js_to_string(a->items[i]));
+            Item element = js_elements_get_int(value, i);
+            TypeId etype = get_type_id(element);
+            if (etype != LMD_TYPE_NULL && etype != LMD_TYPE_UNDEFINED && element.item != JS_DELETED_SENTINEL_VAL) {
+                JS_ASSIGN_OR_RETURN(elem_str, js_to_string(element));
                 String* s = it2s(elem_str);
                 if (s && s->len > 0) {
                     strbuf_append_str_n(sb, s->chars, (int)s->len);
@@ -594,7 +596,7 @@ extern "C" Item js_to_string(Item value) {
         // v16: Check for Symbol.toPrimitive first (prototype chain lookup)
         {
             Item sym_key = js_well_known_symbol_key(2);
-            JS_ASSIGN_OR_RETURN(to_prim, js_property_get(value, sym_key));
+            JS_ASSIGN_OR_RETURN(to_prim, js_get_key_default(value, sym_key));
             TypeId tp_type = get_type_id(to_prim);
             bool tp_present = (to_prim.item != ItemNull.item && tp_type != LMD_TYPE_UNDEFINED && tp_type != LMD_TYPE_NULL);
             // ES spec §7.1.1 step 2.b.i: If exoticToPrim is not undefined AND not callable, throw TypeError.
@@ -608,7 +610,8 @@ extern "C" Item js_to_string(Item value) {
                 if (get_type_id(result) == LMD_TYPE_STRING) return result;
                 // Per ES spec: if Symbol.toPrimitive returns an Object, throw TypeError
                 TypeId rtid = get_type_id(result);
-                if (rtid == LMD_TYPE_MAP || rtid == LMD_TYPE_ARRAY || rtid == LMD_TYPE_FUNC || rtid == LMD_TYPE_ELEMENT) {
+                if (rtid == LMD_TYPE_MAP || js_is_js_array(result) ||
+                        rtid == LMD_TYPE_FUNC || rtid == LMD_TYPE_ELEMENT) {
                     return js_throw_type_error("Cannot convert object to primitive value");
                 }
                 return js_to_string(result);
@@ -624,12 +627,12 @@ extern "C" Item js_to_string(Item value) {
         // Skip fast path if custom toString/valueOf/@@toPrimitive exists on the object
         {
             bool own_pv = false;
-            Item pv = js_map_get_fast(value.map, "__primitiveValue__", 18, &own_pv);
+            Item pv = js_map_shape_lookup(value.map, "__primitiveValue__", 18, &own_pv);
             bigint_wrapper = own_pv && js_is_bigint(pv);
             if (own_pv && !js_is_bigint(pv) && !js_is_symbol(pv)) {
                 bool has_own_vo = false, has_own_ts = false, has_own_tp = false;
-                js_map_get_fast(value.map, "valueOf", 7, &has_own_vo);
-                js_map_get_fast(value.map, "toString", 8, &has_own_ts);
+                js_map_shape_lookup(value.map, "valueOf", 7, &has_own_vo);
+                js_map_shape_lookup(value.map, "toString", 8, &has_own_ts);
                 has_own_tp = it2b(js_has_own_property(value, js_well_known_symbol_key(2)));
                 if (!has_own_vo && !has_own_ts && !has_own_tp) {
                     return js_to_string(pv);
@@ -640,13 +643,13 @@ extern "C" Item js_to_string(Item value) {
         // JS: String(/pattern/flags) => "/pattern/flags"
         {
             bool own_rd = false;
-            js_map_get_fast(value.map, "__rd", 4, &own_rd);
+            js_map_shape_lookup(value.map, "__rd", 4, &own_rd);
             bool own_to_string = false;
-            js_map_get_fast(value.map, "toString", 8, &own_to_string);
+            js_map_shape_lookup(value.map, "toString", 8, &own_to_string);
             if (own_rd && !own_to_string) {
                 bool own_src = false, own_flags = false;
-                Item src_val = js_map_get_fast(value.map, "source", 6, &own_src);
-                Item flags_val = js_map_get_fast(value.map, "flags", 5, &own_flags);
+                Item src_val = js_map_shape_lookup(value.map, "source", 6, &own_src);
+                Item flags_val = js_map_shape_lookup(value.map, "flags", 5, &own_flags);
                 String* src_s = (own_src && get_type_id(src_val) == LMD_TYPE_STRING) ? it2s(src_val) : NULL;
                 String* flags_s = (own_flags && get_type_id(flags_val) == LMD_TYPE_STRING) ? it2s(flags_val) : NULL;
                 StrBuf* sb = strbuf_new();
@@ -664,13 +667,13 @@ extern "C" Item js_to_string(Item value) {
         {
             Item ts_fn = ItemNull;
             // Track ownership for valueOf gating, but always route through
-            // js_property_get so that accessor (getter) toString is invoked,
+            // js_get_key_default so that accessor (getter) toString is invoked,
             // not the raw JsAccessorPair* slot value.
             bool own_ts = false;
-            (void)js_map_get_fast(value.map, "toString", 8, &own_ts);
+            (void)js_map_shape_lookup(value.map, "toString", 8, &own_ts);
             bool ts_found = own_ts || js_ordinary_has_property(value, "toString", 8);
             Item ts_key = js_make_string_len("toString", 8);
-            JS_ASSIGN_OR_RETURN_INTO(ts_fn, js_property_get(value, ts_key));
+            JS_ASSIGN_OR_RETURN_INTO(ts_fn, js_get_key_default(value, ts_key));
             if (ts_fn.item != ItemNull.item && js_is_callable(ts_fn)) {
                 JS_ASSIGN_OR_RETURN(result, js_call_function(ts_fn, value, NULL, 0));
                 TypeId rt = get_type_id(result);
@@ -682,10 +685,10 @@ extern "C" Item js_to_string(Item value) {
             // If toString wasn't found, prototype chain isn't set up — use default "[object Object]"
             bool vo_found = js_ordinary_has_property(value, "valueOf", 7);
             if (ts_found || vo_found || bigint_wrapper) {
-                // v90: Use js_property_get for valueOf to handle getter-defined valueOf
+                // v90: Use js_get_key_default for valueOf to handle getter-defined valueOf
                 // (e.g., {toString: null, get valueOf() { throw ... }})
                 Item vo_key = js_make_string_len("valueOf", 7);
-                JS_ASSIGN_OR_RETURN(vo_fn, js_property_get(value, vo_key));
+                JS_ASSIGN_OR_RETURN(vo_fn, js_get_key_default(value, vo_key));
                 if (vo_fn.item != ItemNull.item && js_is_callable(vo_fn)) {
                     JS_ASSIGN_OR_RETURN(result, js_call_function(vo_fn, value, NULL, 0));
                     TypeId rt = get_type_id(result);
@@ -710,8 +713,8 @@ extern "C" Item js_to_string(Item value) {
         // Check for Error-like objects (have 'name' and 'message' properties)
         // JS: String(new Error("msg")) => "Error: msg"
         bool own_name = false, own_msg = false;
-        Item name_val = js_map_get_fast(value.map, "name", 4, &own_name);
-        Item msg_val = js_map_get_fast(value.map, "message", 7, &own_msg);
+        Item name_val = js_map_shape_lookup(value.map, "name", 4, &own_name);
+        Item msg_val = js_map_shape_lookup(value.map, "message", 7, &own_msg);
         if (own_name && get_type_id(name_val) == LMD_TYPE_STRING) {
             String* name_s = it2s(name_val);
             String* msg_s = (own_msg && get_type_id(msg_val) == LMD_TYPE_STRING) ? it2s(msg_val) : NULL;
@@ -836,12 +839,12 @@ extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
                 return (ts && ts->len == 6 && memcmp(ts->chars, "object", 6) == 0) ? 1 : 0;
             }
             bool own_ip = false;
-            js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
+            js_map_shape_lookup_ext(value.map, "__instance_proto__", 18, &own_ip);
             if (own_ip) return 0;  // class objects are "function"
             // Function.prototype is callable per spec
             if (js_class_id(value) == JS_CLASS_FUNCTION) {
                 bool own_proto = false;
-                js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
+                js_map_shape_lookup_ext(value.map, "__is_proto__", 12, &own_proto);
                 if (own_proto) return 0;  // "function", not "object"
             }
             return 1;
@@ -862,12 +865,12 @@ extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
                 return (ts && ts->len == 8 && memcmp(ts->chars, "function", 8) == 0) ? 1 : 0;
             }
             bool own_ip = false;
-            js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
+            js_map_shape_lookup_ext(value.map, "__instance_proto__", 18, &own_ip);
             if (own_ip) return 1;
             // Function.prototype is callable per spec
             if (js_class_id(value) == JS_CLASS_FUNCTION) {
                 bool own_proto = false;
-                js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
+                js_map_shape_lookup_ext(value.map, "__is_proto__", 12, &own_proto);
                 if (own_proto) return 1;
             }
             return 0;
@@ -1033,9 +1036,10 @@ bool js_ta_numeric_index_valid(Item object, double numeric_index, bool is_negati
     return true;
 }
 
-bool js_ta_proto_chain_set(Item object, Item key, Item value, Item* out_result) {
+bool js_ta_proto_chain_set(Item object, Item key, Item value, Item receiver,
+                           bool bypass_accessor_dispatch, Item* out_result) {
     if (out_result) *out_result = value;
-    if (js_skip_accessor_dispatch) return false;
+    if (bypass_accessor_dispatch) return false;
     TypeId object_type = get_type_id(object);
     if (object_type != LMD_TYPE_MAP && object_type != LMD_TYPE_ARRAY) return false;
     if (js_is_proxy(object)) return false;
@@ -1056,12 +1060,11 @@ bool js_ta_proto_chain_set(Item object, Item key, Item value, Item* out_result) 
             int idx = 0;
             if (!js_ta_numeric_index_valid(proto, numeric_index, is_negative_zero, &idx)) return true;
 
-            Item receiver = js_proxy_receiver.item ? js_proxy_receiver : object;
             Item desc = js_new_object();
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+            js_set_key_default(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+            js_set_key_default(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+            js_set_key_default(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+            js_set_key_default(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
             Item define_result = js_object_define_property(receiver, key, desc);
             // Preserve a failed receiver definition for strict assignment;
             // this path is still the caller's [[Set]] completion.
@@ -1329,7 +1332,7 @@ extern "C" Item js_add(Item left, Item right) {
     // 1. lprim = ToPrimitive(left, default).  2. rprim = ToPrimitive(right, default).
     // js_op_to_primitive honors @@toPrimitive then OrdinaryToPrimitive (valueOf, toString)
     // and throws TypeError on object results / non-callable @@toPrimitive.
-    if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY ||
+    if (left_type == LMD_TYPE_MAP || js_is_js_array(left_root.get()) ||
         left_type == LMD_TYPE_ELEMENT || left_type == LMD_TYPE_FUNC) {
         Item primitive = js_op_to_primitive(left_root.get(), 0);
         if (item_is_error(primitive)) return primitive;
@@ -1337,7 +1340,7 @@ extern "C" Item js_add(Item left, Item right) {
         left = left_root.get();
         left_type = get_type_id(left_root.get());
     }
-    if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY ||
+    if (right_type == LMD_TYPE_MAP || js_is_js_array(right_root.get()) ||
         right_type == LMD_TYPE_ELEMENT || right_type == LMD_TYPE_FUNC) {
         Item primitive = js_op_to_primitive(right_root.get(), 0);
         if (item_is_error(primitive)) return primitive;
@@ -1487,13 +1490,13 @@ extern "C" Item js_equal(Item left, Item right) {
 
     // Array ToPrimitive: arrays are objects; only coerce for object-vs-primitive
     // abstract equality cases, not for null/undefined comparisons.
-    if (left_type == LMD_TYPE_ARRAY &&
+    if (js_is_js_array(left) &&
         (js_number_like_type(right_type) || right_type == LMD_TYPE_STRING ||
          js_is_bigint(right) || js_is_symbol(right))) {
         JS_ASSIGN_OR_RETURN(prim, js_op_to_primitive(left, 0));
         return js_equal(prim, right);
     }
-    if (right_type == LMD_TYPE_ARRAY &&
+    if (js_is_js_array(right) &&
         (js_number_like_type(left_type) || left_type == LMD_TYPE_STRING ||
          js_is_bigint(left) || js_is_symbol(left))) {
         JS_ASSIGN_OR_RETURN(prim, js_op_to_primitive(right, 0));
@@ -1674,20 +1677,20 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
     // whether `left` is the syntactic-left source operand. When false (e.g. `>` and `<=`),
     // the right parameter is the syntactic-left source operand and must be converted first.
     if (leftFirst) {
-        if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_FUNC || left_type == LMD_TYPE_ELEMENT) {
+        if (left_type == LMD_TYPE_MAP || js_is_js_array(left) || left_type == LMD_TYPE_FUNC || left_type == LMD_TYPE_ELEMENT) {
             JS_ASSIGN_OR_RETURN_INTO(left, js_op_to_primitive(left, 1));
             left_type = get_type_id(left);
         }
-        if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_FUNC || right_type == LMD_TYPE_ELEMENT) {
+        if (right_type == LMD_TYPE_MAP || js_is_js_array(right) || right_type == LMD_TYPE_FUNC || right_type == LMD_TYPE_ELEMENT) {
             JS_ASSIGN_OR_RETURN_INTO(right, js_op_to_primitive(right, 1));
             right_type = get_type_id(right);
         }
     } else {
-        if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_FUNC || right_type == LMD_TYPE_ELEMENT) {
+        if (right_type == LMD_TYPE_MAP || js_is_js_array(right) || right_type == LMD_TYPE_FUNC || right_type == LMD_TYPE_ELEMENT) {
             JS_ASSIGN_OR_RETURN_INTO(right, js_op_to_primitive(right, 1));
             right_type = get_type_id(right);
         }
-        if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_FUNC || left_type == LMD_TYPE_ELEMENT) {
+        if (left_type == LMD_TYPE_MAP || js_is_js_array(left) || left_type == LMD_TYPE_FUNC || left_type == LMD_TYPE_ELEMENT) {
             JS_ASSIGN_OR_RETURN_INTO(left, js_op_to_primitive(left, 1));
             left_type = get_type_id(left);
         }
@@ -1888,7 +1891,7 @@ extern "C" Item js_bigint_constructor(Item value) {
     if (js_is_native_bigint_egress(value)) return js_native_bigint_to_bigint(value);
     TypeId vt = get_type_id(value);
     // ToPrimitive for objects (hint: number) — ES spec §7.1.13
-    if (vt == LMD_TYPE_MAP || vt == LMD_TYPE_ARRAY || vt == LMD_TYPE_FUNC) {
+    if (vt == LMD_TYPE_MAP || js_is_js_array(value) || vt == LMD_TYPE_FUNC) {
         JS_ASSIGN_OR_RETURN(prim, js_to_numeric(value));
         // If ToPrimitive returned a BigInt, we're done
         if (js_is_bigint(prim)) return prim;
@@ -1932,7 +1935,7 @@ static Item js_to_bigint_for_bigint_op(Item value) {
     if (js_is_bigint(value)) return value;
     if (js_is_native_bigint_egress(value)) return js_native_bigint_to_bigint(value);
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT) {
+    if (type == LMD_TYPE_MAP || js_is_js_array(value) || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT) {
         JS_ASSIGN_OR_RETURN(prim, js_to_primitive(value, JS_HINT_NUMBER));
         return js_to_bigint_for_bigint_op(prim);
     }
@@ -2091,7 +2094,7 @@ extern "C" Item js_typeof(Item value) {
         // v18h: class objects (MAPs with __instance_proto__) should return "function"
         // Use direct property lookup instead of shape walking for GC safety
         bool own_ip = false;
-        js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
+        js_map_shape_lookup_ext(value.map, "__instance_proto__", 18, &own_ip);
         if (own_ip) {
             result = "function";
             goto done;

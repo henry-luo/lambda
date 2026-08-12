@@ -358,7 +358,7 @@ void js_install_builtin_method_specs(Item object, JsBuiltinOwner owner) {
         if (spec->owner != owner || spec->property_kind != JS_BUILTIN_PROPERTY_METHOD) continue;
         Item key = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
         Item fn = js_create_builtin_function_from_spec(spec);
-        js_property_set(object, key, fn);
+        js_set_key_default(object, key, fn);
         js_mark_non_enumerable(object, key);
     }
 }
@@ -484,7 +484,7 @@ extern "C" Item js_symbol_builtin_method(int which) {
 extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     // Register constructor
     Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-    js_property_set(proto, ctor_key, base_ctor);
+    js_set_key_default(proto, ctor_key, base_ctor);
     js_mark_non_enumerable(proto, ctor_key);
 
     // Prototype methods: reuse Array builtins (dispatch handles typed arrays)
@@ -495,7 +495,7 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
         Item to_string_key = (Item){.item = s2it(heap_create_name("toString", 8))};
         Item array_to_string = js_intrinsic_binding_get(
             JS_BUILTIN_OWNER_ARRAY_PROTOTYPE_METHOD, "toString", 8);
-        js_property_set(proto, to_string_key, array_to_string);
+        js_set_key_default(proto, to_string_key, array_to_string);
         js_mark_non_enumerable(proto, to_string_key);
     }
 
@@ -506,8 +506,8 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     {
         Item si_key = js_well_known_symbol_key(1);
         Item values_key = (Item){.item = s2it(heap_create_name("values", 6))};
-        Item values_fn = js_property_get(proto, values_key);
-        js_property_set(proto, si_key, values_fn);
+        Item values_fn = js_get_key_default(proto, values_key);
+        js_set_key_default(proto, si_key, values_fn);
         js_mark_non_enumerable(proto, si_key);
     }
 

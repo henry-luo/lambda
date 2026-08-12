@@ -215,7 +215,7 @@ static JsTypedArray* gc_typed_array_from_map(Map* map) {
         return (JsTypedArray*)map->data;
     }
     bool found = false;
-    Item ta_val = js_map_get_fast_ext(map, "__ta__", 6, &found);
+    Item ta_val = js_map_shape_lookup_ext(map, "__ta__", 6, &found);
     if (found) return (JsTypedArray*)(uintptr_t)it2i(ta_val);
     return NULL;
 }
@@ -226,7 +226,7 @@ static JsDataView* gc_dataview_from_map(Map* map) {
         return (JsDataView*)map->data;
     }
     bool found = false;
-    Item dv_val = js_map_get_fast_ext(map, "__dv__", 6, &found);
+    Item dv_val = js_map_shape_lookup_ext(map, "__dv__", 6, &found);
     if (found) return (JsDataView*)(uintptr_t)it2i(dv_val);
     return NULL;
 }
@@ -286,7 +286,7 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
             ab = (JsArrayBuffer*)map->data;
         } else {
             bool found = false;
-            Item ab_val = js_map_get_fast_ext(map, "__ab__", 6, &found);
+            Item ab_val = js_map_shape_lookup_ext(map, "__ab__", 6, &found);
             if (found) ab = (JsArrayBuffer*)(uintptr_t)it2i(ab_val);
         }
         gc_finalize_arraybuffer(ab, seen_native);
@@ -326,7 +326,7 @@ extern "C" void err_gc_trace(void* data, gc_heap_t* gc);
 extern "C" void err_gc_destroy(void* data);
 extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc);
 extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc);
-Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
+Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
 // ── Interned single-char ASCII strings (Optimization 4) ──────────────
 // Pre-allocated table of 128 String objects for ASCII chars 0-127.
@@ -686,6 +686,23 @@ extern "C" void* heap_data_calloc(size_t size) {
     void* ptr = heap_data_alloc(size);
     if (ptr) memset(ptr, 0, size);
     return ptr;
+}
+
+extern "C" void heap_retag_container(Container* object, TypeId expected,
+                                      TypeId replacement) {
+    // Tune5 P5: Array and ArrayNum share the published payload layout, so the
+    // GC header and visible TypeId must change in the same no-safepoint commit.
+    assert(object);
+    assert((expected == LMD_TYPE_ARRAY_NUM && replacement == LMD_TYPE_ARRAY) ||
+           (expected == LMD_TYPE_ARRAY && replacement == LMD_TYPE_ARRAY_NUM));
+    gc_header_t* header = gc_get_header(object);
+    assert(header);
+    assert(header->type_tag == expected);
+    assert(object->type_id == expected);
+    assert(header->alloc_size >= sizeof(Array));
+    assert(sizeof(Array) == sizeof(ArrayNum));
+    header->type_tag = (uint16_t)replacement;
+    object->type_id = replacement;
 }
 
 // create a content string by copying from source (NOT pooled - arena allocated)

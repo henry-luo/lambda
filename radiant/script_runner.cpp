@@ -2810,7 +2810,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
         InlineHandlerInstallEntry* h = (InlineHandlerInstallEntry*)item;
         while (h) {
             Item fn_key = (Item){.item = s2it(heap_create_name(h->function_name))};
-            Item fn_item = js_property_get(global, fn_key);
+            Item fn_item = js_get_key_default(global, fn_key);
             char attr_name[64];
             snprintf(attr_name, sizeof(attr_name), "on%s", h->event_type);
             if (get_type_id(fn_item) == LMD_TYPE_FUNC &&

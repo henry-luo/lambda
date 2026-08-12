@@ -799,18 +799,6 @@ extern "C" void js_set_strict_mode(int64_t strict) {
     js_strict_mode = (strict != 0);
 }
 
-// v24: throw TypeError in strict mode for property write violations
-Item js_strict_throw_property_error(const char* reason, const char* prop_name, int prop_len) {
-    if (!js_strict_mode) return js_status_ok();
-    char msg[512];
-    if (prop_name && prop_len > 0) {
-        snprintf(msg, sizeof(msg), "Cannot %s property '%.*s' of object", reason, prop_len > 200 ? 200 : prop_len, prop_name);
-    } else {
-        snprintf(msg, sizeof(msg), "Cannot %s property of object", reason);
-    }
-    return js_throw_type_error(msg);
-}
-
 // Forward declaration for _map_read_field (defined in lambda-data-runtime.cpp)
 Item _map_read_field(ShapeEntry* field, void* map_data);
 // Forward declaration for _map_get (used as fallback for nested/spread maps)
@@ -828,7 +816,7 @@ static void js_runtime_make_non_enumerable(Item object, Item name) {
     desc_root.set(js_new_object());
     js_set_prototype(desc_root.get(), ItemNull);
     enum_key_root.set((Item){.item = s2it(heap_create_name("enumerable", 10))});
-    js_property_set(desc_root.get(), enum_key_root.get(), (Item){.item = b2it(false)});
+    js_set_key_default(desc_root.get(), enum_key_root.get(), (Item){.item = b2it(false)});
     js_object_define_property(object_root.get(), name_root.get(), desc_root.get());
 }
 
@@ -1417,7 +1405,7 @@ extern "C" Item js_new_aggregate_error(Item errors, Item message) {
     // IterableToList is part of construction, so an abrupt iterator result must
     // escape instead of being installed as the new error's `.errors` value.
     if (item_is_error(errors_array_root.get())) return errors_array_root.get();
-    JS_ASSIGN_OR_RETURN(set_result, js_property_set(err_root.get(),
+    JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(err_root.get(),
         (Item){.item = s2it(heap_create_name("errors", 6))},
         errors_array_root.get()));
     return err_root.get();
@@ -1496,7 +1484,7 @@ static int js_error_stack_trace_limit(void) {
     if (!context || !context->debug_info) return 0;
     Item error_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Error", 5))});
     if (get_type_id(error_ctor) != LMD_TYPE_FUNC) return 10;
-    Item limit = js_property_get(error_ctor,
+    Item limit = js_get_key_default(error_ctor,
         (Item){.item = s2it(heap_create_name("stackTraceLimit", 15))});
     TypeId limit_type = get_type_id(limit);
     if (limit_type != LMD_TYPE_INT && limit_type != LMD_TYPE_INT64 &&
@@ -1643,7 +1631,7 @@ static Item js_error_prepare_stack_trace_with_trace(Item error_obj, StackFrame* 
     Item error_ctor = js_get_constructor(error_name);
     if (get_type_id(error_ctor) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
     Item prepare_key = (Item){.item = s2it(heap_create_name("prepareStackTrace", 17))};
-    Item prepare = js_property_get(error_ctor, prepare_key);
+    Item prepare = js_get_key_default(error_ctor, prepare_key);
     if (!js_is_callable(prepare)) return (Item){.item = ITEM_JS_UNDEFINED};
 
     Item frames = js_array_new(0);
@@ -1672,8 +1660,8 @@ extern "C" Item js_error_materialize_stack(Item error_obj) {
     Rooted<Item> error_root(roots, error_obj);
     // Error property reads can allocate and move the unified carrier; read
     // through the rooted object so the raw-stack owner is never invalidated.
-    Rooted<Item> name_root(roots, js_property_get(error_root.get(), make_string_item("name")));
-    Rooted<Item> message_root(roots, js_property_get(error_root.get(), make_string_item("message")));
+    Rooted<Item> name_root(roots, js_get_key_default(error_root.get(), make_string_item("name")));
+    Rooted<Item> message_root(roots, js_get_key_default(error_root.get(), make_string_item("message")));
     Rooted<Item> prepared_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
     Rooted<Item> native_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
     Rooted<Item> eval_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
@@ -1789,8 +1777,8 @@ extern "C" Item js_error_set_cause(Item error, Item options) {
     Item cause_key = (Item){.item = s2it(heap_create_name("cause"))};
     JS_ASSIGN_OR_RETURN(has_cause, js_in(cause_key, options));
     if (js_is_truthy(has_cause)) {
-        JS_ASSIGN_OR_RETURN(cause_val, js_property_get(options, cause_key));
-        JS_ASSIGN_OR_RETURN(set_result, js_property_set(error, cause_key, cause_val));
+        JS_ASSIGN_OR_RETURN(cause_val, js_get_key_default(options, cause_key));
+        JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(error, cause_key, cause_val));
         // mark cause as non-enumerable per spec §20.5.8.1
         js_mark_non_enumerable(error, cause_key);
     }
@@ -1803,11 +1791,11 @@ extern "C" Item js_error_set_cause(Item error, Item options) {
 extern "C" Item js_error_captureStackTrace(Item target, Item ctor) {
     if (get_type_id(target) == LMD_TYPE_MAP) {
         Item stack_key = (Item){.item = s2it(heap_create_name("stack", 5))};
-        Item name = js_property_get(target, (Item){.item = s2it(heap_create_name("name", 4))});
+        Item name = js_get_key_default(target, (Item){.item = s2it(heap_create_name("name", 4))});
         if (get_type_id(name) != LMD_TYPE_STRING) {
             name = (Item){.item = s2it(heap_create_name("Error", 5))};
         }
-        Item message = js_property_get(target, (Item){.item = s2it(heap_create_name("message", 7))});
+        Item message = js_get_key_default(target, (Item){.item = s2it(heap_create_name("message", 7))});
         if (get_type_id(message) != LMD_TYPE_STRING) {
             message = (Item){.item = ITEM_JS_UNDEFINED};
         }
@@ -1815,7 +1803,7 @@ extern "C" Item js_error_captureStackTrace(Item target, Item ctor) {
         if (stack.item == ITEM_JS_UNDEFINED) {
             stack = js_error_default_stack_string(name, message);
         }
-        js_property_set(target, stack_key, stack);
+        js_set_key_default(target, stack_key, stack);
         js_runtime_make_non_enumerable(target, stack_key);
     }
     return make_js_undefined();
@@ -1888,9 +1876,7 @@ extern "C" void js_set_arguments_info(int64_t is_strict) {
 }
 
 void js_reset_transient_call_state() {
-    js_skip_accessor_dispatch = false;
     js_current_this = (Item){0};
-    js_proxy_receiver = (Item){0};
     js_new_target = (Item){0};
     memset(js_super_this_bound_stack, 0, sizeof(js_runtime_state.super_this_bound_stack));
     js_item_stack_clear(&js_runtime_state.super_this_values);
@@ -1921,17 +1907,9 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
         leak_count++;
         log_error("js-batch-state: %s left strict mode enabled", name);
     }
-    if (js_skip_accessor_dispatch) {
-        leak_count++;
-        log_error("js-batch-state: %s left accessor dispatch bypass enabled", name);
-    }
     if (js_current_this.item != 0) {
         leak_count++;
         log_error("js-batch-state: %s left current this item=%lld", name, (long long)js_current_this.item);
-    }
-    if (js_proxy_receiver.item != 0) {
-        leak_count++;
-        log_error("js-batch-state: %s left proxy receiver item=%lld", name, (long long)js_proxy_receiver.item);
     }
     if (js_new_target.item != 0) {
         leak_count++;
@@ -2009,28 +1987,28 @@ extern "C" Item js_build_arguments_object() {
     // Mark as Arguments object via Symbol.toStringTag on companion map
     companion_root.set(js_new_object());
     companion_root.get().map->map_kind = MAP_KIND_ARRAY_PROPS;
-    js_array_set_props(arr_root.get().array, companion_root.get().map);
+    js_elements_set_props(arr_root.get().array, companion_root.get().map);
 
     key_root.set((Item){.item = s2it(heap_create_name("length", 6))});
     descriptor_root.set(js_new_object());
     js_set_prototype(descriptor_root.get(), ItemNull);
-    js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("value", 5))}, (Item){.item = i2it(argc)});
-    js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-    js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-    js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+    js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("value", 5))}, (Item){.item = i2it(argc)});
+    js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+    js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+    js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
     js_object_define_property(companion_root.get(), key_root.get(), descriptor_root.get());
 
     tag_key_root.set(js_well_known_symbol_key(4));
-    js_property_set(companion_root.get(), tag_key_root.get(),
+    js_set_key_default(companion_root.get(), tag_key_root.get(),
                     (Item){.item = s2it(heap_create_name("Arguments", 9))});
     js_mark_non_enumerable(companion_root.get(), tag_key_root.get());
 
     // ES6 §9.4.4.6 step 12: Set Symbol.iterator to Array.prototype.values
     iterator_key_root.set(js_well_known_symbol_key(1));
     Item array_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY);
-    iterator_root.set(js_property_get(array_proto,
+    iterator_root.set(js_get_key_default(array_proto,
         (Item){.item = s2it(heap_create_name("values", 6))}));
-    js_property_set(companion_root.get(), iterator_key_root.get(), iterator_root.get());
+    js_set_key_default(companion_root.get(), iterator_key_root.get(), iterator_root.get());
     js_mark_non_enumerable(companion_root.get(), iterator_key_root.get());
 
     // v29: Set callee property (non-strict only; strict mode throws TypeError on access)
@@ -2041,7 +2019,7 @@ extern "C" Item js_build_arguments_object() {
         js_install_native_accessor(companion_root.get(), callee_key_root.get(),
                                    thrower_root.get(), thrower_root.get(),
                                    JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE);
-        js_property_set(companion_root.get(), (Item){.item = s2it(heap_create_name("__strict_arguments__", 20))},
+        js_set_key_default(companion_root.get(), (Item){.item = s2it(heap_create_name("__strict_arguments__", 20))},
                         (Item){.item = b2it(true)});
     } else {
         // Non-strict: callee is the function object (ES5 §10.6 step 13)
@@ -2049,10 +2027,10 @@ extern "C" Item js_build_arguments_object() {
             callee_key_root.set((Item){.item = s2it(heap_create_name("callee", 6))});
             descriptor_root.set(js_new_object());
             js_set_prototype(descriptor_root.get(), ItemNull);
-            js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("value", 5))}, callee_root.get());
-            js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-            js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-            js_property_set(descriptor_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+            js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("value", 5))}, callee_root.get());
+            js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+            js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+            js_set_key_default(descriptor_root.get(), (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
             js_object_define_property(companion_root.get(), callee_key_root.get(), descriptor_root.get());
         }
     }

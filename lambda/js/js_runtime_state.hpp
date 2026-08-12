@@ -831,6 +831,7 @@ struct JsAsyncContextStateRecord {
     void* state_fn = NULL;
     Item* env = NULL;
     int env_size = 0;
+    uint32_t module_state_id = UINT32_MAX;
     int state = 0;
     int promise_idx = -1;
     Item this_val = {};
@@ -947,6 +948,8 @@ struct JsIntrinsicState {
     uint64_t mutation_versions[JS_CLASS__COUNT] = {};
     uint64_t mutation_serial = 1;
     uint64_t owner_heap_epoch = 0;
+    uint64_t array_proto_clean_epoch = 0;
+    bool array_proto_clean = false;
     uint32_t initialization_depth = 0;
     int array_sym_iter_ever_set = 0;
 };
@@ -1020,7 +1023,6 @@ struct JsRuntimeState {
     void* regex_permanent_cache = NULL;
     Input* input = NULL;
     bool strict_mode = false;
-    bool skip_accessor_dispatch = false;
     JsIntrinsicState intrinsics = {};
     JsEvalState eval = {};
     JsEventLoopQueueState event_loop = {};
@@ -1069,7 +1071,6 @@ struct JsRuntimeState {
     JsRegexpLastMatch regexp_last_match = {};
 
     Item current_this = {0};
-    Item proxy_receiver = {0};
     // Call/constructor bindings are active execution semantics, not process
     // diagnostics.  They are owner-thread fields so dispatch stays ordinary
     // loads and stores with no lock or atomic operation.
@@ -1131,7 +1132,6 @@ static inline Item*& js_active_module_vars_ref() {
 
 #define js_input (js_runtime_state.input)
 #define js_strict_mode (js_runtime_state.strict_mode)
-#define js_skip_accessor_dispatch (js_runtime_state.skip_accessor_dispatch)
 #define js_intrinsic_state (js_runtime_state.intrinsics)
 #define g_array_sym_iter_ever_set (js_intrinsic_state.array_sym_iter_ever_set)
 #define js_module_vars (js_active_module_vars)
@@ -1140,7 +1140,6 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_heap_epoch (js_runtime_state.heap_epoch)
 #define js_regexp_last_match (js_runtime_state.regexp_last_match)
 #define js_current_this (js_runtime_state.current_this)
-#define js_proxy_receiver (js_runtime_state.proxy_receiver)
 #define js_new_target (js_runtime_state.new_target)
 #define js_super_this_bound_stack (js_runtime_state.super_this_bound_stack)
 #define js_super_this_value_stack (js_runtime_state.super_this_values.roots.slots)

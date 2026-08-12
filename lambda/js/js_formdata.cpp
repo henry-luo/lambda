@@ -66,11 +66,11 @@ static inline Item make_str(const char* s) {
 static inline Item make_key(const char* s) { return make_str(s); }
 
 static inline Item prop_get(Item obj, const char* key) {
-    return js_property_get(obj, make_key(key));
+    return js_get_key_default(obj, make_key(key));
 }
 
 static inline void prop_set(Item obj, const char* key, Item val) {
-    js_property_set(obj, make_key(key), val);
+    js_set_key_default(obj, make_key(key), val);
 }
 
 static bool fd_input_supports_dirname(const char* itype) {
@@ -275,9 +275,9 @@ static Item js_fd_delete(Item name_item) {
     // Remove all matching entries (backwards to preserve indices after splice)
     int64_t len = js_array_length(entries);
     for (int64_t i = len - 1; i >= 0; i--) {
-        Item pair = js_array_get_int(entries, i);
+        Item pair = js_elements_get_int(entries, i);
         if (get_type_id(pair) != LMD_TYPE_ARRAY) continue;
-        Item pair_name = js_array_get_int(pair, 0);
+        Item pair_name = js_elements_get_int(pair, 0);
         const char* n = fn_to_cstr(pair_name);
         if (n && strcmp(n, name_cs) == 0) {
             fd_entries_remove_at(entries, i);
@@ -297,12 +297,12 @@ static Item js_fd_get(Item name_item) {
 
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len; i++) {
-        Item pair = js_array_get_int(entries, i);
+        Item pair = js_elements_get_int(entries, i);
         if (get_type_id(pair) != LMD_TYPE_ARRAY) continue;
-        Item pair_name = js_array_get_int(pair, 0);
+        Item pair_name = js_elements_get_int(pair, 0);
         const char* n = fn_to_cstr(pair_name);
         if (n && strcmp(n, name_cs) == 0) {
-            return js_array_get_int(pair, 1);
+            return js_elements_get_int(pair, 1);
         }
     }
     return ItemNull;
@@ -319,12 +319,12 @@ static Item js_fd_getAll(Item name_item) {
 
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len; i++) {
-        Item pair = js_array_get_int(entries, i);
+        Item pair = js_elements_get_int(entries, i);
         if (get_type_id(pair) != LMD_TYPE_ARRAY) continue;
-        Item pair_name = js_array_get_int(pair, 0);
+        Item pair_name = js_elements_get_int(pair, 0);
         const char* n = fn_to_cstr(pair_name);
         if (n && strcmp(n, name_cs) == 0) {
-            js_array_push(result, js_array_get_int(pair, 1));
+            js_array_push(result, js_elements_get_int(pair, 1));
         }
     }
     return result;
@@ -340,9 +340,9 @@ static Item js_fd_has(Item name_item) {
 
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len; i++) {
-        Item pair = js_array_get_int(entries, i);
+        Item pair = js_elements_get_int(entries, i);
         if (get_type_id(pair) != LMD_TYPE_ARRAY) continue;
-        Item pair_name = js_array_get_int(pair, 0);
+        Item pair_name = js_elements_get_int(pair, 0);
         const char* n = fn_to_cstr(pair_name);
         if (n && strcmp(n, name_cs) == 0) {
             return make_bool(true);
@@ -370,9 +370,9 @@ static Item js_fd_set(Item name_item, Item value_item, Item filename_item) {
     int64_t first_idx = -1;
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len; i++) {
-        Item pair = js_array_get_int(entries, i);
+        Item pair = js_elements_get_int(entries, i);
         if (get_type_id(pair) != LMD_TYPE_ARRAY) continue;
-        Item pair_name = js_array_get_int(pair, 0);
+        Item pair_name = js_elements_get_int(pair, 0);
         const char* n = fn_to_cstr(pair_name);
         if (n && strcmp(n, name_cs) == 0) {
             first_idx = i;
@@ -388,15 +388,15 @@ static Item js_fd_set(Item name_item, Item value_item, Item filename_item) {
         js_array_push(entries, pair);
     } else {
         // Update the first occurrence's value
-        Item first_pair = js_array_get_int(entries, first_idx);
-        js_array_set_int(first_pair, 1, value);
+        Item first_pair = js_elements_get_int(entries, first_idx);
+        js_elements_set_int(first_pair, 1, value);
 
         // Remove all other occurrences (backwards to preserve splice indices)
         len = js_array_length(entries);
         for (int64_t i = len - 1; i > first_idx; i--) {
-            Item pair = js_array_get_int(entries, i);
+            Item pair = js_elements_get_int(entries, i);
             if (get_type_id(pair) != LMD_TYPE_ARRAY) continue;
-            Item pair_name = js_array_get_int(pair, 0);
+            Item pair_name = js_elements_get_int(pair, 0);
             const char* n = fn_to_cstr(pair_name);
             if (n && strcmp(n, name_cs) == 0) {
                 fd_entries_remove_at(entries, i);
@@ -416,10 +416,10 @@ static Item js_fd_forEach(Item callback, Item this_arg) {
 
     // Live iteration: re-read length each iteration so deletions are observed
     for (int64_t i = 0; i < js_array_length(entries); i++) {
-        Item pair = js_array_get_int(entries, i);
+        Item pair = js_elements_get_int(entries, i);
         if (get_type_id(pair) != LMD_TYPE_ARRAY) continue;
-        Item name_val = js_array_get_int(pair, 0);
-        Item val_val  = js_array_get_int(pair, 1);
+        Item name_val = js_elements_get_int(pair, 0);
+        Item val_val  = js_elements_get_int(pair, 1);
         // forEach callback: (value, name, formData)
         Item cb_args[3] = {val_val, name_val, this_fd};
         JS_ASSIGN_OR_RETURN(callback_result, js_call_function(callback, this_arg, cb_args, 3));
@@ -457,9 +457,9 @@ static Item js_fd_iter_next() {
     // Advance index for next call
     prop_set(iter, "_i_idx", make_int_item(idx + 1));
 
-    Item pair     = js_array_get_int(entries, idx);
-    Item name_val = (get_type_id(pair) == LMD_TYPE_ARRAY) ? js_array_get_int(pair, 0) : ItemNull;
-    Item val_val  = (get_type_id(pair) == LMD_TYPE_ARRAY) ? js_array_get_int(pair, 1) : ItemNull;
+    Item pair     = js_elements_get_int(entries, idx);
+    Item name_val = (get_type_id(pair) == LMD_TYPE_ARRAY) ? js_elements_get_int(pair, 0) : ItemNull;
+    Item val_val  = (get_type_id(pair) == LMD_TYPE_ARRAY) ? js_elements_get_int(pair, 1) : ItemNull;
 
     Item yield_val;
     if (mode == FD_ITER_MODE_KEYS) {
@@ -490,7 +490,7 @@ static Item fd_make_iterator(Item entries, int mode) {
     prop_set(iter, "_i_mode",    make_int_item(mode));
     prop_set(iter, "next",       js_new_native_function(js_fd_iter_next));
     // Symbol.iterator on the iterator → returns self (so it's iterable)
-    js_property_set(iter, make_sym_iterator_key(), js_new_native_function(js_fd_iter_self));
+    js_set_key_default(iter, make_sym_iterator_key(), js_new_native_function(js_fd_iter_self));
     return iter;
 }
 
@@ -675,7 +675,7 @@ static void fd_walk_form_controls(Item entries, DomNode* node) {
                                  file_index++) {
                                 Item pair = js_array_new(0);
                                 js_array_push(pair, name_item);
-                                js_array_push(pair, js_array_get_int(files, file_index));
+                                js_array_push(pair, js_elements_get_int(files, file_index));
                                 js_array_push(entries, pair);
                             }
                         }
@@ -775,7 +775,7 @@ static void fd_install_methods(Item fd_obj) {
     prop_set(fd_obj, "values",  js_new_native_function(js_fd_values));
     prop_set(fd_obj, "forEach", js_new_native_function(js_fd_forEach));
     // Symbol.iterator → same as entries()
-    js_property_set(fd_obj, make_sym_iterator_key(), js_new_native_function(js_fd_entries));
+    js_set_key_default(fd_obj, make_sym_iterator_key(), js_new_native_function(js_fd_entries));
     js_class_stamp(fd_obj, JS_CLASS_FORM_DATA);
 }
 
@@ -790,7 +790,7 @@ static int64_t blob_compute_size(Item parts) {
     int64_t total = 0;
     int64_t plen = js_array_length(parts);
     for (int64_t i = 0; i < plen; i++) {
-        Item p = js_array_get_int(parts, i);
+        Item p = js_elements_get_int(parts, i);
         TypeId pt = get_type_id(p);
         if (pt == LMD_TYPE_STRING) {
             const char* s = fn_to_cstr(p);

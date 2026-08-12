@@ -131,9 +131,9 @@ static void node_events_set_named_property(Item object, const char* name, Item v
 #define js_array_new(CAPACITY) node_events_host->value->array_new(CAPACITY)
 #define js_array_push(ARRAY, VALUE) node_events_host->value->array_push(ARRAY, VALUE)
 #define js_array_length(ARRAY) node_events_host->value->array_length(ARRAY)
-#define js_array_get_int(ARRAY, INDEX) node_events_host->value->array_get(ARRAY, INDEX)
-#define js_property_get(OBJECT, KEY) node_events_host->value->property_get(OBJECT, KEY)
-#define js_property_set(OBJECT, KEY, VALUE) node_events_host->value->property_set(OBJECT, KEY, VALUE)
+#define js_elements_get_int(ARRAY, INDEX) node_events_host->value->array_get(ARRAY, INDEX)
+#define js_get_key_default(OBJECT, KEY) node_events_host->value->property_get(OBJECT, KEY)
+#define js_set_key_default(OBJECT, KEY, VALUE) node_events_host->value->property_set(OBJECT, KEY, VALUE)
 #define js_object_keys(OBJECT) node_events_host->script->object_keys(OBJECT)
 #define js_call_function(FUNCTION, THIS, ARGS, COUNT) node_events_host->script->call_function(FUNCTION, THIS, ARGS, COUNT)
 #define js_get_this() node_events_host->script->current_this()
@@ -158,17 +158,17 @@ static void ensure_keys() {
 
 static bool is_listener_record(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
-    Item fn = js_property_get(value, listener_fn_key);
+    Item fn = js_get_key_default(value, listener_fn_key);
     return get_type_id(fn) == LMD_TYPE_FUNC;
 }
 
 static Item listener_record_fn(Item value) {
-    if (is_listener_record(value)) return js_property_get(value, listener_fn_key);
+    if (is_listener_record(value)) return js_get_key_default(value, listener_fn_key);
     return value;
 }
 
 static Item listener_record_context(Item value) {
-    if (is_listener_record(value)) return js_property_get(value, listener_context_key);
+    if (is_listener_record(value)) return js_get_key_default(value, listener_context_key);
     return ItemNull;
 }
 
@@ -196,13 +196,13 @@ static Item make_listener_record(Item listener) {
     }
     *record_root = record.item;
     *listener_root = listener.item;
-    js_property_set(record, listener_fn_key, listener);
+    js_set_key_default(record, listener_fn_key, listener);
     record = node_events_root_item(record_root);
     listener = node_events_root_item(listener_root);
     Item context = node_events_host->node->events->als_capture_context();
     *context_root = context.item;
     record = node_events_root_item(record_root);
-    js_property_set(record, listener_context_key, context);
+    js_set_key_default(record, listener_context_key, context);
     node_events_host->node->roots->root_frame_end(&frame);
     return record;
 }
@@ -226,13 +226,13 @@ static Item get_events_map(Item emitter) {
         return ItemNull;
     }
     *emitter_root = emitter.item;
-    Item map = js_property_get(emitter, events_key);
+    Item map = js_get_key_default(emitter, events_key);
     *map_root = map.item;
     if (map.item == 0 || get_type_id(map) == LMD_TYPE_UNDEFINED) {
         map = js_new_object();
         *map_root = map.item;
         emitter = node_events_root_item(emitter_root);
-        js_property_set(emitter, events_key, map);
+        js_set_key_default(emitter, events_key, map);
         emitter = node_events_root_item(emitter_root);
         map = node_events_root_item(map_root);
         // Also set _events alias for Node.js compatibility
@@ -257,13 +257,13 @@ static Item get_once_set(Item emitter) {
         return ItemNull;
     }
     *emitter_root = emitter.item;
-    Item set = js_property_get(emitter, once_key);
+    Item set = js_get_key_default(emitter, once_key);
     *set_root = set.item;
     if (set.item == 0 || get_type_id(set) == LMD_TYPE_UNDEFINED) {
         set = js_array_new(0);
         *set_root = set.item;
         emitter = node_events_root_item(emitter_root);
-        js_property_set(emitter, once_key, set);
+        js_set_key_default(emitter, once_key, set);
     }
     node_events_host->node->roots->root_frame_end(&frame);
     return set;
@@ -274,7 +274,7 @@ static bool is_once_listener(Item emitter, Item fn) {
     Item set = get_once_set(emitter);
     int64_t len = js_array_length(set);
     for (int64_t i = 0; i < len; i++) {
-        Item f = js_array_get_int(set, i);
+        Item f = js_elements_get_int(set, i);
         if (f.item == fn.item || listener_matches(f, listener_record_fn(fn))) return true;
     }
     return false;
@@ -296,7 +296,7 @@ static Item get_listeners_array(Item emitter, Item event_name) {
     *emitter_root = emitter.item;
     *event_root = event_name.item;
     *map_root = map.item;
-    Item arr = js_property_get(map, event_name);
+    Item arr = js_get_key_default(map, event_name);
     *array_root = arr.item;
     if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) {
         arr = js_array_new(0);
@@ -305,14 +305,14 @@ static Item get_listeners_array(Item emitter, Item event_name) {
         // installing the newly allocated listener array in the event map.
         map = node_events_root_item(map_root);
         event_name = node_events_root_item(event_root);
-        js_property_set(map, event_name, arr);
+        js_set_key_default(map, event_name, arr);
     }
     node_events_host->node->roots->root_frame_end(&frame);
     return arr;
 }
 
 static int64_t get_default_max_listeners(void) {
-    Item val = js_property_get(events_namespace, make_string_item("defaultMaxListeners"));
+    Item val = js_get_key_default(events_namespace, make_string_item("defaultMaxListeners"));
     // JS assignments store listener limits as numbers, so accept all numeric Items here.
     if (get_type_id(val) == LMD_TYPE_INT) return (int64_t)node_events_host->script->get_number(val);
     return 10;
@@ -320,7 +320,7 @@ static int64_t get_default_max_listeners(void) {
 
 static int64_t get_emitter_max_listeners(Item emitter) {
     ensure_keys();
-    Item val = js_property_get(emitter, max_listeners_key);
+    Item val = js_get_key_default(emitter, max_listeners_key);
     // setMaxListeners receives JS numbers even when the value is an integer literal.
     if (get_type_id(val) == LMD_TYPE_INT) return (int64_t)node_events_host->script->get_number(val);
     return get_default_max_listeners();
@@ -331,9 +331,9 @@ static void maybe_emit_max_listener_warning(Item emitter, Item event_name, Item 
     if (max <= 0) return;
     int64_t len = js_array_length(arr);
     if (len <= max) return;
-    Item warned = js_property_get(arr, warned_key);
+    Item warned = js_get_key_default(arr, warned_key);
     if (get_type_id(warned) == LMD_TYPE_BOOL && node_events_host->script->is_truthy(warned)) return;
-    js_property_set(arr, warned_key, (Item){.item = b2it(true)});
+    js_set_key_default(arr, warned_key, (Item){.item = b2it(true)});
 
     char event_buf[96];
     const char* event_chars = "event";
@@ -359,8 +359,8 @@ static void update_events_count(Item emitter) {
     int64_t count = 0;
     int64_t klen = js_array_length(all_keys);
     for (int64_t i = 0; i < klen; i++) {
-        Item key = js_array_get_int(all_keys, i);
-        Item arr = js_property_get(map, key);
+        Item key = js_elements_get_int(all_keys, i);
+        Item arr = js_get_key_default(map, key);
         if (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED && js_array_length(arr) > 0) {
             count++;
         }
@@ -382,7 +382,7 @@ static void update_events_count_after_add(Item emitter, Item listeners) {
     Item key = node_events_string("_eventsCount");
     *key_root = key.item;
     emitter = node_events_root_item(emitter_root);
-    Item count_item = js_property_get(emitter, key);
+    Item count_item = js_get_key_default(emitter, key);
     int64_t count = get_type_id(count_item) == LMD_TYPE_INT ?
         (int64_t)node_events_host->script->get_number(count_item) : 0;
     emitter = node_events_root_item(emitter_root);
@@ -395,13 +395,13 @@ static void emit_new_listener(Item emitter, Item event_name, Item listener) {
     // Don't emit newListener for the newListener event itself (avoid infinite recursion)
     if (node_events_string_equals(event_name, "newListener")) return;
     Item map = get_events_map(emitter);
-    Item nl_arr = js_property_get(map, new_listener_key);
+    Item nl_arr = js_get_key_default(map, new_listener_key);
     if (nl_arr.item == 0 || get_type_id(nl_arr) == LMD_TYPE_UNDEFINED) return;
     int64_t nl_len = js_array_length(nl_arr);
     if (nl_len == 0) return;
     Item args[2] = {event_name, listener};
     for (int64_t i = 0; i < nl_len; i++) {
-        Item fn = listener_record_fn(js_array_get_int(nl_arr, i));
+        Item fn = listener_record_fn(js_elements_get_int(nl_arr, i));
         js_call_function(fn, emitter, args, 2);
     }
 }
@@ -411,13 +411,13 @@ static void emit_remove_listener(Item emitter, Item event_name, Item listener) {
     // Don't emit removeListener for the removeListener event itself
     if (node_events_string_equals(event_name, "removeListener")) return;
     Item map = get_events_map(emitter);
-    Item rl_arr = js_property_get(map, remove_listener_key);
+    Item rl_arr = js_get_key_default(map, remove_listener_key);
     if (rl_arr.item == 0 || get_type_id(rl_arr) == LMD_TYPE_UNDEFINED) return;
     int64_t rl_len = js_array_length(rl_arr);
     if (rl_len == 0) return;
     Item args[2] = {event_name, listener};
     for (int64_t i = 0; i < rl_len; i++) {
-        Item fn = listener_record_fn(js_array_get_int(rl_arr, i));
+        Item fn = listener_record_fn(js_elements_get_int(rl_arr, i));
         js_call_function(fn, emitter, args, 2);
     }
 }
@@ -526,21 +526,21 @@ extern "C" Item js_ee_off(Item emitter, Item event_name, Item listener) {
     if (emitter.item == 0) return ItemNull;
     if (!node_events_require_listener(listener)) return ItemNull;
     Item map = get_events_map(emitter);
-    Item arr = js_property_get(map, event_name);
+    Item arr = js_get_key_default(map, event_name);
     if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) return emitter;
 
     int64_t len = js_array_length(arr);
     // find last occurrence
     for (int64_t i = len - 1; i >= 0; i--) {
-        Item f = js_array_get_int(arr, i);
+        Item f = js_elements_get_int(arr, i);
         if (listener_matches(f, listener)) {
             Item original = listener_record_fn(f);
             // rebuild array without this element
             Item new_arr = js_array_new(0);
             for (int64_t j = 0; j < len; j++) {
-                if (j != i) js_array_push(new_arr, js_array_get_int(arr, j));
+                if (j != i) js_array_push(new_arr, js_elements_get_int(arr, j));
             }
-            js_property_set(map, event_name, new_arr);
+            js_set_key_default(map, event_name, new_arr);
             update_events_count(emitter);
             emit_remove_listener(emitter, event_name, original);
             break;
@@ -554,7 +554,7 @@ extern "C" Item js_ee_off(Item emitter, Item event_name, Item listener) {
 extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
     if (emitter.item == 0) return (Item){.item = b2it(false)};
     Item map = get_events_map(emitter);
-    Item arr = js_property_get(map, event_name);
+    Item arr = js_get_key_default(map, event_name);
 
     bool has_listeners = (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED &&
                           js_array_length(arr) > 0);
@@ -566,7 +566,7 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
                 Item err_arg = ItemNull;
                 if (args_rest.item != 0 && get_type_id(args_rest) != LMD_TYPE_UNDEFINED) {
                     int64_t argc = js_array_length(args_rest);
-                    if (argc > 0) err_arg = js_array_get_int(args_rest, 0);
+                    if (argc > 0) err_arg = js_elements_get_int(args_rest, 0);
                 }
                 // check if err_arg is an Error instance
                 bool is_error = node_events_host->node->events->is_error_like(err_arg);
@@ -590,9 +590,9 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
                     }
                     Item wrapped = node_events_host->script->new_error_with_name(
                         make_string_item("Error"), make_string_item(buf, len));
-                    js_property_set(wrapped, make_string_item("code"), make_string_item("ERR_UNHANDLED_ERROR"));
+                    js_set_key_default(wrapped, make_string_item("code"), make_string_item("ERR_UNHANDLED_ERROR"));
                     if (err_arg.item != 0 && get_type_id(err_arg) != LMD_TYPE_UNDEFINED) {
-                        js_property_set(wrapped, make_string_item("context"), err_arg);
+                        js_set_key_default(wrapped, make_string_item("context"), err_arg);
                     }
                     node_events_host->script->throw_value(wrapped);
                 }
@@ -610,20 +610,20 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
         argc = js_array_length(args_rest);
         if (argc > 32) argc = 32;
         for (int64_t i = 0; i < argc; i++) {
-            args[i] = js_array_get_int(args_rest, i);
+            args[i] = js_elements_get_int(args_rest, i);
         }
     }
 
     // call each listener — snapshot the array first since once-listeners modify it
     Item snapshot = js_array_new(0);
     for (int64_t i = 0; i < len; i++) {
-        js_array_push(snapshot, js_array_get_int(arr, i));
+        js_array_push(snapshot, js_elements_get_int(arr, i));
     }
 
     // Remove ALL once-listeners from the emitter BEFORE calling any of them.
     // This prevents recursive emit() from re-firing once-listeners.
     for (int64_t i = 0; i < len; i++) {
-        Item fn = js_array_get_int(snapshot, i);
+        Item fn = js_elements_get_int(snapshot, i);
         if (is_once_listener(emitter, fn)) {
             js_ee_off(emitter, event_name, listener_record_fn(fn));
             // remove from once-set
@@ -631,18 +631,18 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
             int64_t slen = js_array_length(set);
             Item new_set = js_array_new(0);
             for (int64_t j = 0; j < slen; j++) {
-                Item f = js_array_get_int(set, j);
+                Item f = js_elements_get_int(set, j);
                 if (f.item != fn.item && !listener_matches(f, listener_record_fn(fn))) {
                     js_array_push(new_set, f);
                 }
             }
-            js_property_set(emitter, once_key, new_set);
+            js_set_key_default(emitter, once_key, new_set);
         }
     }
 
     // Now call all listeners from the snapshot
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_array_get_int(snapshot, i);
+        Item entry = js_elements_get_int(snapshot, i);
         Item fn = listener_record_fn(entry);
         Item context = listener_record_context(entry);
 
@@ -664,21 +664,21 @@ extern "C" Item js_ee_removeAllListeners(Item emitter, Item event_name) {
     Item map = get_events_map(emitter);
     if (event_name.item == 0 || get_type_id(event_name) == LMD_TYPE_UNDEFINED) {
         // remove all events
-        js_property_set(emitter, events_key, js_new_object());
-        js_property_set(emitter, make_string_item("_events"), js_new_object());
-        js_property_set(emitter, once_key, js_array_new(0));
+        js_set_key_default(emitter, events_key, js_new_object());
+        js_set_key_default(emitter, make_string_item("_events"), js_new_object());
+        js_set_key_default(emitter, once_key, js_array_new(0));
         node_events_set_named_property(emitter, "_eventsCount", node_events_number(0));
     } else {
         // Emit removeListener for each removed listener
-        Item arr = js_property_get(map, event_name);
+        Item arr = js_get_key_default(map, event_name);
         if (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED) {
             int64_t len = js_array_length(arr);
             for (int64_t i = len - 1; i >= 0; i--) {
                 emit_remove_listener(emitter, event_name,
-                    listener_record_fn(js_array_get_int(arr, i)));
+                    listener_record_fn(js_elements_get_int(arr, i)));
             }
         }
-        js_property_set(map, event_name, js_array_new(0));
+        js_set_key_default(map, event_name, js_array_new(0));
         update_events_count(emitter);
     }
     return emitter;
@@ -689,7 +689,7 @@ extern "C" Item js_ee_removeAllListeners(Item emitter, Item event_name) {
 extern "C" Item js_ee_listeners(Item emitter, Item event_name) {
     if (emitter.item == 0) return js_array_new(0);
     Item map = get_events_map(emitter);
-    Item arr = js_property_get(map, event_name);
+    Item arr = js_get_key_default(map, event_name);
     if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) {
         return js_array_new(0);
     }
@@ -697,7 +697,7 @@ extern "C" Item js_ee_listeners(Item emitter, Item event_name) {
     int64_t len = js_array_length(arr);
     Item copy = js_array_new(0);
     for (int64_t i = 0; i < len; i++) {
-        js_array_push(copy, listener_record_fn(js_array_get_int(arr, i)));
+        js_array_push(copy, listener_record_fn(js_elements_get_int(arr, i)));
     }
     return copy;
 }
@@ -713,18 +713,18 @@ static bool event_name_matches(Item a, Item b) {
 }
 
 static Item event_target_listener_count(Item emitter, Item event_name, Item listener) {
-    Item listeners = js_property_get(emitter, make_string_item("__listeners__"));
+    Item listeners = js_get_key_default(emitter, make_string_item("__listeners__"));
     if (get_type_id(listeners) != LMD_TYPE_ARRAY) return node_events_number(0);
 
     bool match_listener = listener.item != 0 && get_type_id(listener) != LMD_TYPE_UNDEFINED;
     int64_t count = 0;
     int64_t len = js_array_length(listeners);
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_array_get_int(listeners, i);
-        Item type = js_property_get(entry, make_string_item("type"));
+        Item entry = js_elements_get_int(listeners, i);
+        Item type = js_get_key_default(entry, make_string_item("type"));
         if (!event_name_matches(type, event_name)) continue;
         if (match_listener) {
-            Item handler = js_property_get(entry, make_string_item("handler"));
+            Item handler = js_get_key_default(entry, make_string_item("handler"));
             if (handler.item != listener.item) continue;
         }
         count++;
@@ -735,7 +735,7 @@ static Item event_target_listener_count(Item emitter, Item event_name, Item list
 extern "C" Item js_ee_listenerCount(Item emitter, Item event_name, Item listener) {
     if (emitter.item == 0) return node_events_number(0);
     Item map = get_events_map(emitter);
-    Item arr = js_property_get(map, event_name);
+    Item arr = js_get_key_default(map, event_name);
     if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) {
         return event_target_listener_count(emitter, event_name, listener);
     }
@@ -747,7 +747,7 @@ extern "C" Item js_ee_listenerCount(Item emitter, Item event_name, Item listener
     // count only matching listeners
     int64_t count = 0;
     for (int64_t i = 0; i < len; i++) {
-        Item f = js_array_get_int(arr, i);
+        Item f = js_elements_get_int(arr, i);
         if (listener_matches(f, listener)) count++;
     }
     return node_events_number(count);
@@ -762,8 +762,8 @@ extern "C" Item js_ee_eventNames(Item emitter) {
     Item result = js_array_new(0);
     int64_t klen = js_array_length(all_keys);
     for (int64_t i = 0; i < klen; i++) {
-        Item key = js_array_get_int(all_keys, i);
-        Item arr = js_property_get(map, key);
+        Item key = js_elements_get_int(all_keys, i);
+        Item arr = js_get_key_default(map, key);
         if (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED && js_array_length(arr) > 0) {
             js_array_push(result, key);
         }
@@ -775,7 +775,7 @@ extern "C" Item js_ee_eventNames(Item emitter) {
 extern "C" Item js_ee_setMaxListeners(Item emitter, Item n) {
     if (emitter.item == 0) return emitter;
     ensure_keys();
-    js_property_set(emitter, max_listeners_key, n);
+    js_set_key_default(emitter, max_listeners_key, n);
     return emitter;
 }
 
@@ -788,7 +788,7 @@ extern "C" Item js_ee_setMaxListeners(Item emitter, Item n) {
 extern "C" Item js_ee_getMaxListeners(Item emitter) {
     if (emitter.item == 0) return node_events_number(10);
     ensure_keys();
-    Item val = js_property_get(emitter, max_listeners_key);
+    Item val = js_get_key_default(emitter, max_listeners_key);
     if (val.item == 0 || get_type_id(val) == LMD_TYPE_UNDEFINED) {
         return node_events_number(10); // default
     }
@@ -807,10 +807,10 @@ extern "C" Item js_ee_prependListener(Item emitter, Item event_name, Item listen
     Item new_arr = js_array_new((int)(len + 1));
     js_array_push(new_arr, make_listener_record(listener));
     for (int64_t i = 0; i < len; i++) {
-        js_array_push(new_arr, js_array_get_int(arr, i));
+        js_array_push(new_arr, js_elements_get_int(arr, i));
     }
     Item map = get_events_map(emitter);
-    js_property_set(map, event_name, new_arr);
+    js_set_key_default(map, event_name, new_arr);
     update_events_count(emitter);
     maybe_emit_max_listener_warning(emitter, event_name, new_arr);
     return emitter;
@@ -827,10 +827,10 @@ extern "C" Item js_ee_prependOnceListener(Item emitter, Item event_name, Item li
     Item record = make_listener_record(listener);
     js_array_push(new_arr, record);
     for (int64_t i = 0; i < len; i++) {
-        js_array_push(new_arr, js_array_get_int(arr, i));
+        js_array_push(new_arr, js_elements_get_int(arr, i));
     }
     Item map = get_events_map(emitter);
-    js_property_set(map, event_name, new_arr);
+    js_set_key_default(map, event_name, new_arr);
     // mark as once
     Item set = get_once_set(emitter);
     js_array_push(set, record);
@@ -912,7 +912,7 @@ extern "C" Item js_ee_constructor(void) {
             // Initializing an EventEmitter allocates several children. Keep its
             // pre-built instance rooted so forced GC cannot sweep it mid-init.
             this_val = node_events_root_item(emitter_root);
-            js_property_set(this_val, events_key, events_map);
+            js_set_key_default(this_val, events_key, events_map);
             this_val = node_events_root_item(emitter_root);
             events_map = node_events_root_item(events_root);
             node_events_set_named_property(this_val, "_events", events_map);
@@ -921,7 +921,7 @@ extern "C" Item js_ee_constructor(void) {
             Item once_set = js_array_new(0);
             *once_root = once_set.item;
             this_val = node_events_root_item(emitter_root);
-            js_property_set(this_val, once_key, once_set);
+            js_set_key_default(this_val, once_key, once_set);
             node_events_host->node->roots->root_frame_end(&frame);
             return make_js_undefined();
         }
@@ -934,7 +934,7 @@ extern "C" Item js_ee_constructor(void) {
     Item events_map = js_new_object();
     *events_root = events_map.item;
     emitter = node_events_root_item(emitter_root);
-    js_property_set(emitter, events_key, events_map);
+    js_set_key_default(emitter, events_key, events_map);
     emitter = node_events_root_item(emitter_root);
     events_map = node_events_root_item(events_root);
     node_events_set_named_property(emitter, "_events", events_map);
@@ -943,7 +943,7 @@ extern "C" Item js_ee_constructor(void) {
     Item once_set = js_array_new(0);
     *once_root = once_set.item;
     emitter = node_events_root_item(emitter_root);
-    js_property_set(emitter, once_key, once_set);
+    js_set_key_default(emitter, once_key, once_set);
     emitter = node_events_root_item(emitter_root);
     if (ee_prototype.item != 0) {
         js_set_prototype(emitter, ee_prototype);
@@ -961,7 +961,7 @@ static Item js_ee_once_resolve_handler(Item env_item, Item rest_args) {
     int64_t total = js_array_length(rest_args);
     Item args_array = js_array_new(0);
     for (int64_t i = 0; i < total; i++) {
-        js_array_push(args_array, js_array_get_int(rest_args, i));
+        js_array_push(args_array, js_elements_get_int(rest_args, i));
     }
     Item call_args[1] = {args_array};
     js_call_function(resolve, make_js_undefined(), call_args, 1);
@@ -974,7 +974,7 @@ static Item js_ee_once_reject_handler(Item env_item, Item rest_args) {
 
     Item reject = env[0];
     int64_t total = js_array_length(rest_args);
-    Item err = (total > 0) ? js_array_get_int(rest_args, 0) : make_js_undefined();
+    Item err = (total > 0) ? js_elements_get_int(rest_args, 0) : make_js_undefined();
     Item call_args[1] = {err};
     js_call_function(reject, make_js_undefined(), call_args, 1);
     return make_js_undefined();
@@ -984,9 +984,9 @@ static Item js_ee_once_reject_handler(Item env_item, Item rest_args) {
 // with an array of args when the event fires, or rejects on 'error'.
 static Item js_ee_static_once(Item emitter, Item event_name) {
     Item resolvers = node_events_host->script->promise_with_resolvers();
-    Item promise = js_property_get(resolvers, make_string_item("promise"));
-    Item resolve_fn = js_property_get(resolvers, make_string_item("resolve"));
-    Item reject_fn = js_property_get(resolvers, make_string_item("reject"));
+    Item promise = js_get_key_default(resolvers, make_string_item("promise"));
+    Item resolve_fn = js_get_key_default(resolvers, make_string_item("resolve"));
+    Item reject_fn = js_get_key_default(resolvers, make_string_item("reject"));
 
     Item* resolve_env = js_alloc_env(1);
     resolve_env[0] = resolve_fn;
@@ -994,7 +994,7 @@ static Item js_ee_static_once(Item emitter, Item event_name) {
         js_ee_once_resolve_handler, -1, resolve_env, 1);
 
     // Call emitter.once(eventName, bound_wrapper)
-    Item once_method = js_property_get(emitter, make_string_item("once"));
+    Item once_method = js_get_key_default(emitter, make_string_item("once"));
     if (get_type_id(once_method) == LMD_TYPE_FUNC) {
         Item args[2] = {event_name, bound};
         js_call_function(once_method, emitter, args, 2);
@@ -1048,7 +1048,7 @@ static void ee_set_method(Item ns, const char* name, Target target,
     Item fn = jube_new_function(node_events_host->script, target,
         adapter_arity);
     *function_root = fn.item;
-    js_property_set(ns, key, fn);
+    js_set_key_default(ns, key, fn);
     node_events_host->node->roots->root_frame_end(&frame);
 }
 
@@ -1109,26 +1109,26 @@ Item node_events_namespace(void) {
     ee_set_method(events_namespace, "rawListeners",        js_ee_listeners, 2);
 
     // Set EventEmitter.prototype to the prototype object
-    js_property_set(events_namespace, make_string_item("prototype"), ee_prototype);
+    js_set_key_default(events_namespace, make_string_item("prototype"), ee_prototype);
     // Set __instance_proto__ so 'new EventEmitter()' (MAP constructor path)
     // sets up the prototype chain on instances correctly
-    js_property_set(events_namespace, make_string_item("__instance_proto__"), ee_prototype);
+    js_set_key_default(events_namespace, make_string_item("__instance_proto__"), ee_prototype);
     // Set __ctor__ so 'new EventEmitter()' calls the constructor to init storage
-    Item ee_ctor = js_property_get(events_namespace, make_string_item("EventEmitter"));
-    js_property_set(events_namespace, make_string_item("__ctor__"), ee_ctor);
+    Item ee_ctor = js_get_key_default(events_namespace, make_string_item("EventEmitter"));
+    js_set_key_default(events_namespace, make_string_item("__ctor__"), ee_ctor);
     // Also set prototype on the constructor function's internal field
     if (get_type_id(ee_ctor) == LMD_TYPE_FUNC) {
         js_function_set_prototype(ee_ctor, ee_prototype);
     }
 
     // static property: defaultMaxListeners = 10
-    js_property_set(events_namespace, make_string_item("defaultMaxListeners"), node_events_number(10));
+    js_set_key_default(events_namespace, make_string_item("defaultMaxListeners"), node_events_number(10));
 
     // static property: captureRejections = false
-    js_property_set(events_namespace, make_string_item("captureRejections"), (Item){.item = b2it(false)});
+    js_set_key_default(events_namespace, make_string_item("captureRejections"), (Item){.item = b2it(false)});
 
     // static property: captureRejectionSymbol
-    js_property_set(events_namespace, make_string_item("captureRejectionSymbol"),
+    js_set_key_default(events_namespace, make_string_item("captureRejectionSymbol"),
         make_string_item("nodejs.rejection"));
 
     // static method: getEventListeners
@@ -1139,7 +1139,7 @@ Item node_events_namespace(void) {
     // and the function falls through to return total count. No override needed.
 
     // default export is the constructor
-    js_property_set(events_namespace, make_string_item("default"), events_namespace);
+    js_set_key_default(events_namespace, make_string_item("default"), events_namespace);
 
     // static events.once — combined: 3 args = listener, 2 args = Promise
     ee_set_method(events_namespace, "once", js_ee_once_combined, 3);

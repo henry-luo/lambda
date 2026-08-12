@@ -20,9 +20,9 @@ extern __thread EvalContext* context;
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
 
-extern "C" Item js_property_get(Item object, Item key);
+extern "C" Item js_get_key_default(Item object, Item key);
 extern "C" Item js_new_object();
-extern "C" Item js_property_set(Item object, Item key, Item value);
+extern "C" Item js_set_key_default(Item object, Item key, Item value);
 extern "C" int js_function_get_arity(Item fn_item);
 extern "C" void* js_function_get_ptr(Item fn_item);
 
@@ -40,7 +40,7 @@ static Item js_namespace_get(Item namespace_obj, const char* name) {
     Rooted<Item> namespace_root(roots, namespace_obj);
     Item key = {.item = s2it(heap_create_name(name))};
     Rooted<Item> key_root(roots, key);
-    return js_property_get(namespace_root.get(), key_root.get());
+    return js_get_key_default(namespace_root.get(), key_root.get());
 }
 
 static const ModuleNamespaceOps js_namespace_ops = {
@@ -254,7 +254,7 @@ Item module_build_lambda_namespace(void* script_ptr) {
                     Rooted<Item> value_root(export_roots, val);
                     // The namespace and export pair remain unpublished until
                     // this store completes; root all three across map growth.
-                    js_property_set(namespace_root.get(), key_root.get(), value_root.get());
+                    js_set_key_default(namespace_root.get(), key_root.get(), value_root.get());
                     log_debug("module_registry: lambda ns export fn '%s' arity=%d", export_name, arity);
                 }
             }
