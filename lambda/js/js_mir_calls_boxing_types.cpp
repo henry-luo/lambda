@@ -256,8 +256,12 @@ JsMirImportEntry* jm_ensure_import_v_i(JsMirTranspiler* mt, const char* name) {
 
 static bool js_ast_tune_boxed_const_reuse_enabled() {
     static int enabled = -1;
-    if (enabled < 0)
-        enabled = getenv("LAMBDA_AST_TUNE_NO_BOXED_CONST_REUSE") ? 0 : 1;
+    if (enabled < 0) {
+        // Reusing a sentinel register across MIR control-flow blocks is not
+        // yet dominance-aware; callback lowering can observe the stale value.
+        // Keep this experiment opt-in until the cache tracks block dominance.
+        enabled = getenv("LAMBDA_AST_TUNE_BOXED_CONST_REUSE") ? 1 : 0;
+    }
     return enabled != 0;
 }
 

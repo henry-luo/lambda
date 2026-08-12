@@ -1110,7 +1110,9 @@ static void jm_copy_cached_function_locals(JsFuncCollected* fc, bool var_only,
     if (include_direct_lexicals && fc->node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
         jm_copy_cached_names(jm_cached_function_direct_lexicals(fc), names);
     }
-    if (suppressed) hashmap_free(suppressed);
+    // cached_annexb_suppressed is owned by JsFuncCollected and released with
+    // the function table; freeing it here leaves later capture analysis with a
+    // dangling suppression map (Annex B bodies expose this as a batch crash).
 }
 
 static bool jm_ast_node_contains_target(JsAstNode* node, JsAstNode* target) {
@@ -6089,21 +6091,16 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Js57 P7d-C: detect TLA in module body so the body emission can install
     // a state-dispatch right before the main statement loop and the split
     // sequence at the first top-level ExpressionStatement(AwaitExpression).
-    // Only applies to nested-load modules (depth >= 2). Entry modules
-    // (top_level_await tests like top-level-ticks.js) need the original
-    // sync-with-microtask-drain semantics so the test's own ticks ordering
-    // stays observable.
+    // Static entry modules retain their synchronous top-level-ticks behavior,
+    // but a dynamic import must expose the module's pending evaluation promise
+    // until its top-level await settles (ECMA-262 ContinueDynamicImport).
     bool p7d_has_tla = false;
     MIR_label_t p7d_post_await_label = NULL;
     {
         extern int js_dynamic_import_suppress_module_drain;
-        // Body split applies only to statically loaded nested modules. The
-        // entry module (depth == 1) keeps its existing sync-with-microtask
-        // semantics so the top-level-ticks family stays observable. Modules
-        // loaded via js_dynamic_import (suppress > 0) also keep the sync path
-        // so `await import('…')` callers see the fully-evaluated namespace.
-        if (mt->is_module && mt->in_main && mt->filename && js_tla_module_depth_get() >= 2 &&
-            js_dynamic_import_suppress_module_drain == 0) {
+        if (mt->is_module && mt->in_main && mt->filename &&
+                (js_tla_module_depth_get() >= 2 ||
+                 js_dynamic_import_suppress_module_drain > 0)) {
             int p7d_tla_count = 0;
             for (JsAstNode* s = program->body; s; s = s->next) {
                 p7d_tla_count += jm_count_awaits(s);
@@ -7379,15 +7376,12 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // nested function/class scopes, so non-zero only when there's a real TLA
     // statement somewhere in the module's top-level. Mark the module so
     // jm_load_imports can wire up the importer's PendingAsyncDeps counter
-    // when the importer pulls this dep in. Only gate on depth >= 2 (nested
-    // load) — for the entry module the body still runs synchronously through
-    // js_main and microtask drains as before; entry-level TLA modules with
-    // top-level ticks rely on that semantics. Modules loaded via dynamic
-    // import (suppress > 0) also stay on the sync path so `await import('…')`
-    // callers see the fully-evaluated namespace.
+    // when the importer pulls this dep in. Static entry modules keep their
+    // synchronous top-level-ticks behavior, while dynamic imports must retain
+    // the pending evaluation promise until TLA settles.
     extern int js_dynamic_import_suppress_module_drain;
     bool module_has_top_level_await = jm_module_has_top_level_await(js_ast);
-    if (js_tla_module_depth_get() >= 2 && js_dynamic_import_suppress_module_drain == 0) {
+    if (js_tla_module_depth_get() >= 2 || js_dynamic_import_suppress_module_drain > 0) {
         if (module_has_top_level_await) {
             js_module_mark_has_tla(p7d_self_spec_item);
             log_debug("P7d-A: module '%s' has TLA (top-level await detected)", filename);
@@ -7410,12 +7404,11 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return ItemNull;
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
-    // A dynamic module compiled while a Test262 preamble is active inherits
-    // that sealed name/IC image; local indexes must start after the inherited
-    // entries or globalThis member loads resolve to another preamble name.
-    mt->module_name_base = g_jm_preamble_in
-        ? g_jm_preamble_in->module_property_count : 0;
-    mt->module_ic_base = g_jm_preamble_in ? g_jm_preamble_in->ic_count : 0;
+    // ES modules own a private zero-based property/IC image even when their
+    // importer uses a test harness preamble. Sharing the preamble offset here
+    // makes globalThis member names resolve against the wrong image (D3.4.4v2).
+    mt->module_name_base = 0;
+    mt->module_ic_base = 0;
 
     mt->module = MIR_new_module(ctx, "js_module");
 

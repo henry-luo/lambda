@@ -30,11 +30,11 @@ static int g_lambda_lazy_mir = -1;
 int lambda_mir_lazy_enabled(void) {
     if (g_lambda_lazy_mir < 0) {
         const char* flag = getenv("LAMBDA_LAZY_MIR");
-        // Cold test/library modules spend most of compile time generating
-        // functions never reached by the selected script. MIR's lazy ABI
-        // keeps those functions as thunks and preserves an explicit opt-out
-        // for backend comparisons and debugging.
-        g_lambda_lazy_mir = !flag || (flag[0] && strcmp(flag, "0") != 0);
+        // MIR's lazy ABI is still experimental for Lambda Direct: document,
+        // math, and PDF scripts can enter a generated thunk through a path
+        // whose module lifetime has already ended. Keep the proven eager
+        // linker as the default; performance captures can opt in explicitly.
+        g_lambda_lazy_mir = flag && flag[0] && strcmp(flag, "0") != 0;
     }
     return g_lambda_lazy_mir;
 }
