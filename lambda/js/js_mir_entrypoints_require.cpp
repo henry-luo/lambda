@@ -839,7 +839,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
 
     // Build JavaScript AST
     phase_start = js_mir_phase_now_us();
-    JsAstNode* js_ast = build_js_ast(tp, root);
+    JsAstNode* js_ast = build_js_ast_indexed(tp, root);
     if (!js_ast) {
         log_error("js-mir: AST build failed");
         jm_clear_active_js_transpile(tp, NULL, NULL);
@@ -1058,6 +1058,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // MIR_finish_func/MIR_finish_module, so this is the finalized stage the
     // emission tests read. LAMBDA_MIR_DUMP_PATH names a private artifact and
     // works in release builds; JS_MIR_DUMP keeps the legacy developer path.
+    // TODO: enable after MIR's post-finish operand mutation contract is
+    // verified on every backend; the volume gate currently observes the
+    // untouched finalized list.
 #ifndef NDEBUG
     const bool js_legacy_mir_dump = getenv("JS_MIR_DUMP") != NULL;
 #else
@@ -1092,18 +1095,24 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         }
     }
 #endif
-    // Count total MIR instructions (drives the interpreter policy and the JIT
-    // opt-downgrade fallback below).
+    // Count finalized executable MIR instructions (drives the interpreter
+    // policy and the AST-tuning volume gate). Labels are structural and must
+    // match the MT7 artifact counter used by test_mir_ratchet_gtest.
     unsigned long total_insns = 0;
+    unsigned long total_functions = 0;
     for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
          m = DLIST_NEXT(MIR_module_t, m)) {
         for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
              item = DLIST_NEXT(MIR_item_t, item)) {
-            if (item->item_type == MIR_func_item)
-                total_insns += DLIST_LENGTH(MIR_insn_t, item->u.func->insns);
+            if (item->item_type != MIR_func_item) continue;
+            total_functions++;
+            for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, item->u.func->insns);
+                    insn != NULL; insn = DLIST_NEXT(MIR_insn_t, insn)) {
+                if (insn->code != MIR_LABEL) total_insns++;
+            }
         }
     }
-    js_mir_volume_counters_set((long)mt->func_count, (long)total_insns);
+    js_mir_volume_counters_set((long)total_functions, (long)total_insns);
     // Tune6 (see vibe/jube/Transpile_Js_Tune6_AST.md §0.2a–§0.2d): the dominant JS
     // startup cost is eager per-function MIR_gen during MIR_link. For large modules
     // opt=0 JIT ≈ opt=2 JIT (link is codegen-emit-bound, not optimizer-bound), so
@@ -1144,7 +1153,12 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     static int js_lazy_mir_cached = -1;
     if (js_lazy_mir_cached < 0) {
         const char* lazy_env = getenv("JS_LAZY_MIR");
-        js_lazy_mir_cached = (lazy_env && lazy_env[0] && strcmp(lazy_env, "0") != 0) ? 1 : 0;
+        // Lazy generation preserves the MIR ABI while deferring native codegen
+        // until a function is called; keep an explicit opt-out for debugging
+        // and backend comparisons, but make the measured cold path default.
+        js_lazy_mir_cached = lazy_env
+            ? (lazy_env[0] && strcmp(lazy_env, "0") != 0 ? 1 : 0)
+            : 1;
     }
     void (*gen_interface)(MIR_context_t, MIR_item_t) =
         js_lazy_mir_cached ? MIR_set_lazy_gen_interface : MIR_set_gen_interface;

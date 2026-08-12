@@ -7,6 +7,19 @@
 
 static void jm_scope_env_mark_pattern_bindings(JsMirTranspiler* mt, JsAstNode* pat);
 
+static bool jm_discardable_literal_statement(JsAstNode* expression) {
+    if (!expression || expression->node_type != JS_AST_NODE_LITERAL) return false;
+    JsLiteralNode* literal = (JsLiteralNode*)expression;
+    // Primitive literal expression statements have no evaluation effects once
+    // completion values are not requested; emitting a boxed temporary here was
+    // pure MIR churn, especially for library directive prologues.
+    return literal->literal_type == JS_LITERAL_NUMBER ||
+        literal->literal_type == JS_LITERAL_STRING ||
+        literal->literal_type == JS_LITERAL_BOOLEAN ||
+        literal->literal_type == JS_LITERAL_NULL ||
+        literal->literal_type == JS_LITERAL_UNDEFINED;
+}
+
 static void jm_bind_catch_destructure(JsMirTranspiler* mt,
         JsAstNode* pattern, MIR_reg_t thrown_val, bool is_array) {
     struct hashmap* catch_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
@@ -4001,14 +4014,14 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
     case JS_AST_NODE_EXPRESSION_STATEMENT: {
         JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
         if (es->expression) {
+            if (!mt->eval_completion_reg &&
+                    jm_discardable_literal_statement(es->expression)) {
+                break;
+            }
             JsAstNode* saved_discarded = mt->discarded_expression;
             if (!mt->eval_completion_reg) mt->discarded_expression = es->expression;
             MIR_reg_t val = jm_transpile_box_item(mt, es->expression);
             mt->discarded_expression = saved_discarded;
-            if (!mt->eval_completion_reg && es->expression->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
-                jm_call_void_1(mt, "js_discard_value",
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-            }
             // Eval completion value: update the completion register so that
             // expression statements inside control flow (for/while/if/switch)
             // propagate their value as the eval() result.
