@@ -1527,44 +1527,37 @@ static void table_apply_auto_column_width_distribution(TableMetadata* meta, floa
     if (!meta || !col_widths) return;
     if (fabsf(available_content_width - pref_table_content_width) < 0.01f) {
         table_copy_columns(col_widths, meta->col_max_widths, columns);
-    } else if (available_content_width > pref_table_content_width) {
-        float extra_space = available_content_width - pref_table_content_width;
-
-
-        int auto_col_count = 0;
-        for (int i = 0; i < columns; i++) {
-            if (!meta->col_has_explicit_width[i]) auto_col_count++;
-        }
-        if (auto_col_count > 0) {
-            table_copy_columns(col_widths, meta->col_max_widths, columns);
-            table_distribute_extra(col_widths, columns, extra_space,
-                [&](int i) { return !meta->col_has_explicit_width[i]; },
-                [&](int i) { return col_widths[i]; });
-        } else {
-            table_copy_columns(col_widths, meta->col_max_widths, columns);
-            if (pref_table_content_width > 0.0f) {
-                table_distribute_extra(col_widths, columns, extra_space,
-                    [](int) { return true; },
-                    [&](int i) { return col_widths[i]; });
-            }
-        }
-    } else {
-        if (available_content_width >= min_table_content_width) {
-            for (int i = 0; i < columns; i++) {
-                float min_w = meta->col_min_widths[i];
-                float pref_w = meta->col_max_widths[i];
-                float range = pref_w - min_w;
-                if (pref_table_content_width > min_table_content_width && range > 0) {
-                    float factor = (available_content_width - min_table_content_width) /
-                                   (pref_table_content_width - min_table_content_width);
-                    col_widths[i] = min_w + range * factor;
-                } else {
-                    col_widths[i] = min_w; // Fallback to minimum
-                }
-            }
-        } else {
+        return;
+    }
+    if (available_content_width <= pref_table_content_width) {
+        if (available_content_width < min_table_content_width) {
             table_copy_columns(col_widths, meta->col_min_widths, columns);
+            return;
         }
+        float factor = pref_table_content_width > min_table_content_width
+            ? (available_content_width - min_table_content_width) /
+              (pref_table_content_width - min_table_content_width) : 0.0f;
+        for (int i = 0; i < columns; i++) {
+            float min_width = meta->col_min_widths[i];
+            float range = meta->col_max_widths[i] - min_width;
+            col_widths[i] = min_width + (range > 0.0f ? range * factor : 0.0f);
+        }
+        return;
+    }
+
+    table_copy_columns(col_widths, meta->col_max_widths, columns);
+    float extra_space = available_content_width - pref_table_content_width;
+    int auto_col_count = 0;
+    for (int i = 0; i < columns; i++) {
+        if (!meta->col_has_explicit_width[i]) auto_col_count++;
+    }
+    if (auto_col_count > 0) {
+        table_distribute_extra(col_widths, columns, extra_space,
+            [&](int i) { return !meta->col_has_explicit_width[i]; },
+            [&](int i) { return col_widths[i]; });
+    } else if (pref_table_content_width > 0.0f) {
+        table_distribute_extra(col_widths, columns, extra_space,
+            [](int) { return true; }, [&](int i) { return col_widths[i]; });
     }
 }
 
@@ -5307,15 +5300,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!table) return;
     float row_spacing = table_inter_spacing(table, false);
     float column_spacing = table_inter_spacing(table, true);
-    // This is necessary because cell layout modifies lycon->font to the cell's font-size,
-    // but the table's CSS properties (like height: 4em) should use the table's font-size.
     float table_font_size = (table->tb && table->tb->computed_font_size > 0)
                            ? table->tb->computed_font_size : 16.0f;
-    // Initialize fixed layout fields
     table->tb->fixed_row_height = 0;  // 0 = auto height (calculate from content)
     bool has_direct_float = table_has_direct_float(table);
-    // CRITICAL FIX: Handle caption positioning first
-    // CSS 2.1 §17.4: A table may have multiple captions; all are rendered.
     TableCaptionCollection caption_collection = table_collect_captions(table);
     ArrayList* captions = caption_collection.captions;
     ArrayList* top_captions = caption_collection.top_captions;
@@ -5327,7 +5315,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!meta) {
         // CSS 2.1 §17.4: A table with only a caption is valid; the caption
         if (caption) {
-            // Use caption's explicit CSS width if set, otherwise shrink auto
             float table_width = caption->width;
             if (caption->blk && caption->block_mut()->given_width > 0) {
                 table_width = caption->block()->given_width;
@@ -5349,18 +5336,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 table_width = layout_apply_min_max_axis(caption, table_width, true, false);
             }
             float caption_box_width = table_width;  // Caption's own box width (without margins)
-            // CSS 2.1 §17.4: The table wrapper must accommodate the caption's margin-box.
-            // Add fixed horizontal margins to the table wrapper width without affecting caption width.
             table_width += table_caption_positive_margin(caption, true, true) +
                 table_caption_positive_margin(caption, true, false);
-            // CSS Tables: captions with different sides form separate stacks.
             float cap_y = 0;
             for_each_table_caption(top_captions, [&](ViewBlock* cap, int ci) {
                 table_position_caption_with_margins(cap, cap_y);
                 cap->width = caption_box_width;
                 cap_y += table_caption_height_with_margins(cap);
             });
-            // CSS 2.1 §17.5.3: The 'height' property on the table element sets the
             float grid_height = 0;
             if (table->blk && table->block_mut()->given_height >= 0) {
                 grid_height = table->block()->given_height;
@@ -5405,9 +5388,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     table->width = table->block()->given_width + bp_left + bp_right;
                 }
             } else {
-                // CSS 2.1 §17.5.2: A block-level table with 'width: auto' uses the
-                // containing block width when it contains floated children that it must
-                // enclose as a BFC. Tables with no in-flow or floated content use only
                 float empty_table_auto_width = bp_left + bp_right;
                 float column_spacing = table_inter_spacing(table, true);
                 if (column_spacing > 0.0f) {
@@ -5457,7 +5437,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
             }
             lam::view_require_block(table)->height = table->height;
-            // CSS 2.1 §9.7: When table-internal elements have float applied, they are
             for (View* tch = table->first_child; tch; tch = tch->next_sibling) {
                 if (!tch->view_type) continue;  // skip nil-views (text nodes)
                 ViewBlock* tblk = lam::view_require_block(tch);
@@ -5485,11 +5464,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
     int columns = meta->column_count;
     int rows = meta->row_count;
-    // CSS 2.1 §17.6.2: Border resolution determines which borders win in conflicts
     if (table->tb->border_collapse) {
         resolve_collapsed_borders(lycon, table, meta);
-        // CSS 2.1 §17.6.2: Compute the maximum resolved border width at each column edge
-        // across ALL rows. In border-collapse mode, the column grid lines are fixed vertically,
         table->each_cell( [&](ViewTableRow* row, ViewTableCell* tcell) {
                 (void)row;
                 int col = tcell->td->col_index;
@@ -5510,13 +5486,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
     float explicit_table_width = 0;
     bool has_explicit_table_width = false;
-    float table_content_width = 0; // Width available for cells
-    // First check resolved style (from HTML width attribute or CSS)
+    float table_content_width = 0;
     if (table->blk && table->block_mut()->given_width >= 0) {
         explicit_table_width = table->block()->given_width;
         has_explicit_table_width = true;
     }
-    // If no resolved width, check CSS specified_style directly
     if (!has_explicit_table_width && table->node_type == DOM_NODE_ELEMENT) {
         DomElement* dom_elem = table->as_element();
         if (dom_elem->specified_style) {
@@ -5525,7 +5499,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             if (width_decl && width_decl->value) {
                 if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                     double percentage = width_decl->value->data.percentage.value;
-                    // Use AvailableSpace if definite, otherwise fall back to BlockContext
                     float container_width_f = lycon->available_space.width.is_definite()
                         ? lycon->available_space.width.value
                         : lycon->block.content_width;
@@ -5550,29 +5523,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
     if (explicit_table_width > 0) {
         table_content_width = explicit_table_width;
-        // CSS 2.1 §17.6.2: In border-collapse mode, CSS width is border-box
-        // CSS 2.1 §10.2: In separate borders mode, CSS width is content-box,
-        // so border is additional and must NOT be subtracted.
-        // Exception: box-sizing:border-box makes width border-box.
-        // Note: HTML <table> elements get box-sizing:border-box from UA stylesheet
-        // (set in resolve_css_style.cpp), so no need to check tag() here.
         bool table_width_is_border_box = table->tb->border_collapse ||
             layout_uses_border_box(table);
         if (table_width_is_border_box && table->bound && table->boundary_mut()->border) {
             BoxMetrics table_box = layout_box_metrics(table);
             table_content_width -= table_box.border_h;
         }
-        // Subtract table padding from content width only when CSS width is border-box.
-        // CSS 2.1 §10.2: In content-box mode (default for CSS tables), 'width' already
-        // specifies the content area, which includes border-spacing and columns.
-        // Padding is outside the content area and must NOT be subtracted.
-        // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode.
-        // Only box-sizing:border-box (e.g., HTML <table> gets this from UA stylesheet)
         if (table_width_is_border_box && !table->tb->border_collapse &&
             table->bound && table->boundary_mut()->padding.left >= 0 && table->boundary_mut()->padding.right >= 0) {
             table_content_width -= layout_box_metrics(table).padding_h;
         }
-        // Subtract border-spacing (only in separate mode)
         if (column_spacing > 0.0f) {
             table_content_width -= (columns + 1) * column_spacing;
         }
@@ -5582,8 +5542,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     table->each_cell( [&](ViewTableRow* row, ViewTableCell* tcell) {
             (void)row;
             int col = tcell->td->col_index;
-            // Get explicit CSS width using helper function
-            // CSS 2.1 §17.6.2: In border-collapse mode, cell borders don't add to column width
             LayoutFontScope font_scope(lycon);
             if (tcell->font) {
                 setup_font(lycon->ui_context, &lycon->font, tcell->font);
@@ -5601,45 +5559,31 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     }
                 });
             }
-            // Track columns with explicit CSS width for distribution
             if (cell_width > 0 && tcell->td->col_span == 1 && col >= 0 && col < meta->column_count) {
                 meta->col_has_explicit_width[col] = true;
             }
-            // Calculate both minimum and preferred widths for CSS 2.1 table layout
             float min_width = 0.0f;   // MCW - Minimum Content Width
             float pref_width = 0.0f;  // PCW - Preferred Content Width
             if (cell_width == 0.0f) {
-                // No explicit CSS width - measure intrinsic content widths
-                // CSS 2.1 §17.6.2: In border-collapse mode, cell borders don't add to column width
                 CellIntrinsicWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);
                 pref_width = widths.max_width;  // PCW (preferred/max-content)
                 min_width = widths.min_width;   // MCW (minimum/min-content)
                 cell_width = pref_width; // Use preferred for backward compatibility
             } else if (table->tb->border_collapse) {
-                // Border-collapse with explicit CSS width: CSS width sets the
-                // block) to shrink columns below their CSS width when needed,
                 pref_width = cell_width;
                 CellIntrinsicWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);
                 min_width = widths.min_width;  // MCW from actual content
             } else {
-                // Separate borders with explicit CSS width
                 pref_width = cell_width;
-                // CSS Tables §4.1: percentage/calc widths on cells are
-                // distribution constraints relative to the table width, not
                 CellIntrinsicWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);
                 min_width = cell_width_is_table_relative ?
                     widths.min_width : (widths.min_width > cell_width ? widths.min_width : cell_width);
             }
-            // CSS 2.1 §17.5.2.2: When white-space: nowrap/pre prevents soft wrap
-            // width must expand beyond any CSS width to accommodate content that cannot
-            // break. Only applies when wrapping is actually suppressed.
             if (should_prevent_wrapping(tcell) && pref_width < min_width) {
                 pref_width = min_width;
                 cell_width = min_width;
             }
             tcell->td->intrinsic_width = pref_width;
-            // CSS 2.1 §17.6.2: In border-collapse mode, include half of the cell's
-            // The column width must accommodate the cell with the largest total.
             if (table->tb->border_collapse && tcell->td->col_span == 1) {
                 float half_left = tcell->td->left_resolved ? tcell->td->left_resolved->width / 2.0f : 0.0f;
                 float half_right = tcell->td->right_resolved ? tcell->td->right_resolved->width / 2.0f : 0.0f;
@@ -5683,12 +5627,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         mem_free(contribution);
     }
     arraylist_free(colspan_widths);
-    // CSS 2.1 §17.5.2.2: Apply <col> element width/min-width/max-width
     for (int c = 0; c < columns; c++) {
         ViewBlock* col_elem = find_column_element(table, c);
         float width_divisor = 1.0f;
         if (!col_elem) {
-            // CSS 2.1 §17.3: A table-column-group without child columns defines
             col_elem = find_colgroup_element(table, c);
             if (!col_elem) continue;
             int span = table_positive_span_attr(col_elem);
@@ -5696,18 +5638,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
         table_apply_column_constraints(lycon, meta, col_widths, c, col_elem, width_divisor);
     }
-    // Apply CSS 2.1 table-layout algorithm with improved precision
-    float fixed_table_width = 0; // Store explicit width for fixed layout
+    float fixed_table_width = 0;
     if (table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED) {
-        // STEP 1: Get explicit table width from CSS (CSS 2.1 Section 17.5.2)
         float fixed_explicit_width = table_resolve_fixed_explicit_width(lycon, table);
-        // CSS 2.1 §17.5.2.1: "A value of 'auto' (for both 'display: table' and
         fixed_table_width = fixed_explicit_width;
       if (fixed_explicit_width > 0) {
-        // STEP 2: Calculate available content width for CSS fixed-layout columns.
         float content_width = table_fixed_content_width_for_columns(
             table, fixed_explicit_width, columns);
-        // STEP 3: Determine column widths per CSS 2.1 §17.5.2.1
         float* explicit_col_widths = (float*)scratch_calloc(&lycon->scratch, columns * sizeof(float));
         float total_explicit = 0.0f;  int unspecified_cols = 0;
         {
@@ -5728,9 +5665,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
             });
         }
-        // STEP 3b: Read cell widths from first row (only for columns not yet specified by col elements)
         ViewTableRow* first_row = table->first_row();
-        // Read cell widths from first row (only for columns not yet set by col elements)
         if (first_row) {
             int col = 0;
             first_row->each_cell( [&](ViewTableCell* cell) {
@@ -5740,17 +5675,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     content_width, &total_explicit, &unspecified_cols);
             });
         }
-        // STEP 4: Distribute widths according to CSS table-layout: fixed algorithm
         table_distribute_fixed_column_widths(
             explicit_col_widths, columns, &content_width, total_explicit, unspecified_cols);
-        // STEP 5: Replace col_widths with fixed layout widths
         memcpy(col_widths, explicit_col_widths, columns * sizeof(float));
         scratch_free(&lycon->scratch, explicit_col_widths);
         table_apply_fixed_height_distribution(lycon, table, rows);
       } // end if (fixed_explicit_width > 0)
     }
-    // Step 3: CSS 2.1 Table Layout Algorithm - Width Distribution (Section 17.5.2)
-    // Run auto algorithm if NOT using fixed layout, or if fixed layout was skipped (width:auto)
     if (table->tb->table_layout != TableProp::TABLE_LAYOUT_FIXED || fixed_table_width == 0) {
     float min_table_content_width = 0;  // MCW sum for table content
     float pref_table_content_width = 0; // PCW sum for table content
@@ -5760,7 +5691,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
     float total_percent_col_width =
         table_sum_span_columns(meta->col_percent_widths, 0, columns, columns);
-    // Add border-spacing to table width calculation (CSS 2.1 requirement)
     float border_spacing_total = 0;
     if (column_spacing > 0.0f) {
         border_spacing_total = (columns + 1) * column_spacing;
@@ -5779,7 +5709,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     });
 
 
-    // CSS 2.1: For auto-width tables, constrain by available space minus margins.
     float max_available_width = 0.0f;
     if (!has_explicit_table_width) {
         max_available_width = table_apply_auto_available_width_constraint(
@@ -5790,25 +5719,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (has_explicit_table_width) {
         float explicit_content_area = table_explicit_content_area_for_auto_layout(
             table, meta, explicit_table_width);
-        // CSS 2.1: Table has explicit width - use content area (but not less than minimum)
         used_table_width = explicit_content_area > min_table_width ? explicit_content_area : min_table_width;
     } else {
-        // CSS 2.1: Table width is auto - use preferred width
-        // A specified cell width can be below its min-content contribution;
-        // auto table sizing must still honor the table's minimum width.
         used_table_width = max(pref_table_width, min_table_width);
         if (has_direct_float && table->display.outer == CSS_VALUE_BLOCK &&
             max_available_width > used_table_width) {
-            // formatting context. A block-level auto-width table must leave room
-            // for both the float and following row content instead of shrink-
-            // wrapping only the row grid.
             used_table_width = max_available_width;
             direct_float_expanded_auto_width = true;
         }
         if (total_percent_col_width >= 99.0f &&
             max_available_width > used_table_width) {
-            // CSS Tables auto layout treats percentage cell widths as table
-            // width constraints. A near/full-width percentage column cannot be
             used_table_width = max_available_width;
         }
     }
@@ -5819,15 +5739,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     bool used_percent_distribution = table_apply_percent_column_distribution(
         meta, col_widths, columns, total_percent_col_width,
         available_content_width, min_table_content_width);
-    // Check for equal distribution case (CSS behavior for similar columns)
     bool use_equal_distribution = table_columns_within_tolerance(meta->col_max_widths, columns, 3.0f);
     if (!used_percent_distribution &&
         use_equal_distribution && columns > 1 && !has_explicit_table_width) {
-        // Special case: columns have similar preferred widths and table width is auto
         float avg_width = used_table_width / columns;
         table_assign_columns(col_widths, columns, avg_width);
     }
-    // CSS 2.1 Column Width Distribution Algorithm (Section 17.5.2.2)
     if (!used_percent_distribution) {
         table_apply_auto_column_width_distribution(
             meta, col_widths, columns, available_content_width,
@@ -5837,17 +5754,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     float table_padding_horizontal = 0.0f;
     float table_width = table_prepare_final_padding_box_width(
         table, meta, col_widths, columns, &table_padding_horizontal);
-    // CSS 2.1 §17.5.2.1: For fixed layout, "the width of the table is then the
-    // Convert CSS width to padding-box for comparison:
-    //   border-collapse (§17.6.2): CSS width is border-box → subtract border
-    //   separate borders (§10.2): CSS width is content-box → add padding
     if (table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED && fixed_table_width > 0) {
         float css_padding_box = table_fixed_css_padding_box_width(table, fixed_table_width);
         if (css_padding_box > table_width) {
             table_width = css_padding_box;
         }
     }
-    // For auto layout with explicit CSS width in border-collapse mode,
     else if (explicit_table_width > 0 && table->tb->border_collapse) {
         float bc_outer_half = meta->collapsed_border_left / 2.0f + meta->collapsed_border_right / 2.0f;
         float bc_content_area = explicit_table_width - bc_outer_half;
@@ -5855,13 +5767,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             table_width = bc_content_area;
         }
     }
-    // CSS 2.1 §10.4: Apply min-width/max-width constraints to table width.
-    // given_min/max_width is border-box when box-sizing:border-box, content-box otherwise.
     table_apply_minmax_width_constraints(
         table, meta, col_widths, columns, &table_width, table_padding_horizontal);
-    // Step 4: Position cells and calculate row heights with CSS 2.1 border model
     float* col_x_positions = (float*)scratch_calloc(&lycon->scratch, (columns + 1) * sizeof(float));
-    // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
     float table_padding_left = 0;
     if (!table->tb->border_collapse && table->bound && table->boundary_mut()->padding.left >= 0) {
         table_padding_left = table->boundary()->padding.left;
@@ -5878,7 +5786,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (column_spacing > 0.0f) {
         col_x_positions[0] += column_spacing;
     }
-    // CSS 2.1 Column Position Calculation (Section 17.5)
     if (table->tb->border_collapse) {
         for (int i = 1; i <= columns; i++) {
             col_x_positions[i] = col_x_positions[i-1] + col_widths[i-1];
@@ -5887,17 +5794,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         for (int i = 1; i <= columns; i++) {
             col_x_positions[i] = col_x_positions[i-1] + col_widths[i-1];
             if (column_spacing > 0.0f) {
-                // CSS 2.1: Separate borders - add border-spacing between columns
                 col_x_positions[i] += column_spacing;
             }
         }
     }
-    // Start Y position - only include caption height if caption is at top
     float current_y = top_caption_height;
     float table_border_top = 0;
     if (table->tb->border_collapse) {
-        // Border-collapse: CSS 2.1 §17.6.2
-        // rather than checking only the table element's own border.
         float collapsed_top = meta->collapsed_border_top;
         if (collapsed_top <= 0 && table->bound && table->boundary_mut()->border) {
             collapsed_top = table->boundary()->border->width.top;
@@ -5910,7 +5813,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         table_border_top = table->boundary()->border->width.top;
         current_y += table_border_top;
     }
-    // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
     float table_padding_top = 0;
     if (!table->tb->border_collapse && table->bound && table->boundary_mut()->padding.top >= 0) {
         table_padding_top = table->boundary()->padding.top;
@@ -5919,7 +5821,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (row_spacing > 0.0f) {
         current_y += row_spacing;
     }
-    // CSS 2.1 §17.2.1: column elements span from the content area top
     float content_area_top_y = current_y;
     // CSS 2.1 §17.4: captions use the wrapper's content width as containing block.
     float table_border_h = 0;

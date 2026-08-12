@@ -111,62 +111,13 @@ static float get_explicit_dom_css_height(LayoutContext* lycon, DomElement* elem)
                 : -1.0f;
 }
 
-static CssValue* flex_margin_side_value(const CssValue* value, CssPropertyCode property_code) {
-    return (CssValue*)css_box_shorthand_side_value(
-        value, radiant_css_box_side(property_code));
-}
-
-static bool resolve_flex_margin_value(LayoutContext* lycon, CssPropertyCode property_code,
-                                      CssValue* value, float inline_base, float* out) {
-    if (!value || !out) return false;
-    if (layout_resolve_percentage_value(value, inline_base, out)) return true;
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return false;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
-        *out = 0.0f;
-        return true;
-    }
-    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER ||
-        value->type == CSS_VALUE_TYPE_KEYWORD) {
-        float val = resolve_length_value(lycon, property_code, value);
-        if (!isnan(val) && val >= 0.0f) {
-            *out = val;
-            return true;
-        }
-    }
-    return false;
-}
-
 // Helper to get the resolved CSS margin for a specific side. Percentage
 // margins resolve against the containing block inline size, which may differ
 // from any earlier style-resolution context during intrinsic flex measurement.
 static float get_css_margin(LayoutContext* lycon, ViewElement* elem,
                             CssPropertyCode property_code, float inline_base) {
-    if (!elem) return 0.0f;
-
-    if (elem->specified_style && lycon) {
-        float val = 0.0f;
-        CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property_code);
-        if (decl && decl->value &&
-            resolve_flex_margin_value(lycon, property_code, decl->value, inline_base, &val)) {
-            return val;
-        }
-
-        CssDeclaration* short_decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_MARGIN);
-        CssValue* side_value = short_decl ? flex_margin_side_value(short_decl->value, property_code) : nullptr;
-        if (side_value &&
-            resolve_flex_margin_value(lycon, property_code, side_value, inline_base, &val)) {
-            return val;
-        }
-    }
-
-    if (elem->bound) {
-        float* margin = radiant_spacing_value(
-            &elem->boundary_mut()->margin, radiant_css_box_side(property_code));
-        float val = margin ? *margin : 0.0f;
-        if (!isnan(val) && val >= 0.0f) return val;
-    }
-
-    return 0.0f;
+    return layout_resolve_intrinsic_margin_side(
+        lycon, elem, property_code, inline_base);
 }
 
 static float get_child_axis_margins(LayoutContext* lycon, ViewElement* elem,

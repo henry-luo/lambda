@@ -2,13 +2,7 @@
 #define LAYOUT_HPP
 #pragma once
 
-// ============================================================================
-// DIMENSION CONVENTION: All layout positions and sizes are float.
-// View.x, y, width, height and all derived measurements (padding, margin,
-// border, gap, offset, content_width, etc.) must use float, never int.
-// If an (int) cast is truly needed, mark it: // INT_CAST_OK: <reason>
-// Run `make check-int-cast` to verify compliance.
-// ============================================================================
+// layout coordinates and dimensions are float; justified integer casts use INT_CAST_OK.
 
 #include "view.hpp"
 #include "grid_track.hpp"
@@ -94,10 +88,6 @@ bool layout_get_text_initial_letter_info(const DomNode* text_node,
                                          InitialLetterInfo* out_info);
 InitialLetterBoxInsets layout_initial_letter_box_insets(ViewText* text);
 
-// ============================================================================
-// Layout Safety Guards
-// ============================================================================
-
 // maximum DOM nesting depth. guards call-stack overflow in layout_flow_node()
 // and layout_abs_block() — both use the same lycon->depth counter.
 #ifdef NDEBUG
@@ -120,10 +110,6 @@ static inline float layout_clamp_dimension(float value) {
     return value < -MAX_LAYOUT_DIMENSION ? -MAX_LAYOUT_DIMENSION :
         value > MAX_LAYOUT_DIMENSION ? MAX_LAYOUT_DIMENSION : value;
 }
-
-// ============================================================================
-// Available Space Type System
-// ============================================================================
 
 enum AvailableSizeType {
     AVAILABLE_SIZE_DEFINITE,
@@ -251,10 +237,6 @@ inline float compute_shrink_to_fit_width(float min_content, float max_content, A
     return avail;
 }
 
-// ============================================================================
-// Intrinsic Sizing and Measurement
-// ============================================================================
-
 // tier-3: layout-transient, valid within pass
 struct TextIntrinsicWidths {
     float min_content;
@@ -341,6 +323,11 @@ void layout_resolve_intrinsic_horizontal_margins(LayoutContext* lycon,
                                                   float* margin_left,
                                                   float* margin_right,
                                                   bool include_shorthand = true);
+float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
+                                            ViewElement* element,
+                                            CssPropertyCode property,
+                                            float inline_base = -1.0f,
+                                            bool include_bound = true);
 
 // tier-3: layout-transient, valid within pass
 struct IntrinsicSizesBidirectional {
@@ -599,10 +586,6 @@ inline void layout_cache_store(
 }
 
 } // namespace radiant
-
-// ============================================================================
-// Box Metrics
-// ============================================================================
 
 // tier-3: layout-transient, valid within pass
 typedef struct BoxEdges {
@@ -956,10 +939,6 @@ static inline void layout_resolve_in_flow_horizontal_margins(ViewBlock* block,
     }
 }
 
-// ============================================================================
-// Containing Blocks
-// ============================================================================
-
 // tier-3: layout-transient, valid within pass
 typedef struct LayoutContainingBlock {
     ViewBlock* view;
@@ -995,10 +974,6 @@ void layout_resolve_percent_size_for_child(LayoutContext* lycon, ViewBlock* chil
     LayoutContainingBlock cb, bool use_content_box);
 void layout_resolve_percent_offsets_for_child(ViewBlock* child,
     LayoutContainingBlock cb);
-
-// ============================================================================
-// CSS Counters
-// ============================================================================
 
 typedef struct Arena Arena;
 typedef struct DomElement DomElement;
@@ -1044,10 +1019,6 @@ int counter_format(CounterContext* ctx, const char* name, uint32_t style,
                    char* buffer, size_t buffer_size);
 int counters_format(CounterContext* ctx, const char* name, const char* separator,
                     uint32_t style, char* buffer, size_t buffer_size);
-
-// ============================================================================
-// Layout Debugging and Profiling
-// ============================================================================
 
 namespace radiant {
 
@@ -1144,10 +1115,6 @@ struct LayoutProfileScope {
 };
 
 } // namespace radiant
-
-// ============================================================================
-// Layout Alignment
-// ============================================================================
 
 namespace radiant {
 
@@ -1270,10 +1237,6 @@ float compute_view_last_text_baseline(
 
 } // namespace radiant
 
-// ============================================================================
-// Text Layout Utilities
-// ============================================================================
-
 CssEnum get_white_space_value(DomNode* node);
 inline bool layout_white_space_collapses(CssEnum white_space) {
     return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
@@ -1287,10 +1250,6 @@ inline bool white_space_preserves_space_advance(CssEnum white_space) {
 CssEnum layout_inherited_text_transform(DomNode* node);
 float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
-
-// ============================================================================
-// Table Metadata
-// ============================================================================
 
 // tier-3: layout-transient, valid within pass
 struct TableMetadata {
@@ -1328,10 +1287,6 @@ struct TableMetadata {
 
 TableMetadata* table_metadata_create(ScratchArena* scratch, int cols, int rows);
 void table_metadata_destroy(TableMetadata* meta);
-
-// ============================================================================
-// Custom Layout
-// ============================================================================
 
 // tier-3: layout-transient, valid within pass
 typedef struct VelmtBox {
@@ -1423,10 +1378,6 @@ const char* custom_layout_name_from_css_value(const CssValue* value);
 const char* custom_layout_name_for_element(DomElement* element);
 bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* layout_name);
 
-// ============================================================================
-// List Layout and Counters
-// ============================================================================
-
 typedef struct StyleTree StyleTree;
 
 void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomElement* dom_elem);
@@ -1436,10 +1387,6 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
 const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode css_property,
                                             LayoutContext* lycon);
 void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
-
-// ============================================================================
-// Multi-column Layout
-// ============================================================================
 
 // One in-flow item used by both direct and nested multicol distribution.
 // Keeping the break and fragmentation facts beside the measured extent avoids
@@ -1593,21 +1540,14 @@ typedef struct StyleContext {
     void *css_parser;  // Placeholder for future CSS parser if needed
 } StyleContext;
 
-/**
- * FloatBox - Represents a positioned floating element
- * Tracks both the element position and its margin box for proper space calculations.
- */
 // tier-3: layout-transient, valid within pass
 typedef struct FloatBox {
-    ViewBlock* element;         // The floating element
-
-    // Margin box bounds (outer bounds including margins)
+    ViewBlock* element;
     float margin_box_top;
     float margin_box_bottom;
     float margin_box_left;
     float margin_box_right;
 
-    // Border box bounds (element position and size)
     float x, y, width, height;
 
     CssEnum float_side;         // CSS_VALUE_LEFT or CSS_VALUE_RIGHT
@@ -1627,58 +1567,34 @@ typedef struct InitialLetterBox {
     struct InitialLetterBox* next;
 } InitialLetterBox;
 
-/**
- * FloatAvailableSpace - Result of space query at a given Y coordinate
- */
 // tier-3: layout-transient, valid within pass
 typedef struct FloatAvailableSpace {
-    float left;                 // Left edge of available space
-    float right;                // Right edge of available space
-    bool has_left_float;        // True if a left float intrudes at this Y
-    bool has_right_float;       // True if a right float intrudes at this Y
+    float left;
+    float right;
+    bool has_left_float;
+    bool has_right_float;
 } FloatAvailableSpace;
 
-/**
- * BlockContext - Unified Block Formatting Context
- *
- * Combines the functionality of:
- * - BlockContext (layout state)
- * - FloatContext (legacy float management)
- * - BlockFormattingContext (new BFC system)
- *
- * Per CSS 2.2 Section 9.4.1, a BFC is established by:
- * - Root element
- * - Floats (float != none)
- * - Absolutely positioned elements
- * - Inline-blocks
- * - Table cells/captions
- * - Overflow != visible
- * - display: flow-root
- * - Flex/Grid items
- */
 // tier-3: layout-transient, valid within pass
 typedef struct BlockContext {
-    // =========================================================================
-    // Layout State (from BlockContext)
-    // =========================================================================
-    float content_width;        // Computed content width for inner content
-    float content_height;       // Computed content height for inner content
-    float advance_y;            // Current vertical position (includes padding.top + border.top)
-    float max_width;            // Maximum content width encountered
-    float max_height;           // Maximum content height encountered
-    float line_height;          // Current line height
-    bool  line_height_is_normal; // true when line-height is 'normal', false when explicitly set
-    float init_ascender;        // Initial ascender at line start
-    float init_descender;       // Initial descender at line start
-    float lead_y;               // Leading space when line_height > font size
-    CssEnum text_align;         // Text alignment
-    CssEnum text_align_last;    // text-align-last (CSS Text 3 §7.2): overrides text_align on last line
-    CssEnum direction;          // CSS_VALUE_LTR or CSS_VALUE_RTL (CSS 2.1 §9.2.1)
-    FontProp* block_container_font; // CSS Text 3 §4.2: block container's font for tab-size calculation
-    float given_width;          // CSS specified width (-1 if auto)
-    float given_height;         // CSS specified height (-1 if auto)
-    float first_line_ascender;  // Baseline of first line (distance from border-box top, for flex baseline)
-    float last_line_ascender;   // Baseline of last line (for inline-block baseline alignment)
+    float content_width;
+    float content_height;
+    float advance_y;
+    float max_width;
+    float max_height;
+    float line_height;
+    bool  line_height_is_normal;
+    float init_ascender;
+    float init_descender;
+    float lead_y;
+    CssEnum text_align;
+    CssEnum text_align_last;
+    CssEnum direction;
+    FontProp* block_container_font;
+    float given_width;
+    float given_height;
+    float first_line_ascender;
+    float last_line_ascender;
 
     // CSS Inline 3 §5: line box metrics for text-box-trim calculation.
     // These store the max ascender/descender of the first and last line boxes,
@@ -1688,9 +1604,8 @@ typedef struct BlockContext {
     float last_line_max_ascender;
     float last_line_max_descender;
 
-    // CSS text-indent: applies only to the first line of a block container
-    float text_indent;          // Resolved text-indent value in pixels
-    bool is_first_line;         // True if we're laying out the first line of this block
+    float text_indent;
+    bool is_first_line;
 
     // CSS Inline 3 §7.7: an initial letter shortens following line boxes at
     // its inline-start margin edge while the letter occupies those lines.
@@ -1711,11 +1626,10 @@ typedef struct BlockContext {
     float initial_letter_trimmed_start_candidate;
     float initial_letter_trimmed_start_contribution;
 
-    // -webkit-line-clamp support
-    int line_number;            // Current line number (1-based, incremented by line_break)
-    int line_clamp;             // Max visible lines (0 = no clamp, from BlockProp)
-    bool line_clamped;          // True after line_clamp lines have been laid out
-    float line_clamp_advance_y; // advance_y at the clamp boundary
+    int line_number;
+    int line_clamp;
+    bool line_clamped;
+    float line_clamp_advance_y;
     float line_clamp_last_line_ascender;
     float line_clamp_last_line_max_ascender;
     float line_clamp_last_line_max_descender;
@@ -1723,52 +1637,33 @@ typedef struct BlockContext {
     bool balance_wrap_active;   // true when wrapping against balance_wrap_width
     float balance_wrap_width;   // inline measure used for text-wrap-style: balance
 
-    // =========================================================================
-    // BFC Hierarchy
-    // =========================================================================
-    struct BlockContext* parent;           // Parent block context
-    ViewBlock* establishing_element;       // Element that established this BFC (if any)
-    bool is_bfc_root;                      // True if this context establishes a new BFC
+    struct BlockContext* parent;
+    ViewBlock* establishing_element;
+    bool is_bfc_root;
 
-    // BFC coordinate origin (absolute position of content area top-left)
     float origin_x;
     float origin_y;
 
-    // Offset from BFC origin to this block's border-box origin
-    // Used to convert between BFC coordinates and local coordinates
-    // Calculated once when entering a block, avoids repeated parent-chain walks
     float bfc_offset_x;
     float bfc_offset_y;
 
-    // =========================================================================
-    // Float Management (unified from FloatContext + BlockFormattingContext)
-    // =========================================================================
-    FloatBox* left_floats;      // Linked list of left floats (head)
-    FloatBox* left_floats_tail; // Tail for O(1) append
-    FloatBox* right_floats;     // Linked list of right floats (head)
-    FloatBox* right_floats_tail;// Tail for O(1) append
+    FloatBox* left_floats;
+    FloatBox* left_floats_tail;
+    FloatBox* right_floats;
+    FloatBox* right_floats_tail;
     int left_float_count;
     int right_float_count;
-    float lowest_float_bottom;  // Optimization: track lowest float edge
+    float lowest_float_bottom;
 
-    // CSS Inline 3 §7.9.2: Initial letters that extend below a short block
-    // continue their exclusion in later blocks in the same BFC.
     InitialLetterBox* initial_letters;
     InitialLetterBox* initial_letters_tail;
 
-    // Content area bounds (for float calculations)
-    float float_left_edge;      // Left edge of content area (usually 0)
-    float float_right_edge;     // Right edge of content area
+    float float_left_edge;
+    float float_right_edge;
 
-    // CSS 2.1 §9.5.2: Saved clear_y for deferred clearance computation.
-    // Set in layout_block_content clear check, read in layout_block margin collapsing.
-    // -1 = no clearance applied, >= 0 = clearance was applied (skip margin collapse).
     float saved_clear_y;
 
-    // =========================================================================
-    // Memory
-    // =========================================================================
-    Pool* pool;                 // Memory pool for float allocations
+    Pool* pool;
 } BlockContext;
 
 // Semantic break kind classification (CSS Text 3 §4–5 + UAX #14)
@@ -1951,24 +1846,22 @@ typedef enum {
 } JustifyContent;
 
 // tier-2: style-derived, valid for one intrinsic/layout query
-typedef struct FlexDeclaredStyleInfo {
-    bool has_direction;
+typedef struct LayoutFlexStyleInfo {
     bool row;
-    bool has_wrap;
     bool wrapping;
-    bool has_row_gap;
-    bool has_column_gap;
     float row_gap;
     float column_gap;
-} FlexDeclaredStyleInfo;
+} LayoutFlexStyleInfo;
 
-FlexDeclaredStyleInfo layout_flex_declared_style_info(
-    LayoutContext* lycon, DomElement* element);
+LayoutFlexStyleInfo layout_flex_declared_style_info(LayoutContext* lycon,
+                                                    DomElement* element);
+CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
+                                 CssEnum fallback);
 
 inline FlexProp* layout_embedded_flex(ViewElement* element) {
     if (!element || (element->view_type != RDT_VIEW_BLOCK &&
                     element->view_type != RDT_VIEW_INLINE_BLOCK)) return nullptr;
-    ViewBlock* block = lam::view_as_block(element);
+    ViewBlock* block = static_cast<ViewBlock*>(element);
     return block && block->embed ? block->embedp()->flex : nullptr;
 }
 
@@ -1986,27 +1879,33 @@ inline bool layout_is_flex_container(ViewElement* element) {
         layout_embedded_flex(element));
 }
 
-inline bool layout_flex_direction_is_row(ViewElement* element) {
-    if (!element) return true;
-    FlexDeclaredStyleInfo info = layout_flex_declared_style_info(
-        nullptr, element->as_element());
-    if (info.has_direction) return info.row;
+inline LayoutFlexStyleInfo layout_flex_style_info(LayoutContext* lycon,
+                                                  ViewElement* element) {
+    LayoutFlexStyleInfo result = {true, false, 0.0f, 0.0f};
+    if (!element) return result;
     FlexProp* flex = layout_embedded_flex(element);
-    return !flex || flex->direction == DIR_ROW || flex->direction == DIR_ROW_REVERSE;
+    if (flex) {
+        result.row = flex->direction == DIR_ROW || flex->direction == DIR_ROW_REVERSE;
+        result.wrapping = flex->wrap == WRAP_WRAP || flex->wrap == WRAP_WRAP_REVERSE;
+        result.row_gap = flex->row_gap;
+        result.column_gap = flex->column_gap;
+        return result;
+    }
+    LayoutFlexStyleInfo declared = layout_flex_declared_style_info(
+        lycon, element->as_element());
+    return declared;
+}
+
+inline bool layout_flex_direction_is_row(ViewElement* element) {
+    return layout_flex_style_info(nullptr, element).row;
 }
 
 inline float layout_flex_column_gap(ViewElement* element) {
-    FlexProp* flex = layout_embedded_flex(element);
-    return flex ? flex->column_gap : 0.0f;
+    return layout_flex_style_info(nullptr, element).column_gap;
 }
 
 inline bool layout_flex_wraps(ViewElement* element) {
-    if (!element) return false;
-    FlexProp* flex = layout_embedded_flex(element);
-    if (flex && (flex->wrap == WRAP_WRAP || flex->wrap == WRAP_WRAP_REVERSE)) return true;
-    FlexDeclaredStyleInfo info = layout_flex_declared_style_info(
-        nullptr, element->as_element());
-    return info.has_wrap && info.wrapping;
+    return layout_flex_style_info(nullptr, element).wrapping;
 }
 
 // tier-3: layout-transient, valid within pass
@@ -2122,6 +2021,13 @@ typedef enum LayoutAxis {
     LAYOUT_AXIS_X,
     LAYOUT_AXIS_Y,
 } LayoutAxis;
+
+static inline bool layout_tag_in_list(NameId tag, const NameId* tags, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        if (tags[i] == tag) return true;
+    }
+    return false;
+}
 
 inline CssBoxSide layout_axis_side(LayoutAxis axis, bool start) {
     if (axis == LAYOUT_AXIS_X) return start ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT;

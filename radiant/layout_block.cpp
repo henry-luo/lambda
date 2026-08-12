@@ -1207,6 +1207,23 @@ static void get_self_margin_chain(ViewBlock* block, float margin_top,
     }
 }
 
+static ViewBlock* find_previous_margin_collapse_block(ViewBlock* block) {
+    if (!block) return nullptr;
+    for (View* previous = block->prev_placed_view();
+         previous && previous->is_block();
+         previous = previous->prev_placed_view()) {
+        ViewBlock* candidate = lam::view_require_block(previous);
+        if ((candidate->position && element_has_float(candidate)) ||
+            layout_block_is_out_of_flow_positioned(candidate) ||
+            (candidate->height == 0.0f && !candidate->bound)) {
+            continue;
+        }
+        if (candidate->view_type != RDT_VIEW_INLINE_BLOCK && candidate->bound) return candidate;
+        break;
+    }
+    return nullptr;
+}
+
 static void shift_margin_collapse_floats(FloatBox* floats, ViewElement* parent,
                                          ViewElement* child, float delta,
                                          const char* source_loc) {
@@ -1243,14 +1260,14 @@ static bool layout_source_has_in_flow_block_child(ViewBlock* block) {
     return false;
 }
 
-// (2) margin-top still has UA specificity (not overridden by author CSS).
 static inline bool is_quirky_margin_tag(NameId tag) {
-    return tag == MARKUP_NAME_P || tag == MARKUP_NAME_H1 || tag == MARKUP_NAME_H2 ||
-           tag == MARKUP_NAME_H3 || tag == MARKUP_NAME_H4 || tag == MARKUP_NAME_H5 ||
-           tag == MARKUP_NAME_H6 || tag == MARKUP_NAME_UL || tag == MARKUP_NAME_OL ||
-           tag == MARKUP_NAME_BLOCKQUOTE || tag == MARKUP_NAME_PRE ||
-           tag == MARKUP_NAME_DL || tag == MARKUP_NAME_FIGURE || tag == MARKUP_NAME_HR ||
-           tag == MARKUP_NAME_FIELDSET || tag == MARKUP_NAME_MENU || tag == MARKUP_NAME_DIR;
+    static const NameId quirky_tags[] = {
+        MARKUP_NAME_P, MARKUP_NAME_H1, MARKUP_NAME_H2, MARKUP_NAME_H3,
+        MARKUP_NAME_H4, MARKUP_NAME_H5, MARKUP_NAME_H6, MARKUP_NAME_UL,
+        MARKUP_NAME_OL, MARKUP_NAME_BLOCKQUOTE, MARKUP_NAME_PRE, MARKUP_NAME_DL,
+        MARKUP_NAME_FIGURE, MARKUP_NAME_HR, MARKUP_NAME_FIELDSET,
+        MARKUP_NAME_MENU, MARKUP_NAME_DIR};
+    return layout_tag_in_list(tag, quirky_tags, sizeof(quirky_tags) / sizeof(*quirky_tags));
 }
 
 static inline bool has_quirky_margin(ViewBlock* block, bool top) {
@@ -4126,7 +4143,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     }
 }
 
-static void resolve_table_auto_margins_after_shrink(ViewBlock* block, float containing_width, bool is_float) {
+static void layout_resolve_auto_margins_after_width_change(
+        ViewBlock* block, float containing_width, bool is_float) {
     if (!block || !block->bound || is_float) return;
     if (block->display.outer == CSS_VALUE_INLINE ||
         block->display.outer == CSS_VALUE_INLINE_BLOCK) return;
@@ -4201,7 +4219,7 @@ static void layout_table_block_content(LayoutContext* lycon, ViewBlock* block,
             (block->bound && block->boundary_mut()->border ? block->boundary_mut()->border->width.right : 0.0f);
         block->width = empty ? layout_apply_min_max_axis(block, shrink_width, true, false)
                              : layout_floor_min_axis(block, shrink_width, true);
-        resolve_table_auto_margins_after_shrink(block, margin_containing_width,
+        layout_resolve_auto_margins_after_width_change(block, margin_containing_width,
             block->position && element_has_float(block));
     }
 }
@@ -4347,9 +4365,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     }
 }
 
-/**
- * Layout inline SVG element with intrinsic sizing from width/height attributes or viewBox
- */
+// layout inline SVG using its intrinsic dimensions and viewBox.
 void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
     Element* native_elem = dom_element_backing(lam::dom_require_element(block));
     if (!native_elem) {
@@ -4518,10 +4534,7 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
     }
 }
 
-/**
- * Insert pseudo-element into DOM tree at appropriate position
- * ::before is inserted as first child, ::after as last child
- */
+// insert a pseudo-element at its generated-content position.
 void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before) {
     if (!parent || !pseudo) return;
     // reflow guards must search descendants, not just direct children.
@@ -4576,10 +4589,7 @@ void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
 
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 
-/**
- * Check if an element is a float by examining its specified style
- * This is called before the element has a view, so we check the CSS properties directly
- */
+// check float state before a view has been materialized.
 static CssEnum get_element_float_value(DomElement* elem) {
     if (!elem) return CSS_VALUE_NONE;
     if (elem->position) {
@@ -4712,36 +4722,8 @@ static DomNode* fieldset_next_flow_child(ViewBlock* fieldset, DomNode* current,
     return next;
 }
 
-/**
- * Pre-scan inline siblings for floats and layout them first
- * This ensures floats are positioned before inline content that follows them in DOM order
- *
- * Per CSS 2.2: floats affect the current line, so they must be positioned before
- * we lay out inline content that shares the same line.
- *
- * IMPORTANT: This only applies when there's inline content mixed with floats.
- * If all siblings are block-level, floats appear at their encounter point.
- *
- * @param lycon Layout context
- * @param first_child First child to scan from
- * @param parent_block The parent block establishing the formatting context
- */
-/**
- * Pre-scan and layout ALL floats in the content.
- *
- * CSS floats are "out of flow" - they're positioned and then content flows around them.
- * This means floats affect content that comes BEFORE them in DOM order if that content
- * is on the same line.
- *
- * For simplicity, we pre-lay ALL floats at Y=0, then during inline layout, content
- * flows around them via adjust_line_for_floats(). If this causes issues with floats
- * that should appear lower (due to preceding block-level content), we'll need a more
- * sophisticated approach.
- *
- * This handles cases like:
- *   <span>Filler Text</span><float/>  -> float at (0,0), text at (96,0) ✓
- *   <span>Long text...</span><float/> -> float at (0,0) - WRONG, should be (0, line2)
- */
+// pre-position inline-sibling floats that affect the current line.
+// detect inline content before the float pre-positioning pass.
 static bool prescan_node_has_in_flow_inline_content(DomNode* node) {
     if (!node) return false;
     if (node->is_text()) {
@@ -7843,14 +7825,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             block->display.outer != CSS_VALUE_INLINE_BLOCK &&
             block->display.outer != CSS_VALUE_INLINE &&
             (block->boundary()->margin.left_type == CSS_VALUE_AUTO || block->boundary()->margin.right_type == CSS_VALUE_AUTO)) {
-            float old_margin_left = block->boundary()->margin.left;
             float margin_available = pa_block->content_width - bfc_available_width_reduction;
-            layout_resolve_auto_margin_pair(
-                margin_available, block->width,
-                block->boundary()->margin.left_type == CSS_VALUE_AUTO,
-                block->boundary()->margin.right_type == CSS_VALUE_AUTO,
-                &block->boundary_mut()->margin.left, &block->boundary_mut()->margin.right);
-            block->x += block->boundary()->margin.left - old_margin_left;
+            layout_resolve_auto_margins_after_width_change(
+                block, margin_available, is_float);
         }
     }
     layout_block_inner_content(lycon, block);
@@ -7971,14 +7948,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     if (block->bound && block->display.inner == RDT_DISPLAY_REPLACED && !is_float &&
         block->display.outer != CSS_VALUE_INLINE_BLOCK && block->display.outer != CSS_VALUE_INLINE &&
         (block->boundary()->margin.left_type == CSS_VALUE_AUTO || block->boundary()->margin.right_type == CSS_VALUE_AUTO)) {
-        float margin_available = pa_block->content_width;
-        float old_margin_left = block->boundary()->margin.left;
-        bool left_auto = block->boundary()->margin.left_type == CSS_VALUE_AUTO;
-        bool right_auto = block->boundary()->margin.right_type == CSS_VALUE_AUTO;
-        layout_resolve_auto_margin_pair(
-            margin_available, block->width, left_auto, right_auto,
-            &block->boundary_mut()->margin.left, &block->boundary_mut()->margin.right);
-        block->x += block->boundary()->margin.left - old_margin_left;
+        layout_resolve_auto_margins_after_width_change(
+            block, pa_block->content_width, is_float);
     }
     // CSS 2.2 Section 8.3.1: Margins collapse when parent has no border/padding
     // IMPORTANT: Elements that establish a BFC do NOT collapse margins with their children
@@ -9216,27 +9187,16 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (is_self_collapsing && parent_margin_collapse_uses_physical_y(block)) {
                     if (!parent_child_collapsed) {
                         // CSS 2.1 §8.3.1: The element's own margins merge via collapse_margins
-                        float prev_mb = 0;
-                        bool prev_has_clearance_chain = false;
-                        ViewBlock* prev_block_for_chain = nullptr;
-                        {
-                            View* pv = block->prev_placed_view();
-                            while (pv && pv->is_block()) {
-                                ViewBlock* vb = lam::view_require_block(pv);
-                                if (vb->position && element_has_float(vb)) { pv = pv->prev_placed_view(); continue; }
-                                if (layout_block_is_out_of_flow_positioned(vb)) { pv = pv->prev_placed_view(); continue; }
-                                // CSS 2.1 §8.3.1: Skip zero-height no-bound blocks
-                                if (vb->height == 0 && !vb->bound) { pv = pv->prev_placed_view(); continue; }
-                                break;
-                            }
-                            if (pv && pv->is_block() && pv->view_type != RDT_VIEW_INLINE_BLOCK && lam::view_require_block(pv)->bound) {
-                                prev_block_for_chain = lam::view_require_block(pv);
-                                prev_mb = prev_block_for_chain->boundary()->margin.bottom;
-                                prev_has_clearance_chain = prev_block_for_chain->boundary()->clearance_in_margin_chain;
-                            }
-                        }
+                        ViewBlock* prev_block_for_chain =
+                            find_previous_margin_collapse_block(block);
+                        float prev_mb = prev_block_for_chain
+                            ? prev_block_for_chain->boundary()->margin.bottom : 0.0f;
+                        bool prev_has_clearance_chain = prev_block_for_chain &&
+                            prev_block_for_chain->boundary()->clearance_in_margin_chain;
                         float self_collapsed = collapse_margins(original_margin_top, block->boundary()->margin.bottom);
                         float new_pending, contribution;
+                        float combined_pos = 0.0f;
+                        float combined_neg = 0.0f;
                         if (block_has_clearance) {
                             // CSS 2.1 §8.3.1 + §9.5.2: Clearance separates this element's
                             // margin stands alone — it does NOT collapse with prev_mb. Clearance
@@ -9245,20 +9205,16 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         } else {
                             // CSS 2.1 §8.3.1: Multi-way collapse using chain components.
                             // use the {max_positive, most_negative} components to avoid
-                            float prev_pos, prev_neg;
-                            if (prev_block_for_chain) {
-                                get_margin_chain(prev_block_for_chain, &prev_pos, &prev_neg);
-                            } else {
-                                prev_pos = 0; prev_neg = 0;
-                            }
+                            float prev_pos = 0.0f, prev_neg = 0.0f;
+                            get_margin_chain(prev_block_for_chain, &prev_pos, &prev_neg);
                             float cur_pos, cur_neg;
                             get_self_margin_chain(block, original_margin_top, &cur_pos, &cur_neg);
                             bool use_chain = (prev_neg < 0 || cur_neg < 0 ||
                                               has_margin_chain(block->bound) ||
                                               (prev_block_for_chain && has_margin_chain(prev_block_for_chain->bound)));
                             if (use_chain) {
-                                float combined_pos = max(prev_pos, cur_pos);
-                                float combined_neg = min(prev_neg, cur_neg);
+                                combined_pos = max(prev_pos, cur_pos);
+                                combined_neg = min(prev_neg, cur_neg);
                                 new_pending = combined_pos + combined_neg;
                                 // CSS 2.1 §8.3.1: contribution can undo up to prev_mb
                                 // (which is already baked into advance_y), but cannot push
@@ -9281,16 +9237,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         if (block_has_clearance) {
                             block->boundary_mut()->margin.bottom = new_pending;
                         } else {
-                            float prev_pos, prev_neg;
-                            if (prev_block_for_chain) {
+                            if (combined_pos == 0.0f && combined_neg == 0.0f) {
+                                float prev_pos = 0.0f, prev_neg = 0.0f;
                                 get_margin_chain(prev_block_for_chain, &prev_pos, &prev_neg);
-                            } else {
-                                prev_pos = 0; prev_neg = 0;
+                                float cur_pos = 0.0f, cur_neg = 0.0f;
+                                get_self_margin_chain(block, original_margin_top, &cur_pos, &cur_neg);
+                                combined_pos = max(prev_pos, cur_pos);
+                                combined_neg = min(prev_neg, cur_neg);
                             }
-                            float cur_pos, cur_neg;
-                            get_self_margin_chain(block, original_margin_top, &cur_pos, &cur_neg);
-                            float combined_pos = max(prev_pos, cur_pos);
-                            float combined_neg = min(prev_neg, cur_neg);
                             set_margin_chain(block->bound, combined_pos, combined_neg);
                         }
                         // CSS 2.1 §8.3.1: Propagate clearance flag through the margin chain.

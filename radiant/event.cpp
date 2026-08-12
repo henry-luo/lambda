@@ -68,10 +68,6 @@ extern "C" void selection_refresh_presentation(DocState* state);
 void rebuild_lambda_doc(UiContext* uicon);
 void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count);
 
-// Forward declarations for HTML event handler post-rebuild
-struct CssEngine;
-void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* pool,
-                                     struct CssStylesheet*** stylesheets, int* count, int depth = 0);
 struct SelectorMatcher* selector_matcher_create(Pool* pool);
 static void clear_cascaded_styles_recursive(DomNode* node);
 static void mark_layout_dirty_recursive(DomNode* node);
@@ -4274,18 +4270,9 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
 
     Pool* pool = doc->document_pool;
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
-    bool epoch_scope = style_epoch_cascade_begin(
-        doc, root, css_engine, false);
-    if (pool && css_engine && matcher) {
-        for (int i = 0; i < doc->stylesheet_count; i++) {
-            if (doc->stylesheets[i]) {
-                radiant_apply_css_stylesheet_to_tree(root, doc->stylesheets[i],
-                                                  matcher, pool, css_engine);
-            }
-        }
-    }
-
-    if (epoch_scope) style_epoch_cascade_end(doc);
+    radiant_apply_css_stylesheets_to_tree(
+        doc, root, doc->stylesheets, doc->stylesheet_count,
+        pool, css_engine, matcher);
 }
 
 typedef struct DomJsDirtyBound {

@@ -786,13 +786,6 @@ static bool layout_inline_display(CssEnum display) {
         display == CSS_VALUE_INLINE_TABLE;
 }
 
-static bool layout_tag_in_list(NameId tag, const NameId* tags, size_t count) {
-    for (size_t i = 0; i < count; i++) {
-        if (tags[i] == tag) return true;
-    }
-    return false;
-}
-
 bool layout_element_was_inline(DomElement* element, bool include_replaced) {
     if (!element) return false;
     CssEnum display = layout_specified_keyword(
@@ -883,17 +876,15 @@ float layout_view_children_bottom(ViewBlock* block, bool block_only) {
     return bottom;
 }
 
-static void layout_apply_flex_declared_keyword(FlexDeclaredStyleInfo* info,
-                                                CssEnum keyword) {
+static void layout_apply_flex_declared_keyword(LayoutFlexStyleInfo* info,
+                                               CssEnum keyword) {
     if (!info) return;
     if (keyword == CSS_VALUE_ROW || keyword == CSS_VALUE_ROW_REVERSE ||
         keyword == CSS_VALUE_COLUMN || keyword == CSS_VALUE_COLUMN_REVERSE) {
-        info->has_direction = true;
         info->row = keyword == CSS_VALUE_ROW || keyword == CSS_VALUE_ROW_REVERSE;
     } else if (keyword == CSS_VALUE_NOWRAP ||
                keyword == CSS_VALUE_WRAP ||
                keyword == CSS_VALUE_WRAP_REVERSE) {
-        info->has_wrap = true;
         info->wrapping = keyword == CSS_VALUE_WRAP ||
             keyword == CSS_VALUE_WRAP_REVERSE;
     }
@@ -911,9 +902,9 @@ static bool layout_flex_declared_length(LayoutContext* lycon, StyleTree* style,
     return true;
 }
 
-FlexDeclaredStyleInfo layout_flex_declared_style_info(
+LayoutFlexStyleInfo layout_flex_declared_style_info(
         LayoutContext* lycon, DomElement* element) {
-    FlexDeclaredStyleInfo info = {};
+    LayoutFlexStyleInfo info = {true, false, 0.0f, 0.0f};
     if (!element || !element->specified_style) return info;
     StyleTree* style = element->specified_style;
 
@@ -942,17 +933,14 @@ FlexDeclaredStyleInfo layout_flex_declared_style_info(
 
     float gap = 0.0f;
     if (layout_flex_declared_length(lycon, style, CSS_PROPERTY_GAP, &gap)) {
-        info.has_row_gap = info.has_column_gap = true;
         info.row_gap = info.column_gap = gap;
     }
     if (layout_flex_declared_length(
             lycon, style, CSS_PROPERTY_ROW_GAP, &gap)) {
-        info.has_row_gap = true;
         info.row_gap = gap;
     }
     if (layout_flex_declared_length(
             lycon, style, CSS_PROPERTY_COLUMN_GAP, &gap)) {
-        info.has_column_gap = true;
         info.column_gap = gap;
     }
     return info;
