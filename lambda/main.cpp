@@ -404,6 +404,8 @@ static bool js_test262_restore_preamble_module_state(const JsPreambleState* prea
     return true;
 }
 
+extern void jm_abandon_active_mir_after_signal(void);
+
 #ifdef _WIN32
 // Windows compatibility shim for __intrinsic_setjmpex
 // In MinGW, we'll use regular setjmp instead of the Microsoft intrinsic
@@ -4005,8 +4007,10 @@ int main(int argc, char *argv[]) {
                 js_test262_clear_preamble(&preamble, &has_preamble, &preamble_var_checkpoint,
                                           &saved_harness_src, &saved_harness_len);
                 if (hot_reload) {
-                    js_test262_hot_context_destroy(&runtime, batch_context);
+                    // Finish deferred code while its JS capsule is active;
+                    // teardown clears that owner and would otherwise leak it.
                     jm_cleanup_deferred_mir();
+                    js_test262_hot_context_destroy(&runtime, batch_context);
                     js_test262_hot_context_create(&runtime, batch_context);
                 } else {
                     js_batch_reset();
@@ -4339,6 +4343,11 @@ int main(int argc, char *argv[]) {
             // Crash, timeout, and MIR-error longjmps bypass generated
             // epilogues, so every batch path returns to its test watermark.
             lambda_recovery_checkpoint_restore(&batch_recovery_checkpoint);
+            if (result >= 128 || result == 124) {
+                // A recovery jump bypasses the compiler epilogue; abandon the
+                // active owner before the next reset can observe it.
+                jm_abandon_active_mir_after_signal();
+            }
 
             gettimeofday(&tv_end, NULL);
             long elapsed_us = (tv_end.tv_sec - tv_start.tv_sec) * 1000000L + (tv_end.tv_usec - tv_start.tv_usec);
@@ -4366,7 +4375,9 @@ int main(int argc, char *argv[]) {
             // but memory-hungry tests (like RegExp CharacterClassEscapes) only
             // exist in a few batches, so actual peak is much lower.
             static const size_t RSS_LIMIT = 4096UL * 1024 * 1024; // 4 GB
-            static const size_t RSS_RESET_LIMIT = 1024UL * 1024 * 1024; // 1 GB
+            // Per-test MIR cleanup keeps the retained heap below the hard cap;
+            // the old lower watermark recycled a live preamble mid-batch.
+            static const size_t RSS_RESET_LIMIT = RSS_LIMIT;
             static const int MAX_CRASH_COUNT = 10;
 
             if (hot_reload) {
@@ -4398,14 +4409,13 @@ int main(int argc, char *argv[]) {
 #endif
                     }
                     js_test262_abandon_preamble_for_recovery(&preamble, &has_preamble);
-                    js_test262_hot_context_destroy(&runtime, batch_context);
-                    // Clean up deferred MIR contexts from previous tests — heap objects
-                    // referencing their code pages are now gone after heap_destroy().
+                    // Finish deferred code while its JS capsule is active;
+                    // teardown clears that owner and would otherwise leak it.
                     jm_cleanup_deferred_mir();
-                    // Clean up the active MIR context that was interrupted by longjmp
-                    // (never deferred because transpile_js_to_mir_core didn't finish).
-                    extern void jm_cleanup_active_mir(void);
-                    jm_cleanup_active_mir();
+                    // The active compile owner may be inconsistent after a
+                    // signal, so abandon it without re-entering MIR_finish.
+                    jm_abandon_active_mir_after_signal();
+                    js_test262_hot_context_destroy(&runtime, batch_context);
                     js_test262_hot_context_create(&runtime, batch_context);
 
                     // Heap destroyed — recompile preamble for subsequent tests.
@@ -4418,9 +4428,14 @@ int main(int argc, char *argv[]) {
                         if (pres.item != ITEM_ERROR) {
                             has_preamble = true;
                             preamble_var_checkpoint = preamble.module_var_count;
-                            // A fresh heap has no test-owned cache state.  Do not
-                            // re-enter reset after a signal recovery: the signal
-                            // may have interrupted allocator-backed cleanup.
+                            // The replacement heap is clean; re-enter reset now so
+                            // the next test owns a consumer slab instead of running
+                            // against the retained preamble after crash recovery.
+                            if (!js_test262_restore_preamble_module_state(&preamble)) {
+                                has_preamble = false;
+                            } else {
+                                js_batch_reset_to(preamble_var_checkpoint);
+                            }
                         }
                     }
                 } else if (rss_after > RSS_LIMIT) {
@@ -4436,8 +4451,8 @@ int main(int argc, char *argv[]) {
                     // the next test so large temporary strings from generated
                     // Unicode/URI suites do not make later tests hit the alarm.
                     js_test262_abandon_preamble_for_recovery(&preamble, &has_preamble);
-                    js_test262_hot_context_destroy(&runtime, batch_context);
                     jm_cleanup_deferred_mir();
+                    js_test262_hot_context_destroy(&runtime, batch_context);
                     js_test262_hot_context_create(&runtime, batch_context);
 
                     if (saved_harness_src) {
@@ -4459,6 +4474,9 @@ int main(int argc, char *argv[]) {
                 } else if (has_preamble) {
                     if (js_test262_restore_preamble_module_state(&preamble)) {
                         js_batch_reset_to(preamble_var_checkpoint);
+                        // Reset clears test-owned function/cache references first;
+                        // only then is it safe to finish that test's MIR context.
+                        jm_cleanup_deferred_mir();
                     } else {
                         has_preamble = false;
                     }
@@ -4467,8 +4485,10 @@ int main(int argc, char *argv[]) {
                     // preamble to restore. Their previous heap is the realm
                     // boundary; retaining it lets one module's TLA registry
                     // and globals affect the next test in this hot worker.
-                    js_test262_hot_context_destroy(&runtime, batch_context);
+                    // Finish deferred code while its JS capsule is active;
+                    // teardown clears that owner and would otherwise leak it.
                     jm_cleanup_deferred_mir();
+                    js_test262_hot_context_destroy(&runtime, batch_context);
                     js_test262_hot_context_create(&runtime, batch_context);
                 }
             } else {
