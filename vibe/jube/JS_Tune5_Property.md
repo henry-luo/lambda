@@ -49,7 +49,7 @@ all enter the same eight semantic operation families.
 | TypeMap safety | Ordinary internal `Map.type` validation is a debug-only C assertion. Release contains no plausibility call, recovery branch, log-and-miss, or synthesized fallback. | Debug death/invariant test plus release object/source scan under **D3.4.1/D3.4.5**. |
 | Deletion | The superseded property, array-index, descriptor, prototype-scan, ambient-state, and public map-fast routes are absent. | P9 deletion ledger and standing census ratchets. |
 | Source size | The aggregate production C/C++ delta across `lambda/js` and any Lambda-runtime support added by Tune5 is net negative. Target at least 750 lines removed. | Clean P0/P9 LOC snapshots; moving code between directories cannot satisfy the gate. |
-| Hard JS runtime LOC reduction | Final `lambda/js` production C/C++ LOC is at least **2,000 lines lower** than the clean post-Tune4 P0 baseline: `final_lambda_js_loc <= P0_lambda_js_loc - 2000`. This is mandatory independently of the aggregate source-size gate. | The `lambda/js` result from the same unmodified LOC command and file scope at P0 and P9. |
+| Hard JS runtime LOC reduction | Final `lambda/js` production C/C++ LOC is at least **4,000 lines lower** than the clean post-Tune4 P0 baseline: `final_lambda_js_loc <= P0_lambda_js_loc - 4000`. This is mandatory independently of the aggregate source-size gate. | The `lambda/js` result from the same unmodified LOC command and file scope at P0 and P9. |
 | Behavior | Baseline JS, Test262, MIR/GC, DOM/layout, and focused Tune5 suites are green in debug and release as applicable. | P9 validation transcript. |
 | Performance | Release-only property/array benchmark buckets show no material regression; no debug build is used for timing. | Repeated benchmark samples and profile comparison. |
 
@@ -1339,15 +1339,23 @@ Record at P0 and P9:
 
 Hard gates:
 
-1. Aggregate production delta is negative. Target: at least 750 lines removed.
-2. Final `lambda/js` production C/C++ LOC is at least 2,000 lines below the
-   clean post-Tune4 P0 baseline:
-   `final_lambda_js_loc <= P0_lambda_js_loc - 2000`.
+`./utils/count_loc.sh` is the only final LOC authority. `rg`, `wc`, and diff
+statistics may diagnose a batch but do not define the gate. The final total
+must satisfy both thresholds after all new callable production code is
+included:
 
-Both gates must pass. If new elements/GC support makes the aggregate positive,
-simplify or delete the remaining predecessors before landing; do not exempt
-the support because it resides outside `lambda/js`. Runtime-support deletion
-also cannot offset a failure to remove 2,000 lines from `lambda/js` itself.
+```text
+hard exit:      final_lambda_js_loc - 4000
+stretch target: final_lambda_js_loc - 5000
+```
+
+Here `lambda_js_loc` is the `./lambda/js` C/C++ count reported by the
+unmodified script: `.c`, `.h`, `.cpp`, and `.hpp` files. Missing the 4,000-line hard exit
+blocks Tune5 completion.
+
+Do not manufacture the reduction by moving code outside `lambda/js`, putting
+runtime semantics in generated output, compressing readable algorithms, or
+combining unrelated statements. The expected deletion comes from structured code simplication, unification, and elimination of dead, or duplicated code.
 
 ---
 
@@ -1512,7 +1520,7 @@ introduce an unbounded compatibility layer.
 - [ ] Release-only performance results are recorded and non-regressing.
 - [ ] Structural census meets every P9 ratchet.
 - [ ] Aggregate production LOC is net negative; target reduction is reported.
-- [ ] Final `lambda/js` production C/C++ LOC is at least 2,000 lines below the
+- [ ] Final `lambda/js` production C/C++ LOC is at least 4,000 lines below the
       clean post-Tune4 P0 baseline.
 - [ ] Old helpers, switches, ambient state, and public fast-map APIs are gone.
 - [ ] Implementation docs describe only the surviving architecture.

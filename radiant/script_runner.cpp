@@ -2088,9 +2088,9 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 
     if (s_js_mir_cache && !s_retain_js_state) {
         if (!cached_preamble) {
-            result = transpile_js_to_mir_preamble_len(runtime, preamble_buf->str,
-                                                      preamble_buf->length,
-                                                      preamble_filename, preamble, NULL);
+            result = compile_js_mir_preamble_len(runtime, preamble_buf->str,
+                                                 preamble_buf->length,
+                                                 preamble_filename, preamble);
             js_mir_accumulate_last_phase_timing(true);
             if (get_type_id(result) != LMD_TYPE_ERROR) {
                 cached_preamble = js_mir_cache_adopt(
