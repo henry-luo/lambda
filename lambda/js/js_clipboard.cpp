@@ -1726,48 +1726,61 @@ extern "C" Item js_lambda_clipboard_get_perm(Item name_item) {
 
 extern "C" void js_register_clipboard_globals(Item global_this) {
     if (!clipboard_ensure_roots()) return;
+    // D5.3/D5.4.3: registration allocates while publishing each property, so
+    // constructor/prototype locals must remain exact roots until publication.
+    RootFrame global_roots(1);
+    Rooted<Item> global_root(global_roots, global_this);
     // ---- Blob -------------------------------------------------------------
     {
-        Item ctor = js_new_native_constructor(js_blob_new);
-        js_set_function_name(ctor, make_str("Blob"));
-        Item proto = js_new_object();
-        js_set_key_default(proto, make_str("constructor"), ctor);
-        js_set_key_default(proto, make_str("text"),
+        RootFrame roots(2);
+        Rooted<Item> ctor_root(roots, js_new_native_constructor(js_blob_new));
+        Rooted<Item> proto_root(roots, ItemNull);
+        js_set_function_name(ctor_root.get(), make_str("Blob"));
+        proto_root.set(js_new_object());
+        js_set_key_default(proto_root.get(), make_str("constructor"), ctor_root.get());
+        js_set_key_default(proto_root.get(), make_str("text"),
             js_new_native_function(js_blob_text));
-        js_set_key_default(proto, make_str("arrayBuffer"),
+        js_set_key_default(proto_root.get(), make_str("arrayBuffer"),
             js_new_native_function(js_blob_array_buffer));
-        js_set_key_default(proto, make_str("slice"),
+        js_set_key_default(proto_root.get(), make_str("slice"),
             js_new_native_function(js_blob_slice));
-        js_set_key_default(ctor, make_str("prototype"), proto);
-        g_blob_proto = proto;
-        js_set_key_default(global_this, make_str("Blob"), ctor);
+        js_set_key_default(ctor_root.get(), make_str("prototype"), proto_root.get());
+        g_blob_proto = proto_root.get();
+        js_set_key_default(global_root.get(), make_str("Blob"), ctor_root.get());
     }
 
     // ---- File -------------------------------------------------------------
     {
-        Item ctor = js_new_native_constructor(js_file_new);
-        js_set_function_name(ctor, make_str("File"));
-        Item proto = js_new_object();
-        js_set_key_default(proto, make_str("constructor"), ctor);
-        if (get_type_id(g_blob_proto) == LMD_TYPE_MAP) js_set_prototype(proto, g_blob_proto);
-        js_set_key_default(ctor, make_str("prototype"), proto);
-        g_file_proto = proto;
-        js_set_key_default(global_this, make_str("File"), ctor);
+        RootFrame roots(2);
+        Rooted<Item> ctor_root(roots, js_new_native_constructor(js_file_new));
+        Rooted<Item> proto_root(roots, ItemNull);
+        js_set_function_name(ctor_root.get(), make_str("File"));
+        proto_root.set(js_new_object());
+        js_set_key_default(proto_root.get(), make_str("constructor"), ctor_root.get());
+        if (get_type_id(g_blob_proto) == LMD_TYPE_MAP) {
+            js_set_prototype(proto_root.get(), g_blob_proto);
+        }
+        js_set_key_default(ctor_root.get(), make_str("prototype"), proto_root.get());
+        g_file_proto = proto_root.get();
+        js_set_key_default(global_root.get(), make_str("File"), ctor_root.get());
     }
 
     // ---- ClipboardItem ---------------------------------------------------
     {
-        Item ctor = js_new_native_constructor(js_clipboard_item_new);
-        js_set_function_name(ctor, make_str("ClipboardItem"));
-        Item proto = js_new_object();
-        js_set_key_default(proto, make_str("constructor"), ctor);
-        js_set_key_default(proto, make_str("getType"),
+        RootFrame roots(2);
+        Rooted<Item> ctor_root(roots,
+            js_new_native_constructor(js_clipboard_item_new));
+        Rooted<Item> proto_root(roots, ItemNull);
+        js_set_function_name(ctor_root.get(), make_str("ClipboardItem"));
+        proto_root.set(js_new_object());
+        js_set_key_default(proto_root.get(), make_str("constructor"), ctor_root.get());
+        js_set_key_default(proto_root.get(), make_str("getType"),
             js_new_native_function(js_clipboard_item_get_type));
-        js_set_key_default(ctor, make_str("prototype"), proto);
-        js_set_key_default(ctor, make_str("supports"),
+        js_set_key_default(ctor_root.get(), make_str("prototype"), proto_root.get());
+        js_set_key_default(ctor_root.get(), make_str("supports"),
             js_new_native_function(js_clipboard_item_supports));
-        g_clipboard_item_proto = proto;
-        js_set_key_default(global_this, make_str("ClipboardItem"), ctor);
+        g_clipboard_item_proto = proto_root.get();
+        js_set_key_default(global_root.get(), make_str("ClipboardItem"), ctor_root.get());
     }
 
     // ---- FileList --------------------------------------------------------
@@ -1797,66 +1810,77 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         // the same precisely rooted prototype; otherwise a nursery relocation
         // splits instanceof identity from the public constructor property.
         g_file_list_proto = proto_root.get();
-        js_set_key_default(global_this, make_str("FileList"), ctor_root.get());
+        js_set_key_default(global_root.get(), make_str("FileList"), ctor_root.get());
     }
 
     // ---- ClipboardEvent --------------------------------------------------
     {
-        Item ctor = js_new_native_constructor(js_clipboard_event_new);
-        js_set_function_name(ctor, make_str("ClipboardEvent"));
-        Item proto = js_new_object();
-        js_set_key_default(proto, make_str("constructor"), ctor);
-        js_set_key_default(ctor, make_str("prototype"), proto);
-        g_clipboard_event_proto = proto;
-        js_set_key_default(global_this, make_str("ClipboardEvent"), ctor);
+        RootFrame roots(2);
+        Rooted<Item> ctor_root(roots,
+            js_new_native_constructor(js_clipboard_event_new));
+        Rooted<Item> proto_root(roots, ItemNull);
+        js_set_function_name(ctor_root.get(), make_str("ClipboardEvent"));
+        proto_root.set(js_new_object());
+        js_set_key_default(proto_root.get(), make_str("constructor"), ctor_root.get());
+        js_set_key_default(ctor_root.get(), make_str("prototype"), proto_root.get());
+        g_clipboard_event_proto = proto_root.get();
+        js_set_key_default(global_root.get(), make_str("ClipboardEvent"), ctor_root.get());
     }
 
     // ---- DataTransfer ----------------------------------------------------
     {
-        Item ctor = js_new_native_constructor(js_data_transfer_new);
-        js_set_function_name(ctor, make_str("DataTransfer"));
-        Item proto = js_new_object();
-        js_set_key_default(proto, make_str("constructor"), ctor);
-        js_set_key_default(ctor, make_str("prototype"), proto);
-        g_data_transfer_proto = proto;
-        js_set_key_default(global_this, make_str("DataTransfer"), ctor);
+        RootFrame roots(2);
+        Rooted<Item> ctor_root(roots,
+            js_new_native_constructor(js_data_transfer_new));
+        Rooted<Item> proto_root(roots, ItemNull);
+        js_set_function_name(ctor_root.get(), make_str("DataTransfer"));
+        proto_root.set(js_new_object());
+        js_set_key_default(proto_root.get(), make_str("constructor"), ctor_root.get());
+        js_set_key_default(ctor_root.get(), make_str("prototype"), proto_root.get());
+        g_data_transfer_proto = proto_root.get();
+        js_set_key_default(global_root.get(), make_str("DataTransfer"), ctor_root.get());
     }
 
     // ---- Clipboard (instanceof + prototype) -----------------------------
     // Real Web platform exposes `Clipboard` as a class. We register a
     // ctor + prototype so `nav.clipboard instanceof Clipboard` works and
     // `Clipboard.prototype.{write,read,readText,writeText}` is observable.
-    Item clipboard_proto;
+    RootFrame clipboard_roots(1);
+    Rooted<Item> clipboard_proto_root(clipboard_roots, ItemNull);
     {
-        Item ctor = js_new_native_constructor(js_data_transfer_new); // dummy ctor
-        js_set_function_name(ctor, make_str("Clipboard"));
-        clipboard_proto = js_new_object();
-        js_set_key_default(clipboard_proto, make_str("constructor"), ctor);
-        js_set_key_default(clipboard_proto, make_str("writeText"),
+        RootFrame roots(1);
+        Rooted<Item> ctor_root(roots,
+            js_new_native_constructor(js_data_transfer_new)); // dummy ctor
+        js_set_function_name(ctor_root.get(), make_str("Clipboard"));
+        clipboard_proto_root.set(js_new_object());
+        js_set_key_default(clipboard_proto_root.get(), make_str("constructor"),
+            ctor_root.get());
+        js_set_key_default(clipboard_proto_root.get(), make_str("writeText"),
             js_new_native_function(js_clipboard_write_text));
-        js_set_key_default(clipboard_proto, make_str("readText"),
+        js_set_key_default(clipboard_proto_root.get(), make_str("readText"),
             js_new_native_function(js_clipboard_read_text));
-        js_set_key_default(clipboard_proto, make_str("write"),
+        js_set_key_default(clipboard_proto_root.get(), make_str("write"),
             js_new_native_function(js_clipboard_write));
-        js_set_key_default(clipboard_proto, make_str("read"),
+        js_set_key_default(clipboard_proto_root.get(), make_str("read"),
             js_new_native_function(js_clipboard_read));
-        js_set_key_default(ctor, make_str("prototype"), clipboard_proto);
-        js_set_key_default(global_this, make_str("Clipboard"), ctor);
+        js_set_key_default(ctor_root.get(), make_str("prototype"),
+            clipboard_proto_root.get());
+        js_set_key_default(global_root.get(), make_str("Clipboard"), ctor_root.get());
     }
 
     // ---- navigator -------------------------------------------------------
     // Bridges to the C ClipboardStore so the WPT shim's `_wpt_clipboard_*`
     // helpers and the synthetic Cmd+C/V keyboard handler share the same
     // underlying store as `navigator.clipboard.{readText,writeText}`.
-    js_set_key_default(global_this, make_str("__lambda_clipboard_clear"),
+    js_set_key_default(global_root.get(), make_str("__lambda_clipboard_clear"),
         js_new_native_function(js_lambda_clipboard_clear));
-    js_set_key_default(global_this, make_str("__lambda_clipboard_write_records"),
+    js_set_key_default(global_root.get(), make_str("__lambda_clipboard_write_records"),
         js_new_native_function(js_lambda_clipboard_write_records));
-    js_set_key_default(global_this, make_str("__lambda_clipboard_read_records"),
+    js_set_key_default(global_root.get(), make_str("__lambda_clipboard_read_records"),
         js_new_native_function(js_lambda_clipboard_read_records));
-    js_set_key_default(global_this, make_str("__lambda_clipboard_set_perm"),
+    js_set_key_default(global_root.get(), make_str("__lambda_clipboard_set_perm"),
         js_new_native_function(js_lambda_clipboard_set_perm));
-    js_set_key_default(global_this, make_str("__lambda_clipboard_get_perm"),
+    js_set_key_default(global_root.get(), make_str("__lambda_clipboard_get_perm"),
         js_new_native_function(js_lambda_clipboard_get_perm));
 
     // navigator + navigator.clipboard backed by C store. Methods come from
@@ -1865,42 +1889,45 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     // resolve without prototype-chain lookup (matches what test code
     // typically does and the shim's previous direct-assignment behaviour).
     {
-        Item clipboard = js_new_object();
-        mark_class(clipboard, "Clipboard");
-        js_set_key_default(clipboard, make_str("writeText"),
-            js_get_key_default(clipboard_proto, make_str("writeText")));
-        js_set_key_default(clipboard, make_str("readText"),
-            js_get_key_default(clipboard_proto, make_str("readText")));
-        js_set_key_default(clipboard, make_str("write"),
-            js_get_key_default(clipboard_proto, make_str("write")));
-        js_set_key_default(clipboard, make_str("read"),
-            js_get_key_default(clipboard_proto, make_str("read")));
+        RootFrame roots(3);
+        Rooted<Item> clipboard_root(roots, js_new_object());
+        Rooted<Item> permissions_root(roots, ItemNull);
+        Rooted<Item> navigator_root(roots, ItemNull);
+        mark_class(clipboard_root.get(), "Clipboard");
+        js_set_key_default(clipboard_root.get(), make_str("writeText"),
+            js_get_key_default(clipboard_proto_root.get(), make_str("writeText")));
+        js_set_key_default(clipboard_root.get(), make_str("readText"),
+            js_get_key_default(clipboard_proto_root.get(), make_str("readText")));
+        js_set_key_default(clipboard_root.get(), make_str("write"),
+            js_get_key_default(clipboard_proto_root.get(), make_str("write")));
+        js_set_key_default(clipboard_root.get(), make_str("read"),
+            js_get_key_default(clipboard_proto_root.get(), make_str("read")));
 
-        Item permissions = js_new_object();
-        js_set_key_default(permissions, make_str("query"),
+        permissions_root.set(js_new_object());
+        js_set_key_default(permissions_root.get(), make_str("query"),
             js_new_native_function(js_permissions_query));
 
-        Item navigator = js_new_object();
-        js_set_key_default(navigator, make_str("clipboard"), clipboard);
-        js_set_key_default(navigator, make_str("permissions"), permissions);
-        js_set_key_default(navigator, make_str("platform"), make_str("MacIntel"));
-        js_set_key_default(navigator, make_str("userAgent"),
+        navigator_root.set(js_new_object());
+        js_set_key_default(navigator_root.get(), make_str("clipboard"), clipboard_root.get());
+        js_set_key_default(navigator_root.get(), make_str("permissions"), permissions_root.get());
+        js_set_key_default(navigator_root.get(), make_str("platform"), make_str("MacIntel"));
+        js_set_key_default(navigator_root.get(), make_str("userAgent"),
             make_str("Lambda/Headless (Macintosh)"));
         // Browser capability probes call appName before inspecting SVG support;
         // leaving this legacy Navigator string absent makes ordinary method
         // access throw before the probe can select its rendering path.
-        js_set_key_default(navigator, make_str("appName"), make_str("Netscape"));
+        js_set_key_default(navigator_root.get(), make_str("appName"), make_str("Netscape"));
         // Legacy UA-sniffing libraries still call string methods on
         // Navigator.appVersion; keep it present and consistent with this host.
-        js_set_key_default(navigator, make_str("appVersion"),
+        js_set_key_default(navigator_root.get(), make_str("appVersion"),
             make_str("5.0 (Macintosh) Lambda/Headless"));
-        js_set_key_default(navigator, make_str("vendor"), make_str(""));
-        js_set_key_default(navigator, make_str("language"), make_str("en-US"));
+        js_set_key_default(navigator_root.get(), make_str("vendor"), make_str(""));
+        js_set_key_default(navigator_root.get(), make_str("language"), make_str("en-US"));
         // Radiant exposes PointerEvent input in both interactive and headless
         // hosts, so feature detection must advertise at least one touch-capable
         // pointer; otherwise libraries never register their pointer handlers.
-        js_set_key_default(navigator, make_str("maxTouchPoints"),
+        js_set_key_default(navigator_root.get(), make_str("maxTouchPoints"),
             (Item){.item = i2it(1)});
-        js_set_key_default(global_this, make_str("navigator"), navigator);
+        js_set_key_default(global_root.get(), make_str("navigator"), navigator_root.get());
     }
 }

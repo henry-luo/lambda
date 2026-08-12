@@ -53,7 +53,6 @@ TableMetadata::~TableMetadata() {
     scratch_free(sa, col_widths);
     scratch_free(sa, grid_occupied);
 }
-
 //------------------------------------------------------------------------------
 // Heap factory (audited boundary for `new TableMetadata` / `delete meta`)
 //------------------------------------------------------------------------------

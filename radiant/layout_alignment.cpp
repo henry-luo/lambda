@@ -9,10 +9,7 @@
 #include "../lambda/input/css/css_value.hpp"
 
 namespace radiant {
-
-// ============================================================================
 // Alignment Offset Computation
-// ============================================================================
 
 float compute_alignment_offset(
     int32_t alignment,
@@ -44,7 +41,6 @@ float compute_alignment_offset(
         case CSS_VALUE_BASELINE:
             // Baseline alignment offset computed separately
             return 0.0f;
-
         // Space distribution types - caller should use compute_space_distribution
         case CSS_VALUE_SPACE_BETWEEN:
         case CSS_VALUE_SPACE_AROUND:
@@ -55,10 +51,7 @@ float compute_alignment_offset(
             return 0.0f;
     }
 }
-
-// ============================================================================
 // Space Distribution
-// ============================================================================
 
 SpaceDistribution compute_space_distribution(
     int32_t alignment,
@@ -66,12 +59,10 @@ SpaceDistribution compute_space_distribution(
     int32_t item_count
 ) {
     SpaceDistribution dist = {0.0f, 0.0f, 0.0f};
-
     // No items or single item - no distribution needed
     if (item_count <= 0) {
         return dist;
     }
-
     // space-* has no useful interval to distribute during overflow; other
     // alignments still use their signed offset so flex-end/center can overflow.
     if (free_space < 0 && alignment_is_space_distribution(alignment)) {
@@ -144,16 +135,12 @@ SpaceDistribution compute_space_distribution(
 
     return dist;
 }
-
-// ============================================================================
 // Safe Alignment Fallback
-// ============================================================================
 
 int32_t alignment_fallback_for_overflow(int32_t alignment, float free_space) {
     if (free_space >= 0) {
         return alignment;
     }
-
     // Negative free space - space distribution falls back to flex-start
     switch (alignment) {
         case CSS_VALUE_SPACE_BETWEEN:
@@ -165,10 +152,7 @@ int32_t alignment_fallback_for_overflow(int32_t alignment, float free_space) {
             return alignment;
     }
 }
-
-// ============================================================================
 // Alignment Value Helpers
-// ============================================================================
 
 bool alignment_is_space_distribution(int32_t alignment) {
     return alignment == CSS_VALUE_SPACE_BETWEEN ||
@@ -201,10 +185,7 @@ int32_t resolve_justify_self(int32_t justify_self, int32_t justify_items) {
     if (justify_self == CSS_VALUE_NORMAL) return CSS_VALUE_STRETCH;
     return justify_self;
 }
-
-// ============================================================================
 // Baseline Calculation
-// ============================================================================
 
 float compute_font_baseline_ascender(
     ::LayoutContext* lycon,
@@ -290,7 +271,6 @@ static float compute_element_baseline(
         return box.padding.top + box.border.top +
             compute_font_baseline_ascender(lycon, element->font, false, fallback);
     }
-
     // No child with baseline: synthesize from the bottom border edge.
     return element->height;
 }

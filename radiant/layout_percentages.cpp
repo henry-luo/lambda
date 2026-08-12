@@ -172,7 +172,6 @@ bool layout_css_size_is_automatic(ViewBlock* block, bool horizontal) {
 
 bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* containing_block) {
     if (!containing_block || containing_block->height <= 0.0f) return false;
-
     // A table-cell used height is established by row/table sizing even when its
     // own CSS height is auto; percentage descendants use that content box.
     if (containing_block->view_type == RDT_VIEW_TABLE_CELL) return true;
@@ -191,7 +190,6 @@ bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* conta
         parent_height_is_definite = true;
     }
     if (!parent_height_is_definite) return false;
-
     // Flex stretch makes the cross size definite; a flex-assigned main size is
     // likewise definite when physical height is the container's main axis.
     if (is_main_axis_horizontal(parent_flex)) {
@@ -252,7 +250,6 @@ WritingMode layout_writing_mode_from_css(CssEnum writing_mode) {
 WritingMode layout_block_writing_mode(ViewBlock* block) {
     WritingMode mode = block && block->blk ? block->block()->writing_mode : WM_HORIZONTAL_TB;
     if (mode != WM_HORIZONTAL_TB || !block) return mode;
-
     // Intrinsic sizing may run before the computed BlockProp exists; resolve
     // the inherited specified axis there instead of falling back to horizontal.
     DomElement* current = block->as_element();
@@ -310,7 +307,6 @@ float layout_block_empty_content_size_in_axis(ViewBlock* block, bool horizontal)
 
     bool inline_axis_is_vertical = layout_block_inline_axis_is_vertical(block);
     if (horizontal == inline_axis_is_vertical) return 0.0f;
-
     // A fixed multicol track remains after containment removes descendants;
     // it is formatting structure in the logical inline axis, not content.
     return multicol_empty_intrinsic_inline_size(block);
@@ -329,7 +325,6 @@ float layout_block_stable_scrollbar_gutter(ViewBlock* block, bool horizontal) {
     bool block_axis_is_scrollable = block_axis_overflow == CSS_VALUE_AUTO ||
         block_axis_overflow == CSS_VALUE_SCROLL || block_axis_overflow == CSS_VALUE_HIDDEN;
     if (!block_axis_is_scrollable) return 0.0f;
-
     // Classic scrollbar width is a UA layout metric; stable gutters reserve it
     // even when no scrollbar is currently painted (CSS Overflow 3 §5.2).
     constexpr float CLASSIC_SCROLLBAR_GUTTER_SIZE = 15.0f;
@@ -341,8 +336,8 @@ float layout_block_auto_content_width_from_inline_base(ViewBlock* block, float i
     if (!block || inline_base <= 0.0f) return -1.0f;
     float content_width = inline_base;
     if (block->bound) {
-        BoxMetrics box = layout_box_metrics(block);
-        content_width -= box.margin_h + box.pad_border_h;
+        content_width -= layout_boundary_metrics(block->bound).margin_h;
+        content_width = layout_content_size_from_border_box(block, content_width, true);
     }
     return content_width >= 0.0f ? content_width : 0.0f;
 }

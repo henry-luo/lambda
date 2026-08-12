@@ -641,8 +641,8 @@ inline void run_sub_batch(
 // Max scripts per lambda.exe process for ordinary regression runs.
 static const size_t BATCH_CHUNK_SIZE = 50;
 
-// keep this shared header helper inline: unrelated test translation units also
-// include the header, and a private static copy triggers -Wunused-function.
+// this helper is shared by multiple test translation units; external inline
+// linkage avoids one unused private copy becoming a -Werror failure.
 inline size_t lambda_capture_batch_chunk_size() {
     const char* override_value = getenv("AST_TUNE_BATCH_CHUNK");
     if (override_value && *override_value) {

@@ -16,10 +16,7 @@
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
-
-// ============================================================================
 // Static helpers: extract counter property values from element CSS
-// ============================================================================
 
 static const char* counter_name_from_css_value(CssValue* item) {
     if (!item) return nullptr;
@@ -31,6 +28,17 @@ static const char* counter_name_from_css_value(CssValue* item) {
         return info ? info->name : nullptr;
     }
     return nullptr;
+}
+
+static const char* counter_name_from_reversed_value(CssValue* item) {
+    if (!item) return nullptr;
+    if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function) {
+        CssFunction* function = item->data.function;
+        if (!function->name || strcmp(function->name, "reversed") != 0 ||
+            function->arg_count < 1) return nullptr;
+        return function->args ? counter_name_from_css_value(function->args[0]) : nullptr;
+    }
+    return counter_name_from_css_value(item);
 }
 
 static bool get_element_counter_property_value(DomElement* elem, CssPropertyCode property,
@@ -66,13 +74,11 @@ static bool get_element_counter_property_value(DomElement* elem, CssPropertyCode
     }
     return false;
 }
-
 // Extract counter-increment value for a specific counter from element's CSS
 static bool get_element_counter_inc(DomElement* elem, const char* counter_name, int* out_value) {
     return get_element_counter_property_value(elem, CSS_PROPERTY_COUNTER_INCREMENT,
                                               counter_name, 1, out_value);
 }
-
 // Check if element's CSS counter-reset contains a specific counter name
 static bool element_resets_counter(DomElement* elem, const char* counter_name) {
     if (!elem || !elem->specified_style || !elem->specified_style->tree) return false;
@@ -83,25 +89,7 @@ static bool element_resets_counter(DomElement* elem, const char* counter_name) {
     CssValue* val = sn->winning_decl->value;
 
     auto check_name = [&](CssValue* item) -> bool {
-        const char* name = nullptr;
-        if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
-            name = item->data.custom_property.name;
-        } else if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-            const CssEnumInfo* info = css_enum_info(item->data.keyword);
-            if (info) name = info->name;
-        } else if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function) {
-            CssFunction* func = item->data.function;
-            if (func->name && strcmp(func->name, "reversed") == 0 &&
-                func->arg_count >= 1 && func->args[0]) {
-                if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM &&
-                    func->args[0]->data.custom_property.name)
-                    name = func->args[0]->data.custom_property.name;
-                else if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
-                    const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
-                    if (info) name = info->name;
-                }
-            }
-        }
+        const char* name = counter_name_from_reversed_value(item);
         return name && strcmp(name, counter_name) == 0;
     };
 
@@ -114,13 +102,11 @@ static bool element_resets_counter(DomElement* elem, const char* counter_name) {
     }
     return false;
 }
-
 // Get the counter-set integer value for a specific counter name on an element
 static bool get_element_counter_set_value(DomElement* elem, const char* counter_name, int* out_value) {
     return get_element_counter_property_value(elem, CSS_PROPERTY_COUNTER_SET,
                                               counter_name, 0, out_value);
 }
-
 // DFS walk: sum non-zero counter-increments for a reversed counter in scope.
 // Skips subtrees that create a new scope (counter-reset) for the same counter.
 // Per CSS Lists 3 §4.4.2: at the first counter-set, adds its value to total and breaks.
@@ -130,17 +116,14 @@ static bool sum_reversed_counter_incs(DomElement* parent, const char* counter_na
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
-
         // skip subtree if this element resets the same counter (new scope)
         if (element_resets_counter(elem, counter_name)) continue;
-
         // check counter-increment (processed before counter-set per spec §12.4)
         int inc = 0;
         if (get_element_counter_inc(elem, counter_name, &inc) && inc != 0) {
             *total += inc;
             *last_nonzero = inc;
         }
-
         // stop if this element has counter-set for the same counter
         // (counter-increment on this element is already counted above)
         // Per spec §4.4.2: add the counter-set value to total and break
@@ -149,30 +132,18 @@ static bool sum_reversed_counter_incs(DomElement* parent, const char* counter_na
             *set_value = sv;
             return true;
         }
-
         // recurse into children; stop if counter-set found in subtree
         if (sum_reversed_counter_incs(elem, counter_name, total, last_nonzero, set_value)) return true;
     }
     return false;
 }
-
 // Extract counter name from a reversed() CSS function value
 static const char* get_reversed_counter_name(CssFunction* func) {
-    if (!func || !func->name || strcmp(func->name, "reversed") != 0) return nullptr;
-    if (func->arg_count < 1 || !func->args[0]) return nullptr;
-    if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM &&
-        func->args[0]->data.custom_property.name)
-        return func->args[0]->data.custom_property.name;
-    if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
-        return info ? info->name : nullptr;
-    }
-    return nullptr;
+    if (!func || !func->name || strcmp(func->name, "reversed") != 0 ||
+        func->arg_count < 1 || !func->args) return nullptr;
+    return counter_name_from_css_value(func->args[0]);
 }
-
-// ============================================================================
 // Counter Spec Extraction from Style Trees
-// ============================================================================
 
 const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode css_property,
                                             LayoutContext* lycon) {
@@ -252,10 +223,7 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style) {
         counter_set(lycon->counter_context, cs);
     }
 }
-
-// ============================================================================
 // List Container Counter Setup
-// ============================================================================
 
 static bool is_html_list_container_tag(NameId tag) {
     return tag == MARKUP_NAME_OL || tag == MARKUP_NAME_UL ||
@@ -267,7 +235,6 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
 
     NameId tag = dom_elem->tag_id;
     if (!is_html_list_container_tag(tag)) return;
-
     // CSS 2.1 §12.5: OL, UL, MENU, DIR have implicit counter-reset: list-item
     // This creates a new list-item counter instance for each list container,
     // enabling counters(list-item, ".") to show nested numbering (e.g., "1.2.3").
@@ -277,7 +244,6 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
         explicit_has_list_item = strstr(block->block()->counter_reset, "list-item") != nullptr;
     }
     if (explicit_has_list_item) return;
-
     // Check <ol start="N"> attribute: resets to N-1 so first li increments to N
     int start_value = 0;  // default: counter-reset: list-item 0
     bool is_reversed_ol = false;
@@ -297,7 +263,6 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
     char reset_spec[64];
     snprintf(reset_spec, sizeof(reset_spec), "list-item %d", start_value);
     counter_reset(lycon->counter_context, reset_spec);
-
     // For <ol reversed> without start attr, compute reversed initial value
     // using the same DFS algorithm as CSS counter-reset: reversed(list-item)
     if (is_reversed_ol && start_value == 0) {
@@ -337,10 +302,7 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
         }
     }
 }
-
-// ============================================================================
 // Reversed Counter Initial Value Computation
-// ============================================================================
 
 void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem) {
     if (!lycon->counter_context || !dom_elem) return;
@@ -353,7 +315,6 @@ void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem
     StyleNode* style_node = (StyleNode*)cr_node->declaration;
     CssValue* cr_value = (style_node && style_node->winning_decl) ?
                          style_node->winning_decl->value : nullptr;
-
     // CSS Lists 3: For reversed() counters without explicit values,
     // compute initial value = -(total_non_zero_increments + last_non_zero_increment)
     // by DFS-walking the subtree, skipping nested scopes for the same counter.
@@ -387,11 +348,7 @@ void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem
         compute_reversed(cr_value->data.function);
     }
 }
-
-// ============================================================================
 // List Item Counter + Marker Generation
-// ============================================================================
-
 // Create a ::marker element with the given properties
 static DomElement* create_marker_element(LayoutContext* lycon, DomElement* parent_elem,
                                          CssEnum marker_style, float font_size,
@@ -417,7 +374,6 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
         is_quirks_mode(lycon->doc->view_tree->html_version);
     marker_prop->reserves_first_line = is_quirks && is_outside &&
         (!list_parent || !is_html_list_container_tag(list_parent->tag_id));
-
     // CSS 2.1 §12.5: list-style-image overrides list-style-type when image loads successfully
     if (image_url && strcmp(image_url, "none") != 0) {
         marker_prop->image_url = lam::promote_to_pool(lycon->pool, image_url).get();
@@ -443,7 +399,6 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
             radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, marker_text));
         }
     }
-
     // CSS Lists 3 §4.2: compute marker width from content
     // For text markers, measure actual text width; for bullets, use fixed bullet size + padding
     if (marker_prop->loaded_image) {
@@ -474,14 +429,12 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     marker_elem->view_type = RDT_VIEW_MARKER;
     marker_elem->blk = (BlockProp*)marker_prop;
 
-
     return marker_elem;
 }
 
 void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                        DomElement* dom_elem, DisplayValue display) {
     if (!lycon->counter_context) return;
-
     // Detect if parent is <ol reversed>
     bool parent_reversed = false;
     if (dom_elem && dom_elem->tag_id == MARKUP_NAME_LI) {
@@ -491,7 +444,6 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             parent_reversed = true;
         }
     }
-
     // Handle <li value="N"> attribute: sets counter to N before increment
     if (dom_elem && dom_elem->tag_id == MARKUP_NAME_LI) {
         const char* value_attr = dom_elem->get_attribute("value");
@@ -505,7 +457,6 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             counter_set(lycon->counter_context, set_spec);
         }
     }
-
     // CSS Lists 3 §4.5: auto-increment list-item only if the element
     // does NOT already have an explicit counter-increment for list-item
     bool explicit_list_item_inc = (block->blk && block->block_mut()->counter_increment &&
@@ -513,11 +464,9 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     if (!explicit_list_item_inc) {
         counter_increment(lycon->counter_context, parent_reversed ? "list-item -1" : "list-item 1");
     }
-
     // For inline list-item (outer != LIST_ITEM), force inside position
     // since there's no block margin area for outside markers
     bool is_inline_list_item = (display.outer != CSS_VALUE_LIST_ITEM && display.list_item);
-
     // Set default list-style-position to outside if not specified
     // CSS 2.1 Section 12.5.1: Initial value is 'outside'
     bool is_outside_position = !is_inline_list_item;  // Default is outside, but inside for inline
@@ -528,7 +477,6 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             is_outside_position = true;
         }
     }
-
     // Generate list marker if list-style-type is not 'none'
     // CSS 2.1 §12.5: list-style-type is inherited. Check element first, then parent.
     CssEnum effective_list_style = block->blk ? block->block()->list_style_type : (CssEnum)0;
@@ -542,11 +490,9 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             effective_list_style = CSS_VALUE_DISC;
         }
     }
-
     // CSS Lists 3 §4.1: check for string marker value
     const char* string_marker = (block->blk) ? block->block()->list_style_type_string : nullptr;
     bool has_marker = (effective_list_style != CSS_VALUE_NONE) || (string_marker != nullptr);
-
     // Check for ::marker { content: ... } CSS override
     const char* marker_css_content = nullptr;
     DomElement* list_elem = lam::dom_require<DOM_NODE_ELEMENT>(elmt);
@@ -590,7 +536,6 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         if (block->font && block->fontp()->font_size > 0) {
             font_size = block->fontp()->font_size;
         }
-
         // CSS 2.1 §12.5: list-style-image is inherited; check self then parent
         const char* image_url = (block->blk) ? block->block()->list_style_image : nullptr;
         if (!image_url || strcmp(image_url, "none") == 0) {
