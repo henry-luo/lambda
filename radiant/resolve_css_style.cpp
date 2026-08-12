@@ -5229,33 +5229,9 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                       di == CSS_VALUE_TABLE_COLUMN_GROUP);
     bool is_cell = (di == CSS_VALUE_TABLE_CELL);
     if (span->bound && (is_row_or_rowgroup || is_column || is_cell)) {
-        // CSS 2.1 §8.3: Margin does not apply to table-row, table-row-group,
-        bool has_margin = false;
-        for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-            if (*radiant_spacing_value(&span->boundary_mut()->margin,
-                                       (CssBoxSide)side) != 0.0f) {
-                has_margin = true;
-                break;
-            }
-        }
-        if (has_margin) {
-            radiant_spacing_set_all(&span->boundary_mut()->margin, 0.0f);
-        }
-        // CSS 2.1 §8.4: Padding does not apply to table-row, table-row-group,
-        // Note: Padding DOES apply to table-cell.
-        if (!is_cell) {
-            bool has_padding = false;
-            for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-                if (*radiant_spacing_value(&span->boundary_mut()->padding,
-                                           (CssBoxSide)side) != 0.0f) {
-                    has_padding = true;
-                    break;
-                }
-            }
-            if (has_padding) {
-                radiant_spacing_set_all(&span->boundary_mut()->padding, 0.0f);
-            }
-        }
+        // CSS 2.1 §8.3/§8.4: these properties do not affect table-internal
+        // geometry, but their computed values must survive for descendants'
+        // `inherit` resolution; table layout ignores them at the box stage.
         // CSS 2.1 §17.5: Border handling for table-internal elements depends on
         // CSS 2.1 §10.3, §17.5.3: 'width' does not apply to table-row,
         // CSS 2.1 §10.5, §17.5.3: 'height' does not apply to table-column
@@ -7353,15 +7329,26 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             CssBoxSide first = CSS_BOX_SIDE_TOP;
             CssBoxSide second = CSS_BOX_SIDE_TOP;
             bool has_second = false;
+            WritingMode writing_mode = layout_element_writing_mode(span->as_element());
+            bool inline_axis_is_vertical = writing_mode == WM_VERTICAL_LR ||
+                writing_mode == WM_VERTICAL_RL;
+            LayoutLogicalSides logical_sides = layout_logical_sides(
+                inline_axis_is_vertical, writing_mode == WM_VERTICAL_RL);
             switch (prop_id) {
                 case CSS_PROPERTY_BORDER_INLINE:
-                    first = CSS_BOX_SIDE_RIGHT; second = CSS_BOX_SIDE_LEFT; has_second = true; break;
+                    first = logical_sides.inline_start;
+                    second = logical_sides.inline_end;
+                    has_second = true;
+                    break;
                 case CSS_PROPERTY_BORDER_BLOCK:
-                    first = CSS_BOX_SIDE_TOP; second = CSS_BOX_SIDE_BOTTOM; has_second = true; break;
-                case CSS_PROPERTY_BORDER_INLINE_START: first = CSS_BOX_SIDE_LEFT; break;
-                case CSS_PROPERTY_BORDER_INLINE_END: first = CSS_BOX_SIDE_RIGHT; break;
-                case CSS_PROPERTY_BORDER_BLOCK_START: first = CSS_BOX_SIDE_TOP; break;
-                case CSS_PROPERTY_BORDER_BLOCK_END: first = CSS_BOX_SIDE_BOTTOM; break;
+                    first = logical_sides.block_pair_start;
+                    second = logical_sides.block_pair_end;
+                    has_second = true;
+                    break;
+                case CSS_PROPERTY_BORDER_INLINE_START: first = logical_sides.inline_start; break;
+                case CSS_PROPERTY_BORDER_INLINE_END: first = logical_sides.inline_end; break;
+                case CSS_PROPERTY_BORDER_BLOCK_START: first = logical_sides.block_start; break;
+                case CSS_PROPERTY_BORDER_BLOCK_END: first = logical_sides.block_end; break;
                 default: break;
             }
             apply_border_side_shorthand(lycon, span, first, value, specificity);

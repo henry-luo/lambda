@@ -2854,6 +2854,15 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     dom_node_resolve_style(elmt, lycon);
 
+    bool root_is_table = html->display.inner == CSS_VALUE_TABLE;
+    if (root_is_table && html->blk) {
+        // the viewport seed is not an authored width; table roots must shrink-wrap
+        // their intrinsic grid before auto margins center the border box.
+        html->block_mut()->given_width = -1.0f;
+        html->block_mut()->given_width_type = CSS_VALUE_AUTO;
+        lycon->block.given_width = -1.0f;
+    }
+
     auto t_style = high_resolution_clock::now();
     log_info("%s [TIMING] layout: root style resolve: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_style - t_init).count());
 
@@ -2902,6 +2911,13 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     }
 
     CssEnum root_intrinsic_width = layout_intrinsic_preferred_size_keyword(html, true);
+    if (root_is_table && !root_has_explicit_width) {
+        IntrinsicSizes intrinsic = measure_element_intrinsic_widths(
+            lycon, elmt->as_element());
+        root_css_width = max(intrinsic.max_content - root_bp_left - root_bp_right, 0.0f);
+        root_has_explicit_width = true;
+        // CSS Tables: an auto-width table root uses its max-content grid width.
+    }
     if (!root_has_explicit_width &&
         (root_intrinsic_width == CSS_VALUE_MIN_CONTENT ||
          root_intrinsic_width == CSS_VALUE_MAX_CONTENT)) {
@@ -2973,6 +2989,12 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         }
         if (html->bound && html->boundary_mut()->margin.top != 0) {
             html->y = html->boundary()->margin.top;
+        }
+
+        if (root_is_table && html->bound &&
+            html->boundary()->margin.left_type == CSS_VALUE_AUTO &&
+            html->boundary()->margin.right_type == CSS_VALUE_AUTO) {
+            html->x = max((physical_width - html->width) / 2.0f, 0.0f);
         }
 
         if (!root_has_explicit_width) {
