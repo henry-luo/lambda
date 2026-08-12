@@ -627,32 +627,15 @@ static CssEnum css_value_axis_type(const CssValue* value) {
     return CSS_VALUE__UNDEF;
 }
 
-static bool css_expand_box_shorthand(const CssValue* value,
-                                     const CssValue* sides[4]) {
-    if (!value || !sides) return false;
-    if (value->type != CSS_VALUE_TYPE_LIST) {
-        for (int i = 0; i < 4; i++) sides[i] = value;
-        return true;
-    }
-    int count = value->data.list.count;
-    if (count < 1 || count > 4 || !value->data.list.values) return false;
-    for (int i = 0; i < 4; i++) {
-        sides[i] = css_box_shorthand_side_value(value, i);
-        if (!sides[i]) return false;
-    }
-    return true;
-}
-
 static void resolve_border_box_part(LayoutContext* lycon, ViewSpan* span,
                                     const CssValue* value, int64_t specificity,
                                     CssBorderSidePart part) {
     if (!lycon || !span || !value) return;
-    const CssValue* sides[4];
-    if (!css_expand_box_shorthand(value, sides)) return;
+    CssQuadValues values;
+    if (!values.expand(value)) return;
     for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-        const CssValue* side_value = sides[side];
         resolve_border_side_part(lycon, span,
-            radiant_inset_property((CssBoxSide)side), side_value, specificity, part);
+            radiant_inset_property((CssBoxSide)side), values.side[side], specificity, part);
     }
 }
 
@@ -792,40 +775,15 @@ static void resolve_inset_sides(LayoutContext* lycon, ViewSpan* span, CssBoxSide
 
 static void resolve_inset_shorthand(LayoutContext* lycon, ViewSpan* span, const CssValue* value) {
     PositionProp* position = ensure_span_position(lycon, span);
-    const CssValue* values[4] = {value, value, value, value};
-    int count = 1;
-    if (value->type == CSS_VALUE_TYPE_LIST) {
-        count = value->data.list.count;
-        if (count > 4) count = 4;
-        for (int i = 0; i < count; i++) {
-            values[i] = value->data.list.values[i];
-        }
-    }
-    switch (count) {
-        case 1:
-            values[1] = values[0];
-            values[2] = values[0];
-            values[3] = values[0];
-            break;
-        case 2:
-            values[2] = values[0];
-            values[3] = values[1];
-            break;
-        case 3:
-            values[3] = values[1];
-            break;
-    }
-    CssBoxSide sides[4] = {
-        CSS_BOX_SIDE_TOP,
-        CSS_BOX_SIDE_RIGHT,
-        CSS_BOX_SIDE_BOTTOM,
-        CSS_BOX_SIDE_LEFT
-    };
+    CssQuadValues values;
+    if (!values.expand(value)) return;
     for (int i = 0; i < 4; i++) {
-        if (values[i]->type == CSS_VALUE_TYPE_KEYWORD) {
-            set_inset_side_auto(position, sides[i]);
+        CssBoxSide side = (CssBoxSide)i;
+        if (values.side[i]->type == CSS_VALUE_TYPE_KEYWORD) {
+            set_inset_side_auto(position, side);
         } else {
-            resolve_inset_sides(lycon, span, sides[i], sides[i], CSS_PROPERTY_INSET, values[i], false);
+            resolve_inset_sides(lycon, span, side, side, CSS_PROPERTY_INSET,
+                                values.side[i], false);
         }
     }
 }
@@ -2146,6 +2104,43 @@ static const CssValue* css_find_background_radial_gradient_layer(const CssValue*
 static const CssValue* css_find_background_conic_gradient_layer(const CssValue* value) {
     static const char* const names[] = {"conic-gradient", "repeating-conic-gradient"};
     return css_find_background_function(value, names, 2);
+}
+
+static GradientType css_background_gradient_type(const CssValue* value) {
+    if (!value || value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function ||
+        !value->data.function->name) return GRADIENT_NONE;
+    const char* name = value->data.function->name;
+    if (strcmp(name, "linear-gradient") == 0 ||
+        strcmp(name, "repeating-linear-gradient") == 0) return GRADIENT_LINEAR;
+    if (strcmp(name, "radial-gradient") == 0 ||
+        strcmp(name, "repeating-radial-gradient") == 0) return GRADIENT_RADIAL;
+    if (strcmp(name, "conic-gradient") == 0 ||
+        strcmp(name, "repeating-conic-gradient") == 0) return GRADIENT_CONIC;
+    return GRADIENT_NONE;
+}
+
+static bool resolve_background_gradient_value(LayoutContext* lycon, ViewSpan* span,
+                                              const CssValue* value) {
+    GradientType type = css_background_gradient_type(value);
+    if (type == GRADIENT_NONE) return false;
+
+    LinearGradient* linear = nullptr;
+    RadialGradient* radial = nullptr;
+    ConicGradient* conic = nullptr;
+    bool resolved = type == GRADIENT_LINEAR
+        ? resolve_linear_gradient_value(lycon, value, &linear)
+        : type == GRADIENT_RADIAL
+            ? resolve_radial_gradient_value(lycon, value, &radial)
+            : resolve_conic_gradient_value(lycon, value, &conic);
+    if (!resolved) return true;
+
+    layout_ensure_background(lycon, span);
+    BackgroundProp* background = span->boundary_mut()->background;
+    background->gradient_type = type;
+    if (type == GRADIENT_LINEAR) background->linear_gradient = linear;
+    else if (type == GRADIENT_RADIAL) background->radial_gradient = radial;
+    else background->conic_gradient = conic;
+    return true;
 }
 
 static const char* css_background_url_value(const CssValue* value) {
@@ -4093,17 +4088,14 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
         }
         return;
     }
-    int value_count = src_space->type == CSS_VALUE_TYPE_LIST
-        ? src_space->data.list.count : 1;
-    if (value_count < 1 || value_count > 4) {
-        log_warn("unexpected spacing value count: %d", value_count);
+    CssQuadValues values;
+    if (!values.expand(src_space)) {
+        log_warn("unexpected spacing shorthand value count");
         return;
     }
     Margin parsed = {};
     for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-        const CssValue* value = src_space->type == CSS_VALUE_TYPE_LIST
-            ? css_box_shorthand_side_value(src_space, side) : src_space;
-        if (!value) continue;
+        const CssValue* value = values.side[side];
         float* parsed_value = radiant_spacing_value(&parsed, (CssBoxSide)side);
         *parsed_value = resolve_length_value(lycon, property, value);
         *radiant_margin_type(&parsed, (CssBoxSide)side) = css_value_axis_type(value);
@@ -8193,11 +8185,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                         size_t func_len = strlen(func_name);
                         if (str_ieq_const(func_name, func_len, "url")) {
                             resolve_background_url_function(lycon, decl, item);
-                        } else if (str_ieq_const(func_name, func_len, "linear-gradient") ||
-                                   str_ieq_const(func_name, func_len, "repeating-linear-gradient") ||
-                                   str_ieq_const(func_name, func_len, "radial-gradient") ||
-                                   str_ieq_const(func_name, func_len, "repeating-radial-gradient") ||
-                                   str_ieq_const(func_name, func_len, "conic-gradient")) {
+                        } else if (css_background_gradient_type(item) != GRADIENT_NONE) {
                             lam::CssTempDecl gradient_decl(decl, CSS_PROPERTY_BACKGROUND, item);
                             gradient_decl.resolve(lycon);
                         } else if (css_value_is_background_color_candidate(item)) {
@@ -8240,39 +8228,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                     return;
                 }
             }
-            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function && value->data.function->name) {
-                const char* func_name = value->data.function->name;
-                if (strcmp(func_name, "linear-gradient") == 0 ||
-                    strcmp(func_name, "repeating-linear-gradient") == 0) {
-                    LinearGradient* gradient = nullptr;
-                    if (resolve_linear_gradient_value(lycon, value, &gradient)) {
-                        layout_ensure_background(lycon, span);
-                        span->boundary_mut()->background->gradient_type = GRADIENT_LINEAR;
-                        span->boundary_mut()->background->linear_gradient = gradient;
-                    }
-                    return;
-                }
-                else if (strcmp(func_name, "radial-gradient") == 0 ||
-                         strcmp(func_name, "repeating-radial-gradient") == 0) {
-                    RadialGradient* gradient = nullptr;
-                    if (resolve_radial_gradient_value(lycon, value, &gradient)) {
-                        layout_ensure_background(lycon, span);
-                        span->boundary_mut()->background->gradient_type = GRADIENT_RADIAL;
-                        span->boundary_mut()->background->radial_gradient = gradient;
-                    }
-                    return;
-                }
-                else if (strcmp(func_name, "conic-gradient") == 0 ||
-                         strcmp(func_name, "repeating-conic-gradient") == 0) {
-                    ConicGradient* gradient = nullptr;
-                    if (resolve_conic_gradient_value(lycon, value, &gradient)) {
-                        layout_ensure_background(lycon, span);
-                        span->boundary_mut()->background->gradient_type = GRADIENT_CONIC;
-                        span->boundary_mut()->background->conic_gradient = gradient;
-                    }
-                    return;
-                }
-            }
+            if (resolve_background_gradient_value(lycon, span, value)) return;
             return;
         }
         case CSS_PROPERTY_GRID_GAP:

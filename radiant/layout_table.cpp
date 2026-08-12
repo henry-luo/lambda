@@ -5562,17 +5562,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             if (cell_width > 0 && tcell->td->col_span == 1 && col >= 0 && col < meta->column_count) {
                 meta->col_has_explicit_width[col] = true;
             }
-            float min_width = 0.0f;   // MCW - Minimum Content Width
-            float pref_width = 0.0f;  // PCW - Preferred Content Width
+            float min_width = 0.0f;
+            float pref_width = 0.0f;
             if (cell_width == 0.0f) {
                 CellIntrinsicWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);
-                pref_width = widths.max_width;  // PCW (preferred/max-content)
-                min_width = widths.min_width;   // MCW (minimum/min-content)
-                cell_width = pref_width; // Use preferred for backward compatibility
+                pref_width = widths.max_width;
+                min_width = widths.min_width;
+                cell_width = pref_width;
             } else if (table->tb->border_collapse) {
                 pref_width = cell_width;
                 CellIntrinsicWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);
-                min_width = widths.min_width;  // MCW from actual content
+                min_width = widths.min_width;
             } else {
                 pref_width = cell_width;
                 CellIntrinsicWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);

@@ -117,12 +117,11 @@ void layout_resolve_percent_size_for_child(LayoutContext* lycon, ViewBlock* chil
 
     float width_base = use_content_box ? cb.content_width : cb.padding_width;
     float height_base = use_content_box ? cb.content_height : cb.padding_height;
-    const float bases[2] = {width_base, height_base};
-    const bool definite[2] = {cb.has_definite_width, cb.has_definite_height};
-    const LayoutAxis axes[2] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
-    for (int i = 0; i < 2; i++) {
+    LayoutAxisPair<float> bases = layout_axis_pair(width_base, height_base);
+    LayoutAxisPair<bool> definite = {cb.has_definite_width, cb.has_definite_height};
+    for (LayoutAxis axis : layout_axes()) {
         layout_resolve_percent_size_axis(
-            lycon, child, axes[i], bases[i], definite[i]);
+            lycon, child, axis, bases[axis], definite[axis]);
     }
 }
 
@@ -132,11 +131,9 @@ void layout_resolve_percent_offsets_for_child(ViewBlock* child,
 
     PositionProp* pos = child->position;
 
-    const float bases[2] = {cb.padding_width, cb.padding_height};
-    const LayoutAxis axes[2] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
-    for (int i = 0; i < 2; i++) {
-        LayoutAxis axis = axes[i];
-        layout_resolve_percent_offset_axis(pos, axis, true, bases[i]);
-        layout_resolve_percent_offset_axis(pos, axis, false, bases[i]);
+    LayoutAxisPair<float> bases = layout_axis_pair(cb.padding_width, cb.padding_height);
+    for (LayoutAxis axis : layout_axes()) {
+        layout_resolve_percent_offset_axis(pos, axis, true, bases[axis]);
+        layout_resolve_percent_offset_axis(pos, axis, false, bases[axis]);
     }
 }
