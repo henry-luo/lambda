@@ -76,24 +76,27 @@ float flex_resolve_inherited_line_height(LayoutContext* lycon, DomElement* targe
 
     for (DomElement* elem = target; elem; ) {
         bool has_declared_lh = flex_element_has_declared_line_height(elem);
+        const CssValue* resolved_value = nullptr;
         ViewBlock* view = lam::view_as_block(elem);
         if (has_declared_lh && view && view->blk && view->block_mut()->line_height) {
             const CssValue* lh = view->block()->line_height;
             if (!(lh->type == CSS_VALUE_TYPE_KEYWORD && lh->data.keyword == CSS_VALUE_INHERIT)) {
-                return layout_resolve_line_height_value(
-                    lycon, lh, elem, target_font_size);
+                resolved_value = lh;
             }
         }
 
-        if (has_declared_lh && elem->specified_style) {
+        if (!resolved_value && has_declared_lh && elem->specified_style) {
             CssDeclaration* decl = style_tree_get_declaration(
                 elem->specified_style, CSS_PROPERTY_LINE_HEIGHT);
             if (decl && decl->value &&
                 !(decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
                   decl->value->data.keyword == CSS_VALUE_INHERIT)) {
-                return layout_resolve_line_height_value(
-                    lycon, decl->value, elem, target_font_size);
+                resolved_value = decl->value;
             }
+        }
+        if (resolved_value) {
+            return layout_resolve_line_height_value(
+                lycon, resolved_value, elem, target_font_size);
         }
 
         DomNode* parent = elem->parent;

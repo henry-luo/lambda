@@ -777,6 +777,26 @@ static inline const CssValue* css_box_shorthand_side_value(const CssValue* value
     return index < count ? values[index] : nullptr;
 }
 
+// CSS quad shorthands use the same clockwise expansion for borders, spacing, and insets.
+struct CssQuadValues {
+    const CssValue* side[4];
+
+    bool expand(const CssValue* value) {
+        if (!value) return false;
+        if (value->type != CSS_VALUE_TYPE_LIST) {
+            for (int i = 0; i < 4; i++) side[i] = value;
+            return true;
+        }
+        int count = value->data.list.count;
+        if (count < 1 || count > 4 || !value->data.list.values) return false;
+        for (int i = 0; i < 4; i++) {
+            side[i] = css_box_shorthand_side_value(value, i);
+            if (!side[i]) return false;
+        }
+        return true;
+    }
+};
+
 typedef struct CssCascadeCandidate {
     CssDeclaration* decl;
     CssValue* value;
@@ -2022,6 +2042,38 @@ typedef enum LayoutAxis {
     LAYOUT_AXIS_Y,
 } LayoutAxis;
 
+template <typename T>
+struct LayoutAxisPair {
+    T x;
+    T y;
+
+    T& operator[](LayoutAxis axis) { return axis == LAYOUT_AXIS_X ? x : y; }
+    const T& operator[](LayoutAxis axis) const {
+        return axis == LAYOUT_AXIS_X ? x : y;
+    }
+};
+
+struct LayoutAxisIterator {
+    int value;
+
+    LayoutAxis operator*() const { return (LayoutAxis)value; }
+    LayoutAxisIterator& operator++() { value++; return *this; }
+    bool operator!=(const LayoutAxisIterator& other) const {
+        return value != other.value;
+    }
+};
+
+struct LayoutAxisRange {
+    LayoutAxisIterator begin() const { return {LAYOUT_AXIS_X}; }
+    LayoutAxisIterator end() const { return {LAYOUT_AXIS_Y + 1}; }
+};
+
+inline LayoutAxisRange layout_axes() { return {}; }
+
+inline LayoutAxisPair<float> layout_axis_pair(float x, float y) {
+    return {x, y};
+}
+
 static inline bool layout_tag_in_list(NameId tag, const NameId* tags, size_t count) {
     for (size_t i = 0; i < count; i++) {
         if (tags[i] == tag) return true;
@@ -2352,6 +2404,20 @@ inline LayoutAxis flex_main_axis(FlexContainerLayout* flex) {
 inline LayoutAxis flex_cross_axis(FlexContainerLayout* flex) {
     return flex_main_axis(flex) == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
 }
+
+struct FlexAxes {
+    LayoutAxis main;
+    LayoutAxis cross;
+
+    explicit FlexAxes(LayoutAxis main_axis)
+        : main(main_axis),
+          cross(main == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X) {}
+
+    explicit FlexAxes(FlexContainerLayout* flex)
+        : FlexAxes(flex_main_axis(flex)) {}
+
+    bool main_is_horizontal() const { return main == LAYOUT_AXIS_X; }
+};
 
 inline float flex_main_axis_size(ViewElement* item, FlexContainerLayout* flex) {
     return layout_axis_size(item, flex_main_axis(flex));

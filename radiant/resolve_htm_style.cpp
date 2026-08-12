@@ -179,28 +179,32 @@ static void apply_html_textarea_font(LayoutContext* lycon, ViewBlock* block) {
     apply_html_font_weight(font, CSS_VALUE_NORMAL, 400);
 }
 
-static BorderProp* apply_html_uniform_border_base(LayoutContext* lycon, ViewBlock* block,
-                                                  float width, CssEnum style,
-                                                  bool set_specificity) {
+static BorderProp* apply_html_uniform_border(LayoutContext* lycon, ViewBlock* block,
+                                             float width, CssEnum style,
+                                             const Color* color,
+                                             bool set_specificity = true) {
     BorderProp* border = layout_ensure_border(lycon, block);
     for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
         RadiantBorderSide refs = radiant_border_side(border, (CssBoxSide)side);
         *refs.width = width;
         *refs.style = style;
         if (set_specificity) *refs.width_specificity = -1;
+        if (color) *refs.color = *color;
     }
     return border;
 }
 
-static void apply_html_uniform_border(LayoutContext* lycon, ViewBlock* block,
-                                      float width, CssEnum style, Color color,
-                                      bool set_specificity = true) {
-    // HTML UA borders differ on specificity, so callers preserve their original policy.
-    BorderProp* border = apply_html_uniform_border_base(
-        lycon, block, width, style, set_specificity);
+static BorderProp* apply_html_inset_border_colors(LayoutContext* lycon,
+                                                 ViewBlock* block, float width) {
+    BorderProp* border = apply_html_uniform_border(
+        lycon, block, width, CSS_VALUE_INSET, nullptr, true);
+    Color dark = {}; dark.r = dark.g = dark.b = 128; dark.a = 255;
+    Color light = {}; light.r = light.g = light.b = 192; light.a = 255;
+    Color colors[4] = {dark, light, light, dark};
     for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-        *radiant_border_side(border, (CssBoxSide)side).color = color;
+        *radiant_border_side(border, (CssBoxSide)side).color = colors[side];
     }
+    return border;
 }
 
 static void apply_html_button_box_defaults(LayoutContext* lycon, ViewBlock* block) {
@@ -212,8 +216,8 @@ static void apply_html_button_box_defaults(LayoutContext* lycon, ViewBlock* bloc
         CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, FormDefaults::BUTTON_PADDING_V * zoom);
     radiant_spacing_set_pair(&block->boundary_mut()->padding,
         CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, FormDefaults::BUTTON_PADDING_H * zoom);
-    apply_html_uniform_border_base(
-        lycon, block, FormDefaults::BUTTON_BORDER * zoom, CSS_VALUE_OUTSET, true);
+    apply_html_uniform_border(
+        lycon, block, FormDefaults::BUTTON_BORDER * zoom, CSS_VALUE_OUTSET, nullptr);
 }
 
 static void apply_html_fixed_replaced_size(LayoutContext* lycon, ViewBlock* block,
@@ -272,22 +276,34 @@ struct HtmlDimensionPolicy {
     bool default_when_invalid;
     bool positive_percent_only;
     bool persist;
+    bool positive_value = false;
+    bool percent_at_most_100 = false;
+    bool clear_unresolved_percent = true;
+    bool store_resolved_percent = false;
 };
 
 static void apply_html_axis_value(LayoutContext* lycon, ViewBlock* block,
                                   LayoutAxis axis, float value, bool is_percent,
-                                  float percent_base) {
+                                  float percent_base, bool clear_unresolved_percent,
+                                  bool store_resolved_percent) {
     float resolved = is_percent
         ? (percent_base > 0.0f ? percent_base * value / 100.0f : -1.0f)
         : value;
     if (block) {
         BlockProp* prop = block->ensure_block(lycon);
         LayoutAxisRefs refs(prop, axis == LAYOUT_AXIS_X);
-        *refs.given = is_percent ? -1.0f : value;
+        // table percentage hints can be unresolved during intrinsic passes; clearing
+        // either provisional width here changes a 50% table into an auto-sized table.
+        if (!is_percent || resolved >= 0.0f || clear_unresolved_percent) {
+            *refs.given = is_percent
+                ? (store_resolved_percent ? resolved : -1.0f) : value;
+        }
         *refs.given_percent = is_percent ? value : NAN;
     }
-    if (axis == LAYOUT_AXIS_X) lycon->block.given_width = resolved;
-    else lycon->block.given_height = resolved;
+    LayoutAxisRefs context(&lycon->block, axis);
+    if (!is_percent || resolved >= 0.0f || clear_unresolved_percent) {
+        *context.given = resolved;
+    }
 }
 
 static void apply_html_dimension_attribute(LayoutContext* lycon, DomNode* element,
@@ -298,7 +314,9 @@ static void apply_html_dimension_attribute(LayoutContext* lycon, DomNode* elemen
     if (!attr) {
         if (policy->default_when_missing) {
             apply_html_axis_value(lycon, policy->persist ? block : nullptr,
-                                  axis, default_value, false, 0.0f);
+                                  axis, default_value, false, 0.0f,
+                                  policy->clear_unresolved_percent,
+                                  policy->store_resolved_percent);
         }
         return;
     }
@@ -308,8 +326,15 @@ static void apply_html_dimension_attribute(LayoutContext* lycon, DomNode* elemen
                                    policy->require_digit_start, &dimension)) {
         if (policy->default_when_invalid) {
             apply_html_axis_value(lycon, policy->persist ? block : nullptr,
-                                  axis, default_value, false, 0.0f);
+                                  axis, default_value, false, 0.0f,
+                                  policy->clear_unresolved_percent,
+                                  policy->store_resolved_percent);
         }
+        return;
+    }
+
+    if ((policy->positive_value && dimension.value <= 0.0f) ||
+        (policy->percent_at_most_100 && dimension.is_percent && dimension.value > 100.0f)) {
         return;
     }
 
@@ -318,10 +343,14 @@ static void apply_html_dimension_attribute(LayoutContext* lycon, DomNode* elemen
         float base = axis == LAYOUT_AXIS_X
             ? policy->width_percent_base : policy->height_percent_base;
         apply_html_axis_value(lycon, policy->persist ? block : nullptr,
-                              axis, dimension.value, true, base);
+                              axis, dimension.value, true, base,
+                              policy->clear_unresolved_percent,
+                              policy->store_resolved_percent);
     } else {
         apply_html_axis_value(lycon, policy->persist ? block : nullptr,
-                              axis, dimension.value, false, 0.0f);
+                              axis, dimension.value, false, 0.0f,
+                              policy->clear_unresolved_percent,
+                              policy->store_resolved_percent);
     }
 }
 
@@ -336,28 +365,18 @@ static void apply_html_dimension_attributes(LayoutContext* lycon, DomNode* eleme
 
 static void apply_html_table_dimension_attribute(LayoutContext* lycon, DomNode* element,
                                                  ViewBlock* block, LayoutAxis axis) {
-    const char* name = axis == LAYOUT_AXIS_X ? "width" : "height";
-    const char* raw = element ? element->get_attribute(name) : nullptr;
-    HtmlDimensionAttr dimension;
-    if (!parse_html_dimension_attr(raw, axis == LAYOUT_AXIS_X, false, &dimension) ||
-        dimension.value <= 0.0f || (dimension.is_percent && dimension.value > 100.0f)) {
-        return;
-    }
-    if (dimension.is_percent) {
-        float base = lycon->block.content_width > 0.0f
-            ? lycon->block.content_width : lycon->line.right - lycon->line.left;
-        BlockProp* prop = block->ensure_block(lycon);
-        LayoutAxisRefs refs(prop, axis == LAYOUT_AXIS_X);
-        *refs.given_percent = dimension.value;
-        if (base > 0.0f) {
-            float resolved = base * dimension.value / 100.0f;
-            *refs.given = resolved;
-            if (axis == LAYOUT_AXIS_X) lycon->block.given_width = resolved;
-            else lycon->block.given_height = resolved;
-        }
-    } else {
-        apply_html_axis_value(lycon, block, axis, dimension.value, false, 0.0f);
-    }
+    HtmlDimensionPolicy policy = {
+        0.0f, 0.0f,
+        lycon->block.content_width > 0.0f
+            ? lycon->block.content_width : lycon->line.right - lycon->line.left,
+        0.0f, axis == LAYOUT_AXIS_X, false, false, false, false, true
+    };
+    policy.positive_value = true;
+    policy.percent_at_most_100 = true;
+    policy.clear_unresolved_percent = false;
+    policy.store_resolved_percent = true;
+    apply_html_dimension_attribute(lycon, element, block, axis,
+        axis == LAYOUT_AXIS_X ? "width" : "height", 0.0f, &policy);
 }
 
 bool layout_canvas_natural_size(ViewBlock* block, float* out_width, float* out_height) {
@@ -626,7 +645,7 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
 
     if (get_parent_table_number(cell_node, "border") > 0.0f) {
         Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
-        apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_INSET, grey);
+        apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_INSET, &grey);
     }
     apply_html_table_rules_cell_border(
         lycon, block, get_parent_table_rules(cell_node), is_header);
@@ -760,7 +779,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             radiant_margin_set_type_all(&block->boundary_mut()->margin, CSS_VALUE_AUTO);
             radiant_spacing_set_all(&block->boundary_mut()->padding,
                                     lycon->font.style->font_size * 0.25f);
-            apply_html_uniform_border_base(lycon, block, 3.0f, CSS_VALUE_SOLID, true);
+            apply_html_uniform_border(lycon, block, 3.0f, CSS_VALUE_SOLID, nullptr, true);
             block->ensure_block(lycon);
             block->blk->given_width = block->blk->given_height = -1.0f;
             block->blk->given_width_type = block->blk->given_height_type = CSS_VALUE_FIT_CONTENT;
@@ -885,14 +904,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     }
     case MARKUP_NAME_IFRAME: {
         // HTML spec §15.5.14: iframe { border: 2px inset; }
-        BorderProp* iframe_border = apply_html_uniform_border_base(
-            lycon, block, 2.0f, CSS_VALUE_INSET, true);
-        Color dark = {}; dark.r = dark.g = dark.b = 128; dark.a = 255;
-        Color light = {}; light.r = light.g = light.b = 192; light.a = 255;
-        Color colors[4] = {dark, light, light, dark};
-        for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-            *radiant_border_side(iframe_border, (CssBoxSide)side).color = colors[side];
-        }
+        BorderProp* iframe_border = apply_html_inset_border_colors(lycon, block, 2.0f);
         const char* frameborder_attr = elmt->get_attribute("frameborder");
         if (frameborder_attr) {
             size_t frameborder_len = strlen(frameborder_attr);
@@ -960,14 +972,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case MARKUP_NAME_HR: {
         // hr default: 1px border on all sides (creates 2px height from border-top + border-bottom)
         // This matches browser UA stylesheet behavior (CSS logical pixels)
-        BorderProp* hr_border = apply_html_uniform_border_base(
-            lycon, block, 1.0f, CSS_VALUE_INSET, true);
-        Color dark = {}; dark.r = dark.g = dark.b = 128; dark.a = 255;
-        Color light = {}; light.r = light.g = light.b = 192; light.a = 255;
-        Color colors[4] = {dark, light, light, dark};
-        for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-            *radiant_border_side(hr_border, (CssBoxSide)side).color = colors[side];
-        }
+        BorderProp* hr_border = apply_html_inset_border_colors(lycon, block, 1.0f);
         // 8px margin top/bottom, auto left/right for horizontal centering (browser default)
         radiant_spacing_set_pair(&block->boundary_mut()->margin,
             CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, 8);
@@ -1120,7 +1125,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (border_width >= 0) {
                 // border-color: grey (128, 128, 128)
                 Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
-                apply_html_uniform_border(lycon, block, border_width, CSS_VALUE_OUTSET, grey);
+                apply_html_uniform_border(lycon, block, border_width, CSS_VALUE_OUTSET, &grey);
             }
         }
         // HTML spec §14.3.3: <table align="center"> maps to margin-left: auto; margin-right: auto
@@ -1176,12 +1181,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->blk->legacy_block_align = CSS_VALUE_CENTER;
         break;
     // ========== Form elements ==========
-    case MARKUP_NAME_FIELDSET:
+    case MARKUP_NAME_FIELDSET: {
         // fieldset: border and padding (CSS logical pixels)
         block->ensure_boundary(lycon);
         // Chrome uses groove style with gray color for fieldset borders
+        Color fieldset_border_color = (Color){ .r=192, .g=192, .b=192, .a=255 };
         apply_html_uniform_border(lycon, block, 2.0f, CSS_VALUE_GROOVE,
-            (Color){ .r=192, .g=192, .b=192, .a=255 });
+            &fieldset_border_color);
         *radiant_spacing_value(&block->boundary_mut()->padding, CSS_BOX_SIDE_TOP) =
             0.35f * lycon->font.style->font_size;
         *radiant_spacing_value(&block->boundary_mut()->padding, CSS_BOX_SIDE_BOTTOM) =
@@ -1200,6 +1206,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, 2);
         }
         break;
+    }
     case MARKUP_NAME_LEGEND:
         // HTML Rendering §15.3.12 defines this as padding-inline; storing it
         // on physical left/right makes vertical legends wider instead of taller.
@@ -1372,8 +1379,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT
                 - 2 * (FormDefaults::TEXT_BORDER + FormDefaults::TEXT_PADDING_V);
         block->ensure_boundary(lycon);
+            Color text_border_color = (Color){ .r=118, .g=118, .b=118, .a=255 };
             apply_html_uniform_border(lycon, block, FormDefaults::TEXT_BORDER, CSS_VALUE_SOLID,
-                (Color){ .r=118, .g=118, .b=118, .a=255 });
+                &text_border_color);
             // Chrome UA: date/time inputs have padding=0; text-like inputs have padding=1
             {
                 const char* itype = block->form->input_type;
@@ -1465,8 +1473,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->form->intrinsic_height = FormDefaults::SELECT_HEIGHT - 2.0f;
         // Default border (UA): 1px solid #767676, 2px border-radius (Chrome-like)
         block->ensure_boundary(lycon);
+        Color select_border_color = (Color){ .r=118, .g=118, .b=118, .a=255 };
         apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_SOLID,
-            (Color){ .r=118, .g=118, .b=118, .a=255 }, false);
+            &select_border_color, false);
         // Border-radius 2px on all four corners (Chrome UA)
         block->boundary_mut()->border->radius.top_left = block->boundary_mut()->border->radius.top_right =
             block->boundary_mut()->border->radius.bottom_left = block->boundary_mut()->border->radius.bottom_right = 2.0f;
@@ -1504,8 +1513,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // intrinsic size dynamically from cols/rows and font metrics
         // Default border and padding
         block->ensure_boundary(lycon);
+        Color textarea_border_color = (Color){ .r=118, .g=118, .b=118, .a=255 };
         apply_html_uniform_border(lycon, block, FormDefaults::TEXTAREA_BORDER, CSS_VALUE_SOLID,
-            (Color){ .r=118, .g=118, .b=118, .a=255 }, false);
+            &textarea_border_color, false);
             radiant_spacing_set_all(&block->boundary_mut()->padding, FormDefaults::TEXTAREA_PADDING);
         break;
     }
