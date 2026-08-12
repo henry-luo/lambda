@@ -410,22 +410,8 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     if (grid_layout && grid_layout->computed_column_count > 0) {
         // Check if container is shrink-to-fit (inline-grid, or absolutely
         // positioned with no explicit width)
-        bool is_shrink_to_fit = false;
-        if (grid_container->display.outer == CSS_VALUE_INLINE_BLOCK &&
-            (!grid_container->blk || grid_container->block()->given_width < 0)) {
-            is_shrink_to_fit = true;
-        } else if (grid_container->position &&
-            (grid_container->positionp()->position == CSS_VALUE_ABSOLUTE ||
-             grid_container->positionp()->position == CSS_VALUE_FIXED)) {
-            // Check if width is auto (not explicitly set)
-            bool has_explicit_width = grid_container->blk && grid_container->block_mut()->given_width > 0;
-            bool has_left_right = grid_container->positionp()->has_left && grid_container->positionp()->has_right;
-            if (!has_explicit_width && !has_left_right) {
-                is_shrink_to_fit = true;
-            }
-        }
-
-        if (is_shrink_to_fit && grid_layout->is_shrink_to_fit_width) {
+        if (layout_is_shrink_to_fit_width(grid_container) &&
+            grid_layout->is_shrink_to_fit_width) {
             // layout_grid_container already set the correct width in Pass 2
             // (including the first-pass intrinsic width for pct tracks).
             // Use grid_layout->content_width which is already correct.

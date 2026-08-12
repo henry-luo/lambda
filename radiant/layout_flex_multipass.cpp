@@ -7,10 +7,44 @@
 #include "../lib/tagged.hpp"
 #include <cmath>
 
+static float flex_auto_container_content_extent(LayoutContext* lycon,
+                                                ViewBlock* container,
+                                                FlexContainerLayout* flex,
+                                                int item_count,
+                                                LayoutAxis axis,
+                                                bool column_main_axis);
+
 static bool flex_child_is_br(DomNode* child) {
     if (!child || !child->is_element()) return false;
     DomElement* elem = child->as_element();
     return elem && elem->tag() == MARKUP_NAME_BR;
+}
+
+static void flex_apply_auto_container_cross_extent(LayoutContext* lycon,
+                                                   ViewBlock* container,
+                                                   FlexContainerLayout* flex,
+                                                   int item_count,
+                                                   bool column_main_axis) {
+    if (!lycon || !container || !flex) return;
+    float measured = flex_auto_container_content_extent(
+        lycon, container, flex, item_count, LAYOUT_AXIS_Y, column_main_axis);
+    if (measured <= 0.0f) return;
+
+    BoxEdges padding = layout_boundary_padding_edges(container->bound);
+    float total = measured + padding.top + padding.bottom;
+    if (!column_main_axis) {
+        flex->cross_axis_size = measured;
+        container->height = total;
+        return;
+    }
+
+    // CSS Flexbox keeps an auto column height from replacing a larger size
+    // supplied by the parent; only the content-derived size is provisional.
+    if (total < container->height) return;
+    bool has_max_height = layout_positive_max_axis_or(container, false, 0.0f) > 0.0f;
+    flex->main_axis_size = flex->wrap != WRAP_NOWRAP && !has_max_height
+        ? 1e9f : measured;
+    container->height = total;
 }
 
 static bool flex_container_has_only_direct_text_and_br(ViewBlock* flex_container) {
@@ -607,37 +641,13 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     }
 
     bool horizontal_flex = flex_layout && is_main_axis_horizontal(flex_layout);
-    if (horizontal_flex && !has_explicit_height) {
-        float max_item_height = flex_auto_container_content_extent(
-            lycon, flex_container, flex_layout, item_count, LAYOUT_AXIS_Y, false);
-        if (max_item_height > 0) {
-            BoxEdges padding = layout_boundary_padding_edges(flex_container->bound);
-            float total_height = max_item_height + padding.top + padding.bottom;
-            flex_layout->cross_axis_size = max_item_height;  // Content height
-            flex_container->height = total_height;  // Total height including padding
-        }
-    } else if (flex_layout && !horizontal_flex && !has_explicit_height) {
-        float total_height = flex_auto_container_content_extent(
-            lycon, flex_container, flex_layout, item_count, LAYOUT_AXIS_Y, true);
-        if (total_height > 0) {
-            BoxEdges padding = layout_boundary_padding_edges(flex_container->bound);
-            float final_height = total_height + padding.top + padding.bottom;
-            // CSS Flexbox: AUTO-HEIGHT must never shrink a container below the height
-            float existing_height = flex_container->height;  // Set by parent flex or prior layout
-            if (final_height >= existing_height) {
-                // boundary to infinite per CSS Flexbox §9.3 (items don't wrap when the
-                bool has_max_height = layout_positive_max_axis_or(
-                    flex_container, false, 0.0f) > 0.0f;
-                if (flex_layout->wrap != WRAP_NOWRAP && !has_max_height) {
-                    flex_layout->main_axis_size = 1e9f;
-                } else {
-                    flex_layout->main_axis_size = total_height;  // Content height
-                }
-                flex_container->height = final_height;  // Total height including padding
-            }
-        } else if (item_count > 0 && flex_layout->main_axis_size <= 0.0f &&
-                   flex_layout->wrap != WRAP_NOWRAP &&
-                   layout_positive_max_axis_or(flex_container, false, 0.0f) <= 0.0f) {
+    if (flex_layout && !has_explicit_height) {
+        flex_apply_auto_container_cross_extent(
+            lycon, flex_container, flex_layout, item_count, !horizontal_flex);
+        if (!horizontal_flex && item_count > 0 &&
+            flex_layout->main_axis_size <= 0.0f &&
+            flex_layout->wrap != WRAP_NOWRAP &&
+            layout_positive_max_axis_or(flex_container, false, 0.0f) <= 0.0f) {
             flex_layout->main_axis_size = 1e9f;
         }
     }

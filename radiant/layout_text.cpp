@@ -305,39 +305,32 @@ int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
         return 1;
     } else if (text_transform == CSS_VALUE_FULL_SIZE_KANA) {
         // CSS Text 3 §2.1: Convert small Kana to their normal (full-size) equivalents
+        bool odd_pair = (codepoint >= 0x3041 && codepoint <= 0x3049) ||
+            (codepoint >= 0x3083 && codepoint <= 0x3087) ||
+            (codepoint >= 0x30A1 && codepoint <= 0x30A9) ||
+            (codepoint >= 0x30E3 && codepoint <= 0x30E7);
+        if (odd_pair && (codepoint & 1)) {
+            out[0] = codepoint + 1;
+            return 1;
+        }
+        if (codepoint == 0x3063 || codepoint == 0x308E ||
+            codepoint == 0x30C3 || codepoint == 0x30EE) {
+            out[0] = codepoint + 1;
+            return 1;
+        }
+        if (codepoint >= 0xFF67 && codepoint <= 0xFF6B) {
+            out[0] = codepoint + 0x0A;
+            return 1;
+        }
+        if (codepoint >= 0xFF6C && codepoint <= 0xFF6E) {
+            out[0] = codepoint + 0x28;
+            return 1;
+        }
         switch (codepoint) {
-        case 0x3041: out[0] = 0x3042; return 1;
-        case 0x3043: out[0] = 0x3044; return 1;
-        case 0x3045: out[0] = 0x3046; return 1;
-        case 0x3047: out[0] = 0x3048; return 1;
-        case 0x3049: out[0] = 0x304A; return 1;
-        case 0x3063: out[0] = 0x3064; return 1;
-        case 0x3083: out[0] = 0x3084; return 1;
-        case 0x3085: out[0] = 0x3086; return 1;
-        case 0x3087: out[0] = 0x3088; return 1;
-        case 0x308E: out[0] = 0x308F; return 1;
         case 0x3095: out[0] = 0x304B; return 1;
         case 0x3096: out[0] = 0x3051; return 1;
-        case 0x30A1: out[0] = 0x30A2; return 1;
-        case 0x30A3: out[0] = 0x30A4; return 1;
-        case 0x30A5: out[0] = 0x30A6; return 1;
-        case 0x30A7: out[0] = 0x30A8; return 1;
-        case 0x30A9: out[0] = 0x30AA; return 1;
-        case 0x30C3: out[0] = 0x30C4; return 1;
-        case 0x30E3: out[0] = 0x30E4; return 1;
-        case 0x30E5: out[0] = 0x30E6; return 1;
-        case 0x30E7: out[0] = 0x30E8; return 1;
-        case 0x30EE: out[0] = 0x30EF; return 1;
         case 0x30F5: out[0] = 0x30AB; return 1;
         case 0x30F6: out[0] = 0x30B1; return 1;
-        case 0xFF67: out[0] = 0xFF71; return 1;
-        case 0xFF68: out[0] = 0xFF72; return 1;
-        case 0xFF69: out[0] = 0xFF73; return 1;
-        case 0xFF6A: out[0] = 0xFF74; return 1;
-        case 0xFF6B: out[0] = 0xFF75; return 1;
-        case 0xFF6C: out[0] = 0xFF94; return 1;
-        case 0xFF6D: out[0] = 0xFF95; return 1;
-        case 0xFF6E: out[0] = 0xFF96; return 1;
         case 0xFF6F: out[0] = 0xFF82; return 1;
         }
     }
@@ -345,58 +338,51 @@ int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
     return 1;
 }
 
-/**
- * Backward-compatible wrapper: returns only the first codepoint of the full mapping.
- */
-uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start) {
-    uint32_t out[3];
-    apply_text_transform_full(codepoint, text_transform, is_word_start, out);
-    return out[0];
-}
-
 bool text_codepoint_has_zero_advance(uint32_t codepoint) {
     if (codepoint >= 0x1F3FB && codepoint <= 0x1F3FF) return true;  // emoji modifiers
     if (codepoint >= 0xFE00 && codepoint <= 0xFE0F) return true;    // variation selectors
     if (codepoint >= 0xE0100 && codepoint <= 0xE01EF) return true;  // variation selectors
 
-    switch (codepoint) {
-        case 0x00AD:  // soft hyphen
-        case 0x034F:  // combining grapheme joiner
-        case 0x061C:  // Arabic letter mark
-        case 0x180E:  // Mongolian vowel separator
-        case 0x200B:  // zero width space
-        case 0x200C:  // zero width non-joiner
-        case 0x200D:  // zero width joiner
-        case 0x200E:  // left-to-right mark
-        case 0x200F:  // right-to-left mark
-        case 0x202A:  // directional formatting controls
-        case 0x202B:
-        case 0x202C:
-        case 0x202D:
-        case 0x202E:
-        case 0x2060:  // word joiner
-        case 0x2061:  // function application
-        case 0x2062:  // invisible times
-        case 0x2063:  // invisible separator
-        case 0x2064:  // invisible plus
-        case 0x2066:  // isolate controls
-        case 0x2067:
-        case 0x2068:
-        case 0x2069:
-        case 0x206A:  // inhibit symmetric swapping
-        case 0x206B:
-        case 0x206C:
-        case 0x206D:
-        case 0x206E:
-        case 0x206F:
-        case 0xFEFF:  // zero width no-break space / BOM
-            return true;
-        default:
-            break;
+    // CSS Text treats these controls as zero-advance even when the font
+    // category lookup would not classify them as combining marks.
+    if (codepoint == 0x00AD || codepoint == 0x034F || codepoint == 0x061C ||
+        codepoint == 0x180E || codepoint == 0xFEFF ||
+        (codepoint >= 0x200B && codepoint <= 0x200F) ||
+        (codepoint >= 0x202A && codepoint <= 0x202E) ||
+        (codepoint >= 0x2060 && codepoint <= 0x2064) ||
+        (codepoint >= 0x2066 && codepoint <= 0x206F)) {
+        return true;
     }
 
     utf8proc_category_t cat = utf8proc_category((utf8proc_int32_t)codepoint);
     return cat == UTF8PROC_CATEGORY_MN || cat == UTF8PROC_CATEGORY_ME;
+}
+
+bool layout_text_edge_has_whitespace(const char* text, bool end) {
+    if (!text || !*text) return false;
+    size_t length = strlen(text);
+    unsigned char ch = (unsigned char)text[end ? length - 1 : 0];
+    return ch == ' ' || ch == '\t' || ch == '\n' ||
+           ch == '\r' || ch == '\f';
+}
+
+bool layout_element_edge_has_whitespace(DomNode* element, bool end) {
+    if (!element || !element->is_element()) return false;
+
+    DomNode* node = end ? element->as_element()->last_child
+                        : element->as_element()->first_child;
+    while (node) {
+        if (node->is_text()) {
+            return layout_text_edge_has_whitespace(
+                (const char*)node->text_data(), end);
+        }
+        DomElement* child = node->is_element() ? node->as_element() : nullptr;
+        DomNode* edge_child = child
+            ? (end ? child->last_child : child->first_child) : nullptr;
+        if (!edge_child) return false;
+        node = edge_child;
+    }
+    return false;
 }
 
 /**
@@ -2874,6 +2860,19 @@ static inline void skip_collapsible_space_sequence(unsigned char** str, bool col
     }
 }
 
+static bool skip_collapsible_text_edge(LayoutContext* lycon, DomNode* text_node,
+                                       unsigned char** str, bool collapse_newlines,
+                                       bool clear_view_when_empty, bool* had_leading_space) {
+    skip_collapsible_space_sequence(str, collapse_newlines);
+    clear_slice_inline_start_edge(lycon, text_node);
+    if (!**str) {
+        if (clear_view_when_empty) text_node->view_type = RDT_VIEW_NONE;
+        return true;
+    }
+    if (had_leading_space) *had_leading_space = false;
+    return false;
+}
+
 static bool whitespace_only_text_before_forced_break(DomNode* text_node) {
     if (!text_node || !text_node->next_sibling ||
         !text_node->next_sibling->is_element() ||
@@ -3093,15 +3092,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         clear_slice_inline_start_edge(lycon, text_node);
     }
     if (collapse_spaces && at_collapsible_text_edge && is_space(*str)) {
-        skip_collapsible_space_sequence(&str, collapse_newlines);
-        clear_slice_inline_start_edge(lycon, text_node);
-        if (!*str) {
-            if (!text_view) {
-                text_node->view_type = RDT_VIEW_NONE;
-            }
-            return;
-        }
-        had_leading_space = false;
+        if (skip_collapsible_text_edge(lycon, text_node, &str, collapse_newlines,
+                                        !text_view, &had_leading_space)) return;
     }
     if (++layout_text_iterations > 500) {
         log_error("layout_text: exceeded 500 iterations, aborting text layout");
@@ -3127,15 +3119,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     cjk_boundary_wrap)) {
             line_break(lycon);
             if (collapse_spaces && is_space(*str)) {
-                skip_collapsible_space_sequence(&str, collapse_newlines);
-                clear_slice_inline_start_edge(lycon, text_node);
-                if (!*str) {
-                    if (!text_view) {
-                        text_node->view_type = RDT_VIEW_NONE;
-                    }
-                    return;
-                }
-                had_leading_space = false;
+                if (skip_collapsible_text_edge(lycon, text_node, &str, collapse_newlines,
+                                                !text_view, &had_leading_space)) return;
             }
         }
     }
@@ -3164,15 +3149,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             record_inline_box_decoration_fragment(lycon, text_node);
             line_break(lycon);
             if (collapse_spaces && is_space(*str)) {
-                skip_collapsible_space_sequence(&str, collapse_newlines);
-                clear_slice_inline_start_edge(lycon, text_node);
-                if (!*str) {
-                    if (!text_view) {
-                        text_node->view_type = RDT_VIEW_NONE;
-                    }
-                    return;
-                }
-                had_leading_space = false;
+                if (skip_collapsible_text_edge(lycon, text_node, &str, collapse_newlines,
+                                                !text_view, &had_leading_space)) return;
             }
         }
     }

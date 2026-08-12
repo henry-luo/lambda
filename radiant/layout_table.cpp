@@ -189,7 +189,8 @@ static void table_apply_positioned_row(LayoutContext* lycon, ViewTableRow* row) 
     });
 }
 
-static float resolve_table_relative_width(LayoutContext* lycon, const CssValue* value, float table_content_width) {
+static float table_resolve_relative_width(LayoutContext* lycon, const CssValue* value,
+                                          float table_content_width) {
     if (!value) return 0.0f;
     if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
         return table_content_width > 0.0f ?
@@ -198,7 +199,7 @@ static float resolve_table_relative_width(LayoutContext* lycon, const CssValue* 
     if (value->type == CSS_VALUE_TYPE_LENGTH) {
         return resolve_length_value(lycon, CSS_PROPERTY_WIDTH, value);
     }
-    if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+    if (value->type == CSS_VALUE_TYPE_CALC || value->type == CSS_VALUE_TYPE_FUNCTION) {
         BlockContext percentage_base = {};
         percentage_base.content_width = table_content_width;
         BlockContext* saved_parent = lycon->block.parent;
@@ -346,7 +347,7 @@ static float get_cell_css_width(LayoutContext* lycon, ViewTableCell* tcell, floa
         (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE ||
          width_decl->value->type == CSS_VALUE_TYPE_LENGTH ||
          width_decl->value->type == CSS_VALUE_TYPE_FUNCTION)) {
-        cell_width = resolve_table_relative_width(lycon, width_decl->value, table_content_width);
+        cell_width = table_resolve_relative_width(lycon, width_decl->value, table_content_width);
         if (is_table_relative) *is_table_relative = table_width_value_is_relative(width_decl->value);
     } else if (tcell->blk && !isnan(tcell->block()->given_width_percent) &&
                table_content_width > 0.0f) {
@@ -1759,30 +1760,6 @@ static float table_fixed_content_width_for_columns(ViewTable* table,
     return content_width;
 }
 
-static float table_resolve_percent_or_length_width(LayoutContext* lycon,
-                                                   const CssValue* value,
-                                                   float percentage_basis) {
-    if (!value) return 0.0f;
-    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        return (float)(percentage_basis * value->data.percentage.value / 100.0);
-    }
-    if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        return resolve_length_value(lycon, CSS_PROPERTY_WIDTH, value);
-    }
-    if (value->type == CSS_VALUE_TYPE_CALC || value->type == CSS_VALUE_TYPE_FUNCTION) {
-        // fixed table percentages in calc() use the same content-track basis
-        // as a standalone percentage.
-        BlockContext percentage_base = {};
-        percentage_base.content_width = percentage_basis;
-        BlockContext* saved_parent = lycon->block.parent;
-        lycon->block.parent = &percentage_base;
-        float resolved = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, value);
-        lycon->block.parent = saved_parent;
-        return isnan(resolved) ? 0.0f : resolved;
-    }
-    return 0.0f;
-}
-
 static float table_resolve_fixed_column_css_width(LayoutContext* lycon, ViewElement* column,
                                                   float content_width) {
     if (!column || column->node_type != DOM_NODE_ELEMENT) return 0.0f;
@@ -1790,7 +1767,7 @@ static float table_resolve_fixed_column_css_width(LayoutContext* lycon, ViewElem
     if (!dom_col || !dom_col->specified_style) return 0.0f;
     CssDeclaration* w_decl = style_tree_get_declaration(dom_col->specified_style, CSS_PROPERTY_WIDTH);
     if (!w_decl || !w_decl->value) return 0.0f;
-    return table_resolve_percent_or_length_width(lycon, w_decl->value, content_width);
+    return table_resolve_relative_width(lycon, w_decl->value, content_width);
 }
 
 static int table_apply_fixed_column_css_width(LayoutContext* lycon, ViewElement* column,
@@ -1817,7 +1794,7 @@ static float table_resolve_fixed_first_row_cell_width(LayoutContext* lycon, View
             CssDeclaration* width_decl = style_tree_get_declaration(
                 dom_elem->specified_style, CSS_PROPERTY_WIDTH);
             if (width_decl && width_decl->value) {
-                cell_width = table_resolve_percent_or_length_width(
+                cell_width = table_resolve_relative_width(
                     lycon, width_decl->value, content_width);
             }
         }
@@ -2126,7 +2103,7 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
                 cell->as_element()->specified_style, padding_properties[side]);
             if (declaration && declaration->value &&
                 layout_css_value_has_percentage(declaration->value)) {
-                float resolved = resolve_table_relative_width(
+                float resolved = table_resolve_relative_width(
                     lycon, declaration->value, table_inline_base);
                 if (resolved >= 0.0f) *padding_values[side] = resolved;
             }
@@ -2977,24 +2954,17 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
 static bool table_cell_apply_vertical_align_keyword(ViewTableCell* cell,
                                                     CssEnum keyword) {
     if (!cell || !cell->td) return false;
-    switch (keyword) {
-    case CSS_VALUE_TOP:
+    if (keyword == CSS_VALUE_TOP) {
         cell->td->vertical_align = TableCellProp::CELL_VALIGN_TOP;
-        break;
-    case CSS_VALUE_MIDDLE:
+    } else if (keyword == CSS_VALUE_MIDDLE) {
         cell->td->vertical_align = TableCellProp::CELL_VALIGN_MIDDLE;
-        break;
-    case CSS_VALUE_BOTTOM:
+    } else if (keyword == CSS_VALUE_BOTTOM) {
         cell->td->vertical_align = TableCellProp::CELL_VALIGN_BOTTOM;
-        break;
-    case CSS_VALUE_BASELINE:
-    case CSS_VALUE_SUB:
-    case CSS_VALUE_SUPER:
-    case CSS_VALUE_TEXT_TOP:
-    case CSS_VALUE_TEXT_BOTTOM:
+    } else if (keyword == CSS_VALUE_BASELINE || keyword == CSS_VALUE_SUB ||
+               keyword == CSS_VALUE_SUPER || keyword == CSS_VALUE_TEXT_TOP ||
+               keyword == CSS_VALUE_TEXT_BOTTOM) {
         cell->td->vertical_align = TableCellProp::CELL_VALIGN_BASELINE;
-        break;
-    default:
+    } else {
         return false;
     }
     return true;
@@ -4240,6 +4210,28 @@ static void table_apply_explicit_height_row_extra(TableMetadata* meta, int row_i
     meta->row_heights[row_idx] += row_extra;
 }
 
+template <typename Fn>
+static int table_for_each_height_distribution_row(ViewTable* table,
+                                                  TableMetadata* meta,
+                                                  bool body_only, Fn fn) {
+    if (!table || !meta) return 0;
+    int count = 0;
+    if (body_only) {
+        table->each_body_row([&](ViewTableRowGroup*, ViewTableRow* row) {
+            int row_idx = table_row_metadata_index_from_row(row, -1);
+            if (row_idx < 0 || row_idx >= meta->row_count) return;
+            fn(row_idx);
+            count++;
+        });
+    } else {
+        for (int row_idx = 0; row_idx < meta->row_count; row_idx++) {
+            fn(row_idx);
+            count++;
+        }
+    }
+    return count;
+}
+
 static float table_resolve_row_explicit_height(LayoutContext* lycon, TableMetadata* meta,
                                                ViewBlock* row, int row_idx) {
     if (!row || !row->is_element()) return 0.0f;
@@ -4511,6 +4503,34 @@ static void table_reposition_row_groups_from_metadata(ViewTable* table, TableMet
     });
 }
 
+static bool table_reflow_row_from_metadata(LayoutContext* lycon, TableMetadata* meta,
+                                           ViewTableRow* trow, ViewBlock* row,
+                                           float group_start_y, bool in_group,
+                                           float row_spacing, int* visual_row_index,
+                                           float* cursor_y, float* group_max_y) {
+    if (!lycon || !meta || !trow || !row || !visual_row_index || !cursor_y) return false;
+    int row_idx = table_row_metadata_index(row, *visual_row_index);
+    if (row_idx < 0 || row_idx >= meta->row_count) return false;
+    float row_height = meta->row_heights[row_idx];
+    bool is_collapsed = meta->row_collapsed && meta->row_collapsed[row_idx];
+    meta->row_y_positions[row_idx] = *cursor_y;
+    row->y = in_group ? *cursor_y - group_start_y : *cursor_y;
+    row->height = row_height;
+    update_row_cells_after_height_change(lycon, trow, row_height, true, false);
+    float row_bottom = row->y + row->height;
+    if (group_max_y && row_bottom > *group_max_y) *group_max_y = row_bottom;
+    *cursor_y += row_height;
+    (*visual_row_index)++;
+    bool next_row_collapsed = meta->row_collapsed &&
+        *visual_row_index < meta->row_count &&
+        meta->row_collapsed[*visual_row_index];
+    if (!is_collapsed && !next_row_collapsed && row_spacing > 0.0f &&
+        *visual_row_index < meta->row_count) {
+        *cursor_y += row_spacing;
+    }
+    return true;
+}
+
 static float reflow_table_rows_from_metadata(LayoutContext* lycon, ViewTable* table,
                                              TableMetadata* meta, ArrayList* ordered_elements,
                                              float content_area_top_y) {
@@ -4527,46 +4547,15 @@ static float reflow_table_rows_from_metadata(LayoutContext* lycon, ViewTable* ta
             child->y = group_start_y;
             ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
             group->each_row_with_block( [&](ViewTableRow* trow, ViewBlock* row) {
-                int row_idx = table_row_metadata_index(row, visual_row_index);
-                if (row_idx < 0 || row_idx >= meta->row_count) return;
-                float row_height = meta->row_heights[row_idx];
-                bool is_collapsed = meta->row_collapsed && meta->row_collapsed[row_idx];
-                meta->row_y_positions[row_idx] = cursor_y;
-                row->y = cursor_y - group_start_y;
-                row->height = row_height;
-                update_row_cells_after_height_change(lycon, trow, row_height, true, false);
-                float row_bottom = row->y + row->height;
-                if (row_bottom > group_max_y) group_max_y = row_bottom;
-                cursor_y += row_height;
-                visual_row_index++;
-                bool next_row_collapsed = meta->row_collapsed &&
-                    visual_row_index < meta->row_count &&
-                    meta->row_collapsed[visual_row_index];
-                if (!is_collapsed && !next_row_collapsed && row_spacing > 0.0f &&
-                    visual_row_index < meta->row_count) {
-                    cursor_y += row_spacing;
-                }
+                table_reflow_row_from_metadata(
+                    lycon, meta, trow, row, group_start_y, true, row_spacing,
+                    &visual_row_index, &cursor_y, &group_max_y);
             });
             child->height = group_max_y;
         } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
-            int row_idx = table_row_metadata_index(child, visual_row_index);
-            if (row_idx < 0 || row_idx >= meta->row_count) continue;
-            float row_height = meta->row_heights[row_idx];
-            bool is_collapsed = meta->row_collapsed && meta->row_collapsed[row_idx];
-            meta->row_y_positions[row_idx] = cursor_y;
-            child->y = cursor_y;
-            child->height = row_height;
-            update_row_cells_after_height_change(
-                lycon, lam::view_require<RDT_VIEW_TABLE_ROW>(child), row_height, true, false);
-            cursor_y += row_height;
-            visual_row_index++;
-            bool next_row_collapsed = meta->row_collapsed &&
-                visual_row_index < meta->row_count &&
-                meta->row_collapsed[visual_row_index];
-            if (!is_collapsed && !next_row_collapsed && row_spacing > 0.0f &&
-                visual_row_index < meta->row_count) {
-                cursor_y += row_spacing;
-            }
+            table_reflow_row_from_metadata(
+                lycon, meta, lam::view_require<RDT_VIEW_TABLE_ROW>(child), child,
+                0.0f, false, row_spacing, &visual_row_index, &cursor_y, nullptr);
         }
     }
     return cursor_y;
@@ -4850,54 +4839,14 @@ static void apply_table_cell_width_constraints(ViewTableCell* cell, bool border_
         if (widths->max_width < min_border_box) widths->max_width = min_border_box;
     }
 }
-// CSS 2.1 whitespace at an inline boundary comes from its edge text descendant.
-static bool element_text_edge_is_whitespace(DomNode* element, bool first) {
-    if (!element || !element->is_element()) return false;
-    DomNode* node = first ? element->as_element()->first_child
-                          : element->as_element()->last_child;
-    while (node) {
-        if (node->is_text()) {
-            const char* text = (const char*)node->text_data();
-            if (!text || !*text) return false;
-            size_t length = strlen(text);
-            unsigned char edge = (unsigned char)(first ? text[0] : text[length - 1]);
-            return edge == ' ' || edge == '\t' || edge == '\n' ||
-                   edge == '\r' || edge == '\f';
-        }
-        if (node->is_element()) {
-            DomElement* child = node->as_element();
-            node = first ? child->first_child : child->last_child;
-            if (node) continue;
-        }
-        return false;
-    }
-    return false;
-}
-
 static float table_intrinsic_child_horizontal_margin(LayoutContext* lycon,
                                                     DomElement* child_elem,
                                                     bool include_shorthand) {
     if (!child_elem) return 0.0f;
-    float margin_h = 0.0f;
-    if (child_elem->bound) {
-        if (child_elem->boundary()->margin.left_type != CSS_VALUE_AUTO) {
-            margin_h += child_elem->boundary()->margin.left;
-        }
-        if (child_elem->boundary()->margin.right_type != CSS_VALUE_AUTO) {
-            margin_h += child_elem->boundary()->margin.right;
-        }
-        if (margin_h != 0.0f || !child_elem->specified_style) return margin_h;
-        // intrinsic measurement can see a bound view before its CSS margins are
-        // resolved; fall through so specified margins still affect max-content.
-    }
-    if (!child_elem->specified_style) return 0.0f;
-    float margin_left = 0.0f;
-    float margin_right = 0.0f;
-    // intrinsic table measurement and used-value resolution share the same
-    // fixed-term handling for calc() margins; only the shorthand policy differs.
-    layout_resolve_intrinsic_horizontal_margins(
-        lycon, child_elem, false, &margin_left, &margin_right, include_shorthand);
-    return margin_left + margin_right;
+    LayoutIntrinsicMarginPair margins =
+        layout_intrinsic_horizontal_margin_pair(lycon, child_elem,
+            {false, include_shorthand, true, false, true});
+    return margins.left + margins.right;
 }
 
 static void table_intrinsic_flush_inline_run(float* inline_run_max, float* float_run_max,
@@ -5075,7 +5024,7 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                     &has_inline_content, &prev_ended_with_space);
             } else if (is_inline) {
                 // CSS 2.1: Account for whitespace between inline elements.
-                bool starts_with_ws = element_text_edge_is_whitespace(child, true);
+                bool starts_with_ws = layout_element_edge_has_whitespace(child, false);
                 if (collapse_ws && has_inline_content && (prev_ended_with_space || starts_with_ws) && lycon->font.style) {
                     inline_run_max += lycon->font.style->space_width;
                 }
@@ -5097,7 +5046,7 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                 child_min += inline_margin_h;
                 if (child_min < 0) child_min = 0;
                 has_inline_content = true;
-                prev_ended_with_space = element_text_edge_is_whitespace(child, false);
+                prev_ended_with_space = layout_element_edge_has_whitespace(child, true);
             } else {
                 if (!child_is_float) {
                     table_intrinsic_flush_inline_run(
@@ -5619,22 +5568,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             if (cell_width > 0 && tcell->td->col_span == 1 && col >= 0 && col < meta->column_count) {
                 meta->col_has_explicit_width[col] = true;
             }
-            float min_width = 0.0f;
-            float pref_width = 0.0f;
+            CellIntrinsicWidths widths = measure_cell_widths(
+                lycon, tcell, table->tb->border_collapse);
+            float min_width = widths.min_width;
+            float pref_width = cell_width > 0.0f ? cell_width : widths.max_width;
             if (cell_width == 0.0f) {
-                CellIntrinsicWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);
-                pref_width = widths.max_width;
-                min_width = widths.min_width;
                 cell_width = pref_width;
-            } else if (table->tb->border_collapse) {
-                pref_width = cell_width;
-                CellIntrinsicWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);
-                min_width = widths.min_width;
-            } else {
-                pref_width = cell_width;
-                CellIntrinsicWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);
-                min_width = cell_width_is_table_relative ?
-                    widths.min_width : (widths.min_width > cell_width ? widths.min_width : cell_width);
+            } else if (!table->tb->border_collapse && !cell_width_is_table_relative &&
+                       min_width < cell_width) {
+                min_width = cell_width;
             }
             if (should_prevent_wrapping(tcell) && pref_width < min_width) {
                 pref_width = min_width;
@@ -6045,59 +5987,29 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 float extra_for_body = available_for_content - padding_in_height - total_spacing -
                                 non_body_grid_height - body_natural_height;
 
-            if (extra_for_body > 0 && body_row_count > 0) {
-                // CSS 2.1 §17.5.3: Rows with percentage heights compute to auto and should
-                // not receive extra height. Only distribute to rows without percentage heights.
+            if (extra_for_body > 0 && meta->row_count > 0) {
+                // CSS 2.1 §17.5.3: body percentage heights compute to auto; when
+                // no body rows exist, CSS Tables 3 lets every grid row participate.
+                bool body_only = body_row_count > 0;
                 int eligible_row_count = 0;
                 float eligible_height_total = 0.0f;
-                table->each_body_row( [&](ViewTableRowGroup* group, ViewTableRow* trow) {
-                    (void)group;
-                    int row_idx = table_row_metadata_index_from_row(trow, -1);
-                    if (row_idx >= 0 && row_idx < meta->row_count) {
-                        // Only count rows that don't have percentage height
-                        if (!meta->row_has_percent_height[row_idx]) {
-                            eligible_row_count++;
-                            if (meta->row_heights[row_idx] > 0.0f) {
-                                eligible_height_total += meta->row_heights[row_idx];
-                            }
+                table_for_each_height_distribution_row(
+                    table, meta, body_only, [&](int row_idx) {
+                        if (body_only && meta->row_has_percent_height[row_idx]) return;
+                        eligible_row_count++;
+                        if (meta->row_heights[row_idx] > 0.0f) {
+                            eligible_height_total += meta->row_heights[row_idx];
                         }
-                    }
-                });
-                if (eligible_row_count > 0) {
-                    distributed_height_delta = extra_for_body;
-                    table->each_body_row( [&](ViewTableRowGroup* group, ViewTableRow* trow) {
-                        (void)group;
-                        int row_idx = table_row_metadata_index_from_row(trow, -1);
-                        if (row_idx < 0 || row_idx >= meta->row_count) return;
-                        if (meta->row_has_percent_height[row_idx]) {
-                            return;
-                        }
-                        table_apply_explicit_height_row_extra(
-                            meta, row_idx, extra_for_body, eligible_row_count,
-                            eligible_height_total);
                     });
-                }
-                table_recalculate_row_y_positions(
-                    table, meta, table_border_top + table_padding_top + top_caption_height + row_spacing);
-            } else if (extra_for_body > 0 && body_row_count == 0 && meta->row_count > 0) {
-                // CSS Tables 3: no tbody rows exist — distribute extra height to all
-                // Use direct index-based iteration over meta->row_heights to avoid
-                // Also: do NOT exclude percent-height rows here — when there are no
-                // body rows, ALL rows should participate in filling the table height.
-                int eligible_row_count = meta->row_count;  // all rows are eligible
                 if (eligible_row_count > 0) {
                     distributed_height_delta = extra_for_body;
-                    float eligible_height_total = 0.0f;
-                    for (int r = 0; r < meta->row_count; r++) {
-                        if (meta->row_heights[r] > 0.0f) {
-                            eligible_height_total += meta->row_heights[r];
-                        }
-                    }
-                    for (int r = 0; r < meta->row_count; r++) {
-                        table_apply_explicit_height_row_extra(
-                            meta, r, extra_for_body, eligible_row_count,
-                            eligible_height_total);
-                    }
+                    table_for_each_height_distribution_row(
+                        table, meta, body_only, [&](int row_idx) {
+                            if (body_only && meta->row_has_percent_height[row_idx]) return;
+                            table_apply_explicit_height_row_extra(
+                                meta, row_idx, extra_for_body, eligible_row_count,
+                                eligible_height_total);
+                        });
                     table_recalculate_row_y_positions(
                         table, meta, table_border_top + table_padding_top + top_caption_height + row_spacing);
                 }

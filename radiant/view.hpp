@@ -2993,8 +2993,6 @@ char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
                                const char* url);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
 const char* css_font_family_name_from_value(const CssValue* value);
-const char* css_join_font_family_values(LayoutContext* lycon, const CssValue* list,
-                                        size_t start, size_t end);
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value,
                                    bool require_loadable_face_source);
 const char* css_select_font_shorthand_family(LayoutContext* lycon,

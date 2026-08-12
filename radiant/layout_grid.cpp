@@ -255,19 +255,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     GridContainerLayout* grid_layout = lycon->grid_container;
     // Check if container is shrink-to-fit (absolutely positioned with no explicit width,
     // or inline-grid which uses shrink-to-fit sizing)
-    bool is_shrink_to_fit_width = false;
-    if (container->display.outer == CSS_VALUE_INLINE_BLOCK &&
-        (!container->blk || container->block()->given_width < 0)) {
-        is_shrink_to_fit_width = true;
-    } else if (container->position &&
-        (container->positionp()->position == CSS_VALUE_ABSOLUTE ||
-         container->positionp()->position == CSS_VALUE_FIXED)) {
-        bool has_explicit_width = container->blk && container->block_mut()->given_width > 0;
-        bool has_left_right = container->positionp()->has_left && container->positionp()->has_right;
-        if (!has_explicit_width && !has_left_right) {
-            is_shrink_to_fit_width = true;
-        }
-    }
+    bool is_shrink_to_fit_width = layout_is_shrink_to_fit_width(container);
     grid_layout->is_shrink_to_fit_width = is_shrink_to_fit_width;
     // An intrinsic width keyword constrains track sizing itself; treating its
     // post-layout used width as definite incorrectly lets auto tracks consume free space.

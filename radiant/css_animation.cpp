@@ -661,20 +661,36 @@ static CssAnimatedProp* find_underlying_prop(CssAnimState* state, CssPropertyCod
     return NULL;
 }
 
+struct CssAnimationLengthSlot {
+    float* value;
+    CssEnum* type;
+    float* percent;
+};
+
+static CssAnimationLengthSlot css_animation_length_slot(BlockProp* block,
+                                                        CssPropertyCode property) {
+    if (!block) return {nullptr, nullptr, nullptr};
+    switch (property) {
+        case CSS_PROPERTY_WIDTH:
+            return {&block->given_width, &block->given_width_type,
+                    &block->given_width_percent};
+        case CSS_PROPERTY_HEIGHT:
+            return {&block->given_height, &block->given_height_type,
+                    &block->given_height_percent};
+        case CSS_PROPERTY_MIN_WIDTH: return {&block->given_min_width, nullptr, nullptr};
+        case CSS_PROPERTY_MAX_WIDTH: return {&block->given_max_width, nullptr, nullptr};
+        case CSS_PROPERTY_MIN_HEIGHT: return {&block->given_min_height, nullptr, nullptr};
+        case CSS_PROPERTY_MAX_HEIGHT: return {&block->given_max_height, nullptr, nullptr};
+        default: return {nullptr, nullptr, nullptr};
+    }
+}
+
 static bool capture_underlying_length(DomElement* element, CssPropertyCode id,
                                       CssAnimatedProp* out) {
     if (!element || !out || !element->blk) return false;
-    const BlockProp* block = element->block();
-    float value = 0.0f;
-    switch (id) {
-        case CSS_PROPERTY_WIDTH: value = block->given_width; break;
-        case CSS_PROPERTY_HEIGHT: value = block->given_height; break;
-        case CSS_PROPERTY_MIN_WIDTH: value = block->given_min_width; break;
-        case CSS_PROPERTY_MAX_WIDTH: value = block->given_max_width; break;
-        case CSS_PROPERTY_MIN_HEIGHT: value = block->given_min_height; break;
-        case CSS_PROPERTY_MAX_HEIGHT: value = block->given_max_height; break;
-        default: return false;
-    }
+    CssAnimationLengthSlot slot = css_animation_length_slot(element->block_mut(), id);
+    if (!slot.value) return false;
+    float value = *slot.value;
     if (value < 0.0f) return false;
     out->property_code = id;
     out->value_type = ANIM_VAL_LENGTH;
@@ -840,26 +856,15 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
         case CSS_PROPERTY_MAX_HEIGHT: {
             ViewBlock* block = lam::view_as_block(static_cast<View*>(element));
             if (!block || !block->blk) break;
-            float value = prop->value.length.value;
             // animated sizing writes the computed value back into the same
             // BlockProp consumed by layout; leaving it in the cascade only
             // changes paint-time state and cannot affect descendants.
-            switch (prop->property_code) {
-                case CSS_PROPERTY_WIDTH:
-                    block->blk->given_width = value;
-                    block->blk->given_width_type = CSS_VALUE__UNDEF;
-                    block->blk->given_width_percent = NAN;
-                    break;
-                case CSS_PROPERTY_HEIGHT:
-                    block->blk->given_height = value;
-                    block->blk->given_height_type = CSS_VALUE__UNDEF;
-                    block->blk->given_height_percent = NAN;
-                    break;
-                case CSS_PROPERTY_MIN_WIDTH: block->blk->given_min_width = value; break;
-                case CSS_PROPERTY_MAX_WIDTH: block->blk->given_max_width = value; break;
-                case CSS_PROPERTY_MIN_HEIGHT: block->blk->given_min_height = value; break;
-                case CSS_PROPERTY_MAX_HEIGHT: block->blk->given_max_height = value; break;
-                default: break;
+            CssAnimationLengthSlot slot = css_animation_length_slot(
+                block->block_mut(), prop->property_code);
+            if (slot.value) {
+                *slot.value = prop->value.length.value;
+                if (slot.type) *slot.type = CSS_VALUE__UNDEF;
+                if (slot.percent) *slot.percent = NAN;
             }
             break;
         }
@@ -1393,6 +1398,31 @@ bool css_animation_parse_timing_function_text(const char* value,
     return false;
 }
 
+struct CssAnimationKeywordOption {
+    CssEnum keyword;
+    int value;
+};
+
+static bool css_animation_apply_keyword(StyleTree* style_tree,
+                                        CssPropertyCode property,
+                                        const CssAnimationKeywordOption* options,
+                                        int option_count, int* out_value) {
+    if (!style_tree || !style_tree->tree || !options || !out_value) return false;
+    AvlNode* node = avl_tree_search(style_tree->tree, property);
+    StyleNode* style_node = node ? (StyleNode*)node->declaration : nullptr;
+    CssDeclaration* declaration = style_node ? style_node->winning_decl : nullptr;
+    if (!declaration || !declaration->value ||
+        declaration->value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+    CssEnum keyword = declaration->value->data.keyword;
+    for (int i = 0; i < option_count; i++) {
+        if (options[i].keyword == keyword) {
+            *out_value = options[i].value;
+            return true;
+        }
+    }
+    return false;
+}
+
 void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     if (!element || !lycon || !lycon->ui_context) return;
     if (lycon->ui_context->document &&
@@ -1511,36 +1541,31 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
         }
     }
 
-    // resolve animation-direction
-    AvlNode* dir_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_ANIMATION_DIRECTION);
-    if (dir_node) {
-        StyleNode* sn = (StyleNode*)dir_node->declaration;
-        CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        if (d && d->value && d->value->type == CSS_VALUE_TYPE_KEYWORD) {
-            switch (d->value->data.keyword) {
-                case CSS_VALUE_NORMAL:             anim_prop.direction = ANIM_DIR_NORMAL; break;
-                case CSS_VALUE_REVERSE:            anim_prop.direction = ANIM_DIR_REVERSE; break;
-                case CSS_VALUE_ALTERNATE:          anim_prop.direction = ANIM_DIR_ALTERNATE; break;
-                case CSS_VALUE_ALTERNATE_REVERSE:  anim_prop.direction = ANIM_DIR_ALTERNATE_REVERSE; break;
-                default: break;
-            }
-        }
+    // resolve animation-direction and animation-fill-mode through one keyword map.
+    static const CssAnimationKeywordOption direction_options[] = {
+        {CSS_VALUE_NORMAL, ANIM_DIR_NORMAL},
+        {CSS_VALUE_REVERSE, ANIM_DIR_REVERSE},
+        {CSS_VALUE_ALTERNATE, ANIM_DIR_ALTERNATE},
+        {CSS_VALUE_ALTERNATE_REVERSE, ANIM_DIR_ALTERNATE_REVERSE}
+    };
+    int mapped_value = 0;
+    if (css_animation_apply_keyword(
+            style_tree, CSS_PROPERTY_ANIMATION_DIRECTION,
+            direction_options, sizeof(direction_options) / sizeof(*direction_options),
+            &mapped_value)) {
+        anim_prop.direction = (AnimationDirection)mapped_value;
     }
 
-    // resolve animation-fill-mode
-    AvlNode* fill_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_ANIMATION_FILL_MODE);
-    if (fill_node) {
-        StyleNode* sn = (StyleNode*)fill_node->declaration;
-        CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        if (d && d->value && d->value->type == CSS_VALUE_TYPE_KEYWORD) {
-            switch (d->value->data.keyword) {
-                case CSS_VALUE_NONE:      anim_prop.fill_mode = ANIM_FILL_NONE; break;
-                case CSS_VALUE_FORWARDS:  anim_prop.fill_mode = ANIM_FILL_FORWARDS; break;
-                case CSS_VALUE_BACKWARDS: anim_prop.fill_mode = ANIM_FILL_BACKWARDS; break;
-                case CSS_VALUE_BOTH:      anim_prop.fill_mode = ANIM_FILL_BOTH; break;
-                default: break;
-            }
-        }
+    static const CssAnimationKeywordOption fill_options[] = {
+        {CSS_VALUE_NONE, ANIM_FILL_NONE},
+        {CSS_VALUE_FORWARDS, ANIM_FILL_FORWARDS},
+        {CSS_VALUE_BACKWARDS, ANIM_FILL_BACKWARDS},
+        {CSS_VALUE_BOTH, ANIM_FILL_BOTH}
+    };
+    if (css_animation_apply_keyword(
+            style_tree, CSS_PROPERTY_ANIMATION_FILL_MODE,
+            fill_options, sizeof(fill_options) / sizeof(*fill_options), &mapped_value)) {
+        anim_prop.fill_mode = (AnimationFillMode)mapped_value;
     }
 
     // resolve animation-play-state
@@ -1622,19 +1647,11 @@ static bool css_transition_read_used_value(DomElement* element,
         case CSS_PROPERTY_MAX_HEIGHT: {
             if (!span->blk) return false;
             const BlockProp* block = span->block();
-            float value = -1.0f;
-            switch (prop_id) {
-                case CSS_PROPERTY_WIDTH: value = block->given_width; break;
-                case CSS_PROPERTY_HEIGHT: value = block->given_height; break;
-                case CSS_PROPERTY_MIN_WIDTH: value = block->given_min_width; break;
-                case CSS_PROPERTY_MAX_WIDTH: value = block->given_max_width; break;
-                case CSS_PROPERTY_MIN_HEIGHT: value = block->given_min_height; break;
-                case CSS_PROPERTY_MAX_HEIGHT: value = block->given_max_height; break;
-                default: break;
-            }
-            if (value < 0.0f || !isfinite(value)) return false;
+            CssAnimationLengthSlot slot = css_animation_length_slot(
+                const_cast<BlockProp*>(block), prop_id);
+            if (!slot.value || *slot.value < 0.0f || !isfinite(*slot.value)) return false;
             *out_type = ANIM_VAL_LENGTH;
-            *out_f = value;
+            *out_f = *slot.value;
             return true;
         }
         case CSS_PROPERTY_OPACITY: {

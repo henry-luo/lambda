@@ -328,6 +328,23 @@ void layout_resolve_intrinsic_horizontal_margins(LayoutContext* lycon,
                                                   float* margin_left,
                                                   float* margin_right,
                                                   bool include_shorthand = true);
+typedef struct LayoutIntrinsicMarginOptions {
+    bool include_logical;
+    bool include_shorthand;
+    bool include_bound;
+    bool nonnegative_bound;
+    bool fallback_zero_bound;
+} LayoutIntrinsicMarginOptions;
+
+typedef struct LayoutIntrinsicMarginPair {
+    float left;
+    float right;
+    bool used_bound;
+} LayoutIntrinsicMarginPair;
+
+LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
+        LayoutContext* lycon, DomElement* element,
+        LayoutIntrinsicMarginOptions options = {false, true, true, false, false});
 float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
                                             ViewElement* element,
                                             CssPropertyCode property,
@@ -2275,6 +2292,22 @@ inline bool layout_axis_is_horizontal(LayoutAxis axis) {
     return axis == LAYOUT_AXIS_X;
 }
 
+inline bool layout_is_shrink_to_fit_width(ViewBlock* block) {
+    if (!block) return false;
+    if (block->display.outer == CSS_VALUE_INLINE_BLOCK &&
+        (!block->blk || block->block()->given_width < 0.0f)) {
+        return true;
+    }
+    if (!block->position ||
+        (block->positionp()->position != CSS_VALUE_ABSOLUTE &&
+         block->positionp()->position != CSS_VALUE_FIXED)) {
+        return false;
+    }
+    bool has_explicit_width = block->blk && block->block()->given_width > 0.0f;
+    bool has_left_right = block->positionp()->has_left && block->positionp()->has_right;
+    return !has_explicit_width && !has_left_right;
+}
+
 typedef struct LayoutAxisBoxMetrics {
     float padding;
     float border;
@@ -3946,6 +3979,8 @@ float layout_measure_space_advance(LayoutContext* lycon, struct FontHandle* hand
                                    FontProp* style);
 size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
                                                char* buffer, size_t buffer_size);
+bool layout_text_edge_has_whitespace(const char* text, bool end);
+bool layout_element_edge_has_whitespace(DomNode* element, bool end);
 // DomNode style resolution
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
@@ -3961,15 +3996,6 @@ bool inline_span_has_multiple_line_fragments(ViewSpan* span);
 bool inline_span_float_continuation_x(
     ViewSpan* span, float* continuation_x, bool* has_left_float);
 // CSS text-transform
-
-/**
- * Apply CSS text-transform to a single Unicode codepoint.
- * @param codepoint Input Unicode codepoint
- * @param text_transform CSS text-transform value (CSS_VALUE_UPPERCASE, etc.)
- * @param is_word_start True if this is the first character of a word (for capitalize)
- * @return Transformed codepoint
- */
-uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start);
 
 /**
  * Apply CSS text-transform with full Unicode case mapping (1-to-many expansion).

@@ -477,16 +477,8 @@ static float get_parent_table_number(DomNode* element, const char* attribute_nam
 static float html_font_size_for_level(int level) {
     if (level < 1) level = 1;
     if (level > 7) level = 7;
-    switch (level) {
-        case 1: return 10.0f;
-        case 2: return 13.0f;
-        case 3: return 16.0f;
-        case 4: return 18.0f;
-        case 5: return 24.0f;
-        case 6: return 32.0f;
-        case 7: return 48.0f;
-    }
-    return 16.0f;
+    static const float sizes[] = {10.0f, 13.0f, 16.0f, 18.0f, 24.0f, 32.0f, 48.0f};
+    return sizes[level - 1];
 }
 
 static bool parse_legacy_font_size_level(const char* input, int* out_level) {
