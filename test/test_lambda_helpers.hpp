@@ -657,8 +657,11 @@ inline size_t lambda_capture_batch_chunk_size() {
     return BATCH_CHUNK_SIZE;
 }
 
-// Max parallel sub-batch processes to avoid resource exhaustion
-static const size_t MAX_PARALLEL_LAMBDA_BATCHES = 8;
+// Max parallel sub-batch processes to avoid resource exhaustion. A Lambda
+// baseline run already shares the host with the other GTest binaries; eight
+// compiler children can exhaust VM/file-descriptor pressure and terminate a
+// child before it emits its final BATCH_END record.
+static const size_t MAX_PARALLEL_LAMBDA_BATCHES = 4;
 
 // Timing captures may deliberately cap process fan-out so compiler samples
 // are not lost to host-level process pressure while large AST/MIR batches run.
@@ -716,6 +719,25 @@ inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
         });
     }
     for (auto& t : threads) t.join();
+
+    // A child can still terminate while compiling one unusually large or
+    // resource-heavy source. Retry only the missing records in one-source
+    // children so a lost protocol record never becomes a false semantic test
+    // failure, while preserving timing/MIR data for instrumentation captures.
+    for (size_t i = 0; i < batches.size(); i++) {
+        for (size_t script_index = batches[i].start;
+             script_index < batches[i].end; script_index++) {
+            if (thread_results[i].find(scripts[script_index]) != thread_results[i].end()) {
+                continue;
+            }
+            std::unordered_map<std::string, BatchResult> retry_result;
+            int retry_id = 100000 + (int)script_index;
+            run_sub_batch(scripts, is_procedural, script_index, script_index + 1,
+                          retry_id, retry_result, completed_scripts,
+                          progress_mutex, scripts.size());
+            for (auto& kv : retry_result) thread_results[i][kv.first] = std::move(kv.second);
+        }
+    }
 
     // Merge results
     for (auto& partial : thread_results) {

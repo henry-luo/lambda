@@ -1146,12 +1146,13 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     static int js_lazy_mir_cached = -1;
     if (js_lazy_mir_cached < 0) {
         const char* lazy_env = getenv("JS_LAZY_MIR");
-        // Lazy generation preserves the MIR ABI while deferring native codegen
-        // until a function is called; keep an explicit opt-out for debugging
-        // and backend comparisons, but make the measured cold path default.
+        // Lazy generation remains opt-in for JS modules: sequential library
+        // tests can retain deferred MIR contexts across host callbacks, so the
+        // eager path is the correctness default until that owner lifetime is
+        // made explicit. Performance captures may opt in with JS_LAZY_MIR=1.
         js_lazy_mir_cached = lazy_env
             ? (lazy_env[0] && strcmp(lazy_env, "0") != 0 ? 1 : 0)
-            : 1;
+            : 0;
     }
     void (*gen_interface)(MIR_context_t, MIR_item_t) =
         js_lazy_mir_cached ? MIR_set_lazy_gen_interface : MIR_set_gen_interface;
