@@ -270,6 +270,17 @@ static void jm_emit_raw(JsMirTranspiler* mt, MIR_insn_t insn) {
     em_emit_insn(&mt->em, insn);
 }
 
+static void jm_clear_boxed_float_const_cache(JsMirTranspiler* mt) {
+    if (!mt) return;
+    mt->boxed_float_const_cache_count = mt->boxed_float_const_cache_seed_count;
+    // Property-name Items are immutable NameId values.  They are still
+    // block-local here: a first definition in one branch must not be reused
+    // from a sibling branch that does not dominate it.
+    mt->property_name_cache_count = 0;
+    mt->module_name_id_cache_count = 0;
+    mt->module_ic_cache_count = 0;
+}
+
 static void jm_ensure_index_map(int** map, int* capacity, int key) {
     if (!map || !capacity || key < 0 || key < *capacity) return;
     if (!em_root_ensure_index_map(map, capacity, key)) {
@@ -658,6 +669,8 @@ void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
     }
     jm_emit_raw(mt, insn);
     if (!insn) return;
+    if (insn->code == MIR_JMP || insn->code == MIR_RET)
+        jm_clear_boxed_float_const_cache(mt);
     if (insn->code == MIR_JMP || insn->code == MIR_RET) {
         jm_error_lane_set_state(mt, JS_ERROR_LANE_UNREACHABLE);
     }
@@ -668,6 +681,7 @@ void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
         log_error("js-mir: attempt to emit NULL label — skipping");
         return;
     }
+    jm_clear_boxed_float_const_cache(mt);
     // Async state-machine labels merge distinct resume activations, so the
     // prior call result cannot dominate the label. Ordinary labels can be
     // deliberate exception-rethrow targets and must retain their Item carrier.
@@ -1044,6 +1058,7 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
 }
 
 JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name) {
+    if (!mt || !name) return NULL;
     JsVarScopeEntry key;
     memset(&key, 0, sizeof(key));
     key.name = name;

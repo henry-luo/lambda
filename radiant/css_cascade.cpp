@@ -108,8 +108,6 @@ void radiant_apply_css_stylesheet_to_tree(DomElement* root,
         return;
     }
 
-    // One shared walker keeps the style epoch open for the complete subtree;
-    // separate layout and event walkers previously allowed ownership to diverge.
     bool epoch_scope = style_epoch_cascade_begin(root->doc, root, engine, false);
     apply_stylesheet_to_tree(root, stylesheet, matcher, pool, engine, 0);
     if (epoch_scope) style_epoch_cascade_end(root->doc);
@@ -125,7 +123,10 @@ void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
 
     bool epoch_scope = style_epoch_cascade_begin(doc, root, engine, false);
     for (int i = 0; i < count; i++) {
-        radiant_apply_css_stylesheet_to_tree(root, stylesheets[i], matcher, pool, engine);
+        CssStylesheet* stylesheet = stylesheets[i];
+        if (stylesheet && stylesheet->rule_count > 0) {
+            apply_stylesheet_to_tree(root, stylesheet, matcher, pool, engine, 0);
+        }
     }
     if (epoch_scope) style_epoch_cascade_end(doc);
 }

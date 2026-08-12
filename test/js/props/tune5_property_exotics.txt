@@ -1,0 +1,4 @@
+1 true true true true 
+g:x:true,s:x:true,h:x,o:x,d:x,k
+3 true 9 true true 0,1
+7 true 7

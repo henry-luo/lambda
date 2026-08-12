@@ -32,6 +32,7 @@ extern "C" void ensure_jit_imports_initialized(void);
 
 bool jm_float_const_is_inline(double value);
 MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
+void jm_seed_boxed_float_const_cache(JsMirTranspiler* mt, JsAstNode* scope_root);
 
 extern JsModuleConstEntry* g_eval_preamble_entries;
 extern int g_eval_preamble_entry_count;
@@ -101,6 +102,7 @@ typedef struct JsMirReference {
     bool uninitialized_this;
     bool is_private;
     bool computed_key;
+    bool property_key_canonicalized;
     uint32_t named_key_index;
     NameId named_key_id;
     uint32_t named_ic_index;
@@ -351,8 +353,14 @@ static inline void jm_preserve_error_lane_carrier(JsMirTranspiler* mt,
 }
 MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
         int arg_count, MIR_reg_t* arg_regs, bool discard_result = false);
+MIR_reg_t jm_module_name_id_at_index(JsMirTranspiler* mt, uint32_t index);
+MIR_reg_t jm_active_module_ic_at_index(JsMirTranspiler* mt, uint32_t index);
 MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
+MIR_reg_t jm_call_function_discard(JsMirTranspiler* mt, MIR_op_t func,
+        MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
+MIR_reg_t jm_apply_function_discard(JsMirTranspiler* mt, MIR_op_t func,
+        MIR_op_t this_value, MIR_op_t args);
 MIR_reg_t jm_call_constructor_body_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count,
         MIR_op_t new_target);
@@ -382,6 +390,8 @@ MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_6(&(mt)->em, fn, __VA_ARGS__, true))
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt);
+MIR_reg_t jm_boxed_immediate_const(JsMirTranspiler* mt, uint64_t item,
+        const char* prefix);
 MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_error_lane_return(JsMirTranspiler* mt);
 bool jm_is_native_binary_expression(JsMirTranspiler* mt, JsBinaryNode* bin);

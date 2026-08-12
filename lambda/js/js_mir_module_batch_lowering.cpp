@@ -1043,28 +1043,76 @@ static struct hashmap* jm_collect_annexb_suppressed_names(JsAstNode* body, bool 
     return suppressed;
 }
 
-static void jm_collect_visible_function_scope_names(JsAstNode* body, bool is_strict,
-        struct hashmap* names, bool include_direct_lexicals) {
-    if (!body || !names) return;
-    struct hashmap* hoists = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-        jm_name_hash, jm_name_cmp, NULL, NULL);
-    struct hashmap* suppressed = jm_collect_annexb_suppressed_names(body, is_strict);
+// Function bodies are immutable after the collection pass. Reusing their
+// declaration sets avoids rescanning large nested ASTs once per ancestor/capture
+// edge while preserving the target-specific lexical resolver below.
+static struct hashmap* jm_cached_function_locals(JsFuncCollected* fc, bool var_only) {
+    if (!fc || !fc->node || !fc->node->body) return NULL;
+    struct hashmap** cache = var_only ? &fc->cached_var_locals : &fc->cached_all_locals;
+    if (!*cache) {
+        *cache = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        if (*cache) jm_collect_body_locals(fc->node->body, *cache, var_only);
+    }
+    return *cache;
+}
 
-    jm_collect_body_locals(body, hoists, true);
+static struct hashmap* jm_cached_function_direct_lexicals(JsFuncCollected* fc) {
+    if (!fc || !fc->node || !fc->node->body ||
+            fc->node->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return NULL;
+    if (!fc->cached_direct_lexicals) {
+        fc->cached_direct_lexicals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        if (fc->cached_direct_lexicals) {
+            jm_collect_let_const_names(fc->node->body, fc->cached_direct_lexicals);
+        }
+    }
+    return fc->cached_direct_lexicals;
+}
+
+static struct hashmap* jm_cached_function_annexb_suppressed(JsFuncCollected* fc,
+        bool is_strict) {
+    if (!fc || !fc->node || !fc->node->body || is_strict) return NULL;
+    if (!fc->cached_annexb_suppressed_ready) {
+        fc->cached_annexb_suppressed = jm_collect_annexb_suppressed_names(
+            fc->node->body, is_strict);
+        fc->cached_annexb_suppressed_ready = true;
+    }
+    return fc->cached_annexb_suppressed;
+}
+
+static void jm_copy_cached_names(struct hashmap* source, struct hashmap* target) {
+    if (!source || !target) return;
     size_t iter = 0;
     void* item;
-    while (hashmap_iter(hoists, &iter, &item)) {
-        JsNameSetEntry* e = (JsNameSetEntry*)item;
-        if (suppressed && jm_name_set_has(suppressed, e->name)) continue;
-        jm_name_set_add(names, e->name);
+    while (hashmap_iter(source, &iter, &item)) {
+        JsNameSetEntry* entry = (JsNameSetEntry*)item;
+        hashmap_set(target, entry);
     }
+}
 
-    if (include_direct_lexicals && body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-        jm_collect_let_const_names(body, names);
+static void jm_copy_cached_function_locals(JsFuncCollected* fc, bool var_only,
+        bool is_strict, struct hashmap* names, bool include_direct_lexicals) {
+    if (!fc || !names) return;
+    struct hashmap* cached = jm_cached_function_locals(fc, var_only);
+    struct hashmap* suppressed = NULL;
+    if (cached) {
+        suppressed = jm_cached_function_annexb_suppressed(fc, is_strict);
+        size_t iter = 0;
+        void* item;
+        while (hashmap_iter(cached, &iter, &item)) {
+            JsNameSetEntry* e = (JsNameSetEntry*)item;
+            if (!suppressed || !jm_name_set_has(suppressed, e->name)) {
+                jm_name_set_add(names, e->name);
+            }
+        }
     }
-
-    if (suppressed) hashmap_free(suppressed);
-    hashmap_free(hoists);
+    if (include_direct_lexicals && fc->node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        jm_copy_cached_names(jm_cached_function_direct_lexicals(fc), names);
+    }
+    // cached_annexb_suppressed is owned by JsFuncCollected and released with
+    // the function table; freeing it here leaves later capture analysis with a
+    // dangling suppression map (Annex B bodies expose this as a batch crash).
 }
 
 static bool jm_ast_node_contains_target(JsAstNode* node, JsAstNode* target) {
@@ -1776,7 +1824,7 @@ void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
     const char* export_key = is_default ? "default" : name;
     int export_key_len = is_default ? 7 : name_len;
     MIR_reg_t key = jm_box_property_name_literal(mt, export_key, export_key_len);
-    jm_call_3(mt, "js_property_set", MIR_T_I64,
+    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -1794,7 +1842,7 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
 
     MIR_reg_t val = jm_transpile_box_item(mt, (JsAstNode*)&temp_id);
     MIR_reg_t key = jm_box_property_name_literal(mt, export_name, export_len);
-    jm_call_3(mt, "js_property_set", MIR_T_I64,
+    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -3034,8 +3082,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // v20: Detect program-level "use strict" directive
     mt->is_global_strict = (mt->tp && mt->tp->strict_mode) || program->has_use_strict_directive;
 
-    // Phase 1: Use the collector itself as the count pass so class-method
-    // eligibility cannot drift from fill and invalidate published pointers.
+    // Phase 1: Use the collector itself as the count pass so class-method and
+    // synthetic-field eligibility cannot drift from the fill pass. The shared
+    // AstIndex remains available for later identity lookups; its callable
+    // count is an upper-bound hint, not the collector's semantic contract.
     mt->collection_count_only = true;
     jm_collect_functions(mt, root);
     if (mt->collection_failed) {
@@ -3061,13 +3111,38 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     mt->collection_count_only = false;
     jm_collect_functions(mt, root);
     if (mt->collection_failed ||
-        mt->func_count != mt->func_capacity ||
-        mt->class_count != mt->class_capacity) {
-        // A mismatch means the shared traversal was state-dependent and exact storage is unsafe.
+            mt->func_count != mt->func_capacity ||
+            mt->class_count != mt->class_capacity) {
+        // A mismatch means the shared traversal was state-dependent and exact
+        // storage is unsafe.
         log_error("js-mir: collection mismatch functions=%d/%d classes=%d/%d",
             mt->func_count, mt->func_capacity, mt->class_count, mt->class_capacity);
         mt->collection_failed = true;
         return false;
+    }
+    // Function collection is the sole producer of callable identity. Publish
+    // a pointer index once so all later analysis/lowering lookups are O(1).
+    if (mt->func_count > 0 && !getenv("LAMBDA_AST_TUNE_NO_FUNC_INDEX")) {
+        int cap = 1;
+        while (cap < mt->func_count * 2) cap <<= 1;
+        mt->func_index_nodes = (JsFunctionNode**)pool_calloc(
+            mt->tp->ast_pool, (size_t)cap * sizeof(JsFunctionNode*));
+        mt->func_index_ids = (int*)pool_calloc(
+            mt->tp->ast_pool, (size_t)cap * sizeof(int));
+        mt->func_index_capacity = cap;
+        if (!mt->func_index_nodes || !mt->func_index_ids) {
+            log_error("js-mir: failed to allocate function identity index");
+            return false;
+        }
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            JsFunctionNode* fn = mt->func_entries[fi].node;
+            uintptr_t key = (uintptr_t)fn >> 3;
+            key ^= key >> 17;
+            int slot = (int)(key & (uintptr_t)(cap - 1));
+            while (mt->func_index_nodes[slot]) slot = (slot + 1) & (cap - 1);
+            mt->func_index_nodes[slot] = fn;
+            mt->func_index_ids[slot] = fi;
+        }
     }
     log_debug("js-mir: collected %d functions, %d classes", mt->func_count, mt->class_count);
 
@@ -3551,31 +3626,56 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     }
 
     // Detect function declarations whose name collides with another function
-    // declaration in the same enclosing scope (e.g., AnnexB B.3.3.3 nested function
-    // var-hoisted into the same scope as a top-level function with the same name,
-    // or two top-level `function f` decls).  In such cases, the binding is mutable
-    // and direct-call dispatch must NOT be used (the runtime register holds the
-    // last-written value).
+    // declaration in the same enclosing scope (e.g., AnnexB B.3.3.3 nested
+    // function var-hoisting or two top-level `function f` declarations). The
+    // old implementation compared every declaration with every other one;
+    // the scope/name key keeps the same conservative result in O(functions).
     {
+        struct JsFunctionDeclScopeEntry {
+            const char* name;
+            int parent_index;
+            int function_index;
+        };
+        auto decl_hash = [](const void* item, uint64_t seed0, uint64_t seed1) -> uint64_t {
+            const JsFunctionDeclScopeEntry* entry =
+                (const JsFunctionDeclScopeEntry*)item;
+            uint64_t hash = hashmap_sip(entry->name, strlen(entry->name), seed0, seed1);
+            return hash ^ ((uint64_t)(uint32_t)entry->parent_index * 0x9e3779b97f4a7c15ULL);
+        };
+        auto decl_compare = [](const void* lhs, const void* rhs, void*) -> int {
+            const JsFunctionDeclScopeEntry* a =
+                (const JsFunctionDeclScopeEntry*)lhs;
+            const JsFunctionDeclScopeEntry* b =
+                (const JsFunctionDeclScopeEntry*)rhs;
+            return a->parent_index == b->parent_index &&
+                strcmp(a->name, b->name) == 0 ? 0 : 1;
+        };
+        struct hashmap* declarations = hashmap_new(
+            sizeof(JsFunctionDeclScopeEntry), (size_t)mt->func_count * 2 + 1,
+            0, 0, decl_hash, decl_compare, NULL, NULL);
+        if (!declarations) {
+            log_error("js-mir: unable to allocate duplicate declaration index");
+            abort();
+        }
         for (int fi = 0; fi < mt->func_count; fi++) {
-            JsFunctionNode* fn_a = mt->func_entries[fi].node;
-            if (!fn_a || !fn_a->name) continue;
-            if (mt->func_entries[fi].is_reassigned) continue;
-            for (int fj = 0; fj < mt->func_count; fj++) {
-                if (fi == fj) continue;
-                JsFunctionNode* fn_b = mt->func_entries[fj].node;
-                if (!fn_b || !fn_b->name) continue;
-                if (fn_b->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
-                if (fn_a->node_type != JS_AST_NODE_FUNCTION_DECLARATION) break;
-                if (mt->func_entries[fi].parent_index != mt->func_entries[fj].parent_index) continue;
-                if (fn_a->name->len != fn_b->name->len) continue;
-                if (memcmp(fn_a->name->chars, fn_b->name->chars, fn_a->name->len) != 0) continue;
+            JsFunctionNode* fn = mt->func_entries[fi].node;
+            if (!fn || !fn->name ||
+                    fn->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+            JsFunctionDeclScopeEntry key = {
+                jm_persist_name(fn->name->chars),
+                mt->func_entries[fi].parent_index, fi};
+            JsFunctionDeclScopeEntry* prior =
+                (JsFunctionDeclScopeEntry*)hashmap_get(declarations, &key);
+            if (prior) {
                 mt->func_entries[fi].is_reassigned = true;
+                mt->func_entries[prior->function_index].is_reassigned = true;
                 log_debug("js-mir: function '%.*s' has duplicate decl in same scope — skipping direct call optimization",
-                    (int)fn_a->name->len, fn_a->name->chars);
-                break;
+                    (int)fn->name->len, fn->name->chars);
+            } else {
+                hashmap_set(declarations, &key);
             }
         }
+        hashmap_free(declarations);
     }
 
     // Add top-level function declarations as module-level identifiers
@@ -4165,7 +4265,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (afn->body) {
                     struct hashmap* anc_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                         jm_name_hash, jm_name_cmp, NULL, NULL);
-                    jm_collect_visible_function_scope_names(afn->body, anc->is_strict, anc_locals, true);
+                    jm_copy_cached_function_locals(anc, true, anc->is_strict,
+                        anc_locals, true);
                     jm_collect_enclosing_lexicals_for_target(afn->body,
                         (JsAstNode*)fc->node, anc_locals);
                     size_t al_iter = 0; void* al_item;
@@ -4229,7 +4330,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 while (anc_idx >= 0 && anc_idx < mt->func_count) {
                     JsFuncCollected* anc = &mt->func_entries[anc_idx];
                     if (anc->node && anc->node->body) {
-                        jm_collect_let_const_names(anc->node->body, let_const_names);
+                        jm_copy_cached_names(jm_cached_function_direct_lexicals(anc),
+                            let_const_names);
                         jm_collect_enclosing_lexicals_for_target(anc->node->body,
                             (JsAstNode*)fc->node, let_const_names);
                     }
@@ -4258,7 +4360,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             sizeof(JsNameSetEntry), 16, 0, 0,
                             jm_name_hash, jm_name_cmp, NULL, NULL);
                         if (parent_fc->node && parent_fc->node->body) {
-                            jm_collect_let_const_names(parent_fc->node->body, direct_lexicals);
+                            jm_copy_cached_names(jm_cached_function_direct_lexicals(parent_fc),
+                                direct_lexicals);
                         }
                         JsNameSetEntry* direct =
                             (JsNameSetEntry*)hashmap_get(direct_lexicals, &lookup);
@@ -4320,7 +4423,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         // module constants and must stop capture propagation.
                         struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                             jm_name_hash, jm_name_cmp, NULL, NULL);
-                        jm_collect_visible_function_scope_names(pfn->body, parent->is_strict, body_locals, true);
+                        jm_copy_cached_function_locals(parent, true, parent->is_strict,
+                            body_locals, true);
                         size_t bl_iter = 0;
                         void* bl_item;
                         while (hashmap_iter(body_locals, &bl_iter, &bl_item)) {
@@ -4420,17 +4524,15 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     if (shadowed_by_ancestor) break;
                                     // Check body locals
                                     if (anc->node->body) {
-                                        struct hashmap* anc_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                                            jm_name_hash, jm_name_cmp, NULL, NULL);
-                                        jm_collect_body_locals(anc->node->body, anc_locals);
-                                        if (jm_name_set_has(anc_locals, cap_name)) {
+                                        struct hashmap* anc_locals =
+                                            jm_cached_function_locals(anc, false);
+                                        if (anc_locals && jm_name_set_has(anc_locals, cap_name)) {
                                             bool is_iife_promoted_module_var =
                                                 jm_modvar_is_iife_scope_binding(mc_prop) && anc->is_iife_body;
                                             if (!is_iife_promoted_module_var) {
                                                 shadowed_by_ancestor = true;
                                             }
                                         }
-                                        hashmap_free(anc_locals);
                                     }
                                     if (shadowed_by_ancestor) break;
                                 }
@@ -4532,18 +4634,16 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 jm_name_hash, jm_name_cmp, NULL, NULL);
             JsFunctionNode* parent_fn = parent_fc->node;
             if (parent_fn && parent_fn->body) {
-                struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                    jm_name_hash, jm_name_cmp, NULL, NULL);
-                jm_collect_body_locals(parent_fn->body, body_locals);
+                struct hashmap* body_locals =
+                    jm_cached_function_locals(parent_fc, false);
                 size_t bl_iter = 0;
                 void* bl_item;
-                while (hashmap_iter(body_locals, &bl_iter, &bl_item)) {
+                while (body_locals && hashmap_iter(body_locals, &bl_iter, &bl_item)) {
                     JsNameSetEntry* e = (JsNameSetEntry*)bl_item;
                     if (e->from_func_decl) {
                         jm_name_set_add(parent_func_decls, e->name);
                     }
                 }
-                hashmap_free(body_locals);
             }
 
             // Collect union of all captures from direct children,
@@ -5422,6 +5522,9 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                          jm_p6_function_allows_native_specialization(fc) &&
                          !fc->has_non_simple_params &&
                          (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT));
+        // diagnostic switch for demand-driven native lowering experiments;
+        // the default remains the existing specialization policy.
+        if (getenv("LAMBDA_AST_TUNE_NO_NATIVE_BODIES")) eligible = false;
         bool has_native_param = false;
         if (eligible) {
             for (int j = 0; j < fc->param_count; j++) {
@@ -5537,6 +5640,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                  !fc->uses_arguments &&
                                  jm_p6_function_allows_native_specialization(fc) &&
                                  !fc->has_non_simple_params);
+                if (getenv("LAMBDA_AST_TUNE_NO_NATIVE_BODIES")) eligible = false;
                 bool has_native_param = false;
                 if (eligible) {
                     for (int p = 0; p < fc->param_count; p++) {
@@ -5736,6 +5840,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // control flow (for/while/if/switch/try) will update this register,
     // so eval() returns the last evaluated expression value per ES spec.
     mt->eval_completion_reg = result;
+    jm_seed_boxed_float_const_cache(mt, root);
 
     // Js57 Track A: allocate the module-level scope env when any top-level
     // closure captures a non-modvar block-let. Mirrors the function-body path
@@ -5979,28 +6084,23 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Js57 P3 (Track B2): no namespace pre-init is needed. The live-binding
         // runtime helper detects "default not yet exported" via the absence of
         // the `default` own property (see js_get_live_binding_default). The
-        // existing `js_property_set` at the `export default <expr>` site is
+        // existing `js_set_key_default` at the `export default <expr>` site is
         // what publishes the binding.
     }
 
     // Js57 P7d-C: detect TLA in module body so the body emission can install
     // a state-dispatch right before the main statement loop and the split
     // sequence at the first top-level ExpressionStatement(AwaitExpression).
-    // Only applies to nested-load modules (depth >= 2). Entry modules
-    // (top_level_await tests like top-level-ticks.js) need the original
-    // sync-with-microtask-drain semantics so the test's own ticks ordering
-    // stays observable.
+    // Static entry modules retain their synchronous top-level-ticks behavior,
+    // but a dynamic import must expose the module's pending evaluation promise
+    // until its top-level await settles (ECMA-262 ContinueDynamicImport).
     bool p7d_has_tla = false;
     MIR_label_t p7d_post_await_label = NULL;
     {
         extern int js_dynamic_import_suppress_module_drain;
-        // Body split applies only to statically loaded nested modules. The
-        // entry module (depth == 1) keeps its existing sync-with-microtask
-        // semantics so the top-level-ticks family stays observable. Modules
-        // loaded via js_dynamic_import (suppress > 0) also keep the sync path
-        // so `await import('…')` callers see the fully-evaluated namespace.
-        if (mt->is_module && mt->in_main && mt->filename && js_tla_module_depth_get() >= 2 &&
-            js_dynamic_import_suppress_module_drain == 0) {
+        if (mt->is_module && mt->in_main && mt->filename &&
+                (js_tla_module_depth_get() >= 2 ||
+                 js_dynamic_import_suppress_module_drain > 0)) {
             int p7d_tla_count = 0;
             for (JsAstNode* s = program->body; s; s = s->next) {
                 p7d_tla_count += jm_count_awaits(s);
@@ -6340,7 +6440,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         if (current_export && current_export->is_default && mt->is_module) {
             MIR_reg_t val = jm_transpile_box_item(mt, actual_stmt);
             MIR_reg_t key = jm_box_property_name_literal(mt, "default", 7);
-            jm_call_3(mt, "js_property_set", MIR_T_I64,
+            jm_call_3(mt, "js_set_key_default", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -6404,10 +6504,6 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
             if (es->expression) {
                 MIR_reg_t val = jm_transpile_box_item(mt, es->expression);
-                if (es->expression->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
-                    jm_call_void_1(mt, "js_discard_value",
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-                }
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, result),
                     MIR_new_reg_op(mt->ctx, val)));
@@ -6795,7 +6891,7 @@ bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
     }
 
     TSNode root = ts_tree_root_node(tp->tree);
-    JsAstNode* js_ast = build_js_ast(tp, root);
+    JsAstNode* js_ast = build_js_ast_indexed(tp, root);
     if (!js_ast) {
         log_error("js-parallel: AST build failed for '%s'", node->path);
         js_transpiler_destroy(tp);
@@ -7238,7 +7334,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
 
     TSNode root = ts_tree_root_node(tp->tree);
     jm_log_module_phase_progress(filename, "ast-begin");
-    JsAstNode* js_ast = build_js_ast(tp, root);
+    JsAstNode* js_ast = build_js_ast_indexed(tp, root);
     if (!js_ast) {
         log_error("js-mir: module: AST build failed for '%s'", filename);
         jm_clear_active_js_transpile(tp, NULL, NULL);
@@ -7280,15 +7376,12 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // nested function/class scopes, so non-zero only when there's a real TLA
     // statement somewhere in the module's top-level. Mark the module so
     // jm_load_imports can wire up the importer's PendingAsyncDeps counter
-    // when the importer pulls this dep in. Only gate on depth >= 2 (nested
-    // load) — for the entry module the body still runs synchronously through
-    // js_main and microtask drains as before; entry-level TLA modules with
-    // top-level ticks rely on that semantics. Modules loaded via dynamic
-    // import (suppress > 0) also stay on the sync path so `await import('…')`
-    // callers see the fully-evaluated namespace.
+    // when the importer pulls this dep in. Static entry modules keep their
+    // synchronous top-level-ticks behavior, while dynamic imports must retain
+    // the pending evaluation promise until TLA settles.
     extern int js_dynamic_import_suppress_module_drain;
     bool module_has_top_level_await = jm_module_has_top_level_await(js_ast);
-    if (js_tla_module_depth_get() >= 2 && js_dynamic_import_suppress_module_drain == 0) {
+    if (js_tla_module_depth_get() >= 2 || js_dynamic_import_suppress_module_drain > 0) {
         if (module_has_top_level_await) {
             js_module_mark_has_tla(p7d_self_spec_item);
             log_debug("P7d-A: module '%s' has TLA (top-level await detected)", filename);
@@ -7311,12 +7404,11 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return ItemNull;
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
-    // A dynamic module compiled while a Test262 preamble is active inherits
-    // that sealed name/IC image; local indexes must start after the inherited
-    // entries or globalThis member loads resolve to another preamble name.
-    mt->module_name_base = g_jm_preamble_in
-        ? g_jm_preamble_in->module_property_count : 0;
-    mt->module_ic_base = g_jm_preamble_in ? g_jm_preamble_in->ic_count : 0;
+    // ES modules own a private zero-based property/IC image even when their
+    // importer uses a test harness preamble. Sharing the preamble offset here
+    // makes globalThis member names resolve against the wrong image (D3.4.4v2).
+    mt->module_name_base = 0;
+    mt->module_ic_base = 0;
 
     mt->module = MIR_new_module(ctx, "js_module");
 

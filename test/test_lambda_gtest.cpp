@@ -6,6 +6,7 @@
 //==============================================================================
 
 #include "test_lambda_helpers.hpp"
+#include "test_ast_tune_capture.hpp"
 #include "../lib/shell.h"
 #include <string.h>
 
@@ -203,7 +204,8 @@ public:
             procs.push_back(test.is_procedural);
         }
 
-        batch_results = execute_lambda_batch(scripts, procs);
+        batch_results = execute_lambda_batch(scripts, procs,
+                                             lambda_capture_batch_chunk_size());
         batch_executed = true;
     }
 };
@@ -226,6 +228,9 @@ TEST_P(LambdaScriptTest, ExecuteAndCompare) {
     char elapsed_ms_buf[64];
     snprintf(elapsed_ms_buf, sizeof(elapsed_ms_buf), "%.3f", (double)br.elapsed_us / 1000.0);
     RecordProperty("lambda_script_elapsed_ms", elapsed_ms_buf);
+    ast_tune_append_timing_row("lambda", info.script_path.c_str(),
+        info.test_name.c_str(), br.status, &br.timing, br.has_timing,
+        br.has_volume);
 
     ASSERT_EQ(br.status, 0) << "Script execution failed: " << info.script_path;
 

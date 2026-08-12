@@ -251,7 +251,7 @@ Item js_define_accessor_partial(Item obj, Item name, Item fn, int is_setter,
 
 // Phase-5C transpiler chokepoint: 4-arg wrapper around
 // `js_define_accessor_partial(..., attrs=0)` returning the object Item so MIR
-// emit sites can replace the legacy `js_make_getter_key`+`js_property_set`
+// emit sites can replace the legacy `js_make_getter_key`+`js_set_key_default`
 // pair with a single call. `is_setter` is an int (0/1) for MIR ABI simplicity.
 Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
 
@@ -259,7 +259,7 @@ Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
 // Walk own + prototype chain for an accessor pair on `name`. Returns the pair
 // pointer (without invoking getter/setter) for the first shape entry along
 // the chain that has JSPD_IS_ACCESSOR set. Used by setter dispatch in
-// `js_property_set` to discover inherited accessors after Phase 4 removed
+// `js_set_key_default` to discover inherited accessors after Phase 4 removed
 // the `__set_X` legacy keys that the old proto-walk relied on.
 JsAccessorPair* js_find_accessor_pair_inheritable(Item obj, const char* name,
                                                   int name_len);

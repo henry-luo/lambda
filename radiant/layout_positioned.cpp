@@ -145,33 +145,31 @@ void layout_relative_position_offset(ViewBlock* block, float* offset_x_out, floa
         }
     }
 
-    const float containing_sizes[2] = {cb_width, cb_height};
-    const LayoutAxis axes[2] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
-    float offsets[2] = {0.0f, 0.0f};
-    for (int i = 0; i < 2; i++) {
-        LayoutAxis axis = axes[i];
+    LayoutAxisPair<float> containing_sizes = layout_axis_pair(cb_width, cb_height);
+    LayoutAxisPair<float> offsets = {};
+    for (LayoutAxis axis : layout_axes()) {
         LayoutAxisRefs refs(block->position, axis);
         bool both = refs.insets.start.has && refs.insets.end.has &&
             *refs.insets.start.has && *refs.insets.end.has;
         if (both && axis == LAYOUT_AXIS_X && parent_direction == TD_RTL) {
             // CSS 2.1 §9.4.3: RTL — right wins, left becomes -right.
-            offsets[i] = relative_inset_offset(
+            offsets[axis] = relative_inset_offset(
                 false, 0.0f, NAN, true, *refs.insets.end.value, *refs.insets.end.percent,
-                containing_sizes[i]);
+                containing_sizes[axis]);
         } else {
-            offsets[i] = relative_inset_offset(
+            offsets[axis] = relative_inset_offset(
                 refs.insets.start.has && *refs.insets.start.has,
                 refs.insets.start.value ? *refs.insets.start.value : 0.0f,
                 refs.insets.start.percent ? *refs.insets.start.percent : NAN,
                 refs.insets.end.has && *refs.insets.end.has,
                 refs.insets.end.value ? *refs.insets.end.value : 0.0f,
                 refs.insets.end.percent ? *refs.insets.end.percent : NAN,
-                containing_sizes[i]);
+                containing_sizes[axis]);
         }
     }
 
-    if (offset_x_out) *offset_x_out = offsets[0];
-    if (offset_y_out) *offset_y_out = offsets[1];
+    if (offset_x_out) *offset_x_out = offsets[LAYOUT_AXIS_X];
+    if (offset_y_out) *offset_y_out = offsets[LAYOUT_AXIS_Y];
 }
 
 // apply CSS relative offsets without affecting normal-flow placement.
@@ -214,68 +212,66 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     ViewBlock* scroller = lam::view_require_block(scroll_ancestor);
 
     BoxMetrics scroller_box = layout_box_metrics(scroller);
-    const LayoutAxis axes[2] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
-    const float scroll_end[2] = {
+    LayoutAxisPair<float> scroll_end = layout_axis_pair(
         max(layout_axis_size(scroller, LAYOUT_AXIS_X) - scroller_box.pad_border_h, 0.0f),
-        max(layout_axis_size(scroller, LAYOUT_AXIS_Y) - scroller_box.pad_border_v, 0.0f)
-    };
+        max(layout_axis_size(scroller, LAYOUT_AXIS_Y) - scroller_box.pad_border_v, 0.0f));
 
     // Walk from element's parent up to (not including) the scroller, accumulating
-    float offset_to_scroller[2] = {0.0f, 0.0f};
+    LayoutAxisPair<float> offset_to_scroller = {};
     for (ViewElement* p = block->parent_view(); p && p != scroll_ancestor; p = p->parent_view()) {
         if (p->is_block()) {
             ViewBlock* pb = lam::view_require_block(p);
-            for (int i = 0; i < 2; i++) {
-                LayoutAxis axis = axes[i];
-                offset_to_scroller[i] += layout_axis_pos(pb, axis);
+            for (LayoutAxis axis : layout_axes()) {
+                offset_to_scroller[axis] += layout_axis_pos(pb, axis);
                 if (pb->bound) {
-                    offset_to_scroller[i] += layout_axis_spacing_start(
+                    offset_to_scroller[axis] += layout_axis_spacing_start(
                         &pb->boundary()->padding, axis);
-                    offset_to_scroller[i] += layout_axis_border_start(
+                    offset_to_scroller[axis] += layout_axis_border_start(
                         pb->boundary()->border, axis);
                 }
             }
         }
     }
 
-    float offsets[2] = {0.0f, 0.0f};
-    for (int i = 0; i < 2; i++) {
-        LayoutAxis axis = axes[i];
+    LayoutAxisPair<float> offsets = {};
+    for (LayoutAxis axis : layout_axes()) {
         LayoutAxisRefs geometry(block, axis);
         LayoutAxisRefs insets(block->position, axis);
-        float element_start = geometry.get_position() + offset_to_scroller[i];
-        offsets[i] = sticky_axis_offset(
+        float element_start = geometry.get_position() + offset_to_scroller[axis];
+        offsets[axis] = sticky_axis_offset(
             *insets.insets.start.has, *insets.insets.start.value,
             *insets.insets.end.has, *insets.insets.end.value,
-            0.0f, scroll_end[i], element_start,
+            0.0f, scroll_end[axis], element_start,
             element_start + geometry.get_size());
     }
 
     // Constrain: element must stay within its containing block (parent).
     ViewElement* parent = block->parent_view();
-    if (parent && parent->is_block() && (offsets[0] != 0 || offsets[1] != 0)) {
+    if (parent && parent->is_block() &&
+        (offsets[LAYOUT_AXIS_X] != 0 || offsets[LAYOUT_AXIS_Y] != 0)) {
         ViewBlock* cb = lam::view_require_block(parent);
         BoxMetrics cb_box = layout_box_metrics(cb);
-        const float containing_end[2] = {
+        LayoutAxisPair<float> containing_end = layout_axis_pair(
             max(layout_axis_size(cb, LAYOUT_AXIS_X) - cb_box.pad_border_h, 0.0f),
             max(layout_axis_size(cb, LAYOUT_AXIS_Y) - cb_box.pad_border_v, 0.0f)
-        };
-        for (int i = 0; i < 2; i++) {
-            LayoutAxisRefs geometry(block, axes[i]);
-            offsets[i] = sticky_clamp_axis_offset(
-                offsets[i], geometry.get_position(),
-                geometry.get_position() + geometry.get_size(), 0.0f, containing_end[i]);
+        );
+    for (LayoutAxis axis : layout_axes()) {
+        LayoutAxisRefs geometry(block, axis);
+            offsets[axis] = sticky_clamp_axis_offset(
+                offsets[axis], geometry.get_position(),
+                geometry.get_position() + geometry.get_size(), 0.0f, containing_end[axis]);
         }
     }
 
-    if (offsets[0] != 0 || offsets[1] != 0) {
+    if (offsets[LAYOUT_AXIS_X] != 0 || offsets[LAYOUT_AXIS_Y] != 0) {
         LayoutAxisRefs x_geometry(block, LAYOUT_AXIS_X);
         LayoutAxisRefs y_geometry(block, LAYOUT_AXIS_Y);
-        x_geometry.set_position(x_geometry.get_position() + offsets[0]);
-        y_geometry.set_position(y_geometry.get_position() + offsets[1]);
+        x_geometry.set_position(x_geometry.get_position() + offsets[LAYOUT_AXIS_X]);
+        y_geometry.set_position(y_geometry.get_position() + offsets[LAYOUT_AXIS_Y]);
 
         if (block->view_type == RDT_VIEW_INLINE) {
-            offset_children_recursive(lam::view_require_element(block), offsets[0], offsets[1]);
+            offset_children_recursive(lam::view_require_element(block),
+                                      offsets[LAYOUT_AXIS_X], offsets[LAYOUT_AXIS_Y]);
         }
     }
 }
@@ -1345,20 +1341,11 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         float line_x = calculate_static_line_x(
             pa_block, pa_line, static_direction, was_inline);
 
-        if (static_direction == TD_RTL) {
-            float static_x = parent_to_cb_offset_x + line_x;
-            if (block->bound && block->boundary_mut()->margin.left > 0) {
-                static_x += block->boundary()->margin.left;
-            }
-            block->x = static_x;
-        } else {
-            // CSS 2.1 §10.3.7: When direction is LTR, set 'left' to the static position.
-            float static_x = parent_to_cb_offset_x + line_x;
-            if (block->bound && block->boundary_mut()->margin.left > 0) {
-                static_x += block->boundary()->margin.left;
-            }
-            block->x = static_x;
+        float static_x = parent_to_cb_offset_x + line_x;
+        if (block->bound && block->boundary_mut()->margin.left > 0) {
+            static_x += block->boundary()->margin.left;
         }
+        block->x = static_x;
     }
 
     // CSS 2.2 Section 9.4.1: "Absolutely positioned elements ... establish new BFCs"

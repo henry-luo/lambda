@@ -250,7 +250,7 @@ static Item js_response_text() {
     if (!js_fetch_runtime_state_get()) return js_promise_resolve(ItemNull);
     Item this_resp = js_get_this();
     String* key = heap_create_name("__body_idx", 10);
-    Item idx_item = js_property_get(this_resp, (Item){.item = s2it(key)});
+    Item idx_item = js_get_key_default(this_resp, (Item){.item = s2it(key)});
     if (get_type_id(idx_item) != LMD_TYPE_INT) return js_promise_resolve(ItemNull);
 
     int idx = (int)it2i(idx_item);
@@ -265,7 +265,7 @@ static Item js_response_json() {
     if (!js_fetch_runtime_state_get()) return js_promise_resolve(ItemNull);
     Item this_resp = js_get_this();
     String* key = heap_create_name("__body_idx", 10);
-    Item idx_item = js_property_get(this_resp, (Item){.item = s2it(key)});
+    Item idx_item = js_get_key_default(this_resp, (Item){.item = s2it(key)});
     if (get_type_id(idx_item) != LMD_TYPE_INT) return js_promise_resolve(ItemNull);
 
     int idx = (int)it2i(idx_item);
@@ -283,18 +283,18 @@ static Item js_response_json() {
 static Item js_response_blob_text() {
     Item this_blob = js_get_this();
     String* tk = heap_create_name("_text", 5);
-    Item t = js_property_get(this_blob, (Item){.item = s2it(tk)});
+    Item t = js_get_key_default(this_blob, (Item){.item = s2it(tk)});
     if (get_type_id(t) != LMD_TYPE_STRING) return js_promise_resolve(make_string_item(""));
     return js_promise_resolve(t);
 }
 
 static Item make_blob_object(const char* bytes, int len, const char* type) {
     Item blob = js_new_object();
-    js_property_set(blob, make_string_item("_text"), make_string_item(bytes ? bytes : "", len));
-    js_property_set(blob, make_string_item("size"), (Item){.item = i2it(len)});
-    js_property_set(blob, make_string_item("type"),
+    js_set_key_default(blob, make_string_item("_text"), make_string_item(bytes ? bytes : "", len));
+    js_set_key_default(blob, make_string_item("size"), (Item){.item = i2it(len)});
+    js_set_key_default(blob, make_string_item("type"),
         make_string_item(type ? type : "application/octet-stream"));
-    js_property_set(blob, make_string_item("text"),
+    js_set_key_default(blob, make_string_item("text"),
         js_new_native_function(js_response_blob_text));
     return blob;
 }
@@ -303,7 +303,7 @@ static Item js_response_blob() {
     if (!js_fetch_runtime_state_get()) return js_promise_resolve(ItemNull);
     Item this_resp = js_get_this();
     String* key = heap_create_name("__body_idx", 10);
-    Item idx_item = js_property_get(this_resp, (Item){.item = s2it(key)});
+    Item idx_item = js_get_key_default(this_resp, (Item){.item = s2it(key)});
     if (get_type_id(idx_item) != LMD_TYPE_INT) return js_promise_resolve(ItemNull);
     int idx = (int)it2i(idx_item);
     if (idx < 0 || idx >= response_body_count || !response_bodies[idx])
@@ -319,12 +319,12 @@ static Item build_response_object(JsFetchWork* fw) {
 
     // status
     Item status_key = make_string_item("status");
-    js_property_set(resp, status_key, (Item){.item = i2it(fw->status_code)});
+    js_set_key_default(resp, status_key, (Item){.item = i2it(fw->status_code)});
 
     // ok (200-299)
     Item ok_key = make_string_item("ok");
     bool ok = fw->status_code >= 200 && fw->status_code <= 299;
-    js_property_set(resp, ok_key, (Item){.item = b2it(ok)});
+    js_set_key_default(resp, ok_key, (Item){.item = b2it(ok)});
 
     // statusText
     Item st_key = make_string_item("statusText");
@@ -340,11 +340,11 @@ static Item build_response_object(JsFetchWork* fw) {
                      (fw->status_code == 404) ? "Not Found" :
                      (fw->status_code == 500) ? "Internal Server Error" :
                      "";
-    js_property_set(resp, st_key, make_string_item(st));
+    js_set_key_default(resp, st_key, make_string_item(st));
 
     // url
     Item url_key = make_string_item("url");
-    js_property_set(resp, url_key, make_string_item(fw->url));
+    js_set_key_default(resp, url_key, make_string_item(fw->url));
 
     // store body for text()/json()/blob() methods
     int body_idx = -1;
@@ -359,20 +359,20 @@ static Item build_response_object(JsFetchWork* fw) {
     }
 
     Item body_idx_key = make_string_item("__body_idx");
-    js_property_set(resp, body_idx_key, (Item){.item = i2it(body_idx)});
+    js_set_key_default(resp, body_idx_key, (Item){.item = i2it(body_idx)});
 
     // text() method
     Item text_key = make_string_item("text");
     Item text_fn = js_new_native_function(js_response_text);
-    js_property_set(resp, text_key, text_fn);
+    js_set_key_default(resp, text_key, text_fn);
 
     // json() method
     Item json_key = make_string_item("json");
     Item json_fn = js_new_native_function(js_response_json);
-    js_property_set(resp, json_key, json_fn);
+    js_set_key_default(resp, json_key, json_fn);
 
     // blob() method — returns Promise<Blob-like object> with .type/.size/.text()
-    js_property_set(resp, make_string_item("blob"),
+    js_set_key_default(resp, make_string_item("blob"),
         js_new_native_function(js_response_blob));
 
     return resp;
@@ -418,7 +418,7 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
 
     // method
     Item method_key = make_string_item("method");
-    Item method_val = js_property_get(options, method_key);
+    Item method_val = js_get_key_default(options, method_key);
     if (get_type_id(method_val) == LMD_TYPE_STRING) {
         String* ms = it2s(method_val);
         fw->method = (char*)mem_alloc(ms->len + 1, MEM_CAT_JS_RUNTIME);
@@ -428,7 +428,7 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
 
     // body
     Item body_key = make_string_item("body");
-    Item body_val = js_property_get(options, body_key);
+    Item body_val = js_get_key_default(options, body_key);
     if (get_type_id(body_val) == LMD_TYPE_STRING) {
         String* bs = it2s(body_val);
         fw->body = (char*)mem_alloc(bs->len + 1, MEM_CAT_JS_RUNTIME);
@@ -439,15 +439,15 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
 
     // headers (map of key→value strings)
     Item headers_key = make_string_item("headers");
-    Item headers_val = js_property_get(options, headers_key);
+    Item headers_val = js_get_key_default(options, headers_key);
     if (get_type_id(headers_val) == LMD_TYPE_MAP) {
         Item keys = js_object_keys(headers_val);
         if (get_type_id(keys) == LMD_TYPE_ARRAY) {
             int len = (int)keys.array->length;
             for (int i = 0; i < len; i++) {
                 Item idx = {.item = i2it(i)};
-                Item hkey = js_array_get(keys, idx);
-                Item hval = js_property_get(headers_val, hkey);
+                Item hkey = js_elements_get(keys, idx);
+                Item hval = js_get_key_default(headers_val, hkey);
                 if (get_type_id(hkey) == LMD_TYPE_STRING && get_type_id(hval) == LMD_TYPE_STRING) {
                     String* ks = it2s(hkey);
                     String* vs = it2s(hval);
@@ -584,7 +584,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         // permission fixture waits for the worker/drain timeout instead of catch().
         Item cause = js_permission_make_net_error("connect", url);
         Item err = js_new_error_with_name(make_string_item("TypeError"), make_string_item("fetch failed"));
-        js_property_set(err, make_string_item("cause"), cause);
+        js_set_key_default(err, make_string_item("cause"), cause);
         return js_promise_reject(err);
     }
 

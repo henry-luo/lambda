@@ -91,6 +91,7 @@ extern int64_t js_key_is_symbol_c(Item key);
 // v90: BigInt constructor (js_runtime.cpp)
 extern Item js_bigint_constructor(Item value);
 extern Item js_to_numeric(Item value);
+extern Item js_check_capture_binding(Item value, NameId name_id, int64_t len);
 extern Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
 extern Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 extern Item js_bigint_not_constructor(void);
@@ -1223,6 +1224,20 @@ extern Item js_reflect_has(Item target, Item key);
 extern Item js_reflect_get_prototype_of(Item target);
 extern Item js_reflect_is_extensible(Item target);
 extern Item js_reflect_get_own_property_descriptor(Item target, Item key);
+extern Item js_get(Item target, uint64_t lane, Item observable_key, Item receiver);
+extern uint64_t js_property_lane_for_canonical_key(Item key);
+extern Item js_set(Item target, uint64_t lane, Item observable_key, Item value, Item receiver);
+extern Item js_define_own(Item target, uint64_t lane, Item observable_key,
+    uint32_t descriptor_bits, Item value, Item getter, Item setter);
+extern Item js_delete(Item target, uint64_t lane, Item observable_key);
+extern Item js_has_property(Item target, uint64_t lane, Item observable_key);
+extern Item js_has_own(Item target, uint64_t lane, Item observable_key);
+extern Item js_get_own_property_descriptor_lane(Item target, uint64_t lane,
+    Item observable_key);
+extern Item js_own_keys(Item target);
+extern Item js_assignment_set_result(Item value, Item key, Item set_result,
+    int64_t strict, Item target);
+extern Item js_delete_reference_result(Item key, Item delete_result, int64_t strict);
 extern Item js_get_reflect_object_value();
 extern Item js_get_atomics_object_value();
 extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
@@ -1239,8 +1254,8 @@ extern Item js_delete_property_strict(Item obj, Item key);
 // v23: Performance facade functions (js_runtime.cpp)
 extern int64_t js_typeof_is(Item value, uint32_t type_name_id);
 #if LAMBDA_INLINE_CACHE
-extern Item js_property_access_name_id_ic(Item object, NameId name_id, JsLoadIC* ic);
-extern Item js_property_set_name_id_ic(Item object, NameId name_id, Item value,
+extern Item js_get_name_id_ic(Item object, NameId name_id, JsLoadIC* ic);
+extern Item js_set_name_id_ic(Item object, NameId name_id, Item value,
     int64_t strict, JsStoreIC* ic);
 extern void* js_active_module_ic(uint32_t index);
 #endif
@@ -1557,6 +1572,7 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED |
       // The helper only selects a sealed NameId and resolves an existing
@@ -1904,11 +1920,15 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     {"js_to_number", FPTR(js_to_number)},
     {"js_to_numeric", FPTR(js_to_numeric)},
-    {"js_to_string", FPTR(js_to_string)},
+    {"js_to_string", FPTR(js_to_string),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_make_string_len", FPTR(js_make_string_len),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"js_to_boolean", FPTR(js_to_boolean)},
@@ -1972,27 +1992,45 @@ JitImport jit_runtime_imports[] = {
     {"js_eq_raw", FPTR(js_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_loose_eq_raw", FPTR(js_loose_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_new_object", FPTR(js_new_object)},
-    {"js_property_get", FPTR(js_property_get)},
+    {"js_get_key_default", FPTR(js_get_key_default)},
+    // Property reads can materialize out-of-band numeric Items; the explicit
+    // boxed contract lets MIR reserve a caller scalar home without treating
+    // every legacy unknown return as numeric (D5.4.3).
+    {"js_get", FPTR(js_get),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM}},
+    {"js_property_lane_for_canonical_key", FPTR(js_property_lane_for_canonical_key),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_NON_GC_SCALAR, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES, 0}},
+    {"js_set", FPTR(js_set)},
+    {"js_define_own", FPTR(js_define_own)},
+    {"js_delete", FPTR(js_delete)},
+    {"js_has_property", FPTR(js_has_property)},
+    {"js_has_own", FPTR(js_has_own)},
+    {"js_get_own_property_descriptor_lane", FPTR(js_get_own_property_descriptor_lane)},
+    {"js_own_keys", FPTR(js_own_keys)},
+    {"js_assignment_set_result", FPTR(js_assignment_set_result)},
+    {"js_delete_reference_result", FPTR(js_delete_reference_result)},
     {"js_arguments_mapped_get", FPTR(js_arguments_mapped_get)},
     {"js_arguments_mapped_param_writeback", FPTR(js_arguments_mapped_param_writeback)},
-    {"js_property_set", FPTR(js_property_set)},
+    {"js_set_key_default", FPTR(js_set_key_default)},
     {"js_using_dispose", FPTR(js_using_dispose)},
-    // Tune8 §2.2: strict-mode setter routes through js_property_set_v
-    // dispatcher; the 3-arg js_property_set_strict is still used by C-side
+    // Tune8 §2.2: strict-mode setter routes through js_set_key_policy
+    // dispatcher; the 3-arg js_set_key_strict_policy is still used by C-side
     // callers (in js_globals.cpp and js_runtime.cpp) but no longer JIT-imported.
-    {"js_property_set_v", FPTR(js_property_set_v)},
+    {"js_set_key_policy", FPTR(js_set_key_policy)},
     {"js_private_property_set", FPTR(js_private_property_set)},
     {"js_create_data_property", FPTR(js_create_data_property)},
-    {"js_property_access", FPTR(js_property_access)},
-    {"js_property_access_name_id", FPTR(js_property_access_name_id)},
-    {"js_property_set_name_id", FPTR(js_property_set_name_id)},
+    {"js_get_reference", FPTR(js_get_reference)},
+    {"js_get_name_id", FPTR(js_get_name_id)},
+    {"js_set_name_id", FPTR(js_set_name_id)},
 #if LAMBDA_INLINE_CACHE
-    {"js_property_access_name_id_ic", FPTR(js_property_access_name_id_ic),
+    {"js_get_name_id_ic", FPTR(js_get_name_id_ic),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER)}},
-    {"js_property_set_name_id_ic", FPTR(js_property_set_name_id_ic),
+    {"js_set_name_id_ic", FPTR(js_set_name_id_ic),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
@@ -2017,12 +2055,15 @@ JitImport jit_runtime_imports[] = {
     {"js_super_call_native", FPTR(js_super_call_native)},
     {"js_super_apply_native", FPTR(js_super_apply_native)},
     {"js_array_new", FPTR(js_array_new)},
+    {"js_array_new_numeric", FPTR(js_array_new_numeric)},
+    {"js_elements_set_numeric_direct", FPTR(js_elements_set_numeric_direct)},
     {"js_array_new_from_item", FPTR(js_array_new_from_item)},
     {"js_build_arguments_object", FPTR(js_build_arguments_object)},
     {"js_set_arguments_info", FPTR(js_set_arguments_info), JIT_IMPORT_VOID_PRESERVES},
     {"js_build_template_object_cached", FPTR(js_build_template_object_cached)},
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},
     {"js_check_tdz", FPTR(js_check_tdz)},
+    {"js_check_capture_binding", FPTR(js_check_capture_binding)},
     // This constructs an Error Item; classing it as a scalar loses the carrier
     // when the SET lane routes a strict const-assignment exception.
     {"js_throw_const_assign", FPTR(js_throw_const_assign),
@@ -2038,10 +2079,10 @@ JitImport jit_runtime_imports[] = {
     // always available: emitted unconditionally by JS class transpiler
     {"js_private_field_init_begin", FPTR(js_private_field_init_begin), JIT_IMPORT_VOID_PRESERVES},
     {"js_private_field_init_end", FPTR(js_private_field_init_end), JIT_IMPORT_VOID_PRESERVES},
-    {"js_array_get", FPTR(js_array_get)},
-    {"js_array_set", FPTR(js_array_set)},
-    {"js_array_set_append_or_dense_int_fast", FPTR(js_array_set_append_or_dense_int_fast), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    {"js_array_set_append_or_dense_item_fast", FPTR(js_array_set_append_or_dense_item_fast), JIT_IMPORT_RAW_SCALAR_PRESERVES},
+    {"js_elements_get", FPTR(js_elements_get)},
+    {"js_elements_set", FPTR(js_elements_set)},
+    {"js_elements_set_append_or_dense_int_fast", FPTR(js_elements_set_append_or_dense_int_fast), JIT_IMPORT_RAW_SCALAR_PRESERVES},
+    {"js_elements_set_append_or_dense_item_fast", FPTR(js_elements_set_append_or_dense_item_fast), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_array_define_dense_element_direct", FPTR(js_array_define_dense_element_direct)},
     {"js_array_length", FPTR(js_array_length), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_array_push", FPTR(js_array_push)},
@@ -2145,10 +2186,18 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(3, JIT_VALUE_BOXED_ITEM)}},
     {"js_set_internal_class_name", FPTR(js_set_internal_class_name), JIT_IMPORT_VOID_PRESERVES},
-    {"js_string_concat", FPTR(js_string_concat)},
-    {"js_string_get_int", FPTR(js_string_get_int)},
-    {"js_array_get_int", FPTR(js_array_get_int)},
-    {"js_array_set_int", FPTR(js_array_set_int)},
+    {"js_string_concat", FPTR(js_string_concat),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_string_get_int", FPTR(js_string_get_int),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_elements_get_int", FPTR(js_elements_get_int)},
+    {"js_elements_set_int", FPTR(js_elements_set_int)},
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},
     {"js_get_this", FPTR(js_get_this)},
     {"js_get_lexical_this_binding", FPTR(js_get_lexical_this_binding)},
@@ -2198,9 +2247,23 @@ JitImport jit_runtime_imports[] = {
     {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
     {"js_new_aggregate_error", FPTR(js_new_aggregate_error)},
     {"js_error_set_cause", FPTR(js_error_set_cause)},
-    {"js_string_replace_nonws_global_fast_no_dollar", FPTR(js_string_replace_nonws_global_fast_no_dollar)},
-    {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
-    {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code)},
+    {"js_string_replace_nonws_global_fast_no_dollar", FPTR(js_string_replace_nonws_global_fast_no_dollar),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_get_math_object_value", FPTR(js_get_math_object_value)},
     {"js_get_json_object_value", FPTR(js_get_json_object_value)},
     {"js_get_console_object_value", FPTR(js_get_console_object_value)},

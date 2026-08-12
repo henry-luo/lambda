@@ -130,10 +130,10 @@ static bool js_assert_has_date_prototype(Item value) {
     if (get_type_id(proto) != LMD_TYPE_MAP) return false;
     Item date_ctor = js_get_constructor(assert_make_string("Date"));
     if (get_type_id(date_ctor) == LMD_TYPE_FUNC) {
-        Item date_proto = js_property_get(date_ctor, assert_make_string("prototype"));
+        Item date_proto = js_get_key_default(date_ctor, assert_make_string("prototype"));
         if (proto.item == date_proto.item) return true;
     }
-    Item tag = js_property_get(proto, js_well_known_symbol_key(4));
+    Item tag = js_get_key_default(proto, js_well_known_symbol_key(4));
     return js_assert_string_equals(tag, "Date");
 }
 
@@ -178,9 +178,9 @@ static Item js_assert_date_checktag_message(Item actual, Item expected) {
 
 static void js_assert_attach_assertion_error_prototype(Item error) {
     if (assert_namespace.item == 0) return;
-    Item ae_fn = js_property_get(assert_namespace, assert_make_string("AssertionError"));
+    Item ae_fn = js_get_key_default(assert_namespace, assert_make_string("AssertionError"));
     if (get_type_id(ae_fn) != LMD_TYPE_FUNC) return;
-    Item ae_proto = js_property_get(ae_fn, assert_make_string("prototype"));
+    Item ae_proto = js_get_key_default(ae_fn, assert_make_string("prototype"));
     if (get_type_id(ae_proto) == LMD_TYPE_MAP) {
         js_set_prototype(error, ae_proto);
     }
@@ -224,9 +224,9 @@ static const char* js_assert_current_diff(void) {
     if (!js_assert_is_registered_instance(this_val)) {
         return "simple";
     }
-    Item options = js_property_get(this_val, js_assert_options_key());
+    Item options = js_get_key_default(this_val, js_assert_options_key());
     if (get_type_id(options) != LMD_TYPE_MAP) return "simple";
-    return js_assert_normalized_diff(js_property_get(options, js_assert_diff_key()));
+    return js_assert_normalized_diff(js_get_key_default(options, js_assert_diff_key()));
 }
 
 static bool js_assert_current_has_instance_diff(void) {
@@ -243,13 +243,13 @@ static void js_assert_mark_instance_error(Item error) {
     Item key = js_assert_instance_error_key();
     // Assert instance errors need Node's longer inspect string budget, while
     // detached instance methods and module-level assert use compact inspect.
-    js_property_set(error, key, (Item){.item = b2it(true)});
+    js_set_key_default(error, key, (Item){.item = b2it(true)});
     js_mark_non_enumerable(error, key);
 }
 
 static bool js_assert_options_strict(Item options) {
     if (get_type_id(options) != LMD_TYPE_MAP) return true;
-    Item strict = js_property_get(options, assert_make_string("strict"));
+    Item strict = js_get_key_default(options, assert_make_string("strict"));
     if (strict.item == ITEM_FALSE || (get_type_id(strict) == LMD_TYPE_BOOL && !it2b(strict))) {
         return false;
     }
@@ -261,9 +261,9 @@ static bool js_assert_current_skip_prototype(void) {
     if (!js_assert_is_registered_instance(this_val)) {
         return false;
     }
-    Item options = js_property_get(this_val, js_assert_options_key());
+    Item options = js_get_key_default(this_val, js_assert_options_key());
     if (get_type_id(options) != LMD_TYPE_MAP) return false;
-    Item skip = js_property_get(options, assert_make_string("skipPrototype"));
+    Item skip = js_get_key_default(options, assert_make_string("skipPrototype"));
     return skip.item == ITEM_TRUE || (get_type_id(skip) == LMD_TYPE_BOOL && it2b(skip));
 }
 
@@ -335,7 +335,7 @@ static void js_internal_errors_append_item(StrBuf* sb, Item value) {
 
 static Item js_internal_errors_make_range_error(Item message) {
     Item error = js_new_error_with_name(assert_make_string("RangeError"), message);
-    js_property_set(error, assert_make_string("code"), assert_make_string(JS_ERR_OUT_OF_RANGE));
+    js_set_key_default(error, assert_make_string("code"), assert_make_string(JS_ERR_OUT_OF_RANGE));
     return error;
 }
 
@@ -366,12 +366,12 @@ static void js_internal_errors_set_code(Item codes, const char* name,
     Item fn = js_new_native_constructor(target);
 
     Item range_ctor = js_get_constructor(assert_make_string("RangeError"));
-    Item range_proto = js_property_get(range_ctor, assert_make_string("prototype"));
+    Item range_proto = js_get_key_default(range_ctor, assert_make_string("prototype"));
     Item proto = js_object_create(range_proto);
-    js_property_set(proto, assert_make_string("constructor"), fn);
-    js_property_set(fn, assert_make_string("prototype"), proto);
+    js_set_key_default(proto, assert_make_string("constructor"), fn);
+    js_set_key_default(fn, assert_make_string("prototype"), proto);
 
-    js_property_set(codes, assert_make_string(name), fn);
+    js_set_key_default(codes, assert_make_string(name), fn);
 }
 
 extern "C" Item js_get_internal_errors_namespace(void) {
@@ -383,15 +383,15 @@ extern "C" Item js_get_internal_errors_namespace(void) {
     Item codes = js_new_object();
     js_internal_errors_set_code(codes, JS_ERR_OUT_OF_RANGE,
         js_internal_errors_ERR_OUT_OF_RANGE_ctor);
-    js_property_set(internal_errors_namespace, assert_make_string("codes"), codes);
+    js_set_key_default(internal_errors_namespace, assert_make_string("codes"), codes);
 
-    js_property_set(internal_errors_namespace, assert_make_string("hideStackFrames"),
+    js_set_key_default(internal_errors_namespace, assert_make_string("hideStackFrames"),
         js_new_native_function(js_internal_errors_identity));
-    js_property_set(internal_errors_namespace, assert_make_string("hideInternalStackFrames"),
+    js_set_key_default(internal_errors_namespace, assert_make_string("hideInternalStackFrames"),
         js_new_native_function(js_internal_errors_identity));
-    js_property_set(internal_errors_namespace, assert_make_string("isErrorStackTraceLimitWritable"),
+    js_set_key_default(internal_errors_namespace, assert_make_string("isErrorStackTraceLimitWritable"),
         js_new_native_function(js_internal_errors_true));
-    js_property_set(internal_errors_namespace, assert_make_string("default"), internal_errors_namespace);
+    js_set_key_default(internal_errors_namespace, assert_make_string("default"), internal_errors_namespace);
     return internal_errors_namespace;
 }
 
@@ -420,8 +420,8 @@ extern "C" Item js_internal_assert_myersDiff(Item actual, Item expected, Item ch
     Item diff = js_array_new(0);
     int64_t common_len = actual_len < expected_len ? actual_len : expected_len;
     for (int64_t i = common_len - 1; i >= 0; i--) {
-        Item actual_value = js_array_get_int(actual, i);
-        Item expected_value = js_array_get_int(expected, i);
+        Item actual_value = js_elements_get_int(actual, i);
+        Item expected_value = js_elements_get_int(expected, i);
         Item same = js_strict_equal(actual_value, expected_value);
         if (get_type_id(same) == LMD_TYPE_BOOL && it2b(same)) {
             js_array_push(diff, js_assert_myers_make_operation(0, actual_value));
@@ -431,10 +431,10 @@ extern "C" Item js_internal_assert_myersDiff(Item actual, Item expected, Item ch
         }
     }
     for (int64_t i = actual_len - 1; i >= common_len; i--) {
-        js_array_push(diff, js_assert_myers_make_operation(1, js_array_get_int(actual, i)));
+        js_array_push(diff, js_assert_myers_make_operation(1, js_elements_get_int(actual, i)));
     }
     for (int64_t i = expected_len - 1; i >= common_len; i--) {
-        js_array_push(diff, js_assert_myers_make_operation(-1, js_array_get_int(expected, i)));
+        js_array_push(diff, js_assert_myers_make_operation(-1, js_elements_get_int(expected, i)));
     }
     return diff;
 }
@@ -450,8 +450,8 @@ extern "C" Item js_internal_assert_printSimpleMyersDiff(Item diff) {
     strbuf_append_char(sb, '\n');
     int64_t len = js_array_length(diff);
     for (int64_t i = len - 1; i >= 0; i--) {
-        Item pair = js_array_get_int(diff, i);
-        js_assert_myers_append_string_value(sb, js_array_get_int(pair, 1));
+        Item pair = js_elements_get_int(diff, i);
+        js_assert_myers_append_string_value(sb, js_elements_get_int(pair, 1));
     }
     Item result = assert_make_string_n(sb->str, sb->length);
     strbuf_free(sb);
@@ -464,19 +464,19 @@ extern "C" Item js_internal_assert_printMyersDiff(Item diff, Item operator_item)
     strbuf_append_char(sb, '\n');
     int64_t len = js_array_length(diff);
     for (int64_t i = len - 1; i >= 0; i--) {
-        Item pair = js_array_get_int(diff, i);
-        Item op_item = js_array_get_int(pair, 0);
+        Item pair = js_elements_get_int(diff, i);
+        Item op_item = js_elements_get_int(pair, 0);
         int64_t op = get_type_id(op_item) == LMD_TYPE_INT ? it2i(op_item) : 0;
         if (op > 0) strbuf_append_str(sb, "+ ");
         else if (op < 0) strbuf_append_str(sb, "- ");
         else strbuf_append_str(sb, "  ");
-        js_assert_myers_append_string_value(sb, js_array_get_int(pair, 1));
+        js_assert_myers_append_string_value(sb, js_elements_get_int(pair, 1));
         if (i > 0) strbuf_append_char(sb, '\n');
     }
     Item result = js_new_object();
-    js_property_set(result, assert_make_string("message"),
+    js_set_key_default(result, assert_make_string("message"),
         assert_make_string_n(sb->str, sb->length));
-    js_property_set(result, assert_make_string("skipped"), (Item){.item = b2it(false)});
+    js_set_key_default(result, assert_make_string("skipped"), (Item){.item = b2it(false)});
     strbuf_free(sb);
     return result;
 }
@@ -486,13 +486,13 @@ extern "C" Item js_get_internal_assert_myers_diff_namespace(void) {
 
     internal_assert_myers_diff_namespace = js_new_object();
     heap_register_gc_root(&internal_assert_myers_diff_namespace.item);
-    js_property_set(internal_assert_myers_diff_namespace, assert_make_string("myersDiff"),
+    js_set_key_default(internal_assert_myers_diff_namespace, assert_make_string("myersDiff"),
         js_new_native_function(js_internal_assert_myersDiff));
-    js_property_set(internal_assert_myers_diff_namespace, assert_make_string("printMyersDiff"),
+    js_set_key_default(internal_assert_myers_diff_namespace, assert_make_string("printMyersDiff"),
         js_new_native_function(js_internal_assert_printMyersDiff));
-    js_property_set(internal_assert_myers_diff_namespace, assert_make_string("printSimpleMyersDiff"),
+    js_set_key_default(internal_assert_myers_diff_namespace, assert_make_string("printSimpleMyersDiff"),
         js_new_native_function(js_internal_assert_printSimpleMyersDiff));
-    js_property_set(internal_assert_myers_diff_namespace, assert_make_string("default"),
+    js_set_key_default(internal_assert_myers_diff_namespace, assert_make_string("default"),
         internal_assert_myers_diff_namespace);
     return internal_assert_myers_diff_namespace;
 }
@@ -512,16 +512,16 @@ static Item make_assertion_error_full_item(Item msg_item, Item actual, Item expe
     strbuf_free(init_stack);
     Item error = js_new_error_with_name_stack(type_name, msg_item, init_stack_item);
     // Node.js AssertionError properties
-    js_property_set(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
-    js_property_set(error, assert_make_string("name"), assert_make_string("AssertionError"));
-    js_property_set(error, assert_make_string("actual"), actual);
-    js_property_set(error, assert_make_string("expected"), expected);
-    if (op_str) js_property_set(error, assert_make_string("operator"), assert_make_string(op_str));
-    js_property_set(error, assert_make_string("diff"), assert_make_string(js_assert_current_diff()));
+    js_set_key_default(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
+    js_set_key_default(error, assert_make_string("name"), assert_make_string("AssertionError"));
+    js_set_key_default(error, assert_make_string("actual"), actual);
+    js_set_key_default(error, assert_make_string("expected"), expected);
+    if (op_str) js_set_key_default(error, assert_make_string("operator"), assert_make_string(op_str));
+    js_set_key_default(error, assert_make_string("diff"), assert_make_string(js_assert_current_diff()));
     js_assert_mark_instance_error(error);
-    js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(generated)});
+    js_set_key_default(error, assert_make_string("generatedMessage"), (Item){.item = b2it(generated)});
     if (op_str) {
-        Item stack_val = js_property_get(error, assert_make_string("stack"));
+        Item stack_val = js_get_key_default(error, assert_make_string("stack"));
         String* stack = get_type_id(stack_val) == LMD_TYPE_STRING ? it2s(stack_val) : NULL;
         StrBuf* sb = strbuf_new();
         if (stack && stack->len > 0) {
@@ -537,7 +537,7 @@ static Item make_assertion_error_full_item(Item msg_item, Item actual, Item expe
         strbuf_append_str(sb, "\n    at ");
         strbuf_append_str(sb, op_str);
         strbuf_append_str(sb, " (node:assert)");
-        js_property_set(error, assert_make_string("stack"), assert_make_string_n(sb->str, sb->length));
+        js_set_key_default(error, assert_make_string("stack"), assert_make_string_n(sb->str, sb->length));
         strbuf_free(sb);
     }
     js_assert_attach_assertion_error_prototype(error);
@@ -596,7 +596,7 @@ static bool js_assert_is_function_like_value(Item value) {
     TypeId type = get_type_id(value);
     if (type != LMD_TYPE_MAP) return false;
     if (js_class_id(value) == JS_CLASS_FUNCTION) return true;
-    Item super_class = js_property_get(value, assert_make_string("__super_class__"));
+    Item super_class = js_get_key_default(value, assert_make_string("__super_class__"));
     return get_type_id(super_class) == LMD_TYPE_FUNC ||
            (get_type_id(super_class) == LMD_TYPE_MAP &&
             js_class_id(super_class) == JS_CLASS_FUNCTION);
@@ -1000,10 +1000,10 @@ static Item js_assert_strict_equal_message(Item actual, Item expected) {
         strbuf_append_str(sb, "+ [Arguments] {\n");
         strbuf_append_str(sb, "- {\n");
         for (int64_t i = 0; i < len; i++) {
-            Item key = js_array_get_int(keys, i);
+            Item key = js_elements_get_int(keys, i);
             if (js_assert_string_equals(key, "__strict_arguments__")) continue;
-            Item av = js_property_get(actual, key);
-            Item ev = js_property_get(expected, key);
+            Item av = js_get_key_default(actual, key);
+            Item ev = js_get_key_default(expected, key);
             Item eq = js_util_isDeepStrictEqual(av, ev);
             bool same = (get_type_id(eq) == LMD_TYPE_BOOL && it2b(eq)) ||
                         (get_type_id(eq) == LMD_TYPE_INT && it2i(eq) == 1);
@@ -1123,7 +1123,7 @@ static void js_assert_append_not_deep_value(StrBuf* sb, Item value, int depth_le
         int64_t limit = len > 45 ? 45 : len;
         for (int64_t i = 0; i < limit; i++) {
             strbuf_append_str(sb, "  ");
-            js_assert_append_not_deep_value(sb, js_array_get_int(value, i), depth_left - 1);
+            js_assert_append_not_deep_value(sb, js_elements_get_int(value, i), depth_left - 1);
             if (i < len - 1) strbuf_append_char(sb, ',');
             strbuf_append_char(sb, '\n');
         }
@@ -1194,7 +1194,7 @@ static bool js_assert_deep_values_same(Item actual, Item expected) {
 static bool js_assert_is_arguments_value(Item value) {
     if (get_type_id(value) == LMD_TYPE_MAP) {
         if (js_class_id(value) == JS_CLASS_ARGUMENTS) return true;
-        Item tag = js_property_get(value, js_well_known_symbol_key(4));
+        Item tag = js_get_key_default(value, js_well_known_symbol_key(4));
         return js_assert_string_equals(tag, "Arguments");
     }
     if (get_type_id(value) != LMD_TYPE_ARRAY || !value.array ||
@@ -1202,7 +1202,7 @@ static bool js_assert_is_arguments_value(Item value) {
         return false;
     }
     Map* props = js_array_props(value.array);
-    Item tag = js_property_get((Item){.map = props}, js_well_known_symbol_key(4));
+    Item tag = js_get_key_default((Item){.map = props}, js_well_known_symbol_key(4));
     if (get_type_id(tag) != LMD_TYPE_STRING) return false;
     String* s = it2s(tag);
     return s && s->len == 9 && memcmp(s->chars, "Arguments", 9) == 0;
@@ -1242,7 +1242,7 @@ static void js_assert_append_multiline_object_key(StrBuf* sb, Item key) {
 static bool js_assert_property_is_getter(Item owner, Item key) {
     Item desc = js_object_get_own_property_descriptor(owner, key);
     if (get_type_id(desc) != LMD_TYPE_MAP) return false;
-    Item getter = js_property_get(desc, assert_make_string("get"));
+    Item getter = js_get_key_default(desc, assert_make_string("get"));
     return js_is_callable(getter);
 }
 
@@ -1263,8 +1263,8 @@ static bool js_assert_is_self_cycle_object(Item value) {
     Item keys = js_object_keys(value);
     int64_t len = js_array_length(keys);
     for (int64_t i = 0; i < len; i++) {
-        Item key = js_array_get_int(keys, i);
-        if (js_property_get(value, key).item == value.item) return true;
+        Item key = js_elements_get_int(keys, i);
+        if (js_get_key_default(value, key).item == value.item) return true;
     }
     return false;
 }
@@ -1276,7 +1276,7 @@ static void js_assert_append_multiline_array(StrBuf* sb, Item value, int indent,
     js_assert_append_line_prefix(sb, indent, sign);
     strbuf_append_str(sb, "[\n");
     for (int64_t i = 0; i < len; i++) {
-        Item child = js_array_get_int(value, i);
+        Item child = js_elements_get_int(value, i);
         js_assert_append_multiline_value(sb, child, indent + 2, sign, i < len - 1, depth_left - 1);
     }
     js_assert_append_line_prefix(sb, indent, sign);
@@ -1292,7 +1292,7 @@ static void js_assert_append_multiline_object(StrBuf* sb, Item value, int indent
     int64_t len = js_array_length(keys);
     int64_t visible_len = 0;
     for (int64_t i = 0; i < len; i++) {
-        if (!js_assert_string_equals(js_array_get_int(keys, i), "__strict_arguments__")) visible_len++;
+        if (!js_assert_string_equals(js_elements_get_int(keys, i), "__strict_arguments__")) visible_len++;
     }
     js_assert_append_line_prefix(sb, indent, sign);
     bool self_cycle = js_assert_is_self_cycle_object(value);
@@ -1302,9 +1302,9 @@ static void js_assert_append_multiline_object(StrBuf* sb, Item value, int indent
     int64_t emitted = 0;
     for (int pass = 0; pass < (self_cycle ? 2 : 1); pass++) {
     for (int64_t i = 0; i < len; i++) {
-        Item key = js_array_get_int(keys, i);
+        Item key = js_elements_get_int(keys, i);
         if (js_assert_string_equals(key, "__strict_arguments__")) continue;
-        Item child = js_property_get(value, key);
+        Item child = js_get_key_default(value, key);
         bool cycle_child = child.item == value.item;
         if (self_cycle && ((pass == 0) != cycle_child)) continue;
         js_assert_append_line_prefix(sb, indent + 2, sign);
@@ -1316,7 +1316,7 @@ static void js_assert_append_multiline_object(StrBuf* sb, Item value, int indent
             strbuf_append_str(sb, "[\n");
             int64_t child_len = js_array_length(child);
             for (int64_t j = 0; j < child_len; j++) {
-                js_assert_append_multiline_value(sb, js_array_get_int(child, j),
+                js_assert_append_multiline_value(sb, js_elements_get_int(child, j),
                     indent + 4, sign, j < child_len - 1, depth_left - 1);
             }
             js_assert_append_line_prefix(sb, indent + 2, sign);
@@ -1326,11 +1326,11 @@ static void js_assert_append_multiline_object(StrBuf* sb, Item value, int indent
             Item child_keys = js_object_keys(child);
             int64_t child_key_len = js_array_length(child_keys);
             for (int64_t j = 0; j < child_key_len; j++) {
-                Item child_key = js_array_get_int(child_keys, j);
+                Item child_key = js_elements_get_int(child_keys, j);
                 js_assert_append_line_prefix(sb, indent + 4, sign);
                 js_assert_append_multiline_object_key(sb, child_key);
                 strbuf_append_str(sb, ": ");
-                js_assert_append_inspected_value(sb, js_property_get(child, child_key));
+                js_assert_append_inspected_value(sb, js_get_key_default(child, child_key));
                 if (j < child_key_len - 1) strbuf_append_char(sb, ',');
                 strbuf_append_char(sb, '\n');
             }
@@ -1375,7 +1375,7 @@ static void js_assert_append_multiline_value(StrBuf* sb, Item value, int indent,
 static bool js_assert_key_array_contains(Item keys, Item key) {
     int64_t len = js_array_length(keys);
     for (int64_t i = 0; i < len; i++) {
-        if (js_assert_same_property_key(js_array_get_int(keys, i), key)) return true;
+        if (js_assert_same_property_key(js_elements_get_int(keys, i), key)) return true;
     }
     return false;
 }
@@ -1391,11 +1391,11 @@ static bool js_assert_lcs_should_take_actual(Item actual, Item expected,
         return score[i + 1][j] > score[i][j + 1];
     }
     bool actual_matches_next_expected = j + 1 < expected_len &&
-        js_assert_deep_values_same(js_array_get_int(actual, i),
-                                   js_array_get_int(expected, j + 1));
+        js_assert_deep_values_same(js_elements_get_int(actual, i),
+                                   js_elements_get_int(expected, j + 1));
     bool expected_matches_next_actual = i + 1 < actual_len &&
-        js_assert_deep_values_same(js_array_get_int(actual, i + 1),
-                                   js_array_get_int(expected, j));
+        js_assert_deep_values_same(js_elements_get_int(actual, i + 1),
+                                   js_elements_get_int(expected, j));
     if (actual_matches_next_expected && expected_matches_next_actual) {
         // When both adjacent values can realign repeated runs, Node keeps the
         // expected-side deletion first so later unique values stay anchored.
@@ -1415,7 +1415,7 @@ static void js_assert_build_lcs_score(Item actual, Item expected,
     memset(score, 0, sizeof(int) * 65 * 65);
     for (int64_t i = actual_len - 1; i >= 0; i--) {
         for (int64_t j = expected_len - 1; j >= 0; j--) {
-            if (js_assert_deep_values_same(js_array_get_int(actual, i), js_array_get_int(expected, j))) {
+            if (js_assert_deep_values_same(js_elements_get_int(actual, i), js_elements_get_int(expected, j))) {
                 score[i][j] = score[i + 1][j + 1] + 1;
             } else {
                 score[i][j] = score[i + 1][j] > score[i][j + 1] ?
@@ -1443,20 +1443,20 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
         int64_t j = 0;
         while (i < actual_len || j < expected_len) {
             if (i < actual_len && j < expected_len &&
-                    js_assert_deep_values_same(js_array_get_int(actual, i), js_array_get_int(expected, j))) {
+                    js_assert_deep_values_same(js_elements_get_int(actual, i), js_elements_get_int(expected, j))) {
                 bool child_comma = i < actual_len - 1 || j < expected_len - 1;
-                js_assert_append_multiline_value(sb, js_array_get_int(actual, i),
+                js_assert_append_multiline_value(sb, js_elements_get_int(actual, i),
                     indent + 2, 0, child_comma, 16);
                 i++;
                 j++;
             } else if (i < actual_len && j < expected_len &&
-                    js_assert_is_object_like_value(js_array_get_int(actual, i)) &&
-                    js_assert_is_object_like_value(js_array_get_int(expected, j))) {
+                    js_assert_is_object_like_value(js_elements_get_int(actual, i)) &&
+                    js_assert_is_object_like_value(js_elements_get_int(expected, j))) {
                 bool child_comma = i < actual_len - 1 || j < expected_len - 1;
                 // LCS is for inserted/removed scalar runs; object-like peers at
                 // the same slot need a nested diff or the leaf mismatch vanishes.
-                js_assert_append_structural_diff(sb, js_array_get_int(actual, i),
-                    js_array_get_int(expected, j), indent + 2, child_comma, 16);
+                js_assert_append_structural_diff(sb, js_elements_get_int(actual, i),
+                    js_elements_get_int(expected, j), indent + 2, child_comma, 16);
                 i++;
                 j++;
             } else if (i < actual_len && j < expected_len && actual_len == expected_len &&
@@ -1464,22 +1464,22 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
                 bool child_comma = i < actual_len - 1;
                 // Equal-length scalar mismatches are replacements; treating
                 // them as add/remove pairs adds a comma between the +/- lines.
-                js_assert_append_multiline_value(sb, js_array_get_int(actual, i),
+                js_assert_append_multiline_value(sb, js_elements_get_int(actual, i),
                     indent + 2, '+', child_comma, 16);
-                js_assert_append_multiline_value(sb, js_array_get_int(expected, j),
+                js_assert_append_multiline_value(sb, js_elements_get_int(expected, j),
                     indent + 2, '-', child_comma, 16);
                 i++;
                 j++;
             } else if (i + 1 < actual_len && j + 1 < expected_len &&
                     actual_len == expected_len &&
-                    js_assert_deep_values_same(js_array_get_int(actual, i + 1),
-                                               js_array_get_int(expected, j + 1))) {
+                    js_assert_deep_values_same(js_elements_get_int(actual, i + 1),
+                                               js_elements_get_int(expected, j + 1))) {
                 bool child_comma = i < actual_len - 1;
                 // Equal-length scalar replacements should keep the actual line
                 // before the expected line when the following slot realigns.
-                js_assert_append_multiline_value(sb, js_array_get_int(actual, i),
+                js_assert_append_multiline_value(sb, js_elements_get_int(actual, i),
                     indent + 2, '+', child_comma, 16);
-                js_assert_append_multiline_value(sb, js_array_get_int(expected, j),
+                js_assert_append_multiline_value(sb, js_elements_get_int(expected, j),
                     indent + 2, '-', child_comma, 16);
                 i++;
                 j++;
@@ -1488,12 +1488,12 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
                         i, j, actual_len, expected_len)) {
                 bool child_comma = score[0][0] == 0 && i == actual_len - 1 &&
                     j < expected_len ? false : (i < actual_len - 1 || j < expected_len);
-                js_assert_append_multiline_value(sb, js_array_get_int(actual, i),
+                js_assert_append_multiline_value(sb, js_elements_get_int(actual, i),
                     indent + 2, '+', child_comma, 16);
                 i++;
             } else if (j < expected_len) {
                 bool child_comma = i < actual_len || j < expected_len - 1;
-                js_assert_append_multiline_value(sb, js_array_get_int(expected, j),
+                js_assert_append_multiline_value(sb, js_elements_get_int(expected, j),
                     indent + 2, '-', child_comma, 16);
                 j++;
             }
@@ -1507,8 +1507,8 @@ static void js_assert_append_array_diff_recursive(StrBuf* sb, Item actual, Item 
     for (int64_t i = 0; i < max_len; i++) {
         bool has_actual = i < actual_len;
         bool has_expected = i < expected_len;
-        Item av = has_actual ? js_array_get_int(actual, i) : make_js_undefined();
-        Item ev = has_expected ? js_array_get_int(expected, i) : make_js_undefined();
+        Item av = has_actual ? js_elements_get_int(actual, i) : make_js_undefined();
+        Item ev = has_expected ? js_elements_get_int(expected, i) : make_js_undefined();
         bool same = has_actual && has_expected && js_assert_deep_values_same(av, ev);
         bool child_comma = i < max_len - 1;
         if (same) {
@@ -1545,9 +1545,9 @@ static void js_assert_append_array_diff_contents(StrBuf* sb, Item actual, Item e
     int64_t j = 0;
     while (i < actual_len || j < expected_len) {
         if (i < actual_len && j < expected_len &&
-                js_assert_deep_values_same(js_array_get_int(actual, i), js_array_get_int(expected, j))) {
+                js_assert_deep_values_same(js_elements_get_int(actual, i), js_elements_get_int(expected, j))) {
             bool comma = i < actual_len - 1 || j < expected_len - 1;
-            js_assert_append_multiline_value(sb, js_array_get_int(actual, i),
+            js_assert_append_multiline_value(sb, js_elements_get_int(actual, i),
                 element_indent, 0, comma, depth_left - 1);
             i++;
             j++;
@@ -1556,12 +1556,12 @@ static void js_assert_append_array_diff_contents(StrBuf* sb, Item actual, Item e
                     i, j, actual_len, expected_len)) {
             bool comma = score[0][0] == 0 && i == actual_len - 1 &&
                 j < expected_len ? false : (i < actual_len - 1 || j < expected_len);
-            js_assert_append_multiline_value(sb, js_array_get_int(actual, i),
+            js_assert_append_multiline_value(sb, js_elements_get_int(actual, i),
                 element_indent, '+', comma, depth_left - 1);
             i++;
         } else if (j < expected_len) {
             bool comma = i < actual_len || j < expected_len - 1;
-            js_assert_append_multiline_value(sb, js_array_get_int(expected, j),
+            js_assert_append_multiline_value(sb, js_elements_get_int(expected, j),
                 element_indent, '-', comma, depth_left - 1);
             j++;
         }
@@ -1572,18 +1572,18 @@ static bool js_assert_append_two_key_array_move_diff(StrBuf* sb, Item actual, It
                                                      Item actual_keys, Item expected_keys,
                                                      int indent, int depth_left) {
     if (js_array_length(actual_keys) != 2 || js_array_length(expected_keys) != 2) return false;
-    Item a0_key = js_array_get_int(actual_keys, 0);
-    Item a1_key = js_array_get_int(actual_keys, 1);
-    Item e0_key = js_array_get_int(expected_keys, 0);
-    Item e1_key = js_array_get_int(expected_keys, 1);
+    Item a0_key = js_elements_get_int(actual_keys, 0);
+    Item a1_key = js_elements_get_int(actual_keys, 1);
+    Item e0_key = js_elements_get_int(expected_keys, 0);
+    Item e1_key = js_elements_get_int(expected_keys, 1);
     if (!js_assert_same_property_key(a0_key, e0_key) ||
             !js_assert_same_property_key(a1_key, e1_key)) {
         return false;
     }
-    Item a0 = js_property_get(actual, a0_key);
-    Item a1 = js_property_get(actual, a1_key);
-    Item e0 = js_property_get(expected, e0_key);
-    Item e1 = js_property_get(expected, e1_key);
+    Item a0 = js_get_key_default(actual, a0_key);
+    Item a1 = js_get_key_default(actual, a1_key);
+    Item e0 = js_get_key_default(expected, e0_key);
+    Item e1 = js_get_key_default(expected, e1_key);
     if (get_type_id(a0) != LMD_TYPE_ARRAY || get_type_id(e1) != LMD_TYPE_ARRAY ||
             js_assert_is_object_like_value(a1) || js_assert_is_object_like_value(e0)) {
         return false;
@@ -1596,8 +1596,8 @@ static bool js_assert_append_two_key_array_move_diff(StrBuf* sb, Item actual, It
     int64_t expected_len = js_array_length(e1);
     int64_t ai = 0;
     while (ai < actual_len && ai < expected_len &&
-            !js_assert_deep_values_same(js_array_get_int(a0, ai), js_array_get_int(e1, 0))) {
-        js_assert_append_multiline_value(sb, js_array_get_int(a0, ai),
+            !js_assert_deep_values_same(js_elements_get_int(a0, ai), js_elements_get_int(e1, 0))) {
+        js_assert_append_multiline_value(sb, js_elements_get_int(a0, ai),
             indent + 2, '+', true, depth_left - 1);
         ai++;
     }
@@ -1610,10 +1610,10 @@ static bool js_assert_append_two_key_array_move_diff(StrBuf* sb, Item actual, It
     js_assert_append_multiline_object_key(sb, e1_key);
     strbuf_append_str(sb, ": [\n");
     for (int64_t j = 0; j < expected_len; j++) {
-        Item ev = js_array_get_int(e1, j);
+        Item ev = js_elements_get_int(e1, j);
         bool matched = false;
         for (int64_t k = ai; k < actual_len; k++) {
-            if (js_assert_deep_values_same(js_array_get_int(a0, k), ev)) {
+            if (js_assert_deep_values_same(js_elements_get_int(a0, k), ev)) {
                 matched = true;
                 break;
             }
@@ -1642,11 +1642,11 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
     int64_t actual_len = js_array_length(actual_keys);
     int64_t expected_len = js_array_length(expected_keys);
     for (int64_t i = 0; i < actual_len; i++) {
-        Item key = js_array_get_int(actual_keys, i);
+        Item key = js_elements_get_int(actual_keys, i);
         if (js_assert_string_equals(key, "__strict_arguments__")) continue;
-        Item av = js_property_get(actual, key);
+        Item av = js_get_key_default(actual, key);
         bool has_expected = js_assert_key_array_contains(expected_keys, key);
-        Item ev = has_expected ? js_property_get(expected, key) : make_js_undefined();
+        Item ev = has_expected ? js_get_key_default(expected, key) : make_js_undefined();
         bool same = has_expected && js_assert_deep_values_same(av, ev);
         bool has_more = i < actual_len - 1 || expected_len > actual_len;
         if (same) {
@@ -1674,7 +1674,7 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
                     memset(score, 0, sizeof(score));
                     for (int64_t ai = alen - 1; ai >= 0; ai--) {
                         for (int64_t ej = elen - 1; ej >= 0; ej--) {
-                            if (js_assert_deep_values_same(js_array_get_int(av, ai), js_array_get_int(ev, ej))) {
+                            if (js_assert_deep_values_same(js_elements_get_int(av, ai), js_elements_get_int(ev, ej))) {
                                 score[ai][ej] = score[ai + 1][ej + 1] + 1;
                             } else {
                                 score[ai][ej] = score[ai + 1][ej] > score[ai][ej + 1] ?
@@ -1686,20 +1686,20 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
                     int64_t ej = 0;
                     while (ai < alen || ej < elen) {
                         if (ai < alen && ej < elen &&
-                                js_assert_deep_values_same(js_array_get_int(av, ai), js_array_get_int(ev, ej))) {
+                                js_assert_deep_values_same(js_elements_get_int(av, ai), js_elements_get_int(ev, ej))) {
                             bool comma = ai < alen - 1 || ej < elen - 1;
-                            js_assert_append_multiline_value(sb, js_array_get_int(av, ai),
+                            js_assert_append_multiline_value(sb, js_elements_get_int(av, ai),
                                 indent + 4, 0, comma, depth_left - 1);
                             ai++;
                             ej++;
                         } else if (ai < alen && ej < elen &&
-                                js_assert_is_object_like_value(js_array_get_int(av, ai)) &&
-                                js_assert_is_object_like_value(js_array_get_int(ev, ej))) {
+                                js_assert_is_object_like_value(js_elements_get_int(av, ai)) &&
+                                js_assert_is_object_like_value(js_elements_get_int(ev, ej))) {
                             bool comma = ai < alen - 1 || ej < elen - 1;
                             // Preserve nested structural context under object
                             // properties instead of replacing the whole child.
-                            js_assert_append_structural_diff(sb, js_array_get_int(av, ai),
-                                js_array_get_int(ev, ej), indent + 4, comma, depth_left - 1);
+                            js_assert_append_structural_diff(sb, js_elements_get_int(av, ai),
+                                js_elements_get_int(ev, ej), indent + 4, comma, depth_left - 1);
                             ai++;
                             ej++;
                         } else if (ai < alen && ej < elen && alen == elen &&
@@ -1707,21 +1707,21 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
                             bool comma = ai < alen - 1;
                             // Equal-length scalar mismatches are replacements;
                             // do not attach an insertion comma to the + line.
-                            js_assert_append_multiline_value(sb, js_array_get_int(av, ai),
+                            js_assert_append_multiline_value(sb, js_elements_get_int(av, ai),
                                 indent + 4, '+', comma, depth_left - 1);
-                            js_assert_append_multiline_value(sb, js_array_get_int(ev, ej),
+                            js_assert_append_multiline_value(sb, js_elements_get_int(ev, ej),
                                 indent + 4, '-', comma, depth_left - 1);
                             ai++;
                             ej++;
                         } else if (ai + 1 < alen && ej + 1 < elen && alen == elen &&
-                                js_assert_deep_values_same(js_array_get_int(av, ai + 1),
-                                                           js_array_get_int(ev, ej + 1))) {
+                                js_assert_deep_values_same(js_elements_get_int(av, ai + 1),
+                                                           js_elements_get_int(ev, ej + 1))) {
                             bool comma = ai < alen - 1;
                             // Equal-length scalar replacements should keep the
                             // actual line before expected after realignment.
-                            js_assert_append_multiline_value(sb, js_array_get_int(av, ai),
+                            js_assert_append_multiline_value(sb, js_elements_get_int(av, ai),
                                 indent + 4, '+', comma, depth_left - 1);
-                            js_assert_append_multiline_value(sb, js_array_get_int(ev, ej),
+                            js_assert_append_multiline_value(sb, js_elements_get_int(ev, ej),
                                 indent + 4, '-', comma, depth_left - 1);
                             ai++;
                             ej++;
@@ -1730,12 +1730,12 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
                                     ai, ej, alen, elen)) {
                             bool comma = score[0][0] == 0 && ai == alen - 1 &&
                                 ej < elen ? false : (ai < alen - 1 || ej < elen);
-                            js_assert_append_multiline_value(sb, js_array_get_int(av, ai),
+                            js_assert_append_multiline_value(sb, js_elements_get_int(av, ai),
                                 indent + 4, '+', comma, depth_left - 1);
                             ai++;
                         } else if (ej < elen) {
                             bool comma = ai < alen || ej < elen - 1;
-                            js_assert_append_multiline_value(sb, js_array_get_int(ev, ej),
+                            js_assert_append_multiline_value(sb, js_elements_get_int(ev, ej),
                                 indent + 4, '-', comma, depth_left - 1);
                             ej++;
                         }
@@ -1744,9 +1744,9 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
                     int64_t max_len = alen > elen ? alen : elen;
                     for (int64_t ai = 0; ai < max_len; ai++) {
                         bool comma = ai < max_len - 1;
-                        if (ai < alen) js_assert_append_multiline_value(sb, js_array_get_int(av, ai),
+                        if (ai < alen) js_assert_append_multiline_value(sb, js_elements_get_int(av, ai),
                             indent + 4, '+', comma, depth_left - 1);
-                        if (ai < elen) js_assert_append_multiline_value(sb, js_array_get_int(ev, ai),
+                        if (ai < elen) js_assert_append_multiline_value(sb, js_elements_get_int(ev, ai),
                             indent + 4, '-', comma, depth_left - 1);
                     }
                 }
@@ -1763,9 +1763,9 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
                             nested_actual_keys, nested_expected_keys, indent + 4, depth_left - 1)) {
                         int64_t nested_len = js_array_length(nested_actual_keys);
                         for (int64_t j = 0; j < nested_len; j++) {
-                            Item child_key = js_array_get_int(nested_actual_keys, j);
-                            Item child_actual = js_property_get(av, child_key);
-                            Item child_expected = js_property_get(ev, child_key);
+                            Item child_key = js_elements_get_int(nested_actual_keys, j);
+                            Item child_actual = js_get_key_default(av, child_key);
+                            Item child_expected = js_get_key_default(ev, child_key);
                             js_assert_append_spaces(sb, indent + 4);
                             js_assert_append_multiline_object_key(sb, child_key);
                             strbuf_append_str(sb, ": ");
@@ -1812,13 +1812,13 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
         }
     }
     for (int64_t i = 0; i < expected_len; i++) {
-        Item key = js_array_get_int(expected_keys, i);
+        Item key = js_elements_get_int(expected_keys, i);
         if (js_assert_string_equals(key, "__strict_arguments__")) continue;
         if (js_assert_key_array_contains(actual_keys, key)) continue;
         js_assert_append_line_prefix(sb, indent + 2, '-');
         js_assert_append_multiline_object_key(sb, key);
         strbuf_append_str(sb, ": ");
-        js_assert_append_property_value(sb, expected, key, js_property_get(expected, key));
+        js_assert_append_property_value(sb, expected, key, js_get_key_default(expected, key));
         strbuf_append_char(sb, '\n');
     }
     js_assert_append_spaces(sb, indent);
@@ -1843,7 +1843,7 @@ static void js_assert_append_structural_diff(StrBuf* sb, Item actual, Item expec
             strbuf_append_str(sb, "[\n");
             for (int64_t i = 0; i < common_len; i++) {
                 js_assert_append_spaces(sb, indent + 4);
-                js_assert_append_inspected_value(sb, js_array_get_int(target, i));
+                js_assert_append_inspected_value(sb, js_elements_get_int(target, i));
                 if (i < expected_len - 1) strbuf_append_char(sb, ',');
                 strbuf_append_char(sb, '\n');
             }
@@ -1852,7 +1852,7 @@ static void js_assert_append_structural_diff(StrBuf* sb, Item actual, Item expec
             if (trailing_comma) strbuf_append_char(sb, ',');
             strbuf_append_char(sb, '\n');
             for (int64_t i = common_len; i < expected_len; i++) {
-                js_assert_append_multiline_value(sb, js_array_get_int(expected, i),
+                js_assert_append_multiline_value(sb, js_elements_get_int(expected, i),
                     indent + 2, '-', i < expected_len - 1, depth_left - 1);
             }
             js_assert_append_line_prefix(sb, indent, '-');
@@ -1884,8 +1884,8 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
     int64_t common_len = actual_len < expected_len ? actual_len : expected_len;
     int64_t diff_index = -1;
     for (int64_t i = 0; i < common_len; i++) {
-        Item eq = js_util_isDeepStrictEqual(js_array_get_int(actual, i),
-            js_array_get_int(expected, i));
+        Item eq = js_util_isDeepStrictEqual(js_elements_get_int(actual, i),
+            js_elements_get_int(expected, i));
         bool same = (get_type_id(eq) == LMD_TYPE_INT && it2i(eq) == 1) ||
             (get_type_id(eq) == LMD_TYPE_BOOL && it2b(eq));
         if (!same) {
@@ -1898,17 +1898,17 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
 
     int64_t max_array_len = actual_len > expected_len ? actual_len : expected_len;
     if (actual_len == expected_len && actual_len >= 5 &&
-            js_assert_is_object_like_value(js_array_get_int(actual, actual_len - 1)) &&
-            js_assert_is_object_like_value(js_array_get_int(expected, expected_len - 1))) {
-        Item actual_child = js_array_get_int(actual, actual_len - 1);
-        Item expected_child = js_array_get_int(expected, expected_len - 1);
+            js_assert_is_object_like_value(js_elements_get_int(actual, actual_len - 1)) &&
+            js_assert_is_object_like_value(js_elements_get_int(expected, expected_len - 1))) {
+        Item actual_child = js_elements_get_int(actual, actual_len - 1);
+        Item expected_child = js_elements_get_int(expected, expected_len - 1);
         Item child_keys = js_object_keys(actual_child);
         int64_t child_key_len = js_array_length(child_keys);
         for (int64_t key_index = 0; key_index < child_key_len; key_index++) {
-            Item child_key = js_array_get_int(child_keys, key_index);
+            Item child_key = js_elements_get_int(child_keys, key_index);
             if (!js_assert_has_own_property_key(expected_child, child_key)) continue;
-            Item actual_value = js_property_get(actual_child, child_key);
-            Item expected_value = js_property_get(expected_child, child_key);
+            Item actual_value = js_get_key_default(actual_child, child_key);
+            Item expected_value = js_get_key_default(expected_child, child_key);
             if (get_type_id(actual_value) == LMD_TYPE_ARRAY &&
                     get_type_id(expected_value) == LMD_TYPE_ARRAY) {
                 StrBuf* sb = strbuf_new();
@@ -1918,7 +1918,7 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
                 strbuf_append_str(sb, "  [\n");
                 int64_t head_count = diff_index < 2 ? diff_index : 2;
                 for (int64_t i = 0; i < head_count; i++) {
-                    js_assert_append_multiline_value(sb, js_array_get_int(actual, i),
+                    js_assert_append_multiline_value(sb, js_elements_get_int(actual, i),
                         4, 0, true, 16);
                 }
                 strbuf_append_str(sb, "...\n");
@@ -1948,32 +1948,32 @@ static Item js_assert_deep_strict_array_message(Item actual, Item expected) {
         strbuf_append_str(sb, "  [\n");
         for (int64_t i = 0; i < 4 && i < actual_len; i++) {
             strbuf_append_str(sb, "    ");
-            js_assert_append_inspected_value(sb, js_array_get_int(actual, i));
+            js_assert_append_inspected_value(sb, js_elements_get_int(actual, i));
             strbuf_append_str(sb, ",\n");
         }
         strbuf_append_str(sb, "...\n");
         int64_t context_index = diff_index - 1;
         if (context_index >= 4 && context_index < actual_len && context_index < expected_len) {
             strbuf_append_str(sb, "    ");
-            js_assert_append_inspected_value(sb, js_array_get_int(actual, context_index));
+            js_assert_append_inspected_value(sb, js_elements_get_int(actual, context_index));
             strbuf_append_str(sb, ",\n");
         }
         if (diff_index < actual_len) {
             strbuf_append_str(sb, "+   ");
-            js_assert_append_inspected_value(sb, js_array_get_int(actual, diff_index));
+            js_assert_append_inspected_value(sb, js_elements_get_int(actual, diff_index));
             if (diff_index < actual_len - 1) strbuf_append_char(sb, ',');
             strbuf_append_char(sb, '\n');
         }
         if (diff_index < expected_len) {
             strbuf_append_str(sb, "-   ");
-            js_assert_append_inspected_value(sb, js_array_get_int(expected, diff_index));
+            js_assert_append_inspected_value(sb, js_elements_get_int(expected, diff_index));
             if (diff_index < expected_len - 1) strbuf_append_char(sb, ',');
             strbuf_append_char(sb, '\n');
         }
         int64_t after = diff_index + 1;
         if (after < actual_len && after < expected_len) {
             strbuf_append_str(sb, "    ");
-            js_assert_append_inspected_value(sb, js_array_get_int(actual, after));
+            js_assert_append_inspected_value(sb, js_elements_get_int(actual, after));
             strbuf_append_char(sb, '\n');
         }
         strbuf_append_str(sb, "  ]\n");
@@ -2046,7 +2046,7 @@ static Item js_assert_deep_strict_typed_array_message(Item actual, Item expected
         Item diff_keys = actual_key_len > expected_key_len ? actual_keys : expected_keys;
         const char* sign = actual_key_len > expected_key_len ? "+   " : "-   ";
         for (int64_t i = 0; i < js_array_length(diff_keys); i++) {
-            Item key = js_array_get_int(diff_keys, i);
+            Item key = js_elements_get_int(diff_keys, i);
             String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
             if (!ks) continue;
             bool is_index = ks->len > 0;
@@ -2061,7 +2061,7 @@ static Item js_assert_deep_strict_typed_array_message(Item actual, Item expected
             strbuf_append_str_n(prop, ks->chars, ks->len);
             strbuf_append_str(prop, ": ");
             js_assert_append_inspected_value(prop,
-                js_property_get(actual_key_len > expected_key_len ? actual : expected, key));
+                js_get_key_default(actual_key_len > expected_key_len ? actual : expected, key));
             strbuf_append_char(prop, '\n');
         }
         strbuf_append_str(prop, "  ]\n");
@@ -2101,7 +2101,7 @@ static bool js_assert_date_iso(Item value, StrBuf* sb) {
     bool found_time = false;
     // Date subclasses keep [[DateValue]] in the hidden map slot; public lookup
     // can miss it and leave assert diffs with a blank subclass label.
-    Item time_value = js_map_get_fast_ext(value.map, "__time__", 8, &found_time);
+    Item time_value = js_map_shape_lookup_ext(value.map, "__time__", 8, &found_time);
     double millis = 0.0;
     if (found_time && get_type_id(time_value) == LMD_TYPE_INT) millis = (double)it2i(time_value);
     else if (found_time && get_type_id(time_value) == LMD_TYPE_FLOAT) millis = it2d(time_value);
@@ -2164,7 +2164,7 @@ static void js_assert_append_class_value_with_props(StrBuf* sb, Item value,
     int64_t len = js_array_length(keys);
     int64_t visible_len = 0;
     for (int64_t i = 0; i < len; i++) {
-        Item key = js_array_get_int(keys, i);
+        Item key = js_elements_get_int(keys, i);
         if (!js_assert_string_equals(key, "__time__")) visible_len++;
     }
     if (visible_len <= 0) {
@@ -2174,14 +2174,14 @@ static void js_assert_append_class_value_with_props(StrBuf* sb, Item value,
     strbuf_append_str(sb, " {\n");
     int64_t emitted = 0;
     for (int64_t i = 0; i < len; i++) {
-        Item key = js_array_get_int(keys, i);
+        Item key = js_elements_get_int(keys, i);
         if (js_assert_string_equals(key, "__time__")) continue;
         String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
         strbuf_append_str(sb, sign);
         strbuf_append_str(sb, "  ");
         js_assert_append_quoted_key(sb, ks);
         strbuf_append_str(sb, ": ");
-        js_assert_append_inspected_value(sb, js_property_get(value, key));
+        js_assert_append_inspected_value(sb, js_get_key_default(value, key));
         emitted++;
         if (emitted < visible_len) strbuf_append_char(sb, ',');
         strbuf_append_char(sb, '\n');
@@ -2213,18 +2213,18 @@ static Item js_assert_deep_strict_map_message(Item actual, Item expected) {
     if (actual_len != expected_len || actual_len <= 0) return ItemNull;
 
     for (int64_t i = 0; i < actual_len; i++) {
-        Item actual_pair = js_array_get_int(actual_entries, i);
-        Item actual_key = js_array_get_int(actual_pair, 0);
-        Item actual_value = js_array_get_int(actual_pair, 1);
+        Item actual_pair = js_elements_get_int(actual_entries, i);
+        Item actual_key = js_elements_get_int(actual_pair, 0);
+        Item actual_value = js_elements_get_int(actual_pair, 1);
         for (int64_t j = 0; j < expected_len; j++) {
-            Item expected_pair = js_array_get_int(expected_entries, j);
-            Item expected_key = js_array_get_int(expected_pair, 0);
+            Item expected_pair = js_elements_get_int(expected_entries, j);
+            Item expected_key = js_elements_get_int(expected_pair, 0);
             Item key_equal = js_util_isDeepStrictEqual(actual_key, expected_key);
             if (!((get_type_id(key_equal) == LMD_TYPE_BOOL && it2b(key_equal)) ||
                     (get_type_id(key_equal) == LMD_TYPE_INT && it2i(key_equal) == 1))) {
                 continue;
             }
-            Item expected_value = js_array_get_int(expected_pair, 1);
+            Item expected_value = js_elements_get_int(expected_pair, 1);
             Item value_equal = js_util_isDeepStrictEqual(actual_value, expected_value);
             if ((get_type_id(value_equal) == LMD_TYPE_BOOL && it2b(value_equal)) ||
                     (get_type_id(value_equal) == LMD_TYPE_INT && it2i(value_equal) == 1)) {
@@ -2287,24 +2287,24 @@ static Item js_assert_deep_strict_object_message(Item actual, Item expected) {
     strbuf_append_str(sb, "+ actual - expected\n\n");
     strbuf_append_str(sb, "  {\n");
     for (int64_t i = 0; i < js_array_length(base_keys); i++) {
-        Item key = js_array_get_int(base_keys, i);
+        Item key = js_elements_get_int(base_keys, i);
         String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
         if (!ks) continue;
         strbuf_append_str(sb, "    ");
         strbuf_append_str_n(sb, ks->chars, ks->len);
         strbuf_append_str(sb, ": ");
-        js_assert_append_inspected_value(sb, js_property_get(actual_len < expected_len ? actual : expected, key));
+        js_assert_append_inspected_value(sb, js_get_key_default(actual_len < expected_len ? actual : expected, key));
         strbuf_append_str(sb, ",\n");
     }
     for (int64_t i = 0; i < js_array_length(diff_keys); i++) {
-        Item key = js_array_get_int(diff_keys, i);
+        Item key = js_elements_get_int(diff_keys, i);
         if (js_assert_has_own_property_key(actual_len < expected_len ? actual : expected, key)) continue;
         String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
         if (!ks) continue;
         strbuf_append_str(sb, diff_sign);
         strbuf_append_str_n(sb, ks->chars, ks->len);
         strbuf_append_str(sb, ": ");
-        js_assert_append_inspected_value(sb, js_property_get(diff_owner, key));
+        js_assert_append_inspected_value(sb, js_get_key_default(diff_owner, key));
         strbuf_append_char(sb, '\n');
     }
     strbuf_append_str(sb, "  }\n");
@@ -2322,9 +2322,9 @@ static Item js_assert_deep_strict_url_message(Item actual, Item expected) {
     strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
     strbuf_append_str(sb, "+ actual - expected\n\n");
     strbuf_append_str(sb, "+ ");
-    js_assert_append_inspected_value(sb, js_property_get(actual, assert_make_string("href")));
+    js_assert_append_inspected_value(sb, js_get_key_default(actual, assert_make_string("href")));
     strbuf_append_str(sb, "\n- ");
-    js_assert_append_inspected_value(sb, js_property_get(expected, assert_make_string("href")));
+    js_assert_append_inspected_value(sb, js_get_key_default(expected, assert_make_string("href")));
     strbuf_append_char(sb, '\n');
     // URL wrappers compare by canonical href; the fallback text hid the
     // differing URL and broke object-pattern message checks.
@@ -2383,7 +2383,7 @@ static void js_assert_append_error_label(StrBuf* sb, Item value) {
     if (get_type_id(value) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(value))) {
         const char* name = js_class_to_name(js_class_id(value));
         if (!name) name = "Error";
-        Item msg = js_property_get(value, assert_make_string("message"));
+        Item msg = js_get_key_default(value, assert_make_string("message"));
         String* ms = get_type_id(msg) == LMD_TYPE_STRING ? it2s(msg) : NULL;
         strbuf_append_char(sb, '[');
         strbuf_append_str(sb, name);
@@ -2402,14 +2402,14 @@ static void js_assert_append_error_cause_value(StrBuf* sb, Item value, const cha
         Item keys = js_object_keys(value);
         int64_t len = js_array_length(keys);
         if (len == 1) {
-            Item key = js_array_get_int(keys, 0);
+            Item key = js_elements_get_int(keys, 0);
             String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
             strbuf_append_str(sb, "{\n");
             strbuf_append_str(sb, prefix);
             strbuf_append_str(sb, "  ");
             if (ks) strbuf_append_str_n(sb, ks->chars, ks->len);
             strbuf_append_str(sb, ": ");
-            js_assert_append_inspected_value(sb, js_property_get(value, key));
+            js_assert_append_inspected_value(sb, js_get_key_default(value, key));
             strbuf_append_str(sb, "\n");
             strbuf_append_str(sb, prefix);
             strbuf_append_str(sb, "}");
@@ -2431,8 +2431,8 @@ static Item js_assert_deep_strict_error_message(Item actual, Item expected) {
         bool actual_has = js_assert_has_own_key_early(actual, keys[i]);
         bool expected_has = js_assert_has_own_key_early(expected, keys[i]);
         if (!actual_has && !expected_has) continue;
-        Item actual_value = actual_has ? js_property_get(actual, assert_make_string(keys[i])) : make_js_undefined();
-        Item expected_value = expected_has ? js_property_get(expected, assert_make_string(keys[i])) : make_js_undefined();
+        Item actual_value = actual_has ? js_get_key_default(actual, assert_make_string(keys[i])) : make_js_undefined();
+        Item expected_value = expected_has ? js_get_key_default(expected, assert_make_string(keys[i])) : make_js_undefined();
         Item equal = js_util_isDeepStrictEqual(actual_value, expected_value);
         bool same = get_type_id(equal) == LMD_TYPE_BOOL && it2b(equal);
         if (same && actual_has == expected_has) continue;
@@ -2482,7 +2482,7 @@ static Item js_assert_deep_strict_error_message(Item actual, Item expected) {
     Item expected_keys = js_object_keys(expected);
     int64_t expected_len = js_array_length(expected_keys);
     for (int64_t i = 0; i < expected_len; i++) {
-        Item key = js_array_get_int(expected_keys, i);
+        Item key = js_elements_get_int(expected_keys, i);
         if (js_assert_string_equals(key, "message") ||
                 js_assert_string_equals(key, "name") ||
                 js_assert_string_equals(key, "stack")) {
@@ -2491,8 +2491,8 @@ static Item js_assert_deep_strict_error_message(Item actual, Item expected) {
         bool actual_has = js_assert_has_own_property_key(actual, key);
         bool expected_has = js_assert_has_own_property_key(expected, key);
         if (!expected_has) continue;
-        Item actual_value = actual_has ? js_property_get(actual, key) : make_js_undefined();
-        Item expected_value = js_property_get(expected, key);
+        Item actual_value = actual_has ? js_get_key_default(actual, key) : make_js_undefined();
+        Item expected_value = js_get_key_default(expected, key);
         if (actual_has && js_assert_deep_values_same(actual_value, expected_value)) continue;
         String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
         if (!ks) continue;
@@ -2903,12 +2903,12 @@ extern "C" Item js_assert_fail(Item message) {
 
 static bool js_assert_function_is_constructor_expectation(Item fn) {
     if (!js_assert_is_function_like_value(fn)) return false;
-    Item proto = js_property_get(fn, assert_make_string("prototype"));
+    Item proto = js_get_key_default(fn, assert_make_string("prototype"));
     if (get_type_id(proto) != LMD_TYPE_MAP && get_type_id(proto) != LMD_TYPE_ELEMENT) {
         return false;
     }
     if (assert_namespace.item != 0) {
-        Item assertion_error = js_property_get(assert_namespace, assert_make_string("AssertionError"));
+        Item assertion_error = js_get_key_default(assert_namespace, assert_make_string("AssertionError"));
         if (fn.item == assertion_error.item) return true;
     }
     const char* known[] = {
@@ -2921,14 +2921,14 @@ static bool js_assert_function_is_constructor_expectation(Item fn) {
         if (fn.item == ctor.item) return true;
     }
     Item error_ctor = js_get_constructor(assert_make_string("Error"));
-    Item error_proto = js_property_get(error_ctor, assert_make_string("prototype"));
-    Item super_class = js_property_get(fn, assert_make_string("__super_class__"));
+    Item error_proto = js_get_key_default(error_ctor, assert_make_string("prototype"));
+    Item super_class = js_get_key_default(fn, assert_make_string("__super_class__"));
     for (int i = 0; i < 64 && js_assert_is_function_like_value(super_class); i++) {
         if (super_class.item == error_ctor.item) return true;
-        if (js_property_get(super_class, assert_make_string("prototype")).item == error_proto.item) return true;
+        if (js_get_key_default(super_class, assert_make_string("prototype")).item == error_proto.item) return true;
         // Lambda class constructors carry their extends chain on __super_class__;
         // checking it keeps Error subclasses from being misused as validators.
-        super_class = js_property_get(super_class, assert_make_string("__super_class__"));
+        super_class = js_get_key_default(super_class, assert_make_string("__super_class__"));
     }
     Item cur = proto;
     for (int i = 0; i < 64 && get_type_id(cur) == LMD_TYPE_MAP; i++) {
@@ -2948,16 +2948,16 @@ static Item js_assert_throw_throws_assertion(Item message, Item actual, Item exp
     Item error = make_assertion_error_full_item(message, actual, expected, NULL, generated);
     // assert.throws owns the operator property, but its internal frame must not
     // be appended to user-visible stacks.
-    js_property_set(error, assert_make_string("operator"), assert_make_string("throws"));
+    js_set_key_default(error, assert_make_string("operator"), assert_make_string("throws"));
     return js_throw_value(error);
 }
 
 static bool js_assert_expected_constructor_label(Item expected, StrBuf* sb) {
     if (!js_assert_is_function_like_value(expected)) return false;
-    Item name = js_property_get(expected, assert_make_string("name"));
+    Item name = js_get_key_default(expected, assert_make_string("name"));
     String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
     if ((!ns || ns->len == 0) && assert_namespace.item != 0) {
-        Item assertion_error = js_property_get(assert_namespace, assert_make_string("AssertionError"));
+        Item assertion_error = js_get_key_default(assert_namespace, assert_make_string("AssertionError"));
         if (expected.item == assertion_error.item) {
             ns = it2s(assert_make_string("AssertionError"));
         }
@@ -3013,17 +3013,17 @@ static Item js_assert_throw_invalid_throws_expected(Item error_expected) {
 
 static bool js_assert_is_vm_context_error(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
-    Item marker = js_property_get(value, assert_make_string("__vm_context_error__"));
+    Item marker = js_get_key_default(value, assert_make_string("__vm_context_error__"));
     return (get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker)) ||
            (get_type_id(marker) == LMD_TYPE_INT && it2i(marker) != 0);
 }
 
 static Item js_assert_throw_constructor_mismatch(Item thrown, Item expected_ctor) {
-    Item expected_name = js_property_get(expected_ctor, assert_make_string("name"));
+    Item expected_name = js_get_key_default(expected_ctor, assert_make_string("name"));
     if (get_type_id(expected_name) != LMD_TYPE_STRING ||
             (it2s(expected_name) && it2s(expected_name)->len == 0)) {
         if (assert_namespace.item != 0) {
-            Item assertion_error = js_property_get(assert_namespace, assert_make_string("AssertionError"));
+            Item assertion_error = js_get_key_default(assert_namespace, assert_make_string("AssertionError"));
             if (expected_ctor.item == assertion_error.item) {
                 expected_name = assert_make_string("AssertionError");
             }
@@ -3037,19 +3037,19 @@ static Item js_assert_throw_constructor_mismatch(Item thrown, Item expected_ctor
     }
     if (actual_ctor.item == 0 || actual_ctor.item == ItemNull.item ||
             get_type_id(actual_ctor) == LMD_TYPE_UNDEFINED) {
-        actual_ctor = js_property_get(thrown, assert_make_string("constructor"));
+        actual_ctor = js_get_key_default(thrown, assert_make_string("constructor"));
     }
-    Item public_name = js_property_get(actual_ctor, assert_make_string("name"));
+    Item public_name = js_get_key_default(actual_ctor, assert_make_string("name"));
     if (js_assert_string_equals(public_name, "Error")) {
         Item thrown_proto = js_get_prototype_of(thrown);
-        Item proto_ctor = js_property_get(thrown_proto, assert_make_string("constructor"));
-        Item proto_name = js_property_get(proto_ctor, assert_make_string("name"));
+        Item proto_ctor = js_get_key_default(thrown_proto, assert_make_string("constructor"));
+        Item proto_name = js_get_key_default(proto_ctor, assert_make_string("name"));
         if (get_type_id(proto_name) == LMD_TYPE_STRING &&
                 !js_assert_string_equals(proto_name, "Error")) {
             actual_ctor = proto_ctor;
         }
     }
-    Item actual_name = js_property_get(actual_ctor, assert_make_string("name"));
+    Item actual_name = js_get_key_default(actual_ctor, assert_make_string("name"));
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "The error is expected to be an instance of \"");
     js_assert_append_item_text(sb, expected_name);
@@ -3076,7 +3076,7 @@ static Item js_assert_throw_constructor_mismatch(Item thrown, Item expected_ctor
         }
         strbuf_append_char(sb, '"');
     }
-    Item thrown_msg = js_property_get(thrown, assert_make_string("message"));
+    Item thrown_msg = js_get_key_default(thrown, assert_make_string("message"));
     if (get_type_id(thrown_msg) == LMD_TYPE_STRING) {
         String* ms = it2s(thrown_msg);
         if (ms && ms->len > 0) {
@@ -3120,7 +3120,7 @@ static bool js_assert_thrown_matches_string_message(Item thrown, Item message) {
     if (get_type_id(message) != LMD_TYPE_STRING) return false;
     Item candidate = thrown;
     if (get_type_id(thrown) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(thrown))) {
-        candidate = js_property_get(thrown, assert_make_string("message"));
+        candidate = js_get_key_default(thrown, assert_make_string("message"));
     }
     if (get_type_id(candidate) != LMD_TYPE_STRING) return false;
     String* cs = it2s(candidate);
@@ -3142,7 +3142,7 @@ static bool js_assert_expected_property_matches(Item actual_val, Item expected_v
 }
 
 static Item js_assert_error_name_value(Item value) {
-    Item name = js_property_get(value, assert_make_string("name"));
+    Item name = js_get_key_default(value, assert_make_string("name"));
     if (get_type_id(name) == LMD_TYPE_STRING) return name;
     if (get_type_id(value) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(value))) {
         const char* class_name = js_class_to_name(js_class_id(value));
@@ -3159,7 +3159,7 @@ static Item js_assert_pattern_property_value(Item object, Item key) {
         // matching observes the public error name rather than own-key storage.
         return js_assert_error_name_value(object);
     }
-    return js_property_get(object, key);
+    return js_get_key_default(object, key);
 }
 
 static int js_assert_compare_key_names(Item a, Item b) {
@@ -3187,7 +3187,7 @@ static int js_assert_collect_expected_pattern_keys(Item expected, Item* out, int
     Item keys = js_object_keys(expected);
     int64_t key_count = js_array_length(keys);
     for (int64_t i = 0; i < key_count && count < max_count; i++) {
-        out[count++] = js_array_get_int(keys, i);
+        out[count++] = js_elements_get_int(keys, i);
     }
     if (get_type_id(expected) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(expected))) {
         if (count < max_count && !js_assert_key_list_contains(out, count, "message")) {
@@ -3404,7 +3404,7 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
     bool expected_constructor = js_assert_function_is_constructor_expectation(error_expected);
     bool expected_callable = js_is_callable(error_expected);
     if (expected_callable || expected_constructor) {
-        Item proto = js_property_get(error_expected, assert_make_string("prototype"));
+        Item proto = js_get_key_default(error_expected, assert_make_string("prototype"));
         if (get_type_id(proto) == LMD_TYPE_MAP || get_type_id(proto) == LMD_TYPE_ELEMENT ||
                 expected_constructor) {
             Item result = js_instanceof(thrown, error_expected);
@@ -3540,7 +3540,7 @@ static bool js_assert_expected_error_matches(Item thrown, Item error_expected) {
 
 
     if (js_is_callable(error_expected)) {
-        Item proto = js_property_get(error_expected, assert_make_string("prototype"));
+        Item proto = js_get_key_default(error_expected, assert_make_string("prototype"));
         if (get_type_id(proto) == LMD_TYPE_MAP) {
             Item result = js_instanceof(thrown, error_expected);
             return get_type_id(result) == LMD_TYPE_BOOL && it2b(result);
@@ -3586,7 +3586,7 @@ static Item js_assert_throw_unwanted_exception(Item thrown, Item expected, Item 
     strbuf_append_str(sb, "Got unwanted exception");
     js_assert_append_does_not_throw_user_message(sb, message);
 
-    Item thrown_msg = js_property_get(thrown, assert_make_string("message"));
+    Item thrown_msg = js_get_key_default(thrown, assert_make_string("message"));
     if (get_type_id(thrown_msg) != LMD_TYPE_STRING &&
             !js_class_is_error_like(get_type_id(thrown) == LMD_TYPE_MAP ? js_class_id(thrown) : JS_CLASS_NONE)) {
         // Non-Error thrown values do not have .message, but Node still reports
@@ -3601,7 +3601,7 @@ static Item js_assert_throw_unwanted_exception(Item thrown, Item expected, Item 
     }
 
     Item error = make_assertion_error_full(sb->str, thrown, expected, NULL, false);
-    js_property_set(error, assert_make_string("operator"), assert_make_string("doesNotThrow"));
+    js_set_key_default(error, assert_make_string("operator"), assert_make_string("doesNotThrow"));
     strbuf_free(sb);
     return js_throw_value(error);
 }
@@ -3649,7 +3649,7 @@ static Item js_assert_ifError_message_detail(Item value) {
 
     if (type == LMD_TYPE_MAP) {
         bool is_error = js_class_is_error_like(js_class_id(value));
-        Item msg_val = js_property_get(value, assert_make_string("message"));
+        Item msg_val = js_get_key_default(value, assert_make_string("message"));
         if (get_type_id(msg_val) == LMD_TYPE_STRING) {
             String* msg = it2s(msg_val);
             if (!is_error || (msg && msg->len > 0)) return msg_val;
@@ -3683,14 +3683,14 @@ extern "C" Item js_assert_ifError(Item value) {
         Item type_name = assert_make_string("AssertionError");
         Item msg_item = js_assert_ifError_message(value);
         Item error = js_new_error_with_name(type_name, msg_item);
-        js_property_set(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
-        js_property_set(error, assert_make_string("name"), assert_make_string("AssertionError"));
-        js_property_set(error, assert_make_string("actual"), value);
-        js_property_set(error, assert_make_string("expected"), ItemNull);
-        js_property_set(error, assert_make_string("operator"), assert_make_string("ifError"));
-        js_property_set(error, assert_make_string("diff"), assert_make_string(js_assert_current_diff()));
+        js_set_key_default(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
+        js_set_key_default(error, assert_make_string("name"), assert_make_string("AssertionError"));
+        js_set_key_default(error, assert_make_string("actual"), value);
+        js_set_key_default(error, assert_make_string("expected"), ItemNull);
+        js_set_key_default(error, assert_make_string("operator"), assert_make_string("ifError"));
+        js_set_key_default(error, assert_make_string("diff"), assert_make_string(js_assert_current_diff()));
         js_assert_mark_instance_error(error);
-        js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(false)});
+        js_set_key_default(error, assert_make_string("generatedMessage"), (Item){.item = b2it(false)});
         js_assert_attach_assertion_error_prototype(error);
         return js_throw_value(error);
     }
@@ -3719,7 +3719,7 @@ static Item js_assert_throw_ambiguous_assert_message(Item message) {
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "The \"message\" argument is ambiguous. Received ");
     if (get_type_id(message) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(message))) {
-        Item msg = js_property_get(message, assert_make_string("message"));
+        Item msg = js_get_key_default(message, assert_make_string("message"));
         String* ms = get_type_id(msg) == LMD_TYPE_STRING ? it2s(msg) : NULL;
         if (ms) strbuf_append_str_n(sb, ms->chars, ms->len);
     } else {
@@ -3936,7 +3936,7 @@ static bool js_assert_key_is_array_index(Item key) {
 static bool js_assert_descriptor_is_enumerable(Item desc) {
     if (get_type_id(desc) != LMD_TYPE_MAP) return false;
     bool found = false;
-    Item enumerable = js_map_get_fast_ext(desc.map, "enumerable", 10, &found);
+    Item enumerable = js_map_shape_lookup_ext(desc.map, "enumerable", 10, &found);
     return found && js_is_truthy(enumerable);
 }
 
@@ -3947,7 +3947,7 @@ static Item js_assert_enumerable_own_keys(Item object) {
     if (get_type_id(symbols) == LMD_TYPE_ARRAY) {
         int64_t sym_count = js_array_length(symbols);
         for (int64_t i = 0; i < sym_count; i++) {
-            Item key = js_array_get_int(symbols, i);
+            Item key = js_elements_get_int(symbols, i);
             Item desc = js_object_get_own_property_descriptor(object, key);
             if (js_assert_descriptor_is_enumerable(desc)) {
                 js_array_push(result, key);
@@ -3963,7 +3963,7 @@ static Item js_assert_enumerable_own_keys(Item object) {
     if (get_type_id(keys) == LMD_TYPE_ARRAY) {
         int64_t key_count = js_array_length(keys);
         for (int64_t i = 0; i < key_count; i++) {
-            js_array_push(result, js_array_get_int(keys, i));
+            js_array_push(result, js_elements_get_int(keys, i));
         }
     }
     // Assert diffs render enumerable symbols before string keys in Node's
@@ -3975,7 +3975,7 @@ static Item js_assert_filter_keys(Item keys, bool want_index_keys) {
     Item result = js_array_new(0);
     int64_t key_count = js_array_length(keys);
     for (int64_t i = 0; i < key_count; i++) {
-        Item key = js_array_get_int(keys, i);
+        Item key = js_elements_get_int(keys, i);
         if (js_assert_key_is_array_index(key) == want_index_keys) {
             js_array_push(result, key);
         }
@@ -3990,7 +3990,7 @@ static bool js_assert_has_enumerable_own_key(Item object, Item key) {
 
 static bool js_assert_tag_equals(Item value, const char* tag) {
     if (get_type_id(value) != LMD_TYPE_MAP || !tag) return false;
-    Item tag_value = js_property_get(value, js_well_known_symbol_key(4));
+    Item tag_value = js_get_key_default(value, js_well_known_symbol_key(4));
     return js_assert_string_equals(tag_value, tag);
 }
 
@@ -4006,10 +4006,10 @@ static bool js_assert_has_constructor_prototype(Item value, const char* ctor_nam
     if (get_type_id(proto) != LMD_TYPE_MAP) return false;
     Item ctor = js_get_constructor(assert_make_string(ctor_name));
     if (get_type_id(ctor) == LMD_TYPE_FUNC) {
-        Item ctor_proto = js_property_get(ctor, assert_make_string("prototype"));
+        Item ctor_proto = js_get_key_default(ctor, assert_make_string("prototype"));
         if (proto.item == ctor_proto.item) return true;
     }
-    Item tag = js_property_get(proto, js_well_known_symbol_key(4));
+    Item tag = js_get_key_default(proto, js_well_known_symbol_key(4));
     return js_assert_string_equals(tag, ctor_name);
 }
 
@@ -4040,7 +4040,7 @@ static bool js_assert_is_real_regexp(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
     if (js_class_id(value) == JS_CLASS_REGEXP) return true;
     bool found = false;
-    (void)js_map_get_fast_ext(value.map, "__rd", 4, &found);
+    (void)js_map_shape_lookup_ext(value.map, "__rd", 4, &found);
     return found;
 }
 
@@ -4087,8 +4087,8 @@ static bool js_assert_partial_error_match(Item actual, Item expected, int depth_
         if (!js_assert_has_own_key(expected, keys[i])) continue;
         if (!js_assert_has_own_key(actual, keys[i])) return false;
         if (!js_assert_partial_deep_match_impl(
-                js_property_get(actual, assert_make_string(keys[i])),
-                js_property_get(expected, assert_make_string(keys[i])),
+                js_get_key_default(actual, assert_make_string(keys[i])),
+                js_get_key_default(expected, assert_make_string(keys[i])),
                 depth_left - 1, ctx)) {
             return false;
         }
@@ -4101,23 +4101,23 @@ static bool js_assert_partial_regexp_match(Item actual, Item expected, int depth
     // Borrowed RegExp prototypes/tags lack native RegExp slots; partial
     // matching them by enumerable keys makes fake object types pass.
     if (!js_assert_deep_strict_equal_bool(
-            js_property_get(actual, assert_make_string("source")),
-            js_property_get(expected, assert_make_string("source"))) ||
+            js_get_key_default(actual, assert_make_string("source")),
+            js_get_key_default(expected, assert_make_string("source"))) ||
             !js_assert_deep_strict_equal_bool(
-            js_property_get(actual, assert_make_string("flags")),
-            js_property_get(expected, assert_make_string("flags")))) {
+            js_get_key_default(actual, assert_make_string("flags")),
+            js_get_key_default(expected, assert_make_string("flags")))) {
         return false;
     }
     Item keys = js_assert_enumerable_own_keys(expected);
     int64_t key_len = js_array_length(keys);
     Item search_params_key = assert_make_string("searchParams");
     for (int64_t i = 0; i < key_len; i++) {
-        Item key = js_array_get_int(keys, i);
+        Item key = js_elements_get_int(keys, i);
         if (js_assert_same_property_key(key, search_params_key)) continue;
         if (!js_assert_has_enumerable_own_key(actual, key)) return false;
         if (!js_assert_partial_deep_match_impl(
-                js_property_get(actual, key),
-                js_property_get(expected, key),
+                js_get_key_default(actual, key),
+                js_get_key_default(expected, key),
                 depth_left - 1, ctx)) {
             return false;
         }
@@ -4193,16 +4193,16 @@ static bool js_assert_is_url_like(Item value) {
     // Some URL construction paths stamp after materializing fields; when the
     // class byte is lost, the URL-owned href/searchParams shape still needs
     // the URL comparator to avoid per-instance wrapper mismatches.
-    Item search_params = js_property_get(value, assert_make_string("searchParams"));
-    return get_type_id(js_property_get(value, assert_make_string("href"))) == LMD_TYPE_STRING &&
+    Item search_params = js_get_key_default(value, assert_make_string("searchParams"));
+    return get_type_id(js_get_key_default(value, assert_make_string("href"))) == LMD_TYPE_STRING &&
            js_assert_is_partial_object_like(search_params);
 }
 
 static bool js_assert_partial_url_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
     if (js_class_id(actual) != JS_CLASS_URL || js_class_id(expected) != JS_CLASS_URL) return false;
     Item href_key = assert_make_string("href");
-    Item actual_href = js_property_get(actual, href_key);
-    Item expected_href = js_property_get(expected, href_key);
+    Item actual_href = js_get_key_default(actual, href_key);
+    Item expected_href = js_get_key_default(expected, href_key);
     // url wrappers materialize per-instance searchParams methods; href is the canonical URL value for equality.
     if (!js_assert_deep_strict_equal_bool(actual_href, expected_href)) return false;
     // User-defined enumerable URL properties are ordinary object surface; href-only
@@ -4211,7 +4211,7 @@ static bool js_assert_partial_url_match(Item actual, Item expected, int depth_le
     int64_t key_len = js_array_length(keys);
     Item search_params_key = assert_make_string("searchParams");
     for (int64_t i = 0; i < key_len; i++) {
-        Item key = js_array_get_int(keys, i);
+        Item key = js_elements_get_int(keys, i);
         if (js_assert_same_property_key(key, search_params_key)) {
             // URLSearchParams is materialized as a per-instance wrapper; href
             // above is the canonical URL/search state being protected.
@@ -4219,8 +4219,8 @@ static bool js_assert_partial_url_match(Item actual, Item expected, int depth_le
         }
         if (!js_assert_has_enumerable_own_key(actual, key)) return false;
         if (!js_assert_partial_deep_match_impl(
-                js_property_get(actual, key),
-                js_property_get(expected, key),
+                js_get_key_default(actual, key),
+                js_get_key_default(expected, key),
                 depth_left - 1, ctx)) {
             return false;
         }
@@ -4238,13 +4238,13 @@ static bool js_assert_partial_key_value_subset(Item actual, Item expected, Item 
     if (!used) return false;
 
     for (int64_t i = 0; i < expected_count; i++) {
-        Item expected_key = js_array_get_int(expected_keys, i);
-        Item expected_value = js_property_get(expected, expected_key);
+        Item expected_key = js_elements_get_int(expected_keys, i);
+        Item expected_value = js_get_key_default(expected, expected_key);
         bool found = false;
         for (int64_t j = 0; j < actual_count; j++) {
             if (used[j]) continue;
-            Item actual_key = js_array_get_int(actual_keys, j);
-            Item actual_value = js_property_get(actual, actual_key);
+            Item actual_key = js_elements_get_int(actual_keys, j);
+            Item actual_value = js_get_key_default(actual, actual_key);
             if (js_assert_partial_deep_match_impl(actual_value, expected_value, depth_left - 1, ctx)) {
                 used[j] = true;
                 found = true;
@@ -4265,14 +4265,14 @@ static bool js_assert_partial_named_key_subset(Item actual, Item expected, Item 
     int64_t expected_count = js_array_length(expected_keys);
     int64_t actual_count = js_array_length(actual_keys);
     for (int64_t i = 0; i < expected_count; i++) {
-        Item expected_key = js_array_get_int(expected_keys, i);
-        Item expected_value = js_property_get(expected, expected_key);
+        Item expected_key = js_elements_get_int(expected_keys, i);
+        Item expected_value = js_get_key_default(expected, expected_key);
         bool found = false;
         for (int64_t j = 0; j < actual_count; j++) {
-            Item actual_key = js_array_get_int(actual_keys, j);
+            Item actual_key = js_elements_get_int(actual_keys, j);
             if (!js_assert_same_property_key(actual_key, expected_key)) continue;
             if (!js_assert_partial_deep_match_impl(
-                    js_property_get(actual, actual_key),
+                    js_get_key_default(actual, actual_key),
                     expected_value,
                     depth_left - 1, ctx)) {
                 return false;
@@ -4347,11 +4347,11 @@ static bool js_assert_partial_set_match(Item actual, Item expected, int depth_le
     if (!used) return false;
 
     for (int64_t i = 0; i < expected_count; i++) {
-        Item expected_value = js_array_get_int(expected_values, i);
+        Item expected_value = js_elements_get_int(expected_values, i);
         bool found = false;
         for (int64_t j = 0; j < actual_count; j++) {
             if (used[j]) continue;
-            Item actual_value = js_array_get_int(actual_values, j);
+            Item actual_value = js_elements_get_int(actual_values, j);
             if (actual_value.item == expected_value.item) {
                 // Unordered Set subset matching must consume exact references
                 // before broad structural matches such as {} versus [].
@@ -4363,7 +4363,7 @@ static bool js_assert_partial_set_match(Item actual, Item expected, int depth_le
         if (found) continue;
         for (int64_t j = 0; j < actual_count; j++) {
             if (used[j]) continue;
-            Item actual_value = js_array_get_int(actual_values, j);
+            Item actual_value = js_elements_get_int(actual_values, j);
             if (js_assert_partial_deep_match_impl(actual_value, expected_value, depth_left - 1, ctx)) {
                 used[j] = true;
                 found = true;
@@ -4393,15 +4393,15 @@ static bool js_assert_partial_map_match(Item actual, Item expected, int depth_le
     if (!used) return false;
 
     for (int64_t i = 0; i < expected_count; i++) {
-        Item expected_pair = js_array_get_int(expected_entries, i);
-        Item expected_key = js_array_get_int(expected_pair, 0);
-        Item expected_value = js_array_get_int(expected_pair, 1);
+        Item expected_pair = js_elements_get_int(expected_entries, i);
+        Item expected_key = js_elements_get_int(expected_pair, 0);
+        Item expected_value = js_elements_get_int(expected_pair, 1);
         bool found = false;
         for (int64_t j = 0; j < actual_count; j++) {
             if (used[j]) continue;
-            Item actual_pair = js_array_get_int(actual_entries, j);
-            Item actual_key = js_array_get_int(actual_pair, 0);
-            Item actual_value = js_array_get_int(actual_pair, 1);
+            Item actual_pair = js_elements_get_int(actual_entries, j);
+            Item actual_key = js_elements_get_int(actual_pair, 0);
+            Item actual_value = js_elements_get_int(actual_pair, 1);
             if (js_assert_deep_strict_equal_bool(actual_key, expected_key) &&
                 js_assert_partial_deep_match_impl(actual_value, expected_value, depth_left - 1, ctx)) {
                 used[j] = true;
@@ -4592,7 +4592,7 @@ static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int de
         int64_t key_len = js_array_length(keys);
         Item url_search_params_key = assert_make_string("searchParams");
         for (int64_t i = 0; i < key_len; i++) {
-            Item key = js_array_get_int(keys, i);
+            Item key = js_elements_get_int(keys, i);
             if (js_assert_same_property_key(key, url_search_params_key)) {
                 // URLSearchParams is a built-in per-instance wrapper; generic
                 // partial matching must not compare wrapper identity for URLs.
@@ -4603,8 +4603,8 @@ static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int de
                 goto done;
             }
             if (!js_assert_partial_deep_match_impl(
-                    js_property_get(actual, key),
-                    js_property_get(expected, key),
+                    js_get_key_default(actual, key),
+                    js_get_key_default(expected, key),
                     depth_left - 1, ctx)) {
                 result = false;
                 goto done;
@@ -4629,7 +4629,7 @@ static void js_assert_append_inspected_value(StrBuf* sb, Item value) {
     Item options = js_new_object();
     // Assert diffs need deeper cycle rendering than util.inspect's default
     // depth=2; otherwise nested circular structures collapse to [Object].
-    js_property_set(options, assert_make_string("depth"), ItemNull);
+    js_set_key_default(options, assert_make_string("depth"), ItemNull);
     Item inspected = js_util_inspect(value, options);
     String* is = get_type_id(inspected) == LMD_TYPE_STRING ? it2s(inspected) : NULL;
     if (is) strbuf_append_str_n(sb, is->chars, is->len);
@@ -4642,9 +4642,9 @@ static bool js_assert_append_first_partial_object_diff(StrBuf* sb, Item actual, 
     Item keys = js_object_keys(expected);
     int64_t key_len = js_array_length(keys);
     for (int64_t i = 0; i < key_len; i++) {
-        Item key = js_array_get_int(keys, i);
-        Item actual_value = js_property_get(actual, key);
-        Item expected_value = js_property_get(expected, key);
+        Item key = js_elements_get_int(keys, i);
+        Item actual_value = js_get_key_default(actual, key);
+        Item expected_value = js_get_key_default(expected, key);
         if (js_assert_partial_deep_match(actual_value, expected_value, 16)) continue;
         if (get_type_id(key) != LMD_TYPE_STRING) return false;
         String* ks = it2s(key);
@@ -4735,7 +4735,7 @@ extern "C" Item js_assert_partialDeepStrictEqual(Item actual, Item expected, Ite
 
 static Item make_type_error_with_code(const char* code, const char* message) {
     Item error = js_new_error_with_name(assert_make_string("TypeError"), assert_make_string(message));
-    js_property_set(error, assert_make_string("code"), assert_make_string(code));
+    js_set_key_default(error, assert_make_string("code"), assert_make_string(code));
     return error;
 }
 
@@ -4749,9 +4749,9 @@ static bool js_assert_is_valid_thenable(Item value) {
         type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) {
         return false;
     }
-    Item then_fn = js_property_get(value, assert_make_string("then"));
+    Item then_fn = js_get_key_default(value, assert_make_string("then"));
     if (!js_is_callable(then_fn)) return false;
-    Item catch_fn = js_property_get(value, assert_make_string("catch"));
+    Item catch_fn = js_get_key_default(value, assert_make_string("catch"));
     return js_is_callable(catch_fn);
 }
 
@@ -4777,16 +4777,16 @@ static bool js_assert_constructor_name(Item value, char* out, int out_size) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
     Item ctor = map_get(value.map, assert_make_string("__ctor__"));
     if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) {
-        ctor = js_property_get(value, assert_make_string("constructor"));
+        ctor = js_get_key_default(value, assert_make_string("constructor"));
     }
     if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) {
         Item proto = js_get_prototype_of(value);
         if (get_type_id(proto) == LMD_TYPE_MAP) {
-            ctor = js_property_get(proto, assert_make_string("constructor"));
+            ctor = js_get_key_default(proto, assert_make_string("constructor"));
         }
     }
     if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) return false;
-    Item name = js_property_get(ctor, assert_make_string("name"));
+    Item name = js_get_key_default(ctor, assert_make_string("name"));
     String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
     if (!ns || ns->len == 0) return false;
     int len = (int)(ns->len < (size_t)out_size - 1 ? ns->len : (size_t)out_size - 1);
@@ -4863,7 +4863,7 @@ static Item js_assert_missing_rejection_error(Item error_expected) {
     const char* suffix = "";
     char name_buf[128];
     if (js_is_callable(error_expected)) {
-        Item name = js_property_get(error_expected, assert_make_string("name"));
+        Item name = js_get_key_default(error_expected, assert_make_string("name"));
         String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
         if (ns && ns->len > 0) {
             int len = (int)(ns->len < (int)sizeof(name_buf) - 1 ? ns->len : (int)sizeof(name_buf) - 1);
@@ -4879,7 +4879,7 @@ static Item js_assert_missing_rejection_error(Item error_expected) {
 }
 
 static Item js_assert_unwanted_rejection_error(Item reason, Item error_expected) {
-    Item msg_val = js_property_get(reason, assert_make_string("message"));
+    Item msg_val = js_get_key_default(reason, assert_make_string("message"));
     String* msg_str = get_type_id(msg_val) == LMD_TYPE_STRING ? it2s(msg_val) : NULL;
     char msg[512];
     if (msg_str && msg_str->len > 0) {
@@ -4922,7 +4922,7 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
         // Callable Proxy validators have the same host-algorithm status as
         // ordinary functions; representation tags cannot reject them (D6.2.2v2).
         // Error class: check instanceof only for constructor-like functions.
-        Item proto = js_property_get(error_expected, assert_make_string("prototype"));
+        Item proto = js_get_key_default(error_expected, assert_make_string("prototype"));
         if (get_type_id(proto) == LMD_TYPE_MAP || get_type_id(proto) == LMD_TYPE_ELEMENT) {
             Item result = js_instanceof(thrown, error_expected);
             if (!item_is_error(result) && get_type_id(result) == LMD_TYPE_BOOL && it2b(result)) return true;
@@ -4959,12 +4959,12 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
             Item thrown_str = js_to_string_val(thrown);
             Item test_result = js_regex_test(error_expected, thrown_str);
             if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) return true;
-            Item code = js_property_get(thrown, assert_make_string("code"));
+            Item code = js_get_key_default(thrown, assert_make_string("code"));
             if (get_type_id(code) == LMD_TYPE_STRING) {
                 test_result = js_regex_test(error_expected, code);
                 if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) return true;
             }
-            Item name = js_property_get(thrown, assert_make_string("name"));
+            Item name = js_get_key_default(thrown, assert_make_string("name"));
             if (get_type_id(name) == LMD_TYPE_STRING) {
                 test_result = js_regex_test(error_expected, name);
                 if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) return true;
@@ -4979,8 +4979,8 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
             if (keys.array->length == 0) return false;
             for (int64_t i = 0; i < keys.array->length; i++) {
                 Item key = list_get(keys.array, (int)i);
-                Item expected_val = js_property_get(error_expected, key);
-                Item actual_val = js_property_get(thrown, key);
+                Item expected_val = js_get_key_default(error_expected, key);
+                Item actual_val = js_get_key_default(thrown, key);
 
                 // check if expected_val is a RegExp
                 TypeId ev_type = get_type_id(expected_val);
@@ -5123,7 +5123,7 @@ static void assert_set_method(Item ns, const char* name, Target target,
         int adapter_arity) {
     Item key = assert_make_string(name);
     Item fn = js_new_native_function(target, adapter_arity);
-    js_property_set(ns, key, fn);
+    js_set_key_default(ns, key, fn);
 }
 
 template <typename Target>
@@ -5132,12 +5132,12 @@ static Item assert_set_fresh_method(Item ns, const char* name, Target target,
     Item key = assert_make_string(name);
     Item fn = js_new_distinct_native_function(target);
     js_set_formal_length(fn, adapter_arity);
-    js_property_set(ns, key, fn);
+    js_set_key_default(ns, key, fn);
     return fn;
 }
 
 static void assert_set_method_item(Item ns, const char* name, Item fn) {
-    js_property_set(ns, assert_make_string(name), fn);
+    js_set_key_default(ns, assert_make_string(name), fn);
 }
 
 static Item js_assert_constructor_default_message(Item actual, Item expected, Item op_item) {
@@ -5182,31 +5182,31 @@ extern "C" Item js_assert_AssertionError_ctor(Item options) {
     Item expected = make_js_undefined();
     const char* diff_str = "simple";
     bool generated = true;
-    Item m = js_property_get(options, assert_make_string("message"));
+    Item m = js_get_key_default(options, assert_make_string("message"));
     if (get_type_id(m) == LMD_TYPE_STRING) {
         msg_item = m;
         generated = false;
     }
-    actual = js_property_get(options, assert_make_string("actual"));
-    expected = js_property_get(options, assert_make_string("expected"));
-    op_item = js_property_get(options, assert_make_string("operator"));
-    diff_str = js_assert_normalized_diff(js_property_get(options, js_assert_diff_key()));
+    actual = js_get_key_default(options, assert_make_string("actual"));
+    expected = js_get_key_default(options, assert_make_string("expected"));
+    op_item = js_get_key_default(options, assert_make_string("operator"));
+    diff_str = js_assert_normalized_diff(js_get_key_default(options, js_assert_diff_key()));
     if (get_type_id(msg_item) != LMD_TYPE_STRING) {
         msg_item = js_assert_constructor_default_message(actual, expected, op_item);
     }
     Item type_name = assert_make_string("AssertionError");
     Item error = js_new_error_with_name(type_name, msg_item);
-    js_property_set(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
-    js_property_set(error, assert_make_string("name"), assert_make_string("AssertionError"));
-    js_property_set(error, assert_make_string("actual"), actual);
-    js_property_set(error, assert_make_string("expected"), expected);
-    if (get_type_id(op_item) == LMD_TYPE_STRING) js_property_set(error, assert_make_string("operator"), op_item);
-    js_property_set(error, assert_make_string("diff"), assert_make_string(diff_str));
-    js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(generated)});
+    js_set_key_default(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
+    js_set_key_default(error, assert_make_string("name"), assert_make_string("AssertionError"));
+    js_set_key_default(error, assert_make_string("actual"), actual);
+    js_set_key_default(error, assert_make_string("expected"), expected);
+    if (get_type_id(op_item) == LMD_TYPE_STRING) js_set_key_default(error, assert_make_string("operator"), op_item);
+    js_set_key_default(error, assert_make_string("diff"), assert_make_string(diff_str));
+    js_set_key_default(error, assert_make_string("generatedMessage"), (Item){.item = b2it(generated)});
     js_assert_attach_assertion_error_prototype(error);
-    Item stack_start = js_property_get(options, assert_make_string("stackStartFn"));
+    Item stack_start = js_get_key_default(options, assert_make_string("stackStartFn"));
     if (get_type_id(stack_start) != LMD_TYPE_FUNC) {
-        stack_start = js_property_get(options, assert_make_string("stackStartFunction"));
+        stack_start = js_get_key_default(options, assert_make_string("stackStartFunction"));
     }
     if (get_type_id(stack_start) == LMD_TYPE_FUNC) {
         // Node AssertionError options provide the public trim function; without
@@ -5218,7 +5218,7 @@ extern "C" Item js_assert_AssertionError_ctor(Item options) {
 
 static Item js_assert_create_instance(Item options) {
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item diff = js_property_get(options, js_assert_diff_key());
+        Item diff = js_get_key_default(options, js_assert_diff_key());
         if (!js_assert_valid_diff(diff)) return js_assert_throw_invalid_diff(diff);
     }
 
@@ -5257,13 +5257,13 @@ static Item js_assert_create_instance(Item options) {
     assert_set_fresh_method(instance_root.get(), "doesNotReject",       js_assert_doesNotReject, 3);
     assert_set_fresh_method(instance_root.get(), "partialDeepStrictEqual", js_assert_partialDeepStrictEqual, 3);
     Rooted<Item> assertion_error_root(roots, assert_namespace.item != 0 ?
-        js_property_get(assert_namespace, assert_make_string("AssertionError")) :
+        js_get_key_default(assert_namespace, assert_make_string("AssertionError")) :
         js_new_native_constructor(js_assert_AssertionError_ctor));
-    js_property_set(instance_root.get(), assert_make_string("AssertionError"), assertion_error_root.get());
+    js_set_key_default(instance_root.get(), assert_make_string("AssertionError"), assertion_error_root.get());
 
     // store options
     if (get_type_id(options_root.get()) == LMD_TYPE_MAP) {
-        js_property_set(instance_root.get(), js_assert_options_key(), options_root.get());
+        js_set_key_default(instance_root.get(), js_assert_options_key(), options_root.get());
     }
     // Only Assert constructor instances may carry option state; module-level
     // calls can have arbitrary receivers and must not probe them for _options.
@@ -5317,17 +5317,17 @@ extern "C" Item js_get_assert_namespace(void) {
     // Set up AssertionError.prototype to inherit from Error.prototype
     // so that (new assert.AssertionError({})) instanceof Error === true
     {
-        Item ae_fn = js_property_get(assert_namespace, assert_make_string("AssertionError"));
+        Item ae_fn = js_get_key_default(assert_namespace, assert_make_string("AssertionError"));
         // Get Error constructor and its prototype
         Item error_ctor = js_get_constructor(assert_make_string("Error"));
         Item error_proto_key = assert_make_string("prototype");
-        Item error_proto = js_property_get(error_ctor, error_proto_key);
+        Item error_proto = js_get_key_default(error_ctor, error_proto_key);
         // Create AssertionError.prototype that inherits from Error.prototype
         Item ae_proto = js_object_create(error_proto);
-        js_property_set(ae_proto, assert_make_string("name"), assert_make_string("AssertionError"));
-        js_property_set(ae_proto, assert_make_string("constructor"), ae_fn);
+        js_set_key_default(ae_proto, assert_make_string("name"), assert_make_string("AssertionError"));
+        js_set_key_default(ae_proto, assert_make_string("constructor"), ae_fn);
         // Set AssertionError.prototype
-        js_property_set(ae_fn, error_proto_key, ae_proto);
+        js_set_key_default(ae_fn, error_proto_key, ae_proto);
     }
 
     // Assert constructor (creates a new Assert instance with the same methods + options)
@@ -5338,14 +5338,14 @@ extern "C" Item js_get_assert_namespace(void) {
     // aliases to their strict variants; aliasing the loose module lets
     // strict.equal/deepEqual silently pass loose comparisons.
     Item strict_instance = js_assert_create_instance(make_js_undefined());
-    js_property_set(strict_instance, assert_make_string("Assert"),
-        js_property_get(assert_namespace, assert_make_string("Assert")));
-    js_property_set(strict_instance, assert_make_string("strict"), strict_instance);
-    js_property_set(strict_instance, assert_make_string("default"), strict_instance);
-    js_property_set(assert_namespace, assert_make_string("strict"), strict_instance);
+    js_set_key_default(strict_instance, assert_make_string("Assert"),
+        js_get_key_default(assert_namespace, assert_make_string("Assert")));
+    js_set_key_default(strict_instance, assert_make_string("strict"), strict_instance);
+    js_set_key_default(strict_instance, assert_make_string("default"), strict_instance);
+    js_set_key_default(assert_namespace, assert_make_string("strict"), strict_instance);
 
     // default export
-    js_property_set(assert_namespace, assert_make_string("default"), assert_namespace);
+    js_set_key_default(assert_namespace, assert_make_string("default"), assert_namespace);
 
     return assert_namespace;
 }
@@ -5440,14 +5440,14 @@ static Item js_mock_wrapper_##SLOT_IDX(Item a0, Item a1, Item a2) { \
     js_array_push(args_array, a0); \
     js_array_push(args_array, a1); \
     js_array_push(args_array, a2); \
-    js_property_set(call_record, assert_make_string("arguments"), args_array); \
-    js_property_set(call_record, assert_make_string("this"), make_js_undefined()); \
+    js_set_key_default(call_record, assert_make_string("arguments"), args_array); \
+    js_set_key_default(call_record, assert_make_string("this"), make_js_undefined()); \
     Item result = make_js_undefined(); \
     if (js_is_callable(g_mock_slots[idx].original)) { \
         Item call_args[3] = {a0, a1, a2}; \
         result = js_call_function(g_mock_slots[idx].original, make_js_undefined(), call_args, 3); \
     } \
-    js_property_set(call_record, assert_make_string("result"), result); \
+    js_set_key_default(call_record, assert_make_string("result"), result); \
     js_array_push(g_mock_slots[idx].calls, call_record); \
     g_mock_slots[idx].call_count++; \
     return result; \
@@ -5497,26 +5497,26 @@ static Item js_mock_fn_impl(Item original_fn) {
 
     // create .mock property pointing to the live calls array
     Item mock_prop = js_new_object();
-    js_property_set(mock_prop, assert_make_string("calls"), g_mock_slots[slot].calls);
-    js_property_set(mock_prop, assert_make_string("callCount"),
+    js_set_key_default(mock_prop, assert_make_string("calls"), g_mock_slots[slot].calls);
+    js_set_key_default(mock_prop, assert_make_string("callCount"),
                     js_new_native_function(js_mock_call_count_impl));
-    js_property_set(mock_prop, assert_make_string("_slot"), (Item){.item = i2it(slot)});
+    js_set_key_default(mock_prop, assert_make_string("_slot"), (Item){.item = i2it(slot)});
 
     // mock.restore() — no-op for fn mocks
-    js_property_set(mock_prop, assert_make_string("restore"),
+    js_set_key_default(mock_prop, assert_make_string("restore"),
                     js_new_native_function(js_mock_reset_impl));
     // mock.resetCalls()
-    js_property_set(mock_prop, assert_make_string("resetCalls"),
+    js_set_key_default(mock_prop, assert_make_string("resetCalls"),
                     js_new_native_function(js_mock_reset_impl));
 
-    js_property_set(wrapper, assert_make_string("mock"), mock_prop);
+    js_set_key_default(wrapper, assert_make_string("mock"), mock_prop);
     return wrapper;
 }
 
 // mock.method(object, methodName[, implementation]) — replace a method with a mock
 static Item js_mock_method_impl(Item object, Item method_name, Item implementation) {
     // get original method
-    Item original = js_property_get(object, method_name);
+    Item original = js_get_key_default(object, method_name);
 
     // create mock wrapper — if implementation provided, use that as the "original"
     Item mock_original = js_is_callable(implementation)
@@ -5524,13 +5524,13 @@ static Item js_mock_method_impl(Item object, Item method_name, Item implementati
     Item wrapper = js_mock_fn_impl(mock_original);
 
     // store info for restore
-    Item mock_prop = js_property_get(wrapper, assert_make_string("mock"));
-    js_property_set(mock_prop, assert_make_string("_owner"), object);
-    js_property_set(mock_prop, assert_make_string("_methodName"), method_name);
-    js_property_set(mock_prop, assert_make_string("_originalMethod"), original);
+    Item mock_prop = js_get_key_default(wrapper, assert_make_string("mock"));
+    js_set_key_default(mock_prop, assert_make_string("_owner"), object);
+    js_set_key_default(mock_prop, assert_make_string("_methodName"), method_name);
+    js_set_key_default(mock_prop, assert_make_string("_originalMethod"), original);
 
     // replace the method
-    js_property_set(object, method_name, wrapper);
+    js_set_key_default(object, method_name, wrapper);
     return wrapper;
 }
 
@@ -5544,7 +5544,7 @@ static Item js_mock_restore_all_impl(void) {
 
 static Item js_mock_call_count_impl(void) {
     Item self = js_get_this();
-    Item slot_item = js_property_get(self, assert_make_string("_slot"));
+    Item slot_item = js_get_key_default(self, assert_make_string("_slot"));
     if (get_type_id(slot_item) != LMD_TYPE_INT) return (Item){.item = i2it(0)};
     int slot = (int)it2i(slot_item);
     if (slot < 0 || slot >= MAX_MOCK_SLOTS || !g_mock_slots[slot].in_use) {
@@ -5588,27 +5588,27 @@ static Item js_mock_setter_impl(Item object, Item property) {
 // Create a mock context object with fn/method/getter/setter/reset/restoreAll
 static Item js_mock_create_context(void) {
     Item mock_obj = js_new_object();
-    js_property_set(mock_obj, assert_make_string("fn"),
+    js_set_key_default(mock_obj, assert_make_string("fn"),
                     js_new_native_function(js_mock_fn_impl));
-    js_property_set(mock_obj, assert_make_string("method"),
+    js_set_key_default(mock_obj, assert_make_string("method"),
                     js_new_native_function(js_mock_method_impl));
-    js_property_set(mock_obj, assert_make_string("getter"),
+    js_set_key_default(mock_obj, assert_make_string("getter"),
                     js_new_native_function(js_mock_getter_impl));
-    js_property_set(mock_obj, assert_make_string("setter"),
+    js_set_key_default(mock_obj, assert_make_string("setter"),
                     js_new_native_function(js_mock_setter_impl));
-    js_property_set(mock_obj, assert_make_string("reset"),
+    js_set_key_default(mock_obj, assert_make_string("reset"),
                     js_new_native_function(js_mock_reset_impl));
-    js_property_set(mock_obj, assert_make_string("restoreAll"),
+    js_set_key_default(mock_obj, assert_make_string("restoreAll"),
                     js_new_native_function(js_mock_restore_all_impl));
     // timers sub-object
     Item timers_obj = js_new_object();
-    js_property_set(timers_obj, assert_make_string("enable"),
+    js_set_key_default(timers_obj, assert_make_string("enable"),
                     js_new_native_function(js_mock_timers_enable_impl));
-    js_property_set(timers_obj, assert_make_string("reset"),
+    js_set_key_default(timers_obj, assert_make_string("reset"),
                     js_new_native_function(js_mock_timers_reset_impl));
-    js_property_set(timers_obj, assert_make_string("tick"),
+    js_set_key_default(timers_obj, assert_make_string("tick"),
                     js_new_native_function(js_mock_timers_tick_impl));
-    js_property_set(mock_obj, assert_make_string("timers"), timers_obj);
+    js_set_key_default(mock_obj, assert_make_string("timers"), timers_obj);
     return mock_obj;
 }
 
@@ -5647,9 +5647,9 @@ static void node_test_ensure_hook_stores(void) {
         g_node_after_each_store = js_array_new(0);
     }
     if (node_test_namespace.item != 0) {
-        js_property_set(node_test_namespace, assert_make_string("__beforeEachHooks__"),
+        js_set_key_default(node_test_namespace, assert_make_string("__beforeEachHooks__"),
                         g_node_before_each_store);
-        js_property_set(node_test_namespace, assert_make_string("__afterEachHooks__"),
+        js_set_key_default(node_test_namespace, assert_make_string("__afterEachHooks__"),
                         g_node_after_each_store);
     }
 }
@@ -5673,7 +5673,7 @@ static Item node_test_run_hooks(Item* hooks, int count) {
 
 static bool node_test_is_promise_like(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
-    Item then = js_property_get(value, assert_make_string("then"));
+    Item then = js_get_key_default(value, assert_make_string("then"));
     return js_is_callable(then);
 }
 
@@ -5698,14 +5698,14 @@ static void node_test_emit_event(const char* type, Item name, int64_t test_id, I
     if (!node_test_event_queue_active()) return;
     Item event = js_new_object();
     Item data = js_new_object();
-    js_property_set(event, assert_make_string("type"), assert_make_string(type));
-    js_property_set(data, assert_make_string("name"),
+    js_set_key_default(event, assert_make_string("type"), assert_make_string(type));
+    js_set_key_default(data, assert_make_string("name"),
         get_type_id(name) == LMD_TYPE_STRING ? name : assert_make_string(""));
-    js_property_set(data, assert_make_string("testId"), (Item){.item = i2it((int)test_id)});
+    js_set_key_default(data, assert_make_string("testId"), (Item){.item = i2it((int)test_id)});
     if (get_type_id(error) != LMD_TYPE_UNDEFINED) {
-        js_property_set(data, assert_make_string("error"), error);
+        js_set_key_default(data, assert_make_string("error"), error);
     }
-    js_property_set(event, assert_make_string("data"), data);
+    js_set_key_default(event, assert_make_string("data"), data);
     js_array_push(g_node_test_event_queue, event);
 }
 
@@ -5716,35 +5716,35 @@ static Item node_test_event_stream_identity(void) {
 static Item node_test_event_stream_next(void) {
 
     Item self = js_get_this();
-    Item events = js_property_get(self, assert_make_string("__events__"));
-    Item index_item = js_property_get(self, assert_make_string("__index__"));
+    Item events = js_get_key_default(self, assert_make_string("__events__"));
+    Item index_item = js_get_key_default(self, assert_make_string("__index__"));
     int64_t index = get_type_id(index_item) == LMD_TYPE_INT ? it2i(index_item) : 0;
     int64_t len = get_type_id(events) == LMD_TYPE_ARRAY ? js_array_length(events) : 0;
 
     Item result = js_new_object();
     if (index < len) {
-        js_property_set(result, assert_make_string("value"), js_array_get_int(events, index));
-        js_property_set(result, assert_make_string("done"), (Item){.item = b2it(false)});
-        js_property_set(self, assert_make_string("__index__"), (Item){.item = i2it(index + 1)});
+        js_set_key_default(result, assert_make_string("value"), js_elements_get_int(events, index));
+        js_set_key_default(result, assert_make_string("done"), (Item){.item = b2it(false)});
+        js_set_key_default(self, assert_make_string("__index__"), (Item){.item = i2it(index + 1)});
     } else {
-        js_property_set(result, assert_make_string("value"), make_js_undefined());
-        js_property_set(result, assert_make_string("done"), (Item){.item = b2it(true)});
+        js_set_key_default(result, assert_make_string("value"), make_js_undefined());
+        js_set_key_default(result, assert_make_string("done"), (Item){.item = b2it(true)});
     }
     return js_promise_resolve(result);
 }
 
 static Item node_test_make_event_stream(Item events) {
     Item stream = js_new_object();
-    js_property_set(stream, assert_make_string("__events__"), events);
-    js_property_set(stream, assert_make_string("__index__"), (Item){.item = i2it(0)});
-    js_property_set(stream, assert_make_string("next"),
+    js_set_key_default(stream, assert_make_string("__events__"), events);
+    js_set_key_default(stream, assert_make_string("__index__"), (Item){.item = i2it(0)});
+    js_set_key_default(stream, assert_make_string("next"),
                     js_new_native_function(node_test_event_stream_next));
     Item identity = js_new_native_function(node_test_event_stream_identity);
     Item async_key = js_well_known_symbol_key(5);
     Item iter_key = js_well_known_symbol_key(1);
     // node:test run() returns an async iterable stream, not a materialized array.
-    js_property_set(stream, async_key, identity);
-    js_property_set(stream, iter_key, identity);
+    js_set_key_default(stream, async_key, identity);
+    js_set_key_default(stream, iter_key, identity);
     js_mark_non_enumerable(stream, async_key);
     js_mark_non_enumerable(stream, iter_key);
     return stream;
@@ -5788,11 +5788,11 @@ extern "C" void js_diagnostics_channel_publish_named(const char* name, Item mess
 static Item node_test_diagnostics_message(Item name, const char* type) {
     Item message = js_new_object();
     if (get_type_id(name) == LMD_TYPE_STRING) {
-        js_property_set(message, assert_make_string("name"), name);
+        js_set_key_default(message, assert_make_string("name"), name);
     } else {
-        js_property_set(message, assert_make_string("name"), assert_make_string(""));
+        js_set_key_default(message, assert_make_string("name"), assert_make_string(""));
     }
-    js_property_set(message, assert_make_string("type"), assert_make_string(type ? type : "test"));
+    js_set_key_default(message, assert_make_string("type"), assert_make_string(type ? type : "test"));
     return message;
 }
 
@@ -5802,7 +5802,7 @@ static Item node_test_diagnostics_start(Item message) {
 }
 
 static void node_test_diagnostics_error(Item message, Item error) {
-    js_property_set(message, assert_make_string("error"), error);
+    js_set_key_default(message, assert_make_string("error"), error);
     js_diagnostics_channel_publish_named("tracing:node.test:error", message);
 }
 
@@ -5817,44 +5817,44 @@ static Item js_build_test_context(void) {
 
     // t.mock — per-test mock context
     Item mock = js_mock_create_context();
-    js_property_set(t, assert_make_string("mock"), mock);
+    js_set_key_default(t, assert_make_string("mock"), mock);
 
     // t.assert — the assert module + snapshot stubs
     extern Item js_get_assert_namespace(void);
     Item t_assert = js_assert_create_instance(make_js_undefined());
     // add snapshot and fileSnapshot as no-op stubs for test runner context
-    js_property_set(t_assert, assert_make_string("snapshot"),
+    js_set_key_default(t_assert, assert_make_string("snapshot"),
                     js_new_native_function(js_test_context_skip));
-    js_property_set(t_assert, assert_make_string("fileSnapshot"),
+    js_set_key_default(t_assert, assert_make_string("fileSnapshot"),
                     js_new_native_function(js_test_context_skip));
-    js_property_set(t, assert_make_string("assert"), t_assert);
+    js_set_key_default(t, assert_make_string("assert"), t_assert);
 
     // t.skip(), t.todo(), t.diagnostic(), t.plan()
-    js_property_set(t, assert_make_string("skip"),
+    js_set_key_default(t, assert_make_string("skip"),
                     js_new_native_function(js_test_context_skip));
-    js_property_set(t, assert_make_string("todo"),
+    js_set_key_default(t, assert_make_string("todo"),
                     js_new_native_function(js_test_context_todo));
-    js_property_set(t, assert_make_string("diagnostic"),
+    js_set_key_default(t, assert_make_string("diagnostic"),
                     js_new_native_function(js_test_context_diagnostic));
-    js_property_set(t, assert_make_string("plan"),
+    js_set_key_default(t, assert_make_string("plan"),
                     js_new_native_function(js_test_context_plan));
 
     // t.test — sub-tests
-    js_property_set(t, assert_make_string("test"),
+    js_set_key_default(t, assert_make_string("test"),
                     js_new_native_function(js_test_context_subtest));
 
     // t.name — filled in later
-    js_property_set(t, assert_make_string("name"), make_js_undefined());
+    js_set_key_default(t, assert_make_string("name"), make_js_undefined());
 
     // t.workerId — mirrors NODE_TEST_WORKER_ID for process-isolated test files.
-    js_property_set(t, assert_make_string("workerId"),
+    js_set_key_default(t, assert_make_string("workerId"),
                     (Item){.item = i2it(node_test_current_worker_id())});
 
     // t.signal — an AbortSignal stub
-    js_property_set(t, assert_make_string("signal"), make_js_undefined());
+    js_set_key_default(t, assert_make_string("signal"), make_js_undefined());
 
     // t.fullName
-    js_property_set(t, assert_make_string("fullName"), assert_make_string(""));
+    js_set_key_default(t, assert_make_string("fullName"), assert_make_string(""));
 
     return t;
 }
@@ -5881,11 +5881,11 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
 
     // If options has skip: true or skip is a string, skip the test
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item skip_val = js_property_get(options, assert_make_string("skip"));
+        Item skip_val = js_get_key_default(options, assert_make_string("skip"));
         if (js_is_truthy(skip_val)) {
             return make_js_undefined(); // skip this test
         }
-        Item todo_val = js_property_get(options, assert_make_string("todo"));
+        Item todo_val = js_get_key_default(options, assert_make_string("todo"));
         if (js_is_truthy(todo_val)) {
             return make_js_undefined(); // todo tests are skipped
         }
@@ -5903,8 +5903,8 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
 
     // set t.name
     if (get_type_id(name) == LMD_TYPE_STRING) {
-        js_property_set(t, assert_make_string("name"), name);
-        js_property_set(t, assert_make_string("fullName"), name);
+        js_set_key_default(t, assert_make_string("name"), name);
+        js_set_key_default(t, assert_make_string("fullName"), name);
     }
 
     // node:test run() consumers need instance IDs, not source-location IDs:
@@ -5980,7 +5980,7 @@ extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
     js_node_test_resolve_options(options_or_fn, fn, &options, &callback);
 
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item skip_val = js_property_get(options, assert_make_string("skip"));
+        Item skip_val = js_get_key_default(options, assert_make_string("skip"));
         if (js_is_truthy(skip_val)) return make_js_undefined();
     }
     if (!js_is_callable(callback)) return make_js_undefined();
@@ -6042,11 +6042,11 @@ static Item js_node_test_run_files(Item options) {
     g_node_test_next_id = 1;
 
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item files = js_property_get(options, assert_make_string("files"));
+        Item files = js_get_key_default(options, assert_make_string("files"));
         if (get_type_id(files) == LMD_TYPE_ARRAY) {
             int64_t len = js_array_length(files);
             for (int64_t i = 0; i < len; i++) {
-                Item file = js_array_get_int(files, i);
+                Item file = js_elements_get_int(files, i);
                 if (get_type_id(file) != LMD_TYPE_STRING) continue;
                 Item require_result = js_require(file);
                 js_microtask_flush();
@@ -6079,34 +6079,34 @@ extern "C" Item js_get_node_test_namespace(void) {
     node_test_ensure_hook_stores();
 
     // test is both the default export and a named export
-    js_property_set(node_test_namespace, assert_make_string("test"), test_fn);
-    js_property_set(node_test_namespace, assert_make_string("default"), test_fn);
+    js_set_key_default(node_test_namespace, assert_make_string("test"), test_fn);
+    js_set_key_default(node_test_namespace, assert_make_string("default"), test_fn);
 
     Item describe_fn = js_new_native_function(js_node_test_describe);
-    js_property_set(node_test_namespace, assert_make_string("describe"), describe_fn);
-    js_property_set(node_test_namespace, assert_make_string("suite"), describe_fn);
-    js_property_set(node_test_namespace, assert_make_string("it"), test_fn);
+    js_set_key_default(node_test_namespace, assert_make_string("describe"), describe_fn);
+    js_set_key_default(node_test_namespace, assert_make_string("suite"), describe_fn);
+    js_set_key_default(node_test_namespace, assert_make_string("it"), test_fn);
     Item hook_fn = js_new_native_function(js_node_test_hook);
     Item before_each_fn = js_new_native_function(js_node_test_before_each);
     Item after_each_fn = js_new_native_function(js_node_test_after_each);
-    js_property_set(node_test_namespace, assert_make_string("before"), hook_fn);
-    js_property_set(node_test_namespace, assert_make_string("after"), hook_fn);
-    js_property_set(node_test_namespace, assert_make_string("beforeEach"), before_each_fn);
-    js_property_set(node_test_namespace, assert_make_string("afterEach"), after_each_fn);
+    js_set_key_default(node_test_namespace, assert_make_string("before"), hook_fn);
+    js_set_key_default(node_test_namespace, assert_make_string("after"), hook_fn);
+    js_set_key_default(node_test_namespace, assert_make_string("beforeEach"), before_each_fn);
+    js_set_key_default(node_test_namespace, assert_make_string("afterEach"), after_each_fn);
 
     // mock — global mock object
     Item mock_obj = js_mock_create_context();
-    js_property_set(node_test_namespace, assert_make_string("mock"), mock_obj);
+    js_set_key_default(node_test_namespace, assert_make_string("mock"), mock_obj);
 
     // MockTracker class — same as mock
-    js_property_set(node_test_namespace, assert_make_string("MockTracker"), mock_obj);
+    js_set_key_default(node_test_namespace, assert_make_string("MockTracker"), mock_obj);
 
     // run — in-process file runner that returns a test event iterable
-    js_property_set(node_test_namespace, assert_make_string("run"),
+    js_set_key_default(node_test_namespace, assert_make_string("run"),
                     js_new_native_function(js_node_test_run_files));
 
     // getTestContext — stub
-    js_property_set(node_test_namespace, assert_make_string("getTestContext"),
+    js_set_key_default(node_test_namespace, assert_make_string("getTestContext"),
                     js_new_native_function(js_mock_reset_impl));
 
     return node_test_namespace;

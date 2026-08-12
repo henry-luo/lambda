@@ -183,6 +183,9 @@ static inline void em_normalize_import_call(MirImportEntry* entry,
     entry->call.normal_result.value.value_class = ret_class;
     entry->call.normal_result.transport = nres > 0
         ? JIT_RETURN_MIR_RESULT : JIT_RETURN_NONE;
+    // Only audited boxed-Item imports may return a transient number-home
+    // pointer; UNKNOWN also covers ordinary containers, whose values must not
+    // be misclassified as scalar homes at later retaining calls (D5.4.3).
     entry->call.normal_result.scalar_class =
         ret_class == JIT_VALUE_BOXED_ITEM &&
         !(entry->audit.flags & JIT_IMPORT_RESULT_SCALAR_STABLE)
@@ -312,12 +315,22 @@ enum ScalarPayloadProvenance {
 struct MirValue {
     MIR_reg_t reg;
     MIR_type_t mir_type;
+    Type* contract_type;
     TypeId semantic_type;
     ValueRep rep;
     JitValueClass value_class;
+    uint32_t demand;
+    const AstNode* provenance_node;
     int gc_home_id;
     int scalar_home_id;
     ScalarPayloadProvenance scalar_provenance;
+};
+enum MirValueDemand {
+    MIR_VALUE_DISCARD = 1u << 0,
+    MIR_VALUE_ANY = 1u << 1,
+    MIR_VALUE_REQUIRED_REP = 1u << 2,
+    MIR_VALUE_DEST_REG = 1u << 3,
+    MIR_VALUE_BRANCH = 1u << 4,
 };
 struct MirCallOptions {
     MirFrameRef scalar_return_home;
@@ -767,9 +780,12 @@ static inline MirValue em_value(MIR_reg_t reg, MIR_type_t mir_type,
     MirValue value = {};
     value.reg = reg;
     value.mir_type = mir_type;
+    value.contract_type = NULL;
     value.semantic_type = semantic_type;
     value.rep = rep;
     value.value_class = value_class;
+    value.demand = MIR_VALUE_ANY;
+    value.provenance_node = NULL;
     value.scalar_provenance = SCALAR_PROVENANCE_UNKNOWN;
     return value;
 }

@@ -1,23 +1,4 @@
-/**
- * lambda layout - HTML Layout Command with Lambda CSS
- *
- * Computes layout for HTML documents using Lambda-parsed HTML/CSS and Radiant's layout engine.
- * This is separate from the Lexbor-based CSS system.
- *
- * Usage:
- *   lambda layout input.html [-o output.json] [-c styles.css] [-vw 1200] [-vh 800]
- *
- * Options:
- *   -o, --output FILE              Output file for layout results (default: stdout)
- *   -c, --css FILE                 External CSS file to apply
- *   -vw, --viewport-width WIDTH    Viewport width in pixels (default: 1200)
- *   -vh, --viewport-height HEIGHT  Viewport height in pixels (default: 800)
- *   --format FORMAT                Output format: json, text (default: text)
- *   --debug                        Enable debug output
- *   --event-log                    Emit per-document JSONL event/state log under ./temp/
- *   --state-dump                   Emit per-cascade Mark state-store dump under ./temp/state/
- *   --flavor FLAVOR                LaTeX rendering pipeline: latex-js (default), tex-proper
- */
+// lambda layout command: parse, cascade, lay out, and emit documents.
 
 #include <stdio.h>
 #include <string.h>
@@ -108,9 +89,6 @@ extern __thread Context* input_context;
 Element* get_html_root_element(Input* input);
 extern void fontface_cleanup(UiContext* uicon);
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out = nullptr);
-void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
-                                CssStylesheet*** stylesheets, int* count, int* capacity,
-                                int depth = 0, bool recurse = true);
 static void populate_layout_document(DomDocument* doc, DomElement* root,
                                      Element* html_root, HtmlVersion version,
                                      Url* url, Runtime* runtime);
@@ -121,7 +99,7 @@ static CssStylesheet* load_pool_backed_stylesheet(CssEngine* css_engine, Pool* p
 static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context,
                                                            DomDocument* doc);
 
-// Current document charset for CSS fallback encoding (set before collect_linked_stylesheets)
+// Current document charset for CSS fallback encoding (set before stylesheet collection)
 const char* g_css_document_charset = nullptr;
 
 static void annotate_css_rule_source_file(CssRule* rule, const char* source_file) {
@@ -164,6 +142,110 @@ static bool css_file_url_to_local_path(const char* href, char* out_path, size_t 
     if (len + 1 > out_size) return false;
     str_copy(out_path, out_size, path, len);
     return true;
+}
+
+static bool css_path_is_http(const char* path) {
+    return path && (strncmp(path, "http://", 7) == 0 ||
+                    strncmp(path, "https://", 8) == 0);
+}
+
+static void css_copy_path(char* out_path, size_t out_size, const char* path) {
+    if (!out_path || out_size == 0) return;
+    if (!path) {
+        out_path[0] = '\0';
+        return;
+    }
+    str_copy(out_path, out_size, path, strlen(path));
+}
+
+// CSS references share URL resolution, but only link elements use the layout
+// support-root fallback for WPT-style absolute paths.
+static bool css_resolve_reference_path(const char* href, const char* base_path,
+                                       bool allow_support_root, char* out_path,
+                                       size_t out_size, bool* out_is_http) {
+    if (!href || !*href || !out_path || out_size == 0) return false;
+    out_path[0] = '\0';
+    if (out_is_http) *out_is_http = false;
+
+    bool base_is_http = css_path_is_http(base_path);
+    if (href[0] == '/' && href[1] != '/' && (!base_path || !base_is_http)) {
+        if (!allow_support_root ||
+            !radiant_resolve_layout_support_resource_path(href, base_path,
+                                                          out_path, out_size)) {
+            css_copy_path(out_path, out_size, href);
+        }
+    } else if (strstr(href, "://") != nullptr) {
+        if (strncmp(href, "file:", 5) == 0 &&
+            !css_file_url_to_local_path(href, out_path, out_size)) {
+            css_copy_path(out_path, out_size, href);
+        } else if (strncmp(href, "file:", 5) != 0) {
+            css_copy_path(out_path, out_size, href);
+        }
+    } else if (base_path) {
+        Url* base_url = url_parse(base_path);
+        Url* resolved_url = base_url && base_url->is_valid
+            ? url_parse_with_base(href, base_url) : nullptr;
+        if (resolved_url && resolved_url->is_valid) {
+            if (resolved_url->scheme == URL_SCHEME_HTTP ||
+                resolved_url->scheme == URL_SCHEME_HTTPS) {
+                css_copy_path(out_path, out_size, url_get_href(resolved_url));
+            } else if (resolved_url->scheme == URL_SCHEME_FILE) {
+                char* local_path = url_to_local_path(resolved_url);
+                if (local_path) {
+                    css_copy_path(out_path, out_size, local_path);
+                    mem_free(local_path);
+                } else {
+                    css_copy_path(out_path, out_size, href);
+                }
+            } else {
+                const char* resolved_href = url_get_href(resolved_url);
+                css_copy_path(out_path, out_size, resolved_href ? resolved_href : href);
+            }
+        } else {
+            const char* last_slash = strrchr(base_path, '/');
+            if (last_slash) {
+                size_t dir_len = (size_t)(last_slash - base_path) + 1;
+                if (dir_len + strlen(href) + 1 <= out_size) {
+                    memcpy(out_path, base_path, dir_len);
+                    str_copy(out_path + dir_len, out_size - dir_len,
+                             href, strlen(href));
+                } else {
+                    css_copy_path(out_path, out_size, href);
+                }
+            } else {
+                css_copy_path(out_path, out_size, href);
+            }
+        }
+        if (resolved_url) url_destroy(resolved_url);
+        if (base_url) url_destroy(base_url);
+    } else {
+        css_copy_path(out_path, out_size, href);
+    }
+
+    if (out_path[0] == '\0') css_copy_path(out_path, out_size, href);
+    if (out_is_http) *out_is_http = css_path_is_http(out_path);
+    return out_path[0] != '\0';
+}
+
+struct CssSourceBuffer {
+    char* data;
+    size_t length;
+};
+
+static bool css_load_source(const char* path, bool is_http, bool binary,
+                            CssSourceBuffer* source) {
+    if (!path || !*path || !source) return false;
+    source->data = nullptr;
+    source->length = 0;
+    if (is_http) {
+        source->data = download_http_content_cached(path, &source->length, "./temp/cache");
+    } else if (binary) {
+        source->data = read_binary_file(path, &source->length);
+    } else {
+        source->data = read_text_file(path);
+        if (source->data) source->length = strlen(source->data);
+    }
+    return source->data != nullptr;
 }
 
 // Forward declaration for charset conversion.
@@ -375,11 +457,7 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Pool* pool, int depth) {
     }
 }
 
-/**
- * Extract the root HTML element from parsed input
- * Skips DOCTYPE, comments, and other non-element nodes
- * Handles both old parser (list root) and HTML5 parser (#document root)
- */
+// extract the first renderable HTML root from either parser representation.
 Element* get_html_root_element(Input* input) {
     if (!input) return nullptr;
     TypeId root_type = get_type_id(input->root);
@@ -444,12 +522,7 @@ Element* get_html_root_element(Input* input) {
     return nullptr;
 }
 
-/**
- * Parse viewport meta tag content string
- * Format: "width=device-width, initial-scale=1.0, maximum-scale=2.0, ..."
- * @param content The content attribute value from <meta name="viewport">
- * @param doc The DomDocument to store parsed values in
- */
+// parse a viewport meta content value into document viewport state.
 void parse_viewport_content(const char* content, DomDocument* doc) {
     if (!content || !doc) return;
 
@@ -518,11 +591,7 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
     }
 }
 
-/**
- * Recursively find and parse <meta name="viewport"> tag from HTML tree
- * @param elem The current element to search (start with html_root)
- * @param doc The DomDocument to store parsed viewport values
- */
+// find and parse the document viewport meta element.
 void extract_viewport_meta(Element* elem, DomDocument* doc) {
     if (!elem || !doc) return;
 
@@ -623,12 +692,7 @@ static char* find_meta_refresh_url(Element* elem) {
     return nullptr;
 }
 
-/**
- * Extract <base href="..."> from the HTML document and return the URL
- * This is used to properly resolve relative URLs when loading remote HTML
- * @param elem The root element to search
- * @return The base href URL or nullptr if not found
- */
+// resolve the document's <base href> URL.
 const char* extract_base_href(Element* elem) {
     if (!elem) return nullptr;
 
@@ -660,11 +724,7 @@ const char* extract_base_href(Element* elem) {
     return nullptr;
 }
 
-/**
- * Extract scale value from a CSS transform declaration
- * Parses transform functions like scale(0.9), scale(0.9, 0.9), scaleX(0.9), scaleY(0.9)
- * Returns the uniform scale factor if found, 1.0 otherwise
- */
+// extract a uniform scale from a transform declaration.
 float extract_transform_scale(CssDeclaration* transform_decl) {
     if (!transform_decl || !transform_decl->value) return 1.0f;
 
@@ -728,11 +788,7 @@ float extract_transform_scale(CssDeclaration* transform_decl) {
     return 1.0f;  // no scale transform found
 }
 
-/**
- * Find body element in DOM tree and extract transform scale from its CSS
- * @param root The root DomElement to search from
- * @param doc The DomDocument to store the body_transform_scale in
- */
+// cache the body transform scale used by viewport mapping.
 void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
     if (!root || !doc) return;
 
@@ -781,10 +837,7 @@ void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
     }
 }
 
-/**
- * Resolve @import rules within a stylesheet: load and parse imported CSS files,
- * add them to the stylesheet list. This handles CSS like @import url('font-awesome.css');
- */
+// load nested @import rules in source order.
 static CssStylesheet* parse_and_collect_stylesheet(
     CssEngine* engine, const char* css, const char* source_path,
     const char* import_base, Pool* pool, CssStylesheet*** stylesheets,
@@ -800,21 +853,6 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
         return;
     }
 
-    // Get directory of the stylesheet for resolving relative import URLs
-    char dir_buf[1024];
-    const char* import_base_dir = nullptr;
-    if (stylesheet_path) {
-        const char* last_slash = strrchr(stylesheet_path, '/');
-        if (last_slash) {
-            size_t dir_len = last_slash - stylesheet_path + 1;
-            if (dir_len < sizeof(dir_buf)) {
-                memcpy(dir_buf, stylesheet_path, dir_len);
-                dir_buf[dir_len] = '\0';
-                import_base_dir = dir_buf;
-            }
-        }
-    }
-
     for (size_t i = 0; i < stylesheet->rule_count; i++) {
         CssRule* rule = stylesheet->rules[i];
         if (!rule || rule->type != CSS_RULE_IMPORT) continue;
@@ -825,86 +863,25 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
 
         // Resolve import path relative to the stylesheet or document URL.
         char import_path[1024];
-        import_path[0] = '\0';
-        if (strstr(import_url, "://") != nullptr) {
-            Url* import_abs_url = url_parse(import_url);
-            if (import_abs_url && import_abs_url->scheme == URL_SCHEME_FILE) {
-                char* local_path = url_to_local_path(import_abs_url);
-                if (local_path) {
-                    strncpy(import_path, local_path, sizeof(import_path) - 1);
-                    import_path[sizeof(import_path) - 1] = '\0';
-                    mem_free(local_path);
-                }
-                if (import_path[0] == '\0') {
-                    const char* import_href = url_get_href(import_abs_url);
-                    css_file_url_to_local_path(import_href, import_path, sizeof(import_path));
-                }
-            }
-            if (import_path[0] == '\0') {
-                if (!css_file_url_to_local_path(import_url, import_path, sizeof(import_path))) {
-                    strncpy(import_path, import_url, sizeof(import_path) - 1);
-                    import_path[sizeof(import_path) - 1] = '\0';
-                }
-            }
-            if (import_abs_url) url_destroy(import_abs_url);
-        } else if (stylesheet_path &&
-                   (strncmp(stylesheet_path, "file:", 5) == 0 ||
-                    strncmp(stylesheet_path, "http://", 7) == 0 ||
-                    strncmp(stylesheet_path, "https://", 8) == 0)) {
-            Url* base_url = url_parse(stylesheet_path);
-            Url* resolved_url = base_url ? url_parse_with_base(import_url, base_url) : nullptr;
-            if (resolved_url && resolved_url->scheme == URL_SCHEME_FILE) {
-                char* local_path = url_to_local_path(resolved_url);
-                if (local_path) {
-                    strncpy(import_path, local_path, sizeof(import_path) - 1);
-                    import_path[sizeof(import_path) - 1] = '\0';
-                    mem_free(local_path);
-                }
-                if (import_path[0] == '\0') {
-                    const char* resolved_href = url_get_href(resolved_url);
-                    css_file_url_to_local_path(resolved_href, import_path, sizeof(import_path));
-                }
-            } else if (resolved_url) {
-                const char* resolved_href = url_get_href(resolved_url);
-                if (resolved_href) {
-                    if (!css_file_url_to_local_path(resolved_href, import_path, sizeof(import_path))) {
-                        strncpy(import_path, resolved_href, sizeof(import_path) - 1);
-                        import_path[sizeof(import_path) - 1] = '\0';
-                    }
-                }
-            }
-            if (resolved_url) url_destroy(resolved_url);
-            if (base_url) url_destroy(base_url);
-        } else if (import_base_dir) {
-            snprintf(import_path, sizeof(import_path), "%s%s", import_base_dir, import_url);
-        } else {
-            strncpy(import_path, import_url, sizeof(import_path) - 1);
-            import_path[sizeof(import_path) - 1] = '\0';
+        if (!css_resolve_reference_path(import_url, stylesheet_path, false,
+                                        import_path, sizeof(import_path), nullptr)) {
+            continue;
         }
 
         // Load and parse the imported CSS file
-        char* css_content = nullptr;
-        bool is_http = (strncmp(import_path, "http://", 7) == 0 || strncmp(import_path, "https://", 8) == 0);
-        if (is_http) {
-            size_t content_size = 0;
-            css_content = download_http_content_cached(import_path, &content_size, "./temp/cache");
-        } else {
-            css_content = read_text_file(import_path);
-        }
-
-        if (!css_content) {
+        CssSourceBuffer source;
+        if (!css_load_source(import_path, css_path_is_http(import_path), false, &source)) {
             log_warn("[CSS @import] Failed to load imported stylesheet: %s", import_path);
             continue;
         }
 
-        size_t css_len = strlen(css_content);
-        char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+        char* css_pool_copy = (char*)pool_alloc(pool, source.length + 1);
         if (!css_pool_copy) {
-            mem_free(css_content);
+            mem_free(source.data);
             continue;
         }
-        str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-        mem_free(css_content);
+        str_copy(css_pool_copy, source.length + 1, source.data, source.length);
+        mem_free(source.data);
 
         CssStylesheet* imported = parse_and_collect_stylesheet(
             engine, css_pool_copy, import_path, import_path, pool,
@@ -976,11 +953,7 @@ static size_t css_utf16_encoded_at_charset_prelude_len(const char* data, size_t 
     return 0;
 }
 
-/**
- * Detect the encoding of a CSS file per CSS Syntax §3.2.
- * Resolution order: BOM → HTTP charset → link charset → @charset → document fallback → UTF-8.
- * Returns the charset name or nullptr if UTF-8.
- */
+// detect a CSS source encoding using the CSS Syntax precedence order.
 const char* detect_css_encoding(const char* data, size_t len, const char* document_charset,
                                       const char* http_charset = nullptr, const char* link_charset = nullptr) {
     if (!data || len == 0) return nullptr;
@@ -1063,11 +1036,7 @@ const char* detect_css_encoding(const char* data, size_t len, const char* docume
     return nullptr;
 }
 
-/**
- * Sanitize UTF-8 content per CSS Syntax §3.3: replace invalid byte sequences with U+FFFD.
- * Returns newly allocated sanitized content, or nullptr if no changes needed.
- * Caller must free with mem_free().
- */
+// replace invalid UTF-8 and embedded NULs for CSS parsing.
 static size_t css_utf8_sequence_length(const char* data, size_t len, size_t offset) {
     unsigned char c = (unsigned char)data[offset];
     if (c == 0x00) return 0;
@@ -1120,20 +1089,13 @@ static char* sanitize_utf8_css(const char* data, size_t len) {
     return out;
 }
 
-/**
- * Convert CSS file content from detected encoding to UTF-8.
- * Returns newly allocated UTF-8 content, or nullptr if no conversion needed.
- * Caller must free with mem_free().
- */
+// convert a non-UTF-8 CSS source to UTF-8.
 static char* convert_css_to_utf8(const char* data, size_t len, const char* css_charset) {
     if (!data || !css_charset) return nullptr;
     return convert_charset_to_utf8(data, len, css_charset);
 }
 
-/**
- * Resolve a possibly-relative href against a base URL/path. Returns mem_alloc'd
- * absolute URL string (caller mem_free's), or nullptr if not HTTP/HTTPS.
- */
+// resolve an HTTP href against its base URL.
 static char* resolve_http_href(const char* href, const char* base_path) {
     if (!href || !*href) return nullptr;
 
@@ -1190,11 +1152,7 @@ static void append_external_resource_url(char* url, char*** out_urls,
     (*out_urls)[(*out_count)++] = url;
 }
 
-/**
- * Recursively collect HTTP(S) URLs from <link rel="stylesheet" href="...">
- * and <script src="..."> elements. Appends absolute URL strings (mem_alloc'd)
- * to *out_urls (realloc'd) and increments *out_count.
- */
+// collect external CSS and script URLs for prefetch.
 static void collect_external_resource_urls(Element* elem, const char* base_path,
                                             char*** out_urls, int* out_count, int* out_capacity,
                                             int depth) {
@@ -1227,11 +1185,7 @@ recurse:
     }
 }
 
-/**
- * Pre-fetch all external HTTP(S) sub-resources (CSS links, script sources)
- * referenced by the document in parallel. Populates the on-disk cache so the
- * subsequent serial loaders find them already cached. No-op for local docs.
- */
+// prefetch external CSS and script resources for remote documents.
 static void prefetch_document_subresources(Element* html_root, const char* base_path) {
     if (!html_root || !base_path) return;
     if (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0) return;
@@ -1253,104 +1207,31 @@ static void prefetch_document_subresources(Element* html_root, const char* base_
     if (urls) mem_free(urls);
 }
 
-/**
- * Recursively collect <link rel="stylesheet"> references from HTML
- * Loads and parses external CSS files
- */
-void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
-                                CssStylesheet*** stylesheets, int* count, int* capacity,
-                                int depth, bool recurse) {
+// load one linked stylesheet; document traversal owns source ordering.
+static void load_linked_stylesheet(Element* elem, CssEngine* engine, const char* base_path,
+                                   Pool* pool, CssStylesheet*** stylesheets,
+                                   int* count, int* capacity) {
     if (!elem || !engine || !pool || !stylesheets || !count || !capacity) return;
-    if (depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
 
     TypeElmt* type = (TypeElmt*)elem->type;
     if (!type) return;
 
-    // Check if this is a <link> element
-    if (str_ieq_const(type->name.str, strlen(type->name.str), "link")) {
-        // Extract 'rel' and 'href' attributes
-        const char* rel = extract_element_attribute(elem, "rel", nullptr);
-        const char* href = extract_element_attribute(elem, "href", nullptr);
+    if (!str_ieq_const(type->name.str, strlen(type->name.str), "link")) return;
+    const char* rel = extract_element_attribute(elem, "rel", nullptr);
+    const char* href = extract_element_attribute(elem, "href", nullptr);
+    if (!rel || !href || !str_ieq_const(rel, strlen(rel), "stylesheet")) return;
 
-        if (rel && href && str_ieq_const(rel, strlen(rel), "stylesheet")) {
-            // Extract optional charset attribute from <link>
-            const char* link_charset = extract_element_attribute(elem, "charset", nullptr);
+    const char* link_charset = extract_element_attribute(elem, "charset", nullptr);
+    const char* media = extract_element_attribute(elem, "media", nullptr);
+    if (media && !css_evaluate_media_query(engine, media)) return;
 
-            // Check media attribute - skip stylesheets that don't apply to screen
-            const char* media = extract_element_attribute(elem, "media", nullptr);
-            if (!media || css_evaluate_media_query(engine, media)) {
-
-            // Resolve relative path using base_path (supports file:// and http:// URLs)
-            char css_path[1024];
-            bool is_http_css = false;
-
-            if (href[0] == '/' && href[1] != '/'
-                && (!base_path || (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0))) {
-                // WPT-style absolute support URLs (for example /fonts/ahem.css)
-                // are rooted at the test server, not the local filesystem root.
-                if (!radiant_resolve_layout_support_resource_path(href, base_path, css_path, sizeof(css_path))) {
-                    // Absolute local path - use as-is (only when base is not HTTP)
-                    strncpy(css_path, href, sizeof(css_path) - 1);
-                    css_path[sizeof(css_path) - 1] = '\0';
-                }
-            } else if (strstr(href, "://") != nullptr) {
-                // Full URL - use as-is
-                strncpy(css_path, href, sizeof(css_path) - 1);
-                css_path[sizeof(css_path) - 1] = '\0';
-                is_http_css = (strncmp(href, "http://", 7) == 0 || strncmp(href, "https://", 8) == 0);
-            } else if (base_path) {
-                // Relative path - resolve against base_path using URL resolution
-                Url* base_url = url_parse(base_path);
-                if (base_url && base_url->is_valid) {
-                    Url* resolved_url = parse_url(base_url, href);
-                    if (resolved_url && resolved_url->is_valid) {
-                        if (resolved_url->scheme == URL_SCHEME_HTTP || resolved_url->scheme == URL_SCHEME_HTTPS) {
-                            // HTTP URL - use the full href
-                            const char* url_str = url_get_href(resolved_url);
-                            strncpy(css_path, url_str, sizeof(css_path) - 1);
-                            css_path[sizeof(css_path) - 1] = '\0';
-                            is_http_css = true;
-                        } else {
-                            // File URL - convert to local path
-                            char* local_path = url_to_local_path(resolved_url);
-                            if (local_path) {
-                                strncpy(css_path, local_path, sizeof(css_path) - 1);
-                                css_path[sizeof(css_path) - 1] = '\0';
-                                mem_free(local_path);
-                            } else {
-                                strncpy(css_path, href, sizeof(css_path) - 1);
-                                css_path[sizeof(css_path) - 1] = '\0';
-                            }
-                        }
-                        url_destroy(resolved_url);
-                    } else {
-                        strncpy(css_path, href, sizeof(css_path) - 1);
-                        css_path[sizeof(css_path) - 1] = '\0';
-                    }
-                    url_destroy(base_url);
-                } else {
-                    // Fallback: simple string concatenation for non-URL base paths
-                    const char* last_slash = strrchr(base_path, '/');
-                    if (last_slash) {
-                        size_t dir_len = last_slash - base_path + 1;
-                        if (dir_len < sizeof(css_path) - strlen(href) - 1) {
-                            strncpy(css_path, base_path, dir_len);
-                            css_path[dir_len] = '\0';
-                            strncat(css_path, href, sizeof(css_path) - dir_len - 1);
-                        } else {
-                            strncpy(css_path, href, sizeof(css_path) - 1);
-                            css_path[sizeof(css_path) - 1] = '\0';
-                        }
-                    } else {
-                        strncpy(css_path, href, sizeof(css_path) - 1);
-                        css_path[sizeof(css_path) - 1] = '\0';
-                    }
-                }
-            } else {
-                strncpy(css_path, href, sizeof(css_path) - 1);
-                css_path[sizeof(css_path) - 1] = '\0';
-            }
-
+    char css_path[1024];
+    bool is_http_css = false;
+    if (!css_resolve_reference_path(href, base_path, true,
+                                    css_path, sizeof(css_path), &is_http_css)) {
+        log_warn("[CSS] Failed to resolve stylesheet: %s", href);
+        return;
+    }
             if (!is_http_css && access(css_path, R_OK) != 0) {
                 char shared_path[1024];
                 if (radiant_resolve_shared_data_resource_path(href, base_path,
@@ -1360,29 +1241,18 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
             }
 
 
-            // Load and parse CSS file (or download from HTTP URL)
-            char* css_content = nullptr;
-            size_t css_file_size = 0;
-            if (is_http_css) {
-                // Download CSS from HTTP URL (uses on-disk cache populated by prefetch)
-                size_t content_size = 0;
-                css_content = download_http_content_cached(css_path, &content_size, "./temp/cache");
-                if (css_content) {
-                    css_file_size = content_size;
-                }
-            } else {
-                size_t content_size = 0;
-                css_content = read_binary_file(css_path, &content_size);
-                if (css_content) {
-                    css_file_size = content_size;
-                }
+            CssSourceBuffer source;
+            if (!css_load_source(css_path, is_http_css, true, &source)) {
+                log_warn("[CSS] Failed to load stylesheet: %s", css_path);
+                return;
             }
-            bool css_content_empty = css_content && css_file_size == 0 && css_content[0] == '\0';
-            if (css_content_empty) {
-                // Empty linked stylesheets are valid CSS; skip them before
-                // parser setup so zero-byte resources do not look failed.
-                mem_free(css_content);
-            } else if (css_content) {
+            if (source.length == 0 && source.data[0] == '\0') {
+                mem_free(source.data);
+                return;
+            }
+            {
+                char* css_content = source.data;
+                size_t css_file_size = source.length;
 
                 // Use binary size when available (handles null bytes); fallback to strlen
                 size_t css_len = css_file_size > 0 ? css_file_size : strlen(css_content);
@@ -1475,23 +1345,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                     mem_free(css_content);
                     log_error("[CSS] Failed to allocate memory for CSS content");
                 }
-            } else {
-                log_warn("[CSS] Failed to load stylesheet: %s", css_path);
             }
-            }
-        }
-    }
-
-    // Recursively process children
-    if (recurse) {
-        for (int64_t i = 0; i < elem->length; i++) {
-            Item child_item = elem->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                collect_linked_stylesheets(child_item.element, engine, base_path, pool,
-                                           stylesheets, count, capacity, depth + 1, true);
-            }
-        }
-    }
 }
 
 static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engine,
@@ -1507,8 +1361,8 @@ static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engi
     if (type) {
         if (str_ieq_const(type->name.str, strlen(type->name.str), "link")) {
             int before = *count;
-            collect_linked_stylesheets(elem, engine, base_path, pool,
-                                       stylesheets, count, capacity, depth, false);
+            load_linked_stylesheet(elem, engine, base_path, pool,
+                                   stylesheets, count, capacity);
             if (linked_count && *count > before) {
                 *linked_count += *count - before;
             }
@@ -1539,17 +1393,7 @@ static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engi
     }
 }
 
-/**
- * Recursively collect <style> inline CSS from DomElement* tree (post-JS mutations).
- * Unlike collect_inline_styles_to_list() which walks Element* (pre-JS), this walks
- * the DomElement tree which reflects JS DOM mutations (createElement, appendChild,
- * textContent writes, disabled attribute changes).
- *
- * Handles:
- * - Dynamically-added <style> elements (e.g. first-letter-dynamic-001)
- * - <style disabled> elements — skipped (e.g. table-anonymous-objects-015)
- * - Media query filtering
- */
+// collect live DOM <style> elements after script mutations.
 void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const char* base_path, Pool* pool,
                                     CssStylesheet*** stylesheets, int* count,
                                     int* capacity, int depth = 0) {
@@ -1636,11 +1480,7 @@ static bool dom_js_mutation_requires_inline_stylesheet_rescan(DomDocument* doc) 
     return false;
 }
 
-/**
- * Master function to extract and apply all CSS from HTML document
- * Handles linked stylesheets, <style> elements, and inline style attributes
- * Returns array of collected stylesheets
- */
+// collect linked and inline document stylesheets in source order.
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out) {
     if (!html_root || !engine || !pool || !stylesheet_count) return nullptr;
 
@@ -1680,49 +1520,38 @@ static void clear_load_stylesheet_cascade_recursive(DomNode* node) {
     }
 }
 
-static void store_document_stylesheet_bundle(DomDocument* dom_doc,
-                                             CssStylesheet* first_stylesheet,
-                                             CssStylesheet* second_stylesheet,
-                                             CssStylesheet* third_stylesheet,
-                                             CssStylesheet** inline_stylesheets,
-                                             int inline_stylesheet_count,
-                                             Pool* pool) {
-    if (!dom_doc || !pool) return;
+static CssStylesheet** layout_merge_css_sources(Pool* pool,
+                                                CssStylesheet** first, int first_count,
+                                                CssStylesheet** second, int second_count,
+                                                int* out_count) {
+    if (out_count) *out_count = 0;
+    if (!pool || !out_count) return nullptr;
 
-    int total_stylesheets = inline_stylesheet_count;
-    if (first_stylesheet) total_stylesheets++;
-    if (second_stylesheet) total_stylesheets++;
-    if (third_stylesheet) total_stylesheets++;
-    dom_doc->stylesheet_capacity = total_stylesheets;
-    dom_doc->stylesheet_count = 0;
-    dom_doc->stylesheets = total_stylesheets > 0
-        ? (CssStylesheet**)pool_alloc(pool, total_stylesheets * sizeof(CssStylesheet*))
-        : nullptr;
-
-    if (first_stylesheet && dom_doc->stylesheets) {
-        dom_doc->stylesheets[dom_doc->stylesheet_count++] = first_stylesheet;
-    }
-    if (second_stylesheet && dom_doc->stylesheets) {
-        dom_doc->stylesheets[dom_doc->stylesheet_count++] = second_stylesheet;
-    }
-    if (third_stylesheet && dom_doc->stylesheets) {
-        dom_doc->stylesheets[dom_doc->stylesheet_count++] = third_stylesheet;
-    }
-    for (int i = 0; i < inline_stylesheet_count; i++) {
-        if (inline_stylesheets && inline_stylesheets[i] && dom_doc->stylesheets) {
-            dom_doc->stylesheets[dom_doc->stylesheet_count++] = inline_stylesheets[i];
+    int capacity = first_count + second_count;
+    if (capacity <= 0) return nullptr;
+    CssStylesheet** merged = (CssStylesheet**)pool_alloc(
+        pool, (size_t)capacity * sizeof(CssStylesheet*));
+    if (!merged) return nullptr;
+    for (int pass = 0; pass < 2; pass++) {
+        CssStylesheet** source = pass == 0 ? first : second;
+        int count = pass == 0 ? first_count : second_count;
+        for (int i = 0; source && i < count; i++) {
+            if (source[i]) merged[(*out_count)++] = source[i];
         }
     }
+    return merged;
 }
 
 static void store_document_stylesheets(DomDocument* dom_doc,
-                                       CssStylesheet* external_stylesheet,
-                                       CssStylesheet** inline_stylesheets,
-                                       int inline_stylesheet_count,
+                                       CssStylesheet** first, int first_count,
+                                       CssStylesheet** second, int second_count,
                                        Pool* pool) {
-    store_document_stylesheet_bundle(dom_doc, external_stylesheet, nullptr, nullptr,
-                                     inline_stylesheets, inline_stylesheet_count,
-                                     pool);
+    if (!dom_doc || !pool) return;
+    int count = 0;
+    dom_doc->stylesheets = layout_merge_css_sources(
+        pool, first, first_count, second, second_count, &count);
+    dom_doc->stylesheet_count = count;
+    dom_doc->stylesheet_capacity = count;
 }
 
 static void layout_apply_css_stylesheets(DomDocument* doc, DomElement* root,
@@ -1747,17 +1576,11 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
     if (!dom_doc || !dom_root || !pool || !css_engine) return;
     using namespace std::chrono;
     auto t_cascade_start = high_resolution_clock::now();
-    int stylesheet_capacity = inline_stylesheet_count + (external_stylesheet ? 1 : 0);
-    CssStylesheet** stylesheets = stylesheet_capacity > 0
-        ? (CssStylesheet**)pool_alloc(pool, stylesheet_capacity * sizeof(CssStylesheet*)) : nullptr;
-    if (stylesheet_capacity > 0 && !stylesheets) return;
+    CssStylesheet* external[] = {external_stylesheet};
     int stylesheet_count = 0;
-    if (external_stylesheet) stylesheets[stylesheet_count++] = external_stylesheet;
-    for (int i = 0; i < inline_stylesheet_count; i++) {
-        if (inline_stylesheets && inline_stylesheets[i]) {
-            stylesheets[stylesheet_count++] = inline_stylesheets[i];
-        }
-    }
+    CssStylesheet** stylesheets = layout_merge_css_sources(
+        pool, external_stylesheet ? external : nullptr, external_stylesheet ? 1 : 0,
+        inline_stylesheets, inline_stylesheet_count, &stylesheet_count);
     layout_apply_css_stylesheets(
         dom_doc, dom_root, stylesheets, stylesheet_count, pool, css_engine);
     log_info("[TIMING] load: CSS cascade (%s): %.1fms",
@@ -1765,9 +1588,7 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
              duration<double, std::milli>(high_resolution_clock::now() - t_cascade_start).count());
 }
 
-/**
- * Check if content starts with a UTF-8 BOM (EF BB BF).
- */
+// check for a UTF-8 BOM.
 static bool has_utf8_bom(const char* html, size_t len) {
     return len >= 3 &&
            (unsigned char)html[0] == 0xEF &&
@@ -1775,13 +1596,7 @@ static bool has_utf8_bom(const char* html, size_t len) {
            (unsigned char)html[2] == 0xBF;
 }
 
-/**
- * Quick heuristic: check if content with high bytes appears to be valid UTF-8.
- * Scans up to 4096 bytes. If we find multi-byte UTF-8 sequences and no invalid
- * sequences, the content is likely UTF-8 regardless of what the meta tag says.
- * Returns true if content appears to be valid UTF-8 (has multi-byte sequences).
- * Returns false if content is all-ASCII (ambiguous) or has invalid UTF-8 sequences.
- */
+// heuristically detect valid non-ASCII UTF-8 content.
 static bool content_looks_utf8(const char* html, size_t len) {
     size_t scan_len = len < 4096 ? len : 4096;
     int multi_byte_count = 0;
@@ -1804,14 +1619,7 @@ static bool content_looks_utf8(const char* html, size_t len) {
     return multi_byte_count > 0;
 }
 
-/**
- * Detect charset from HTML content by scanning for <meta charset="..."> or
- * <meta http-equiv="Content-Type" content="...; charset=..."> within the first 1024 bytes.
- * Returns the charset name (e.g., "iso-8859-1") or nullptr if UTF-8 or not specified.
- * Per HTML spec, UTF-8 BOM takes precedence over meta charset declarations.
- * Also skips conversion if content is already valid UTF-8 (e.g., file saved as UTF-8
- * but with a legacy meta charset tag).
- */
+// detect HTML charset metadata after applying BOM and UTF-8 precedence.
 const char* detect_html_charset(const char* html, size_t len) {
     if (!html || len == 0) return nullptr;
 
@@ -1870,18 +1678,8 @@ const char* detect_html_charset(const char* html, size_t len) {
     return nullptr;
 }
 
-/**
- * Convert HTML content from ISO-8859-1 or Windows-1252 to UTF-8.
- * These two encodings cover the vast majority of non-UTF-8 web pages.
- * Each byte 0x80-0xFF maps to a 2-byte or 3-byte UTF-8 sequence.
- * Returns a newly allocated UTF-8 string or nullptr on failure.
- * Caller must free the returned string with mem_free().
- */
-/**
- * Convert content from a single-byte encoding to UTF-8 using a 128-entry mapping table.
- * The table maps bytes 0x80-0xFF to Unicode code points.
- * Bytes 0x00-0x7F are passed through as ASCII.
- */
+// convert the common Latin-1/Windows-1252 HTML encodings.
+// convert a single-byte encoding using its codepoint table.
 static char* convert_single_byte_to_utf8(const char* content, size_t content_len, const uint16_t* table, const char* charset_name) {
     if (!content) return nullptr;
     // Win-1252 maps the Latin-1 C1 control range to the glyphs commonly found
@@ -1989,12 +1787,7 @@ static const uint16_t win1253_table[128] = {
     0x03C8, 0x03C9, 0x03CA, 0x03CB, 0x03CC, 0x03CD, 0x03CE, 0xFFFD, // F8-FF
 };
 
-/**
- * Convert content from a non-UTF-8 charset to UTF-8.
- * Currently supports ISO-8859-1 and Windows-1252 (covers ~95% of non-UTF-8 pages).
- * Returns a newly allocated UTF-8 string or nullptr if charset is unsupported.
- * Caller must free the returned string with mem_free().
- */
+// convert supported non-UTF-8 HTML sources.
 char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset) {
     if (!content || !from_charset) return nullptr;
 
@@ -2023,13 +1816,7 @@ char* convert_charset_to_utf8(const char* content, size_t content_len, const cha
     return nullptr;
 }
 
-/**
- * Generate an HTML error page for network/loading errors.
- * Returns a heap-allocated HTML string that the caller must free with mem_free().
- * @param url The URL that failed to load
- * @param error_title Short error title (e.g., "Network Error", "404 Not Found")
- * @param error_detail Detailed error message
- */
+// generate a self-contained load-error document.
 static char* generate_error_page_html(const char* url, const char* error_title, const char* error_detail) {
     char buf[4096];
     snprintf(buf, sizeof(buf),
@@ -2051,17 +1838,7 @@ static char* generate_error_page_html(const char* url, const char* error_title, 
     return mem_strdup(buf, MEM_CAT_LAYOUT);
 }
 
-/**
- * Load HTML document with Lambda CSS system
- * Parses HTML, applies CSS cascade, builds DOM tree, returns DomDocument for layout
- *
- * @param html_filename Path to HTML file
- * @param css_filename Optional external CSS file (can be NULL)
- * @param viewport_width Viewport width for layout
- * @param viewport_height Viewport height for layout
- * @param pool Memory pool for allocations
- * @return DomDocument structure with Lambda CSS DOM, ready for layout
- */
+// load, style, and build an HTML document.
 struct HtmlLoadPhaseTiming {
     double loader_total_ms;
     double read_ms;
@@ -2313,8 +2090,11 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
     // Store stylesheets before scripts so getComputedStyle and @font-face share
     // the same sheet list that the pre-script cascade uses.
-    store_document_stylesheets(dom_doc, external_stylesheet, inline_stylesheets,
-                               inline_stylesheet_count, pool);
+    CssStylesheet* external_sources[] = {external_stylesheet};
+    store_document_stylesheets(dom_doc,
+                               external_stylesheet ? external_sources : nullptr,
+                               external_stylesheet ? 1 : 0,
+                               inline_stylesheets, inline_stylesheet_count, pool);
     auto t_stylesheet_setup = timing ? high_resolution_clock::now() : t_css_parse;
 
     // Step 2c: Apply inline style="" attributes BEFORE scripts
@@ -2394,8 +2174,10 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
                 inline_stylesheet_count = merged_count;
             }
 
-            store_document_stylesheets(dom_doc, external_stylesheet, inline_stylesheets,
-                                       inline_stylesheet_count, pool);
+            store_document_stylesheets(dom_doc,
+                                       external_stylesheet ? external_sources : nullptr,
+                                       external_stylesheet ? 1 : 0,
+                                       inline_stylesheets, inline_stylesheet_count, pool);
 
             clear_load_stylesheet_cascade_recursive(static_cast<DomNode*>(dom_root));
             apply_load_css_cascade(dom_doc, dom_root, external_stylesheet,
@@ -2606,6 +2388,91 @@ static DomDocument* load_graph_bridge_doc(Url* graph_url, int viewport_width,
     return doc;
 }
 
+typedef DomDocument* (*LayoutFormatLoader)(Url*, int, int, Pool*);
+
+DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
+                               int viewport_height, Pool* pool);
+DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width,
+                           int viewport_height, Pool* pool);
+static DomDocument* load_svg_layout_file(Url* url, int width, int height, Pool* pool);
+static DomDocument* load_image_layout_file(Url* url, int width, int height, Pool* pool);
+
+struct LayoutFormatRoute {
+    const char* extension;
+    LayoutFormatLoader loader;
+};
+
+static const LayoutFormatRoute layout_format_routes[] = {
+    {".ls", load_lambda_script_doc},
+    {".tex", load_latex_doc}, {".latex", load_latex_doc},
+    {".md", load_markdown_doc}, {".markdown", load_markdown_doc},
+    {".wiki", load_wiki_doc}, {".xml", load_xml_doc},
+    {".svg", load_svg_layout_file}, {".png", load_image_layout_file},
+    {".jpg", load_image_layout_file}, {".jpeg", load_image_layout_file},
+    {".gif", load_image_layout_file},
+    {".json", load_text_doc}, {".yaml", load_text_doc},
+    {".yml", load_text_doc}, {".toml", load_text_doc},
+    {".txt", load_text_doc}, {".csv", load_text_doc},
+    {".ini", load_text_doc}, {".conf", load_text_doc}, {".cfg", load_text_doc},
+    {".log", load_text_doc}
+};
+
+static const LayoutFormatRoute* layout_find_format_route(const char* extension) {
+    if (!extension) return nullptr;
+    for (size_t i = 0; i < sizeof(layout_format_routes) / sizeof(layout_format_routes[0]); i++) {
+        if (strcmp(extension, layout_format_routes[i].extension) == 0) {
+            return &layout_format_routes[i];
+        }
+    }
+    return nullptr;
+}
+
+static bool layout_path_has_known_extension(const char* path) {
+    if (!path) return false;
+    if (graph_bridge_path_is_graph(path)) return true;
+    const char* extension = strrchr(path, '.');
+    return extension && (strcmp(extension, ".pdf") == 0 ||
+                         layout_find_format_route(extension));
+}
+
+static DomDocument* load_svg_layout_file(Url* url, int width, int height, Pool* pool) {
+    return load_svg_doc(url, width, height, pool, 1.0f);
+}
+
+static DomDocument* load_image_layout_file(Url* url, int width, int height, Pool* pool) {
+    return load_image_doc(url, width, height, pool, 1.0f);
+}
+
+static DomDocument* load_layout_special_file(Url* url, const char* path,
+                                              int width, int height, Pool* pool,
+                                              bool bridge_pdf, bool include_text,
+                                              bool* handled) {
+    if (handled) *handled = false;
+    if (!url || !path || !pool) return nullptr;
+
+    if (graph_bridge_path_is_graph(path)) {
+        if (handled) *handled = true;
+        return load_graph_bridge_doc(url, width, height, pool);
+    }
+
+    const char* ext = strrchr(path, '.');
+    if (!ext) return nullptr;
+    if (strcmp(ext, ".pdf") == 0) {
+        if (handled) *handled = true;
+        return bridge_pdf ? load_pdf_bridge_doc(url, width, height, pool) : nullptr;
+    }
+
+    const LayoutFormatRoute* route = layout_find_format_route(ext);
+    if (route) {
+        bool text_route = route->loader == load_text_doc;
+        if (text_route && !include_text) return nullptr;
+        if (handled) *handled = true;
+        log_info("[Layout] Detected %s file, using format loader", ext);
+        return route->loader(url, width, height, pool);
+    }
+    return nullptr;
+}
+
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int viewport_width,
                                               int viewport_height, float pixel_ratio,
                                               const DocumentJsHostConfig* js_host_config) {
@@ -2627,54 +2494,10 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
                                                     viewport_height, pool, js_host_config);
     } else {
-    // Detect file type by extension (local files only)
-    const char* ext = strrchr(doc_url, '.');
-
-    if (ext && strcmp(ext, ".ls") == 0) {
-        // Load Lambda script: evaluate script → wrap result → layout
-        log_info("[load_html_doc] Detected Lambda script file, using script evaluation pipeline");
-        doc = load_lambda_script_doc(full_url, viewport_width, viewport_height, pool);
-    } else if (graph_bridge_path_is_graph(doc_url)) {
-        log_info("[load_html_doc] Detected graph file, using Lambda graph package pipeline");
-        doc = load_graph_bridge_doc(full_url, viewport_width, viewport_height, pool);
-    } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
-        // Load LaTeX document via LaTeX→HTML pipeline
-        log_info("[load_html_doc] Detected LaTeX file, using LaTeX→HTML pipeline");
-        doc = load_latex_doc(full_url, viewport_width, viewport_height, pool);
-    } else if (ext && (strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0)) {
-        // Load Markdown document: parse Markdown → convert to HTML → layout
-        log_info("[load_html_doc] Detected Markdown file, using Markdown→HTML pipeline");
-        doc = load_markdown_doc(full_url, viewport_width, viewport_height, pool);
-    } else if (ext && strcmp(ext, ".wiki") == 0) {
-        // Load Wiki document: parse Wiki → convert to HTML → layout
-        log_info("[load_html_doc] Detected Wiki file, using Wiki→HTML pipeline");
-        doc = load_wiki_doc(full_url, viewport_width, viewport_height, pool);
-    } else if (ext && strcmp(ext, ".xml") == 0) {
-        // Load XML document: parse XML → treat as custom HTML elements → apply CSS → layout
-        log_info("[load_html_doc] Detected XML file, using XML→DOM pipeline");
-        doc = load_xml_doc(full_url, viewport_width, viewport_height, pool);
-    } else if (ext && strcmp(ext, ".pdf") == 0) {
-        log_info("[load_html_doc] Detected PDF file, using Lambda PDF package in-memory element pipeline");
-        doc = load_pdf_bridge_doc(full_url, viewport_width, viewport_height, pool);
-    } else if (ext && strcmp(ext, ".svg") == 0) {
-        // Load SVG document as a normal DOM-backed image document.
-        log_info("[load_html_doc] Detected SVG file, using SVG image document pipeline");
-        doc = load_svg_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
-    } else if (ext && (strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||
-                       strcmp(ext, ".jpeg") == 0 || strcmp(ext, ".gif") == 0)) {
-        // Load image document as html/body/img so view interactions use normal DOM paths.
-        log_info("[load_html_doc] Detected image file, using DOM image document pipeline");
-        doc = load_image_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
-    } else if (ext && (strcmp(ext, ".json") == 0 || strcmp(ext, ".yaml") == 0 ||
-                       strcmp(ext, ".yml") == 0 || strcmp(ext, ".toml") == 0 ||
-                       strcmp(ext, ".txt") == 0 || strcmp(ext, ".csv") == 0 ||
-                       strcmp(ext, ".ini") == 0 || strcmp(ext, ".conf") == 0 ||
-                       strcmp(ext, ".cfg") == 0 || strcmp(ext, ".log") == 0)) {
-        // Load text document: read source → wrap in <pre> → render as HTML
-        log_info("[load_html_doc] Detected text file, using Text→HTML pipeline");
-        doc = load_text_doc(full_url, viewport_width, viewport_height, pool);
-    } else {
-        // Load HTML document with Lambda CSS system
+    bool handled = false;
+    doc = load_layout_special_file(full_url, doc_url, viewport_width, viewport_height,
+                                   pool, true, true, &handled);
+    if (!handled) {
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
                                                     viewport_height, pool, js_host_config);
     }
@@ -2816,17 +2639,13 @@ static DomDocument* load_dom_backed_image_document(Url* image_url, int viewport_
     return doc;
 }
 
-/**
- * Load SVG document as a DOM-backed html/body/img document.
- */
+// load SVG through the DOM-backed image path.
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
     (void)pixel_ratio;
     return load_dom_backed_image_document(svg_url, viewport_width, viewport_height, pool, "load_svg_doc");
 }
 
-/**
- * Load raster image document (PNG, JPG, JPEG, GIF) as a DOM-backed html/body/img document.
- */
+// load a raster image through the DOM-backed image path.
 DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
     (void)pixel_ratio;
     return load_dom_backed_image_document(img_url, viewport_width, viewport_height, pool, "load_image_doc");
@@ -2946,24 +2765,8 @@ static CssStylesheet* load_home_stylesheet(CssEngine* css_engine, Pool* pool,
     return stylesheet;
 }
 
-static DomDocument* create_layout_css_document(
-        Input* input, Element* root, const char* document_kind,
-        Runtime* owned_runtime, int viewport_width, int viewport_height,
-        Pool* pool, DomElement** out_root, CssEngine** out_engine);
-
-/**
- * Load text document as source view
- * Reads text file content, wraps in HTML <pre> element, renders with monospace font
- *
- * @param text_url URL to text file
- * @param viewport_width Viewport width for layout
- * @param viewport_height Viewport height for layout
- * @param pool Memory pool for allocations
- * @return DomDocument structure ready for layout
- */
+// load a text file as an escaped, monospace HTML source view.
 DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_height, Pool* pool) {
-    auto total_start = std::chrono::high_resolution_clock::now();
-
     if (!text_url || !pool) {
         log_error("load_text_doc: invalid parameters");
         return nullptr;
@@ -2977,7 +2780,6 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     }
     log_info("[TIMING] Loading text document: %s", text_filepath);
 
-    // Step 1: Read text file content
     auto step1_start = std::chrono::high_resolution_clock::now();
     char* text_content = read_text_file(text_filepath);
     if (!text_content) {
@@ -3011,14 +2813,11 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     log_info("[TIMING] Step 2 - Escape HTML: %.1fms",
         std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
 
-    // Step 3: Build HTML document wrapping text in <pre>
     auto step3_start = std::chrono::high_resolution_clock::now();
 
-    // Get filename for title
     const char* filename = strrchr(text_filepath, '/');
     filename = filename ? filename + 1 : text_filepath;
 
-    // Create HTML with minimal styling for source text view
     const char* html_template =
         "<!DOCTYPE html>\n"
         "<html>\n"
@@ -3047,7 +2846,6 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
         "</body>\n"
         "</html>\n";
 
-    // Calculate buffer size and format HTML
     size_t html_len = strlen(html_template) + strlen(filename) + strlen(escaped_content) + 1;
     char* html_content = (char*)mem_alloc(html_len, MEM_CAT_LAYOUT);
     if (!html_content) {
@@ -3062,8 +2860,6 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     log_info("[TIMING] Step 3 - Build HTML: %.1fms",
         std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
 
-    // The normal HTML loader already owns parsing, DOM construction, CSS
-    // collection, and cascade ordering; text documents only provide a wrapper.
     DomDocument* document = load_lambda_html_doc(
         text_url, nullptr, viewport_width, viewport_height, pool,
         html_content, false, false);
@@ -3071,16 +2867,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     return document;
 }
 
-/**
- * Load markdown document with Lambda CSS system
- * Parses markdown, applies GitHub-style CSS, builds DOM tree, returns DomDocument for layout
- *
- * @param markdown_url URL to markdown file
- * @param viewport_width Viewport width for layout
- * @param viewport_height Viewport height for layout
- * @param pool Memory pool for allocations
- * @return DomDocument structure with Lambda CSS DOM, ready for layout
- */
+// load Markdown and its bundled stylesheets.
 static void release_layout_runtime(Runtime* runtime) {
     if (!runtime) return;
     runtime_cleanup(runtime);
@@ -3139,6 +2926,40 @@ static DomDocument* create_layout_css_document(
     return document;
 }
 
+static DomDocument* load_home_styled_source_doc(
+        Url* url, int viewport_width, int viewport_height, Pool* pool,
+        const char* type_name, const char* log_prefix, const char* stylesheet_path,
+        const char* stylesheet_label) {
+    if (!url || !pool) return nullptr;
+    LayoutTempPathGuard path_guard = {url_to_local_path(url)};
+    if (!path_guard.path) {
+        log_error("[%s] failed to resolve source URL", log_prefix);
+        return nullptr;
+    }
+    Input* input = read_layout_input_file(
+        url, path_guard.path, type_name, log_prefix, type_name);
+    Element* source_root = input_first_element_root(input);
+    if (!source_root) {
+        log_error("[%s] failed to get source root", log_prefix);
+        return nullptr;
+    }
+
+    DomElement* dom_root = nullptr;
+    CssEngine* css_engine = nullptr;
+    DomDocument* document = create_layout_css_document(
+        input, source_root, type_name, nullptr, viewport_width, viewport_height,
+        pool, &dom_root, &css_engine);
+    if (!document) return nullptr;
+
+    CssStylesheet* stylesheet = load_home_stylesheet(
+        css_engine, pool, stylesheet_path, log_prefix, stylesheet_label, true);
+    CssStylesheet* stylesheets[1] = {stylesheet};
+    layout_apply_css_stylesheets(document, dom_root, stylesheets, 1, pool, css_engine);
+    populate_layout_document(document, dom_root, source_root, HTML5, url, nullptr);
+    log_info("[%s] loaded source document", log_prefix);
+    return document;
+}
+
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool) {
     auto total_start = std::chrono::high_resolution_clock::now();
 
@@ -3151,7 +2972,6 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     char* markdown_filepath = markdown_path_guard.path;
     log_info("[TIMING] Loading markdown document: %s", markdown_filepath);
 
-    // Step 1: Parse markdown with Lambda parser
     auto step1_start = std::chrono::high_resolution_clock::now();
     Input* input = read_layout_input_file(markdown_url, markdown_filepath,
                                           "markdown", "load_markdown_doc", "markdown");
@@ -3159,7 +2979,6 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         return nullptr;
     }
 
-    // Get root element from parsed markdown
     Element* markdown_root = input_first_element_root(input);
 
     if (!markdown_root) {
@@ -3173,13 +2992,9 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
     Runtime* markdown_math_runtime = nullptr;
 
-    // Step 1.5: Process <math> elements using Lambda math package
-    // Walk the Element tree, find <math> elements, render them to HTML via the math package,
-    // and replace them in the tree with the rendered HTML elements.
     {
         auto math_start = std::chrono::high_resolution_clock::now();
 
-        // Collect all <math> elements: {parent, index_in_parent, source, is_display}
         struct MathInfo {
             Element* parent;
             int64_t index;
@@ -3189,7 +3004,6 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         };
         ArrayList* math_list = arraylist_new(16);
 
-        // Recursive lambda to walk the tree (use a stack to avoid recursion depth issues)
         struct WalkFrame { Element* elem; };
         ArrayList* stack = arraylist_new(64);
         arraylist_append(stack, (ArrayListValue)markdown_root);
@@ -3208,12 +3022,10 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
                 const char* tag = child_type->name.str;
                 if (tag && strcmp(tag, "math") == 0) {
-                    // Found a <math> element - extract source and type
                     ConstItem type_attr = child_elem->get_attr("type");
                     String* type_str_val = type_attr.string();
                     bool is_display = type_str_val && strcmp(type_str_val->chars, "block") == 0;
 
-                    // Get LaTeX source from first string child
                     const char* math_src = nullptr;
                     size_t math_src_len = 0;
                     for (int64_t j = 0; j < child_elem->length; j++) {
@@ -3237,7 +3049,6 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
                         arraylist_append(math_list, (ArrayListValue)mi);
                     }
                 } else {
-                    // Not a <math> element - recurse into it
                     arraylist_append(stack, (ArrayListValue)child_elem);
                 }
             }
@@ -3394,8 +3205,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     populate_layout_document(dom_doc, dom_root, markdown_root, HTML5,
                              markdown_url, markdown_math_runtime);
 
-    store_document_stylesheet_bundle(dom_doc, markdown_stylesheet, math_stylesheet, katex_stylesheet,
-                                     nullptr, 0, pool);
+    store_document_stylesheets(dom_doc, markdown_stylesheets, 3, nullptr, 0, pool);
 
     auto total_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] load_markdown_doc total: %.1fms",
@@ -3404,105 +3214,14 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     return dom_doc;
 }
 
-/**
- * Load MediaWiki document with Lambda CSS system
- * Parses wiki markup, applies Wikipedia-style CSS, builds DOM tree, returns DomDocument for layout
- *
- * @param wiki_url URL to wiki file
- * @param viewport_width Viewport width for layout
- * @param viewport_height Viewport height for layout
- * @param pool Memory pool for allocations
- * @return DomDocument structure with Lambda CSS DOM, ready for layout
- */
+// load MediaWiki markup and its bundled stylesheet.
 DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool) {
-    auto total_start = std::chrono::high_resolution_clock::now();
-
-    if (!wiki_url || !pool) {
-        log_error("load_wiki_doc: invalid parameters");
-        return nullptr;
-    }
-
-    LayoutTempPathGuard wiki_path_guard = { url_to_local_path(wiki_url) };
-    char* wiki_filepath = wiki_path_guard.path;
-    if (!wiki_filepath) {
-        log_error("load_wiki_doc: failed to resolve wiki file URL");
-        return nullptr;
-    }
-    log_info("[TIMING] Loading wiki document: %s", wiki_filepath);
-
-    // Step 1: Parse wiki with Lambda parser
-    auto step1_start = std::chrono::high_resolution_clock::now();
-    Input* input = read_layout_input_file(wiki_url, wiki_filepath,
-                                          "wiki", "load_wiki_doc", "wiki");
-    if (!input) {
-        return nullptr;
-    }
-
-    // Get root element from parsed wiki
-    Element* wiki_root = input_first_element_root(input);
-
-    if (!wiki_root) {
-        log_error("Failed to get wiki root element");
-        return nullptr;
-    }
-
-    auto step1_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 1 - Parse wiki: %.1fms",
-        std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
-
-    // Step 2: Create DomDocument, CSS engine, and build the DOM tree.
-    auto step2_start = std::chrono::high_resolution_clock::now();
-    DomElement* dom_root = nullptr;
-    CssEngine* css_engine = nullptr;
-    DomDocument* dom_doc = create_layout_css_document(
-        input, wiki_root, "wiki", nullptr, viewport_width, viewport_height,
-        pool, &dom_root, &css_engine);
-    if (!dom_doc) return nullptr;
-
-    auto step2_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 2 - Build DOM tree: %.1fms",
-        std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
-
-    // Step 3: Load the document stylesheet.
-    auto step3_start = std::chrono::high_resolution_clock::now();
-    CssStylesheet* wiki_stylesheet = load_home_stylesheet(
-        css_engine, pool, "input/wiki.css", "Lambda Wiki", "wiki stylesheet", true);
-    if (!wiki_stylesheet) {
-        log_warn("Continuing without stylesheet - wiki will use browser defaults");
-    }
-
-    auto step3_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 3 - CSS parse: %.1fms",
-        std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
-
-    // Step 5: Apply CSS cascade to DOM tree
-    auto step4_start = std::chrono::high_resolution_clock::now();
-    CssStylesheet* wiki_stylesheets[1] = {wiki_stylesheet};
-    layout_apply_css_stylesheets(dom_doc, dom_root, wiki_stylesheets, 1, pool, css_engine);
-    auto step4_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 4 - CSS cascade: %.1fms",
-        std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
-
-    // Step 6: Populate DomDocument structure
-    populate_layout_document(dom_doc, dom_root, wiki_root, HTML5, wiki_url, nullptr);
-
-    auto total_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] load_wiki_doc total: %.1fms",
-        std::chrono::duration<double, std::milli>(total_end - total_start).count());
-
-    return dom_doc;
+    return load_home_styled_source_doc(
+        wiki_url, viewport_width, viewport_height, pool,
+        "wiki", "Lambda Wiki", "input/wiki.css", "wiki stylesheet");
 }
 
-/**
- * Load LaTeX document with Lambda CSS system
- * Parses LaTeX, converts to HTML, applies CSS, builds DOM tree, returns DomDocument for layout
- *
- * @param latex_url URL to LaTeX file
- * @param viewport_width Viewport width for layout
- * @param viewport_height Viewport height for layout
- * @param pool Memory pool for allocations
- * @return DomDocument structure with Lambda CSS DOM, ready for layout
- */
+// convert LaTeX through the Lambda package, then style the generated DOM.
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool) {
     if (!latex_url || !pool) {
         log_error("load_latex_doc: invalid parameters");
@@ -3519,7 +3238,6 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     // Step 1: Use the Lambda LaTeX package to convert LaTeX → HTML
     // Build a Lambda script that imports the LaTeX package and renders to HTML
-    // Normalize backslashes to forward slashes so the path is safe inside a Lambda string literal
     char safe_path[1024];
     snprintf(safe_path, sizeof(safe_path), "%s", latex_filepath);
     for (char* p = safe_path; *p; p++) {
@@ -3547,9 +3265,6 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     }
     result_input->ui_mode = true;
 
-    // Run the script in-memory (no temp file needed). Match the normal .ls
-    // view path: allocate generated nodes in the retained document arena and
-    // keep the runtime alive for the document session.
     Runtime* latex_runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
     if (!latex_runtime) {
         log_error("[Lambda LaTeX] Failed to allocate runtime");
@@ -3571,9 +3286,6 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
 
-    // The script returns a Lambda Element tree (not an HTML string).
-    // Use it directly as input to build_dom_tree_from_element, skipping
-    // the unnecessary serialize→reparse roundtrip.
     Element* html_root = nullptr;
     TypeId result_type = get_type_id(script_result->root);
     if (result_type == LMD_TYPE_ELEMENT) {
@@ -3586,8 +3298,6 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
 
-    // The retained runtime remains this eval thread's owner until document
-    // teardown; only input construction state is call-scoped.
     input_context = nullptr;
 
     if (!html_root) {
@@ -3598,7 +3308,6 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     }
 
 
-    // Step 3: Create the DOM and CSS engine before loading document sheets.
     DomElement* dom_root = nullptr;
     CssEngine* css_engine = nullptr;
     DomDocument* dom_doc = create_layout_css_document(
@@ -3614,42 +3323,30 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     CssStylesheet* katex_stylesheet = load_home_stylesheet(
         css_engine, pool, "input/latex/css/katex.css", "Lambda LaTeX", "KaTeX font stylesheet", false);
 
-    // Step 6: Extract and parse any inline <style> elements from HTML
     int inline_stylesheet_count = 0;
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
         html_root, css_engine, latex_filepath, pool, &inline_stylesheet_count);
 
-    // Step 7: Apply CSS cascade to DOM tree
-    CssStylesheet* latex_stylesheets[1] = {latex_stylesheet};
-    layout_apply_css_stylesheets(dom_doc, dom_root, latex_stylesheets, 1, pool, css_engine);
-    layout_apply_css_stylesheets(dom_doc, dom_root, inline_stylesheets,
-                             inline_stylesheet_count, pool, css_engine);
+    CssStylesheet* latex_stylesheets[2] = {latex_stylesheet, katex_stylesheet};
+    int latex_sheet_count = 0;
+    CssStylesheet** all_latex_stylesheets = layout_merge_css_sources(
+        pool, latex_stylesheets, 2, inline_stylesheets, inline_stylesheet_count,
+        &latex_sheet_count);
+    layout_apply_css_stylesheets(dom_doc, dom_root, all_latex_stylesheets,
+                                 latex_sheet_count, pool, css_engine);
 
-    // Apply inline style="" attributes (highest priority)
     apply_inline_styles_to_tree(dom_root, pool);
 
 
-    store_document_stylesheet_bundle(dom_doc, latex_stylesheet, katex_stylesheet, nullptr,
-                                     inline_stylesheets, inline_stylesheet_count,
-                                     pool);
+    store_document_stylesheets(dom_doc, latex_stylesheets, 2,
+                               inline_stylesheets, inline_stylesheet_count, pool);
 
-    // Step 8: Populate DomDocument structure
     populate_layout_document(dom_doc, dom_root, html_root, HTML5,
                              latex_url, latex_runtime);
 
     return dom_doc;
 }
 
-/**
- * Load XML document with Lambda CSS system
- * Parses XML, treats XML elements as custom HTML elements, applies external CSS, builds DOM tree
- *
- * @param xml_url URL to XML file
- * @param viewport_width Viewport width for layout
- * @param viewport_height Viewport height for layout
- * @param pool Memory pool for allocations
- * @return DomDocument structure with Lambda CSS DOM, ready for layout
- */
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool) {
     using namespace std::chrono;
     auto total_start = high_resolution_clock::now();
@@ -3667,7 +3364,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     }
     log_info("[Lambda XML] Loading XML file: %s", xml_filepath);
 
-    // Step 1: Read XML file
     auto t_read = high_resolution_clock::now();
     char* xml_content = read_text_file(xml_filepath);
     if (!xml_content) {
@@ -3678,7 +3374,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     log_info("[TIMING] load: read XML: %.1fms",
              duration_cast<duration<double, std::milli>>(t_parse - t_read).count());
 
-    // Step 2: Parse XML with ui_mode for unified DOM allocation
     Input* xml_input = Input::create(pool, xml_url);
     if (!xml_input) {
         log_error("[Lambda XML] Failed to create Input for XML");
@@ -3694,7 +3389,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    // Check if XML has stylesheet - if not, fall back to source text view
     if (!xml_input->xml_stylesheet_href) {
         log_info("[Lambda XML] No <?xml-stylesheet?> directive found, showing as source text");
         return load_text_doc(xml_url, viewport_width, viewport_height, pool);
@@ -3705,16 +3399,13 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     log_info("[TIMING] load: parse XML: %.1fms",
              duration_cast<duration<double, std::milli>>(t_css_parse - t_parse).count());
 
-    // Step 3: Get the actual XML root element (skip document wrapper)
     Element* document_wrapper = (Element*)xml_input->root.item;
     Element* xml_root = nullptr;
 
-    // Find the first actual XML element (skip processing instructions, comments)
     if (document_wrapper && document_wrapper->type) {
         TypeElmt* doc_type = (TypeElmt*)document_wrapper->type;
 
         if (strcmp(doc_type->name.str, "document") == 0) {
-            // Element extends List, so access children via items array
             for (int64_t i = 0; i < document_wrapper->length; i++) {
                 Item child = document_wrapper->items[i];
                 TypeId child_type_id = get_type_id(child);
@@ -3723,7 +3414,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
                     Element* child_elem = (Element*)child.item;
                     TypeElmt* child_type = (TypeElmt*)child_elem->type;
 
-                    // Skip processing instructions and comments
                     if (child_type->name.str[0] != '?' && child_type->name.str[0] != '!') {
                         xml_root = child_elem;
                         break;
@@ -3738,7 +3428,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    // Step 4: Create CSS engine and set viewport
     CssEngine* css_engine = css_engine_create(pool);
     if (!css_engine) {
         log_error("[Lambda XML] Failed to create CSS engine");
@@ -3746,7 +3435,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
-    // Step 5: Load external CSS stylesheet.
     CssStylesheet* external_stylesheet = load_pool_backed_stylesheet(
         css_engine, pool, xml_input->xml_stylesheet_href,
         "Lambda XML", "XML stylesheet", true);
@@ -3756,21 +3444,15 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     log_info("[TIMING] load: parse CSS: %.1fms",
              duration_cast<duration<double, std::milli>>(t_dom - t_css_parse).count());
 
-    // Step 6: Create DOM document
     DomDocument* dom_doc = dom_document_create(xml_input);
     if (!dom_doc) {
         log_error("[Lambda XML] Failed to create DOM document");
         return nullptr;
     }
 
-    // Assign pool to DOM document for future allocations
     dom_doc->document_pool = pool;
     dom_doc->url = xml_url;
 
-    // Step 7: Build DOM tree from XML elements
-    // XML needs to be wrapped in html > body structure for the layout engine
-
-    // Create <html> wrapper element
     DomElement* html_elem = DomElement::create(dom_doc, "html", nullptr);
     if (!html_elem) {
         log_error("[Lambda XML] Failed to create html wrapper element");
@@ -3778,7 +3460,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     }
     html_elem->tag_id = MARKUP_NAME_HTML;
 
-    // Create <body> wrapper element
     DomElement* body_elem = DomElement::create(dom_doc, "body", nullptr);
     if (!body_elem) {
         log_error("[Lambda XML] Failed to create body wrapper element");
@@ -3786,14 +3467,12 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     }
     body_elem->tag_id = MARKUP_NAME_BODY;
 
-    // Build DOM tree from XML content and add as child of body
     DomElement* xml_dom = build_dom_tree_from_element(xml_root, dom_doc, body_elem);
     if (!xml_dom) {
         log_error("[Lambda XML] Failed to build DOM tree from XML");
         return nullptr;
     }
 
-    // Wire up the tree structure: html > body > xml_dom
     html_elem->first_child = static_cast<DomNode*>(body_elem);
     html_elem->last_child = static_cast<DomNode*>(body_elem);
     body_elem->parent = static_cast<DomNode*>(html_elem);
@@ -3803,7 +3482,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     xml_dom->parent = static_cast<DomNode*>(body_elem);
 
 
-    // Use html_elem as the root
     dom_doc->root = html_elem;
     dom_doc->html_root = xml_root;
 
@@ -3811,16 +3489,11 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     log_info("[TIMING] load: build DOM: %.1fms",
              duration_cast<duration<double, std::milli>>(t_cascade - t_dom).count());
 
-    // Step 8: Store stylesheet in DOM document.
-    store_document_stylesheets(dom_doc, external_stylesheet, nullptr, 0, pool);
-
-    // Step 9: Apply CSS cascade to DOM tree
-
-    // Apply external stylesheet to the entire tree (starting from html)
     CssStylesheet* xml_stylesheets[1] = {external_stylesheet};
+    store_document_stylesheets(dom_doc, xml_stylesheets, 1, nullptr, 0, pool);
+
     layout_apply_css_stylesheets(dom_doc, html_elem, xml_stylesheets, 1, pool, css_engine);
 
-    // Apply inline style="" attributes (if XML elements have them)
     apply_inline_styles_to_tree(html_elem, pool);
 
     auto t_complete = high_resolution_clock::now();
@@ -3832,15 +3505,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     return dom_doc;
 }
 
-/**
- * Load HTML document from an in-memory string, using the Lambda CSS pipeline.
- * Avoids writing to a temp file. Creates its own pool (owned by the returned DomDocument).
- *
- * @param html_source  NUL-terminated HTML string (caller owns; not freed here)
- * @param viewport_width  Viewport width for layout
- * @param viewport_height Viewport height for layout
- * @return DomDocument ready for layout, or nullptr on failure
- */
+// load an in-memory HTML string with a document-owned pool.
 static DomDocument* load_html_string_doc(const char* html_source, int viewport_width, int viewport_height) {
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("load_html_string_doc: pool_create failed"); return nullptr; }
@@ -3849,16 +3514,7 @@ static DomDocument* load_html_string_doc(const char* html_source, int viewport_w
     return load_lambda_html_doc(base_url, nullptr, viewport_width, viewport_height, pool, html_source);
 }
 
-/**
- * Load Lambda script document with Lambda CSS system
- * Evaluates a Lambda script, wraps the result in HTML structure, applies CSS, builds DOM tree
- *
- * @param script_url URL to Lambda script file (.ls)
- * @param viewport_width Viewport width for layout
- * @param viewport_height Viewport height for layout
- * @param pool Memory pool for allocations
- * @return DomDocument structure with Lambda CSS DOM, ready for layout
- */
+// evaluate a Lambda document and run it through the CSS/layout pipeline.
 DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
                                            int viewport_width, int viewport_height, Pool* pool) {
     auto total_start = std::chrono::high_resolution_clock::now();
@@ -3874,13 +3530,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         return nullptr;
     }
 
-    struct ScriptTempPathGuard {
-        char* path;
-        ~ScriptTempPathGuard() {
-            if (path) mem_free(path);
-        }
-    };
-    ScriptTempPathGuard script_path_guard = { url_to_local_path(script_url) };
+    LayoutTempPathGuard script_path_guard = { url_to_local_path(script_url) };
     char* script_filepath = script_path_guard.path;
     if (!script_filepath) {
         log_error("load_lambda_script_doc: failed to resolve Lambda script URL");
@@ -3898,16 +3548,12 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         mem_free(runtime);
         return nullptr;
     }
-    // Template/render registration starts before run_script_mir initializes the
-    // heap, but it still belongs to this long-lived document Runtime.
     if (!eval_context_thread_initialize(layout_context)) {
         log_error("load_lambda_script_doc: failed to initialize eval thread");
         release_layout_runtime(runtime);
         return nullptr;
     }
 
-    // Phase 5: Create result Input with arena for unified DOM allocation.
-    // Elements from JIT execution will be fat DomElements on this arena.
     Pool* result_pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     Input* result_input = Input::create(result_pool, script_url);
     result_input->ui_mode = true;
@@ -3918,11 +3564,8 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     render_map_init();
     render_map_set_path_recorder(&render_map_record_path);
 
-    // Use MIR Direct JIT to evaluate the Lambda script as a functional document result.
     Input* script_output = run_script_mir(runtime, script_source, script_filepath, false);
 
-    // The runner and later event handlers borrow this same canonical context.
-    // Never fabricate a heap-only stack context for post-evaluation roots.
     if (runtime->heap) {
         layout_context->heap = runtime->heap;
         layout_context->name_pool = runtime->name_pool;
@@ -3951,10 +3594,8 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     log_info("[TIMING] Step 1 - Evaluate script: %.1fms",
         std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
 
-    // Step 2: Get the result from script execution
     TypeId result_type = get_type_id(script_output->root);
 
-    // Check if the script returned an error
     if (result_type == LMD_TYPE_ERROR) {
         log_error("[Lambda Script] Script evaluation returned an error");
         release_layout_runtime(runtime);
@@ -3962,12 +3603,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         return nullptr;
     }
 
-    // Check if the script returned SVG content — embed it in an HTML page so the
-    // inline SVG rendering pipeline (render_inline_svg) handles it, rather than
-    // the external-SVG file path (which uses ThorVG's root-embed approach that
-    // is not drawn by render_children at the root level).
     auto write_svg_wrapped_html = [&](const char* svg_content) -> DomDocument* {
-        // Build a minimal HTML page that contains only the SVG
         StrBuf* html_buf = strbuf_new_cap(strlen(svg_content) + 256);
         strbuf_append_format(html_buf,
             "<!DOCTYPE html><html><head><style>"
@@ -4005,16 +3641,10 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             log_info("[Lambda Script] Script returned SVG string, wrapping in HTML for rendering");
             return write_svg_wrapped_html(result_str->chars);
         }
-        // Handle HTML strings: script returned a full HTML document as a string
         if (result_str && result_str->len >= 5 &&
                 (strncmp(result_str->chars, "<html", 5) == 0 ||
                  (result_str->len >= 9 && strncmp(result_str->chars, "<!DOCTYPE", 9) == 0))) {
             log_info("[Lambda Script] Script returned HTML string, loading in-memory (%zu bytes)", (size_t)result_str->len);
-            // Parse the HTML into a DomDocument BEFORE tearing down the runtime:
-            // result_str lives in the runtime's GC heap, so runtime_cleanup() frees
-            // result_str->chars. load_html_string_doc() copies its input (see the
-            // SVG helper above, which frees its buffer right after the call), so the
-            // document is self-contained once it returns. (was heap-use-after-free)
             DomDocument* doc = load_html_string_doc(result_str->chars, viewport_width, viewport_height);
             release_layout_runtime(runtime);
             pool_destroy(result_pool);
@@ -4023,7 +3653,6 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         }
     }
 
-    // Check if the script returned a complete HTML document
     bool is_html_document = false;
     Element* html_elem = nullptr;
 
@@ -4031,29 +3660,21 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         Element* result_elem = script_output->root.element;
         TypeElmt* elem_type = (TypeElmt*)result_elem->type;
 
-        // Check if this is an 'html' element
         if (elem_type && str_ieq_const(elem_type->name.str, strlen(elem_type->name.str), "html")) {
             is_html_document = true;
             html_elem = result_elem;
         }
     }
 
-    // If not a complete HTML document, wrap the result
     if (!is_html_document) {
-        // Wrap the result in an HTML structure for rendering
         Element* result_elem = nullptr;
 
         if (result_type == LMD_TYPE_ELEMENT) {
-            // If the script returns an element (but not html), use it directly
             result_elem = script_output->root.element;
         } else {
-            // For other types, create a wrapper element with the result as text content
-
-            // Convert result to string representation
             StrBuf* result_str = strbuf_new();
             print_item(result_str, script_output->root, 0);
 
-            // Use MarkBuilder with result_input (ui_mode) so DomText goes to result arena
             MarkBuilder builder(result_input);
             ElementBuilder div = builder.element("div");
             div.text(result_str->str);
@@ -4067,11 +3688,8 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         log_info("[TIMING] Step 2 - Wrap result: %.1fms",
             std::chrono::duration<double, std::milli>(step2_start - step1_end).count());
 
-        // Step 3: Create HTML wrapper structure using MarkBuilder (on result arena in ui_mode)
-
         MarkBuilder builder(result_input);
 
-        // Build: html > body > result_elem
         Item result_item = {.element = result_elem};
 
         ElementBuilder body = builder.element("body");
@@ -4088,10 +3706,8 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         log_info("[TIMING] Step 3 - Build HTML structure: %.1fms",
             std::chrono::duration<double, std::milli>(step3_end - step2_start).count());
 
-        // Step 4: Update root to point to html element
         result_input->root = html_item;
     } else {
-        // In ui_mode, the html root element is already on result_input's arena
         result_input->root = {.element = html_elem};
 
         auto step2_start = std::chrono::high_resolution_clock::now();
@@ -4099,7 +3715,6 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             std::chrono::duration<double, std::milli>(step2_start - step1_end).count());
     }
 
-    // Step 5: Create the DOM and CSS engine from the retained script input.
     auto step5_start = std::chrono::high_resolution_clock::now();
     DomElement* dom_root = nullptr;
     CssEngine* css_engine = nullptr;
@@ -4115,20 +3730,17 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     log_info("[TIMING] Step 5 - Build DOM tree: %.1fms",
         std::chrono::duration<double, std::milli>(step5_end - step5_start).count());
 
-    // Step 6: Load stylesheets
     auto step6_start = std::chrono::high_resolution_clock::now();
     CssStylesheet* script_stylesheet = nullptr;
     int inline_stylesheet_count = 0;
     CssStylesheet** inline_stylesheets = nullptr;
 
     if (!is_html_document) {
-        // For non-HTML elements, load the default script.css
         char* css_filename = lambda_home_path("input/script.css");
         script_stylesheet = load_pool_backed_stylesheet(
             css_engine, pool, css_filename, "Lambda Script", "script.css", true);
         mem_free(css_filename);
     } else {
-        // For complete HTML documents, extract inline <style> elements
         inline_stylesheets = extract_and_collect_css(
             html_elem, css_engine, script_filepath, pool, &inline_stylesheet_count);
     }
@@ -4137,53 +3749,38 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     log_info("[TIMING] Step 6 - CSS parse: %.1fms",
         std::chrono::duration<double, std::milli>(step6_end - step6_start).count());
 
-    // Step 8: Apply CSS cascade to DOM tree
     auto step7_start = std::chrono::high_resolution_clock::now();
     CssStylesheet* script_stylesheets[1] = {script_stylesheet};
-    layout_apply_css_stylesheets(dom_doc, dom_root, script_stylesheets, 1, pool, css_engine);
-    layout_apply_css_stylesheets(dom_doc, dom_root, inline_stylesheets,
-                             inline_stylesheet_count, pool, css_engine);
+    int script_sheet_count = 0;
+    CssStylesheet** all_script_stylesheets = layout_merge_css_sources(
+        pool, script_stylesheet ? script_stylesheets : nullptr,
+        script_stylesheet ? 1 : 0, inline_stylesheets, inline_stylesheet_count,
+        &script_sheet_count);
+    layout_apply_css_stylesheets(dom_doc, dom_root, all_script_stylesheets,
+                                 script_sheet_count, pool, css_engine);
 
     auto step7_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 7 - CSS cascade: %.1fms",
         std::chrono::duration<double, std::milli>(step7_end - step7_start).count());
 
-    // Step 9: Populate DomDocument structure
     populate_layout_document(dom_doc, dom_root, html_elem, HTML5, script_url, nullptr);
 
-    int total_stylesheets = inline_stylesheet_count + (script_stylesheet ? 1 : 0);
-    if (total_stylesheets > 0) {
-        dom_doc->stylesheet_capacity = total_stylesheets;
-        dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, total_stylesheets * sizeof(CssStylesheet*));
-        dom_doc->stylesheet_count = 0;
-        if (script_stylesheet) {
-            dom_doc->stylesheets[dom_doc->stylesheet_count++] = script_stylesheet;
-        }
-        for (int i = 0; i < inline_stylesheet_count; i++) {
-            if (inline_stylesheets[i]) {
-                dom_doc->stylesheets[dom_doc->stylesheet_count++] = inline_stylesheets[i];
-            }
-        }
+    store_document_stylesheets(dom_doc,
+                               script_stylesheet ? script_stylesheets : nullptr,
+                               script_stylesheet ? 1 : 0,
+                               inline_stylesheets, inline_stylesheet_count, pool);
+    if (dom_doc->stylesheet_count > 0) {
         dom_doc->cached_inline_sheets = inline_stylesheets;
         dom_doc->cached_inline_sheet_count = inline_stylesheet_count;
         dom_doc->services.cached_css_engine = css_engine;
     }
 
-    // Register doc root for render map parent fixup during retransform
     Item html_item_root = {.element = html_elem};
     render_map_set_doc_root(html_item_root);
 
-    // Event execution continues on this document Runtime's canonical context.
     input_context = nullptr;
 
-    // Store the retained runtime on the document for event handler execution.
-    // The GC heap, JIT code, and name pool remain live for the session.
     dom_doc->lambda_runtime = runtime;
-
-    // dom_doc->input already set to result_input by dom_document_create
-    // result_input has ui_mode=true and its arena holds the fat DomElement/DomText nodes
-
-    // Note: Don't cleanup runtime — heap and JIT context still in use for reactive UI
 
     auto total_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] load_lambda_script_doc total: %.1fms",
@@ -4197,17 +3794,6 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     return load_lambda_script_source_doc(script_url, nullptr, viewport_width, viewport_height, pool);
 }
 
-// ============================================================================
-// Reactive UI: rebuild DOM after template handler modifies state
-// ============================================================================
-
-/**
- * Rebuild the DOM tree from the Lambda html_root element after a template
- * handler has modified state and render_map_retransform() has updated the
- * Lambda element tree. Rebuilds DOM, re-applies CSS, and triggers relayout.
- */
-
-// helper: walk view tree to find a form text input matching tag + class
 static View* find_matching_input(View* root, const char* match_tag, const char* match_class) {
     if (!root) return nullptr;
     if (root->is_element()) {
@@ -4227,7 +3813,6 @@ static View* find_matching_input(View* root, const char* match_tag, const char* 
             }
             if (tag_ok && class_ok) return root;
         }
-        // recurse into children
         DomNode* child = elem->first_child;
         while (child) {
             if (child->node_type == DOM_NODE_ELEMENT) {
@@ -4417,6 +4002,17 @@ static View* restore_lambda_focus(DomDocument* doc, DocState* state, bool had_fo
     return focused;
 }
 
+static Element* layout_current_html_root(DomDocument* doc) {
+    if (!doc) return nullptr;
+    Element* html_root = doc->html_root;
+    Item current_root = render_map_get_doc_root();
+    if (current_root.item && current_root.element != html_root) {
+        html_root = current_root.element;
+        doc->html_root = html_root;
+    }
+    return html_root;
+}
+
 void rebuild_lambda_doc(UiContext* uicon) {
     if (!uicon || !uicon->document) {
         log_error("rebuild_lambda_doc: no document");
@@ -4424,14 +4020,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     }
 
     DomDocument* doc = uicon->document;
-    Element* html_elem = doc->html_root;
-
-    // sync html_root with render_map's doc_root (may have been updated by retransform)
-    Item current_doc_root = render_map_get_doc_root();
-    if (current_doc_root.item && current_doc_root.element != html_elem) {
-        html_elem = current_doc_root.element;
-        doc->html_root = html_elem;
-    }
+    Element* html_elem = layout_current_html_root(doc);
 
     if (!html_elem) {
         log_error("rebuild_lambda_doc: no html_root in document");
@@ -4442,22 +4031,18 @@ void rebuild_lambda_doc(UiContext* uicon) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
-    // Save focus info before rebuild so we can restore it on the new tree
     DocState* state = (DocState*)doc->state;
     LambdaFocusRestore focus_restore;
     bool had_focus = capture_lambda_focus_restore(state, &focus_restore);
 
-    // ensure CSS property system is initialized
     css_property_system_init(doc->document_pool);
 
-    // create/reset element-to-DOM map (enables incremental rebuild next time)
     if (!doc->element_dom_map) {
         doc->element_dom_map = element_dom_map_create();
     } else {
         hashmap_clear(doc->element_dom_map, false);
     }
 
-    // rebuild DOM tree from Lambda elements
     DomElement* new_root = build_dom_tree_from_element(html_elem, doc, nullptr);
     if (!new_root) {
         log_error("rebuild_lambda_doc: failed to rebuild DOM tree");
@@ -4465,16 +4050,13 @@ void rebuild_lambda_doc(UiContext* uicon) {
     }
     auto t_dom = high_resolution_clock::now();
 
-    // replace old DOM root
     doc->root = new_root;
 
-    // apply cached CSS stylesheets (parse once, reuse on subsequent rebuilds)
     CssStylesheet** inline_sheets = doc->cached_inline_sheets;
     int inline_count = doc->cached_inline_sheet_count;
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
 
     if (!inline_sheets) {
-        // first rebuild: parse and cache stylesheets
         css_engine = css_engine_create(doc->document_pool);
         if (css_engine) {
             inline_sheets = extract_and_collect_css(
@@ -4485,30 +4067,17 @@ void rebuild_lambda_doc(UiContext* uicon) {
         }
     }
 
-    if (css_engine && inline_sheets && inline_count > 0) {
-        SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
-        state_configure_selector_matcher((DocState*)doc->state, matcher);
-        for (int i = 0; i < inline_count; i++) {
-            radiant_apply_css_stylesheet_to_tree(new_root, inline_sheets[i],
-                                                     matcher, doc->document_pool, css_engine);
-        }
-    }
+    layout_apply_css_stylesheets(
+        doc, new_root, inline_sheets, inline_count, doc->document_pool, css_engine);
 
-    // apply inline style attributes
     apply_inline_styles_to_tree(new_root, doc->document_pool);
     auto t_css = high_resolution_clock::now();
 
-    // layout_html_doc owns the retained-tree reset; clearing this pointer would
-    // orphan a script-created geometry tree and its heap-allocated shell.
-
-    // trigger relayout + repaint
     layout_html_doc(uicon, doc, false);
     auto t_layout = high_resolution_clock::now();
 
-    // Restore focus to matching element in new view tree
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
 
-    // autofocus — if no focus was restored, scan the new tree for an autofocus input
     if (state && !focus_has_current(state) &&
         doc->view_tree && doc->view_tree->root) {
         View* af = find_matching_input(doc->view_tree->root, "input", nullptr);
@@ -4521,8 +4090,6 @@ void rebuild_lambda_doc(UiContext* uicon) {
         }
     }
 
-    // Skip render here — let the main loop handle it via render().
-    // Full rebuild: mark dirty tracker for full repaint so the main loop does a full render.
     if (state) {
         state->dirty_tracker.full_repaint = true;
         doc_state_mark_dirty(state);
@@ -4538,13 +4105,6 @@ void rebuild_lambda_doc(UiContext* uicon) {
         duration<double, std::milli>(t_end - t_start).count());
 }
 
-// ============================================================================
-// Reactive UI: incremental DOM rebuild (Phase 12)
-// Only rebuilds changed DOM subtrees instead of the entire tree.
-// Falls back to full rebuild when incremental update is not possible.
-// ============================================================================
-
-// Helper: compute absolute bounds of a DOM node by walking parent chain
 static void compute_absolute_bounds(DomNode* node, float* abs_x, float* abs_y, float* w, float* h) {
     *abs_x = node->x;
     *abs_y = node->y;
@@ -4565,26 +4125,17 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     }
 
     DomDocument* doc = uicon->document;
-    Element* html_elem = doc->html_root;
-
-    // sync html_root with render_map's doc_root (may have been updated by retransform)
-    Item current_doc_root = render_map_get_doc_root();
-    if (current_doc_root.item && current_doc_root.element != html_elem) {
-        html_elem = current_doc_root.element;
-        doc->html_root = html_elem;
-    }
+    Element* html_elem = layout_current_html_root(doc);
 
     if (!html_elem) {
         log_error("rebuild_lambda_doc_incremental: no html_root in document");
         return;
     }
 
-    // Determine if incremental update is feasible
     bool can_incremental = (doc->element_dom_map != nullptr) &&
                            (doc->root != nullptr) &&
                            (result_count > 0);
 
-    // Verify all results have Element-typed old_result that exists in the map
     if (can_incremental) {
         for (int i = 0; i < result_count; i++) {
             if (get_type_id(results[i].old_result) != LMD_TYPE_ELEMENT) {
@@ -4597,7 +4148,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
                 can_incremental = false;
                 break;
             }
-            // Verify parent DOM is still valid (not GC-collected)
             DomElement* parent_dom = lam::dom_require_element(old_dom->parent);
             if (parent_dom->node_type != DOM_NODE_ELEMENT || !parent_dom->tag_name) {
                 can_incremental = false;
@@ -4611,31 +4161,23 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     }
 
     if (!can_incremental) {
-        // Fallback: full rebuild (rebuild_lambda_doc creates element_dom_map for next time)
         rebuild_lambda_doc(uicon);
         return;
     }
 
-    // --- Incremental path ---
-
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
-    // Save focus info
     DocState* state = (DocState*)doc->state;
     LambdaFocusRestore focus_restore;
     bool had_focus = capture_lambda_focus_restore(state, &focus_restore);
 
-    // ensure CSS property system is initialized
     css_property_system_init(doc->document_pool);
 
-    // Get cached CSS (must already exist from prior full rebuild)
     CssStylesheet** inline_sheets = doc->cached_inline_sheets;
     int inline_count = doc->cached_inline_sheet_count;
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
 
-    // Phase 12.3: Record old bounds of changed subtrees for dirty tracking
-    // (Views ARE DomNodes — x/y/w/h from previous layout pass)
     struct { float x, y, w, h; } old_bounds[16] = {};
     DomElement* new_doms[16] = {};
     for (int i = 0; i < result_count && i < 16; i++) {
@@ -4647,7 +4189,12 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
     }
 
-    // Phase 12.1: Replace changed DOM subtrees
+    SelectorMatcher* incremental_matcher = nullptr;
+    if (css_engine && inline_sheets && inline_count > 0) {
+        incremental_matcher = selector_matcher_create(doc->document_pool);
+        state_configure_selector_matcher((DocState*)doc->state, incremental_matcher);
+    }
+
     for (int i = 0; i < result_count; i++) {
         Element* old_elem = results[i].old_result.element;
         Element* new_elem = results[i].new_result.element;
@@ -4660,16 +4207,12 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         DomNode* old_previous = old_dom->prev_sibling;
         DomNode* old_next = old_dom->next_sibling;
 
-        // Build new DOM subtree from the new Lambda element (not linked to parent yet)
         DomElement* new_dom = build_dom_tree_from_element(new_elem, doc, nullptr);
 
         if (!new_dom) {
             continue;
         }
 
-        // UI-mode retransforms can reuse the same fat DomElement storage for
-        // old and new output. create_in clears its links, so self-replacement
-        // would detach the live subtree and invalidate focus after each input.
         if (new_dom == old_dom) {
             new_dom->parent = parent_dom;
             new_dom->prev_sibling = old_previous;
@@ -4691,11 +4234,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
         if (i < 16) new_doms[i] = new_dom;
 
-        // Phase 16: Mark new subtree as layout_dirty
         set_layout_dirty_subtree(static_cast<DomNode*>(new_dom), true);
 
-        // Phase 15: Invalidate ancestor styles only (new subtree nodes already have styles_resolved=false)
-        // Phase 16: Mark ancestors as layout_dirty for incremental layout
         DomNode* ancestor = static_cast<DomNode*>(parent_dom);
         while (ancestor) {
             if (ancestor->is_element()) {
@@ -4705,52 +4245,36 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             ancestor = ancestor->parent;
         }
 
-        // Phase 12.2: Apply CSS cascade to new subtree only
-        if (css_engine && inline_sheets && inline_count > 0) {
-            SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
-            state_configure_selector_matcher((DocState*)doc->state, matcher);
-            for (int s = 0; s < inline_count; s++) {
-                radiant_apply_css_stylesheet_to_tree(new_dom, inline_sheets[s],
-                                                         matcher, doc->document_pool, css_engine);
-            }
+        if (incremental_matcher) {
+            radiant_apply_css_stylesheets_to_tree(
+                doc, new_dom, inline_sheets, inline_count, doc->document_pool,
+                css_engine, incremental_matcher);
         }
 
-        // Apply inline styles to new subtree only
         apply_inline_styles_to_tree(new_dom, doc->document_pool);
     }
     auto t_dom_css = high_resolution_clock::now();
 
-    // Reuse ViewTree — Phase 16: incremental layout preserves pool for clean elements
     if (doc->view_tree) {
-        // Phase 16: DON'T destroy pool — preserve BoundaryProp etc. for unchanged elements
-        // view_pool_destroy(doc->view_tree);  // disabled for incremental layout
         doc->incremental_layout = true;
-        // Phase 15: Skip blanket reset_styles_resolved — only ancestors + new nodes need re-resolution
         doc->skip_style_reset = true;
         layout_html_doc(uicon, doc, true);
         doc->skip_style_reset = false;
         doc->incremental_layout = false;
-        // Phase 16: Clear layout_dirty flags for next pass
         if (doc->root) set_layout_dirty_subtree(static_cast<DomNode*>(doc->root), false);
     } else {
         layout_html_doc(uicon, doc, false);
     }
     auto t_layout = high_resolution_clock::now();
 
-    // Phase 12.3: Compute dirty rects from old/new bounds
     if (state) {
         dirty_clear(&state->dirty_tracker);
 
-        // Template retransform can affect any part of the page (counters, headers, etc.),
-        // not just the replaced subtree.  Always do a full repaint for correctness.
         state->dirty_tracker.full_repaint = true;
     }
 
-    // Restore focus
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
 
-    // Phase 20: autofocus — if no focus was restored and new subtree contains an input,
-    // check for autofocus attribute and set focus to it
     if (state && !focus_has_current(state)) {
         for (int i = 0; i < result_count; i++) {
             if (new_doms[i]) {
@@ -4767,7 +4291,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
     }
 
-    // Skip render here — let the main loop handle it via render().
     if (state) {
         doc_state_mark_dirty(state);
         doc_state_clear_reflow(state);  // layout already done by rebuild
@@ -4785,9 +4308,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         has_selective ? "yes" : "no");
 }
 
-/**
- * Parse command-line arguments
- */
 #define MAX_INPUT_FILES 4096
 
 struct LayoutOptions {
@@ -4812,136 +4332,96 @@ struct LayoutOptions {
     bool disable_animations;                    // freeze CSS animation/transition effects for snapshots
 };
 
-bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
-    // Initialize defaults
-    opts->input_file_count = 0;
-    opts->output_file = nullptr;
-    opts->output_dir = nullptr;
-    opts->css_file = nullptr;
-    opts->view_output_file = nullptr;  // Default to ./temp/view_tree.json
-    opts->font_dir_count = 0;
-    opts->viewport_width = 1200;  // Standard viewport width for layout tests (matches browser reference)
-    opts->viewport_height = 800;  // Standard viewport height for layout tests (matches browser reference)
-    opts->debug = false;
-    opts->event_log = false;
-    opts->state_dump = false;
-    opts->continue_on_error = false;
-    opts->summary = false;
-    opts->timing_output_file = nullptr;
-    opts->memory_profile_output_file = nullptr;
-    opts->auto_close = false;
-    opts->disable_animations = false;
+static bool layout_read_option_value(int argc, char** argv, int* index,
+                                     const char* option, const char** value) {
+    if (!index || !value || *index + 1 >= argc) {
+        log_error("Error: %s requires an argument", option);
+        return false;
+    }
+    *value = argv[++*index];
+    return true;
+}
 
-    // Parse arguments
+enum LayoutOptionKind {
+    LAYOUT_OPTION_STRING,
+    LAYOUT_OPTION_INTEGER,
+    LAYOUT_OPTION_FLAG
+};
+
+struct LayoutOption {
+    const char* short_name;
+    const char* long_name;
+    const char* error_name;
+    void* target;
+    LayoutOptionKind kind;
+};
+
+bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
+    if (!opts) return false;
+    *opts = {};
+    opts->viewport_width = 1200;
+    opts->viewport_height = 800;
+
+    LayoutOption options[] = {
+        {"-o", "--output", "-o", &opts->output_file, LAYOUT_OPTION_STRING},
+        {nullptr, "--output-dir", "--output-dir", &opts->output_dir, LAYOUT_OPTION_STRING},
+        {nullptr, "--view-output", "--view-output", &opts->view_output_file, LAYOUT_OPTION_STRING},
+        {"-c", "--css", "-c", &opts->css_file, LAYOUT_OPTION_STRING},
+        {nullptr, "--timing-output", "--timing-output", &opts->timing_output_file, LAYOUT_OPTION_STRING},
+        {nullptr, "--view-memory-profile", "--view-memory-profile",
+         &opts->memory_profile_output_file, LAYOUT_OPTION_STRING},
+        {"-vw", "--viewport-width", "-vw/--viewport-width", &opts->viewport_width, LAYOUT_OPTION_INTEGER},
+        {"-vh", "--viewport-height", "-vh/--viewport-height", &opts->viewport_height, LAYOUT_OPTION_INTEGER},
+        {nullptr, "--debug", nullptr, &opts->debug, LAYOUT_OPTION_FLAG},
+        {nullptr, "--event-log", nullptr, &opts->event_log, LAYOUT_OPTION_FLAG},
+        {nullptr, "--state-dump", nullptr, &opts->state_dump, LAYOUT_OPTION_FLAG},
+        {nullptr, "--continue-on-error", nullptr, &opts->continue_on_error, LAYOUT_OPTION_FLAG},
+        {nullptr, "--summary", nullptr, &opts->summary, LAYOUT_OPTION_FLAG},
+        {nullptr, "--auto-close", nullptr, &opts->auto_close, LAYOUT_OPTION_FLAG},
+        {nullptr, "--disable-animations", nullptr, &opts->disable_animations, LAYOUT_OPTION_FLAG}
+    };
+
     for (int i = 0; i < argc; i++) {
-        if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
-            if (i + 1 < argc) {
-                opts->output_file = argv[++i];
-            } else {
-                log_error("Error: -o requires an argument");
-                return false;
-            }
-        }
-        else if (strcmp(argv[i], "--output-dir") == 0) {
-            if (i + 1 < argc) {
-                opts->output_dir = argv[++i];
-            } else {
-                log_error("Error: --output-dir requires an argument");
-                return false;
-            }
-        }
-        else if (strcmp(argv[i], "--view-output") == 0) {
-            if (i + 1 < argc) {
-                opts->view_output_file = argv[++i];
-            } else {
-                log_error("Error: --view-output requires an argument");
-                return false;
-            }
-        }
-        else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--css") == 0) {
-            if (i + 1 < argc) {
-                opts->css_file = argv[++i];
-            } else {
-                log_error("Error: -c requires an argument");
-                return false;
-            }
-        }
-        else if (strcmp(argv[i], "-vw") == 0 || strcmp(argv[i], "--viewport-width") == 0) {
-            if (i + 1 < argc) {
-                i++;
-                opts->viewport_width = (int)str_to_int64_default(argv[i], strlen(argv[i]), 0);
-            } else {
-                log_error("Error: -vw/--viewport-width requires an argument");
-                return false;
-            }
-        }
-        else if (strcmp(argv[i], "-vh") == 0 || strcmp(argv[i], "--viewport-height") == 0) {
-            if (i + 1 < argc) {
-                i++;
-                opts->viewport_height = (int)str_to_int64_default(argv[i], strlen(argv[i]), 0);
-            } else {
-                log_error("Error: -vh/--viewport-height requires an argument");
-                return false;
-            }
-        }
-        else if (strcmp(argv[i], "--debug") == 0) {
-            opts->debug = true;
-        }
-        else if (strcmp(argv[i], "--event-log") == 0) {
-            opts->event_log = true;
-        }
-        else if (strcmp(argv[i], "--state-dump") == 0) {
-            opts->state_dump = true;
-        }
-        else if (strcmp(argv[i], "--continue-on-error") == 0) {
-            opts->continue_on_error = true;
-        }
-        else if (strcmp(argv[i], "--summary") == 0) {
-            opts->summary = true;
-        }
-        else if (strcmp(argv[i], "--auto-close") == 0) {
-            opts->auto_close = true;
-        }
-        else if (strcmp(argv[i], "--disable-animations") == 0) {
-            opts->disable_animations = true;
-        }
-        else if (strcmp(argv[i], "--timing-output") == 0) {
-            if (i + 1 < argc) {
-                opts->timing_output_file = argv[++i];
-            } else {
-                log_error("Error: --timing-output requires an argument");
-                return false;
-            }
-        }
-        else if (strcmp(argv[i], "--view-memory-profile") == 0) {
-            if (i + 1 < argc) {
-                opts->memory_profile_output_file = argv[++i];
-            } else {
-                log_error("Error: --view-memory-profile requires an argument");
-                return false;
-            }
-        }
-        else if (strcmp(argv[i], "--font-dir") == 0) {
-            if (i + 1 < argc) {
-                if (opts->font_dir_count < 16) {
-                    opts->font_dirs[opts->font_dir_count++] = argv[++i];
+        bool matched = false;
+        for (size_t option = 0; option < sizeof(options) / sizeof(options[0]); option++) {
+            LayoutOption* spec = &options[option];
+            if ((spec->short_name && strcmp(argv[i], spec->short_name) == 0) ||
+                (spec->long_name && strcmp(argv[i], spec->long_name) == 0)) {
+                if (spec->kind == LAYOUT_OPTION_FLAG) {
+                    *(bool*)spec->target = true;
                 } else {
-                    log_error("Error: too many --font-dir options (max 16)");
-                    return false;
+                    const char* value = nullptr;
+                    if (!layout_read_option_value(argc, argv, &i, spec->error_name, &value)) return false;
+                    if (spec->kind == LAYOUT_OPTION_STRING) {
+                        *(const char**)spec->target = value;
+                    } else {
+                        *(int*)spec->target = (int)str_to_int64_default(
+                            value, strlen(value), 0); // INT_CAST_OK: CLI viewport option
+                    }
                 }
-            } else {
-                log_error("Error: --font-dir requires an argument");
-                return false;
+                matched = true;
+                break;
             }
         }
-        else if (argv[i][0] != '-') {
-            // Collect all non-option arguments as input files
-            if (opts->input_file_count < MAX_INPUT_FILES) {
-                opts->input_files[opts->input_file_count++] = argv[i];
-            } else {
+        if (matched) continue;
+
+        if (strcmp(argv[i], "--font-dir") == 0) {
+            const char* value = nullptr;
+            if (!layout_read_option_value(argc, argv, &i, "--font-dir", &value)) return false;
+            if (opts->font_dir_count >= 16) {
+                log_error("Error: too many --font-dir options (max 16)");
+                return false;
+            }
+            opts->font_dirs[opts->font_dir_count++] = value;
+            continue;
+        }
+
+        if (argv[i][0] != '-') {
+            if (opts->input_file_count >= MAX_INPUT_FILES) {
                 log_error("Error: too many input files (max %d)", MAX_INPUT_FILES);
                 return false;
             }
+            opts->input_files[opts->input_file_count++] = argv[i];
         }
     }
 
@@ -5173,11 +4653,20 @@ static void write_layout_phase_timing(FILE* timing_file, const char* input_file,
     fflush(timing_file);
 }
 
-/**
- * Load and layout a single document file.
- * Returns true on success, false on failure.
- * Uses shared UiContext for batch efficiency.
- */
+static void layout_close_failed_load_logs(EventStateLog** event_log,
+                                          StateDumpLog** state_dump) {
+    if (event_log && *event_log) {
+        event_state_log_document(*event_log, "load_failed");
+        event_state_log_close(*event_log);
+        *event_log = nullptr;
+    }
+    if (state_dump && *state_dump) {
+        radiant_state_dump_close(*state_dump);
+        *state_dump = nullptr;
+    }
+}
+
+// load and layout one document file.
 static bool layout_single_file(
     const char* input_file,
     const char* output_path,
@@ -5207,7 +4696,6 @@ static bool layout_single_file(
     HtmlLoadPhaseTiming html_load_timing = {};
     DocumentScriptPhaseTiming document_script_timing = {};
 
-    // Create memory pool for this file
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) {
         log_error("Failed to create memory pool for %s", input_file);
@@ -5215,8 +4703,6 @@ static bool layout_single_file(
     }
     js_mir_begin_document_phase_timing();
 
-    // The document Runtime does not exist at this point. Carry auto-close with
-    // the document so script setup cannot silently lose it before binding.
     DocumentJsHostConfig js_host_config = {
         ui_context,
         false,
@@ -5239,30 +4725,15 @@ static bool layout_single_file(
         state_dump = radiant_state_dump_open(input_file);
     }
 
-    // For HTTP URLs without clear extension, fetch and determine type from Content-Type
     const char* effective_ext = nullptr;
     bool is_http_url = (input_url->scheme == URL_SCHEME_HTTP || input_url->scheme == URL_SCHEME_HTTPS);
 
-    // Detect file type by extension and load appropriate document
     DomDocument* doc = nullptr;
     const char* ext = strrchr(input_file, '.');
 
-    // Check if extension looks valid (not just a domain TLD like .org, .com, etc.)
-    bool has_valid_ext = ext && (
-        strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
-        strcmp(ext, ".ls") == 0 || strcmp(ext, ".tex") == 0 ||
-        strcmp(ext, ".latex") == 0 || strcmp(ext, ".md") == 0 ||
-        strcmp(ext, ".markdown") == 0 || strcmp(ext, ".xml") == 0 ||
-        strcmp(ext, ".wiki") == 0 || strcmp(ext, ".pdf") == 0 ||
-        strcmp(ext, ".mmd") == 0 || strcmp(ext, ".d2") == 0 ||
-        strcmp(ext, ".dot") == 0 || strcmp(ext, ".gv") == 0 ||
-        strcmp(ext, ".dsl") == 0 || strcmp(ext, ".structurizr") == 0 ||
-        strcmp(ext, ".svg") == 0 || strcmp(ext, ".png") == 0 ||
-        strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0 ||
-        strcmp(ext, ".gif") == 0
-    );
+    bool has_valid_ext = layout_path_has_known_extension(input_file) ||
+        (ext && (strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0));
 
-    // If HTTP URL with no valid extension, fetch to determine type
     if (is_http_url && !has_valid_ext) {
         const char* url_str = url_get_href(input_url);
         log_info("[Layout] HTTP URL without extension, fetching to determine type: %s", url_str);
@@ -5272,59 +4743,28 @@ static bool layout_single_file(
             log_error("Failed to fetch URL: %s (HTTP %ld)", url_str,
                       response ? response->status_code : 0);
             if (response) free_fetch_response(response);
-            if (event_log) {
-                event_state_log_document(event_log, "load_failed");
-                event_state_log_close(event_log);
-            }
-            if (state_dump) {
-                radiant_state_dump_close(state_dump);
-                state_dump = nullptr;
-            }
+            layout_close_failed_load_logs(&event_log, &state_dump);
             pool_destroy(pool);
             return false;
         }
 
-        // Get extension from Content-Type
         effective_ext = content_type_to_extension(response->content_type);
         log_info("[Layout] HTTP Content-Type: %s -> extension: %s",
                  response->content_type ? response->content_type : "(none)",
                  effective_ext ? effective_ext : ".html");
 
-        // Use the effective extension for routing
         ext = effective_ext;
 
         free_fetch_response(response);
     }
 
-    if (ext && strcmp(ext, ".ls") == 0) {
-        log_info("[Layout] Detected Lambda script file, using script evaluation pipeline");
-        doc = load_lambda_script_doc(input_url, viewport_width, viewport_height, pool);
-    } else if (graph_bridge_path_is_graph(input_file)) {
-        log_info("[Layout] Detected graph file, using Lambda graph package pipeline");
-        doc = load_graph_bridge_doc(input_url, viewport_width, viewport_height, pool);
-    } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
-        // Load LaTeX document via LaTeX→HTML pipeline
-        log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline");
-        doc = load_latex_doc(input_url, viewport_width, viewport_height, pool);
-    } else if (ext && (strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0)) {
-        log_info("[Layout] Detected Markdown file, using Markdown→HTML pipeline");
-        doc = load_markdown_doc(input_url, viewport_width, viewport_height, pool);
-    } else if (ext && strcmp(ext, ".wiki") == 0) {
-        log_info("[Layout] Detected Wiki file, using Wiki→HTML pipeline");
-        doc = load_wiki_doc(input_url, viewport_width, viewport_height, pool);
-    } else if (ext && strcmp(ext, ".xml") == 0) {
-        log_info("[Layout] Detected XML file, using XML→DOM pipeline");
-        doc = load_xml_doc(input_url, viewport_width, viewport_height, pool);
-    } else if (ext && strcmp(ext, ".pdf") == 0) {
-        log_error("[Layout] Direct PDF layout was retired; use lambda view PDF conversion");
-        doc = nullptr;
-    } else if (ext && strcmp(ext, ".svg") == 0) {
-        log_info("[Layout] Detected SVG file, using SVG→ViewTree pipeline");
-        doc = load_svg_doc(input_url, viewport_width, viewport_height, pool, 1.0f);
-    } else {
+    bool special_handled = false;
+    const char* route_path = effective_ext ? effective_ext : input_file;
+    doc = load_layout_special_file(input_url, route_path, viewport_width, viewport_height,
+                                   pool, false, false, &special_handled);
+    if (!special_handled) {
         const int max_redirects = 8;
         for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
-            // layout CLI only needs load-time DOM mutations; event dispatch is not used
             script_runner_set_retain_js_state(false);
             script_runner_set_execute_external_scripts(true);
             doc = load_lambda_html_doc_profiled(input_url, css_file, viewport_width,
@@ -5374,14 +4814,7 @@ static bool layout_single_file(
             &html_load_timing, &document_script_timing, &document_js_timing);
         write_layout_phase_timing(timing_file, input_file, false, &timing);
         log_error("Failed to load document: %s", input_file);
-        if (event_log) {
-            event_state_log_document(event_log, "load_failed");
-            event_state_log_close(event_log);
-        }
-        if (state_dump) {
-            radiant_state_dump_close(state_dump);
-            state_dump = nullptr;
-        }
+        layout_close_failed_load_logs(&event_log, &state_dump);
         pool_destroy(pool);
         return false;
     }
@@ -5390,21 +4823,12 @@ static bool layout_single_file(
     js_mir_end_document_phase_timing(&document_js_timing);
 
     ui_context->document = doc;
-    // browser layout snapshots freeze animations before measuring; doing this
-    // on the document prevents sampled effects from changing used geometry.
     doc->disable_css_animations = disable_animations;
 
     DocState* state = radiant_document_ensure_state(doc, "layout_single_file");
     if (!state) {
         log_error("Failed to create DocState for headless document: %s", input_file);
-        if (event_log) {
-            event_state_log_document(event_log, "load_failed");
-            event_state_log_close(event_log);
-        }
-        if (state_dump) {
-            radiant_state_dump_close(state_dump);
-            state_dump = nullptr;
-        }
+        layout_close_failed_load_logs(&event_log, &state_dump);
         script_runner_cleanup_js_state(doc);
         dom_document_destroy(doc);
         ui_context->document = nullptr;
@@ -5425,11 +4849,9 @@ static bool layout_single_file(
         event_log,
         "layout");
 
-    // Process @font-face rules from stored stylesheets
     process_document_font_faces(ui_context, doc);
     EnhancedFileCache* layout_file_cache = layout_prepare_network_resources(ui_context, doc);
 
-    // Perform layout computation
     if (doc->view_tree && doc->view_tree->root) {
         log_info("[Layout] Document already has view_tree (PDF/SVG/image), skipping CSS layout");
     } else {
@@ -5460,8 +4882,6 @@ static bool layout_single_file(
         }
     }
 
-    // Capture while all six domains are live and before output/render work can
-    // contaminate the page-layout sample.
     bool success = !memory_profile_output_file || view_memory_profile_write(
         doc, input_file, memory_profile_output_file);
     if (!doc->view_tree || !doc->view_tree->root) {
@@ -5470,7 +4890,6 @@ static bool layout_single_file(
     } else {
         log_info("[Layout] Layout computed successfully for %s", input_file);
 
-        // For PDF/SVG documents, disable text node combination
         bool is_pdf = ext && strcmp(ext, ".pdf") == 0;
         bool is_svg = ext && strcmp(ext, ".svg") == 0;
         if (is_pdf || is_svg) {
@@ -5504,11 +4923,6 @@ static bool layout_single_file(
         write_layout_phase_timing(timing_file, input_file, success, &timing);
     }
 
-    // Cleanup: destroy view tree, document, and per-file CSS pool.
-    // DomDocument and ViewTree are malloc-allocated with their own internal pools.
-    // Failing to free them leaks pools/arenas across batch files, which can cause
-    // grouped-owner corruption that manifests as SIGTRAP in system malloc.
-
     if (event_log || state_dump) {
         state_end_event_cascade(
             doc && doc->state ? (DocState*)doc->state : nullptr,
@@ -5524,17 +4938,12 @@ static bool layout_single_file(
         if (doc->resource_manager) {
             radiant_cleanup_network_support(doc);
         }
-        // Document script execution clears transient TLS. The render-map and
-        // editor path table still belong to this document Runtime, so release
-        // them before JS teardown removes that canonical context.
         Runtime* render_runtime = doc->lambda_runtime ? doc->lambda_runtime : doc->js.runtime;
         if (render_runtime &&
                 !eval_context_thread_initialize(runtime_get_eval_context(render_runtime))) {
             log_error("[Layout] document cleanup reached a foreign eval thread");
         }
         source_pos_bridge_reset();
-        // StateStore releases document-owned template and render maps while
-        // their semantic Runtime remains live; JS teardown clears that owner.
         radiant_document_destroy_state(doc);
         render_map_destroy();
         script_runner_cleanup_js_state(doc);
@@ -5559,13 +4968,6 @@ static bool layout_single_file(
         state_dump = nullptr;
     }
 
-    // Free the input URL (dom_document_destroy doesn't own it). Some loaders
-    // (markdown/latex/wiki/xml/script) pass input_url straight into
-    // input_from_source, so a tracked Input ends up owning this exact pointer
-    // (input->url == input_url). InputManager::destroy_global() below frees
-    // every tracked input->url, so detach it from any owner first to avoid a
-    // double-free. detach_url is doc-independent, so it also covers the case
-    // where doc creation failed after the input was parsed.
     if (input_url) {
         InputManager::detach_url(input_url);
         url_destroy(input_url);
@@ -5581,28 +4983,20 @@ static bool layout_single_file(
 
     if (!script_runner_js_batch_cleanup_unsafe()) {
         js_event_loop_shutdown();
-        // Reset JS runtime state to avoid cross-document leakage in batch mode.
-        // Must happen BEFORE script_runner_cleanup_heap: js_batch_reset clears
-        // global Items (js_input and the current call state) that reference the
-        // JS heap. Freeing the heap first would leave dangling pointers.
         js_batch_reset();
         js_dom_batch_reset();
         js_globals_batch_reset();
 
-        // drain the JS owner group after js_batch_reset cleared its globals.
         script_runner_cleanup_heap();
     }
     lambda_uv_cleanup();
 
-    // Reset per-document font state to avoid cross-document cache pollution in batch mode.
     fontface_cleanup(ui_context);
     font_context_reset_document_fonts(ui_context->font_ctx);
     font_context_reset_glyph_caches(ui_context->font_ctx);
 
-    // [DIAG] Track memory usage per file for leak detection
     {
 #ifdef __APPLE__
-        // use mach_task_basic_info for CURRENT RSS (not peak)
         struct mach_task_basic_info info;
         mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
         task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count);
@@ -5628,22 +5022,16 @@ static bool layout_single_file(
         }
     }
 
-    // Release decoded image cache to prevent batch accumulation.
     image_cache_cleanup(ui_context);
 
-    // Release the InputManager's global pool which accumulates all Input parse trees.
     InputManager::destroy_global();
 
-    // Reset ui_context document pointer to avoid dangling pointer in batch mode
     ui_context->document = nullptr;
 
     return success;
 }
 
-/**
- * Generate output path for batch mode.
- * Returns allocated string that caller must free.
- */
+// generate a batch-mode output path.
 static char* generate_output_path(const char* input_file, const char* output_dir) {
     // Extract basename from input file
     const char* basename = strrchr(input_file, '/');
@@ -5777,10 +5165,7 @@ static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context
     return file_cache;
 }
 
-/**
- * Main layout command implementation using Lambda CSS and Radiant layout.
- * Supports both single-file and batch modes.
- */
+// run the layout command in single-file or batch mode.
 // Crash recovery for layout_single_file — catches SIGSEGV/SIGBUS from
 // Apple framework code (CoreText/CoreGraphics font rasterisation, vImage lazy load, etc.)
 // that cannot be fixed in our code.
@@ -5825,13 +5210,11 @@ static void crash_signal_handler(int sig) {
 }
 
 int cmd_layout(int argc, char** argv) {
-    // Install crash signal handlers for diagnostics
 #ifndef _WIN32
     signal(SIGTRAP, crash_signal_handler);
 #endif
     signal(SIGABRT, crash_signal_handler);
 #ifndef _WIN32
-    // SIGSEGV/SIGBUS use sigaction for crash recovery (siglongjmp) support
     {
         struct sigaction sa;
         memset(&sa, 0, sizeof(sa));
@@ -5842,15 +5225,12 @@ int cmd_layout(int argc, char** argv) {
     }
 #endif
 
-    // preserve the process-wide no-log flag; parsing here would re-enable
-    // glyph-level logging after main() disabled it for layout workers.
     if (!log_is_disabled() && file_exists("log.conf")) {
         FILE *file = fopen("log.txt", "w");
         if (file) { fclose(file); }
         log_parse_config_file("log.conf");
     }
 
-    // Parse command-line options
     LayoutOptions opts;
     if (!parse_layout_args(argc, argv, &opts)) {
         return 1;
@@ -5859,12 +5239,10 @@ int cmd_layout(int argc, char** argv) {
     bool batch_mode = (opts.input_file_count > 1) || (opts.output_dir != nullptr);
     bool auto_close = opts.auto_close || shell_getenv("LAMBDA_AUTO_CLOSE") != nullptr;
 
-    // Disable all logging in batch mode for better performance
     if (batch_mode) {
         log_disable_all();
     }
 
-    // Initialize UI context once (shared across all files in batch mode)
     UiContext ui_context;
     memset(&ui_context, 0, sizeof(UiContext));
 
@@ -5872,10 +5250,6 @@ int cmd_layout(int argc, char** argv) {
         log_error("Failed to initialize UI context");
         return 1;
     }
-    // Batch files share immutable JS code, but every document instantiates it
-    // into a fresh heap and DOM realm. The batch owns the cache lifetime.
-    // The disable switch keeps an identical uncached path available for
-    // differential verification and performance attribution.
     bool js_mir_cache_enabled = batch_mode &&
         shell_getenv("LAMBDA_DISABLE_JS_MIR_CACHE") == nullptr;
     JsMirCache* js_mir_cache = js_mir_cache_enabled ? js_mir_cache_create() : nullptr;
@@ -5884,22 +5258,17 @@ int cmd_layout(int argc, char** argv) {
     }
     script_runner_set_js_mir_cache(js_mir_cache);
 
-    // Add custom font scan directories (must be done before any font resolution)
     for (int i = 0; i < opts.font_dir_count; i++) {
         font_context_add_scan_directory(ui_context.font_ctx, opts.font_dirs[i]);
     }
 
-    // Set viewport dimensions (both window and viewport must be set so layout_init
-    // uses the correct initial containing block width via uicon->viewport_width)
     ui_context.window_width = opts.viewport_width;
     ui_context.window_height = opts.viewport_height;
     ui_context.viewport_width = opts.viewport_width;
     ui_context.viewport_height = opts.viewport_height;
 
-    // Create surface for layout calculations
     ui_context_create_surface(&ui_context, opts.viewport_width, opts.viewport_height);
 
-    // Get current working directory
     Url* cwd = get_current_dir();
 
     FILE* timing_file = nullptr;
@@ -5910,29 +5279,24 @@ int cmd_layout(int argc, char** argv) {
         }
     }
 
-    // Track statistics for batch mode
     int success_count = 0;
     int failure_count = 0;
     auto batch_start = std::chrono::high_resolution_clock::now();
 
-    // Process all input files
     for (int i = 0; i < opts.input_file_count; i++) {
         const char* input_file = opts.input_files[i];
         const char* output_path = nullptr;
         char* allocated_output = nullptr;
 
         if (batch_mode && opts.output_dir) {
-            // Generate output path for batch mode
             allocated_output = generate_output_path(input_file, opts.output_dir);
             output_path = allocated_output;
         } else {
-            // Single file mode: use view_output_file if specified
             output_path = opts.view_output_file;
         }
 
         bool success = false;
 #ifdef _WIN32
-        // Windows: no sigsetjmp/siglongjmp crash recovery — run directly
         try {
             success = layout_single_file(
                 input_file,
@@ -5955,7 +5319,6 @@ int cmd_layout(int argc, char** argv) {
             success = false;
         }
 #else
-        // Guard layout with crash recovery (catches SIGSEGV/SIGBUS from Apple frameworks)
         layout_crash_guarded = 1;
         int crash_sig = sigsetjmp(layout_crash_jmpbuf, 1);
         if (crash_sig == 0) {
@@ -5982,10 +5345,6 @@ int cmd_layout(int argc, char** argv) {
             }
             layout_crash_guarded = 0;
         } else {
-            // After SIGSEGV/SIGBUS recovery via siglongjmp, the process state
-            // (heap, allocator, caches) is likely corrupted. It is NOT safe to
-            // continue processing more files — exit immediately with code 1
-            // (graceful failure) instead of 128+sig (crash).
             fprintf(stderr, "layout: recovered from signal %d processing %s — exiting\n",
                     crash_sig, input_file);
             _exit(1);
@@ -6011,7 +5370,6 @@ int cmd_layout(int argc, char** argv) {
     auto batch_end = std::chrono::high_resolution_clock::now();
     double total_time_ms = std::chrono::duration<double, std::milli>(batch_end - batch_start).count();
 
-    // Print summary if requested or in batch mode
     if (opts.summary || (batch_mode && opts.input_file_count > 1)) {
         printf("\n=== Layout Summary ===\n");
         printf("Files processed: %d\n", success_count + failure_count);
@@ -6024,7 +5382,6 @@ int cmd_layout(int argc, char** argv) {
         printf("======================\n");
     }
 
-    // Cleanup
     if (timing_file) {
         fclose(timing_file);
         timing_file = nullptr;
@@ -6032,8 +5389,6 @@ int cmd_layout(int argc, char** argv) {
     script_runner_set_js_mir_cache(nullptr);
     js_mir_cache_destroy(js_mir_cache);
     ui_context_cleanup(&ui_context);
-    // cwd is the base URL passed (by pointer, not owned) into each
-    // layout_single_file call; cmd_layout owns it and must free it here.
     if (cwd) url_destroy(cwd);
 
     printf("Completed layout command: %d success, %d failed\n", success_count, failure_count);

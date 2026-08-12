@@ -817,6 +817,43 @@ LAMBDA_STATIC_ASSERT(CONTAINER_FLAG_JS_PROPS == (1u << 6),
 LAMBDA_STATIC_ASSERT(CONTAINER_FLAG_CTOR_RESERVED == (1u << 7),
                      "Container constructor-reserved mask must match its bitfield");
 
+// Tune5 §5.1: the high three ArrayNum flag bits carry the per-instance
+// ordinary-JS elements state.  Low layout/view bits remain ArrayNum-owned;
+// zero deliberately means unmanaged or excluded from JS element semantics.
+#define JS_ELEMENTS_STATE_MASK ((uint8_t)0xe0u)
+typedef enum JsElementsKind {
+    JS_ELEMENTS_NONE = 0x00,
+    JS_ELEMENTS_PACKED_NUMERIC = 0x20,
+    JS_ELEMENTS_PACKED_TAGGED = 0x40,
+    JS_ELEMENTS_HOLEY_TAGGED = 0x60,
+    JS_ELEMENTS_SPARSE_TAGGED = 0x80,
+} JsElementsKind;
+
+static inline JsElementsKind container_js_elements_kind(const Container* c) {
+    return c ? (JsElementsKind)(c->array_flags & JS_ELEMENTS_STATE_MASK)
+             : JS_ELEMENTS_NONE;
+}
+
+static inline void container_set_js_elements_kind(Container* c,
+                                                   JsElementsKind kind) {
+    if (!c) return;
+    c->array_flags = (uint8_t)((c->array_flags & (uint8_t)~JS_ELEMENTS_STATE_MASK) |
+                               ((uint8_t)kind & JS_ELEMENTS_STATE_MASK));
+}
+
+static inline bool container_js_elements_kind_is_tagged(JsElementsKind kind) {
+    return kind == JS_ELEMENTS_PACKED_TAGGED ||
+        kind == JS_ELEMENTS_HOLEY_TAGGED || kind == JS_ELEMENTS_SPARSE_TAGGED;
+}
+
+#if defined(__cplusplus)
+static_assert(JS_ELEMENTS_STATE_MASK == (uint8_t)(0x20u | 0x40u | 0x80u),
+              "Tune5 elements state must occupy only reserved high bits");
+#else
+_Static_assert(JS_ELEMENTS_STATE_MASK == (uint8_t)(0x20u | 0x40u | 0x80u),
+               "Tune5 elements state must occupy only reserved high bits");
+#endif
+
 // A descriptor carries the full semantic contract for a packed carrier. TypeId
 // alone cannot distinguish int from int?, even though both have LMD_TYPE_INT.
 typedef enum LaneStorageKind {
@@ -992,7 +1029,7 @@ bool js_array_has_props(const Array* arr);
 Map* js_array_props(const Array* arr);
 int64_t container_tail_reserved(const Array* arr);
 int64_t container_dense_capacity(const Array* arr);
-void js_array_set_props(Array* arr, Map* props);
+void js_elements_set_props(Array* arr, Map* props);
 void list_relocate_owned_tail(List* list, Item* old_items, int64_t old_capacity,
                               Item* new_items, int64_t new_capacity);
 void owned_item_slot_store(Item* storage, int64_t item_count,
@@ -1961,6 +1998,8 @@ extern "C" {
     ArrayNum* array_float();
 
     ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length);
+    ArrayNum* array_num_new_with_extra(ArrayNumElemType elem_type, int64_t length,
+                                       int64_t extra);
     ArrayNum* array_num_new_external_view(Container* base, void* data_base,
         ArrayNumElemType elem_type, int64_t byte_offset, int64_t length, bool mutable_view);
     ArrayNum* array_num_new_buffer_view(Container* base, ByteBufferHandle* handle,

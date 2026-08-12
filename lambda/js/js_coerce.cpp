@@ -29,15 +29,16 @@ static inline Item k_to_string(void) {
     return (Item){.item = s2it(heap_create_name("toString", 8))};
 }
 
-static inline bool is_object_type(TypeId t) {
-    return t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY ||
+static inline bool is_object_value(Item value) {
+    TypeId t = get_type_id(value);
+    return t == LMD_TYPE_MAP || js_is_js_array(value) ||
            t == LMD_TYPE_FUNC || t == LMD_TYPE_ELEMENT;
 }
 
 // Per ES §7.1.1 step 4.b: a valid ToPrimitive return is *not* an object.
 // We treat the four object TypeIds above as objects for this check.
-static inline bool result_is_object(TypeId rt) {
-    return is_object_type(rt);
+static inline bool result_is_object(Item result) {
+    return is_object_value(result);
 }
 
 static inline bool js_coerce_is_bigint(Item value) {
@@ -48,7 +49,7 @@ static inline bool js_coerce_is_bigint(Item value) {
 
 extern "C" Item js_to_primitive(Item value, JsHint hint) {
     TypeId vt = get_type_id(value);
-    if (!is_object_type(vt)) return value;
+    if (!is_object_value(value)) return value;
 
     const char* hint_str =
         (hint == JS_HINT_NUMBER) ? "number" :
@@ -61,19 +62,19 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     // boxed-primitive prototype.
     if (vt == LMD_TYPE_MAP) {
         bool own_pv = false;
-        Item pv = js_map_get_fast_ext(value.map, "__primitiveValue__", 18, &own_pv);
+        Item pv = js_map_shape_lookup_ext(value.map, "__primitiveValue__", 18, &own_pv);
         bool pv_is_symbol = get_type_id(pv) == LMD_TYPE_INT && it2i(pv) <= -(int64_t)JS_SYMBOL_BASE;
         if (own_pv && !js_coerce_is_bigint(pv) && !pv_is_symbol) {
             bool has_vo = false, has_ts = false, has_tp = false;
-            js_map_get_fast_ext(value.map, "valueOf", 7, &has_vo);
-            js_map_get_fast_ext(value.map, "toString", 8, &has_ts);
+            js_map_shape_lookup_ext(value.map, "valueOf", 7, &has_vo);
+            js_map_shape_lookup_ext(value.map, "toString", 8, &has_ts);
             has_tp = it2b(js_has_own_property(value, k_sym_to_primitive()));
             if (!has_vo && !has_ts && !has_tp) return pv;
         }
     }
 
-    // Step 2: @@toPrimitive lookup (prototype-chain walk via js_property_get).
-    JS_ASSIGN_OR_RETURN(to_prim, js_property_get(value, k_sym_to_primitive()));
+    // Step 2: @@toPrimitive lookup (prototype-chain walk via js_get_key_default).
+    JS_ASSIGN_OR_RETURN(to_prim, js_get_key_default(value, k_sym_to_primitive()));
     TypeId tp_type = get_type_id(to_prim);
     bool tp_present = (to_prim.item != ItemNull.item &&
                        tp_type != LMD_TYPE_UNDEFINED &&
@@ -91,7 +92,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
         Item hint_item = (Item){.item = s2it(heap_create_name(hint_str))};
         Item args[1] = { hint_item };
         JS_ASSIGN_OR_RETURN(result, js_call_function(to_prim, value, args, 1));
-        if (result_is_object(get_type_id(result))) {
+        if (result_is_object(result)) {
             return js_throw_type_error("Cannot convert object to primitive value");
         }
         return result;
@@ -99,7 +100,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
 
     if (vt == LMD_TYPE_MAP) {
         bool raw_proto_found = false;
-        Item raw_proto = js_map_get_fast_ext(value.map, "__proto__", 9, &raw_proto_found);
+        Item raw_proto = js_map_shape_lookup_ext(value.map, "__proto__", 9, &raw_proto_found);
         Item proto = raw_proto_found ? raw_proto : js_get_prototype(value);
         TypeId proto_type = get_type_id(proto);
         bool null_proto = proto.item == ItemNull.item || proto.item == ITEM_JS_UNDEFINED ||
@@ -108,8 +109,8 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
         if (raw_proto_found && null_proto && value.map != object_proto &&
             !js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
             bool has_vo = false, has_ts = false;
-            js_map_get_fast_ext(value.map, "valueOf", 7, &has_vo);
-            js_map_get_fast_ext(value.map, "toString", 8, &has_ts);
+            js_map_shape_lookup_ext(value.map, "valueOf", 7, &has_vo);
+            js_map_shape_lookup_ext(value.map, "toString", 8, &has_ts);
             if (!has_vo && !has_ts) {
                 return js_throw_type_error("Cannot convert object to primitive value");
             }
@@ -129,10 +130,10 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     }
 
     for (int i = 0; i < 2; i++) {
-        JS_ASSIGN_OR_RETURN(fn, js_property_get(value, method_keys[i]));
+        JS_ASSIGN_OR_RETURN(fn, js_get_key_default(value, method_keys[i]));
         if (fn.item == ItemNull.item || !js_is_callable(fn)) continue;
         JS_ASSIGN_OR_RETURN(result, js_call_function(fn, value, NULL, 0));
-        if (!result_is_object(get_type_id(result))) {
+        if (!result_is_object(result)) {
             return result;
         }
     }

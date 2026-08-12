@@ -65,11 +65,11 @@ static char* js_dom_build_submit_query(Item entries) {
     StrBuf* sb = strbuf_new_cap(128);
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len; i++) {
-        Item pair = js_array_get_int(entries, i);
+        Item pair = js_elements_get_int(entries, i);
         if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
 
-        const char* key = fn_to_cstr(js_array_get_int(pair, 0));
-        const char* val = fn_to_cstr(js_array_get_int(pair, 1));
+        const char* key = fn_to_cstr(js_elements_get_int(pair, 0));
+        const char* val = fn_to_cstr(js_elements_get_int(pair, 1));
         if (!key) continue;
         if (!val) val = "";
 
@@ -154,7 +154,7 @@ static void event_apply_new_target_prototype(Item event) {
         return;
     }
 
-    Item proto = js_property_get(new_target,
+    Item proto = js_get_key_default(new_target,
         (Item){.item = s2it(heap_create_name("prototype"))});
     TypeId proto_type = get_type_id(proto);
     if (proto_type == LMD_TYPE_MAP || proto_type == LMD_TYPE_FUNC ||
@@ -177,7 +177,7 @@ static Item event_exception_message(Item err) {
     Item msg = err;
     if (get_type_id(err) == LMD_TYPE_MAP || get_type_id(err) == LMD_TYPE_OBJECT) {
         Item m_key = (Item){.item = s2it(heap_create_name("message"))};
-        Item m = js_property_get(err, m_key);
+        Item m = js_get_key_default(err, m_key);
         if (get_type_id(m) == LMD_TYPE_STRING) msg = m;
         else msg = js_to_string(err);
     } else if (get_type_id(err) != LMD_TYPE_STRING) {
@@ -212,7 +212,7 @@ static void report_exception_to_window_onerror(Item err, const char* type) {
     Item global = js_get_global_this();
     if (global.item == 0) return;
     Item onerr_key = (Item){.item = s2it(heap_create_name("onerror"))};
-    Item onerr = js_property_get(global, onerr_key);
+    Item onerr = js_get_key_default(global, onerr_key);
     if (!js_is_callable(onerr)) return;
     Item msg = event_exception_message(err);
     Item args[5] = { msg, ItemNull, (Item){.item = b2it(false)}, (Item){.item = b2it(false)}, err };
@@ -323,9 +323,9 @@ extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter
     }
 
     Item submit_event = js_create_event("submit", true, true);
-    js_property_set(submit_event, (Item){.item = s2it(heap_create_name("isTrusted"))},
+    js_set_key_default(submit_event, (Item){.item = s2it(heap_create_name("isTrusted"))},
                     (Item){.item = ITEM_TRUE});
-    js_property_set(submit_event, (Item){.item = s2it(heap_create_name("submitter"))},
+    js_set_key_default(submit_event, (Item){.item = s2it(heap_create_name("submitter"))},
                     submitter ? js_dom_wrap_element(submitter) : ItemNull);
     Item submit_ok = js_dom_dispatch_event(form_item, submit_event);
     if (submit_ok.item == ITEM_FALSE) return make_js_undefined();
@@ -836,10 +836,10 @@ static Item parse_listener_options(Item opts, bool* capture, bool* once,
         Item passive_key = (Item){.item = s2it(heap_create_name("passive"))};
         Item signal_key = (Item){.item = s2it(heap_create_name("signal"))};
 
-        Item cap_val = js_property_get(opts, cap_key);
-        Item once_val = js_property_get(opts, once_key);
-        Item passive_val = js_property_get(opts, passive_key);
-        Item signal_val = js_property_get(opts, signal_key);
+        Item cap_val = js_get_key_default(opts, cap_key);
+        Item once_val = js_get_key_default(opts, once_key);
+        Item passive_val = js_get_key_default(opts, passive_key);
+        Item signal_val = js_get_key_default(opts, signal_key);
 
         if (cap_val.item != 0 && get_type_id(cap_val) != LMD_TYPE_UNDEFINED)
             *capture = js_is_truthy(cap_val);
@@ -872,7 +872,7 @@ static bool signal_is_aborted(Item signal_item) {
     if (signal_item.item == 0) return false;
     TypeId t = get_type_id(signal_item);
     if (t != LMD_TYPE_MAP && t != LMD_TYPE_OBJECT) return false;
-    Item ab = js_property_get(signal_item,
+    Item ab = js_get_key_default(signal_item,
         (Item){.item = s2it(heap_create_name("aborted"))});
     return js_is_truthy(ab);
 }
@@ -1022,7 +1022,7 @@ void js_dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, 
         TypeId opt_tid = get_type_id(opts_item);
         if (opt_tid == LMD_TYPE_MAP || opt_tid == LMD_TYPE_OBJECT) {
             Item cap_key = (Item){.item = s2it(heap_create_name("capture"))};
-            Item cap_val = js_property_get(opts_item, cap_key);
+            Item cap_val = js_get_key_default(opts_item, cap_key);
             if (cap_val.item != 0 && get_type_id(cap_val) != LMD_TYPE_UNDEFINED)
                 capture = js_is_truthy(cap_val);
         } else {
@@ -1073,33 +1073,33 @@ static void nl_compact(NodeListeners* nl) {
 static void event_set_str(Item event, const char* key, const char* value) {
     Item k = (Item){.item = s2it(heap_create_name(key))};
     Item v = value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull;
-    js_property_set(event, k, v);
+    js_set_key_default(event, k, v);
 }
 
 // helper: set a bool property on an event object
 static void event_set_bool(Item event, const char* key, bool value) {
     Item k = (Item){.item = s2it(heap_create_name(key))};
     Item v = (Item){.item = b2it(value ? 1 : 0)};
-    js_property_set(event, k, v);
+    js_set_key_default(event, k, v);
 }
 
 // helper: set an int property on an event object
 static void event_set_int(Item event, const char* key, int value) {
     Item k = (Item){.item = s2it(heap_create_name(key))};
     Item v = (Item){.item = i2it(value)};
-    js_property_set(event, k, v);
+    js_set_key_default(event, k, v);
 }
 
 // helper: set a double property
 static void event_set_double(Item event, const char* key, double value) {
     Item k = (Item){.item = s2it(heap_create_name(key))};
-    js_property_set(event, k, event_make_double(value));
+    js_set_key_default(event, k, event_make_double(value));
 }
 
 // helper: set an arbitrary item
 static void event_set_item(Item event, const char* key, Item value) {
     Item k = (Item){.item = s2it(heap_create_name(key))};
-    js_property_set(event, k, value);
+    js_set_key_default(event, k, value);
 }
 
 static void event_mark_non_writable(Item event, const char* key) {
@@ -1110,7 +1110,7 @@ static void event_mark_non_writable(Item event, const char* key) {
 // Get the current event flag values from per-event slots stored on the event
 // object itself (so nested dispatches don't trample each other).
 static bool event_flag_get(Item event, const char* key) {
-    Item v = js_property_get(event, (Item){.item = s2it(heap_create_name(key))});
+    Item v = js_get_key_default(event, (Item){.item = s2it(heap_create_name(key))});
     return js_is_truthy(v);
 }
 
@@ -1125,7 +1125,7 @@ extern "C" Item js_event_prevent_default() {
         // Spec: silently no-op if the event is in a passive listener.
         if (event_flag_get(ev, "__in_passive")) return make_js_undefined();
         // Spec: silently no-op if event is not cancelable.
-        Item cancelable = js_property_get(ev, (Item){.item = s2it(heap_create_name("cancelable"))});
+        Item cancelable = js_get_key_default(ev, (Item){.item = s2it(heap_create_name("cancelable"))});
         if (!js_is_truthy(cancelable)) return make_js_undefined();
         event_set_bool(ev, "__default_prevented", true);
     }
@@ -1169,7 +1169,7 @@ extern "C" Item js_event_returnvalue_set(Item value) {
     if (get_type_id(ev) != LMD_TYPE_MAP) return make_js_undefined();
     bool truthy = js_is_truthy(value);
     if (!truthy) {
-        Item cancelable = js_property_get(ev, (Item){.item = s2it(heap_create_name("cancelable"))});
+        Item cancelable = js_get_key_default(ev, (Item){.item = s2it(heap_create_name("cancelable"))});
         if (js_is_truthy(cancelable) && !event_flag_get(ev, "__in_passive")) {
             event_set_bool(ev, "__default_prevented", true);
         }
@@ -1209,7 +1209,7 @@ extern "C" Item js_event_composed_path() {
     Item ev = js_get_this();
     Item out = js_array_new(0);
     if (get_type_id(ev) != LMD_TYPE_MAP) return out;
-    Item path = js_property_get(ev,
+    Item path = js_get_key_default(ev,
         (Item){.item = s2it(heap_create_name("__dispatch_path"))});
     if (get_type_id(path) != LMD_TYPE_ARRAY || !path.array) return out;
     // The dispatch path is fixed before listeners run. Copying it prevents a
@@ -1356,11 +1356,11 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
     Item cp_key = (Item){.item = s2it(heap_create_name("composedPath"))};
     Item ie_key = (Item){.item = s2it(heap_create_name("initEvent"))};
 
-    js_property_set(event, pd_key, js_new_native_function(js_event_prevent_default));
-    js_property_set(event, sp_key, js_new_native_function(js_event_stop_propagation));
-    js_property_set(event, si_key, js_new_native_function(js_event_stop_immediate_propagation));
-    js_property_set(event, cp_key, js_new_native_function(js_event_composed_path));
-    js_property_set(event, ie_key, js_new_native_function(js_event_init_event));
+    js_set_key_default(event, pd_key, js_new_native_function(js_event_prevent_default));
+    js_set_key_default(event, sp_key, js_new_native_function(js_event_stop_propagation));
+    js_set_key_default(event, si_key, js_new_native_function(js_event_stop_immediate_propagation));
+    js_set_key_default(event, cp_key, js_new_native_function(js_event_composed_path));
+    js_set_key_default(event, ie_key, js_new_native_function(js_event_init_event));
 
     // Install accessor properties for legacy spec'd setters/getters
     // (returnValue, cancelBubble, defaultPrevented). These override the
@@ -1375,29 +1375,29 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
         // returnValue: get + set
         descriptor_root.set(js_new_object());
         Item rv_desc = descriptor_root.get();
-        js_property_set(rv_desc, get_key, js_new_native_function(js_event_returnvalue_get));
-        js_property_set(rv_desc, set_key, js_new_native_function(js_event_returnvalue_set));
-        js_property_set(rv_desc, conf_key, true_v);
-        js_property_set(rv_desc, enum_key, true_v);
+        js_set_key_default(rv_desc, get_key, js_new_native_function(js_event_returnvalue_get));
+        js_set_key_default(rv_desc, set_key, js_new_native_function(js_event_returnvalue_set));
+        js_set_key_default(rv_desc, conf_key, true_v);
+        js_set_key_default(rv_desc, enum_key, true_v);
         js_object_define_property(event,
             (Item){.item = s2it(heap_create_name("returnValue"))}, rv_desc);
 
         // cancelBubble: get + set
         descriptor_root.set(js_new_object());
         Item cb_desc = descriptor_root.get();
-        js_property_set(cb_desc, get_key, js_new_native_function(js_event_cancelbubble_get));
-        js_property_set(cb_desc, set_key, js_new_native_function(js_event_cancelbubble_set));
-        js_property_set(cb_desc, conf_key, true_v);
-        js_property_set(cb_desc, enum_key, true_v);
+        js_set_key_default(cb_desc, get_key, js_new_native_function(js_event_cancelbubble_get));
+        js_set_key_default(cb_desc, set_key, js_new_native_function(js_event_cancelbubble_set));
+        js_set_key_default(cb_desc, conf_key, true_v);
+        js_set_key_default(cb_desc, enum_key, true_v);
         js_object_define_property(event,
             (Item){.item = s2it(heap_create_name("cancelBubble"))}, cb_desc);
 
         // defaultPrevented: get only
         descriptor_root.set(js_new_object());
         Item dp_desc = descriptor_root.get();
-        js_property_set(dp_desc, get_key, js_new_native_function(js_event_defaultprevented_get));
-        js_property_set(dp_desc, conf_key, true_v);
-        js_property_set(dp_desc, enum_key, true_v);
+        js_set_key_default(dp_desc, get_key, js_new_native_function(js_event_defaultprevented_get));
+        js_set_key_default(dp_desc, conf_key, true_v);
+        js_set_key_default(dp_desc, enum_key, true_v);
         js_object_define_property(event,
             (Item){.item = s2it(heap_create_name("defaultPrevented"))}, dp_desc);
     }
@@ -1423,7 +1423,7 @@ Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
     event_set_int(event_root.get(), "inputMethod", 0);
     event_set_str(event_root.get(), "locale", "");
     Item ite_key = (Item){.item = s2it(heap_create_name("initTextEvent"))};
-    js_property_set(event_root.get(), ite_key,
+    js_set_key_default(event_root.get(), ite_key,
         js_new_native_function(js_event_init_text_event));
     return event_root.get();
 }
@@ -1436,7 +1436,7 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
         roots, js_create_event_init(type, bubbles, cancelable, composed));
     event_set_item(event_root.get(), "detail", detail_root.get());
     Item ice_key = (Item){.item = s2it(heap_create_name("initCustomEvent"))};
-    js_property_set(event_root.get(), ice_key,
+    js_set_key_default(event_root.get(), ice_key,
         js_new_native_function(js_event_init_custom_event));
     js_class_stamp(event_root.get(), JS_CLASS_CUSTOM_EVENT);
     return event_root.get();
@@ -1473,9 +1473,9 @@ Item js_create_event_target(void) {
     Item ael = (Item){.item = s2it(heap_create_name("addEventListener"))};
     Item rel = (Item){.item = s2it(heap_create_name("removeEventListener"))};
     Item dis = (Item){.item = s2it(heap_create_name("dispatchEvent"))};
-    js_property_set(et, ael, js_new_native_function(js_eventtarget_add_listener));
-    js_property_set(et, rel, js_new_native_function(js_eventtarget_remove_listener));
-    js_property_set(et, dis, js_new_native_function(js_eventtarget_dispatch));
+    js_set_key_default(et, ael, js_new_native_function(js_eventtarget_add_listener));
+    js_set_key_default(et, rel, js_new_native_function(js_eventtarget_remove_listener));
+    js_set_key_default(et, dis, js_new_native_function(js_eventtarget_dispatch));
     js_class_stamp(et, JS_CLASS_EVENT_TARGET);
     return et;
 }
@@ -1492,7 +1492,7 @@ static Item read_init(Item init, const char* key) {
     TypeId t = get_type_id(init);
     if (t != LMD_TYPE_MAP && t != LMD_TYPE_OBJECT && t != LMD_TYPE_VMAP) return ItemNull;
     Item k = (Item){.item = s2it(heap_create_name(key))};
-    return js_property_get(init, k);
+    return js_get_key_default(init, k);
 }
 
 static bool init_present(Item v) {
@@ -1586,7 +1586,7 @@ extern "C" Item js_event_get_modifier_state(Item key_arg) {
     else if (strcmp(key, "Meta") == 0)    snprintf(buf, sizeof(buf), "metaKey");
     else snprintf(buf, sizeof(buf), "modifier%s", key);
     Item k = (Item){.item = s2it(heap_create_name(buf))};
-    Item v = js_property_get(ev, k);
+    Item v = js_get_key_default(ev, k);
     return (Item){.item = (js_is_truthy(v)) ? ITEM_TRUE : ITEM_FALSE};
 }
 
@@ -1646,7 +1646,7 @@ extern "C" Item js_ctor_mouse_event_fn(Item type_arg, Item init_arg) {
     event_set_int(ev, "buttons", init_int(init_arg, "buttons", 0));
     event_set_item(ev, "relatedTarget", init_item(init_arg, "relatedTarget"));
     Item gms_key = (Item){.item = s2it(heap_create_name("getModifierState"))};
-    js_property_set(ev, gms_key, js_new_native_function(js_event_get_modifier_state));
+    js_set_key_default(ev, gms_key, js_new_native_function(js_event_get_modifier_state));
     return ev;
 }
 
@@ -1679,7 +1679,7 @@ extern "C" Item js_ctor_keyboard_event_fn(Item type_arg, Item init_arg) {
     event_set_int(ev, "DOM_KEY_LOCATION_RIGHT", 2);
     event_set_int(ev, "DOM_KEY_LOCATION_NUMPAD", 3);
     Item gms_key = (Item){.item = s2it(heap_create_name("getModifierState"))};
-    js_property_set(ev, gms_key, js_new_native_function(js_event_get_modifier_state));
+    js_set_key_default(ev, gms_key, js_new_native_function(js_event_get_modifier_state));
     return ev;
 }
 
@@ -1762,7 +1762,7 @@ static Item js_input_event_live_target_ranges(Item target_ranges) {
 
     int64_t len = js_array_length(target_ranges);
     for (int64_t i = 0; i < len; i++) {
-        Item range = js_array_get_int(target_ranges, i);
+        Item range = js_elements_get_int(target_ranges, i);
         TypeId range_type = get_type_id(range);
         if (range_type != LMD_TYPE_MAP &&
             range_type != LMD_TYPE_OBJECT &&
@@ -2031,13 +2031,13 @@ static Item js_input_event_get_target_ranges(Item* args, int argc) {
     Item ev = js_get_this();
     if (get_type_id(ev) != LMD_TYPE_MAP) return js_array_new(0);
     Item key = (Item){.item = s2it(heap_create_name("__target_ranges"))};
-    Item stashed = js_property_get(ev, key);
+    Item stashed = js_get_key_default(ev, key);
     Item ranges = js_array_new(0);
     if (get_type_id(stashed) != LMD_TYPE_ARRAY) return ranges;
 
     int64_t len = js_array_length(stashed);
     for (int64_t i = 0; i < len; i++) {
-        Item range = js_array_get_int(stashed, i);
+        Item range = js_elements_get_int(stashed, i);
         TypeId range_type = get_type_id(range);
         // DOM-backed constructor ranges are promoted to live Range host
         // wrappers so mutations adjust their boundaries. Restricting this
@@ -2058,9 +2058,9 @@ static void js_input_event_install_target_ranges(Item ev, Item target_ranges) {
         ranges = js_array_new(0);
     }
     Item ranges_key = (Item){.item = s2it(heap_create_name("__target_ranges"))};
-    js_property_set(ev, ranges_key, ranges);
+    js_set_key_default(ev, ranges_key, ranges);
     Item gtr_key = (Item){.item = s2it(heap_create_name("getTargetRanges"))};
-    js_property_set(ev, gtr_key,
+    js_set_key_default(ev, gtr_key,
         js_new_native_span_function(js_input_event_get_target_ranges));
 }
 
@@ -2136,15 +2136,15 @@ extern "C" bool js_event_is_default_prevented(Item event) {
 extern "C" Item js_set_window_event_for_legacy(Item event) {
     Item global = js_get_global_this();
     Item event_key = (Item){.item = s2it(heap_create_name("event"))};
-    Item prev = js_property_get(global, event_key);
-    js_property_set(global, event_key, event);
+    Item prev = js_get_key_default(global, event_key);
+    js_set_key_default(global, event_key, event);
     return prev;
 }
 
 extern "C" void js_restore_window_event_for_legacy(Item prev) {
     Item global = js_get_global_this();
     Item event_key = (Item){.item = s2it(heap_create_name("event"))};
-    js_property_set(global, event_key, prev);
+    js_set_key_default(global, event_key, prev);
 }
 
 // ============================================================================
@@ -2230,7 +2230,7 @@ static Item event_target_get_idl_handler(Item target, const char* type) {
     char on_name[64];
     int written = snprintf(on_name, sizeof(on_name), "on%s", type);
     if (written < 3 || written >= (int)sizeof(on_name)) return ItemNull;
-    Item handler = js_property_get(
+    Item handler = js_get_key_default(
         target, (Item){.item = s2it(heap_create_name(on_name))});
     return js_is_callable(handler) ? handler : ItemNull;
 }
@@ -2249,7 +2249,7 @@ static void fire_idl_handler(Item target, const char* type, Item event) {
         return;
     }
     if (get_type_id(result) == LMD_TYPE_BOOL && !it2b(result)) {
-        Item cancelable = js_property_get(
+        Item cancelable = js_get_key_default(
             event, (Item){.item = s2it(heap_create_name("cancelable"))});
         if (js_is_truthy(cancelable) && !event_flag_get(event, "__in_passive")) {
             event_set_bool(event, "__default_prevented", true);
@@ -2288,7 +2288,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
 
     // set currentTarget
     Item ct_key = (Item){.item = s2it(heap_create_name("currentTarget"))};
-    js_property_set(event, ct_key, wrap_path_key(key, key_is_dom));
+    js_set_key_default(event, ct_key, wrap_path_key(key, key_is_dom));
 
     // Check stop-immediate flag against per-event slot.
     #define _STOP_IMM event_flag_get(event, "__stop_imm")
@@ -2352,7 +2352,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         if (!js_is_callable(callback)) {
             // EventListener WebIDL: if value is an object, call handleEvent on it
             Item he_key = (Item){.item = s2it(heap_create_name("handleEvent"))};
-            Item he = js_property_get(callback, he_key);
+            Item he = js_get_key_default(callback, he_key);
             if (!js_is_callable(he)) continue;
             // per spec, `this` is the EventListener object itself
             this_for_call = callback;
@@ -2406,7 +2406,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     }
     // get event type
     Item type_key = (Item){.item = s2it(heap_create_name("type"))};
-    Item type_val = js_property_get(event_item, type_key);
+    Item type_val = js_get_key_default(event_item, type_key);
     const char* type = fn_to_cstr(type_val);
     if (!type) {
         log_error("js_dom_dispatch_event: event has no type");
@@ -2415,7 +2415,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
 
     // get bubbles flag
     Item bubbles_key = (Item){.item = s2it(heap_create_name("bubbles"))};
-    Item bubbles_val = js_property_get(event_item, bubbles_key);
+    Item bubbles_val = js_get_key_default(event_item, bubbles_key);
     bool bubbles = js_is_truthy(bubbles_val);
 
     // ------------------------------------------------------------------
@@ -2500,8 +2500,8 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     // current dispatch target — re-dispatch updates it).
     Item target_key = (Item){.item = s2it(heap_create_name("target"))};
     Item src_key = (Item){.item = s2it(heap_create_name("srcElement"))};
-    js_property_set(event_item, target_key, elem_item);
-    js_property_set(event_item, src_key, elem_item);
+    js_set_key_default(event_item, target_key, elem_item);
+    js_set_key_default(event_item, src_key, elem_item);
 
     // Mark event as dispatching.
     event_set_bool(event_item, "__dispatch_flag", true);
@@ -2546,8 +2546,8 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     // DOM headlessly, so we always set it).
     Item global = js_get_global_this();
     Item event_key = (Item){.item = s2it(heap_create_name("event"))};
-    Item prev_global_event = js_property_get(global, event_key);
-    js_property_set(global, event_key, event_item);
+    Item prev_global_event = js_get_key_default(global, event_key);
+    js_set_key_default(global, event_key, event_item);
 
     #define _STOP_PROP (_stop_propagation || event_flag_get(event_item, "__stop_prop") \
         || event_flag_get(event_item, "cancelBubble"))
@@ -2583,7 +2583,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
 
     // currentTarget is reset to null after dispatch (per spec).
     Item ct_key = (Item){.item = s2it(heap_create_name("currentTarget"))};
-    js_property_set(event_item, ct_key, ItemNull);
+    js_set_key_default(event_item, ct_key, ItemNull);
 
     // Per DOM spec §2.10 step 26: at the end of dispatch, unset stop
     // propagation flag, stop immediate propagation flag, and dispatch flag.
@@ -2597,7 +2597,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     event_set_item(event_item, "__dispatch_path", ItemNull);
 
     // Restore the previous `window.event` value (legacy IE-style).
-    js_property_set(global, event_key, prev_global_event);
+    js_set_key_default(global, event_key, prev_global_event);
 
     // Compact tombstoned listeners now that dispatch is done. Walk all
     // touched nodes in the path.
@@ -2704,7 +2704,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
 
     // dispatchEvent returns false only when the event is cancelable AND
     // preventDefault was called.
-    Item cancelable = js_property_get(event_item, (Item){.item = s2it(heap_create_name("cancelable"))});
+    Item cancelable = js_get_key_default(event_item, (Item){.item = s2it(heap_create_name("cancelable"))});
     bool ret_false = prevented && js_is_truthy(cancelable);
     return (Item){.item = ret_false ? ITEM_FALSE : ITEM_TRUE};
 }

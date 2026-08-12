@@ -1,13 +1,16 @@
 # LJS Runtime Redesign — One Mechanism per Concept, on Lambda's Mechanisms
 
-**Date**: 2026-08-12  **Status**: JR2/JR3/JR5 IMPLEMENTED — JR6 DESIGN ADOPTED
-**Tree anchor**: master `88aa5556c8` plus the Tune4 implementation worktree
+**Date**: 2026-08-12  **Status**: JR2/JR3/JR5 IMPLEMENTED — JR6 DESIGN ADOPTED — JR4 DESIGN REFINED (FORMAL D3.4 ADOPTION PENDING)
+**Tree anchor**: master `88aa5556c8` plus the implemented Tune4 work and the
+in-progress Tune5 Property worktree
 **Companions**: `JS_Profiling_Helpers.md` (measured evidence),
 `JS_Runtime_Review.md` (complexity findings), `JS_Tune1_Helpers.md`
 (performance phases — subsumed by this design where they overlap),
 `JS_Runtime_Name.md` / `JS_Tune3_Name.md` (adopted NameId design and
 implementation), and `JS_Runtime_Callable.md` / `JS_Tune4_Callable.md`
-(adopted Callable design and implementation plan)
+(adopted Callable design and implementation plan),
+`JS_Runtime_Object_Property.md` (JOP1–JOP18 object/property design), and
+`JS_Tune6_Object.md` (JR4 implementation plan).
 
 Decisions in this doc carry **JR#** ledger ids. Where a decision changes a
 formal ruling, §8 names the `D#` to revise per rule 17 — landing any such
@@ -53,9 +56,9 @@ mechanism per concept" and "reuse Lambda" are the same instruction here.
 |---|---|---|
 | QuickJS: atoms (one interned name identity, int compare) | **Yes** | NamePool-owned `NameId`, **D4.6.1v2–D4.6.2v2** — the only semantic key identity |
 | QuickJS: exception = in-band sentinel return + exception value in context | **Yes** | Lambda's in-band error signaling (`ItemError`, S-layer `T^E` model); the `LambdaError` carrier owns the payload |
-| QuickJS: one `class_id` + exotic-methods table | **Yes** | TypeMap-carried class metadata + per-class ops table (extends D3.4) |
+| QuickJS: one `class_id` + exotic-methods table | **Yes** | immutable TypeMap-carried `JsClassMeta` + one `JsPropertyOps` surface (proposed D3.4 extension; JOP1–JOP18) |
 | QuickJS: builtins are function objects on prototypes | **Yes** | Lambda function values (D6.2) built from the existing catalog (D6.4/D7.4.3) |
-| QuickJS: single property get/set path | **Yes** | One helper pair over shape/IC/exotic/proto tiers |
+| QuickJS: single property semantic path | **Yes** | Tune5's eight receiver-aware operation families over one ordinary/exotic/prototype core |
 | QuickJS: refcount GC | **No** | Lambda precise GC stays (rule 15, D5.3) |
 | QuickJS: interpreter | **No** | MIR Direct stays (D8.1.1) |
 | V8: elements kinds (packed/holey × smi/double/tagged) | **Yes** | one per-array state machine over `LMD_TYPE_ARRAY_NUM`, tagged `LMD_TYPE_ARRAY`, and the existing sparse overlay |
@@ -71,7 +74,8 @@ mechanism per concept" and "reuse Lambda" are the same instruction here.
 | Concept | Baseline before its owning phase (count) | Target (single mechanism) |
 |---|---|---|
 | Property key | raw `(chars,len)`, `PropertyKeyRef`, `String*`, pool strviews (**4**) | **`NameId`** owned/resolved by NamePool (**1**); strings are observable materialization only |
-| Object discrimination | TypeId, `map_kind`, `JsClass` (44), shape flags, sentinel props (**5**) | TypeId + **shape-carried JsClassMeta** (class/prototype/exotic policy); callability stays per value (**2**) |
+| Object discrimination | TypeId, `map_kind`, `JsClass` (44 at review anchor), shape flags, sentinel props (**5**) | TypeId + one resolved immutable **shape-carried `JsClassMeta`** (class/prototype/exotic policy); callability stays per value (**2**) |
+| Map native state | `Map.data` alternates between TypeMap-described fields and native payload; marker properties preserve payload during upgrades (**≥2 meanings**) | `Map.data` is always TypeMap-described property data; engine exotics use typed trailing storage and host-native objects use VMap (**1 meaning**) |
 | Array element storage | `ARRAY_NUM`, tagged `ARRAY`, holes, sparse overlays, descriptor side paths | one per-array **JsElementsKind** state machine over the existing physical forms |
 | Builtin dispatch | catalog→id switch, per-kind name switches, direct-impl calls (**3**) | builtins are **function values** installed on prototypes; dispatch = get + call (**1**) |
 | Property access | **54** entry points | eight receiver-aware semantic operation families; caches and phase adapters stay outside the core |
@@ -89,6 +93,13 @@ mechanism per concept" and "reuse Lambda" are the same instruction here.
   arrays retain the existing companion storage. JR6 records elements state on
   each array instance, not in shared shape metadata, and adds no container
   type (D2.6.1/D2.6.2).
+- **Object metadata and native state**: runtime JS TypeMaps carry one immutable
+  `JsClassMeta*`; this qualifies their transition/cache family without changing
+  D3.4.2 structural field-layout identity. Engine-owned exotics may extend a
+  Map with typed trailing payload under D2.1.4, while `Map.data` continues to
+  match `Map.type` under D3.4.1/D3.4.5. Module/host-native objects remain
+  VMaps under D7.4.1. `map_kind` is physical tracing/finalization information,
+  never property/prototype/brand semantics.
 - **Stack & GC**: D5 unchanged — scalar homes, safepoint-current slots,
   `RootFrame`/`Rooted`. The redesign *removes* the one large deviation
   (promise static tables with epoch re-registration) by moving promises onto
@@ -373,26 +384,64 @@ return status Items or are audited infallible.
 
 ### JR4 — Object metadata: shape-carried class + one exotic ops table
 
+**Status: design refined 2026-08-12; formal adoption and implementation
+pending.** `JS_Runtime_Object_Property.md` records **JOP1–JOP18** and
+`JS_Tune6_Object.md` owns the O0–O9 migration. Production work starts only
+after Tune5's clean property-kernel handoff and adoption of the required
+D3.4 metadata ruling.
+
 **Evidence.** Five discriminators decide behavior (review §3.3); sentinel
-properties (`__promise_idx`, `__instance_proto__`) are load-bearing;
-`js_get_implicit_proto` synthesizes prototypes from class stamps with raw-name
-probes inside the chain walk (7.0% prototype-walk cost).
+properties and fake internal fields are load-bearing; `js_get_implicit_proto`
+synthesizes prototypes from class stamps with raw-name probes inside the chain
+walk (7.0% prototype-walk cost). More fundamentally, several native-backed
+Maps use `Map.data` for a Proxy/TypedArray/ArrayBuffer/DataView/iterator payload
+even though D3.4.1/D3.4.5 say `Map.type` describes those bytes. Property
+upgrade code then preserves native pointers in hidden marker properties.
 
-**Design.** A one-word **JsClassMeta** carried by the TypeMap (extends D3.4):
-`{class_id (~44 values), flags, prototype policy, property_ops}` — with one
-static property-ops table (`get`, `set`, `define`, `delete`, `has`, `ownKeys`,
-`proto`) for exotic classes only (typed arrays, proxy, arguments, host VMaps,
-DOM). Plain objects never consult ops. The prototype is resolved through one
-place: shape meta → memoized `__proto__` entry or class intrinsic table
-(subsumes Tune1-P3). Array elements state is per container and is not a
-`JsClassMeta` field. Callability/constructibility remains a per-value Callable
-capability under D6.2.2v2; class metadata may select an exotic protocol
-implementation but cannot grant callability by class alone.
+**Metadata design.** A runtime JS `TypeMap` carries one immutable
+`const JsClassMeta*`, selected before object publication and inherited exactly
+by property/descriptor transitions. The record contains stable
+`{class_id, family_id, flags, prototype policy, intrinsic prototype id,
+property_ops, diagnostic name}` and no realm Item, GC edge, mutable cache, or
+context-owned pointer under D5.4.3. Metadata remains orthogonal to D3.4.2's
+structural field-layout identity but qualifies runtime TypeMap/transition and
+cache identity: different metadata families never share one runtime TypeMap
+pointer. Arrays still keep elements state per container, and functions still
+keep call/construct capability per value under D6.2.2v2.
 
-**Deleted.** `JsClass` side-stamping as a separate mechanism (folds into
-shape meta), `map_kind` checks outside storage code, all sentinel properties,
-`js_get_implicit_proto`'s string probes, the per-kind special cases spread
-through property code.
+**Operations design.** One internal **`JsPropertyOps`** surface owns optional
+exotic `Get`, `Set`, `DefineOwn`, `Delete`, `HasProperty`,
+`GetOwnPropertyDescriptor`, `OwnKeys`, `GetPrototypeOf`, `SetPrototypeOf`,
+`IsExtensible`, and `PreventExtensions` hooks. `HasOwn` derives from the own
+descriptor operation. A callback may fall through to JR6 ordinary semantics
+only before allocation, coercion, mutation, host action, or user-code
+re-entry; after observable work it returns a complete value/status/ERROR.
+JR6's eight public semantic property operations and `JsPropertyLane` remain
+unchanged. Plain objects pay only metadata resolution and a null-ops test.
+
+**Storage and prototype design.** For every Map, `Map.data` remains null or a
+packed buffer exactly described by its valid TypeMap. Engine-owned exotics use
+typed Map-prefix/trailing payloads under D2.1.4; VMap/Jube remains the host
+authority under D7.4.1–D7.4.3. `map_kind` may select allocation, precise
+tracing/finalization, and checked payload access only. One prototype resolver
+owns explicit override/null plus realm-relative intrinsic, TypedArray-kind,
+host, and Proxy policies. Metadata stores stable intrinsic IDs, never realm
+prototype Items. Public `__proto__` is only an accessor.
+
+**Callable and sentinel boundary.** Legacy callable class Maps become
+`JsFunction` values, closing Tune4's named compatibility seam;
+`__instance_proto__` disappears and produced-instance metadata is explicit
+construct-target data. Tune6 deletes class/prototype/native-backing sentinels,
+fake TypeMap markers, and generic private-name spelling tests. The sole
+temporary exception is `__promise_idx`, confined to JR7's legacy Promise
+adapter; JR7 deletes it with the static table and wrapper rather than Tune6
+inventing another temporary Promise representation.
+
+**Deleted.** Mutable `TypeMap.js_class` and `js_class_stamp`, semantic
+`map_kind` switches, native payloads in `Map.data`, backing marker properties,
+fake iterator TypeMaps, `js_property_exotic_adapter`, the `js_try_exotic_*`
+families, `js_get_implicit_proto`, `__instance_proto__`, callable class Maps,
+and per-kind property/prototype/brand special cases.
 
 ### JR5 — Builtins are function values; one callable kernel
 
@@ -496,8 +545,9 @@ site cache probe (outside JR6 core; a miss is observationally invisible)
 
 JR6 contains exactly one transitional `js_property_exotic_adapter` for
 current Proxy, TypedArray, DOM/host, Arguments, and legacy `map_kind`
-behavior. JR4 replaces that adapter's implementation with `JsPropertyOps`
-without changing the eight semantic operations. JR8 replaces the outer cache
+behavior. JR4 first replaces the adapter's implementation with metadata-
+selected `JsPropertyOps`, then deletes the adapter symbol after its last
+caller, without changing the eight semantic operations. JR8 replaces the outer cache
 wrappers with the unified feedback vector without changing JR6 semantics or
 adding a `FeedbackSlot*` parameter to the core. Neither adapter may duplicate
 receiver propagation, key conversion, descriptor rules, or prototype
@@ -660,7 +710,9 @@ other value (this *is* the JR1 principle applied).
 
 **Deleted.** `JsPromise` static table + `JS_PROMISE_STATE_MAX`, `[8]` caps,
 `js_promise_to_item` wrapper machinery, the register-roots-once loop
-(`js_runtime.cpp:31908`), Tune1-P1 becomes moot.
+(`js_runtime.cpp:31908`), the JR4-confined `__promise_idx` exception, Tune1-P1
+becomes moot. JR4 provides stable Promise metadata and host/property bridging
+for the temporary wrapper but does not reinterpret or relocate Promise state.
 
 ### JR8 — Feedback vectors: one IC mechanism, out of the code
 
@@ -706,8 +758,9 @@ seams: `js_object.cpp` (shape/property), `js_array.cpp` (elements),
 
 ## 4. What does not change
 
-Item representation and tagging (D2), TypeMap shape internals and transitions
-(D3.4), GC algorithm and rooting protocol (D5 — promises simply join it),
+Item representation and tagging (D2), TypeMap's structural field-layout and
+transactional transition rules (D3.4 — JR4 adds immutable family metadata but
+does not replace shape storage), GC algorithm and rooting protocol (D5 — promises simply join it),
 scalar-home ABI (D5.2; JR3 narrows who may use raw lanes), MIR Direct pipeline
 and emitter (D8.1.1), helper-effect catalog as the ABI contract (D7.4.3),
 Node/DOM compat layers' *behavior* (they migrate to the new entry points
@@ -723,6 +776,12 @@ redesign, not a semantics change.
 | Property get/set/access entry-point definitions | 54 | 8 |
 | Named-property identity representations in property APIs | 4 | 1 |
 | Object discriminators consulted in property code | 5 | 2 |
+| Mutable class-stamp mechanisms | ≥1 | 0 |
+| JS exotic operation table types | scattered switches/helpers | 1 (`JsPropertyOps`) |
+| Transitional exotic adapters | 1 after JR6 | 0 after JR4 |
+| Semantic `map_kind` reads | Tune6 O0 baseline | 0 |
+| Native payload uses of `Map.data` | Tune6 O0 baseline | 0 |
+| Non-TypeMap/fake values in `Map.type` | Tune6 O0 baseline | 0 |
 | Builtin dispatch mechanisms | 3 | 1 |
 | Error channels | 2 | 1 |
 | Promise representations | 2 | 1 |
@@ -731,7 +790,7 @@ redesign, not a semantics change.
 | Module loader/caches for JS | 2 | 1 |
 | Emitted exception-poll sites (batch) | 153,725 | 0 |
 | Emitted ERROR-tag tests (fixed MIR probe) | Tune2 baseline | 1 |
-| Sentinel-property conventions | ≥2 | 0 |
+| Sentinel-property conventions | ≥2 | 0 after JR7; after JR4 only the exact JR7-owned `__promise_idx` allowlist may remain |
 
 The census script (extension of the review's greps) lives in `utils/` and
 runs in the per-phase gate; a phase that adds a mechanism without deleting
@@ -762,6 +821,13 @@ the same phase must delete more than it adds. LOC is counted by `wc -l` over
 - R4's symbol census must show exactly eight public semantic property
   operations, one internal transitional exotic adapter, no `FeedbackSlot*` in
   the JR6 core, and no release reference to the TypeMap plausibility predicate.
+- R5's census must show one immutable metadata resolver/table surface, zero
+  transitional exotic adapters, zero mutable class stamps, zero semantic
+  `map_kind` reads, zero native payload uses of `Map.data`, zero fake TypeMaps,
+  and no sentinel convention except the exact JR7-owned Promise allowlist.
+  Proxy/TypedArray/Arguments/String/iterator/collection/host/DOM behavior,
+  prototype/extensibility operations, callable class migration, and forced-GC
+  payload tracing are differential gates for R5.
 - Bench suite (Tune line) non-regressing; the **profiling harness**
   (`JS_Profiling_Helpers.md` §6 protocol) re-run per phase — expected
   end-state on the batch workload: helper share 43.5% → **≤30%**, lookup
@@ -778,8 +844,8 @@ Ordered so the tree stays green and each phase's deletions are immediate:
 | R2b | JR3.2 payload unification — **landed** | R2a + shared class-Error shape (struct-backed slots, `.stack` accessor) | today's JS Error map construction |
 | R3 | JR5 builtins as values + one callable kernel with distinct Call/Construct entries — **landed** | R1 | dispatch switches, 10 call variants |
 | R4 | JR6 semantic property kernel + per-array elements states + realm prototype-index epoch + one transitional exotic adapter | R1, R3 | 46 entry points, per-operation prototype scans, release P0 check/recovery |
-| R5 | JR4 class/prototype metadata + `JsPropertyOps` behind the JR6 adapter seam | R4 | JsClass side-stamp, sentinels, transitional exotic adapter implementation |
-| R6 | JR7 promises/jobs | R5 | static tables, wrapper, root storm |
+| R5 | JR4 immutable class/prototype metadata + `JsPropertyOps` + typed native payloads; delete the JR6 adapter | R4 + formal D3.4 metadata ruling | JsClass side-stamp, semantic `map_kind`, native `Map.data` payloads/markers, fake TypeMaps, class/prototype sentinels, callable class Maps, transitional exotic adapter; `__promise_idx` is confined to JR7 |
+| R6 | JR7 promises/jobs | R5 | static tables, wrapper, root storm, final `__promise_idx` exception |
 | R7 | JR8 feedback vectors | R4 | four IC struct kinds |
 | R8 | JR9 modules; JR10 file split | R2–R7 | private loader layers; the 40k TU |
 
@@ -821,6 +887,19 @@ stopgap.
   epoch-invalidating callback tests, custom-prototype/Proxy fallbacks, and a
   debug assertion that a skipped-`HasProperty` loop holds a matching clean
   realm epoch.
+- **JR4 metadata-family drift** if construction publishes an ordinary shape
+  and stamps class later, or a transition drops/changes metadata. Mitigation:
+  metadata-qualified empty roots, choose-before-publication factories,
+  transition equality assertions, and a zero-stamp census under
+  D3.4.1/D3.4.5 plus the new formal metadata ruling.
+- **JR4 native-layout drift** because current Proxy/TypedArray/iterator Maps
+  overload `Map.data`/`Map.type`. Mitigation: typed Map-prefix trailing
+  payloads or VMap according to D2.1.4/D7.4.1, precise per-carrier tracing,
+  forced-GC/finalizer tests, and zero native-payload/fake-TypeMap ratchets.
+- **JR4 observable double work** if an exotic callback performs a trap,
+  coercion, host side effect, or allocation and then falls through. Mitigation:
+  fallthrough is legal only before observable work; after re-entry the callback
+  must complete and callers reload mutable state under D5.3.
 
 ## 8. Formal-spec impact (rule 17)
 
@@ -840,10 +919,21 @@ stopgap.
   pattern, unchanged); raw-scalar returns are restricted to catalog-verified
   infallible helpers (the existing TE-15/`can_raise` rule applied to JS;
   revises the D5.2 impl footnote; resolves **DO15**).
-- **D3.4 extension (JR4 formal work)**: shape-carried `JsClassMeta` contains
-  class/prototype/exotic-property policy and is the sole object discriminator
-  beside TypeId. Per-value Callable capability and per-array elements state
-  are deliberately outside the shared class meta.
+- **D3.4 extension (JR4 formal work, pending adoption)**: a runtime JS TypeMap
+  carries one immutable `JsClassMeta*`, chosen before publication and
+  preserved by every transition. Metadata contains stable class/family IDs,
+  flags, realm-relative prototype policy, intrinsic ID, and an optional static
+  `JsPropertyOps*`, but no realm Item, GC edge, mutable cache, or context-owned
+  address. It is orthogonal to D3.4.2 structural field-layout identity while
+  qualifying runtime TypeMap/transition/cache identity; different metadata
+  families never share one TypeMap pointer. `map_kind` is physical storage
+  information and cannot select JS property/prototype semantics. Per-value
+  Callable capability and per-array elements state remain outside class meta.
+- **D2.1.4 + D3.4.1/D3.4.5 application (JR4)**: engine ECMAScript exotics may
+  use typed Map-prefix trailing state, while `Map.type/data` always retain
+  their ordinary shape/layout meaning. Host/module-native values remain VMaps
+  under D7.4.1. Fake TypeMaps, payload-in-data, and backing marker properties
+  are not valid transitional end states.
 - **D2.6.1/D2.6.2 application**: ordinary arrays use the JR6 per-container
   state machine over `ARRAY_NUM`, tagged `ARRAY`, and sparse storage.
   `ARRAY_NUM` promotes atomically to tagged holey storage when an operation
@@ -899,16 +989,24 @@ implementation states and evidence.
    prototype-index epoch; and the hard **D3.4.1/D3.4.5** TypeMap invariant
    with debug-only C `assert` and no release recovery-as-miss. Implementation
    census, fixtures, and profiling remain R4 work rather than design choices.
-4. **JR7**: unhandled-rejection tracking without the static table — epoch
+4. **JR4** — *design detailed 2026-08-12; formal adoption pending*: immutable
+   TypeMap-carried metadata; one `JsPropertyOps` surface including prototype
+   and extensibility hooks; non-observable fallthrough; TypeMap-described
+   property data plus typed trailing engine payload/VMap host payload; one
+   prototype resolver; class constructors remain `JsFunction`; and all
+   Tune6-owned sentinels disappear. `__promise_idx` is explicitly confined to
+   JR7. `JS_Runtime_Object_Property.md` records JOP1–JOP18 and
+   `JS_Tune6_Object.md` owns implementation evidence.
+5. **JR7**: unhandled-rejection tracking without the static table — epoch
    sweep over a weak list, or a small strong queue drained by the job loop
    (current design has both; one must win)?
-5. **JR8**: feedback vector lifetime for `eval`/dynamic functions — pool-owned
+6. **JR8**: feedback vector lifetime for `eval`/dynamic functions — pool-owned
    with the function, or GC-owned? (The const pool precedent says
    pool-owned.)
-6. **JR9**: does the Node compile cache's integrity manifest
+7. **JR9**: does the Node compile cache's integrity manifest
    (`update_jube_manifest_integrity.py` flow) key cleanly into module-registry
    entries, or does the registry need a content-hash field first?
-7. Sequencing R2/R3 — *analyzed*: measured file surfaces are
+8. Sequencing R2/R3 — *analyzed*: measured file surfaces are
    region-disjoint but share the two biggest TUs. R2's surface: the pending
    flag lives in 5 runtime files (js_runtime.cpp 400 refs,
    js_runtime_value.cpp 41, js_globals.cpp 12, js_runtime_state.cpp 11,

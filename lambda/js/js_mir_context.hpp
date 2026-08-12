@@ -232,6 +232,13 @@ struct JsFuncCollected {
     int ctor_prop_ta_types[16];     // typed array type for each prop (-1 = not a typed array)
     TypeId ctor_prop_types[16];     // P1: detected field type from constructor init (LMD_TYPE_NULL = unknown)
     int ctor_prop_param_idx[16];    // P4b: maps property → constructor param index (-1 = not a param)
+    // immutable post-collection scope facts; cache AST walks shared by capture,
+    // propagation, and scope-environment planning.
+    struct hashmap* cached_var_locals;
+    struct hashmap* cached_all_locals;
+    struct hashmap* cached_direct_lexicals;
+    struct hashmap* cached_annexb_suppressed;
+    bool cached_annexb_suppressed_ready;
 };
 
 static inline FnParamTypeInfo* jm_param_info(JsFuncCollected* fc, int index) {
@@ -260,6 +267,22 @@ static inline void jm_set_param_type(JsFuncCollected* fc, int index, TypeId type
 // Free dynamically allocated scope_env_names for all func_entries
 static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_count) {
     for (int i = 0; i < func_count; i++) {
+        if (func_entries[i].cached_var_locals) {
+            hashmap_free(func_entries[i].cached_var_locals);
+            func_entries[i].cached_var_locals = NULL;
+        }
+        if (func_entries[i].cached_all_locals) {
+            hashmap_free(func_entries[i].cached_all_locals);
+            func_entries[i].cached_all_locals = NULL;
+        }
+        if (func_entries[i].cached_direct_lexicals) {
+            hashmap_free(func_entries[i].cached_direct_lexicals);
+            func_entries[i].cached_direct_lexicals = NULL;
+        }
+        if (func_entries[i].cached_annexb_suppressed) {
+            hashmap_free(func_entries[i].cached_annexb_suppressed);
+            func_entries[i].cached_annexb_suppressed = NULL;
+        }
         if (func_entries[i].scope_env_names) {
             mem_free(func_entries[i].scope_env_names);
             func_entries[i].scope_env_names = NULL;
@@ -417,6 +440,9 @@ struct JsMirTranspiler {
     JsFuncCollected* func_entries;      // exact-sized after the shared count pass
     int func_capacity;
     int func_count;
+    JsFunctionNode** func_index_nodes;  // pointer-keyed identity index, built once after collection
+    int* func_index_ids;
+    int func_index_capacity;
 
     // Collected classes
     JsClassEntry* class_entries;        // exact-sized after the shared count pass
@@ -438,6 +464,37 @@ struct JsMirTranspiler {
     bool in_native_func;            // currently transpiling native version?
     JsFuncCollected* current_fc;    // current function being transpiled
     JsAstNode* discarded_expression; // outer expression whose value is unobserved
+
+    // Immediate JS-number Items are non-GC values. Reusing them within one
+    // basic block removes repeated constant moves without allowing a value
+    // first defined on one branch to be read from another branch.
+    struct JsMirBoxedFloatConst {
+        uint64_t bits;
+        MIR_reg_t reg;
+    } boxed_float_const_cache[32];
+    int boxed_float_const_cache_count;
+    int boxed_float_const_cache_seed_count;
+    MIR_item_t boxed_float_const_cache_func;
+    struct {
+        uint32_t module_name_index;
+        NameId direct_name_id;
+        MIR_reg_t reg;
+    } property_name_cache[32];
+    int property_name_cache_count;
+    MIR_item_t property_name_cache_func;
+    struct {
+        uint32_t module_name_index;
+        NameId direct_name_id;
+        MIR_reg_t reg;
+    } module_name_id_cache[32];
+    int module_name_id_cache_count;
+    MIR_item_t module_name_id_cache_func;
+    struct {
+        uint32_t index;
+        MIR_reg_t reg;
+    } module_ic_cache[32];
+    int module_ic_cache_count;
+    MIR_item_t module_ic_cache_func;
 
     // TCO state
     JsFuncCollected* tco_func;      // function being TCO'd (NULL if not active)

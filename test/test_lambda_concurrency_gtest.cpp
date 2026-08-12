@@ -52,23 +52,23 @@ static bool capture_callable_realm(Runtime* runtime,
     {
         RootFrame roots(7);
         Rooted<Item> global_root(roots, js_get_global_this());
-        Rooted<Item> math_root(roots, js_property_get(global_root.get(),
+        Rooted<Item> math_root(roots, js_get_key_default(global_root.get(),
             js_make_string("Math")));
-        Rooted<Item> abs_root(roots, js_property_get(math_root.get(),
+        Rooted<Item> abs_root(roots, js_get_key_default(math_root.get(),
             js_make_string("abs")));
-        Rooted<Item> array_root(roots, js_property_get(global_root.get(),
+        Rooted<Item> array_root(roots, js_get_key_default(global_root.get(),
             js_make_string("Array")));
-        Rooted<Item> prototype_root(roots, js_property_get(array_root.get(),
+        Rooted<Item> prototype_root(roots, js_get_key_default(array_root.get(),
             js_make_string("prototype")));
-        Rooted<Item> values_root(roots, js_property_get(prototype_root.get(),
+        Rooted<Item> values_root(roots, js_get_key_default(prototype_root.get(),
             js_make_string("values")));
-        Rooted<Item> iterator_root(roots, js_property_get(prototype_root.get(),
+        Rooted<Item> iterator_root(roots, js_get_key_default(prototype_root.get(),
             js_well_known_symbol_key(1)));
 
         snapshot->math_abs = abs_root.get();
         snapshot->array_constructor = array_root.get();
         snapshot->stable_lookup = abs_root.get().item ==
-            js_property_get(math_root.get(), js_make_string("abs")).item;
+            js_get_key_default(math_root.get(), js_make_string("abs")).item;
         snapshot->iterator_alias = values_root.get().item == iterator_root.get().item;
         captured = get_type_id(snapshot->math_abs) == LMD_TYPE_FUNC &&
             get_type_id(snapshot->array_constructor) == LMD_TYPE_FUNC;

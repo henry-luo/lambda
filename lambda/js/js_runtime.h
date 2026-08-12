@@ -161,6 +161,8 @@ Item js_to_object(Item value);
  * Check if a value is truthy according to JavaScript rules.
  */
 bool js_is_truthy(Item value);
+// true for both physical representations of an ordinary JavaScript Array.
+bool js_is_js_array(Item value);
 // Item-status helpers use the same merged lane as ordinary JS calls: a
 // boolean true is success and an ERROR-tagged Item is the complete failure.
 Item js_status_ok(void);
@@ -243,23 +245,39 @@ Item js_typeof(Item value);         // typeof x
 // =============================================================================
 
 Item js_new_object(void);
-Item js_property_get(Item object, Item key);
-Item js_property_set(Item object, Item key, Item value);
-Item js_property_set_cstr(Item object, const char* key, Item value);
+// Shared numeric property-key materialization for JS element/descriptor code.
+Item js_property_index_key(int64_t index);
+String* js_property_index_name(int64_t index);
+const char* js_property_index_chars(int64_t index, int* out_len);
+Item js_get_key_default(Item object, Item key);
+// Receiver-explicit property Get used by prototype, accessor, and Proxy paths.
+Item js_get_key_core(Item object, Item key, Item receiver);
+Item js_set_key_default(Item object, Item key, Item value);
+// Receiver-explicit property Set used by prototype, accessor, and Proxy paths.
+Item js_set_key_core(Item object, Item key, Item value,
+                                   Item receiver);
+Item js_set_completion_with_key(Item target, Item key, Item value,
+                                Item receiver);
+// Internal DefineOwn storage write; it never dispatches inherited accessors.
+Item js_define_own_key_storage(Item object, Item key, Item value);
+Item js_set_key_cstr(Item object, const char* key, Item value);
 Item js_using_dispose(Item resource);
-Item js_property_set_strict(Item object, Item key, Item value);
+Item js_set_key_strict_policy(Item object, Item key, Item value);
 // Tune8 §2.2: dispatcher for JIT-emitted dynamic-strict property sets.
-Item js_property_set_v(Item object, Item key, Item value, int64_t strict);
+Item js_set_key_policy(Item object, Item key, Item value, int64_t strict);
+Item js_assignment_set_result(Item value, Item key, Item set_result,
+                              int64_t strict, Item target);
+Item js_delete_reference_result(Item key, Item delete_result, int64_t strict);
 // Tune8 §2.2: js_private_property_set takes strict flag (4-arg);
 // js_private_property_set_strict removed.
 Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
 Item js_private_field_define(Item object, Item private_key, Item value);
 Item js_create_data_property(Item object, Item key, Item value);
-Item js_property_access(Item object, Item key);
-Item js_property_access_name_id(Item object, NameId name_id);
-Item js_property_set_name_id(Item object, NameId name_id, Item value, int64_t strict);
-Item js_property_access_name_id_ic(Item object, NameId name_id, JsLoadIC* ic);
-Item js_property_set_name_id_ic(Item object, NameId name_id, Item value,
+Item js_get_reference(Item object, Item key);
+Item js_get_name_id(Item object, NameId name_id);
+Item js_set_name_id(Item object, NameId name_id, Item value, int64_t strict);
+Item js_get_name_id_ic(Item object, NameId name_id, JsLoadIC* ic);
+Item js_set_name_id_ic(Item object, NameId name_id, Item value,
     int64_t strict, JsStoreIC* ic);
 void* js_active_module_ic(uint32_t index);
 
@@ -268,18 +286,24 @@ void* js_active_module_ic(uint32_t index);
 // =============================================================================
 
 Item js_array_new(int length);
+Item js_array_new_numeric(int length);
+Item js_elements_set_numeric_direct(Item array, int64_t index, Item value);
+bool js_is_ordinary_numeric_array(Item value);
+bool js_array_promote_numeric(Item array);
+bool js_array_validate_elements_kind(Item value);
 Item js_array_new_from_item(Item arg);
 Item js_create_arguments(void);
-Item js_array_get(Item array, Item index);
-Item js_array_set(Item array, Item index, Item value);
-Item js_array_get_int(Item array, int64_t index);
-Item js_array_set_int(Item array, int64_t index, Item value);
+Item js_elements_get(Item array, Item index);
+Item js_elements_set(Item array, Item index, Item value);
+Item js_elements_get_int(Item array, int64_t index);
+Item js_elements_set_int(Item array, int64_t index, Item value);
+Item js_elements_set_int_direct(Item array, int64_t index, Item value);
 int64_t js_array_sparse_delete_index(Item array, int64_t index);
 int64_t js_array_sparse_has_index(Item array, int64_t index);
 Item js_array_sparse_get_index(Item array, int64_t index);
 int64_t js_array_sparse_collect_indices(Item array, int64_t start, int64_t end, int64_t* indices, int64_t cap);
-int64_t js_array_set_append_or_dense_int_fast(Item array, int64_t index, Item value);
-int64_t js_array_set_append_or_dense_item_fast(Item array, Item index, Item value);
+int64_t js_elements_set_append_or_dense_int_fast(Item array, int64_t index, Item value);
+int64_t js_elements_set_append_or_dense_item_fast(Item array, Item index, Item value);
 Item js_array_define_dense_element_direct(Item array, int64_t index, Item value);
 int64_t js_array_length(Item array);
 Item js_array_push(Item array, Item value);
@@ -591,7 +615,7 @@ Item js_reflect_prevent_extensions(Item obj);
 Item js_reflect_set(Item obj, Item key, Item value, Item receiver);
 Item js_reflect_set_prototype_of(Item obj, Item proto);
 Item js_prototype_lookup(Item object, Item property);
-Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
+Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
 // =============================================================================
 // v9: Object extensions
@@ -836,6 +860,8 @@ typedef struct JsScopeCounters {
     long lookup_calls;     // calls to js_scope_lookup + js_scope_lookup_current
     long entries_scanned;  // total NameEntry compared across all lookups
     long scopes_walked;    // total parent scopes visited across all lookups
+    long cache_hits;
+    long cache_misses;
 } JsScopeCounters;
 
 void js_scope_counters_set_enabled(int enabled);
@@ -954,6 +980,7 @@ void js_eval_env_track_global_binding(Item key);
 void js_eval_env_pop_frame(void);
 void js_eval_global_lexical_pop_frame(void);
 Item js_check_unresolved_capture(Item value, NameId name_id, int64_t len);
+Item js_check_capture_binding(Item value, NameId name_id, int64_t len);
 Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_t len, int64_t in_typeof);
 
 // URL constructor

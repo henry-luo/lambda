@@ -613,6 +613,12 @@ struct ArrayNum : Container {
     void set_elem_type(ArrayNumElemType e) { map_kind = (uint8_t)e; }
 };
 
+// Tune5 P5 gate: a List and ArrayNum share the same managed header and tail
+// offsets, but their element buffers still have different semantic contracts.
+// Retagging is legal only after this physical proof is true on every build.
+static_assert(sizeof(List) == sizeof(ArrayNum),
+              "JS numeric promotion requires identical container sizes");
+
 static inline bool array_num_init_external_view(ArrayNum* view, ArrayNumShape* shape,
         Container* base, void* data_base, ArrayNumElemType elem_type,
         int64_t byte_offset, int64_t length, bool mutable_view) {

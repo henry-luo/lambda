@@ -829,11 +829,11 @@ extern "C" Item js_new_object(void);
 extern "C" Item js_array_new(int capacity);
 extern "C" Item js_array_push(Item array, Item value);
 extern "C" int64_t js_array_length(Item array);
-extern "C" Item js_array_get_int(Item array, int64_t index);
-extern "C" Item js_property_get(Item object, Item key);
-extern "C" Item js_property_set(Item object, Item key, Item value);
+extern "C" Item js_elements_get_int(Item array, int64_t index);
+extern "C" Item js_get_key_default(Item object, Item key);
+extern "C" Item js_set_key_default(Item object, Item key, Item value);
 extern "C" Item js_has_own_property(Item object, Item key);
-extern "C" Item js_map_get_fast_ext(Map* map, const char* key, int key_length, bool* out_found);
+extern "C" Item js_map_shape_lookup_ext(Map* map, const char* key, int key_length, bool* out_found);
 extern "C" Item js_make_string_len(const char* str, int len);
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 extern "C" void js_set_function_name(Item fn_item, Item name_item);
@@ -1121,7 +1121,7 @@ static void jube_host_dom_notify_mutation_detail(int kind, void* target, void* p
 static void jube_host_node_function_install_promisify_custom(Item function,
         JubeNativeFunctionSpec spec) {
     Item custom = jube_host_script_new_function(spec);
-    js_property_set(function, js_util_promisify_custom_symbol(), custom);
+    js_set_key_default(function, js_util_promisify_custom_symbol(), custom);
 }
 
 static void jube_host_node_function_install_promisify_args(Item function, const char* first,
@@ -1143,7 +1143,7 @@ static void jube_host_node_function_install_promisify_args(Item function, const 
     if (second) js_array_push((Item){.item = *names_root}, js_make_string_len(second, (int)strlen(second)));
     Item symbol = js_util_custom_promisify_args_symbol();
     *symbol_root = symbol.item;
-    js_property_set((Item){.item = *function_root}, (Item){.item = *symbol_root},
+    js_set_key_default((Item){.item = *function_root}, (Item){.item = *symbol_root},
                     (Item){.item = *names_root});
     jube_host_opaque_root_frame_end(&frame);
 }
@@ -1335,10 +1335,10 @@ static const JubeHostValueAPI jube_host_value_api = {
     js_array_new,
     js_array_push,
     js_array_length,
-    js_array_get_int,
+    js_elements_get_int,
     jube_host_value_array_set,
-    js_property_get,
-    js_property_set,
+    js_get_key_default,
+    js_set_key_default,
     jube_host_value_property_set_own,
     jube_host_value_property_has_own,
     jube_host_value_property_get_own_data,
@@ -3293,8 +3293,7 @@ static Item jube_host_value_property_set_own(Item object, Item key, Item value) 
                 (Item){.item = s2it(heap_create_name("__internal_proto__", 18))});
         }
     }
-    ScopedSkipAccessorDispatch skip_accessor_dispatch;
-    return js_property_set(object, key, value);
+    return js_define_own_key_storage(object, key, value);
 }
 
 static bool jube_host_value_property_has_own(Item object, Item key) {
@@ -3309,7 +3308,7 @@ static bool jube_host_value_property_get_own_data(Item object, Item key, Item* o
     String* text = it2s(key);
     if (!text) return false;
     bool found = false;
-    Item value = js_map_get_fast_ext(object.map, text->chars, (int)text->len, &found);
+    Item value = js_map_shape_lookup_ext(object.map, text->chars, (int)text->len, &found);
     if (found && out_value) *out_value = value;
     return found;
 }
@@ -3319,7 +3318,7 @@ static bool jube_host_value_is_array(Item value) {
 }
 
 static Item jube_host_value_array_set(Item array, int64_t index, Item value) {
-    return js_array_set_int(array, index, value);
+    return js_elements_set_int(array, index, value);
 }
 
 static Item jube_host_script_current_this(void) {
@@ -3502,16 +3501,16 @@ static Item jube_host_node_throw_network_error(void* session, int status, const 
         snprintf(message, sizeof(message), "%s %s", operation, code);
     }
     Item error = js_new_error(js_make_string_len(message, (int)strlen(message)));
-    js_property_set(error, js_make_string_len("code", 4), js_make_string_len(code, (int)strlen(code)));
-    js_property_set(error, js_make_string_len("errno", 5), (Item){.item = i2it(status)});
-    js_property_set(error, js_make_string_len("syscall", 7),
+    js_set_key_default(error, js_make_string_len("code", 4), js_make_string_len(code, (int)strlen(code)));
+    js_set_key_default(error, js_make_string_len("errno", 5), (Item){.item = i2it(status)});
+    js_set_key_default(error, js_make_string_len("syscall", 7),
         js_make_string_len(operation, (int)strlen(operation)));
     if (address) {
-        js_property_set(error, js_make_string_len("address", 7),
+        js_set_key_default(error, js_make_string_len("address", 7),
             js_make_string_len(address, (int)strlen(address)));
     }
     if (port >= 0) {
-        js_property_set(error, js_make_string_len("port", 4), (Item){.item = i2it(port)});
+        js_set_key_default(error, js_make_string_len("port", 4), (Item){.item = i2it(port)});
     }
     return js_throw_value(error);
 }

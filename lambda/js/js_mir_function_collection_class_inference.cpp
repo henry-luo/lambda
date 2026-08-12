@@ -1,6 +1,13 @@
 #include "js_mir_internal.hpp"
 #include <limits.h>
 
+static bool js_ast_tune_function_index_enabled() {
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = getenv("LAMBDA_AST_TUNE_NO_FUNC_INDEX") ? 0 : 1;
+    return enabled != 0;
+}
+
 static bool jm_function_inside_class_syntax(JsFunctionNode* fn) {
     if (!fn || ts_node_is_null(fn->node)) return false;
     TSNode node = ts_node_parent(fn->node);
@@ -115,6 +122,8 @@ static bool jm_node_has_direct_eval_call(JsAstNode* node) {
 JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode* call) {
     if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+    // The scope table is authoritative after Annex B rewrites; the AST entry
+    // can still point at a suppressed declaration from the pre-rewrite pass.
     NameEntry* entry = js_scope_lookup(mt->tp, id->name);
     if (!entry) entry = id->entry;
     if (!entry || !entry->node) return NULL;
@@ -146,8 +155,11 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
 
     // Resolve to a function declaration or expression
+    // Native-call resolution must observe the post-Annex-B scope table before
+    // consulting the AST fallback, otherwise a stale declaration can recurse
+    // through the wrong MIR body and crash the batch worker.
     NameEntry* entry = js_scope_lookup(mt->tp, id->name);
-    if (!entry) entry = id->entry; // fallback to AST-resolved entry
+    if (!entry) entry = id->entry;
     if (!entry || !entry->node) return NULL;
 
     JsFunctionNode* fn = NULL;
@@ -1119,6 +1131,20 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
 // ============================================================================
 
 JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn) {
+    if (js_ast_tune_function_index_enabled() && mt && fn &&
+            mt->func_index_capacity && mt->func_index_nodes && mt->func_index_ids) {
+        uintptr_t key = (uintptr_t)fn >> 3;
+        key ^= key >> 17;
+        int slot = (int)(key & (uintptr_t)(mt->func_index_capacity - 1));
+        while (mt->func_index_nodes[slot]) {
+            if (mt->func_index_nodes[slot] == fn) {
+                int id = mt->func_index_ids[slot];
+                return id >= 0 && id < mt->func_count ? &mt->func_entries[id] : NULL;
+            }
+            slot = (slot + 1) & (mt->func_index_capacity - 1);
+        }
+        return NULL;
+    }
     for (int i = 0; i < mt->func_count; i++) {
         if (mt->func_entries[i].node == fn) return &mt->func_entries[i];
     }
@@ -2764,7 +2790,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             // Box through the funnel: an int Item is not a tagged payload, so
             // OR-ing the tag onto a raw index no longer produces that index.
             MIR_reg_t idx_boxed = jm_box_int_reg(mt, i_reg);
-            MIR_reg_t elem = jm_call_2(mt, "js_array_get", MIR_T_I64,
+            MIR_reg_t elem = jm_call_2(mt, "js_elements_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
             jm_emit_error_lane_propagate_check(mt);

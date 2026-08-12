@@ -33,12 +33,12 @@ static GridTrackSize* grid_scratch_clone_track(ScratchArena* scratch,
     copy->repeat_tracks = NULL;
     copy->repeat_track_count = 0;
 
-    GridTrackSize** nested[2] = {&copy->min_size, &copy->max_size};
-    GridTrackSize* source_nested[2] = {source->min_size, source->max_size};
-    for (int i = 0; i < 2; i++) {
-        if (source_nested[i]) {
-            *nested[i] = grid_scratch_clone_track(scratch, source_nested[i]);
-            if (!*nested[i]) return NULL;
+    LayoutAxisPair<GridTrackSize**> nested = {&copy->min_size, &copy->max_size};
+    LayoutAxisPair<GridTrackSize*> source_nested = {source->min_size, source->max_size};
+    for (LayoutAxis axis : layout_axes()) {
+        if (source_nested[axis]) {
+            *nested[axis] = grid_scratch_clone_track(scratch, source_nested[axis]);
+            if (!*nested[axis]) return NULL;
         }
     }
     if (source->repeat_tracks && source->repeat_track_count > 0) {
@@ -312,20 +312,20 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // Resolve percentage gaps against the container dimensions.
     // For definite containers, resolve immediately. For indefinite (shrink-to-fit),
     // the enhanced adapter handles the two-pass resolution.
-    float* gaps[2] = {&grid_layout->column_gap, &grid_layout->row_gap};
-    bool* gap_is_percent[2] = {
+    LayoutAxisPair<float*> gaps = {&grid_layout->column_gap, &grid_layout->row_gap};
+    LayoutAxisPair<bool*> gap_is_percent = {
         &grid_layout->column_gap_is_percent, &grid_layout->row_gap_is_percent
     };
-    const float content_sizes[2] = {
+    LayoutAxisPair<float> content_sizes = {
         grid_layout->content_width, grid_layout->content_height
     };
-    const bool definite_gap_base[2] = {
+    LayoutAxisPair<bool> definite_gap_base = {
         !is_shrink_to_fit_width, grid_layout->has_explicit_height
     };
-    for (int i = 0; i < 2; i++) {
-        if (*gap_is_percent[i] && definite_gap_base[i]) {
-            *gaps[i] = content_sizes[i] * (*gaps[i] / 100.0f);
-            *gap_is_percent[i] = false;
+    for (LayoutAxis axis : layout_axes()) {
+        if (*gap_is_percent[axis] && definite_gap_base[axis]) {
+            *gaps[axis] = content_sizes[axis] * (*gaps[axis] / 100.0f);
+            *gap_is_percent[axis] = false;
         }
     }
 
@@ -347,7 +347,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         if (!grid_layout->has_explicit_height && grid_layout->computed_row_count > 0) {
             float new_h = layout_grid_row_border_box_extent(container, grid_layout);
             if (new_h > (float)container->height) {
-                container->height = (int)new_h; // INT_CAST_OK: grid container height
+                container->height = new_h;
             }
         }
         grid_layout->needs_reflow = false;
@@ -358,15 +358,16 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     resolve_grid_template_areas(grid_layout);
 
     // Phase 2.5: Register named grid lines from track lists and template areas
-    GridTrackList* template_tracks[2] = {
+    LayoutAxisPair<GridTrackList*> template_tracks = {
         grid_layout->grid_template_columns, grid_layout->grid_template_rows
     };
-    for (int axis = 0; axis < 2; axis++) {
+    for (LayoutAxis axis : layout_axes()) {
         GridTrackList* tracks = template_tracks[axis];
         if (!tracks) continue;
         for (int i = 0; i <= tracks->track_count && i < tracks->allocated_tracks + 1; i++) {
             if (tracks->line_names[i]) {
-                add_grid_line_name(grid_layout, tracks->line_names[i], i + 1, axis == 1);
+                add_grid_line_name(grid_layout, tracks->line_names[i], i + 1,
+                                   axis == LAYOUT_AXIS_Y);
             }
         }
     }
@@ -612,13 +613,12 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             continue;
         }
         if (item->positionp()->position != CSS_VALUE_RELATIVE) continue;
-        const LayoutAxis axes[2] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
-        const float containing_sizes[2] = {container->width, container->height};
-        for (int axis_index = 0; axis_index < 2; axis_index++) {
-            LayoutAxisRefs refs(item, axes[axis_index]);
+        LayoutAxisPair<float> containing_sizes = layout_axis_pair(
+            container->width, container->height);
+        for (LayoutAxis axis : layout_axes()) {
+            LayoutAxisRefs refs(item, axis);
             float offset = layout_relative_axis_offset(
-                item, layout_axis_is_horizontal(axes[axis_index]),
-                containing_sizes[axis_index]);
+                item, layout_axis_is_horizontal(axis), containing_sizes[axis]);
             refs.set_position(refs.get_position() + offset);
         }
     }

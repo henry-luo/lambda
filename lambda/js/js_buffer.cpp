@@ -39,8 +39,8 @@ static Item js_buffer_resolve_object_url(Item id_item) {
     if (jube_specifier_resolve("url", &url_namespace) != JUBE_SPECIFIER_RESOLVED) {
         return make_js_undefined();
     }
-    Item url_ctor = js_property_get(url_namespace, make_string_item("URL"));
-    Item resolver = js_property_get(url_ctor, make_string_item("resolveObjectURL"));
+    Item url_ctor = js_get_key_default(url_namespace, make_string_item("URL"));
+    Item resolver = js_get_key_default(url_ctor, make_string_item("resolveObjectURL"));
     if (!js_is_callable(resolver)) return make_js_undefined();
     Item args[1] = {id_item};
     return js_call_function(resolver, url_ctor, args, 1);
@@ -234,9 +234,9 @@ static int format_received_suffix(char* buf, int buf_size, Item value) {
         case LMD_TYPE_UNDEFINED:
             return snprintf(buf, buf_size, " Received undefined");
         case LMD_TYPE_MAP: {
-            Item ctor = js_property_get(value, make_string_item("constructor"));
+            Item ctor = js_get_key_default(value, make_string_item("constructor"));
             Item name = get_type_id(ctor) == LMD_TYPE_FUNC
-                ? js_property_get(ctor, make_string_item("name"))
+                ? js_get_key_default(ctor, make_string_item("name"))
                 : ItemNull;
             if (get_type_id(name) == LMD_TYPE_STRING) {
                 String* ns = it2s(name);
@@ -601,7 +601,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
         if (bdata) {
             for (int64_t i = 0; i < arr_len; i++) {
-                Item elem = js_array_get_int(data, i);
+                Item elem = js_elements_get_int(data, i);
                 int64_t v = 0;
                 TypeId et = get_type_id(elem);
                 if (et == LMD_TYPE_INT) v = it2i(elem);
@@ -651,15 +651,15 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
     if (tid == LMD_TYPE_MAP) {
         Item type_key = make_string_item("type", 4);
         Item data_key = make_string_item("data", 4);
-        Item type_val = js_property_get(data, type_key);
-        Item data_val = js_property_get(data, data_key);
+        Item type_val = js_get_key_default(data, type_key);
+        Item data_val = js_get_key_default(data, data_key);
         if (get_type_id(type_val) == LMD_TYPE_STRING && get_type_id(data_val) == LMD_TYPE_ARRAY) {
             // recursively create from the data array
             return js_buffer_from(data_val, encoding, make_js_undefined());
         }
         // array-like object with length property
         Item len_key = make_string_item("length", 6);
-        Item len_val = js_property_get(data, len_key);
+        Item len_val = js_get_key_default(data, len_key);
         TypeId lt = get_type_id(len_val);
         if (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) {
             int64_t arr_len = (lt == LMD_TYPE_INT) ? it2i(len_val) : (int64_t)it2d(len_val);
@@ -670,13 +670,11 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
             }
             Item buf = create_buffer((int)arr_len);
             int buf_byte_len = 0;
-            uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
-            if (bdata) {
-                for (int64_t i = 0; i < arr_len; i++) {
-                    char idx[24];
-                    snprintf(idx, sizeof(idx), "%lld", (long long)i);
-                    Item idx_key = make_string_item(idx, (int)strlen(idx));
-                    Item elem = js_property_get(data, idx_key);
+                uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
+                if (bdata) {
+                    for (int64_t i = 0; i < arr_len; i++) {
+                    Item idx_key = js_property_index_key(i);
+                    Item elem = js_get_key_default(data, idx_key);
                     int64_t v = 0;
                     TypeId et = get_type_id(elem);
                     if (et == LMD_TYPE_INT) v = it2i(elem);
@@ -730,7 +728,7 @@ extern "C" Item js_buffer_concat(Item list, Item total_length_item) {
     // compute natural total length
     int64_t total = 0;
     for (int64_t i = 0; i < count; i++) {
-        Item buf = js_array_get_int(list, i);
+        Item buf = js_elements_get_int(list, i);
         if (!js_is_typed_array(buf)) {
             char msg[256];
             int pos = snprintf(msg, sizeof(msg),
@@ -795,7 +793,7 @@ extern "C" Item js_buffer_concat(Item list, Item total_length_item) {
     uint8_t* dst = buffer_data_write(result, &dst_len);
     int64_t offset = 0;
     for (int64_t i = 0; i < count && offset < total; i++) {
-        Item buf = js_array_get_int(list, i);
+        Item buf = js_elements_get_int(list, i);
         int blen = 0;
         uint8_t* bdata = buffer_data(buf, &blen);
         if (bdata && blen > 0) {
@@ -1027,7 +1025,7 @@ extern "C" Item js_buffer_byteLength(Item str_item, Item enc_item) {
     if (js_is_dataview(str_item)) {
         // DataView byte_length: get from the DataView struct via byteLength property
         Item bl_key = make_string_item("byteLength", 10);
-        Item bl_val = js_property_get(str_item, bl_key);
+        Item bl_val = js_get_key_default(str_item, bl_key);
         if (get_type_id(bl_val) == LMD_TYPE_INT) return bl_val;
         return (Item){.item = i2it(0)};
     }
@@ -2070,14 +2068,14 @@ extern "C" Item js_buffer_toJSON(Item buf) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
     Item result = js_new_object();
-    js_property_set(result, make_string_item("type"), make_string_item("Buffer"));
+    js_set_key_default(result, make_string_item("type"), make_string_item("Buffer"));
     Item arr = js_array_new(0);
     if (data) {
         for (int i = 0; i < blen; i++) {
             js_array_push(arr, (Item){.item = i2it((int64_t)data[i])});
         }
     }
-    js_property_set(result, make_string_item("data"), arr);
+    js_set_key_default(result, make_string_item("data"), arr);
     return result;
 }
 
@@ -2132,17 +2130,17 @@ extern "C" Item js_buffer_iterator_next(void) {
     }
 
     Item done_key = buffer_iterator_key("__done__", 8);
-    Item done_val = js_property_get(iter, done_key);
+    Item done_val = js_get_key_default(iter, done_key);
     if (get_type_id(done_val) == LMD_TYPE_BOOL && it2b(done_val)) {
         Item result = js_new_object();
-        js_property_set(result, make_string_item("value"), make_js_undefined());
-        js_property_set(result, make_string_item("done"), (Item){.item = b2it(true)});
+        js_set_key_default(result, make_string_item("value"), make_js_undefined());
+        js_set_key_default(result, make_string_item("done"), (Item){.item = b2it(true)});
         return result;
     }
 
-    Item target = js_property_get(iter, buffer_iterator_key("__buf__", 7));
-    Item index_item = js_property_get(iter, buffer_iterator_key("__index__", 9));
-    Item kind_item = js_property_get(iter, buffer_iterator_key("__kind__", 8));
+    Item target = js_get_key_default(iter, buffer_iterator_key("__buf__", 7));
+    Item index_item = js_get_key_default(iter, buffer_iterator_key("__index__", 9));
+    Item kind_item = js_get_key_default(iter, buffer_iterator_key("__kind__", 8));
     if (!js_is_typed_array(target) ||
         get_type_id(index_item) != LMD_TYPE_INT ||
         get_type_id(kind_item) != LMD_TYPE_INT) {
@@ -2156,14 +2154,14 @@ extern "C" Item js_buffer_iterator_next(void) {
     int kind = (int)it2i(kind_item); // kind values: 0=keys, 1=values, 2=entries
     int len = js_typed_array_length(target);
     if (idx >= len) {
-        js_property_set(iter, done_key, (Item){.item = b2it(true)});
+        js_set_key_default(iter, done_key, (Item){.item = b2it(true)});
         Item result = js_new_object();
-        js_property_set(result, make_string_item("value"), make_js_undefined());
-        js_property_set(result, make_string_item("done"), (Item){.item = b2it(true)});
+        js_set_key_default(result, make_string_item("value"), make_js_undefined());
+        js_set_key_default(result, make_string_item("done"), (Item){.item = b2it(true)});
         return result;
     }
 
-    js_property_set(iter, buffer_iterator_key("__index__", 9), (Item){.item = i2it(idx + 1)});
+    js_set_key_default(iter, buffer_iterator_key("__index__", 9), (Item){.item = i2it(idx + 1)});
     Item value = ItemNull;
     if (kind == 0) {
         value = (Item){.item = i2it(idx)};
@@ -2172,7 +2170,7 @@ extern "C" Item js_buffer_iterator_next(void) {
         if (elem.item == ITEM_NULL) elem = make_js_undefined();
         Item pair = js_array_new(2);
         pair.array->items[0] = (Item){.item = i2it(idx)};
-        js_array_set_int(pair, 1, elem);
+        js_elements_set_int(pair, 1, elem);
         value = pair;
     } else {
         value = js_typed_array_get(target, (Item){.item = i2it(idx)});
@@ -2180,8 +2178,8 @@ extern "C" Item js_buffer_iterator_next(void) {
     }
 
     Item result = js_new_object();
-    js_property_set(result, make_string_item("value"), value);
-    js_property_set(result, make_string_item("done"), (Item){.item = b2it(false)});
+    js_set_key_default(result, make_string_item("value"), value);
+    js_set_key_default(result, make_string_item("done"), (Item){.item = b2it(false)});
     return result;
 }
 
@@ -2191,12 +2189,12 @@ static Item js_buffer_iterator_new(Item target, int kind) {
     }
 
     Item iter = js_new_object();
-    js_property_set(iter, buffer_iterator_key("__buf__", 7), target);
-    js_property_set(iter, buffer_iterator_key("__index__", 9), (Item){.item = i2it(0)});
-    js_property_set(iter, buffer_iterator_key("__kind__", 8), (Item){.item = i2it(kind)});
-    js_property_set(iter, buffer_iterator_key("__done__", 8), (Item){.item = b2it(false)});
-    js_property_set(iter, make_string_item("next"), js_new_native_function(js_buffer_iterator_next));
-    js_property_set(iter, js_well_known_symbol_key(1), js_new_native_function(js_buffer_iterator_identity));
+    js_set_key_default(iter, buffer_iterator_key("__buf__", 7), target);
+    js_set_key_default(iter, buffer_iterator_key("__index__", 9), (Item){.item = i2it(0)});
+    js_set_key_default(iter, buffer_iterator_key("__kind__", 8), (Item){.item = i2it(kind)});
+    js_set_key_default(iter, buffer_iterator_key("__done__", 8), (Item){.item = b2it(false)});
+    js_set_key_default(iter, make_string_item("next"), js_new_native_function(js_buffer_iterator_next));
+    js_set_key_default(iter, js_well_known_symbol_key(1), js_new_native_function(js_buffer_iterator_identity));
     return iter;
 }
 
@@ -2529,8 +2527,8 @@ extern "C" Item js_get_buffer_prototype(void) {
         js_new_native_function(js_buf_inst_values));
     // D5.4.3: both aliases are published after allocating keys, so the shared
     // callable must remain precisely rooted until the second store owns it.
-    js_property_set(buffer_prototype, make_string_item("values"), values_root.get());
-    js_property_set(buffer_prototype, js_well_known_symbol_key(1), values_root.get());
+    js_set_key_default(buffer_prototype, make_string_item("values"), values_root.get());
+    js_set_key_default(buffer_prototype, js_well_known_symbol_key(1), values_root.get());
     buf_set_method(buffer_prototype, "entries",    js_buf_inst_entries, 0);
 
     // endian-aware reads (1 arg: offset)
@@ -2699,7 +2697,7 @@ extern "C" Item js_get_buffer_namespace(void) {
     prototype_root.set(js_get_buffer_prototype());
     // D5.4.3: prototype construction allocates before the outer property call
     // establishes ownership, so retain the returned object in this root frame.
-    js_property_set(namespace_root.get(), make_string_item("prototype"),
+    js_set_key_default(namespace_root.get(), make_string_item("prototype"),
         prototype_root.get());
     {
         Item has_instance_key = js_well_known_symbol_key(3);
@@ -2710,8 +2708,8 @@ extern "C" Item js_get_buffer_namespace(void) {
     }
 
     // Buffer is the default export
-    js_property_set(buffer_namespace, make_string_item("Buffer"), buffer_namespace);
-    js_property_set(buffer_namespace, make_string_item("default"), buffer_namespace);
+    js_set_key_default(buffer_namespace, make_string_item("Buffer"), buffer_namespace);
+    js_set_key_default(buffer_namespace, make_string_item("default"), buffer_namespace);
 
     // Node.js: buffer module also exports atob/btoa
     buf_set_method(buffer_namespace, "atob", js_atob, 1);
@@ -2721,7 +2719,7 @@ extern "C" Item js_get_buffer_namespace(void) {
         // D5.4.3: naming allocates before namespace publication owns the
         // constructor; keep the intermediate callable in the enclosing frame.
         js_set_function_name(blob_ctor_root.get(), make_string_item("Blob"));
-        js_property_set(namespace_root.get(), make_string_item("Blob"),
+        js_set_key_default(namespace_root.get(), make_string_item("Blob"),
             blob_ctor_root.get());
     }
     // Resolve through the registry so the host never imports a node-core
@@ -2733,18 +2731,18 @@ extern "C" Item js_get_buffer_namespace(void) {
         constants_root.set(js_new_object());
         // D5.4.3: the constants object is not owned by the namespace until all
         // of its fields are installed, so each allocating store needs this root.
-        js_property_set(constants_root.get(), make_string_item("MAX_LENGTH"),
+        js_set_key_default(constants_root.get(), make_string_item("MAX_LENGTH"),
             (Item){.item = i2it(JS_BUFFER_MAX_LENGTH)});
-        js_property_set(constants_root.get(), make_string_item("MAX_STRING_LENGTH"),
+        js_set_key_default(constants_root.get(), make_string_item("MAX_STRING_LENGTH"),
             (Item){.item = i2it(JS_BUFFER_MAX_STRING_LENGTH)});
-        js_property_set(namespace_root.get(), make_string_item("constants"),
+        js_set_key_default(namespace_root.get(), make_string_item("constants"),
             constants_root.get());
     }
 
     // buffer.kMaxLength, buffer.kStringMaxLength — legacy aliases
-    js_property_set(buffer_namespace, make_string_item("kMaxLength"),
+    js_set_key_default(buffer_namespace, make_string_item("kMaxLength"),
         (Item){.item = i2it(JS_BUFFER_MAX_LENGTH)});
-    js_property_set(buffer_namespace, make_string_item("kStringMaxLength"),
+    js_set_key_default(buffer_namespace, make_string_item("kStringMaxLength"),
         (Item){.item = i2it(JS_BUFFER_MAX_STRING_LENGTH)});
 
     // buffer.SlowBuffer — legacy, alias for allocUnsafeSlow
@@ -2753,7 +2751,7 @@ extern "C" Item js_get_buffer_namespace(void) {
     buf_set_method(buffer_namespace, "SlowBuffer", js_buffer_allocUnsafeSlow, 1);
 
     // Buffer.poolSize — default 8192
-    js_property_set(buffer_namespace, make_string_item("poolSize"),
+    js_set_key_default(buffer_namespace, make_string_item("poolSize"),
         (Item){.item = i2it(8192)});
 
     return namespace_root.get();

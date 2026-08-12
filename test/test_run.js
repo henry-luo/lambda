@@ -60,6 +60,7 @@ for (let i = 0; i < args.length; i++) {
 Environment variables:
   LAMBDA_TEST_IDLE_TIMEOUT   Override idle timeout in seconds (default: auto-scaled by CPU count/load)
   LAMBDA_TEST_HEAVY_LOAD     Set to 1 to bias idle timeout upward for full-suite parallel runs
+  LAMBDA_TEST_MAX_CONCURRENT Cap nested GTest fan-out (default: CPU-scaled, heavy-load caps at 4)
   LAMBDA_UI_TEST_JOBS        Override UI automation parallelism in suite runs
 `);
         process.exit(0);
@@ -143,7 +144,18 @@ const IDLE_TIMEOUT_MS = IDLE_TIMEOUT.timeoutMs;
 // Max concurrent tests: scale to CPU count, leave 1 core free (min 1).
 function getMaxConcurrent() {
     if (!parallelExecution) return 1;
-    return Math.max(1, os.cpus().length - 1);
+    const cpuScaled = Math.max(1, os.cpus().length - 1);
+    const requested = parseInt(process.env.LAMBDA_TEST_MAX_CONCURRENT || '', 10);
+    if (Number.isFinite(requested) && requested > 0) {
+        return Math.min(cpuScaled, requested);
+    }
+    // Each GTest binary can launch its own compiler-worker pool. Keep the
+    // baseline runner below the CPU count when its heavy-load mode is active;
+    // otherwise the nested pools compete for memory and child processes can
+    // die before emitting their result protocol.
+    return process.env.LAMBDA_TEST_HEAVY_LOAD === '1'
+        ? Math.min(cpuScaled, 4)
+        : cpuScaled;
 }
 
 const MAX_CONCURRENT = getMaxConcurrent();

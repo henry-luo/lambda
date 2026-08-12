@@ -11,6 +11,7 @@ typedef struct AstNode AstNode;
 typedef struct AstImportNode AstImportNode;
 typedef struct NameEntry NameEntry;
 typedef struct NameScope NameScope;
+typedef struct LangProfile LangProfile;
 typedef struct TsTypeAnnotationNode TsTypeAnnotationNode;
 typedef struct _ArrayList ArrayList;
 
@@ -296,6 +297,52 @@ struct AstNode {
     AstNode* next;
     TSNode node;
 };
+
+// Stable compiler identities and one authoritative child/index contract. The
+// index is deliberately representation-neutral: language profiles add only
+// extension children, while all core passes use these dense IDs.
+typedef uint32_t AstNodeId;
+typedef uint32_t AstFunctionId;
+#define AST_NODE_ID_INVALID UINT32_MAX
+#define AST_FUNCTION_ID_INVALID UINT32_MAX
+
+typedef void (*AstChildVisitor)(AstNode* child, AstNode* parent, void* ctx);
+
+typedef struct AstIndex {
+    AstNode** nodes;
+    AstNode** parents;
+    AstFunctionId* owner_functions;
+    // Dense function roots make FunctionId the shared authority for Lambda
+    // and JS lowering instead of requiring each frontend to rescan nodes.
+    AstNode** functions;
+    struct AstNodeFacts* facts;
+    uint32_t count;
+    uint32_t capacity;
+    uint32_t function_count;
+    uint32_t function_capacity;
+    AstNode** slots;
+    AstNodeId* slot_ids;
+    uint32_t slot_capacity;
+} AstIndex;
+
+typedef struct AstNodeFacts {
+    Type* declared_contract;
+    Type* inferred_type;
+    ValueRep representation;
+    uint32_t flags;
+} AstNodeFacts;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx);
+bool ast_index_build(AstIndex* index, AstNode* root);
+bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile);
+void ast_index_destroy(AstIndex* index);
+AstNodeId ast_index_find(const AstIndex* index, const AstNode* node);
+#ifdef __cplusplus
+}
+#endif
 
 typedef struct AstFieldNode : AstNode {
     AstNode *object;
@@ -835,6 +882,7 @@ typedef struct LangProfile {
     void (*validate)(void* ctx, AstNode* root);
     void (*analyze)(void* ctx, AstNode* root);
     void (*lower)(void* ctx, AstNode* root);
+    void (*visit_ext_children)(AstNode* node, AstChildVisitor visitor, void* ctx);
 } LangProfile;
 
 static inline void lang_profile_noop_hook(void* ctx, AstNode* root) {
@@ -842,11 +890,18 @@ static inline void lang_profile_noop_hook(void* ctx, AstNode* root) {
     (void)root;
 }
 
+static inline void lang_profile_noop_ext(AstNode* node, AstChildVisitor visitor, void* ctx) {
+    (void)node;
+    (void)visitor;
+    (void)ctx;
+}
+
 inline LangProfile lambda_profile = {
     "lambda",
     lang_profile_noop_hook,
     lang_profile_noop_hook,
     lang_profile_noop_hook,
+    lang_profile_noop_ext,
 };
 
 inline LangProfile js_profile = {
@@ -854,6 +909,7 @@ inline LangProfile js_profile = {
     lang_profile_noop_hook,
     lang_profile_noop_hook,
     lang_profile_noop_hook,
+    lang_profile_noop_ext,
 };
 
 static inline LangProfile* lang_profile_for_name(const char* name) {

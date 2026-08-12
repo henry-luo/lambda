@@ -2335,6 +2335,10 @@ int main(int argc, char *argv[]) {
             const char* tune6_timing_env = getenv("JS_TRANSPILE_TIMING");
             bool tune6_timing = tune6_timing_env && tune6_timing_env[0] &&
                                 strcmp(tune6_timing_env, "0") != 0;
+            const char* compiler_timing_env = getenv("LAMBDA_COMPILER_TIMING");
+            bool compiler_timing = compiler_timing_env && compiler_timing_env[0] &&
+                                   strcmp(compiler_timing_env, "0") != 0;
+            tune6_timing = tune6_timing || compiler_timing;
             if (tune6_timing) {
                 js_scope_counters_set_enabled(1);
                 js_scope_counters_reset();
@@ -2397,11 +2401,26 @@ int main(int argc, char *argv[]) {
                        t.imports_us / 1000.0, t.mir_us / 1000.0, t.link_us / 1000.0,
                        t.execute_us / 1000.0, t.cleanup_us / 1000.0, t.total_us / 1000.0);
                 printf("JS_AST_COUNTERS file=%s scope_lookups=%ld "
-                       "scope_entries_scanned=%ld scopes_walked=%ld\n",
-                       js_file, sc.lookup_calls, sc.entries_scanned, sc.scopes_walked);
+                       "scope_entries_scanned=%ld scopes_walked=%ld cache_hits=%ld cache_misses=%ld\n",
+                       js_file, sc.lookup_calls, sc.entries_scanned, sc.scopes_walked,
+                       sc.cache_hits, sc.cache_misses);
                 JsMirVolumeCounters vc; js_mir_volume_counters_get(&vc);
                 printf("JS_MIR_VOLUME file=%s functions=%ld mir_insns=%ld\n",
                        js_file, vc.functions_discovered, vc.mir_insns_emitted);
+                if (compiler_timing) {
+                    long build_transpile_us = t.parse_us + t.ast_us + t.early_us +
+                        t.imports_us + t.mir_us + t.link_us;
+                    printf("\x01" "COMPILER_TIMING schema=1 parse_us=%ld ast_build_us=%ld "
+                           "validate_us=%ld imports_us=%ld mir_lower_us=%ld link_us=%ld "
+                           "build_transpile_us=%ld\n",
+                           t.parse_us, t.ast_us, t.early_us, t.imports_us,
+                           t.mir_us, t.link_us, build_transpile_us);
+                    const char* sample_name = strrchr(js_file, '/');
+                    sample_name = sample_name ? sample_name + 1 : js_file;
+                    printf("\x01" "MIR_VOLUME schema=1 sample_id=%s test_name=%s modules=1 functions=%ld insns=%ld\n",
+                           js_file, sample_name,
+                           vc.functions_discovered, vc.mir_insns_emitted);
+                }
                 fflush(stdout);
                 js_scope_counters_set_enabled(0);
             }
@@ -3838,6 +3857,7 @@ int main(int argc, char *argv[]) {
 
             printf("\x01" "BATCH_START %s\n", script_path);
             fflush(stdout);
+            lambda_compiler_timing_reset();
 
             if (!file_exists(script_path)) {
                 fprintf(stderr, "Error: Script file '%s' does not exist\n", script_path);
@@ -3874,6 +3894,34 @@ int main(int argc, char *argv[]) {
             result = run_script_file(&runtime, script_path, false, run_main);
 #endif
             fflush(stdout);
+
+            if (lambda_compiler_timing_enabled()) {
+                LambdaCompilerTiming timing;
+                lambda_compiler_timing_get(&timing);
+                // Declaration-only modules can complete successfully without
+                // entering MIR lowering. Emit an explicit zero-work record so
+                // captures distinguish that case from a lost sample.
+                if (!timing.valid) timing.valid = 1;
+                if (timing.valid) {
+                    printf("\x01" "COMPILER_TIMING schema=1 parse_us=%llu ast_build_us=%llu "
+                           "mir_lower_us=%llu module_finalize_us=%llu link_us=%llu "
+                           "build_transpile_us=%llu\n",
+                           (unsigned long long)timing.parse_us,
+                           (unsigned long long)timing.ast_build_us,
+                           (unsigned long long)timing.mir_lower_us,
+                           (unsigned long long)timing.module_finalize_us,
+                           (unsigned long long)timing.link_us,
+                           (unsigned long long)timing.build_transpile_us);
+                    const char* sample_name = strrchr(script_path, '/');
+                    sample_name = sample_name ? sample_name + 1 : script_path;
+                    printf("\x01" "MIR_VOLUME schema=1 sample_id=%s test_name=%s modules=%llu functions=%llu insns=%llu\n",
+                           script_path, sample_name,
+                           (unsigned long long)timing.mir_module_count,
+                           (unsigned long long)timing.mir_function_count,
+                           (unsigned long long)timing.mir_insn_count);
+                    fflush(stdout);
+                }
+            }
 
             printf("\x01" "BATCH_END %d\n", result);
             fflush(stdout);
@@ -3917,6 +3965,9 @@ int main(int argc, char *argv[]) {
         }
 
         int batch_timeout = 10; // default per-script timeout in seconds
+        const char* compiler_timing_env = getenv("LAMBDA_COMPILER_TIMING");
+        bool compiler_timing = compiler_timing_env && compiler_timing_env[0] &&
+                               strcmp(compiler_timing_env, "0") != 0;
         bool hot_reload = true; // persistent heap between tests (default: on)
         for (int i = 2; i < argc; i++) {
             if (strncmp(argv[i], "--timeout=", 10) == 0) {
@@ -4355,6 +4406,25 @@ int main(int argc, char *argv[]) {
             size_t rss_after = get_rss_bytes();
             JsMirPhaseTiming phase_timing;
             js_mir_get_last_phase_timing(&phase_timing);
+            if (compiler_timing) {
+                JsMirVolumeCounters volume;
+                js_mir_volume_counters_get(&volume);
+                long build_transpile_us = phase_timing.parse_us + phase_timing.ast_us +
+                    phase_timing.early_us + phase_timing.imports_us +
+                    phase_timing.mir_us + phase_timing.link_us;
+                printf("\x01" "COMPILER_TIMING schema=1 parse_us=%ld ast_build_us=%ld "
+                       "validate_us=%ld imports_us=%ld mir_lower_us=%ld link_us=%ld "
+                       "build_transpile_us=%ld\n",
+                       phase_timing.parse_us, phase_timing.ast_us,
+                       phase_timing.early_us, phase_timing.imports_us,
+                       phase_timing.mir_us, phase_timing.link_us,
+                       build_transpile_us);
+                const char* sample_name = strrchr(script_path, '/');
+                sample_name = sample_name ? sample_name + 1 : script_path;
+                printf("\x01" "MIR_VOLUME schema=1 sample_id=%s test_name=%s modules=1 functions=%ld insns=%ld\n",
+                       script_path, sample_name,
+                       volume.functions_discovered, volume.mir_insns_emitted);
+            }
             printf("\x01" "BATCH_END %d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld\n",
                    result, elapsed_us, rss_before, rss_after,
                    phase_timing.parse_us, phase_timing.ast_us, phase_timing.early_us,

@@ -254,17 +254,65 @@ JsMirImportEntry* jm_ensure_import_v_i(JsMirTranspiler* mt, const char* name) {
     return jm_ensure_import(mt, name, MIR_T_I64, 0, NULL, 1);
 }
 
+static bool js_ast_tune_boxed_const_reuse_enabled() {
+    static int enabled = -1;
+    if (enabled < 0) {
+        // Reusing a sentinel register across MIR control-flow blocks is not
+        // yet dominance-aware; callback lowering can observe the stale value.
+        // Keep this experiment opt-in until the cache tracks block dominance.
+        enabled = getenv("LAMBDA_AST_TUNE_BOXED_CONST_REUSE") ? 1 : 0;
+    }
+    return enabled != 0;
+}
+
+// Immediate Item constants are non-GC values. Keep one function-entry copy
+// and reuse it across blocks; this removes repeated moves without extending
+// the lifetime of a heap/scalar value across a control-flow boundary.
+MIR_reg_t jm_boxed_immediate_const(JsMirTranspiler* mt, uint64_t item,
+        const char* prefix) {
+    if (!mt || !mt->ctx) return 0;
+    // Boolean Item registers are frequently used as mutable temporary homes
+    // by logical/validation lowering; sharing one across those consumers can
+    // change a later predicate's value. Null/undefined are immutable sentinels
+    // and remain safe to reuse across a dominating block.
+    bool reusable = item == ITEM_NULL_VAL || item == ITEM_JS_UNDEFINED;
+    if (!js_ast_tune_boxed_const_reuse_enabled() || !reusable) {
+        MIR_reg_t result = jm_new_reg(mt, prefix, MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx,
+                (int64_t)item)));
+        return result;
+    }
+    if (mt->em.func_item != mt->boxed_float_const_cache_func) {
+        mt->boxed_float_const_cache_func = mt->em.func_item;
+        mt->boxed_float_const_cache_count = 0;
+        mt->boxed_float_const_cache_seed_count = 0;
+    }
+    for (int i = 0; i < mt->boxed_float_const_cache_count; i++) {
+        if (mt->boxed_float_const_cache[i].bits == item)
+            return mt->boxed_float_const_cache[i].reg;
+    }
+    MIR_reg_t result = jm_new_reg(mt, prefix, MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx,
+            (int64_t)item)));
+    if (mt->boxed_float_const_cache_count <
+            (int)(sizeof(mt->boxed_float_const_cache) /
+                  sizeof(mt->boxed_float_const_cache[0]))) {
+        int slot = mt->boxed_float_const_cache_count++;
+        mt->boxed_float_const_cache[slot].bits = item;
+        mt->boxed_float_const_cache[slot].reg = result;
+    }
+    return result;
+}
+
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt) {
-    MIR_reg_t r = jm_new_reg(mt, "null", MIR_T_I64);
-    mir_emit_i64_const_to_reg(mt->ctx, mt->em.func_item, r, (int64_t)ITEM_NULL_VAL);
-    return r;
+    return jm_boxed_immediate_const(mt, ITEM_NULL_VAL, "null");
 }
 
 // v17: emit JS undefined value (for strict mode this coercion)
 MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt) {
-    MIR_reg_t r = jm_new_reg(mt, "undef", MIR_T_I64);
-    mir_emit_i64_const_to_reg(mt->ctx, mt->em.func_item, r, (int64_t)ITEM_JS_UNDEFINED);
-    return r;
+    return jm_boxed_immediate_const(mt, ITEM_JS_UNDEFINED, "undef");
 }
 
 MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt) {
@@ -400,10 +448,62 @@ MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value) {
             MIR_new_reg_op(mt->ctx, d), MIR_new_double_op(mt->ctx, value)));
         return jm_box_float(mt, d);
     }
-    MIR_reg_t result = jm_new_reg(mt, "boxfc", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, (int64_t)item)));
-    return result;
+
+    return jm_boxed_immediate_const(mt, item, "boxfc");
+}
+
+void jm_seed_boxed_float_const_cache(JsMirTranspiler* mt, JsAstNode* scope_root) {
+    if (!js_ast_tune_boxed_const_reuse_enabled() || !mt || !mt->tp || !scope_root)
+        return;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId root_id = ast_index_find(index, (AstNode*)scope_root);
+    if (root_id == AST_NODE_ID_INVALID) return;
+    AstFunctionId owner = index->owner_functions[root_id];
+    uint64_t keys[32] = {};
+    uint16_t counts[32] = {};
+    int key_count = 0;
+    // These values occur in almost every JS library. Seed them once so the
+    // cache survives branch boundaries without rebuilding the same Item.
+    keys[key_count] = ITEM_NULL_VAL; counts[key_count++] = UINT16_MAX;
+    keys[key_count] = ITEM_JS_UNDEFINED; counts[key_count++] = UINT16_MAX;
+    for (uint32_t i = 0; i < index->count; i++) {
+        if (index->owner_functions[i] != owner) continue;
+        AstNode* node = index->nodes[i];
+        if (!node || node->node_type != AST_NODE_LITERAL) continue;
+        JsLiteralNode* literal = (JsLiteralNode*)node;
+        if (literal->literal_type != JS_LITERAL_NUMBER || literal->is_bigint) continue;
+        uint64_t bits;
+        __builtin_memcpy(&bits, &literal->value.number_value, sizeof(bits));
+        uint64_t item = literal->value.number_value == 0.0
+            ? ITEM_FLOAT_P0 | (bits >> 63) : bits;
+        if (literal->value.number_value != 0.0 && !(bits & ITEM_DBL_MASK)) continue;
+        int k = 0;
+        while (k < key_count && keys[k] != item) k++;
+        if (k == key_count) {
+            if (key_count >= (int)(sizeof(keys) / sizeof(keys[0]))) continue;
+            keys[key_count] = item;
+            counts[key_count++] = 1;
+        } else if (counts[k] != UINT16_MAX) {
+            counts[k]++;
+        }
+    }
+    mt->boxed_float_const_cache_func = mt->em.func_item;
+    mt->boxed_float_const_cache_count = 0;
+    mt->boxed_float_const_cache_seed_count = 0;
+    for (int k = 0; k < key_count; k++) {
+        if (counts[k] < 2) continue;
+        if (mt->boxed_float_const_cache_seed_count >=
+                (int)(sizeof(mt->boxed_float_const_cache) /
+                      sizeof(mt->boxed_float_const_cache[0]))) break;
+        MIR_reg_t reg = jm_new_reg(mt, "boxfc_seed", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, reg),
+            MIR_new_int_op(mt->ctx, (int64_t)keys[k])));
+        int slot = mt->boxed_float_const_cache_seed_count++;
+        mt->boxed_float_const_cache[slot].bits = keys[k];
+        mt->boxed_float_const_cache[slot].reg = reg;
+    }
+    mt->boxed_float_const_cache_count = mt->boxed_float_const_cache_seed_count;
 }
 
 // Box string via s2it tagging: result = ptr ? (STR_TAG | ptr) : ITEM_NULL
@@ -431,8 +531,7 @@ uint32_t jm_module_name_index(JsMirTranspiler* mt, const char* chars, uint32_t l
     }
     for (int i = 0; i < mt->module_name_specs->length; i++) {
         NameRef spec = (NameRef)arraylist_get(mt->module_name_specs, i);
-        if (spec && spec->len == length &&
-                memcmp(spec->chars, chars, length) == 0) {
+        if (spec && spec->len == length && memcmp(spec->chars, chars, length) == 0) {
             return mt->module_name_base + (uint32_t)i;
         }
     }
@@ -545,33 +644,118 @@ bool jm_build_property_key_image(const PropertyKeySpec* inherited,
     return true;
 }
 
+MIR_reg_t jm_module_name_id_at_index(JsMirTranspiler* mt, uint32_t index) {
+    if (!mt) return 0;
+    if (mt->em.func_item != mt->module_name_id_cache_func) {
+        mt->module_name_id_cache_func = mt->em.func_item;
+        mt->module_name_id_cache_count = 0;
+    }
+    for (int i = 0; i < mt->module_name_id_cache_count; i++) {
+        if (mt->module_name_id_cache[i].module_name_index == index &&
+                mt->module_name_id_cache[i].direct_name_id == NAME_ID_NONE) {
+            return mt->module_name_id_cache[i].reg;
+        }
+    }
+    MIR_reg_t result = jm_call_1(mt, "js_active_module_name_id", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)index));
+    if (result && mt->module_name_id_cache_count <
+            (int)(sizeof(mt->module_name_id_cache) /
+                  sizeof(mt->module_name_id_cache[0]))) {
+        int slot = mt->module_name_id_cache_count++;
+        mt->module_name_id_cache[slot].module_name_index = index;
+        mt->module_name_id_cache[slot].direct_name_id = NAME_ID_NONE;
+        mt->module_name_id_cache[slot].reg = result;
+    }
+    return result;
+}
+
+MIR_reg_t jm_active_module_ic_at_index(JsMirTranspiler* mt, uint32_t index) {
+    if (!mt) return 0;
+    if (mt->em.func_item != mt->module_ic_cache_func) {
+        mt->module_ic_cache_func = mt->em.func_item;
+        mt->module_ic_cache_count = 0;
+    }
+    for (int i = 0; i < mt->module_ic_cache_count; i++) {
+        if (mt->module_ic_cache[i].index == index) {
+            return mt->module_ic_cache[i].reg;
+        }
+    }
+    MIR_reg_t result = jm_call_1(mt, "js_active_module_ic", MIR_T_P,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)index));
+    if (result && mt->module_ic_cache_count <
+            (int)(sizeof(mt->module_ic_cache) /
+                  sizeof(mt->module_ic_cache[0]))) {
+        int slot = mt->module_ic_cache_count++;
+        mt->module_ic_cache[slot].index = index;
+        mt->module_ic_cache[slot].reg = result;
+    }
+    return result;
+}
+
 MIR_reg_t jm_module_name_id(JsMirTranspiler* mt,
         const char* chars, uint32_t length) {
+    if (!mt) return 0;
     // Generated catalog names are stable across modules, so keep their NameId
     // as an immediate. Only arbitrary sealed spellings need the active module
     // table lookup (D4.6.1v2, D4.6.2v2).
     NameId generated_id = well_known_name_id({chars, length});
     if (generated_id != NAME_ID_NONE) {
+        if (mt->em.func_item != mt->module_name_id_cache_func) {
+            mt->module_name_id_cache_func = mt->em.func_item;
+            mt->module_name_id_cache_count = 0;
+        }
+        for (int i = 0; i < mt->module_name_id_cache_count; i++) {
+            if (mt->module_name_id_cache[i].module_name_index == UINT32_MAX &&
+                    mt->module_name_id_cache[i].direct_name_id == generated_id) {
+                return mt->module_name_id_cache[i].reg;
+            }
+        }
         MIR_reg_t id = jm_new_reg(mt, "nameid", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, id),
             MIR_new_int_op(mt->ctx, (int64_t)generated_id)));
+        if (mt->module_name_id_cache_count <
+                (int)(sizeof(mt->module_name_id_cache) /
+                      sizeof(mt->module_name_id_cache[0]))) {
+            int slot = mt->module_name_id_cache_count++;
+            mt->module_name_id_cache[slot].module_name_index = UINT32_MAX;
+            mt->module_name_id_cache[slot].direct_name_id = generated_id;
+            mt->module_name_id_cache[slot].reg = id;
+        }
         return id;
     }
     uint32_t index = jm_module_name_index(mt, chars, length);
-    MIR_reg_t id = jm_call_1(mt, "js_active_module_name_id", MIR_T_I64,
-        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)index));
-    return id;
+    return jm_module_name_id_at_index(mt, index);
 }
 
 MIR_reg_t jm_box_property_name_literal(JsMirTranspiler* mt,
         const char* chars, uint32_t length) {
+    if (!mt) return 0;
     NameId direct_name_id = well_known_name_id({chars, length});
     uint32_t module_name_index = direct_name_id == NAME_ID_NONE
         ? jm_module_name_index(mt, chars, length) : UINT32_MAX;
-    return jm_call_2(mt, "js_active_module_name_item", MIR_T_I64,
+    if (mt->em.func_item != mt->property_name_cache_func) {
+        mt->property_name_cache_func = mt->em.func_item;
+        mt->property_name_cache_count = 0;
+    }
+    for (int i = 0; i < mt->property_name_cache_count; i++) {
+        if (mt->property_name_cache[i].module_name_index == module_name_index &&
+                mt->property_name_cache[i].direct_name_id == direct_name_id) {
+            return mt->property_name_cache[i].reg;
+        }
+    }
+    MIR_reg_t result = jm_call_2(mt, "js_active_module_name_item", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)module_name_index),
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)direct_name_id));
+    if (result && mt->property_name_cache_count <
+            (int)(sizeof(mt->property_name_cache) /
+                  sizeof(mt->property_name_cache[0]))) {
+        int slot = mt->property_name_cache_count++;
+        mt->property_name_cache[slot].module_name_index = module_name_index;
+        mt->property_name_cache[slot].direct_name_id = direct_name_id;
+        mt->property_name_cache[slot].reg = result;
+    }
+    return result;
 }
 
 MIR_reg_t jm_string_literal_chars(JsMirTranspiler* mt, const char* str, int len) {
@@ -833,7 +1017,7 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
         MIR_T_I64, MIR_new_int_op(mt->ctx, flags));
 }
 
-// Helper: emit js_property_set(cls_obj, "__source_text__", source) so that
+// Helper: emit js_set_key_default(cls_obj, "__source_text__", source) so that
 // Function.prototype.toString on the class returns the original source text
 // (per ES spec: Function.prototype.toString on a class returns its source).
 // Avoids the slow validateNativeFunctionSource fallback in test262 harness.
@@ -853,7 +1037,7 @@ void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNod
     while (len > 1 && text[len - 1] != '}') len--;
     MIR_reg_t key = jm_box_property_name_literal(mt, "__source_text__", 15);
     MIR_reg_t src_reg = jm_box_string_literal(mt, text, len);
-    jm_call_3(mt, "js_property_set", MIR_T_I64,
+    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, src_reg));
@@ -1797,7 +1981,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
 
             // A3: Regular array element access — get boxed Item then unbox to target.
             // When used in a float expression (target_type == FLOAT), the caller needs
-            // a native double. Get the boxed result via js_array_get_int (avoiding
+            // a native double. Get the boxed result via js_elements_get_int (avoiding
             // boxing the index), then unbox to float directly.
             TypeId idx_type = jm_get_effective_type(mt, mem->property);
             if (idx_type == LMD_TYPE_INT) {
@@ -1809,7 +1993,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                         idx_native, arr_var->hoisted_data_reg, arr_var->hoisted_len_reg);
                 } else {
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
-                    boxed_result = jm_call_2(mt, "js_array_get_int", MIR_T_I64,
+                    boxed_result = jm_call_2(mt, "js_elements_get_int", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
                 }

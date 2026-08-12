@@ -13,7 +13,7 @@ MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
     MIR_reg_t super_val = jm_emit_class_object_for_entry(mt, static_superclass);
     if (!super_val) super_val = jm_emit_undefined(mt);
     MIR_reg_t sp_key = jm_box_property_name_literal(mt, "prototype", 9);
-    MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
+    MIR_reg_t sp_proto = jm_call_2(mt, "js_get_key_default", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
     jm_call_1(mt, "js_check_class_prototype_parent", MIR_T_I64,
@@ -193,7 +193,7 @@ void jm_emit_set_function_home_class(JsMirTranspiler* mt, MIR_reg_t fn_item,
     // Preserve the legacy user-visible backing property while the dispatcher
     // reads the dedicated field installed above.
     MIR_reg_t home_key = jm_box_property_name_literal(mt, "__home_class__", 14);
-    jm_call_3(mt, "js_property_set", MIR_T_I64,
+    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, home_key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
@@ -383,7 +383,7 @@ void jm_emit_class_constructor_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         if (set_home_class) jm_emit_set_function_home_class(mt, function_item, cls_obj);
         MIR_reg_t constructor_key = jm_box_property_name_literal(mt, "__ctor__", 8);
         jm_create_gc_root_slot(mt, constructor_key);
-        jm_call_3(mt, "js_property_set", MIR_T_I64,
+        jm_call_3(mt, "js_set_key_default", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, constructor_key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, function_item));
@@ -1201,6 +1201,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // Transpile body (same as original, but params are native-typed)
         if (fn->body) {
+            jm_seed_boxed_float_const_cache(mt, fn->body);
             if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                 JsBlockNode* blk = (JsBlockNode*)fn->body;
                 JsAstNode* s = blk->statements;
@@ -3589,6 +3590,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // Transpile body
         if (fn->body) {
+            jm_seed_boxed_float_const_cache(mt, fn->body);
             if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                 JsBlockNode* blk = (JsBlockNode*)fn->body;
                 if (!fn->is_async) {

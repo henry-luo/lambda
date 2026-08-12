@@ -1034,17 +1034,18 @@ static bool compute_grid_area_for_absolute(
     }
 
     // Calculate grid line positions
-    const LayoutAxis axes[2] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
-    const float offsets[2] = {container_offset_x, container_offset_y};
-    int line_counts[2] = {};
-    float* positions[2] = {
-        calculate_grid_line_positions(grid_layout, axes[0], offsets[0], &line_counts[0]),
-        calculate_grid_line_positions(grid_layout, axes[1], offsets[1], &line_counts[1])
-    };
+    LayoutAxisPair<float> offsets = layout_axis_pair(container_offset_x, container_offset_y);
+    LayoutAxisPair<int> line_counts = {};
+    LayoutAxisPair<float*> positions = {};
+    for (int i = LAYOUT_AXIS_X; i <= LAYOUT_AXIS_Y; i++) {
+        LayoutAxis axis = (LayoutAxis)i;
+        positions[axis] = calculate_grid_line_positions(
+            grid_layout, axis, offsets[axis], &line_counts[axis]);
+    }
 
-    if (!positions[0] || !positions[1]) {
-        scratch_free(&grid_layout->lycon->scratch, positions[0]);
-        scratch_free(&grid_layout->lycon->scratch, positions[1]);
+    if (!positions[LAYOUT_AXIS_X] || !positions[LAYOUT_AXIS_Y]) {
+        scratch_free(&grid_layout->lycon->scratch, positions[LAYOUT_AXIS_X]);
+        scratch_free(&grid_layout->lycon->scratch, positions[LAYOUT_AXIS_Y]);
         return false;
     }
 
@@ -1065,45 +1066,46 @@ static bool compute_grid_area_for_absolute(
 
     // Resolve explicit grid lines (1-based CSS to 0-based index into positions array)
     // Handle negative line numbers (count from end)
-    const bool has_start[2] = {has_col_start, has_row_start};
-    const bool has_end[2] = {has_col_end, has_row_end};
-    const int authored_start[2] = {
+    LayoutAxisPair<bool> has_start = {has_col_start, has_row_start};
+    LayoutAxisPair<bool> has_end = {has_col_end, has_row_end};
+    LayoutAxisPair<int> authored_start = {
         has_col_start ? gi->grid_column_start : 0,
         has_row_start ? gi->grid_row_start : 0
     };
-    const int authored_end[2] = {
+    LayoutAxisPair<int> authored_end = {
         has_col_end ? gi->grid_column_end : 0,
         has_row_end ? gi->grid_row_end : 0
     };
-    const float auto_start[2] = {col_auto_start_pos, row_auto_start_pos};
-    const float auto_end[2] = {col_auto_end_pos, row_auto_end_pos};
-    float start[2] = {};
-    float end[2] = {};
-    for (int i = 0; i < 2; i++) {
-        int start_line = authored_start[i];
-        int end_line = authored_end[i];
-        if (start_line < 0) start_line = line_counts[i] + start_line + 1;
-        if (end_line < 0) end_line = line_counts[i] + end_line + 1;
-        start[i] = has_start[i]
-            ? positions[i][start_line >= 1 && start_line <= line_counts[i]
-                ? start_line - 1 : 0] : auto_start[i];
-        end[i] = has_end[i]
-            ? positions[i][end_line >= 1 && end_line <= line_counts[i]
-                ? end_line - 1 : line_counts[i] - 1] : auto_end[i];
-        if (start[i] > end[i]) {
-            float swap = start[i];
-            start[i] = end[i];
-            end[i] = swap;
+    LayoutAxisPair<float> auto_start = {col_auto_start_pos, row_auto_start_pos};
+    LayoutAxisPair<float> auto_end = {col_auto_end_pos, row_auto_end_pos};
+    LayoutAxisPair<float> start = {};
+    LayoutAxisPair<float> end = {};
+    for (int i = LAYOUT_AXIS_X; i <= LAYOUT_AXIS_Y; i++) {
+        LayoutAxis axis = (LayoutAxis)i;
+        int start_line = authored_start[axis];
+        int end_line = authored_end[axis];
+        if (start_line < 0) start_line = line_counts[axis] + start_line + 1;
+        if (end_line < 0) end_line = line_counts[axis] + end_line + 1;
+        start[axis] = has_start[axis]
+            ? positions[axis][start_line >= 1 && start_line <= line_counts[axis]
+                ? start_line - 1 : 0] : auto_start[axis];
+        end[axis] = has_end[axis]
+            ? positions[axis][end_line >= 1 && end_line <= line_counts[axis]
+                ? end_line - 1 : line_counts[axis] - 1] : auto_end[axis];
+        if (start[axis] > end[axis]) {
+            float swap = start[axis];
+            start[axis] = end[axis];
+            end[axis] = swap;
         }
     }
 
-    *out_x = start[0];
-    *out_y = start[1];
-    *out_width = end[0] - start[0];
-    *out_height = end[1] - start[1];
+    *out_x = start[LAYOUT_AXIS_X];
+    *out_y = start[LAYOUT_AXIS_Y];
+    *out_width = end[LAYOUT_AXIS_X] - start[LAYOUT_AXIS_X];
+    *out_height = end[LAYOUT_AXIS_Y] - start[LAYOUT_AXIS_Y];
 
-    scratch_free(&grid_layout->lycon->scratch, positions[1]);
-    scratch_free(&grid_layout->lycon->scratch, positions[0]);
+    scratch_free(&grid_layout->lycon->scratch, positions[LAYOUT_AXIS_Y]);
+    scratch_free(&grid_layout->lycon->scratch, positions[LAYOUT_AXIS_X]);
     return true;
 }
 
@@ -1145,13 +1147,15 @@ static void layout_grid_abs_after_child(LayoutContext* lycon, ViewBlock* contain
     GridContainerLayout* grid_layout = ctx->grid;
 
     if (state->has_grid_area) {
-        const LayoutAxis axes[2] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
-        const float area_start[2] = {state->grid_area_x, state->grid_area_y};
-        const float area_size[2] = {state->grid_area_width, state->grid_area_height};
-        for (int i = 0; i < 2; i++) {
-            LayoutAxisRefs refs(child_block, axes[i]);
+        LayoutAxisPair<float> area_start =
+            layout_axis_pair(state->grid_area_x, state->grid_area_y);
+        LayoutAxisPair<float> area_size =
+            layout_axis_pair(state->grid_area_width, state->grid_area_height);
+        for (int i = LAYOUT_AXIS_X; i <= LAYOUT_AXIS_Y; i++) {
+            LayoutAxis axis = (LayoutAxis)i;
+            LayoutAxisRefs refs(child_block, axis);
             refs.set_position(grid_abs_axis_position(
-                area_start[i], area_size[i], refs.get_size(), refs, refs.size));
+                area_start[axis], area_size[axis], refs.get_size(), refs, refs.size));
         }
         return;
     }
@@ -1159,20 +1163,20 @@ static void layout_grid_abs_after_child(LayoutContext* lycon, ViewBlock* contain
     GridItemProp* gi = grid_item_prop(child_block);
     if (!gi) return;
 
-    const LayoutAxis axes[2] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
-    const float available[2] = {cb.padding_width, cb.padding_height};
-    const int self_alignment[2] = {gi->justify_self, gi->align_self_grid};
-    const int container_alignment[2] = {
+    LayoutAxisPair<float> available = layout_axis_pair(cb.padding_width, cb.padding_height);
+    LayoutAxisPair<int> self_alignment = {gi->justify_self, gi->align_self_grid};
+    LayoutAxisPair<int> container_alignment = {
         grid_layout ? grid_layout->justify_items : CSS_VALUE_STRETCH,
         grid_layout ? grid_layout->align_items : CSS_VALUE_STRETCH
     };
-    for (int i = 0; i < 2; i++) {
-        LayoutAxisRefs refs(child_block, axes[i]);
+    for (int i = LAYOUT_AXIS_X; i <= LAYOUT_AXIS_Y; i++) {
+        LayoutAxis axis = (LayoutAxis)i;
+        LayoutAxisRefs refs(child_block, axis);
         if (refs.has_any_inset()) continue;
-        int alignment = i == 0
-            ? radiant::resolve_justify_self(self_alignment[i], container_alignment[i])
-            : radiant::resolve_align_self(self_alignment[i], container_alignment[i]);
-        float free_space = available[i] - refs.get_size() -
+        int alignment = axis == LAYOUT_AXIS_X
+            ? radiant::resolve_justify_self(self_alignment[axis], container_alignment[axis])
+            : radiant::resolve_align_self(self_alignment[axis], container_alignment[axis]);
+        float free_space = available[axis] - refs.get_size() -
             refs.margin_start() - refs.margin_end();
         float offset = radiant::compute_alignment_offset_simple(alignment, free_space);
         if (offset != 0.0f) refs.set_position(refs.get_position() + offset);

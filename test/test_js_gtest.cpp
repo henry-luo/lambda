@@ -12,6 +12,8 @@
 #include <atomic>
 #include "test_process.h"
 #include "test_baseline_mode.hpp"
+#include "../lambda/runtime/compiler_timing.hpp"
+#include "test_ast_tune_capture.hpp"
 
 extern "C" {
 #include "../lib/shell.h"
@@ -42,8 +44,62 @@ extern "C" {
     #include <unistd.h>
     #include <sys/wait.h>
     #include <dirent.h>
-    #define LAMBDA_EXE "./lambda.exe"
+#define LAMBDA_EXE "./lambda.exe"
 #endif
+
+static LambdaCompilerTiming g_js_direct_timing = {};
+static bool g_js_direct_has_timing = false;
+static bool g_js_direct_has_volume = false;
+static int g_js_direct_status = 0;
+
+static void parse_js_direct_protocol(const char* output) {
+    g_js_direct_timing = {};
+    g_js_direct_has_timing = false;
+    g_js_direct_has_volume = false;
+    if (!output) return;
+    const char* line = output;
+    while (*line) {
+        const char* end = strchr(line, '\n');
+        size_t len = end ? (size_t)(end - line) : strlen(line);
+        if (len > 0 && len < 2048 && line[0] == '\x01') {
+            char record[2048];
+            memcpy(record, line + 1, len - 1);
+            record[len - 1] = '\0';
+            int schema = 0;
+            unsigned long long parse_us = 0, ast_us = 0, validate_us = 0;
+            unsigned long long imports_us = 0, mir_us = 0, link_us = 0, build_us = 0;
+            if (sscanf(record,
+                    "COMPILER_TIMING schema=%d parse_us=%llu ast_build_us=%llu "
+                    "validate_us=%llu imports_us=%llu mir_lower_us=%llu link_us=%llu "
+                    "build_transpile_us=%llu", &schema, &parse_us, &ast_us,
+                    &validate_us, &imports_us, &mir_us, &link_us, &build_us) == 8 &&
+                    schema == 1) {
+                g_js_direct_timing.parse_us = parse_us;
+                g_js_direct_timing.ast_build_us = ast_us;
+                g_js_direct_timing.validate_us = validate_us;
+                g_js_direct_timing.analysis_us = imports_us;
+                g_js_direct_timing.mir_lower_us = mir_us;
+                g_js_direct_timing.link_us = link_us;
+                g_js_direct_timing.build_transpile_us = build_us;
+                g_js_direct_timing.valid = 1;
+                g_js_direct_has_timing = true;
+            } else {
+                unsigned long long modules = 0, functions = 0, insns = 0;
+                char sample[1024], name[256];
+                if (sscanf(record,
+                        "MIR_VOLUME schema=%d sample_id=%1023s test_name=%255s "
+                        "modules=%llu functions=%llu insns=%llu", &schema, sample, name,
+                        &modules, &functions, &insns) == 6 && schema == 1) {
+                    g_js_direct_timing.mir_module_count = modules;
+                    g_js_direct_timing.mir_function_count = functions;
+                    g_js_direct_timing.mir_insn_count = insns;
+                    g_js_direct_has_volume = true;
+                }
+            }
+        }
+        line = end ? end + 1 : line + len;
+    }
+}
 
 // Helper function to execute a JavaScript file with lambda js and capture output
 static char* execute_js_script_configured(const char* script_path,
@@ -63,13 +119,16 @@ static char* execute_js_script_configured(const char* script_path,
     }
     ShellResult shell_result = shell_exec(LAMBDA_EXE, args,
         options.env ? &options : NULL);
+    g_js_direct_status = shell_result.exit_code;
+    char* full_output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
+    parse_js_direct_protocol(full_output);
     if (shell_result.exit_code != 0) {
         fprintf(stderr, "Error: lambda.exe js exited with code %d for script: %s\n",
                 shell_result.exit_code, script_path);
+        free(full_output);
         shell_result_free(&shell_result);
         return nullptr;
     }
-    char* full_output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
     shell_result_free(&shell_result);
 
     // Return empty string for successful but empty output
@@ -217,6 +276,28 @@ static bool write_module_source_manifest(const char* source_path,
 }
 
 // Helper function to test JavaScript script against expected output file
+static void strip_js_timing_lines(char* output) {
+    if (!output) return;
+    char* read = output;
+    char* write = output;
+    while (*read) {
+        bool instrumentation = strncmp(read, "JS_TRANSPILE_TIMING ", 20) == 0 ||
+            strncmp(read, "JS_AST_COUNTERS ", 16) == 0 ||
+            strncmp(read, "JS_MIR_VOLUME ", 14) == 0 ||
+            (read[0] == '\x01' &&
+             (strncmp(read + 1, "COMPILER_TIMING ", 16) == 0 ||
+              strncmp(read + 1, "MIR_VOLUME ", 11) == 0));
+        if (instrumentation) {
+            while (*read && *read != '\n') read++;
+            if (*read == '\n') read++;
+            continue;
+        }
+        while (*read && *read != '\n') *write++ = *read++;
+        if (*read == '\n') *write++ = *read++;
+    }
+    *write = '\0';
+}
+
 void test_js_script_against_file(const char* script_path, const char* expected_file_path) {
     // Get script name for better error messages
     const char* script_name = strrchr(script_path, '/');
@@ -228,6 +309,7 @@ void test_js_script_against_file(const char* script_path, const char* expected_f
     char* actual_output = execute_js_script(script_path);
     ASSERT_NE(actual_output, nullptr) << "Could not execute JavaScript script: " << script_path;
 
+    strip_js_timing_lines(actual_output);
     // Trim whitespace from actual output
     trim_trailing_whitespace(actual_output);
 
@@ -252,6 +334,7 @@ char* execute_js_builtin_tests() {
         return nullptr;
     }
     char* full_output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
+    parse_js_direct_protocol(full_output);
     shell_result_free(&shell_result);
     return full_output;
 }
@@ -262,13 +345,16 @@ char* execute_js_script_with_doc(const char* script_path, const char* html_path)
         LAMBDA_EXE, "js", script_path, "--document", html_path, "--no-log", NULL,
     };
     ShellResult shell_result = shell_exec(LAMBDA_EXE, args, NULL);
+    g_js_direct_status = shell_result.exit_code;
+    char* full_output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
+    parse_js_direct_protocol(full_output);
     if (shell_result.exit_code != 0) {
         fprintf(stderr, "Error: lambda.exe js exited with code %d for script: %s --document %s\n",
                 shell_result.exit_code, script_path, html_path);
+        free(full_output);
         shell_result_free(&shell_result);
         return nullptr;
     }
-    char* full_output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
     shell_result_free(&shell_result);
 
     // Extract result from "##### Script" marker (same as Lambda tests)
@@ -298,8 +384,11 @@ void test_js_dom_script_against_file(const char* script_path, const char* html_p
     ASSERT_NE(expected_output, nullptr) << "Could not read expected output file: " << expected_file_path;
 
     char* actual_output = execute_js_script_with_doc(script_path, html_path);
+    ast_tune_append_timing_row("js", script_path, script_name, g_js_direct_status,
+        &g_js_direct_timing, g_js_direct_has_timing, g_js_direct_has_volume);
     ASSERT_NE(actual_output, nullptr) << "Could not execute JavaScript DOM script: " << script_path;
 
+    strip_js_timing_lines(actual_output);
     trim_trailing_whitespace(actual_output);
 
     ASSERT_STREQ(expected_output, actual_output)
@@ -318,11 +407,64 @@ void test_js_dom_script_against_file(const char* script_path, const char* html_p
 struct JsBatchResult {
     std::string output;
     int status;
+    LambdaCompilerTiming timing;
+    bool has_timing;
+    bool has_volume;
 };
+
+static bool parse_js_timing_line(const char* line, LambdaCompilerTiming* out) {
+    if (!line || !out) return false;
+    unsigned long long parse_us = 0, ast_build_us = 0, validate_us = 0;
+    unsigned long long imports_us = 0, mir_lower_us = 0, link_us = 0;
+    unsigned long long build_transpile_us = 0;
+    int schema = 0;
+    int matched = sscanf(line,
+        "COMPILER_TIMING schema=%d parse_us=%llu ast_build_us=%llu "
+        "validate_us=%llu imports_us=%llu mir_lower_us=%llu link_us=%llu "
+        "build_transpile_us=%llu",
+        &schema, &parse_us, &ast_build_us, &validate_us, &imports_us,
+        &mir_lower_us, &link_us, &build_transpile_us);
+    if (matched != 8 || schema != 1) return false;
+    out->parse_us = parse_us;
+    out->ast_build_us = ast_build_us;
+    out->validate_us = validate_us;
+    out->analysis_us = imports_us;
+    out->mir_lower_us = mir_lower_us;
+    out->link_us = link_us;
+    out->build_transpile_us = build_transpile_us;
+    out->valid = 1;
+    return true;
+}
+
+static bool parse_js_volume_line(const char* line, LambdaCompilerTiming* out) {
+    if (!line || !out) return false;
+    unsigned long long modules = 0, functions = 0, insns = 0;
+    int schema = 0;
+    char sample_id[1024], test_name[256];
+    int matched = sscanf(line, "MIR_VOLUME schema=%d sample_id=%1023s test_name=%255s modules=%llu functions=%llu insns=%llu",
+                         &schema, sample_id, test_name, &modules, &functions, &insns);
+    if (matched != 6) {
+        matched = sscanf(line, "MIR_VOLUME schema=%d modules=%llu functions=%llu insns=%llu",
+                         &schema, &modules, &functions, &insns);
+    }
+    if ((matched != 6 && matched != 4) || schema != 1) return false;
+    out->mir_module_count = modules;
+    out->mir_function_count = functions;
+    out->mir_insn_count = insns;
+    return true;
+}
 
 // Max scripts per lambda.exe js-test-batch process
 static const size_t JS_BATCH_CHUNK_SIZE = 50;
 static bool js_baseline_mode = false;
+
+static size_t js_capture_batch_chunk_size() {
+    // Large-library workers retain MIR contexts until the batch watermark is
+    // reclaimed. Timing captures must not lose samples to RSS exhaustion, so
+    // use one source compilation per child while preserving the normal fast
+    // batch size for ordinary regression runs.
+    return getenv("LAMBDA_COMPILER_TIMING") ? 1 : JS_BATCH_CHUNK_SIZE;
+}
 
 static void run_js_sub_batch(
     const std::vector<std::string>& scripts,
@@ -355,6 +497,9 @@ static void run_js_sub_batch(
     std::string current_script;
     std::string current_output;
     bool in_script = false;
+    LambdaCompilerTiming current_timing = {};
+    bool current_has_timing = false;
+    bool current_has_volume = false;
 
     TestProcessLines lines;
     test_process_lines_init(&lines, shell_result.stdout_buf, shell_result.stdout_len);
@@ -367,9 +512,21 @@ static void run_js_sub_batch(
                     current_script.pop_back();
                 current_output.clear();
                 in_script = true;
+                current_timing = {};
+                current_has_timing = false;
+                current_has_volume = false;
+            } else if (strncmp(buffer + 1, "COMPILER_TIMING ", 16) == 0) {
+                current_has_timing = parse_js_timing_line(buffer + 1, &current_timing) ||
+                    current_has_timing;
+            } else if (strncmp(buffer + 1, "MIR_VOLUME ", 11) == 0) {
+                current_has_volume = parse_js_volume_line(buffer + 1, &current_timing) ||
+                    current_has_volume;
             } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
                 int status = atoi(buffer + 11);
-                results[current_script] = {current_output, status};
+                JsBatchResult result = {current_output, status,
+                                         current_timing, current_has_timing,
+                                         current_has_volume};
+                results[current_script] = result;
                 in_script = false;
             }
         } else if (in_script) {
@@ -613,7 +770,7 @@ public:
         }
 
         if (!batch_scripts.empty()) {
-            batch_results = execute_js_batch(batch_scripts);
+            batch_results = execute_js_batch(batch_scripts, js_capture_batch_chunk_size());
         }
         batch_executed = true;
     }
@@ -645,9 +802,13 @@ TEST_P(JsFileTest, Run) {
     if (it == batch_results.end()) {
         char* retry_output = execute_js_script_configured(
             p.script_path.c_str(), p.permission, p.module_path);
+        ast_tune_append_timing_row("js", p.script_path.c_str(),
+            p.test_name.c_str(), g_js_direct_status, &g_js_direct_timing,
+            g_js_direct_has_timing, g_js_direct_has_volume);
         ASSERT_NE(retry_output, nullptr)
             << "Script absent from batch results and retry execution failed: "
-            << p.script_path;
+             << p.script_path;
+        strip_js_timing_lines(retry_output);
         trim_trailing_whitespace(retry_output);
         bool match = strcmp(expected_output, retry_output) == 0;
         if (!match) {
@@ -660,6 +821,9 @@ TEST_P(JsFileTest, Run) {
     }
 
     const JsBatchResult& br = it->second;
+    ast_tune_append_timing_row("js", p.script_path.c_str(),
+        p.test_name.c_str(), br.status, &br.timing, br.has_timing,
+        br.has_volume);
 
     // extract output (handle ##### Script marker)
     std::string actual = br.output;
@@ -672,6 +836,11 @@ TEST_P(JsFileTest, Run) {
     // trim trailing whitespace
     while (!actual.empty() && isspace((unsigned char)actual.back()))
         actual.pop_back();
+    if (!actual.empty()) {
+        strip_js_timing_lines(actual.data());
+        trim_trailing_whitespace(actual.data());
+        actual.assign(actual.data());
+    }
 
     // Batch mode is an optimization.  If a prior test in the same worker
     // crashes or exits through an unusual path, retry this script in a fresh
@@ -680,6 +849,7 @@ TEST_P(JsFileTest, Run) {
         char* retry_output = execute_js_script_configured(
             p.script_path.c_str(), p.permission, p.module_path);
         if (retry_output) {
+            strip_js_timing_lines(retry_output);
             trim_trailing_whitespace(retry_output);
             if (strcmp(expected_output, retry_output) == 0) {
                 free(retry_output);

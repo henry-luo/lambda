@@ -110,7 +110,7 @@ static bool https_item_to_int64(Item value, int64_t* out) {
 
 static int append_option_value(char* out, int pos, int cap, Item options, const char* name) {
     if (get_type_id(options) != LMD_TYPE_MAP) return pos;
-    Item value = js_property_get(options, make_string_item(name));
+    Item value = js_get_key_default(options, make_string_item(name));
     return append_item_string(out, pos, cap, value);
 }
 
@@ -126,7 +126,7 @@ static int append_option_segment(char* out, int pos, int cap, Item options, cons
 static int append_option_segment_if_present(char* out, int pos, int cap, Item options, const char* name) {
     pos = append_colon(out, pos, cap);
     if (get_type_id(options) != LMD_TYPE_MAP) return pos;
-    Item value = js_property_get(options, make_string_item(name));
+    Item value = js_get_key_default(options, make_string_item(name));
     if (is_missing_value(value)) return pos;
     return append_item_string(out, pos, cap, value);
 }
@@ -134,7 +134,7 @@ static int append_option_segment_if_present(char* out, int pos, int cap, Item op
 static int append_json_string_segment(char* out, int pos, int cap, Item options, const char* name) {
     pos = append_colon(out, pos, cap);
     if (get_type_id(options) != LMD_TYPE_MAP) return pos;
-    Item value = js_property_get(options, make_string_item(name));
+    Item value = js_get_key_default(options, make_string_item(name));
     if (is_missing_value(value)) return pos;
     if (get_type_id(value) == LMD_TYPE_STRING) {
         pos = append_cstr(out, pos, cap, "\"");
@@ -163,9 +163,9 @@ extern "C" Item js_https_agent_getName(Item options) {
     char local_addr[256] = "";
 
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item host_item = js_property_get(options, make_string_item("host"));
+        Item host_item = js_get_key_default(options, make_string_item("host"));
         if (is_missing_value(host_item)) {
-            host_item = js_property_get(options, make_string_item("hostname"));
+            host_item = js_get_key_default(options, make_string_item("hostname"));
         }
         if (get_type_id(host_item) == LMD_TYPE_STRING) {
             String* s = it2s(host_item);
@@ -174,7 +174,7 @@ extern "C" Item js_https_agent_getName(Item options) {
             host[len] = '\0';
         }
 
-        Item port_item = js_property_get(options, make_string_item("port"));
+        Item port_item = js_get_key_default(options, make_string_item("port"));
         int64_t port_int = 0;
         if (https_item_to_int64(port_item, &port_int)) {
             snprintf(port, sizeof(port), "%lld", (long long)port_int);
@@ -185,7 +185,7 @@ extern "C" Item js_https_agent_getName(Item options) {
             port[len] = '\0';
         }
 
-        Item local_item = js_property_get(options, make_string_item("localAddress"));
+        Item local_item = js_get_key_default(options, make_string_item("localAddress"));
         if (get_type_id(local_item) == LMD_TYPE_STRING) {
             String* s = it2s(local_item);
             int len = (int)s->len < (int)sizeof(local_addr) - 1 ? (int)s->len : (int)sizeof(local_addr) - 1;
@@ -227,7 +227,7 @@ extern "C" Item js_https_agent_getName(Item options) {
 
 static bool https_has_usable_port(Item options_item) {
     if (get_type_id(options_item) != LMD_TYPE_MAP) return false;
-    Item port = js_property_get(options_item, make_string_item("port"));
+    Item port = js_get_key_default(options_item, make_string_item("port"));
     TypeId type = get_type_id(port);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return true;
     if (type == LMD_TYPE_STRING) {
@@ -240,14 +240,14 @@ static bool https_has_usable_port(Item options_item) {
 static void https_set_default_port(Item options_item) {
     if (get_type_id(options_item) != LMD_TYPE_MAP) return;
     if (!https_has_usable_port(options_item)) {
-        js_property_set(options_item, make_string_item("port"),
+        js_set_key_default(options_item, make_string_item("port"),
                         (Item){.item = i2it(443)});
     }
 }
 
 static bool https_property_is_present(Item object, const char* name) {
     if (get_type_id(object) != LMD_TYPE_MAP) return false;
-    return !is_missing_value(js_property_get(object, make_string_item(name)));
+    return !is_missing_value(js_get_key_default(object, make_string_item(name)));
 }
 
 static void https_copy_property_if_absent(Item target, Item source,
@@ -255,9 +255,9 @@ static void https_copy_property_if_absent(Item target, Item source,
                                           const char* source_name) {
     if (get_type_id(target) != LMD_TYPE_MAP || get_type_id(source) != LMD_TYPE_MAP) return;
     if (https_property_is_present(target, target_name)) return;
-    Item value = js_property_get(source, make_string_item(source_name));
+    Item value = js_get_key_default(source, make_string_item(source_name));
     if (!is_missing_value(value)) {
-        js_property_set(target, make_string_item(target_name), value);
+        js_set_key_default(target, make_string_item(target_name), value);
     }
 }
 
@@ -288,42 +288,42 @@ static Item https_clone_options_object(Item source) {
 
     int64_t len = js_array_length(keys);
     for (int64_t i = 0; i < len; i++) {
-        Item key = js_array_get_int(keys, i);
-        js_property_set(result, key, js_property_get(source, key));
+        Item key = js_elements_get_int(keys, i);
+        js_set_key_default(result, key, js_get_key_default(source, key));
     }
     return result;
 }
 
 static void https_set_option_if_value(Item options, const char* name, Item value) {
     if (is_missing_value(value)) return;
-    js_property_set(options, make_string_item(name), value);
+    js_set_key_default(options, make_string_item(name), value);
 }
 
 static void https_normalize_tls_host_option(Item options) {
     if (get_type_id(options) != LMD_TYPE_MAP) return;
 
-    Item host = js_property_get(options, make_string_item("host"));
+    Item host = js_get_key_default(options, make_string_item("host"));
     if (is_missing_value(host)) {
-        Item hostname = js_property_get(options, make_string_item("hostname"));
+        Item hostname = js_get_key_default(options, make_string_item("hostname"));
         https_set_option_if_value(options, "host", hostname);
     }
 
-    Item servername = js_property_get(options, make_string_item("servername"));
+    Item servername = js_get_key_default(options, make_string_item("servername"));
     if (is_missing_value(servername)) {
-        host = js_property_get(options, make_string_item("host"));
+        host = js_get_key_default(options, make_string_item("host"));
         https_set_option_if_value(options, "servername", host);
     }
 }
 
 static void https_call_event_listeners(Item self, const char* key_name, Item* args, int argc) {
-    Item listeners = js_property_get(self, make_string_item(key_name));
+    Item listeners = js_get_key_default(self, make_string_item(key_name));
     if (is_callable(listeners)) {
         js_call_function(listeners, self, args, argc);
         js_microtask_flush();
     } else if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
         int64_t count = js_array_length(listeners);
         for (int64_t i = 0; i < count; i++) {
-            Item listener = js_array_get_int(listeners, i);
+            Item listener = js_elements_get_int(listeners, i);
             if (is_callable(listener)) {
                 js_call_function(listener, self, args, argc);
             }
@@ -349,13 +349,13 @@ extern "C" Item js_https_agent_createConnection(Item rest_args) {
     int64_t argc64 = get_type_id(rest_args) == LMD_TYPE_ARRAY ? js_array_length(rest_args) : 0;
     int argc = argc64 > 8 ? 8 : (int)argc64;
 
-    Item arg0 = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
-    Item arg1 = argc > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
-    Item arg2 = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
-    Item arg3 = argc > 3 ? js_array_get_int(rest_args, 3) : make_js_undefined();
+    Item arg0 = argc > 0 ? js_elements_get_int(rest_args, 0) : make_js_undefined();
+    Item arg1 = argc > 1 ? js_elements_get_int(rest_args, 1) : make_js_undefined();
+    Item arg2 = argc > 2 ? js_elements_get_int(rest_args, 2) : make_js_undefined();
+    Item arg3 = argc > 3 ? js_elements_get_int(rest_args, 3) : make_js_undefined();
     Item callback = make_js_undefined();
     if (argc > 0) {
-        Item last = js_array_get_int(rest_args, argc - 1);
+        Item last = js_elements_get_int(rest_args, argc - 1);
         if (is_callable(last)) {
             callback = last;
             argc--;
@@ -395,7 +395,7 @@ extern "C" Item js_https_agent_createConnection(Item rest_args) {
         Item* env = js_alloc_env(1);
         env[0] = callback;
         Item bridge = js_new_native_closure(https_agent_secure_connect_bridge, 0, env, 1);
-        Item on_fn = js_property_get(socket, make_string_item("on"));
+        Item on_fn = js_get_key_default(socket, make_string_item("on"));
         if (is_callable(on_fn)) {
             Item on_args[2] = { make_string_item("secureConnect"), bridge };
             js_call_function(on_fn, socket, on_args, 2);
@@ -451,7 +451,7 @@ static Item https_parse_url_string(Item url_item) {
     }
 
     Item options = js_new_object();
-    js_property_set(options, make_string_item("protocol"), make_string_item("https:"));
+    js_set_key_default(options, make_string_item("protocol"), make_string_item("https:"));
     if (userinfo_end && userinfo_end > start) {
         const char* password_start = NULL;
         for (const char* p = start; p < userinfo_end; p++) {
@@ -460,25 +460,25 @@ static Item https_parse_url_string(Item url_item) {
                 break;
             }
         }
-        js_property_set(options, make_string_item("auth"),
+        js_set_key_default(options, make_string_item("auth"),
                         make_decoded_url_string_item(start, (int)(userinfo_end - start)));
         if (password_start) {
-            js_property_set(options, make_string_item("username"),
+            js_set_key_default(options, make_string_item("username"),
                             make_decoded_url_string_item(start, (int)(password_start - start - 1)));
-            js_property_set(options, make_string_item("password"),
+            js_set_key_default(options, make_string_item("password"),
                             make_decoded_url_string_item(password_start, (int)(userinfo_end - password_start)));
         } else {
-            js_property_set(options, make_string_item("username"),
+            js_set_key_default(options, make_string_item("username"),
                             make_decoded_url_string_item(start, (int)(userinfo_end - start)));
-            js_property_set(options, make_string_item("password"), make_string_item(""));
+            js_set_key_default(options, make_string_item("password"), make_string_item(""));
         }
     }
     if (host_end > host_start) {
-        js_property_set(options, make_string_item("hostname"),
+        js_set_key_default(options, make_string_item("hostname"),
                         make_string_item(host_start, (int)(host_end - host_start)));
     }
     if (port_start && port_start < authority_end) {
-        js_property_set(options, make_string_item("port"),
+        js_set_key_default(options, make_string_item("port"),
                         make_string_item(port_start, (int)(authority_end - port_start)));
     }
 
@@ -493,13 +493,13 @@ static Item https_parse_url_string(Item url_item) {
             int pos = append_cstr(path_buf, 0, (int)sizeof(path_buf), "/");
             append_bytes(path_buf, pos, (int)sizeof(path_buf),
                          path_start, (int)(path_end - path_start));
-            js_property_set(options, make_string_item("path"), make_string_item(path_buf));
+            js_set_key_default(options, make_string_item("path"), make_string_item(path_buf));
         } else {
-            js_property_set(options, make_string_item("path"),
+            js_set_key_default(options, make_string_item("path"),
                             make_string_item(path_start, (int)(path_end - path_start)));
         }
     } else {
-        js_property_set(options, make_string_item("path"), make_string_item("/"));
+        js_set_key_default(options, make_string_item("path"), make_string_item("/"));
     }
 
     return options;
@@ -534,9 +534,9 @@ extern "C" Item js_https_Agent(Item options) {
     if (get_type_id(https_agent_prototype) == LMD_TYPE_MAP) {
         js_set_prototype(agent, https_agent_prototype);
     }
-    js_property_set(agent, make_string_item("getName"),
+    js_set_key_default(agent, make_string_item("getName"),
                     js_new_native_function(js_https_agent_getName));
-    js_property_set(agent, make_string_item("createConnection"),
+    js_set_key_default(agent, make_string_item("createConnection"),
                     js_new_native_rest_function(js_https_agent_createConnection));
     return agent;
 }
@@ -558,10 +558,10 @@ static Item js_https_server_listeners(Item event_item) {
     Item result = js_array_new(0);
     if (!https_string_equals(event_item, "request")) return result;
 
-    Item listener = js_property_get(self, make_string_item("__https_request_listener__"));
+    Item listener = js_get_key_default(self, make_string_item("__https_request_listener__"));
     if (js_is_callable(listener)) js_array_push(result, listener);
 
-    Item on_request = js_property_get(self, make_string_item("__on_request__"));
+    Item on_request = js_get_key_default(self, make_string_item("__on_request__"));
     if (js_is_callable(on_request) && on_request.item != listener.item) {
         js_array_push(result, on_request);
     }
@@ -572,27 +572,27 @@ static void https_server_apply_alpn_options(Item server, Item options) {
     if (get_type_id(server) != LMD_TYPE_MAP) return;
 
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item alpn_callback = js_property_get(options, make_string_item("ALPNCallback"));
+        Item alpn_callback = js_get_key_default(options, make_string_item("ALPNCallback"));
         if (!is_missing_value(alpn_callback)) {
-            js_property_set(server, make_string_item("ALPNCallback"), alpn_callback);
+            js_set_key_default(server, make_string_item("ALPNCallback"), alpn_callback);
             return;
         }
 
-        Item alpn_protocols = js_property_get(options, make_string_item("ALPNProtocols"));
+        Item alpn_protocols = js_get_key_default(options, make_string_item("ALPNProtocols"));
         if (!is_missing_value(alpn_protocols)) {
             Item encoded = js_new_object();
             js_tls_convertALPNProtocols(alpn_protocols, encoded);
-            Item encoded_protocols = js_property_get(encoded, make_string_item("ALPNProtocols"));
+            Item encoded_protocols = js_get_key_default(encoded, make_string_item("ALPNProtocols"));
             if (!is_missing_value(encoded_protocols)) {
-                js_property_set(server, make_string_item("ALPNProtocols"), encoded_protocols);
+                js_set_key_default(server, make_string_item("ALPNProtocols"), encoded_protocols);
             } else {
-                js_property_set(server, make_string_item("ALPNProtocols"), alpn_protocols);
+                js_set_key_default(server, make_string_item("ALPNProtocols"), alpn_protocols);
             }
             return;
         }
     }
 
-    js_property_set(server, make_string_item("ALPNProtocols"), https_default_alpn_protocols());
+    js_set_key_default(server, make_string_item("ALPNProtocols"), https_default_alpn_protocols());
 }
 
 // https.createServer(options, requestListener)
@@ -604,16 +604,16 @@ extern "C" Item js_https_createServer(Item options, Item handler) {
     // For basic compatibility, we create the server and note it's HTTPS
     Item server = js_http_createServer(options, handler);
     if (server.item != 0) {
-        js_property_set(server, make_string_item("__is_https__"),
+        js_set_key_default(server, make_string_item("__is_https__"),
                         (Item){.item = b2it(true)});
         // store TLS options for later use in listen()
-        js_property_set(server, make_string_item("__tls_options__"), options);
+        js_set_key_default(server, make_string_item("__tls_options__"), options);
         if (js_is_callable(options)) {
-            js_property_set(server, make_string_item("__https_request_listener__"), options);
+            js_set_key_default(server, make_string_item("__https_request_listener__"), options);
         } else if (js_is_callable(handler)) {
-            js_property_set(server, make_string_item("__https_request_listener__"), handler);
+            js_set_key_default(server, make_string_item("__https_request_listener__"), handler);
         }
-        js_property_set(server, make_string_item("listeners"),
+        js_set_key_default(server, make_string_item("listeners"),
                         js_new_native_function(js_https_server_listeners));
         https_server_apply_alpn_options(server, options);
     }
@@ -630,7 +630,7 @@ extern "C" Item js_https_request(Item options_item, Item maybe_options, Item cal
 extern "C" Item js_https_get(Item options_item, Item maybe_options, Item callback) {
     options_item = https_normalize_options(options_item, maybe_options, &callback);
     if (get_type_id(options_item) == LMD_TYPE_MAP) {
-        js_property_set(options_item, make_string_item("method"), make_string_item("GET"));
+        js_set_key_default(options_item, make_string_item("method"), make_string_item("GET"));
     }
     Item req = js_http_request(options_item, callback);
     // auto-end for GET
@@ -651,13 +651,13 @@ extern "C" Item js_get_https_namespace(void) {
 
     https_namespace = js_new_object();
 
-    js_property_set(https_namespace, make_string_item("createServer"),
+    js_set_key_default(https_namespace, make_string_item("createServer"),
                     js_new_native_function(js_https_createServer));
-    js_property_set(https_namespace, make_string_item("Server"),
+    js_set_key_default(https_namespace, make_string_item("Server"),
                     js_new_native_constructor(js_https_createServer)); // alias
-    js_property_set(https_namespace, make_string_item("request"),
+    js_set_key_default(https_namespace, make_string_item("request"),
                     js_new_native_function(js_https_request));
-    js_property_set(https_namespace, make_string_item("get"),
+    js_set_key_default(https_namespace, make_string_item("get"),
                     js_new_native_function(js_https_get));
 
     // Agent — share HTTP agent storage, but use HTTPS constructor/prototype and
@@ -665,23 +665,23 @@ extern "C" Item js_get_https_namespace(void) {
     Item agent_ctor = js_new_native_constructor(js_https_Agent);
     https_agent_prototype = js_new_object();
     js_class_stamp(https_agent_prototype, JS_CLASS_AGENT);
-    js_property_set(https_agent_prototype, make_string_item("constructor"), agent_ctor);
+    js_set_key_default(https_agent_prototype, make_string_item("constructor"), agent_ctor);
     js_mark_non_enumerable(https_agent_prototype, make_string_item("constructor"));
-    js_property_set(https_agent_prototype, make_string_item("getName"),
+    js_set_key_default(https_agent_prototype, make_string_item("getName"),
                     js_new_native_function(js_https_agent_getName));
-    js_property_set(https_agent_prototype, make_string_item("destroy"),
+    js_set_key_default(https_agent_prototype, make_string_item("destroy"),
                     js_new_native_function(js_http_agent_destroy));
-    js_property_set(https_agent_prototype, make_string_item("createConnection"),
+    js_set_key_default(https_agent_prototype, make_string_item("createConnection"),
                     js_new_native_rest_function(js_https_agent_createConnection));
     js_function_set_prototype(agent_ctor, https_agent_prototype);
-    js_property_set(https_namespace, make_string_item("Agent"), agent_ctor);
+    js_set_key_default(https_namespace, make_string_item("Agent"), agent_ctor);
 
     // globalAgent
     Item agent = js_https_Agent((Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)});
-    js_property_set(https_namespace, make_string_item("globalAgent"), agent);
+    js_set_key_default(https_namespace, make_string_item("globalAgent"), agent);
 
     Item default_key = make_string_item("default");
-    js_property_set(https_namespace, default_key, https_namespace);
+    js_set_key_default(https_namespace, default_key, https_namespace);
 
     return https_namespace;
 }

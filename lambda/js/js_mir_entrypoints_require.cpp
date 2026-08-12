@@ -45,7 +45,7 @@ static Item js_require_module_not_found(const char* specifier) {
     char message[640];
     snprintf(message, sizeof(message), "Cannot find module '%s'", name);
     Item error = js_new_error_with_name(make_string_item("Error"), make_string_item(message));
-    js_property_set(error, make_string_item("code"), make_string_item("MODULE_NOT_FOUND"));
+    js_set_key_default(error, make_string_item("code"), make_string_item("MODULE_NOT_FOUND"));
     // the returned error must stay attached to the call result; there is no
     // pending side channel for require callers to recover.
     return js_throw_value(error);
@@ -832,7 +832,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
 
     // Build JavaScript AST
     phase_start = js_mir_phase_now_us();
-    JsAstNode* js_ast = build_js_ast(tp, root);
+    JsAstNode* js_ast = build_js_ast_indexed(tp, root);
     if (!js_ast) {
         log_error("js-mir: AST build failed");
         jm_clear_active_js_transpile(tp, NULL, NULL);
@@ -1051,6 +1051,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // MIR_finish_func/MIR_finish_module, so this is the finalized stage the
     // emission tests read. LAMBDA_MIR_DUMP_PATH names a private artifact and
     // works in release builds; JS_MIR_DUMP keeps the legacy developer path.
+    // TODO: enable after MIR's post-finish operand mutation contract is
+    // verified on every backend; the volume gate currently observes the
+    // untouched finalized list.
 #ifndef NDEBUG
     const bool js_legacy_mir_dump = getenv("JS_MIR_DUMP") != NULL;
 #else
@@ -1085,18 +1088,24 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         }
     }
 #endif
-    // Count total MIR instructions (drives the interpreter policy and the JIT
-    // opt-downgrade fallback below).
+    // Count finalized executable MIR instructions (drives the interpreter
+    // policy and the AST-tuning volume gate). Labels are structural and must
+    // match the MT7 artifact counter used by test_mir_ratchet_gtest.
     unsigned long total_insns = 0;
+    unsigned long total_functions = 0;
     for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
          m = DLIST_NEXT(MIR_module_t, m)) {
         for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
              item = DLIST_NEXT(MIR_item_t, item)) {
-            if (item->item_type == MIR_func_item)
-                total_insns += DLIST_LENGTH(MIR_insn_t, item->u.func->insns);
+            if (item->item_type != MIR_func_item) continue;
+            total_functions++;
+            for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, item->u.func->insns);
+                    insn != NULL; insn = DLIST_NEXT(MIR_insn_t, insn)) {
+                if (insn->code != MIR_LABEL) total_insns++;
+            }
         }
     }
-    js_mir_volume_counters_set((long)mt->func_count, (long)total_insns);
+    js_mir_volume_counters_set((long)total_functions, (long)total_insns);
     // Tune6 (see vibe/jube/Transpile_Js_Tune6_AST.md §0.2a–§0.2d): the dominant JS
     // startup cost is eager per-function MIR_gen during MIR_link. For large modules
     // opt=0 JIT ≈ opt=2 JIT (link is codegen-emit-bound, not optimizer-bound), so
@@ -1137,7 +1146,13 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     static int js_lazy_mir_cached = -1;
     if (js_lazy_mir_cached < 0) {
         const char* lazy_env = getenv("JS_LAZY_MIR");
-        js_lazy_mir_cached = (lazy_env && lazy_env[0] && strcmp(lazy_env, "0") != 0) ? 1 : 0;
+        // Lazy generation remains opt-in for JS modules: sequential library
+        // tests can retain deferred MIR contexts across host callbacks, so the
+        // eager path is the correctness default until that owner lifetime is
+        // made explicit. Performance captures may opt in with JS_LAZY_MIR=1.
+        js_lazy_mir_cached = lazy_env
+            ? (lazy_env[0] && strcmp(lazy_env, "0") != 0 ? 1 : 0)
+            : 0;
     }
     void (*gen_interface)(MIR_context_t, MIR_item_t) =
         js_lazy_mir_cached ? MIR_set_lazy_gen_interface : MIR_set_gen_interface;
@@ -1968,7 +1983,7 @@ static char* js_require_read_package_main(char* path_buf, int path_buf_size,
     if (item_is_error(package_obj)) return NULL;
 
     Item main_key = (Item){.item = s2it(heap_create_name("main", 4))};
-    Item main_value = js_property_get(package_obj, main_key);
+    Item main_value = js_get_key_default(package_obj, main_key);
     if (item_is_error(main_value) || get_type_id(main_value) != LMD_TYPE_STRING) return NULL;
 
     String* main_str = it2s(main_value);
@@ -2115,20 +2130,20 @@ static void js_cjs_store_module(Item filename, Item module) {
 
 static Item js_cjs_exports(Item module) {
     Item exports_key = js_cjs_key("exports");
-    Item exports = js_property_get(module, exports_key);
+    Item exports = js_get_key_default(module, exports_key);
     if (get_type_id(exports) == LMD_TYPE_NULL || get_type_id(exports) == LMD_TYPE_UNDEFINED) {
         exports = js_new_object();
-        js_property_set(module, exports_key, exports);
+        js_set_key_default(module, exports_key, exports);
     }
     return exports;
 }
 
 static Item js_cjs_children(Item module) {
     Item children_key = js_cjs_key("children");
-    Item children = js_property_get(module, children_key);
+    Item children = js_get_key_default(module, children_key);
     if (get_type_id(children) != LMD_TYPE_ARRAY) {
         children = js_array_new(0);
-        js_property_set(module, children_key, children);
+        js_set_key_default(module, children_key, children);
     }
     return children;
 }
@@ -2136,7 +2151,7 @@ static Item js_cjs_children(Item module) {
 static void js_cjs_update_cached_default(Item filename, Item module) {
     Item ns = js_module_get(filename);
     if (get_type_id(ns) != LMD_TYPE_MAP && get_type_id(ns) != LMD_TYPE_OBJECT) return;
-    js_property_set(ns, js_cjs_key("default"), js_cjs_exports(module));
+    js_set_key_default(ns, js_cjs_key("default"), js_cjs_exports(module));
 }
 
 extern "C" Item js_cjs_enter(Item module, Item filename) {
@@ -2144,13 +2159,13 @@ extern "C" Item js_cjs_enter(Item module, Item filename) {
     if (get_type_id(module) != LMD_TYPE_MAP && get_type_id(module) != LMD_TYPE_OBJECT) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    js_property_set(module, js_cjs_key("id"), filename);
-    js_property_set(module, js_cjs_key("filename"), filename);
-    js_property_set(module, js_cjs_key("loaded"), (Item){.item = ITEM_FALSE});
+    js_set_key_default(module, js_cjs_key("id"), filename);
+    js_set_key_default(module, js_cjs_key("filename"), filename);
+    js_set_key_default(module, js_cjs_key("loaded"), (Item){.item = ITEM_FALSE});
     js_cjs_exports(module);
     js_cjs_children(module);
     Item parent = js_cjs_current_module();
-    js_property_set(module, js_cjs_key("parent"), parent);
+    js_set_key_default(module, js_cjs_key("parent"), parent);
     if (get_type_id(filename) == LMD_TYPE_STRING) {
         js_cjs_store_module(filename, module);
         js_cjs_update_cached_default(filename, module);
@@ -2165,7 +2180,7 @@ extern "C" Item js_cjs_enter(Item module, Item filename) {
 
 extern "C" Item js_cjs_complete(Item module) {
     if (get_type_id(module) == LMD_TYPE_MAP || get_type_id(module) == LMD_TYPE_OBJECT) {
-        js_property_set(module, js_cjs_key("loaded"), (Item){.item = ITEM_TRUE});
+        js_set_key_default(module, js_cjs_key("loaded"), (Item){.item = ITEM_TRUE});
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -2192,12 +2207,12 @@ extern "C" Item js_cjs_leave(Item module) {
 
 static Item js_cjs_create_module_metadata(Item child_filename, Item exports) {
     Item module = js_new_object();
-    js_property_set(module, js_cjs_key("id"), child_filename);
-    js_property_set(module, js_cjs_key("filename"), child_filename);
-    js_property_set(module, js_cjs_key("exports"), exports);
-    js_property_set(module, js_cjs_key("loaded"), (Item){.item = ITEM_TRUE});
-    js_property_set(module, js_cjs_key("children"), js_array_new(0));
-    js_property_set(module, js_cjs_key("parent"), ItemNull);
+    js_set_key_default(module, js_cjs_key("id"), child_filename);
+    js_set_key_default(module, js_cjs_key("filename"), child_filename);
+    js_set_key_default(module, js_cjs_key("exports"), exports);
+    js_set_key_default(module, js_cjs_key("loaded"), (Item){.item = ITEM_TRUE});
+    js_set_key_default(module, js_cjs_key("children"), js_array_new(0));
+    js_set_key_default(module, js_cjs_key("parent"), ItemNull);
     js_cjs_store_module(child_filename, module);
     return module;
 }
@@ -2231,7 +2246,7 @@ static void js_cjs_note_child(Item child_filename, Item child_exports) {
     Item children = js_cjs_children(parent);
     int64_t len = js_array_length(children);
     for (int64_t i = 0; i < len; i++) {
-        Item existing = js_array_get_int(children, i);
+        Item existing = js_elements_get_int(children, i);
         if (existing.item == child.item) return;
     }
     js_array_push(children, child);
@@ -2296,7 +2311,7 @@ extern "C" Item js_require(Item specifier) {
         // For CJS modules, the cached value is the namespace.
         // Extract the default export (which is module.exports)
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
-        Item def_val = js_property_get(existing, def_key);
+        Item def_val = js_get_key_default(existing, def_key);
         TypeId dt = get_type_id(def_val);
         if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
             if (js_cjs_specifier_is_file_path(specifier)) js_cjs_note_child(specifier, def_val);
@@ -2330,7 +2345,7 @@ extern "C" Item js_require(Item specifier) {
         jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
-        Item def_val = js_property_get(existing, def_key);
+        Item def_val = js_get_key_default(existing, def_key);
         TypeId dt = get_type_id(def_val);
         if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
             if (js_is_cjs_file(path_buf)) js_cjs_note_child(resolved_spec, def_val);
@@ -2389,7 +2404,7 @@ extern "C" Item js_require(Item specifier) {
     // For CJS, extract the default export (module.exports)
     if (js_is_cjs_file(path_buf)) {
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
-        Item def_val = js_property_get(ns, def_key);
+        Item def_val = js_get_key_default(ns, def_key);
         TypeId dt = get_type_id(def_val);
         if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) {
             js_cjs_note_child(resolved_spec, def_val);
