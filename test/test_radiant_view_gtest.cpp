@@ -360,14 +360,14 @@ TEST(RadiantViewTest, JsMirCacheKeepsFreshDocumentRealms) {
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
     shell_result_free(&shell_result);
 
-    // Cached code may cross documents, but window values and prototype
-    // mutations must remain owned by the document heap that created them.
+    // Only the reusable preamble is shared now; lifecycle tasks execute in
+    // each fresh document realm while window values and prototypes stay local.
     EXPECT_TRUE(test_radiant_view_file_contains(
         result_path, "js-cache-realm-isolated"));
     EXPECT_FALSE(test_radiant_view_file_contains(
         result_path, "js-cache-realm-leaked"));
     EXPECT_TRUE(test_radiant_view_file_contains(
-        timing_path, "\"script_cache_hits\":5"));
+        timing_path, "\"script_cache_hits\":1"));
     EXPECT_TRUE(test_radiant_view_file_contains(
         timing_path, "\"script_cache_compiles\":0"));
 }

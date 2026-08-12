@@ -14053,13 +14053,15 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
                                       DomNode* ref_child) {
     if (!parent || !text || !text->native_string || !parent->doc ||
         !parent->doc->input) return false;
+    String* native_string = text->native_string;
 
     if (text->parent) {
-        if (!text->parent->is_element() ||
-            !js_dom_remove_backed_child(text->parent->as_element(),
-                                        (DomNode*)text)) {
+        if (!text->parent->is_element() || !dom_text_remove(text)) {
             return false;
         }
+        // static Mark text is invalidated when unlinked, but appendChild must
+        // carry the original backing item through a move before relinking it.
+        if (!text->native_string) text->native_string = native_string;
     }
 
     int64_t insert_index = dom_element_to_element(parent)->length;
@@ -14092,10 +14094,15 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
     Item result = editor.elmt_insert_child(
         {.element = parent_backing},
         (int)insert_index,
-        {.item = s2it(text->native_string)});
+        {.item = s2it(native_string)});
     if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
         log_error("js_dom_insert_backed_text: inline insert changed backing identity");
         return false;
+    }
+    if (text->parent != (DomNode*)parent) {
+        // MarkEditor can update the backing list before the wrapper relink;
+        // complete the DOM-side link without creating a second Mark string.
+        return ((DomNode*)parent)->append_child((DomNode*)text);
     }
     return text->parent == (DomNode*)parent;
 }

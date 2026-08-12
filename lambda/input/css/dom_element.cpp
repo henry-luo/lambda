@@ -2504,6 +2504,7 @@ DomText* DomText::create_detached_copy(DomDocument* doc,
     DomText* text_node = create_in(doc->node_arena, len);
     if (!text_node) return nullptr;
     String* string = dom_text_to_string(text_node);
+    text_node->node_flags |= DOM_NODE_FLAG_TEXT_REINSERTABLE;
     string->flags = 0;
     string->is_ascii = str_is_ascii(text ? text : "", len) ? 1 : 0;
     if (len) memcpy(string->chars, text, len);
@@ -2780,7 +2781,11 @@ bool dom_text_remove(DomText* text_node) {
         return false;
     }
 
-    text_node->native_string = nullptr;
+    if (!(text_node->node_flags & DOM_NODE_FLAG_TEXT_REINSERTABLE)) {
+        // static Mark text keeps the old invalidation behavior so relinking a
+        // removed source node cannot recover a stale wrapper.
+        text_node->native_string = nullptr;
+    }
     log_debug("dom_text_remove: removed text node at index %lld", child_idx);
     return true;
 }
@@ -2858,6 +2863,7 @@ DomText* DomElement::append_text(const char* text_content) {
         return nullptr;
     }
 
+    if (text_node) text_node->node_flags |= DOM_NODE_FLAG_TEXT_REINSERTABLE;
     log_debug("dom_element_append_text: appended text '%s'", text_content);
 
     return text_node;
