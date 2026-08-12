@@ -215,6 +215,8 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->em.lookup_import_metadata = jm_lookup_import_metadata;
     mt->is_module = is_module;
     mt->filename = filename;
+    mt->lexical_path_cache = hashmap_new(sizeof(JsLexicalPathCacheEntry), 64, 0, 0,
+        jm_lexical_path_hash, jm_lexical_path_cmp, NULL, NULL);
     mt->cascade_debug_site_counter = 100;
     mt->em.import_cache = em_import_cache_new(import_capacity);
     mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), local_func_capacity, 0, 0,

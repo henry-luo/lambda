@@ -183,6 +183,28 @@ The first optimization order is therefore:
 
 AST allocation alone is too small to produce G3. Builder consolidation is still required for structure and G1, but MIR lowering must carry most of the time reduction.
 
+### 3.3 Regression root cause: cached capture facts had two owners
+
+The timeout symptom was not a scheduler-only regression. The indexed/cached
+capture slice added `JsFuncCollected::cached_annexb_suppressed` so Annex-B
+lexical suppression could be reused while determining closure captures. The
+copy helper still freed that map after copying it, although the function table
+owned it and later capture passes reused the pointer. AddressSanitizer reduced
+the failure to `hashmap_get -> jm_name_set_has ->
+jm_copy_cached_function_locals`: a stale suppression-map read in an Annex-B
+batch worker. A worker crash then looked like a transpilation timeout because
+the batch controller waited for a lost result and retried the work.
+
+The ownership invariant is now explicit and follows **D5.3.4**: cached
+analysis facts live for the whole MIR-transpiler compilation and are released
+only by `jm_free_scope_env_names`/transpiler cleanup; copy helpers never free
+borrowed cached maps. The same pass also memoizes the immutable
+`(root,target)` lexical-path query per transpiler. A focused three-test Annex-B
+batch passes 3/3 after the fix. This distinction is important for G2/G3:
+first eliminate crash/retry work, then compare source-to-linked-MIR time with
+identical complete manifests; a timeout reduction caused only by fewer crashed
+workers is not compiler credit.
+
 ---
 
 ## 4. Target compiler process
@@ -727,7 +749,7 @@ full **D8.4.3** error/root contract.
 | D4 JS large-library finalized MIR diagnostic | 5,743,247 | 5,008,331 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
 | D4 JS complete-corpus finalized MIR diagnostic | 7,187,862 | 6,135,408 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
 | G5 sample/timing integrity | 698 Lambda rows / 324 JS rows, identical sorted manifests | candidate_final5: 698 Lambda rows; candidate_final_js: 324 JS rows; incomplete captures are rejected | exact timing manifest | pass for retained complete captures; known baseline `lib_floating_ui` semantic failure is recorded separately |
-| G0 regressions | current baselines | focused release ratchet 16/16, exact-collection GC 1/1, compiler-pass 2/2, and input baseline 2104/2104 pass; concurrent full baseline remains noisy | all green | open: `make test-lambda-baseline` reports 1469/1590 and `make test262-baseline` reports 40179/40261 fully passing, with batch-worker crashes/collateral failures under host pressure |
+| G0 regressions | current baselines | focused release ratchet 16/16, exact-collection GC 1/1, compiler-pass 2/2, input baseline 2104/2104, prior full Lambda baseline 3694/3694, and current Annex-B cache-fix batch 3/3 | all green | full post-fix `make test-lambda-baseline`/`make test262-baseline` closeout remains to be rerun; the prior failures were worker crashes/collateral timeout symptoms, not accepted results |
 
 ### 13.4 Deletion ledger
 
