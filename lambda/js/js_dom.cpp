@@ -467,7 +467,7 @@ extern "C" bool js_dom_mutation_since_affects_subtree(
         DomDocument* doc, uint32_t sequence_before, void* root) {
     if (!doc || !root) return false;
     DomNode* root_node = (DomNode*)root;
-    for (uint32_t index = 0; index < doc->js.mutation_record_count; index++) {
+    for (int index = 0; index < doc->js.mutation_record_count; index++) {
         DomJsMutationRecord* record = &doc->js.mutation_records[index];
         if (record->sequence <= sequence_before) continue;
         if (js_dom_mutation_node_overlaps_root(record->target, root_node) ||
@@ -14160,29 +14160,8 @@ extern "C" Item js_dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has
     DomElement* clone = dom_element_create(elem->doc, elem->tag_name, _clean_elem.element);
     if (!clone) return ItemNull;
     js_dom_clone_content_attributes(elem, clone);
-    Item orig_expando = expando_get_map((DomNode*)elem);
-    if (orig_expando.item != ITEM_NULL) {
-        Item clone_expando = expando_get_or_create_map((DomNode*)clone);
-        if (clone_expando.item != ITEM_NULL) {
-            Map* em = orig_expando.map;
-            if (em && em->type) {
-                TypeMap* em_type = (TypeMap*)em->type;
-                ShapeEntry* se = em_type->shape;
-                while (se) {
-                    if (se->name && se->name->str) {
-                        const char* ek = se->name->str;
-                        Item ev = js_get_key_default(orig_expando,
-                            (Item){.item = s2it(heap_create_name(ek))});
-                        if (!is_js_undefined(ev)) {
-                            js_set_key_default(clone_expando,
-                                (Item){.item = s2it(heap_create_name(ek))}, ev);
-                        }
-                    }
-                    se = se->next;
-                }
-            }
-        }
-    }
+    // DOM cloning must not copy source-bound wrapper caches; their host_data would
+    // make clone.classList/style writes mutate the original element.
     clone->tag_id = elem->tag_id;
     if (deep) {
         DomNode* child = elem->first_child;

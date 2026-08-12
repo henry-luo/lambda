@@ -239,19 +239,16 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style) {
 
     const char* cr = extract_counter_spec_from_style(style, CSS_PROPERTY_COUNTER_RESET, lycon);
     if (cr) {
-        log_debug("    [Pseudo] Applying counter-reset: %s", cr);
         counter_reset(lycon->counter_context, cr);
     }
 
     const char* ci = extract_counter_spec_from_style(style, CSS_PROPERTY_COUNTER_INCREMENT, lycon);
     if (ci) {
-        log_debug("    [Pseudo] Applying counter-increment: %s", ci);
         counter_increment(lycon->counter_context, ci);
     }
 
     const char* cs = extract_counter_spec_from_style(style, CSS_PROPERTY_COUNTER_SET, lycon);
     if (cs) {
-        log_debug("    [Pseudo] Applying counter-set: %s", cs);
         counter_set(lycon->counter_context, cs);
     }
 }
@@ -293,17 +290,13 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
                 start_value = atoi(start_attr) + 1;
             }
             // else: start_value stays 0; reversed initial computed below via DFS
-            log_debug("    [List] OL reversed → counter-reset: list-item %d%s",
-                      start_value, start_attr ? "" : " (will compute reversed initial)");
         } else if (start_attr) {
             start_value = atoi(start_attr) - 1;
-            log_debug("    [List] OL start=%s → counter-reset: list-item %d", start_attr, start_value);
         }
     }
     char reset_spec[64];
     snprintf(reset_spec, sizeof(reset_spec), "list-item %d", start_value);
     counter_reset(lycon->counter_context, reset_spec);
-    log_debug("    [List] Implicit counter-reset: %s for <%s>", reset_spec, dom_elem->tag_name);
 
     // For <ol reversed> without start attr, compute reversed initial value
     // using the same DFS algorithm as CSS counter-reset: reversed(list-item)
@@ -341,8 +334,6 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
             char set_spec2[64];
             snprintf(set_spec2, sizeof(set_spec2), "list-item %d", initial);
             counter_set(lycon->counter_context, set_spec2);
-            log_debug("    [List] OL reversed computed: total=%d, last_nz=%d, set_val=%d, initial=%d",
-                      total, last_nz, set_val, initial);
         }
     }
 }
@@ -377,8 +368,6 @@ void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem
         char set_spec[128];
         snprintf(set_spec, sizeof(set_spec), "%s %d", rev_name, initial);
         counter_set(lycon->counter_context, set_spec);
-        log_debug("    [Block] Reversed counter '%s': total=%d, last_nz=%d, set_val=%d, initial=%d",
-                  rev_name, total, last_nz, set_val, initial);
     };
 
     if (cr_value && cr_value->type == CSS_VALUE_TYPE_LIST) {
@@ -485,10 +474,6 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     marker_elem->view_type = RDT_VIEW_MARKER;
     marker_elem->blk = (BlockProp*)marker_prop;
 
-    log_debug("    [List] Created %s::marker width=%.1f, bullet_size=%.1f, type=%s, text='%s'",
-             is_outside ? "outside " : "", marker_prop->width, bullet_size,
-             is_bullet_marker ? "bullet" : "text",
-             marker_prop->text_content ? marker_prop->text_content : "");
 
     return marker_elem;
 }
@@ -518,7 +503,6 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             char set_spec[64];
             snprintf(set_spec, sizeof(set_spec), "list-item %d", set_value);
             counter_set(lycon->counter_context, set_spec);
-            log_debug("    [List] LI value=%s → counter-set: list-item %d", value_attr, set_value);
         }
     }
 
@@ -527,10 +511,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     bool explicit_list_item_inc = (block->blk && block->block_mut()->counter_increment &&
                                    strstr(block->block()->counter_increment, "list-item") != nullptr);
     if (!explicit_list_item_inc) {
-        log_debug("    [List] Auto-%s list-item counter", parent_reversed ? "decrementing" : "incrementing");
         counter_increment(lycon->counter_context, parent_reversed ? "list-item -1" : "list-item 1");
-    } else {
-        log_debug("    [List] Skipping auto-increment (explicit counter-increment includes list-item)");
     }
 
     // For inline list-item (outer != LIST_ITEM), force inside position
@@ -543,13 +524,9 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     if (block->blk && block->block_mut()->list_style_position != 0) {
         if (block->block()->list_style_position == 1) {
             is_outside_position = false;
-            log_debug("    [List] list-style-position=inside (is_outside=0)");
         } else if (!is_inline_list_item) {
             is_outside_position = true;
-            log_debug("    [List] list-style-position=outside (is_outside=1)");
         }
-    } else {
-        log_debug("    [List] Using default list-style-position=outside");
     }
 
     // Generate list marker if list-style-type is not 'none'
@@ -580,14 +557,12 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             CssValue* cv = content_decl->value;
             if (cv->type == CSS_VALUE_TYPE_KEYWORD && cv->data.keyword == CSS_VALUE_NONE) {
                 has_marker = false;  // content: none suppresses marker
-                log_debug("    [List] ::marker { content: none } - suppressing marker");
             } else if (!(cv->type == CSS_VALUE_TYPE_KEYWORD && cv->data.keyword == CSS_VALUE_NORMAL)) {
                 // explicit content (not 'normal') - resolve using counter context
                 marker_css_content = dom_element_get_pseudo_element_content_with_counters(
                     list_elem, 6, lycon->counter_context, lycon->scratch.arena);
                 if (marker_css_content) {
                     has_marker = true;
-                    log_debug("    [List] ::marker { content: '%s' } - using CSS content", marker_css_content);
                 }
             }
         }
@@ -597,13 +572,6 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
 
     CssEnum marker_style = effective_list_style;
     bool is_string_marker = (string_marker != nullptr);
-
-    if (!is_string_marker) {
-        const CssEnumInfo* info = css_enum_info(marker_style);
-        log_debug("    [List] Generating marker with style: %s (0x%04X)", info ? info->name : "unknown", marker_style);
-    } else {
-        log_debug("    [List] Generating string marker: \"%s\"", string_marker);
-    }
 
     bool is_bullet_marker = !is_string_marker && !marker_css_content &&
                             (marker_style == CSS_VALUE_DISC ||

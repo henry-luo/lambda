@@ -860,6 +860,8 @@ typedef struct JsScopeCounters {
     long lookup_calls;     // calls to js_scope_lookup + js_scope_lookup_current
     long entries_scanned;  // total NameEntry compared across all lookups
     long scopes_walked;    // total parent scopes visited across all lookups
+    long cache_hits;
+    long cache_misses;
 } JsScopeCounters;
 
 void js_scope_counters_set_enabled(int enabled);
@@ -978,6 +980,7 @@ void js_eval_env_track_global_binding(Item key);
 void js_eval_env_pop_frame(void);
 void js_eval_global_lexical_pop_frame(void);
 Item js_check_unresolved_capture(Item value, NameId name_id, int64_t len);
+Item js_check_capture_binding(Item value, NameId name_id, int64_t len);
 Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_t len, int64_t in_typeof);
 
 // URL constructor

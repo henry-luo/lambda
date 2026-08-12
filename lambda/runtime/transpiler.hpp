@@ -6,6 +6,7 @@
 #include "../lambda-data.hpp"
 
 #include "ast.hpp"
+#include "compiler_timing.hpp"
 
 // Shared range materialization helper for runtime sequence consumers.
 Item fn_chr(Item codepoint);
@@ -182,7 +183,10 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
                                    double* out_jit_init_ms = nullptr,
                                    double* out_transpile_ms = nullptr,
-                                   double* out_mir_gen_ms = nullptr);
+                                   double* out_mir_gen_ms = nullptr,
+                                   uint64_t* out_mir_module_count = nullptr,
+                                   uint64_t* out_mir_function_count = nullptr,
+                                   uint64_t* out_mir_instruction_count = nullptr);
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import = false);
 Script* load_script_mir_direct(Runtime *runtime, const char* script_path,

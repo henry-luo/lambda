@@ -271,8 +271,6 @@ static void custom_layout_log_unregistered_once(ViewBlock* block, const char* la
             g_custom_layout_unknown_log_count++;
         }
     }
-    log_debug("CUSTOM_LAYOUT_UNREGISTERED %s layout='%s'",
-              block ? block->source_loc() : "(null)", layout_name);
 }
 
 static void custom_layout_apply_parent_axis(ViewBlock* block, float content_size, bool horizontal) {
@@ -548,9 +546,6 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
     }
 
     custom_layout_apply_parent_size(block, &result, min_x, min_y, max_x, max_y);
-    log_debug("CUSTOM_LAYOUT_APPLIED %s layout='%s' children=%d placements=%d size=%.1fx%.1f",
-              block->source_loc(), layout_name, child_count, result.placement_count,
-              block->width, block->height);
     scratch_restore(&lycon->scratch, mark);
     return true;
 }

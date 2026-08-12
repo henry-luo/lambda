@@ -91,6 +91,7 @@ extern int64_t js_key_is_symbol_c(Item key);
 // v90: BigInt constructor (js_runtime.cpp)
 extern Item js_bigint_constructor(Item value);
 extern Item js_to_numeric(Item value);
+extern Item js_check_capture_binding(Item value, NameId name_id, int64_t len);
 extern Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
 extern Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 extern Item js_bigint_not_constructor(void);
@@ -1571,6 +1572,7 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED |
       // The helper only selects a sealed NameId and resolves an existing
@@ -1918,11 +1920,15 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     {"js_to_number", FPTR(js_to_number)},
     {"js_to_numeric", FPTR(js_to_numeric)},
-    {"js_to_string", FPTR(js_to_string)},
+    {"js_to_string", FPTR(js_to_string),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_make_string_len", FPTR(js_make_string_len),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"js_to_boolean", FPTR(js_to_boolean)},
@@ -2057,6 +2063,7 @@ JitImport jit_runtime_imports[] = {
     {"js_build_template_object_cached", FPTR(js_build_template_object_cached)},
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},
     {"js_check_tdz", FPTR(js_check_tdz)},
+    {"js_check_capture_binding", FPTR(js_check_capture_binding)},
     // This constructs an Error Item; classing it as a scalar loses the carrier
     // when the SET lane routes a strict const-assignment exception.
     {"js_throw_const_assign", FPTR(js_throw_const_assign),
@@ -2179,8 +2186,16 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(3, JIT_VALUE_BOXED_ITEM)}},
     {"js_set_internal_class_name", FPTR(js_set_internal_class_name), JIT_IMPORT_VOID_PRESERVES},
-    {"js_string_concat", FPTR(js_string_concat)},
-    {"js_string_get_int", FPTR(js_string_get_int)},
+    {"js_string_concat", FPTR(js_string_concat),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_string_get_int", FPTR(js_string_get_int),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_elements_get_int", FPTR(js_elements_get_int)},
     {"js_elements_set_int", FPTR(js_elements_set_int)},
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},
@@ -2232,9 +2247,23 @@ JitImport jit_runtime_imports[] = {
     {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
     {"js_new_aggregate_error", FPTR(js_new_aggregate_error)},
     {"js_error_set_cause", FPTR(js_error_set_cause)},
-    {"js_string_replace_nonws_global_fast_no_dollar", FPTR(js_string_replace_nonws_global_fast_no_dollar)},
-    {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
-    {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code)},
+    {"js_string_replace_nonws_global_fast_no_dollar", FPTR(js_string_replace_nonws_global_fast_no_dollar),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_get_math_object_value", FPTR(js_get_math_object_value)},
     {"js_get_json_object_value", FPTR(js_get_json_object_value)},
     {"js_get_console_object_value", FPTR(js_get_console_object_value)},

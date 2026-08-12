@@ -91,12 +91,8 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
     BackgroundProp* bg = view->boundary()->background;
 
-    log_debug("[RENDER BG] Element <%s>: color=#%08x gradient_type=%d linear=%p radial=%p",
-              view->node_name(), bg->color.c, bg->gradient_type,
-              (void*)bg->linear_gradient, (void*)bg->radial_gradient);
 
     if (bg->bg_clip == CSS_VALUE_TEXT) {
-        log_debug("[RENDER BG] background-clip:text defers background paint to glyph fill");
         return;
     }
 
@@ -170,7 +166,6 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (bg->linear_layers && bg->linear_layer_count > 0) {
         for (int i = 0; i < bg->linear_layer_count; i++) {
             if (bg->linear_layers[i]) {
-                log_debug("[GRADIENT] Rendering linear gradient layer %d/%d", i + 1, bg->linear_layer_count);
                 render_linear_gradient_layer(rdcon, view, bg, bg->linear_layers[i], pos_rect, paint_rect);
             }
         }
@@ -180,7 +175,6 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (bg->radial_layers && bg->radial_layer_count > 0) {
         for (int i = 0; i < bg->radial_layer_count; i++) {
             if (bg->radial_layers[i]) {
-                log_debug("[GRADIENT] Rendering radial gradient layer %d/%d", i + 1, bg->radial_layer_count);
                 render_radial_gradient_layer(rdcon, view, bg, bg->radial_layers[i], pos_rect, paint_rect);
             }
         }
@@ -189,7 +183,6 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     // Render main gradient (if any), clipped to paint area
     if (bg->gradient_type != GRADIENT_NONE &&
         (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient)) {
-        log_debug("[GRADIENT] Rendering gradient type=%d", bg->gradient_type);
         if (bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient) {
             render_linear_gradient_layer(rdcon, view, bg, bg->linear_gradient, pos_rect, paint_rect);
         } else if (bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient) {
@@ -203,8 +196,6 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (has_blend && has_upper_layers && blend_w > 0 && blend_h > 0) {
         rc_apply_blend_mode(rdcon, blend_x0, blend_y0, blend_w, blend_h,
                             bg->blend_mode);
-        log_debug("[BLEND] Recorded DL background-blend-mode=%d for %dx%d region",
-                  bg->blend_mode, blend_w, blend_h);
     }
 
     // Restore original clip
@@ -285,8 +276,6 @@ static void calc_linear_gradient_points(float angle, Rect rect,
     *x2 = cx + dx;
     *y2 = cy + dy;
 
-    log_debug("[GRADIENT] Linear gradient angle=%.1f°, line=(%.1f,%.1f)-(%.1f,%.1f)",
-              angle, *x1, *y1, *x2, *y2);
 }
 
 /**
@@ -300,12 +289,9 @@ static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
                                         LinearGradient* gradient, Rect tile_rect,
                                         Rect clip_rect) {
     if (!gradient || gradient->stop_count < 2) {
-        log_debug("[GRADIENT] Invalid gradient (need at least 2 stops)");
         return;
     }
 
-    log_debug("[GRADIENT] render_linear_gradient <%s> rect=(%.0f,%.0f,%.0f,%.0f)",
-              view->node_name(), tile_rect.x, tile_rect.y, tile_rect.width, tile_rect.height);
 
     const RdtMatrix* xform = render_state_current_transform(rdcon);
 
@@ -336,8 +322,6 @@ static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
         stops[i].g = gs->color.g;
         stops[i].b = gs->color.b;
         stops[i].a = gs->color.a;
-        log_debug("[GRADIENT] Stop %d: pos=%.2f color=#%02x%02x%02x%02x",
-                  i, stops[i].offset, stops[i].r, stops[i].g, stops[i].b, stops[i].a);
     }
 
     if (gradient->stops_in_px) {
@@ -378,8 +362,6 @@ static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
             if (idx >= 2) {
                 final_stops = rep_stops;
                 final_stop_count = idx;
-                log_debug("[GRADIENT] Repeating: replicated %d stops to %d (unit=%.3f)",
-                          stop_count, idx, unit);
             }
         }
     }
@@ -444,7 +426,6 @@ static float calc_radial_radius(RadialGradient* gradient, Rect rect, float cx, f
  */
 static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradient* gradient, Rect rect) {
     if (!gradient || gradient->stop_count < 2) {
-        log_debug("[GRADIENT] Invalid radial gradient (need at least 2 stops)");
         return;
     }
 
@@ -460,8 +441,6 @@ static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, Radial
         radius = fmaxf(rect.width, rect.height) * 0.5f;
     }
 
-    log_debug("[GRADIENT] Radial gradient center=(%.1f,%.1f) radius=%.1f shape=%d",
-              cx, cy, radius, gradient->shape);
 
     // gradient stop counts come from parsed CSS; use render scratch to avoid attacker-sized stack frames.
     RdtGradientStop* stops = (RdtGradientStop*)scratch_calloc(&rdcon->scratch, (size_t)gradient->stop_count * sizeof(RdtGradientStop));
@@ -477,8 +456,6 @@ static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, Radial
         stops[i].g = gs->color.g;
         stops[i].b = gs->color.b;
         stops[i].a = gs->color.a;
-        log_debug("[GRADIENT] Radial stop %d: pos=%.2f color=#%02x%02x%02x%02x",
-                  i, stops[i].offset, stops[i].r, stops[i].g, stops[i].b, stops[i].a);
     }
 
     RdtPath* clip = render_path_create_clip_path(rdcon);
@@ -532,17 +509,11 @@ static Color get_gradient_color_at(GradientStop* stops, int stop_count, float po
  */
 static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient* gradient, Rect rect) {
     if (!gradient || gradient->stop_count < 2) {
-        log_debug("[GRADIENT] Invalid conic gradient (need at least 2 stops)");
         return;
     }
 
-    log_debug("[GRADIENT] Rendering conic gradient: from=%.1fdeg center=(%.2f,%.2f) stops=%d",
-              gradient->from_angle, gradient->cx, gradient->cy, gradient->stop_count);
 
     for (int i = 0; i < gradient->stop_count; i++) {
-        log_debug("[GRADIENT] Conic stop %d: pos=%.2f color=#%02x%02x%02x",
-                  i, gradient->stops[i].position,
-                  gradient->stops[i].color.r, gradient->stops[i].color.g, gradient->stops[i].color.b);
     }
 
     int w = (int)(rect.width + 0.5f);
@@ -611,7 +582,6 @@ static void render_background_gradient(RenderContext* rdcon, ViewBlock* view, Ba
             }
             break;
         default:
-            log_debug("[GRADIENT] Unknown gradient type");
             break;
     }
 }
@@ -1232,9 +1202,6 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         float sr_br = max(0.0f, r_br + s_spread * spread_factor);
         float sr_bl = max(0.0f, r_bl + s_spread * spread_factor);
 
-        log_debug("[BOX-SHADOW] Rendering shadow: offset=(%.1f,%.1f) blur=%.1f spread=%.1f scale=%.1f color=#%02x%02x%02x%02x",
-                  s_offset_x, s_offset_y, s_blur, s_spread, sc,
-                  s->color.r, s->color.g, s->color.b, s->color.a);
 
         // Serialize CSS clip-path shape (if active) for masking the shadow
         int clip_type = 0;
@@ -1281,8 +1248,6 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                                 exclude_type, exclude_params,
                                 clip_type, clip_params);
             }
-            log_debug("[BOX-SHADOW] Applied isolated-buffer blur radius=%.1f on shadow rect (%.1f,%.1f,%.1f,%.1f)",
-                      s_blur, shadow_x, shadow_y, shadow_w, shadow_h);
         } else {
             // No blur (or sub-pixel blur, treated as 0 per CSS): paint the
             // shadow path directly.  For rounded elements we still need to
@@ -1328,7 +1293,6 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     }
 
     scratch_free(&rdcon->scratch, shadows);
-    log_debug("[BOX-SHADOW] Rendered %d outer shadow(s)", shadow_count);
 }
 
 /**
@@ -1429,9 +1393,6 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         float ir_br = max(0.0f, r_br - band);
         float ir_bl = max(0.0f, r_bl - band);
 
-        log_debug("[BOX-SHADOW INSET] Rendering inset shadow: offset=(%.1f,%.1f) blur=%.1f spread=%.1f band=%.1f scale=%.1f alpha=%d color=#%02x%02x%02x%02x",
-                  s_offset_x, s_offset_y, s_blur, s_spread, band, sc, fill_color.a,
-                  fill_color.r, fill_color.g, fill_color.b, fill_color.a);
 
         // Even-odd fill: outer (CW) = element border-box, inner (CCW) = inset cutout
         RdtPath* shadow_path = rdt_path_new();
@@ -1556,8 +1517,6 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                                 ((uint32_t)bg.g << 8) | (uint32_t)bg.r;
 
             rc_box_blur_inset(rdcon, br_x, br_y, br_w, br_h, pad, blur_px, bg_pixel);
-            log_debug("[BOX-SHADOW INSET] Applied inset blur radius=%.1f pad=%d bg=#%08x on region (%d,%d,%d,%d)",
-                      blur_px, pad, bg_pixel, br_x, br_y, br_w, br_h);
         }
 
         // Restore corner pixels outside rounded border-box after inset blur
@@ -1568,7 +1527,6 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     }
 
     scratch_free(&rdcon->scratch, shadows);
-    log_debug("[BOX-SHADOW INSET] Rendered %d inset shadow(s)", shadow_count);
 }
 
 /**
@@ -1954,8 +1912,6 @@ static void render_background_image_tile_cb(const Rect* tile_rect, void* userdat
  */
 static void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
     const char* image_url = bg->image;
-    log_debug("[BG-IMAGE] Rendering background-image '%s' on <%s> (%.0fx%.0f)",
-              image_url, view->node_name(), rect.width, rect.height);
 
     // Load image via the image cache
     ImageSurface* img = load_image(rdcon->ui_context, image_url);
@@ -1980,9 +1936,6 @@ static void render_background_image(RenderContext* rdcon, ViewBlock* view, Backg
         return;
     }
 
-    log_debug("[BG-IMAGE] size=%.0fx%.0f pos=(%.0f,%.0f) repeat=(%d,%d)",
-              plan.tile_w, plan.tile_h, plan.origin_x - rect.x, plan.origin_y - rect.y,
-              plan.repeat_x, plan.repeat_y);
 
     // Render tiles
     bool is_svg = (img->format == IMAGE_FORMAT_SVG);
@@ -2007,6 +1960,4 @@ static void render_background_image(RenderContext* rdcon, ViewBlock* view, Backg
     };
     background_for_each_tile(&plan, rect, rect, render_background_image_tile_cb, &tile_ctx);
 
-    log_debug("[BG-IMAGE] Rendered background-image '%s' tiles=(%d-%d)x(%d-%d)",
-              image_url, plan.start_col, plan.end_col, plan.start_row, plan.end_row);
 }

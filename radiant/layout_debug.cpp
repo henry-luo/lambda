@@ -46,22 +46,6 @@ static uint32_t category_from_token(const char* token, int len) {
     return LAYOUT_DEBUG_NONE;
 }
 
-#ifndef NDEBUG
-static const char* category_name(LayoutDebugCategory category) {
-    switch (category) {
-        case LAYOUT_DEBUG_BOX: return "LAYOUT_BOX";
-        case LAYOUT_DEBUG_PASS: return "LAYOUT_PASS";
-        case LAYOUT_DEBUG_ABS: return "LAYOUT_ABS";
-        case LAYOUT_DEBUG_FLEX: return "LAYOUT_FLEX";
-        case LAYOUT_DEBUG_GRID: return "LAYOUT_GRID";
-        case LAYOUT_DEBUG_TABLE: return "LAYOUT_TABLE";
-        case LAYOUT_DEBUG_TEXT: return "LAYOUT_TEXT";
-        case LAYOUT_DEBUG_CACHE: return "LAYOUT_CACHE";
-        default: return "LAYOUT";
-    }
-}
-#endif
-
 static const char* bucket_name(LayoutProfileBucket bucket) {
     switch (bucket) {
         case LAYOUT_PROFILE_BLOCK: return "block";
@@ -117,8 +101,6 @@ void layout_debug_vlog(LayoutContext* lycon, LayoutDebugCategory category,
 
     static thread_local char message[1024];  // LARGE_ARRAY_OK: static buffer — not on call stack.
     vsnprintf(message, sizeof(message), format, args);
-    log_debug("[%s] %s %s", category_name(category),
-              node ? node->source_loc() : "-", message);
 }
 
 void layout_debug_log(LayoutContext* lycon, LayoutDebugCategory category,

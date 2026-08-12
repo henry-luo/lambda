@@ -1,6 +1,5 @@
 #include "layout.hpp"
 
-#include "../lib/log.h"
 #include "../lib/tagged.hpp"
 #include <cmath>
 
@@ -79,32 +78,25 @@ bool layout_is_initial_containing_block(LayoutContext* lycon, ViewBlock* block) 
 }
 
 static void layout_resolve_percent_size_axis(LayoutContext* lycon, ViewBlock* child,
-                                             bool horizontal, float base, bool definite,
-                                             const char* context) {
-    LayoutAxisConstraintRefs refs(child->block_mut(), horizontal);
+                                             LayoutAxis axis, float base, bool definite) {
+    LayoutAxisRefs refs(child->block_mut(), axis);
     float percent = *refs.given_percent;
     if (isnan(percent) || !definite) return;
 
     float value = base * percent / 100.0f;
-    float& given = horizontal ? lycon->block.given_width : lycon->block.given_height;
     float& child_given = *refs.given;
-    const char* axis_name = horizontal ? "width" : "height";
-    log_debug("[LAYOUT_CB] %s %s %.1f%% of %.1f = %.1f (was %.1f)",
-              context, axis_name, percent, base, value, given);
-    given = value;
+    LayoutAxisRefs context_refs(&lycon->block, axis);
+    if (context_refs.given) *context_refs.given = value;
     child_given = value;
 }
 
-static void layout_resolve_percent_offset_axis(PositionProp* position, bool horizontal,
-                                               bool start, float base, const char* context) {
-    LayoutAxisInsetRefs refs(position, horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y);
-    RadiantInsetSide inset = start ? refs.start : refs.end;
+static void layout_resolve_percent_offset_axis(PositionProp* position, LayoutAxis axis,
+                                               bool start, float base) {
+    LayoutAxisRefs refs(position, axis);
+    RadiantInsetSide inset = start ? refs.insets.start : refs.insets.end;
     if (!*inset.has || isnan(*inset.percent)) return;
 
     *inset.value = *inset.percent * base / 100.0f;
-    const char* side = horizontal ? (start ? "left" : "right") : (start ? "top" : "bottom");
-    log_debug("[LAYOUT_CB] %s %s %.1f%% of %.1f = %.1f",
-              context, side, *inset.percent, base, *inset.value);
 }
 
 LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, ViewBlock* block) {
@@ -120,27 +112,28 @@ LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, Vie
 }
 
 void layout_resolve_percent_size_for_child(LayoutContext* lycon, ViewBlock* child,
-    LayoutContainingBlock cb, bool use_content_box, const char* log_context) {
+    LayoutContainingBlock cb, bool use_content_box) {
     if (!lycon || !child || !child->blk) return;
 
     float width_base = use_content_box ? cb.content_width : cb.padding_width;
     float height_base = use_content_box ? cb.content_height : cb.padding_height;
-    const char* context = log_context ? log_context : "child";
-    layout_resolve_percent_size_axis(
-        lycon, child, true, width_base, cb.has_definite_width, context);
-    layout_resolve_percent_size_axis(
-        lycon, child, false, height_base, cb.has_definite_height, context);
+    LayoutAxisPair<float> bases = layout_axis_pair(width_base, height_base);
+    LayoutAxisPair<bool> definite = {cb.has_definite_width, cb.has_definite_height};
+    for (LayoutAxis axis : layout_axes()) {
+        layout_resolve_percent_size_axis(
+            lycon, child, axis, bases[axis], definite[axis]);
+    }
 }
 
 void layout_resolve_percent_offsets_for_child(ViewBlock* child,
-    LayoutContainingBlock cb, const char* log_context) {
+    LayoutContainingBlock cb) {
     if (!child || !child->position) return;
 
     PositionProp* pos = child->position;
-    const char* context = log_context ? log_context : "positioned child";
 
-    layout_resolve_percent_offset_axis(pos, true, true, cb.padding_width, context);
-    layout_resolve_percent_offset_axis(pos, true, false, cb.padding_width, context);
-    layout_resolve_percent_offset_axis(pos, false, true, cb.padding_height, context);
-    layout_resolve_percent_offset_axis(pos, false, false, cb.padding_height, context);
+    LayoutAxisPair<float> bases = layout_axis_pair(cb.padding_width, cb.padding_height);
+    for (LayoutAxis axis : layout_axes()) {
+        layout_resolve_percent_offset_axis(pos, axis, true, bases[axis]);
+        layout_resolve_percent_offset_axis(pos, axis, false, bases[axis]);
+    }
 }

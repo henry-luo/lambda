@@ -4687,6 +4687,19 @@
             "icon": "🟨"
           },
           {
+            "source": "test/test_compiler_pass_gtest.cpp",
+            "name": "Compiler Pass Manager Tests",
+            "dependencies": [
+              "lambda-rt"
+            ],
+            "binary": "test_compiler_pass_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "icon": "🧭"
+          },
+          {
             "source": "test/test_js_bt_regex_gtest.cpp",
             "name": "JS Backtracking Regex Matcher Tests",
             "dependencies": [

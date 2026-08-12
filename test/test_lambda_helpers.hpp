@@ -12,6 +12,7 @@
 #include <atomic>
 #include <mutex>
 #include <unordered_map>
+#include "../lambda/runtime/compiler_timing.hpp"
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -391,6 +392,26 @@ inline void strip_timing_lines(char* output) {
     *write = '\0';
 }
 
+// remove compiler protocol records before comparing program output
+inline void strip_lambda_protocol_lines(char* output) {
+    if (!output) return;
+    char* read = output;
+    char* write = output;
+    while (*read) {
+        bool protocol = ((unsigned char)*read == 1) &&
+            (strncmp(read + 1, "COMPILER_TIMING ", 16) == 0 ||
+             strncmp(read + 1, "MIR_VOLUME ", 11) == 0);
+        if (protocol) {
+            while (*read && *read != '\n') read++;
+            if (*read == '\n') read++;
+            continue;
+        }
+        while (*read && *read != '\n') *write++ = *read++;
+        if (*read == '\n') *write++ = *read++;
+    }
+    *write = '\0';
+}
+
 // Helper function to test lambda script against expected output file
 inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path, bool is_procedural) {
     const char* script_name = strrchr(script_path, '/');
@@ -407,6 +428,7 @@ inline void test_lambda_script_against_file(const char* script_path, const char*
 
     // Strip __TIMING__ lines (benchmark instrumentation — variable across runs)
     strip_timing_lines(actual_output);
+    strip_lambda_protocol_lines(actual_output);
     trim_trailing_whitespace(actual_output);
 
     // Compare outputs
@@ -431,7 +453,50 @@ struct BatchResult {
     std::string output;
     int status;
     long long elapsed_us;
+    LambdaCompilerTiming timing;
+    bool has_timing;
+    bool has_volume;
 };
+
+inline bool parse_lambda_timing_line(const char* line, LambdaCompilerTiming* out) {
+    if (!line || !out) return false;
+    unsigned long long parse_us = 0, ast_build_us = 0, mir_lower_us = 0;
+    unsigned long long module_finalize_us = 0, link_us = 0, build_transpile_us = 0;
+    int schema = 0;
+    int matched = sscanf(line,
+        "COMPILER_TIMING schema=%d parse_us=%llu ast_build_us=%llu "
+        "mir_lower_us=%llu module_finalize_us=%llu link_us=%llu "
+        "build_transpile_us=%llu",
+        &schema, &parse_us, &ast_build_us, &mir_lower_us,
+        &module_finalize_us, &link_us, &build_transpile_us);
+    if (matched != 7 || schema != 1) return false;
+    out->parse_us = parse_us;
+    out->ast_build_us = ast_build_us;
+    out->mir_lower_us = mir_lower_us;
+    out->module_finalize_us = module_finalize_us;
+    out->link_us = link_us;
+    out->build_transpile_us = build_transpile_us;
+    out->valid = 1;
+    return true;
+}
+
+inline bool parse_lambda_volume_line(const char* line, LambdaCompilerTiming* out) {
+    if (!line || !out) return false;
+    unsigned long long modules = 0, functions = 0, insns = 0;
+    int schema = 0;
+    char sample_id[1024], test_name[256];
+    int matched = sscanf(line, "MIR_VOLUME schema=%d sample_id=%1023s test_name=%255s modules=%llu functions=%llu insns=%llu",
+                         &schema, sample_id, test_name, &modules, &functions, &insns);
+    if (matched != 6) {
+        matched = sscanf(line, "MIR_VOLUME schema=%d modules=%llu functions=%llu insns=%llu",
+                         &schema, &modules, &functions, &insns);
+    }
+    if ((matched != 6 && matched != 4) || schema != 1) return false;
+    out->mir_module_count = modules;
+    out->mir_function_count = functions;
+    out->mir_insn_count = insns;
+    return true;
+}
 
 inline long long lambda_test_now_us() {
 #ifdef _WIN32
@@ -510,6 +575,9 @@ inline void run_sub_batch(
     std::string current_output;
     bool in_script = false;
     long long current_start_us = 0;
+    LambdaCompilerTiming current_timing = {};
+    bool current_has_timing = false;
+    bool current_has_volume = false;
 
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
         // A failed script may leave stdout without a newline. In that case the
@@ -517,7 +585,9 @@ inline void run_sub_batch(
         char* control = strchr(buffer, '\x01');
         bool is_start = control && strncmp(control + 1, "BATCH_START ", 12) == 0;
         bool is_end = control && strncmp(control + 1, "BATCH_END ", 10) == 0;
-        if (is_start || is_end) {
+        bool is_timing = control && strncmp(control + 1, "COMPILER_TIMING ", 16) == 0;
+        bool is_volume = control && strncmp(control + 1, "MIR_VOLUME ", 11) == 0;
+        if (is_start || is_end || is_timing || is_volume) {
             if (in_script && control > buffer) {
                 current_output.append(buffer, (size_t)(control - buffer));
             }
@@ -529,10 +599,22 @@ inline void run_sub_batch(
                 current_output.clear();
                 in_script = true;
                 current_start_us = lambda_test_now_us();
+                current_timing = {};
+                current_has_timing = false;
+                current_has_volume = false;
+            } else if (is_timing) {
+                current_has_timing = parse_lambda_timing_line(control + 1, &current_timing) ||
+                    current_has_timing;
+            } else if (is_volume) {
+                current_has_volume = parse_lambda_volume_line(control + 1, &current_timing) ||
+                    current_has_volume;
             } else {
                 int status = atoi(control + 11);
                 long long elapsed_us = current_start_us > 0 ? lambda_test_now_us() - current_start_us : 0;
-                results[current_script] = {current_output, status, elapsed_us};
+                BatchResult result = {current_output, status, elapsed_us,
+                                      current_timing, current_has_timing,
+                                      current_has_volume};
+                results[current_script] = result;
                 size_t done = completed_scripts.fetch_add(1, std::memory_order_relaxed) + 1;
                 {
                     std::lock_guard<std::mutex> lock(progress_mutex);
@@ -556,11 +638,42 @@ inline void run_sub_batch(
     unlink(manifest_path);
 }
 
-// Max scripts per lambda.exe process to avoid state accumulation crashes
+// Max scripts per lambda.exe process for ordinary regression runs.
 static const size_t BATCH_CHUNK_SIZE = 50;
+
+// keep this shared header helper inline: unrelated test translation units also
+// include the header, and a private static copy triggers -Wunused-function.
+inline size_t lambda_capture_batch_chunk_size() {
+    const char* override_value = getenv("AST_TUNE_BATCH_CHUNK");
+    if (override_value && *override_value) {
+        char* end = nullptr;
+        unsigned long parsed = strtoul(override_value, &end, 10);
+        if (end != override_value && *end == '\0' && parsed > 0) {
+            return (size_t)parsed;
+        }
+    }
+    // Timing runs may override this explicitly; otherwise retain the normal
+    // 50-source worker so compiler totals stay comparable with the baseline.
+    return BATCH_CHUNK_SIZE;
+}
 
 // Max parallel sub-batch processes to avoid resource exhaustion
 static const size_t MAX_PARALLEL_LAMBDA_BATCHES = 8;
+
+// Timing captures may deliberately cap process fan-out so compiler samples
+// are not lost to host-level process pressure while large AST/MIR batches run.
+static size_t lambda_batch_worker_limit(size_t batch_count) {
+    size_t limit = std::min(MAX_PARALLEL_LAMBDA_BATCHES, batch_count);
+    const char* override_value = getenv("AST_TUNE_BATCH_WORKERS");
+    if (override_value && *override_value) {
+        char* end = nullptr;
+        unsigned long parsed = strtoul(override_value, &end, 10);
+        if (end != override_value && *end == '\0' && parsed > 0) {
+            limit = std::min(limit, (size_t)parsed);
+        }
+    }
+    return limit;
+}
 
 // Run multiple scripts using test-batch command, splitting into sub-batches
 // to avoid memory/state accumulation in the lambda.exe process.
@@ -588,7 +701,7 @@ inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
     std::atomic<size_t> next_batch{0};
     std::atomic<size_t> completed_scripts{0};
     std::mutex progress_mutex;
-    size_t num_workers = std::min(MAX_PARALLEL_LAMBDA_BATCHES, batches.size());
+    size_t num_workers = lambda_batch_worker_limit(batches.size());
     std::vector<std::thread> threads;
     for (size_t w = 0; w < num_workers; w++) {
         threads.emplace_back([&]() {

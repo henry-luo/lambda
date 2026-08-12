@@ -74,7 +74,7 @@ float layout_stretch_fit_border_box_size(ViewBlock* block, float available_margi
     float end_margin = 0.0f;
     if (block->bound) {
         LayoutAxis axis = horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
-        LayoutAxisPlacementRefs refs(block, axis);
+        LayoutAxisRefs refs(block, axis);
         CssEnum* start_type = refs.margins.start_type;
         CssEnum* end_type = refs.margins.end_type;
         float* start_value = refs.margins.start;
@@ -129,7 +129,7 @@ void layout_resolve_stretch_minmax_axis(ViewBlock* block, float available_margin
                                         bool available_size_is_definite, bool horizontal) {
     if (!block || !block->blk) return;
 
-    LayoutAxisConstraintRefs axis(block->blk, horizontal);
+    LayoutAxisRefs axis(block->blk, horizontal);
     float* minimum = axis.minimum;
     float* maximum = axis.maximum;
     CssEnum minimum_type = *axis.minimum_type;
@@ -174,60 +174,68 @@ void layout_apply_aspect_ratio_min_max_constraints(ViewBlock* block, float aspec
 
     bool ratio_uses_border_box = !layout_aspect_ratio_uses_content_box(block) &&
         layout_uses_border_box(block);
-    float ratio_width = ratio_uses_border_box
-        ? layout_border_size_from_content_box(block, *content_width, true) : *content_width;
-    float ratio_height = ratio_uses_border_box
-        ? layout_border_size_from_content_box(block, *content_height, false) : *content_height;
-    float min_width = layout_aspect_ratio_constraint_size(
-        block, block->block()->given_min_width, true, ratio_uses_border_box);
-    float max_width = layout_aspect_ratio_constraint_size(
-        block, block->block()->given_max_width, true, ratio_uses_border_box);
-    float min_height = layout_aspect_ratio_constraint_size(
-        block, block->block()->given_min_height, false, ratio_uses_border_box);
-    float max_height = layout_aspect_ratio_constraint_size(
-        block, block->block()->given_max_height, false, ratio_uses_border_box);
-
-    float source_min_width = min_width;
-    float source_min_height = min_height;
-    if (source_min_height >= 0.0f) {
-        float transferred_min_width = source_min_height * aspect_ratio;
-        if (max_width >= 0.0f) transferred_min_width = min(transferred_min_width, max_width);
-        min_width = max(min_width, transferred_min_width);
-    }
-    if (source_min_width >= 0.0f) {
-        float transferred_min_height = source_min_width / aspect_ratio;
-        if (max_height >= 0.0f) transferred_min_height = min(transferred_min_height, max_height);
-        min_height = max(min_height, transferred_min_height);
+    LayoutAxisPair<float> ratio = layout_axis_pair(*content_width, *content_height);
+    LayoutAxisPair<float> minimum = {};
+    LayoutAxisPair<float> maximum = {};
+    LayoutAxisRefs constraints(block->block_mut(), LAYOUT_AXIS_X);
+    minimum[LAYOUT_AXIS_X] = layout_aspect_ratio_constraint_size(
+        block, *constraints.minimum, true, ratio_uses_border_box);
+    maximum[LAYOUT_AXIS_X] = layout_aspect_ratio_constraint_size(
+        block, *constraints.maximum, true, ratio_uses_border_box);
+    constraints = LayoutAxisRefs(block->block_mut(), LAYOUT_AXIS_Y);
+    minimum[LAYOUT_AXIS_Y] = layout_aspect_ratio_constraint_size(
+        block, *constraints.minimum, false, ratio_uses_border_box);
+    maximum[LAYOUT_AXIS_Y] = layout_aspect_ratio_constraint_size(
+        block, *constraints.maximum, false, ratio_uses_border_box);
+    for (LayoutAxis axis : layout_axes()) {
+        bool horizontal = layout_axis_is_horizontal(axis);
+        if (ratio_uses_border_box) {
+            ratio[axis] = layout_border_size_from_content_box(block, ratio[axis], horizontal);
+        }
     }
 
-    float source_max_width = max_width;
-    float source_max_height = max_height;
-    if (source_max_height >= 0.0f) {
-        float transferred_max_width = max(source_max_height * aspect_ratio, min_width);
-        max_width = max_width >= 0.0f ? min(max_width, transferred_max_width)
-                                      : transferred_max_width;
-    }
-    if (source_max_width >= 0.0f) {
-        float transferred_max_height = max(source_max_width / aspect_ratio, min_height);
-        max_height = max_height >= 0.0f ? min(max_height, transferred_max_height)
-                                        : transferred_max_height;
+    LayoutAxisPair<float> source_minimum = minimum;
+    for (LayoutAxis axis : layout_axes()) {
+        LayoutAxis other = axis == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+        if (source_minimum[other] >= 0.0f) {
+            float transferred = axis == LAYOUT_AXIS_X
+                ? source_minimum[other] * aspect_ratio
+                : source_minimum[other] / aspect_ratio;
+            if (maximum[axis] >= 0.0f) transferred = min(transferred, maximum[axis]);
+            minimum[axis] = max(minimum[axis], transferred);
+        }
     }
 
-    if (max_width >= 0.0f && ratio_width > max_width) ratio_width = max_width;
-    if (min_width >= 0.0f && ratio_width < min_width) ratio_width = min_width;
-    if (max_height >= 0.0f && ratio_height > max_height) ratio_height = max_height;
-    if (min_height >= 0.0f && ratio_height < min_height) ratio_height = min_height;
-    *content_width = ratio_uses_border_box
-        ? layout_content_size_from_border_box(block, ratio_width, true) : ratio_width;
-    *content_height = ratio_uses_border_box
-        ? layout_content_size_from_border_box(block, ratio_height, false) : ratio_height;
+    LayoutAxisPair<float> source_maximum = maximum;
+    for (LayoutAxis axis : layout_axes()) {
+        LayoutAxis other = axis == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+        if (source_maximum[other] >= 0.0f) {
+            float transferred = axis == LAYOUT_AXIS_X
+                ? source_maximum[other] * aspect_ratio
+                : source_maximum[other] / aspect_ratio;
+            transferred = max(transferred, minimum[axis]);
+            maximum[axis] = maximum[axis] >= 0.0f
+                ? min(maximum[axis], transferred) : transferred;
+        }
+    }
+
+    for (LayoutAxis axis : layout_axes()) {
+        if (maximum[axis] >= 0.0f) ratio[axis] = min(ratio[axis], maximum[axis]);
+        if (minimum[axis] >= 0.0f) ratio[axis] = max(ratio[axis], minimum[axis]);
+        if (ratio_uses_border_box) {
+            ratio[axis] = layout_content_size_from_border_box(
+                block, ratio[axis], layout_axis_is_horizontal(axis));
+        }
+    }
+    *content_width = ratio[LAYOUT_AXIS_X];
+    *content_height = ratio[LAYOUT_AXIS_Y];
 }
 
 float layout_apply_min_max_border_box_axis(ViewBlock* block, float border_size, bool horizontal,
                                            bool ignore_percentage_max) {
     if (!block || !block->blk) return border_size;
 
-    LayoutAxisConstraintRefs axis(block->block_mut(), horizontal);
+    LayoutAxisRefs axis(block->block_mut(), horizontal);
     float minimum = *axis.minimum;
     float maximum = *axis.maximum;
     if (ignore_percentage_max && horizontal && !isnan(*axis.maximum_percent)) {

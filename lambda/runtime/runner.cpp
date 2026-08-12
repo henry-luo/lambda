@@ -34,6 +34,7 @@
 #include "../../lib/file_utils.h"
 #include "../../lib/shell.h"
 #include "../../lib/uv_loop.h"
+#include "compiler_timing.hpp"
 
 extern "C" Item js_get_key_default(Item object, Item key);
 extern "C" void js_dom_shutdown(void);
@@ -43,6 +44,30 @@ extern void free_document(DomDocument* doc);
 #ifndef LAMBDA_MIR_CACHE_DEFAULT
 #define LAMBDA_MIR_CACHE_DEFAULT 1
 #endif
+
+static __thread LambdaCompilerTiming g_last_lambda_compiler_timing;
+static int g_compiler_timing_enabled = -1;
+
+static int lambda_index_compiler_pass(void* opaque) {
+    Transpiler* tp = (Transpiler*)opaque;
+    return tp && (!tp->ast_root || ast_index_build_profile(
+        &tp->ast_index, tp->ast_root, tp->profile));
+}
+
+extern "C" int lambda_compiler_timing_enabled(void) {
+    if (g_compiler_timing_enabled >= 0) return g_compiler_timing_enabled;
+    const char* value = shell_getenv("LAMBDA_COMPILER_TIMING");
+    g_compiler_timing_enabled = value && value[0] && strcmp(value, "0") != 0;
+    return g_compiler_timing_enabled;
+}
+
+extern "C" void lambda_compiler_timing_reset(void) {
+    memset(&g_last_lambda_compiler_timing, 0, sizeof(g_last_lambda_compiler_timing));
+}
+
+extern "C" void lambda_compiler_timing_get(LambdaCompilerTiming* out) {
+    if (out) *out = g_last_lambda_compiler_timing;
+}
 
 // ============================================================================
 // Lambda Home Path
@@ -653,8 +678,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
     // Phase profiling: use high-res timer for release-accurate timing.
     bool profiling = is_profile_enabled();
-    profile_time_t p0, p1, p2;
-    if (profiling) profile_get_time(&p0);
+    bool compiler_timing = lambda_compiler_timing_enabled();
+    if (compiler_timing) lambda_compiler_timing_reset();
+    profile_time_t p0, p1, p2, p3;
+    if (profiling || compiler_timing) profile_get_time(&p0);
 
     // create a parser
     get_time(&start);
@@ -668,7 +695,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&end);
     print_elapsed_time("parsing", start, end);
 
-    if (profiling) profile_get_time(&p1);
+    if (profiling || compiler_timing) profile_get_time(&p1);
 
 #ifndef NDEBUG
     // print the syntax tree as an s-expr
@@ -715,10 +742,25 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     }
     // build the AST
     tp->ast_root = build_script(tp, root_node);
+    if (profiling || compiler_timing) profile_get_time(&p2);
+    // Publish the first production pass contract now: all later Lambda work
+    // consumes the indexed identity table rather than rediscovering children
+    // or owners. The remaining legacy passes are added to this schedule as
+    // their inputs/outputs become explicit.
+    CompilerPassManager pass_manager;
+    compiler_pass_manager_init(&pass_manager,
+        COMPILER_FACT_AST | COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED);
+    CompilerPassSpec index_pass = {"index",
+        COMPILER_FACT_AST | COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED,
+        COMPILER_FACT_INDEXED, lambda_index_compiler_pass};
+    if (!compiler_pass_manager_add(&pass_manager, &index_pass) ||
+            !compiler_pass_manager_run(&pass_manager, tp)) {
+        log_error("failed to run indexed AST pass for '%s'", script_path);
+        return;
+    }
+    if (profiling || compiler_timing) profile_get_time(&p3);
     get_time(&end);
     print_elapsed_time("building AST", start, end);
-
-    if (profiling) profile_get_time(&p2);
 
     // Check for errors during AST building
     if (tp->error_count > 0) {
@@ -729,10 +771,31 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // compile the AST directly to MIR; this is the only supported Lambda backend.
     {
         double mir_jit_init_ms = 0, mir_transpile_ms = 0, mir_gen_ms = 0;
+        uint64_t mir_module_count = 0;
+        uint64_t mir_function_count = 0;
+        uint64_t mir_instruction_count = 0;
         compile_script_as_mir_direct(tp, script, script_path,
-                                      profiling ? &mir_jit_init_ms : NULL,
-                                      profiling ? &mir_transpile_ms : NULL,
-                                      profiling ? &mir_gen_ms : NULL);
+                                      profiling || compiler_timing ? &mir_jit_init_ms : NULL,
+                                      profiling || compiler_timing ? &mir_transpile_ms : NULL,
+                                      profiling || compiler_timing ? &mir_gen_ms : NULL,
+                                      compiler_timing ? &mir_module_count : NULL,
+                                      compiler_timing ? &mir_function_count : NULL,
+                                      compiler_timing ? &mir_instruction_count : NULL);
+        if (compiler_timing) {
+            LambdaCompilerTiming* timing = &g_last_lambda_compiler_timing;
+            timing->parse_us = (uint64_t)(elapsed_ms_val(p0, p1) * 1000.0);
+            timing->ast_build_us = (uint64_t)(elapsed_ms_val(p1, p2) * 1000.0);
+            timing->index_us = (uint64_t)(elapsed_ms_val(p2, p3) * 1000.0);
+            timing->module_finalize_us = (uint64_t)(mir_jit_init_ms * 1000.0);
+            timing->mir_lower_us = (uint64_t)(mir_transpile_ms * 1000.0);
+            timing->link_us = (uint64_t)(mir_gen_ms * 1000.0);
+            timing->build_transpile_us = timing->parse_us + timing->ast_build_us + timing->index_us +
+                timing->module_finalize_us + timing->mir_lower_us + timing->link_us;
+            timing->mir_module_count = mir_module_count;
+            timing->mir_function_count = mir_function_count;
+            timing->mir_insn_count = mir_instruction_count;
+            timing->valid = 1;
+        }
         if (profiling) {
             PhaseProfile prof;
             memset(&prof, 0, sizeof(prof));

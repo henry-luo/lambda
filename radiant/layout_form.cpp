@@ -459,9 +459,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         DomElement* child_elem = child->as_element();
         NameId ctag = child_elem->tag();
 
-        if (ctag == MARKUP_NAME_OPTION) {
-            // direct options were measured above together with nested optgroup options
-        } else if (ctag == MARKUP_NAME_OPTGROUP) {
+        if (ctag == MARKUP_NAME_OPTGROUP) {
             // Measure optgroup label — shown as a header row in the dropdown (no indent)
             const char* label_attr = child_elem->get_attribute("label");
             if (label_attr) {
@@ -612,8 +610,6 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         tc_ensure_init(static_cast<DomElement*>(block));
     }
 
-    log_debug("[FORM] layout_form_control: type=%d, tag=%s",
-              form->control_type, block->tag_name ? block->tag_name : "?");
 
     // Calculate intrinsic size based on control type
     switch (form->control_type) {
@@ -672,8 +668,6 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         break;
     }
 
-    BoxMetrics box = layout_box_metrics(block);
-
     // Check box-sizing model (default is content-box per CSS spec)
     bool is_border_box = layout_uses_border_box(block);
 
@@ -687,10 +681,6 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     width = form_resolve_axis_size(block, form->intrinsic_width, true, &content_width);
     height = form_resolve_axis_size(block, form->intrinsic_height, false, &content_height);
 
-    log_debug("[FORM] layout: intrinsic=%.1fx%.1f, given=%.1fx%.1f, border=%.1f/%.1f, padding=%.1f/%.1f, box_sizing=%s",
-              form->intrinsic_width, form->intrinsic_height,
-              block->blk ? block->block()->given_width : -1, block->blk ? block->block()->given_height : -1,
-              box.border_h, box.border_v, box.padding_h, box.padding_v, is_border_box ? "border-box" : "content-box");
 
     // Set final dimensions
     // Apply CSS min-width/max-width constraints (e.g., max-width: 100px on textarea).
@@ -780,8 +770,6 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         }
     }
 
-    log_debug("[FORM] layout complete: w=%.1f h=%.1f cw=%.1f ch=%.1f",
-              block->width, block->height, block->content_width, block->content_height);
 
     // For select (and other form controls with option/optgroup children):
     // - Listbox mode (multiple or size>1): position each option as a row inside the select.

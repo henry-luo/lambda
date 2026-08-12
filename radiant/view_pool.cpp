@@ -993,16 +993,12 @@ void print_view_tree(ViewElement* view_root, Url* url, const char* output_path) 
     print_view_tree_json(view_root, url, output_path);
 }
 
-// Helper function to escape JSON strings
-void append_json_string(StrBuf* buf, const char* str) {
-    if (!str) {
-        strbuf_append_str(buf, "null");
-        return;
-    }
-
+// escape a bounded JSON string without requiring a temporary null terminator
+static void append_json_string_n(StrBuf* buf, const char* str, size_t length) {
     strbuf_append_char(buf, '"');
-    for (const unsigned char* p = (const unsigned char*)str; *p; p++) {
-        switch (*p) {
+    for (size_t i = 0; i < length; i++) {
+        unsigned char ch = (unsigned char)str[i];
+        switch (ch) {
             case '"': strbuf_append_str(buf, "\\\""); break;
             case '\\': strbuf_append_str(buf, "\\\\"); break;
             case '\n': strbuf_append_str(buf, "\\n"); break;
@@ -1012,17 +1008,26 @@ void append_json_string(StrBuf* buf, const char* str) {
             case '\f': strbuf_append_str(buf, "\\f"); break;
             default:
                 // Escape all other control characters (0x00-0x1F)
-                if (*p < 0x20) {
+                if (ch < 0x20) {
                     char escape[8];
-                    snprintf(escape, sizeof(escape), "\\u%04x", (unsigned)*p);
+                    snprintf(escape, sizeof(escape), "\\u%04x", (unsigned)ch);
                     strbuf_append_str(buf, escape);
                 } else {
-                    strbuf_append_char(buf, *p);
+                    strbuf_append_char(buf, ch);
                 }
                 break;
         }
     }
     strbuf_append_char(buf, '"');
+}
+
+// Helper function to escape JSON strings
+void append_json_string(StrBuf* buf, const char* str) {
+    if (!str) {
+        strbuf_append_str(buf, "null");
+        return;
+    }
+    append_json_string_n(buf, str, strlen(str));
 }
 
 static void append_json_key(StrBuf* buf, int indent, const char* key) {
@@ -1737,16 +1742,28 @@ static const char* non_rendered_table_marker_display(DomElement* elem) {
 
 static void append_element_selector_json(DomElement* elem, StrBuf* buf, const char* tag_name);
 
+static void append_class_list_json(StrBuf* buf, const char* class_attr) {
+    strbuf_append_char(buf, '[');
+    const char* cursor = class_attr;
+    bool first = true;
+    while (cursor && *cursor) {
+        cursor = str_skip_ascii_space(cursor);
+        if (!*cursor) break;
+        const char* token = cursor;
+        while (*cursor && !str_char_is_ascii_space(*cursor)) cursor++;
+        if (!first) strbuf_append_str(buf, ", ");
+        append_json_string_n(buf, token, (size_t)(cursor - token));
+        first = false;
+    }
+    strbuf_append_char(buf, ']');
+}
+
 static void append_element_classes_json(DomElement* elem, StrBuf* buf, int indent) {
     const char* class_attr = elem->get_attribute("class");
     strbuf_append_char_n(buf, ' ', indent);
-    strbuf_append_str(buf, "\"classes\": [");
-    if (class_attr) {
-        strbuf_append_char(buf, '\"');
-        strbuf_append_str_n(buf, class_attr, strlen(class_attr));
-        strbuf_append_char(buf, '\"');
-    }
-    strbuf_append_str(buf, "],\n");
+    strbuf_append_str(buf, "\"classes\": ");
+    append_class_list_json(buf, class_attr);
+    strbuf_append_str(buf, ",\n");
 }
 
 static void print_non_rendered_table_marker_json(View* view, StrBuf* buf, int indent) {
@@ -1881,16 +1898,20 @@ static bool should_skip_non_rendered_dom_tag(const char* tag) {
 
 static void append_element_selector_json(DomElement* elem, StrBuf* buf, const char* tag_name) {
     const char* class_attr = elem->get_attribute("class");
-    char base_selector[256];
-    if (class_attr) {
-        size_t class_len = strlen(class_attr);
-        snprintf(base_selector, sizeof(base_selector), "%s.%.*s",
-                 tag_name, (int)class_len, class_attr); // INT_CAST_OK: snprintf precision requires int.
-    } else {
-        snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
+    StrBuf* selector = strbuf_new_cap(128);
+    strbuf_append_str(selector, tag_name);
+    // class is a whitespace-separated token list; joining it after one dot
+    // makes `a b` a descendant selector instead of the element's compound selector.
+    const char* cursor = class_attr;
+    while (cursor && *cursor) {
+        cursor = str_skip_ascii_space(cursor);
+        if (!*cursor) break;
+        const char* token = cursor;
+        while (*cursor && !str_char_is_ascii_space(*cursor)) cursor++;
+        strbuf_append_char(selector, '.');
+        strbuf_append_str_n(selector, token, (size_t)(cursor - token));
     }
 
-    char final_selector[512];
     DomNode* parent = elem->parent;
     if (parent) {
         int sibling_count = 0;
@@ -1907,14 +1928,11 @@ static void append_element_selector_json(DomElement* elem, StrBuf* buf, const ch
             sibling = sibling->next_sibling;
         }
         if (sibling_count > 1 && current_index > 0) {
-            snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)", base_selector, current_index);
-        } else {
-            snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
+            strbuf_append_format(selector, ":nth-of-type(%d)", current_index);
         }
-    } else {
-        snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
     }
-    append_json_string(buf, final_selector);
+    append_json_string(buf, selector->str);
+    strbuf_free(selector);
 }
 
 static void print_display_none_json(ViewElement* elem, StrBuf* buf, int indent) {
@@ -1929,12 +1947,9 @@ static void print_display_none_json(ViewElement* elem, StrBuf* buf, int indent) 
     append_element_selector_json(elem, buf, tag_name);
     strbuf_append_str(buf, ",\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"classes\": [");
-    const char* class_attr = elem->get_attribute("class");
-    if (class_attr) {
-        append_json_string(buf, class_attr);
-    }
-    strbuf_append_str(buf, "],\n");
+    strbuf_append_str(buf, "\"classes\": ");
+    append_class_list_json(buf, elem->get_attribute("class"));
+    strbuf_append_str(buf, ",\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     append_json_format_field(buf, indent + 4, "x", true, "0.0");

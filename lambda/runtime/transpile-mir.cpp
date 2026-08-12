@@ -8,6 +8,8 @@
 #include "type_contract.hpp"
 #include "mir_emitter_shared.hpp"
 #include "mir_dump.h"
+
+extern "C" int lambda_mir_lazy_enabled(void);
 #include "../js/js_runtime.h"
 #include "../../lib/log.h"
 #include "../../lib/lambda_alloca.h"
@@ -24936,7 +24938,10 @@ static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
                                    double* out_jit_init_ms,
                                    double* out_transpile_ms,
-                                   double* out_mir_gen_ms) {
+                                   double* out_mir_gen_ms,
+                                   uint64_t* out_mir_module_count,
+                                   uint64_t* out_mir_function_count,
+                                   uint64_t* out_mir_instruction_count) {
     log_notice("MIR Direct: compiling module '%s'", script_path ? script_path : "<unknown>");
 
     EvalContext* template_context = tp && tp->runtime
@@ -25011,7 +25016,9 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     ArrayList* property_keys = NULL;
     transpile_mir_ast(ctx, ast_root, tp->source, tp->type_list, tp->const_list,
         tp->pool, tp->name_pool, &property_keys);
-    MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
+    MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface :
+        (lambda_mir_lazy_enabled() ? MIR_set_lazy_gen_interface :
+            MIR_set_gen_interface), import_resolver);
 
 #ifdef _WIN32
     if (timing) QueryPerformanceCounter(&pt2);
@@ -25168,6 +25175,35 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
         jit_cleanup(ctx);
         tp->jit_context = NULL;
     }
+
+    if (out_mir_module_count || out_mir_function_count || out_mir_instruction_count) {
+        uint64_t module_count = 0;
+        uint64_t function_count = 0;
+        uint64_t instruction_count = 0;
+        for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
+                module; module = DLIST_NEXT(MIR_module_t, module)) {
+            module_count++;
+            for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items);
+                    item; item = DLIST_NEXT(MIR_item_t, item)) {
+                if (item->item_type != MIR_func_item) continue;
+                function_count++;
+                for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, item->u.func->insns);
+                        insn; insn = DLIST_NEXT(MIR_insn_t, insn)) {
+                    // finalized MIR volume matches MT7: labels are structural,
+                    // while executable MIR instructions are counted.
+                    if (insn->code != MIR_LABEL) instruction_count++;
+                }
+            }
+        }
+        if (out_mir_module_count) *out_mir_module_count = module_count;
+        if (out_mir_function_count) *out_mir_function_count = function_count;
+        if (out_mir_instruction_count) *out_mir_instruction_count = instruction_count;
+    }
+
+    // Lambda MIR currently consumes the indexed AST during the compiler pass;
+    // release its malloc-backed table before transferring the Script fields so
+    // batch teardown never retains an index whose AST owner is already gone.
+    ast_index_destroy(&tp->ast_index);
 
     // Copy Script-sized portion of Transpiler back to the Script object
     memcpy(script, tp, sizeof(Script));

@@ -33,7 +33,6 @@ CounterContext* counter_context_create(Arena* arena) {
         return nullptr;
     }
 
-    log_debug("[Counters] Created counter context");
     return ctx;
 }
 
@@ -77,7 +76,6 @@ void CounterContext::destroy() {
     }
     current_scope = nullptr;
 
-    log_debug("[Counters] Destroyed counter context");
 }
 
 void counter_push_scope(CounterContext* ctx) {
@@ -170,13 +168,11 @@ void CounterContext::pop_scope_propagate(bool propagate_resets) {
                 if (cv->created_by_reset && parent_cv->created_by_reset) {
                     // Parent has a counter with same name from a reset — child's
                     // counter-reset creates a nested scope, don't overwrite
-                    log_debug("[Counters] Skip propagating reset '%s' = %d (parent has reset counter)", cv->name, cv->value);
                     continue;
                 }
                 if (cv->created_by_reset && parent_cv->propagated) {
                     // Parent inherited this counter from ancestor — child's
                     // counter-reset creates a nested scope, don't propagate
-                    log_debug("[Counters] Skip propagating reset '%s' = %d (parent has inherited counter)", cv->name, cv->value);
                     continue;
                 }
                 // Update existing parent counter value (propagated or increment-created)
@@ -199,7 +195,6 @@ void CounterContext::pop_scope_propagate(bool propagate_resets) {
                         }
                     }
                     if (ancestor_has_counter) {
-                        log_debug("[Counters] Skip propagating reset '%s' = %d (ancestor has counter)", cv->name, cv->value);
                         continue;
                     }
                 }
@@ -211,7 +206,6 @@ void CounterContext::pop_scope_propagate(bool propagate_resets) {
                 new_cv.created_by_reset = cv->created_by_reset;
                 hashmap_set(parent->counters, &new_cv);
             }
-            log_debug("[Counters] Propagated '%s' = %d to parent scope", cv->name, cv->value);
         }
     }
 
@@ -371,7 +365,6 @@ static ParsedCounterSpec counter_parse(CounterContext* ctx, const char* spec,
 void counter_reset(CounterContext* ctx, const char* counter_spec) {
     if (!ctx || !ctx->current_scope || !counter_spec) return;
 
-    log_debug("[Counters] counter-reset: %s", counter_spec);
 
     ParsedCounterSpec parsed = counter_parse(ctx, counter_spec);
 
@@ -389,18 +382,14 @@ void counter_reset(CounterContext* ctx, const char* counter_spec) {
                     ctx->current_scope->parent->counters, &search_key);
                 if (parent_cv && parent_cv->propagated) {
                     hashmap_delete(ctx->current_scope->parent->counters, &search_key);
-                    log_debug("[Counters]   Removed propagated '%s' from parent (sibling replacement)",
-                              parsed.names[i]);
                 }
             }
 
             // Create new counter
             counter_create(ctx->current_scope, parsed.names[i], parsed.values[i], true);
-            log_debug("[Counters]   Reset '%s' = %d (new)", parsed.names[i], parsed.values[i]);
         } else {
             // Update existing counter value
             existing->value = parsed.values[i];
-            log_debug("[Counters]   Reset '%s' = %d (existing)", parsed.names[i], parsed.values[i]);
         }
     }
 }
@@ -408,14 +397,11 @@ void counter_reset(CounterContext* ctx, const char* counter_spec) {
 void counter_increment(CounterContext* ctx, const char* counter_spec) {
     if (!ctx || !ctx->current_scope || !counter_spec) return;
 
-    log_debug("[Counters] counter-increment: %s", counter_spec);
 
     ParsedCounterSpec parsed = counter_parse(ctx, counter_spec, 1);
 
-    log_debug("[Counters] counter-increment parsed: count=%d", parsed.count);
 
     for (int i = 0; i < parsed.count; i++) {
-        log_debug("[Counters]   Processing counter[%d]: name=%s, value=%d", i, parsed.names[i], parsed.values[i]);
 
         int increment = parsed.values[i];
 
@@ -426,10 +412,8 @@ void counter_increment(CounterContext* ctx, const char* counter_spec) {
         if (!cv) {
             // Counter doesn't exist - create it in current scope with value 0 + increment
             counter_create(ctx->current_scope, parsed.names[i], increment, false);
-            log_debug("[Counters]   Increment '%s' by %d = %d (new)", parsed.names[i], increment, increment);
         } else {
             cv->value += increment;
-            log_debug("[Counters]   Increment '%s' by %d = %d", parsed.names[i], increment, cv->value);
         }
     }
 }
@@ -446,18 +430,15 @@ static void counter_set_parsed(CounterContext* ctx, ParsedCounterSpec parsed) {
         if (cv) {
             // set existing counter to specified value
             cv->value = parsed.values[i];
-            log_debug("[Counters]   Set '%s' = %d (existing)", parsed.names[i], parsed.values[i]);
         } else {
             // create new counter in current scope with specified value
             counter_create(ctx->current_scope, parsed.names[i], parsed.values[i], false);
-            log_debug("[Counters]   Set '%s' = %d (new)", parsed.names[i], parsed.values[i]);
         }
     }
 }
 
 void counter_set(CounterContext* ctx, const char* counter_spec) {
     if (!ctx || !ctx->current_scope || !counter_spec) return;
-    log_debug("[Counters] counter-set: %s", counter_spec);
     counter_set_parsed(ctx, counter_parse(ctx, counter_spec));
 }
 

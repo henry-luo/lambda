@@ -33061,10 +33061,10 @@ extern "C" Item js_await_sync(Item value) {
     // promise that genuinely cannot settle in this turn returns undefined
     // quickly — Js55 P23(b) hit 1675 s on the suite by drainin unconditionally.
     //
-    // Conditional trigger: if the promise has no then-handlers queued AND no
-    // pending nextTick / microtask is present, no future progress is possible
-    // from this thread; return undefined immediately.
-    if (p->then_count > 0 || js_microtask_pending_count() > 0) {
+    // Conditional trigger: a pending rAF is also a progress source. Without it,
+    // two-frame DOM promises return undefined before their frame callbacks run.
+    if (p->then_count > 0 || js_microtask_pending_count() > 0 ||
+        js_animation_frame_has_pending()) {
         struct AwaitPredCtx { JsPromise* p; };
         AwaitPredCtx ctx = { p };
         auto predicate = [](void* u) -> int {
@@ -33170,6 +33170,10 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     if (!js_mir_owner_is_current(ctx->runtime_context, "js-async-drive")) {
         return;
     }
+    uint32_t previous_module_state_id = js_get_active_module_state_id();
+    if (ctx->module_state_id != UINT32_MAX) {
+        js_set_active_module_state_id(ctx->module_state_id);
+    }
     RootFrame roots(5);
     Rooted<Item> input_root(roots, input);
     Rooted<Item> result_root(roots, ItemNull);
@@ -33196,11 +33200,17 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     // Parse result: [value, next_state]
     if (get_type_id(result_root.get()) != LMD_TYPE_ARRAY) {
         js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, result_root.get());
+        if (previous_module_state_id != UINT32_MAX) {
+            js_set_active_module_state_id(previous_module_state_id);
+        }
         return;
     }
     Array* arr = result_root.get().array;
     if (arr->length < 2) {
         js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, ItemNull);
+        if (previous_module_state_id != UINT32_MAX) {
+            js_set_active_module_state_id(previous_module_state_id);
+        }
         return;
     }
     value_root.set(arr->items[0]);
@@ -33230,6 +33240,9 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
 
         // Register on the pending promise
         js_promise_then(value_root.get(), resume_root.get(), reject_root.get());
+    }
+    if (previous_module_state_id != UINT32_MAX) {
+        js_set_active_module_state_id(previous_module_state_id);
     }
 }
 
@@ -33279,6 +33292,7 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     ctx->module_state_id = js_get_active_module_state_id();
     ctx->state = 0;
     ctx->this_val = this_val;
+    ctx->module_state_id = js_get_active_module_state_id();
 
     // Create a pending promise for this async function's result
     JsPromise* p = js_alloc_promise();

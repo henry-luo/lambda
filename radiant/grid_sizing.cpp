@@ -21,7 +21,6 @@ static void initialize_grid_axis(radiant::grid::TrackArray** destination, int tr
         return;
     }
     if (track_count <= 0) return;
-    log_debug("  Allocated %d %s tracks", track_count, axis_name);
     int explicit_start = negative_implicit_count;
     int explicit_end = explicit_start + explicit_count;
 
@@ -53,8 +52,6 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
         return;
     }
 
-    log_debug("Initializing track sizes: computed_rows=%d, computed_cols=%d",
-              grid_layout->computed_row_count, grid_layout->computed_column_count);
 
     // Allocate computed tracks (clamp to prevent excessive allocation)
     // The sizing algorithm's canonical storage has one shared bound; counts must match it.
@@ -72,8 +69,6 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
                          grid_layout->grid_template_columns,
                          grid_layout->grid_auto_columns, &grid_layout->lycon->scratch, "column");
 
-    log_debug("Track sizes initialized - %d rows, %d columns\n",
-              grid_layout->computed_row_count, grid_layout->computed_column_count);
 }
 
 // Enhanced track sizing using the new algorithm adapted from Taffy
@@ -81,7 +76,6 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
 void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* container) {
     if (!grid_layout || !container) return;
 
-    log_debug("Resolving track sizes (enhanced algorithm)\n");
 
     // Phase 1: Initialize track sizes (still needed for memory allocation)
     initialize_track_sizes(grid_layout);
@@ -117,15 +111,6 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
         grid_layout->row_intrinsic_height = row_intrinsic_height;
     }
 
-    // Diagnostic: dump column sizes after enhanced track sizing
-    log_debug("grid sizing enhanced: computed_column_count=%d content_width=%.1f sizing_width=%.1f",
-             grid_layout->computed_column_count, grid_layout->content_width, sizing_width);
-    for (int i = 0; i < grid_layout->computed_column_count; i++) {
-        radiant::grid::EnhancedGridTrack* track = &(*grid_layout->computed_columns)[i];
-        log_debug("grid sizing enhanced col[%d]: base=%.1f gl=%.1f flex=%d",
-                 i, track->base_size, track->growth_limit, track->is_flexible());
-    }
-
     // Intrinsic-width grids and shrink-to-fit grids use the resolved track sum,
     // not the provisional parent width used before their item styles were materialized.
     // When percentage tracks exist, the container's intrinsic width (first-pass) is used
@@ -150,5 +135,4 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
         grid_layout->content_width = total_column_width;
     }
 
-    log_debug("Track sizes resolved (enhanced algorithm)\n");
 }

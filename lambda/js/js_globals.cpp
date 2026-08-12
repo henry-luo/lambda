@@ -16298,6 +16298,16 @@ extern "C" Item js_check_unresolved_capture(Item value, NameId name_id, int64_t 
     return js_throw_reference_error((Item){.item = s2it(heap_create_name(msg, strlen(msg)))});
 }
 
+extern "C" Item js_check_capture_binding(Item value, NameId name_id, int64_t len) {
+    // Captured reads use one merged lane check: unresolved captures retain the
+    // historical ReferenceError, while a TDZ sentinel retains the lexical
+    // ReferenceError. Keeping both predicates in one helper avoids emitting
+    // two identical name-id calls and two error-lane branches per read.
+    if (value.item == ITEM_ERROR) return js_check_unresolved_capture(value, name_id, len);
+    if (value.item == ITEM_JS_TDZ) return js_check_tdz(value, name_id, (int)len);
+    return js_status_ok();
+}
+
 extern "C" Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_t len, int64_t in_typeof) {
     if (value.item != ITEM_ERROR) return value;
     if (in_typeof) return make_js_undefined();

@@ -831,9 +831,10 @@ struct JsAsyncContextStateRecord {
     void* state_fn = NULL;
     Item* env = NULL;
     int env_size = 0;
-    uint32_t module_state_id = UINT32_MAX;
     int state = 0;
     int promise_idx = -1;
+    // resumed MIR property names must use the module image that compiled the body.
+    uint32_t module_state_id = UINT32_MAX;
     Item this_val = {};
 };
 

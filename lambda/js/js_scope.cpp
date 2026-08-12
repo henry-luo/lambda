@@ -44,12 +44,35 @@ extern "C" {
 // default so normal transpiles pay only a single predictable not-taken branch
 // per scanned entry.
 static bool g_js_scope_counters_enabled = false;
-static JsScopeCounters g_js_scope_counters = {0, 0, 0};
+static JsScopeCounters g_js_scope_counters = {0, 0, 0, 0, 0};
 
 static bool g_js_identifier_counters_enabled = false;
 static bool g_js_identifier_counters_checked = false;
 static bool g_js_identifier_counters_registered = false;
 static JsIdentifierCounters g_js_identifier_counters = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+typedef struct JsScopeLookupCacheEntry {
+    JsScope* scope;
+    String* name;
+    NameEntry* result;
+    bool found;
+    bool current_only;
+} JsScopeLookupCacheEntry;
+
+static uint64_t js_scope_lookup_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const JsScopeLookupCacheEntry* entry = (const JsScopeLookupCacheEntry*)item;
+    uintptr_t scope = (uintptr_t)entry->scope >> 3;
+    uintptr_t name = (uintptr_t)entry->name >> 3;
+    uint64_t key[3] = {(uint64_t)scope, (uint64_t)name, entry->current_only ? 1u : 0u};
+    return hashmap_xxhash3(key, sizeof(key), seed0, seed1);
+}
+
+static int js_scope_lookup_cache_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const JsScopeLookupCacheEntry* lhs = (const JsScopeLookupCacheEntry*)a;
+    const JsScopeLookupCacheEntry* rhs = (const JsScopeLookupCacheEntry*)b;
+    return lhs->scope == rhs->scope && lhs->name == rhs->name &&
+        lhs->current_only == rhs->current_only ? 0 : 1;
+}
 static void js_identifier_counters_report(void);
 static void js_identifier_counters_write_line(int fd, const char* line);
 
@@ -106,6 +129,8 @@ extern "C" void js_scope_counters_reset(void) {
     g_js_scope_counters.lookup_calls = 0;
     g_js_scope_counters.entries_scanned = 0;
     g_js_scope_counters.scopes_walked = 0;
+    g_js_scope_counters.cache_hits = 0;
+    g_js_scope_counters.cache_misses = 0;
 }
 
 extern "C" void js_scope_counters_get(JsScopeCounters* out) {
@@ -253,8 +278,38 @@ void js_scope_pop(JsTranspiler* tp) {
 
 NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
     JsScope* scope = tp->current_scope;
-
     if (g_js_scope_counters_enabled) g_js_scope_counters.lookup_calls++;
+
+    if (tp && tp->scope_lookup_cache && scope && name) {
+        JsScopeLookupCacheEntry probe = {scope, name, NULL, false, false};
+        const JsScopeLookupCacheEntry* cached = (const JsScopeLookupCacheEntry*)
+            hashmap_get(tp->scope_lookup_cache, &probe);
+        if (cached) {
+            if (g_js_scope_counters_enabled) g_js_scope_counters.cache_hits++;
+            return cached->found ? cached->result : NULL;
+        }
+        if (g_js_scope_counters_enabled) g_js_scope_counters.cache_misses++;
+        NameEntry* result = NULL;
+        JsScope* scan_scope = scope;
+        while (scan_scope && !result) {
+            if (g_js_scope_counters_enabled) g_js_scope_counters.scopes_walked++;
+            NameEntry* entry = scan_scope->first;
+            while (entry) {
+                if (g_js_scope_counters_enabled) g_js_scope_counters.entries_scanned++;
+                if (entry->name->len == name->len &&
+                    memcmp(entry->name->chars, name->chars, name->len) == 0) {
+                    result = entry;
+                    break;
+                }
+                entry = entry->next;
+            }
+            scan_scope = scan_scope->parent;
+        }
+        probe.result = result;
+        probe.found = result != NULL;
+        hashmap_set(tp->scope_lookup_cache, &probe);
+        return result;
+    }
 
     while (scope) {
         if (g_js_scope_counters_enabled) g_js_scope_counters.scopes_walked++;
@@ -277,17 +332,36 @@ NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
 
 NameEntry* js_scope_lookup_current(JsTranspiler* tp, String* name) {
     if (g_js_scope_counters_enabled) g_js_scope_counters.lookup_calls++;
+    if (tp && tp->scope_lookup_cache && tp->current_scope && name) {
+        JsScopeLookupCacheEntry probe = {tp->current_scope, name, NULL, false, true};
+        const JsScopeLookupCacheEntry* cached = (const JsScopeLookupCacheEntry*)
+            hashmap_get(tp->scope_lookup_cache, &probe);
+        if (cached) {
+            if (g_js_scope_counters_enabled) g_js_scope_counters.cache_hits++;
+            return cached->found ? cached->result : NULL;
+        }
+        if (g_js_scope_counters_enabled) g_js_scope_counters.cache_misses++;
+    }
     if (!tp->current_scope) return NULL;
 
     if (g_js_scope_counters_enabled) g_js_scope_counters.scopes_walked++;
     NameEntry* entry = tp->current_scope->first;
     while (entry) {
         if (g_js_scope_counters_enabled) g_js_scope_counters.entries_scanned++;
-        if (entry->name->len == name->len &&
-            memcmp(entry->name->chars, name->chars, name->len) == 0) {
-            return entry;
+            if (entry->name->len == name->len &&
+                memcmp(entry->name->chars, name->chars, name->len) == 0) {
+                if (tp->scope_lookup_cache) {
+                    JsScopeLookupCacheEntry hit = {tp->current_scope, name, entry, true, true};
+                    hashmap_set(tp->scope_lookup_cache, &hit);
+                }
+                return entry;
         }
         entry = entry->next;
+    }
+
+    if (tp->scope_lookup_cache && name) {
+        JsScopeLookupCacheEntry miss = {tp->current_scope, name, NULL, false, true};
+        hashmap_set(tp->scope_lookup_cache, &miss);
     }
 
     return NULL;
@@ -352,6 +426,9 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
         target_scope->last->next = entry;
     }
     target_scope->last = entry;
+    // declarations mutate lexical lookup results; clear cached probes before
+    // subsequent AST-builder references observe the new binding.
+    if (tp->scope_lookup_cache) hashmap_clear(tp->scope_lookup_cache, false);
 
     log_debug("Defined JavaScript variable '%.*s' in scope type %d",
              (int)name->len, name->chars, target_scope->kind);
@@ -433,12 +510,18 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     tp->strict_js = true;  // default: pure JS mode (reject TS syntax)
     tp->profile = &js_profile;
     tp->runtime = runtime;
+    js_scope_lookup_cache_enable(tp);
 
     return tp;
 }
 
 void js_transpiler_destroy(JsTranspiler* tp) {
     if (!tp) return;
+
+    // The shared AST index owns malloc-backed identity tables rather than the
+    // AST pool; release it before the pool so batch workers do not accumulate
+    // one full index per test module.
+    ast_index_destroy(&tp->ast_index);
 
     // Cleanup Tree-sitter
     if (tp->tree) {
@@ -462,11 +545,19 @@ void js_transpiler_destroy(JsTranspiler* tp) {
     if (tp->type_registry) {
         hashmap_free(tp->type_registry);
     }
+    if (tp->scope_lookup_cache) hashmap_free(tp->scope_lookup_cache);
     if (tp->normalized_source) {
         mem_free(tp->normalized_source);
     }
 
     mem_free(tp);
+}
+
+void js_scope_lookup_cache_enable(JsTranspiler* tp) {
+    if (!tp || tp->scope_lookup_cache) return;
+    if (getenv("LAMBDA_AST_TUNE_NO_SCOPE_CACHE")) return;
+    tp->scope_lookup_cache = hashmap_new(sizeof(JsScopeLookupCacheEntry), 256,
+        0, 0, js_scope_lookup_cache_hash, js_scope_lookup_cache_compare, NULL, NULL);
 }
 
 static bool js_source_utf8_whitespace_at(const char* source, size_t length, size_t pos,

@@ -146,7 +146,7 @@
           "frames": [
             {
               "name": "js_main",
-              "roots": 2,
+              "roots": 4,
               "root_stores": 13,
               "scalar_homes": 3,
               "number_scratch": 0,
