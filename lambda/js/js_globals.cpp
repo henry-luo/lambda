@@ -2669,7 +2669,6 @@ extern "C" Item js_process_exit(Item code_item) {
     // Fire 'exit' listeners before terminating (Node.js compatibility)
     js_process_emit_exit(code);
     exit(code);
-    return make_js_undefined(); // unreachable
 }
 
 // process.exitCode getter/setter
