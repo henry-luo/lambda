@@ -42,7 +42,7 @@ extern "C" void rb_reset_module_vars();
 // cross-language interop
 extern "C" Item js_property_get(Item object, Item key);
 extern "C" Item js_new_object();
-extern "C" Item js_new_function(void* func_ptr, int param_count);
+extern "C" Item js_new_function_mir(void* func_ptr, int param_count);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" void* js_function_get_ptr(Item fn_item);
 extern "C" void js_runtime_set_input(void* input);
@@ -754,7 +754,7 @@ static MIR_reg_t rm_transpile_identifier(RbMirTranspiler* mt, RbIdentifierNode* 
     snprintf(key.name, sizeof(key.name), "_rb_%.*s", (int)id->name->len, id->name->chars);
     RbLocalFuncEntry* fentry = (RbLocalFuncEntry*)hashmap_get(mt->local_funcs, &key);
     if (fentry) {
-        // return function as Item (js_new_function wrapper)
+        // return function as Item (js_new_function_mir wrapper)
         MIR_reg_t fn_ptr = rm_new_reg(mt, "fnptr", MIR_T_I64);
         rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, fn_ptr),
             MIR_new_ref_op(mt->em.ctx, fentry->func_item)));
@@ -766,7 +766,7 @@ static MIR_reg_t rm_transpile_identifier(RbMirTranspiler* mt, RbIdentifierNode* 
                 break;
             }
         }
-        return rm_call_2(mt, "js_new_function", MIR_T_I64,
+        return rm_call_2(mt, "js_new_function_mir", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_ptr),
             MIR_T_I64, MIR_new_int_op(mt->em.ctx, pc));
     }
@@ -3095,7 +3095,7 @@ static MIR_reg_t rm_transpile_block_as_func(RbMirTranspiler* mt, RbBlockNode* bl
                     MIR_T_I64, MIR_new_reg_op(mt->em.ctx, env),
                     MIR_T_I64, MIR_new_int_op(mt->em.ctx, bc->capture_count));
             } else {
-                return rm_call_2(mt, "js_new_function", MIR_T_I64,
+                return rm_call_2(mt, "js_new_function_mir", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_ptr),
                     MIR_T_I64, MIR_new_int_op(mt->em.ctx, nparams));
             }
@@ -3843,7 +3843,7 @@ static void rm_transpile_class_def(RbMirTranspiler* mt, RbClassDefNode* cls_node
                 MIR_reg_t fn_ptr = rm_new_reg(mt, "mfptr", MIR_T_I64);
                 rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, fn_ptr),
                     MIR_new_ref_op(mt->em.ctx, fc->func_item)));
-                MIR_reg_t fn_item = rm_call_2(mt, "js_new_function", MIR_T_I64,
+                MIR_reg_t fn_item = rm_call_2(mt, "js_new_function_mir", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_ptr),
                     MIR_T_I64, MIR_new_int_op(mt->em.ctx, mir_param_count));
 
@@ -3977,7 +3977,7 @@ static void rm_transpile_module_def(RbMirTranspiler* mt, RbModuleDefNode* mod_no
                     MIR_reg_t fn_ptr = rm_new_reg(mt, "modfptr", MIR_T_I64);
                     rm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, fn_ptr),
                         MIR_new_ref_op(mt->em.ctx, fc->func_item)));
-                    MIR_reg_t fn_item = rm_call_2(mt, "js_new_function", MIR_T_I64,
+                    MIR_reg_t fn_item = rm_call_2(mt, "js_new_function_mir", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_ptr),
                         MIR_T_I64, MIR_new_int_op(mt->em.ctx, mir_param_count));
                     rm_call_void_3(mt, "rb_class_add_method",
@@ -4637,7 +4637,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     Input* input = Input::create(context->pool);
     rb_runtime_set_input(input);
 
-    // also set JS input context — js_new_function and js_function_get_ptr use it
+    // also set JS input context — js_new_function_mir and js_function_get_ptr use it
     js_runtime_set_input(input);
 
     // init MIR context

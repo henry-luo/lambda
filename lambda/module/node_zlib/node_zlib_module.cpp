@@ -281,12 +281,14 @@ NODE_ZLIB_CALLBACK_WRAPPER(node_zlib_unzip, JUBE_NODE_ZLIB_UNZIP, "unzip", "comp
 
 #undef NODE_ZLIB_CALLBACK_WRAPPER
 
-static void node_zlib_install_method(uint64_t* namespace_root, uint64_t* key_root,
-                                     uint64_t* function_root, const char* name,
-                                     int name_length, void* implementation, int parameter_count) {
+template <typename Target>
+static void node_zlib_install_method(uint64_t* namespace_root,
+        uint64_t* key_root, uint64_t* function_root, const char* name,
+        int name_length, Target target, int adapter_arity) {
     Item key = node_zlib_host->value->string_from_utf8_n(name, name_length);
     *key_root = key.item;
-    Item function = node_zlib_host->script->new_function(implementation, parameter_count);
+    Item function = jube_new_function(node_zlib_host->script, target,
+        adapter_arity);
     *function_root = function.item;
     node_zlib_host->value->property_set((Item){.item = *namespace_root},
                                         (Item){.item = *key_root},
@@ -318,25 +320,26 @@ static Item node_zlib_namespace(void) {
     *namespace_root = result.item;
     Item key = node_zlib_host->value->string_from_utf8_n("crc32", 5);
     *key_root = key.item;
-    Item function = node_zlib_host->script->new_function((void*)node_zlib_crc32, 2);
+    Item function = jube_new_function(node_zlib_host->script,
+        node_zlib_crc32, 2);
     *function_root = function.item;
     node_zlib_host->value->property_set((Item){.item = *namespace_root},
                                         (Item){.item = *key_root},
                                         (Item){.item = *function_root});
-    node_zlib_install_method(namespace_root, key_root, function_root, "gzipSync", 8, (void*)node_zlib_gzip_sync, 1);
-    node_zlib_install_method(namespace_root, key_root, function_root, "gunzipSync", 10, (void*)node_zlib_gunzip_sync, 1);
-    node_zlib_install_method(namespace_root, key_root, function_root, "deflateSync", 11, (void*)node_zlib_deflate_sync, 1);
-    node_zlib_install_method(namespace_root, key_root, function_root, "inflateSync", 11, (void*)node_zlib_inflate_sync, 1);
-    node_zlib_install_method(namespace_root, key_root, function_root, "deflateRawSync", 14, (void*)node_zlib_deflate_raw_sync, 1);
-    node_zlib_install_method(namespace_root, key_root, function_root, "inflateRawSync", 14, (void*)node_zlib_inflate_raw_sync, 1);
-    node_zlib_install_method(namespace_root, key_root, function_root, "unzipSync", 9, (void*)node_zlib_unzip_sync, 1);
-    node_zlib_install_method(namespace_root, key_root, function_root, "gzip", 4, (void*)node_zlib_gzip, 3);
-    node_zlib_install_method(namespace_root, key_root, function_root, "gunzip", 6, (void*)node_zlib_gunzip, 3);
-    node_zlib_install_method(namespace_root, key_root, function_root, "deflate", 7, (void*)node_zlib_deflate, 3);
-    node_zlib_install_method(namespace_root, key_root, function_root, "inflate", 7, (void*)node_zlib_inflate, 3);
-    node_zlib_install_method(namespace_root, key_root, function_root, "deflateRaw", 10, (void*)node_zlib_deflate_raw, 3);
-    node_zlib_install_method(namespace_root, key_root, function_root, "inflateRaw", 10, (void*)node_zlib_inflate_raw, 3);
-    node_zlib_install_method(namespace_root, key_root, function_root, "unzip", 5, (void*)node_zlib_unzip, 3);
+    node_zlib_install_method(namespace_root, key_root, function_root, "gzipSync", 8, node_zlib_gzip_sync, 1);
+    node_zlib_install_method(namespace_root, key_root, function_root, "gunzipSync", 10, node_zlib_gunzip_sync, 1);
+    node_zlib_install_method(namespace_root, key_root, function_root, "deflateSync", 11, node_zlib_deflate_sync, 1);
+    node_zlib_install_method(namespace_root, key_root, function_root, "inflateSync", 11, node_zlib_inflate_sync, 1);
+    node_zlib_install_method(namespace_root, key_root, function_root, "deflateRawSync", 14, node_zlib_deflate_raw_sync, 1);
+    node_zlib_install_method(namespace_root, key_root, function_root, "inflateRawSync", 14, node_zlib_inflate_raw_sync, 1);
+    node_zlib_install_method(namespace_root, key_root, function_root, "unzipSync", 9, node_zlib_unzip_sync, 1);
+    node_zlib_install_method(namespace_root, key_root, function_root, "gzip", 4, node_zlib_gzip, 3);
+    node_zlib_install_method(namespace_root, key_root, function_root, "gunzip", 6, node_zlib_gunzip, 3);
+    node_zlib_install_method(namespace_root, key_root, function_root, "deflate", 7, node_zlib_deflate, 3);
+    node_zlib_install_method(namespace_root, key_root, function_root, "inflate", 7, node_zlib_inflate, 3);
+    node_zlib_install_method(namespace_root, key_root, function_root, "deflateRaw", 10, node_zlib_deflate_raw, 3);
+    node_zlib_install_method(namespace_root, key_root, function_root, "inflateRaw", 10, node_zlib_inflate_raw, 3);
+    node_zlib_install_method(namespace_root, key_root, function_root, "unzip", 5, node_zlib_unzip, 3);
     node_zlib_namespace_cache = *namespace_root;
     node_zlib_host->node->roots->root_frame_end(&frame);
     return result;

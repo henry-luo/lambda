@@ -327,7 +327,8 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
         with_scope->last_binding_slots, 2, "with binding cache");
 
     js_root_range_set_storage(&state->builtin_cache.roots,
-        state->builtin_cache.entries, JS_BUILTIN_MAX, "builtin function cache");
+        state->builtin_cache.entries, JS_INTRINSIC_BINDING_COUNT,
+        "intrinsic binding function cache");
     js_root_range_set_storage(&state->readline.roots,
         &state->readline.namespace_object, 3 + 2 * JS_READLINE_INPUT_MAP_MAX,
         "readline namespaces and input map");
@@ -393,7 +394,7 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     js_root_range_set_storage(&state->process.roots, &state->process.argv,
         3 + 2 * JS_PROCESS_LISTENER_MAX + 2, "process realm state");
     js_root_range_set_storage(&state->iterators.roots,
-        &state->iterators.generator_return_marker, 8,
+        &state->iterators.generator_return_marker, 13,
         "generator and iterator prototype caches");
     js_root_range_set_storage(&state->diagnostics_channels.roots,
         state->diagnostics_channels.channel_names,
@@ -1402,16 +1403,24 @@ extern "C" Item js_throw_named_error_text(const char* type_name, const char* mes
 
 // AggregateError(errors, message): Error subclass with .errors array
 extern "C" Item js_new_aggregate_error(Item errors, Item message) {
+    RootFrame roots(4);
+    Rooted<Item> errors_root(roots, errors);
+    Rooted<Item> message_root(roots, message);
+    Rooted<Item> err_root(roots, ItemNull);
+    Rooted<Item> errors_array_root(roots, ItemNull);
     Item err_name = (Item){.item = s2it(heap_create_name("AggregateError", 14))};
-    Item err = js_new_error_with_name(err_name, message);
-    // Convert errors iterable to array — use js_array_from for iterable conversion
-    Item errors_arr = js_array_from(errors);
+    err_root.set(js_new_error_with_name(err_name, message_root.get()));
+    // AggregateError requires IterableToList. Array.from's no-argument
+    // compatibility path returned [] for undefined and hid GetIterator's
+    // required TypeError; use the iterator primitive directly (D6.2.2v2).
+    errors_array_root.set(js_iterable_to_array(errors_root.get()));
     // IterableToList is part of construction, so an abrupt iterator result must
     // escape instead of being installed as the new error's `.errors` value.
-    if (item_is_error(errors_arr)) return errors_arr;
-    JS_ASSIGN_OR_RETURN(set_result, js_property_set(err,
-        (Item){.item = s2it(heap_create_name("errors", 6))}, errors_arr));
-    return err;
+    if (item_is_error(errors_array_root.get())) return errors_array_root.get();
+    JS_ASSIGN_OR_RETURN(set_result, js_property_set(err_root.get(),
+        (Item){.item = s2it(heap_create_name("errors", 6))},
+        errors_array_root.get()));
+    return err_root.get();
 }
 
 static Item js_error_default_stack_string(Item error_name, Item message) {
@@ -1635,7 +1644,7 @@ static Item js_error_prepare_stack_trace_with_trace(Item error_obj, StackFrame* 
     if (get_type_id(error_ctor) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
     Item prepare_key = (Item){.item = s2it(heap_create_name("prepareStackTrace", 17))};
     Item prepare = js_property_get(error_ctor, prepare_key);
-    if (get_type_id(prepare) != LMD_TYPE_FUNC) return (Item){.item = ITEM_JS_UNDEFINED};
+    if (!js_is_callable(prepare)) return (Item){.item = ITEM_JS_UNDEFINED};
 
     Item frames = js_array_new(0);
     int frame_count = 0;
@@ -1818,7 +1827,6 @@ extern "C" void js_runtime_set_input(void* input) {
     // referenced objects are not collected.  Must re-register on each new heap.
     heap_register_gc_root(&js_current_this.item);
     heap_register_gc_root(&js_new_target.item);
-    heap_register_gc_root(&js_pending_new_target.item);
     heap_register_gc_root(&js_pending_args_callee.item);
 }
 
@@ -1858,12 +1866,6 @@ extern "C" Item js_get_new_target() {
     return js_new_target;
 }
 
-extern "C" void js_set_new_target(Item target) {
-    // Set as pending — will be picked up by js_call_function on entry
-    js_pending_new_target = target;
-    js_has_pending_new_target = true;
-}
-
 extern "C" void js_set_direct_new_target(Item target) {
     // Directly set new.target (for direct calls that bypass js_call_function)
     js_new_target = target;
@@ -1890,8 +1892,6 @@ void js_reset_transient_call_state() {
     js_current_this = (Item){0};
     js_proxy_receiver = (Item){0};
     js_new_target = (Item){0};
-    js_pending_new_target = (Item){0};
-    js_has_pending_new_target = false;
     memset(js_super_this_bound_stack, 0, sizeof(js_runtime_state.super_this_bound_stack));
     js_item_stack_clear(&js_runtime_state.super_this_values);
     js_pending_call_args = NULL;
@@ -1900,10 +1900,8 @@ void js_reset_transient_call_state() {
     js_pending_call_source_len = 0;
     js_pending_args_is_strict = 0;
     js_pending_args_callee = (Item){0};
-    js_array_method_real_this = (Item){0};
     // Array-vs-TypedArray dispatch is scoped to one builtin invocation; an
     // exceptional nested call must not select Array semantics for the next test.
-    js_dispatch_as_array_method = false;
     js_eval_state_reset(&js_runtime_state.eval);
 }
 
@@ -1939,11 +1937,6 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
         leak_count++;
         log_error("js-batch-state: %s left new.target item=%lld", name, (long long)js_new_target.item);
     }
-    if (js_pending_new_target.item != 0 || js_has_pending_new_target) {
-        leak_count++;
-        log_error("js-batch-state: %s left pending new.target item=%lld flag=%d",
-            name, (long long)js_pending_new_target.item, js_has_pending_new_target ? 1 : 0);
-    }
     if (js_super_this_bound_depth != 0) {
         leak_count++;
         log_error("js-batch-state: %s left super this binding depth=%d", name, js_super_this_bound_depth);
@@ -1964,16 +1957,6 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
         log_error("js-batch-state: %s left pending arguments state strict=%d callee=%lld",
             name, js_pending_args_is_strict, (long long)js_pending_args_callee.item);
     }
-    if (js_array_method_real_this.item != 0) {
-        leak_count++;
-        log_error("js-batch-state: %s left array method receiver item=%lld",
-            name, (long long)js_array_method_real_this.item);
-    }
-    if (js_dispatch_as_array_method) {
-        leak_count++;
-        log_error("js-batch-state: %s left Array method dispatch enabled", name);
-    }
-
     if (include_heap_bound) {
         if (js_cached_object_proto) {
             leak_count++;
@@ -2044,13 +2027,16 @@ extern "C" Item js_build_arguments_object() {
 
     // ES6 §9.4.4.6 step 12: Set Symbol.iterator to Array.prototype.values
     iterator_key_root.set(js_well_known_symbol_key(1));
-    iterator_root.set(js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6));
+    Item array_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY);
+    iterator_root.set(js_property_get(array_proto,
+        (Item){.item = s2it(heap_create_name("values", 6))}));
     js_property_set(companion_root.get(), iterator_key_root.get(), iterator_root.get());
     js_mark_non_enumerable(companion_root.get(), iterator_key_root.get());
 
     // v29: Set callee property (non-strict only; strict mode throws TypeError on access)
     if (is_strict) {
-        thrower_root.set(js_get_or_create_builtin(JS_BUILTIN_FUNC_THROW_TYPE_ERROR, "ThrowTypeError", 0));
+        thrower_root.set(js_intrinsic_binding_get(
+            JS_BUILTIN_OWNER_FUNCTION_SYMBOL_INTERNAL, "ThrowTypeError", 14));
         callee_key_root.set((Item){.item = s2it(heap_create_name("callee", 6))});
         js_install_native_accessor(companion_root.get(), callee_key_root.get(),
                                    thrower_root.get(), thrower_root.get(),

@@ -28,9 +28,7 @@ static float line_terminal_letter_spacing_trim(float letter_spacing) {
     return max(letter_spacing, 0.0f);
 }
 
-// ============================================================================
 // CSS text-transform Helpers
-// ============================================================================
 
 struct SimpleCaseMapping { uint32_t from; uint32_t to; };
 
@@ -620,9 +618,7 @@ static inline bool is_lang_japanese(const char* lang) {
     return false;
 }
 
-// ============================================================================
 // CSS white-space Property Helpers
-// ============================================================================
 
 /**
  * Check if a codepoint has UAX#14 line break class ID (Ideographic).
@@ -727,9 +723,7 @@ bool has_id_line_break_class(uint32_t cp) {
     return false;
 }
 
-// ============================================================================
 // Unicode Line Break Class Helpers (UAX #14 / CSS Text 3 §5.2)
-// ============================================================================
 
 /**
  * Check if a codepoint has OP (Opening Punctuation) line-break class.
@@ -1373,9 +1367,7 @@ int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
         collapse_spaces && trim_trailing_space);
 }
 
-// ============================================================================
 // Intrinsic Sizing Mode Helpers
-// ============================================================================
 
 /**
  * Check if layout is in max-content measurement mode.
@@ -1408,9 +1400,7 @@ static inline bool is_min_content_mode(LayoutContext* lycon, DomNode* text_node)
     return false;
 }
 
-// ============================================================================
 // BlockContext-aware Line Adjustment
-// ============================================================================
 
 /**
  * Update effective line bounds based on floats in the current BlockContext.
@@ -2928,20 +2918,13 @@ InitialLetterBoxInsets layout_initial_letter_box_insets(ViewText* text) {
     ViewElement* pseudo = text ? text->parent_view() : NULL;
     if (!pseudo || !pseudo->bound) return insets;
 
-    insets.top = pseudo->boundary()->margin.top;
-    insets.right = pseudo->boundary()->margin.right;
-    insets.bottom = pseudo->boundary()->margin.bottom;
-    insets.left = pseudo->boundary()->margin.left;
-    if (pseudo->boundary()->border) {
-        insets.top += pseudo->boundary()->border->width.top;
-        insets.right += pseudo->boundary()->border->width.right;
-        insets.bottom += pseudo->boundary()->border->width.bottom;
-        insets.left += pseudo->boundary()->border->width.left;
+    BoxEdges margin = layout_boundary_margin_edges(pseudo->boundary());
+    BoxEdges border = layout_boundary_border_edges(pseudo->boundary());
+    BoxEdges padding = layout_boundary_padding_edges(pseudo->boundary());
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        insets.values[side] = margin.values[side] + border.values[side] +
+            max(padding.values[side], 0.0f);
     }
-    insets.top += max(pseudo->boundary()->padding.top, 0.0f);
-    insets.right += max(pseudo->boundary()->padding.right, 0.0f);
-    insets.bottom += max(pseudo->boundary()->padding.bottom, 0.0f);
-    insets.left += max(pseudo->boundary()->padding.left, 0.0f);
     ViewBlock* block = text ? layout_nearest_block_ancestor(text->parent_view()) : nullptr;
     WritingMode writing_mode = block ? layout_block_writing_mode(block)
                                      : WM_HORIZONTAL_TB;

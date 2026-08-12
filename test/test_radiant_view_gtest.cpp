@@ -358,16 +358,20 @@ TEST(RadiantViewTest, JsMirCacheKeepsFreshDocumentRealms) {
     ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
     ASSERT_EQ(0, shell_result.exit_code)
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    // D4.1.1v2: descriptor type changes must not move a runtime Map payload
+    // from the GC data zone back through the pool allocator on later appends.
+    EXPECT_EQ(nullptr, shell_result.stdout_buf
+        ? strstr(shell_result.stdout_buf, "pool_free: pointer") : nullptr);
     shell_result_free(&shell_result);
 
-    // Cached code may cross documents, but window values and prototype
-    // mutations must remain owned by the document heap that created them.
+    // Only the reusable preamble is shared now; lifecycle tasks execute in
+    // each fresh document realm while window values and prototypes stay local.
     EXPECT_TRUE(test_radiant_view_file_contains(
-        result_path, "js-cache-realm-isolated"));
+        result_path, "js-cache-realm-isolated|dom|load"));
     EXPECT_FALSE(test_radiant_view_file_contains(
         result_path, "js-cache-realm-leaked"));
     EXPECT_TRUE(test_radiant_view_file_contains(
-        timing_path, "\"script_cache_hits\":5"));
+        timing_path, "\"script_cache_hits\":1"));
     EXPECT_TRUE(test_radiant_view_file_contains(
         timing_path, "\"script_cache_compiles\":0"));
 }

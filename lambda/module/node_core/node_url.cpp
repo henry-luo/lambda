@@ -182,7 +182,6 @@ static Item node_url_set_item_property(Item object, const char* name, Item value
 #define js_array_set_int(ARRAY, INDEX, VALUE) node_url_host->value->array_set(ARRAY, INDEX, VALUE)
 #define js_property_get(OBJECT, KEY) node_url_host->value->property_get(OBJECT, KEY)
 #define js_property_set(OBJECT, KEY, VALUE) node_url_host->value->property_set(OBJECT, KEY, VALUE)
-#define js_new_function(FUNCTION, COUNT) node_url_host->script->new_function(FUNCTION, COUNT)
 #define js_mark_non_enumerable(OBJECT, KEY) node_url_host->script->mark_non_enumerable(OBJECT, KEY)
 #define js_get_this() node_url_host->script->current_this()
 #define js_to_string(VALUE) node_url_host->script->to_string(VALUE)
@@ -1339,25 +1338,26 @@ extern "C" Item js_url_search_params_new(Item init) {
     js_mark_non_enumerable(obj, entries_key);
 
     // set methods
-    auto usp_method = [&](const char* name, void* fn, int params) {
+    auto usp_method = [&](const char* name, auto target, int adapter_arity) {
         Item key = make_string_item(name);
-        js_property_set(obj, key, js_new_function(fn, params));
+        js_property_set(obj, key,
+            jube_new_function(node_url_host->script, target, adapter_arity));
         // URLSearchParams methods live on the prototype in Node; keeping these
         // fallback own methods enumerable leaks per-instance functions.
         js_mark_non_enumerable(obj, key);
     };
-    usp_method("append",  (void*)js_usp_append, 2);
-    usp_method("delete",  (void*)js_usp_delete, 2);
-    usp_method("get",     (void*)js_usp_get, 1);
-    usp_method("getAll",  (void*)js_usp_getAll, 1);
-    usp_method("has",     (void*)js_usp_has, 2);
-    usp_method("set",     (void*)js_usp_set, 2);
-    usp_method("sort",    (void*)js_usp_sort, 0);
-    usp_method("toString",(void*)js_usp_toString, 0);
-    usp_method("forEach", (void*)js_usp_forEach, 2);
-    usp_method("keys",    (void*)js_usp_keys, 0);
-    usp_method("values",  (void*)js_usp_values, 0);
-    usp_method("entries",  (void*)js_usp_entries, 0);
+    usp_method("append", js_usp_append, 2);
+    usp_method("delete", js_usp_delete, 2);
+    usp_method("get", js_usp_get, 1);
+    usp_method("getAll", js_usp_getAll, 1);
+    usp_method("has", js_usp_has, 2);
+    usp_method("set", js_usp_set, 2);
+    usp_method("sort", js_usp_sort, 0);
+    usp_method("toString", js_usp_toString, 0);
+    usp_method("forEach", js_usp_forEach, 2);
+    usp_method("keys", js_usp_keys, 0);
+    usp_method("values", js_usp_values, 0);
+    usp_method("entries", js_usp_entries, 0);
 
     // size as getter
     int64_t sz = js_array_length(entries);
@@ -1374,7 +1374,9 @@ extern "C" Item js_url_search_params_new(Item init) {
 // url Module Namespace Object
 // =============================================================================
 
-static Item js_url_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+template <typename Target>
+static Item js_url_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
     JubeRootFrame frame = {};
     if (!node_url_roots_begin(&frame, 2)) return ItemNull;
     uint64_t* key_root = node_url_host->node->roots->root_frame_take_slot(&frame);
@@ -1385,7 +1387,8 @@ static Item js_url_set_method(Item ns, const char* name, void* func_ptr, int par
     }
     Item key = make_string_item(name);
     *key_root = key.item;
-    Item fn = js_new_function(func_ptr, param_count);
+    Item fn = jube_new_function(node_url_host->script, target,
+        adapter_arity);
     *function_root = fn.item;
     js_property_set(ns, key, fn);
     node_url_host->node->roots->root_frame_end(&frame);
@@ -1407,26 +1410,26 @@ Item node_url_namespace(void) {
     }
 
     // URL constructor (as a function, not class)
-    Item url_ctor = js_url_set_method(url_module_namespace, "URL", (void*)js_url_module_construct, 2);
+    Item url_ctor = js_url_set_method(url_module_namespace, "URL", js_url_module_construct, 2);
     *constructor_root = url_ctor.item;
-    js_url_set_method(url_ctor, "createObjectURL", (void*)js_url_createObjectURL, 1);
-    js_url_set_method(url_ctor, "revokeObjectURL", (void*)js_url_revokeObjectURL, 1);
-    js_url_set_method(url_ctor, "resolveObjectURL", (void*)js_blob_url_resolve, 1);
+    js_url_set_method(url_ctor, "createObjectURL", js_url_createObjectURL, 1);
+    js_url_set_method(url_ctor, "revokeObjectURL", js_url_revokeObjectURL, 1);
+    js_url_set_method(url_ctor, "resolveObjectURL", js_blob_url_resolve, 1);
 
     // legacy methods
-    js_url_set_method(url_module_namespace, "parse", (void*)js_url_parse_legacy, 2);
-    js_url_set_method(url_module_namespace, "format", (void*)js_url_format, 1);
-    js_url_set_method(url_module_namespace, "resolve", (void*)js_url_resolve, 2);
-    js_url_set_method(url_module_namespace, "resolveObject", (void*)js_url_resolve, 2);
-    js_url_set_method(url_module_namespace, "Url", (void*)js_url_legacy_construct, 0);
+    js_url_set_method(url_module_namespace, "parse", js_url_parse_legacy, 2);
+    js_url_set_method(url_module_namespace, "format", js_url_format, 1);
+    js_url_set_method(url_module_namespace, "resolve", js_url_resolve, 2);
+    js_url_set_method(url_module_namespace, "resolveObject", js_url_resolve, 2);
+    js_url_set_method(url_module_namespace, "Url", js_url_legacy_construct, 0);
 
     // file URL conversion
-    js_url_set_method(url_module_namespace, "fileURLToPath", (void*)js_url_fileURLToPath, 1);
-    js_url_set_method(url_module_namespace, "pathToFileURL", (void*)js_url_pathToFileURL, 1);
-    js_url_set_method(url_module_namespace, "urlToHttpOptions", (void*)js_url_to_http_options, 1);
+    js_url_set_method(url_module_namespace, "fileURLToPath", js_url_fileURLToPath, 1);
+    js_url_set_method(url_module_namespace, "pathToFileURL", js_url_pathToFileURL, 1);
+    js_url_set_method(url_module_namespace, "urlToHttpOptions", js_url_to_http_options, 1);
 
     // URLSearchParams constructor
-    js_url_set_method(url_module_namespace, "URLSearchParams", (void*)js_url_search_params_new, 1);
+    js_url_set_method(url_module_namespace, "URLSearchParams", js_url_search_params_new, 1);
 
     // default export
     Item default_key = make_string_item("default");

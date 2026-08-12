@@ -21,9 +21,14 @@ static bool jm_node_has_direct_eval_call(JsAstNode* node) {
     switch (node->node_type) {
     case JS_AST_NODE_CALL_EXPRESSION: {
         JsCallNode* call = (JsCallNode*)node;
-        if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+        if (!call->optional && call->callee &&
+                call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
-            if (id->name && id->name->len == 4 && strncmp(id->name->chars, "eval", 4) == 0) return true;
+            // `eval?.()` is always indirect eval. Classifying it as direct made
+            // the function publish caller locals into the eval bridge, so the
+            // otherwise-indirect intrinsic still observed the local environment.
+            if (id->name && id->name->len == 4 &&
+                    strncmp(id->name->chars, "eval", 4) == 0) return true;
         }
         for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
             if (jm_node_has_direct_eval_call(arg)) return true;
@@ -131,58 +136,10 @@ JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode
 // Check if a call expression should use the native version of a function.
 // Returns the JsFuncCollected* if native call is possible, NULL otherwise.
 JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
-    // P7: obj.method(args) — typed class instance with known native method
+    // D6.2.2v2: a receiver's inferred class plus a mutable property spelling
+    // does not prove callee identity; member calls must observe Get before Call.
     if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
-        JsMemberNode* mem = (JsMemberNode*)call->callee;
-        if (!mem->computed && mem->object && mem->property &&
-            mem->object->node_type == JS_AST_NODE_IDENTIFIER &&
-            mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* obj_id  = (JsIdentifierNode*)mem->object;
-            JsIdentifierNode* prop_id = (JsIdentifierNode*)mem->property;
-            const char* vname = jm_format_name("_js_%.*s", (int)obj_id->name->len, obj_id->name->chars);
-            JsMirVarEntry* obj_var = jm_find_var(mt, vname);
-            // P7: also check module_consts for top-level vars (is_modvar path has no local entry)
-            JsClassEntry* p7_ce = obj_var ? obj_var->class_entry : NULL;
-            if (!p7_ce && mt->module_consts) {
-                JsModuleConstEntry p7_mclookup;
-                memset(&p7_mclookup, 0, sizeof(p7_mclookup));
-                p7_mclookup.name = jm_persist_name(vname);
-                JsModuleConstEntry* p7_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &p7_mclookup);
-                if (p7_mc) p7_ce = p7_mc->class_entry;
-            }
-            if (p7_ce) {
-                JsClassEntry* ce = p7_ce;
-                for (int i = 0; i < ce->method_count; i++) {
-                    JsClassMethodEntry* me = &ce->methods[i];
-                    if (me->is_constructor || me->is_static) continue;
-                    if (!me->fc || !me->fc->has_native_version || !me->fc->native_func_item) continue;
-                    if (!me->name) continue;
-                    if (me->name->len != (size_t)prop_id->name->len ||
-                        strncmp(me->name->chars, prop_id->name->chars, me->name->len) != 0) continue;
-                    // found matching method — validate arg types
-                    JsAstNode* arg = call->arguments;
-                    bool ok = true;
-                    for (int p = 0; p < me->fc->param_count && ok; p++) {
-                        TypeId expected = jm_param_type(me->fc, p);
-                        TypeId actual   = arg ? jm_get_effective_type(mt, arg) : LMD_TYPE_ANY;
-                        if (expected == LMD_TYPE_INT) {
-                            if (actual != LMD_TYPE_INT && actual != LMD_TYPE_BOOL) ok = false;
-                        } else if (expected == LMD_TYPE_FLOAT) {
-                            if (actual != LMD_TYPE_FLOAT && actual != LMD_TYPE_INT) ok = false;
-                        }
-                        if (arg) arg = arg->next;
-                    }
-                    if (ok) {
-                        log_debug("P7: resolved native method %.*s.%.*s → %s",
-                            (int)obj_id->name->len, obj_id->name->chars,
-                            (int)prop_id->name->len, prop_id->name->chars,
-                            me->fc->name);
-                        return me->fc;
-                    }
-                }
-            }
-        }
-        return NULL; // MEMBER_EXPRESSION but not P7-eligible
+        return NULL;
     }
 
     if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
@@ -402,6 +359,98 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
 // ============================================================================
 
 JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len);
+
+void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node);
+
+static String* jm_class_member_source_name(JsMirTranspiler* mt,
+        JsClassEntry* owner, JsAstNode* key) {
+    if (!mt || !key) return NULL;
+    if (key->node_type == JS_AST_NODE_IDENTIFIER) {
+        return jm_class_private_name(mt, owner,
+            ((JsIdentifierNode*)key)->name);
+    }
+    if (key->node_type != JS_AST_NODE_LITERAL) return NULL;
+    JsLiteralNode* literal = (JsLiteralNode*)key;
+    if (literal->literal_type == JS_LITERAL_STRING) {
+        return literal->value.string_value;
+    }
+    if (literal->literal_type == JS_LITERAL_NUMBER) {
+        char number_name[64];
+        js_double_to_string(literal->value.number_value, number_name,
+            sizeof(number_name));
+        return name_pool_create_len(mt->tp->name_pool, number_name,
+            (int)strlen(number_name));
+    }
+    return NULL;
+}
+
+static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
+        JsFieldDefinitionNode* field) {
+    if (!mt || !field || !field->value ||
+        field->value->node_type == JS_AST_NODE_LITERAL) return NULL;
+    int children_start = mt->func_count;
+    jm_collect_functions(mt, field->value);
+    int children_end = mt->func_count;
+    if (mt->collection_count_only) {
+        if (mt->func_count == INT_MAX) {
+            log_error("js-mir: function count overflow in class field initializer");
+            mt->collection_failed = true;
+            return NULL;
+        }
+        mt->func_count++;
+        return NULL;
+    }
+    if (mt->func_count >= mt->func_capacity) {
+        log_error("js-mir: class field initializer count/fill mismatch at %d of %d",
+            mt->func_count, mt->func_capacity);
+        mt->collection_failed = true;
+        return NULL;
+    }
+
+    JsFunctionNode* function = (JsFunctionNode*)pool_calloc(
+        mt->tp->ast_pool, sizeof(JsFunctionNode));
+    JsBlockNode* body = (JsBlockNode*)pool_calloc(
+        mt->tp->ast_pool, sizeof(JsBlockNode));
+    JsReturnNode* result = (JsReturnNode*)pool_calloc(
+        mt->tp->ast_pool, sizeof(JsReturnNode));
+    if (!function || !body || !result) {
+        log_error("js-mir: failed to allocate class field initializer AST");
+        mt->collection_failed = true;
+        return NULL;
+    }
+    // D6.2.2v2 requires dynamic construction to follow stored capabilities.
+    // A synthetic ordinary function preserves the definition environment while
+    // receiving the constructed object as `this`; evaluating the expression at
+    // class definition would permanently capture the wrong receiver.
+    function->node_type = JS_AST_NODE_FUNCTION_EXPRESSION;
+    function->node = field->node;
+    function->body = (JsAstNode*)body;
+    body->node_type = JS_AST_NODE_BLOCK_STATEMENT;
+    body->node = field->node;
+    body->statements = (JsAstNode*)result;
+    result->node_type = JS_AST_NODE_RETURN_STATEMENT;
+    result->node = field->node;
+    result->argument = field->value;
+
+    int function_index = mt->func_count;
+    JsFuncCollected* collected = &mt->func_entries[function_index];
+    memset(collected, 0, sizeof(JsFuncCollected));
+    collected->node = function;
+    collected->name = jm_format_name("class_field_initializer_%d_%u",
+        function_index, ts_node_start_byte(field->node));
+    collected->parent_index = -1;
+    collected->is_strict = true;
+    collected->is_class_field_initializer = true;
+    collected->has_direct_eval = jm_node_has_direct_eval_call(field->value);
+    mt->func_count++;
+    for (int child_index = children_start; child_index < children_end;
+            child_index++) {
+        if (mt->func_entries[child_index].parent_index == -1) {
+            mt->func_entries[child_index].parent_index = function_index;
+        }
+    }
+    return collected;
+}
 
 void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node || mt->collection_failed) return;
@@ -724,7 +773,10 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 if (member->node_type == JS_AST_NODE_FIELD_DEFINITION) {
                     JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)member;
                     if (fd->computed && fd->key) jm_collect_functions(mt, fd->key);
-                    if (fd->key && fd->value) jm_collect_functions(mt, fd->value);
+                    if (fd->key && fd->value) {
+                        if (fd->is_static) jm_collect_functions(mt, fd->value);
+                        else jm_collect_class_field_initializer(mt, fd);
+                    }
                 } else if (member->node_type == JS_AST_NODE_STATIC_BLOCK) {
                     JsStaticBlockNode* sb = (JsStaticBlockNode*)member;
                     if (sb->body) jm_collect_functions(mt, sb->body);
@@ -811,11 +863,11 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                         JsStaticFieldEntry* sf = &ce->static_fields[ce->static_field_count];
                         sf->computed = fd->computed;
                         sf->key_expr = fd->key;
-                        if (!fd->computed && fd->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                            sf->name = jm_class_private_name(mt, ce, ((JsIdentifierNode*)fd->key)->name);
-                        } else {
-                            sf->name = NULL;
-                        }
+                        // Class field metadata carries the semantic property
+                        // spelling; dropping literal keys made `"x";` vanish
+                        // during instance initialization (D6.2.2v2).
+                        sf->name = !fd->computed
+                            ? jm_class_member_source_name(mt, ce, fd->key) : NULL;
                         sf->initializer = fd->value;
                         sf->module_var_index = -1; // assigned later in Phase 1.1 (only for non-computed)
                         sf->key_module_var_index = -1;
@@ -832,14 +884,12 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                         JsInstanceFieldEntry* inf = &ce->instance_fields[ce->instance_field_count];
                         inf->computed = fd->computed;
                         inf->key_expr = fd->key;
-                        if (!fd->computed && fd->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                            inf->name = jm_class_private_name(mt, ce, ((JsIdentifierNode*)fd->key)->name);
-                        } else {
-                            inf->name = NULL;
-                        }
+                        inf->name = !fd->computed
+                            ? jm_class_member_source_name(mt, ce, fd->key) : NULL;
                         inf->initializer = fd->value;
+                        inf->initializer_fc = fd->value
+                            ? jm_collect_class_field_initializer(mt, fd) : NULL;
                         inf->key_module_var_index = -1;
-                        if (fd->value) jm_collect_functions(mt, fd->value);
                         ce->instance_field_count++;
                         log_debug("js-mir: class '%.*s' instance field %s'%.*s'",
                             cls->name ? (int)cls->name->len : 5, cls->name ? cls->name->chars : "anon?",
@@ -880,21 +930,10 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             fc->node = fn;
                             fc->parent_index = -1; // class methods are at top level
                             // Name: ClassName_methodName
-                            String* method_name = NULL;
-                            if (md->key && md->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                                method_name = jm_class_private_name(mt, ce, ((JsIdentifierNode*)md->key)->name);
-                            } else if (md->key && md->key->node_type == JS_AST_NODE_LITERAL) {
-                                JsLiteralNode* lit = (JsLiteralNode*)md->key;
-                                if (lit->literal_type == JS_LITERAL_STRING) {
-                                    method_name = lit->value.string_value;
-                                } else if (lit->literal_type == JS_LITERAL_NUMBER) {
-                                    char nbuf[64];
-                                    js_double_to_string(lit->value.number_value, nbuf, sizeof(nbuf));
-                                    int nlen = (int)strlen(nbuf);
-                                    String* ns = name_pool_create_len(mt->tp->name_pool, nbuf, nlen);
-                                    method_name = ns;
-                                }
-                            } else if (md->key && md->key->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+                            String* method_name = jm_class_member_source_name(
+                                mt, ce, md->key);
+                            if (!method_name && md->key &&
+                                    md->key->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
                                 // computed key like [Symbol.iterator] — use the property name
                                 JsMemberNode* mem = (JsMemberNode*)md->key;
                                 if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {

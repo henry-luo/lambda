@@ -155,7 +155,7 @@ static Item microtask_pop(Item* out_resource, Item* out_als_context, Item* out_d
 }
 
 extern "C" void js_microtask_enqueue(Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         log_error("event_loop: microtask_enqueue called with non-function (type=%d)", get_type_id(callback));
         return;
     }
@@ -163,7 +163,7 @@ extern "C" void js_microtask_enqueue(Item callback) {
 }
 
 extern "C" void js_next_tick_enqueue(Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         log_error("event_loop: nextTick enqueue called with non-function (type=%d)", get_type_id(callback));
         return;
     }
@@ -191,7 +191,7 @@ static Item js_run_queued_callback(Item cb, Item resource, Item als_context, Ite
     Rooted<Item> domain_root(roots, domain);
     Rooted<Item> previous_resource_root(roots, ItemNull);
     Rooted<Item> previous_domain_root(roots, ItemNull);
-    if (get_type_id(callback_root.get()) != LMD_TYPE_FUNC) return make_js_undefined();
+    if (!js_is_callable(callback_root.get())) return make_js_undefined();
 
     previous_resource_root.set(js_async_hooks_enter_resource(resource_root.get()));
     previous_domain_root.set(js_domain_set_stack(domain_root.get()));
@@ -269,7 +269,7 @@ static Item raf_pop(int64_t* out_id) {
 }
 
 extern "C" Item js_requestAnimationFrame(Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"callback\" argument must be of type function.");
     }
@@ -328,7 +328,7 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
         int64_t id = -1;
         Item cb = raf_pop(&id);
         (void)id;
-        if (get_type_id(cb) == LMD_TYPE_FUNC) {
+        if (js_is_callable(cb)) {
             js_call_function(cb, ItemNull, &timestamp, 1);
             called++;
         }
@@ -601,7 +601,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
     if (timer_runtime_enter(th, &scope)) {
         Item previous_resource = js_async_hooks_enter_resource(th->async_resource);
         Item previous_domain = js_domain_set_stack(th->domain);
-        if (get_type_id(th->callback) == LMD_TYPE_FUNC) {
+        if (js_is_callable(th->callback)) {
             if (th->extra_count > 0) {
                 if (th->extra_count == 1) {
                     callback_result = js_als_context_call(th->als_context, th->callback, ItemNull,
@@ -786,10 +786,10 @@ static Item make_timer_object(int64_t id, JsClass cls) {
     // Native timeout methods use one Item ABI argument (the JS argument or
     // undefined). Declaring zero made the invoke trampoline call a P0 function
     // even though these handlers read Item this_val, corrupting `@@toPrimitive`.
-    Item ref_fn = js_new_function((void*)js_timeout_ref, 1);
-    Item unref_fn = js_new_function((void*)js_timeout_unref, 1);
-    Item hasRef_fn = js_new_function((void*)js_timeout_hasRef, 1);
-    Item refresh_fn = js_new_function((void*)js_timeout_refresh, 1);
+    Item ref_fn = js_new_native_function(js_timeout_ref);
+    Item unref_fn = js_new_native_function(js_timeout_unref);
+    Item hasRef_fn = js_new_native_function(js_timeout_hasRef);
+    Item refresh_fn = js_new_native_function(js_timeout_refresh);
 
     js_property_set(obj, (Item){.item = s2it(heap_create_name("ref", 3))}, ref_fn);
     js_property_set(obj, (Item){.item = s2it(heap_create_name("unref", 5))}, unref_fn);
@@ -800,7 +800,7 @@ static Item make_timer_object(int64_t id, JsClass cls) {
     // @@toPrimitive receives the coercion hint. Declaring that ABI argument
     // prevents the generic call trampoline from invoking this one-argument C
     // function as P0 while it recovers the Timeout receiver from `this`.
-    Item toPrim_fn = js_new_function((void*)js_timeout_toPrimitive, 1);
+    Item toPrim_fn = js_new_native_function(js_timeout_toPrimitive);
     js_property_set(obj, js_well_known_symbol_key(2), toPrim_fn);
 
     // class identity (T5b: typed JsClass byte; legacy `__class_name__`
@@ -963,7 +963,7 @@ extern "C" int js_event_loop_advance_virtual_time(double delta_ms, int frame_ste
 
 static Item js_schedule_timer(Item callback, Item delay, Item args_array,
                               bool has_args, bool is_interval) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"callback\" argument must be of type function.");
     }
@@ -1016,7 +1016,7 @@ extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
 }
 
 static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"callback\" argument must be of type function.");
     }
@@ -1374,7 +1374,7 @@ extern "C" Item js_setTimeout_promisified(Item delay, Item value) {
 
 extern "C" void js_timer_install_promisify_custom(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    Item custom_fn = js_new_function((void*)js_setTimeout_promisified, 2);
+    Item custom_fn = js_new_native_function(js_setTimeout_promisified);
     js_property_set(fn_item, js_util_promisify_custom_symbol(), custom_fn);
 }
 

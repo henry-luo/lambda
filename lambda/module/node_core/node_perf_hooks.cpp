@@ -40,7 +40,9 @@ static void node_perf_hooks_set_property(Item object, const char* name, Item val
     node_perf_hooks_host->node->roots->root_frame_end(&frame);
 }
 
-static void node_perf_hooks_set_method(Item object, const char* name, void* function) {
+template <typename Target>
+static void node_perf_hooks_set_method(Item object, const char* name,
+        Target target) {
     JubeRootFrame frame = {};
     if (!node_perf_hooks_host->node->roots->root_frame_begin(&frame, 2)) return;
     uint64_t* object_root = node_perf_hooks_host->node->roots->root_frame_take_slot(&frame);
@@ -50,7 +52,7 @@ static void node_perf_hooks_set_method(Item object, const char* name, void* func
         return;
     }
     *object_root = object.item;
-    Item method = node_perf_hooks_host->script->new_function(function, 1);
+    Item method = jube_new_function(node_perf_hooks_host->script, target, 1);
     *function_root = method.item;
     node_perf_hooks_set_property(node_perf_hooks_root_value(object_root), name,
         node_perf_hooks_root_value(function_root));
@@ -100,11 +102,11 @@ Item node_perf_hooks_namespace(void) {
     node_perf_hooks_set_property(node_perf_hooks_root_value(namespace_root), "PerformanceObserver",
         node_perf_hooks_root_value(observer_root));
     node_perf_hooks_set_method(node_perf_hooks_root_value(namespace_root), "PerformanceEntry",
-        (void*)node_perf_hooks_empty_object);
+        node_perf_hooks_empty_object);
     node_perf_hooks_set_method(node_perf_hooks_root_value(namespace_root), "monitorEventLoopDelay",
-        (void*)node_perf_hooks_empty_object);
+        node_perf_hooks_empty_object);
     node_perf_hooks_set_method(node_perf_hooks_root_value(namespace_root), "createHistogram",
-        (void*)node_perf_hooks_empty_object);
+        node_perf_hooks_empty_object);
     node_perf_hooks_set_property(node_perf_hooks_root_value(namespace_root), "default",
         node_perf_hooks_root_value(namespace_root));
     node_perf_hooks_cached_namespace = node_perf_hooks_root_value(namespace_root);

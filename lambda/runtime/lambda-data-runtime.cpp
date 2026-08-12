@@ -2124,6 +2124,74 @@ Map* map_fill(Map* map, ...) {
     return map;
 }
 
+static bool map_grow_gc_data(Map** map_slot, int byte_cap, int64_t copy_bytes,
+        String** keys, int key_count, Item* values, int value_count,
+        void* grow_context) {
+    (void)grow_context;
+    if (!map_slot || !*map_slot || byte_cap <= 0 || key_count < 0 ||
+            value_count < 0) return false;
+
+    RootFrame roots((size_t)key_count + (size_t)value_count + 1);
+    Rooted<Container*> map_root(roots, (Container*)*map_slot);
+    for (int i = 0; i < key_count; i++) {
+        uint64_t* slot = roots.take_slot();
+        if (!slot) return false;
+        *slot = keys && keys[i] ? s2it(keys[i]) : ItemNull.item;
+    }
+    for (int i = 0; i < value_count; i++) {
+        uint64_t* slot = roots.take_slot();
+        if (!slot) return false;
+        *slot = values ? values[i].item : ItemNull.item;
+    }
+
+    void* new_data = heap_data_calloc((size_t)byte_cap);
+    if (!new_data) return false;
+    Map* map = (Map*)map_root.get();
+    // D4.1.1v2/D4.3.1: a runtime Map's payload has one GC data-zone owner.
+    // Descriptor type rebuilds already use that owner; growing through the
+    // Input pool afterwards paired pool_free with GC bytes on the next append.
+    void* old_data = map->data;
+    if (old_data) {
+        if (copy_bytes < 0) copy_bytes = 0;
+        if (copy_bytes > map->data_cap) copy_bytes = map->data_cap;
+        if (copy_bytes > 0) memcpy(new_data, old_data, (size_t)copy_bytes);
+        // data-zone buffers are grow-and-abandon and reclaimed by GC
+    }
+    map->data = new_data;
+    map->data_cap = byte_cap;
+    *map_slot = map;
+
+    for (int i = 0; keys && i < key_count; i++) {
+        Item rooted_key = (Item){.item = *roots.slot((size_t)i + 1)};
+        keys[i] = get_type_id(rooted_key) == LMD_TYPE_STRING
+            ? it2s(rooted_key) : NULL;
+    }
+    size_t value_base = (size_t)key_count + 1;
+    for (int i = 0; values && i < value_count; i++) {
+        values[i] = (Item){.item = *roots.slot(value_base + (size_t)i)};
+    }
+    return true;
+}
+
+void map_put_heap(Map* map, String* key, Item value, Input* input) {
+    if (!map || !map->is_heap) {
+        map_put(map, key, value, input);
+        return;
+    }
+    map_put_with_data_growth(map, key, value, input,
+        map_grow_gc_data, NULL);
+}
+
+bool map_put_undefined_unique_absent_bulk_heap(Map* map, String** keys,
+        int count, Input* input, uint8_t shape_flags) {
+    if (!map || !map->is_heap) {
+        return map_put_undefined_unique_absent_bulk(map, keys, count,
+            input, shape_flags);
+    }
+    return map_put_undefined_unique_absent_bulk_with_data_growth(map, keys,
+        count, input, shape_flags, map_grow_gc_data, NULL);
+}
+
 // extract field value from a named shape entry's storage
 Item _map_read_field(ShapeEntry* field, void* map_data) {
     return map_shape_field_to_item(map_data, field);

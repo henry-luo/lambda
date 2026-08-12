@@ -807,7 +807,8 @@ Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* fi
     char* js_source = ts_preprocess_source(ts_source, ts_len, &js_len);
     if (js_source) {
         log_debug("ts-mir: preprocessed TypeScript source to JavaScript (%zu bytes)", js_len);
-        Item result = transpile_js_to_mir(runtime, js_source, filename, result_home);
+        Item result = transpile_js_typescript_to_mir_len(
+            runtime, js_source, js_len, filename, result_home);
         mem_free(js_source);
         return result;
     }

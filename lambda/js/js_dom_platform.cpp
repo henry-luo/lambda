@@ -161,21 +161,15 @@ static Item storage_object(JsStorageState* storage) {
 
     RootFrame roots(1);
     Rooted<Item> descriptor_root(roots, ItemNull);
-    js_property_set(object, js_make_string("key"),
-        js_new_function((void*)js_storage_key, 1));
-    js_property_set(object, js_make_string("getItem"),
-        js_new_function((void*)js_storage_get_item, 1));
-    js_property_set(object, js_make_string("setItem"),
-        js_new_function((void*)js_storage_set_item, 2));
-    js_property_set(object, js_make_string("removeItem"),
-        js_new_function((void*)js_storage_remove_item, 1));
-    js_property_set(object, js_make_string("clear"),
-        js_new_function((void*)js_storage_clear, 0));
+    js_install_native_method(object, "key", js_storage_key, 1);
+    js_install_native_method(object, "getItem", js_storage_get_item, 1);
+    js_install_native_method(object, "setItem", js_storage_set_item, 2);
+    js_install_native_method(object, "removeItem", js_storage_remove_item, 1);
+    js_install_native_method(object, "clear", js_storage_clear, 0);
 
     Item descriptor = js_new_object();
     descriptor_root.set(descriptor);
-    js_property_set(descriptor, js_make_string("get"),
-        js_new_function((void*)js_storage_length, 0));
+    js_install_native_method(descriptor, "get", js_storage_length, 0);
     js_property_set(descriptor, js_make_string("enumerable"),
         (Item){.item = ITEM_TRUE});
     js_property_set(descriptor, js_make_string("configurable"),
@@ -257,14 +251,14 @@ extern "C" Item js_match_media(Item query_item) {
         js_make_string(state->query));
     js_property_set(state->object, js_make_string("onchange"), ItemNull);
     js_property_set(state->object, js_make_string("addListener"),
-        js_new_function((void*)js_media_query_add_listener, 1));
+        js_new_native_function(js_media_query_add_listener));
     js_property_set(state->object, js_make_string("removeListener"),
-        js_new_function((void*)js_media_query_remove_listener, 1));
+        js_new_native_function(js_media_query_remove_listener));
 
     Item descriptor = js_new_object();
     descriptor_root.set(descriptor);
     js_property_set(descriptor, js_make_string("get"),
-        js_new_function((void*)js_media_query_matches, 0));
+        js_new_native_function(js_media_query_matches));
     js_property_set(descriptor, js_make_string("enumerable"),
         (Item){.item = ITEM_TRUE});
     js_property_set(descriptor, js_make_string("configurable"),

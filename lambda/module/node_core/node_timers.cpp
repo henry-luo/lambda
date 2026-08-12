@@ -85,7 +85,9 @@ static void node_timers_set_property(Item object, const char* name, Item value) 
     node_timers_host->node->roots->root_frame_end(&frame);
 }
 
-static void node_timers_set_method(Item object, const char* name, void* function, int parameter_count) {
+template <typename Target>
+static void node_timers_set_method(Item object, const char* name, Target target,
+        int adapter_arity) {
     JubeRootFrame frame = {};
     if (!node_timers_host->node->roots->root_frame_begin(&frame, 2)) return;
     uint64_t* object_root = node_timers_host->node->roots->root_frame_take_slot(&frame);
@@ -95,7 +97,8 @@ static void node_timers_set_method(Item object, const char* name, void* function
         return;
     }
     *object_root = object.item;
-    Item method = node_timers_host->script->new_function(function, parameter_count);
+    Item method = jube_new_function(node_timers_host->script, target,
+        adapter_arity);
     *function_root = method.item;
     object = node_timers_from_root(object_root);
     method = node_timers_from_root(function_root);
@@ -108,9 +111,9 @@ Item node_timers_promises_namespace(void) {
     if (!node_timers_host || !node_timers_session) return ItemNull;
 
     node_timers_cached_namespace = node_timers_host->value->new_object();
-    node_timers_set_method(node_timers_cached_namespace, "setTimeout", (void*)node_timers_timeout, 3);
-    node_timers_set_method(node_timers_cached_namespace, "setInterval", (void*)node_timers_interval, 2);
-    node_timers_set_method(node_timers_cached_namespace, "setImmediate", (void*)node_timers_immediate, 2);
+    node_timers_set_method(node_timers_cached_namespace, "setTimeout", node_timers_timeout, 3);
+    node_timers_set_method(node_timers_cached_namespace, "setInterval", node_timers_interval, 2);
+    node_timers_set_method(node_timers_cached_namespace, "setImmediate", node_timers_immediate, 2);
     JubeRootFrame frame = {};
     if (!node_timers_host->node->roots->root_frame_begin(&frame, 1)) return ItemNull;
     uint64_t* scheduler_root = node_timers_host->node->roots->root_frame_take_slot(&frame);
@@ -120,9 +123,9 @@ Item node_timers_promises_namespace(void) {
     }
     Item scheduler = node_timers_host->value->new_object();
     *scheduler_root = scheduler.item;
-    node_timers_set_method(scheduler, "wait", (void*)node_timers_scheduler_wait, 2);
+    node_timers_set_method(scheduler, "wait", node_timers_scheduler_wait, 2);
     scheduler = node_timers_from_root(scheduler_root);
-    node_timers_set_method(scheduler, "yield", (void*)node_timers_scheduler_yield, 0);
+    node_timers_set_method(scheduler, "yield", node_timers_scheduler_yield, 0);
     scheduler = node_timers_from_root(scheduler_root);
     // Method creation may compact the scheduler before it is attached to the
     // persistent namespace; retain it in the temporary root until publication.
@@ -138,15 +141,15 @@ Item node_timers_namespace(void) {
 
     node_timers_classic_namespace = node_timers_host->value->new_object();
     node_timers_set_method(node_timers_classic_namespace, "setTimeout",
-                           (void*)node_timers_timeout_callback, 2);
+                           node_timers_timeout_callback, 2);
     node_timers_set_method(node_timers_classic_namespace, "setInterval",
-                           (void*)node_timers_interval_callback, 2);
+                           node_timers_interval_callback, 2);
     node_timers_set_method(node_timers_classic_namespace, "clearTimeout",
-                           (void*)node_timers_clear_timeout, 1);
+                           node_timers_clear_timeout, 1);
     node_timers_set_method(node_timers_classic_namespace, "clearInterval",
-                           (void*)node_timers_clear_interval, 1);
+                           node_timers_clear_interval, 1);
     node_timers_set_method(node_timers_classic_namespace, "setImmediate",
-                           (void*)node_timers_immediate_callback, 1);
+                           node_timers_immediate_callback, 1);
     JubeRootFrame frame = {};
     if (node_timers_host->node->roots->root_frame_begin(&frame, 3)) {
         uint64_t* namespace_root = node_timers_host->node->roots->root_frame_take_slot(&frame);

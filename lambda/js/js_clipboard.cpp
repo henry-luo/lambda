@@ -236,9 +236,9 @@ extern "C" Item js_blob_new(Item parts, Item options) {
     js_property_set(obj, make_str("size"), (Item){.item = i2it((int64_t)sb->length)});
     js_property_set(obj, make_str("type"), make_str(type_buf));
     // bind prototype methods directly to instance (Lambda has no proto chain walk)
-    js_property_set(obj, make_str("text"), js_new_function((void*)js_blob_text, 0));
-    js_property_set(obj, make_str("arrayBuffer"), js_new_function((void*)js_blob_array_buffer, 0));
-    js_property_set(obj, make_str("slice"), js_new_function((void*)js_blob_slice, 3));
+    js_property_set(obj, make_str("text"), js_new_native_function(js_blob_text));
+    js_property_set(obj, make_str("arrayBuffer"), js_new_native_function(js_blob_array_buffer));
+    js_property_set(obj, make_str("slice"), js_new_native_function(js_blob_slice));
     strbuf_free(sb);
     return obj;
 }
@@ -370,7 +370,7 @@ extern "C" Item js_clipboard_item_new(Item items, Item options) {
     js_property_set(obj, make_str("_reps"), reps);
     // bind prototype methods directly to instance (Lambda has no proto chain walk)
     js_property_set(obj, make_str("getType"),
-        js_new_function((void*)js_clipboard_item_get_type, 1));
+        js_new_native_function(js_clipboard_item_get_type));
 
     const char* presentation = "attachment";
     if (get_type_id(options) == LMD_TYPE_MAP) {
@@ -523,13 +523,13 @@ extern "C" Item js_clipboard_event_new(Item type_item, Item init_item) {
     }
 
     js_property_set(ev, make_str("preventDefault"),
-        js_new_function((void*)js_clipboard_event_prevent_default, 0));
+        js_new_native_function(js_clipboard_event_prevent_default));
     js_property_set(ev, make_str("stopPropagation"),
-        js_new_function((void*)js_clipboard_event_stop_propagation, 0));
+        js_new_native_function(js_clipboard_event_stop_propagation));
     js_property_set(ev, make_str("stopImmediatePropagation"),
-        js_new_function((void*)js_clipboard_event_stop_immediate_propagation, 0));
+        js_new_native_function(js_clipboard_event_stop_immediate_propagation));
     js_property_set(ev, make_str("composedPath"),
-        js_new_function((void*)js_clipboard_event_composed_path, 0));
+        js_new_native_function(js_clipboard_event_composed_path));
     return ev;
 }
 
@@ -647,9 +647,9 @@ static void dt_recompute_views(Item dt) {
         js_property_set(proxy, make_str("type"), type);
         js_property_set(proxy, make_str("_record"), r);
         js_property_set(proxy, make_str("getAsFile"),
-            js_new_function((void*)js_dt_item_get_as_file, 0));
+            js_new_native_function(js_dt_item_get_as_file));
         js_property_set(proxy, make_str("getAsString"),
-            js_new_function((void*)js_dt_item_get_as_string, 1));
+            js_new_native_function(js_dt_item_get_as_string));
         js_array_push(items, proxy);
 
         bool is_file = dt_record_kind_is(r, "file", 4);
@@ -692,7 +692,7 @@ extern "C" Item js_dt_item_get_as_string(Item callback) {
     if (get_type_id(item) != LMD_TYPE_MAP) return make_js_undefined();
     Item record = js_property_get(item, make_str("_record"));
     if (!dt_record_kind_is(record, "string", 6)) return make_js_undefined();
-    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    if (!js_is_callable(callback)) return make_js_undefined();
     Item value = js_property_get(record, make_str("value"));
     if (get_type_id(value) != LMD_TYPE_STRING) value = make_str("");
     js_call_function(callback, make_js_undefined(), &value, 1);
@@ -959,23 +959,23 @@ static Item js_make_data_transfer_object(void) {
     js_property_set(items_root.get(), make_str("_owner"), dt_root.get());
     js_property_set(files_root.get(), make_str("_owner"), dt_root.get());
     js_property_set(items_root.get(), make_str("add"),
-        js_new_function((void*)js_dt_items_add, 2));
+        js_new_native_function(js_dt_items_add));
     js_property_set(items_root.get(), make_str("item"),
-        js_new_function((void*)js_dt_items_item, 1));
+        js_new_native_function(js_dt_items_item));
     js_property_set(items_root.get(), make_str("remove"),
-        js_new_function((void*)js_dt_items_remove, 1));
+        js_new_native_function(js_dt_items_remove));
     js_property_set(items_root.get(), make_str("clear"),
-        js_new_function((void*)js_dt_items_clear, 0));
+        js_new_native_function(js_dt_items_clear));
     js_property_set(dt_root.get(), make_str("items"), items_root.get());
     js_property_set(dt_root.get(), make_str("files"), files_root.get());
     js_property_set(dt_root.get(), make_str("types"), types_root.get());
 
     js_property_set(dt_root.get(), make_str("setData"),
-        js_new_function((void*)js_dt_set_data, 2));
+        js_new_native_function(js_dt_set_data));
     js_property_set(dt_root.get(), make_str("getData"),
-        js_new_function((void*)js_dt_get_data, 1));
+        js_new_native_function(js_dt_get_data));
     js_property_set(dt_root.get(), make_str("clearData"),
-        js_new_function((void*)js_dt_clear_data, 1));
+        js_new_native_function(js_dt_clear_data));
     // The public views are published only after all native method allocation;
     // retain each owner explicitly because native locals are not GC roots.
     return dt_root.get();
@@ -1197,7 +1197,7 @@ static bool item_is_blob_like(Item it) {
     Item ty = js_property_get(it, make_str("type"));
     Item tx = js_property_get(it, make_str("text"));
     return get_type_id(ty) == LMD_TYPE_STRING &&
-           get_type_id(tx) == LMD_TYPE_FUNC;
+           js_is_callable(tx);
 }
 
 // Strip <script>...</script> and <style>...</style> blocks (case-insensitive)
@@ -1444,7 +1444,7 @@ extern "C" Item js_clipboard_write(Item items_array) {
     }
 
     Item all_p = js_promise_all(flat);
-    Item handler_raw = js_new_function((void*)js_clipboard_materialise, 2);
+    Item handler_raw = js_new_native_function(js_clipboard_materialise);
     Item bound = js_bind_function(handler_raw, ItemNull, &items_array, 1);
     return js_promise_then(all_p, bound, ItemNull);
 }
@@ -1728,16 +1728,16 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     if (!clipboard_ensure_roots()) return;
     // ---- Blob -------------------------------------------------------------
     {
-        Item ctor = js_new_function((void*)js_blob_new, 2);
+        Item ctor = js_new_native_constructor(js_blob_new);
         js_set_function_name(ctor, make_str("Blob"));
         Item proto = js_new_object();
         js_property_set(proto, make_str("constructor"), ctor);
         js_property_set(proto, make_str("text"),
-            js_new_function((void*)js_blob_text, 0));
+            js_new_native_function(js_blob_text));
         js_property_set(proto, make_str("arrayBuffer"),
-            js_new_function((void*)js_blob_array_buffer, 0));
+            js_new_native_function(js_blob_array_buffer));
         js_property_set(proto, make_str("slice"),
-            js_new_function((void*)js_blob_slice, 3));
+            js_new_native_function(js_blob_slice));
         js_property_set(ctor, make_str("prototype"), proto);
         g_blob_proto = proto;
         js_property_set(global_this, make_str("Blob"), ctor);
@@ -1745,7 +1745,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
 
     // ---- File -------------------------------------------------------------
     {
-        Item ctor = js_new_function((void*)js_file_new, 3);
+        Item ctor = js_new_native_constructor(js_file_new);
         js_set_function_name(ctor, make_str("File"));
         Item proto = js_new_object();
         js_property_set(proto, make_str("constructor"), ctor);
@@ -1757,38 +1757,52 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
 
     // ---- ClipboardItem ---------------------------------------------------
     {
-        Item ctor = js_new_function((void*)js_clipboard_item_new, 2);
+        Item ctor = js_new_native_constructor(js_clipboard_item_new);
         js_set_function_name(ctor, make_str("ClipboardItem"));
         Item proto = js_new_object();
         js_property_set(proto, make_str("constructor"), ctor);
         js_property_set(proto, make_str("getType"),
-            js_new_function((void*)js_clipboard_item_get_type, 1));
+            js_new_native_function(js_clipboard_item_get_type));
         js_property_set(ctor, make_str("prototype"), proto);
         js_property_set(ctor, make_str("supports"),
-            js_new_function((void*)js_clipboard_item_supports, 1));
+            js_new_native_function(js_clipboard_item_supports));
         g_clipboard_item_proto = proto;
         js_property_set(global_this, make_str("ClipboardItem"), ctor);
     }
 
     // ---- FileList --------------------------------------------------------
     {
-        Item ctor = js_new_function((void*)js_file_list_new, 0);
-        js_set_function_name(ctor, make_str("FileList"));
-        Item proto = js_new_object();
-        js_property_set(proto, make_str("constructor"), ctor);
-        js_property_set(proto, make_str("item"),
-            js_new_function((void*)js_dt_files_item, 1));
-        js_property_set(proto, js_well_known_symbol_key(4), make_str("FileList"));
-        Item array_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY);
-        if (get_type_id(array_proto) == LMD_TYPE_MAP) js_set_prototype(proto, array_proto);
-        js_property_set(ctor, make_str("prototype"), proto);
-        g_file_list_proto = proto;
-        js_property_set(global_this, make_str("FileList"), ctor);
+        RootFrame roots(4);
+        Rooted<Item> ctor_root(roots,
+            js_new_native_constructor(js_file_list_new));
+        Rooted<Item> proto_root(roots, ItemNull);
+        Rooted<Item> method_root(roots, ItemNull);
+        Rooted<Item> array_proto_root(roots, ItemNull);
+        js_set_function_name(ctor_root.get(), make_str("FileList"));
+        proto_root.set(js_new_object());
+        js_property_set(proto_root.get(), make_str("constructor"),
+            ctor_root.get());
+        method_root.set(js_new_native_function(js_dt_files_item));
+        js_property_set(proto_root.get(), make_str("item"), method_root.get());
+        js_property_set(proto_root.get(), js_well_known_symbol_key(4),
+            make_str("FileList"));
+        array_proto_root.set(
+            js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY));
+        if (get_type_id(array_proto_root.get()) == LMD_TYPE_MAP) {
+            js_set_prototype(proto_root.get(), array_proto_root.get());
+        }
+        js_initialize_native_constructor_prototype(ctor_root.get(),
+            proto_root.get());
+        // D5.4.3/D6.2.2v2: FileList arrays and the realm constructor must share
+        // the same precisely rooted prototype; otherwise a nursery relocation
+        // splits instanceof identity from the public constructor property.
+        g_file_list_proto = proto_root.get();
+        js_property_set(global_this, make_str("FileList"), ctor_root.get());
     }
 
     // ---- ClipboardEvent --------------------------------------------------
     {
-        Item ctor = js_new_function((void*)js_clipboard_event_new, 2);
+        Item ctor = js_new_native_constructor(js_clipboard_event_new);
         js_set_function_name(ctor, make_str("ClipboardEvent"));
         Item proto = js_new_object();
         js_property_set(proto, make_str("constructor"), ctor);
@@ -1799,7 +1813,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
 
     // ---- DataTransfer ----------------------------------------------------
     {
-        Item ctor = js_new_function((void*)js_data_transfer_new, 0);
+        Item ctor = js_new_native_constructor(js_data_transfer_new);
         js_set_function_name(ctor, make_str("DataTransfer"));
         Item proto = js_new_object();
         js_property_set(proto, make_str("constructor"), ctor);
@@ -1814,18 +1828,18 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     // `Clipboard.prototype.{write,read,readText,writeText}` is observable.
     Item clipboard_proto;
     {
-        Item ctor = js_new_function((void*)js_data_transfer_new, 0); // dummy ctor
+        Item ctor = js_new_native_constructor(js_data_transfer_new); // dummy ctor
         js_set_function_name(ctor, make_str("Clipboard"));
         clipboard_proto = js_new_object();
         js_property_set(clipboard_proto, make_str("constructor"), ctor);
         js_property_set(clipboard_proto, make_str("writeText"),
-            js_new_function((void*)js_clipboard_write_text, 1));
+            js_new_native_function(js_clipboard_write_text));
         js_property_set(clipboard_proto, make_str("readText"),
-            js_new_function((void*)js_clipboard_read_text, 0));
+            js_new_native_function(js_clipboard_read_text));
         js_property_set(clipboard_proto, make_str("write"),
-            js_new_function((void*)js_clipboard_write, 1));
+            js_new_native_function(js_clipboard_write));
         js_property_set(clipboard_proto, make_str("read"),
-            js_new_function((void*)js_clipboard_read, 1));
+            js_new_native_function(js_clipboard_read));
         js_property_set(ctor, make_str("prototype"), clipboard_proto);
         js_property_set(global_this, make_str("Clipboard"), ctor);
     }
@@ -1835,15 +1849,15 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     // helpers and the synthetic Cmd+C/V keyboard handler share the same
     // underlying store as `navigator.clipboard.{readText,writeText}`.
     js_property_set(global_this, make_str("__lambda_clipboard_clear"),
-        js_new_function((void*)js_lambda_clipboard_clear, 0));
+        js_new_native_function(js_lambda_clipboard_clear));
     js_property_set(global_this, make_str("__lambda_clipboard_write_records"),
-        js_new_function((void*)js_lambda_clipboard_write_records, 1));
+        js_new_native_function(js_lambda_clipboard_write_records));
     js_property_set(global_this, make_str("__lambda_clipboard_read_records"),
-        js_new_function((void*)js_lambda_clipboard_read_records, 0));
+        js_new_native_function(js_lambda_clipboard_read_records));
     js_property_set(global_this, make_str("__lambda_clipboard_set_perm"),
-        js_new_function((void*)js_lambda_clipboard_set_perm, 2));
+        js_new_native_function(js_lambda_clipboard_set_perm));
     js_property_set(global_this, make_str("__lambda_clipboard_get_perm"),
-        js_new_function((void*)js_lambda_clipboard_get_perm, 1));
+        js_new_native_function(js_lambda_clipboard_get_perm));
 
     // navigator + navigator.clipboard backed by C store. Methods come from
     // Clipboard.prototype above (writeText/readText/write/read). We also
@@ -1864,7 +1878,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
 
         Item permissions = js_new_object();
         js_property_set(permissions, make_str("query"),
-            js_new_function((void*)js_permissions_query, 1));
+            js_new_native_function(js_permissions_query));
 
         Item navigator = js_new_object();
         js_property_set(navigator, make_str("clipboard"), clipboard);

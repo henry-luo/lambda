@@ -135,6 +135,11 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
                           uint64_t* result_home);
 Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                              const char* filename, uint64_t* result_home);
+// Compile preprocessed TypeScript with the JS parser while retaining the TS
+// language-profile intrinsics during MIR lowering.
+Item transpile_js_typescript_to_mir_len(Runtime* runtime, const char* js_source,
+                                        size_t js_source_len, const char* filename,
+                                        uint64_t* result_home);
 
 // Batch mode preamble support (two-module MIR split)
 struct JsModuleConstEntry;  // defined in transpile_js_mir.cpp
@@ -156,9 +161,10 @@ struct JsPreambleState {
 
 enum JsMirCacheMode {
     JS_MIR_CACHE_PREAMBLE = 1,
-    JS_MIR_CACHE_EXTERNAL_CLASSIC = 2,
-    JS_MIR_CACHE_INLINE_CLASSIC = 3,
-    JS_MIR_CACHE_MODULE = 4,
+    JS_MIR_CACHE_LIFECYCLE = 2,
+    JS_MIR_CACHE_EXTERNAL_CLASSIC = 3,
+    JS_MIR_CACHE_INLINE_CLASSIC = 4,
+    JS_MIR_CACHE_MODULE = 5,
 };
 
 struct JsMirCache;
@@ -192,6 +198,15 @@ Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const
 Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                       const char* filename, JsPreambleState* out_state,
                                       uint64_t* result_home);
+Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                                 const char* filename, JsPreambleState* out_state);
+Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
+                                      size_t js_source_len, const char* filename,
+                                      const JsPreambleState* preamble,
+                                      JsPreambleState* out_state);
+Item execute_compiled_js_in_current_realm(Runtime* runtime,
+                                          const JsPreambleState* base_preamble,
+                                          const JsPreambleState* compiled_state);
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble, uint64_t* result_home);
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
@@ -276,7 +291,18 @@ bool js_property_has(Item object, Item key);
 Item js_call_function(Item func, Item this_binding, Item* args, int arg_count);
 Item js_call_function_into(Item func, Item this_binding, Item* args,
                            int arg_count, uint64_t* result_home);
-Item js_new_function(void* func_ptr, int param_count);
+Item js_call_constructor_body_into(Item func, Item this_binding, Item* args,
+                                   int arg_count, Item new_target,
+                                   uint64_t* result_home);
+Item js_call_constructor_body_prerooted_args_into(Item func, Item this_binding,
+                                                  Item* args, int arg_count,
+                                                  Item new_target,
+                                                  uint64_t* result_home);
+Item js_construct_value(Item callee, Item* args, int arg_count, Item new_target,
+                        uint64_t* result_home, bool args_prerooted);
+Item js_construct_value_defer_own_fields(Item callee, Item* args, int arg_count,
+                                         Item new_target);
+Item js_init_class_instance_fields_after_super(Item callee, Item object);
 
 // Array functions
 Item js_array_get(Item array, Item index);
@@ -285,13 +311,7 @@ int64_t js_array_length(Item array);
 Item js_array_push(Item array, Item value);
 Item js_array_pop(Item array);
 
-// String, Array, Math method dispatchers (v3)
-Item js_string_method(Item str, Item method_name, Item* args, int argc);
-Item js_array_method(Item arr, Item method_name, Item* args, int argc);
-Item js_math_method(Item method_name, Item* args, int argc);
-Item js_math_apply(Item method_name, Item args_array);
-Item js_method_call_apply(Item obj, Item method_name, Item args_array);
-Item js_math_property(Item prop_name);
+// Math helpers retained for exact namespace operations.
 
 // Prototype and inheritance
 Item js_prototype_lookup(Item object, Item property);

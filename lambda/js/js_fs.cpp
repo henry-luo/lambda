@@ -145,7 +145,7 @@ static Item fs_validate_encoding_item(Item encoding_item) {
 
 static Item fs_permission_callback_error(Item callback, const char* permission, const char* path, const char* message) {
     Item err = js_permission_make_fs_error(permission, path, message);
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         Item args[1] = {err};
         js_call_function(callback, ItemNull, args, 1);
     }
@@ -359,7 +359,7 @@ extern "C" Item js_get_internal_fs_binding_namespace(void) {
     if (!fs_ensure_roots()) return ItemNull;
     if (internal_fs_binding_namespace.item == 0) {
         internal_fs_binding_namespace = js_new_object();
-        internal_fs_default_fstat = js_new_function((void*)js_internal_fs_fstat, 1);
+        internal_fs_default_fstat = js_new_native_function(js_internal_fs_fstat);
         js_property_set(internal_fs_binding_namespace, make_string_item("fstat"), internal_fs_default_fstat);
         js_property_set(internal_fs_binding_namespace, make_string_item("default"), internal_fs_binding_namespace);
     }
@@ -370,7 +370,7 @@ static void fs_maybe_call_internal_fstat_hook(int fd) {
     if (internal_fs_binding_namespace.item == 0) return;
     Item fstat = js_property_get(internal_fs_binding_namespace, make_string_item("fstat"));
     if (fstat.item == internal_fs_default_fstat.item) return;
-    if (get_type_id(fstat) != LMD_TYPE_FUNC) return;
+    if (!js_is_callable(fstat)) return;
     Item fd_item = (Item){.item = i2it((int64_t)fd)};
     // This optional instrumentation hook is deliberately observational; consume
     // a hook failure so it cannot replace the filesystem operation's result.
@@ -378,7 +378,9 @@ static void fs_maybe_call_internal_fstat_hook(int fd) {
     if (item_is_error(hook_result)) (void)js_error_lane_payload(hook_result);
 }
 
-static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count);
+template <typename Target>
+static Item js_fs_set_method(Item ns, const char* name, Target target,
+                             int adapter_arity);
 
 static Item fs_parse_access_mode(Item mode_item, bool has_mode, int* out_mode) {
     *out_mode = 0;
@@ -590,13 +592,13 @@ static Item get_stats_proto() {
     if (!fs_ensure_roots()) return ItemNull;
     if (stats_proto.item != 0) return stats_proto;
     stats_proto = js_new_object();
-    js_property_set(stats_proto, make_string_item("isFile"), js_new_function((void*)js_stats_isFile, 0));
-    js_property_set(stats_proto, make_string_item("isDirectory"), js_new_function((void*)js_stats_isDirectory, 0));
-    js_property_set(stats_proto, make_string_item("isSymbolicLink"), js_new_function((void*)js_stats_isSymbolicLink, 0));
-    js_property_set(stats_proto, make_string_item("isBlockDevice"), js_new_function((void*)js_stats_isBlockDevice, 0));
-    js_property_set(stats_proto, make_string_item("isCharacterDevice"), js_new_function((void*)js_stats_isCharacterDevice, 0));
-    js_property_set(stats_proto, make_string_item("isFIFO"), js_new_function((void*)js_stats_isFIFO, 0));
-    js_property_set(stats_proto, make_string_item("isSocket"), js_new_function((void*)js_stats_isSocket, 0));
+    js_property_set(stats_proto, make_string_item("isFile"), js_new_native_function(js_stats_isFile));
+    js_property_set(stats_proto, make_string_item("isDirectory"), js_new_native_function(js_stats_isDirectory));
+    js_property_set(stats_proto, make_string_item("isSymbolicLink"), js_new_native_function(js_stats_isSymbolicLink));
+    js_property_set(stats_proto, make_string_item("isBlockDevice"), js_new_native_function(js_stats_isBlockDevice));
+    js_property_set(stats_proto, make_string_item("isCharacterDevice"), js_new_native_function(js_stats_isCharacterDevice));
+    js_property_set(stats_proto, make_string_item("isFIFO"), js_new_native_function(js_stats_isFIFO));
+    js_property_set(stats_proto, make_string_item("isSocket"), js_new_native_function(js_stats_isSocket));
     return stats_proto;
 }
 
@@ -803,8 +805,8 @@ static Item js_fs_readstream_drain(Item stream) {
     Item data_cb = js_property_get(stream, make_string_item("__readstream_data_cb__"));
     Item end_cb = js_property_get(stream, make_string_item("__readstream_end_cb__"));
     Item close_cb = js_property_get(stream, make_string_item("__readstream_close_cb__"));
-    bool has_data = get_type_id(data_cb) == LMD_TYPE_FUNC;
-    bool has_terminal = get_type_id(end_cb) == LMD_TYPE_FUNC || get_type_id(close_cb) == LMD_TYPE_FUNC;
+    bool has_data = js_is_callable(data_cb);
+    bool has_terminal = js_is_callable(end_cb) || js_is_callable(close_cb);
     if (!has_data || !has_terminal) return make_js_undefined();
 
     Item path_item = js_property_get(stream, make_string_item("__readstream_path__"));
@@ -818,10 +820,10 @@ static Item js_fs_readstream_drain(Item stream) {
     Item data_args[1] = {chunk};
     JS_ASSIGN_OR_RETURN(callback_result, js_call_function(data_cb, stream, data_args, 1));
 
-    if (get_type_id(end_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(end_cb)) {
         JS_ASSIGN_OR_RETURN_INTO(callback_result, js_call_function(end_cb, stream, NULL, 0));
     }
-    if (get_type_id(close_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(close_cb)) {
         JS_ASSIGN_OR_RETURN_INTO(callback_result, js_call_function(close_cb, stream, NULL, 0));
     }
     return make_js_undefined();
@@ -829,7 +831,7 @@ static Item js_fs_readstream_drain(Item stream) {
 
 extern "C" Item js_fs_readstream_on(Item event_item, Item callback_item) {
     Item stream = js_get_this();
-    if (get_type_id(event_item) != LMD_TYPE_STRING || get_type_id(callback_item) != LMD_TYPE_FUNC) {
+    if (get_type_id(event_item) != LMD_TYPE_STRING || !js_is_callable(callback_item)) {
         return stream;
     }
 
@@ -855,13 +857,13 @@ extern "C" Item js_fs_readstream_pipe(Item dest_item) {
     JS_ASSIGN_OR_RETURN(chunk, js_fs_read_file_buffer(path));
 
     Item write_fn = js_property_get(dest_item, make_string_item("write"));
-    if (get_type_id(write_fn) == LMD_TYPE_FUNC) {
+    if (js_is_callable(write_fn)) {
         Item args[1] = {chunk};
         JS_ASSIGN_OR_RETURN(write_result, js_call_function(write_fn, dest_item, args, 1));
     }
 
     Item end_fn = js_property_get(dest_item, make_string_item("end"));
-    if (get_type_id(end_fn) == LMD_TYPE_FUNC) {
+    if (js_is_callable(end_fn)) {
         JS_ASSIGN_OR_RETURN(end_result, js_call_function(end_fn, dest_item, NULL, 0));
     }
 
@@ -871,7 +873,7 @@ extern "C" Item js_fs_readstream_pipe(Item dest_item) {
 
 static Item js_fs_readstream_close(Item callback_item) {
     Item stream = js_get_this();
-    if (get_type_id(callback_item) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback_item)) {
         js_property_set(stream, make_string_item("__destroy_callback__"), callback_item);
     }
     return js_stream_destroy(stream, make_js_undefined());
@@ -903,10 +905,10 @@ extern "C" Item js_fs_createReadStream(Item path_item, Item options_item) {
     // Readable; keep it rooted because each property allocation may compact.
     js_property_set(stream_root.get(), make_string_item("__readstream_path__"), path_root.get());
     js_property_set(stream_root.get(), make_string_item("__readstream_drained__"), (Item){.item = b2it(false)});
-    js_property_set(stream_root.get(), make_string_item("close"), js_new_function((void*)js_fs_readstream_close, 1));
+    js_property_set(stream_root.get(), make_string_item("close"), js_new_native_function(js_fs_readstream_close));
     // keep Readable.on() intact so late 'data' listeners switch buffered
     // fs streams into flowing mode; the fs-only drain path missed data-only consumers.
-    js_property_set(stream_root.get(), make_string_item("pipe"), js_new_function((void*)js_fs_readstream_pipe, 1));
+    js_property_set(stream_root.get(), make_string_item("pipe"), js_new_native_function(js_fs_readstream_pipe));
 
     chunk_root.set(js_fs_read_file_buffer(path));
     if (item_is_error(chunk_root.get())) {
@@ -931,7 +933,7 @@ static Item js_fs_writestream_write(Item chunk_item, Item callback_item) {
     Item stream = js_get_this();
     Item finished = js_property_get(stream, make_string_item("__writestream_finished__"));
     if (get_type_id(finished) == LMD_TYPE_BOOL && it2b(finished)) {
-        if (get_type_id(callback_item) == LMD_TYPE_FUNC) {
+        if (js_is_callable(callback_item)) {
             Item err = js_fs_writestream_write_after_end_error();
             js_call_function(callback_item, stream, &err, 1);
         }
@@ -1004,7 +1006,7 @@ static Item js_fs_writestream_write(Item chunk_item, Item callback_item) {
 
 static void js_fs_writestream_emit_finish(Item stream) {
     Item cb = js_property_get(stream, make_string_item("__writestream_finish_cb__"));
-    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(cb)) {
         js_call_function(cb, stream, NULL, 0);
         js_microtask_flush();
     }
@@ -1012,7 +1014,7 @@ static void js_fs_writestream_emit_finish(Item stream) {
 
 static void js_fs_writestream_emit_close(Item stream) {
     Item cb = js_property_get(stream, make_string_item("__writestream_close_cb__"));
-    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(cb)) {
         js_call_function(cb, stream, NULL, 0);
         js_microtask_flush();
     }
@@ -1022,7 +1024,7 @@ static Item js_fs_writestream_emit_open_tick(Item stream) {
     js_property_set(stream, make_string_item("__writestream_opened__"), (Item){.item = b2it(true)});
     Item cb = js_property_get(stream, make_string_item("__writestream_open_cb__"));
     Item fd_item = js_property_get(stream, make_string_item("fd"));
-    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(cb)) {
         Item args[1] = {fd_item};
         js_call_function(cb, stream, args, 1);
         js_microtask_flush();
@@ -1032,7 +1034,7 @@ static Item js_fs_writestream_emit_open_tick(Item stream) {
 
 static void js_fs_writestream_schedule_open(Item stream) {
     Item bound_args[1] = {stream};
-    Item tick = js_bind_function(js_new_function((void*)js_fs_writestream_emit_open_tick, 1),
+    Item tick = js_bind_function(js_new_native_function(js_fs_writestream_emit_open_tick),
                                  make_js_undefined(), bound_args, 1);
     js_next_tick_enqueue(tick);
 }
@@ -1040,7 +1042,7 @@ static void js_fs_writestream_schedule_open(Item stream) {
 static Item js_fs_writestream_emit_drain_tick(Item stream) {
     js_property_set(stream, make_string_item("__writestream_drain_pending__"), (Item){.item = b2it(false)});
     Item cb = js_property_get(stream, make_string_item("__writestream_drain_cb__"));
-    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(cb)) {
         js_call_function(cb, stream, NULL, 0);
         js_microtask_flush();
     }
@@ -1052,7 +1054,7 @@ static void js_fs_writestream_schedule_drain(Item stream) {
     if (get_type_id(pending) == LMD_TYPE_BOOL && it2b(pending)) return;
     js_property_set(stream, make_string_item("__writestream_drain_pending__"), (Item){.item = b2it(true)});
     Item bound_args[1] = {stream};
-    Item tick = js_bind_function(js_new_function((void*)js_fs_writestream_emit_drain_tick, 1),
+    Item tick = js_bind_function(js_new_native_function(js_fs_writestream_emit_drain_tick),
                                  make_js_undefined(), bound_args, 1);
     js_next_tick_enqueue(tick);
 }
@@ -1092,8 +1094,8 @@ static void js_fs_writestream_call_open_hook(Item stream, Item path_item, Item f
     Item hooks = js_fs_writestream_hooks(stream);
     if (get_type_id(hooks) != LMD_TYPE_MAP) return;
     Item open_fn = js_property_get(hooks, make_string_item("open"));
-    if (get_type_id(open_fn) != LMD_TYPE_FUNC) return;
-    Item cb = js_new_function((void*)js_fs_writestream_open_hook_cb, 2);
+    if (!js_is_callable(open_fn)) return;
+    Item cb = js_new_native_function(js_fs_writestream_open_hook_cb);
     Item args[4] = {path_item, flags, mode, cb};
     js_call_function(open_fn, hooks, args, 4);
 }
@@ -1102,10 +1104,10 @@ static void js_fs_writestream_call_write_hook(Item stream, Item fd_item) {
     Item hooks = js_fs_writestream_hooks(stream);
     if (get_type_id(hooks) != LMD_TYPE_MAP || get_type_id(fd_item) != LMD_TYPE_INT) return;
     Item writev_fn = js_property_get(hooks, make_string_item("writev"));
-    if (get_type_id(writev_fn) == LMD_TYPE_FUNC) return;
+    if (js_is_callable(writev_fn)) return;
     Item write_fn = js_property_get(hooks, make_string_item("write"));
-    if (get_type_id(write_fn) != LMD_TYPE_FUNC) return;
-    Item cb = js_new_function((void*)js_fs_writestream_io_hook_cb, 3);
+    if (!js_is_callable(write_fn)) return;
+    Item cb = js_new_native_function(js_fs_writestream_io_hook_cb);
     Item args[4] = {fd_item, make_string_item("", 0), (Item){.item = i2it(0)}, cb};
     js_call_function(write_fn, hooks, args, 4);
 }
@@ -1114,10 +1116,10 @@ static void js_fs_writestream_call_writev_hook(Item stream) {
     Item hooks = js_fs_writestream_hooks(stream);
     if (get_type_id(hooks) != LMD_TYPE_MAP) return;
     Item writev_fn = js_property_get(hooks, make_string_item("writev"));
-    if (get_type_id(writev_fn) != LMD_TYPE_FUNC) return;
+    if (!js_is_callable(writev_fn)) return;
     Item fd_item = js_property_get(stream, make_string_item("fd"));
     if (get_type_id(fd_item) != LMD_TYPE_INT) return;
-    Item cb = js_new_function((void*)js_fs_writestream_io_hook_cb, 3);
+    Item cb = js_new_native_function(js_fs_writestream_io_hook_cb);
     Item args[3] = {fd_item, js_array_new(0), cb};
     js_call_function(writev_fn, hooks, args, 3);
 }
@@ -1133,8 +1135,8 @@ static void js_fs_writestream_close_if_needed(Item stream) {
     Item close_fn = get_type_id(hooks) == LMD_TYPE_MAP ?
         js_property_get(hooks, make_string_item("close")) :
         js_property_get(fs_namespace, make_string_item("close"));
-    if (get_type_id(close_fn) == LMD_TYPE_FUNC) {
-        Item noop = js_new_function((void*)js_fs_writestream_close_noop, 1);
+    if (js_is_callable(close_fn)) {
+        Item noop = js_new_native_function(js_fs_writestream_close_noop);
         Item args[2] = {fd_item, noop};
         js_call_function(close_fn, fs_namespace, args, 2);
     } else {
@@ -1160,7 +1162,7 @@ static Item js_fs_writestream_end(Item chunk_item) {
 
 static Item js_fs_writestream_on(Item event_item, Item callback_item) {
     Item stream = js_get_this();
-    if (get_type_id(event_item) != LMD_TYPE_STRING || get_type_id(callback_item) != LMD_TYPE_FUNC) {
+    if (get_type_id(event_item) != LMD_TYPE_STRING || !js_is_callable(callback_item)) {
         return stream;
     }
     String* event = it2s(event_item);
@@ -1274,11 +1276,11 @@ extern "C" Item js_fs_createWriteStream(Item path_item, Item options_item) {
     }
 
     js_property_set(stream_root.get(), make_string_item("write"),
-                    js_new_function((void*)js_fs_writestream_write, 2));
+                    js_new_native_function(js_fs_writestream_write));
     js_property_set(stream_root.get(), make_string_item("end"),
-                    js_new_function((void*)js_fs_writestream_end, 1));
+                    js_new_native_function(js_fs_writestream_end));
     js_property_set(stream_root.get(), make_string_item("on"),
-                    js_new_function((void*)js_fs_writestream_on, 2));
+                    js_new_native_function(js_fs_writestream_on));
     return stream_root.get();
 }
 
@@ -1421,7 +1423,7 @@ extern "C" Item js_fs_mkdir_async(Item path_item, Item options_or_cb, Item callb
     Item options = options_or_cb;
 
     // if second arg is a function, it's the callback (no options)
-    if (get_type_id(options_or_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(options_or_cb)) {
         callback = options_or_cb;
         options = ItemNull;
     }
@@ -1446,7 +1448,7 @@ extern "C" Item js_fs_mkdir_async(Item path_item, Item options_or_cb, Item callb
     int r = uv_fs_mkdir(NULL, &req, path, mode, NULL);
     uv_fs_req_cleanup(&req);
 
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         if (r < 0 && !(recursive && r == UV_EEXIST)) {
             Item err = js_new_error(make_string_item(uv_strerror(r)));
             js_property_set(err, make_string_item("code"),
@@ -2018,7 +2020,7 @@ static void fs_req_free(JsFsReq* fsreq) {
 }
 
 static Item fs_req_call_callback(JsFsReq* fsreq, Item* args, int arg_count) {
-    if (!fsreq || fsreq->detached || get_type_id(fsreq->callback) != LMD_TYPE_FUNC) {
+    if (!fsreq || fsreq->detached || !js_is_callable(fsreq->callback)) {
         return make_js_undefined();
     }
     return js_domain_call_function(fsreq->domain, fsreq->callback, ItemNull, args, arg_count);
@@ -2089,7 +2091,7 @@ static void fs_read_file_destroy(void* user) {
 // fs.readFile(path[, options], callback)
 extern "C" Item js_fs_readFile(Item path_item, Item options_or_cb, Item callback_item) {
     Item callback = callback_item;
-    if (get_type_id(options_or_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(options_or_cb)) {
         callback = options_or_cb;
     } else {
         JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_or_cb));
@@ -2185,7 +2187,7 @@ static void fs_write_file_destroy(void* user) {
 // fs.writeFile(path, data[, options], callback)
 extern "C" Item js_fs_writeFile(Item path_item, Item data_item, Item options_or_cb, Item callback_item) {
     Item callback = callback_item;
-    if (get_type_id(options_or_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(options_or_cb)) {
         callback = options_or_cb;
     } else {
         JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_or_cb));
@@ -2351,26 +2353,26 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
 }
 
 extern "C" Item js_fs_read(Item fd_item, Item buffer_item, Item offset_item, Item length_item, Item position_item, Item callback) {
-    if (get_type_id(position_item) == LMD_TYPE_FUNC) {
+    if (js_is_callable(position_item)) {
         callback = position_item;
         position_item = make_js_undefined();
-    } else if (get_type_id(length_item) == LMD_TYPE_FUNC) {
+    } else if (js_is_callable(length_item)) {
         callback = length_item;
         length_item = make_js_undefined();
         position_item = make_js_undefined();
-    } else if (get_type_id(offset_item) == LMD_TYPE_FUNC) {
+    } else if (js_is_callable(offset_item)) {
         callback = offset_item;
         offset_item = make_js_undefined();
         length_item = make_js_undefined();
         position_item = make_js_undefined();
-    } else if (get_type_id(buffer_item) == LMD_TYPE_FUNC) {
+    } else if (js_is_callable(buffer_item)) {
         callback = buffer_item;
         buffer_item = make_js_undefined();
         offset_item = make_js_undefined();
         length_item = make_js_undefined();
         position_item = make_js_undefined();
     }
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
 
@@ -2500,7 +2502,9 @@ static Item js_fs_filehandle_close(void) {
     return js_promise_resolve(make_js_undefined());
 }
 
-static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count);
+template <typename Target>
+static Item js_fs_set_method(Item ns, const char* name, Target target,
+                             int adapter_arity);
 
 static Item js_fs_filehandle_illegal_constructor(void) {
     return js_throw_type_error("FileHandle is not constructible");
@@ -2516,14 +2520,14 @@ static Item fs_get_filehandle_prototype(void) {
     if (fs_filehandle_proto.item != 0) return fs_filehandle_proto;
 
     fs_filehandle_proto = js_new_object();
-    Item fd_getter = js_new_function((void*)js_fs_filehandle_fd_getter, 0);
+    Item fd_getter = js_new_native_function(js_fs_filehandle_fd_getter);
     js_install_native_accessor(fs_filehandle_proto, make_string_item("fd"), fd_getter,
                                ItemNull, JSPD_NON_ENUMERABLE);
-    js_fs_set_method(fs_filehandle_proto, "read", (void*)js_fs_filehandle_read, 4);
-    js_fs_set_method(fs_filehandle_proto, "readFile", (void*)js_fs_filehandle_readFile, 1);
-    js_fs_set_method(fs_filehandle_proto, "close", (void*)js_fs_filehandle_close, 0);
+    js_fs_set_method(fs_filehandle_proto, "read", js_fs_filehandle_read, 4);
+    js_fs_set_method(fs_filehandle_proto, "readFile", js_fs_filehandle_readFile, 1);
+    js_fs_set_method(fs_filehandle_proto, "close", js_fs_filehandle_close, 0);
     js_property_set(fs_filehandle_proto, js_well_known_symbol_key(14),
-        js_new_function((void*)js_fs_filehandle_close, 0));
+        js_new_native_function(js_fs_filehandle_close));
     return fs_filehandle_proto;
 }
 
@@ -2532,7 +2536,7 @@ static Item fs_get_filehandle_constructor(void) {
     if (fs_filehandle_ctor.item != 0) return fs_filehandle_ctor;
 
     Item proto = fs_get_filehandle_prototype();
-    fs_filehandle_ctor = js_new_function((void*)js_fs_filehandle_illegal_constructor, 0);
+    fs_filehandle_ctor = js_new_native_constructor(js_fs_filehandle_illegal_constructor);
     js_property_set(fs_filehandle_ctor, make_string_item("prototype"), proto);
     js_property_set(proto, make_string_item("constructor"), fs_filehandle_ctor);
     return fs_filehandle_ctor;
@@ -2615,20 +2619,20 @@ static Item fs_write_parse_options(Item options_item, Item data_item,
 extern "C" Item js_fs_write(Item fd_item, Item data_item, Item offset_item,
                             Item length_item, Item position_item, Item callback_item) {
     Item callback = callback_item;
-    if (get_type_id(position_item) == LMD_TYPE_FUNC) {
+    if (js_is_callable(position_item)) {
         callback = position_item;
         position_item = make_js_undefined();
-    } else if (get_type_id(length_item) == LMD_TYPE_FUNC) {
+    } else if (js_is_callable(length_item)) {
         callback = length_item;
         length_item = make_js_undefined();
         position_item = make_js_undefined();
-    } else if (get_type_id(offset_item) == LMD_TYPE_FUNC) {
+    } else if (js_is_callable(offset_item)) {
         callback = offset_item;
         offset_item = make_js_undefined();
         length_item = make_js_undefined();
         position_item = make_js_undefined();
     }
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
 
@@ -2647,7 +2651,7 @@ extern "C" Item js_fs_write(Item fd_item, Item data_item, Item offset_item,
         write_offset = (Item){.item = i2it(0)};
         write_length = make_js_undefined();
         write_position = offset_item;
-        if (fs_is_nullish(write_position) || get_type_id(write_position) == LMD_TYPE_FUNC) {
+        if (fs_is_nullish(write_position) || js_is_callable(write_position)) {
             write_position = make_js_undefined();
         }
         JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_item(length_item));
@@ -2721,11 +2725,11 @@ extern "C" Item js_fs_readvSync(Item fd_item, Item buffers_item, Item position_i
 extern "C" Item js_fs_readv(Item fd_item, Item buffers_item, Item position_item, Item callback_item) {
     Item callback = callback_item;
     Item position = position_item;
-    if (get_type_id(position_item) == LMD_TYPE_FUNC) {
+    if (js_is_callable(position_item)) {
         callback = position_item;
         position = make_js_undefined();
     }
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
     JS_ASSIGN_OR_RETURN(bytes_read, js_fs_readvSync(fd_item, buffers_item, position));
@@ -2762,11 +2766,11 @@ extern "C" Item js_fs_writevSync(Item fd_item, Item buffers_item, Item position_
 extern "C" Item js_fs_writev(Item fd_item, Item buffers_item, Item position_item, Item callback_item) {
     Item callback = callback_item;
     Item position = position_item;
-    if (get_type_id(position_item) == LMD_TYPE_FUNC) {
+    if (js_is_callable(position_item)) {
         callback = position_item;
         position = make_js_undefined();
     }
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
     JS_ASSIGN_OR_RETURN(bytes_written, js_fs_writevSync(fd_item, buffers_item, position));
@@ -2826,7 +2830,7 @@ static Item js_fs_access_async(Item path_item, Item mode_or_cb, Item callback_it
     Item callback = callback_item;
     Item mode_item = mode_or_cb;
     bool has_mode = true;
-    if (get_type_id(mode_or_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(mode_or_cb)) {
         callback = mode_or_cb;
         mode_item = make_js_undefined();
         has_mode = false;
@@ -2834,7 +2838,7 @@ static Item js_fs_access_async(Item path_item, Item mode_or_cb, Item callback_it
         has_mode = get_type_id(mode_or_cb) != LMD_TYPE_UNDEFINED;
     }
 
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
 
@@ -2868,11 +2872,11 @@ static Item js_fs_stat_like_async(Item path_item, Item opts_or_cb, Item callback
         bool use_lstat) {
     Item callback = callback_item;
     Item options = opts_or_cb;
-    if (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(opts_or_cb)) {
         callback = opts_or_cb;
         options = make_js_undefined();
     }
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
 
@@ -2915,11 +2919,11 @@ static Item js_fs_lstat_async(Item path_item, Item opts_or_cb, Item callback_ite
 static Item js_fs_statfs_async(Item path_item, Item opts_or_cb, Item callback_item) {
     Item callback = callback_item;
     Item options = opts_or_cb;
-    if (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(opts_or_cb)) {
         callback = opts_or_cb;
         options = make_js_undefined();
     }
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
     JS_ASSIGN_OR_RETURN(result, js_fs_statfsSync(path_item, options));
@@ -2932,12 +2936,12 @@ static Item js_fs_statfs_async(Item path_item, Item opts_or_cb, Item callback_it
 static Item js_fs_open_async(Item path_item, Item flags_item, Item mode_or_cb, Item callback_item) {
     Item callback = callback_item;
     Item mode_item = mode_or_cb;
-    if (get_type_id(mode_or_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(mode_or_cb)) {
         callback = mode_or_cb;
         mode_item = make_js_undefined();
     }
     JS_ASSIGN_OR_RETURN(fd, js_fs_openSync(path_item, flags_item, mode_item));
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         if (fd.item == ITEM_NULL || get_type_id(fd) == LMD_TYPE_NULL) {
             char path_buf[1024];
             const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
@@ -2955,7 +2959,7 @@ static Item js_fs_open_async(Item path_item, Item flags_item, Item mode_or_cb, I
 // fs.close(fd, callback)
 static Item js_fs_close_async(Item fd_item, Item callback) {
     js_fs_closeSync(fd_item);
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         Item args[1] = {ItemNull};
         js_call_function(callback, ItemNull, args, 1);
     }
@@ -2965,7 +2969,7 @@ static Item js_fs_close_async(Item fd_item, Item callback) {
 // fs.chmod(path, mode, callback)
 static Item js_fs_chmod_async(Item path_item, Item mode_item, Item callback) {
     JS_ASSIGN_OR_RETURN(result, js_fs_chmodSync(path_item, mode_item));
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         Item args[1] = {ItemNull};
         js_call_function(callback, ItemNull, args, 1);
     }
@@ -2981,7 +2985,7 @@ static Item js_fs_unlink_async(Item path_item, Item callback) {
     uv_fs_t req;
     int r = uv_fs_unlink(NULL, &req, path, NULL);
     uv_fs_req_cleanup(&req);
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         if (r < 0) {
             Item err = make_fs_error(r, path);
             Item args[1] = {err};
@@ -3009,7 +3013,7 @@ static Item js_fs_exists_async(Item path_item, Item callback) {
         uv_fs_req_cleanup(&req);
         exists = (r == 0);
     }
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         Item args[1] = {(Item){.item = b2it(exists)}};
         js_call_function(callback, ItemNull, args, 1);
     }
@@ -3019,7 +3023,7 @@ static Item js_fs_exists_async(Item path_item, Item callback) {
 // fs.rename(oldPath, newPath, callback)
 static Item js_fs_rename_async(Item old_item, Item new_item, Item callback) {
     JS_ASSIGN_OR_RETURN(result, js_fs_renameSync(old_item, new_item));
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         Item args[1] = {ItemNull};
         js_call_function(callback, ItemNull, args, 1);
     }
@@ -3029,11 +3033,11 @@ static Item js_fs_rename_async(Item old_item, Item new_item, Item callback) {
 // fs.readdir(path[, options], callback)
 static Item js_fs_readdir_async(Item path_item, Item opts_or_cb, Item callback_item) {
     Item callback = callback_item;
-    if (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(opts_or_cb)) {
         callback = opts_or_cb;
     }
     JS_ASSIGN_OR_RETURN(result, js_fs_readdirSync(path_item, opts_or_cb));
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         if (result.item == ITEM_NULL || get_type_id(result) == LMD_TYPE_NULL) {
             char path_buf[1024];
             const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
@@ -3052,12 +3056,12 @@ static Item js_fs_readdir_async(Item path_item, Item opts_or_cb, Item callback_i
 static Item js_fs_fstat_async(Item fd_item, Item opts_or_cb, Item callback_item) {
     Item callback = callback_item;
     Item options = opts_or_cb;
-    if (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(opts_or_cb)) {
         callback = opts_or_cb;
         options = make_js_undefined();
     }
     Item result = js_fs_fstatSync(fd_item, options);
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         if (result.item == ITEM_NULL || get_type_id(result) == LMD_TYPE_NULL) {
             Item err = make_fs_error(UV_EBADF, NULL);
             Item args[1] = {err};
@@ -3074,13 +3078,10 @@ static Item js_fs_fstat_async(Item fd_item, Item opts_or_cb, Item callback_item)
 // fs Module Namespace Object
 // =============================================================================
 
-static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    RootFrame roots(3);
-    Rooted<Item> ns_root(roots, ns);
-    Rooted<Item> key_root(roots, make_string_item(name));
-    Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
-    js_property_set(ns_root.get(), key_root.get(), fn_root.get());
-    return fn_root.get();
+template <typename Target>
+static Item js_fs_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
+    return js_install_native_method(ns, name, target, adapter_arity);
 }
 
 static void js_fs_set_custom_promisify_args(Item fn, const char* name1, const char* name2) {
@@ -3094,10 +3095,13 @@ static void js_fs_set_custom_promisify_args(Item fn, const char* name1, const ch
     js_property_set(fn_root.get(), symbol_root.get(), names_root.get());
 }
 
-static void js_fs_set_custom_promisify(Item fn, void* func_ptr, int param_count) {
+template <typename Target>
+static void js_fs_set_custom_promisify(Item fn, Target target,
+        int adapter_arity) {
     RootFrame roots(3);
     Rooted<Item> fn_root(roots, fn);
-    Rooted<Item> custom_root(roots, js_new_function(func_ptr, param_count));
+    Rooted<Item> custom_root(roots,
+        js_new_native_function(target, adapter_arity));
     Rooted<Item> symbol_root(roots, js_util_promisify_custom_symbol());
     js_property_set(fn_root.get(), symbol_root.get(), custom_root.get());
 }
@@ -3124,7 +3128,7 @@ static bool fs_is_abort_signal(Item signal) {
     if (sig_type != LMD_TYPE_MAP && sig_type != LMD_TYPE_OBJECT) return false;
     Item aborted = js_property_get(signal, make_string_item("aborted"));
     Item add_event = js_property_get(signal, make_string_item("addEventListener"));
-    return get_type_id(aborted) == LMD_TYPE_BOOL && get_type_id(add_event) == LMD_TYPE_FUNC;
+    return get_type_id(aborted) == LMD_TYPE_BOOL && js_is_callable(add_event);
 }
 
 static bool fs_signal_aborted(Item signal) {
@@ -3226,7 +3230,7 @@ extern "C" Item js_fs_readFile_promise(Item path, Item opts) {
         env[2] = signal;
         env[3] = resolve_fn;
         env[4] = reject_fn;
-        Item callback = js_new_closure((void*)fs_readFile_promise_deferred, 0, env, 5);
+        Item callback = js_new_native_closure(fs_readFile_promise_deferred, 0, env, 5);
         js_next_tick_enqueue(callback);
         return promise;
     }
@@ -3348,7 +3352,7 @@ static Item js_fs_rmdir_async(Item path_item, Item callback) {
     uv_fs_t req;
     int r = uv_fs_rmdir(NULL, &req, path, NULL);
     uv_fs_req_cleanup(&req);
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         Item args[1] = { r < 0 ? make_fs_error(r, path) : ItemNull };
         js_call_function(callback, ItemNull, args, 1);
     }
@@ -3358,12 +3362,12 @@ static Item js_fs_rmdir_async(Item path_item, Item callback) {
 static Item js_fs_copyFile_async(Item src_item, Item dest_item, Item flags_or_cb, Item callback) {
     // copyFile(src, dest, [flags], callback) — flags is optional
     Item cb = callback;
-    if (get_type_id(flags_or_cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(flags_or_cb)) {
         cb = flags_or_cb;
     }
     Item result = js_fs_copyFileSync(src_item, dest_item);
     if (fs_callback_failed(result)) return result;
-    if (get_type_id(cb) == LMD_TYPE_FUNC) {
+    if (js_is_callable(cb)) {
         Item args[1] = { get_type_id(result) == LMD_TYPE_NULL ? ItemNull : ItemNull };
         js_call_function(cb, ItemNull, args, 1);
     }
@@ -3372,7 +3376,7 @@ static Item js_fs_copyFile_async(Item src_item, Item dest_item, Item flags_or_cb
 
 static void js_fs_callback_string_result(Item cb, Item result, int error_code,
         Item this_arg) {
-    if (get_type_id(cb) != LMD_TYPE_FUNC) return;
+    if (!js_is_callable(cb)) return;
     if (get_type_id(result) == LMD_TYPE_STRING) {
         Item args[2] = {ItemNull, result};
         js_call_function(cb, this_arg, args, 2);
@@ -3384,13 +3388,13 @@ static void js_fs_callback_string_result(Item cb, Item result, int error_code,
 }
 
 static void js_fs_callback_success(Item cb) {
-    if (get_type_id(cb) != LMD_TYPE_FUNC) return;
+    if (!js_is_callable(cb)) return;
     Item args[1] = {ItemNull};
     js_call_function(cb, ItemNull, args, 1);
 }
 
 static Item js_fs_realpath_async(Item path_item, Item opts_or_cb, Item callback) {
-    Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
+    Item cb = js_is_callable(opts_or_cb) ? opts_or_cb : callback;
     Item result = js_fs_realpathSync(path_item, opts_or_cb);
     if (fs_callback_failed(result)) return result;
     js_fs_callback_string_result(cb, result, UV_ENOENT, make_js_undefined());
@@ -3398,7 +3402,7 @@ static Item js_fs_realpath_async(Item path_item, Item opts_or_cb, Item callback)
 }
 
 static Item js_fs_mkdtemp_async(Item prefix_item, Item opts_or_cb, Item callback) {
-    Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
+    Item cb = js_is_callable(opts_or_cb) ? opts_or_cb : callback;
     Item result = js_fs_mkdtempSync(prefix_item, opts_or_cb);
     if (fs_callback_failed(result)) return result;
     js_fs_callback_string_result(cb, result, UV_EINVAL, ItemNull);
@@ -3406,7 +3410,7 @@ static Item js_fs_mkdtemp_async(Item prefix_item, Item opts_or_cb, Item callback
 }
 
 static Item js_fs_readlink_async(Item path_item, Item opts_or_cb, Item callback) {
-    Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
+    Item cb = js_is_callable(opts_or_cb) ? opts_or_cb : callback;
     Item result = js_fs_readlinkSync(path_item, opts_or_cb);
     if (fs_callback_failed(result)) return result;
     js_fs_callback_string_result(cb, result, UV_EINVAL, ItemNull);
@@ -3414,7 +3418,7 @@ static Item js_fs_readlink_async(Item path_item, Item opts_or_cb, Item callback)
 }
 
 static Item js_fs_symlink_async(Item target_item, Item path_item, Item type_or_cb, Item callback) {
-    Item cb = (get_type_id(type_or_cb) == LMD_TYPE_FUNC) ? type_or_cb : callback;
+    Item cb = js_is_callable(type_or_cb) ? type_or_cb : callback;
     Item result = js_fs_symlinkSync(target_item, path_item);
     if (fs_callback_failed(result)) return result;
     js_fs_callback_success(cb);
@@ -3422,8 +3426,8 @@ static Item js_fs_symlink_async(Item target_item, Item path_item, Item type_or_c
 }
 
 static Item js_fs_truncate_async(Item path_item, Item len_or_cb, Item callback) {
-    Item cb = (get_type_id(len_or_cb) == LMD_TYPE_FUNC) ? len_or_cb : callback;
-    Item len = (get_type_id(len_or_cb) == LMD_TYPE_FUNC) ? (Item){.item = i2it(0)} : len_or_cb;
+    Item cb = js_is_callable(len_or_cb) ? len_or_cb : callback;
+    Item len = js_is_callable(len_or_cb) ? (Item){.item = i2it(0)} : len_or_cb;
     Item result = js_fs_truncateSync(path_item, len);
     if (fs_callback_failed(result)) return result;
     js_fs_callback_success(cb);
@@ -3431,7 +3435,7 @@ static Item js_fs_truncate_async(Item path_item, Item len_or_cb, Item callback) 
 }
 
 static Item js_fs_appendFile_async(Item path_item, Item data_item, Item opts_or_cb, Item callback) {
-    Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
+    Item cb = js_is_callable(opts_or_cb) ? opts_or_cb : callback;
     Item result = js_fs_appendFileSync(path_item, data_item, opts_or_cb);
     if (fs_callback_failed(result)) return result;
     js_fs_callback_success(cb);
@@ -3460,7 +3464,7 @@ static Item js_fs_fchown_async(Item fd_item, Item uid_item, Item gid_item, Item 
 }
 
 static Item js_fs_lchown_async(Item path_item, Item uid_item, Item gid_item, Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) return js_throw_invalid_arg_type("callback", "function", callback);
+    if (!js_is_callable(callback)) return js_throw_invalid_arg_type("callback", "function", callback);
     JS_ASSIGN_OR_RETURN(result, js_fs_lchownSync(path_item, uid_item, gid_item));
     js_fs_callback_success(callback);
     (void)result;
@@ -3468,7 +3472,7 @@ static Item js_fs_lchown_async(Item path_item, Item uid_item, Item gid_item, Ite
 }
 
 static Item js_fs_chown_async(Item path_item, Item uid_item, Item gid_item, Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) return js_throw_invalid_arg_type("callback", "function", callback);
+    if (!js_is_callable(callback)) return js_throw_invalid_arg_type("callback", "function", callback);
     JS_ASSIGN_OR_RETURN(result, js_fs_chownSync(path_item, uid_item, gid_item));
     js_fs_callback_success(callback);
     (void)result;
@@ -3476,7 +3480,7 @@ static Item js_fs_chown_async(Item path_item, Item uid_item, Item gid_item, Item
 }
 
 static Item js_fs_link_async(Item existing_item, Item new_item, Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    if (!js_is_callable(callback)) return make_js_undefined();
     Item result = js_fs_linkSync(existing_item, new_item);
     if (fs_callback_failed(result)) return result;
     js_fs_callback_success(callback);
@@ -3498,15 +3502,15 @@ static Item js_fs_watcher_unref(void) {
 
 static Item js_fs_make_watcher(void) {
     Item watcher = js_new_object();
-    js_property_set(watcher, make_string_item("close"), js_new_function((void*)js_fs_watcher_close, 0));
-    js_property_set(watcher, make_string_item("ref"), js_new_function((void*)js_fs_watcher_ref, 0));
-    js_property_set(watcher, make_string_item("unref"), js_new_function((void*)js_fs_watcher_unref, 0));
+    js_property_set(watcher, make_string_item("close"), js_new_native_function(js_fs_watcher_close));
+    js_property_set(watcher, make_string_item("ref"), js_new_native_function(js_fs_watcher_ref));
+    js_property_set(watcher, make_string_item("unref"), js_new_native_function(js_fs_watcher_unref));
     return watcher;
 }
 
 static Item js_fs_watch(Item path_item, Item options_or_listener, Item listener_item) {
     (void)listener_item;
-    if (get_type_id(options_or_listener) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(options_or_listener)) {
         JS_ASSIGN_OR_RETURN(validation, fs_validate_watch_options(options_or_listener));
     }
     char path_buf[1024];
@@ -3518,8 +3522,8 @@ static Item js_fs_watch(Item path_item, Item options_or_listener, Item listener_
 
 static Item js_fs_watchFile(Item path_item, Item options_or_listener, Item listener_item) {
     Item listener = listener_item;
-    if (get_type_id(options_or_listener) == LMD_TYPE_FUNC) listener = options_or_listener;
-    if (get_type_id(listener) != LMD_TYPE_FUNC) {
+    if (js_is_callable(options_or_listener)) listener = options_or_listener;
+    if (!js_is_callable(listener)) {
         return js_throw_invalid_arg_type("listener", "function", listener);
     }
     char path_buf[1024];
@@ -3548,7 +3552,7 @@ static Item js_fs_utimesSync(Item path_item, Item atime_item, Item mtime_item) {
 
 static Item js_fs_utimes_async(Item path_item, Item atime_item, Item mtime_item, Item callback) {
     JS_ASSIGN_OR_RETURN(result, js_fs_utimesSync(path_item, atime_item, mtime_item));
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         Item args[1] = {ItemNull};
         js_call_function(callback, ItemNull, args, 1);
     }
@@ -3612,9 +3616,9 @@ extern "C" Item js_get_internal_fs_utils_namespace(void) {
     RootFrame roots(1);
     Rooted<Item> ns_root(roots, js_new_object());
     js_fs_set_method(ns_root.get(), "validateOffsetLengthRead",
-        (void*)js_internal_fs_validateOffsetLengthRead, 3);
+        js_internal_fs_validateOffsetLengthRead, 3);
     js_fs_set_method(ns_root.get(), "validateOffsetLengthWrite",
-        (void*)js_internal_fs_validateOffsetLengthWrite, 3);
+        js_internal_fs_validateOffsetLengthWrite, 3);
     js_property_set(ns_root.get(), make_string_item("default"), ns_root.get());
     return ns_root.get();
 }
@@ -3631,97 +3635,99 @@ extern "C" Item js_get_fs_namespace(void) {
     Rooted<Item> default_key_root(roots, ItemNull);
 
     // synchronous methods
-    js_fs_set_method(fs_namespace, "readFileSync",    (void*)js_fs_readFileSync, 2);
-    js_fs_set_method(fs_namespace, "writeFileSync",   (void*)js_fs_writeFileSync, 3);
-    js_fs_set_method(fs_namespace, "existsSync",      (void*)js_fs_existsSync, 1);
-    js_fs_set_method(fs_namespace, "unlinkSync",      (void*)js_fs_unlinkSync, 1);
-    js_fs_set_method(fs_namespace, "mkdirSync",       (void*)js_fs_mkdirSync, 2);
-    js_fs_set_method(fs_namespace, "rmdirSync",       (void*)js_fs_rmdirSync, 1);
-    js_fs_set_method(fs_namespace, "renameSync",      (void*)js_fs_renameSync, 2);
-    js_fs_set_method(fs_namespace, "readdirSync",     (void*)js_fs_readdirSync, 2);
-    js_fs_set_method(fs_namespace, "statSync",        (void*)js_fs_statSync, 2);
-    js_fs_set_method(fs_namespace, "appendFileSync",  (void*)js_fs_appendFileSync, 3);
-    js_fs_set_method(fs_namespace, "createReadStream",(void*)js_fs_createReadStream, 2);
-    js_fs_set_method(fs_namespace, "createWriteStream",(void*)js_fs_createWriteStream, 2);
-    js_fs_set_method(fs_namespace, "ReadStream",      (void*)js_fs_createReadStream, 2);
-    js_fs_set_method(fs_namespace, "WriteStream",     (void*)js_fs_createWriteStream, 2);
+    js_fs_set_method(fs_namespace, "readFileSync",    js_fs_readFileSync, 2);
+    js_fs_set_method(fs_namespace, "writeFileSync",   js_fs_writeFileSync, 3);
+    js_fs_set_method(fs_namespace, "existsSync",      js_fs_existsSync, 1);
+    js_fs_set_method(fs_namespace, "unlinkSync",      js_fs_unlinkSync, 1);
+    js_fs_set_method(fs_namespace, "mkdirSync",       js_fs_mkdirSync, 2);
+    js_fs_set_method(fs_namespace, "rmdirSync",       js_fs_rmdirSync, 1);
+    js_fs_set_method(fs_namespace, "renameSync",      js_fs_renameSync, 2);
+    js_fs_set_method(fs_namespace, "readdirSync",     js_fs_readdirSync, 2);
+    js_fs_set_method(fs_namespace, "statSync",        js_fs_statSync, 2);
+    js_fs_set_method(fs_namespace, "appendFileSync",  js_fs_appendFileSync, 3);
+    js_fs_set_method(fs_namespace, "createReadStream",js_fs_createReadStream, 2);
+    js_fs_set_method(fs_namespace, "createWriteStream",js_fs_createWriteStream, 2);
+    js_install_native_constructor(fs_namespace, "ReadStream",
+        js_fs_createReadStream, 2);
+    js_install_native_constructor(fs_namespace, "WriteStream",
+        js_fs_createWriteStream, 2);
 
     // asynchronous (callback) methods
-    js_fs_set_method(fs_namespace, "readFile",        (void*)js_fs_readFile, 3);
-    js_fs_set_method(fs_namespace, "writeFile",       (void*)js_fs_writeFile, 4);
-    js_fs_set_method(fs_namespace, "mkdir",           (void*)js_fs_mkdir_async, 3);
-    js_fs_set_method(fs_namespace, "access",          (void*)js_fs_access_async, 3);
-    js_fs_set_method(fs_namespace, "stat",            (void*)js_fs_stat_async, 3);
-    js_fs_set_method(fs_namespace, "statfs",          (void*)js_fs_statfs_async, 3);
-    js_fs_set_method(fs_namespace, "lstat",           (void*)js_fs_lstat_async, 3);
-    js_fs_set_method(fs_namespace, "open",            (void*)js_fs_open_async, 4);
-    js_fs_set_method(fs_namespace, "close",           (void*)js_fs_close_async, 2);
-    js_fs_set_method(fs_namespace, "chmod",           (void*)js_fs_chmod_async, 3);
-    js_fs_set_method(fs_namespace, "unlink",          (void*)js_fs_unlink_async, 2);
-    Item exists_fn = js_fs_set_method(fs_namespace, "exists",          (void*)js_fs_exists_async, 2);
-    js_fs_set_custom_promisify(exists_fn, (void*)js_fs_exists_promisified, 1);
-    js_fs_set_method(fs_namespace, "rename",          (void*)js_fs_rename_async, 3);
-    js_fs_set_method(fs_namespace, "readdir",         (void*)js_fs_readdir_async, 3);
-    js_fs_set_method(fs_namespace, "fstat",           (void*)js_fs_fstat_async, 3);
-    js_fs_set_method(fs_namespace, "rmdir",           (void*)js_fs_rmdir_async, 2);
-    js_fs_set_method(fs_namespace, "copyFile",        (void*)js_fs_copyFile_async, 4);
-    Item realpath_fn = js_fs_set_method(fs_namespace, "realpath",        (void*)js_fs_realpath_async, 3);
+    js_fs_set_method(fs_namespace, "readFile",        js_fs_readFile, 3);
+    js_fs_set_method(fs_namespace, "writeFile",       js_fs_writeFile, 4);
+    js_fs_set_method(fs_namespace, "mkdir",           js_fs_mkdir_async, 3);
+    js_fs_set_method(fs_namespace, "access",          js_fs_access_async, 3);
+    js_fs_set_method(fs_namespace, "stat",            js_fs_stat_async, 3);
+    js_fs_set_method(fs_namespace, "statfs",          js_fs_statfs_async, 3);
+    js_fs_set_method(fs_namespace, "lstat",           js_fs_lstat_async, 3);
+    js_fs_set_method(fs_namespace, "open",            js_fs_open_async, 4);
+    js_fs_set_method(fs_namespace, "close",           js_fs_close_async, 2);
+    js_fs_set_method(fs_namespace, "chmod",           js_fs_chmod_async, 3);
+    js_fs_set_method(fs_namespace, "unlink",          js_fs_unlink_async, 2);
+    Item exists_fn = js_fs_set_method(fs_namespace, "exists",          js_fs_exists_async, 2);
+    js_fs_set_custom_promisify(exists_fn, js_fs_exists_promisified, 1);
+    js_fs_set_method(fs_namespace, "rename",          js_fs_rename_async, 3);
+    js_fs_set_method(fs_namespace, "readdir",         js_fs_readdir_async, 3);
+    js_fs_set_method(fs_namespace, "fstat",           js_fs_fstat_async, 3);
+    js_fs_set_method(fs_namespace, "rmdir",           js_fs_rmdir_async, 2);
+    js_fs_set_method(fs_namespace, "copyFile",        js_fs_copyFile_async, 4);
+    Item realpath_fn = js_fs_set_method(fs_namespace, "realpath",        js_fs_realpath_async, 3);
     js_property_set(realpath_fn, make_string_item("native"), realpath_fn);
-    js_fs_set_method(fs_namespace, "mkdtemp",         (void*)js_fs_mkdtemp_async, 3);
-    js_fs_set_method(fs_namespace, "readlink",        (void*)js_fs_readlink_async, 3);
-    js_fs_set_method(fs_namespace, "symlink",         (void*)js_fs_symlink_async, 4);
-    js_fs_set_method(fs_namespace, "truncate",        (void*)js_fs_truncate_async, 3);
-    js_fs_set_method(fs_namespace, "appendFile",      (void*)js_fs_appendFile_async, 4);
-    js_fs_set_method(fs_namespace, "fchmod",          (void*)js_fs_fchmod_async, 3);
-    js_fs_set_method(fs_namespace, "lchmod",          (void*)js_fs_lchmod_async, 3);
-    js_fs_set_method(fs_namespace, "fchown",          (void*)js_fs_fchown_async, 4);
-    js_fs_set_method(fs_namespace, "lchown",          (void*)js_fs_lchown_async, 4);
-    js_fs_set_method(fs_namespace, "chown",           (void*)js_fs_chown_async, 4);
-    js_fs_set_method(fs_namespace, "link",            (void*)js_fs_link_async, 3);
-    js_fs_set_method(fs_namespace, "watch",           (void*)js_fs_watch, 3);
-    js_fs_set_method(fs_namespace, "watchFile",       (void*)js_fs_watchFile, 3);
-    js_fs_set_method(fs_namespace, "unwatchFile",     (void*)js_fs_unwatchFile, 2);
-    js_fs_set_method(fs_namespace, "utimes",          (void*)js_fs_utimes_async, 4);
+    js_fs_set_method(fs_namespace, "mkdtemp",         js_fs_mkdtemp_async, 3);
+    js_fs_set_method(fs_namespace, "readlink",        js_fs_readlink_async, 3);
+    js_fs_set_method(fs_namespace, "symlink",         js_fs_symlink_async, 4);
+    js_fs_set_method(fs_namespace, "truncate",        js_fs_truncate_async, 3);
+    js_fs_set_method(fs_namespace, "appendFile",      js_fs_appendFile_async, 4);
+    js_fs_set_method(fs_namespace, "fchmod",          js_fs_fchmod_async, 3);
+    js_fs_set_method(fs_namespace, "lchmod",          js_fs_lchmod_async, 3);
+    js_fs_set_method(fs_namespace, "fchown",          js_fs_fchown_async, 4);
+    js_fs_set_method(fs_namespace, "lchown",          js_fs_lchown_async, 4);
+    js_fs_set_method(fs_namespace, "chown",           js_fs_chown_async, 4);
+    js_fs_set_method(fs_namespace, "link",            js_fs_link_async, 3);
+    js_fs_set_method(fs_namespace, "watch",           js_fs_watch, 3);
+    js_fs_set_method(fs_namespace, "watchFile",       js_fs_watchFile, 3);
+    js_fs_set_method(fs_namespace, "unwatchFile",     js_fs_unwatchFile, 2);
+    js_fs_set_method(fs_namespace, "utimes",          js_fs_utimes_async, 4);
 
     // additional sync methods
-    js_fs_set_method(fs_namespace, "copyFileSync",    (void*)js_fs_copyFileSync, 2);
-    Item realpath_sync_fn = js_fs_set_method(fs_namespace, "realpathSync",    (void*)js_fs_realpathSync, 2);
+    js_fs_set_method(fs_namespace, "copyFileSync",    js_fs_copyFileSync, 2);
+    Item realpath_sync_fn = js_fs_set_method(fs_namespace, "realpathSync",    js_fs_realpathSync, 2);
     js_property_set(realpath_sync_fn, make_string_item("native"), realpath_sync_fn);
-    js_fs_set_method(fs_namespace, "statfsSync",      (void*)js_fs_statfsSync, 2);
-    js_fs_set_method(fs_namespace, "accessSync",      (void*)js_fs_accessSync, 2);
-    js_fs_set_method(fs_namespace, "rmSync",          (void*)js_fs_rmSync, 2);
-    js_fs_set_method(fs_namespace, "mkdtempSync",     (void*)js_fs_mkdtempSync, 2);
-    js_fs_set_method(fs_namespace, "chmodSync",       (void*)js_fs_chmodSync, 2);
-    js_fs_set_method(fs_namespace, "fchmodSync",      (void*)js_fs_fchmodSync, 2);
-    js_fs_set_method(fs_namespace, "lchmodSync",      (void*)js_fs_lchmodSync, 2);
-    js_fs_set_method(fs_namespace, "chownSync",       (void*)js_fs_chownSync, 3);
-    js_fs_set_method(fs_namespace, "lchownSync",      (void*)js_fs_lchownSync, 3);
-    js_fs_set_method(fs_namespace, "fchownSync",      (void*)js_fs_fchownSync, 3);
-    js_fs_set_method(fs_namespace, "symlinkSync",     (void*)js_fs_symlinkSync, 2);
-    js_fs_set_method(fs_namespace, "readlinkSync",    (void*)js_fs_readlinkSync, 2);
-    js_fs_set_method(fs_namespace, "lstatSync",       (void*)js_fs_lstatSync, 2);
-    js_fs_set_method(fs_namespace, "truncateSync",    (void*)js_fs_truncateSync, 2);
-    js_fs_set_method(fs_namespace, "utimesSync",      (void*)js_fs_utimesSync, 3);
-    js_fs_set_method(fs_namespace, "linkSync",        (void*)js_fs_linkSync, 2);
-    js_fs_set_method(fs_namespace, "opendirSync",     (void*)js_fs_opendirSync, 2);
-    js_fs_set_method(fs_namespace, "_toUnixTimestamp",(void*)js_fs_toUnixTimestamp, 1);
+    js_fs_set_method(fs_namespace, "statfsSync",      js_fs_statfsSync, 2);
+    js_fs_set_method(fs_namespace, "accessSync",      js_fs_accessSync, 2);
+    js_fs_set_method(fs_namespace, "rmSync",          js_fs_rmSync, 2);
+    js_fs_set_method(fs_namespace, "mkdtempSync",     js_fs_mkdtempSync, 2);
+    js_fs_set_method(fs_namespace, "chmodSync",       js_fs_chmodSync, 2);
+    js_fs_set_method(fs_namespace, "fchmodSync",      js_fs_fchmodSync, 2);
+    js_fs_set_method(fs_namespace, "lchmodSync",      js_fs_lchmodSync, 2);
+    js_fs_set_method(fs_namespace, "chownSync",       js_fs_chownSync, 3);
+    js_fs_set_method(fs_namespace, "lchownSync",      js_fs_lchownSync, 3);
+    js_fs_set_method(fs_namespace, "fchownSync",      js_fs_fchownSync, 3);
+    js_fs_set_method(fs_namespace, "symlinkSync",     js_fs_symlinkSync, 2);
+    js_fs_set_method(fs_namespace, "readlinkSync",    js_fs_readlinkSync, 2);
+    js_fs_set_method(fs_namespace, "lstatSync",       js_fs_lstatSync, 2);
+    js_fs_set_method(fs_namespace, "truncateSync",    js_fs_truncateSync, 2);
+    js_fs_set_method(fs_namespace, "utimesSync",      js_fs_utimesSync, 3);
+    js_fs_set_method(fs_namespace, "linkSync",        js_fs_linkSync, 2);
+    js_fs_set_method(fs_namespace, "opendirSync",     js_fs_opendirSync, 2);
+    js_fs_set_method(fs_namespace, "_toUnixTimestamp",js_fs_toUnixTimestamp, 1);
 
     // file descriptor operations
-    js_fs_set_method(fs_namespace, "openSync",        (void*)js_fs_openSync, 3);
-    js_fs_set_method(fs_namespace, "closeSync",       (void*)js_fs_closeSync, 1);
-    Item read_fn = js_fs_set_method(fs_namespace, "read",            (void*)js_fs_read, 6);
+    js_fs_set_method(fs_namespace, "openSync",        js_fs_openSync, 3);
+    js_fs_set_method(fs_namespace, "closeSync",       js_fs_closeSync, 1);
+    Item read_fn = js_fs_set_method(fs_namespace, "read",            js_fs_read, 6);
     js_fs_set_custom_promisify_args(read_fn, "bytesRead", "buffer");
-    js_fs_set_method(fs_namespace, "readSync",        (void*)js_fs_readSync, 5);
-    Item write_fn = js_fs_set_method(fs_namespace, "write",           (void*)js_fs_write, 6);
+    js_fs_set_method(fs_namespace, "readSync",        js_fs_readSync, 5);
+    Item write_fn = js_fs_set_method(fs_namespace, "write",           js_fs_write, 6);
     js_fs_set_custom_promisify_args(write_fn, "bytesWritten", "buffer");
-    js_fs_set_method(fs_namespace, "writeSync",       (void*)js_fs_writeSync, 5);
-    Item readv_fn = js_fs_set_method(fs_namespace, "readv",           (void*)js_fs_readv, 4);
+    js_fs_set_method(fs_namespace, "writeSync",       js_fs_writeSync, 5);
+    Item readv_fn = js_fs_set_method(fs_namespace, "readv",           js_fs_readv, 4);
     js_fs_set_custom_promisify_args(readv_fn, "bytesRead", "buffers");
-    js_fs_set_method(fs_namespace, "readvSync",       (void*)js_fs_readvSync, 3);
-    Item writev_fn = js_fs_set_method(fs_namespace, "writev",          (void*)js_fs_writev, 4);
+    js_fs_set_method(fs_namespace, "readvSync",       js_fs_readvSync, 3);
+    Item writev_fn = js_fs_set_method(fs_namespace, "writev",          js_fs_writev, 4);
     js_fs_set_custom_promisify_args(writev_fn, "bytesWritten", "buffer");
-    js_fs_set_method(fs_namespace, "writevSync",      (void*)js_fs_writevSync, 3);
-    js_fs_set_method(fs_namespace, "fstatSync",       (void*)js_fs_fstatSync, 2);
+    js_fs_set_method(fs_namespace, "writevSync",      js_fs_writevSync, 3);
+    js_fs_set_method(fs_namespace, "fstatSync",       js_fs_fstatSync, 2);
 
     // fs.constants — null prototype per Node.js spec
     constants_root.set(js_object_create(ItemNull));
@@ -3790,25 +3796,25 @@ extern "C" Item js_get_fs_namespace(void) {
         // Create a set of promise-returning wrapper functions
         // Each calls the sync version and wraps result in a resolved promise
         // (or rejected promise on error)
-        js_fs_set_method(promises, "readFile",    (void*)js_fs_readFile_promise, 2);
-        js_fs_set_method(promises, "writeFile",   (void*)js_fs_writeFile_promise, 2);
-        js_fs_set_method(promises, "stat",        (void*)js_fs_stat_promise, 2);
-        js_fs_set_method(promises, "lstat",       (void*)js_fs_lstat_promise, 2);
-        js_fs_set_method(promises, "mkdir",       (void*)js_fs_mkdir_promise, 2);
-        js_fs_set_method(promises, "access",      (void*)js_fs_access_promise, 2);
-        js_fs_set_method(promises, "unlink",      (void*)js_fs_unlink_promise, 1);
-        js_fs_set_method(promises, "rm",          (void*)js_fs_unlink_promise, 1);
-        js_fs_set_method(promises, "rename",      (void*)js_fs_rename_promise, 2);
-        js_fs_set_method(promises, "readdir",     (void*)js_fs_readdir_promise, 1);
-        js_fs_set_method(promises, "open",        (void*)js_fs_open_promise, 3);
-        js_fs_set_method(promises, "chmod",       (void*)js_fs_chmod_promise, 2);
-        js_fs_set_method(promises, "chown",       (void*)js_fs_chown_promise, 3);
-        js_fs_set_method(promises, "lchown",      (void*)js_fs_lchown_promise, 3);
-        js_fs_set_method(promises, "realpath",    (void*)js_fs_realpath_promise, 1);
-        js_fs_set_method(promises, "copyFile",    (void*)js_fs_copyFile_promise, 2);
-        js_fs_set_method(promises, "mkdtemp",     (void*)js_fs_mkdtemp_promise, 1);
-        js_fs_set_method(promises, "truncate",    (void*)js_fs_truncate_promise, 2);
-        js_fs_set_method(promises, "symlink",     (void*)js_fs_symlink_promise, 2);
+        js_fs_set_method(promises, "readFile",    js_fs_readFile_promise, 2);
+        js_fs_set_method(promises, "writeFile",   js_fs_writeFile_promise, 2);
+        js_fs_set_method(promises, "stat",        js_fs_stat_promise, 2);
+        js_fs_set_method(promises, "lstat",       js_fs_lstat_promise, 2);
+        js_fs_set_method(promises, "mkdir",       js_fs_mkdir_promise, 2);
+        js_fs_set_method(promises, "access",      js_fs_access_promise, 2);
+        js_fs_set_method(promises, "unlink",      js_fs_unlink_promise, 1);
+        js_fs_set_method(promises, "rm",          js_fs_unlink_promise, 1);
+        js_fs_set_method(promises, "rename",      js_fs_rename_promise, 2);
+        js_fs_set_method(promises, "readdir",     js_fs_readdir_promise, 1);
+        js_fs_set_method(promises, "open",        js_fs_open_promise, 3);
+        js_fs_set_method(promises, "chmod",       js_fs_chmod_promise, 2);
+        js_fs_set_method(promises, "chown",       js_fs_chown_promise, 3);
+        js_fs_set_method(promises, "lchown",      js_fs_lchown_promise, 3);
+        js_fs_set_method(promises, "realpath",    js_fs_realpath_promise, 1);
+        js_fs_set_method(promises, "copyFile",    js_fs_copyFile_promise, 2);
+        js_fs_set_method(promises, "mkdtemp",     js_fs_mkdtemp_promise, 1);
+        js_fs_set_method(promises, "truncate",    js_fs_truncate_promise, 2);
+        js_fs_set_method(promises, "symlink",     js_fs_symlink_promise, 2);
 
         // fs.promises.constants === fs.constants
         js_property_set(promises, make_string_item("constants"), constants);

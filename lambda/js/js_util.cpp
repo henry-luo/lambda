@@ -887,7 +887,7 @@ static Item js_util_inspect_object(Item obj_item, JsInspectContext* ctx, int dep
 
     Item custom_sym = js_symbol_for(make_string_item("nodejs.util.inspect.custom"));
     Item custom_fn = js_property_get(obj_item, custom_sym);
-    if (get_type_id(custom_fn) == LMD_TYPE_FUNC) {
+    if (js_is_callable(custom_fn)) {
         Item result = js_call_function(custom_fn, obj_item, nullptr, 0);
         if (ctx) js_util_inspect_seen_pop(ctx->seen);
         if (item_is_error(result)) {
@@ -1161,7 +1161,7 @@ static Item js_util_promisify_executor(Item env_item, Item resolve, Item reject)
     cb_env[0] = resolve_root.get();
     cb_env[1] = reject_root.get();
     cb_env[2] = custom_args_root.get();
-    callback_root.set(js_new_closure((void*)js_util_promisify_callback, -1, cb_env, 3));
+    callback_root.set(js_new_native_closure(js_util_promisify_callback, -1, cb_env, 3));
 
     int argc = (int)argc64 + 1;
     Item* call_args = (Item*)alloca((size_t)argc * sizeof(Item));
@@ -1203,7 +1203,7 @@ static Item js_util_promisified_function(Item env_item, Item rest_args) {
     exec_env[1] = this_root.get();
     exec_env[2] = call_args_root.get();
     exec_env[3] = custom_args_root.get();
-    executor_root.set(js_new_closure((void*)js_util_promisify_executor, 2, exec_env, 4));
+    executor_root.set(js_new_native_closure(js_util_promisify_executor, 2, exec_env, 4));
     return js_promise_create(executor_root.get());
 }
 
@@ -1221,7 +1221,7 @@ static bool js_util_is_promise_like(Item value) {
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_FUNC) return false;
     Item then_fn = js_property_get(value, make_string_item("then"));
     if (item_is_error(then_fn)) return false;
-    return get_type_id(then_fn) == LMD_TYPE_FUNC;
+    return js_is_callable(then_fn);
 }
 
 static void js_util_emit_promisify_promise_warning(void) {
@@ -1257,7 +1257,7 @@ static Item js_util_promisify_result_from_args(Item custom_args, Item rest_args)
 }
 
 extern "C" Item js_util_promisify(Item fn_item) {
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(fn_item)) {
         return js_throw_invalid_arg_type("original", "function", fn_item);
     }
 
@@ -1265,7 +1265,7 @@ extern "C" Item js_util_promisify(Item fn_item) {
     JS_ASSIGN_OR_RETURN(custom, js_property_get(fn_item, custom_key));
     if (custom.item != ITEM_NULL && custom.item != ITEM_JS_UNDEFINED &&
         get_type_id(custom) != LMD_TYPE_UNDEFINED) {
-        if (get_type_id(custom) != LMD_TYPE_FUNC) {
+        if (!js_is_callable(custom)) {
             return js_throw_invalid_arg_type("util.promisify.custom", "function", custom);
         }
         return custom;
@@ -1276,7 +1276,7 @@ extern "C" Item js_util_promisify(Item fn_item) {
     Item* env = js_alloc_env(2);
     env[0] = fn_item;
     env[1] = custom_args;
-    Item wrapper = js_new_closure((void*)js_util_promisified_function, -1, env, 2);
+    Item wrapper = js_new_native_closure(js_util_promisified_function, -1, env, 2);
     js_property_set(wrapper, custom_key, wrapper);
     js_set_function_name(wrapper, make_string_item("promisified"));
     return wrapper;
@@ -1325,7 +1325,7 @@ static Item js_util_callbackified_function(Item env_item, Item rest_args) {
     }
 
     Item callback = js_array_get_int(rest_args, argc64 - 1);
-    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(callback)) {
         return js_throw_invalid_arg_type("callback", "function", callback);
     }
 
@@ -1346,20 +1346,20 @@ static Item js_util_callbackified_function(Item env_item, Item rest_args) {
 
     Item* cb_env = js_alloc_env(1);
     cb_env[0] = callback;
-    Item on_fulfilled = js_new_closure((void*)js_util_callbackify_on_fulfilled, 1, cb_env, 1);
-    Item on_rejected = js_new_closure((void*)js_util_callbackify_on_rejected, 1, cb_env, 1);
+    Item on_fulfilled = js_new_native_closure(js_util_callbackify_on_fulfilled, 1, cb_env, 1);
+    Item on_rejected = js_new_native_closure(js_util_callbackify_on_rejected, 1, cb_env, 1);
     js_promise_then(promise, on_fulfilled, on_rejected);
     return make_js_undefined();
 }
 
 extern "C" Item js_util_callbackify(Item fn) {
-    if (get_type_id(fn) != LMD_TYPE_FUNC) {
+    if (!js_is_callable(fn)) {
         return js_throw_invalid_arg_type("original", "function", fn);
     }
 
     Item* env = js_alloc_env(1);
     env[0] = fn;
-    Item wrapper = js_new_closure((void*)js_util_callbackified_function, -1, env, 1);
+    Item wrapper = js_new_native_closure(js_util_callbackified_function, -1, env, 1);
     js_set_function_name(wrapper, make_string_item("callbackified"));
     return wrapper;
 }
@@ -1397,12 +1397,12 @@ static Item js_util_aborted_on_abort(Item env_item, Item event_item) {
     Item handler = env[2];
 
     Item remove_fn = js_property_get(signal, make_string_item("removeEventListener"));
-    if (get_type_id(remove_fn) == LMD_TYPE_FUNC) {
+    if (js_is_callable(remove_fn)) {
         Item remove_args[2] = { make_string_item("abort"), handler };
         (void)js_call_function(remove_fn, signal, remove_args, 2);
     }
 
-    if (get_type_id(resolve) == LMD_TYPE_FUNC) {
+    if (js_is_callable(resolve)) {
         Item resolve_args[1] = { make_js_undefined() };
         (void)js_call_function(resolve, make_js_undefined(), resolve_args, 1);
     }
@@ -1426,11 +1426,11 @@ static Item js_util_aborted_executor(Item env_item, Item resolve, Item reject) {
     handler_env[0] = signal;
     handler_env[1] = resolve;
     handler_env[2] = make_js_undefined();
-    Item handler = js_new_closure((void*)js_util_aborted_on_abort, 1, handler_env, 3);
+    Item handler = js_new_native_closure(js_util_aborted_on_abort, 1, handler_env, 3);
     handler_env[2] = handler;
 
     Item add_fn = js_property_get(signal, make_string_item("addEventListener"));
-    if (get_type_id(add_fn) == LMD_TYPE_FUNC) {
+    if (js_is_callable(add_fn)) {
         Item add_args[2] = { make_string_item("abort"), handler };
         (void)js_call_function(add_fn, signal, add_args, 2);
     }
@@ -1447,7 +1447,7 @@ extern "C" Item js_util_aborted(Item signal, Item resource) {
 
     Item* env = js_alloc_env(1);
     env[0] = signal;
-    Item executor = js_new_closure((void*)js_util_aborted_executor, 2, env, 1);
+    Item executor = js_new_native_closure(js_util_aborted_executor, 2, env, 1);
     return js_promise_create(executor);
 }
 
@@ -2267,12 +2267,12 @@ extern "C" Item js_util_types_isPromise(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
     // also check for .then method (thenable duck-type)
     Item then = js_property_get(obj, make_string_item("then"));
-    if (get_type_id(then) == LMD_TYPE_FUNC) return (Item){.item = b2it(true)};
+    if (js_is_callable(then)) return (Item){.item = b2it(true)};
     return (Item){.item = b2it(false)};
 }
 
 extern "C" Item js_util_types_isFunction(Item obj) {
-    return (Item){.item = b2it(get_type_id(obj) == LMD_TYPE_FUNC)};
+    return (Item){.item = b2it(js_is_callable(obj))};
 }
 
 extern "C" Item js_util_types_isString(Item obj) {
@@ -2655,17 +2655,17 @@ static Item js_debuglog_active(Item args_rest) {
 
 extern "C" Item js_util_debuglog(Item section) {
     if (get_type_id(section) != LMD_TYPE_STRING) {
-        return js_new_function((void*)js_debuglog_noop, -1);
+        return js_new_native_rest_function(js_debuglog_noop);
     }
     String* sec = it2s(section);
     if (!sec || sec->len == 0) {
-        return js_new_function((void*)js_debuglog_noop, -1);
+        return js_new_native_rest_function(js_debuglog_noop);
     }
 
     // check NODE_DEBUG env var
     const char* node_debug = getenv("NODE_DEBUG");
     if (!node_debug) {
-        return js_new_function((void*)js_debuglog_noop, -1);
+        return js_new_native_rest_function(js_debuglog_noop);
     }
 
     // case-insensitive search for section name in NODE_DEBUG
@@ -2688,10 +2688,10 @@ extern "C" Item js_util_debuglog(Item section) {
     debug_upper[dlen] = '\0';
 
     if (strstr(debug_upper, sec_upper)) {
-        return js_new_function((void*)js_debuglog_active, -1);
+        return js_new_native_rest_function(js_debuglog_active);
     }
 
-    return js_new_function((void*)js_debuglog_noop, -1);
+    return js_new_native_rest_function(js_debuglog_noop);
 }
 
 // util.stripVTControlCharacters(str)
@@ -2788,12 +2788,10 @@ static bool util_ensure_roots(void) {
         js_root_range_ensure_registered(&js_runtime_state.util.roots);
 }
 
-static void js_util_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    RootFrame roots(3);
-    Rooted<Item> ns_root(roots, ns);
-    Rooted<Item> key_root(roots, make_string_item(name));
-    Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
-    js_property_set(ns_root.get(), key_root.get(), fn_root.get());
+template <typename Target>
+static void js_util_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
+    js_install_native_method(ns, name, target, adapter_arity);
 }
 
 extern "C" Item js_get_util_namespace(void) {
@@ -2819,8 +2817,8 @@ extern "C" Item js_get_util_namespace(void) {
     Rooted<Item> default_key_root(roots, ItemNull);
     Rooted<Item> temporary_root(roots, ItemNull);
 
-    js_util_set_method(util_namespace, "format",              (void*)js_util_format, -1);
-    js_util_set_method(util_namespace, "inspect",             (void*)js_util_inspect, 2);
+    js_util_set_method(util_namespace, "format",              js_util_format, -1);
+    js_util_set_method(util_namespace, "inspect",             js_util_inspect, 2);
     // Set util.inspect.custom = Symbol.for('nodejs.util.inspect.custom')
     {
         inspect_root.set(js_property_get(util_namespace, make_string_item("inspect")));
@@ -2832,85 +2830,85 @@ extern "C" Item js_get_util_namespace(void) {
         js_property_set(default_options_root.get(), make_string_item("colors"), (Item){.item = b2it(false)});
         js_property_set(inspect_root.get(), make_string_item("defaultOptions"), default_options_root.get());
     }
-    js_util_set_method(util_namespace, "promisify",           (void*)js_util_promisify, 1);
+    js_util_set_method(util_namespace, "promisify",           js_util_promisify, 1);
     {
         promisify_root.set(js_property_get(util_namespace, make_string_item("promisify")));
         temporary_root.set(js_util_promisify_custom_symbol());
         js_property_set(promisify_root.get(), make_string_item("custom"), temporary_root.get());
     }
-    js_util_set_method(util_namespace, "callbackify",         (void*)js_util_callbackify, 1);
-    js_util_set_method(util_namespace, "aborted",             (void*)js_util_aborted, 2);
-    js_util_set_method(util_namespace, "deprecate",           (void*)js_util_deprecate, 2);
-    js_util_set_method(util_namespace, "inherits",            (void*)js_util_inherits, 2);
-    js_util_set_method(util_namespace, "isDeepStrictEqual",   (void*)js_util_isDeepStrictEqual, 2);
-    js_util_set_method(util_namespace, "debuglog",            (void*)js_util_debuglog, 1);
-    js_util_set_method(util_namespace, "styleText",           (void*)js_util_styleText, 2);
-    js_util_set_method(util_namespace, "getSystemErrorName",  (void*)js_util_getSystemErrorName, 1);
-    js_util_set_method(util_namespace, "stripVTControlCharacters", (void*)js_util_stripVTControlCharacters, 1);
-    js_util_set_method(util_namespace, "_extend",             (void*)js_util_extend, 2);
+    js_util_set_method(util_namespace, "callbackify",         js_util_callbackify, 1);
+    js_util_set_method(util_namespace, "aborted",             js_util_aborted, 2);
+    js_util_set_method(util_namespace, "deprecate",           js_util_deprecate, 2);
+    js_util_set_method(util_namespace, "inherits",            js_util_inherits, 2);
+    js_util_set_method(util_namespace, "isDeepStrictEqual",   js_util_isDeepStrictEqual, 2);
+    js_util_set_method(util_namespace, "debuglog",            js_util_debuglog, 1);
+    js_util_set_method(util_namespace, "styleText",           js_util_styleText, 2);
+    js_util_set_method(util_namespace, "getSystemErrorName",  js_util_getSystemErrorName, 1);
+    js_util_set_method(util_namespace, "stripVTControlCharacters", js_util_stripVTControlCharacters, 1);
+    js_util_set_method(util_namespace, "_extend",             js_util_extend, 2);
     // util.debug is an alias for util.debuglog
-    js_util_set_method(util_namespace, "debug",               (void*)js_util_debuglog, 1);
+    js_util_set_method(util_namespace, "debug",               js_util_debuglog, 1);
 
     // util.types sub-namespace
     types_root.set(js_new_object());
-    js_util_set_method(types_root.get(), "isDate",           (void*)js_util_types_isDate, 1);
-    js_util_set_method(types_root.get(), "isRegExp",         (void*)js_util_types_isRegExp, 1);
-    js_util_set_method(types_root.get(), "isArray",          (void*)js_util_types_isArray, 1);
-    js_util_set_method(types_root.get(), "isMap",            (void*)js_util_types_isMap, 1);
-    js_util_set_method(types_root.get(), "isSet",            (void*)js_util_types_isSet, 1);
-    js_util_set_method(types_root.get(), "isUint8Array",     (void*)js_util_types_isUint8Array, 1);
-    js_util_set_method(types_root.get(), "isPromise",        (void*)js_util_types_isPromise, 1);
-    js_util_set_method(types_root.get(), "isFunction",       (void*)js_util_types_isFunction, 1);
-    js_util_set_method(types_root.get(), "isString",         (void*)js_util_types_isString, 1);
-    js_util_set_method(types_root.get(), "isNumber",         (void*)js_util_types_isNumber, 1);
-    js_util_set_method(types_root.get(), "isBoolean",        (void*)js_util_types_isBoolean, 1);
-    js_util_set_method(types_root.get(), "isNull",           (void*)js_util_types_isNull, 1);
-    js_util_set_method(types_root.get(), "isUndefined",      (void*)js_util_types_isUndefined, 1);
-    js_util_set_method(types_root.get(), "isNullOrUndefined",(void*)js_util_types_isNullOrUndefined, 1);
-    js_util_set_method(types_root.get(), "isObject",         (void*)js_util_types_isObject, 1);
-    js_util_set_method(types_root.get(), "isPrimitive",      (void*)js_util_types_isPrimitive, 1);
-    js_util_set_method(types_root.get(), "isBuffer",         (void*)js_util_types_isBuffer, 1);
-    js_util_set_method(types_root.get(), "isError",          (void*)js_util_types_isError, 1);
+    js_util_set_method(types_root.get(), "isDate",           js_util_types_isDate, 1);
+    js_util_set_method(types_root.get(), "isRegExp",         js_util_types_isRegExp, 1);
+    js_util_set_method(types_root.get(), "isArray",          js_util_types_isArray, 1);
+    js_util_set_method(types_root.get(), "isMap",            js_util_types_isMap, 1);
+    js_util_set_method(types_root.get(), "isSet",            js_util_types_isSet, 1);
+    js_util_set_method(types_root.get(), "isUint8Array",     js_util_types_isUint8Array, 1);
+    js_util_set_method(types_root.get(), "isPromise",        js_util_types_isPromise, 1);
+    js_util_set_method(types_root.get(), "isFunction",       js_util_types_isFunction, 1);
+    js_util_set_method(types_root.get(), "isString",         js_util_types_isString, 1);
+    js_util_set_method(types_root.get(), "isNumber",         js_util_types_isNumber, 1);
+    js_util_set_method(types_root.get(), "isBoolean",        js_util_types_isBoolean, 1);
+    js_util_set_method(types_root.get(), "isNull",           js_util_types_isNull, 1);
+    js_util_set_method(types_root.get(), "isUndefined",      js_util_types_isUndefined, 1);
+    js_util_set_method(types_root.get(), "isNullOrUndefined",js_util_types_isNullOrUndefined, 1);
+    js_util_set_method(types_root.get(), "isObject",         js_util_types_isObject, 1);
+    js_util_set_method(types_root.get(), "isPrimitive",      js_util_types_isPrimitive, 1);
+    js_util_set_method(types_root.get(), "isBuffer",         js_util_types_isBuffer, 1);
+    js_util_set_method(types_root.get(), "isError",          js_util_types_isError, 1);
     // additional types checks
     Item types = types_root.get();
-    js_util_set_method(types, "isTypedArray",     (void*)js_util_types_isTypedArray, 1);
-    js_util_set_method(types, "isArrayBuffer",    (void*)js_util_types_isArrayBuffer, 1);
-    js_util_set_method(types, "isSharedArrayBuffer", (void*)js_util_types_isSharedArrayBuffer, 1);
-    js_util_set_method(types, "isAnyArrayBuffer",    (void*)js_util_types_isAnyArrayBuffer, 1);
-    js_util_set_method(types, "isDataView",       (void*)js_util_types_isDataView, 1);
-    js_util_set_method(types, "isWeakMap",        (void*)js_util_types_isWeakMap, 1);
-    js_util_set_method(types, "isWeakSet",        (void*)js_util_types_isWeakSet, 1);
-    js_util_set_method(types, "isWeakRef",        (void*)js_util_types_isWeakRef, 1);
-    js_util_set_method(types, "isUint16Array",    (void*)js_util_types_isUint16Array, 1);
-    js_util_set_method(types, "isUint32Array",    (void*)js_util_types_isUint32Array, 1);
-    js_util_set_method(types, "isInt8Array",      (void*)js_util_types_isInt8Array, 1);
-    js_util_set_method(types, "isInt16Array",     (void*)js_util_types_isInt16Array, 1);
-    js_util_set_method(types, "isInt32Array",     (void*)js_util_types_isInt32Array, 1);
-    js_util_set_method(types, "isFloat16Array",   (void*)js_util_types_isFloat16Array, 1);
-    js_util_set_method(types, "isFloat32Array",   (void*)js_util_types_isFloat32Array, 1);
-    js_util_set_method(types, "isFloat64Array",   (void*)js_util_types_isFloat64Array, 1);
-    js_util_set_method(types, "isUint8ClampedArray", (void*)js_util_types_isUint8ClampedArray, 1);
-    js_util_set_method(types, "isNumberObject",   (void*)js_util_types_isNumberObject, 1);
-    js_util_set_method(types, "isStringObject",   (void*)js_util_types_isStringObject, 1);
-    js_util_set_method(types, "isBooleanObject",  (void*)js_util_types_isBooleanObject, 1);
-    js_util_set_method(types, "isSymbolObject",   (void*)js_util_types_isSymbolObject, 1);
-    js_util_set_method(types, "isNativeError",    (void*)js_util_types_isNativeError, 1);
-    js_util_set_method(types, "isBoxedPrimitive", (void*)js_util_types_isBoxedPrimitive, 1);
-    js_util_set_method(types, "isProxy",          (void*)js_util_types_isProxy, 1);
-    js_util_set_method(types, "isExternal",       (void*)js_util_types_isExternal, 1);
-    js_util_set_method(types, "isGeneratorFunction", (void*)js_util_types_isGeneratorFunction, 1);
-    js_util_set_method(types, "isGeneratorObject",   (void*)js_util_types_isGeneratorObject, 1);
-    js_util_set_method(types, "isAsyncFunction",     (void*)js_util_types_isAsyncFunction, 1);
-    js_util_set_method(types, "isMapIterator",       (void*)js_util_types_isMapIterator, 1);
-    js_util_set_method(types, "isSetIterator",       (void*)js_util_types_isSetIterator, 1);
-    js_util_set_method(types, "isArgumentsObject",   (void*)js_util_types_isArgumentsObject, 1);
-    js_util_set_method(types, "isModuleNamespaceObject", (void*)js_util_types_isModuleNamespaceObject, 1);
+    js_util_set_method(types, "isTypedArray",     js_util_types_isTypedArray, 1);
+    js_util_set_method(types, "isArrayBuffer",    js_util_types_isArrayBuffer, 1);
+    js_util_set_method(types, "isSharedArrayBuffer", js_util_types_isSharedArrayBuffer, 1);
+    js_util_set_method(types, "isAnyArrayBuffer",    js_util_types_isAnyArrayBuffer, 1);
+    js_util_set_method(types, "isDataView",       js_util_types_isDataView, 1);
+    js_util_set_method(types, "isWeakMap",        js_util_types_isWeakMap, 1);
+    js_util_set_method(types, "isWeakSet",        js_util_types_isWeakSet, 1);
+    js_util_set_method(types, "isWeakRef",        js_util_types_isWeakRef, 1);
+    js_util_set_method(types, "isUint16Array",    js_util_types_isUint16Array, 1);
+    js_util_set_method(types, "isUint32Array",    js_util_types_isUint32Array, 1);
+    js_util_set_method(types, "isInt8Array",      js_util_types_isInt8Array, 1);
+    js_util_set_method(types, "isInt16Array",     js_util_types_isInt16Array, 1);
+    js_util_set_method(types, "isInt32Array",     js_util_types_isInt32Array, 1);
+    js_util_set_method(types, "isFloat16Array",   js_util_types_isFloat16Array, 1);
+    js_util_set_method(types, "isFloat32Array",   js_util_types_isFloat32Array, 1);
+    js_util_set_method(types, "isFloat64Array",   js_util_types_isFloat64Array, 1);
+    js_util_set_method(types, "isUint8ClampedArray", js_util_types_isUint8ClampedArray, 1);
+    js_util_set_method(types, "isNumberObject",   js_util_types_isNumberObject, 1);
+    js_util_set_method(types, "isStringObject",   js_util_types_isStringObject, 1);
+    js_util_set_method(types, "isBooleanObject",  js_util_types_isBooleanObject, 1);
+    js_util_set_method(types, "isSymbolObject",   js_util_types_isSymbolObject, 1);
+    js_util_set_method(types, "isNativeError",    js_util_types_isNativeError, 1);
+    js_util_set_method(types, "isBoxedPrimitive", js_util_types_isBoxedPrimitive, 1);
+    js_util_set_method(types, "isProxy",          js_util_types_isProxy, 1);
+    js_util_set_method(types, "isExternal",       js_util_types_isExternal, 1);
+    js_util_set_method(types, "isGeneratorFunction", js_util_types_isGeneratorFunction, 1);
+    js_util_set_method(types, "isGeneratorObject",   js_util_types_isGeneratorObject, 1);
+    js_util_set_method(types, "isAsyncFunction",     js_util_types_isAsyncFunction, 1);
+    js_util_set_method(types, "isMapIterator",       js_util_types_isMapIterator, 1);
+    js_util_set_method(types, "isSetIterator",       js_util_types_isSetIterator, 1);
+    js_util_set_method(types, "isArgumentsObject",   js_util_types_isArgumentsObject, 1);
+    js_util_set_method(types, "isModuleNamespaceObject", js_util_types_isModuleNamespaceObject, 1);
     js_property_set(util_namespace, make_string_item("types"), types_root.get());
-    js_util_set_method(util_namespace, "getCallSites", (void*)js_util_getCallSites, 1);
+    js_util_set_method(util_namespace, "getCallSites", js_util_getCallSites, 1);
 
     // TextEncoder/TextDecoder — expose constructors on util namespace
-    text_encoder_root.set(js_new_function((void*)js_text_encoder_new, 0));
-    text_decoder_root.set(js_new_function((void*)js_text_decoder_new, 2));
+    text_encoder_root.set(js_new_native_function(js_text_encoder_new));
+    text_decoder_root.set(js_new_native_function(js_text_decoder_new));
     js_property_set(util_namespace, make_string_item("TextEncoder"), text_encoder_root.get());
     js_property_set(util_namespace, make_string_item("TextDecoder"), text_decoder_root.get());
 

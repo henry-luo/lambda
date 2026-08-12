@@ -16,6 +16,38 @@ struct JsFunction;
 typedef Item (*JsCallEntry)(Item fn_item, Item this_val, Item* args, int argc,
                             uint64_t* result_home, bool args_prerooted);
 
+// Construction is a separate capability under D6.2.2v2. The caller supplies
+// newTarget explicitly; an absent entry is the complete IsConstructor answer.
+typedef Item (*JsConstructEntry)(Item fn_item, Item* args, int argc,
+                                 Item new_target, uint64_t* result_home,
+                                 bool args_prerooted);
+
+union JsNativeTarget {
+    JsNativeP0 p0;
+    JsNativeP1 p1;
+    JsNativeP2 p2;
+    JsNativeP3 p3;
+    JsNativeP4 p4;
+    JsNativeP5 p5;
+    JsNativeP6 p6;
+    JsNativeP7 p7;
+    JsNativeP8 p8;
+    JsNativeSpan span;
+    JsNativeThisSpan this_span;
+    JsNativeEnvSpan env_span;
+    uint64_t bits;
+};
+
+enum JsNativeCallPolicy : uint8_t {
+    JS_NATIVE_CALL_NONE = 0,
+    JS_NATIVE_CALL_FIXED = 1,
+    JS_NATIVE_CALL_REST = 2,
+    JS_NATIVE_CALL_SPAN = 3,
+    JS_NATIVE_CALL_THIS_SPAN = 4,
+    JS_NATIVE_CALL_ENV_SPAN = 5,
+    JS_NATIVE_CALL_BODY = 6,
+};
+
 struct JsFunction {
     TypeId type_id;
     uint32_t layout_magic;
@@ -27,15 +59,25 @@ struct JsFunction {
     Item bound_this_store[2];
     Item* bound_args;
     int bound_argc;
+    Item bound_target;
     String* name;
-    int builtin_id;
+    int catalog_id;
     Item properties_map;
     uint16_t flags;
     uint8_t call_lane_kind;
-    uint8_t special_ctor_kind;
+    uint8_t intrinsic_class;
     int16_t formal_length;
-    NameId special_ctor_name_id;
+    // Concrete TypedArray constructors carry their element policy directly;
+    // display names and catalog IDs are never executable selectors (D6.2.2v2).
+    uint8_t typed_array_element_type_plus_one;
+    uint8_t pool_pointer_roots_registered;
     JsCallEntry invoke;
+    JsConstructEntry construct;
+    JsNativeCallBody native_call;
+    JsNativeConstructBody native_construct;
+    JsNativeTarget native_target;
+    uint8_t native_arity;
+    uint8_t native_policy;
     uint32_t module_state_id;
     Item home_global;
     Item home_class;
@@ -86,6 +128,8 @@ static inline Item js_function_get_bound_this(JsFunction* fn) {
 #define JS_FUNC_FLAG_READS_NEW_TARGET 4096
 #define JS_FUNC_FLAG_ANALYSIS_KNOWN 8192
 #define JS_FUNC_FLAG_MIR_CONTEXT_ABI 16384
+
+#define JS_FUNC_POOL_POINTER_ROOTS_REGISTERED 1
 #define JS_FUNC_FLAG_DATA_VIEW_ACCESSOR JS_FUNC_FLAG_METHOD
 
 enum JsFunctionCallLaneKind : uint8_t {
@@ -93,57 +137,3 @@ enum JsFunctionCallLaneKind : uint8_t {
     JS_CALL_LANE_ORDINARY = 1,
     JS_CALL_LANE_METHOD_HOME = 2,
 };
-
-// Call dispatch caches the classification against the NameId of fn->name;
-// pointer identity is not stable across the Input/runtime materialization
-// boundary covered by D4.6.1v2.
-enum JsSpecialCtorKind : uint8_t {
-    JS_SPECIAL_CTOR_UNCHECKED = 0,
-    JS_SPECIAL_CTOR_NONE = 1,
-    JS_SPECIAL_CTOR_DATE = 2,
-    JS_SPECIAL_CTOR_FUNCTION = 3,
-    JS_SPECIAL_CTOR_GENERATOR_FUNCTION = 4,
-    JS_SPECIAL_CTOR_ASYNC_GENERATOR_FUNCTION = 5,
-    JS_SPECIAL_CTOR_ASYNC_FUNCTION = 6,
-};
-
-// Classify against the current name and remember the key. Cheap enough to run
-// inline on the rare miss; never changes which callees the dispatcher treats
-// as special — the sufficient conditions stay at the use sites.
-static inline uint8_t js_function_special_ctor_kind(JsFunction* fn) {
-    if (!fn) return JS_SPECIAL_CTOR_NONE;
-    NameId name_id = fn->name ? name_ref_id(fn->name) : NAME_ID_NONE;
-    if (name_id != NAME_ID_NONE &&
-        fn->special_ctor_kind != JS_SPECIAL_CTOR_UNCHECKED &&
-        fn->special_ctor_name_id == name_id) {
-        return fn->special_ctor_kind;
-    }
-    uint8_t kind = JS_SPECIAL_CTOR_NONE;
-    String* name = fn->name;
-    if (name) {
-        switch (name->len) {
-        case 4:
-            if (memcmp(name->chars, "Date", 4) == 0) kind = JS_SPECIAL_CTOR_DATE;
-            break;
-        case 8:
-            if (memcmp(name->chars, "Function", 8) == 0) kind = JS_SPECIAL_CTOR_FUNCTION;
-            break;
-        case 13:
-            if (memcmp(name->chars, "AsyncFunction", 13) == 0)
-                kind = JS_SPECIAL_CTOR_ASYNC_FUNCTION;
-            break;
-        case 17:
-            if (memcmp(name->chars, "GeneratorFunction", 17) == 0)
-                kind = JS_SPECIAL_CTOR_GENERATOR_FUNCTION;
-            break;
-        case 22:
-            if (memcmp(name->chars, "AsyncGeneratorFunction", 22) == 0)
-                kind = JS_SPECIAL_CTOR_ASYNC_GENERATOR_FUNCTION;
-            break;
-        default: break;
-        }
-    }
-    fn->special_ctor_name_id = name_id;
-    fn->special_ctor_kind = kind;
-    return kind;
-}

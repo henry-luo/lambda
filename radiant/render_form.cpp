@@ -184,34 +184,21 @@ static void draw_3d_border(RenderContext* rdcon, float x, float y, float w, floa
 
 static bool form_border_has_visible_side(BorderProp* border) {
     if (!border) return false;
-    return ((border->width.top > 0.0f &&
-             border->top_style != CSS_VALUE_NONE &&
-             border->top_style != CSS_VALUE_HIDDEN) ||
-            (border->width.right > 0.0f &&
-             border->right_style != CSS_VALUE_NONE &&
-             border->right_style != CSS_VALUE_HIDDEN) ||
-            (border->width.bottom > 0.0f &&
-             border->bottom_style != CSS_VALUE_NONE &&
-             border->bottom_style != CSS_VALUE_HIDDEN) ||
-            (border->width.left > 0.0f &&
-             border->left_style != CSS_VALUE_NONE &&
-             border->left_style != CSS_VALUE_HIDDEN));
+    for (int i = 0; i < 4; i++) {
+        if (border->width.values[i] > 0.0f && border->styles[i] != CSS_VALUE_NONE &&
+            border->styles[i] != CSS_VALUE_HIDDEN) return true;
+    }
+    return false;
 }
 
 static bool form_border_has_author_override(BorderProp* border) {
     if (!border) return false;
-    return border->width.top_specificity > 0 ||
-           border->width.right_specificity > 0 ||
-           border->width.bottom_specificity > 0 ||
-           border->width.left_specificity > 0 ||
-           border->top_style_specificity > 0 ||
-           border->right_style_specificity > 0 ||
-           border->bottom_style_specificity > 0 ||
-           border->left_style_specificity > 0 ||
-           border->top_color_specificity > 0 ||
-           border->right_color_specificity > 0 ||
-           border->bottom_color_specificity > 0 ||
-           border->left_color_specificity > 0;
+    for (int i = 0; i < 4; i++) {
+        if (border->width.specificities[i] > 0 ||
+            border->style_specificities[i] > 0 ||
+            border->color_specificities[i] > 0) return true;
+    }
+    return false;
 }
 
 static float form_control_border_left_width(ViewBlock* block, bool has_css_border,

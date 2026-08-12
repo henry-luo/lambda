@@ -1,0 +1,23 @@
+direct:2
+replaced:replacement:local = 3
+replacement-no-direct:2
+indirect:5
+extra-result:6
+extra-effect:7
+spread:9
+spread-effect:10
+number-replaced:N:4
+math-replaced:91
+array-replaced-call:A:12
+array-replaced-new:A:13
+date-replaced:D:14
+timer-replaced:T:16:15
+eval-throw:eval-boom:11
+lazy-own:true
+lazy-process-descriptor:true
+lazy-buffer-descriptor:true
+lazy-crypto-descriptor:true
+lazy-buffer-module:true
+lazy-crypto-module:true
+lazy-replaced:42
+lazy-deleted:false

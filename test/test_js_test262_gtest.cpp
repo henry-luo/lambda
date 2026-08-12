@@ -4784,7 +4784,17 @@ int main(int argc, char** argv) {
         if (!g_baseline_passing.empty()) {
             std::set<std::string> pass_set(current_passing.begin(), current_passing.end());
             for (auto& name : g_baseline_passing) {
-                if (pass_set.find(name) == pass_set.end()) regressions.push_back(name);
+                if (pass_set.find(name) != pass_set.end()) continue;
+                auto cached = g_cached_results.find(name);
+                // async-flagged tests are intentionally withheld unless an
+                // allowlist enables the async harness; that skip is not a
+                // semantic regression against a synchronous baseline.
+                if (cached != g_cached_results.end() &&
+                        cached->second.result == T262_SKIP &&
+                        cached->second.message == "async flag") {
+                    continue;
+                }
+                regressions.push_back(name);
             }
         }
 

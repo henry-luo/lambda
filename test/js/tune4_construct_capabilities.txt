@@ -1,0 +1,14 @@
+2:1
+string
+true
+6
+TypeError
+TypeError
+inner:true
+caught
+outer:true
+13:2
+13:2:1:2
+true
+8
+9

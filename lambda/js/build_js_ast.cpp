@@ -396,7 +396,9 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
         } else {
             literal->value.number_value = 0.0;
         }
-        literal->type = &TYPE_FLOAT; // All JS numbers are float64
+        // BigInt is a decimal-backed JS primitive; marking it FLOAT let native
+        // number inference reinterpret its preserved integer spelling.
+        literal->type = literal->is_bigint ? &TYPE_DECIMAL : &TYPE_FLOAT;
     } else if (strcmp(node_type, "string") == 0) {
         literal->literal_type = JS_LITERAL_STRING;
         // Remove quotes and handle escape sequences

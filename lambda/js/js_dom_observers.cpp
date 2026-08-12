@@ -2,6 +2,7 @@
 #include "js_dom.h"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
+#include "../jube/jube.h"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_lifecycle.hpp"
@@ -13,6 +14,9 @@
 #include <string.h>
 
 extern "C" void heap_register_gc_root(uint64_t* slot);
+extern "C" Item radiant_dom_element_operation(Item elem_item,
+                                                JubeDomElementOperation operation,
+                                                Item* args, int argc);
 extern Item js_make_number(double d);
 
 #define JS_OBSERVER_CAP 64
@@ -415,7 +419,7 @@ static Item js_geometry_observer_observe(Item target_item) {
     // Geometry observation requires an initial sample even when observe() did
     // not dirty layout, but sampling waits until the current script's writes
     // settle so ResizeObserver reports the latest box once per checkpoint.
-    js_microtask_enqueue(js_new_function((void*)js_geometry_observer_initial_sample, 0));
+    js_microtask_enqueue(js_new_native_function(js_geometry_observer_initial_sample));
     return make_js_undefined();
 }
 
@@ -452,7 +456,7 @@ static Item js_observer_deliver(void) {
 static void observer_schedule_delivery(void) {
     if (observer_delivery_scheduled) return;
     observer_delivery_scheduled = true;
-    js_microtask_enqueue(js_new_function((void*)js_observer_deliver, 0));
+    js_microtask_enqueue(js_new_native_function(js_observer_deliver));
 }
 
 static void observer_queue_record(JsObserverState* observer, Item record) {
@@ -462,17 +466,17 @@ static void observer_queue_record(JsObserverState* observer, Item record) {
 
 static void observer_install_common_methods(JsObserverState* observer, bool mutation) {
     js_property_set(observer->object, observer_key("disconnect"),
-        js_new_function((void*)js_observer_disconnect, 0));
+        js_new_native_function(js_observer_disconnect));
     if (mutation) {
         js_property_set(observer->object, observer_key("observe"),
-            js_new_function((void*)js_mutation_observer_observe, 2));
+            js_new_native_function(js_mutation_observer_observe));
         js_property_set(observer->object, observer_key("takeRecords"),
-            js_new_function((void*)js_observer_take_records, 0));
+            js_new_native_function(js_observer_take_records));
     } else {
         js_property_set(observer->object, observer_key("observe"),
-            js_new_function((void*)js_geometry_observer_observe, 1));
+            js_new_native_function(js_geometry_observer_observe));
         js_property_set(observer->object, observer_key("unobserve"),
-            js_new_function((void*)js_observer_unobserve, 1));
+            js_new_native_function(js_observer_unobserve));
     }
 }
 
@@ -679,7 +683,8 @@ static double observer_number_property(Item object, const char* name) {
 }
 
 static Item observer_rect(Item target_item, float* x, float* y, float* width, float* height) {
-    Item rect = js_dom_element_method(target_item, observer_key("getBoundingClientRect"), nullptr, 0);
+    Item rect = radiant_dom_element_operation(target_item,
+        JUBE_DOM_GET_BOUNDING_CLIENT_RECT, nullptr, 0);
     *x = (float)observer_number_property(rect, "x");
     *y = (float)observer_number_property(rect, "y");
     *width = (float)observer_number_property(rect, "width");

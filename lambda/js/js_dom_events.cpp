@@ -50,6 +50,9 @@ extern "C" bool js_dom_is_connected(void* dom_elem);
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
 extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
 extern "C" Item js_dom_check_validity_bridge(Item elem_item);
+extern "C" Item radiant_dom_element_operation(Item elem_item,
+                                                JubeDomElementOperation operation,
+                                                Item* args, int argc);
 static inline Item event_make_double(double v) {
     return js_make_number(v);
 }
@@ -210,7 +213,7 @@ static void report_exception_to_window_onerror(Item err, const char* type) {
     if (global.item == 0) return;
     Item onerr_key = (Item){.item = s2it(heap_create_name("onerror"))};
     Item onerr = js_property_get(global, onerr_key);
-    if (get_type_id(onerr) != LMD_TYPE_FUNC) return;
+    if (!js_is_callable(onerr)) return;
     Item msg = event_exception_message(err);
     Item args[5] = { msg, ItemNull, (Item){.item = b2it(false)}, (Item){.item = b2it(false)}, err };
     Item onerror_result = js_call_function(onerr, global, args, 5);
@@ -732,7 +735,7 @@ static void event_handler_property_set_for_key(void* key,
     stack_type[type_len] = '\0';
 
     EventHandlerSlot* slot = find_handler_slot(key, stack_type);
-    bool callable = get_type_id(value) == LMD_TYPE_FUNC;
+    bool callable = js_is_callable(value);
     if (!callable) {
         if (slot) slot->active = false;
         return;
@@ -1353,11 +1356,11 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
     Item cp_key = (Item){.item = s2it(heap_create_name("composedPath"))};
     Item ie_key = (Item){.item = s2it(heap_create_name("initEvent"))};
 
-    js_property_set(event, pd_key, js_new_function((void*)js_event_prevent_default, 0));
-    js_property_set(event, sp_key, js_new_function((void*)js_event_stop_propagation, 0));
-    js_property_set(event, si_key, js_new_function((void*)js_event_stop_immediate_propagation, 0));
-    js_property_set(event, cp_key, js_new_function((void*)js_event_composed_path, 0));
-    js_property_set(event, ie_key, js_new_function((void*)js_event_init_event, 3));
+    js_property_set(event, pd_key, js_new_native_function(js_event_prevent_default));
+    js_property_set(event, sp_key, js_new_native_function(js_event_stop_propagation));
+    js_property_set(event, si_key, js_new_native_function(js_event_stop_immediate_propagation));
+    js_property_set(event, cp_key, js_new_native_function(js_event_composed_path));
+    js_property_set(event, ie_key, js_new_native_function(js_event_init_event));
 
     // Install accessor properties for legacy spec'd setters/getters
     // (returnValue, cancelBubble, defaultPrevented). These override the
@@ -1372,8 +1375,8 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
         // returnValue: get + set
         descriptor_root.set(js_new_object());
         Item rv_desc = descriptor_root.get();
-        js_property_set(rv_desc, get_key, js_new_function((void*)js_event_returnvalue_get, 0));
-        js_property_set(rv_desc, set_key, js_new_function((void*)js_event_returnvalue_set, 1));
+        js_property_set(rv_desc, get_key, js_new_native_function(js_event_returnvalue_get));
+        js_property_set(rv_desc, set_key, js_new_native_function(js_event_returnvalue_set));
         js_property_set(rv_desc, conf_key, true_v);
         js_property_set(rv_desc, enum_key, true_v);
         js_object_define_property(event,
@@ -1382,8 +1385,8 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
         // cancelBubble: get + set
         descriptor_root.set(js_new_object());
         Item cb_desc = descriptor_root.get();
-        js_property_set(cb_desc, get_key, js_new_function((void*)js_event_cancelbubble_get, 0));
-        js_property_set(cb_desc, set_key, js_new_function((void*)js_event_cancelbubble_set, 1));
+        js_property_set(cb_desc, get_key, js_new_native_function(js_event_cancelbubble_get));
+        js_property_set(cb_desc, set_key, js_new_native_function(js_event_cancelbubble_set));
         js_property_set(cb_desc, conf_key, true_v);
         js_property_set(cb_desc, enum_key, true_v);
         js_object_define_property(event,
@@ -1392,7 +1395,7 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
         // defaultPrevented: get only
         descriptor_root.set(js_new_object());
         Item dp_desc = descriptor_root.get();
-        js_property_set(dp_desc, get_key, js_new_function((void*)js_event_defaultprevented_get, 0));
+        js_property_set(dp_desc, get_key, js_new_native_function(js_event_defaultprevented_get));
         js_property_set(dp_desc, conf_key, true_v);
         js_property_set(dp_desc, enum_key, true_v);
         js_object_define_property(event,
@@ -1421,7 +1424,7 @@ Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
     event_set_str(event_root.get(), "locale", "");
     Item ite_key = (Item){.item = s2it(heap_create_name("initTextEvent"))};
     js_property_set(event_root.get(), ite_key,
-        js_new_function((void*)js_event_init_text_event, 7));
+        js_new_native_function(js_event_init_text_event));
     return event_root.get();
 }
 
@@ -1434,7 +1437,7 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
     event_set_item(event_root.get(), "detail", detail_root.get());
     Item ice_key = (Item){.item = s2it(heap_create_name("initCustomEvent"))};
     js_property_set(event_root.get(), ice_key,
-        js_new_function((void*)js_event_init_custom_event, 4));
+        js_new_native_function(js_event_init_custom_event));
     js_class_stamp(event_root.get(), JS_CLASS_CUSTOM_EVENT);
     return event_root.get();
 }
@@ -1470,9 +1473,9 @@ Item js_create_event_target(void) {
     Item ael = (Item){.item = s2it(heap_create_name("addEventListener"))};
     Item rel = (Item){.item = s2it(heap_create_name("removeEventListener"))};
     Item dis = (Item){.item = s2it(heap_create_name("dispatchEvent"))};
-    js_property_set(et, ael, js_new_function((void*)js_eventtarget_add_listener, 3));
-    js_property_set(et, rel, js_new_function((void*)js_eventtarget_remove_listener, 3));
-    js_property_set(et, dis, js_new_function((void*)js_eventtarget_dispatch, 1));
+    js_property_set(et, ael, js_new_native_function(js_eventtarget_add_listener));
+    js_property_set(et, rel, js_new_native_function(js_eventtarget_remove_listener));
+    js_property_set(et, dis, js_new_native_function(js_eventtarget_dispatch));
     js_class_stamp(et, JS_CLASS_EVENT_TARGET);
     return et;
 }
@@ -1643,7 +1646,7 @@ extern "C" Item js_ctor_mouse_event_fn(Item type_arg, Item init_arg) {
     event_set_int(ev, "buttons", init_int(init_arg, "buttons", 0));
     event_set_item(ev, "relatedTarget", init_item(init_arg, "relatedTarget"));
     Item gms_key = (Item){.item = s2it(heap_create_name("getModifierState"))};
-    js_property_set(ev, gms_key, js_new_function((void*)js_event_get_modifier_state, 1));
+    js_property_set(ev, gms_key, js_new_native_function(js_event_get_modifier_state));
     return ev;
 }
 
@@ -1676,7 +1679,7 @@ extern "C" Item js_ctor_keyboard_event_fn(Item type_arg, Item init_arg) {
     event_set_int(ev, "DOM_KEY_LOCATION_RIGHT", 2);
     event_set_int(ev, "DOM_KEY_LOCATION_NUMPAD", 3);
     Item gms_key = (Item){.item = s2it(heap_create_name("getModifierState"))};
-    js_property_set(ev, gms_key, js_new_function((void*)js_event_get_modifier_state, 1));
+    js_property_set(ev, gms_key, js_new_native_function(js_event_get_modifier_state));
     return ev;
 }
 
@@ -1820,25 +1823,37 @@ extern "C" Item js_ctor_pointer_event_fn(Item type_arg, Item init_arg) {
 }
 
 extern "C" Item js_ctor_transition_event_fn(Item type_arg, Item init_arg) {
-    Item ev = js_create_event_init(fn_to_cstr(type_arg),
-        init_bool(init_arg, "bubbles", false),
-        init_bool(init_arg, "cancelable", false),
-        init_bool(init_arg, "composed", false));
-    event_set_str(ev, "propertyName", init_str(init_arg, "propertyName", ""));
-    event_set_double(ev, "elapsedTime", init_double(init_arg, "elapsedTime", 0.0));
-    event_set_str(ev, "pseudoElement", init_str(init_arg, "pseudoElement", ""));
+    RootFrame roots(3);
+    Rooted<Item> type_root(roots, type_arg);
+    Rooted<Item> init_root(roots, init_arg);
+    Rooted<Item> event_root(roots, js_create_event_init(fn_to_cstr(type_root.get()),
+        init_bool(init_root.get(), "bubbles", false),
+        init_bool(init_root.get(), "cancelable", false),
+        init_bool(init_root.get(), "composed", false)));
+    // Subclass property writes allocate after the Event initializer's root
+    // frame closes, so the partially built receiver needs its own precise root (D5.4.3).
+    Item ev = event_root.get();
+    event_set_str(ev, "propertyName", init_str(init_root.get(), "propertyName", ""));
+    event_set_double(ev, "elapsedTime", init_double(init_root.get(), "elapsedTime", 0.0));
+    event_set_str(ev, "pseudoElement", init_str(init_root.get(), "pseudoElement", ""));
     stamp_class(ev, "TransitionEvent");
     return ev;
 }
 
 extern "C" Item js_ctor_animation_event_fn(Item type_arg, Item init_arg) {
-    Item ev = js_create_event_init(fn_to_cstr(type_arg),
-        init_bool(init_arg, "bubbles", false),
-        init_bool(init_arg, "cancelable", false),
-        init_bool(init_arg, "composed", false));
-    event_set_str(ev, "animationName", init_str(init_arg, "animationName", ""));
-    event_set_double(ev, "elapsedTime", init_double(init_arg, "elapsedTime", 0.0));
-    event_set_str(ev, "pseudoElement", init_str(init_arg, "pseudoElement", ""));
+    RootFrame roots(3);
+    Rooted<Item> type_root(roots, type_arg);
+    Rooted<Item> init_root(roots, init_arg);
+    Rooted<Item> event_root(roots, js_create_event_init(fn_to_cstr(type_root.get()),
+        init_bool(init_root.get(), "bubbles", false),
+        init_bool(init_root.get(), "cancelable", false),
+        init_bool(init_root.get(), "composed", false)));
+    // AnimationEvent has the same post-base-initialization allocation window
+    // as TransitionEvent and must preserve the receiver precisely (D5.4.3).
+    Item ev = event_root.get();
+    event_set_str(ev, "animationName", init_str(init_root.get(), "animationName", ""));
+    event_set_double(ev, "elapsedTime", init_double(init_root.get(), "elapsedTime", 0.0));
+    event_set_str(ev, "pseudoElement", init_str(init_root.get(), "pseudoElement", ""));
     stamp_class(ev, "AnimationEvent");
     return ev;
 }
@@ -2046,7 +2061,7 @@ static void js_input_event_install_target_ranges(Item ev, Item target_ranges) {
     js_property_set(ev, ranges_key, ranges);
     Item gtr_key = (Item){.item = s2it(heap_create_name("getTargetRanges"))};
     js_property_set(ev, gtr_key,
-        js_new_function((void*)js_input_event_get_target_ranges, 0));
+        js_new_native_span_function(js_input_event_get_target_ranges));
 }
 
 extern "C" Item js_create_native_input_event(const char* type,
@@ -2217,12 +2232,12 @@ static Item event_target_get_idl_handler(Item target, const char* type) {
     if (written < 3 || written >= (int)sizeof(on_name)) return ItemNull;
     Item handler = js_property_get(
         target, (Item){.item = s2it(heap_create_name(on_name))});
-    return get_type_id(handler) == LMD_TYPE_FUNC ? handler : ItemNull;
+    return js_is_callable(handler) ? handler : ItemNull;
 }
 
 static void fire_idl_handler(Item target, const char* type, Item event) {
     Item handler = event_target_get_idl_handler(target, type);
-    if (get_type_id(handler) != LMD_TYPE_FUNC) return;
+    if (!js_is_callable(handler)) return;
 
     Item args[1] = { event };
     Item result = js_call_function(handler, target, args, 1);
@@ -2261,7 +2276,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         // queried through their host-property bridge as well as plain maps.
         on_handler = event_target_get_idl_handler(target_item, type);
     }
-    bool has_on = (get_type_id(on_handler) == LMD_TYPE_FUNC);
+    bool has_on = js_is_callable(on_handler);
     if (!has_listeners && !has_on) return;
 
     EventHandlerSlot* handler_slot = has_on ? find_handler_slot(key, type) : nullptr;
@@ -2334,12 +2349,11 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         // listeners disappear from the same dispatch.
         Item callback = event_listener_root_item(live->callback_root);
         Item this_for_call = wrap_path_key(key, key_is_dom);
-        TypeId ct = get_type_id(callback);
-        if (ct != LMD_TYPE_FUNC) {
+        if (!js_is_callable(callback)) {
             // EventListener WebIDL: if value is an object, call handleEvent on it
             Item he_key = (Item){.item = s2it(heap_create_name("handleEvent"))};
             Item he = js_property_get(callback, he_key);
-            if (get_type_id(he) != LMD_TYPE_FUNC) continue; // not callable
+            if (!js_is_callable(he)) continue;
             // per spec, `this` is the EventListener object itself
             this_for_call = callback;
             callback = he;
@@ -2676,8 +2690,8 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
             }
             if (owner) {
                 Item form_item = js_dom_wrap_element(owner);
-                Item m = (Item){.item = s2it(heap_create_name("reset"))};
-                js_dom_element_method(form_item, m, nullptr, 0);
+                radiant_dom_element_operation(form_item, JUBE_DOM_RESET,
+                    nullptr, 0);
             }
         }
     }

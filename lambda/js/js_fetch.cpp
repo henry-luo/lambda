@@ -295,7 +295,7 @@ static Item make_blob_object(const char* bytes, int len, const char* type) {
     js_property_set(blob, make_string_item("type"),
         make_string_item(type ? type : "application/octet-stream"));
     js_property_set(blob, make_string_item("text"),
-        js_new_function((void*)js_response_blob_text, 0));
+        js_new_native_function(js_response_blob_text));
     return blob;
 }
 
@@ -363,17 +363,17 @@ static Item build_response_object(JsFetchWork* fw) {
 
     // text() method
     Item text_key = make_string_item("text");
-    Item text_fn = js_new_function((void*)js_response_text, 0);
+    Item text_fn = js_new_native_function(js_response_text);
     js_property_set(resp, text_key, text_fn);
 
     // json() method
     Item json_key = make_string_item("json");
-    Item json_fn = js_new_function((void*)js_response_json, 0);
+    Item json_fn = js_new_native_function(js_response_json);
     js_property_set(resp, json_key, json_fn);
 
     // blob() method — returns Promise<Blob-like object> with .type/.size/.text()
     js_property_set(resp, make_string_item("blob"),
-        js_new_function((void*)js_response_blob, 0));
+        js_new_native_function(js_response_blob));
 
     return resp;
 }
@@ -609,7 +609,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
 
     // create promise — executor captures resolve/reject into fw
     pending_fetch_work = fw;
-    Item executor = js_new_function((void*)fetch_executor, 2);
+    Item executor = js_new_native_function(fetch_executor);
     Item promise = js_promise_create(executor);
     pending_fetch_work = NULL;
 

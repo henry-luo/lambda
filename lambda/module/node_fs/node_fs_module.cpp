@@ -1031,9 +1031,11 @@ static Item node_fs_promise_capability(NodeFsMode mode, Item path, Item data, It
     }
     environment[0] = node_fs_root_value(resolve_root);
     environment[1] = node_fs_root_value(reject_root);
-    Item callback = node_fs_host->script->new_closure(
-        mode != NODE_FS_MODE_READ ? (void*)node_fs_promise_write_callback : (void*)node_fs_promise_read_callback,
-        mode != NODE_FS_MODE_READ ? 1 : 2, environment, 2);
+    Item callback = mode != NODE_FS_MODE_READ
+        ? jube_new_closure(node_fs_host->script,
+            node_fs_promise_write_callback, 1, environment, 2)
+        : jube_new_closure(node_fs_host->script,
+            node_fs_promise_read_callback, 2, environment, 2);
     *callback_root = callback.item;
     Item scheduled = node_fs_schedule(path, data, node_fs_root_value(callback_root), mode);
     if (scheduled.item == 0 || item_is_error(scheduled)) {
@@ -2517,8 +2519,9 @@ static Item node_fs_write_sync_export(Item descriptor_item, Item data_item, Item
     return node_fs_host->script->make_number((double)count);
 }
 
-static void node_fs_set_method(Item namespace_item, const char* name, void* function,
-                               int parameter_count) {
+template <typename Target>
+static void node_fs_set_method(Item namespace_item, const char* name,
+        Target target, int adapter_arity) {
     JubeRootFrame frame = {};
     if (!node_fs_roots_begin(&frame, 3)) return;
     uint64_t* namespace_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
@@ -2531,7 +2534,8 @@ static void node_fs_set_method(Item namespace_item, const char* name, void* func
     *namespace_root = namespace_item.item;
     Item key = node_fs_host->value->string_from_utf8_n(name, strlen(name));
     *key_root = key.item;
-    Item method = node_fs_host->script->new_function(function, parameter_count);
+    Item method = jube_new_function(node_fs_host->script, target,
+        adapter_arity);
     *function_root = method.item;
     // Key and method construction may compact before the host namespace owns
     // them, so publish only from the temporary root frame.
@@ -2613,9 +2617,9 @@ static Item node_fs_make_watcher(void) {
     *watcher_root = watcher.item;
     // Method construction can compact before the watcher receives a property,
     // so retain this otherwise-unpublished watcher in the module root frame.
-    node_fs_set_method(node_fs_root_value(watcher_root), "close", (void*)node_fs_watcher_close, 0);
-    node_fs_set_method(node_fs_root_value(watcher_root), "ref", (void*)node_fs_watcher_ref, 0);
-    node_fs_set_method(node_fs_root_value(watcher_root), "unref", (void*)node_fs_watcher_unref, 0);
+    node_fs_set_method(node_fs_root_value(watcher_root), "close", node_fs_watcher_close, 0);
+    node_fs_set_method(node_fs_root_value(watcher_root), "ref", node_fs_watcher_ref, 0);
+    node_fs_set_method(node_fs_root_value(watcher_root), "unref", node_fs_watcher_unref, 0);
     Item result = node_fs_root_value(watcher_root);
     node_fs_host->node->roots->root_frame_end(&frame);
     return result;
@@ -2912,8 +2916,9 @@ static Item node_fs_create_write_stream(Item path, Item options) {
     return node_fs_create_stream(path, options, false);
 }
 
-static void node_fs_install_custom_promisify(Item namespace_item, const char* name,
-                                             void* function, int parameter_count) {
+template <typename Target>
+static void node_fs_install_custom_promisify(Item namespace_item,
+        const char* name, Target target, int adapter_arity) {
     JubeRootFrame frame = {};
     if (!node_fs_roots_begin(&frame, 2)) return;
     uint64_t* namespace_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
@@ -2927,7 +2932,8 @@ static void node_fs_install_custom_promisify(Item namespace_item, const char* na
     *key_root = key.item;
     Item exported = node_fs_host->value->property_get(node_fs_root_value(namespace_root),
                                                        node_fs_root_value(key_root));
-    node_fs_host->node->async_ops->function_install_promisify_custom(exported, function, parameter_count);
+    node_fs_host->node->async_ops->function_install_promisify_custom(exported,
+        jube_native_function_spec(target, adapter_arity));
     node_fs_host->node->roots->root_frame_end(&frame);
 }
 
@@ -3095,92 +3101,92 @@ static Item node_fs_namespace(void) {
     *namespace_root = namespace_item.item;
     // Each method allocation can compact the heap; retain the borrowed host
     // namespace until every module-owned replacement property is published.
-    node_fs_set_method(node_fs_root_value(namespace_root), "readFile", (void*)node_fs_read_file, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "writeFile", (void*)node_fs_write_file, 4);
-    node_fs_set_method(node_fs_root_value(namespace_root), "appendFile", (void*)node_fs_append_file, 4);
-    node_fs_set_method(node_fs_root_value(namespace_root), "readFileSync", (void*)node_fs_read_file_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "accessSync", (void*)node_fs_access_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "chmodSync", (void*)node_fs_chmod_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "fchmodSync", (void*)node_fs_fchmod_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "copyFileSync", (void*)node_fs_copy_file_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "truncateSync", (void*)node_fs_truncate_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "rmSync", (void*)node_fs_rm_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "realpathSync", (void*)node_fs_realpath_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "mkdtempSync", (void*)node_fs_mkdtemp_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "linkSync", (void*)node_fs_link_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "symlinkSync", (void*)node_fs_symlink_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "writeFileSync", (void*)node_fs_write_file_sync_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "appendFileSync", (void*)node_fs_append_file_sync_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "existsSync", (void*)node_fs_exists_sync, 1);
-    node_fs_set_method(node_fs_root_value(namespace_root), "unlinkSync", (void*)node_fs_unlink_sync, 1);
-    node_fs_set_method(node_fs_root_value(namespace_root), "mkdirSync", (void*)node_fs_mkdir_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "rmdirSync", (void*)node_fs_rmdir_sync, 1);
-    node_fs_set_method(node_fs_root_value(namespace_root), "renameSync", (void*)node_fs_rename_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "readdirSync", (void*)node_fs_readdir_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "stat", (void*)node_fs_stat_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "statfs", (void*)node_fs_statfs_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "lstat", (void*)node_fs_lstat_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "fstat", (void*)node_fs_fstat_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "open", (void*)node_fs_open_export, 4);
-    node_fs_set_method(node_fs_root_value(namespace_root), "close", (void*)node_fs_close_export, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "read", (void*)node_fs_read_export, 6);
-    node_fs_set_method(node_fs_root_value(namespace_root), "write", (void*)node_fs_write_export, 6);
-    node_fs_set_method(node_fs_root_value(namespace_root), "readv", (void*)node_fs_readv_export, 4);
-    node_fs_set_method(node_fs_root_value(namespace_root), "writev", (void*)node_fs_writev_export, 4);
+    node_fs_set_method(node_fs_root_value(namespace_root), "readFile", node_fs_read_file, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "writeFile", node_fs_write_file, 4);
+    node_fs_set_method(node_fs_root_value(namespace_root), "appendFile", node_fs_append_file, 4);
+    node_fs_set_method(node_fs_root_value(namespace_root), "readFileSync", node_fs_read_file_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "accessSync", node_fs_access_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "chmodSync", node_fs_chmod_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "fchmodSync", node_fs_fchmod_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "copyFileSync", node_fs_copy_file_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "truncateSync", node_fs_truncate_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "rmSync", node_fs_rm_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "realpathSync", node_fs_realpath_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "mkdtempSync", node_fs_mkdtemp_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "linkSync", node_fs_link_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "symlinkSync", node_fs_symlink_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "writeFileSync", node_fs_write_file_sync_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "appendFileSync", node_fs_append_file_sync_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "existsSync", node_fs_exists_sync, 1);
+    node_fs_set_method(node_fs_root_value(namespace_root), "unlinkSync", node_fs_unlink_sync, 1);
+    node_fs_set_method(node_fs_root_value(namespace_root), "mkdirSync", node_fs_mkdir_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "rmdirSync", node_fs_rmdir_sync, 1);
+    node_fs_set_method(node_fs_root_value(namespace_root), "renameSync", node_fs_rename_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "readdirSync", node_fs_readdir_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "stat", node_fs_stat_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "statfs", node_fs_statfs_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "lstat", node_fs_lstat_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "fstat", node_fs_fstat_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "open", node_fs_open_export, 4);
+    node_fs_set_method(node_fs_root_value(namespace_root), "close", node_fs_close_export, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "read", node_fs_read_export, 6);
+    node_fs_set_method(node_fs_root_value(namespace_root), "write", node_fs_write_export, 6);
+    node_fs_set_method(node_fs_root_value(namespace_root), "readv", node_fs_readv_export, 4);
+    node_fs_set_method(node_fs_root_value(namespace_root), "writev", node_fs_writev_export, 4);
     node_fs_install_custom_promisify_args(node_fs_root_value(namespace_root), "read", "bytesRead", "buffer");
     node_fs_install_custom_promisify_args(node_fs_root_value(namespace_root), "write", "bytesWritten", "buffer");
     node_fs_install_custom_promisify_args(node_fs_root_value(namespace_root), "readv", "bytesRead", "buffers");
     node_fs_install_custom_promisify_args(node_fs_root_value(namespace_root), "writev", "bytesWritten", "buffer");
-    node_fs_set_method(node_fs_root_value(namespace_root), "exists", (void*)node_fs_exists, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "exists", node_fs_exists, 2);
     node_fs_install_custom_promisify(node_fs_root_value(namespace_root), "exists",
-                                    (void*)node_fs_exists_promisified, 1);
-    node_fs_set_method(node_fs_root_value(namespace_root), "mkdir", (void*)node_fs_mkdir_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "access", (void*)node_fs_access_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "chmod", (void*)node_fs_chmod_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "fchmod", (void*)node_fs_fchmod_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "copyFile", (void*)node_fs_copy_file_export, 4);
-    node_fs_set_method(node_fs_root_value(namespace_root), "truncate", (void*)node_fs_truncate_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "rm", (void*)node_fs_rm_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "realpath", (void*)node_fs_realpath_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "mkdtemp", (void*)node_fs_mkdtemp_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "link", (void*)node_fs_link_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "symlink", (void*)node_fs_symlink_export, 4);
-    node_fs_set_method(node_fs_root_value(namespace_root), "unlink", (void*)node_fs_unlink_export, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "rmdir", (void*)node_fs_rmdir_export, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "rename", (void*)node_fs_rename_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "readdir", (void*)node_fs_readdir_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "readlink", (void*)node_fs_readlink_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "chown", (void*)node_fs_chown_export, 4);
-    node_fs_set_method(node_fs_root_value(namespace_root), "lchown", (void*)node_fs_lchown_export, 4);
-    node_fs_set_method(node_fs_root_value(namespace_root), "fchown", (void*)node_fs_fchown_export, 4);
-    node_fs_set_method(node_fs_root_value(namespace_root), "lchmod", (void*)node_fs_lchmod_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "watch", (void*)node_fs_watch, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "watchFile", (void*)node_fs_watch_file, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "unwatchFile", (void*)node_fs_unwatch_file, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "utimes", (void*)node_fs_utimes_export, 4);
-    node_fs_set_method(node_fs_root_value(namespace_root), "statSync", (void*)node_fs_stat_sync_export, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "statfsSync", (void*)node_fs_statfs_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "lstatSync", (void*)node_fs_lstat_sync_export, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "fstatSync", (void*)node_fs_fstat_sync_export, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "closeSync", (void*)node_fs_close_sync_export, 1);
-    node_fs_set_method(node_fs_root_value(namespace_root), "openSync", (void*)node_fs_open_sync_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "readSync", (void*)node_fs_read_sync_export, 5);
-    node_fs_set_method(node_fs_root_value(namespace_root), "writeSync", (void*)node_fs_write_sync_export, 5);
-    node_fs_set_method(node_fs_root_value(namespace_root), "readvSync", (void*)node_fs_readv_sync, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "writevSync", (void*)node_fs_writev_sync, 3);
+                                    node_fs_exists_promisified, 1);
+    node_fs_set_method(node_fs_root_value(namespace_root), "mkdir", node_fs_mkdir_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "access", node_fs_access_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "chmod", node_fs_chmod_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "fchmod", node_fs_fchmod_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "copyFile", node_fs_copy_file_export, 4);
+    node_fs_set_method(node_fs_root_value(namespace_root), "truncate", node_fs_truncate_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "rm", node_fs_rm_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "realpath", node_fs_realpath_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "mkdtemp", node_fs_mkdtemp_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "link", node_fs_link_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "symlink", node_fs_symlink_export, 4);
+    node_fs_set_method(node_fs_root_value(namespace_root), "unlink", node_fs_unlink_export, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "rmdir", node_fs_rmdir_export, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "rename", node_fs_rename_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "readdir", node_fs_readdir_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "readlink", node_fs_readlink_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "chown", node_fs_chown_export, 4);
+    node_fs_set_method(node_fs_root_value(namespace_root), "lchown", node_fs_lchown_export, 4);
+    node_fs_set_method(node_fs_root_value(namespace_root), "fchown", node_fs_fchown_export, 4);
+    node_fs_set_method(node_fs_root_value(namespace_root), "lchmod", node_fs_lchmod_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "watch", node_fs_watch, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "watchFile", node_fs_watch_file, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "unwatchFile", node_fs_unwatch_file, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "utimes", node_fs_utimes_export, 4);
+    node_fs_set_method(node_fs_root_value(namespace_root), "statSync", node_fs_stat_sync_export, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "statfsSync", node_fs_statfs_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "lstatSync", node_fs_lstat_sync_export, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "fstatSync", node_fs_fstat_sync_export, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "closeSync", node_fs_close_sync_export, 1);
+    node_fs_set_method(node_fs_root_value(namespace_root), "openSync", node_fs_open_sync_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "readSync", node_fs_read_sync_export, 5);
+    node_fs_set_method(node_fs_root_value(namespace_root), "writeSync", node_fs_write_sync_export, 5);
+    node_fs_set_method(node_fs_root_value(namespace_root), "readvSync", node_fs_readv_sync, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "writevSync", node_fs_writev_sync, 3);
     node_fs_install_constants(node_fs_root_value(namespace_root));
-    node_fs_set_method(node_fs_root_value(namespace_root), "utimesSync", (void*)node_fs_utimes_sync, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "opendirSync", (void*)node_fs_opendir_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "readlinkSync", (void*)node_fs_readlink_sync, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "_toUnixTimestamp", (void*)node_fs_to_unix_timestamp, 1);
-    node_fs_set_method(node_fs_root_value(namespace_root), "createReadStream", (void*)node_fs_create_read_stream, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "ReadStream", (void*)node_fs_create_read_stream, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "createWriteStream", (void*)node_fs_create_write_stream, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "WriteStream", (void*)node_fs_create_write_stream, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "chownSync", (void*)node_fs_chown_sync_export, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "lchownSync", (void*)node_fs_lchown_sync, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "fchownSync", (void*)node_fs_fchown_sync, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "lchmodSync", (void*)node_fs_lchmod_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "utimesSync", node_fs_utimes_sync, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "opendirSync", node_fs_opendir_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "readlinkSync", node_fs_readlink_sync, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "_toUnixTimestamp", node_fs_to_unix_timestamp, 1);
+    node_fs_set_method(node_fs_root_value(namespace_root), "createReadStream", node_fs_create_read_stream, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "ReadStream", node_fs_create_read_stream, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "createWriteStream", node_fs_create_write_stream, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "WriteStream", node_fs_create_write_stream, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "chownSync", node_fs_chown_sync_export, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "lchownSync", node_fs_lchown_sync, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "fchownSync", node_fs_fchown_sync, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "lchmodSync", node_fs_lchmod_sync, 2);
     Item result = node_fs_root_value(namespace_root);
     node_fs_host->node->roots->root_frame_end(&frame);
     return result;
@@ -3204,26 +3210,26 @@ static Item node_fs_promises_namespace(void) {
     *namespace_root = namespace_item.item;
     // Promise wrapper allocation has the same moving-heap requirement as the
     // callback namespace: never reuse an unrooted borrowed namespace Item.
-    node_fs_set_method(node_fs_root_value(namespace_root), "readFile", (void*)node_fs_promises_read_file, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "writeFile", (void*)node_fs_promises_write_file, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "appendFile", (void*)node_fs_promises_append_file, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "stat", (void*)node_fs_promises_stat, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "lstat", (void*)node_fs_promises_lstat, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "mkdir", (void*)node_fs_promises_mkdir, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "access", (void*)node_fs_promises_access, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "chmod", (void*)node_fs_promises_chmod, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "chown", (void*)node_fs_promises_chown, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "lchown", (void*)node_fs_promises_lchown, 3);
-    node_fs_set_method(node_fs_root_value(namespace_root), "copyFile", (void*)node_fs_promises_copy_file, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "truncate", (void*)node_fs_promises_truncate, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "unlink", (void*)node_fs_promises_unlink, 1);
-    node_fs_set_method(node_fs_root_value(namespace_root), "rm", (void*)node_fs_promises_rm, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "realpath", (void*)node_fs_promises_realpath, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "mkdtemp", (void*)node_fs_promises_mkdtemp, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "symlink", (void*)node_fs_promises_symlink, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "rename", (void*)node_fs_promises_rename, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "readdir", (void*)node_fs_promises_readdir, 2);
-    node_fs_set_method(node_fs_root_value(namespace_root), "open", (void*)node_fs_promises_open, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "readFile", node_fs_promises_read_file, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "writeFile", node_fs_promises_write_file, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "appendFile", node_fs_promises_append_file, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "stat", node_fs_promises_stat, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "lstat", node_fs_promises_lstat, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "mkdir", node_fs_promises_mkdir, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "access", node_fs_promises_access, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "chmod", node_fs_promises_chmod, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "chown", node_fs_promises_chown, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "lchown", node_fs_promises_lchown, 3);
+    node_fs_set_method(node_fs_root_value(namespace_root), "copyFile", node_fs_promises_copy_file, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "truncate", node_fs_promises_truncate, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "unlink", node_fs_promises_unlink, 1);
+    node_fs_set_method(node_fs_root_value(namespace_root), "rm", node_fs_promises_rm, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "realpath", node_fs_promises_realpath, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "mkdtemp", node_fs_promises_mkdtemp, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "symlink", node_fs_promises_symlink, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "rename", node_fs_promises_rename, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "readdir", node_fs_promises_readdir, 2);
+    node_fs_set_method(node_fs_root_value(namespace_root), "open", node_fs_promises_open, 3);
     Item result = node_fs_root_value(namespace_root);
     node_fs_host->node->roots->root_frame_end(&frame);
     return result;

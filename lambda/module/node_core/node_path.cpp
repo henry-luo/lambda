@@ -82,7 +82,6 @@ static void node_path_describe_invalid_object(Item value, char* out, int out_siz
 #define js_new_object() node_path_host->value->new_object()
 #define js_property_get(ARG_OBJECT, ARG_KEY) node_path_host->value->property_get(ARG_OBJECT, ARG_KEY)
 #define js_property_set(ARG_OBJECT, ARG_KEY, ARG_VALUE) node_path_host->value->property_set(ARG_OBJECT, ARG_KEY, ARG_VALUE)
-#define js_new_function(ARG_FUNCTION, ARG_COUNT) node_path_host->script->new_function(ARG_FUNCTION, ARG_COUNT)
 #define js_throw_type_error_code(ARG_CODE, ARG_MESSAGE) node_path_throw_type_error(ARG_CODE, ARG_MESSAGE)
 
 // Helper: get JS type name for error messages
@@ -940,9 +939,12 @@ static Item js_path_win32_matches_glob(Item path_item, Item pattern_item) {
 // path Module Namespace Object
 // =============================================================================
 
-static void js_path_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+template <typename Target>
+static void js_path_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
     Item key = make_string_item(name);
-    Item fn = js_new_function(func_ptr, param_count);
+    Item fn = jube_new_function(node_path_host->script, target,
+        adapter_arity);
     js_property_set(ns, key, fn);
 }
 
@@ -952,18 +954,18 @@ Item node_path_namespace(void) {
 
     path_namespace = js_new_object();
 
-    js_path_set_method(path_namespace, "basename",   (void*)js_path_basename, 2);
-    js_path_set_method(path_namespace, "dirname",    (void*)js_path_dirname, 1);
-    js_path_set_method(path_namespace, "extname",    (void*)js_path_extname, 1);
-    js_path_set_method(path_namespace, "isAbsolute", (void*)js_path_isAbsolute, 1);
-    js_path_set_method(path_namespace, "join",       (void*)js_path_join, -1);
-    js_path_set_method(path_namespace, "resolve",    (void*)js_path_resolve, -1);
-    js_path_set_method(path_namespace, "normalize",  (void*)js_path_normalize, 1);
-    js_path_set_method(path_namespace, "relative",   (void*)js_path_relative, 2);
-    js_path_set_method(path_namespace, "parse",      (void*)js_path_parse, 1);
-    js_path_set_method(path_namespace, "format",     (void*)js_path_format, 1);
-    js_path_set_method(path_namespace, "matchesGlob", (void*)js_path_matches_glob, 2);
-    js_path_set_method(path_namespace, "toNamespacedPath", (void*)js_path_toNamespacedPath, 1);
+    js_path_set_method(path_namespace, "basename",   js_path_basename, 2);
+    js_path_set_method(path_namespace, "dirname",    js_path_dirname, 1);
+    js_path_set_method(path_namespace, "extname",    js_path_extname, 1);
+    js_path_set_method(path_namespace, "isAbsolute", js_path_isAbsolute, 1);
+    js_path_set_method(path_namespace, "join",       js_path_join, -1);
+    js_path_set_method(path_namespace, "resolve",    js_path_resolve, -1);
+    js_path_set_method(path_namespace, "normalize",  js_path_normalize, 1);
+    js_path_set_method(path_namespace, "relative",   js_path_relative, 2);
+    js_path_set_method(path_namespace, "parse",      js_path_parse, 1);
+    js_path_set_method(path_namespace, "format",     js_path_format, 1);
+    js_path_set_method(path_namespace, "matchesGlob", js_path_matches_glob, 2);
+    js_path_set_method(path_namespace, "toNamespacedPath", js_path_toNamespacedPath, 1);
 
     // properties
     js_property_set(path_namespace, make_string_item("sep"), js_path_get_sep());
@@ -974,18 +976,18 @@ Item node_path_namespace(void) {
 
     // path.win32 — win32-specific path implementations
     Item win32_ns = js_new_object();
-    js_path_set_method(win32_ns, "basename",   (void*)js_path_win32_basename, 2);
-    js_path_set_method(win32_ns, "dirname",    (void*)js_path_win32_dirname, 1);
-    js_path_set_method(win32_ns, "extname",    (void*)js_path_win32_extname, 1);
-    js_path_set_method(win32_ns, "isAbsolute", (void*)js_path_win32_isAbsolute, 1);
-    js_path_set_method(win32_ns, "join",       (void*)js_path_win32_join, -1);
-    js_path_set_method(win32_ns, "resolve",    (void*)js_path_win32_resolve, -1);
-    js_path_set_method(win32_ns, "normalize",  (void*)js_path_win32_normalize, 1);
-    js_path_set_method(win32_ns, "relative",   (void*)js_path_win32_relative, 2);
-    js_path_set_method(win32_ns, "parse",      (void*)js_path_win32_parse, 1);
-    js_path_set_method(win32_ns, "format",     (void*)js_path_win32_format, 1);
-    js_path_set_method(win32_ns, "matchesGlob", (void*)js_path_win32_matches_glob, 2);
-    js_path_set_method(win32_ns, "toNamespacedPath", (void*)js_path_win32_toNamespacedPath, 1);
+    js_path_set_method(win32_ns, "basename",   js_path_win32_basename, 2);
+    js_path_set_method(win32_ns, "dirname",    js_path_win32_dirname, 1);
+    js_path_set_method(win32_ns, "extname",    js_path_win32_extname, 1);
+    js_path_set_method(win32_ns, "isAbsolute", js_path_win32_isAbsolute, 1);
+    js_path_set_method(win32_ns, "join",       js_path_win32_join, -1);
+    js_path_set_method(win32_ns, "resolve",    js_path_win32_resolve, -1);
+    js_path_set_method(win32_ns, "normalize",  js_path_win32_normalize, 1);
+    js_path_set_method(win32_ns, "relative",   js_path_win32_relative, 2);
+    js_path_set_method(win32_ns, "parse",      js_path_win32_parse, 1);
+    js_path_set_method(win32_ns, "format",     js_path_win32_format, 1);
+    js_path_set_method(win32_ns, "matchesGlob", js_path_win32_matches_glob, 2);
+    js_path_set_method(win32_ns, "toNamespacedPath", js_path_win32_toNamespacedPath, 1);
     js_property_set(win32_ns, make_string_item("sep"), make_string_item("\\"));
     js_property_set(win32_ns, make_string_item("delimiter"), make_string_item(";"));
     js_property_set(path_namespace, make_string_item("win32"), win32_ns);

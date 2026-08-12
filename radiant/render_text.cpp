@@ -483,10 +483,11 @@ static void render_text_inline_background(RenderContext* rdcon, ViewText* text_v
     float s = rdcon->scale;
     BackgroundProp* bg = parent_elem->boundary()->background;
     Color* bg_color = bg ? &bg->color : nullptr;
-    float bg_pad_top = parent_elem->boundary()->padding.top * s;
-    float bg_pad_right = parent_elem->boundary()->padding.right * s;
-    float bg_pad_bottom = parent_elem->boundary()->padding.bottom * s;
-    float bg_pad_left = parent_elem->boundary()->padding.left * s;
+    const float* padding = parent_elem->boundary()->padding.values;
+    float bg_pad_top = padding[CSS_BOX_SIDE_TOP] * s;
+    float bg_pad_right = padding[CSS_BOX_SIDE_RIGHT] * s;
+    float bg_pad_bottom = padding[CSS_BOX_SIDE_BOTTOM] * s;
+    float bg_pad_left = padding[CSS_BOX_SIDE_LEFT] * s;
     float bg_radius = parent_elem->boundary()->border ?
         parent_elem->boundary()->border->radius.top_left * s : 0;
 

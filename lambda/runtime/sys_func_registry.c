@@ -1151,11 +1151,14 @@ extern void js_mark_private_method_non_writable(Item object, Item name);
 extern void js_set_method_home_from_target(Item target, Item fn_item);
 extern void js_refresh_prototype_method_homes(Item prototype, Item class_item);
 extern Item js_init_class_instance_fields(Item callee, Item object);
+extern Item js_init_class_instance_fields_after_super(Item callee, Item object);
 extern void js_init_class_instance_field_metadata(Item class_item, int count);
 extern void js_set_class_instance_field_metadata_name_id_range(Item class_item,
     int index, uint32_t module_name_base, int count, uint64_t method_mask);
 extern void js_set_class_instance_field_metadata_key(Item class_item, int index, Item key);
 extern void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
+extern void js_set_class_instance_field_metadata_initializer(Item class_item, int index,
+    Item initializer);
 extern Item js_private_key_for_class(Item class_item, Item source_name);
 extern Item js_private_key_for_current_class(Item source_name);
 extern Item js_private_home_class_enter(Item class_item);
@@ -1412,7 +1415,7 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"v2it", FPTR(v2it)},
     {"push_d", FPTR(push_d),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"complex_new", FPTR(complex_new)},
     {"lambda_item_adopt_scalar_home", FPTR(lambda_item_adopt_scalar_home),
@@ -1541,6 +1544,7 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    // D8.4.3: a NameId lookup has no Item carrier and preserves the error lane.
     {"js_active_module_name_id", FPTR(js_active_module_name_id),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
@@ -1995,9 +1999,14 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
+    // IC-cell lookup cannot create an exception. Treating its raw pointer as
+    // MAY_SET contaminated the following property load's D8.4.3 carrier.
     {"js_active_module_ic", FPTR(js_active_module_ic),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_PRESERVES, 0}},
 #endif
     {"js_super_property_get", FPTR(js_super_property_get)},
     {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
@@ -2036,11 +2045,9 @@ JitImport jit_runtime_imports[] = {
     {"js_array_define_dense_element_direct", FPTR(js_array_define_dense_element_direct)},
     {"js_array_length", FPTR(js_array_length), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_array_push", FPTR(js_array_push)},
-    {"js_new_function", FPTR(js_new_function)},
     {"js_new_function_mir", FPTR(js_new_function_mir)},
-    {"js_new_method_function", FPTR(js_new_method_function)},
+    {"js_new_distinct_function_mir", FPTR(js_new_distinct_function_mir)},
     {"js_new_method_function_mir", FPTR(js_new_method_function_mir)},
-    {"js_new_closure", FPTR(js_new_closure)},
     {"js_new_closure_mir", FPTR(js_new_closure_mir)},
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_env_rehome_scalars", FPTR(js_env_rehome_scalars), JIT_IMPORT_VOID_PRESERVES},
@@ -2057,28 +2064,55 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_MAY_SET, 0}},
+    {"js_call_constructor_body_into", FPTR(js_call_constructor_body_into),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(4, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(5, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_MAY_SET, 0}},
     {"js_apply_function", FPTR(js_apply_function)},
     {"js_apply_function_into", FPTR(js_apply_function_into),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER)}},
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_MAY_SET, 0}},
     {"js_super_call_class_into", FPTR(js_super_call_class_into),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_MAY_SET, 0}},
     {"js_super_apply_class_into", FPTR(js_super_apply_class_into),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER)}},
-    {"js_apply_constructor", FPTR(js_apply_constructor)},
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_MAY_SET, 0}},
+    {"js_construct_array_like", FPTR(js_construct_array_like),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM)}},
     // Ruby block lowering imports the JS/Lambda function pointer bridge directly.
     {"js_function_get_ptr", FPTR(js_function_get_ptr)},
     {"js_new_function_from_string", FPTR(js_new_function_from_string)},
@@ -2093,8 +2127,23 @@ JitImport jit_runtime_imports[] = {
     {"js_url_can_parse", FPTR(js_url_can_parse)},
     {"js_readable_stream_new", FPTR(js_readable_stream_new)},
     {"js_writable_stream_new", FPTR(js_writable_stream_new)},
-    {"js_new_from_class_object", FPTR(js_new_from_class_object)},
-    {"js_new_from_class_object_defer_own_fields", FPTR(js_new_from_class_object_defer_own_fields)},
+    {"js_construct_value", FPTR(js_construct_value),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(3, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(5, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_MAY_SET, 0}},
+    {"js_construct_value_defer_own_fields", FPTR(js_construct_value_defer_own_fields),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(3, JIT_VALUE_BOXED_ITEM)}},
     {"js_set_internal_class_name", FPTR(js_set_internal_class_name), JIT_IMPORT_VOID_PRESERVES},
     {"js_string_concat", FPTR(js_string_concat)},
     {"js_string_get_int", FPTR(js_string_get_int)},
@@ -2114,7 +2163,6 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES, 0}},
-    {"js_set_new_target", FPTR(js_set_new_target), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_direct_new_target", FPTR(js_set_direct_new_target),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
@@ -2150,23 +2198,9 @@ JitImport jit_runtime_imports[] = {
     {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
     {"js_new_aggregate_error", FPTR(js_new_aggregate_error)},
     {"js_error_set_cause", FPTR(js_error_set_cause)},
-    {"js_string_method", FPTR(js_string_method)},
     {"js_string_replace_nonws_global_fast_no_dollar", FPTR(js_string_replace_nonws_global_fast_no_dollar)},
     {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
     {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code)},
-    {"js_array_method_direct", FPTR(js_array_method_direct)},
-    {"js_array_method_direct_into", FPTR(js_array_method_direct_into),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
-    {"js_math_method", FPTR(js_math_method)},
-    {"js_math_apply", FPTR(js_math_apply)},
-    {"js_method_call_apply", FPTR(js_method_call_apply)},
-    {"js_math_property", FPTR(js_math_property)},
-    {"js_math_set_property", FPTR(js_math_set_property)},
     {"js_get_math_object_value", FPTR(js_get_math_object_value)},
     {"js_get_json_object_value", FPTR(js_get_json_object_value)},
     {"js_get_console_object_value", FPTR(js_get_console_object_value)},
@@ -2175,12 +2209,6 @@ JitImport jit_runtime_imports[] = {
     {"js_get_262_object_value", FPTR(js_get_262_object_value)},
     {"js_get_css_object_value", FPTR(js_get_css_object_value)},
     {"js_get_document_object_value", FPTR(js_get_document_object_value)},
-    {"js_number_method", FPTR(js_number_method)},
-    {"js_get_length_item", FPTR(js_get_length_item),
-     // .length may return a frame-backed Number, so the MIR caller must adopt
-     // the result into its scalar home before a later allocating expression.
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
     // process I/O
     {"js_process_stdout_write", FPTR(js_process_stdout_write)},
     {"js_get_process_argv", FPTR(js_get_process_argv)},
@@ -2195,7 +2223,6 @@ JitImport jit_runtime_imports[] = {
     {"js_string_fromCharCode_array", FPTR(js_string_fromCharCode_array)},
     {"js_string_fromCodePoint", FPTR(js_string_fromCodePoint)},
     {"js_string_fromCodePoint_array", FPTR(js_string_fromCodePoint_array)},
-    {"js_constructor_static_property", FPTR(js_constructor_static_property)},
     {"js_console_log_multi", FPTR(js_console_log_multi), JIT_IMPORT_VOID_PRESERVES},
     // additional operators
     {"js_instanceof", FPTR(js_instanceof)},
@@ -2232,20 +2259,45 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_EFFECT(0, JIT_ARG_MAY_WRITE_THROUGH) |
       JIT_ARG_EFFECT(1, JIT_ARG_PERSISTENT_STORE)}},
     {"js_set_function_home_class", FPTR(js_set_function_home_class), JIT_IMPORT_VOID_PRESERVES},
-    {"js_call_function_prerooted_args_into", FPTR(js_call_function_prerooted_args_into)},
-    {"js_finalize_function", FPTR(js_finalize_function),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+    {"js_call_function_prerooted_args_into", FPTR(js_call_function_prerooted_args_into),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(4, JIT_VALUE_NON_GC_SCALAR),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES, JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_MAY_SET, 0}},
+    {"js_call_constructor_body_prerooted_args_into",
+     FPTR(js_call_constructor_body_prerooted_args_into),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(4, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(5, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_MAY_SET, 0}},
+    {"js_finalize_function", FPTR(js_finalize_function),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(4, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(5, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_PRESERVES,
       JIT_ARG_EFFECT(0, JIT_ARG_MAY_WRITE_THROUGH) |
-      JIT_ARG_EFFECT(1, JIT_ARG_PERSISTENT_STORE) |
-      JIT_ARG_EFFECT(2, JIT_ARG_PERSISTENT_STORE) |
+      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(2, JIT_ARG_BORROWED) |
       JIT_ARG_EFFECT(3, JIT_ARG_BORROWED) |
-      JIT_ARG_EFFECT(4, JIT_ARG_BORROWED)}},
+      JIT_ARG_EFFECT(4, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(5, JIT_ARG_BORROWED)}},
     {"js_mark_generator_func", FPTR(js_mark_generator_func), JIT_IMPORT_VOID_PRESERVES},
     {"js_mark_async_generator_func", FPTR(js_mark_async_generator_func), JIT_IMPORT_VOID_PRESERVES},
     {"js_mark_async_func", FPTR(js_mark_async_func), JIT_IMPORT_VOID_PRESERVES},
@@ -2254,12 +2306,9 @@ JitImport jit_runtime_imports[] = {
     {"js_mark_method_func", FPTR(js_mark_method_func), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_method_home_from_target", FPTR(js_set_method_home_from_target), JIT_IMPORT_VOID_PRESERVES},
     {"js_refresh_prototype_method_homes", FPTR(js_refresh_prototype_method_homes), JIT_IMPORT_VOID_PRESERVES},
-    {"js_mark_strict_func", FPTR(js_mark_strict_func),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES,
-      JIT_EXCEPTION_PRESERVES,
-      JIT_ARG_EFFECT(0, JIT_ARG_MAY_WRITE_THROUGH)}},
+    // D5.3.3/D6.2.2v2: strict marking re-finalizes capabilities and may
+    // allocate `.name`/`.length`; NO_GC would hide that safepoint from MIR.
+    {"js_mark_strict_func", FPTR(js_mark_strict_func), JIT_IMPORT_VOID_PRESERVES},
     {"js_mark_derived_constructor_func", FPTR(js_mark_derived_constructor_func), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_formal_length", FPTR(js_set_formal_length), JIT_IMPORT_VOID_PRESERVES},
     {"js_get_prototype_of", FPTR(js_get_prototype_of)},
@@ -2324,14 +2373,6 @@ JitImport jit_runtime_imports[] = {
     {"js_map_collection_new_from", FPTR(js_map_collection_new_from)},
     {"js_set_collection_new", FPTR(js_set_collection_new)},
     {"js_set_collection_new_from", FPTR(js_set_collection_new_from)},
-    {"js_map_method", FPTR(js_map_method)},
-    {"js_map_method_into", FPTR(js_map_method_into),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
-      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
     // shims
     {"js_alert", FPTR(js_alert)},
     // typed arrays
@@ -2347,7 +2388,6 @@ JitImport jit_runtime_imports[] = {
     // Buffer constructor
     {"js_buffer_construct", FPTR(js_buffer_construct)},
     {"js_dataview_new", FPTR(js_dataview_new)},
-    {"js_dataview_method", FPTR(js_dataview_method)},
     // SharedArrayBuffer
     {"js_sharedarraybuffer_construct_with_options", FPTR(js_sharedarraybuffer_construct_with_options)},
     {"js_set_module_var", FPTR(js_set_module_var),
@@ -2409,10 +2449,12 @@ JitImport jit_runtime_imports[] = {
     {"js_set_global_property_strict_prechecked", FPTR(js_set_global_property_strict_prechecked)},
     {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable), JIT_IMPORT_VOID_PRESERVES},
     {"js_init_class_instance_fields", FPTR(js_init_class_instance_fields)},
+    {"js_init_class_instance_fields_after_super", FPTR(js_init_class_instance_fields_after_super)},
     {"js_init_class_instance_field_metadata", FPTR(js_init_class_instance_field_metadata), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_class_instance_field_metadata_name_id_range", FPTR(js_set_class_instance_field_metadata_name_id_range), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_class_instance_field_metadata_key", FPTR(js_set_class_instance_field_metadata_key), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_class_instance_field_metadata_value", FPTR(js_set_class_instance_field_metadata_value), JIT_IMPORT_VOID_PRESERVES},
+    {"js_set_class_instance_field_metadata_initializer", FPTR(js_set_class_instance_field_metadata_initializer), JIT_IMPORT_VOID_PRESERVES},
     {"js_private_key_for_class", FPTR(js_private_key_for_class)},
     {"js_private_key_for_current_class", FPTR(js_private_key_for_current_class)},
     {"js_private_home_class_enter", FPTR(js_private_home_class_enter)},
@@ -2454,8 +2496,6 @@ JitImport jit_runtime_imports[] = {
     {"js_symbol_key_for", FPTR(js_symbol_key_for)},
     {"js_symbol_well_known", FPTR(js_symbol_well_known)},
     // v12: DOM extensions
-    {"js_classlist_method", FPTR(js_classlist_method)},
-    {"js_classlist_method_apply", FPTR(js_classlist_method_apply)},
     {"js_classlist_get_property", FPTR(js_classlist_get_property)},
     {"js_dataset_get_property", FPTR(js_dataset_get_property)},
     {"js_dataset_set_property", FPTR(js_dataset_set_property)},
@@ -3331,7 +3371,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "js_error_lane_payload",
         "js_set_this", "js_get_new_target",
         "js_set_direct_new_target", "js_set_function_source",
-        "js_mark_strict_func", "js_finalize_function", "js_set_module_var",
+        "js_set_module_var",
         "js_get_module_var",
         "js_with_save_depth", "js_with_restore_depth",
     };

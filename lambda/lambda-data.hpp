@@ -1139,10 +1139,20 @@ Map* map_arena(Arena* arena);
 Element* elmt_arena(Arena* arena);
 List* list_arena(Arena* arena);
 
+typedef bool (*MapDataGrowFn)(Map** map_slot, int byte_cap, int64_t copy_bytes,
+    String** keys, int key_count, Item* values, int value_count, void* context);
+void map_put_with_data_growth(Map* mp, String* key, Item value, Input* input,
+    MapDataGrowFn grow, void* grow_context);
 void map_put(Map* mp, String* key, Item value, Input *input);
+void map_put_heap(Map* mp, String* key, Item value, Input* input);
 // bulk append for callers that have already proven every key is unique and
 // absent from the target map. Values are JS `undefined` slots.
+bool map_put_undefined_unique_absent_bulk_with_data_growth(Map* mp,
+    String** keys, int count, Input* input, uint8_t shape_flags,
+    MapDataGrowFn grow, void* grow_context);
 bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
+    Input* input, uint8_t shape_flags);
+bool map_put_undefined_unique_absent_bulk_heap(Map* mp, String** keys, int count,
     Input* input, uint8_t shape_flags);
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 

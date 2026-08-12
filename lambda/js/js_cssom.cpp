@@ -1495,55 +1495,48 @@ static Item js_css_supports(Item* args, int argc) {
     return (Item){.item = b2it(result)};
 }
 
-extern "C" Item js_css_namespace_method(Item obj, Item method_name, Item* args, int argc) {
-    (void)obj;
-    String* name = it2s(method_name);
-    if (!name) return ItemNull;
+extern "C" Item js_css_supports_operation(Item* args, int argc) {
+    return js_css_supports(args, argc);
+}
 
-    if (name->len == 8 && strncmp(name->chars, "supports", 8) == 0) {
-        return js_css_supports(args, argc);
-    }
+extern "C" Item js_css_escape_operation(Item* args, int argc) {
+    // CSS.escape(ident) — serialize a CSS identifier. The intrinsic target
+    // selects this operation before invocation; spelling is metadata only
+    // under D6.2.2v2.
+    if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+    String* ident = it2s(args[0]);
+    if (!ident) return (Item){.item = s2it(heap_create_name(""))};
 
-    if (name->len == 6 && strncmp(name->chars, "escape", 6) == 0) {
-        // CSS.escape(ident) — serialize a CSS identifier
-        if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
-        String* ident = it2s(args[0]);
-        if (!ident) return (Item){.item = s2it(heap_create_name(""))};
-
-        // simple CSS serialization: escape special chars in ident
-        // per CSSOM §2: https://drafts.csswg.org/cssom/#serialize-an-identifier
-        char buf[1024];
-        int out = 0;
-        for (size_t i = 0; i < ident->len && out < (int)sizeof(buf) - 10; i++) {
-            unsigned char ch = (unsigned char)ident->chars[i];
-            if (i == 0 && ch >= '0' && ch <= '9') {
-                // escape first digit: \3N
-                out += snprintf(buf + out, sizeof(buf) - out, "\\%x ", ch);
-            } else if (ch == 0) {
-                buf[out++] = '\\';
-                buf[out++] = 'f';
-                buf[out++] = 'f';
-                buf[out++] = 'f';
-                buf[out++] = 'd';
-                buf[out++] = ' ';
-            } else if ((ch >= 0x01 && ch <= 0x1f) || ch == 0x7f) {
-                out += snprintf(buf + out, sizeof(buf) - out, "\\%x ", ch);
-            } else if (i == 0 && ch == '-' && ident->len == 1) {
-                buf[out++] = '\\';
-                buf[out++] = '-';
-            } else if (ch == '-' || ch == '_' || (ch >= 'a' && ch <= 'z') ||
-                       (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch >= 0x80) {
-                buf[out++] = (char)ch;
-            } else {
-                buf[out++] = '\\';
-                buf[out++] = (char)ch;
-            }
+    // simple CSS serialization: escape special chars in ident
+    // per CSSOM §2: https://drafts.csswg.org/cssom/#serialize-an-identifier
+    char buf[1024];
+    int out = 0;
+    for (size_t i = 0; i < ident->len && out < (int)sizeof(buf) - 10; i++) {
+        unsigned char ch = (unsigned char)ident->chars[i];
+        if (i == 0 && ch >= '0' && ch <= '9') {
+            // escape first digit: \3N
+            out += snprintf(buf + out, sizeof(buf) - out, "\\%x ", ch);
+        } else if (ch == 0) {
+            buf[out++] = '\\';
+            buf[out++] = 'f';
+            buf[out++] = 'f';
+            buf[out++] = 'f';
+            buf[out++] = 'd';
+            buf[out++] = ' ';
+        } else if ((ch >= 0x01 && ch <= 0x1f) || ch == 0x7f) {
+            out += snprintf(buf + out, sizeof(buf) - out, "\\%x ", ch);
+        } else if (i == 0 && ch == '-' && ident->len == 1) {
+            buf[out++] = '\\';
+            buf[out++] = '-';
+        } else if (ch == '-' || ch == '_' || (ch >= 'a' && ch <= 'z') ||
+                   (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch >= 0x80) {
+            buf[out++] = (char)ch;
+        } else {
+            buf[out++] = '\\';
+            buf[out++] = (char)ch;
         }
-        return (Item){.item = s2it(heap_create_name(buf, (size_t)out))};
     }
-
-    log_debug("js_css_namespace_method: unknown method '%.*s'", (int)name->len, name->chars);
-    return ItemNull;
+    return (Item){.item = s2it(heap_create_name(buf, (size_t)out))};
 }
 
 // CSS namespace object is managed in js_runtime.cpp (needs access to builtin enum)

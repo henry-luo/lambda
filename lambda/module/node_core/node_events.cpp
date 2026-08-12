@@ -135,14 +135,12 @@ static void node_events_set_named_property(Item object, const char* name, Item v
 #define js_property_get(OBJECT, KEY) node_events_host->value->property_get(OBJECT, KEY)
 #define js_property_set(OBJECT, KEY, VALUE) node_events_host->value->property_set(OBJECT, KEY, VALUE)
 #define js_object_keys(OBJECT) node_events_host->script->object_keys(OBJECT)
-#define js_new_function(FUNCTION, COUNT) node_events_host->script->new_function(FUNCTION, COUNT)
 #define js_call_function(FUNCTION, THIS, ARGS, COUNT) node_events_host->script->call_function(FUNCTION, THIS, ARGS, COUNT)
 #define js_get_this() node_events_host->script->current_this()
 #define js_function_set_prototype(FUNCTION, PROTOTYPE) node_events_host->script->function_set_prototype(FUNCTION, PROTOTYPE)
 #define js_get_prototype(OBJECT) node_events_host->script->get_prototype(OBJECT)
 #define js_set_prototype(OBJECT, PROTOTYPE) node_events_host->script->set_prototype(OBJECT, PROTOTYPE)
 #define js_class_stamp(OBJECT, CLASS) node_events_host->script->class_stamp(OBJECT, CLASS)
-#define js_new_closure(FUNCTION, COUNT, ENV, ENV_COUNT) node_events_host->script->new_closure(FUNCTION, COUNT, ENV, ENV_COUNT)
 #define js_alloc_env(COUNT) node_events_host->script->closure_env_new(COUNT)
 
 static void ensure_keys() {
@@ -992,7 +990,8 @@ static Item js_ee_static_once(Item emitter, Item event_name) {
 
     Item* resolve_env = js_alloc_env(1);
     resolve_env[0] = resolve_fn;
-    Item bound = js_new_closure((void*)js_ee_once_resolve_handler, -1, resolve_env, 1);
+    Item bound = jube_new_closure(node_events_host->script,
+        js_ee_once_resolve_handler, -1, resolve_env, 1);
 
     // Call emitter.once(eventName, bound_wrapper)
     Item once_method = js_property_get(emitter, make_string_item("once"));
@@ -1007,7 +1006,8 @@ static Item js_ee_static_once(Item emitter, Item event_name) {
     if (!is_error_event) {
         Item* reject_env = js_alloc_env(1);
         reject_env[0] = reject_fn;
-        Item err_bound = js_new_closure((void*)js_ee_once_reject_handler, -1, reject_env, 1);
+        Item err_bound = jube_new_closure(node_events_host->script,
+            js_ee_once_reject_handler, -1, reject_env, 1);
         Item err_once_args[2] = {make_string_item("error"), err_bound};
         if (get_type_id(once_method) == LMD_TYPE_FUNC) {
             js_call_function(once_method, emitter, err_once_args, 2);
@@ -1032,7 +1032,9 @@ static Item js_ee_static_getEventListeners(Item emitter, Item event_name) {
     return js_ee_listeners(emitter, event_name);
 }
 
-static void ee_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+template <typename Target>
+static void ee_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
     JubeRootFrame frame = {};
     if (!node_events_roots_begin(&frame, 2)) return;
     uint64_t* key_root = node_events_host->node->roots->root_frame_take_slot(&frame);
@@ -1043,7 +1045,8 @@ static void ee_set_method(Item ns, const char* name, void* func_ptr, int param_c
     }
     Item key = make_string_item(name);
     *key_root = key.item;
-    Item fn = js_new_function(func_ptr, param_count);
+    Item fn = jube_new_function(node_events_host->script, target,
+        adapter_arity);
     *function_root = fn.item;
     js_property_set(ns, key, fn);
     node_events_host->node->roots->root_frame_end(&frame);
@@ -1069,41 +1072,41 @@ Item node_events_namespace(void) {
     // Create prototype object with instance methods (this-based wrappers)
     ee_prototype = js_new_object();
     *prototype_root = ee_prototype.item;
-    ee_set_method(ee_prototype, "on",                  (void*)js_ee_inst_on, 2);
-    ee_set_method(ee_prototype, "addListener",         (void*)js_ee_inst_on, 2);
-    ee_set_method(ee_prototype, "once",                (void*)js_ee_inst_once, 2);
-    ee_set_method(ee_prototype, "off",                 (void*)js_ee_inst_off, 2);
-    ee_set_method(ee_prototype, "removeListener",      (void*)js_ee_inst_off, 2);
-    ee_set_method(ee_prototype, "emit",                (void*)js_ee_inst_emit, -2);
-    ee_set_method(ee_prototype, "removeAllListeners",  (void*)js_ee_inst_removeAllListeners, 1);
-    ee_set_method(ee_prototype, "listeners",           (void*)js_ee_inst_listeners, 1);
-    ee_set_method(ee_prototype, "listenerCount",       (void*)js_ee_inst_listenerCount, 2);
-    ee_set_method(ee_prototype, "eventNames",          (void*)js_ee_inst_eventNames, 0);
-    ee_set_method(ee_prototype, "setMaxListeners",     (void*)js_ee_inst_setMaxListeners, 1);
-    ee_set_method(ee_prototype, "getMaxListeners",     (void*)js_ee_inst_getMaxListeners, 0);
-    ee_set_method(ee_prototype, "prependListener",     (void*)js_ee_inst_prependListener, 2);
-    ee_set_method(ee_prototype, "prependOnceListener", (void*)js_ee_inst_prependOnceListener, 2);
-    ee_set_method(ee_prototype, "rawListeners",        (void*)js_ee_inst_listeners, 1);
+    ee_set_method(ee_prototype, "on",                  js_ee_inst_on, 2);
+    ee_set_method(ee_prototype, "addListener",         js_ee_inst_on, 2);
+    ee_set_method(ee_prototype, "once",                js_ee_inst_once, 2);
+    ee_set_method(ee_prototype, "off",                 js_ee_inst_off, 2);
+    ee_set_method(ee_prototype, "removeListener",      js_ee_inst_off, 2);
+    ee_set_method(ee_prototype, "emit",                js_ee_inst_emit, -2);
+    ee_set_method(ee_prototype, "removeAllListeners",  js_ee_inst_removeAllListeners, 1);
+    ee_set_method(ee_prototype, "listeners",           js_ee_inst_listeners, 1);
+    ee_set_method(ee_prototype, "listenerCount",       js_ee_inst_listenerCount, 2);
+    ee_set_method(ee_prototype, "eventNames",          js_ee_inst_eventNames, 0);
+    ee_set_method(ee_prototype, "setMaxListeners",     js_ee_inst_setMaxListeners, 1);
+    ee_set_method(ee_prototype, "getMaxListeners",     js_ee_inst_getMaxListeners, 0);
+    ee_set_method(ee_prototype, "prependListener",     js_ee_inst_prependListener, 2);
+    ee_set_method(ee_prototype, "prependOnceListener", js_ee_inst_prependOnceListener, 2);
+    ee_set_method(ee_prototype, "rawListeners",        js_ee_inst_listeners, 1);
 
     // EventEmitter constructor
-    ee_set_method(events_namespace, "EventEmitter", (void*)js_ee_constructor, 0);
+    ee_set_method(events_namespace, "EventEmitter", js_ee_constructor, 0);
 
     // Also put methods on namespace for direct use (e.g. events.on(emitter, event, fn))
-    ee_set_method(events_namespace, "on",                  (void*)js_ee_on, 3);
-    ee_set_method(events_namespace, "addListener",         (void*)js_ee_on, 3);
-    ee_set_method(events_namespace, "once",                (void*)js_ee_once, 3);
-    ee_set_method(events_namespace, "off",                 (void*)js_ee_off, 3);
-    ee_set_method(events_namespace, "removeListener",      (void*)js_ee_off, 3);
-    ee_set_method(events_namespace, "emit",                (void*)js_ee_emit, -3);
-    ee_set_method(events_namespace, "removeAllListeners",  (void*)js_ee_removeAllListeners, 2);
-    ee_set_method(events_namespace, "listeners",           (void*)js_ee_listeners, 2);
-    ee_set_method(events_namespace, "listenerCount",       (void*)js_ee_listenerCount, 3);
-    ee_set_method(events_namespace, "eventNames",          (void*)js_ee_eventNames, 1);
-    ee_set_method(events_namespace, "setMaxListeners",     (void*)js_ee_setMaxListeners, 2);
-    ee_set_method(events_namespace, "getMaxListeners",     (void*)js_ee_getMaxListeners, 1);
-    ee_set_method(events_namespace, "prependListener",     (void*)js_ee_prependListener, 3);
-    ee_set_method(events_namespace, "prependOnceListener", (void*)js_ee_prependOnceListener, 3);
-    ee_set_method(events_namespace, "rawListeners",        (void*)js_ee_listeners, 2);
+    ee_set_method(events_namespace, "on",                  js_ee_on, 3);
+    ee_set_method(events_namespace, "addListener",         js_ee_on, 3);
+    ee_set_method(events_namespace, "once",                js_ee_once, 3);
+    ee_set_method(events_namespace, "off",                 js_ee_off, 3);
+    ee_set_method(events_namespace, "removeListener",      js_ee_off, 3);
+    ee_set_method(events_namespace, "emit",                js_ee_emit, -3);
+    ee_set_method(events_namespace, "removeAllListeners",  js_ee_removeAllListeners, 2);
+    ee_set_method(events_namespace, "listeners",           js_ee_listeners, 2);
+    ee_set_method(events_namespace, "listenerCount",       js_ee_listenerCount, 3);
+    ee_set_method(events_namespace, "eventNames",          js_ee_eventNames, 1);
+    ee_set_method(events_namespace, "setMaxListeners",     js_ee_setMaxListeners, 2);
+    ee_set_method(events_namespace, "getMaxListeners",     js_ee_getMaxListeners, 1);
+    ee_set_method(events_namespace, "prependListener",     js_ee_prependListener, 3);
+    ee_set_method(events_namespace, "prependOnceListener", js_ee_prependOnceListener, 3);
+    ee_set_method(events_namespace, "rawListeners",        js_ee_listeners, 2);
 
     // Set EventEmitter.prototype to the prototype object
     js_property_set(events_namespace, make_string_item("prototype"), ee_prototype);
@@ -1129,7 +1132,7 @@ Item node_events_namespace(void) {
         make_string_item("nodejs.rejection"));
 
     // static method: getEventListeners
-    ee_set_method(events_namespace, "getEventListeners", (void*)js_ee_static_getEventListeners, 2);
+    ee_set_method(events_namespace, "getEventListeners", js_ee_static_getEventListeners, 2);
 
     // static EventEmitter.listenerCount(emitter, event) — the 3-arg form at line ~627
     // already handles this: when called with 2 args, 3rd param (listener) is null/0,
@@ -1139,7 +1142,7 @@ Item node_events_namespace(void) {
     js_property_set(events_namespace, make_string_item("default"), events_namespace);
 
     // static events.once — combined: 3 args = listener, 2 args = Promise
-    ee_set_method(events_namespace, "once", (void*)js_ee_once_combined, 3);
+    ee_set_method(events_namespace, "once", js_ee_once_combined, 3);
 
     node_events_host->node->roots->root_frame_end(&frame);
     return events_namespace;

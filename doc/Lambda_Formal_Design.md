@@ -764,12 +764,20 @@ that carries them.
   address (addresses break under COW and JIT recompilation; semantics
   S5.5.1). The boxed `_b` entry is the universal dynamic-call target
   (§D8.3). [C8.7, DF7]
-- **D6.2.2** Dynamic calls dispatch through **per-callee `fn->invoke`
-  entries**; the 16-slot source-argument limit is checked statically
-  where possible with a runtime backstop; dynamic calls with named
-  arguments, and dynamic calls to `var`/inout signatures, are rejected by
-  design. Adapter spans are dynamically sized, precisely rooted,
-  LIFO-destroyed (`padded_args[32]` retired). [Function_Arg, LC call-ABI]
+- **D6.2.2v2** Dynamic calls dispatch through per-callee executable entries.
+  LambdaJS function values carry distinct `[[Call]]` and `[[Construct]]`
+  capabilities: call dispatch uses `fn->invoke`; construction uses an explicit
+  construct entry and passes `newTarget` as an operand, never through a pending
+  one-shot side channel. Builtin catalog IDs, names, formal lengths, and class
+  labels are metadata and may not select runtime semantics; a declared native
+  ABI may select a typed adapter once when the function is created. The
+  JavaScript dynamic boundary remains `Item* + argc`; caller-donated scalar
+  homes and precise rooted argument spans are ownership-qualified adapters to
+  the same entries, not separate dispatch mechanisms. The 16-slot source-
+  argument limit remains statically checked where possible with a runtime
+  backstop; adapter spans are dynamically sized, precisely rooted, and
+  LIFO-destroyed. Dynamic calls with named arguments and dynamic calls to
+  `var`/inout signatures remain rejected. [Function_Arg, LC call-ABI; JC1–JC4]
 - **D6.2.3** Closures are **immutable values**: captures snapshot at
   creation and are stored as `Item`s in the env, unboxed on access;
   assignment — including interior mutation — through a captured name is a
@@ -1281,7 +1289,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D5.1–D5.3 | SF1–SF20, OS1–OS11; Stack_API phases + invariants; CR1–CR8, RH1–RH8; Merges A/B/C | `Lambda_Design_Stack_Frame.md`, `Lambda_Design_Stack_API.md`, `Lambda_Design_Stack_Rooting.md` |
 | D5.4 | RG0–RG14, MT2 contract | `Lambda_Design_Runtime_Globals.md` |
 | D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `Lambda_Impl_Error_Handling.md` |
-| D6.2 | C8.7; Function_Arg; DF7/DF11; SF18 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md` |
+| D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md` |
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
 | D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md` |

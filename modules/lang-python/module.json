@@ -1,7 +1,7 @@
 {
   "name": "lang-python",
   "version": "0.1.0",
-  "base_abi_version": 2,
+  "base_abi_version": 3,
   "hosted_api_version": 1,
   "language": "python",
   "aliases": [

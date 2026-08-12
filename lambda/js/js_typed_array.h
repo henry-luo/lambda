@@ -112,14 +112,15 @@ int  js_typed_array_byte_length(Item ta);
 int  js_typed_array_byte_offset(Item ta);
 bool js_typed_array_is_out_of_bounds_item(Item ta);
 Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int index);
-Item js_typed_array_fill(Item ta, Item value, int start, int end);
+Item js_typed_array_fill(Item ta, Item value, int start, int end,
+                         bool array_semantics);
 bool js_is_typed_array(Item val);
 JsTypedArray* js_get_typed_array_ptr(Map* m);
 void* js_typed_array_current_data_ptr(Item ta_item);
 void* js_typed_array_prepare_write_ptr(Item ta_item);
 bool js_item_bytes(Item item, const char** data, int* len);
 Item js_typed_array_subarray(Item ta, int start, int end, bool end_is_default);
-Item js_typed_array_slice(Item ta, int start, int end);
+Item js_typed_array_slice(Item ta, int start, int end, bool array_semantics);
 Item js_typed_array_set_from(Item ta, Item source, int offset);
 bool js_typed_array_raw_reverse(Item ta);
 bool js_typed_array_raw_copy_reversed(Item dst, Item src);
@@ -131,6 +132,8 @@ int js_typed_array_raw_index_of(Item ta, Item search_value, int from, int bound,
 Item js_arraybuffer_new(int byte_length);
 Item js_arraybuffer_construct(Item length_arg);
 Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg);
+Item js_arraybuffer_construct_resizable_target(Item length_arg,
+    Item options_arg, Item new_target);
 Item js_arraybuffer_wrap(JsArrayBuffer* ab);
 bool js_is_arraybuffer(Item val);
 JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val);
@@ -151,10 +154,18 @@ void js_arraybuffer_detach(Item val);
 bool js_arraybuffer_is_detached(Item val);
 
 // SharedArrayBuffer
+typedef enum JsSharedArrayBufferOperation {
+    JS_SHARED_ARRAY_BUFFER_SLICE,
+    JS_SHARED_ARRAY_BUFFER_GROW,
+} JsSharedArrayBufferOperation;
+
 Item js_sharedarraybuffer_construct(Item length_arg);
 Item js_sharedarraybuffer_construct_with_options(Item length_arg, Item options_arg);
+Item js_sharedarraybuffer_construct_with_options_target(Item length_arg,
+    Item options_arg, Item new_target);
 bool js_is_sharedarraybuffer(Item val);
-Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* args, int argc);
+Item js_sharedarraybuffer_operation(Item sab,
+    JsSharedArrayBufferOperation operation, Item* args, int argc);
 
 // Atomics operations on SharedArrayBuffer-backed integer typed arrays
 Item js_atomics_operation(int op, Item typed_array, Item index, Item value, Item replacement);
@@ -172,13 +183,40 @@ Item js_atomics_agent_monotonic_now(void);
 void js_atomics_agent_leaving(int agent_slot);
 
 // DataView operations
+typedef enum JsDataViewOperation {
+    JS_DATAVIEW_GET_INT8,
+    JS_DATAVIEW_GET_UINT8,
+    JS_DATAVIEW_GET_INT16,
+    JS_DATAVIEW_GET_UINT16,
+    JS_DATAVIEW_GET_INT32,
+    JS_DATAVIEW_GET_UINT32,
+    JS_DATAVIEW_GET_FLOAT32,
+    JS_DATAVIEW_GET_FLOAT64,
+    JS_DATAVIEW_GET_BIGINT64,
+    JS_DATAVIEW_GET_BIGUINT64,
+    JS_DATAVIEW_SET_INT8,
+    JS_DATAVIEW_SET_UINT8,
+    JS_DATAVIEW_SET_INT16,
+    JS_DATAVIEW_SET_UINT16,
+    JS_DATAVIEW_SET_INT32,
+    JS_DATAVIEW_SET_UINT32,
+    JS_DATAVIEW_SET_FLOAT32,
+    JS_DATAVIEW_SET_FLOAT64,
+    JS_DATAVIEW_SET_BIGINT64,
+    JS_DATAVIEW_SET_BIGUINT64,
+} JsDataViewOperation;
+
 Item js_dataview_new(Item buffer, Item offset_item, Item length_item);
+Item js_dataview_construct(Item buffer, Item offset_item, Item length_item,
+    Item new_target);
 bool js_is_dataview(Item val);
 JsDataView* js_get_dataview_ptr(Item val);
-Item js_dataview_method(Item dv, Item method_name, Item* args, int argc);
+Item js_dataview_operation(Item dv, JsDataViewOperation operation,
+    Item* args, int argc);
 
 // Smart constructor: dispatches based on argument type (number, ArrayBuffer, TypedArray, Array)
 Item js_typed_array_construct(int type_id, Item arg, Item byte_offset, Item length, int argc);
+Item js_typed_array_validate_constructor_argument(Item argument, int argc);
 
 // Returns the JS type name (e.g. "Uint8Array"), or NULL if not a typed array
 const char* js_typed_array_type_name(Item val);

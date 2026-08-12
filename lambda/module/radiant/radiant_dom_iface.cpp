@@ -215,9 +215,12 @@ const char radiant_dom_interface_decl[] =
     "    add: fn(a0: any, a1: any) any,\n"
     "    remove: fn(a0: any) any,\n"
     "    contains: fn(a0: any) any,\n"
+    "    is_equal_node: fn(a0: any) any,\n"
+    "    is_same_node: fn(a0: any) any,\n"
     "    compare_document_position: fn(a0: any) any,\n"
     "    get_root_node: fn(a0: any) any,\n"
     "    replace_with: fn(a0: any) any,\n"
+    "    after: fn(a0: any) any,\n"
     "    has_child_nodes: fn() any,\n"
     "    clone_node: fn(a0: any) any,\n"
     "    replace_data: fn(a0: any, a1: any, a2: any) any,\n"
@@ -227,11 +230,16 @@ const char radiant_dom_interface_decl[] =
     "    substring_data: fn(a0: any, a1: any) any,\n"
     "    get_attribute: fn(a0: any) any,\n"
     "    set_attribute: fn(a0: any, a1: any) any,\n"
+    "    set_attribute_ns: fn(a0: any, a1: any, a2: any) any,\n"
+    "    get_attribute_ns: fn(a0: any, a1: any) any,\n"
+    "    remove_attribute_ns: fn(a0: any, a1: any) any,\n"
     "    remove_attribute: fn(a0: any) any,\n"
     "    toggle_attribute: fn(a0: any, a1: any) any,\n"
     "    has_attribute: fn(a0: any) any,\n"
     "    get_attribute_names: fn() any,\n"
     "    matches: fn(a0: any) any,\n"
+    "    webkit_matches_selector: fn(a0: any) any,\n"
+    "    ms_matches_selector: fn(a0: any) any,\n"
     "    query_selector: fn(a0: any) any,\n"
     "    query_selector_all: fn(a0: any) any,\n"
     "    closest: fn(a0: any) any,\n"
@@ -275,6 +283,13 @@ const char radiant_dom_interface_decl[] =
     "    replace: fn(a0: any, a1: any) any,\n"
     "    attach_shadow: fn(a0: any) any,\n"
     "    to_string: fn() any,\n"
+    "    create_svg_point: fn() any,\n"
+    "    create_svg_matrix: fn() any,\n"
+    "    create_svg_transform: fn() any,\n"
+    "    create_svg_transform_from_matrix: fn(a0: any) any,\n"
+    "    get_bbox: fn() any,\n"
+    "    get_ctm: fn() any,\n"
+    "    get_screen_ctm: fn() any,\n"
     "    __lambda_boundary_from_point: fn(a0: any, a1: any, a2: any) any,\n"
     "    __lambda_text_control_boundary_from_point: fn(a0: any, a1: any) any,\n"
     "    __lambda_text_control_caret_bounds: fn() any\n"
@@ -325,6 +340,7 @@ const char radiant_dom_interface_decl[] =
     "    reload: fn() any,\n"
     "    focus: fn() any,\n"
     "    blur: fn() any,\n"
+    "    has_focus: fn() bool,\n"
     "    open: fn() any,\n"
     "    close: fn() any,\n"
     "    write: fn(a0: any) any,\n"
@@ -349,10 +365,13 @@ const char radiant_dom_interface_decl[] =
     "    adopt_node: fn(a0: any) any,\n"
     "    append_child: fn(a0: any) any,\n"
     "    contains: fn(a0: any) any,\n"
+    "    compare_document_position: fn(a0: any) any,\n"
     "    get_root_node: fn(a0: any) any,\n"
     "    add_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
     "    remove_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
-    "    dispatch_event: fn(a0: any) any\n"
+    "    dispatch_event: fn(a0: any) any,\n"
+    "    create_tree_walker: fn(a0: any, a1: any) any,\n"
+    "    create_event: fn(a0: any) any\n"
     "}\n"
     "type foreign_document : document {\n"
     "}\n";
@@ -824,6 +843,7 @@ extern "C" int radiant_dom_member_id(Item receiver, Item* out);
 extern "C" int radiant_dom_member_class_name(Item receiver, Item* out);
 extern "C" int radiant_dom_member_node_type_any(Item receiver, Item* out);
 extern "C" int radiant_dom_member_parent_node_any(Item receiver, Item* out);
+extern "C" int radiant_dom_member_parent_element_any(Item receiver, Item* out);
 extern "C" int radiant_dom_member_is_connected_any(Item receiver, Item* out);
 extern "C" int radiant_dom_member_child_element_count(Item receiver, Item* out);
 extern "C" int radiant_dom_member_children(Item receiver, Item* out);
@@ -947,7 +967,7 @@ extern "C" int radiant_dom_guard_input_typed_value(Item receiver);
 extern "C" int radiant_dom_guard_node(Item receiver);
 extern "C" int radiant_dom_guard_text(Item receiver);
 extern "C" int radiant_dom_guard_character_data(Item receiver);
-extern "C" Item radiant_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
+extern "C" int radiant_dom_guard_svg(Item receiver);
 extern "C" int radiant_dom_m4d_named_item(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_add(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_remove(Item r, Item* args, int argc, Item* out);
@@ -956,6 +976,7 @@ extern "C" int radiant_dom_m4d_compare_document_position(Item r, Item* args, int
 extern "C" int radiant_dom_m4d_get_root_node(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_remove2(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_replace_with(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_after(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_has_child_nodes(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_clone_node(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_replace_data(Item r, Item* args, int argc, Item* out);
@@ -1014,6 +1035,18 @@ extern "C" int radiant_dom_m4d_to_string(Item r, Item* args, int argc, Item* out
 extern "C" int radiant_dom_m4d___lambda_boundary_from_point(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d___lambda_text_control_boundary_from_point(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d___lambda_text_control_caret_bounds(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_get_attribute_ns(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_set_attribute_ns(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_remove_attribute_ns(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_is_equal_node(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_is_same_node(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_create_svg_point(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_create_svg_matrix(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_create_svg_transform(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_create_svg_transform_from_matrix(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_get_bbox(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_get_ctm(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_get_screen_ctm(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4c_get_checked(Item r, Item* out);
 extern "C" int radiant_dom_m4c_checked_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_get_value(Item r, Item* out);
@@ -1084,7 +1117,7 @@ static const JubeMemberBind radiant_dom_node_members[] = {
      JUBE_MEMBER_NON_ENUMERABLE},
     {"parent_node", "parentNode", NULL, radiant_dom_guard_node, radiant_dom_member_parent_node_any, NULL, NULL, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
-    {"parent_element", "parentElement", NULL, radiant_dom_guard_node, radiant_dom_member_parent_node_any, NULL, NULL, NULL,
+    {"parent_element", "parentElement", NULL, radiant_dom_guard_node, radiant_dom_member_parent_element_any, NULL, NULL, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
     {"is_connected", "isConnected", NULL, radiant_dom_guard_node, radiant_dom_member_is_connected_any, NULL, NULL, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
@@ -1253,10 +1286,15 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     {"add", NULL, NULL, radiant_dom_guard_select, NULL, NULL, radiant_dom_m4d_add, NULL, 0},
     {"remove", NULL, NULL, radiant_dom_guard_select, NULL, NULL, radiant_dom_m4d_remove, NULL, 0},
     {"contains", NULL, NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_contains, NULL, 0},
+    {"is_equal_node", "isEqualNode", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_is_equal_node, NULL, 0},
+    {"is_same_node", "isSameNode", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_is_same_node, NULL, 0},
     {"compare_document_position", "compareDocumentPosition", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_compare_document_position, NULL, 0},
     {"get_root_node", "getRootNode", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_get_root_node, NULL, 0},
     {"remove", NULL, NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_remove2, NULL, 0},
     {"replace_with", "replaceWith", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_replace_with, NULL, 0},
+    // D6.2.2v2 requires ChildNode.after to be a published callable property;
+    // the retired receiver/name dispatcher can no longer hide a missing member.
+    {"after", NULL, NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_after, NULL, 0},
     {"has_child_nodes", "hasChildNodes", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_has_child_nodes, NULL, 0},
     {"clone_node", "cloneNode", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_clone_node, NULL, 0},
     {"replace_data", "replaceData", NULL, radiant_dom_guard_text, NULL, NULL, radiant_dom_m4d_replace_data, NULL, 0},
@@ -1266,20 +1304,25 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     {"substring_data", "substringData", NULL, radiant_dom_guard_text, NULL, NULL, radiant_dom_m4d_substring_data, NULL, 0},
     {"get_attribute", "getAttribute", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_get_attribute, NULL, 0},
     {"set_attribute", "setAttribute", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_set_attribute, NULL, 0},
+    {"set_attribute_ns", "setAttributeNS", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_set_attribute_ns, NULL, 0},
+    {"get_attribute_ns", "getAttributeNS", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_get_attribute_ns, NULL, 0},
+    {"remove_attribute_ns", "removeAttributeNS", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_remove_attribute_ns, NULL, 0},
     {"remove_attribute", "removeAttribute", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_remove_attribute, NULL, 0},
     {"toggle_attribute", "toggleAttribute", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_toggle_attribute, NULL, 0},
     {"has_attribute", "hasAttribute", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_has_attribute, NULL, 0},
     {"get_attribute_names", "getAttributeNames", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_get_attribute_names, NULL, 0},
     {"matches", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_matches, NULL, 0},
+    {"webkit_matches_selector", "webkitMatchesSelector", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_matches, NULL, 0},
+    {"ms_matches_selector", "msMatchesSelector", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_matches, NULL, 0},
     {"query_selector", "querySelector", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_query_selector, NULL, 0},
     {"query_selector_all", "querySelectorAll", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_query_selector_all, NULL, 0},
     {"closest", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_closest, NULL, 0},
     {"get_elements_by_tag_name", "getElementsByTagName", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_get_elements_by_tag_name, NULL, 0},
     {"get_elements_by_class_name", "getElementsByClassName", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_get_elements_by_class_name, NULL, 0},
     {"get_element_by_id", "getElementById", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_get_element_by_id, NULL, 0},
-    {"add_event_listener", "addEventListener", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_add_event_listener, NULL, 0},
-    {"remove_event_listener", "removeEventListener", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_remove_event_listener, NULL, 0},
-    {"dispatch_event", "dispatchEvent", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_dispatch_event, NULL, 0},
+    {"add_event_listener", "addEventListener", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_add_event_listener, NULL, 0},
+    {"remove_event_listener", "removeEventListener", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_remove_event_listener, NULL, 0},
+    {"dispatch_event", "dispatchEvent", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_dispatch_event, NULL, 0},
     {"append_child", "appendChild", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_append_child, NULL, 0},
     {"remove_child", "removeChild", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_remove_child, NULL, 0},
     {"insert_before", "insertBefore", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_insert_before, NULL, 0},
@@ -1314,6 +1357,13 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     {"replace", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_replace, NULL, 0},
     {"attach_shadow", "attachShadow", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_attach_shadow, NULL, 0},
     {"to_string", "toString", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_to_string, NULL, 0},
+    {"create_svg_point", "createSVGPoint", NULL, radiant_dom_guard_svg, NULL, NULL, radiant_dom_m4d_create_svg_point, NULL, 0},
+    {"create_svg_matrix", "createSVGMatrix", NULL, radiant_dom_guard_svg, NULL, NULL, radiant_dom_m4d_create_svg_matrix, NULL, 0},
+    {"create_svg_transform", "createSVGTransform", NULL, radiant_dom_guard_svg, NULL, NULL, radiant_dom_m4d_create_svg_transform, NULL, 0},
+    {"create_svg_transform_from_matrix", "createSVGTransformFromMatrix", NULL, radiant_dom_guard_svg, NULL, NULL, radiant_dom_m4d_create_svg_transform_from_matrix, NULL, 0},
+    {"get_bbox", "getBBox", NULL, radiant_dom_guard_svg, NULL, NULL, radiant_dom_m4d_get_bbox, NULL, 0},
+    {"get_ctm", "getCTM", NULL, radiant_dom_guard_svg, NULL, NULL, radiant_dom_m4d_get_ctm, NULL, 0},
+    {"get_screen_ctm", "getScreenCTM", NULL, radiant_dom_guard_svg, NULL, NULL, radiant_dom_m4d_get_screen_ctm, NULL, 0},
     {"__lambda_boundary_from_point", "__lambdaBoundaryFromPoint", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d___lambda_boundary_from_point, NULL, 0},
     {"__lambda_text_control_boundary_from_point", "__lambdaTextControlBoundaryFromPoint", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d___lambda_text_control_boundary_from_point, NULL, 0},
     {"__lambda_text_control_caret_bounds", "__lambdaTextControlCaretBounds", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d___lambda_text_control_caret_bounds, NULL, 0},
@@ -1328,9 +1378,9 @@ static Item radiant_dom_doc_key(const char* name) {
         return radiant_dom_document_host_get_property(receiver, radiant_dom_doc_key(js), out); \
     }
 
-#define RADIANT_DOC_CALL_FN(fn, js) \
+#define RADIANT_DOC_CALL_FN(fn, operation) \
     static int fn(Item receiver, Item* args, int argc, Item* out) { \
-        return radiant_dom_document_host_call_method(receiver, radiant_dom_doc_key(js), args, argc, out); \
+        return radiant_dom_document_operation(receiver, operation, args, argc, out); \
     }
 
 RADIANT_DOC_GET_FN(radiant_doc_get_document_element, "documentElement")
@@ -1367,39 +1417,43 @@ RADIANT_DOC_GET_FN(radiant_doc_get_design_mode, "designMode")
 RADIANT_DOC_GET_FN(radiant_doc_get_active_element, "activeElement")
 RADIANT_DOC_GET_FN(radiant_doc_get_forms, "forms")
 
-RADIANT_DOC_CALL_FN(radiant_doc_call_assign, "assign")
-RADIANT_DOC_CALL_FN(radiant_doc_call_replace, "replace")
-RADIANT_DOC_CALL_FN(radiant_doc_call_reload, "reload")
-RADIANT_DOC_CALL_FN(radiant_doc_call_focus, "focus")
-RADIANT_DOC_CALL_FN(radiant_doc_call_blur, "blur")
-RADIANT_DOC_CALL_FN(radiant_doc_call_open, "open")
-RADIANT_DOC_CALL_FN(radiant_doc_call_close, "close")
-RADIANT_DOC_CALL_FN(radiant_doc_call_write, "write")
-RADIANT_DOC_CALL_FN(radiant_doc_call_writeln, "writeln")
-RADIANT_DOC_CALL_FN(radiant_doc_call_element_from_point, "elementFromPoint")
-RADIANT_DOC_CALL_FN(radiant_doc_call_create_range, "createRange")
-RADIANT_DOC_CALL_FN(radiant_doc_call_get_selection, "getSelection")
-RADIANT_DOC_CALL_FN(radiant_doc_call_get_element_by_id, "getElementById")
-RADIANT_DOC_CALL_FN(radiant_doc_call_get_elements_by_class_name, "getElementsByClassName")
-RADIANT_DOC_CALL_FN(radiant_doc_call_get_elements_by_tag_name, "getElementsByTagName")
-RADIANT_DOC_CALL_FN(radiant_doc_call_get_elements_by_name, "getElementsByName")
-RADIANT_DOC_CALL_FN(radiant_doc_call_query_selector, "querySelector")
-RADIANT_DOC_CALL_FN(radiant_doc_call_query_selector_all, "querySelectorAll")
-RADIANT_DOC_CALL_FN(radiant_doc_call_create_element, "createElement")
-RADIANT_DOC_CALL_FN(radiant_doc_call_create_element_ns, "createElementNS")
-RADIANT_DOC_CALL_FN(radiant_doc_call_create_text_node, "createTextNode")
-RADIANT_DOC_CALL_FN(radiant_doc_call_create_document_fragment, "createDocumentFragment")
-RADIANT_DOC_CALL_FN(radiant_doc_call_create_comment, "createComment")
-RADIANT_DOC_CALL_FN(radiant_doc_call_create_processing_instruction, "createProcessingInstruction")
-RADIANT_DOC_CALL_FN(radiant_doc_call_import_node, "importNode")
-RADIANT_DOC_CALL_FN(radiant_doc_call_normalize, "normalize")
-RADIANT_DOC_CALL_FN(radiant_doc_call_adopt_node, "adoptNode")
-RADIANT_DOC_CALL_FN(radiant_doc_call_append_child, "appendChild")
-RADIANT_DOC_CALL_FN(radiant_doc_call_contains, "contains")
-RADIANT_DOC_CALL_FN(radiant_doc_call_get_root_node, "getRootNode")
-RADIANT_DOC_CALL_FN(radiant_doc_call_add_event_listener, "addEventListener")
-RADIANT_DOC_CALL_FN(radiant_doc_call_remove_event_listener, "removeEventListener")
-RADIANT_DOC_CALL_FN(radiant_doc_call_dispatch_event, "dispatchEvent")
+RADIANT_DOC_CALL_FN(radiant_doc_call_assign, RADIANT_DOCUMENT_ASSIGN)
+RADIANT_DOC_CALL_FN(radiant_doc_call_replace, RADIANT_DOCUMENT_REPLACE)
+RADIANT_DOC_CALL_FN(radiant_doc_call_reload, RADIANT_DOCUMENT_RELOAD)
+RADIANT_DOC_CALL_FN(radiant_doc_call_focus, RADIANT_DOCUMENT_FOCUS)
+RADIANT_DOC_CALL_FN(radiant_doc_call_blur, RADIANT_DOCUMENT_BLUR)
+RADIANT_DOC_CALL_FN(radiant_doc_call_has_focus, RADIANT_DOCUMENT_HAS_FOCUS)
+RADIANT_DOC_CALL_FN(radiant_doc_call_open, RADIANT_DOCUMENT_OPEN)
+RADIANT_DOC_CALL_FN(radiant_doc_call_close, RADIANT_DOCUMENT_CLOSE)
+RADIANT_DOC_CALL_FN(radiant_doc_call_write, RADIANT_DOCUMENT_WRITE)
+RADIANT_DOC_CALL_FN(radiant_doc_call_writeln, RADIANT_DOCUMENT_WRITELN)
+RADIANT_DOC_CALL_FN(radiant_doc_call_element_from_point, RADIANT_DOCUMENT_ELEMENT_FROM_POINT)
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_range, RADIANT_DOCUMENT_CREATE_RANGE)
+RADIANT_DOC_CALL_FN(radiant_doc_call_get_selection, RADIANT_DOCUMENT_GET_SELECTION)
+RADIANT_DOC_CALL_FN(radiant_doc_call_get_element_by_id, RADIANT_DOCUMENT_GET_ELEMENT_BY_ID)
+RADIANT_DOC_CALL_FN(radiant_doc_call_get_elements_by_class_name, RADIANT_DOCUMENT_GET_ELEMENTS_BY_CLASS_NAME)
+RADIANT_DOC_CALL_FN(radiant_doc_call_get_elements_by_tag_name, RADIANT_DOCUMENT_GET_ELEMENTS_BY_TAG_NAME)
+RADIANT_DOC_CALL_FN(radiant_doc_call_get_elements_by_name, RADIANT_DOCUMENT_GET_ELEMENTS_BY_NAME)
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_selector, RADIANT_DOCUMENT_QUERY_SELECTOR)
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_selector_all, RADIANT_DOCUMENT_QUERY_SELECTOR_ALL)
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_element, RADIANT_DOCUMENT_CREATE_ELEMENT)
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_element_ns, RADIANT_DOCUMENT_CREATE_ELEMENT_NS)
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_text_node, RADIANT_DOCUMENT_CREATE_TEXT_NODE)
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_document_fragment, RADIANT_DOCUMENT_CREATE_DOCUMENT_FRAGMENT)
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_comment, RADIANT_DOCUMENT_CREATE_COMMENT)
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_processing_instruction, RADIANT_DOCUMENT_CREATE_PROCESSING_INSTRUCTION)
+RADIANT_DOC_CALL_FN(radiant_doc_call_import_node, RADIANT_DOCUMENT_IMPORT_NODE)
+RADIANT_DOC_CALL_FN(radiant_doc_call_normalize, RADIANT_DOCUMENT_NORMALIZE)
+RADIANT_DOC_CALL_FN(radiant_doc_call_adopt_node, RADIANT_DOCUMENT_ADOPT_NODE)
+RADIANT_DOC_CALL_FN(radiant_doc_call_append_child, RADIANT_DOCUMENT_APPEND_CHILD)
+RADIANT_DOC_CALL_FN(radiant_doc_call_contains, RADIANT_DOCUMENT_CONTAINS)
+RADIANT_DOC_CALL_FN(radiant_doc_call_compare_document_position, RADIANT_DOCUMENT_COMPARE_DOCUMENT_POSITION)
+RADIANT_DOC_CALL_FN(radiant_doc_call_get_root_node, RADIANT_DOCUMENT_GET_ROOT_NODE)
+RADIANT_DOC_CALL_FN(radiant_doc_call_add_event_listener, RADIANT_DOCUMENT_ADD_EVENT_LISTENER)
+RADIANT_DOC_CALL_FN(radiant_doc_call_remove_event_listener, RADIANT_DOCUMENT_REMOVE_EVENT_LISTENER)
+RADIANT_DOC_CALL_FN(radiant_doc_call_dispatch_event, RADIANT_DOCUMENT_DISPATCH_EVENT)
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_tree_walker, RADIANT_DOCUMENT_CREATE_TREE_WALKER)
+RADIANT_DOC_CALL_FN(radiant_doc_call_create_event, RADIANT_DOCUMENT_CREATE_EVENT)
 
 #define DOC_FIELD(n, js, fn) \
     {n, js, NULL, NULL, fn, NULL, NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE}
@@ -1445,6 +1499,7 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_METHOD("reload", NULL, radiant_doc_call_reload),
     DOC_METHOD("focus", NULL, radiant_doc_call_focus),
     DOC_METHOD("blur", NULL, radiant_doc_call_blur),
+    DOC_METHOD("has_focus", "hasFocus", radiant_doc_call_has_focus),
     DOC_METHOD("open", NULL, radiant_doc_call_open),
     DOC_METHOD("close", NULL, radiant_doc_call_close),
     DOC_METHOD("write", NULL, radiant_doc_call_write),
@@ -1469,10 +1524,13 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_METHOD("adopt_node", "adoptNode", radiant_doc_call_adopt_node),
     DOC_METHOD("append_child", "appendChild", radiant_doc_call_append_child),
     DOC_METHOD("contains", NULL, radiant_doc_call_contains),
+    DOC_METHOD("compare_document_position", "compareDocumentPosition", radiant_doc_call_compare_document_position),
     DOC_METHOD("get_root_node", "getRootNode", radiant_doc_call_get_root_node),
     DOC_METHOD("add_event_listener", "addEventListener", radiant_doc_call_add_event_listener),
     DOC_METHOD("remove_event_listener", "removeEventListener", radiant_doc_call_remove_event_listener),
     DOC_METHOD("dispatch_event", "dispatchEvent", radiant_doc_call_dispatch_event),
+    DOC_METHOD("create_tree_walker", "createTreeWalker", radiant_doc_call_create_tree_walker),
+    DOC_METHOD("create_event", "createEvent", radiant_doc_call_create_event),
 };
 
 extern const JubeTypeBinding radiant_dom_type_bindings[];
@@ -1508,19 +1566,19 @@ const JubeTypeBinding radiant_dom_type_bindings[] = {
     {"dom_node", NULL, radiant_dom_node_members,
      (int32_t)(sizeof(radiant_dom_node_members) / sizeof(radiant_dom_node_members[0])),
      radiant_dom_node_named_get, radiant_dom_node_named_set, NULL, NULL, NULL,
-     NULL, radiant_dom_host_call_method, radiant_dom_host_has_property, radiant_dom_host_delete_property,
+     NULL, NULL, radiant_dom_host_has_property, radiant_dom_host_delete_property,
      radiant_dom_host_own_property_descriptor, radiant_dom_host_own_property_names,
      radiant_dom_node_prototype, NULL},
     {"document", NULL, radiant_document_members,
      (int32_t)(sizeof(radiant_document_members) / sizeof(radiant_document_members[0])),
      radiant_dom_document_host_get_property, radiant_dom_document_host_set_property,
-     NULL, NULL, NULL, NULL, radiant_dom_document_host_call_method,
+     NULL, NULL, NULL, NULL, NULL,
      radiant_dom_document_host_has_property, radiant_dom_document_host_delete_property,
      radiant_dom_document_host_own_property_descriptor, radiant_dom_document_host_own_property_names,
      radiant_dom_document_prototype, NULL},
     {"foreign_document", NULL, NULL, 0,
      radiant_dom_document_host_get_property, radiant_dom_document_host_set_property,
-     NULL, NULL, NULL, NULL, radiant_dom_document_host_call_method,
+     NULL, NULL, NULL, NULL, NULL,
      radiant_dom_document_host_has_property, radiant_dom_document_host_delete_property,
      radiant_dom_document_host_own_property_descriptor, radiant_dom_document_host_own_property_names,
      radiant_dom_document_prototype, NULL},

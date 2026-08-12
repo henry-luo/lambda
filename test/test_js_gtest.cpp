@@ -900,7 +900,7 @@ TEST(JavaScriptRegression, Js54P4TypedArrayPrototypeOob) {
 // ValidateTypedArray, Array.prototype.X uses LengthOfArrayLike (0 for OOB) and
 // silently no-ops. js_call_function and js_invoke_fn now flip
 // js_dispatch_as_array_method based on the calling fn's TYPED_ARRAY_METHOD
-// flag; the per-method OOB-throw blocks in js_map_method gate on it.
+// flag; the per-method object-intrinsic OOB checks gate on it.
 TEST(JavaScriptRegression, Js54P5ArrayProtoOnTypedArray) {
     char output[2048];
     int status = execute_js_script_status(

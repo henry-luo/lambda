@@ -1,5 +1,4 @@
-// Tune7 call-dispatch differential fixture. Run once normally and once with
-// JS_CALL_FORCE_GENERIC=1; the observable output must be identical.
+// Tune7 finalized call-entry fixture retained as ordinary call coverage.
 function plain(a, b) { return a + b; }
 function closureFactory(seed) {
     return function closure(value) { return seed + value; };

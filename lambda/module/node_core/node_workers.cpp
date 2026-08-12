@@ -40,8 +40,9 @@ static void node_workers_set_property(Item object, const char* name, Item value)
     node_workers_host->node->roots->root_frame_end(&frame);
 }
 
-static void node_workers_set_method(Item object, const char* name, void* function,
-                                    int parameter_count) {
+template <typename Target>
+static void node_workers_set_method(Item object, const char* name, Target target,
+                                    int adapter_arity) {
     JubeRootFrame frame = {};
     if (!node_workers_host->node->roots->root_frame_begin(&frame, 2)) return;
     uint64_t* object_root = node_workers_host->node->roots->root_frame_take_slot(&frame);
@@ -51,7 +52,8 @@ static void node_workers_set_method(Item object, const char* name, void* functio
         return;
     }
     *object_root = object.item;
-    Item method = node_workers_host->script->new_function(function, parameter_count);
+    Item method = jube_new_function(node_workers_host->script, target,
+        adapter_arity);
     *function_root = method.item;
     node_workers_set_property(node_workers_root_value(object_root), name,
         node_workers_root_value(function_root));
@@ -75,23 +77,23 @@ Item node_workers_namespace(void) {
     node_workers_set_property(node_workers_root_value(namespace_root), "parentPort", ItemNull);
     node_workers_set_property(node_workers_root_value(namespace_root), "workerData", ItemNull);
     node_workers_set_method(node_workers_root_value(namespace_root), "MessageChannel",
-        (void*)node_workers_host->node->workers->message_channel_new, 0);
+        node_workers_host->node->workers->message_channel_new, 0);
     node_workers_set_method(node_workers_root_value(namespace_root), "MessagePort",
-        (void*)node_workers_host->node->workers->message_port_new, 0);
+        node_workers_host->node->workers->message_port_new, 0);
     node_workers_set_method(node_workers_root_value(namespace_root), "moveMessagePortToContext",
-        (void*)node_workers_host->node->workers->message_port_move_to_context, 2);
+        node_workers_host->node->workers->message_port_move_to_context, 2);
     node_workers_set_method(node_workers_root_value(namespace_root), "receiveMessageOnPort",
-        (void*)node_workers_host->node->workers->receive_message_on_port, 1);
+        node_workers_host->node->workers->receive_message_on_port, 1);
     node_workers_set_method(node_workers_root_value(namespace_root), "markAsUntransferable",
-        (void*)node_workers_host->node->workers->mark_as_untransferable, 1);
+        node_workers_host->node->workers->mark_as_untransferable, 1);
     node_workers_set_method(node_workers_root_value(namespace_root), "isMarkedAsUntransferable",
-        (void*)node_workers_host->node->workers->is_marked_as_untransferable, 1);
+        node_workers_host->node->workers->is_marked_as_untransferable, 1);
     node_workers_set_method(node_workers_root_value(namespace_root), "Worker",
-        (void*)node_workers_empty_object, 1);
+        node_workers_empty_object, 1);
     node_workers_set_property(node_workers_root_value(namespace_root), "threadId",
         (Item){.item = i2it(0)});
     node_workers_set_method(node_workers_root_value(namespace_root), "BroadcastChannel",
-        (void*)node_workers_empty_object, 1);
+        node_workers_empty_object, 1);
     node_workers_set_property(node_workers_root_value(namespace_root), "default",
         node_workers_root_value(namespace_root));
     node_workers_cached_namespace = node_workers_root_value(namespace_root);

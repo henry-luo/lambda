@@ -96,7 +96,33 @@ Runtime helpers are referenced by name and resolved at link time. The emit side 
 
 Every generated entry point also uses the shared Lambda side-stack emitter. `jm_begin_function_frame` inserts one checked prologue that binds the context stacks, saves root/number watermarks, and reserves the function's static root count. Heap-capable locals and raw env/args pointers publish into root slots; assignments refresh their slots and helper calls first publish all live scope variables. `jm_emit` rewrites every `MIR_RET` to one return label. Return inference selects a scalar lifetime mode (`NONE`, `FLOAT`, `INT64`, `DTIME`, or `DYNAMIC`). `jm_finish_function_frame` re-homes owned env scalars, then the shared MIR emitter either restores the number watermark directly or donates one normalized frame-base slot for a callee-owned wide scalar. No scalar capture/rebuild import is involved. Generator and async state-machine entries use `DYNAMIC` and the same discipline, so suspension state owns no pointer into a reclaimed invocation.
 
-`jm_transpile_call` (`js_mir_expression_lowering.cpp:6458`) is a large dispatcher that recognizes special callees before the generic path: `console.log` (`:6462`), `require(literal)` resolved to `js_require` at transpile time (`:6482`), dynamic `import()` (`:6519`), and `super.method(...)` (`:6611`). The generic user-function call boxes the callee and `this`, builds an argument array via `jm_build_args_array`, and emits `js_call_function(fn, this, args, argc)` (e.g. `:6879`); spread-or-apply forms route through `js_apply_function`. Every call site that can observe side effects is wrapped, in `jm_transpile_expression`'s call case (`:12474`), by `js_args_save`/`js_args_restore` (to reset the transient argument stack), `jm_scope_env_reload_vars` / `jm_env_reload_shared_captures` (to re-read captured variables a callee may have mutated — see [JS_05](JS_05_Functions_Closures.md)), and `jm_emit_error_lane_propagate_check` (§9).
+`jm_transpile_call` recognizes syntax-level operations such as `require`, dynamic
+`import`, direct `eval`, and `super`, but it does not select an ordinary method's
+semantics from receiver class or source spelling.  Under **D6.2.2v2**, a member
+call first evaluates and roots the receiver, performs `js_property_access` (or
+the equivalent NameId helper), propagates an accessor ERROR before evaluating
+arguments, and only then calls the returned value with the receiver as `this`.
+Optional member calls use the same `Get -> Call` sequence after their nullish
+guards.  `jm_resolve_native_call` therefore rejects every member expression;
+only an exact lexical function binding may use a direct body call.
+
+The generic path builds a caller-owned argument span and delegates to
+`jm_call_function_into`, which donates a scalar result home and emits either
+`js_call_function_into` or `js_call_function_prerooted_args_into` according to
+the emitter's exact rooting provenance. Spread forms route through
+`js_apply_function_into`. Dynamic construction uses
+`jm_construct_value_into`, whose six-operand runtime call carries the callee,
+argument span, argument count, explicit `newTarget`, result home, and the
+pre-rooted-span fact to `js_construct_value`. There is no pending `newTarget`
+handoff. Exact direct-body calls may temporarily install active `this` and
+`new.target` for their dynamic extent, restoring both on exit; this is active
+activation state rather than constructor-selection state.
+
+Every call site that can observe side effects is wrapped by the transient
+argument-stack save/restore discipline, closure-environment readback, and
+`jm_emit_error_lane_propagate_check` (§9). The standing MIR fixture
+`test/mir/js/tune4_call_construct.mir-check` ratchets property `Get` before
+dynamic call and the explicit construct operand shape.
 
 ---
 

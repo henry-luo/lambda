@@ -69,14 +69,51 @@ bool js_activate_runtime_name_pool(void) {
     return true;
 }
 
+static bool js_compiled_name_table_inherits_preamble(
+        const JsMirTranspiler* mt) {
+    // D3.4.4v2: an ES module owns a private zero-based name slab. A nested
+    // module compile must not inherit the outer script's preamble merely
+    // because that script remains the active compiler owner.
+    return g_jm_preamble_in && mt && !mt->is_module;
+}
+
 bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
     if (!context || !context->active_js_module_state) return false;
-    const PropertyKeySpec* inherited_specs = g_jm_preamble_in
+    bool inherits_preamble = js_compiled_name_table_inherits_preamble(mt);
+    const PropertyKeySpec* inherited_specs = inherits_preamble
         ? g_jm_preamble_in->module_property_specs : NULL;
-    uint32_t inherited = g_jm_preamble_in
+    uint32_t inherited = inherits_preamble
         ? g_jm_preamble_in->module_property_count : 0;
-    uint32_t inherited_bytes = g_jm_preamble_in
+    uint32_t inherited_bytes = inherits_preamble
         ? g_jm_preamble_in->module_property_bytes_size : 0;
+    // A preamble consumer is a growing document/test slab. Linking a fresh
+    // inherited+local image for every script re-sealed that slab at a different
+    // size; direct Get->Call then made the latent failure observable as soon as
+    // a host method allocated names. Preserve the D3.4.4v2 NameId prefix once
+    // and append each consumer unit at the base encoded into its MIR.
+    if (inherits_preamble) {
+        uint32_t active_names = js_active_module_name_count();
+        uint32_t active_ics = js_active_module_ic_count();
+        if (active_names == 0 && inherited > 0 &&
+                !lambda_module_state_link_property_keys(
+                    context->active_js_module_state->module_id,
+                    inherited_specs, inherited, inherited_bytes)) {
+            return false;
+        }
+        uint32_t inherited_ic = g_jm_preamble_in->ic_count;
+        if (active_ics == 0 && inherited_ic > 0 &&
+                !js_link_module_ic_table(
+                    context->active_js_module_state->module_id, inherited_ic)) {
+            return false;
+        }
+        if (js_active_module_name_count() < inherited ||
+                js_active_module_ic_count() < inherited_ic) {
+            log_error("js-preamble-link: consumer is missing its inherited prefix");
+            return false;
+        }
+        return js_append_compiled_name_table(mt);
+    }
+
     PropertyKeySpec* image = NULL;
     uint32_t image_count = 0;
     uint32_t image_bytes = 0;
@@ -88,18 +125,37 @@ bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
         image_bytes);
     mem_free(image);
     if (!linked) return false;
-    uint32_t inherited_ic = g_jm_preamble_in ? g_jm_preamble_in->ic_count : 0;
+    uint32_t inherited_ic = inherits_preamble ? g_jm_preamble_in->ic_count : 0;
     uint32_t local_ic = mt ? mt->ic_count : 0;
     return js_link_module_ic_table(
         context->active_js_module_state->module_id, inherited_ic + local_ic);
 }
 
+static uint32_t js_preamble_consumer_name_base(const JsPreambleState* preamble) {
+    uint32_t base = preamble ? preamble->module_property_count : 0;
+    if (!g_jm_preamble_compile_only) {
+        uint32_t active = js_active_module_name_count();
+        if (active > base) base = active;
+    }
+    return base;
+}
+
+static uint32_t js_preamble_consumer_ic_base(const JsPreambleState* preamble) {
+    uint32_t base = preamble ? preamble->ic_count : 0;
+    if (!g_jm_preamble_compile_only) {
+        uint32_t active = js_active_module_ic_count();
+        if (active > base) base = active;
+    }
+    return base;
+}
+
 bool js_prelink_compiled_name_table(const JsMirTranspiler* mt) {
-    const PropertyKeySpec* inherited_specs = g_jm_preamble_in
+    bool inherits_preamble = js_compiled_name_table_inherits_preamble(mt);
+    const PropertyKeySpec* inherited_specs = inherits_preamble
         ? g_jm_preamble_in->module_property_specs : NULL;
-    uint32_t inherited = g_jm_preamble_in
+    uint32_t inherited = inherits_preamble
         ? g_jm_preamble_in->module_property_count : 0;
-    uint32_t inherited_bytes = g_jm_preamble_in
+    uint32_t inherited_bytes = inherits_preamble
         ? g_jm_preamble_in->module_property_bytes_size : 0;
     PropertyKeySpec* image = NULL;
     uint32_t image_count = 0;
@@ -414,9 +470,8 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         js_mir_destroy_unowned_eval_context(runtime, js_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
-    mt->module_name_base = g_jm_preamble_in
-        ? g_jm_preamble_in->module_property_count : 0;
-    mt->module_ic_base = g_jm_preamble_in ? g_jm_preamble_in->ic_count : 0;
+    mt->module_name_base = js_preamble_consumer_name_base(g_jm_preamble_in);
+    mt->module_ic_base = js_preamble_consumer_ic_base(g_jm_preamble_in);
 
     mt->module = MIR_new_module(ctx, "ts_script");
 
@@ -652,9 +707,10 @@ static size_t js_commonjs_injection_offset(const char* source, size_t source_len
     return i;
 }
 
-Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
-                                  size_t js_source_len, const char* filename,
-                                  uint64_t* result_home) {
+static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* js_source,
+                                                 size_t js_source_len, const char* filename,
+                                                 uint64_t* result_home,
+                                                 bool typescript_profile) {
     // Recovery ownership begins before parsing. The first entry may initialize
     // an idle eval thread, but compilation cannot borrow and restore another
     // live context.
@@ -754,6 +810,14 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
+    }
+    if (typescript_profile) {
+        // The fast TS preprocessor erases syntax, not the compilation profile;
+        // losing this bit made the TS-only type() intrinsic look like a JS
+        // property-miss synthesis dependency after D6.2.2v2 removed that path.
+        tp->strict_js = false;
+        tp->strict_mode = true;
+        tp->global_scope->strict = true;
     }
     jm_track_active_js_transpile(tp, NULL, NULL);
 
@@ -897,9 +961,8 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
         return (Item){.item = ITEM_ERROR};
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
-    mt->module_name_base = g_jm_preamble_in
-        ? g_jm_preamble_in->module_property_count : 0;
-    mt->module_ic_base = g_jm_preamble_in ? g_jm_preamble_in->ic_count : 0;
+    mt->module_name_base = js_preamble_consumer_name_base(g_jm_preamble_in);
+    mt->module_ic_base = js_preamble_consumer_ic_base(g_jm_preamble_in);
 
     // Preamble mode setup
     mt->preamble_mode = g_jm_preamble_mode;
@@ -1416,6 +1479,13 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     return final_result;
 }
 
+Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
+                                  size_t js_source_len, const char* filename,
+                                  uint64_t* result_home) {
+    return transpile_js_to_mir_core_profile_len(runtime, js_source, js_source_len,
+                                                filename, result_home, false);
+}
+
 Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source,
                               const char* filename, uint64_t* result_home) {
     return transpile_js_to_mir_core_len(runtime, js_source, strlen(js_source), filename,
@@ -1437,6 +1507,16 @@ Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_
     g_jm_preamble_out = NULL;
     g_jm_preamble_in = NULL;
     return transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename, result_home);
+}
+
+Item transpile_js_typescript_to_mir_len(Runtime* runtime, const char* js_source,
+                                        size_t js_source_len, const char* filename,
+                                        uint64_t* result_home) {
+    g_jm_preamble_mode = false;
+    g_jm_preamble_out = NULL;
+    g_jm_preamble_in = NULL;
+    return transpile_js_to_mir_core_profile_len(runtime, js_source, js_source_len,
+                                                filename, result_home, true);
 }
 
 Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
@@ -1464,6 +1544,110 @@ Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, s
     g_js_mir_optimize_level = saved_level;
     g_jm_preamble_mode = false;
     g_jm_preamble_out = NULL;
+    return result;
+}
+
+static Item compile_js_mir_cached_unit_len(
+    Runtime* runtime, const char* js_source, size_t js_source_len,
+    const char* filename, bool preamble_mode,
+    const JsPreambleState* preamble, JsPreambleState* out_state) {
+    // Cached units retain code and declaration metadata only. Execution is a
+    // separate step so no document heap can become part of the cache owner.
+    g_jm_preamble_mode = preamble_mode;
+    g_jm_preamble_compile_only = true;
+    g_jm_preamble_out = out_state;
+    g_jm_preamble_in = preamble;
+    unsigned int saved_level = g_js_mir_optimize_level;
+    g_js_mir_optimize_level = 3;
+    uint64_t compile_result_home = 0;
+    Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename,
+                                                &compile_result_home);
+    g_js_mir_optimize_level = saved_level;
+    g_jm_preamble_out = NULL;
+    g_jm_preamble_in = NULL;
+    g_jm_preamble_compile_only = false;
+    g_jm_preamble_mode = false;
+    return result;
+}
+
+Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                                 const char* filename, JsPreambleState* out_state) {
+    // Unlike js262's hot-heap preamble, a browser preamble captures document
+    // globals. Retain only MIR code and declaration metadata, then instantiate
+    // it separately into each document heap.
+    return compile_js_mir_cached_unit_len(runtime, js_source, js_source_len,
+                                          filename, true, NULL, out_state);
+}
+
+Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
+                                      size_t js_source_len, const char* filename,
+                                      const JsPreambleState* preamble,
+                                      JsPreambleState* out_state) {
+    if (!preamble) return ItemError;
+    return compile_js_mir_cached_unit_len(runtime, js_source, js_source_len,
+                                          filename, false, preamble, out_state);
+}
+
+Item execute_compiled_js_in_current_realm(Runtime* runtime,
+                                          const JsPreambleState* base_preamble,
+                                          const JsPreambleState* compiled_state) {
+    if (!runtime || !runtime->heap || !base_preamble || !compiled_state ||
+            !compiled_state->entry_func) {
+        return ItemError;
+    }
+
+    EvalContext* runtime_context = runtime_get_eval_context(runtime);
+    if (!runtime_context) return ItemError;
+    runtime_context->heap = runtime->heap;
+    runtime_context->name_pool = runtime->name_pool;
+    runtime_context->type_list = runtime->type_list;
+    runtime_context->pool = runtime->heap->pool;
+    if (!eval_context_thread_initialize(runtime_context) ||
+            !js_runtime_state_thread_initialize(runtime_context)) {
+        return ItemError;
+    }
+    if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
+    if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
+
+    uint32_t consumer_state_id = js_get_active_module_state_id();
+    uint32_t unit_var_count = compiled_state->module_var_count >
+            base_preamble->module_var_count
+        ? (uint32_t)compiled_state->module_var_count
+        : (uint32_t)base_preamble->module_var_count;
+    if (consumer_state_id == UINT32_MAX ||
+            !js_activate_module_state(unit_var_count)) {
+        return ItemError;
+    }
+    uint32_t unit_state_id = js_get_active_module_state_id();
+    // D3.4.4v2: immutable cached MIR keeps the property/IC indices encoded at
+    // the preamble boundary. Give it a private slab with that exact prefix;
+    // executing against the growing browser-consumer slab aliases its first
+    // script names and ICs once any user unit has appended to the table.
+    bool linked = lambda_module_state_link_property_keys(unit_state_id,
+            base_preamble->module_property_specs,
+            base_preamble->module_property_count,
+            base_preamble->module_property_bytes_size) &&
+        lambda_module_state_append_property_keys(unit_state_id,
+            compiled_state->module_property_specs,
+            compiled_state->module_property_count,
+            compiled_state->module_property_bytes_size) &&
+        js_link_module_ic_table(unit_state_id, base_preamble->ic_count) &&
+        js_append_module_ic_table(unit_state_id, compiled_state->ic_count) &&
+        js_copy_module_state_var_prefix(consumer_state_id, unit_state_id,
+            (uint32_t)base_preamble->module_var_count);
+    if (!linked) {
+        (void)js_set_active_module_state_id(consumer_state_id);
+        return ItemError;
+    }
+
+    typedef Item (*js_main_func_t)(Context*);
+    js_main_func_t js_main = (js_main_func_t)compiled_state->entry_func;
+    js_mir_reset_last_phase_timing();
+    long execute_start = js_mir_phase_now_us();
+    Item result = js_main((Context*)context);
+    g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - execute_start;
+    g_last_js_mir_phase_timing.total_us = g_last_js_mir_phase_timing.execute_us;
+    if (!js_set_active_module_state_id(consumer_state_id)) return ItemError;
     return result;
 }
 

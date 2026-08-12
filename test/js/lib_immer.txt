@@ -22,10 +22,10 @@ true
 6
 7
 2
+100
+2
 1
-undefined
-1
-false
 true
+false
 true
 IMMER_DONE

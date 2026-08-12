@@ -229,12 +229,24 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
     return true;
 }
 
-static bool map_ensure_data_capacity_for_end(Map* mp, Pool* pool,
-        int64_t byte_end, int64_t copy_bytes) {
-    if (!mp || !pool || byte_end < 0 || byte_end > INT_MAX) return false;
+static bool map_ensure_data_capacity_for_end(Map** map_slot, Pool* pool,
+        int64_t byte_end, int64_t copy_bytes, MapDataGrowFn grow,
+        void* grow_context, String** keys, int key_count,
+        Item* values, int value_count) {
+    if (!map_slot || !*map_slot || !pool || byte_end < 0 || byte_end > INT_MAX) {
+        return false;
+    }
+    Map* mp = *map_slot;
     if (mp->data && byte_end <= mp->data_cap) return true;
-    int byte_cap = MAX(mp->data_cap, (int)byte_end) * 2;
-    if (byte_cap < 64) byte_cap = 64;
+    int byte_cap = mp->data_cap == 0
+        ? MAX(64, (int)byte_end)
+        : MAX(mp->data_cap, (int)byte_end) * 2;
+
+    if (grow) {
+        return grow(map_slot, byte_cap, copy_bytes, keys, key_count,
+            values, value_count, grow_context);
+    }
+
     void* new_data = pool_calloc(pool, byte_cap);
     if (!new_data) return false;
     if (mp->data) {
@@ -485,7 +497,8 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
 }
 
 // Internal helper function - not exported in header but accessible to mark_builder.cpp
-void map_put(Map* mp, String* key, Item value, Input *input) {
+void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
+        MapDataGrowFn grow, void* grow_context) {
     // note: key could be null for nested map
     TypeMap *map_type = (TypeMap*)mp->type;
     TypeId type_id = get_type_id(value);
@@ -499,9 +512,12 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         arraylist_append(input->type_list, map_type);
         map_type->type_index = input->type_list->length - 1;
         map_type->has_array_index_shape = array_index_shape;
-        int byte_cap = 64;
-        mp->data = pool_calloc(input->pool, byte_cap);  mp->data_cap = byte_cap;
-        if (!mp->data) return;
+        String* keys[1] = {key};
+        Item values[1] = {value};
+        if (!map_ensure_data_capacity_for_end(&mp, input->pool, 64, 0,
+                grow, grow_context, keys, 1, values, 1)) return;
+        key = keys[0];
+        value = values[0];
     } else if (typemap_is_shared_shape(map_type)) {
         if (key && !property_key_requires_identity(key) &&
                 mp->map_kind == MAP_KIND_PLAIN && js_shape_transitions_enabled()) {
@@ -511,10 +527,15 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
             if (transition_type && transition_entry) {
                 int bsize = type_info[type_id].byte_size;
                 int64_t byte_end = transition_entry->byte_offset + bsize;
-                if (!map_ensure_data_capacity_for_end(mp, input->pool, byte_end,
-                        map_type->byte_size)) {
+                String* keys[1] = {key};
+                Item values[1] = {value};
+                if (!map_ensure_data_capacity_for_end(&mp, input->pool, byte_end,
+                        map_type->byte_size, grow, grow_context,
+                        keys, 1, values, 1)) {
                     return;
                 }
+                key = keys[0];
+                value = values[0];
                 mp->type = transition_type;
                 map_store_field_value((char*)mp->data + transition_entry->byte_offset,
                     type_id, value);
@@ -544,17 +565,12 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     int64_t byte_offset64 = shape_entry->byte_offset + bsize;
     if (byte_offset64 > INT_MAX) return;
     int byte_offset = (int)byte_offset64;
-    if (byte_offset > mp->data_cap) { // resize map data
-        // mp->data_cap could be 0 (e.g. zero-byte-size maps from map_with_data)
-        int byte_cap = MAX(mp->data_cap, byte_offset) * 2;
-        void* new_data = pool_calloc(input->pool, byte_cap);
-        if (!new_data) return;
-        if (mp->data) {
-            memcpy(new_data, mp->data, byte_offset - bsize);
-            pool_free(input->pool, mp->data);
-        }
-        mp->data = new_data;  mp->data_cap = byte_cap;
-    }
+    String* keys[1] = {key};
+    Item values[1] = {value};
+    if (!map_ensure_data_capacity_for_end(&mp, input->pool, byte_offset,
+            byte_offset - bsize, grow, grow_context, keys, 1, values, 1)) return;
+    key = keys[0];
+    value = values[0];
     map_type->byte_size = byte_offset;
 
     // store the value
@@ -562,8 +578,13 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     map_store_field_value(field_ptr, type_id, value);
 }
 
-bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
-        Input* input, uint8_t shape_flags) {
+void map_put(Map* mp, String* key, Item value, Input *input) {
+    map_put_with_data_growth(mp, key, value, input, NULL, NULL);
+}
+
+bool map_put_undefined_unique_absent_bulk_with_data_growth(Map* mp,
+        String** keys, int count, Input* input, uint8_t shape_flags,
+        MapDataGrowFn grow, void* grow_context) {
     if (!mp || !keys || count <= 0 || !input || !input->pool) return false;
     for (int i = 0; i < count; i++) {
         if (!keys[i]) return false;
@@ -588,23 +609,10 @@ bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
     int bsize = type_info[LMD_TYPE_UNDEFINED].byte_size;
     int64_t old_byte_size = map_type->byte_size;
     int64_t new_byte_size = old_byte_size + ((int64_t)bsize * count);
-    if (new_byte_size > mp->data_cap) {
-        int byte_cap = MAX(mp->data_cap, (int)new_byte_size) * 2;
-        if (byte_cap < 64) byte_cap = 64;
-        void* new_data = pool_calloc(input->pool, byte_cap);
-        if (!new_data) return false;
-        if (mp->data && old_byte_size > 0) {
-            memcpy(new_data, mp->data, (size_t)old_byte_size);
-            pool_free(input->pool, mp->data);
-        }
-        mp->data = new_data;
-        mp->data_cap = byte_cap;
-    } else if (!mp->data && new_byte_size > 0) {
-        int byte_cap = (int)new_byte_size;
-        if (byte_cap < 64) byte_cap = 64;
-        mp->data = pool_calloc(input->pool, byte_cap);
-        if (!mp->data) return false;
-        mp->data_cap = byte_cap;
+    if (!mp->data || new_byte_size > mp->data_cap) {
+        if (!map_ensure_data_capacity_for_end(&mp, input->pool, new_byte_size,
+                old_byte_size, grow, grow_context, keys, count,
+                NULL, 0)) return false;
     }
 
     ShapeEntry* prev = map_type->last;
@@ -630,6 +638,12 @@ bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
         mp->map_kind = MAP_KIND_DESC;
     }
     return true;
+}
+
+bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
+        Input* input, uint8_t shape_flags) {
+    return map_put_undefined_unique_absent_bulk_with_data_growth(mp, keys,
+        count, input, shape_flags, NULL, NULL);
 }
 
 extern TypeElmt EmptyElmt;

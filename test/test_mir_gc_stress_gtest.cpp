@@ -42,6 +42,7 @@ static const char* kExtraJsScripts[] = {
     "test/js/class_method_capture_hoist.js",
     "test/js/function_decl_callback_hoist.js",
     "test/js/concurrency_lambda_promise.js",
+    "test/js/tune4_closure_scalar_ownership.js",
 };
 
 static const char* kExtraLambdaScripts[] = {
