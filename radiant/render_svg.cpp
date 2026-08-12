@@ -1003,8 +1003,6 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
 
     if (rule_height <= 0) return;
 
-    log_debug("[MULTICOL SVG] Rendering %d column rules, width=%.1f, style=%d, height=%.1f",
-              rule_column_count - 1, mc->rule_width, mc->rule_style, rule_height);
 
     // Draw rule between each pair of columns
     for (int i = 0; i < rule_column_count - 1; i++) {
@@ -1059,7 +1057,6 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
             }
         }
 
-        log_debug("[MULTICOL SVG] Rule %d at x=%.1f, height=%.1f", i, rule_x, rule_height);
     }
 }
 
@@ -1097,10 +1094,6 @@ static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
     float img_width = content_rect.width;
     float img_height = content_rect.height;
 
-    log_debug("[SVG IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f)",
-              img->url && img->url->href ? img->url->href->chars : "unknown",
-              img->format, img->width, img->height,
-              img_width, img_height, content_rect.x, content_rect.y);
 
     if (img->url && img->url->href) {
         paint_draw_image_resource(svg_active_paint_list(ctx), img,
@@ -1497,7 +1490,6 @@ static void render_caret_svg(SvgRenderContext* ctx, DocState* state) {
         "stroke=\"black\" stroke-width=\"1.5\" id=\"caret\" />\n",
         x, y, x, y + height);
 
-    log_debug("[CARET SVG] Rendered caret at (%.1f, %.1f) height=%.1f", x, y, height);
 }
 
 // Main SVG rendering function
@@ -1608,7 +1600,6 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
 bool save_svg_to_file(const char* svg_content, const char* filename) {
     FILE* file = fopen(filename, "w");
     if (!file) {
-        log_debug("Failed to open file for writing: %s", filename);
         return false;
     }
 
@@ -1617,7 +1608,6 @@ bool save_svg_to_file(const char* svg_content, const char* filename) {
     fclose(file);
 
     if (written != len) {
-        log_debug("Failed to write complete SVG content to file: %s", filename);
         return false;
     }
 
@@ -1627,8 +1617,6 @@ bool save_svg_to_file(const char* svg_content, const char* filename) {
 // Main function to layout HTML and render to SVG
 // scale: User-specified scale factor (default 1.0, use 2.0 for high-DPI output)
 int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width, int viewport_height, float scale) {
-    log_debug("render_html_to_svg called with html_file='%s', svg_file='%s', viewport=%dx%d, scale=%.2f",
-              html_file, svg_file, viewport_width, viewport_height, scale);
 
     RenderExportSession session;
     if (!render_export_session_begin(
@@ -1640,7 +1628,6 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
 
     // Render to SVG (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
-        log_debug("Rendering view tree to SVG...");
         // SVG output dimensions are scaled; coordinates inside are in CSS pixels with viewBox transform
         int svg_width = (int)(session.content_width * session.scale); // INT_CAST_OK: SVG dimensions are integer pixels.
         int svg_height = (int)(session.content_height * session.scale); // INT_CAST_OK: SVG dimensions are integer pixels.
@@ -1653,14 +1640,11 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
                 render_export_session_end(&session);
                 return 0;
             } else {
-                log_debug("Failed to save SVG to file: %s", svg_file);
                 mem_free(svg_content);
             }
         } else {
-            log_debug("Failed to render view tree to SVG");
         }
     } else {
-        log_debug("No view tree available for rendering");
     }
 
     // Cleanup

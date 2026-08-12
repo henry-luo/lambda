@@ -114,7 +114,6 @@ bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
 static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     if (!view->embed || !view->embedp()->img) return;
 
-    log_debug("render image content");
     ImageSurface* img = view->embedp()->img;
     Rect border_rect = render_geometry_block_border_rect(&rdcon->block, view, rdcon->scale);
     Rect rect = render_geometry_block_content_rect(&rdcon->block, view, rdcon->scale);
@@ -169,12 +168,6 @@ static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         img_rect.width = rendered_w;
         img_rect.height = rendered_h;
     }
-    log_debug("[IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f), clip=(%.0f,%.0f,%.0f,%.0f)",
-              img->url && img->url->href ? img->url->href->chars : "unknown",
-              img->format, img->width, img->height,
-              rect.width, rect.height, rect.x, rect.y,
-              rdcon->block.clip.left, rdcon->block.clip.top,
-              rdcon->block.clip.right, rdcon->block.clip.bottom);
     uint8_t content_opacity = render_media_content_opacity(view);
     Bound image_clip = rdcon->has_transform
         ? rdcon->block.clip
@@ -183,8 +176,6 @@ static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     if (img->format == IMAGE_FORMAT_SVG) {
         bool drew_svg = false;
         if (img->pic) {
-            log_debug("render svg image as display-list picture at x:%f, y:%f, wd:%f, hg:%f",
-                      img_rect.x, img_rect.y, img_rect.width, img_rect.height);
             RdtPicture* pic = rdt_picture_dup(img->pic);
             if (pic) {
                 render_painter_draw_picture_rect(rdcon, pic, &img_rect, &image_clip,
@@ -199,21 +190,16 @@ static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         if (!drew_svg && svg_target_h < 1) svg_target_h = 1;
         bool rasterized = !drew_svg && render_media_rasterize_svg_picture(img, svg_target_w, svg_target_h);
         if (!drew_svg && rasterized && img->pixels) {
-            log_debug("render svg image as local raster at x:%f, y:%f, wd:%f, hg:%f, src=%dx%d",
-                      img_rect.x, img_rect.y, img_rect.width, img_rect.height,
-                      svg_target_w, svg_target_h);
             render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels, svg_target_w, svg_target_h,
                                             svg_target_w, &img_rect, &image_clip,
                                             content_opacity, img);
             drew_svg = true;
         }
         if (!drew_svg) {
-            log_debug("failed to render svg image: no vector picture or raster pixels");
         }
     } else {
         // ensure raster image pixels are decoded (lazy loading) at the displayed size
         image_surface_ensure_decoded(img, (int)img_rect.width, (int)img_rect.height); // INT_CAST_OK: image decoder target dimensions are integer pixels
-        log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
         if (rdcon->has_transform) {
             // scaled image decodes may replace pixels with a smaller buffer;
             // display-list image commands store decoded dimensions and uint32_t row stride.
@@ -240,13 +226,10 @@ static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         // Semi-transparent blue overlay (same color as text selection)
         uint32_t sel_bg_color = 0x80FF9933;  // ABGR format: semi-transparent blue
         rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &border_rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
-        log_debug("[IMAGE SELECTION] Rendered blue overlay on image at (%.0f,%.0f) size %.0fx%.0f",
-                  border_rect.x, border_rect.y, border_rect.width, border_rect.height);
     }
 }
 
 void render_image_view(RenderContext* rdcon, ViewBlock* view) {
-    log_debug("render image view");
     log_enter();
     if (render_block_dirty_misses(rdcon, view)) {
         log_leave();
@@ -273,7 +256,6 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
     render_image_content(rdcon, view);
     render_state_pop_transform(&content_transform_scope);
     render_element_marker_end(rdcon, &marker_scope);
-    log_debug("end of image render");
     log_leave();
 }
 
@@ -294,9 +276,6 @@ void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
     float dst_w = view->width * s;
     float dst_h = view->height * s;
 
-    log_debug("[WEBVIEW LAYER RENDER] pos=(%.0f,%.0f) size=%.0fx%.0f surface=%dx%d",
-              dst_x, dst_y, dst_w, dst_h,
-              wv->surface->width, wv->surface->height);
 
     rc_webview_layer_placeholder(rdcon, wv->surface,
                                  dst_x, dst_y, dst_w, dst_h,
@@ -316,8 +295,6 @@ void render_video_content(RenderContext* rdcon, ViewBlock* view) {
     // pack has_controls into bit 8
     if (view->embedp()->has_controls) object_fit_flags |= 0x100;
 
-    log_debug("[VIDEO RENDER] placeholder at (%.0f,%.0f) size %.0fx%.0f controls=%d",
-              dst_x, dst_y, dst_w, dst_h, view->embedp()->has_controls);
 
     rc_video_placeholder(rdcon, view->embedp()->video,
                          dst_x, dst_y, dst_w, dst_h,

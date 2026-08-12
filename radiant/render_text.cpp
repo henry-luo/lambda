@@ -136,20 +136,16 @@ static bool render_text_rect_misses_clip(RenderContext* rdcon, float x, float y,
 }
 
 void render_text_view(RenderContext* rdcon, ViewText* text_view) {
-    log_debug("render_text_view clip:[%.0f,%.0f,%.0f,%.0f]",
-        rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
 
     // CSS 2.1 §11.2: text inherits visibility from parent element
     if (text_view->parent && text_view->parent->is_element()) {
         DomElement* parent_elem = lam::dom_require_element(text_view->parent);
         if (parent_elem->in_line && parent_elem->inl()->visibility == VIS_HIDDEN) {
-            log_debug("text hidden by parent visibility:hidden");
             return;
         }
     }
 
     if (!rdcon->font.font_handle) {
-        log_debug("font face is null");
         return;
     }
 
@@ -158,7 +154,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     TextRect* text_rect = text_view->rect;
 
     if (!text_rect) {
-        log_debug("no text rect for text view");
         return;
     }
 
@@ -178,7 +173,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
     // Skip rendering if font size is 0 - text should be invisible (e.g., font-size: 0)
     if (rdcon->font.style && rdcon->font.style->font_size <= 0.0f) {
-        log_debug("skipping zero font-size text render");
         rdcon->font = saved_font;
         rdcon->color = saved_color;
         return;
@@ -231,9 +225,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
         unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
         if (render_text_trace_enabled()) {
-            log_debug("draw text:'%t', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f), white_space:%d, preserve:%d, color:0x%08x",
-                str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, x, y,
-                white_space, preserve_spaces, rdcon->color.c);
         }
 
         // Calculate natural text width and space count for justify rendering
@@ -287,8 +278,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             float extra_space = (text_rect->width * s) - natural_width;
             space_width += (extra_space / space_count);
             if (render_text_trace_enabled()) {
-                log_debug("apply justification: text_align=JUSTIFY, natural_width=%f, text_rect->width=%f, space_count=%d, space_width=%f -> %f",
-                    natural_width, text_rect->width * s, space_count, scaled_space_width, space_width);
             }
         }
 
@@ -300,16 +289,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         // Selection background color - standard blue for text selection
         uint32_t sel_bg_color = 0x80FF9933;  // ABGR format: semi-transparent blue (like browser selection)
 
-        // Debug: log inline selection position info
-        if (has_selection) {
-            log_debug("[SEL-INLINE] text_rect: x=%.1f y=%.1f, rdcon->block: x=%.1f y=%.1f, final pos: x=%.1f y=%.1f, font_size=%.1f, y_ppem=%d",
-                text_rect->x, text_rect->y, rdcon->block.x, rdcon->block.y, x, y,
-                rdcon->font.style->font_size, (int)font_handle_get_physical_size_px(rdcon->font.font_handle));
-        }
-
-        // Track cumulative position for debugging
-        float debug_start_x = x;
-
         bool shadow_needs_blur = render_text_paint_blurred_shadows(rdcon, str, text_rect,
             text_shadow, text_transform, preserve_spaces, space_width, scaled_space_width, x, y);
 
@@ -319,8 +298,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
             // Debug first selected character
             if (is_selected && char_index == sel_start) {
-                log_debug("[SEL-INLINE] First selected char at index=%d, x=%.1f y=%.1f, advance_so_far=%.1f (expected overlay start_x=%.1f * scale=%.1f = %.1f)",
-                    char_index, x, y, x - debug_start_x, 0.0f, s, 0.0f);
             }
 
             // log_debug("draw character '%c'", *p);
@@ -367,12 +344,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
                     static int glyph_debug_count = 0;
                     if (render_text_trace_enabled() && glyph_debug_count < 500) {
-                        log_debug("[GLYPH DEBUG] loading glyph U+%04X from font '%s' (family=%s) y_ppem=%d css_size=%.2f",
-                                  codepoint,
-                                  rdcon->font.font_handle ? font_handle_get_family_name(rdcon->font.font_handle) : "NULL",
-                                  rdcon->font.style ? rdcon->font.style->family : "NULL",
-                                  rdcon->font.font_handle ? (int)font_handle_get_physical_size_px(rdcon->font.font_handle) : -1,
-                                  rdcon->font.style ? rdcon->font.style->font_size : -1.0f);
                         glyph_debug_count++;
                     }
 
@@ -403,9 +374,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                                 std::chrono::duration<double, std::milli>(tfm2 - tfm1).count());
                         }
                         if (has_selection && char_index <= 15) {
-                            log_debug("[SEL-ADVANCE] char_index=%d codepoint=U+%04X '%c' x=%.1f advance=%.1f",
-                                char_index, codepoint, (codepoint >= 32 && codepoint < 127) ? (char)codepoint : '?',
-                                x, glyph->advance_x);
                         }
 
                         // Draw selection background BEFORE glyph (so text appears on top)
@@ -420,10 +388,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                         const char* _dbg_fname = rdcon->font.font_handle ? font_handle_get_family_name(rdcon->font.font_handle) : NULL;
                         if (bitmap_debug_count < 50 && _dbg_fname &&
                             strcmp(_dbg_fname, "Monaco") == 0) {
-                            log_debug("[BITMAP DEBUG] Monaco glyph U+%04X: bitmap=%dx%d pitch=%d left=%d top=%d advance=%.1f pixel_mode=%d",
-                                      codepoint, glyph->bitmap.width, glyph->bitmap.height,
-                                      glyph->bitmap.pitch, glyph->bitmap.bearing_x, glyph->bitmap.bearing_y,
-                                      glyph->advance_x, glyph->bitmap.pixel_mode);
                             bitmap_debug_count++;
                         }
 
@@ -682,8 +646,6 @@ static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned cha
         int bw = (int)ceilf(text_rect->width * s + blur_extend * 2 + shadow_max_ox * s * 2);
         int bh = (int)ceilf(text_rect->height * s + blur_extend * 2 + shadow_max_oy * s * 2);
         rc_box_blur_region(rdcon, bx, by, bw, bh, max_shadow_blur, 0, nullptr);
-        log_debug("[TEXT-SHADOW] Recorded blur radius=%.1f for region (%d,%d,%d,%d)",
-            max_shadow_blur, bx, by, bw, bh);
     }
 
     return true;
@@ -703,7 +665,6 @@ static LoadedGlyph* render_text_load_glyph_for_paint(RenderContext* rdcon, uint3
         int peek_bytes = str_utf8_decode((const char*)cursor, (size_t)(end - cursor), &peek_cp);
         if (peek_bytes > 0 && peek_cp == 0xFE0F) {
             emoji_presentation = true;
-            log_debug("render emoji: VS16 peek hit for U+%04X", codepoint);
         }
     }
     if (!emoji_presentation && utf_is_emoji_presentation_default(codepoint)) {
@@ -1042,8 +1003,6 @@ static void render_text_decorations(RenderContext* rdcon, unsigned char* str, Te
 
     rect.width = text_rect->width * s;
     rect.height = thickness;
-    log_debug("text deco: %d style=%d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f",
-        rdcon->font.style->text_deco, deco_style, rect.x, rect.y, rect.width, rect.height);
 
     if (deco_style == CSS_VALUE_DASHED) {
         float dash_len = thickness * 3.0f;

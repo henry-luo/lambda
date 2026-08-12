@@ -1220,7 +1220,6 @@ static void register_svg_def_element(SvgInlineRenderContext* ctx, Element* elem)
             const char* so = get_svg_attr(stop_elem, "stop-opacity");
             if (so) gs->color.a = (uint8_t)((float)gs->color.a * strtof(so, nullptr));
         }
-        log_debug("[SVG] defs: %s id='%s' stops=%d", tag, id, def->stop_count);
     } else if (id) {
         SvgElemDef* existing = nullptr;
         for (int i = 0; i < table->elem_count; i++) {
@@ -1377,7 +1376,6 @@ static bool resolve_svg_gaussian_blur_filter(SvgInlineRenderContext* ctx, Elemen
 
     Element* filter_elem = lookup_elem_def((SvgDefTable*)ctx->defs, filter_id);
     if (!filter_elem) {
-        log_debug("[SVG-FILTER] filter ref '%s' not found", filter_id);
         return false;
     }
 
@@ -1445,8 +1443,6 @@ static bool resolve_svg_gaussian_blur_filter(SvgInlineRenderContext* ctx, Elemen
     // box_blur_region's argument follows the box-shadow convention where
     // sigma is half the blur radius; SVG stdDeviation is already sigma.
     out_filter->blur_radius = sigma_px * 2.0f;
-    log_debug("[SVG-FILTER] resolved feGaussianBlur id='%s' std=(%.2f,%.2f) region=(%d,%d,%d,%d)",
-              filter_id, std_x, std_y, px, py, pw, ph);
     return true;
 }
 
@@ -1654,7 +1650,6 @@ static void draw_svg_fill_stroke(SvgInlineRenderContext* ctx, RdtPath* path, Ele
             if (!gradient_applied && !pattern_applied) {
                 // unresolved url() reference - per SVG spec, this should NOT
                 // fall back to a default solid color (black); skip the fill.
-                log_debug("[SVG] paint server fill not resolved: %s (skip fill)", fill);
                 has_fill = false;
             }
         } else {
@@ -1774,7 +1769,6 @@ static void render_svg_rect(SvgInlineRenderContext* ctx, Element* elem) {
     draw_svg_fill_stroke(ctx, path, elem, &m, x, y, width, height);
     rdt_path_free(path);
 
-    log_debug("[SVG] rect: x=%.1f y=%.1f w=%.1f h=%.1f rx=%.1f", x, y, width, height, rx);
 }
 
 static void render_svg_circle(SvgInlineRenderContext* ctx, Element* elem) {
@@ -1790,7 +1784,6 @@ static void render_svg_circle(SvgInlineRenderContext* ctx, Element* elem) {
     draw_svg_fill_stroke(ctx, path, elem, &m, cx - r, cy - r, 2 * r, 2 * r);
     rdt_path_free(path);
 
-    log_debug("[SVG] circle: cx=%.1f cy=%.1f r=%.1f", cx, cy, r);
 }
 
 static void render_svg_ellipse(SvgInlineRenderContext* ctx, Element* elem) {
@@ -1807,7 +1800,6 @@ static void render_svg_ellipse(SvgInlineRenderContext* ctx, Element* elem) {
     draw_svg_fill_stroke(ctx, path, elem, &m, cx - rx, cy - ry, 2 * rx, 2 * ry);
     rdt_path_free(path);
 
-    log_debug("[SVG] ellipse: cx=%.1f cy=%.1f rx=%.1f ry=%.1f", cx, cy, rx, ry);
 }
 
 static void render_svg_line(SvgInlineRenderContext* ctx, Element* elem) {
@@ -1832,7 +1824,6 @@ static void render_svg_line(SvgInlineRenderContext* ctx, Element* elem) {
     draw_svg_fill_stroke(ctx, path, elem, &m, 0, 0, 0, 0);
     rdt_path_free(path);
 
-    log_debug("[SVG] line: (%.1f,%.1f) -> (%.1f,%.1f)", x1, y1, x2, y2);
 }
 
 // helper: parse points attribute for polyline/polygon into RdtPath
@@ -1888,7 +1879,6 @@ static void render_svg_polyline(SvgInlineRenderContext* ctx, Element* elem, bool
     draw_svg_fill_stroke(ctx, path, elem, &m, 0, 0, 0, 0);
     rdt_path_free(path);
 
-    log_debug("[SVG] %s: points=%s", close_path ? "polygon" : "polyline", points);
 }
 
 // ============================================================================
@@ -2608,7 +2598,6 @@ static void render_svg_path(SvgInlineRenderContext* ctx, Element* elem) {
     if (stable_path) rdt_path_free(stable_path);
     rdt_path_free(path);
 
-    log_debug("[SVG] path: d=%s", d);
 }
 
 // ============================================================================
@@ -2637,7 +2626,6 @@ static char* resolve_font_via_database(FontContext* font_ctx, const char* family
     if (result.font && result.font->file_path) {
         // skip TTC files — ThorVG TTF loader doesn't handle TrueType Collections
         if (strstr(result.font->file_path, ".ttc")) {
-            log_debug("[SVG] skipping TTC from database: %s", result.font->file_path);
             return nullptr;
         }
         if (out_font_name) *out_font_name = result.font->family_name;
@@ -2677,7 +2665,6 @@ static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family
             if (strstr(src, ".ttc")) continue;
             char* p = mem_strdup(src, MEM_CAT_RENDER);
             if (out_font_name) *out_font_name = entry->family;
-            log_debug("[SVG] @font-face resolved: %s -> %s", family, src);
             return p;
         }
 
@@ -2718,12 +2705,10 @@ static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family
             fclose(fcheck);
             // reject if no Unicode cmap (PDF Identity / Mac Roman subsets)
             if (!allow_nonunicode_cmap && !font_file_has_unicode_cmap(temp_path)) {
-                log_debug("[SVG] @font-face %s has no Unicode cmap, falling back to system font", family);
                 return nullptr;
             }
             char* p = mem_strdup(temp_path, MEM_CAT_RENDER);
             if (out_font_name) *out_font_name = entry->family;
-            log_debug("[SVG] @font-face cached file: %s -> %s", family, temp_path);
             return p;
         }
 
@@ -2733,21 +2718,18 @@ static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family
         uint8_t* decoded = base64_decode(comma + 1, b64_len, &decoded_len);
         if (!decoded || decoded_len == 0) {
             if (decoded) mem_free(decoded);
-            log_debug("[SVG] @font-face base64 decode failed for %s", family);
             continue;
         }
 
         FILE* fout = fopen(temp_path, "wb");
         if (!fout) {
             mem_free(decoded);
-            log_debug("[SVG] @font-face cannot open temp file %s", temp_path);
             continue;
         }
         size_t written = fwrite(decoded, 1, decoded_len, fout);
         fclose(fout);
         mem_free(decoded);
         if (written != decoded_len) {
-            log_debug("[SVG] @font-face write incomplete %zu/%zu", written, decoded_len);
             continue;
         }
 
@@ -2877,8 +2859,6 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
                     bold_font_name[name_len] = '\0';
                     *out_font_name = bold_font_name;
                 }
-                log_debug("[SVG] font resolved via best-match (weight=%d slant=%d): %s -> %s (name='%s')",
-                          weight, (int)slant, fam, path, out_font_name ? *out_font_name : "?");
                 return path;
             }
         }
@@ -2901,8 +2881,6 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
                 platform_font_name[name_len] = '\0';
                 *out_font_name = platform_font_name;
             }
-            log_debug("[SVG] font resolved via platform: %s -> %s (name='%s')",
-                      fam, p, out_font_name ? *out_font_name : "?");
             return p;
         }
         // database lookup
@@ -2927,7 +2905,6 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
                     }
                     *out_font_name = db_font_name;
                 }
-                log_debug("[SVG] font resolved via database: %s -> %s", fam, p);
                 return p;
             }
         }
@@ -2950,12 +2927,10 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
     for (int i = 0; fallbacks[i]; i++) {
         char* p = try_family(fallbacks[i]);
         if (p) {
-            log_debug("[SVG] font fallback: %s -> %s", font_family, fallbacks[i]);
             return p;
         }
     }
 
-    log_debug("[SVG] no font found for: %s", font_family);
     if (out_font_name) *out_font_name = nullptr;
     return nullptr;
 }
@@ -3084,7 +3059,6 @@ static void collect_svg_style_rules(SvgInlineRenderContext* ctx, Element* elem) 
         const char* css = get_direct_text_content(elem);
         if (css && *css) {
             parse_svg_style_text(ctx, css);
-            log_debug("[SVG] collected embedded style rules, total=%d", ctx->style_rule_count);
             mem_free((void*)css);
         }
         return;
@@ -3116,27 +3090,22 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
     // load font (ThorVG caches it)
     Tvg_Result load_result = tvg_font_load(font_path);
     if (load_result != TVG_RESULT_SUCCESS) {
-        log_debug("[SVG] failed to load font file: %s (result=%d)", font_path, load_result);
         tvg_paint_unref(tvg_text, true);
         return nullptr;
     }
 
-    log_debug("[SVG TEXT] loaded font file: %s, setting font name: '%s'", font_path, font_name ? font_name : "null");
 
     // set font by name - ThorVG matches the font name from the loaded font file
     // common font names: "Arial", "Helvetica", "SF NS", "Geneva", etc.
     Tvg_Result result = tvg_text_set_font(tvg_text, font_name);
     if (result != TVG_RESULT_SUCCESS) {
         // if font name fails, try nullptr as fallback
-        log_debug("[SVG TEXT] font name '%s' not found (result=%d), trying nullptr fallback", font_name ? font_name : "null", result);
         result = tvg_text_set_font(tvg_text, nullptr);
         if (result != TVG_RESULT_SUCCESS) {
-            log_debug("[SVG] failed to set font (result=%d)", result);
             tvg_paint_unref(tvg_text, true);
             return nullptr;
         }
     } else {
-        log_debug("[SVG TEXT] successfully set font name: '%s'", font_name);
     }
 
     result = tvg_text_set_size(tvg_text, font_size_tvg);
@@ -3168,8 +3137,6 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
     // by tvg_paint_set_transform in rdt_picture_draw. The caller composes
     // text position into the drawing transform matrix instead.
 
-    log_debug("[SVG] text segment: '%s' at (%.1f, %.1f) size=%.1f color=rgb(%d,%d,%d)",
-              text, x, y, font_size_tvg, fill_color.r, fill_color.g, fill_color.b);
 
     return tvg_text;
 }
@@ -3317,9 +3284,6 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
             advance_scale = target_width / natural_width;
             glyph_scale_x = scale_glyphs_x ? advance_scale : base_x_scale;
         }
-        log_debug("[SVG] Radiant textLength fit: '%s' target=%.3f measured=%.3f advance_scale=%.3f",
-                  text, rotated_text ? text_length * sy : text_length * sx, natural_width,
-                  rotated_text ? local_advance_scale : advance_scale);
     }
 
     float pen_x = matrix->e11 * base_x + matrix->e12 * base_y + matrix->e13;
@@ -3473,7 +3437,6 @@ static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {
     char* font_path = resolve_svg_font_path(font_family, &font_name, ctx->font_ctx,
                                            font_weight, font_slant, allow_embedded_font);
     if (!font_path) {
-        log_debug("[SVG] <text> no font available for: %s", font_family ? font_family : "default");
         return;
     }
 
@@ -3564,8 +3527,6 @@ static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {
                 float measured_width = measure_svg_text_width(text_content, font_size, ctx->font_ctx, metrics_family, font_weight);
                 if (measured_width > 0.0f) {
                     text_scale_x = text_length / measured_width;
-                    log_debug("[SVG] textLength fit: '%s' target=%.3f measured=%.3f scale_x=%.3f",
-                              text_content, text_length, measured_width, text_scale_x);
                 }
             }
             bool rendered_with_radiant = false;
@@ -3593,8 +3554,6 @@ static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {
                     if (tvg_paint_get_aabb(text, &bounds_x, &bounds_y, &bounds_w, &bounds_h) == TVG_RESULT_SUCCESS &&
                         bounds_w > 0.0f) {
                         text_scale_x = text_length / bounds_w;
-                        log_debug("[SVG] ThorVG textLength fit: '%s' target=%.3f bounds=%.3f scale_x=%.3f",
-                                  text_content, text_length, bounds_w, text_scale_x);
                     }
                 }
             }
@@ -3716,8 +3675,6 @@ static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {
     mem_free(font_path);
     if (free_radiant_family) mem_free((void*)radiant_family);
 
-    log_debug("[SVG] <text> rendered with %d segments at base (%.1f, %.1f)",
-              text_segments, base_x, base_y);
 }
 
 // ============================================================================
@@ -3876,10 +3833,8 @@ static const char* svg_resolve_pdf_image_href(SvgInlineRenderContext* ctx, const
     if (object_num <= 0) return href;
     const char* data_uri = svg_pdf_data_uri_for_image_id(ctx, object_num);
     if (data_uri && *data_uri) {
-        log_debug("[SVG] resolved PDF image handle img:%d", object_num);
         return data_uri;
     }
-    log_debug("[SVG] PDF image handle unresolved: img:%d", object_num);
     return href;
 }
 
@@ -3903,7 +3858,6 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
     const char* href = get_svg_attr(elem, "href");
     if (!href) href = get_svg_attr(elem, "xlink:href");
     if (!href || !*href) {
-        log_debug("[SVG] <image> missing href attribute");
         return;
     }
 
@@ -3926,7 +3880,6 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
         char declared_mime[64] = {0};
         uint8_t* decoded = parse_data_uri(href, declared_mime, sizeof(declared_mime), &decoded_len);
         if (!decoded || decoded_len == 0) {
-            log_debug("[SVG] <image> data URI decode failed");
             if (decoded) mem_free(decoded);
             return;
         }
@@ -3950,7 +3903,6 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
         }
 
         if (!mime_hint) {
-            log_debug("[SVG] <image> unknown data URI format (declared mime='%s')", declared_mime);
             mem_free(decoded);
             return;
         }
@@ -3959,11 +3911,9 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
             RdtPicture* rdt_pic = rdt_picture_load_data((const char*)decoded, (int)decoded_len, "svg");
             mem_free(decoded);
             if (!rdt_pic) {
-                log_debug("[SVG] <image> failed to parse nested SVG data URI");
                 return;
             }
             render_svg_image_picture(ctx, elem, rdt_pic, x, y, width, height);
-            log_debug("[SVG] <image> loaded nested SVG data URI at (%.1f, %.1f) size %.1fx%.1f", x, y, width, height);
             return;
         }
 
@@ -3979,8 +3929,6 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
                                                   mime_hint, NULL, true);
         mem_free(decoded);
         if (result != TVG_RESULT_SUCCESS) {
-            log_debug("[SVG] <image> failed to load data URI (mime=%s, declared=%s)",
-                      mime_hint, declared_mime);
             tvg_paint_unref(pic, true);
             return;
         }
@@ -4012,25 +3960,21 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
             svg_draw_picture(ctx, rdt_pic, op, &m);
         }
 
-        log_debug("[SVG] <image> loaded: %s at (%.1f, %.1f) size %.1fx%.1f", display_href, x, y, width, height);
         return;
     } else if (href_is_svg) {
         char* href_file = svg_href_file_part(href, nullptr);
         char* resolved_href = svg_resolve_resource_path(ctx, href_file ? href_file : href);
         if (href_file) mem_free(href_file);
         if (resolved_href && svg_resource_stack_contains(resolved_href)) {
-            log_debug("[SVG] <image> skipped recursive SVG reference: %s", resolved_href);
             mem_free(resolved_href);
             return;
         }
         RdtPicture* rdt_pic = rdt_picture_load(resolved_href ? resolved_href : href);
         if (!rdt_pic) {
-            log_debug("[SVG] <image> failed to parse nested SVG: %s", href);
             if (resolved_href) mem_free(resolved_href);
             return;
         }
         render_svg_image_picture(ctx, elem, rdt_pic, x, y, width, height);
-        log_debug("[SVG] <image> loaded nested SVG: %s at (%.1f, %.1f) size %.1fx%.1f", resolved_href ? resolved_href : href, x, y, width, height);
         if (resolved_href) mem_free(resolved_href);
         return;
     } else {
@@ -4041,7 +3985,6 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
         if (href_file) mem_free(href_file);
         Tvg_Result result = tvg_picture_load(pic, resolved_href ? resolved_href : href);
         if (result != TVG_RESULT_SUCCESS) {
-            log_debug("[SVG] <image> failed to load: %s", display_href);
             if (resolved_href) mem_free(resolved_href);
             tvg_paint_unref(pic, true);
             return;
@@ -4067,8 +4010,6 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
             svg_draw_picture(ctx, rdt_pic, op, &m);
         }
 
-        log_debug("[SVG] <image> loaded: %s at (%.1f, %.1f) size %.1fx%.1f",
-                  href, x, y, width, height);
         if (resolved_href) mem_free(resolved_href);
     }
 }
@@ -4383,13 +4324,11 @@ static RdtPath* resolve_svg_clip_path(SvgInlineRenderContext* ctx, Element* elem
     if (!ctx->defs) return nullptr;
     Element* clip_elem = lookup_elem_def((SvgDefTable*)ctx->defs, id_buf);
     if (!clip_elem) {
-        log_debug("[SVG] clip-path ref '%s' not found in defs", id_buf);
         return nullptr;
     }
 
     RdtPath* path = build_clip_path_from_def(clip_elem);
     if (path) {
-        log_debug("[SVG] resolved clip-path='%s'", cp);
     }
     return path;
 }
@@ -4442,8 +4381,6 @@ static void render_svg_group(SvgInlineRenderContext* ctx, Element* elem) {
             if (op_w > 0 && op_h > 0) {
                 use_opacity_layer = true;
                 svg_save_backdrop(ctx, op_x0, op_y0, op_w, op_h);
-                log_debug("[SVG-GROUP] opacity=%.2f, save backdrop (%d,%d,%d,%d)",
-                          group_op, op_x0, op_y0, op_w, op_h);
             }
         }
     }
@@ -4480,7 +4417,6 @@ static void render_svg_group(SvgInlineRenderContext* ctx, Element* elem) {
     // composite opacity layer if active
     if (use_opacity_layer && op_w > 0 && op_h > 0) {
         svg_composite_opacity(ctx, op_x0, op_y0, op_w, op_h, group_op);
-        log_debug("[SVG-GROUP] composite opacity=%.2f over backdrop", group_op);
     }
 
     // restore inherited state
@@ -4598,7 +4534,6 @@ static void render_svg_use_target(SvgInlineRenderContext* ctx, Element* use_elem
             }
         }
         render_svg_children(ctx, ref);
-        log_debug("[SVG] rendered <use> -> <symbol> href='%s'", href ? href : "(none)");
     } else {
         render_svg_element(ctx, ref);
     }
@@ -4619,7 +4554,6 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
     mem_free(href_file);
     if (!resolved_href) return false;
     if (svg_resource_stack_contains(resolved_href)) {
-        log_debug("[SVG] external <use> skipped recursive reference '%s'", resolved_href);
         mem_free(resolved_href);
         return false;
     }
@@ -4627,7 +4561,6 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
 
     RdtPicture* pic = rdt_picture_load(resolved_href);
     if (!pic) {
-        log_debug("[SVG] external <use> failed to load '%s'", resolved_href);
         if (pushed_resource) svg_resource_stack_pop(resolved_href);
         mem_free(resolved_href);
         return false;
@@ -4635,7 +4568,6 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
     Element* root = rdt_picture_get_svg_root(pic);
     Element* ref = rdt_picture_find_svg_element_by_id(pic, fragment);
     if (!root || !ref) {
-        log_debug("[SVG] external <use> missing id '%s' in '%s'", fragment, resolved_href);
         rdt_picture_free(pic);
         if (pushed_resource) svg_resource_stack_pop(resolved_href);
         mem_free(resolved_href);
@@ -4665,7 +4597,6 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
     ctx->source_path = saved_source_path;  // RETAINED_FIELD_OK: render-context field, not a retained DOM field
 
     rdt_picture_free(pic);
-    log_debug("[SVG] external <use> rendered href='%s'", href);
     if (pushed_resource) svg_resource_stack_pop(resolved_href);
     mem_free(resolved_href);
     return true;
@@ -4727,7 +4658,6 @@ static bool render_svg_element_with_simple_mask(SvgInlineRenderContext* ctx, Ele
     if (!parse_svg_url_id(mask_ref, id_buf, sizeof(id_buf)) || !ctx->defs) return false;
     Element* mask_elem = lookup_elem_def((SvgDefTable*)ctx->defs, id_buf);
     if (!mask_elem) {
-        log_debug("[SVG-MASK] mask ref '%s' not found", id_buf);
         return false;
     }
 
@@ -4769,7 +4699,6 @@ static bool render_svg_element_with_simple_mask(SvgInlineRenderContext* ctx, Ele
     ctx->opacity = saved_opacity;
     ctx->suppress_masks = saved_suppress;
     if (painted) {
-        log_debug("[SVG-MASK] applied simple luminance mask '%s'", id_buf);
     }
     return painted;
 }
@@ -4787,11 +4716,9 @@ static void render_svg_element(SvgInlineRenderContext* ctx, Element* elem) {
     char display_buf[64];
     const char* display = get_svg_attr_or_style(ctx, elem, "display", display_buf, sizeof(display_buf));
     if (display && strcmp(display, "none") == 0) {
-        log_debug("[SVG] skipping display:none element: %s", tag);
         return;
     }
 
-    log_debug("[SVG] rendering element: %s", tag);
 
     if (render_svg_element_with_simple_mask(ctx, elem)) {
         return;
@@ -4934,7 +4861,6 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
         return;
     }
     if (source_path && svg_resource_stack_contains(source_path)) {
-        log_debug("[SVG] skipped recursive render of SVG resource: %s", source_path);
         return;
     }
     if (!resource_scratch) {
@@ -4944,7 +4870,6 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     ScratchMark resource_mark = scratch_mark(resource_scratch);
     bool pushed_source = svg_resource_stack_push(source_path);
 
-    log_debug("[SVG] render_svg_to_display_list: viewport %.0fx%.0f pixel_ratio=%.2f font_ctx=%p", viewport_width, viewport_height, pixel_ratio, (void*)font_ctx);
 
     // initialize render context
     SvgInlineRenderContext ctx = {};
@@ -5063,7 +4988,6 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
         render_svg_element(&ctx, child);
     }
 
-    log_debug("[SVG] render_svg_to_display_list complete");
     scratch_restore(resource_scratch, resource_mark);
     if (pushed_source) svg_resource_stack_pop(source_path);
 }
@@ -5321,9 +5245,6 @@ static bool render_svg_subscene_to_svg(const PaintSvgSubscene* subscene,
 
     svg_subscene_indent(out, indent_level);
     strbuf_append_str(out, "</g>\n");
-    log_debug("[SVG_SUBSCENE] svg lowering %.1fx%.1f generation=%" PRIu64,
-              subscene->viewport_width, subscene->viewport_height,
-              subscene->resource_generation);
     return true;
 }
 
@@ -5350,9 +5271,6 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
     Color* stroke_color = subscene->has_stroke ? (Color*)&subscene->stroke : nullptr;
     Pool* render_pool = subscene->pool ? (Pool*)subscene->pool : temp_pool;
 
-    log_debug("[SVG_SUBSCENE] raster lowering %.1fx%.1f generation=%" PRIu64,
-              subscene->viewport_width, subscene->viewport_height,
-              subscene->resource_generation);
     render_svg_to_display_list_primitives((Element*)subscene->svg_root,
                       subscene->viewport_width,
                       subscene->viewport_height,
@@ -5489,29 +5407,20 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
 
     DomElement* dom_elem = lam::dom_require_element(lam::view_dom_node(view));
     if (dom_elem->is_synthetic()) {
-        log_debug("[SVG] render_inline_svg: no native element");
         return;
     }
 
     Element* svg_elem = dom_element_to_element(dom_elem);
     float scale = rdcon->scale;
 
-    log_debug("[SVG] render_inline_svg: view pos=(%.0f,%.0f) size=(%.0f,%.0f) pixel_ratio=%.2f",
-              view->x, view->y, view->width, view->height, scale);
 
     Rect content_rect = render_geometry_block_content_rect(&rdcon->block, view, scale);
     float viewport_width = scale > 0.0f ? content_rect.width / scale : content_rect.width;
     float viewport_height = scale > 0.0f ? content_rect.height / scale : content_rect.height;
     if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
-        log_debug("[SVG] render_inline_svg: skipped empty content viewport %.1fx%.1f",
-                  viewport_width, viewport_height);
         return;
     }
 
-    log_debug("[SVG] render_inline_svg: doc pos=(%.1f,%.1f) block pos=(%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f)",
-              content_rect.x, content_rect.y, rdcon->block.x, rdcon->block.y,
-              rdcon->block.clip.left, rdcon->block.clip.top,
-              rdcon->block.clip.right, rdcon->block.clip.bottom);
 
     // build base transform: Translate(x,y) * Scale(scale)
     RdtMatrix base_transform = {
@@ -5569,7 +5478,6 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
         rc_pop_clip(rdcon);
     }
 
-    log_debug("[SVG] render_inline_svg: rendered to buffer");
 }
 
 void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,

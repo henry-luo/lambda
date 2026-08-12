@@ -140,45 +140,22 @@ static DomElement* layout_positioned_containing_block(DomElement* elem) {
 
 static bool layout_ua_block_margin_em(NameId tag, float* top_em, float* bottom_em) {
     if (!top_em || !bottom_em) return false;
-    switch (tag) {
-    case MARKUP_NAME_P:
-    case MARKUP_NAME_UL:
-    case MARKUP_NAME_OL:
-    case MARKUP_NAME_MENU:
-    case MARKUP_NAME_PRE:
-    case MARKUP_NAME_BLOCKQUOTE:
-    case MARKUP_NAME_DL:
-    case MARKUP_NAME_FIGURE:
-        *top_em = 1.0f;
-        *bottom_em = 1.0f;
+    struct UaMarginScale { NameId tag; float value; };
+    static const UaMarginScale scales[] = {
+        {MARKUP_NAME_P, 1.0f}, {MARKUP_NAME_UL, 1.0f}, {MARKUP_NAME_OL, 1.0f},
+        {MARKUP_NAME_MENU, 1.0f}, {MARKUP_NAME_PRE, 1.0f},
+        {MARKUP_NAME_BLOCKQUOTE, 1.0f}, {MARKUP_NAME_DL, 1.0f},
+        {MARKUP_NAME_FIGURE, 1.0f}, {MARKUP_NAME_H1, 0.67f},
+        {MARKUP_NAME_H2, 0.83f}, {MARKUP_NAME_H3, 1.0f},
+        {MARKUP_NAME_H4, 1.33f}, {MARKUP_NAME_H5, 1.67f},
+        {MARKUP_NAME_H6, 2.33f}
+    };
+    for (const UaMarginScale& scale : scales) {
+        if (scale.tag != tag) continue;
+        *top_em = *bottom_em = scale.value;
         return true;
-    case MARKUP_NAME_H1:
-        *top_em = 0.67f;
-        *bottom_em = 0.67f;
-        return true;
-    case MARKUP_NAME_H2:
-        *top_em = 0.83f;
-        *bottom_em = 0.83f;
-        return true;
-    case MARKUP_NAME_H3:
-        *top_em = 1.0f;
-        *bottom_em = 1.0f;
-        return true;
-    case MARKUP_NAME_H4:
-        *top_em = 1.33f;
-        *bottom_em = 1.33f;
-        return true;
-    case MARKUP_NAME_H5:
-        *top_em = 1.67f;
-        *bottom_em = 1.67f;
-        return true;
-    case MARKUP_NAME_H6:
-        *top_em = 2.33f;
-        *bottom_em = 2.33f;
-        return true;
-    default:
-        return false;
     }
+    return false;
 }
 
 static void layout_reresolve_ua_em_margins(DomElement* dom_elem, float font_size) {
@@ -375,10 +352,7 @@ static void reset_non_inherited_style_cache(ViewSpan* view) {
         view->boundary_mut()->outline->width = 0.0f;
         view->boundary_mut()->outline->offset = 0.0f;
         view->boundary_mut()->outline->style = CSS_VALUE_NONE;
-        view->boundary_mut()->outline->color.r = 0;
-        view->boundary_mut()->outline->color.g = 0;
-        view->boundary_mut()->outline->color.b = 0;
-        view->boundary_mut()->outline->color.a = 0;
+        view->boundary_mut()->outline->color = {};
     }
 
     if (view->boundary()->background) {
@@ -386,10 +360,7 @@ static void reset_non_inherited_style_cache(ViewSpan* view) {
         // hints and CSS so stale pseudo-class fills are cleared without wiping
         // attributes such as table/td bgcolor.
         BackgroundProp* bg = view->boundary()->background;
-        bg->color.r = 0;
-        bg->color.g = 0;
-        bg->color.b = 0;
-        bg->color.a = 0;
+        bg->color = {};
         radiant_clear_background_image(bg);
         bg->gradient_type = GRADIENT_NONE;
         bg->linear_gradient = NULL;
@@ -673,9 +644,6 @@ static bool run_in_should_merge_with_next(DomNode* run_in_node) {
 static void merge_run_in_with_next_block(LayoutContext* lycon, DomElement* run_in, DomElement* next_block) {
     if (!lycon || !run_in || !next_block) return;
 
-    log_debug("%s [RUN-IN] Merging <%s> into <%s>", run_in->source_loc(),
-              run_in->tag_name ? run_in->tag_name : "unknown",
-              next_block->tag_name ? next_block->tag_name : "unknown");
 
     // Get run-in's children
     DomNode* first_run_in_child = run_in->first_child;
@@ -714,7 +682,6 @@ static void merge_run_in_with_next_block(LayoutContext* lycon, DomElement* run_i
     run_in->display.outer = CSS_VALUE_NONE;
     run_in->display.inner = CSS_VALUE_NONE;
 
-    log_debug("%s [RUN-IN] Merge complete, run-in now hidden", run_in->source_loc());
 }
 
 /**
@@ -733,8 +700,6 @@ static DisplayValue resolve_run_in_display(LayoutContext* lycon, DomNode* node) 
 
     // CSS 2.1: If run-in contains a block-level element, it becomes block
     if (run_in_contains_block_child(node)) {
-        log_debug("%s [RUN-IN] <%s> contains block child, becomes BLOCK", node->source_loc(),
-                  elem->tag_name ? elem->tag_name : "unknown");
         return result;
     }
 
@@ -753,8 +718,6 @@ static DisplayValue resolve_run_in_display(LayoutContext* lycon, DomNode* node) 
     }
 
     // CSS 2.1: Otherwise, run-in becomes a block box
-    log_debug("%s [RUN-IN] <%s> not followed by block, becomes BLOCK", node->source_loc(),
-              elem->tag_name ? elem->tag_name : "unknown");
     return result;
 }
 
@@ -823,35 +786,38 @@ static bool layout_inline_display(CssEnum display) {
         display == CSS_VALUE_INLINE_TABLE;
 }
 
+static bool layout_tag_in_list(NameId tag, const NameId* tags, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        if (tags[i] == tag) return true;
+    }
+    return false;
+}
+
 bool layout_element_was_inline(DomElement* element, bool include_replaced) {
     if (!element) return false;
     CssEnum display = layout_specified_keyword(
         element, CSS_PROPERTY_DISPLAY, CSS_VALUE__UNDEF);
     if (display != CSS_VALUE__UNDEF) return layout_inline_display(display);
 
-    switch (element->tag_id) {
-        case MARKUP_NAME_SPAN: case MARKUP_NAME_A: case MARKUP_NAME_EM:
-        case MARKUP_NAME_STRONG: case MARKUP_NAME_B: case MARKUP_NAME_I:
-        case MARKUP_NAME_U: case MARKUP_NAME_S: case MARKUP_NAME_SMALL:
-        case MARKUP_NAME_CODE: case MARKUP_NAME_SUB: case MARKUP_NAME_SUP:
-        case MARKUP_NAME_ABBR: case MARKUP_NAME_CITE: case MARKUP_NAME_Q:
-        case MARKUP_NAME_VAR: case MARKUP_NAME_TIME: case MARKUP_NAME_MARK:
-        case MARKUP_NAME_BDO: case MARKUP_NAME_BDI: case MARKUP_NAME_LABEL:
-            return true;
-        default:
-            break;
-    }
+    static const NameId inline_tags[] = {
+        MARKUP_NAME_SPAN, MARKUP_NAME_A, MARKUP_NAME_EM, MARKUP_NAME_STRONG,
+        MARKUP_NAME_B, MARKUP_NAME_I, MARKUP_NAME_U, MARKUP_NAME_S,
+        MARKUP_NAME_SMALL, MARKUP_NAME_CODE, MARKUP_NAME_SUB, MARKUP_NAME_SUP,
+        MARKUP_NAME_ABBR, MARKUP_NAME_CITE, MARKUP_NAME_Q, MARKUP_NAME_VAR,
+        MARKUP_NAME_TIME, MARKUP_NAME_MARK, MARKUP_NAME_BDO, MARKUP_NAME_BDI,
+        MARKUP_NAME_LABEL
+    };
+    if (layout_tag_in_list(element->tag_id, inline_tags,
+                           sizeof(inline_tags) / sizeof(inline_tags[0]))) return true;
     if (!include_replaced) return false;
-    switch (element->tag_id) {
-        case MARKUP_NAME_IMG: case MARKUP_NAME_INPUT: case MARKUP_NAME_SELECT:
-        case MARKUP_NAME_TEXTAREA: case MARKUP_NAME_BUTTON: case MARKUP_NAME_VIDEO:
-        case MARKUP_NAME_IFRAME: case MARKUP_NAME_CANVAS: case MARKUP_NAME_METER:
-        case MARKUP_NAME_PROGRESS: case MARKUP_NAME_EMBED: case MARKUP_NAME_OBJECT:
-        case MARKUP_NAME_SVG:
-            return true;
-        default:
-            return false;
-    }
+    static const NameId replaced_tags[] = {
+        MARKUP_NAME_IMG, MARKUP_NAME_INPUT, MARKUP_NAME_SELECT, MARKUP_NAME_TEXTAREA,
+        MARKUP_NAME_BUTTON, MARKUP_NAME_VIDEO, MARKUP_NAME_IFRAME, MARKUP_NAME_CANVAS,
+        MARKUP_NAME_METER, MARKUP_NAME_PROGRESS, MARKUP_NAME_EMBED, MARKUP_NAME_OBJECT,
+        MARKUP_NAME_SVG
+    };
+    return layout_tag_in_list(element->tag_id, replaced_tags,
+                              sizeof(replaced_tags) / sizeof(replaced_tags[0]));
 }
 
 LayoutBorderSpacingValue layout_resolve_border_spacing_value(
@@ -1127,9 +1093,6 @@ CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
                         } else { // CSS_UNIT_CH
                             computed_px = multiplier * parent_fs * 0.5f;
                         }
-                        log_debug("inherit line-height: resolved %.2f%s against parent font-size %.1f → %.2fpx",
-                                  multiplier, unit == CSS_UNIT_EM ? "em" : unit == CSS_UNIT_EX ? "ex" : "ch",
-                                  parent_fs, computed_px);
                         value.data.length.value = computed_px;
                         value.data.length.unit = CSS_UNIT_PX;
                     }
@@ -1138,8 +1101,6 @@ CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
                 float parent_fs = parent->font ? parent->fontp()->font_size : 0;
                 if (parent_fs > 0) {
                     float computed_px = (float)(value.data.percentage.value * parent_fs / 100.0);
-                    log_debug("inherit line-height: resolved %.1f%% against parent font-size %.1f → %.2fpx",
-                              value.data.percentage.value, parent_fs, computed_px);
                     value.type = CSS_VALUE_TYPE_LENGTH;
                     value.data.length.value = computed_px;
                     value.data.length.unit = CSS_UNIT_PX;
@@ -1192,7 +1153,6 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
             // var() couldn't be resolved, use normal
             lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
             lycon->block.line_height_is_normal = true;
-            log_debug("%s line-height var() unresolved, using normal: %f", block->source_loc(), lycon->block.line_height);
             return;
         }
 
@@ -1212,7 +1172,6 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         // CSS 2.1 §10.8.1: "Negative values are not allowed" for line-height
         // Zero is a valid computed value; only negative/NaN falls back to 'normal'
         if (resolved_height < 0 || isnan(resolved_height)) {
-            log_debug("%s invalid line-height: %f, falling back to normal", block->source_loc(), resolved_height);
             lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
             lycon->block.line_height_is_normal = true;
         } else {
@@ -1305,7 +1264,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 apply_element_default_style(lycon, dom_elem);
             } else {
                 // Author `all` must suppress UA declarations before CSS initial/inherited values resolve.
-                log_debug("[CSS] all reset suppresses HTML default style for <%s>", dom_elem->tag_name);
             }
 
             // Track measurement vs full resolution
@@ -1365,7 +1323,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 apply_element_default_style(lycon, dom_elem);
             } else {
                 // Author `all` must suppress UA declarations before CSS initial/inherited values resolve.
-                log_debug("[CSS] all reset suppresses HTML default style for <%s>", dom_elem->tag_name);
             }
 
             // CSS 2.1: Elements without specified styles still have computed values
@@ -1764,8 +1721,6 @@ static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* e
         lycon->line.start_view = marker;
     }
     lycon->view = marker;
-    log_debug("%s non-rendered table marker: display=%d, x=%.1f, line_y=%.1f",
-              elem->source_loc(), display.inner, marker->x, marker->y);
     return true;
 }
 
@@ -1976,10 +1931,6 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             }
             float vertical_offset = calculate_vertical_align_offset(lycon, lycon->line.vertical_align, item_height,
                 line_height, baseline_pos, item_baseline, lycon->line.vertical_align_offset);
-            const unsigned char* td = text_view->text_data();
-            log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*t'",
-                (int)rect->y, (int)lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
-                rect->length, td ? td + rect->start_index : (const unsigned char*)"(null)");
             // CSS 2.1 §10.8.1: Content area may overflow the line box when
             // line-height < content-height (negative half-leading). Allow negative
             // offsets so the content area extends above the line box top.
@@ -2141,8 +2092,6 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         if (block->position && block->positionp()->position == CSS_VALUE_RELATIVE) {
             layout_relative_positioned(lycon, block);
         }
-        log_debug("vertical-adjusted-inline-block: y=%f, adv_y=%f, offset=%f, line=%f, blk=%f, max_asc=%f, max_desc=%f",
-            block->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height, lycon->line.max_ascender, lycon->line.max_descender);
     }
     else if (view->view_type == RDT_VIEW_INLINE) {
         // for inline elements, apply to all children
@@ -2229,9 +2178,6 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                     span->y = anonymous_inline_table->y +
                         (anonymous_inline_table->height - table_baseline);
                     span->height = expected_height;
-                    log_debug("anonymous table-cell inline fragment placement: y=%.1f, h=%.1f, table_desc=%.1f",
-                              span->y, span->height,
-                              anonymous_inline_table->height - table_baseline);
                 }
             } else if (span->height < expected_height) {
                 // A shorter atomic child cannot shrink its non-replaced inline
@@ -2254,8 +2200,6 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                     lycon, span, span->content_height,
                     span_asc, span_desc, baseline_pos, bt, pt);
                 span->height = expected_height;
-                log_debug("inline box font-box placement: y=%.1f, h=%.1f, area=%.1f",
-                         span->y, span->height, content_area);
             }
             // Else: text-only content — compute_span_bounding_box result is correct
         }
@@ -2270,9 +2214,6 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 layout_offset_ruby_annotation_tree(child, 0.0f, target_y - annotation->y);
             }
         }
-    }
-    else {
-        log_debug("view_vertical_align: unknown view type %d", view->view_type);
     }
 }
 
@@ -2525,7 +2466,6 @@ void place_rtl_initial_letter_line(LayoutContext* lycon) {
 
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
     auto align_view = [&](View* view) -> bool {
-        log_debug("view line align: %d", view->view_type);
         view->x += offset;
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
@@ -2643,8 +2583,6 @@ static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* v
         float current_end = last_rect->x + last_rect->width;
         if (current_end < line_end) {
             last_rect->width += (line_end - current_end);
-            log_debug("view_line_justify: extended last rect width by %.2fpx to fill line",
-                      line_end - current_end);
         }
     }
 }
@@ -2762,7 +2700,6 @@ void line_align(LayoutContext* lycon) {
             lycon->block.given_width < 0;
         if (container_is_shrink_inline_block && line_width <= available_width &&
             (text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT)) {
-            log_debug("line_align: skipping center/right align for content inside shrink-to-fit inline-block");
             return;
         }
 
@@ -2960,23 +2897,15 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                     elem->width = 0;
                     elem->height = 0;
                 }
-                log_debug("%s skipping non-summary child of closed <details>", node->source_loc());
                 lycon->depth--;
                 return;
             }
         }
     }
 
-    // Log for IMG elements
-    uintptr_t node_tag = node->tag();
-    if (node_tag == MARKUP_NAME_IMG) {
-        log_debug("%s [FLOW_NODE IMG] Processing IMG element: %s", node->source_loc(), node->node_name());
-    }
-
     // Skip HTML comments (Lambda CSS parser creates these as elements with name "!--")
     const char* node_name = node->node_name();
     if (node_name && (strcmp(node_name, "!--") == 0 || strcmp(node_name, "#comment") == 0)) {
-        log_debug("%s skipping HTML comment node", node->source_loc());
         lycon->depth--;
         return;
     }
@@ -3063,9 +2992,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                         }
                     }
 
-                    log_debug("%s [MARKER] Laid out %s marker width=%.1f, height=%.1f at (%.1f, %.1f)", node->source_loc(),
-                             marker_prop->is_outside ? "outside" : "inside",
-                             marker_prop->width, marker_span->height, marker_span->x, marker_span->y);
                 }
             }
             lycon->depth--;
@@ -3074,7 +3000,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         // Skip floats that were pre-laid in the float pre-pass
         if (elem->float_prelaid()) {
-            log_debug("%s skipping pre-laid float: %s", node->source_loc(), node->node_name());
             lycon->depth--;
             return;
         }
@@ -3086,7 +3011,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             // CSS Writing Modes 4 §7.3: a perpendicular inline flow is atomic so
             // its dimensions can be sized in its own writing mode.
             display.outer = CSS_VALUE_INLINE_BLOCK;
-            log_debug("%s orthogonal inline: promoting inline flow to inline-block", node->source_loc());
         }
         // CSS 2.2 Section 9.7: When float is not 'none', display is computed as 'block'
         // Check float property from specified styles (before view is created)
@@ -3103,8 +3027,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         if (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT) {
             // Float transforms most display values to block
             if (!layout_display_is_none(display)) {
-                log_debug("%s Float on %s: transforming display from outer=%d to BLOCK (float=%d)", node->source_loc(),
-                          node->node_name(), display.outer, float_value);
                 display.outer = CSS_VALUE_BLOCK;
                 // Keep inner display but treat as flow for layout purposes if it's a table type
                 if (is_table_internal_display(display.inner)) {
@@ -3131,8 +3053,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             // INLINE) which layout_block needs to decide whether to suppress the
             // line break for inline-level abs-pos elements (§10.3.7 static position).
             if (display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_RUN_IN) {
-                log_debug("%s Position absolute/fixed on %s: transforming display from outer=%d to BLOCK", node->source_loc(),
-                          node->node_name(), display.outer);
                 display.outer = CSS_VALUE_BLOCK;
             }
         }
@@ -3146,7 +3066,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             DisplayValue resolved = resolve_run_in_display(lycon, node);
             if (resolved.outer == CSS_VALUE_NONE) {
                 // Run-in was merged into following block, skip layout
-                log_debug("%s run-in merged into following block, skipping", node->source_loc());
                 lycon->depth--;
                 return;
             }
@@ -3158,7 +3077,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         // generate boxes. They only serve to define column properties for table layout.
         // When orphaned (outside a table context), they should not be rendered.
         if (layout_non_rendered_table_marker(lycon, elem, display)) {
-            log_debug("%s skipping non-rendered table-internal element (no visual rendering)", node->source_loc());
             lycon->depth--;
             return;
         }
@@ -3231,14 +3149,12 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             elem->height = 0.0f;
             elem->content_width = 0.0f;
             elem->content_height = 0.0f;
-            log_debug("%s skipping element of display: none", node->source_loc());
             break;
         case CSS_VALUE_CONTENTS: {
             // CSS Display Level 3: display: contents
             // Element does not generate a box, but its children are laid out
             // as if they were children of the element's parent.
             // Counter properties do NOT apply (no box generated).
-            log_debug("%s display:contents for <%s> - no box, layout children directly", node->source_loc(), node->node_name());
 
             // Mark element in the view tree with zero dimensions (no box generated)
             // Don't use set_view() — avoid affecting line start view
@@ -3270,8 +3186,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             break;
         }
         default:
-            log_debug("%s unknown display type: outer=%d", node->source_loc(), display.outer);
-            // skip the element
+            break;
         }
     }
     else if (node->is_text()) {
@@ -3286,7 +3201,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         }
     }
     else {
-        log_debug("%s layout unknown node type: %d", node->source_loc(), node->node_type);
         // skip the node
     }
     lycon->depth--;
@@ -3296,7 +3210,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
-    log_debug("layout html root");
 
     // init context
     lycon->elmt = elmt;
@@ -3336,21 +3249,17 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // CSS 2.2: The root element establishes the initial BFC
     html->content_width = physical_width;
     Pool* layout_pool = lycon->doc->view_tree->prop_pool;
-    log_debug("[BlockContext] Initializing root BFC for HTML element");
 
     // Initialize the unified BlockContext for the root element
     block_context_init(&lycon->block, html, layout_pool);
     lycon->block.content_width = physical_width;
     lycon->block.float_right_edge = physical_width;
-    log_debug("[BlockContext] Root BFC created (width=%.1f)", html->content_width);
 
     auto t_init = high_resolution_clock::now();
     log_info("%s [TIMING] layout: context init: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_init - t_start).count());
 
     // resolve CSS style
-    log_debug("DEBUG: About to resolve style for elmt of name=%s", elmt->source_loc());
     dom_node_resolve_style(elmt, lycon);
-    log_debug("DEBUG: After resolve style");
 
     auto t_style = high_resolution_clock::now();
     log_info("%s [TIMING] layout: root style resolve: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_style - t_init).count());
@@ -3421,8 +3330,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         root_has_explicit_width = true;
         // CSS Sizing intrinsic keywords determine the root's used inline size;
         // the viewport fallback must not replace a valid min/max-content result.
-        log_debug("[CSS] Root intrinsic width: keyword=%d, content=%.1f",
-                  root_intrinsic_width, root_css_width);
     }
 
     // Check for explicit CSS height on the root element
@@ -3450,7 +3357,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         lycon->block.given_width = root_css_width;
         lycon->block.float_right_edge = border_box_width;
         line_init(lycon, 0, border_box_width);
-        log_debug("[CSS] Root explicit width: css_width=%.1f, border_box=%.1f", root_css_width, border_box_width);
     }
 
     if (root_has_explicit_height) {
@@ -3460,7 +3366,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         html->height = border_box_height;
         lycon->block.given_height = root_css_height;
         if (html->blk) html->blk->given_height = root_css_height;
-        log_debug("[CSS] Root explicit height: css_height=%.1f, border_box=%.1f", root_css_height, border_box_height);
     }
 
     if (!root_has_explicit_height && layout_block_inline_axis_is_vertical(html)) {
@@ -3468,7 +3373,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         // descendants need that definite basis before root post-layout sizing.
         lycon->block.given_height = physical_height;
         if (html->blk) html->blk->given_height = physical_height;
-        log_debug("[CSS] Root vertical inline basis: height=%.1f", physical_height);
     }
 
     if (root_is_abspos) {
@@ -3489,12 +3393,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             html->y += html->boundary()->margin.top;
         }
 
-        // If no explicit width was set, use viewport width for abspos
-        if (!root_has_explicit_width) {
-            // Same as default: use viewport - margins (but margins don't reduce abspos width)
-            // Keep the default viewport width
-        }
-        log_debug("[CSS] Root abspos: x=%.1f, y=%.1f", html->x, html->y);
     } else {
         // Static or relative positioning: apply margins normally
         if (html->bound && html->boundary_mut()->margin.left != 0) {
@@ -3517,8 +3415,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
                 lycon->block.given_width = new_width;
                 lycon->block.float_right_edge = new_width;
                 line_init(lycon, 0, new_width);
-                log_debug("[CSS] Root element margins: left=%.1f right=%.1f, width adjusted to %.1f",
-                          html->boundary()->margin.left, html->boundary()->margin.right, new_width);
             }
         }
     }
@@ -3534,11 +3430,9 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             lycon->block.max_width = new_cw;
             lycon->block.given_width = new_cw;
             lycon->block.float_right_edge = new_cw;
-            log_debug("[CSS] Root border+padding: reducing content_width by %.1f to %.1f", bp_h, new_cw);
         }
         if (root_bp_top > 0) {
             lycon->block.advance_y += root_bp_top;
-            log_debug("[CSS] Root border+padding: advance_y offset by %.1f to %.1f", root_bp_top, lycon->block.advance_y);
         }
         line_init(lycon, root_bp_left, lycon->block.content_width + root_bp_left);
     }
@@ -3560,16 +3454,12 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     while (child) {
         if (child->is_element()) {
             const char* tag_name = child->node_name();
-            log_debug("  Checking html child element: %s", tag_name);
             DisplayValue child_display = resolve_display_value(child);
             if (!layout_display_is_none(child_display)) {
-                log_debug("  Laying out html child <%s> (display outer=%d, inner=%d)",
-                    tag_name, child_display.outer, child_display.inner);
                 layout_block(lycon, child, child_display);
             }
             if (strcmp(tag_name, "body") == 0) {
                 body_node = child;
-                log_debug("Found Lambda CSS body element");
             }
         }
         child = child->next_sibling;
@@ -3592,15 +3482,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             }
             child = child->next();
         }
-
-        if (body_view) {
-            log_debug("Body layout done: body->height=%.1f, advance_y=%.1f",
-                body_view->height, lycon->block.advance_y);
-        } else {
-            log_debug("Could not find body view in html children");
-        }
-    } else {
-        log_debug("No body element found in DOM tree");
     }
 
     auto t_layout_block = high_resolution_clock::now();
@@ -3710,10 +3591,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // (missing DOCTYPE or legacy DTD), but html height = content height in standards mode.
     bool is_quirks = is_quirks_mode(lycon->doc->view_tree->html_version);
     if (is_quirks && !root_has_explicit_height && html->height < physical_height) {
-        float old_html_height = html->height;
         html->height = physical_height;
-        log_debug("%s quirks viewport stretch: html height %.1f -> %.1f", elmt->source_loc(),
-            old_html_height, physical_height);
 
         // Stretch body to fill html content area (quirks mode behavior)
         View* vc = html->first_placed_child();
@@ -3729,7 +3607,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
                     // Quirks viewport fill is the body's auto min-height behavior;
                     // explicit min-height must survive aspect-ratio sizing.
                     if (body_uses_quirks_auto_min_height && vb->height < body_available) {
-                        log_debug("  quirks viewport stretch: body height %.1f -> %.1f", vb->height, body_available);
                         vb->height = body_available;
                     }
                     break;
@@ -3744,11 +3621,9 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         if (html->positionp()->position == CSS_VALUE_RELATIVE) {
             if (html->positionp()->has_left) {
                 html->x += html->positionp()->left;
-                log_debug("[CSS] Root relative offset: x += %.1f = %.1f", html->positionp()->left, html->x);
             }
             if (html->positionp()->has_top) {
                 html->y += html->positionp()->top;
-                log_debug("[CSS] Root relative offset: y += %.1f = %.1f", html->positionp()->top, html->y);
             }
         }
         // sticky on root element: no scroll container above root, so no clamping applies
@@ -3790,7 +3665,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 int detect_html_version_lambda_css(DomDocument* doc) {
     if (!doc) { return HTML5; } // Default fallback
     // Return the HTML version that was detected during document loading
-    log_debug("Using pre-detected HTML version: %d", doc->html_version);
     return doc->html_version;
 }
 
@@ -3847,8 +3721,6 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
         log_info("layout_init: viewport meta override height=%d", doc->viewport.height);
     }
 
-    log_debug("layout_init: uicon=%p, viewport=%.1fx%.1f (CSS logical pixels), pixel_ratio=%.2f",
-              uicon, lycon->width, lycon->height, uicon->pixel_ratio);
 
     // Initialize available space to indefinite (will be set properly during layout)
     lycon->available_space = AvailableSpace::make_indefinite();
@@ -3877,7 +3749,6 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     } else {
         doc->view_tree->html_version = HTML5;
     }
-    log_debug("Detected HTML version: %d", doc->view_tree->html_version);
 
     // setup default font
     FontProp* default_font = doc->view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
@@ -3890,7 +3761,6 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     // Counter scopes are pass-local. Allocating them in the stable DOM arena
     // made every reflow permanently grow dom.node.arena.
     lycon->counter_context = counter_context_create(lycon->scratch.arena);
-    log_debug("Initialized counter context");
 
     // BlockContext floats are already initialized to NULL in memset
 }
@@ -3979,9 +3849,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
 
     LayoutContext lycon;
     if (!doc) return;
-    log_debug("layout html doc - start");
     if (!is_reflow && !doc->root && doc->view_tree && doc->view_tree->root) {
-        log_debug("layout html doc - using prebuilt view tree");
         doc_state_set_lifecycle((DocState*)doc->state, DOC_LIFECYCLE_COMMITTED);
         return;
     }
@@ -3989,7 +3857,6 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         arena_active_scope_count(doc->view_tree->scratch_arena) > 0) {
         // A full nested pass would replace the tree still owned by its caller;
         // the outer pass will publish the completed geometry.
-        log_debug("layout html doc - defer nested full layout to active pass");
         return;
     }
     bool init_view_pool = false;
@@ -4028,14 +3895,11 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     }
 
     DomNode* root_node = doc->root;
-    if (root_node) {
+    if (root_node && (root_node->node_type < DOM_NODE_ELEMENT ||
+                      root_node->node_type > DOM_NODE_DOCTYPE)) {
         // invalid DOM roots must be rejected before layout_init registers per-pass resources.
-        if (root_node->node_type >= DOM_NODE_ELEMENT && root_node->node_type <= DOM_NODE_DOCTYPE) {
-            log_debug("layout lambda css html root %s", root_node->node_name());
-        } else {
-            log_error("Invalid node_type: %d (pointer may be corrupted)", root_node->node_type);
-            return;
-        }
+        log_error("Invalid node_type: %d (pointer may be corrupted)", root_node->node_type);
+        return;
     }
 
     if (!root_node) {
@@ -4046,13 +3910,10 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
 
     reset_float_prelaid_flags(root_node);
 
-    log_debug("calling layout_init...");
     LayoutPassScope layout_scope(&lycon, doc, uicon);
-    log_debug("layout_init complete");
 
     auto t_init = high_resolution_clock::now();
 
-    log_debug("calling layout_html_root...");
     layout_html_root(&lycon, root_node);
 
     layout_store_last_remembered_sizes(root_node);

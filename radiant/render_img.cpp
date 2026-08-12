@@ -201,8 +201,6 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
-    log_debug("render_html_to_png called with html_file='%s', png_file='%s', viewport=%dx%d, scale=%.2f, pixel_ratio=%.2f",
-              html_file, png_file, viewport_width, viewport_height, scale, pixel_ratio);
 
     // Validate scale and pixel_ratio
     if (scale <= 0) scale = 1.0f;
@@ -222,7 +220,6 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     // Initialize UI context in headless mode
     UiContext ui_context;
     if (ui_context_init(&ui_context, true) != 0) {
-        log_debug("Failed to initialize UI context for PNG rendering");
         return 1;
     }
 
@@ -244,7 +241,6 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     // Get current directory for relative path resolution
     Url* cwd = get_current_dir();
     if (!cwd) {
-        log_debug("Could not get current directory");
         ui_context_cleanup(&ui_context);
         return 1;
     }
@@ -255,7 +251,6 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     // Load and layout the HTML document
     DomDocument* doc = load_html_doc(cwd, (char*)html_file, layout_width, layout_height);
     if (!doc) {
-        log_debug("Failed to load HTML document: %s", html_file);
         ui_context_cleanup(&ui_context);
         return 1;
     }
@@ -339,7 +334,6 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
             target.pixel_ratio = pixel_ratio;
             render_output_render_view_tree_to_target(&ui_context, doc->view_tree, &target);
         } else {
-            log_debug("No view tree to render");
             ui_context_cleanup(&ui_context);
             return 1;
         }
@@ -348,7 +342,6 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     auto t_render = high_resolution_clock::now();
     log_info("[TIMING] Render: %.1fms", duration<double, std::milli>(t_render - t_layout).count());
 
-    log_debug("PNG rendering completed successfully");
     ui_context_cleanup(&ui_context);
 
     auto t_end = high_resolution_clock::now();
@@ -361,8 +354,6 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 // scale: User-specified zoom factor (default 1.0)
 // pixel_ratio: Device pixel ratio for HiDPI (default 1.0, use 2.0 for Retina displays)
 int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width, int viewport_height, float scale, float pixel_ratio) {
-    log_debug("render_html_to_jpeg called with html_file='%s', jpeg_file='%s', quality=%d, viewport=%dx%d, scale=%.2f, pixel_ratio=%.2f",
-              html_file, jpeg_file, quality, viewport_width, viewport_height, scale, pixel_ratio);
 
     // Validate scale and pixel_ratio
     if (scale <= 0) scale = 1.0f;
@@ -374,7 +365,6 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
     // Initialize UI context in headless mode
     UiContext ui_context;
     if (ui_context_init(&ui_context, true) != 0) {
-        log_debug("Failed to initialize UI context for JPEG rendering");
         return 1;
     }
 
@@ -397,7 +387,6 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
     // Get current directory for relative path resolution
     Url* cwd = get_current_dir();
     if (!cwd) {
-        log_debug("Could not get current directory");
         ui_context_cleanup(&ui_context);
         return 1;
     }
@@ -405,7 +394,6 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
     // Load and layout the HTML document
     DomDocument* doc = load_html_doc(cwd, (char*)html_file, viewport_width, viewport_height);
     if (!doc) {
-        log_debug("Failed to load HTML document: %s", html_file);
         ui_context_cleanup(&ui_context);
         return 1;
     }
@@ -436,12 +424,10 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
         target.pixel_ratio = pixel_ratio;
         render_output_render_view_tree_to_target(&ui_context, doc->view_tree, &target);
     } else {
-        log_debug("No view tree to render");
         ui_context_cleanup(&ui_context);
         return 1;
     }
 
-    log_debug("JPEG rendering completed successfully");
     ui_context_cleanup(&ui_context);
     return 0;
 }

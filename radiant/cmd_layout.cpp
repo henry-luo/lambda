@@ -197,10 +197,8 @@ bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode*
 // before it gets filtered out during DomElement tree construction
 HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* input) {
     if (!input || !input->root.item) {
-        log_debug("No input or root available for DOCTYPE detection");
         return HTML5;
     }
-    log_debug("Detecting HTML version from Lambda Element tree");
     // The input->root contains the full parsed tree including DOCTYPE
     // It's typically a List containing multiple items (DOCTYPE, html element, etc.)
     // HTML5 parser: root is #document element with children including #doctype
@@ -221,37 +219,30 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                         const char* public_id = extract_element_attribute(child_elem, "publicId", nullptr);
                         const char* system_id = extract_element_attribute(child_elem, "systemId", nullptr);
 
-                        log_debug("Found #doctype: name=%s publicId=%s",
-                                  name ? name : "null", public_id ? public_id : "null");
 
                         // HTML5: <!DOCTYPE html> — name="html", no publicId
                         if (!public_id || public_id[0] == '\0') {
-                            log_debug("Detected HTML5 DOCTYPE (no publicId)");
                             return HTML5;
                         }
 
                         int quirks_mode = html5_determine_quirks_mode(
                             name, public_id, system_id, false);
                         if (quirks_mode == 1) {
-                            log_debug("DOCTYPE triggers quirks mode: %s", public_id);
                             return HTML_QUIRKS;
                         }
                         if (quirks_mode == 2) {
-                            log_debug("DOCTYPE triggers limited quirks mode: %s", public_id);
                             return HTML4_01_STRICT;
                         }
 
                         // Check known public identifiers for HTML version
                         if (strstr(public_id, "-//W3C//DTD HTML 4.01//EN") ||
                             strstr(public_id, "-//W3C//DTD HTML 4.0//EN")) {
-                            log_debug("Detected HTML 4.0/4.01 Strict DOCTYPE");
                             return HTML4_01_STRICT;
                         }
                         if (strstr(public_id, "Transitional")) {
                             return HTML4_01_STRICT;
                         }
                         if (strstr(public_id, "Frameset")) {
-                            log_debug("Detected Frameset DOCTYPE");
                             return HTML4_01_FRAMESET;
                         }
                         if (strstr(public_id, "-//W3C//DTD XHTML 1.0")) {
@@ -259,19 +250,16 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                         }
                         // Only identifiers in the WHATWG trigger lists enter quirks;
                         // all other public identifiers are standards mode.
-                        log_debug("Detected standards-mode publicId: %s", public_id);
                         return HTML4_01_STRICT;
                     }
                 }
             }
             // #document without #doctype → quirks mode
-            log_debug("No #doctype found in #document, using quirks mode");
             return HTML4_01_TRANSITIONAL;
         }
     }
     if (root_type == LMD_TYPE_ARRAY) {
         List* root_list = input->root.array;
-        log_debug("Examining root list with %lld items", root_list->length);
 
         // Search through the list for DOCTYPE element
         for (int64_t i = 0; i < root_list->length; i++) {
@@ -284,7 +272,6 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
 
                 // Check for DOCTYPE element (case-insensitive)
                 if (type && str_ieq_const(type->name.str, strlen(type->name.str), "!DOCTYPE")) {
-                    log_debug("Found DOCTYPE element");
 
                     // Extract DOCTYPE content from the element's children
                     if (elem->length > 0) {
@@ -293,61 +280,49 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                             String* doctype_content = (String*)first_child.string_ptr;
                             const char* content = doctype_content->chars;
 
-                            log_debug("DOCTYPE content: '%s'", content);
 
                             // Parse DOCTYPE content to determine version
                             // Check for HTML 4.01 patterns first (more specific)
                             if (strstr(content, "-//W3C//DTD HTML 4.01//EN")) {
-                                log_debug("Detected HTML 4.01 Strict DOCTYPE");
                                 return HTML4_01_STRICT;
                             }
 
                             if (strstr(content, "-//W3C//DTD HTML 4.01 Transitional//EN")) {
-                                log_debug("Detected HTML 4.01 Transitional DOCTYPE");
                                 return HTML4_01_TRANSITIONAL;
                             }
 
                             if (strstr(content, "-//W3C//DTD HTML 4.01 Frameset//EN")) {
-                                log_debug("Detected HTML 4.01 Frameset DOCTYPE");
                                 return HTML4_01_FRAMESET;
                             }
 
                             // Check for HTML 4.0 patterns
                             if (strstr(content, "-//W3C//DTD HTML 4.0//EN")) {
-                                log_debug("Detected HTML 4.0 Strict DOCTYPE");
                                 return HTML4_01_STRICT;
                             }
 
                             if (strstr(content, "-//W3C//DTD HTML 4.0 Transitional//EN")) {
-                                log_debug("Detected HTML 4.0 Transitional DOCTYPE");
                                 return HTML4_01_TRANSITIONAL;
                             }
 
                             if (strstr(content, "-//W3C//DTD HTML 4.0 Frameset//EN")) {
-                                log_debug("Detected HTML 4.0 Frameset DOCTYPE");
                                 return HTML4_01_FRAMESET;
                             }
 
                             // Check for XHTML patterns
                             if (strstr(content, "-//W3C//DTD XHTML 1.0")) {
                                 if (strstr(content, "Strict")) {
-                                    log_debug("Detected XHTML 1.0 Strict DOCTYPE");
                                     return HTML4_01_STRICT;
                                 }
                                 if (strstr(content, "Transitional")) {
-                                    log_debug("Detected XHTML 1.0 Transitional DOCTYPE");
                                     return HTML4_01_TRANSITIONAL;
                                 }
                                 if (strstr(content, "Frameset")) {
-                                    log_debug("Detected XHTML 1.0 Frameset DOCTYPE");
                                     return HTML4_01_FRAMESET;
                                 }
-                                log_debug("Detected XHTML 1.0 DOCTYPE (default to Transitional)");
                                 return HTML4_01_TRANSITIONAL; // Default XHTML 1.0
                             }
 
                             if (strstr(content, "-//W3C//DTD XHTML 1.1//EN")) {
-                                log_debug("Detected XHTML 1.1 DOCTYPE");
                                 return HTML4_01_TRANSITIONAL;
                             }
 
@@ -361,19 +336,16 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                                 }
                                 // HTML5 should have nothing after "html" (or only whitespace)
                                 if (*after_html == '\0') {
-                                    log_debug("Detected HTML5 DOCTYPE");
                                     return HTML5;
                                 }
                             }
 
                             // If we found a DOCTYPE but don't recognize it, assume HTML5
-                            log_debug("Found unrecognized DOCTYPE '%s', defaulting to HTML5", content);
                             return HTML5;
                         }
                     }
 
                     // Empty DOCTYPE content - assume HTML5
-                    log_debug("Found empty DOCTYPE, assuming HTML5");
                     return HTML5;
                 }
             }
@@ -382,7 +354,6 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
 
     // No DOCTYPE found - use quirks mode (legacy HTML)
     // Per HTML spec, missing DOCTYPE triggers quirks mode, which uses serif fonts
-    log_debug("No DOCTYPE found in Lambda Element tree, using quirks mode (HTML4_01_TRANSITIONAL)");
     return HTML4_01_TRANSITIONAL;
 }
 
@@ -398,19 +369,9 @@ void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Poo
     const char* style_text = dom_elem->get_attribute("style");
 
     if (style_text && strlen(style_text) > 0) {
-        log_debug("[CSS] Applying inline style to <%s>: %s",
-                dom_elem->tag_name, style_text);
 
         // Apply the inline style using the DOM element API
-        int decl_count = dom_element_apply_inline_style(dom_elem, style_text);
-
-        if (decl_count > 0) {
-            log_debug("[CSS] Applied %d inline declarations to <%s>",
-                    decl_count, dom_elem->tag_name);
-        } else {
-            log_debug("[CSS] Warning: Failed to parse inline style for <%s>",
-                    dom_elem->tag_name);
-        }
+        dom_element_apply_inline_style(dom_elem, style_text);
     }
 }
 
@@ -541,37 +502,28 @@ Element* get_html_root_element(Input* input) {
         Element* root_elem = input->root.element;
         TypeElmt* root_type_elmt = (TypeElmt*)root_elem->type;
 
-        log_debug("Root element type: '%.*s'", (int)root_type_elmt->name.length, root_type_elmt->name.str);
 
         // HTML5 parser: root is #document, find html child
         if (strview_equal(&root_type_elmt->name, "#document")) {
-            log_debug("HTML5 parser detected: root is #document, searching for html element");
 
             // Search all children of #document for the html element
             // NOTE: HTML5 parser stores children as "attributes" not content
             List* doc_list = (List*)root_elem;
 
-            log_debug("#document: list->length=%lld, content_length=%lld",
-                      (long long)doc_list->length,
-                      (long long)root_type_elmt->content_length);
 
             // Iterate through all items (HTML5 parser doesn't use content_length correctly)
             for (int64_t i = 0; i < doc_list->length; i++) {
                 Item child = doc_list->items[i];
                 TypeId child_type = get_type_id(child);
 
-                log_debug("Child %lld: type_id=%d", (long long)i, child_type);
 
                 if (child_type == LMD_TYPE_ELEMENT) {
                     Element* child_elem = child.element;
                     TypeElmt* child_type_elmt = (TypeElmt*)child_elem->type;
 
-                    log_debug("  Element name: '%.*s'",
-                             (int)child_type_elmt->name.length, child_type_elmt->name.str);
 
                     // Return the html element (skip #doctype, comments, etc.)
                     if (strview_equal(&child_type_elmt->name, "html")) {
-                        log_debug("Found html element inside #document");
                         return child_elem;
                     }
                 }
@@ -583,9 +535,6 @@ Element* get_html_root_element(Input* input) {
 
         // Old parser or direct html element
         return root_elem;
-    }
-    else {
-        log_debug("Unexpected root type_id=%d in input", root_type);
     }
     return nullptr;
 }
@@ -599,7 +548,6 @@ Element* get_html_root_element(Input* input) {
 void parse_viewport_content(const char* content, DomDocument* doc) {
     if (!content || !doc) return;
 
-    log_debug("[viewport] Parsing viewport content: '%s'", content);
 
     // Parse comma or semicolon separated key=value pairs
     const char* p = content;
@@ -636,7 +584,6 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
             strncpy(value, value_start, copy_len);
             value[copy_len] = '\0';
 
-            log_debug("[viewport] Key='%s' Value='%s'", key, value);
 
             if (str_ieq_const(key, strlen(key), "initial-scale")) {
                 doc->viewport.initial_scale = (float)str_to_double_default(value, strlen(value), 0.0);
@@ -644,28 +591,22 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
             }
             else if (str_ieq_const(key, strlen(key), "minimum-scale")) {
                 doc->viewport.min_scale = (float)str_to_double_default(value, strlen(value), 0.0);
-                log_debug("[viewport] minimum-scale=%.2f", doc->viewport.min_scale);
             }
             else if (str_ieq_const(key, strlen(key), "maximum-scale")) {
                 doc->viewport.max_scale = (float)str_to_double_default(value, strlen(value), 0.0);
-                log_debug("[viewport] maximum-scale=%.2f", doc->viewport.max_scale);
             }
             else if (str_ieq_const(key, strlen(key), "width")) {
                 if (str_ieq_const(value, strlen(value), "device-width")) {
                     doc->viewport.width = 0;  // 0 means device-width
-                    log_debug("[viewport] width=device-width");
                 } else {
                     doc->viewport.width = (int)str_to_int64_default(value, strlen(value), 0);
-                    log_debug("[viewport] width=%d", doc->viewport.width);
                 }
             }
             else if (str_ieq_const(key, strlen(key), "height")) {
                 if (str_ieq_const(value, strlen(value), "device-height")) {
                     doc->viewport.height = 0;  // 0 means device-height
-                    log_debug("[viewport] height=device-height");
                 } else {
                     doc->viewport.height = (int)str_to_int64_default(value, strlen(value), 0);
-                    log_debug("[viewport] height=%d", doc->viewport.height);
                 }
             }
         }
@@ -793,7 +734,6 @@ const char* extract_base_href(Element* elem) {
     if (str_ieq_const(type->name.str, strlen(type->name.str), "base")) {
         const char* href = extract_element_attribute(elem, "href", nullptr);
         if (href && strlen(href) > 0) {
-            log_debug("[base] Found <base href=\"%s\">", href);
             return href;
         }
         return nullptr;
@@ -922,7 +862,6 @@ void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
     }
 
     if (!body_elem) {
-        log_debug("[transform] Body element not found");
         return;
     }
 
@@ -978,8 +917,6 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
         const char* import_url = rule->data.import_rule.url;
         if (!import_url || import_url[0] == '\0') continue;
 
-        log_debug("[CSS @import] Processing: @import '%s' (base: %s)", import_url,
-                  import_base_dir ? import_base_dir : "(none)");
 
         // Resolve import path relative to the stylesheet or document URL.
         char import_path[1024];
@@ -1067,9 +1004,7 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
         CssStylesheet* imported = parse_and_collect_stylesheet(
             engine, css_pool_copy, import_path, import_path, pool,
             stylesheets, count, capacity, depth + 1);
-        if (imported && imported->rule_count > 0) {
-            log_debug("[CSS @import] Parsed imported stylesheet '%s': %zu rules", import_path, imported->rule_count);
-        } else {
+        if (!imported || imported->rule_count == 0) {
             log_warn("[CSS @import] Failed to parse imported stylesheet: %s", import_path);
         }
     }
@@ -1130,7 +1065,6 @@ static size_t css_utf16_encoded_at_charset_prelude_len(const char* data, size_t 
             size_t end = pos + 2;
             if (end < len && data[end] == '\r') end++;
             if (end < len && data[end] == '\n') end++;
-            log_debug("[CSS charset] Ignoring UTF-16-pattern @charset prelude (%zu bytes)", end);
             return end;
         }
     }
@@ -1166,7 +1100,6 @@ const char* detect_css_encoding(const char* data, size_t len, const char* docume
         if (strncasecmp(http_charset, "windows-", 8) == 0 ||
             strncasecmp(http_charset, "iso-8859", 8) == 0 ||
             strncasecmp(http_charset, "utf-16", 6) == 0) {
-            log_debug("[CSS charset] HTTP charset '%s'", http_charset);
             return http_charset;
         }
         // bogus/unrecognized HTTP charset → ignore, fall through
@@ -1199,7 +1132,6 @@ const char* detect_css_encoding(const char* data, size_t len, const char* docume
                         strncmp(cs_buf, "cp12", 4) == 0 ||
                         strcmp(cs_buf, "latin1") == 0 ||
                         strcmp(cs_buf, "latin-1") == 0) {
-                        log_debug("[CSS charset] @charset declares '%s'", cs_buf);
                         return cs_buf;
                     }
                 }
@@ -1213,14 +1145,12 @@ const char* detect_css_encoding(const char* data, size_t len, const char* docume
         // validate: only use if recognized
         if (strncasecmp(link_charset, "windows-", 8) == 0 ||
             strncasecmp(link_charset, "iso-8859", 8) == 0) {
-            log_debug("[CSS charset] <link charset='%s'>", link_charset);
             return link_charset;
         }
     }
 
     // 5. Fallback to referring document's encoding
     if (document_charset) {
-        log_debug("[CSS charset] Falling back to document charset '%s'", document_charset);
         return document_charset;
     }
 
@@ -1282,7 +1212,6 @@ static char* sanitize_utf8_css(const char* data, size_t len) {
         }
     }
     out[o] = '\0';
-    log_debug("[CSS charset] Sanitized UTF-8: replaced invalid bytes (%zu → %zu bytes)", len, o);
     return out;
 }
 
@@ -1444,10 +1373,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 
             // Check media attribute - skip stylesheets that don't apply to screen
             const char* media = extract_element_attribute(elem, "media", nullptr);
-            if (media && !css_evaluate_media_query(engine, media)) {
-                log_debug("[CSS] Skipping <link> stylesheet '%s' - media '%s' does not match screen", href, media);
-            } else {
-            log_debug("[CSS] Found <link rel='stylesheet' href='%s'>", href);
+            if (!media || css_evaluate_media_query(engine, media)) {
 
             // Resolve relative path using base_path (supports file:// and http:// URLs)
             char css_path[1024];
@@ -1458,8 +1384,6 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                 // WPT-style absolute support URLs (for example /fonts/ahem.css)
                 // are rooted at the test server, not the local filesystem root.
                 if (!radiant_resolve_layout_support_resource_path(href, base_path, css_path, sizeof(css_path))) {
-                    log_debug("[CSS] Support resource fallback miss: href=%s base=%s",
-                              href, base_path ? base_path : "(none)");
                     // Absolute local path - use as-is (only when base is not HTTP)
                     strncpy(css_path, href, sizeof(css_path) - 1);
                     css_path[sizeof(css_path) - 1] = '\0';
@@ -1530,7 +1454,6 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                 }
             }
 
-            log_debug("[CSS] Loading stylesheet from: %s", css_path);
 
             // Load and parse CSS file (or download from HTTP URL)
             char* css_content = nullptr;
@@ -1541,7 +1464,6 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                 css_content = download_http_content_cached(css_path, &content_size, "./temp/cache");
                 if (css_content) {
                     css_file_size = content_size;
-                    log_debug("[CSS] Downloaded stylesheet from URL: %s (%zu bytes)", css_path, content_size);
                 }
             } else {
                 size_t content_size = 0;
@@ -1554,7 +1476,6 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
             if (css_content_empty) {
                 // Empty linked stylesheets are valid CSS; skip them before
                 // parser setup so zero-byte resources do not look failed.
-                log_debug("[CSS] Skipping empty linked stylesheet: %s", css_path);
                 mem_free(css_content);
             } else if (css_content) {
 
@@ -1597,7 +1518,6 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                             http_cs_buf[i] = '\0';
                             if (i > 0) {
                                 http_charset = http_cs_buf;
-                                log_debug("[CSS charset] Found .headers file charset='%s' for %s", http_charset, css_path);
                             }
                         }
                         mem_free(headers);
@@ -1643,9 +1563,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                     CssStylesheet* stylesheet = parse_and_collect_stylesheet(
                         engine, css_pool_copy, css_path, css_path, pool,
                         stylesheets, count, capacity, 0);
-                    if (stylesheet && stylesheet->rule_count > 0) {
-                        log_debug("[CSS] Parsed linked stylesheet '%s': %zu rules", css_path, stylesheet->rule_count);
-                    } else {
+                    if (!stylesheet || stylesheet->rule_count == 0) {
                         log_warn("[CSS] Failed to parse stylesheet or empty: %s", css_path);
                     }
                 } else {
@@ -1655,7 +1573,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
             } else {
                 log_warn("[CSS] Failed to load stylesheet: %s", css_path);
             }
-            } // end media check else
+            }
         }
     }
 
@@ -1679,27 +1597,18 @@ static void parse_inline_style_children(Element* elem, CssEngine* engine,
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         int type_id = get_type_id(child_item);
-        if (collect_to_list) {
-            log_debug("[CSS] <style> child[%lld] type_id=%d", i, type_id);
-        }
         if (type_id != LMD_TYPE_STRING) continue;
 
         String* css_text = (String*)child_item.string_ptr;
         if (!css_text || css_text->len <= 0) continue;
         CssStylesheet* stylesheet = nullptr;
         if (collect_to_list) {
-            log_debug("[CSS] Found STRING child: ptr=%p, len=%d",
-                      (void*)css_text, css_text->len);
             stylesheet = parse_and_collect_stylesheet(
                 engine, css_text->chars, "<inline-style>", base_path,
                 pool, stylesheets, count, capacity, 0);
         } else {
-            log_debug("[CSS] Found <style> element with %d bytes of CSS", css_text->len);
             stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
             annotate_css_stylesheet_source_file(stylesheet, "<inline-style>");
-        }
-        if (stylesheet && stylesheet->rule_count > 0) {
-            log_debug("[CSS] Parsed inline <style>: %zu rules", stylesheet->rule_count);
         }
     }
 }
@@ -1724,12 +1633,10 @@ static void collect_inline_styles_impl(Element* elem, CssEngine* engine,
     if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
         // Check media attribute - skip styles that don't apply to screen
         const char* media = extract_element_attribute(elem, "media", nullptr);
-        if (media && !css_evaluate_media_query(engine, media)) {
-            log_debug("[CSS] Skipping <style> element - media '%s' does not match screen", media);
-        } else {
+        if (!media || css_evaluate_media_query(engine, media)) {
         parse_inline_style_children(
             elem, engine, base_path, pool, stylesheets, count, capacity);
-        } // end media check else
+        }
     }
 
     // Recursively process children
@@ -1805,32 +1712,25 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const c
     // Check if this is a <style> element
     if (elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
         // Check disabled attribute — skip disabled stylesheets
-        if (elem->has_attribute("disabled")) {
-            log_debug("[CSS] Skipping <style> element with disabled attribute");
-        } else {
+        if (!elem->has_attribute("disabled")) {
             // Check media attribute
             const char* media = elem->get_attribute("media");
-            if (media && !css_evaluate_media_query(engine, media)) {
-                log_debug("[CSS] Skipping <style> element - media '%s' does not match screen", media);
-            } else {
+            if (!media || css_evaluate_media_query(engine, media)) {
                 // Extract text content from DomText children
                 DomNode* child = elem->first_child;
                 while (child) {
                     if (child->node_type == DOM_NODE_TEXT) {
                         DomText* text_node = lam::dom_require_text(child);
                         if (text_node->text && text_node->length > 0) {
-                            CssStylesheet* stylesheet = parse_and_collect_stylesheet(
+                            parse_and_collect_stylesheet(
                                 engine, text_node->text, "<inline-style>", base_path,
                                 pool, stylesheets, count, capacity, 0);
-                            if (stylesheet && stylesheet->rule_count > 0) {
-                                log_debug("[CSS] Re-scan: parsed <style> from DOM: %zu rules", stylesheet->rule_count);
-                            }
                         }
                     }
                     child = child->next_sibling;
                 }
-            }
         }
+    }
     }
 
     // Recursively process children
@@ -1897,7 +1797,6 @@ static bool dom_js_mutation_requires_inline_stylesheet_rescan(DomDocument* doc) 
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out) {
     if (!html_root || !engine || !pool || !stylesheet_count) return nullptr;
 
-    log_debug("[CSS] Extracting CSS from HTML document...");
 
     *stylesheet_count = 0;
     CssStylesheet** stylesheets = nullptr;
@@ -1910,17 +1809,12 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
     // CSS Cascade §6.4: stylesheet source order follows document order across
     // both <link rel=stylesheet> and <style>. A later external sheet must win
     // ties against earlier inline rules, and vice versa.
-    log_debug("[CSS] Collecting stylesheets in document order...");
     int linked_count = 0;
     collect_stylesheets_in_document_order(html_root, engine, base_path, pool,
                                           &stylesheets, stylesheet_count,
                                           &stylesheet_capacity, &linked_count, 0);
     if (linked_count_out) *linked_count_out = linked_count;
 
-    int inline_count = *stylesheet_count - linked_count;
-
-    log_debug("[CSS] Collected %d stylesheet(s) from HTML (%d linked, %d inline)",
-              *stylesheet_count, linked_count, inline_count);
     return stylesheets;
 }
 
@@ -2467,9 +2361,6 @@ static void store_document_stylesheet_bundle(DomDocument* dom_doc,
             dom_doc->stylesheets[dom_doc->stylesheet_count++] = inline_stylesheets[i];
         }
     }
-    log_debug("[%s] Stored %d stylesheets in DomDocument for %s",
-              log_prefix ? log_prefix : "Lambda CSS",
-              dom_doc->stylesheet_count, reason ? reason : "load");
 }
 
 static void store_document_stylesheets(DomDocument* dom_doc,
@@ -2518,7 +2409,6 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
         dom_doc, dom_root, css_engine, false);
 
     if (external_stylesheet && external_stylesheet->rule_count > 0) {
-        log_debug("[Lambda CSS] Applying external stylesheet with %d rules", external_stylesheet->rule_count);
         apply_stylesheet_to_dom_tree_if_nonempty(dom_root, external_stylesheet, matcher, pool, css_engine);
     }
 
@@ -2528,34 +2418,19 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
              duration<double, std::milli>(t_external - t_cascade_start).count());
 
     for (int i = 0; i < inline_stylesheet_count; i++) {
-        log_debug("[Lambda CSS] Inline stylesheet %d: ptr=%p, rule_count=%zu",
-            i, inline_stylesheets ? inline_stylesheets[i] : nullptr,
-            (inline_stylesheets && inline_stylesheets[i]) ? inline_stylesheets[i]->rule_count : 0);
-        if (inline_stylesheets && inline_stylesheets[i]) {
-            log_debug("[Lambda CSS] Stylesheet %d is not null, rule_count=%zu",
-                i, inline_stylesheets[i]->rule_count);
-            if (inline_stylesheets[i]->rule_count > 0) {
-                log_debug("[Lambda CSS] Applying inline stylesheet %d with %zu rules",
-                    i, inline_stylesheets[i]->rule_count);
+        if (inline_stylesheets && inline_stylesheets[i] &&
+            inline_stylesheets[i]->rule_count > 0) {
                 auto t_inline_start = high_resolution_clock::now();
                 apply_stylesheet_to_dom_tree_if_nonempty(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
                 auto t_inline_end = high_resolution_clock::now();
                 log_info("[TIMING] cascade(%s): inline stylesheet %d (%zu rules): %.1fms",
                     phase ? phase : "load", i, inline_stylesheets[i]->rule_count,
                     duration<double, std::milli>(t_inline_end - t_inline_start).count());
-                log_debug("[Lambda CSS] Finished applying inline stylesheet %d", i);
-            } else {
-                log_debug("[Lambda CSS] Skipping stylesheet %d: rule_count=%zu is not > 0",
-                    i, inline_stylesheets[i]->rule_count);
-            }
-        } else {
-            log_debug("[Lambda CSS] Stylesheet %d is NULL", i);
         }
     }
 
     auto t_cascade = high_resolution_clock::now();
     if (epoch_scope) style_epoch_cascade_end(dom_doc);
-    log_debug("[Lambda CSS] CSS cascade complete (%s)", phase ? phase : "load");
     log_cascade_timing_summary();
     log_dom_element_timing();
     log_info("[TIMING] load: CSS cascade (%s): %.1fms",
@@ -2893,7 +2768,6 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     int superseded_html_url_count = 0;
 
     char* html_filepath = url_to_local_path(html_url);
-    log_debug("[Lambda CSS] Loading HTML document: %s", html_filepath);
 
     // Step 1: Parse HTML with Lambda parser
     // If html_source is provided, use it directly; otherwise read from file or download
@@ -2901,10 +2775,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     bool html_content_owned = false;
     if (html_source) {
         html_content = const_cast<char*>(html_source);
-        log_debug("[Lambda CSS] Using in-memory HTML source (%zu bytes)", strlen(html_source));
     } else if (html_url->scheme == URL_SCHEME_HTTP || html_url->scheme == URL_SCHEME_HTTPS) {
         const char* url_str = url_get_href(html_url);
-        log_debug("[Lambda CSS] Downloading HTML from URL: %s", url_str);
         size_t content_size = 0;
         char* eff_url = nullptr;
         html_content = download_http_content(url_str, &content_size, nullptr, &eff_url);
@@ -3029,7 +2901,6 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     if (input) {
         detected_version = detect_html_version_from_lambda_element(nullptr, input);
     }
-    log_debug("Parsed HTML root element");
     log_root_item((Item){.element = html_root});
 
     // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
@@ -3106,7 +2977,6 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // Load external CSS if provided
     CssStylesheet* external_stylesheet = nullptr;
     if (css_filename) {
-        log_debug("[Lambda CSS] Loading external CSS: %s", css_filename);
         char* css_content = read_text_file(css_filename);
         if (css_content) {
             size_t css_len = strlen(css_content);
@@ -3115,15 +2985,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
                 str_copy(css_pool_copy, css_len + 1, css_content, css_len);
                 mem_free(css_content);
                 external_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
-                if (external_stylesheet) {
-                    const char* formatted_css = css_stylesheet_to_string_styled(
-                        external_stylesheet, pool, CSS_FORMAT_EXPANDED);
-                    if (formatted_css) {
-                        log_debug("[Lambda CSS] Parsed external stylesheet:\n%s", formatted_css);
-                    }
-                    log_debug("[Lambda CSS] Loaded external stylesheet with %zu rules",
-                            external_stylesheet->rule_count);
-                } else {
+                if (!external_stylesheet) {
                     log_warn("Failed to parse CSS file: %s", css_filename);
                 }
             } else {
@@ -3146,19 +3008,6 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     auto t_css_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse CSS: %.1fms", duration<double, std::milli>(t_css_parse - t_dom).count());
     log_mem_stage("load_html: css_parsed");
-
-    // print internal stylesheets for debugging
-    // Skip the (expensive) formatting entirely when debug logs are disabled —
-    // for large pages (e.g. cnn_lite) this dump dominated peak memory.
-    if (log_level_enabled(NULL, LOG_LEVEL_DEBUG)) {
-        for (int i = 0; i < inline_stylesheet_count; i++) {
-            const char* formatted_css = css_stylesheet_to_string_styled(
-                inline_stylesheets[i], pool, CSS_FORMAT_EXPANDED);
-            if (formatted_css) {
-                log_debug("[Lambda CSS] Parsed inline stylesheet %d:\n%s", i, formatted_css);
-            }
-        }
-    }
 
     // Store stylesheets before scripts so getComputedStyle and @font-face share
     // the same sheet list that the pre-script cascade uses.
@@ -3273,8 +3122,6 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
             timing->post_script_ms += duration<double, std::milli>(
                 t_post_script - t_script_exec).count();
         }
-    } else {
-        log_debug("[Lambda CSS] Skipping document script execution for caller-managed JS");
     }
 
     if (!css_cascade_current) {
@@ -3293,7 +3140,6 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     if (log_level_enabled(NULL, LOG_LEVEL_DEBUG)) {
         StrBuf* str_buf = strbuf_new();
         dom_root->print(str_buf, 0);
-        log_debug("Built DomElement tree with styles::\n%s", str_buf->str);
         strbuf_free(str_buf);
     }
 
@@ -3340,7 +3186,6 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
     log_info("[TIMING] load: total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
 
-    log_debug("[Lambda CSS] Document loaded and styled");
     return dom_doc;
 }
 
@@ -3787,9 +3632,7 @@ static CssStylesheet* load_pool_backed_stylesheet(CssEngine* css_engine, Pool* p
     str_copy(css_pool_copy, css_len + 1, css_content, css_len);
     mem_free(css_content);
     CssStylesheet* stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
-    if (stylesheet) {
-        log_debug("[%s] Loaded %s with %zu rules", log_prefix, label, stylesheet->rule_count);
-    } else if (warn_missing) {
+    if (!stylesheet && warn_missing) {
         log_warn("[%s] Failed to parse %s", log_prefix, label);
     }
     return stylesheet;
@@ -3801,7 +3644,6 @@ static CssStylesheet* load_home_stylesheet(CssEngine* css_engine, Pool* pool,
                                            const char* label,
                                            bool warn_missing) {
     char* css_filename = lambda_home_path(relative_path);
-    log_debug("[%s] Loading stylesheet: %s", log_prefix, css_filename);
     CssStylesheet* stylesheet = load_pool_backed_stylesheet(css_engine, pool, css_filename,
                                                             log_prefix, label, warn_missing);
     mem_free(css_filename);
@@ -4045,14 +3887,6 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
     LayoutTempPathGuard markdown_path_guard = { url_to_local_path(markdown_url) };
     char* markdown_filepath = markdown_path_guard.path;
-    if (!markdown_filepath) {
-        // url_to_local_path failed - try using the URL's pathname directly as fallback
-        const char* pathname = url_get_pathname(markdown_url);
-        log_debug("load_markdown_doc: url_to_local_path returned NULL, scheme=%d, pathname=%s, href=%s",
-                  markdown_url->scheme,
-                  pathname ? pathname : "(null)",
-                  markdown_url->href ? markdown_url->href->chars : "(null)");
-    }
     log_info("[TIMING] Loading markdown document: %s", markdown_filepath);
 
     // Step 1: Parse markdown with Lambda parser
@@ -4530,10 +4364,8 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
 
-    log_debug("[Lambda LaTeX] Converted LaTeX to HTML Element tree via Lambda package");
 
     // Step 3: Create DomDocument and build DomElement tree from HTML Element tree
-    log_debug("[Lambda LaTeX] Building DomElement tree from HTML");
     DomDocument* dom_doc = dom_document_create(result_input);
     if (!dom_doc) {
         log_error("Failed to create DomDocument");
@@ -4555,7 +4387,6 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
 
-    log_debug("[Lambda LaTeX] Built DomElement tree: root=%p", (void*)dom_root);
 
     // Step 4: Initialize CSS engine
     CssEngine* css_engine = css_engine_create(pool);
@@ -4570,14 +4401,10 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     CssStylesheet* latex_stylesheet = load_home_stylesheet(
         css_engine, pool, "input/latex/css/article.css", "Lambda LaTeX", "LaTeX stylesheet", false);
-    if (!latex_stylesheet) {
-        log_debug("No latex.css file found, LaTeX HTML will use embedded and inline styles");
-    }
     CssStylesheet* katex_stylesheet = load_home_stylesheet(
         css_engine, pool, "input/latex/css/katex.css", "Lambda LaTeX", "KaTeX font stylesheet", false);
 
     // Step 6: Extract and parse any inline <style> elements from HTML
-    log_debug("[Lambda LaTeX] Extracting inline <style> elements from LaTeX-generated HTML...");
     int inline_stylesheet_count = 0;
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
         html_root, css_engine, latex_filepath, pool, &inline_stylesheet_count);
@@ -4588,15 +4415,12 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     // Apply LaTeX stylesheet first if available
     if (latex_stylesheet && latex_stylesheet->rule_count > 0) {
-        log_debug("[Lambda LaTeX] Applying LaTeX stylesheet...");
         apply_stylesheet_to_dom_tree_if_nonempty(dom_root, latex_stylesheet, matcher, pool, css_engine);
     }
 
     // Apply inline stylesheets from LaTeX-generated HTML
     for (int i = 0; i < inline_stylesheet_count; i++) {
         if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
-            log_debug("[Lambda LaTeX] Applying inline stylesheet %d with %zu rules",
-                     i, inline_stylesheets[i]->rule_count);
             apply_stylesheet_to_dom_tree_if_nonempty(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
         }
     }
@@ -4604,7 +4428,6 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     // Apply inline style="" attributes (highest priority)
     apply_inline_styles_to_tree(dom_root, html_root, pool);
 
-    log_debug("[Lambda LaTeX] CSS cascade complete");
 
     store_document_stylesheet_bundle(dom_doc, latex_stylesheet, katex_stylesheet, nullptr,
                                      inline_stylesheets, inline_stylesheet_count,
@@ -4619,7 +4442,6 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     dom_doc->state = nullptr;
     dom_doc->lambda_runtime = latex_runtime;
 
-    log_debug("[Lambda LaTeX] LaTeX document loaded, converted to HTML, and styled");
     return dom_doc;
 }
 
@@ -4709,8 +4531,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
                     // Skip processing instructions and comments
                     if (child_type->name.str[0] != '?' && child_type->name.str[0] != '!') {
                         xml_root = child_elem;
-                        log_debug("[Lambda XML] Found XML root element: <%s> with %lld children",
-                                child_type->name.str, child_elem->length);
                         break;
                     }
                 }
@@ -4732,7 +4552,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
     // Step 5: Load external CSS stylesheet
-    log_debug("[Lambda XML] Loading external stylesheet: %s", xml_input->xml_stylesheet_href);
 
     CssStylesheet* external_stylesheet = nullptr;
     char* css_content = read_text_file(xml_input->xml_stylesheet_href);
@@ -4770,7 +4589,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
 
     // Step 7: Build DOM tree from XML elements
     // XML needs to be wrapped in html > body structure for the layout engine
-    log_debug("[Lambda XML] Building DOM tree from XML root with %lld children", xml_root->length);
 
     // Create <html> wrapper element
     DomElement* html_elem = DomElement::create(dom_doc, "html", nullptr);
@@ -4804,7 +4622,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     body_elem->last_child = static_cast<DomNode*>(xml_dom);
     xml_dom->parent = static_cast<DomNode*>(body_elem);
 
-    log_debug("[Lambda XML] Built DOM tree: html > body > %s", xml_dom->tag_name);
 
     // Use html_elem as the root
     dom_doc->root = html_elem;
@@ -4823,7 +4640,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     }
 
     // Step 9: Apply CSS cascade to DOM tree
-    log_debug("[Lambda XML] Applying CSS cascade to XML/DOM tree");
 
     // Create selector matcher
     SelectorMatcher* matcher = selector_matcher_create(pool);
@@ -4838,7 +4654,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
 
     // Apply external stylesheet to the entire tree (starting from html)
     if (external_stylesheet && external_stylesheet->rule_count > 0) {
-        log_debug("[Lambda XML] Applying external stylesheet with %zu rules", external_stylesheet->rule_count);
         apply_stylesheet_to_dom_tree_if_nonempty(html_elem, external_stylesheet, matcher, pool, css_engine);
     }
 
@@ -4846,7 +4661,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
 
     // Apply inline style="" attributes (if XML elements have them)
     apply_inline_styles_to_tree(html_elem, xml_root, pool);
-    log_debug("[Lambda XML] CSS cascade complete");
 
     auto t_complete = high_resolution_clock::now();
     log_info("[TIMING] load: apply cascade: %.1fms",
@@ -4854,7 +4668,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     log_info("[TIMING] load: total: %.1fms",
              duration_cast<duration<double, std::milli>>(t_complete - total_start).count());
 
-    log_debug("[Lambda XML] Document loaded and styled");
     return dom_doc;
 }
 
@@ -4944,7 +4757,6 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     render_map_init();
     render_map_set_path_recorder(&render_map_record_path);
 
-    log_debug("[Lambda Script] Evaluating script (ui_mode=true, arena allocation)...");
     // Use MIR Direct JIT to evaluate the Lambda script as a functional document result.
     Input* script_output = run_script_mir(runtime, script_source, script_filepath, false);
 
@@ -4980,7 +4792,6 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
 
     // Step 2: Get the result from script execution
     TypeId result_type = get_type_id(script_output->root);
-    log_debug("[Lambda Script] Script result type: %d", result_type);
 
     // Check if the script returned an error
     if (result_type == LMD_TYPE_ERROR) {
@@ -5061,7 +4872,6 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
 
         // Check if this is an 'html' element
         if (elem_type && str_ieq_const(elem_type->name.str, strlen(elem_type->name.str), "html")) {
-            log_debug("[Lambda Script] Script returned complete HTML document, using as-is");
             is_html_document = true;
             html_elem = result_elem;
         }
@@ -5075,10 +4885,8 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         if (result_type == LMD_TYPE_ELEMENT) {
             // If the script returns an element (but not html), use it directly
             result_elem = script_output->root.element;
-            log_debug("[Lambda Script] Script returned element, wrapping in html>body");
         } else {
             // For other types, create a wrapper element with the result as text content
-            log_debug("[Lambda Script] Script returned non-element, wrapping in div");
 
             // Convert result to string representation
             StrBuf* result_str = strbuf_new();
@@ -5099,7 +4907,6 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             std::chrono::duration<double, std::milli>(step2_start - step1_end).count());
 
         // Step 3: Create HTML wrapper structure using MarkBuilder (on result arena in ui_mode)
-        log_debug("[Lambda Script] Building HTML wrapper structure");
 
         MarkBuilder builder(result_input);
 
@@ -5177,7 +4984,6 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     if (!is_html_document) {
         // For non-HTML elements, load the default script.css
         char* css_filename = lambda_home_path("input/script.css");
-        log_debug("[Lambda Script] Loading default script stylesheet: %s", css_filename);
 
         char* css_content = read_text_file(css_filename);
         if (css_content) {
@@ -5187,26 +4993,18 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
                 str_copy(css_pool_copy, css_len + 1, css_content, css_len);
                 mem_free(css_content);
                 script_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
-                if (script_stylesheet) {
-                    log_debug("[Lambda Script] Loaded script stylesheet with %zu rules",
-                            script_stylesheet->rule_count);
-                } else {
+                if (!script_stylesheet) {
                     log_warn("[Lambda Script] Failed to parse script.css");
                 }
             } else {
                 mem_free(css_content);
             }
-        } else {
-            log_debug("[Lambda Script] No script.css file found, using browser defaults");
         }
         mem_free(css_filename);
     } else {
         // For complete HTML documents, extract inline <style> elements
-        log_debug("[Lambda Script] Skipping script.css for complete HTML document");
-        log_debug("[Lambda Script] Extracting inline <style> elements...");
         inline_stylesheets = extract_and_collect_css(
             html_elem, css_engine, script_filepath, pool, &inline_stylesheet_count);
-        log_debug("[Lambda Script] Found %d inline stylesheet(s)", inline_stylesheet_count);
     }
 
     auto step6_end = std::chrono::high_resolution_clock::now();
@@ -5227,8 +5025,6 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     if (inline_stylesheets && inline_stylesheet_count > 0) {
         for (int i = 0; i < inline_stylesheet_count; i++) {
             if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
-                log_debug("[Lambda Script] Applying inline stylesheet %d with %zu rules",
-                          i, inline_stylesheets[i]->rule_count);
                 apply_stylesheet_to_dom_tree_if_nonempty(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
             }
         }
@@ -5262,7 +5058,6 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         dom_doc->cached_inline_sheets = inline_stylesheets;
         dom_doc->cached_inline_sheet_count = inline_stylesheet_count;
         dom_doc->services.cached_css_engine = css_engine;
-        log_debug("[Lambda Script] Stored %d stylesheet(s) in DomDocument", dom_doc->stylesheet_count);
     }
 
     // Register doc root for render map parent fixup during retransform
@@ -5527,7 +5322,6 @@ void rebuild_lambda_doc(UiContext* uicon) {
     if (current_doc_root.item && current_doc_root.element != html_elem) {
         html_elem = current_doc_root.element;
         doc->html_root = html_elem;
-        log_debug("rebuild_lambda_doc: synced html_root from render_map doc_root");
     }
 
     if (!html_elem) {
@@ -5535,7 +5329,6 @@ void rebuild_lambda_doc(UiContext* uicon) {
         return;
     }
 
-    log_debug("rebuild_lambda_doc: rebuilding DOM from updated Lambda elements");
 
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
@@ -5580,7 +5373,6 @@ void rebuild_lambda_doc(UiContext* uicon) {
             doc->cached_inline_sheets = inline_sheets;
             doc->cached_inline_sheet_count = inline_count;
             doc->services.cached_css_engine = css_engine;
-            log_debug("rebuild_lambda_doc: cached %d inline stylesheet(s)", inline_count);
         }
     }
 
@@ -5605,13 +5397,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     auto t_layout = high_resolution_clock::now();
 
     // Restore focus to matching element in new view tree
-    View* restored_focus = restore_lambda_focus(doc, state, had_focus, &focus_restore);
-    if (restored_focus) {
-        log_debug("rebuild_lambda_doc: restored focus to new view %p (tag=%s class=%s)",
-                  restored_focus,
-                  focus_restore.fallback_tag ? focus_restore.fallback_tag : "",
-                  focus_restore.fallback_class ? focus_restore.fallback_class : "");
-    }
+    restore_lambda_focus(doc, state, had_focus, &focus_restore);
 
     // autofocus — if no focus was restored, scan the new tree for an autofocus input
     if (state && !focus_has_current(state) &&
@@ -5622,7 +5408,6 @@ void rebuild_lambda_doc(UiContext* uicon) {
             if (af_elem->has_attribute("autofocus")) {
                 focus_set(state, af, false);
                 state_store_caret_collapse_to_view_offset(state, af, 0);
-                log_debug("rebuild_lambda_doc: autofocus set on new input");
             }
         }
     }
@@ -5678,7 +5463,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     if (current_doc_root.item && current_doc_root.element != html_elem) {
         html_elem = current_doc_root.element;
         doc->html_root = html_elem;
-        log_debug("rebuild_lambda_doc_incremental: synced html_root from render_map doc_root");
     }
 
     if (!html_elem) {
@@ -5719,13 +5503,11 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
     if (!can_incremental) {
         // Fallback: full rebuild (rebuild_lambda_doc creates element_dom_map for next time)
-        log_debug("rebuild_lambda_doc_incremental: falling back to full rebuild");
         rebuild_lambda_doc(uicon);
         return;
     }
 
     // --- Incremental path ---
-    log_debug("rebuild_lambda_doc_incremental: patching %d subtree(s)", result_count);
 
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
@@ -5763,7 +5545,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
         DomElement* old_dom = element_dom_map_lookup(doc->element_dom_map, old_elem);
         if (!old_dom || !old_dom->parent) {
-            log_debug("rebuild_lambda_doc_incremental: entry %d has no DOM parent, skipping", i);
             continue;
         }
         DomElement* parent_dom = lam::dom_require_element(old_dom->parent);
@@ -5774,7 +5555,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         DomElement* new_dom = build_dom_tree_from_element(new_elem, doc, nullptr);
 
         if (!new_dom) {
-            log_debug("rebuild_lambda_doc_incremental: failed to build subtree for entry %d", i);
             continue;
         }
 
@@ -5855,13 +5635,10 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         // Template retransform can affect any part of the page (counters, headers, etc.),
         // not just the replaced subtree.  Always do a full repaint for correctness.
         state->dirty_tracker.full_repaint = true;
-        log_debug("rebuild_incr dirty: full repaint (template retransform)");
     }
 
     // Restore focus
-    if (restore_lambda_focus(doc, state, had_focus, &focus_restore)) {
-        log_debug("rebuild_lambda_doc_incremental: restored focus");
-    }
+    restore_lambda_focus(doc, state, had_focus, &focus_restore);
 
     // Phase 20: autofocus — if no focus was restored and new subtree contains an input,
     // check for autofocus attribute and set focus to it
@@ -5874,7 +5651,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
                     if (af_elem->has_attribute("autofocus")) {
                         focus_set(state, af, false);
                         state_store_caret_collapse_to_view_offset(state, af, 0);
-                        log_debug("rebuild_incr: autofocus set on new input");
                         break;
                     }
                 }
@@ -6309,7 +6085,6 @@ static bool layout_single_file(
     bool auto_close = false,
     bool disable_animations = false
 ) {
-    log_debug("[Layout] Processing file: %s", input_file);
     auto total_start = std::chrono::high_resolution_clock::now();
     auto load_start = total_start;
     auto load_end = load_start;
@@ -6549,7 +6324,6 @@ static bool layout_single_file(
     if (doc->view_tree && doc->view_tree->root) {
         log_info("[Layout] Document already has view_tree (PDF/SVG/image), skipping CSS layout");
     } else {
-        log_debug("[Layout] About to call layout_html_doc...");
         auto event_layout_start = std::chrono::high_resolution_clock::now();
         layout_start = event_layout_start;
         layout_html_doc(ui_context, doc, false);
@@ -6575,7 +6349,6 @@ static bool layout_single_file(
             jw_obj_end(&event_writer);
             event_state_log_finish_record(event_log, &event_writer);
         }
-        log_debug("[Layout] layout_html_doc returned");
     }
 
     // Capture while all six domains are live and before output/render work can
@@ -6599,7 +6372,6 @@ static bool layout_single_file(
         print_view_tree(lam::unsafe_view_element_storage(doc->view_tree->root), doc->url, output_path);
         output_end = std::chrono::high_resolution_clock::now();
         output_phase_ran = true;
-        log_debug("[Layout] Layout tree written to %s", output_path ? output_path : "./temp/view_tree.json");
 
         if (is_pdf || is_svg) {
             set_combine_text_nodes(true);
@@ -6983,19 +6755,7 @@ int cmd_layout(int argc, char** argv) {
         log_disable_all();
     }
 
-    log_debug("Lambda Layout Command");
-    log_debug("  Mode: %s", batch_mode ? "batch" : "single");
-    log_debug("  Input files: %d", opts.input_file_count);
-    if (opts.input_file_count > 0) {
-        log_debug("  First input: %s", opts.input_files[0]);
-    }
-    log_debug("  Output dir: %s", opts.output_dir ? opts.output_dir : "(none)");
-    log_debug("  CSS: %s", opts.css_file ? opts.css_file : "(inline only)");
-    log_debug("  Viewport: %dx%d", opts.viewport_width, opts.viewport_height);
-    log_debug("  Auto-close: %s", auto_close ? "yes" : "no");
-
     // Initialize UI context once (shared across all files in batch mode)
-    log_debug("[Layout] Initializing UI context (headless mode)...");
     UiContext ui_context;
     memset(&ui_context, 0, sizeof(UiContext));
 
@@ -7018,7 +6778,6 @@ int cmd_layout(int argc, char** argv) {
     // Add custom font scan directories (must be done before any font resolution)
     for (int i = 0; i < opts.font_dir_count; i++) {
         font_context_add_scan_directory(ui_context.font_ctx, opts.font_dirs[i]);
-        log_debug("[Layout] Added font directory: %s", opts.font_dirs[i]);
     }
 
     // Set viewport dimensions (both window and viewport must be set so layout_init
@@ -7029,9 +6788,7 @@ int cmd_layout(int argc, char** argv) {
     ui_context.viewport_height = opts.viewport_height;
 
     // Create surface for layout calculations
-    log_debug("[Layout] Creating surface for layout calculations...");
     ui_context_create_surface(&ui_context, opts.viewport_width, opts.viewport_height);
-    log_debug("[Layout] Surface created");
 
     // Get current working directory
     Url* cwd = get_current_dir();
@@ -7165,13 +6922,10 @@ int cmd_layout(int argc, char** argv) {
     }
     script_runner_set_js_mir_cache(nullptr);
     js_mir_cache_destroy(js_mir_cache);
-    log_debug("[Cleanup] Starting cleanup...");
-    log_debug("[Cleanup] Cleaning up UI context...");
     ui_context_cleanup(&ui_context);
     // cwd is the base URL passed (by pointer, not owned) into each
     // layout_single_file call; cmd_layout owns it and must free it here.
     if (cwd) url_destroy(cwd);
-    log_debug("[Cleanup] Complete");
 
     printf("Completed layout command: %d success, %d failed\n", success_count, failure_count);
     log_notice("Completed layout command: %d success, %d failed", success_count, failure_count);

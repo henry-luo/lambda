@@ -384,7 +384,7 @@ IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block
 float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arrow);
 
 IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement* element,
-    const char* log_context = nullptr, bool content_only = false);
+    bool content_only = false);
 
 TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
     const char* text, size_t length,
@@ -392,8 +392,7 @@ TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
     CssEnum font_variant = CSS_VALUE_NONE,
     CssEnum white_space = CSS_VALUE_NORMAL,
     CssEnum overflow_wrap = CSS_VALUE_NORMAL,
-    CssEnum word_break = CSS_VALUE_NORMAL,
-    const char* log_context = nullptr);
+    CssEnum word_break = CSS_VALUE_NORMAL);
 
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
@@ -408,8 +407,6 @@ ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
                                                    ViewBlock* block,
                                                    DomElement* element);
 bool layout_canvas_natural_size(ViewBlock* block, float* out_width, float* out_height);
-CssEnum layout_intrinsic_min_size_keyword(ViewBlock* block, bool horizontal);
-
 namespace radiant {
 
 enum class RunMode : uint8_t {
@@ -628,18 +625,6 @@ inline float layout_spacing_edge(const Spacing* spacing, CssBoxSide side) {
     return value ? *value : 0.0f;
 }
 
-inline float layout_margin_edge(const BoundaryProp* bound, CssBoxSide side) {
-    return layout_spacing_edge(bound ? &bound->margin : nullptr, side);
-}
-
-inline float layout_padding_edge(const BoundaryProp* bound, CssBoxSide side) {
-    return layout_spacing_edge(bound ? &bound->padding : nullptr, side);
-}
-
-inline float layout_edges_axis_sum(const BoxEdges& edges, bool horizontal) {
-    return horizontal ? edges.left + edges.right : edges.top + edges.bottom;
-}
-
 inline BoxEdges layout_spacing_edges(const Spacing* spacing) {
     BoxEdges edges = {};
     if (!spacing) return edges;
@@ -668,10 +653,6 @@ inline BoxEdges layout_boundary_padding_edges(const BoundaryProp* bound) {
 
 inline BoxEdges layout_boundary_border_edges(const BoundaryProp* bound) {
     return layout_border_width_edges(bound ? bound->border : nullptr);
-}
-
-inline float layout_border_edge(const BoundaryProp* bound, CssBoxSide side) {
-    return layout_edge_value(layout_boundary_border_edges(bound), side);
 }
 
 // tier-3: layout-transient, valid within pass
@@ -932,9 +913,9 @@ LayoutContainingBlock layout_initial_containing_block(LayoutContext* lycon);
 LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, ViewBlock* block);
 
 void layout_resolve_percent_size_for_child(LayoutContext* lycon, ViewBlock* child,
-    LayoutContainingBlock cb, bool use_content_box, const char* log_context);
+    LayoutContainingBlock cb, bool use_content_box);
 void layout_resolve_percent_offsets_for_child(ViewBlock* child,
-    LayoutContainingBlock cb, const char* log_context);
+    LayoutContainingBlock cb);
 
 // ============================================================================
 // CSS Counters
@@ -2019,6 +2000,140 @@ typedef enum LayoutAxis {
     LAYOUT_AXIS_Y,
 } LayoutAxis;
 
+inline CssBoxSide layout_axis_side(LayoutAxis axis, bool start) {
+    if (axis == LAYOUT_AXIS_X) return start ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT;
+    return start ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_BOTTOM;
+}
+
+// One physical-axis view. Geometry, used-size slots, constraints, and
+// positioned edges share a lifetime and a physical direction, so keeping them
+// together prevents partial axis conversions from mixing X and Y state.
+typedef struct LayoutAxisRefs {
+    typedef struct AxisInsets {
+        RadiantInsetSide start;
+        RadiantInsetSide end;
+    } AxisInsets;
+
+    typedef struct AxisMargins {
+        float* start;
+        float* end;
+        CssEnum* start_type;
+        CssEnum* end_type;
+    } AxisMargins;
+
+    LayoutAxis axis;
+    float* size;
+    float* position;
+    float* given;
+    float* minimum;
+    float* maximum;
+    float* given_percent;
+    float* minimum_percent;
+    float* maximum_percent;
+    float* given_fit_content_limit;
+    float* given_fit_content_percent;
+    CssEnum* given_type;
+    CssEnum* minimum_type;
+    CssEnum* maximum_type;
+    AxisInsets insets;
+    AxisMargins margins;
+
+    LayoutAxisRefs(LayoutAxis selected)
+        : axis(selected), size(nullptr), position(nullptr), given(nullptr),
+          minimum(nullptr), maximum(nullptr), given_percent(nullptr),
+          minimum_percent(nullptr), maximum_percent(nullptr),
+          given_fit_content_limit(nullptr), given_fit_content_percent(nullptr),
+          given_type(nullptr), minimum_type(nullptr), maximum_type(nullptr),
+          insets{}, margins{} {}
+
+    void bind_geometry(ViewElement* item) {
+        if (!item) return;
+        if (axis == LAYOUT_AXIS_X) {
+            size = &item->width;
+            position = &item->x;
+        } else {
+            size = &item->height;
+            position = &item->y;
+        }
+    }
+
+    void bind_constraints(BlockProp* block) {
+        if (!block) return;
+        bool horizontal = axis == LAYOUT_AXIS_X;
+        given = horizontal ? &block->given_width : &block->given_height;
+        minimum = horizontal ? &block->given_min_width : &block->given_min_height;
+        maximum = horizontal ? &block->given_max_width : &block->given_max_height;
+        given_percent = horizontal ? &block->given_width_percent : &block->given_height_percent;
+        minimum_percent = horizontal ? &block->given_min_width_percent : &block->given_min_height_percent;
+        maximum_percent = horizontal ? &block->given_max_width_percent : &block->given_max_height_percent;
+        given_fit_content_limit = horizontal ? &block->given_width_fit_content_limit
+                                             : &block->given_height_fit_content_limit;
+        given_fit_content_percent = horizontal ? &block->given_width_fit_content_percent
+                                               : &block->given_height_fit_content_percent;
+        given_type = horizontal ? &block->given_width_type : &block->given_height_type;
+        minimum_type = horizontal ? &block->given_min_width_type : &block->given_min_height_type;
+        maximum_type = horizontal ? &block->given_max_width_type : &block->given_max_height_type;
+    }
+
+    void bind_insets(PositionProp* position_prop) {
+        if (!position_prop) return;
+        insets.start = radiant_inset_side(position_prop, layout_axis_side(axis, true));
+        insets.end = radiant_inset_side(position_prop, layout_axis_side(axis, false));
+    }
+
+    void bind_margins(Margin* margin) {
+        if (!margin) return;
+        CssBoxSide start_side = layout_axis_side(axis, true);
+        CssBoxSide end_side = layout_axis_side(axis, false);
+        margins.start = radiant_spacing_value(margin, start_side);
+        margins.end = radiant_spacing_value(margin, end_side);
+        margins.start_type = radiant_margin_type(margin, start_side);
+        margins.end_type = radiant_margin_type(margin, end_side);
+    }
+
+    LayoutAxisRefs(ViewElement* item, LayoutAxis selected)
+        : LayoutAxisRefs(selected) {
+        bind_geometry(item);
+    }
+
+    LayoutAxisRefs(BlockContext* context, LayoutAxis selected)
+        : LayoutAxisRefs(selected) {
+        if (context) given = selected == LAYOUT_AXIS_X
+            ? &context->given_width : &context->given_height;
+    }
+
+    LayoutAxisRefs(BlockProp* block, LayoutAxis selected)
+        : LayoutAxisRefs(selected) {
+        bind_constraints(block);
+    }
+
+    LayoutAxisRefs(BlockProp* block, bool horizontal)
+        : LayoutAxisRefs(block, horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y) {}
+
+    LayoutAxisRefs(PositionProp* position_prop, LayoutAxis selected)
+        : LayoutAxisRefs(selected) {
+        bind_insets(position_prop);
+    }
+
+    LayoutAxisRefs(ViewBlock* block, LayoutAxis selected)
+        : LayoutAxisRefs(static_cast<ViewElement*>(block), selected) {
+        if (!block) return;
+        bind_constraints(block->block_mut());
+        bind_insets(block->position);
+        bind_margins(block->bound ? &block->boundary_mut()->margin : nullptr);
+    }
+
+    float get_size() const { return size ? *size : 0.0f; }
+    float get_position() const { return position ? *position : 0.0f; }
+    void set_size(float value) const { if (size) *size = value; }
+    void set_position(float value) const { if (position) *position = value; }
+    bool has_start() const { return insets.start.has && *insets.start.has; }
+    bool has_end() const { return insets.end.has && *insets.end.has; }
+    bool has_any_inset() const { return has_start() || has_end(); }
+    float margin_start() const { return margins.start ? *margins.start : 0.0f; }
+    float margin_end() const { return margins.end ? *margins.end : 0.0f; }
+} LayoutAxisRefs;
+
 // tier-3: layout-transient, describes one child during vertical-flow sizing
 typedef struct LayoutVerticalFlowChild {
     ViewBlock* block;
@@ -2032,35 +2147,27 @@ bool layout_classify_vertical_flow_child(ViewBlock* parent, View* child,
                                          LayoutVerticalFlowChild* result);
 
 inline float layout_axis_size(ViewElement* item, LayoutAxis axis) {
-    if (!item) return 0.0f;
-    return axis == LAYOUT_AXIS_X ? item->width : item->height;
+    return LayoutAxisRefs(item, axis).get_size();
 }
 
 inline void layout_axis_set_size(ViewElement* item, LayoutAxis axis, float size) {
-    if (!item) return;
-    if (axis == LAYOUT_AXIS_X) {
-        item->width = size;
-    } else {
-        item->height = size;
-    }
+    LayoutAxisRefs(item, axis).set_size(size);
 }
 
 inline float layout_axis_pos(ViewElement* item, LayoutAxis axis) {
-    if (!item) return 0.0f;
-    return axis == LAYOUT_AXIS_X ? item->x : item->y;
+    return LayoutAxisRefs(item, axis).get_position();
 }
 
 inline void layout_axis_set_pos(ViewElement* item, LayoutAxis axis, float pos) {
-    if (!item) return;
-    if (axis == LAYOUT_AXIS_X) {
-        item->x = pos;
-    } else {
-        item->y = pos;
-    }
+    LayoutAxisRefs(item, axis).set_position(pos);
 }
 
 inline bool layout_axis_is_horizontal(LayoutAxis axis) {
     return axis == LAYOUT_AXIS_X;
+}
+
+inline const char* layout_axis_name(LayoutAxis axis) {
+    return layout_axis_is_horizontal(axis) ? "width" : "height";
 }
 
 typedef struct LayoutAxisBoxMetrics {
@@ -2069,12 +2176,15 @@ typedef struct LayoutAxisBoxMetrics {
     float pad_border;
 } LayoutAxisBoxMetrics;
 
+inline LayoutAxisBoxMetrics layout_axis_box_metrics(const BoxMetrics& metrics,
+                                                    LayoutAxis axis) {
+    return axis == LAYOUT_AXIS_X
+        ? LayoutAxisBoxMetrics{metrics.padding_h, metrics.border_h, metrics.pad_border_h}
+        : LayoutAxisBoxMetrics{metrics.padding_v, metrics.border_v, metrics.pad_border_v};
+}
+
 inline LayoutAxisBoxMetrics layout_axis_box_metrics(ViewBlock* block, LayoutAxis axis) {
-    BoxMetrics metrics = layout_box_metrics(block);
-    if (axis == LAYOUT_AXIS_X) {
-        return {metrics.padding_h, metrics.border_h, metrics.pad_border_h};
-    }
-    return {metrics.padding_v, metrics.border_v, metrics.pad_border_v};
+    return layout_axis_box_metrics(layout_box_metrics(block), axis);
 }
 
 inline float layout_axis_border_box_extent(ViewBlock* block, LayoutAxis axis,
@@ -2083,83 +2193,6 @@ inline float layout_axis_border_box_extent(ViewBlock* block, LayoutAxis axis,
     LayoutAxisBoxMetrics box = layout_axis_box_metrics(block, axis);
     return content_extent + box.padding + (include_border ? box.border : 0.0f);
 }
-
-// Select the CSS size slots for one physical axis once; this keeps min/max
-// resolution paths from drifting across repeated width/height branches.
-typedef struct LayoutAxisConstraintRefs {
-    float* given, *minimum, *maximum, *given_percent, *minimum_percent, *maximum_percent;
-    CssEnum* given_type, *minimum_type, *maximum_type;
-    LayoutAxisConstraintRefs(BlockProp* block, bool horizontal)
-        : given(nullptr), minimum(nullptr), maximum(nullptr), given_percent(nullptr),
-          minimum_percent(nullptr), maximum_percent(nullptr), given_type(nullptr),
-          minimum_type(nullptr), maximum_type(nullptr) {
-        if (!block) return;
-        given = horizontal ? &block->given_width : &block->given_height;
-        minimum = horizontal ? &block->given_min_width : &block->given_min_height;
-        maximum = horizontal ? &block->given_max_width : &block->given_max_height;
-        given_percent = horizontal ? &block->given_width_percent : &block->given_height_percent;
-        minimum_percent = horizontal ? &block->given_min_width_percent : &block->given_min_height_percent;
-        maximum_percent = horizontal ? &block->given_max_width_percent : &block->given_max_height_percent;
-        given_type = horizontal ? &block->given_width_type : &block->given_height_type;
-        minimum_type = horizontal ? &block->given_min_width_type : &block->given_min_height_type;
-        maximum_type = horizontal ? &block->given_max_width_type : &block->given_max_height_type;
-    }
-    LayoutAxisConstraintRefs(BlockProp* block, LayoutAxis axis)
-        : LayoutAxisConstraintRefs(block, axis == LAYOUT_AXIS_X) {}
-} LayoutAxisConstraintRefs;
-
-// Keep physical start/end selection in one value object.  Layout algorithms
-// use physical axes after writing-mode resolution, so every caller should use
-// the same left/right or top/bottom mapping for insets and margins.
-inline CssBoxSide layout_axis_side(LayoutAxis axis, bool start) {
-    if (axis == LAYOUT_AXIS_X) return start ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT;
-    return start ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_BOTTOM;
-}
-
-typedef struct LayoutAxisInsetRefs {
-    RadiantInsetSide start;
-    RadiantInsetSide end;
-
-    LayoutAxisInsetRefs(PositionProp* position, LayoutAxis axis)
-        : start{}, end{} {
-        if (!position) return;
-        start = radiant_inset_side(position, layout_axis_side(axis, true));
-        end = radiant_inset_side(position, layout_axis_side(axis, false));
-    }
-} LayoutAxisInsetRefs;
-
-typedef struct LayoutAxisMarginRefs {
-    float* start;
-    float* end;
-    CssEnum* start_type;
-    CssEnum* end_type;
-
-    LayoutAxisMarginRefs(Margin* margin, LayoutAxis axis)
-        : start(nullptr), end(nullptr), start_type(nullptr), end_type(nullptr) {
-        if (!margin) return;
-        start = radiant_spacing_value(margin, layout_axis_side(axis, true));
-        end = radiant_spacing_value(margin, layout_axis_side(axis, false));
-        start_type = radiant_margin_type(margin, layout_axis_side(axis, true));
-        end_type = radiant_margin_type(margin, layout_axis_side(axis, false));
-    }
-} LayoutAxisMarginRefs;
-
-// Keep an absolute/static-position axis as one unit; callers must not mix an
-// inset from one physical axis with margins from the other.
-typedef struct LayoutAxisPlacementRefs {
-    LayoutAxisInsetRefs insets;
-    LayoutAxisMarginRefs margins;
-
-    LayoutAxisPlacementRefs(ViewBlock* block, LayoutAxis axis)
-        : insets(block ? block->position : nullptr, axis),
-          margins(block && block->bound ? &block->boundary_mut()->margin : nullptr, axis) {}
-
-    bool has_start() const { return insets.start.has && *insets.start.has; }
-    bool has_end() const { return insets.end.has && *insets.end.has; }
-    bool has_any_inset() const { return has_start() || has_end(); }
-    float margin_start() const { return margins.start ? *margins.start : 0.0f; }
-    float margin_end() const { return margins.end ? *margins.end : 0.0f; }
-} LayoutAxisPlacementRefs;
 
 inline CssEnum layout_axis_given_type(const BlockProp* block, LayoutAxis axis) {
     if (!block) return CSS_VALUE_AUTO;
@@ -2359,6 +2392,9 @@ struct FlexLayoutScope {
 };
 
 int collect_and_prepare_flex_items(LayoutContext* lycon, FlexContainerLayout* flex_layout, ViewBlock* container);
+void layout_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
+bool has_auto_margins(ViewBlock* item);
+void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container);
 float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout);
 void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_layout);
 void apply_constraints_to_flex_items(FlexContainerLayout* flex_layout);
@@ -2649,6 +2685,8 @@ typedef struct GridContainerLayout : GridProp {
 
 void init_grid_container(LayoutContext* lycon, struct ViewBlock* container);
 void cleanup_grid_container(LayoutContext* lycon);
+float layout_grid_row_border_box_extent(struct ViewBlock* container,
+                                        GridContainerLayout* grid_layout);
 
 // Mirrors BlockContextScope: pass-local grid scratch and parent context must
 // unwind together, even when no-item or absolute-only grid paths return early.
@@ -2810,8 +2848,6 @@ typedef enum LayoutTextRectContentKind {
 LayoutTextRectContentKind layout_text_rect_content_kind(ViewText* text,
                                                         TextRect* rect);
 bool layout_text_rect_has_painted_codepoint(ViewText* text, TextRect* rect);
-bool layout_text_rect_has_non_collapsible_whitespace(ViewText* text,
-                                                     TextRect* rect);
 float layout_vertical_flow_block_start_margin(ViewBlock* child, WritingMode parent_mode);
 float layout_vertical_flow_block_end_margin(ViewBlock* child, WritingMode parent_mode);
 bool layout_parent_block_edge_is_unedged(ViewBlock* block, bool horizontal, bool start);
@@ -2956,7 +2992,6 @@ typedef struct AbsStaticContext {
     FlexContainerLayout* flex;
     GridContainerLayout* grid;
     bool resolve_percent_against_content_box;
-    const char* log_context;
     AbsPrepareChildFn prepare_child;
     AbsAfterChildFn after_child;
 } AbsStaticContext;
@@ -3377,15 +3412,14 @@ void adjust_text_bounds(ViewText* text);
 View* layout_inline_fragment_root(View* view);
 float layout_rtl_inline_item_x(Linebox* line, float item_width);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
-void layout_block_resolve_intrinsic_width_constraints(LayoutContext* lycon,
-                                                      ViewBlock* block);
-void layout_block_resolve_intrinsic_height_constraints(LayoutContext* lycon,
-                                                       ViewBlock* block,
-                                                       float content_width);
 DomElement* find_fieldset_rendered_legend(ViewBlock* fieldset);
 void layout_block(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_text(LayoutContext* lycon, DomNode* text_node);
 void layout_inline(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
+bool layout_block_resolve_intrinsic_axis_constraints(LayoutContext* lycon,
+                                                     ViewBlock* block,
+                                                     LayoutAxis axis,
+                                                     float content_width);
 void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
 void layout_html_root(LayoutContext* lycon, DomNode* elmt);
 bool is_only_whitespace(const char* str);
@@ -3710,12 +3744,6 @@ static inline bool layout_block_is_out_of_flow(const ViewBlock* block) {
     return block &&
            (layout_position_is_abs_fixed(block->position) ||
             layout_position_is_floated(block->position));
-}
-
-static inline bool layout_block_is_hidden_or_display_none(const ViewBlock* block) {
-    return !block ||
-           layout_block_is_display_none(block) ||
-           (block->in_line && block->inl()->visibility == VIS_HIDDEN);
 }
 
 static inline bool layout_block_is_skipped_container_item(const ViewBlock* block) {

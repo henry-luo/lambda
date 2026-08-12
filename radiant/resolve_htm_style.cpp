@@ -291,7 +291,7 @@ static void apply_html_axis_value(LayoutContext* lycon, ViewBlock* block,
         : value;
     if (block) {
         BlockProp* prop = block->ensure_block(lycon);
-        LayoutAxisConstraintRefs refs(prop, axis == LAYOUT_AXIS_X);
+        LayoutAxisRefs refs(prop, axis == LAYOUT_AXIS_X);
         *refs.given = is_percent ? -1.0f : value;
         *refs.given_percent = is_percent ? value : NAN;
     }
@@ -356,7 +356,7 @@ static void apply_html_table_dimension_attribute(LayoutContext* lycon, DomNode* 
         float base = lycon->block.content_width > 0.0f
             ? lycon->block.content_width : lycon->line.right - lycon->line.left;
         BlockProp* prop = block->ensure_block(lycon);
-        LayoutAxisConstraintRefs refs(prop, axis == LAYOUT_AXIS_X);
+        LayoutAxisRefs refs(prop, axis == LAYOUT_AXIS_X);
         *refs.given_percent = dimension.value;
         if (base > 0.0f) {
             float resolved = base * dimension.value / 100.0f;
@@ -526,7 +526,7 @@ static void apply_table_cell_dimension_attribute(DomElement* elmt, ViewBlock* bl
 
     HtmlDimensionAttr dimension;
     if (!parse_html_dimension_attr(raw, axis == LAYOUT_AXIS_X, true, &dimension)) return;
-    LayoutAxisConstraintRefs refs(block->blk, axis == LAYOUT_AXIS_X);
+    LayoutAxisRefs refs(block->blk, axis == LAYOUT_AXIS_X);
     if (dimension.is_percent) {
         *refs.given = -1.0f;
         *refs.given_percent = dimension.value;

@@ -2237,8 +2237,6 @@ static void resolve_css_mask_image(LayoutContext* lycon, ViewSpan* span,
                 else if (item->data.keyword == CSS_VALUE_RIGHT) mask->cx = 1.0f;
                 else if (item->data.keyword == CSS_VALUE_TOP) mask->cy = 0.0f;
                 else if (item->data.keyword == CSS_VALUE_BOTTOM) mask->cy = 1.0f;
-                else if (item->data.keyword == CSS_VALUE_CENTER) {
-                }
                 const CssEnumInfo* info = css_enum_info(item->data.keyword);
                 if (info && info->name && strcmp(info->name, "at") == 0) {
                     at_idx = i;
@@ -2246,7 +2244,6 @@ static void resolve_css_mask_image(LayoutContext* lycon, ViewSpan* span,
             } else if (at_idx >= 0 && item->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 if (i == at_idx + 1) mask->cx = (float)(item->data.percentage.value / 100.0);
                 else if (i == at_idx + 2) mask->cy = (float)(item->data.percentage.value / 100.0);
-            } else if (at_idx >= 0 && item->type == CSS_VALUE_TYPE_LENGTH) {
             }
         }
         arg_idx = 1;
@@ -5441,8 +5438,8 @@ static void apply_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
         prop_id == CSS_PROPERTY_MAX_HEIGHT;
     if (prop_id != CSS_PROPERTY_MIN_WIDTH && prop_id != CSS_PROPERTY_MAX_WIDTH &&
         prop_id != CSS_PROPERTY_MIN_HEIGHT && prop_id != CSS_PROPERTY_MAX_HEIGHT) return;
-    LayoutAxisConstraintRefs axis(props, horizontal);
-    LayoutAxisConstraintRefs parent_axis(parent_props, horizontal);
+    LayoutAxisRefs axis(props, horizontal);
+    LayoutAxisRefs parent_axis(parent_props, horizontal);
     float* constraint = is_maximum ? axis.maximum : axis.minimum;
     float* percentage = is_maximum ? axis.maximum_percent : axis.minimum_percent;
     CssEnum* constraint_type = is_maximum ? axis.maximum_type : axis.minimum_type;
@@ -5677,8 +5674,9 @@ static void resolve_grid_auto_track(LayoutContext* lycon, ViewBlock* block,
 
 static void resolve_css_axis_size(LayoutContext* lycon, ViewBlock* block,
                                   const CssValue* value,
-                                  bool horizontal) {
+                                  LayoutAxis axis) {
     const CssValue* fit_limit = css_fit_content_function_limit(value);
+    bool horizontal = axis == LAYOUT_AXIS_X;
     CssPropertyCode axis_property = horizontal ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
     float size = -1.0f;
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
@@ -5701,18 +5699,16 @@ static void resolve_css_axis_size(LayoutContext* lycon, ViewBlock* block,
         size = resolve_length_value(lycon, axis_property, value);
         size = isnan(size) ? -1.0f : max(size, 0.0f);
     }
-    if (horizontal) lycon->block.given_width = size;
-    else lycon->block.given_height = size;
+    LayoutAxisRefs context(&lycon->block, axis);
+    if (context.given) *context.given = size;
     if (!block) return;
     block->ensure_block(lycon);
-    LayoutAxisConstraintRefs refs(block->block_mut(), horizontal);
+    LayoutAxisRefs refs(block->block_mut(), axis);
     *refs.given = size;
     *refs.given_type = fit_limit ? CSS_VALUE_FIT_CONTENT
         : value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
-    float* fit_size = horizontal ? &block->blk->given_width_fit_content_limit
-                                 : &block->blk->given_height_fit_content_limit;
-    float* fit_percent = horizontal ? &block->blk->given_width_fit_content_percent
-                                    : &block->blk->given_height_fit_content_percent;
+    float* fit_size = refs.given_fit_content_limit;
+    float* fit_percent = refs.given_fit_content_percent;
     *fit_size = -1.0f;
     *fit_percent = NAN;
     if (fit_limit) {
@@ -6917,7 +6913,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         case CSS_PROPERTY_WIDTH:
         case CSS_PROPERTY_HEIGHT:
-            resolve_css_axis_size(lycon, block, value, prop_id == CSS_PROPERTY_WIDTH);
+            resolve_css_axis_size(lycon, block, value,
+                prop_id == CSS_PROPERTY_WIDTH ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y);
             break;
         case CSS_PROPERTY_MIN_WIDTH:
         case CSS_PROPERTY_MAX_WIDTH:
@@ -7227,6 +7224,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 const CssValue* v = vals[vi];
                 if (!v) continue;
                 if (v->type == CSS_VALUE_TYPE_KEYWORD && v->data.keyword == CSS_VALUE_AUTO) {
+                    continue;
                 } else if (v->type == CSS_VALUE_TYPE_NUMBER && v->data.number.is_integer) {
                     int count = (int)v->data.number.value;
                     if (count > 0) {

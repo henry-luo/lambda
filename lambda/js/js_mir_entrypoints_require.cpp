@@ -132,21 +132,14 @@ bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
 }
 
 static uint32_t js_preamble_consumer_name_base(const JsPreambleState* preamble) {
-    uint32_t base = preamble ? preamble->module_property_count : 0;
-    if (!g_jm_preamble_compile_only) {
-        uint32_t active = js_active_module_name_count();
-        if (active > base) base = active;
-    }
-    return base;
+    // every consumer gets a fresh state whose prefix is the immutable preamble;
+    // using a prior consumer's appended count shifts this unit's names past the
+    // prefix that js_link_compiled_name_table actually installs.
+    return preamble ? preamble->module_property_count : 0;
 }
 
 static uint32_t js_preamble_consumer_ic_base(const JsPreambleState* preamble) {
-    uint32_t base = preamble ? preamble->ic_count : 0;
-    if (!g_jm_preamble_compile_only) {
-        uint32_t active = js_active_module_ic_count();
-        if (active > base) base = active;
-    }
-    return base;
+    return preamble ? preamble->ic_count : 0;
 }
 
 bool js_prelink_compiled_name_table(const JsMirTranspiler* mt) {

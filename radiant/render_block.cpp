@@ -141,8 +141,6 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
         return false;
     }
     retained_dl_cache_note_reuse_hit(rdcon->retained_dl_cache);
-    log_debug("[RETAINED_DL] reused view %u (%d items)",
-              view_id, retained_dl_fragment_item_count(fragment));
     return true;
 }
 
@@ -216,7 +214,6 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
 
     // Render borders using new rendering system
     if (view->boundary()->border) {
-        log_debug("render border");
 
         // CSS 2.1 17.6.2: Use resolved borders for border-collapse cells
         bool use_resolved = false;
@@ -358,13 +355,9 @@ static bool render_block_skip_paint(RenderContext* rdcon, ViewBlock* block) {
         return true;
     }
     if (render_block_clip_empty(&rdcon->block.clip)) {
-        log_debug("render_block_skip_paint: empty inherited clip for %s",
-                  block->node_name());
         return true;
     }
     if (render_block_fully_transparent(block)) {
-        log_debug("render_block_skip_paint: opacity zero for %s",
-                  block->node_name());
         return true;
     }
     if (render_block_viewport_misses(rdcon, block)) {
@@ -384,9 +377,6 @@ static bool render_block_skip_paint(RenderContext* rdcon, ViewBlock* block) {
 }
 
 static void render_block_log_begin(RenderContext* rdcon, ViewBlock* block) {
-    log_debug("render block view:%s, clip:[%.0f,%.0f,%.0f,%.0f]", block->node_name(),
-        rdcon->block.clip.left, rdcon->block.clip.top,
-        rdcon->block.clip.right, rdcon->block.clip.bottom);
     log_enter();
 }
 
@@ -398,7 +388,6 @@ static bool render_block_empty_cell_hides_bound(ViewBlock* block) {
     if (!block || block->view_type != RDT_VIEW_TABLE_CELL) return false;
     ViewTableCell* cell = lam::view_require_table_cell(block);
     if (cell->td && cell->td->hide_empty) {
-        log_debug("Skipping bound for empty cell (empty-cells: hide)");
         return true;
     }
     return false;
@@ -484,18 +473,10 @@ static void render_block_apply_inherited_color(RenderContext* rdcon, ViewBlock* 
     if (!rdcon || !block) return;
     if (block->in_line && block->inl()->has_color) {
         if (render_block_trace_enabled()) {
-            log_debug("[RENDER COLOR] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
-                      block->node_name(),
-                      block->inl()->color.r, block->inl()->color.g, block->inl()->color.b,
-                      rdcon->color.r, rdcon->color.g, rdcon->color.b,
-                      block->inl()->color.c);
         }
         rdcon->color = block->inl()->color;
     } else {
         if (render_block_trace_enabled()) {
-            log_debug("[RENDER COLOR] element=%s inheriting color #%02x%02x%02x (in_line=%p, color.c=%u)",
-                      block->node_name(), rdcon->color.r, rdcon->color.g, rdcon->color.b,
-                      block->in_line, block->in_line ? block->inl()->color.c : 0);
         }
     }
 }
@@ -522,7 +503,6 @@ static RenderBlockChildrenPhase render_block_begin_children_phase(RenderContext*
     View* view = block ? block->first_child : nullptr;
     phase.has_children = view != nullptr || (block && block->custom_layout_paint_prop());
     if (!phase.has_children) {
-        log_debug("view has no child");
         return phase;
     }
 
@@ -545,7 +525,6 @@ static void render_block_walk_children_phase(RenderContext* rdcon, ViewBlock* bl
         render_children(rdcon, block->first_child);
     }
     if (block->position) {
-        log_debug("render absolute/fixed positioned children");
         render_raster_positioned_children(rdcon, block);
     }
     if (!custom_painted) {

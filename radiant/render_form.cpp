@@ -346,7 +346,6 @@ void render_simple_string(RenderContext* rdcon, const char* text, float x, float
     FontBox fbox = {0};
     setup_font(rdcon->ui_context, &fbox, font);
     if (!fbox.font_handle) {
-        log_debug("[FORM] render_simple_string: failed to setup font");
         return;
     }
 
@@ -805,7 +804,6 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
 
     if (mask_buf) mem_free(mask_buf);
     if (preedit_display) mem_free(preedit_display);
-    log_debug("[FORM] render_text_input at (%.1f, %.1f) size %.1fx%.1f", x, y, w, h);
 }
 
 /**
@@ -872,7 +870,6 @@ static void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlP
         draw_rect_focus_ring(rdcon, x, y, size, size, s);
     }
 
-    log_debug("[FORM] render_checkbox at (%.1f, %.1f) checked=%d", x, y, checked ? 1 : 0);
 }
 
 /**
@@ -920,7 +917,6 @@ static void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp
         stroke_circle(rdcon, cx, cy, radius + ring, ring_color, ring);
     }
 
-    log_debug("[FORM] render_radio at (%.1f, %.1f) checked=%d", x, y, checked ? 1 : 0);
 }
 
 /**
@@ -984,8 +980,6 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
         draw_rect_focus_ring(rdcon, x, y, w, h, s);
     }
 
-    log_debug("[FORM] render_button at (%.1f, %.1f) size %.1fx%.1f, has_css_bg=%d",
-              x, y, w, h, has_css_background);
 }
 
 /**
@@ -1120,7 +1114,6 @@ static void render_select(RenderContext* rdcon, ViewBlock* block, FormControlPro
         }
     }
 
-    log_debug("[FORM] render_select at (%.1f, %.1f) size %.1fx%.1f selected=%d", x, y, w, h, selected_index);
 }
 
 /**
@@ -1172,8 +1165,6 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
     // Update state with actual dropdown position for hit testing
     doc_state_set_dropdown_geometry(state, x, y, w, h);
 
-    log_debug("[FORM] dropdown clip before override: (%.1f, %.1f, %.1f, %.1f)",
-        rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
 
     // Override clip to full viewport for overlay rendering (dropdown should not be clipped by parent containers)
     Bound saved_clip = rdcon->block.clip;
@@ -1225,8 +1216,6 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
             // Center text vertically: opt_y + (option_height - font_height) / 2
             float text_top = opt_y + (option_height - font_height_scaled) / 2;
 
-            log_debug("[FORM] option %d: text='%s' opt_y=%.1f option_height=%.1f font_height=%.1f text_top=%.1f",
-                i, opt_text, opt_y, option_height, font_height_scaled, text_top);
 
             // Render the option text (y is top of text area, not baseline)
             render_simple_string(rdcon, opt_text, text_x, text_top, select->font, text_color);
@@ -1236,8 +1225,6 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
     // Restore original clip
     rdcon->block.clip = saved_clip;
 
-    log_debug("[FORM] render_select_dropdown at (%.1f, %.1f) size %.1fx%.1f, %d options",
-        x, y, w, h, form->option_count);
 }
 
 /**
@@ -1540,7 +1527,6 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
 
     if (preedit_display) mem_free(preedit_display);
 
-    log_debug("[FORM] render_textarea at (%.1f, %.1f) size %.1fx%.1f", x, y, w, h);
 }
 
 /**
@@ -1571,7 +1557,6 @@ static void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp
     fill_rect(rdcon, thumb_x, thumb_y, thumb_size, thumb_size, thumb_color);
     draw_3d_border(rdcon, thumb_x, thumb_y, thumb_size, thumb_size, false, 1 * s);
 
-    log_debug("[FORM] render_range at (%.1f, %.1f) value=%.2f", x, y, range_value);
 }
 
 /**
@@ -1620,7 +1605,6 @@ void render_form_control(RenderContext* rdcon, ViewBlock* block) {
         break;
 
     default:
-        log_debug("[FORM] unknown control type: %d", form->control_type);
         break;
     }
 }

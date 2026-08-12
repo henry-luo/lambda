@@ -1,7 +1,6 @@
 #include "layout.hpp"
 
 #include "../lambda/input/css/css_style_node.hpp"
-#include "../lib/log.h"
 #include "../lib/tagged.hpp"
 #include <cmath>
 
@@ -42,10 +41,6 @@ void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* contai
     AbsStaticContext* ctx) {
     if (!lycon || !container || !ctx) return;
 
-    log_enter();
-    log_debug("[LAYOUT_ABS] children start: container=%s context=%s",
-              container->node_name(), ctx->log_context ? ctx->log_context : "abs");
-
     DomNode* child = container->first_child;
     while (child) {
         if (!child->is_element()) {
@@ -74,7 +69,7 @@ void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* contai
             lycon->block.given_height = child_block->block()->given_height;
             if (ctx->resolve_percent_against_content_box) {
                 layout_resolve_percent_size_for_child(lycon, child_block,
-                    state.containing_block, true, ctx->log_context);
+                    state.containing_block, true);
             }
         } else {
             lycon->block.given_width = -1.0f;
@@ -96,13 +91,6 @@ void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* contai
 
         layout_apply_abs_child_aspect_ratio(&state);
 
-        log_debug("[LAYOUT_ABS] child laid out: %s at (%.1f, %.1f) size %.1fx%.1f",
-                  child->node_name(), child_block->x, child_block->y,
-                  child_block->width, child_block->height);
-
         child = child->next_sibling;
     }
-
-    log_debug("[LAYOUT_ABS] children complete: container=%s", container->node_name());
-    log_leave();
 }

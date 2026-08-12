@@ -33,13 +33,13 @@ static GridTrackSize* grid_scratch_clone_track(ScratchArena* scratch,
     copy->repeat_tracks = NULL;
     copy->repeat_track_count = 0;
 
-    if (source->min_size) {
-        copy->min_size = grid_scratch_clone_track(scratch, source->min_size);
-        if (!copy->min_size) return NULL;
-    }
-    if (source->max_size) {
-        copy->max_size = grid_scratch_clone_track(scratch, source->max_size);
-        if (!copy->max_size) return NULL;
+    GridTrackSize** nested[2] = {&copy->min_size, &copy->max_size};
+    GridTrackSize* source_nested[2] = {source->min_size, source->max_size};
+    for (int i = 0; i < 2; i++) {
+        if (source_nested[i]) {
+            *nested[i] = grid_scratch_clone_track(scratch, source_nested[i]);
+            if (!*nested[i]) return NULL;
+        }
     }
     if (source->repeat_tracks && source->repeat_track_count > 0) {
         copy->repeat_tracks = (GridTrackSize**)scratch_calloc(
@@ -91,6 +91,23 @@ static GridTrackList* grid_scratch_clone_track_list(ScratchArena* scratch,
         if (!copy->line_names[i]) return NULL;
     }
     return copy;
+}
+
+float layout_grid_row_border_box_extent(ViewBlock* container,
+                                        GridContainerLayout* grid_layout) {
+    if (!container || !grid_layout || !grid_layout->computed_rows ||
+        grid_layout->computed_row_count <= 0) {
+        return 0.0f;
+    }
+    float content_extent = 0.0f;
+    for (int i = 0; i < grid_layout->computed_row_count; i++) {
+        content_extent += (*grid_layout->computed_rows)[i].base_size;
+    }
+    content_extent += grid_layout->row_gap * (grid_layout->computed_row_count - 1);
+    if (grid_layout->row_intrinsic_height > 0.0f) {
+        content_extent = grid_layout->row_intrinsic_height;
+    }
+    return content_extent + layout_axis_box_metrics(container, LAYOUT_AXIS_Y).pad_border;
 }
 
 // Initialize grid container layout state
@@ -152,18 +169,17 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
             }
         }
     }
-    GridTrackList* source_template_rows = grid->grid_template_rows;
-    GridTrackList* source_template_columns = grid->grid_template_columns;
-    GridTrackList* source_auto_rows = grid->grid_auto_rows;
-    GridTrackList* source_auto_columns = grid->grid_auto_columns;
-    grid->grid_template_rows = grid_scratch_clone_track_list(
-        &lycon->scratch, source_template_rows, 4);
-    grid->grid_template_columns = grid_scratch_clone_track_list(
-        &lycon->scratch, source_template_columns, 4);
-    grid->grid_auto_rows = grid_scratch_clone_track_list(
-        &lycon->scratch, source_auto_rows, 2);
-    grid->grid_auto_columns = grid_scratch_clone_track_list(
-        &lycon->scratch, source_auto_columns, 2);
+    GridTrackList** track_lists[4] = {
+        &grid->grid_template_rows, &grid->grid_template_columns,
+        &grid->grid_auto_rows, &grid->grid_auto_columns};
+    GridTrackList* source_lists[4] = {
+        grid->grid_template_rows, grid->grid_template_columns,
+        grid->grid_auto_rows, grid->grid_auto_columns};
+    const int default_capacities[4] = {4, 4, 2, 2};
+    for (int i = 0; i < 4; i++) {
+        *track_lists[i] = grid_scratch_clone_track_list(
+            &lycon->scratch, source_lists[i], default_capacities[i]);
+    }
     if (!grid->grid_template_rows || !grid->grid_template_columns ||
         !grid->grid_auto_rows || !grid->grid_auto_columns) {
         cleanup_grid_container(lycon);
@@ -296,18 +312,20 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // Resolve percentage gaps against the container dimensions.
     // For definite containers, resolve immediately. For indefinite (shrink-to-fit),
     // the enhanced adapter handles the two-pass resolution.
-    if (grid_layout->column_gap_is_percent) {
-        if (!is_shrink_to_fit_width) {
-            grid_layout->column_gap = grid_layout->content_width * (grid_layout->column_gap / 100.0f);
-            grid_layout->column_gap_is_percent = false;
-        }
-        // For shrink-to-fit: keep percentage value in column_gap, column_gap_is_percent=true
-        // The adapter will use gap=0 for first pass, then resolve against intrinsic width
-    }
-    if (grid_layout->row_gap_is_percent) {
-        if (grid_layout->has_explicit_height) {
-            grid_layout->row_gap = grid_layout->content_height * (grid_layout->row_gap / 100.0f);
-            grid_layout->row_gap_is_percent = false;
+    float* gaps[2] = {&grid_layout->column_gap, &grid_layout->row_gap};
+    bool* gap_is_percent[2] = {
+        &grid_layout->column_gap_is_percent, &grid_layout->row_gap_is_percent
+    };
+    const float content_sizes[2] = {
+        grid_layout->content_width, grid_layout->content_height
+    };
+    const bool definite_gap_base[2] = {
+        !is_shrink_to_fit_width, grid_layout->has_explicit_height
+    };
+    for (int i = 0; i < 2; i++) {
+        if (*gap_is_percent[i] && definite_gap_base[i]) {
+            *gaps[i] = content_sizes[i] * (*gaps[i] / 100.0f);
+            *gap_is_percent[i] = false;
         }
     }
 
@@ -327,14 +345,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
         // Update container height from explicit row heights + padding (mirroring the shrink-to-fit path)
         if (!grid_layout->has_explicit_height && grid_layout->computed_row_count > 0) {
-            float total_row_height = 0;
-            for (int r = 0; r < grid_layout->computed_row_count; r++) {
-                total_row_height += (*grid_layout->computed_rows)[r].base_size;
-            }
-            if (grid_layout->computed_row_count > 1) {
-                total_row_height += grid_layout->row_gap * (grid_layout->computed_row_count - 1);
-            }
-            float new_h = total_row_height + container_box.pad_border_v;
+            float new_h = layout_grid_row_border_box_extent(container, grid_layout);
             if (new_h > (float)container->height) {
                 container->height = (int)new_h; // INT_CAST_OK: grid container height
             }
@@ -347,19 +358,15 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     resolve_grid_template_areas(grid_layout);
 
     // Phase 2.5: Register named grid lines from track lists and template areas
-    if (grid_layout->grid_template_columns) {
-        GridTrackList* cols = grid_layout->grid_template_columns;
-        for (int i = 0; i <= cols->track_count && i < cols->allocated_tracks + 1; i++) {
-            if (cols->line_names[i]) {
-                add_grid_line_name(grid_layout, cols->line_names[i], i + 1, false);
-            }
-        }
-    }
-    if (grid_layout->grid_template_rows) {
-        GridTrackList* rows = grid_layout->grid_template_rows;
-        for (int i = 0; i <= rows->track_count && i < rows->allocated_tracks + 1; i++) {
-            if (rows->line_names[i]) {
-                add_grid_line_name(grid_layout, rows->line_names[i], i + 1, true);
+    GridTrackList* template_tracks[2] = {
+        grid_layout->grid_template_columns, grid_layout->grid_template_rows
+    };
+    for (int axis = 0; axis < 2; axis++) {
+        GridTrackList* tracks = template_tracks[axis];
+        if (!tracks) continue;
+        for (int i = 0; i <= tracks->track_count && i < tracks->allocated_tracks + 1; i++) {
+            if (tracks->line_names[i]) {
+                add_grid_line_name(grid_layout, tracks->line_names[i], i + 1, axis == 1);
             }
         }
     }
@@ -608,13 +615,14 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             continue;
         }
         if (item->positionp()->position != CSS_VALUE_RELATIVE) continue;
-        float parent_w = (float)container->width;
-        float parent_h = (float)container->height;
-        float offset_x = layout_relative_axis_offset(item, true, parent_w);
-        float offset_y = layout_relative_axis_offset(item, false, parent_h);
-        if (offset_x != 0 || offset_y != 0) {
-            item->x += (int)offset_x; // INT_CAST_OK: grid item relative offset
-            item->y += (int)offset_y; // INT_CAST_OK: grid item relative offset
+        const LayoutAxis axes[2] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
+        const float containing_sizes[2] = {container->width, container->height};
+        for (int axis_index = 0; axis_index < 2; axis_index++) {
+            LayoutAxisRefs refs(item, axes[axis_index]);
+            float offset = layout_relative_axis_offset(
+                item, layout_axis_is_horizontal(axes[axis_index]),
+                containing_sizes[axis_index]);
+            refs.set_position(refs.get_position() + offset);
         }
     }
 
@@ -630,12 +638,8 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     if (!container || !items || !grid_layout) return 0;
 
     int count = 0;
-
-    // Count element children first - ONLY count element nodes, skip text nodes
     DomNode* child_node = container->first_child;
     while (child_node) {
-        // CRITICAL FIX: Only process element nodes, skip text nodes
-        // CSS Grid §8.1: whitespace-only text in grid containers is not rendered
         if (!child_node->is_element()) {
             layout_suppress_ignorable_container_text(child_node);
             child_node = child_node->next_sibling;
@@ -643,8 +647,24 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         }
 
         ViewBlock* child = lam::view_require_block(child_node);
-        if (!layout_block_is_skipped_container_item(child)) {
-            count++;
+        if (layout_block_is_skipped_container_item(child)) {
+            child_node = child_node->next_sibling;
+            continue;
+        }
+        // layout_count_potential_items supplies this scratch capacity; keep the
+        // guard here because malformed DOM trees must not overrun the pass array.
+        if (count >= grid_layout->allocated_items || !grid_layout->grid_items) {
+            *items = nullptr;
+            grid_layout->item_count = 0;
+            return 0;
+        }
+        grid_layout->grid_items[count++] = child;
+        GridItemProp* child_gi = grid_item_prop(child);
+        bool has_explicit_placement = child_gi && (
+            child_gi->grid_row_start != 0 || child_gi->grid_row_end != 0 ||
+            child_gi->grid_column_start != 0 || child_gi->grid_column_end != 0);
+        if (child_gi && !has_explicit_placement) {
+            child_gi->is_grid_auto_placed = true;
         }
         child_node = child_node->next_sibling;
     }
@@ -652,43 +672,6 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     if (count == 0) {
         *items = nullptr;
         return 0;
-    }
-
-    // Ensure the exact scratch-sized grid item array is not overrun.
-    if (count > grid_layout->allocated_items) {
-        *items = nullptr;
-        return 0;
-    }
-
-    // Collect items - ONLY collect element nodes, skip text nodes
-    count = 0;
-    child_node = container->first_child;
-    while (child_node) {
-        // CRITICAL FIX: Only process element nodes, skip text nodes
-        if (!child_node->is_element()) {
-            child_node = child_node->next_sibling;
-            continue;
-        }
-
-        ViewBlock* child = lam::view_require_block(child_node);
-        if (!layout_block_is_skipped_container_item(child)) {
-            grid_layout->grid_items[count] = child;
-
-            // Initialize grid item placement properties with defaults if not set
-            // Note: Only initialize placement-related properties (row/column),
-            // NOT alignment properties (justify_self/align_self_grid) which may be set via CSS
-            GridItemProp* child_gi = grid_item_prop(child);
-            bool has_explicit_placement = child_gi && (
-                child_gi->grid_row_start != 0 || child_gi->grid_row_end != 0 ||
-                child_gi->grid_column_start != 0 || child_gi->grid_column_end != 0);
-            if (!has_explicit_placement && child_gi) {
-                // Mark as auto-placed but preserve any CSS-set alignment properties
-                child_gi->is_grid_auto_placed = true;
-            }
-
-            count++;
-        }
-        child_node = child_node->next_sibling;
     }
 
     grid_layout->item_count = count;
