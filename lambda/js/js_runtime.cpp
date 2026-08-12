@@ -4591,7 +4591,10 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         return js_throw_type_error(msg);
                     }
                 }
-                return ord_val;
+                // D5.3/D5.4.3: shaped map fields can expose a pointer into
+                // movable scalar storage; publish a current number-home Item
+                // before later property/call allocations can compact it.
+                return scalar_storage_read(ord_val, false);
             }
             if (st == JS_OWN_DELETED) {
                 own_found = true;
@@ -26514,25 +26517,43 @@ static Item js_array_generic_iterative_callback(Item object, Item* args, int arg
 
 static Item js_array_generic_reduce_with_object(Item object, Item callback_object, Item* args,
         int argc, bool from_right, uint64_t* result_home) {
+    // D5.3/D5.4.3: the reducer callback may collect before returning, so the
+    // receiver, callback, accumulator, and current element cannot live only in
+    // native locals between iterations.
+    RootFrame roots(7);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> callback_object_root(roots, callback_object);
+    Rooted<Item> callback_root(roots, argc > 0 ? args[0] : ItemNull);
+    Rooted<Item> accumulator_root(roots, ItemNull);
+    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> element_root(roots, ItemNull);
+    Rooted<Item> undefined_this_root(roots,
+        (Item){.item = ITEM_JS_UNDEFINED});
     Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
     int64_t len = 0;
-    JS_ASSIGN_OR_RETURN(length_status, js_array_to_length_status(js_get_key_default(object, len_key), &len));
-    if (argc < 1 || !js_is_callable(args[0])) return js_throw_not_callable("callback");
+    JS_ASSIGN_OR_RETURN(length_status, js_array_to_length_status(
+        js_get_key_default(object_root.get(), len_key), &len));
+    if (argc < 1 || !js_is_callable(callback_root.get())) {
+        return js_throw_not_callable("callback");
+    }
 
-    Item callback = args[0];
-    Item accumulator = make_js_undefined();
+    accumulator_root.set(make_js_undefined());
     bool found = false;
     int64_t k = from_right ? len - 1 : 0;
 
     if (argc >= 2) {
-        accumulator = args[1];
+        accumulator_root.set(args[1]);
         found = true;
     } else {
         while (from_right ? (k >= 0) : (k < len)) {
             Item key = js_array_index_key(k);
-            JS_ASSIGN_OR_RETURN(has, js_array_method_has_property_status(object, key));
+            key_root.set(key);
+            JS_ASSIGN_OR_RETURN(has, js_array_method_has_property_status(
+                object_root.get(), key_root.get()));
             if (js_is_truthy(has)) {
-                JS_ASSIGN_OR_RETURN_INTO(accumulator, js_get_key_default(object, key));
+                Item initial = js_get_key_default(object_root.get(), key_root.get());
+                if (item_is_error(initial)) return initial;
+                accumulator_root.set(initial);
                 found = true;
                 k += from_right ? -1 : 1;
                 break;
@@ -26544,21 +26565,28 @@ static Item js_array_generic_reduce_with_object(Item object, Item callback_objec
         }
     }
 
-    Item undefined_this = (Item){.item = ITEM_JS_UNDEFINED};
     while (from_right ? (k >= 0) : (k < len)) {
         Item key = js_array_index_key(k);
-        JS_ASSIGN_OR_RETURN(has, js_array_method_has_property_status(object, key));
+        key_root.set(key);
+        JS_ASSIGN_OR_RETURN(has, js_array_method_has_property_status(
+            object_root.get(), key_root.get()));
         if (js_is_truthy(has)) {
-            JS_ASSIGN_OR_RETURN(elem, js_get_key_default(object, key));
-            Item cb_args[4] = { accumulator, elem, (Item){.item = i2it(k)}, callback_object };
-            accumulator = result_home
-                ? js_call_function_into(callback, undefined_this, cb_args, 4, result_home)
-                : js_call_function(callback, undefined_this, cb_args, 4);
-            if (item_is_error(accumulator)) return accumulator;
+            Item element = js_get_key_default(object_root.get(), key_root.get());
+            if (item_is_error(element)) return element;
+            element_root.set(element);
+            Item cb_args[4] = { accumulator_root.get(), element_root.get(),
+                (Item){.item = i2it(k)}, callback_object_root.get() };
+            Item next = result_home
+                ? js_call_function_into(callback_root.get(),
+                    undefined_this_root.get(), cb_args, 4, result_home)
+                : js_call_function(callback_root.get(),
+                    undefined_this_root.get(), cb_args, 4);
+            if (item_is_error(next)) return next;
+            accumulator_root.set(next);
         }
         k += from_right ? -1 : 1;
     }
-    return accumulator;
+    return accumulator_root.get();
 }
 
 static Item js_array_generic_reduce(Item object, Item* args, int argc, bool from_right,
@@ -29736,27 +29764,36 @@ static Item js_async_generator_yield_result(Item value) {
 
 // v15: Create a 2-element array [value, next_state] for state machine returns
 extern "C" Item js_gen_yield_result(Item value, int64_t next_state) {
-    Item arr = js_array_new(2);
-    js_array_store_owned(arr.array, 0, value);
-    arr.array->items[1] = (Item){.item = i2it(next_state)};
-    return arr;
+    // D5.3/D5.4.3: building the state-result array can collect before its
+    // payload store, so keep the yielded scalar and fresh result container
+    // rooted across that allocation boundary.
+    RootFrame roots(2);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> result_root(roots, js_array_new(2));
+    js_array_store_owned(result_root.get().array, 0, value_root.get());
+    result_root.get().array->items[1] = (Item){.item = i2it(next_state)};
+    return result_root.get();
 }
 
 // yield* delegation: create 3-element array [iterable, resume_state, 1(flag)]
 extern "C" Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state) {
-    Item arr = js_array_new(3);
-    js_array_store_owned(arr.array, 0, iterable);
-    arr.array->items[1] = (Item){.item = i2it(resume_state)};
-    arr.array->items[2] = (Item){.item = i2it(1)};  // delegation flag
-    return arr;
+    RootFrame roots(2);
+    Rooted<Item> iterable_root(roots, iterable);
+    Rooted<Item> result_root(roots, js_array_new(3));
+    js_array_store_owned(result_root.get().array, 0, iterable_root.get());
+    result_root.get().array->items[1] = (Item){.item = i2it(resume_state)};
+    result_root.get().array->items[2] = (Item){.item = i2it(1)};  // delegation flag
+    return result_root.get();
 }
 
 extern "C" Item js_gen_await_result(Item value, int64_t next_state) {
-    Item arr = js_array_new(3);
-    js_array_store_owned(arr.array, 0, value);
-    arr.array->items[1] = (Item){.item = i2it(next_state)};
-    arr.array->items[2] = (Item){.item = i2it(2)};  // async-generator await flag
-    return arr;
+    RootFrame roots(2);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> result_root(roots, js_array_new(3));
+    js_array_store_owned(result_root.get().array, 0, value_root.get());
+    result_root.get().array->items[1] = (Item){.item = i2it(next_state)};
+    result_root.get().array->items[2] = (Item){.item = i2it(2)};  // async-generator await flag
+    return result_root.get();
 }
 
 
@@ -30243,6 +30280,11 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         Array* arr = result.array;
         Item value = (arr->length > 0) ? arr->items[0] : ItemNull;
         value_root.set(value);
+        // D5.3/D5.4.3: the state-result array owns wide scalar tails, but the
+        // iterator-result map may allocate and compact that array before it
+        // consumes the value; re-home the scalar while the source is rooted.
+        value_root.set(scalar_storage_read(value_root.get(), false));
+        value = value_root.get();
         int64_t next_state = -1;
         if (arr->length > 1 && get_type_id(arr->items[1]) == LMD_TYPE_INT) {
             next_state = it2i(arr->items[1]);
@@ -31460,29 +31502,38 @@ static bool js_domain_is_domain_item(Item domain) {
 }
 
 static void js_domain_sync_visible_state(void) {
-    Item domain = js_domain_stack_count > 0
+    // D5.3/D5.4.3: domain publication allocates process properties and the
+    // visible stack array, so transient values must stay exact roots across
+    // each allocation instead of relying only on the persistent state slots.
+    RootFrame roots(3);
+    Rooted<Item> domain_root(roots, js_domain_stack_count > 0
         ? js_domain_stack[js_domain_stack_count - 1]
-        : make_js_undefined();
-    js_domain_current = js_domain_stack_count > 0 ? domain : (Item){0};
+        : make_js_undefined());
+    Rooted<Item> process_root(roots, ItemNull);
+    Rooted<Item> stack_root(roots, ItemNull);
+    js_domain_current = js_domain_stack_count > 0 ? domain_root.get() : (Item){0};
 
-    Item process = js_get_process_object_value();
-    js_set_key_default(process, (Item){.item = s2it(heap_create_name("domain", 6))}, domain);
+    process_root.set(js_get_process_object_value());
+    js_set_key_default(process_root.get(), (Item){.item = s2it(heap_create_name("domain", 6))},
+        domain_root.get());
 
     if (js_domain_namespace.item != 0) {
-        Item stack = js_array_new(0);
+        stack_root.set(js_array_new(0));
         for (int i = 0; i < js_domain_stack_count; i++) {
-            js_array_push(stack, js_domain_stack[i]);
+            js_array_push(stack_root.get(), js_domain_stack[i]);
         }
-        js_set_key_default(js_domain_namespace, (Item){.item = s2it(heap_create_name("_stack", 6))}, stack);
+        js_set_key_default(js_domain_namespace,
+            (Item){.item = s2it(heap_create_name("_stack", 6))}, stack_root.get());
     }
 }
 
 extern "C" Item js_domain_capture_stack(void) {
-    Item stack = js_array_new(0);
+    RootFrame roots(1);
+    Rooted<Item> stack_root(roots, js_array_new(0));
     for (int i = 0; i < js_domain_stack_count; i++) {
-        js_array_push(stack, js_domain_stack[i]);
+        js_array_push(stack_root.get(), js_domain_stack[i]);
     }
-    return stack;
+    return stack_root.get();
 }
 
 extern "C" Item js_domain_capture_async_stack(void) {
@@ -31492,31 +31543,37 @@ extern "C" Item js_domain_capture_async_stack(void) {
 }
 
 static void js_domain_apply_stack(Item stack) {
+    RootFrame roots(1);
+    Rooted<Item> stack_root(roots, stack);
     if (!js_root_range_ensure_registered(&js_domain_stack_state.roots)) return;
     js_item_stack_clear(&js_domain_stack_state);
-    if (get_type_id(stack) == LMD_TYPE_ARRAY) {
-        int64_t len = js_array_length(stack);
+    if (get_type_id(stack_root.get()) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(stack_root.get());
         if (len > 64) len = 64;
         for (int64_t i = 0; i < len; i++) {
-            Item domain = js_elements_get_int(stack, i);
+            Item domain = js_elements_get_int(stack_root.get(), i);
             if (js_domain_is_domain_item(domain)) {
                 if (!js_item_stack_push(&js_domain_stack_state, domain)) break;
             }
         }
-    } else if (js_domain_is_domain_item(stack)) {
-        js_item_stack_push(&js_domain_stack_state, stack);
+    } else if (js_domain_is_domain_item(stack_root.get())) {
+        js_item_stack_push(&js_domain_stack_state, stack_root.get());
     }
     js_domain_sync_visible_state();
 }
 
 extern "C" Item js_domain_set_stack(Item stack) {
-    Item previous = js_domain_capture_stack();
-    js_domain_apply_stack(stack);
-    return previous;
+    RootFrame roots(2);
+    Rooted<Item> stack_root(roots, stack);
+    Rooted<Item> previous_root(roots, js_domain_capture_stack());
+    js_domain_apply_stack(stack_root.get());
+    return previous_root.get();
 }
 
 extern "C" void js_domain_restore_stack(Item previous) {
-    js_domain_apply_stack(previous);
+    RootFrame roots(1);
+    Rooted<Item> previous_root(roots, previous);
+    js_domain_apply_stack(previous_root.get());
 }
 
 static void js_domain_push(Item domain) {

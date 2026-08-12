@@ -596,31 +596,38 @@ static void timer_fire_cb(uv_timer_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
     timer_progress_generation++;
     bool close_after_fire = th && !th->is_interval;
-    Item callback_result = ItemNull;
+    // D5.3/D5.4.3: the timer callback may collect before the saved async
+    // context is restored, so callback results and prior context snapshots
+    // must remain exact roots across the callback boundary.
+    RootFrame roots(3);
+    Rooted<Item> callback_result_root(roots, ItemNull);
+    Rooted<Item> previous_resource_root(roots, ItemNull);
+    Rooted<Item> previous_domain_root(roots, ItemNull);
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
-        Item previous_resource = js_async_hooks_enter_resource(th->async_resource);
-        Item previous_domain = js_domain_set_stack(th->domain);
+        previous_resource_root.set(js_async_hooks_enter_resource(th->async_resource));
+        previous_domain_root.set(js_domain_set_stack(th->domain));
         if (js_is_callable(th->callback)) {
             if (th->extra_count > 0) {
                 if (th->extra_count == 1) {
-                    callback_result = js_als_context_call(th->als_context, th->callback, ItemNull,
-                                        th->extra_args[0], 1);
+                    callback_result_root.set(js_als_context_call(th->als_context, th->callback, ItemNull,
+                                        th->extra_args[0], 1));
                 } else {
-                    callback_result = js_als_context_call_args(th->als_context, th->callback, ItemNull,
-                                             th->extra_args, th->extra_count);
+                    callback_result_root.set(js_als_context_call_args(th->als_context, th->callback, ItemNull,
+                                             th->extra_args, th->extra_count));
                 }
             } else {
-                callback_result = js_als_context_call(th->als_context, th->callback, ItemNull, ItemNull, 0);
+                callback_result_root.set(js_als_context_call(th->als_context, th->callback,
+                    ItemNull, ItemNull, 0));
             }
         }
-        js_domain_restore_stack(previous_domain);
-        js_async_hooks_restore_resource(previous_resource);
+        js_domain_restore_stack(previous_domain_root.get());
+        js_async_hooks_restore_resource(previous_resource_root.get());
         timer_runtime_exit(&scope);
     } else {
         log_error("event_loop: timer fired without captured JS runtime");
     }
-    if (th && th->is_interval && item_is_error(callback_result) && !th->closing) {
+    if (th && th->is_interval && item_is_error(callback_result_root.get()) && !th->closing) {
         // An interval callback that throws before its clearInterval call can
         // otherwise re-enter forever and starve the drain watchdog.
         timer_mark_object_destroyed(th);

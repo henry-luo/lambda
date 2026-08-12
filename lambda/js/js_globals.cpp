@@ -2587,19 +2587,25 @@ extern "C" void js_store_process_exec_argv(int argc, const char** argv) {
 
 extern "C" void js_set_process_argv(int argc, const char** argv) {
     // Build a Lambda array from the argv (requires heap to be active)
+    // D5.3/D5.4.3: array() returns a GC object before process state owns it;
+    // root it while each argv name allocation can trigger collection.
+    RootFrame roots(1);
     Array* arr = array();
+    Rooted<Item> arr_root(roots, (Item){.array = arr});
     for (int i = 0; i < argc; i++) {
-        array_push(arr, (Item){.item = s2it(heap_create_name(argv[i]))});
+        array_push(arr_root.get().array, (Item){.item = s2it(heap_create_name(argv[i]))});
     }
-    js_process_argv_items = array_end(arr);
+    js_process_argv_items = array_end(arr_root.get().array);
 }
 
 extern "C" void js_set_process_exec_argv(int argc, const char** argv) {
+    RootFrame roots(1);
     Array* arr = array();
+    Rooted<Item> arr_root(roots, (Item){.array = arr});
     for (int i = 0; i < argc; i++) {
-        array_push(arr, (Item){.item = s2it(heap_create_name(argv[i]))});
+        array_push(arr_root.get().array, (Item){.item = s2it(heap_create_name(argv[i]))});
     }
-    js_process_exec_argv_items = array_end(arr);
+    js_process_exec_argv_items = array_end(arr_root.get().array);
 }
 
 extern "C" Item js_get_process_argv(void) {
@@ -2609,8 +2615,10 @@ extern "C" Item js_get_process_argv(void) {
     }
     // Return an empty array if process.argv was never set (prevents null subscript crash)
     if (js_process_cache_is_empty(js_process_argv_items)) {
+        RootFrame roots(1);
         Array* arr = array();
-        js_process_argv_items = array_end(arr);
+        Rooted<Item> arr_root(roots, (Item){.array = arr});
+        js_process_argv_items = array_end(arr_root.get().array);
     }
     return js_process_argv_items;
 }
@@ -2620,8 +2628,10 @@ extern "C" Item js_get_process_exec_argv(void) {
         js_set_process_exec_argv(js_process_exec_argc_raw, js_process_exec_argv_raw);
     }
     if (js_process_cache_is_empty(js_process_exec_argv_items)) {
+        RootFrame roots(1);
         Array* arr = array();
-        js_process_exec_argv_items = array_end(arr);
+        Rooted<Item> arr_root(roots, (Item){.array = arr});
+        js_process_exec_argv_items = array_end(arr_root.get().array);
     }
     return js_process_exec_argv_items;
 }
@@ -2694,7 +2704,11 @@ extern "C" int js_process_current_exit_code(void) {
 
 // build process.env as a map of environment variables
 static Item build_process_env(void) {
-    Item env = js_new_object();
+    // D5.3/D5.4.3: process sub-objects are published only after construction,
+    // so their builder locals must remain exact roots across every property write.
+    RootFrame roots(1);
+    Rooted<Item> env_root(roots, js_new_object());
+    Item env = env_root.get();
     // Mark as process.env so js_set_key_default coerces values to strings
     env.map->map_kind = MAP_KIND_PROCESS_ENV;
     extern char** environ;
@@ -2720,54 +2734,47 @@ static Item build_process_env(void) {
     js_set_key_default(env,
         (Item){.item = s2it(heap_create_name("NODE_SKIP_FLAG_CHECK", 20))},
         (Item){.item = s2it(heap_create_name("1", 1))});
-    return env;
+    return env_root.get();
 }
 
 // build process.stdout object with write() method
 static Item build_process_stdout(void) {
-    Item stdout_obj = js_new_object();
-    Item write_fn = js_new_native_function(js_process_stdout_write);
-    js_set_key_default(stdout_obj, (Item){.item = s2it(heap_create_name("write", 5))}, write_fn);
-    js_set_key_default(stdout_obj, (Item){.item = s2it(heap_create_name("fd", 2))}, (Item){.item = i2it(1)});
-    js_set_key_default(stdout_obj, (Item){.item = s2it(heap_create_name("isTTY", 5))},
+    RootFrame roots(1);
+    Rooted<Item> stdout_root(roots, js_new_object());
+    js_set_key_cstr(stdout_root.get(), "write", js_new_native_function(js_process_stdout_write));
+    js_set_key_cstr(stdout_root.get(), "fd", (Item){.item = i2it(1)});
+    js_set_key_cstr(stdout_root.get(), "isTTY",
         (Item){.item = b2it(isatty(1))});
-    return stdout_obj;
+    return stdout_root.get();
 }
 
 // build process.stderr object with write() method
 static Item build_process_stderr(void) {
-    Item stderr_obj = js_new_object();
-    Item write_fn = js_new_native_function(js_process_stderr_write);
-    js_set_key_default(stderr_obj, (Item){.item = s2it(heap_create_name("write", 5))}, write_fn);
-    js_set_key_default(stderr_obj, (Item){.item = s2it(heap_create_name("fd", 2))}, (Item){.item = i2it(2)});
-    js_set_key_default(stderr_obj, (Item){.item = s2it(heap_create_name("isTTY", 5))},
+    RootFrame roots(1);
+    Rooted<Item> stderr_root(roots, js_new_object());
+    js_set_key_cstr(stderr_root.get(), "write", js_new_native_function(js_process_stderr_write));
+    js_set_key_cstr(stderr_root.get(), "fd", (Item){.item = i2it(2)});
+    js_set_key_cstr(stderr_root.get(), "isTTY",
         (Item){.item = b2it(isatty(2))});
-    return stderr_obj;
+    return stderr_root.get();
 }
 
 // build process.stdin object with read() method and basic Readable-like interface
 static Item build_process_stdin(void) {
-    Item stdin_obj = js_new_object();
-    Item read_fn = js_new_native_function(js_process_stdin_read);
-    js_set_key_default(stdin_obj, (Item){.item = s2it(heap_create_name("read", 4))}, read_fn);
-    js_set_key_default(stdin_obj, (Item){.item = s2it(heap_create_name("destroy", 7))},
-        js_new_native_function(js_process_stdin_destroy));
-    js_set_key_default(stdin_obj, (Item){.item = s2it(heap_create_name("setRawMode", 10))},
-        js_new_native_function(js_process_stdin_setRawMode));
-    js_set_key_default(stdin_obj, (Item){.item = s2it(heap_create_name("on", 2))},
-        js_new_native_function(js_process_stdin_on));
-    js_set_key_default(stdin_obj, (Item){.item = s2it(heap_create_name("addListener", 11))},
-        js_new_native_function(js_process_stdin_on));
-    js_set_key_default(stdin_obj, (Item){.item = s2it(heap_create_name("pipe", 4))},
-        js_new_native_function(js_process_stdin_pipe));
-    js_set_key_default(stdin_obj, (Item){.item = s2it(heap_create_name("resume", 6))},
-        js_new_native_function(js_process_stdin_resume));
-    js_set_key_default(stdin_obj, (Item){.item = s2it(heap_create_name("pause", 5))},
-        js_new_native_function(js_process_stdin_pause));
-    js_set_key_default(stdin_obj, (Item){.item = s2it(heap_create_name("fd", 2))}, (Item){.item = i2it(0)});
-    js_set_key_default(stdin_obj, (Item){.item = s2it(heap_create_name("isTTY", 5))},
+    RootFrame roots(1);
+    Rooted<Item> stdin_root(roots, js_new_object());
+    js_set_key_cstr(stdin_root.get(), "read", js_new_native_function(js_process_stdin_read));
+    js_set_key_cstr(stdin_root.get(), "destroy", js_new_native_function(js_process_stdin_destroy));
+    js_set_key_cstr(stdin_root.get(), "setRawMode", js_new_native_function(js_process_stdin_setRawMode));
+    js_set_key_cstr(stdin_root.get(), "on", js_new_native_function(js_process_stdin_on));
+    js_set_key_cstr(stdin_root.get(), "addListener", js_new_native_function(js_process_stdin_on));
+    js_set_key_cstr(stdin_root.get(), "pipe", js_new_native_function(js_process_stdin_pipe));
+    js_set_key_cstr(stdin_root.get(), "resume", js_new_native_function(js_process_stdin_resume));
+    js_set_key_cstr(stdin_root.get(), "pause", js_new_native_function(js_process_stdin_pause));
+    js_set_key_cstr(stdin_root.get(), "fd", (Item){.item = i2it(0)});
+    js_set_key_cstr(stdin_root.get(), "isTTY",
         (Item){.item = b2it(isatty(0))});
-    return stdin_obj;
+    return stdin_root.get();
 }
 
 // process.nextTick(callback, ...args) — queue callback before microtasks
@@ -2948,26 +2955,19 @@ extern "C" Item js_node_throw_system_error(const char* syscall, int error_number
 
 // build process.versions object
 static Item build_process_versions(void) {
-    Item versions = js_new_object();
-    js_set_key_default(versions, (Item){.item = s2it(heap_create_name("node", 4))},
-                    (Item){.item = s2it(heap_create_name("20.0.0", 6))});
-    js_set_key_default(versions, (Item){.item = s2it(heap_create_name("lambda", 6))},
-                    (Item){.item = s2it(heap_create_name("1.0.0", 5))});
-    js_set_key_default(versions, (Item){.item = s2it(heap_create_name("v8", 2))},
-                    (Item){.item = s2it(heap_create_name("0.0.0", 5))});
-    js_set_key_default(versions, (Item){.item = s2it(heap_create_name("uv", 2))},
-                    (Item){.item = s2it(heap_create_name("1.0.0", 5))});
-    js_set_key_default(versions, (Item){.item = s2it(heap_create_name("modules", 7))},
-                    (Item){.item = s2it(heap_create_name("115", 3))});
+    RootFrame roots(1);
+    Rooted<Item> versions_root(roots, js_new_object());
+    js_set_key_cstr(versions_root.get(), "node", make_string_item("20.0.0"));
+    js_set_key_cstr(versions_root.get(), "lambda", make_string_item("1.0.0"));
+    js_set_key_cstr(versions_root.get(), "v8", make_string_item("0.0.0"));
+    js_set_key_cstr(versions_root.get(), "uv", make_string_item("1.0.0"));
+    js_set_key_cstr(versions_root.get(), "modules", make_string_item("115"));
     // LambdaJS exposes crypto compatibility APIs backed by mbedTLS, not full
     // OpenSSL 3 provider/FIPS/RSA-keygen semantics.
-    js_set_key_default(versions, (Item){.item = s2it(heap_create_name("openssl", 7))},
-                    (Item){.item = s2it(heap_create_name("1.1.1", 5))});
-    js_set_key_default(versions, (Item){.item = s2it(heap_create_name("zlib", 4))},
-                    (Item){.item = s2it(heap_create_name("1.3.0", 5))});
-    js_set_key_default(versions, (Item){.item = s2it(heap_create_name("napi", 4))},
-                    (Item){.item = s2it(heap_create_name("9", 1))});
-    return versions;
+    js_set_key_cstr(versions_root.get(), "openssl", make_string_item("1.1.1"));
+    js_set_key_cstr(versions_root.get(), "zlib", make_string_item("1.3.0"));
+    js_set_key_cstr(versions_root.get(), "napi", make_string_item("9"));
+    return versions_root.get();
 }
 
 template <typename Target>
@@ -3827,73 +3827,75 @@ extern "C" Item js_get_process_object_value(void) {
 
         // config — minimal process.config for Node.js compat
         {
-            Item config_obj = js_new_object();
-            Item variables_obj = js_new_object();
-            js_set_key_default(variables_obj,
+            RootFrame roots(2);
+            Rooted<Item> config_root(roots, js_new_object());
+            Rooted<Item> variables_root(roots, js_new_object());
+            js_set_key_default(variables_root.get(),
                 (Item){.item = s2it(heap_create_name("v8_enable_i18n_support", 22))},
                 (Item){.item = i2it(0)});
-            js_set_key_default(variables_obj,
+            js_set_key_default(variables_root.get(),
                 (Item){.item = s2it(heap_create_name("node_shared", 11))},
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(variables_obj,
+            js_set_key_default(variables_root.get(),
                 (Item){.item = s2it(heap_create_name("node_use_ffi", 12))},
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(config_obj,
+            js_set_key_default(config_root.get(),
                 (Item){.item = s2it(heap_create_name("variables", 9))},
-                variables_obj);
+                variables_root.get());
             js_set_key_default(js_process_object,
                 (Item){.item = s2it(heap_create_name("config", 6))},
-                config_obj);
+                config_root.get());
         }
 
         // features — minimal process.features for Node.js compat
         {
-            Item features_obj = js_new_object();
-            js_set_key_default(features_obj,
+            RootFrame roots(1);
+            Rooted<Item> features_root(roots, js_new_object());
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("inspector", 9))},
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_obj,
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("debug", 5))},
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_obj,
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("uv", 2))},
                 (Item){.item = ITEM_TRUE});
-            js_set_key_default(features_obj,
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("tls_alpn", 8))},
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_obj,
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("tls_sni", 7))},
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_obj,
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("tls_ocsp", 8))},
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_obj,
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("tls", 3))},
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_obj,
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("ipv6", 4))},
                 (Item){.item = ITEM_TRUE});
             // Lambda's mbedTLS-backed crypto does not expose OpenSSL legacy
             // provider digests; use the BoringSSL-compatible feature gate for
             // Node tests that distinguish those algorithms.
-            js_set_key_default(features_obj,
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("openssl_is_boringssl", 20))},
                 (Item){.item = ITEM_TRUE});
-            js_set_key_default(features_obj,
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("quic", 4))},
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(features_obj,
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("cached_builtins", 15))},
                 (Item){.item = ITEM_TRUE});
-            js_set_key_default(features_obj,
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("require_module", 14))},
                 (Item){.item = ITEM_TRUE});
-            js_set_key_default(features_obj,
+            js_set_key_default(features_root.get(),
                 (Item){.item = s2it(heap_create_name("typescript", 10))},
                 (Item){.item = ITEM_FALSE});
             js_set_key_default(js_process_object,
                 (Item){.item = s2it(heap_create_name("features", 8))},
-                features_obj);
+                features_root.get());
         }
 
         // POSIX: process.getuid(), getgid(), geteuid(), getegid()
@@ -3909,13 +3911,14 @@ extern "C" Item js_get_process_object_value(void) {
 
         // process.release — Node.js compat
         {
-            Item release_obj = js_new_object();
-            js_set_key_default(release_obj,
+            RootFrame roots(1);
+            Rooted<Item> release_root(roots, js_new_object());
+            js_set_key_default(release_root.get(),
                 (Item){.item = s2it(heap_create_name("name", 4))},
                 (Item){.item = s2it(heap_create_name("node", 4))});
             js_set_key_default(js_process_object,
                 (Item){.item = s2it(heap_create_name("release", 7))},
-                release_obj);
+                release_root.get());
         }
 
         // process.binding(name) — deprecated, but tests check it exists
@@ -3933,44 +3936,43 @@ extern "C" Item js_get_process_object_value(void) {
         // process.allowedNodeEnvironmentFlags — Set of known flags
         {
             // Create an empty Set-like object with .has() method
-            Item flags = js_new_object();
+            RootFrame roots(1);
+            Rooted<Item> flags_root(roots, js_new_object());
             extern Item js_set_has_stub(Item self, Item key);
-            js_set_key_default(flags,
-                (Item){.item = s2it(heap_create_name("has", 3))},
-                js_new_native_function(js_set_has_stub));
+            js_set_key_cstr(flags_root.get(), "has", js_new_native_function(js_set_has_stub));
             js_set_key_default(js_process_object,
                 (Item){.item = s2it(heap_create_name("allowedNodeEnvironmentFlags", 27))},
-                flags);
+                flags_root.get());
         }
 
         // process.report — diagnostic report stub
         {
-            Item report = js_new_object();
+            RootFrame roots(1);
+            Rooted<Item> report_root(roots, js_new_object());
             extern Item js_process_report_getReport(void);
-            js_set_key_default(report,
-                (Item){.item = s2it(heap_create_name("getReport", 9))},
+            js_set_key_cstr(report_root.get(), "getReport",
                 js_new_native_function(js_process_report_getReport));
-            js_set_key_default(report,
+            js_set_key_default(report_root.get(),
                 (Item){.item = s2it(heap_create_name("directory", 9))},
                 (Item){.item = s2it(heap_create_name("", 0))});
-            js_set_key_default(report,
+            js_set_key_default(report_root.get(),
                 (Item){.item = s2it(heap_create_name("filename", 8))},
                 (Item){.item = s2it(heap_create_name("", 0))});
-            js_set_key_default(report,
+            js_set_key_default(report_root.get(),
                 (Item){.item = s2it(heap_create_name("compact", 7))},
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(report,
+            js_set_key_default(report_root.get(),
                 (Item){.item = s2it(heap_create_name("reportOnFatalError", 18))},
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(report,
+            js_set_key_default(report_root.get(),
                 (Item){.item = s2it(heap_create_name("reportOnSignal", 14))},
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(report,
+            js_set_key_default(report_root.get(),
                 (Item){.item = s2it(heap_create_name("reportOnUncaughtException", 25))},
                 (Item){.item = ITEM_FALSE});
             js_set_key_default(js_process_object,
                 (Item){.item = s2it(heap_create_name("report", 6))},
-                report);
+                report_root.get());
         }
 
         // `process` itself is an ordinary JS global. Activating node-core here
@@ -9018,19 +9020,24 @@ extern "C" Item js_object_keys(Item object) {
 
     // For arrays, return indices as string keys: ["0", "1", "2", ...]
     if (type == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(object)) {
-        int64_t len = object.array->length;
-        Item result = js_array_new(0);
-        Map* pm = js_array_props_map(object.array);
+        // D5.3/D5.4.3: array-key collection appends while allocation may
+        // collect, so neither the source array nor the result snapshot may
+        // live only in native locals during enumeration.
+        RootFrame roots(2);
+        Rooted<Item> object_root(roots, object);
+        Rooted<Item> result_root(roots, js_array_new(0));
+        int64_t len = object_root.get().array->length;
+        Map* pm = js_array_props_map(object_root.get().array);
         // Limit iteration to logical dense storage; sparse entries are picked
         // up by the companion-map walk below and the owned tail is excluded.
         int64_t dense_lim = len;
-        int64_t dense_capacity = container_dense_capacity(object.array);
+        int64_t dense_capacity = container_dense_capacity(object_root.get().array);
         if (dense_capacity < dense_lim) dense_lim = dense_capacity;
         for (int64_t i = 0; i < dense_lim; i++) {
             // v25: skip deleted elements (holes)... unless an accessor descriptor
             // is registered for this index in the companion map (Object.defineProperty
             // on an array index installs the data slot as a hole and stores get/set in pm).
-            if (object.array->items[i].item == JS_DELETED_SENTINEL_VAL) {
+            if (object_root.get().array->items[i].item == JS_DELETED_SENTINEL_VAL) {
                 bool has_companion_index = false;
                 if (pm) {
                     // AT-3: IS_ACCESSOR shape-flag probe under digit-string name
@@ -9056,21 +9063,21 @@ extern "C" Item js_object_keys(Item object) {
             String* index_name = js_property_index_name(i);
             if (!index_name) return ItemError;
             Item key_str = (Item){.item = s2it(index_name)};
-            js_array_push(result, key_str);
+            js_array_push(result_root.get(), key_str);
         }
         int64_t sparse_hash_count = js_array_sparse_collect_indices(
-            object, dense_lim, object.array->length, NULL, 0);
+            object_root.get(), dense_lim, object_root.get().array->length, NULL, 0);
         if (sparse_hash_count > 0) {
             int64_t* sparse_hash_indices =
                 (int64_t*)mem_alloc((size_t)sparse_hash_count * sizeof(int64_t), MEM_CAT_JS_RUNTIME);
             if (sparse_hash_indices) {
                 int64_t written = js_array_sparse_collect_indices(
-                    object, dense_lim, object.array->length,
+                    object_root.get(), dense_lim, object_root.get().array->length,
                     sparse_hash_indices, sparse_hash_count);
                 for (int64_t si = 0; si < written; si++) {
                     String* index_name = js_property_index_name(sparse_hash_indices[si]);
                     if (!index_name) return ItemError;
-                    js_array_push(result, (Item){.item = s2it(index_name)});
+                    js_array_push(result_root.get(), (Item){.item = s2it(index_name)});
                 }
                 mem_free(sparse_hash_indices);
             }
@@ -9100,11 +9107,11 @@ extern "C" Item js_object_keys(Item object) {
                 // skip non-enumerable (Stage A3: shape-flag-first)
                 if (!js_props_query_enumerable(pm, e, s, slen)) { e = e->next; continue; }
                 Item key_item = (Item){.item = s2it(heap_create_name(s, slen))};
-                js_array_push(result, key_item);
+                js_array_push(result_root.get(), key_item);
                 e = e->next;
             }
         }
-        return result;
+        return result_root.get();
     }
 
     // Functions: return enumerable properties from properties_map

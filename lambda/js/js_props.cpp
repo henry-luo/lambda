@@ -1267,6 +1267,12 @@ extern "C" Item js_get(Item target, JsPropertyLane lane, Item observable_key,
     Rooted<Item> receiver_root(roots,
         receiver.item == ItemNull.item ? target_root.get() : receiver);
     if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
+    if (get_type_id(target_root.get()) == LMD_TYPE_NULL ||
+            get_type_id(target_root.get()) == LMD_TYPE_UNDEFINED) {
+        // D8.4.3: the optimized Get kernel may box primitives, but nullish
+        // receivers still need the reference-level TypeError completion.
+        return js_get_reference(target_root.get(), key_root.get());
+    }
     // D6.2.2v2: the semantic Get kernel also owns primitive boxing. Reflect's
     // public target validation is a caller policy and would reject valid
     // primitive member reads emitted by MIR.
