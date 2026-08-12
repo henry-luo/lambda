@@ -474,6 +474,26 @@ static float get_parent_table_number(DomNode* element, const char* attribute_nam
     return value >= 0.0f ? value : -1.0f;
 }
 
+static float parse_html_table_border_width(const char* attribute, bool is_present) {
+    if (!is_present) return -1.0f;
+    if (!attribute) return 1.0f;
+    const char* cursor = str_skip_ascii_space(attribute);
+    if (*cursor < '0' || *cursor > '9') {
+        // HTML's boolean border attribute defaults to one CSS pixel; only an
+        // explicit numeric zero suppresses the legacy table and cell borders.
+        return 1.0f;
+    }
+    StrView view = strview_init(cursor, strlen(cursor));
+    float width = strview_to_int(&view);
+    return width >= 0.0f ? width : 1.0f;
+}
+
+static float get_parent_table_border_width(DomNode* element) {
+    DomElement* table = parent_table_element(element);
+    return parse_html_table_border_width(table ? table->get_attribute("border") : nullptr,
+                                         table && table->has_attribute("border"));
+}
+
 static float html_font_size_for_level(int level) {
     if (level < 1) level = 1;
     if (level > 7) level = 7;
@@ -646,7 +666,7 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
         apply_html_background_color(lycon, block, bg_color);
     }
 
-    if (get_parent_table_number(cell_node, "border") > 0.0f) {
+    if (get_parent_table_border_width(cell_node) > 0.0f) {
         Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
         apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_INSET, &grey);
     }
@@ -1122,9 +1142,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Per WHATWG 15.3.10: table[border] { border-style: outset; border-color: grey; }
         // border-width is the attribute value in pixels
         const char* border_attr = elmt->get_attribute("border");
-        if (border_attr) {
-            StrView bv = strview_init(border_attr, strlen(border_attr));
-            float border_width = strview_to_int(&bv);
+        if (elmt->has_attribute("border")) {
+            float border_width = parse_html_table_border_width(border_attr, true);
             if (border_width >= 0) {
                 // border-color: grey (128, 128, 128)
                 Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };

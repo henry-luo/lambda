@@ -389,6 +389,8 @@ enum DomElementFlag : uint32_t {
     // Generated pseudo boxes read their originating element's pseudo tree.
     // Borrowing is distinct from epoch sharing because it has no epoch refcount.
     ELMT_FLAG_SPECIFIED_STYLE_BORROWED = 1u << 21,
+    // CSS Tables fixup boxes carry generated display roles rather than authored style.
+    ELMT_FLAG_TABLE_FIXUP = 1u << 22,
 };
 
 static_assert((ELMT_FLAG_INLINE_PROP_SHARED & ((1u << 17) - 1u)) == 0,
@@ -595,6 +597,8 @@ struct DomElement : DomNode {
     void set_measuring_intrinsic_width(bool value) { set_flag(ELMT_FLAG_MEASURING_INTRINSIC_WIDTH, value); }
     bool is_synthetic() const { return flag(ELMT_FLAG_SYNTHETIC); }
     void set_synthetic(bool value) { set_flag(ELMT_FLAG_SYNTHETIC, value); }
+    bool is_table_fixup() const { return flag(ELMT_FLAG_TABLE_FIXUP); }
+    void set_table_fixup(bool value) { set_flag(ELMT_FLAG_TABLE_FIXUP, value); }
     bool inline_prop_shared() const { return flag(ELMT_FLAG_INLINE_PROP_SHARED); }
     void mark_inline_prop_owned() { set_flag(ELMT_FLAG_INLINE_PROP_SHARED, false); }
     void mark_inline_prop_shared() { set_flag(ELMT_FLAG_INLINE_PROP_SHARED, true); }

@@ -370,8 +370,6 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
 
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 
-void update_scroller(ViewBlock* block, float content_width, float content_height);
-
 static bool flex_final_content_is_layout_item(View* view) {
     if (!layout_view_is_block_flow_box(view)) return false;
     ViewBlock* block = lam::view_as_block(view);
