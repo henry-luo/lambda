@@ -108,8 +108,9 @@ static uint8_t* node_string_decoder_buffer_data(Item buffer, int* out_length) {
     return data;
 }
 
+template <typename Target>
 static void node_string_decoder_set_method(Item object, const char* name,
-                                           void* function, int parameter_count) {
+        Target target, int adapter_arity) {
     if (!node_string_decoder_host || !node_string_decoder_host->value ||
             !node_string_decoder_host->script || !node_string_decoder_host->value->property_set ||
             !node_string_decoder_host->script->new_function) return;
@@ -123,7 +124,8 @@ static void node_string_decoder_set_method(Item object, const char* name,
     }
     Item key = node_string_decoder_string(name);
     *key_root = key.item;
-    Item method = node_string_decoder_host->script->new_function(function, parameter_count);
+    Item method = jube_new_function(node_string_decoder_host->script, target,
+        adapter_arity);
     *method_root = method.item;
     node_string_decoder_host->value->property_set(object, key, method);
     node_string_decoder_roots_end(&frame);
@@ -162,8 +164,8 @@ extern "C" Item node_string_decoder_new(Item encoding_item) {
     node_string_decoder_set_string_property(decoder, "encoding", encoding);
     node_string_decoder_set_string_property(decoder, "__pending__", "");
     node_string_decoder_set_item_property(decoder, "__pending_len__", (Item){.item = i2it(0)});
-    node_string_decoder_set_method(decoder, "write", (void*)node_string_decoder_write, 1);
-    node_string_decoder_set_method(decoder, "end", (void*)node_string_decoder_end, 1);
+    node_string_decoder_set_method(decoder, "write", node_string_decoder_write, 1);
+    node_string_decoder_set_method(decoder, "end", node_string_decoder_end, 1);
     node_string_decoder_roots_end(&frame);
     return decoder;
 }
@@ -202,11 +204,11 @@ Item node_string_decoder_namespace(void) {
 
     node_string_decoder_namespace_cache = node_string_decoder_host->value->new_object();
     node_string_decoder_set_method(node_string_decoder_namespace_cache, "StringDecoder",
-                                   (void*)node_string_decoder_new, 1);
+                                   node_string_decoder_new, 1);
     node_string_decoder_set_method(node_string_decoder_namespace_cache, "write",
-                                   (void*)node_string_decoder_write, 1);
+                                   node_string_decoder_write, 1);
     node_string_decoder_set_method(node_string_decoder_namespace_cache, "end",
-                                   (void*)node_string_decoder_end, 1);
+                                   node_string_decoder_end, 1);
     node_string_decoder_set_item_property(node_string_decoder_namespace_cache, "default",
                                           node_string_decoder_namespace_cache);
     return node_string_decoder_namespace_cache;

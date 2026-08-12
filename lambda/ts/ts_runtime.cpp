@@ -7,6 +7,7 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../js/js_runtime.h"
+#include "../js/js_function.hpp"
 #include "../../lib/log.h"
 #include <cstring>
 
@@ -270,7 +271,13 @@ extern "C" Item ts_type_info(Item value) {
 
     // for function items with attached TypeFunc
     if (type == LMD_TYPE_FUNC) {
-        Function* func = value.function;
+        JsFunction* js_func = (JsFunction*)value.function;
+        // JsFunction and core Function deliberately share only their tagged
+        // prefix. Reading JsFunction::func_ptr as Function::fn_type made the
+        // TS introspector dereference executable code after Tune4 canonicalized
+        // JS callable layout (D6.2.2v2).
+        Function* func = js_func && js_func->layout_magic != JS_FUNCTION_LAYOUT_MAGIC
+            ? value.function : NULL;
         if (func && func->fn_type) {
             TypeFunc* tf = (TypeFunc*)func->fn_type;
             if (tf->type_id == LMD_TYPE_FUNC) {

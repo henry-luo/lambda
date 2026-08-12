@@ -108,7 +108,7 @@
       "name": "js_numeric_inference_call",
       "script": "test/mir/js/numeric_inference_call.js",
       "language": "js",
-      "description": "JS call-result binding: watches js_main's root-store traffic and merged Item error-tag branches. D4.6.1v2 re-baseline: the fused active-module name resolver selects a direct or sealed NameId and returns the existing NamePool Item without a GC boundary.",
+      "description": "JS call-result binding: watches js_main's root-store traffic and merged Item error-tag branches. Tune4 re-baseline: console.log is an ordinary mutable property call through the per-callee entry instead of a name-selected MIR shortcut (D6.2.2v2).",
       "budgets": {
         "default": {
           "module_insns": 319,
@@ -120,11 +120,11 @@
           "frames": [
             {
               "name": "js_main",
-              "roots": 4,
-              "root_stores": 21,
-              "scalar_homes": 3,
+              "roots": 7,
+              "root_stores": 23,
+              "scalar_homes": 4,
               "number_scratch": 0,
-              "safepoints": 24
+              "safepoints": 35
             }
           ]
         }
@@ -134,7 +134,7 @@
       "name": "js_hoisted_modvar_write_through",
       "script": "test/mir/js/hoisted_modvar_write_through.js",
       "language": "js",
-      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. D4.6.1v2 re-baseline: the fused active-module name resolver selects a direct or sealed NameId and returns the existing NamePool Item without a GC boundary.",
+      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3).",
       "budgets": {
         "default": {
           "module_insns": 701,
@@ -155,11 +155,11 @@
             {
               "name": "_js_anon1_#",
               "occurrence": 0,
-              "roots": 3,
-              "root_stores": 6,
+              "roots": 4,
+              "root_stores": 8,
               "scalar_homes": 4,
               "number_scratch": 0,
-              "safepoints": 10
+              "safepoints": 14
             }
           ]
         }
@@ -213,7 +213,7 @@
       "name": "js_corpus_side_stack_frame_gc",
       "script": "test/js/regression_side_stack_frame_gc.js",
       "language": "js",
-      "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested, throwing fixed argument-root extents, merged Item error-tag branches, and generator throw-resume markers. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary.",
+      "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested, throwing fixed argument-root extents, merged Item error-tag branches, and generator throw-resume markers. Tune4 re-baseline: 64 former name/receiver-selected calls now perform observable property Get plus per-callee dispatch with precise argument roots (D6.2.2v2, D5.4.3).",
       "budgets": {
         "default": {
           "module_insns": 9590
@@ -260,7 +260,7 @@
               "name": "_guarded_store_#",
               "roots": 6,
               "root_stores": 0,
-              "scalar_homes": 1,
+              "scalar_homes": 0,
               "number_scratch": 0,
               "safepoints": 5
             }
@@ -324,7 +324,7 @@
       "name": "js_tune6_exact_collection",
       "script": "test/mir/js/tune6_exact_collection.js",
       "language": "js",
-      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case resolves class-owned unique NameIds instead of encoding private identity in a spelling (D4.6.1v2); active-module name resolution is fused into one no-GC MIR import.",
+      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case resolves class-owned unique NameIds instead of encoding private identity in a spelling. Tune4 re-baseline: atomic GC-aware callable finalization and precise class-metadata publication increase root stores while reducing finalized instructions and safepoints (D6.2.2v2, D5.4.3).",
       "budgets": {
         "linux-debug": {
           "module_insns": 6578,
@@ -361,10 +361,10 @@
             {
               "name": "js_main",
               "roots": 11,
-              "root_stores": 878,
-              "scalar_homes": 16,
+              "root_stores": 941,
+              "scalar_homes": 26,
               "number_scratch": 0,
-              "safepoints": 2176
+              "safepoints": 2452
             }
           ]
         },

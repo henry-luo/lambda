@@ -28,8 +28,6 @@ RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
 RADIANT_C_API void* radiant_dom_unwrap_node(Item item);
 RADIANT_C_API int radiant_dom_host_get_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_host_set_property(Item object, Item key, Item value, Item* out);
-RADIANT_C_API int radiant_dom_host_call_method(Item object, Item method_name,
-                                            Item* args, int argc, Item* out);
 RADIANT_C_API int radiant_dom_host_has_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_host_delete_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_host_own_property_descriptor(Item object, Item key, Item* out);
@@ -38,8 +36,6 @@ RADIANT_C_API Item radiant_dom_host_prototype(Item object);
 RADIANT_C_API void radiant_dom_host_invalidate(Item object);
 RADIANT_C_API int radiant_dom_document_host_get_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_document_host_set_property(Item object, Item key, Item value, Item* out);
-RADIANT_C_API int radiant_dom_document_host_call_method(Item object, Item method_name,
-                                                     Item* args, int argc, Item* out);
 RADIANT_C_API int radiant_dom_document_host_has_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_document_host_delete_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_document_host_own_property_descriptor(Item object, Item key, Item* out);
@@ -1083,8 +1079,7 @@ RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item valu
     // Attribute writes from Lambda must share JS DOM side effects such as
     // event-attribute compilation, selection refresh, and mutation notices.
     Item args[2] = {name_item, value_item};
-    Item method = (Item){.item = s2it(heap_create_name("setAttribute"))};
-    radiant_dom_element_method(node_item, method, args, 2);
+    radiant_dom_element_operation(node_item, JUBE_DOM_SET_ATTRIBUTE, args, 2);
     return node_item;
 }
 
@@ -1361,7 +1356,7 @@ extern const JubeHostObjectOps radiant_dom_node_host_ops;
 const JubeHostObjectOps radiant_dom_node_host_ops = {
     radiant_dom_host_get_property,
     radiant_dom_host_set_property,
-    radiant_dom_host_call_method,
+    NULL,
     radiant_dom_host_has_property,
     radiant_dom_host_delete_property,
     radiant_dom_host_own_property_descriptor,

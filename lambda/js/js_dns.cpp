@@ -100,7 +100,7 @@ static void append_invalid_arg_received(char* out, int out_size, Item value) {
         pos = append_text(out, out_size, pos, " Received type string (");
         pos = append_quoted_string_preview(out, out_size, pos, it2s(value));
         append_text(out, out_size, pos, ")");
-    } else if (type == LMD_TYPE_FUNC) {
+    } else if (js_is_callable(value)) {
         append_text(out, out_size, pos, " Received function ");
     } else if (type == LMD_TYPE_ARRAY) {
         append_text(out, out_size, pos, " Received an instance of Array");
@@ -349,7 +349,7 @@ static void dns_lookup_schedule(Item callback, Item resolve, Item reject,
     env[4] = callback_value;
     env[5] = callback_family;
     env[6] = promise_value;
-    Item fn = js_new_closure((void*)dns_lookup_emit_scheduled, 0, env, 7);
+    Item fn = js_new_native_closure(dns_lookup_emit_scheduled, 0, env, 7);
 
     dns_enqueue_scheduled(fn);
 }
@@ -362,7 +362,7 @@ static void dns_resolve_schedule(Item callback, Item resolve, Item reject,
     env[2] = reject;
     env[3] = error;
     env[4] = value;
-    Item fn = js_new_closure((void*)dns_resolve_emit_scheduled, 0, env, 5);
+    Item fn = js_new_native_closure(dns_resolve_emit_scheduled, 0, env, 5);
 
     dns_enqueue_scheduled(fn);
 }
@@ -378,7 +378,7 @@ static void dns_lookup_service_schedule(Item callback, Item resolve, Item reject
     env[4] = hostname;
     env[5] = service;
     env[6] = promise_value;
-    Item fn = js_new_closure((void*)dns_lookup_service_emit_scheduled, 0, env, 7);
+    Item fn = js_new_native_closure(dns_lookup_service_emit_scheduled, 0, env, 7);
 
     dns_enqueue_scheduled(fn);
 }
@@ -870,7 +870,7 @@ static void dns_ensure_cares_channelwrap(void) {
 
     Item ctor = js_property_get(cares, make_string_item("ChannelWrap"));
     if (!is_callable(ctor)) {
-        ctor = js_new_function((void*)js_dns_cares_query_default, 0);
+        ctor = js_new_native_constructor(js_dns_cares_query_default);
         js_property_set(cares, make_string_item("ChannelWrap"), ctor);
     }
 
@@ -888,7 +888,7 @@ static void dns_ensure_cares_channelwrap(void) {
         Item key = make_string_item(methods[i]);
         if (!is_callable(js_property_get(proto, key))) {
             js_property_set(proto, key,
-                js_new_function((void*)js_dns_cares_query_default, 1));
+                js_new_native_function(js_dns_cares_query_default));
         }
     }
 }
@@ -1614,10 +1614,10 @@ extern "C" Item js_dns_setLocalAddress(Item ipv4_item, Item ipv6_item) {
 // dns Module Namespace
 // =============================================================================
 
-static void dns_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    Item key = make_string_item(name);
-    Item fn = js_new_function(func_ptr, param_count);
-    js_property_set(ns, key, fn);
+template <typename Target>
+static void dns_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
+    js_install_native_method(ns, name, target, adapter_arity);
 }
 
 static void dns_set_constant(Item ns, const char* name, const char* value) {
@@ -1670,31 +1670,31 @@ static Item dns_get_resolver_prototype(bool promise_mode) {
 
     Item proto = js_new_object();
     if (promise_mode) {
-        dns_set_method(proto, "lookupService", (void*)js_dns_promises_lookupService, -1);
-        dns_set_method(proto, "resolve",  (void*)js_dns_promises_resolve, -1);
-        dns_set_method(proto, "resolve4", (void*)js_dns_promises_resolve4, -1);
-        dns_set_method(proto, "resolve6", (void*)js_dns_promises_resolve6, -1);
-        dns_set_method(proto, "resolveCname", (void*)js_dns_promises_resolveCname, -1);
-        dns_set_method(proto, "resolveMx", (void*)js_dns_promises_resolveMx, -1);
-        dns_set_method(proto, "resolveNs", (void*)js_dns_promises_resolveNs, -1);
-        dns_set_method(proto, "resolveSrv", (void*)js_dns_promises_resolveSrv, -1);
-        dns_set_method(proto, "resolveTxt", (void*)js_dns_promises_resolveTxt, -1);
-        dns_set_method(proto, "reverse", (void*)js_dns_promises_reverse, -1);
+        dns_set_method(proto, "lookupService", js_dns_promises_lookupService, -1);
+        dns_set_method(proto, "resolve",  js_dns_promises_resolve, -1);
+        dns_set_method(proto, "resolve4", js_dns_promises_resolve4, -1);
+        dns_set_method(proto, "resolve6", js_dns_promises_resolve6, -1);
+        dns_set_method(proto, "resolveCname", js_dns_promises_resolveCname, -1);
+        dns_set_method(proto, "resolveMx", js_dns_promises_resolveMx, -1);
+        dns_set_method(proto, "resolveNs", js_dns_promises_resolveNs, -1);
+        dns_set_method(proto, "resolveSrv", js_dns_promises_resolveSrv, -1);
+        dns_set_method(proto, "resolveTxt", js_dns_promises_resolveTxt, -1);
+        dns_set_method(proto, "reverse", js_dns_promises_reverse, -1);
     } else {
-        dns_set_method(proto, "lookupService", (void*)js_dns_lookupService, -1);
-        dns_set_method(proto, "resolve",  (void*)js_dns_resolve, -1);
-        dns_set_method(proto, "resolve4", (void*)js_dns_resolve4, -1);
-        dns_set_method(proto, "resolve6", (void*)js_dns_resolve6, -1);
-        dns_set_method(proto, "resolveCname", (void*)js_dns_resolveCname, -1);
-        dns_set_method(proto, "resolveMx", (void*)js_dns_resolveMx, -1);
-        dns_set_method(proto, "resolveNs", (void*)js_dns_resolveNs, -1);
-        dns_set_method(proto, "resolveSrv", (void*)js_dns_resolveSrv, -1);
-        dns_set_method(proto, "resolveTxt", (void*)js_dns_resolveTxt, -1);
-        dns_set_method(proto, "reverse", (void*)js_dns_reverse, -1);
+        dns_set_method(proto, "lookupService", js_dns_lookupService, -1);
+        dns_set_method(proto, "resolve",  js_dns_resolve, -1);
+        dns_set_method(proto, "resolve4", js_dns_resolve4, -1);
+        dns_set_method(proto, "resolve6", js_dns_resolve6, -1);
+        dns_set_method(proto, "resolveCname", js_dns_resolveCname, -1);
+        dns_set_method(proto, "resolveMx", js_dns_resolveMx, -1);
+        dns_set_method(proto, "resolveNs", js_dns_resolveNs, -1);
+        dns_set_method(proto, "resolveSrv", js_dns_resolveSrv, -1);
+        dns_set_method(proto, "resolveTxt", js_dns_resolveTxt, -1);
+        dns_set_method(proto, "reverse", js_dns_reverse, -1);
     }
-    dns_set_method(proto, "getServers", (void*)js_dns_getServers, 0);
-    dns_set_method(proto, "setServers", (void*)js_dns_setServers, 1);
-    dns_set_method(proto, "setLocalAddress", (void*)js_dns_setLocalAddress, 2);
+    dns_set_method(proto, "getServers", js_dns_getServers, 0);
+    dns_set_method(proto, "setServers", js_dns_setServers, 1);
+    dns_set_method(proto, "setLocalAddress", js_dns_setLocalAddress, 2);
 
     *proto_ptr = proto;
     return proto;
@@ -1708,7 +1708,7 @@ static void dns_init_resolver_state(Item resolver) {
     Item handle = js_new_object();
     js_property_set(handle, make_string_item("__dns_owner__"), resolver);
     js_property_set(handle, make_string_item("getServers"),
-        js_new_function((void*)js_dns_resolver_handle_getServers, 0));
+        js_new_native_function(js_dns_resolver_handle_getServers));
     js_property_set(resolver, make_string_item("_handle"), handle);
 }
 
@@ -1736,9 +1736,9 @@ extern "C" Item js_dns_promises_resolver_constructor(void) {
 }
 
 static Item dns_make_resolver_constructor(bool promise_mode) {
-    Item ctor = js_new_function(promise_mode ?
-        (void*)js_dns_promises_resolver_constructor :
-        (void*)js_dns_resolver_constructor, 0);
+    JsNativeP0 target = promise_mode ? js_dns_promises_resolver_constructor :
+        js_dns_resolver_constructor;
+    Item ctor = js_new_native_constructor(target);
     Item proto = dns_get_resolver_prototype(promise_mode);
     js_property_set(ctor, make_string_item("prototype"), proto);
     js_property_set(proto, make_string_item("constructor"), ctor);
@@ -1750,19 +1750,19 @@ extern "C" Item js_get_dns_promises_namespace(void) {
 
     dns_ensure_cares_channelwrap();
     dns_promises_namespace = js_new_object();
-    dns_set_method(dns_promises_namespace, "lookup",  (void*)js_dns_promises_lookup, -1);
-    dns_set_method(dns_promises_namespace, "lookupService", (void*)js_dns_promises_lookupService, -1);
-    dns_set_method(dns_promises_namespace, "resolve", (void*)js_dns_promises_resolve, -1);
-    dns_set_method(dns_promises_namespace, "resolve4", (void*)js_dns_promises_resolve4, -1);
-    dns_set_method(dns_promises_namespace, "resolve6", (void*)js_dns_promises_resolve6, -1);
-    dns_set_method(dns_promises_namespace, "resolveCname", (void*)js_dns_promises_resolveCname, -1);
-    dns_set_method(dns_promises_namespace, "resolveMx", (void*)js_dns_promises_resolveMx, -1);
-    dns_set_method(dns_promises_namespace, "resolveNs", (void*)js_dns_promises_resolveNs, -1);
-    dns_set_method(dns_promises_namespace, "resolveSrv", (void*)js_dns_promises_resolveSrv, -1);
-    dns_set_method(dns_promises_namespace, "resolveTxt", (void*)js_dns_promises_resolveTxt, -1);
-    dns_set_method(dns_promises_namespace, "reverse", (void*)js_dns_promises_reverse, -1);
-    dns_set_method(dns_promises_namespace, "getServers", (void*)js_dns_getServers, 0);
-    dns_set_method(dns_promises_namespace, "setServers", (void*)js_dns_setServers, 1);
+    dns_set_method(dns_promises_namespace, "lookup",  js_dns_promises_lookup, -1);
+    dns_set_method(dns_promises_namespace, "lookupService", js_dns_promises_lookupService, -1);
+    dns_set_method(dns_promises_namespace, "resolve", js_dns_promises_resolve, -1);
+    dns_set_method(dns_promises_namespace, "resolve4", js_dns_promises_resolve4, -1);
+    dns_set_method(dns_promises_namespace, "resolve6", js_dns_promises_resolve6, -1);
+    dns_set_method(dns_promises_namespace, "resolveCname", js_dns_promises_resolveCname, -1);
+    dns_set_method(dns_promises_namespace, "resolveMx", js_dns_promises_resolveMx, -1);
+    dns_set_method(dns_promises_namespace, "resolveNs", js_dns_promises_resolveNs, -1);
+    dns_set_method(dns_promises_namespace, "resolveSrv", js_dns_promises_resolveSrv, -1);
+    dns_set_method(dns_promises_namespace, "resolveTxt", js_dns_promises_resolveTxt, -1);
+    dns_set_method(dns_promises_namespace, "reverse", js_dns_promises_reverse, -1);
+    dns_set_method(dns_promises_namespace, "getServers", js_dns_getServers, 0);
+    dns_set_method(dns_promises_namespace, "setServers", js_dns_setServers, 1);
     dns_set_constants(dns_promises_namespace);
     js_property_set(dns_promises_namespace, make_string_item("__dns_servers__"),
         dns_get_default_servers());
@@ -1778,19 +1778,19 @@ extern "C" Item js_get_dns_namespace(void) {
     dns_ensure_cares_channelwrap();
     dns_namespace = js_new_object();
 
-    dns_set_method(dns_namespace, "lookup",     (void*)js_dns_lookup, -1);
-    dns_set_method(dns_namespace, "lookupService", (void*)js_dns_lookupService, -1);
-    dns_set_method(dns_namespace, "resolve",    (void*)js_dns_resolve, -1);
-    dns_set_method(dns_namespace, "resolve4",   (void*)js_dns_resolve4, -1);
-    dns_set_method(dns_namespace, "resolve6",   (void*)js_dns_resolve6, -1);
-    dns_set_method(dns_namespace, "resolveCname", (void*)js_dns_resolveCname, -1);
-    dns_set_method(dns_namespace, "resolveMx",    (void*)js_dns_resolveMx, -1);
-    dns_set_method(dns_namespace, "resolveNs",    (void*)js_dns_resolveNs, -1);
-    dns_set_method(dns_namespace, "resolveSrv",   (void*)js_dns_resolveSrv, -1);
-    dns_set_method(dns_namespace, "resolveTxt",   (void*)js_dns_resolveTxt, -1);
-    dns_set_method(dns_namespace, "reverse",      (void*)js_dns_reverse, -1);
-    dns_set_method(dns_namespace, "getServers", (void*)js_dns_getServers, 0);
-    dns_set_method(dns_namespace, "setServers", (void*)js_dns_setServers, 1);
+    dns_set_method(dns_namespace, "lookup",     js_dns_lookup, -1);
+    dns_set_method(dns_namespace, "lookupService", js_dns_lookupService, -1);
+    dns_set_method(dns_namespace, "resolve",    js_dns_resolve, -1);
+    dns_set_method(dns_namespace, "resolve4",   js_dns_resolve4, -1);
+    dns_set_method(dns_namespace, "resolve6",   js_dns_resolve6, -1);
+    dns_set_method(dns_namespace, "resolveCname", js_dns_resolveCname, -1);
+    dns_set_method(dns_namespace, "resolveMx",    js_dns_resolveMx, -1);
+    dns_set_method(dns_namespace, "resolveNs",    js_dns_resolveNs, -1);
+    dns_set_method(dns_namespace, "resolveSrv",   js_dns_resolveSrv, -1);
+    dns_set_method(dns_namespace, "resolveTxt",   js_dns_resolveTxt, -1);
+    dns_set_method(dns_namespace, "reverse",      js_dns_reverse, -1);
+    dns_set_method(dns_namespace, "getServers", js_dns_getServers, 0);
+    dns_set_method(dns_namespace, "setServers", js_dns_setServers, 1);
     dns_set_constants(dns_namespace);
     js_property_set(dns_namespace, make_string_item("__dns_servers__"),
         dns_get_default_servers());

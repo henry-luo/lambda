@@ -14,6 +14,21 @@ extern "C" {
 #include "../core/name_identity.h"
 #include <string.h>
 
+typedef Item (*JsNativeP0)(void);
+typedef Item (*JsNativeP1)(Item);
+typedef Item (*JsNativeP2)(Item, Item);
+typedef Item (*JsNativeP3)(Item, Item, Item);
+typedef Item (*JsNativeP4)(Item, Item, Item, Item);
+typedef Item (*JsNativeP5)(Item, Item, Item, Item, Item);
+typedef Item (*JsNativeP6)(Item, Item, Item, Item, Item, Item);
+typedef Item (*JsNativeP7)(Item, Item, Item, Item, Item, Item, Item);
+typedef Item (*JsNativeP8)(Item, Item, Item, Item, Item, Item, Item, Item);
+typedef Item (*JsNativeSpan)(Item*, int);
+typedef Item (*JsNativeThisSpan)(Item, Item*, int);
+typedef Item (*JsNativeEnvSpan)(Item, Item*, int);
+typedef Item (*JsNativeCallBody)(Item, Item, Item*, int, uint64_t*);
+typedef Item (*JsNativeConstructBody)(Item, Item*, int, Item, uint64_t*);
+
 static inline bool js_map_kind_uses_default_object_to_primitive(uint8_t map_kind) {
     return map_kind == MAP_KIND_WEB_API_RESOURCE ||
            map_kind == MAP_KIND_CSS_NAMESPACE ||
@@ -68,6 +83,8 @@ static inline int js_utf8_next_codepoint(const char* s, int len, int* index) {
 Item js_well_known_symbol_key(int64_t symbol_id);
 bool js_is_callable(Item value);
 bool is_callable(Item value);
+bool js_has_call_capability(Item value);
+bool js_has_construct_capability(Item value);
 
 // Sentinel value for dense array holes. Uses the reserved non-type tag
 // ITEM_SENTINEL_TAG, so it cannot collide with any valid JS value. Ordinary
@@ -270,18 +287,14 @@ void js_array_push_item_direct(Array* arr, Item value);
 Item js_math_pow(Item base, Item exp);
 double js_math_pow_d(double base, double exp);
 int64_t js_get_length(Item object);
-Item js_get_length_item(Item object);
 
 // =============================================================================
 // Function Functions
 // =============================================================================
 
-Item js_new_function(void* func_ptr, int param_count);
 Item js_new_function_mir(void* func_ptr, int param_count);
-Item js_new_distinct_function(void* func_ptr, int param_count);
-Item js_new_method_function(void* func_ptr, int param_count);
+Item js_new_distinct_function_mir(void* func_ptr, int param_count);
 Item js_new_method_function_mir(void* func_ptr, int param_count);
-Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
 Item js_new_closure_mir(void* func_ptr, int param_count, Item* env, int env_size);
 void js_set_formal_length(Item fn_item, int length);
 void js_func_cache_suppress_push(void);
@@ -310,9 +323,11 @@ enum {
     JS_FUNC_INIT_READS_THIS = 1u << 8,
     JS_FUNC_INIT_READS_NEW_TARGET = 1u << 9,
     JS_FUNC_INIT_MIR_CONTEXT_ABI = 1u << 10,
+    JS_FUNC_INIT_CLASS_FIELD_INITIALIZER = 1u << 11,
 };
-void js_finalize_function(Item fn_item, Item name_item, Item source_item,
-                          int formal_length, int init_flags);
+void js_finalize_function(Item fn_item, const char* name_chars,
+                          const char* source_chars, uint64_t span_lengths,
+                          int64_t formal_length, int64_t init_flags);
 void js_set_function_home_class(Item fn_item, Item home_class);
 void js_mark_generator_func(Item fn_item);
 void js_mark_async_generator_func(Item fn_item);
@@ -321,12 +336,21 @@ void js_mark_derived_constructor_func(Item fn_item);
 void js_mark_eval_initializer_func_if_active(Item fn_item);
 Item js_get_constructor(Item name_item);
 Item js_get_intrinsic_prototype_for_class(int class_id);
+Item js_get_typed_array_per_type_proto(int element_type);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+Item js_call_accessor_getter(Item getter, Item receiver);
 Item js_call_function_into(Item func_item, Item this_val, Item* args,
                            int arg_count, uint64_t* result_home);
 Item js_call_function_prerooted_args_into(Item func_item, Item this_val,
                                           Item* args, int arg_count,
                                           uint64_t* result_home);
+Item js_call_constructor_body_into(Item func_item, Item this_val, Item* args,
+                                   int arg_count, Item new_target,
+                                   uint64_t* result_home);
+Item js_call_constructor_body_prerooted_args_into(Item func_item, Item this_val,
+                                                  Item* args, int arg_count,
+                                                  Item new_target,
+                                                  uint64_t* result_home);
 Item js_call_export_0_into(Function* function, uint64_t* result_home);
 Item js_call_export_1_into(Function* function, Item a, uint64_t* result_home);
 Item js_call_export_2_into(Function* function, Item a, Item b, uint64_t* result_home);
@@ -342,7 +366,6 @@ Item js_call_export_7_into(Function* function, Item a, Item b, Item c, Item d,
                            Item e, Item f, Item g, uint64_t* result_home);
 Item js_call_export_8_into(Function* function, Item a, Item b, Item c, Item d,
                            Item e, Item f, Item g, Item h, uint64_t* result_home);
-void js_call_stats_dump(void);
 void js_array_stats_dump(void);
 void js_set_call_stack_limit(int64_t limit);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
@@ -352,12 +375,32 @@ Item js_super_call_class_into(Item callee, Item this_val, Item* args, int argc,
                               uint64_t* result_home);
 Item js_super_apply_class_into(Item callee, Item this_val, Item args_array,
                                uint64_t* result_home);
-Item js_apply_constructor(Item constructor, Item args_array);
+Item js_construct_array_like(Item constructor, Item args_array, Item new_target);
 void js_set_internal_class_name(Item obj, Item class_name);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 void js_function_root_item_if_needed(void* fn, Item* slot);
 Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_new_function_from_string(Item* args, int argc);
+Item js_dynamic_function_call_body(Item callee, Item this_value, Item* args,
+                                   int argc, uint64_t* result_home);
+Item js_dynamic_function_construct_body(Item callee, Item* args, int argc,
+                                        Item new_target, uint64_t* result_home);
+Item js_dynamic_async_function_call_body(Item callee, Item this_value,
+                                         Item* args, int argc,
+                                         uint64_t* result_home);
+Item js_dynamic_async_function_construct_body(Item callee, Item* args,
+                                              int argc, Item new_target,
+                                              uint64_t* result_home);
+Item js_dynamic_generator_function_call_body(Item callee, Item this_value,
+                                             Item* args, int argc,
+                                             uint64_t* result_home);
+Item js_dynamic_generator_function_construct_body(Item callee, Item* args,
+                                                  int argc, Item new_target,
+                                                  uint64_t* result_home);
+Item js_dynamic_async_generator_function_call_body(Item callee,
+        Item this_value, Item* args, int argc, uint64_t* result_home);
+Item js_dynamic_async_generator_function_construct_body(Item callee,
+        Item* args, int argc, Item new_target, uint64_t* result_home);
 Item js_builtin_eval(Item code_item, int64_t is_global_scope);
 void js_eval_private_push_frame(void);
 void js_eval_private_pop_frame(void);
@@ -376,7 +419,6 @@ Item js_get_lexical_this_binding(void);
 Item js_resolve_lexical_this(Item this_val);
 void js_set_this(Item this_val);
 Item js_get_new_target();
-void js_set_new_target(Item target);
 void js_set_direct_new_target(Item target);
 void js_set_pending_call_source(const char* source, int64_t len);
 Item js_super_bind_this(Item this_val, Item construct_result);
@@ -398,31 +440,9 @@ int js_function_get_arity(Item fn_item);
 Item js_console_log(Item value);
 
 // =============================================================================
-// String Method Dispatcher (delegates to Lambda fn_* functions)
-// =============================================================================
-
-Item js_string_method(Item str, Item method_name, Item* args, int argc);
-
-// =============================================================================
-// Array Method Dispatcher (map, filter, reduce, forEach, find, etc.)
-// =============================================================================
-
-Item js_array_method(Item arr, Item method_name, Item* args, int argc);
-Item js_array_method_into(Item arr, Item method_name, Item* args, int argc,
-                          uint64_t* result_home);
-Item js_array_method_direct(Item arr, Item method_name, Item* args, int argc);
-Item js_array_method_direct_into(Item arr, Item method_name, Item* args, int argc,
-                                 uint64_t* result_home);
-Item js_array_push_method_direct_1(Item arr, Item value);
-
-// =============================================================================
 // Math Object Methods & Properties
 // =============================================================================
 
-Item js_math_method(Item method_name, Item* args, int argc);
-Item js_math_apply(Item method_name, Item args_array);
-Item js_math_property(Item prop_name);
-Item js_math_set_property(Item key, Item value);
 Item js_get_math_object_value(void);
 Item js_get_json_object_value(void);
 Item js_get_console_object_value(void);
@@ -461,7 +481,6 @@ Item js_isFinite(Item value);
 // =============================================================================
 
 Item js_toFixed(Item num_item, Item digits_item);
-Item js_number_method(Item num, Item method_name, Item* args, int argc);
 
 // =============================================================================
 // v5: String Methods (charCodeAt, fromCharCode)
@@ -520,11 +539,6 @@ Item js_object_define_properties(Item obj, Item props);
 Item js_object_create_define_properties(Item obj, Item props);
 Item js_object_get_own_property_descriptor(Item obj, Item name);
 Item js_object_get_own_property_descriptors(Item obj);
-Item js_lookup_builtin_method(TypeId type, const char* name, int len);
-Item js_builtin_registry_prototype_method_descriptor(int js_class, TypeId fallback_type, const char* name, int len);
-bool js_builtin_registry_has_prototype_method(int js_class, TypeId fallback_type, const char* name, int len);
-void js_append_builtin_method_names_for_class(int js_class, TypeId fallback_type, Item result);
-void js_append_builtin_method_names(TypeId type, Item result);
 Item js_array_is_array(Item value);
 Item js_performance_now(void);
 double js_performance_now_ms(void);
@@ -548,10 +562,6 @@ Item js_map_collection_new_from(Item iterable);
 Item js_set_collection_new(void);
 Item js_set_collection_new_from(Item iterable);
 Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
-Item js_map_method(Item obj, Item method_name, Item* args, int argc);
-Item js_map_method_into(Item obj, Item method_name, Item* args, int argc,
-        uint64_t* result_home);
-Item js_method_call_apply(Item obj, Item method_name, Item args_array);
 Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);
 void js_object_proto_setter(Item object, Item value);
@@ -567,10 +577,15 @@ Item js_new_string_wrapper(Item arg);
 void js_link_base_prototype(Item proto_marker, Item base_ctor);
 Item js_get_prototype(Item object);
 Item js_get_prototype_of(Item object);
+Item js_get_prototype_from_constructor_default(Item new_target,
+    int default_class, int typed_array_type);
 Item js_reflect_construct(Item target, Item args_array, Item new_target);
 Item js_reflect_apply(Item target, Item this_arg, Item args_array);
 Item js_reflect_define_property(Item obj, Item key, Item desc);
 Item js_reflect_delete_property(Item obj, Item key);
+Item js_reflect_get_own_property_descriptor(Item target, Item key);
+Item js_reflect_get_prototype_of(Item target);
+Item js_reflect_is_extensible(Item target);
 Item js_reflect_own_keys(Item obj);
 Item js_reflect_prevent_extensions(Item obj);
 Item js_reflect_set(Item obj, Item key, Item value, Item receiver);
@@ -766,9 +781,11 @@ void js_symbol_registry_batch_reset(void);
 void js_dom_batch_reset(void);
 void js_globals_batch_reset(void);
 void js_reset_constructor_prototypes(void);
-Item js_constructor_create_object(Item callee);
-Item js_new_from_class_object(Item callee, Item* args, int argc);
-Item js_new_from_class_object_defer_own_fields(Item callee, Item* args, int argc);
+Item js_constructor_create_object(Item callee, Item new_target);
+Item js_construct_value(Item callee, Item* args, int argc, Item new_target,
+                        uint64_t* result_home, bool args_prerooted);
+Item js_construct_value_defer_own_fields(Item callee, Item* args, int argc,
+                                         Item new_target);
 
 // =============================================================================
 // v12: Language extensions
@@ -888,11 +905,14 @@ void js_mark_private_method_non_writable(Item object, Item name);
 void js_set_method_home_from_target(Item target, Item fn_item);
 void js_refresh_prototype_method_homes(Item prototype, Item class_item);
 Item js_init_class_instance_fields(Item callee, Item object);
+Item js_init_class_instance_fields_after_super(Item callee, Item object);
 void js_init_class_instance_field_metadata(Item class_item, int count);
 void js_set_class_instance_field_metadata_name_id_range(Item class_item,
     int index, uint32_t module_name_base, int count, uint64_t method_mask);
 void js_set_class_instance_field_metadata_key(Item class_item, int index, Item key);
 void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
+void js_set_class_instance_field_metadata_initializer(Item class_item, int index,
+    Item initializer);
 Item js_private_key_for_class(Item class_item, Item source_name);
 Item js_private_key_for_current_class(Item source_name);
 Item js_private_in(Item object, Item private_key);
@@ -901,6 +921,7 @@ void js_private_home_class_leave(Item previous_class);
 Item js_private_home_class_leave_result(Item previous_class, Item result);
 Item js_private_brand_add(Item object, Item private_key, Item callee);
 void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
+void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
 Item js_get_global_builtin_fn_by_id(Item global_id);
 void js_eval_env_push_frame(void);
 void js_eval_global_lexical_push_frame(void);
@@ -1053,8 +1074,10 @@ Item js_async_get_promise(Item ctx_idx);          // get result promise for asyn
 
 Item js_text_encoder_new(void);
 Item js_text_encoder_encode(Item encoder, Item str);
+Item js_text_encoder_encode_method(Item encoder, Item* args, int argc);
 Item js_text_decoder_new(Item encoding, Item options);
 Item js_text_decoder_decode(Item decoder, Item input);
+Item js_text_decoder_decode_method(Item decoder, Item* args, int argc);
 
 // =============================================================================
 // WeakMap / WeakSet stubs
@@ -1080,6 +1103,8 @@ typedef struct JsProxyData {
     uint64_t target;   // [[ProxyTarget]] — Item stored as uint64_t for C/C++ header compat
     uint64_t handler;  // [[ProxyHandler]] — Item stored as uint64_t for C/C++ header compat
     uint64_t private_slots; // engine-private slots attached to the Proxy object itself
+    bool callable;     // immutable [[Call]] capability copied from the target
+    bool constructable; // immutable [[Construct]] capability copied from the target
     bool revoked;      // true after Proxy.revocable().revoke() called
 } JsProxyData;
 
@@ -1232,7 +1257,6 @@ Item js_offscreen_canvas_new(Item width, Item height);
 Item js_canvas_get_context(Item canvas);
 void js_canvas_ctx_set_font(Item ctx_obj, Item font_val);
 Item js_canvas_measure_text(Item ctx_obj, Item text);
-bool js_canvas_method_dispatch(Item obj, Item method_name, Item* args, int argc, Item* result);
 bool js_canvas_property_set_intercept(Item obj, Item key, Item value);
 void js_canvas_cleanup(void);
 bool js_array_runtime_items_release(Item* items);
@@ -1243,4 +1267,151 @@ void js_array_runtime_items_cleanup_all(void);
 
 Item make_string_item(const char* str, int len);
 Item make_string_item(const char* str);
+Item js_new_native_function(JsNativeP0 target);
+Item js_new_native_function(JsNativeP1 target);
+Item js_new_native_function(JsNativeP2 target);
+Item js_new_native_function(JsNativeP3 target);
+Item js_new_native_function(JsNativeP4 target);
+Item js_new_native_function(JsNativeP5 target);
+Item js_new_native_function(JsNativeP6 target);
+Item js_new_native_function(JsNativeP7 target);
+Item js_new_native_function(JsNativeP8 target);
+Item js_new_native_function(JsNativeP0 target, int adapter_arity);
+Item js_new_native_function(JsNativeP1 target, int adapter_arity);
+Item js_new_native_function(JsNativeP2 target, int adapter_arity);
+Item js_new_native_function(JsNativeP3 target, int adapter_arity);
+Item js_new_native_function(JsNativeP4 target, int adapter_arity);
+Item js_new_native_function(JsNativeP5 target, int adapter_arity);
+Item js_new_native_function(JsNativeP6 target, int adapter_arity);
+Item js_new_native_function(JsNativeP7 target, int adapter_arity);
+Item js_new_native_function(JsNativeP8 target, int adapter_arity);
+Item js_install_native_method(Item object, const char* name,
+                              JsNativeP0 target, int adapter_arity);
+Item js_install_native_method(Item object, const char* name,
+                              JsNativeP1 target, int adapter_arity);
+Item js_install_native_method(Item object, const char* name,
+                              JsNativeP2 target, int adapter_arity);
+Item js_install_native_method(Item object, const char* name,
+                              JsNativeP3 target, int adapter_arity);
+Item js_install_native_method(Item object, const char* name,
+                              JsNativeP4 target, int adapter_arity);
+Item js_install_native_method(Item object, const char* name,
+                              JsNativeP5 target, int adapter_arity);
+Item js_install_native_method(Item object, const char* name,
+                              JsNativeP6 target, int adapter_arity);
+Item js_install_native_method(Item object, const char* name,
+                              JsNativeP7 target, int adapter_arity);
+Item js_install_native_method(Item object, const char* name,
+                              JsNativeP8 target, int adapter_arity);
+Item js_install_native_method(Item object, const char* name, JsNativeP0 target);
+Item js_install_native_method(Item object, const char* name, JsNativeP1 target);
+Item js_install_native_method(Item object, const char* name, JsNativeP2 target);
+Item js_install_native_method(Item object, const char* name, JsNativeP3 target);
+Item js_install_native_method(Item object, const char* name, JsNativeP4 target);
+Item js_install_native_method(Item object, const char* name, JsNativeP5 target);
+Item js_install_native_method(Item object, const char* name, JsNativeP6 target);
+Item js_install_native_method(Item object, const char* name, JsNativeP7 target);
+Item js_install_native_method(Item object, const char* name, JsNativeP8 target);
+Item js_install_native_constructor(Item object, const char* name, JsNativeP0 target);
+Item js_install_native_constructor(Item object, const char* name, JsNativeP1 target);
+Item js_install_native_constructor(Item object, const char* name, JsNativeP2 target);
+Item js_install_native_constructor(Item object, const char* name, JsNativeP3 target);
+Item js_install_native_constructor(Item object, const char* name, JsNativeP4 target);
+Item js_install_native_constructor(Item object, const char* name, JsNativeP5 target);
+Item js_install_native_constructor(Item object, const char* name, JsNativeP6 target);
+Item js_install_native_constructor(Item object, const char* name, JsNativeP7 target);
+Item js_install_native_constructor(Item object, const char* name, JsNativeP8 target);
+Item js_install_native_constructor(Item object, const char* name,
+                                   JsNativeP0 target, int adapter_arity);
+Item js_install_native_constructor(Item object, const char* name,
+                                   JsNativeP1 target, int adapter_arity);
+Item js_install_native_constructor(Item object, const char* name,
+                                   JsNativeP2 target, int adapter_arity);
+Item js_install_native_constructor(Item object, const char* name,
+                                   JsNativeP3 target, int adapter_arity);
+Item js_install_native_constructor(Item object, const char* name,
+                                   JsNativeP4 target, int adapter_arity);
+Item js_install_native_constructor(Item object, const char* name,
+                                   JsNativeP5 target, int adapter_arity);
+Item js_install_native_constructor(Item object, const char* name,
+                                   JsNativeP6 target, int adapter_arity);
+Item js_install_native_constructor(Item object, const char* name,
+                                   JsNativeP7 target, int adapter_arity);
+Item js_install_native_constructor(Item object, const char* name,
+                                   JsNativeP8 target, int adapter_arity);
+Item js_initialize_native_constructor_prototype(Item constructor,
+                                                Item prototype);
+Item js_new_native_rest_function(JsNativeP1 target);
+Item js_new_native_rest_function(JsNativeP2 target);
+Item js_new_native_rest_function(JsNativeP3 target);
+Item js_new_native_rest_function(JsNativeP4 target);
+Item js_new_native_rest_function(JsNativeP5 target);
+Item js_new_native_rest_function(JsNativeP6 target);
+Item js_new_native_rest_function(JsNativeP7 target);
+Item js_new_native_rest_function(JsNativeP8 target);
+Item js_new_native_span_function(JsNativeSpan target);
+Item js_new_native_this_span_function(JsNativeThisSpan target);
+Item js_new_native_span_constructor(JsNativeSpan target);
+Item js_new_native_body_constructor(JsNativeCallBody call_body,
+                                     JsNativeConstructBody construct_body,
+                                     int formal_length);
+Item js_new_native_payload_function(JsNativeCallBody call_body,
+                                    uint64_t payload,
+                                    int formal_length);
+Item js_new_native_constructor(JsNativeP0 target);
+Item js_new_native_constructor(JsNativeP1 target);
+Item js_new_native_constructor(JsNativeP2 target);
+Item js_new_native_constructor(JsNativeP3 target);
+Item js_new_native_constructor(JsNativeP4 target);
+Item js_new_native_constructor(JsNativeP5 target);
+Item js_new_native_constructor(JsNativeP6 target);
+Item js_new_native_constructor(JsNativeP7 target);
+Item js_new_native_constructor(JsNativeP8 target);
+Item js_new_native_constructor(JsNativeP0 target, int adapter_arity);
+Item js_new_native_constructor(JsNativeP1 target, int adapter_arity);
+Item js_new_native_constructor(JsNativeP2 target, int adapter_arity);
+Item js_new_native_constructor(JsNativeP3 target, int adapter_arity);
+Item js_new_native_constructor(JsNativeP4 target, int adapter_arity);
+Item js_new_native_constructor(JsNativeP5 target, int adapter_arity);
+Item js_new_native_constructor(JsNativeP6 target, int adapter_arity);
+Item js_new_native_constructor(JsNativeP7 target, int adapter_arity);
+Item js_new_native_constructor(JsNativeP8 target, int adapter_arity);
+Item js_new_native_rest_constructor(JsNativeP1 target);
+Item js_new_native_rest_constructor(JsNativeP2 target);
+Item js_new_native_rest_constructor(JsNativeP3 target);
+Item js_new_native_rest_constructor(JsNativeP4 target);
+Item js_new_native_rest_constructor(JsNativeP5 target);
+Item js_new_native_rest_constructor(JsNativeP6 target);
+Item js_new_native_rest_constructor(JsNativeP7 target);
+Item js_new_native_rest_constructor(JsNativeP8 target);
+Item js_new_distinct_native_function(JsNativeP0 target);
+Item js_new_distinct_native_function(JsNativeP1 target);
+Item js_new_distinct_native_function(JsNativeP2 target);
+Item js_new_distinct_native_function(JsNativeP3 target);
+Item js_new_distinct_native_function(JsNativeP4 target);
+Item js_new_distinct_native_function(JsNativeP5 target);
+Item js_new_distinct_native_function(JsNativeP6 target);
+Item js_new_distinct_native_function(JsNativeP7 target);
+Item js_new_distinct_native_function(JsNativeP8 target);
+Item js_new_distinct_native_constructor(JsNativeP0 target);
+Item js_new_distinct_native_constructor(JsNativeP1 target);
+Item js_new_distinct_native_constructor(JsNativeP2 target);
+Item js_new_distinct_native_constructor(JsNativeP3 target);
+Item js_new_distinct_native_constructor(JsNativeP4 target);
+Item js_new_distinct_native_constructor(JsNativeP5 target);
+Item js_new_distinct_native_constructor(JsNativeP6 target);
+Item js_new_distinct_native_constructor(JsNativeP7 target);
+Item js_new_distinct_native_constructor(JsNativeP8 target);
+Item js_new_native_closure(JsNativeP1 target, int adapter_arity,
+                           Item* env, int env_size);
+Item js_new_native_closure(JsNativeP2 target, int adapter_arity,
+                           Item* env, int env_size);
+Item js_new_native_closure(JsNativeP3 target, int adapter_arity,
+                           Item* env, int env_size);
+Item js_new_native_closure(JsNativeP4 target, int adapter_arity,
+                           Item* env, int env_size);
+Item js_new_native_closure(JsNativeP5 target, int adapter_arity,
+                           Item* env, int env_size);
+Item js_new_native_env_span_closure(JsNativeEnvSpan target, int formal_length,
+                                    Item* env, int env_size);
 #endif

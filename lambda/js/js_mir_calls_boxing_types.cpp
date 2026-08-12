@@ -118,16 +118,14 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
     return jm_publish_call_result(mt, result);
 }
 
+static bool jm_args_are_prerooted(JsMirTranspiler* mt, MIR_op_t args,
+        MIR_op_t arg_count);
+
 MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count) {
     JsMirScalarResultHome home = jm_new_scalar_result_home(mt, "dynamic-call");
     if (!home.reg) return 0;
-    bool prerooted_args = mt && !mt->in_generator && mt->arg_stack_scope &&
-        mt->arg_stack_scope->base_slot >= 0 &&
-        args.mode == MIR_OP_REG && arg_count.mode == MIR_OP_INT &&
-        args.u.reg == mt->arg_stack_scope->args_reg &&
-        arg_count.u.i == mt->arg_stack_scope->slot_count &&
-        mt->arg_stack_scope->slot_count > 0;
+    bool prerooted_args = jm_args_are_prerooted(mt, args, arg_count);
     // The active scope is the emitter's provenance proof: its frame-relative
     // extent owns exactly this argument span until expression completion.
     MIR_reg_t result = jm_call_5(mt, prerooted_args
@@ -139,6 +137,45 @@ MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_T_P, MIR_new_reg_op(mt->ctx, home.reg));
     // The callee writes scalar payloads directly into this logical home; bind
     // the returned Item so subsequent calls share the liveness-coloured slot.
+    return jm_finish_scalar_result_home(mt, home, result);
+}
+
+static bool jm_args_are_prerooted(JsMirTranspiler* mt, MIR_op_t args,
+        MIR_op_t arg_count) {
+    return mt && !mt->in_generator && mt->arg_stack_scope &&
+        mt->arg_stack_scope->base_slot >= 0 && args.mode == MIR_OP_REG &&
+        arg_count.mode == MIR_OP_INT &&
+        args.u.reg == mt->arg_stack_scope->args_reg &&
+        arg_count.u.i == mt->arg_stack_scope->slot_count &&
+        mt->arg_stack_scope->slot_count > 0;
+}
+
+MIR_reg_t jm_call_constructor_body_into(JsMirTranspiler* mt, MIR_op_t func,
+        MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count,
+        MIR_op_t new_target) {
+    JsMirScalarResultHome home = jm_new_scalar_result_home(mt,
+        "constructor-body");
+    if (!home.reg) return 0;
+    bool prerooted_args = jm_args_are_prerooted(mt, args, arg_count);
+    MIR_reg_t result = jm_call_6(mt, prerooted_args
+            ? "js_call_constructor_body_prerooted_args_into"
+            : "js_call_constructor_body_into", MIR_T_I64,
+        MIR_T_I64, func, MIR_T_I64, this_value, MIR_T_I64, args,
+        MIR_T_I64, arg_count, MIR_T_I64, new_target,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, home.reg));
+    return jm_finish_scalar_result_home(mt, home, result);
+}
+
+MIR_reg_t jm_construct_value_into(JsMirTranspiler* mt, MIR_op_t callee,
+        MIR_op_t args, MIR_op_t arg_count, MIR_op_t new_target) {
+    JsMirScalarResultHome home = jm_new_scalar_result_home(mt, "construct");
+    if (!home.reg) return 0;
+    bool prerooted_args = jm_args_are_prerooted(mt, args, arg_count);
+    MIR_reg_t result = jm_call_6(mt, "js_construct_value", MIR_T_I64,
+        MIR_T_I64, callee, MIR_T_I64, args, MIR_T_I64, arg_count,
+        MIR_T_I64, new_target,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, home.reg),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, prerooted_args ? 1 : 0));
     return jm_finish_scalar_result_home(mt, home, result);
 }
 
@@ -170,27 +207,6 @@ MIR_reg_t jm_super_apply_class_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_T_I64, callee, MIR_T_I64, this_value, MIR_T_I64, args,
         MIR_T_P, MIR_new_reg_op(mt->ctx, home.reg));
     return jm_finish_scalar_result_home(mt, home, result);
-}
-
-MIR_reg_t jm_array_method_direct_into(JsMirTranspiler* mt, MIR_op_t array,
-        MIR_op_t method_name, MIR_op_t args, MIR_op_t arg_count) {
-    JsMirScalarResultHome home = jm_new_scalar_result_home(mt, "array-method");
-    if (!home.reg) return 0;
-    MIR_reg_t result = jm_call_5(mt, "js_array_method_direct_into", MIR_T_I64,
-        MIR_T_I64, array, MIR_T_I64, method_name, MIR_T_I64, args,
-        MIR_T_I64, arg_count, MIR_T_P, MIR_new_reg_op(mt->ctx, home.reg));
-    return jm_finish_scalar_result_home(mt, home, result);
-}
-
-MIR_reg_t jm_map_method_into(JsMirTranspiler* mt, MIR_op_t object,
-        MIR_op_t method_name, MIR_op_t args, MIR_op_t arg_count) {
-    // Map dispatch can resolve an arbitrary JS closure, so its result cannot
-    // promise the scalar-home ABI of a known callee. Keep this call on the
-    // boxed dynamic lane; known typed/array calls retain their explicit home
-    // contracts (D2.2.2, D3.2.1, D3.3.1).
-    return jm_call_4(mt, "js_map_method", MIR_T_I64,
-        MIR_T_I64, object, MIR_T_I64, method_name, MIR_T_I64, args,
-        MIR_T_I64, arg_count);
 }
 
 MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
@@ -558,15 +574,21 @@ MIR_reg_t jm_box_property_name_literal(JsMirTranspiler* mt,
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)direct_name_id));
 }
 
+MIR_reg_t jm_string_literal_chars(JsMirTranspiler* mt, const char* str, int len) {
+    if (!mt || len < 0 || (!str && len > 0)) return 0;
+    MIR_reg_t chars = jm_new_reg(mt, "strlit", MIR_T_P);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, chars),
+        MIR_new_str_op(mt->ctx, {(size_t)len, str ? str : ""})));
+    return chars;
+}
+
 MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len) {
     if (!mt || !str || len < 0) return jm_emit_null(mt);
     // String values are not property identities. Keep their bytes in the MIR
     // artifact and allocate an ordinary GC String at evaluation time so source
     // text, diagnostics, and literals never consume permanent NameIds.
-    MIR_reg_t chars = jm_new_reg(mt, "strlit", MIR_T_P);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, chars),
-        MIR_new_str_op(mt->ctx, {(size_t)len, str})));
+    MIR_reg_t chars = jm_string_literal_chars(mt, str, len);
     return jm_call_2(mt, "js_make_string_len", MIR_T_I64,
         MIR_T_P, MIR_new_reg_op(mt->ctx, chars),
         MIR_T_I64, MIR_new_int_op(mt->ctx, len));
@@ -763,14 +785,18 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
     const char* source_name = fn_node->name ? fn_node->name->chars : NULL;
     const char* display_name = jm_function_display_name(source_name,
         display_buffer, sizeof(display_buffer));
-    MIR_reg_t name = display_name
-        ? jm_box_string_literal(mt, display_name, (int)strlen(display_name))
-        : jm_emit_undefined(mt);
     const char* source_text = NULL;
     uint32_t source_len = 0;
-    MIR_reg_t source = jm_function_source_span(mt, fn_node, &source_text,
-        &source_len) ? jm_box_string_literal(mt, source_text, (int)source_len)
-        : jm_emit_undefined(mt);
+    if (!jm_function_source_span(mt, fn_node, &source_text, &source_len)) {
+        source_text = NULL;
+        source_len = 0;
+    }
+    uint32_t name_len = display_name ? (uint32_t)strlen(display_name) : 0;
+    MIR_reg_t name_chars = display_name
+        ? jm_string_literal_chars(mt, display_name, (int)name_len) : 0;
+    MIR_reg_t source_chars = source_text
+        ? jm_string_literal_chars(mt, source_text, (int)source_len) : 0;
+    uint64_t span_lengths = (uint64_t)name_len | ((uint64_t)source_len << 32);
     int flags = 0;
     if (fn_node->is_generator && fn_node->is_async) {
         flags |= JS_FUNC_INIT_ASYNC_GENERATOR;
@@ -785,15 +811,24 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
     flags |= JS_FUNC_INIT_ANALYSIS_KNOWN;
     if (fc->observes_this) flags |= JS_FUNC_INIT_READS_THIS;
     if (fc->observes_new_target) flags |= JS_FUNC_INIT_READS_NEW_TARGET;
+    if (fc->is_class_field_initializer) {
+        flags |= JS_FUNC_INIT_CLASS_FIELD_INITIALIZER;
+    }
     // Every compiled public wrapper takes the trailing ABI pointer. Only
     // scalar-returning wrappers consume it, but one canonical call shape
     // prevents callback dispatch from guessing a function's return type.
     flags |= JS_FUNC_INIT_MIR_PUBLIC_ABI;
     flags |= JS_FUNC_INIT_MIR_CONTEXT_ABI;
-    jm_call_void_5(mt, "js_finalize_function",
+    // D5.4.3: no allocating operation separates callable creation from this
+    // GC-aware transaction. The runtime roots the fresh callable before it
+    // materializes either string or publishes metadata and capabilities.
+    jm_call_void_6(mt, "js_finalize_function",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, name),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, source),
+        MIR_T_P, name_chars ? MIR_new_reg_op(mt->ctx, name_chars)
+                            : MIR_new_int_op(mt->ctx, 0),
+        MIR_T_P, source_chars ? MIR_new_reg_op(mt->ctx, source_chars)
+                              : MIR_new_int_op(mt->ctx, 0),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)span_lengths),
         MIR_T_I64, MIR_new_int_op(mt->ctx, fc->formal_length),
         MIR_T_I64, MIR_new_int_op(mt->ctx, flags));
 }
@@ -1041,11 +1076,6 @@ MIR_reg_t jm_ensure_boxed(JsMirTranspiler* mt, MIR_reg_t reg) {
 JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call);
 JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn);
 // Phase 5 forward declarations
-String* jm_get_math_method(JsCallNode* call);
-TypeId jm_math_return_type(String* method, JsMirTranspiler* mt, JsAstNode* arg0);
-MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
-                                            String* method, TypeId target_type);
-MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* method);
 // P9 forward declarations
 JsMirVarEntry* jm_get_typed_array_var(JsMirTranspiler* mt, JsAstNode* obj_node);
 bool jm_typed_array_is_int(int ta_type);
@@ -1247,9 +1277,6 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         // and all arg types match, the call returns the function's return type
         JsFuncCollected* fc = jm_resolve_native_call(mt, call);
         if (fc && jm_call_result_uses_native_register(mt, call, fc)) return fc->return_type;
-        // Phase 5: If callee is Math.xxx(), resolve return type at compile time
-        String* math_method = jm_get_math_method(call);
-        if (math_method) return jm_math_return_type(math_method, mt, call->arguments);
         // Phase 3.5: return type from any collected function (not just native-eligible)
         // Skip generators — they return iterator objects, not the inferred return type
         {
@@ -1723,12 +1750,6 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
     // Phase 4: Call expressions — if native call, result is already native
     if (expr && expr->node_type == JS_AST_NODE_CALL_EXPRESSION) {
         JsCallNode* call = (JsCallNode*)expr;
-
-        // Phase 5: Math.xxx() calls — use native C math when arg types known
-        String* math_method = jm_get_math_method(call);
-        if (math_method) {
-            return jm_transpile_math_native(mt, call, math_method, target_type);
-        }
 
         JsFuncCollected* fc = jm_resolve_native_call(mt, call);
         if (fc && jm_call_result_uses_native_register(mt, call, fc)) {

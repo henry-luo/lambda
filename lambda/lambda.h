@@ -728,7 +728,7 @@ enum MapKind {
     MAP_KIND_CSSOM       = 5,  // Stylesheet, CSSRule, RuleStyleDeclaration
     MAP_KIND_ITERATOR    = 6,  // Synthetic iterator (array, string, typed array)
     MAP_KIND_PROCESS_ENV = 7,  // process.env — coerces all values to strings on set
-    MAP_KIND_RESERVED_8  = 8,  // retired document proxy map carrier
+    MAP_KIND_COLLECTION  = 8,  // Map/Set/WeakMap/WeakSet with native internal data
     MAP_KIND_PROXY       = 9,  // ES6 Proxy object
     MAP_KIND_RESERVED_10 = 10, // retired foreign-document map carrier
     MAP_KIND_ARRAY_PROPS = 11, // array reserved-tail companion map: stores literal
@@ -1537,12 +1537,12 @@ static inline int64_t lambda_double_to_int_lane(double value) {
 #define LAMBDA_INT_VALUE_IS_INF(v)     ((v) > 1.7976931348623157e308)
 #define LAMBDA_INT_VALUE_IS_NEG_INF(v) ((v) < -1.7976931348623157e308)
 
-// Unresolved Jube global. Unlike the sentinels above it is stored in ordinary
+// Unresolved lazy global. Unlike the sentinels above it is stored in ordinary
 // property storage, which round-trips a scalar through its *value*, so this
 // marker has to be a real int value ("JUBELZ") rather than a magic payload on
 // some tag — a payload would be re-encoded to a different word on the way back.
-#define ITEM_JS_JUBE_LAZY_MAGIC     ((int64_t)0x004A5542454C5A)
-#define ITEM_JS_JUBE_LAZY_SENTINEL  i2it(ITEM_JS_JUBE_LAZY_MAGIC)
+#define ITEM_JS_LAZY_GLOBAL_MAGIC     ((int64_t)0x004A5542454C5A)
+#define ITEM_JS_LAZY_GLOBAL_SENTINEL  i2it(ITEM_JS_LAZY_GLOBAL_MAGIC)
 
 static inline uint64_t lambda_int64_ptr_to_item_bits(const int64_t* ptr) {
     if (!ptr) return ITEM_NULL;
@@ -2315,9 +2315,6 @@ extern "C" {
 
     // String.raw tagged template literal
     Item js_string_raw(Item* args, int argc);
-
-    // Constructor static property lookup (String.raw, etc.)
-    Item js_constructor_static_property(Item ctor_name, Item prop_name);
 
     // Mark arrow functions as non-constructable
     void js_mark_arrow_func(Item fn_item);

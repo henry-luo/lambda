@@ -2509,18 +2509,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->eval_local_frame_reg = 0;
     mt->last_closure_has_env = false;  // clear stale closure env from previous function
 
-    // Determine if this function is a class method and set current_class
-    mt->current_class = NULL;
-    for (int ci = 0; ci < mt->class_count; ci++) {
-        JsClassEntry* ce = &mt->class_entries[ci];
-        for (int mi = 0; mi < ce->method_count; mi++) {
-            if (ce->methods[mi].fc == fc) {
-                mt->current_class = ce;
-                goto found_class;
-            }
-        }
-    }
-    found_class:
+    // Collection assigns the lexical class to methods, nested functions, and
+    // synthetic field-initializer callables. Rescanning only method entries
+    // dropped the PrivateEnvironment for direct eval in field initializers.
+    mt->current_class = fc->owner_class;
 
     if (jm_has_use_strict_directive(fn)) {
         fc->is_strict = true;

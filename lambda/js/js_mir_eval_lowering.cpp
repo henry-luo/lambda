@@ -634,11 +634,39 @@ static Item js_dynfunc_cache_execute(JsDynFuncCacheEntry* entry, Item* args, int
     return fn_item;
 }
 
+static void js_install_realm_global_preamble(JsMirTranspiler* mt,
+        JsTranspiler* tp) {
+    if (!mt || !tp || !g_eval_preamble_entries ||
+            g_eval_preamble_entry_count <= 0) return;
+    uint32_t harness_var_count = js_get_batch_preamble_var_count();
+    JsModuleConstEntry* global_entries = (JsModuleConstEntry*)pool_calloc(
+        tp->ast_pool, sizeof(JsModuleConstEntry) * g_eval_preamble_entry_count);
+    if (!global_entries) return;
+    int global_entry_count = 0;
+    for (int i = 0; i < g_eval_preamble_entry_count; i++) {
+        JsModuleConstEntry* entry = &g_eval_preamble_entries[i];
+        if (entry->const_type != MCONST_MODVAR || entry->int_val < 0 ||
+                entry->is_iife_var || entry->is_iife_func_decl ||
+                entry->is_nested_func_hoist) continue;
+        bool harness_entry = (uint64_t)entry->int_val < harness_var_count;
+        bool global_lexical = entry->var_kind == JS_VAR_LET ||
+            entry->var_kind == JS_VAR_CONST;
+        if (!harness_entry && !global_lexical) continue;
+        global_entries[global_entry_count++] = *entry;
+    }
+    mt->preamble_entries = global_entries;
+    mt->preamble_entry_count = global_entry_count;
+    // Retain original slot indices for sparse top-level lexicals. New dynamic
+    // declarations must start beyond the caller slab without inheriting its
+    // var/function bindings.
+    mt->preamble_var_count = g_eval_preamble_var_count;
+}
+
 // ============================================================================
 // new Function / GeneratorFunction / AsyncFunction dynamic compilation
 // ============================================================================
 static Item js_new_function_from_string_kind(Item* args, int argc, const char* parse_prefix,
-        const char* source_prefix) {
+        const char* source_prefix, bool inherit_caller_environment) {
     if (!js_current_runtime()) {
         log_error("js-new-function: no runtime context for dynamic function compilation");
         return ItemNull;
@@ -731,7 +759,12 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 
     int dynfunc_kind = js_dynfunc_kind_from_prefix(parse_prefix);
     uint64_t source_hash = hash_fnv1a_64(source, source_len);
-    JsDynFuncDependency dep = js_dynfunc_scan_preamble_dependency(source, source_len);
+    // Cache reuse is unsafe whenever generated code resolves a preamble slot,
+    // whether that slot is a direct-eval local or a realm-global harness/
+    // lexical binding. Skipping the scan for Function constructors cached
+    // fixed module indices from an unrelated script state.
+    JsDynFuncDependency dep = js_dynfunc_scan_preamble_dependency(
+        source, source_len);
     bool cacheable = js_dynfunc_dependency_is_independent(&dep);
     if (cacheable) {
         JsDynFuncCacheEntry* cached = js_dynfunc_cache_lookup(source_hash, source, source_len,
@@ -806,12 +839,19 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     mt->module_name_base = js_active_module_name_count();
     mt->module_ic_base = js_active_module_ic_count();
 
-    // Inherit outer script's module_consts so eval()/new Function() can
-    // resolve var declarations from the calling scope.
-    if (g_eval_preamble_entries && g_eval_preamble_entry_count > 0) {
+    if (inherit_caller_environment && g_eval_preamble_entries &&
+            g_eval_preamble_entry_count > 0) {
+        // Direct eval expression form must close over the caller module slab;
+        // sharing Function-constructor lowering without this explicit mode
+        // silently turned lexical reads and writes into global accesses.
         mt->preamble_entries = g_eval_preamble_entries;
         mt->preamble_entry_count = g_eval_preamble_entry_count;
         mt->preamble_var_count = g_eval_preamble_var_count;
+    } else {
+        // Function-constructor code is global code. It may see Test262 harness
+        // bindings and top-level let/const/class bindings, but never the
+        // constructor caller's function-local module slots.
+        js_install_realm_global_preamble(mt, tp);
     }
 
     char module_name[48];
@@ -917,18 +957,22 @@ extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* runtime_state) 
 }
 
 extern "C" Item js_new_function_from_string(Item* args, int argc) {
-    return js_new_function_from_string_kind(args, argc, "function", "function anonymous");
+    return js_new_function_from_string_kind(args, argc, "function",
+        "function anonymous", false);
 }
 
 extern "C" Item js_new_async_function_from_string(Item* args, int argc) {
-    return js_new_function_from_string_kind(args, argc, "async function", "async function anonymous");
+    return js_new_function_from_string_kind(args, argc, "async function",
+        "async function anonymous", false);
 }
 
 extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async) {
     if (is_async) {
-        return js_new_function_from_string_kind(args, argc, "async function*", "async function* anonymous");
+        return js_new_function_from_string_kind(args, argc, "async function*",
+            "async function* anonymous", false);
     }
-    return js_new_function_from_string_kind(args, argc, "function*", "function* anonymous");
+    return js_new_function_from_string_kind(args, argc, "function*",
+        "function* anonymous", false);
 }
 
 // ============================================================================
@@ -1603,7 +1647,11 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
     // Skip if code starts with a declaration keyword or contains semicolons
     // (multi-statement code should go to Phase C for correct scoping).
     {
-        bool skip_expr_form = false;
+        // The IIFE expression fast path can model direct eval because it
+        // intentionally inherits the caller environment. Indirect eval must
+        // execute as global script code so realm-global lexical bindings are
+        // visible without capturing caller locals.
+        bool skip_expr_form = !is_direct_eval;
         const char* s = code_str->chars;
         size_t slen = code_str->len;
         // Skip leading whitespace
@@ -1719,7 +1767,8 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
 
             Item body_item = (Item){.item = s2it(heap_create_name(body, total - 1))};
             mem_free(body);
-            fn_item = js_new_function_from_string(&body_item, 1);
+            fn_item = js_new_function_from_string_kind(&body_item, 1,
+                "function", "function anonymous", is_direct_eval);
             if (item_is_error(fn_item)) {
                 js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
                 return fn_item;
@@ -1826,25 +1875,11 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
                 mt->preamble_entry_count = g_eval_preamble_entry_count;
                 mt->preamble_var_count = g_eval_preamble_var_count;
             } else {
-                // Indirect eval shares a realm, not a lexical environment. In
-                // batch mode globalThis is recreated between tests, so retain
-                // only the harness prefix; caller declarations must resolve
-                // through the global object rather than caller module slots.
-                uint32_t harness_var_count = js_get_batch_preamble_var_count();
-                JsModuleConstEntry* global_entries = (JsModuleConstEntry*)pool_calloc(
-                    tp->ast_pool, sizeof(JsModuleConstEntry) * g_eval_preamble_entry_count);
-                if (global_entries) {
-                    int global_entry_count = 0;
-                    for (int i = 0; i < g_eval_preamble_entry_count; i++) {
-                        JsModuleConstEntry* entry = &g_eval_preamble_entries[i];
-                        if (entry->const_type != MCONST_MODVAR || entry->int_val < 0 ||
-                                (uint64_t)entry->int_val >= harness_var_count) continue;
-                        global_entries[global_entry_count++] = *entry;
-                    }
-                    mt->preamble_entries = global_entries;
-                    mt->preamble_entry_count = global_entry_count;
-                    mt->preamble_var_count = (int)harness_var_count;
-                }
+                // Indirect eval shares the realm's global environment but not
+                // caller var/function slots. Reusing those slots made Annex-B
+                // eval update only a disposable copied module state instead of
+                // defining/updating the realm-global binding.
+                js_install_realm_global_preamble(mt, tp);
             }
         }
 
@@ -1927,7 +1962,18 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             return ItemError;
         }
 
+        RootFrame eval_this_roots(2);
+        Rooted<Item> previous_this(eval_this_roots, js_get_this());
+        Rooted<Item> global_this(eval_this_roots, js_get_global_this());
+        if (!is_direct_eval) {
+            // An indirect eval executes as global script code even when its
+            // source has a strict directive. Leaving the intrinsic call's
+            // undefined `this` installed made top-level `this` incorrectly
+            // behave like strict function code instead of the realm global.
+            js_set_this(global_this.get());
+        }
         Item result = js_main_fn((Context*)context);
+        if (!is_direct_eval) js_set_this(previous_this.get());
         if (item_is_error(result)) js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
 
         if (js_eval_fresh_module_scope) {

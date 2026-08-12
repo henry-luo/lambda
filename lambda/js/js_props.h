@@ -52,6 +52,14 @@ JsShapeSlotStatus js_own_shape_slot_status_key(Item object, Item key,
                                                Item* out_slot,
                                                ShapeEntry** out_se);
 
+// Return the ordinary property-storage map for Map, Array, or Function values.
+// Callers use this only after validating that the value has ordinary storage.
+Map* js_obj_underlying_map(Item object);
+
+// Runtime-only storage key for ordinary [[Prototype]] on callable carriers.
+extern const char JS_INTERNAL_PROTO_KEY[];
+extern const int JS_INTERNAL_PROTO_KEY_LEN;
+
 // Mark a shape entry deleted, optionally materializing a shadowable slot.
 bool js_shape_mark_deleted_own(Item object, const char* name, int name_len,
                                bool create_if_missing);

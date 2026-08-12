@@ -19,5 +19,11 @@ console.log(typeof undefined);
 function add(x: number, y: number): number { return x + y; }
 console.log(type(add));
 
+// a lexical value named type remains an ordinary callable
+function callShadowedType(type: (value: unknown) => string): string {
+  return type(1);
+}
+console.log(callShadowedType(() => "shadowed"));
+
 // typeof with function
 console.log(typeof add);

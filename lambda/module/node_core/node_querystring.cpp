@@ -132,7 +132,6 @@ static char* node_querystring_percent_decode(const char* text, size_t length,
 #define js_array_length(ARG_ARRAY) node_querystring_host->value->array_length(ARG_ARRAY)
 #define js_array_get_int(ARG_ARRAY, ARG_INDEX) node_querystring_host->value->array_get(ARG_ARRAY, ARG_INDEX)
 #define js_new_object() node_querystring_host->value->new_object()
-#define js_new_function(ARG_FUNCTION, ARG_COUNT) node_querystring_host->script->new_function(ARG_FUNCTION, ARG_COUNT)
 #define js_object_keys(ARG_OBJECT) node_querystring_host->script->object_keys(ARG_OBJECT)
 #define js_call_function(ARG_FUNCTION, ARG_THIS, ARG_ARGS, ARG_COUNT) node_querystring_host->script->call_function(ARG_FUNCTION, ARG_THIS, ARG_ARGS, ARG_COUNT)
 #define js_to_string(ARG_VALUE) node_querystring_host->script->to_string(ARG_VALUE)
@@ -890,7 +889,9 @@ extern "C" Item js_qs_stringify(Item obj_item, Item sep_item, Item eq_item, Item
 
 // ─── Namespace ───────────────────────────────────────────────────────────────
 
-static void qs_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+template <typename Target>
+static void qs_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
     JubeRootFrame frame = {};
     if (!node_querystring_host || !node_querystring_host->node ||
             !node_querystring_host->node->roots ||
@@ -904,7 +905,8 @@ static void qs_set_method(Item ns, const char* name, void* func_ptr, int param_c
     }
     Item key = make_string_item(name);
     *key_root = key.item;
-    Item fn = js_new_function(func_ptr, param_count);
+    Item fn = jube_new_function(node_querystring_host->script, target,
+        adapter_arity);
     *function_root = fn.item;
     js_property_set(ns, key, fn);
     node_querystring_host->node->roots->root_frame_end(&frame);
@@ -916,13 +918,13 @@ Item node_querystring_namespace(void) {
 
     qs_namespace = js_new_object();
 
-    qs_set_method(qs_namespace, "parse",     (void*)js_qs_parse, 4);
-    qs_set_method(qs_namespace, "stringify",  (void*)js_qs_stringify, 4);
-    qs_set_method(qs_namespace, "escape",    (void*)js_qs_escape, 1);
-    qs_set_method(qs_namespace, "unescape",  (void*)js_qs_unescape, 1);
-    qs_set_method(qs_namespace, "unescapeBuffer", (void*)node_querystring_unescape_buffer, 2);
-    qs_set_method(qs_namespace, "decode",    (void*)js_qs_parse, 4);     // alias
-    qs_set_method(qs_namespace, "encode",    (void*)js_qs_stringify, 4); // alias
+    qs_set_method(qs_namespace, "parse",     js_qs_parse, 4);
+    qs_set_method(qs_namespace, "stringify",  js_qs_stringify, 4);
+    qs_set_method(qs_namespace, "escape",    js_qs_escape, 1);
+    qs_set_method(qs_namespace, "unescape",  js_qs_unescape, 1);
+    qs_set_method(qs_namespace, "unescapeBuffer", node_querystring_unescape_buffer, 2);
+    qs_set_method(qs_namespace, "decode",    js_qs_parse, 4);     // alias
+    qs_set_method(qs_namespace, "encode",    js_qs_stringify, 4); // alias
 
     // default export is the namespace itself
     JubeRootFrame frame = {};

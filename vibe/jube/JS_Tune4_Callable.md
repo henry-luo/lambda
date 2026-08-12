@@ -1,21 +1,22 @@
 # JS Tune4 — Direct Callable Runtime Implementation Plan
 
-**Date**: 2026-08-11
+**Date**: 2026-08-12
 
-**Status**: PROPOSED IMPLEMENTATION PLAN — blocked on the Tune3 NameId handoff
+**Status**: IMPLEMENTED — C0–C8 complete under D6.2.2v2
 
-**Planning tree anchor**: master `2bfb9bdfa4` plus the in-progress Tune3
-NameId work; C0 must recapture a clean post-Tune3 baseline
+**Implementation tree anchor**: master `88aa5556c8` plus this Tune4 worktree;
+the source-faithful clean post-Tune3 C0 snapshot is recorded in §14
 
 **Design authority**: [JS_Runtime_Callable.md](JS_Runtime_Callable.md),
-especially **JC1–JC12**, design phases C0–C6, and the proposed
-**D6.2.2v2** text. Governing formal rulings are **D4.6.1–D4.6.2**,
+especially **JC1–JC12**, design phases C0–C6, and adopted
+**D6.2.2v2**. Governing formal rulings are **D4.6.1–D4.6.2**,
 **D5.2.1–D5.2.2**, **D5.3.1–D5.3.5**, **D5.4.1–D5.4.4**,
 **D6.2.1–D6.2.2**, **D8.4.2**, and **D8.4.3**.
 
-This document is the execution plan for Tune4. It does not reopen the callable
-design. The target is one JavaScript call kernel, a distinct construct kernel,
-and per-callee executable capabilities selected when a function is created.
+This document is the execution plan and completion record for Tune4. It does
+not reopen the callable design. The implemented result is one JavaScript call
+kernel, a distinct construct kernel, and per-callee executable capabilities
+selected when a function is created.
 Names, catalog IDs, formal lengths, receiver categories, and constructor class
 labels become metadata; none may select runtime behavior.
 
@@ -291,7 +292,7 @@ lock observable behavior before representation changes.
 
 #### C0.1 Formal/document adoption
 
-1. Replace **D6.2.2** with the proposed **D6.2.2v2** from
+1. Replace **D6.2.2** with adopted **D6.2.2v2** from
    `JS_Runtime_Callable.md` and bump `doc/Lambda_Formal_Design.md` semver.
 2. Revise JR5 in `vibe/jube/JS_Runtime_Redesign.md` to say one callable kernel
    with distinct Call/Construct capabilities and an explicit `newTarget`.
@@ -329,7 +330,8 @@ Add focused tests for:
 - `.name` and `.length` redefinition with unchanged behavior;
 - arrows/methods/generators not constructable and classes rejecting call;
 - `Date()` versus `new Date()`, primitive wrapper dual behavior,
-  Symbol/BigInt call-only behavior, and collection construct-only behavior;
+  Symbol/BigInt rejecting `[[Construct]]` behavior, and collection
+  construct-only behavior;
 - bound constructors, target equality/substitution rules, and bound argument
   order;
 - `Reflect.construct(A, args, B)`, builtin subclass prototypes, recursive
@@ -671,7 +673,7 @@ specific lane.
 | Batch | Families | Special proof point |
 |---|---|---|
 | C4A | Function.prototype, Function.prototype itself, Object prototype/static, Boolean/primitive basics | Recursive call/apply/bind paths and real callable Function.prototype. |
-| C4B | Math, Number, BigInt, Symbol, String and string iterator | Scalar homes, boxing, call-only Symbol/BigInt, and primitive receiver branding. |
+| C4B | Math, Number, BigInt, Symbol, String and string iterator | Scalar homes, boxing, rejecting Symbol/BigInt construct entries, and primitive receiver branding. |
 | C4C | Array prototype/static and array iterator | Mutation/species/callback ordering without a global dispatch mode. |
 | C4D | TypedArray, ArrayBuffer, SharedArrayBuffer, DataView, Atomics | Distinct typed-array brand/OOB policy feeding shared algorithms. |
 | C4E | Map, Set, Weak collections, iterators, WeakRef, FinalizationRegistry | Iterator alias identity, GC reachability, and brand checks. |
@@ -784,7 +786,9 @@ Catalog target rows declare the actual matrix:
 
 - call + construct: Object, Array, String, Number, Boolean, Date, RegExp, Error
   families where specified;
-- call only: Symbol, BigInt, ordinary global functions;
+- call + rejecting construct: Symbol and BigInt expose `[[Construct]]` for
+  `IsConstructor`/`extends`, but reject before argument coercion;
+- call only: ordinary global functions;
 - construct only with deliberate call rejection: Promise, Map, Set, weak
   collections, TypedArrays, ArrayBuffer/DataView and specified host classes;
 - special Proxy construction through its explicit target; and
@@ -1138,7 +1142,7 @@ invoke a body is not.
 | Intrinsic properties | descriptors, ownKeys, extraction identity, deletion, redefinition, accessor functions, aliases, cross-realm separation. |
 | Method order | receiver once, nullish check, getter/Proxy lookup, arguments, call; mutation and accessor replacement. |
 | Construct | new, Reflect.construct distinct target, base/derived class, super, field/private init order, object/primitive return. |
-| Builtin duality | Date, Object/Array, primitive wrappers, RegExp, Error; Symbol/BigInt call-only; collection/Promise/TypedArray construct-only. |
+| Builtin duality | Date, Object/Array, primitive wrappers, RegExp, Error; Symbol/BigInt rejecting construct entries; collection/Promise/TypedArray construct-only. |
 | Prototype choice | primitive/non-object `.prototype`, cross-realm defaults, subclassing every internal-slot family. |
 | Bound | bound this/args, nested bind, length/name observability, construct substitution, non-constructable target. |
 | Proxy | call/construct trap, absent trap, revoked proxy, invalid trap result, target capability matrix. |
@@ -1309,32 +1313,145 @@ Each commit that fixes a lifecycle, rooting, evaluation-order, or ABI defect
 adds a brief root-cause/invariant comment at the fix point, per repository rule
 12. Generic narration comments are not a substitute.
 
-## 14. Completion checklist
+## 14. Completion evidence
 
-- [ ] Tune2 ERROR-tag and Tune3 NameId prerequisites are complete.
-- [ ] **D6.2.2v2** is formally adopted and the formal-design semver is bumped.
-- [ ] C0 clean baseline, callable census, layout, release profile, and deletion ledger are recorded.
-- [ ] Every published function has a final call entry and exact construct capability.
-- [ ] Call wrappers delegate to one ownership-aware `js_call_value` kernel.
-- [ ] All construct producers delegate to one explicit-`newTarget` `js_construct_value` kernel.
-- [ ] MIR, fixed-native, span-native, intrinsic, constructor, bound, and exotic factories are typed and distinct.
-- [ ] `js_new_function(void*, arity)` and all mismatched native pointer casts are gone.
-- [ ] The one catalog produces target and binding tables with NameId and explicit identity keys.
-- [ ] All intrinsic call bodies are direct; `js_dispatch_builtin` and runtime `case JS_BUILTIN_*` semantics are gone.
-- [ ] `js_dispatch_as_array_method` and its guards/state are gone.
-- [ ] All intrinsic construct bodies are direct and use shared prototype selection.
-- [ ] Pending `newTarget`, special constructor fields, and name-byte constructor selection are gone.
-- [ ] Intrinsic methods/accessors are real realm properties; runtime misses do not synthesize them.
-- [ ] Generic static and computed method calls lower through NameId/computed `Get -> Call`.
-- [ ] Public receiver/name method dispatch imports and unsafe name/type direct lowerings are gone.
-- [ ] Bound and Proxy call/construct entries forward through the common kernels correctly.
-- [ ] Function.prototype is a real call-only function and ordinary objects have no sentinel/own-`.call` callability.
-- [ ] At most one named JR4 legacy class-map construct bridge remains, with a recorded deletion condition.
-- [ ] Catalog, structural, MIR, behavior, Test262, GC, scalar-home, async, two-context, and Radiant gates pass.
-- [ ] Release results show no unexplained regression and realm startup/retained growth is within the 5% review threshold.
-- [ ] `./utils/count_loc.sh` proves `lambda/js` C/C++ LOC is at least **1,000 lines below** the clean C0 baseline; this hard exit is not waived by passing tests or performance gates.
-- [ ] `lambda/js` C/C++ LOC targets at least 1,500 lines removed, with any shortfall above the hard exit explained in the final report.
-- [ ] JS implementation docs and `JS_Runtime_Redesign.md` describe the implemented mechanism and mark JR5 complete.
+### 14.1 Reproducible C0/C8 accounting
+
+The authoritative C0 is a source-faithful archive of the clean post-Tune3 JS
+tree. C0 and C8 use the same unmodified `utils/count_loc.sh` definition. The
+checked-in census accepts `--root` so the same parser can inspect that archive;
+catalog-schema validation is intentionally final-only because C0 predates the
+target/binding schema.
+
+| Measure | C0 | C8 | Result |
+|---|---:|---:|---:|
+| `lambda/js` C/C++ LOC | 225,711 | 221,377 | **−4,334 (−1.92%)** |
+| Release `lambda.exe` | 22,292,520 bytes | 22,499,400 bytes | +206,880 (+0.93%) |
+| `JsFunction` payload | 224 bytes | 256 bytes | +32 bytes |
+| GC allocation slot including header | explicit class 7, 400 bytes | class 6, 272 bytes | **−128 bytes (−32%)** |
+
+The C0 release SHA-256 is
+`b76fe64b7dbd46ceb99c7cc7c51abc7b351a4bbe013a17807166678a770efb07`;
+the final clean C8 release SHA-256 is
+`aa9c55b9d3408ff229c42657d0aa29b78b9ec18fe7a7bbf20c99aba19389632b`.
+The 4,334-line deletion exceeds both the mandatory 1,000-line exit and the
+1,500-line stretch target. The modest binary increase is explained by typed
+entry/factory coverage across JS, Jube, host modules, and diagnostics; it did
+not relocate the deleted dispatcher or constructor chain.
+
+The deletion ledger uses exact source counts:
+
+| Retired mechanism | C0 | C8 |
+|---|---:|---:|
+| `js_dispatch_builtin` declarations / total references | 2 / 11 | 0 / 0 |
+| Runtime `case JS_BUILTIN_*` semantic cases | 337 | 0 |
+| Ambiguous `js_new_function` / raw native casts | 930 / 896 | 0 / 0 |
+| Pending `newTarget` references | 106 | 0 |
+| Special-constructor fields / references | 15 | 0 |
+| Constructor-name comparisons in the dynamic-new chain | 43 | 0 |
+| Intrinsic receiver/name dispatch references | 36 | 0 |
+| Host receiver/name dispatch references | 55 | 0 |
+| Property-miss synthesis references | 67 | 0 |
+| Array receiver side-state references | 30 | 0 |
+| Legacy invoke wrappers / migration flags | 8 / 4 | 0 / 0 |
+| Direct global catalog shortcuts | 2 | 0 |
+
+One exact global-identity load remains within its ratchet because its lowering
+is justified by the proven binding, not receiver/name inference. The only
+compatibility mechanism is `js_construct_entry_legacy_class_map` (one
+definition, two total references). JR4 deletes it when class maps publish
+ordinary Function/capability values; no other shadow callable route remains.
+
+### 14.2 Startup, allocation, and release profile
+
+Transactional whole-object laziness for `process`, `Buffer`, and `crypto`
+keeps their real own global slots while deferring namespace construction until
+the slot is observed. In the C8 empty-realm trace this reduced GC
+`JsFunction` creation from the eager intermediate implementation's 202
+objects / 54,944 requested bytes to 42 / 11,424. C0 allocated function records
+from a different pool regime, so its per-object requested-byte count is not an
+apples-to-apples retained-byte comparator. The matched whole-process capture
+was 55/65 MiB C0 versus 58/68 MiB C8 for macOS footprint/RSS; RSS grew about
+4.6%. Empty-realm median startup grew only 0.71%, below the 5% review
+threshold. The rounded footprint signal was reviewed and led to the lazy
+whole-object implementation rather than restoring miss-time fabrication.
+
+The final release A/B used 11 interleaved measured repetitions per side:
+
+| Workload | C0 median | C8 median | Delta |
+|---|---:|---:|---:|
+| Ordinary dynamic call | 51.684 ms | 48.791 ms | −5.60% |
+| Intrinsic target | 345.869 ms | 235.358 ms | −31.95% |
+| Static source method | 116.126 ms | 371.868 ms | +220.23% |
+| Computed source method | 87.166 ms | 82.396 ms | −5.47% |
+| Dynamic `Date` construction | 99.495 ms | 130.793 ms | +31.46% |
+| Bound call | 125.277 ms | 110.306 ms | −11.95% |
+| Bound construction | 82.232 ms | 80.952 ms | −1.56% |
+| Empty-realm startup | 14.244 ms | 14.345 ms | +0.71% |
+
+The static-method C0 result came from the deleted spelling/receiver shortcut,
+which skipped observable property `Get`; the computed-property control uses
+the canonical path on both sides and improves 5.47%. C0's dynamic `Date`
+construction also skipped required `Get(newTarget, "prototype")` when
+`newTarget === callee`; the bound-construction control improves 1.56%.
+Therefore both slower rows are measured costs of restoring **D6.2.2v2**
+semantics, not unexplained callable-kernel regressions. Full variance and
+interpretation are also recorded in `doc/dev/js/JS_15_Performance.md` §2.1.
+
+### 14.3 Correctness, ownership, and embedding gates
+
+Final verification produced all of the following:
+
+- generated well-known-name check, callable catalog validation, exception
+  catalog validation, the complete callable census ratchet, and
+  `git diff --check`: pass;
+- nine focused Tune4 JS fixtures plus the call/construct MIR fixture: pass in
+  debug, release, and forced-GC lanes;
+- standalone JS GTest: 338/338; rebuilt input/runtime matrix: 3,692/3,692;
+  MIR forced-GC stress: 61/61. The aggregate runner's idle watchdog killed
+  the two quiet JS/Lambda binaries, which recovered standalone at 338/338 and
+  713/713; all other aggregate lanes passed 2,641/2,641;
+- Test262 baseline: 40,261 passing tests, zero regressions. Resource-killed or
+  slow parallel items were rerun in isolation and all recovered; the external
+  js262 tree changes exactly the 12 intended stripped TypedArray sources;
+- scope-relevant Radiant embedding: view 23/23, page load 105/105, DOM/UI
+  integration 63/63; and
+- scalar-home, closure-environment ownership, nested/new-target cleanup,
+  async spills/teardown, two-context realm identity, aliases, bound/Proxy,
+  host constructor capabilities, and catalog/MIR budgets all pass their
+  focused and aggregate lanes.
+
+The broad Radiant sweep also reported pre-existing/out-of-scope layout sizing,
+cross-origin image, and editor-automation issues; Radiant layout is explicitly
+outside Tune4 under §2.3. The three callable/realm/document embedding suites
+above isolate the surfaces Tune4 changes and are green.
+
+## 15. Completion checklist
+
+- [x] Tune2 ERROR-tag and Tune3 NameId prerequisites are complete.
+- [x] **D6.2.2v2** is formally adopted and the formal-design semver is bumped.
+- [x] C0 clean baseline, callable census, layout, release profile, and deletion ledger are recorded.
+- [x] Every published function has a final call entry and exact construct capability.
+- [x] Call wrappers delegate to one ownership-aware `js_call_value` kernel.
+- [x] All construct producers delegate to one explicit-`newTarget` `js_construct_value` kernel.
+- [x] MIR, fixed-native, span-native, intrinsic, constructor, bound, and exotic factories are typed and distinct.
+- [x] `js_new_function(void*, arity)` and all mismatched native pointer casts are gone.
+- [x] The one catalog produces target and binding tables with NameId and explicit identity keys.
+- [x] All intrinsic call bodies are direct; `js_dispatch_builtin` and runtime `case JS_BUILTIN_*` semantics are gone.
+- [x] `js_dispatch_as_array_method` and its guards/state are gone.
+- [x] All intrinsic construct bodies are direct and use shared prototype selection.
+- [x] Pending `newTarget`, special constructor fields, and name-byte constructor selection are gone.
+- [x] Intrinsic methods/accessors are real realm properties; runtime misses do not synthesize them.
+- [x] Generic static and computed method calls lower through NameId/computed `Get -> Call`.
+- [x] Public receiver/name method dispatch imports and unsafe name/type direct lowerings are gone.
+- [x] Bound and Proxy call/construct entries forward through the common kernels correctly.
+- [x] Function.prototype is a real call-only function and ordinary objects have no sentinel/own-`.call` callability.
+- [x] At most one named JR4 legacy class-map construct bridge remains, with a recorded deletion condition.
+- [x] Catalog, structural, MIR, behavior, Test262, GC, scalar-home, async, two-context, and Radiant gates pass.
+- [x] Release results show no unexplained regression and realm startup/retained growth is within the 5% review threshold.
+- [x] `./utils/count_loc.sh` proves `lambda/js` C/C++ LOC is at least **1,000 lines below** the clean C0 baseline; this hard exit is not waived by passing tests or performance gates.
+- [x] `lambda/js` C/C++ LOC targets at least 1,500 lines removed, with any shortfall above the hard exit explained in the final report.
+- [x] JS implementation docs and `JS_Runtime_Redesign.md` describe the implemented mechanism and mark JR5 complete.
 
 When this checklist is complete, callable behavior has one semantic owner per
 callee, and the next redesign is JR6: property representation and lookup. JR6

@@ -144,7 +144,7 @@ static Item js_xhr_get_status(void) {
 static void xhr_define_status_accessor(Item obj) {
     Item descriptor = js_new_object();
     js_property_set(descriptor, (Item){.item = s2it(heap_create_name("get"))},
-        js_new_function((void*)js_xhr_get_status, 0));
+        js_new_native_function(js_xhr_get_status));
     js_property_set(descriptor, (Item){.item = s2it(heap_create_name("enumerable"))},
         (Item){.item = ITEM_TRUE});
     js_property_set(descriptor, (Item){.item = s2it(heap_create_name("configurable"))},
@@ -184,8 +184,7 @@ static void xhr_fire_readystatechange(XhrState* xhr) {
 
     // fire onreadystatechange if set
     Item cb = xhr_get_prop(xhr->js_object, "onreadystatechange");
-    TypeId cb_type = get_type_id(cb);
-    if (cb_type == LMD_TYPE_FUNC) {
+    if (js_is_callable(cb)) {
         js_call_function(cb, xhr->js_object, nullptr, 0);
     }
 }
@@ -338,11 +337,11 @@ static void xhr_complete_response(XhrState* xhr, long status,
     const char* completion_handler = status >= 200 && status < 600
         ? "onload" : "onerror";
     Item completion = xhr_get_prop(xhr->js_object, completion_handler);
-    if (get_type_id(completion) == LMD_TYPE_FUNC) {
+    if (js_is_callable(completion)) {
         js_call_function(completion, xhr->js_object, nullptr, 0);
     }
     Item onloadend = xhr_get_prop(xhr->js_object, "onloadend");
-    if (get_type_id(onloadend) == LMD_TYPE_FUNC) {
+    if (js_is_callable(onloadend)) {
         js_call_function(onloadend, xhr->js_object, nullptr, 0);
     }
 }
@@ -389,39 +388,39 @@ extern "C" Item js_xhr_new(void) {
     xhr_set_int(obj, "UNSENT", 0);
 
     // attach methods
-    Item open_fn = js_new_function((void*)js_xhr_open, 3);
+    Item open_fn = js_new_native_function(js_xhr_open);
     xhr_set_str(obj, "", ""); // dummy to avoid collision
     Item k;
 
     k = (Item){.item = s2it(heap_create_name("open"))};
     js_property_set(obj, k, open_fn);
 
-    Item send_fn = js_new_function((void*)js_xhr_send, 1);
+    Item send_fn = js_new_native_function(js_xhr_send);
     k = (Item){.item = s2it(heap_create_name("send"))};
     js_property_set(obj, k, send_fn);
 
-    Item srh_fn = js_new_function((void*)js_xhr_set_request_header, 2);
+    Item srh_fn = js_new_native_function(js_xhr_set_request_header);
     k = (Item){.item = s2it(heap_create_name("setRequestHeader"))};
     js_property_set(obj, k, srh_fn);
 
-    Item abort_fn = js_new_function((void*)js_xhr_abort, 0);
+    Item abort_fn = js_new_native_function(js_xhr_abort);
     k = (Item){.item = s2it(heap_create_name("abort"))};
     js_property_set(obj, k, abort_fn);
 
-    Item grh_fn = js_new_function((void*)js_xhr_get_response_header, 1);
+    Item grh_fn = js_new_native_function(js_xhr_get_response_header);
     k = (Item){.item = s2it(heap_create_name("getResponseHeader"))};
     js_property_set(obj, k, grh_fn);
 
-    Item garh_fn = js_new_function((void*)js_xhr_get_all_response_headers, 0);
+    Item garh_fn = js_new_native_function(js_xhr_get_all_response_headers);
     k = (Item){.item = s2it(heap_create_name("getAllResponseHeaders"))};
     js_property_set(obj, k, garh_fn);
 
-    Item override_mime_fn = js_new_function((void*)js_xhr_override_mime_type, 1);
+    Item override_mime_fn = js_new_native_function(js_xhr_override_mime_type);
     k = (Item){.item = s2it(heap_create_name("overrideMimeType"))};
     js_property_set(obj, k, override_mime_fn);
 
     // addEventListener / removeEventListener stubs (jQuery sets onreadystatechange directly)
-    Item noop_fn = js_new_function((void*)js_xhr_noop, 0);
+    Item noop_fn = js_new_native_function(js_xhr_noop);
     k = (Item){.item = s2it(heap_create_name("addEventListener"))};
     js_property_set(obj, k, noop_fn);
     k = (Item){.item = s2it(heap_create_name("removeEventListener"))};
@@ -576,9 +575,9 @@ static bool xhr_schedule_async_send(XhrState* xhr) {
         (Item){.item = i2it((int64_t)xhr->request_token)},
     };
     Item task = js_bind_function(
-        js_new_function((void*)js_xhr_async_send_task, 2), xhr->js_object,
+        js_new_native_function(js_xhr_async_send_task), xhr->js_object,
         args, 2);
-    if (get_type_id(task) != LMD_TYPE_FUNC) return false;
+    if (!js_is_callable(task)) return false;
     Item delay = {.item = i2it(0)};
     Item timer = js_setTimeout(task, delay);
     return get_type_id(timer) != LMD_TYPE_NULL;
@@ -607,7 +606,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
         xhr->request_token++;
 
         Item loadstart_cb = xhr_get_prop(xhr->js_object, "onloadstart");
-        if (get_type_id(loadstart_cb) == LMD_TYPE_FUNC) {
+        if (js_is_callable(loadstart_cb)) {
             js_call_function(loadstart_cb, xhr->js_object, nullptr, 0);
         }
         if (xhr->ready_state != 1 || !xhr->send_pending) {
@@ -716,11 +715,11 @@ extern "C" Item js_xhr_send(Item body_arg) {
         xhr_fire_readystatechange(xhr);
 
         Item onerror = xhr_get_prop(xhr->js_object, "onerror");
-        if (get_type_id(onerror) == LMD_TYPE_FUNC) {
+        if (js_is_callable(onerror)) {
             js_call_function(onerror, xhr->js_object, nullptr, 0);
         }
         Item onloadend = xhr_get_prop(xhr->js_object, "onloadend");
-        if (get_type_id(onloadend) == LMD_TYPE_FUNC) {
+        if (js_is_callable(onloadend)) {
             js_call_function(onloadend, xhr->js_object, nullptr, 0);
         }
 
@@ -749,11 +748,11 @@ extern "C" Item js_xhr_abort(void) {
     xhr_fire_readystatechange(xhr);
 
     Item onabort = xhr_get_prop(xhr->js_object, "onabort");
-    if (get_type_id(onabort) == LMD_TYPE_FUNC) {
+    if (js_is_callable(onabort)) {
         js_call_function(onabort, xhr->js_object, nullptr, 0);
     }
     Item onloadend = xhr_get_prop(xhr->js_object, "onloadend");
-    if (get_type_id(onloadend) == LMD_TYPE_FUNC) {
+    if (js_is_callable(onloadend)) {
         js_call_function(onloadend, xhr->js_object, nullptr, 0);
     }
 

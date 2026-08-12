@@ -190,7 +190,7 @@ struct JsDnsState {
 };
 
 struct JsBuiltinCacheState {
-    Item entries[JS_BUILTIN_MAX] = {};
+    Item entries[JS_INTRINSIC_BINDING_COUNT] = {};
     JsRootRange roots = {};
     bool initialized = false;
 };
@@ -582,6 +582,11 @@ struct JsIteratorState {
     Item map_iterator_prototype = {};
     Item set_iterator_prototype = {};
     Item regexp_string_iterator_prototype = {};
+    Item generator_proto_depth1 = {};
+    Item async_generator_proto_depth1 = {};
+    Item generator_proto_depth2 = {};
+    Item async_generator_proto_depth2 = {};
+    Item async_iterator_prototype = {};
     JsRootRange roots = {};
 };
 
@@ -944,8 +949,6 @@ struct JsIntrinsicState {
     uint64_t owner_heap_epoch = 0;
     uint32_t initialization_depth = 0;
     int array_sym_iter_ever_set = 0;
-    int array_proto_push_ever_set = 0;
-    int array_writable_methods_ever_set = 0;
 };
 
 struct JsRuntimeState {
@@ -1032,7 +1035,13 @@ struct JsRuntimeState {
     void* mir_compile_recovery_state = NULL;
     // Wrapper identity is observable through .prototype and must therefore be
     // private to the context that owns the function objects and their heap.
-    void* function_cache_keys[JS_FUNCTION_CACHE_CAPACITY] = {};
+    struct JsFunctionCacheKey {
+        uint64_t target_bits;
+        int16_t arity;
+        uint8_t kind;
+        uint8_t policy;
+        uint8_t capabilities;
+    } function_cache_keys[JS_FUNCTION_CACHE_CAPACITY] = {};
     JsFunction* function_cache_values[JS_FUNCTION_CACHE_CAPACITY] = {};
     int function_cache_count = 0;
     int function_cache_suppress_depth = 0;
@@ -1046,11 +1055,6 @@ struct JsRuntimeState {
     Item async_resolved_value = {};
     void* async_roots_registered_gc = NULL;
     uint64_t async_roots_registered_epoch = UINT64_MAX;
-    Item generator_proto_depth1_cache = {};
-    Item async_generator_proto_depth1_cache = {};
-    Item generator_proto_depth2_cache = {};
-    Item async_generator_proto_depth2_cache = {};
-    Item async_iterator_proto_cache = {};
     int dynamic_func_counter = 0;
 
     int module_var_count = 0;
@@ -1075,8 +1079,6 @@ struct JsRuntimeState {
     int call_depth = 0;
     int call_stack_limit = 4096;
     Item new_target = {0};
-    Item pending_new_target = {0};
-    bool has_pending_new_target = false;
     bool super_this_bound_stack[128] = {};
     Item super_this_value_slots[128] = {};
     JsItemStack super_this_values = {};
@@ -1084,19 +1086,6 @@ struct JsRuntimeState {
     int pending_call_argc = 0;
     const char* pending_call_source = NULL;
     int pending_call_source_len = 0;
-    Item array_method_real_this = {0};
-    // Js54 P5: true when the currently-dispatched builtin was invoked through
-    // an Array.prototype function object (no JS_FUNC_FLAG_TYPED_ARRAY_METHOD).
-    // Several methods (every, fill, slice, forEach, ...) share the same
-    // JS_BUILTIN_ARR_* id between Array.prototype and TypedArray.prototype.
-    // TypedArray.prototype.X on an OOB receiver throws via ValidateTypedArray;
-    // Array.prototype.X.call(ta_oob, ...) must NOT throw — it uses
-    // LengthOfArrayLike which yields 0 and the method silently no-ops.
-    // Default is false (i.e. TA-mode) so that the direct-method-call fast
-    // path used by the MIR JIT (which bypasses js_call_function and calls
-    // js_map_method directly) still throws on OOB. js_call_function /
-    // js_invoke_fn flip this to true when the calling fn lacks the TA flag.
-    bool dispatch_as_array_method = false;
     Map* cached_object_proto = NULL;
     bool resolving_object_proto = false;
     bool private_field_initializing = false;
@@ -1145,8 +1134,6 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_skip_accessor_dispatch (js_runtime_state.skip_accessor_dispatch)
 #define js_intrinsic_state (js_runtime_state.intrinsics)
 #define g_array_sym_iter_ever_set (js_intrinsic_state.array_sym_iter_ever_set)
-#define g_array_proto_push_ever_set (js_intrinsic_state.array_proto_push_ever_set)
-#define g_array_writable_methods_ever_set (js_intrinsic_state.array_writable_methods_ever_set)
 #define js_module_vars (js_active_module_vars)
 #define js_active_module_vars (js_active_module_vars_ref())
 #define js_module_var_count (js_runtime_state.module_var_count)
@@ -1155,8 +1142,6 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_current_this (js_runtime_state.current_this)
 #define js_proxy_receiver (js_runtime_state.proxy_receiver)
 #define js_new_target (js_runtime_state.new_target)
-#define js_pending_new_target (js_runtime_state.pending_new_target)
-#define js_has_pending_new_target (js_runtime_state.has_pending_new_target)
 #define js_super_this_bound_stack (js_runtime_state.super_this_bound_stack)
 #define js_super_this_value_stack (js_runtime_state.super_this_values.roots.slots)
 #define js_super_this_bound_depth (js_runtime_state.super_this_values.depth)
@@ -1164,8 +1149,6 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_pending_call_argc (js_runtime_state.pending_call_argc)
 #define js_pending_call_source (js_runtime_state.pending_call_source)
 #define js_pending_call_source_len (js_runtime_state.pending_call_source_len)
-#define js_array_method_real_this (js_runtime_state.array_method_real_this)
-#define js_dispatch_as_array_method (js_runtime_state.dispatch_as_array_method)
 #define js_cached_object_proto (js_runtime_state.cached_object_proto)
 #define js_resolving_object_proto (js_runtime_state.resolving_object_proto)
 #define js_private_field_initializing (js_runtime_state.private_field_initializing)

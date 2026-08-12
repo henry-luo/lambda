@@ -345,12 +345,14 @@ static Item node_net_bound_socket_close(void) {
     return (Item){.item = ITEM_UNDEFINED};
 }
 
-static void node_net_bound_socket_set_method(uint64_t* object_root, uint64_t* key_root,
-        uint64_t* function_root, const char* name, void* function) {
+template <typename Target>
+static void node_net_bound_socket_set_method(uint64_t* object_root,
+        uint64_t* key_root, uint64_t* function_root, const char* name,
+        Target target) {
     if (!object_root || !key_root || !function_root || !node_net_host || !node_net_host->script ||
             !node_net_host->value || !node_net_host->value->property_set) return;
     Item key = node_net_property_key(key_root, name);
-    *function_root = node_net_host->script->new_function(function, 0).item;
+    *function_root = jube_new_function(node_net_host->script, target, 0).item;
     if (key.item) node_net_host->value->property_set(node_net_root_value(object_root), key,
         node_net_root_value(function_root));
 }
@@ -445,23 +447,26 @@ static Item node_net_bound_socket_new(Item options) {
     node_net_property_set_name(object_root, key_root, "__jube_bound_socket_resource_id__",
         node_net_root_value(value_root));
     node_net_bound_socket_set_method(object_root, key_root, function_root, "address",
-        (void*)node_net_bound_socket_address);
+        node_net_bound_socket_address);
     node_net_bound_socket_set_method(object_root, key_root, function_root, "fd",
-        (void*)node_net_bound_socket_fd);
+        node_net_bound_socket_fd);
     node_net_bound_socket_set_method(object_root, key_root, function_root, "close",
-        (void*)node_net_bound_socket_close);
+        node_net_bound_socket_close);
     Item result = node_net_root_value(object_root);
     node_net_host->node->roots->root_frame_end(&frame);
     return result;
 }
 
+template <typename Target>
 static void node_net_set_method(uint64_t* namespace_root, uint64_t* key_root,
-        uint64_t* function_root, const char* name, void* function, int parameter_count) {
+        uint64_t* function_root, const char* name, Target target,
+        int adapter_arity) {
     if (!namespace_root || !key_root || !function_root || !node_net_host ||
             !node_net_host->value || !node_net_host->script) return;
     Item key = node_net_host->value->string_from_utf8_n(name, strlen(name));
     *key_root = key.item;
-    Item method = node_net_host->script->new_function(function, parameter_count);
+    Item method = jube_new_function(node_net_host->script, target,
+        adapter_arity);
     *function_root = method.item;
     node_net_host->value->property_set((Item){.item = *namespace_root},
         (Item){.item = *key_root}, (Item){.item = *function_root});
@@ -486,25 +491,25 @@ static Item node_net_install_ip_helpers(Item namespace_item) {
     *namespace_root = namespace_item.item;
     // IP literal parsing is platform-only; publishing it here keeps this
     // Node-visible surface out of js_net while stream ownership moves later.
-    node_net_set_method(namespace_root, key_root, function_root, "isIP", (void*)node_net_is_ip, 1);
-    node_net_set_method(namespace_root, key_root, function_root, "isIPv4", (void*)node_net_is_ipv4, 1);
-    node_net_set_method(namespace_root, key_root, function_root, "isIPv6", (void*)node_net_is_ipv6, 1);
+    node_net_set_method(namespace_root, key_root, function_root, "isIP", node_net_is_ip, 1);
+    node_net_set_method(namespace_root, key_root, function_root, "isIPv4", node_net_is_ipv4, 1);
+    node_net_set_method(namespace_root, key_root, function_root, "isIPv6", node_net_is_ipv6, 1);
     node_net_set_method(namespace_root, key_root, function_root, "getDefaultAutoSelectFamily",
-        (void*)node_net_get_default_auto_select_family, 0);
+        node_net_get_default_auto_select_family, 0);
     node_net_set_method(namespace_root, key_root, function_root, "setDefaultAutoSelectFamily",
-        (void*)node_net_set_default_auto_select_family, 1);
+        node_net_set_default_auto_select_family, 1);
     node_net_set_method(namespace_root, key_root, function_root,
         "getDefaultAutoSelectFamilyAttemptTimeout",
-        (void*)node_net_get_default_auto_select_family_timeout, 0);
+        node_net_get_default_auto_select_family_timeout, 0);
     node_net_set_method(namespace_root, key_root, function_root,
         "setDefaultAutoSelectFamilyAttemptTimeout",
-        (void*)node_net_set_default_auto_select_family_timeout, 1);
+        node_net_set_default_auto_select_family_timeout, 1);
     // BoundSocket is a real module-owned Node object; only its opaque TCP rid
     // crosses into the statically linked host stream provider.
     node_net_set_method(namespace_root, key_root, function_root, "BoundSocket",
-        (void*)node_net_bound_socket_new, 1);
+        node_net_bound_socket_new, 1);
     node_net_set_method(namespace_root, key_root, function_root, "_normalizeArgs",
-        (void*)node_net_normalize_args, 1);
+        node_net_normalize_args, 1);
     Item result = (Item){.item = *namespace_root};
     node_net_host->node->roots->root_frame_end(&frame);
     return result;
@@ -608,7 +613,7 @@ static Item node_net_install_dns_helpers(Item namespace_item) {
     // lookupSync has no loop state: keeping its resolver implementation here
     // removes this real DNS operation from the host adapter without exposing uv.
     node_net_set_method(namespace_root, key_root, function_root, "lookupSync",
-        (void*)node_net_dns_lookup_sync, 1);
+        node_net_dns_lookup_sync, 1);
     Item result = node_net_root_value(namespace_root);
     node_net_host->node->roots->root_frame_end(&frame);
     return result;

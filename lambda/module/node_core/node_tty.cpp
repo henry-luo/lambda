@@ -66,8 +66,9 @@ static Item node_tty_property(Item object, const char* name) {
     return result;
 }
 
-static void node_tty_set_method(Item object, const char* name, void* function,
-                                int parameter_count) {
+template <typename Target>
+static void node_tty_set_method(Item object, const char* name, Target target,
+                                int adapter_arity) {
     JubeRootFrame frame = {};
     if (!node_tty_host->node->roots->root_frame_begin(&frame, 2)) return;
     uint64_t* object_root = node_tty_host->node->roots->root_frame_take_slot(&frame);
@@ -77,7 +78,8 @@ static void node_tty_set_method(Item object, const char* name, void* function,
         return;
     }
     *object_root = object.item;
-    Item method = node_tty_host->script->new_function(function, parameter_count);
+    Item method = jube_new_function(node_tty_host->script, target,
+        adapter_arity);
     *function_root = method.item;
     node_tty_set_property(node_tty_root_value(object_root), name,
         node_tty_root_value(function_root));
@@ -101,7 +103,8 @@ static void node_tty_build_stream_constructor(Item namespace_item, const char* n
     *namespace_root = namespace_item.item;
     *socket_function_root = socket_fn.item;
     *socket_prototype_root = socket_proto.item;
-    Item constructor = node_tty_host->script->new_function((void*)node_tty_empty_object, 1);
+    Item constructor = jube_new_constructor(node_tty_host->script,
+        node_tty_empty_object, 1);
     *function_root = constructor.item;
     Item prototype = node_tty_host->value->new_object();
     *prototype_root = prototype.item;
@@ -137,7 +140,7 @@ Item node_tty_namespace(void) {
     }
     node_tty_cached_namespace = node_tty_host->value->new_object();
     *namespace_root = node_tty_cached_namespace.item;
-    node_tty_set_method(node_tty_root_value(namespace_root), "isatty", (void*)node_tty_undefined, 1);
+    node_tty_set_method(node_tty_root_value(namespace_root), "isatty", node_tty_undefined, 1);
     Item net_namespace = ItemNull;
     if (node_tty_host->node->runtime->resolve_host_namespace(node_tty_session, "net",
             &net_namespace) == 0) {
@@ -152,9 +155,9 @@ Item node_tty_namespace(void) {
             node_tty_root_value(socket_root), node_tty_root_value(socket_prototype_root));
     } else {
         node_tty_set_method(node_tty_root_value(namespace_root), "WriteStream",
-            (void*)node_tty_empty_object, 1);
+            node_tty_empty_object, 1);
         node_tty_set_method(node_tty_root_value(namespace_root), "ReadStream",
-            (void*)node_tty_empty_object, 1);
+            node_tty_empty_object, 1);
     }
     node_tty_set_property(node_tty_root_value(namespace_root), "default",
         node_tty_root_value(namespace_root));

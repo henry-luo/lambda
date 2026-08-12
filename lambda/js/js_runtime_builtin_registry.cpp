@@ -7,9 +7,8 @@
 // Built-in registry
 // =============================================================================
 
-// Built-in method function cache — keyed by builtin_id and owned by the
-// current isolate.  These functions embed heap pointers, so process storage
-// cannot safely cache them across Runtime instances.
+// Intrinsic functions are realm-owned binding values. A shared target never
+// implies JavaScript identity; only an explicit binding alias can share a slot.
 #define js_builtin_cache (js_runtime_state.builtin_cache.entries)
 #define js_builtin_cache_init (js_runtime_state.builtin_cache.initialized)
 
@@ -18,47 +17,52 @@ static bool js_builtin_cache_ensure_roots(void) {
 }
 
 
-typedef struct JsBuiltinDescriptor {
-    JsBuiltinDispatchGroup dispatch_group;
-    JsBuiltinMirLoweringKind mir_kind;
-} JsBuiltinDescriptor;
-
-static const JsBuiltinDescriptor JS_BUILTIN_DESCRIPTORS[] = {
-    {JS_BUILTIN_DISPATCH_NONE, JS_BUILTIN_MIR_GENERIC},
+static const JsIntrinsicTargetSpec JS_INTRINSIC_TARGET_SPECS[] = {
+    {JS_BUILTIN_NONE, NULL, NULL,
+        JS_BUILTIN_MIR_GENERIC},
 #define JS_BUILTIN_OWNER(owner)
-#define JS_BUILTIN_ID(id, dispatch_group, mir_kind) {dispatch_group, mir_kind},
-#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, use_cache)
-#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, arity, flags)
+#define JS_BUILTIN_ID(id, call_body, mir_kind) \
+    {id, call_body, NULL, mir_kind},
+#define JS_BUILTIN_CONSTRUCTOR_TARGET(id, call_body, construct_body, mir_kind) \
+    {id, call_body, construct_body, mir_kind},
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, identity_alias)
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, target_id, arity, flags)
 #include "js_builtin_catalog.def"
 #undef JS_BUILTIN_GLOBAL
 #undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_CONSTRUCTOR_TARGET
 #undef JS_BUILTIN_ID
 #undef JS_BUILTIN_OWNER
 };
 
 static const JsBuiltinMethodSpec JS_BUILTIN_METHOD_SPECS[] = {
 #define JS_BUILTIN_OWNER(owner)
-#define JS_BUILTIN_ID(id, dispatch_group, mir_kind)
-#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, use_cache) \
-    {owner, name, len, id, arity, display_name, property_kind, flags, use_cache},
-#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, arity, flags)
+#define JS_BUILTIN_ID(id, call_body, mir_kind)
+#define JS_BUILTIN_CONSTRUCTOR_TARGET(id, call_body, construct_body, mir_kind)
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, identity_alias) \
+    {owner, name, len, id, arity, display_name, property_kind, flags, identity_alias},
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, target_id, arity, flags)
 #include "js_builtin_catalog.def"
 #undef JS_BUILTIN_GLOBAL
 #undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_CONSTRUCTOR_TARGET
 #undef JS_BUILTIN_ID
 #undef JS_BUILTIN_OWNER
-    {JS_BUILTIN_OWNER_NONE, NULL, 0, 0, 0, NULL, JS_BUILTIN_PROPERTY_METHOD, 0, false}
+    {JS_BUILTIN_OWNER_NONE, NULL, 0, 0, 0, NULL, JS_BUILTIN_PROPERTY_METHOD,
+        0, JS_INTRINSIC_ALIAS_NONE}
 };
 
 static const JsBuiltinGlobalSpec JS_BUILTIN_GLOBAL_SPECS[] = {
 #define JS_BUILTIN_OWNER(owner)
-#define JS_BUILTIN_ID(id, dispatch_group, mir_kind)
-#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, use_cache)
-#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, arity, flags) \
-    {id, name, len, kind, runtime_id, arity, flags},
+#define JS_BUILTIN_ID(id, call_body, mir_kind)
+#define JS_BUILTIN_CONSTRUCTOR_TARGET(id, call_body, construct_body, mir_kind)
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, identity_alias)
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, target_id, arity, flags) \
+    {id, name, len, kind, runtime_id, target_id, arity, flags},
 #include "js_builtin_catalog.def"
 #undef JS_BUILTIN_GLOBAL
 #undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_CONSTRUCTOR_TARGET
 #undef JS_BUILTIN_ID
 #undef JS_BUILTIN_OWNER
 };
@@ -80,12 +84,27 @@ static uint32_t js_builtin_name_hash(uint32_t seed, const char* name, int len) {
 static const JsBuiltinGlobalSpec* js_builtin_global_lookup_index[
     JS_BUILTIN_GLOBAL_LOOKUP_INDEX_SIZE];
 static bool js_builtin_global_lookup_index_initialized = false;
+static bool js_builtin_catalog_valid = true;
 
 static void js_builtin_global_initialize_index() {
     if (js_builtin_global_lookup_index_initialized) return;
     int count = (int)(sizeof(JS_BUILTIN_GLOBAL_SPECS) / sizeof(JS_BUILTIN_GLOBAL_SPECS[0]));
     for (int i = 0; i < count; i++) {
         const JsBuiltinGlobalSpec* spec = &JS_BUILTIN_GLOBAL_SPECS[i];
+        if (spec->kind != JS_BUILTIN_GLOBAL_NAMESPACE) {
+            const JsIntrinsicTargetSpec* target =
+                js_intrinsic_target_find(spec->target_id);
+            bool invalid_function = spec->kind == JS_BUILTIN_GLOBAL_FUNCTION &&
+                (!target || !target->call_body || target->construct_body);
+            bool invalid_constructor =
+                spec->kind == JS_BUILTIN_GLOBAL_CONSTRUCTOR &&
+                (!target || !target->call_body || !target->construct_body);
+            if (invalid_function || invalid_constructor) {
+                log_error("js-callable-catalog: global binding '%s' has an invalid call/construct matrix",
+                    spec->name);
+                js_builtin_catalog_valid = false;
+            }
+        }
         uint32_t slot = js_builtin_name_hash(2166136261u, spec->name, spec->len) &
                         (JS_BUILTIN_GLOBAL_LOOKUP_INDEX_SIZE - 1u);
         while (js_builtin_global_lookup_index[slot]) {
@@ -118,26 +137,6 @@ bool js_builtin_global_has_flag(const char* name, int len, int flag) {
     return spec && (spec->flags & flag) != 0;
 }
 
-int js_builtin_typed_array_type(const char* name, int len) {
-    const JsBuiltinGlobalSpec* spec = js_builtin_global_find(name, len);
-    if (!spec || !(spec->flags & JS_BUILTIN_GLOBAL_TYPED_ARRAY)) return -1;
-    switch (spec->runtime_id) {
-    case JS_CTOR_INT8ARRAY: return JS_TYPED_INT8;
-    case JS_CTOR_UINT8ARRAY: return JS_TYPED_UINT8;
-    case JS_CTOR_UINT8CLAMPEDARRAY: return JS_TYPED_UINT8_CLAMPED;
-    case JS_CTOR_INT16ARRAY: return JS_TYPED_INT16;
-    case JS_CTOR_UINT16ARRAY: return JS_TYPED_UINT16;
-    case JS_CTOR_INT32ARRAY: return JS_TYPED_INT32;
-    case JS_CTOR_UINT32ARRAY: return JS_TYPED_UINT32;
-    case JS_CTOR_FLOAT16ARRAY: return JS_TYPED_FLOAT16;
-    case JS_CTOR_FLOAT32ARRAY: return JS_TYPED_FLOAT32;
-    case JS_CTOR_FLOAT64ARRAY: return JS_TYPED_FLOAT64;
-    case JS_CTOR_BIGINT64ARRAY: return JS_TYPED_BIGINT64;
-    case JS_CTOR_BIGUINT64ARRAY: return JS_TYPED_BIGUINT64;
-    default: return -1;
-    }
-}
-
 int js_builtin_global_count() {
     return (int)(sizeof(JS_BUILTIN_GLOBAL_SPECS) / sizeof(JS_BUILTIN_GLOBAL_SPECS[0]));
 }
@@ -147,7 +146,8 @@ const JsBuiltinGlobalSpec* js_builtin_global_at(int index) {
     return &JS_BUILTIN_GLOBAL_SPECS[index];
 }
 
-static_assert(sizeof(JS_BUILTIN_DESCRIPTORS) / sizeof(JS_BUILTIN_DESCRIPTORS[0]) == JS_BUILTIN_MAX,
+static_assert(sizeof(JS_INTRINSIC_TARGET_SPECS) /
+                  sizeof(JS_INTRINSIC_TARGET_SPECS[0]) == JS_BUILTIN_MAX,
               "builtin catalog IDs must remain dense");
 static_assert(JS_BUILTIN_ARR_TO_LOCALE_STRING - JS_BUILTIN_ARR_PUSH == 38,
               "Array builtin range arithmetic requires contiguous catalog IDs");
@@ -175,15 +175,59 @@ static void js_builtin_catalog_initialize_index() {
     if (js_builtin_lookup_index_initialized) return;
     for (int i = 0; JS_BUILTIN_METHOD_SPECS[i].name; i++) {
         const JsBuiltinMethodSpec* spec = &JS_BUILTIN_METHOD_SPECS[i];
+        if (spec->owner <= JS_BUILTIN_OWNER_NONE ||
+            spec->owner >= JS_BUILTIN_OWNER_MAX) {
+            log_error("js-callable-catalog: binding '%s' has invalid owner %d",
+                spec->name, (int)spec->owner);
+            js_builtin_catalog_valid = false;
+            continue;
+        }
+        if (spec->builtin_id > JS_BUILTIN_NONE) {
+            const JsIntrinsicTargetSpec* target = js_intrinsic_target_find(
+                spec->builtin_id);
+            if (!target || target->catalog_id != spec->builtin_id ||
+                (!target->call_body && !target->construct_body)) {
+                log_error("js-callable-catalog: binding '%s' has no executable target",
+                    spec->name);
+                js_builtin_catalog_valid = false;
+                continue;
+            }
+        }
         uint32_t slot = js_builtin_spec_name_hash(spec->owner, spec->name, spec->len) &
                         (JS_BUILTIN_LOOKUP_INDEX_SIZE - 1u);
         while (js_builtin_lookup_index[slot]) {
+            const JsBuiltinMethodSpec* prior = js_builtin_lookup_index[slot];
+            if (prior->owner == spec->owner && prior->len == spec->len &&
+                strncmp(prior->name, spec->name, spec->len) == 0) {
+                log_error("js-callable-catalog: duplicate owner/property binding '%s'",
+                    spec->name);
+                js_builtin_catalog_valid = false;
+                break;
+            }
             slot = (slot + 1u) & (JS_BUILTIN_LOOKUP_INDEX_SIZE - 1u);
         }
+        if (!js_builtin_catalog_valid && js_builtin_lookup_index[slot]) continue;
         js_builtin_lookup_index[slot] = spec;
         if (spec->builtin_id > 0 && spec->builtin_id < JS_BUILTIN_MAX &&
             !js_builtin_id_index[spec->builtin_id]) {
             js_builtin_id_index[spec->builtin_id] = spec;
+        }
+        if (spec->identity_alias != JS_INTRINSIC_ALIAS_NONE) {
+            for (int j = 0; j < i; j++) {
+                const JsBuiltinMethodSpec* alias = &JS_BUILTIN_METHOD_SPECS[j];
+                if (alias->identity_alias != spec->identity_alias) continue;
+                const char* alias_name = js_builtin_method_spec_display_name(alias);
+                const char* spec_name = js_builtin_method_spec_display_name(spec);
+                if (alias->builtin_id != spec->builtin_id ||
+                    alias->param_count != spec->param_count ||
+                    alias->property_kind != spec->property_kind ||
+                    alias->flags != spec->flags || strcmp(alias_name, spec_name) != 0) {
+                    log_error("js-callable-catalog: incompatible identity alias '%s'",
+                        spec->name);
+                    js_builtin_catalog_valid = false;
+                }
+                break;
+            }
         }
     }
     js_builtin_lookup_index_initialized = true;
@@ -193,6 +237,7 @@ const JsBuiltinMethodSpec* js_builtin_catalog_find(JsBuiltinOwner owner,
                                                     const char* name, int len) {
     if (owner <= JS_BUILTIN_OWNER_NONE || owner >= JS_BUILTIN_OWNER_MAX || !name) return NULL;
     js_builtin_catalog_initialize_index();
+    if (!js_builtin_catalog_valid) return NULL;
     uint32_t slot = js_builtin_spec_name_hash(owner, name, len) &
                     (JS_BUILTIN_LOOKUP_INDEX_SIZE - 1u);
     for (uint32_t probe = 0; probe < JS_BUILTIN_LOOKUP_INDEX_SIZE; probe++) {
@@ -210,6 +255,7 @@ const JsBuiltinMethodSpec* js_builtin_catalog_find(JsBuiltinOwner owner,
 const JsBuiltinMethodSpec* js_builtin_catalog_find_id(int builtin_id) {
     if (builtin_id <= JS_BUILTIN_NONE || builtin_id >= JS_BUILTIN_MAX) return NULL;
     js_builtin_catalog_initialize_index();
+    if (!js_builtin_catalog_valid) return NULL;
     return js_builtin_id_index[builtin_id];
 }
 
@@ -218,42 +264,92 @@ int js_builtin_catalog_lookup_id(JsBuiltinOwner owner, const char* name, int len
     return spec ? spec->builtin_id : JS_BUILTIN_NONE;
 }
 
-JsBuiltinDispatchGroup js_builtin_dispatch_group(int builtin_id) {
-    if (builtin_id <= JS_BUILTIN_NONE || builtin_id >= JS_BUILTIN_MAX) {
-        return JS_BUILTIN_DISPATCH_NONE;
-    }
-    return JS_BUILTIN_DESCRIPTORS[builtin_id].dispatch_group;
-}
-
 JsBuiltinMirLoweringKind js_builtin_mir_kind(int builtin_id) {
     if (builtin_id <= JS_BUILTIN_NONE || builtin_id >= JS_BUILTIN_MAX) {
         return JS_BUILTIN_MIR_GENERIC;
     }
-    return JS_BUILTIN_DESCRIPTORS[builtin_id].mir_kind;
+    return JS_INTRINSIC_TARGET_SPECS[builtin_id].mir_kind;
 }
 
-Item js_lookup_builtin_method_spec(JsBuiltinOwner owner, const char* name, int len) {
-    const JsBuiltinMethodSpec* spec = js_builtin_catalog_find(owner, name, len);
-    if (!spec || spec->builtin_id <= JS_BUILTIN_NONE) return ItemNull;
-    return js_get_or_create_builtin(spec->builtin_id,
-                                    js_builtin_method_spec_display_name(spec),
-                                    spec->param_count);
+const JsIntrinsicTargetSpec* js_intrinsic_target_find(int catalog_id) {
+    if (catalog_id <= JS_BUILTIN_NONE || catalog_id >= JS_BUILTIN_MAX) {
+        return NULL;
+    }
+    return &JS_INTRINSIC_TARGET_SPECS[catalog_id];
 }
 
 static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec) {
-    const char* display_name = js_builtin_method_spec_display_name(spec);
-    if (spec->use_cache && spec->flags == 0 && spec->builtin_id > 0) {
-        return js_get_or_create_builtin(spec->builtin_id, display_name, spec->param_count);
+    if (!spec || !js_active_runtime_state || !js_builtin_cache_ensure_roots()) {
+        return ItemError;
     }
+    if (!js_builtin_cache_init) {
+        for (int i = 0; i < JS_INTRINSIC_BINDING_COUNT; i++) {
+            js_builtin_cache[i] = ItemNull;
+        }
+        js_builtin_cache_init = true;
+    }
+    int identity_slot = (int)(spec - JS_BUILTIN_METHOD_SPECS);
+    if (identity_slot < 0 || identity_slot >= JS_INTRINSIC_BINDING_COUNT) {
+        return ItemError;
+    }
+    if (spec->identity_alias != JS_INTRINSIC_ALIAS_NONE) {
+        // Binding identity is unique unless the catalog names an alias group.
+        for (int i = 0; i < identity_slot; i++) {
+            if (JS_BUILTIN_METHOD_SPECS[i].identity_alias == spec->identity_alias) {
+                identity_slot = i;
+                break;
+            }
+        }
+    }
+    if (js_builtin_cache[identity_slot].item != 0 &&
+        js_builtin_cache[identity_slot].item != ItemNull.item) {
+        return js_builtin_cache[identity_slot];
+    }
+    const char* display_name = js_builtin_method_spec_display_name(spec);
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
     js_function_init_native_module_scope(fn);
     fn->type_id = LMD_TYPE_FUNC;
     fn->param_count = spec->param_count;
     fn->formal_length = -1;
-    fn->builtin_id = spec->builtin_id;
+    fn->catalog_id = spec->builtin_id;
+    if (spec->builtin_id > JS_BUILTIN_NONE) {
+        const JsIntrinsicTargetSpec* target = js_intrinsic_target_find(
+            spec->builtin_id);
+        if (!target || !target->call_body) return ItemError;
+        fn->native_call = target->call_body;
+        fn->native_construct = target->construct_body;
+        fn->native_policy = JS_NATIVE_CALL_BODY;
+    }
     fn->name = heap_create_name(display_name, strlen(display_name));
     fn->flags = spec->flags;
-    return (Item){.function = (Function*)fn};
+    js_function_finalize_capabilities(fn);
+    Item result = (Item){.function = (Function*)fn};
+    if (spec->builtin_id == JS_BUILTIN_FUNC_THROW_TYPE_ERROR) {
+        Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+        js_func_init_property(result, length_key, (Item){.item = i2it(0)});
+        js_attr_set_writable(result, "length", 6, false);
+        js_attr_set_enumerable(result, "length", 6, false);
+        js_attr_set_configurable(result, "length", 6, false);
+        Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
+        js_func_init_property(result, name_key,
+            (Item){.item = s2it(heap_create_name("", 0))});
+        js_attr_set_writable(result, "name", 4, false);
+        js_attr_set_enumerable(result, "name", 4, false);
+        js_attr_set_configurable(result, "name", 4, false);
+        Item non_ext_key = (Item){.item = s2it(heap_create_name(
+            "__non_extensible__", 17))};
+        js_func_init_property(result, non_ext_key, (Item){.item = b2it(true)});
+        Item frozen_key = (Item){.item = s2it(heap_create_name("__frozen__", 10))};
+        js_func_init_property(result, frozen_key, (Item){.item = b2it(true)});
+    }
+    js_builtin_cache[identity_slot] = result;
+    return result;
+}
+
+Item js_intrinsic_binding_get(JsBuiltinOwner owner, const char* name, int len) {
+    const JsBuiltinMethodSpec* spec = js_builtin_catalog_find(owner, name, len);
+    if (!spec || spec->builtin_id <= JS_BUILTIN_NONE) return ItemNull;
+    return js_create_builtin_function_from_spec(spec);
 }
 
 void js_install_builtin_method_specs(Item object, JsBuiltinOwner owner) {
@@ -306,11 +402,6 @@ void js_populate_dataview_prototype_methods(Item prototype) {
     js_install_builtin_accessor_specs(prototype, JS_BUILTIN_OWNER_DATAVIEW_ACCESSOR);
 }
 
-typedef struct JsBuiltinTypeOwnerMap {
-    TypeId type;
-    JsBuiltinOwner owner;
-} JsBuiltinTypeOwnerMap;
-
 typedef struct JsBuiltinOwnerBinding {
     const char* name;
     int len;
@@ -323,15 +414,17 @@ typedef struct JsBuiltinOwnerBinding {
 #define JS_BUILTIN_OWNER_BINDING_SPECIES 1
 static const JsBuiltinOwnerBinding JS_BUILTIN_OWNER_BINDINGS[] = {
 #define JS_BUILTIN_OWNER(owner)
-#define JS_BUILTIN_ID(id, dispatch_group, mir_kind)
-#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, use_cache)
-#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, arity, flags)
+#define JS_BUILTIN_ID(id, call_body, mir_kind)
+#define JS_BUILTIN_CONSTRUCTOR_TARGET(id, call_body, construct_body, mir_kind)
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, identity_alias)
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, target_id, arity, flags)
 #define JS_BUILTIN_OWNER_BINDING(name, len, member, prototype, accessor, flags) \
     {name, len, member, prototype, accessor, flags},
 #include "js_builtin_catalog.def"
 #undef JS_BUILTIN_OWNER_BINDING
 #undef JS_BUILTIN_GLOBAL
 #undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_CONSTRUCTOR_TARGET
 #undef JS_BUILTIN_ID
 #undef JS_BUILTIN_OWNER
     {NULL, 0, JS_BUILTIN_OWNER_NONE, JS_BUILTIN_OWNER_NONE, JS_BUILTIN_OWNER_NONE, 0}
@@ -346,32 +439,9 @@ static const JsBuiltinOwnerBinding* js_find_owner_binding(const char* name, int 
     return NULL;
 }
 
-static JsBuiltinOwner js_find_type_owner(const JsBuiltinTypeOwnerMap* map, TypeId type) {
-    if (!map) return JS_BUILTIN_OWNER_NONE;
-    for (int i = 0; map[i].owner != JS_BUILTIN_OWNER_NONE; i++) {
-        if (map[i].type == type) return map[i].owner;
-    }
-    return JS_BUILTIN_OWNER_NONE;
-}
-
-static const JsBuiltinTypeOwnerMap JS_PROTOTYPE_TYPE_OWNER_MAP[] = {
-    {LMD_TYPE_ARRAY, JS_BUILTIN_OWNER_ARRAY_PROTOTYPE_METHOD},
-    {LMD_TYPE_FUNC, JS_BUILTIN_OWNER_FUNCTION_PROTOTYPE_METHOD},
-    {LMD_TYPE_INT, JS_BUILTIN_OWNER_NUMBER_PROTOTYPE_METHOD},
-    {LMD_TYPE_FLOAT, JS_BUILTIN_OWNER_NUMBER_PROTOTYPE_METHOD},
-    {LMD_TYPE_DECIMAL, JS_BUILTIN_OWNER_BIGINT_PROTOTYPE_METHOD},
-    {LMD_TYPE_STRING, JS_BUILTIN_OWNER_STRING_PROTOTYPE_METHOD},
-    {LMD_TYPE_BOOL, JS_BUILTIN_OWNER_BOOLEAN_PROTOTYPE_METHOD},
-    {LMD_TYPE_NULL, JS_BUILTIN_OWNER_NONE}
-};
-
 static JsBuiltinOwner js_get_constructor_static_owner(const char* ctor_name, int ctor_len) {
     const JsBuiltinOwnerBinding* binding = js_find_owner_binding(ctor_name, ctor_len);
     return binding ? binding->member_owner : JS_BUILTIN_OWNER_NONE;
-}
-
-static JsBuiltinOwner js_get_prototype_owner_for_type(TypeId type) {
-    return js_find_type_owner(JS_PROTOTYPE_TYPE_OWNER_MAP, type);
 }
 
 int js_builtin_catalog_lookup_constructor_id(const char* ctor_name, int ctor_len,
@@ -386,141 +456,6 @@ int js_builtin_catalog_lookup_member_id(const char* owner_name, int owner_len,
     return js_builtin_catalog_lookup_id(owner, prop_name, prop_len);
 }
 
-static bool js_builtin_type_has_own_to_string(TypeId type) {
-    return type == LMD_TYPE_FUNC || type == LMD_TYPE_BOOL ||
-           type == LMD_TYPE_ARRAY || type == LMD_TYPE_STRING ||
-           type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-           type == LMD_TYPE_FLOAT || type == LMD_TYPE_DECIMAL;
-}
-
-static bool js_builtin_type_has_own_value_of(TypeId type) {
-    return type == LMD_TYPE_FUNC || type == LMD_TYPE_INT ||
-           type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT ||
-           type == LMD_TYPE_DECIMAL;
-}
-
-static bool js_builtin_type_uses_number_prototype(TypeId type) {
-    return type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-           type == LMD_TYPE_FLOAT;
-}
-
-static JsBuiltinOwner js_get_prototype_owner_for_class_or_type(int js_class,
-                                                                  TypeId fallback_type) {
-    switch ((JsClass)js_class) {
-    case JS_CLASS_OBJECT: return JS_BUILTIN_OWNER_OBJECT_PROTOTYPE_METHOD;
-    case JS_CLASS_FUNCTION: return JS_BUILTIN_OWNER_FUNCTION_PROTOTYPE_METHOD;
-    case JS_CLASS_BOOLEAN: return JS_BUILTIN_OWNER_BOOLEAN_PROTOTYPE_METHOD;
-    case JS_CLASS_NUMBER: return JS_BUILTIN_OWNER_NUMBER_PROTOTYPE_METHOD;
-    case JS_CLASS_BIGINT: return JS_BUILTIN_OWNER_BIGINT_PROTOTYPE_METHOD;
-    case JS_CLASS_SYMBOL: return JS_BUILTIN_OWNER_SYMBOL_PROTOTYPE_METHOD;
-    case JS_CLASS_STRING: return JS_BUILTIN_OWNER_STRING_PROTOTYPE_METHOD;
-    case JS_CLASS_ARRAY: return JS_BUILTIN_OWNER_ARRAY_PROTOTYPE_METHOD;
-    case JS_CLASS_DATE: return JS_BUILTIN_OWNER_DATE_PROTOTYPE_METHOD;
-    case JS_CLASS_REGEXP: return JS_BUILTIN_OWNER_REGEXP_PROTOTYPE_METHOD;
-    case JS_CLASS_PROMISE: return JS_BUILTIN_OWNER_PROMISE_PROTOTYPE_METHOD;
-    case JS_CLASS_MAP: return JS_BUILTIN_OWNER_MAP_PROTOTYPE_METHOD;
-    case JS_CLASS_SET: return JS_BUILTIN_OWNER_SET_PROTOTYPE_METHOD;
-    case JS_CLASS_WEAK_MAP: return JS_BUILTIN_OWNER_WEAKMAP_PROTOTYPE_METHOD;
-    case JS_CLASS_WEAK_SET: return JS_BUILTIN_OWNER_WEAKSET_PROTOTYPE_METHOD;
-    case JS_CLASS_WEAK_REF: return JS_BUILTIN_OWNER_WEAKREF_PROTOTYPE_METHOD;
-    case JS_CLASS_FINALIZATION_REGISTRY:
-        return JS_BUILTIN_OWNER_FINALIZATION_REGISTRY_PROTOTYPE_METHOD;
-    case JS_CLASS_ARRAY_BUFFER: return JS_BUILTIN_OWNER_ARRAYBUFFER_PROTOTYPE_METHOD;
-    case JS_CLASS_DATA_VIEW: return JS_BUILTIN_OWNER_DATAVIEW_PROTOTYPE_METHOD;
-    case JS_CLASS_TYPED_ARRAY: return JS_BUILTIN_OWNER_TYPED_ARRAY_PROTOTYPE_METHOD;
-    default:
-        return js_get_prototype_owner_for_type(fallback_type);
-    }
-}
-
-static void js_append_builtin_method_spec_names(JsBuiltinOwner owner, Item result) {
-    if (owner == JS_BUILTIN_OWNER_NONE) return;
-    for (int i = 0; JS_BUILTIN_METHOD_SPECS[i].name; i++) {
-        const JsBuiltinMethodSpec* spec = &JS_BUILTIN_METHOD_SPECS[i];
-        if (spec->owner != owner) continue;
-        Item key = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
-        js_array_push(result, key);
-    }
-}
-
-static Item js_builtin_registry_data_descriptor_from_spec(const JsBuiltinMethodSpec* spec) {
-    if (!spec) return make_js_undefined();
-    Item value = js_create_builtin_function_from_spec(spec);
-    Item desc = js_new_object();
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
-    return desc;
-}
-
-static Item js_builtin_registry_accessor_descriptor_from_spec(const JsBuiltinMethodSpec* spec) {
-    if (!spec) return make_js_undefined();
-    Item getter = js_create_builtin_function_from_spec(spec);
-    Item desc = js_new_object();
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))}, getter);
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))}, make_js_undefined());
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
-    return desc;
-}
-
-static Item js_lookup_unconditional_object_prototype_method(const char* name, int len) {
-    const JsBuiltinMethodSpec* spec = js_builtin_catalog_find(
-        JS_BUILTIN_OWNER_OBJECT_PROTOTYPE_METHOD, name, len);
-    if (!spec) return ItemNull;
-    if (spec->builtin_id == JS_BUILTIN_OBJ_TO_STRING ||
-        spec->builtin_id == JS_BUILTIN_OBJ_VALUE_OF) {
-        return ItemNull;
-    }
-    return js_get_or_create_builtin(spec->builtin_id,
-                                    js_builtin_method_spec_display_name(spec),
-                                    spec->param_count);
-}
-
-extern "C" Item js_builtin_registry_prototype_method_descriptor(
-    int js_class, TypeId fallback_type, const char* name, int len) {
-    JsBuiltinOwner owner = js_get_prototype_owner_for_class_or_type(js_class, fallback_type);
-    const JsBuiltinMethodSpec* spec = js_builtin_catalog_find(owner, name, len);
-    if (spec) return js_builtin_registry_data_descriptor_from_spec(spec);
-
-    if ((JsClass)js_class == JS_CLASS_TYPED_ARRAY) {
-        spec = js_builtin_catalog_find(JS_BUILTIN_OWNER_TYPED_ARRAY_STUB_METHOD, name, len);
-        if (spec) return js_builtin_registry_data_descriptor_from_spec(spec);
-        spec = js_builtin_catalog_find(JS_BUILTIN_OWNER_TYPED_ARRAY_ACCESSOR, name, len);
-        if (spec) return js_builtin_registry_accessor_descriptor_from_spec(spec);
-    }
-    if ((JsClass)js_class == JS_CLASS_DATA_VIEW) {
-        spec = js_builtin_catalog_find(JS_BUILTIN_OWNER_DATAVIEW_ACCESSOR, name, len);
-        if (spec) return js_builtin_registry_accessor_descriptor_from_spec(spec);
-    }
-    if ((JsClass)js_class == JS_CLASS_ARRAY_BUFFER) {
-        spec = js_builtin_catalog_find(JS_BUILTIN_OWNER_ARRAYBUFFER_ACCESSOR, name, len);
-        if (spec) return js_builtin_registry_accessor_descriptor_from_spec(spec);
-    }
-    return make_js_undefined();
-}
-
-extern "C" bool js_builtin_registry_has_prototype_method(
-    int js_class, TypeId fallback_type, const char* name, int len) {
-    Item desc = js_builtin_registry_prototype_method_descriptor(js_class, fallback_type, name, len);
-    return get_type_id(desc) != LMD_TYPE_UNDEFINED;
-}
-
-extern "C" void js_append_builtin_method_names_for_class(
-    int js_class, TypeId fallback_type, Item result) {
-    JsBuiltinOwner owner = js_get_prototype_owner_for_class_or_type(js_class, fallback_type);
-    js_append_builtin_method_spec_names(owner, result);
-    if ((JsClass)js_class == JS_CLASS_TYPED_ARRAY) {
-        js_append_builtin_method_spec_names(JS_BUILTIN_OWNER_TYPED_ARRAY_STUB_METHOD, result);
-        js_append_builtin_method_spec_names(JS_BUILTIN_OWNER_TYPED_ARRAY_ACCESSOR, result);
-    } else if ((JsClass)js_class == JS_CLASS_DATA_VIEW) {
-        js_append_builtin_method_spec_names(JS_BUILTIN_OWNER_DATAVIEW_ACCESSOR, result);
-    } else if ((JsClass)js_class == JS_CLASS_ARRAY_BUFFER) {
-        js_append_builtin_method_spec_names(JS_BUILTIN_OWNER_ARRAYBUFFER_ACCESSOR, result);
-    }
-}
-
 void js_populate_builtin_prototype_methods(Item prototype, const char* ctor_name, int ctor_len) {
     const JsBuiltinOwnerBinding* binding = js_find_owner_binding(ctor_name, ctor_len);
     if (!binding) return;
@@ -528,108 +463,20 @@ void js_populate_builtin_prototype_methods(Item prototype, const char* ctor_name
     js_install_builtin_accessor_specs(prototype, binding->accessor_owner);
 }
 
-Item js_lookup_builtin_prototype_method_for_class(JsClass cls, const char* name, int len) {
-    JsBuiltinOwner owner = js_get_prototype_owner_for_class_or_type((int)cls, LMD_TYPE_MAP);
-    return js_lookup_builtin_method_spec(owner, name, len);
-}
-
 void js_builtin_cache_reset() {
     if (!js_active_runtime_state) return;
-    for (int i = 0; i < JS_BUILTIN_MAX; i++) js_builtin_cache[i] = ItemNull;
-}
-
-Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count) {
-    if (!js_active_runtime_state || !js_builtin_cache_ensure_roots()) return ItemError;
-    if (!js_builtin_cache_init) {
-        for (int i = 0; i < JS_BUILTIN_MAX; i++) js_builtin_cache[i] = ItemNull;
-        js_builtin_cache_init = true;
+    for (int i = 0; i < JS_INTRINSIC_BINDING_COUNT; i++) {
+        js_builtin_cache[i] = ItemNull;
     }
-    // Heap root cleanup zeroes slots after a batch teardown while the
-    // context-owned initialized flag remains set; zero is an empty cache slot.
-    if (js_builtin_cache[builtin_id].item != 0 &&
-            js_builtin_cache[builtin_id].item != ItemNull.item) {
-        return js_builtin_cache[builtin_id];
-    }
-    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-    js_function_init_native_module_scope(fn);
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->func_ptr = NULL;  // not needed, dispatch uses builtin_id
-    fn->param_count = param_count;
-    fn->formal_length = -1; // -1 = use param_count for .length
-    fn->builtin_id = builtin_id;
-    if (builtin_id == JS_BUILTIN_FUNC_THROW_TYPE_ERROR) {
-        fn->name = heap_create_name("", 0);
-    } else {
-        fn->name = heap_create_name(name, strlen(name));
-    }
-    fn->prototype = ItemNull;
-    // bound_this_store remains zeroed; bound state is represented only by its
-    // flag so scalar payload storage is never mistaken for a truthy Item.
-    Item result = {.function = (Function*)fn};
-    if (builtin_id == JS_BUILTIN_FUNC_THROW_TYPE_ERROR) {
-        Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
-        js_func_init_property(result, length_key, (Item){.item = i2it(0)});
-        js_attr_set_writable(result, "length", 6, false);
-        js_attr_set_enumerable(result, "length", 6, false);
-        js_attr_set_configurable(result, "length", 6, false);
-
-        Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
-        js_func_init_property(result, name_key, (Item){.item = s2it(heap_create_name("", 0))});
-        js_attr_set_writable(result, "name", 4, false);
-        js_attr_set_enumerable(result, "name", 4, false);
-        js_attr_set_configurable(result, "name", 4, false);
-
-        Item non_ext_key = (Item){.item = s2it(heap_create_name("__non_extensible__", 17))};
-        js_func_init_property(result, non_ext_key, (Item){.item = b2it(true)});
-        Item frozen_key = (Item){.item = s2it(heap_create_name("__frozen__", 10))};
-        js_func_init_property(result, frozen_key, (Item){.item = b2it(true)});
-    }
-    js_builtin_cache[builtin_id] = result;
-    return result;
 }
 
 // Wrapper for js_globals.cpp to create Symbol.for / Symbol.keyFor builtins
 extern "C" Item js_symbol_builtin_method(int which) {
-    if (which == 0) return js_get_or_create_builtin(JS_BUILTIN_SYMBOL_FOR, "for", 1);
-    if (which == 1) return js_get_or_create_builtin(JS_BUILTIN_SYMBOL_KEY_FOR, "keyFor", 1);
+    if (which == 0) return js_intrinsic_binding_get(
+        JS_BUILTIN_OWNER_SYMBOL_STATIC_METHOD, "for", 3);
+    if (which == 1) return js_intrinsic_binding_get(
+        JS_BUILTIN_OWNER_SYMBOL_STATIC_METHOD, "keyFor", 6);
     return ItemNull;
-}
-
-// v18k: Lookup static methods on constructor functions (Object.keys, Array.isArray, etc.)
-// Returns ItemNull if not a known constructor or not a known static method.
-Item js_lookup_constructor_static(const char* ctor_name, int ctor_len,
-                                          const char* prop_name, int prop_len) {
-    JsBuiltinOwner owner = js_get_constructor_static_owner(ctor_name, ctor_len);
-    Item method = js_lookup_builtin_method_spec(owner, prop_name, prop_len);
-    if (method.item != ItemNull.item) return method;
-
-    // Handle .prototype on any constructor — delegate to the constructor's property access
-    if (prop_len == 9 && strncmp(prop_name, "prototype", 9) == 0) {
-        Item ctor_name_item = (Item){.item = s2it(heap_create_name(ctor_name, ctor_len))};
-        Item ctor = js_get_constructor(ctor_name_item);
-        if (get_type_id(ctor) == LMD_TYPE_FUNC) {
-            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-            return js_property_get(ctor, proto_key);
-        }
-    }
-    return ItemNull;
-}
-
-// Externally callable wrapper for js_lookup_constructor_static (from transpiler)
-extern "C" Item js_constructor_static_property(Item ctor_name, Item prop_name) {
-    String* cn = it2s(ctor_name);
-    String* pn = it2s(prop_name);
-    if (!cn || !pn) return ItemNull;
-    Item v = js_lookup_constructor_static(cn->chars, (int)cn->len, pn->chars, (int)pn->len);
-    if (v.item != ItemNull.item) return v;
-    // Fall back to general property access on the constructor function object.
-    // This handles standard function properties (length, name, prototype) and
-    // any user-assigned own properties on the constructor.
-    Item ctor = js_get_constructor(ctor_name);
-    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
-        return js_property_get(ctor, prop_name);
-    }
-    return make_js_undefined();
 }
 
 // Populate %TypedArray%.prototype with proper Array builtin methods
@@ -646,7 +493,8 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     // %TypedArray%.prototype.toString is exactly Array.prototype.toString.
     {
         Item to_string_key = (Item){.item = s2it(heap_create_name("toString", 8))};
-        Item array_to_string = js_get_or_create_builtin(JS_BUILTIN_ARR_TO_STRING, "toString", 0);
+        Item array_to_string = js_intrinsic_binding_get(
+            JS_BUILTIN_OWNER_ARRAY_PROTOTYPE_METHOD, "toString", 8);
         js_property_set(proto, to_string_key, array_to_string);
         js_mark_non_enumerable(proto, to_string_key);
     }
@@ -671,6 +519,11 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
         tag_getter->name = heap_create_name("get [Symbol.toStringTag]", 24);
         tag_getter->param_count = 0;
         tag_getter->formal_length = -1;
+        // The symbol accessor's spelling is observable metadata; its stored
+        // body protects callable behavior from later name mutation.
+        tag_getter->native_call = js_intrinsic_typed_array_to_string_tag_body;
+        tag_getter->native_policy = JS_NATIVE_CALL_BODY;
+        js_function_finalize_capabilities(tag_getter);
         Item getter_item = (Item){.function = (Function*)tag_getter};
         Item tag_name = js_well_known_symbol_key(4);
         js_install_native_accessor(proto, tag_name, getter_item, ItemNull, JSPD_NON_ENUMERABLE);
@@ -689,7 +542,8 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
         // Install get [Symbol.species]() { return this; } on %TypedArray%
         // Phase 3 Stage A: route through unified js_install_native_accessor.
         Item species_name = js_well_known_symbol_key(6);
-        Item getter_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "get [Symbol.species]", 0);
+        Item getter_fn = js_intrinsic_binding_get(
+            JS_BUILTIN_OWNER_SPECIES_INTERNAL, "[Symbol.species]", 16);
         js_install_native_accessor(base_ctor, species_name, getter_fn, ItemNull, JSPD_NON_ENUMERABLE);
     }
 }
@@ -708,74 +562,8 @@ extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor
         // install the Symbol.species getter that returns this
         // Phase 3 Stage A: route through unified js_install_native_accessor.
         Item species_name = js_well_known_symbol_key(6);
-        Item getter_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "get [Symbol.species]", 0);
+        Item getter_fn = js_intrinsic_binding_get(
+            JS_BUILTIN_OWNER_SPECIES_INTERNAL, "[Symbol.species]", 16);
         js_install_native_accessor(ctor_item, species_name, getter_fn, ItemNull, JSPD_NON_ENUMERABLE);
-    }
-}
-
-// Lookup built-in method by name for a given receiver type
-extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len) {
-    // Object.prototype methods (available on all objects and arrays)
-    Item object_method = js_lookup_unconditional_object_prototype_method(name, len);
-    if (object_method.item != ItemNull.item) return object_method;
-    if (len == 8 && strncmp(name, "toString", 8) == 0 &&
-        !js_builtin_type_has_own_to_string(type)) {
-        return js_get_or_create_builtin(JS_BUILTIN_OBJ_TO_STRING, "toString", 0);
-    }
-    if (type == LMD_TYPE_BOOL) {
-        Item method = js_lookup_builtin_method_spec(
-            JS_BUILTIN_OWNER_BOOLEAN_PROTOTYPE_METHOD, name, len);
-        if (method.item != ItemNull.item) return method;
-    }
-    if (len == 7 && strncmp(name, "valueOf", 7) == 0 &&
-        !js_builtin_type_has_own_value_of(type)) {
-        return js_get_or_create_builtin(JS_BUILTIN_OBJ_VALUE_OF, "valueOf", 0);
-    }
-
-    // Function.prototype methods
-    if (type == LMD_TYPE_FUNC) {
-        Item method = js_lookup_builtin_method_spec(
-            JS_BUILTIN_OWNER_FUNCTION_PROTOTYPE_METHOD, name, len);
-        if (method.item != ItemNull.item) return method;
-    }
-
-    // Array.prototype methods
-    if (type == LMD_TYPE_ARRAY) {
-        Item method = js_lookup_builtin_method_spec(
-            JS_BUILTIN_OWNER_ARRAY_PROTOTYPE_METHOD, name, len);
-        if (method.item != ItemNull.item) return method;
-    }
-
-    // String.prototype methods
-    if (type == LMD_TYPE_STRING) {
-        Item method = js_lookup_builtin_method_spec(
-            JS_BUILTIN_OWNER_STRING_PROTOTYPE_METHOD, name, len);
-        if (method.item != ItemNull.item) return method;
-    }
-
-    // Number.prototype methods
-    if (js_builtin_type_uses_number_prototype(type)) {
-        Item method = js_lookup_builtin_method_spec(
-            JS_BUILTIN_OWNER_NUMBER_PROTOTYPE_METHOD, name, len);
-        if (method.item != ItemNull.item) return method;
-    }
-
-    return ItemNull;
-}
-
-// v26: Return all builtin method names for a prototype type as a Lambda array.
-// Used by getOwnPropertyNames to enumerate builtin methods on prototype objects.
-extern "C" void js_append_builtin_method_names(TypeId type, Item result) {
-    JsBuiltinOwner owner = js_get_prototype_owner_for_type(type);
-    if (owner == JS_BUILTIN_OWNER_NONE) owner = JS_BUILTIN_OWNER_OBJECT_PROTOTYPE_METHOD;
-    if (owner != JS_BUILTIN_OWNER_NONE) {
-        js_append_builtin_method_spec_names(owner, result);
-        if (type == LMD_TYPE_ARRAY) {
-            Item locale_key = (Item){.item = s2it(heap_create_name("toLocaleString", 14))};
-            js_array_push(result, locale_key);
-        }
-        Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-        js_array_push(result, ctor_key);
-        return;
     }
 }

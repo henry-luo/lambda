@@ -361,7 +361,7 @@ static void maybe_complete(JsChildProcess* cp) {
     cp->callback_fired = true;
 
     // call callback(err, stdout, stderr)
-    if (get_type_id(cp->callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(cp->callback)) {
         Item err = ItemNull;
         if (cp->aborted) {
             err = child_abort_error(cp->abort_reason);
@@ -447,7 +447,7 @@ static void child_install_abort_signal(JsChildProcess* cp, Item options) {
     Item* abort_env = js_alloc_env(1);
     abort_env[0] = (Item){.item = (uint64_t)(uintptr_t)cp};
     cp->abort_env = abort_env;
-    Item listener = js_new_closure((void*)child_abort_with_env, 1, abort_env, 1);
+    Item listener = js_new_native_closure(child_abort_with_env, 1, abort_env, 1);
     cp->abort_listener = listener;
     Item add_listener = js_property_get(signal, make_string_item("addEventListener"));
     Item args[2] = {make_string_item("abort"), listener};
@@ -455,7 +455,7 @@ static void child_install_abort_signal(JsChildProcess* cp, Item options) {
     js_microtask_flush();
     Item aborted = js_property_get(signal, make_string_item("aborted"));
     if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
-        Item abort_tick = js_new_closure((void*)child_abort_later, 0, abort_env, 1);
+        Item abort_tick = js_new_native_closure(child_abort_later, 0, abort_env, 1);
         js_next_tick_enqueue(abort_tick);
     }
 }
@@ -532,7 +532,7 @@ static Item js_cp_exec_with_options(Item command_item, Item options_item,
     int r = uv_spawn(loop, &cp->process, &opts);
     if (r != 0) {
         log_error("child_process: exec: spawn failed: %s", uv_strerror(r));
-        if (get_type_id(callback_item) == LMD_TYPE_FUNC) {
+        if (js_is_callable(callback_item)) {
             Item err = js_new_error(make_string_item(uv_strerror(r)));
             Item args_cb[3] = {err, ItemNull, ItemNull};
             js_call_function(callback_item, ItemNull, args_cb, 3);
@@ -928,7 +928,7 @@ static Item spawn_emit_cluster_online_later(Item env_item) {
 static void spawn_schedule_cluster_online(Item obj) {
     Item* env = js_alloc_env(1);
     env[0] = obj;
-    Item callback = js_new_closure((void*)spawn_emit_cluster_online_later, 0, env, 1);
+    Item callback = js_new_native_closure(spawn_emit_cluster_online_later, 0, env, 1);
     js_next_tick_enqueue(callback);
 }
 
@@ -995,14 +995,14 @@ static void schedule_spawn_error(Item obj, Item err) {
     Item* env = js_alloc_env(2);
     env[0] = obj;
     env[1] = err;
-    Item callback = js_new_closure((void*)spawn_emit_error_later, 0, env, 2);
+    Item callback = js_new_native_closure(spawn_emit_error_later, 0, env, 2);
     js_setTimeout(callback, (Item){.item = i2it(0)});
 }
 
 static void schedule_spawn_event(Item obj) {
     Item* env = js_alloc_env(1);
     env[0] = obj;
-    Item callback = js_new_closure((void*)spawn_emit_spawn_later, 0, env, 1);
+    Item callback = js_new_native_closure(spawn_emit_spawn_later, 0, env, 1);
     js_next_tick_enqueue(callback);
 }
 
@@ -1097,7 +1097,7 @@ static Item spawn_unref_with_env(Item env_item) {
         // just before ChildProcess.unref() can flush to the fork parent.
         Item* tick_env = js_alloc_env(1);
         tick_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
-        js_next_tick_enqueue(js_new_closure((void*)spawn_unref_ipc_later, 0, tick_env, 1));
+        js_next_tick_enqueue(js_new_native_closure(spawn_unref_ipc_later, 0, tick_env, 1));
     }
     return js_get_this();
 }
@@ -1107,7 +1107,7 @@ static void schedule_spawn_send_callback(Item callback, Item err) {
     Item* env = js_alloc_env(2);
     env[0] = callback;
     env[1] = err;
-    Item tick = js_new_closure((void*)spawn_send_callback_later, 0, env, 2);
+    Item tick = js_new_native_closure(spawn_send_callback_later, 0, env, 2);
     js_next_tick_enqueue(tick);
 }
 
@@ -1331,7 +1331,7 @@ static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item option
     Item* abort_env = js_alloc_env(1);
     abort_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->abort_env = abort_env;
-    Item listener = js_new_closure((void*)spawn_abort_with_env, 1, abort_env, 1);
+    Item listener = js_new_native_closure(spawn_abort_with_env, 1, abort_env, 1);
     sp->abort_listener = listener;
 
     Item add_listener = js_property_get(signal, make_string_item("addEventListener"));
@@ -1343,7 +1343,7 @@ static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item option
 
     Item aborted = js_property_get(signal, make_string_item("aborted"));
     if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
-        Item abort_tick = js_new_closure((void*)spawn_abort_later, 0, abort_env, 1);
+        Item abort_tick = js_new_native_closure(spawn_abort_later, 0, abort_env, 1);
         js_next_tick_enqueue(abort_tick);
     }
     (void)obj;
@@ -1752,7 +1752,7 @@ static Item js_spawn_stream_pipe(Item dest, Item options) {
     Item* data_env = js_alloc_env(1);
     data_env[0] = dest;
     spawn_add_listener(source, make_string_item("data"),
-                       js_new_closure((void*)spawn_stream_pipe_on_data, 1, data_env, 1), false);
+                       js_new_native_closure(spawn_stream_pipe_on_data, 1, data_env, 1), false);
 
     Item should_end = (Item){.item = ITEM_TRUE};
     if (is_object_item(options)) {
@@ -1765,7 +1765,7 @@ static Item js_spawn_stream_pipe(Item dest, Item options) {
     // child stdio streams are lightweight readables; missing pipe() aborts
     // silent fork setup and leaves the IPC child alive until the drain watchdog.
     spawn_add_listener(source, make_string_item("end"),
-                       js_new_closure((void*)spawn_stream_pipe_on_end, 0, end_env, 2), false);
+                       js_new_native_closure(spawn_stream_pipe_on_end, 0, end_env, 2), false);
     return dest;
 }
 
@@ -1773,15 +1773,15 @@ static Item js_spawn_stream_pipe(Item dest, Item options) {
 static Item make_stream_object(void) {
     Item obj = js_new_object();
     js_property_set(obj, make_string_item("on"),
-                    js_new_function((void*)js_spawn_stream_on, 2));
+                    js_new_native_function(js_spawn_stream_on));
     js_property_set(obj, make_string_item("once"),
-                    js_new_function((void*)js_spawn_stream_once, 2));
+                    js_new_native_function(js_spawn_stream_once));
     js_property_set(obj, make_string_item("setEncoding"),
-                    js_new_function((void*)js_spawn_stream_set_encoding, 1));
+                    js_new_native_function(js_spawn_stream_set_encoding));
     js_property_set(obj, make_string_item("pipe"),
-                    js_new_function((void*)js_spawn_stream_pipe, 2));
+                    js_new_native_function(js_spawn_stream_pipe));
     js_property_set(obj, make_string_item("resume"),
-                    js_new_function((void*)js_spawn_stream_resume, 0));
+                    js_new_native_function(js_spawn_stream_resume));
     return obj;
 }
 
@@ -1899,7 +1899,7 @@ static void install_spawn_stream_destroy(Item stream_obj, JsSpawnProcess* sp,
     env[1] = (Item){.item = i2it(kind)};
     if (out_env) *out_env = env;
     js_property_set(stream_obj, make_string_item("destroy"),
-                    js_new_closure((void*)js_spawn_stream_destroy, 1, env, 2));
+                    js_new_native_closure(js_spawn_stream_destroy, 1, env, 2));
     js_property_set(stream_obj, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
     js_property_set(stream_obj, make_string_item("closed"), (Item){.item = ITEM_FALSE});
     js_property_set(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"),
@@ -2116,9 +2116,9 @@ static Item make_child_process_object(void) {
     js_property_set(obj, make_string_item("stderr"), stderr_obj);
     js_property_set(obj, make_string_item("stdio"), stdio);
     js_property_set(obj, make_string_item("on"),
-                    js_new_function((void*)js_spawn_on, 2));
+                    js_new_native_function(js_spawn_on));
     js_property_set(obj, make_string_item("once"),
-                    js_new_function((void*)js_spawn_once, 2));
+                    js_new_native_function(js_spawn_once));
     js_property_set(obj, make_string_item("pid"), make_js_undefined());
     js_property_set(obj, make_string_item("killed"), (Item){.item = ITEM_FALSE});
     js_property_set(obj, make_string_item("exitCode"), ItemNull);
@@ -2132,12 +2132,12 @@ static void install_ipc_surface(Item obj, JsSpawnProcess* sp) {
     send_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->send_env = send_env;
     js_property_set(obj, make_string_item("send"),
-                    js_new_closure((void*)js_spawn_send_with_env, 4, send_env, 1));
+                    js_new_native_closure(js_spawn_send_with_env, 4, send_env, 1));
     Item* disconnect_env = js_alloc_env(1);
     disconnect_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->disconnect_env = disconnect_env;
     js_property_set(obj, make_string_item("disconnect"),
-                    js_new_closure((void*)js_spawn_disconnect_with_env, 0, disconnect_env, 1));
+                    js_new_native_closure(js_spawn_disconnect_with_env, 0, disconnect_env, 1));
 }
 
 static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
@@ -2145,7 +2145,7 @@ static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
     kill_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->kill_env = kill_env;
     js_property_set(obj, make_string_item("kill"),
-                    js_new_closure((void*)spawn_kill_with_env, 1, kill_env, 1));
+                    js_new_native_closure(spawn_kill_with_env, 1, kill_env, 1));
     Item* dispose_env = js_alloc_env(1);
     dispose_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->dispose_env = dispose_env;
@@ -2153,27 +2153,27 @@ static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
     // Symbol.dispose must drive the native kill path; treating it as a missing
     // JS method leaves cat-style children alive until the drain watchdog.
     js_property_set(obj, dispose_key,
-                    js_new_closure((void*)spawn_dispose_with_env, 0, dispose_env, 1));
+                    js_new_native_closure(spawn_dispose_with_env, 0, dispose_env, 1));
 
     Item* ref_env = js_alloc_env(1);
     ref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->ref_env = ref_env;
     js_property_set(obj, make_string_item("ref"),
-                    js_new_closure((void*)spawn_ref_with_env, 0, ref_env, 1));
+                    js_new_native_closure(spawn_ref_with_env, 0, ref_env, 1));
 
     Item* unref_env = js_alloc_env(1);
     unref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->unref_env = unref_env;
     js_property_set(obj, make_string_item("unref"),
-                    js_new_closure((void*)spawn_unref_with_env, 0, unref_env, 1));
+                    js_new_native_closure(spawn_unref_with_env, 0, unref_env, 1));
 }
 
 static void install_ipc_legacy_surface(Item obj) {
     spawn_set_connected(obj, true);
     js_property_set(obj, make_string_item("send"),
-                    js_new_function((void*)js_spawn_send, 4));
+                    js_new_native_function(js_spawn_send));
     js_property_set(obj, make_string_item("disconnect"),
-                    js_new_function((void*)js_spawn_disconnect, 0));
+                    js_new_native_function(js_spawn_disconnect));
 }
 
 typedef struct SpawnRequest {
@@ -2565,9 +2565,9 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         stdin_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
         sp->stdin_env = stdin_env;
         js_property_set(stdin_obj, make_string_item("write"),
-                        js_new_closure((void*)js_spawn_stdin_write, 1, stdin_env, 1));
+                        js_new_native_closure(js_spawn_stdin_write, 1, stdin_env, 1));
         js_property_set(stdin_obj, make_string_item("end"),
-                        js_new_closure((void*)js_spawn_stdin_end, 1, stdin_env, 1));
+                        js_new_native_closure(js_spawn_stdin_end, 1, stdin_env, 1));
         install_spawn_stream_destroy(stdin_obj, sp, 0, &sp->stdin_destroy_env);
         js_property_set(stdin_obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
         js_property_set(stdin_obj, make_string_item("readable"), (Item){.item = ITEM_FALSE});
@@ -3682,10 +3682,10 @@ static bool js_cp_register_namespace_root(void) {
     return js_root_range_ensure_registered(&js_runtime_state.child_process.roots);
 }
 
-static void js_cp_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    Item key = make_string_item(name);
-    Item fn = js_new_function(func_ptr, param_count);
-    js_property_set(ns, key, fn);
+template <typename Target>
+static void js_cp_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
+    js_install_native_method(ns, name, target, adapter_arity);
 }
 
 extern "C" Item js_get_child_process_namespace(void) {
@@ -3698,13 +3698,13 @@ extern "C" Item js_get_child_process_namespace(void) {
     cp_namespace = js_new_object();
     namespace_root.set(cp_namespace);
 
-    js_cp_set_method(namespace_root.get(), "exec",       (void*)js_cp_exec, -1);
-    js_cp_set_method(namespace_root.get(), "execSync",   (void*)js_cp_execSync, 2);
-    js_cp_set_method(namespace_root.get(), "spawn",      (void*)js_cp_spawn, -1);
-    js_cp_set_method(namespace_root.get(), "spawnSync",  (void*)js_cp_spawnSync, 3);
-    js_cp_set_method(namespace_root.get(), "execFile",   (void*)js_cp_execFile, -1);
-    js_cp_set_method(namespace_root.get(), "execFileSync", (void*)js_cp_execSync, 2);
-    js_cp_set_method(namespace_root.get(), "fork",       (void*)js_cp_fork, -1);
+    js_cp_set_method(namespace_root.get(), "exec",       js_cp_exec, -1);
+    js_cp_set_method(namespace_root.get(), "execSync",   js_cp_execSync, 2);
+    js_cp_set_method(namespace_root.get(), "spawn",      js_cp_spawn, -1);
+    js_cp_set_method(namespace_root.get(), "spawnSync",  js_cp_spawnSync, 3);
+    js_cp_set_method(namespace_root.get(), "execFile",   js_cp_execFile, -1);
+    js_cp_set_method(namespace_root.get(), "execFileSync", js_cp_execSync, 2);
+    js_cp_set_method(namespace_root.get(), "fork",       js_cp_fork, -1);
 
     // set "default" for `import cp from 'child_process'`
     Item default_key = make_string_item("default");

@@ -12,7 +12,7 @@ extern "C" {
 
 #include "../lambda.h"
 
-// Document-method entry points (called from js_document_method dispatcher).
+// D6.2.2v2: direct Document callable targets for the selection operations.
 Item js_dom_create_range(void);
 Item js_dom_get_selection(void);
 

@@ -93,7 +93,8 @@ static Item hostobj_demo_get_constructor(void) {
     // the constructor's .prototype must be the same object the generic
     // dispatch reports for instances, or instanceof breaks
     Item proto = jube_type_prototype(&s_hostobj_demo_types[0]);
-    s_hostobj_demo_ctor = s_hostobj_demo_host->script->new_function((void*)hostobj_demo_construct, 1);
+    s_hostobj_demo_ctor = jube_new_constructor(s_hostobj_demo_host->script,
+        hostobj_demo_construct, 1);
     s_hostobj_demo_host->script->set_function_name(s_hostobj_demo_ctor, hostobj_demo_key("HostObjDemo"));
     s_hostobj_demo_host->script->function_set_prototype(s_hostobj_demo_ctor, proto);
     s_hostobj_demo_host->value->property_set(proto, hostobj_demo_key("constructor"), s_hostobj_demo_ctor);
@@ -192,11 +193,11 @@ extern "C" Item hostobj_demo_namespace(void) {
     s_hostobj_demo_host->value->property_set(s_hostobj_demo_namespace,
         hostobj_demo_key("HostObjDemo"), ctor);
     s_hostobj_demo_host->value->property_set(s_hostobj_demo_namespace, hostobj_demo_key("create"),
-        s_hostobj_demo_host->script->new_function((void*)hostobj_demo_construct, 1));
+        jube_new_function(s_hostobj_demo_host->script, hostobj_demo_construct, 1));
     s_hostobj_demo_host->value->property_set(s_hostobj_demo_namespace, hostobj_demo_key("release"),
-        s_hostobj_demo_host->script->new_function((void*)hostobj_demo_release, 1));
+        jube_new_function(s_hostobj_demo_host->script, hostobj_demo_release, 1));
     s_hostobj_demo_host->value->property_set(s_hostobj_demo_namespace, hostobj_demo_key("destroyed"),
-        s_hostobj_demo_host->script->new_function((void*)hostobj_demo_destroyed, 0));
+        jube_new_function(s_hostobj_demo_host->script, hostobj_demo_destroyed, 0));
     return s_hostobj_demo_namespace;
 }
 

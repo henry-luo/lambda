@@ -172,6 +172,22 @@ static Item fd_get_entries(Item this_fd) {
     return prop_get(this_fd, FD_ENTRIES_KEY);
 }
 
+static void fd_entries_remove_at(Item entries, int64_t index) {
+    if (get_type_id(entries) != LMD_TYPE_ARRAY || !entries.array ||
+        index < 0 || index >= entries.array->length) {
+        return;
+    }
+    // D6.2.2v2: _fd_entries is private FormData list storage. Calling the
+    // mutable Array.prototype.splice binding would expose this internal step
+    // to prototype replacement instead of applying the FormData list algorithm.
+    Array* array = entries.array;
+    for (int64_t i = index; i + 1 < array->length; i++) {
+        array->items[i] = array->items[i + 1];
+    }
+    array->items[array->length - 1] = ItemNull;
+    array->length--;
+}
+
 // Coerce a FormData value to string (or pass through Blob/File objects).
 // Per XHR spec: all non-Blob values are stringified using the same rules
 // as the HTML serializer (essentially JavaScript toString).
@@ -264,8 +280,7 @@ static Item js_fd_delete(Item name_item) {
         Item pair_name = js_array_get_int(pair, 0);
         const char* n = fn_to_cstr(pair_name);
         if (n && strcmp(n, name_cs) == 0) {
-            Item splice_args[2] = {make_int_item(i), make_int_item(1)};
-            js_array_method(entries, make_key("splice"), splice_args, 2);
+            fd_entries_remove_at(entries, i);
         }
     }
     log_debug("fd_delete: deleted entries named '%s'", name_cs);
@@ -384,8 +399,7 @@ static Item js_fd_set(Item name_item, Item value_item, Item filename_item) {
             Item pair_name = js_array_get_int(pair, 0);
             const char* n = fn_to_cstr(pair_name);
             if (n && strcmp(n, name_cs) == 0) {
-                Item splice_args[2] = {make_int_item(i), make_int_item(1)};
-                js_array_method(entries, make_key("splice"), splice_args, 2);
+                fd_entries_remove_at(entries, i);
             }
         }
     }
@@ -394,7 +408,7 @@ static Item js_fd_set(Item name_item, Item value_item, Item filename_item) {
 }
 
 static Item js_fd_forEach(Item callback, Item this_arg) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    if (!js_is_callable(callback)) return make_js_undefined();
 
     Item this_fd = js_get_this();
     Item entries = fd_get_entries(this_fd);
@@ -474,9 +488,9 @@ static Item fd_make_iterator(Item entries, int mode) {
     prop_set(iter, "_i_entries", entries);
     prop_set(iter, "_i_idx",     make_int_item(0));
     prop_set(iter, "_i_mode",    make_int_item(mode));
-    prop_set(iter, "next",       js_new_function((void*)js_fd_iter_next, 0));
+    prop_set(iter, "next",       js_new_native_function(js_fd_iter_next));
     // Symbol.iterator on the iterator → returns self (so it's iterable)
-    js_property_set(iter, make_sym_iterator_key(), js_new_function((void*)js_fd_iter_self, 0));
+    js_property_set(iter, make_sym_iterator_key(), js_new_native_function(js_fd_iter_self));
     return iter;
 }
 
@@ -750,18 +764,18 @@ static void fd_walk_form_controls(Item entries, DomNode* node) {
 // ============================================================================
 
 static void fd_install_methods(Item fd_obj) {
-    prop_set(fd_obj, "append",  js_new_function((void*)js_fd_append,  3));
-    prop_set(fd_obj, "delete",  js_new_function((void*)js_fd_delete,  1));
-    prop_set(fd_obj, "get",     js_new_function((void*)js_fd_get,     1));
-    prop_set(fd_obj, "getAll",  js_new_function((void*)js_fd_getAll,  1));
-    prop_set(fd_obj, "has",     js_new_function((void*)js_fd_has,     1));
-    prop_set(fd_obj, "set",     js_new_function((void*)js_fd_set,     3));
-    prop_set(fd_obj, "entries", js_new_function((void*)js_fd_entries, 0));
-    prop_set(fd_obj, "keys",    js_new_function((void*)js_fd_keys,    0));
-    prop_set(fd_obj, "values",  js_new_function((void*)js_fd_values,  0));
-    prop_set(fd_obj, "forEach", js_new_function((void*)js_fd_forEach, 2));
+    prop_set(fd_obj, "append",  js_new_native_function(js_fd_append));
+    prop_set(fd_obj, "delete",  js_new_native_function(js_fd_delete));
+    prop_set(fd_obj, "get",     js_new_native_function(js_fd_get));
+    prop_set(fd_obj, "getAll",  js_new_native_function(js_fd_getAll));
+    prop_set(fd_obj, "has",     js_new_native_function(js_fd_has));
+    prop_set(fd_obj, "set",     js_new_native_function(js_fd_set));
+    prop_set(fd_obj, "entries", js_new_native_function(js_fd_entries));
+    prop_set(fd_obj, "keys",    js_new_native_function(js_fd_keys));
+    prop_set(fd_obj, "values",  js_new_native_function(js_fd_values));
+    prop_set(fd_obj, "forEach", js_new_native_function(js_fd_forEach));
     // Symbol.iterator → same as entries()
-    js_property_set(fd_obj, make_sym_iterator_key(), js_new_function((void*)js_fd_entries, 0));
+    js_property_set(fd_obj, make_sym_iterator_key(), js_new_native_function(js_fd_entries));
     js_class_stamp(fd_obj, JS_CLASS_FORM_DATA);
 }
 
@@ -1011,20 +1025,22 @@ extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitte
 
 extern "C" void js_formdata_install_globals(void) {
     Item global = js_get_global_this();
-    Item ctor_fn = js_new_function((void*)js_formdata_construct, 2);
+    // D6.2.2v2: global constructor bindings carry [[Construct]] themselves;
+    // no compiler name interception remains to supply it.
+    Item ctor_fn = js_new_native_constructor(js_formdata_construct);
     prop_set(global, "FormData", ctor_fn);
 
     Item blob_ctor_fn = prop_get(global, "Blob");
     if (get_type_id(blob_ctor_fn) == LMD_TYPE_UNDEFINED ||
         blob_ctor_fn.item == ITEM_JS_UNDEFINED || blob_ctor_fn.item == ItemNull.item) {
-        blob_ctor_fn = js_new_function((void*)js_blob_construct, 2);
+        blob_ctor_fn = js_new_native_constructor(js_blob_construct);
         prop_set(global, "Blob", blob_ctor_fn);
     }
 
     Item file_ctor_fn = prop_get(global, "File");
     if (get_type_id(file_ctor_fn) == LMD_TYPE_UNDEFINED ||
         file_ctor_fn.item == ITEM_JS_UNDEFINED || file_ctor_fn.item == ItemNull.item) {
-        file_ctor_fn = js_new_function((void*)js_file_construct, 3);
+        file_ctor_fn = js_new_native_constructor(js_file_construct);
         prop_set(global, "File", file_ctor_fn);
     }
 

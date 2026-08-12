@@ -162,19 +162,14 @@ bool js_is_document_proxy(Item item);
 
 /**
  * Get the document proxy object for bare 'document' identifier resolution.
- * Returns a singleton Map-based proxy that routes method calls and property
- * access through js_document_method / js_document_get_property.
+ * Returns a singleton Map-based proxy whose callable properties are installed
+ * as direct targets under D6.2.2v2; dynamic data properties use the getter.
  * @return Document proxy Item
  */
 Item js_get_document_object_value(void);
 
 /**
- * Dispatch method call on document proxy (routes to js_document_method).
- */
-Item js_document_proxy_method(Item method_name, Item* args, int argc);
-
-/**
- * Dispatch property access on document proxy (routes to js_document_get_property).
+ * Resolve dynamic property access on the document proxy.
  */
 Item js_document_proxy_get_property(Item prop_name);
 
@@ -196,12 +191,6 @@ bool js_is_dom_implementation(Item item);
 /** Get (lazily creating) the document.implementation singleton. */
 Item js_get_dom_implementation(void);
 
-/**
- * Dispatch a method call on document.implementation.
- * Returns true and sets *out if the method was handled.
- */
-bool js_dom_implementation_method(Item method_name, Item* args, int argc, Item* out);
-
 /** Build a foreign HTML document (used by createHTMLDocument). */
 Item js_create_foreign_html_doc(const char* title);
 
@@ -218,17 +207,6 @@ void  js_dom_restore_active_document(void* prev_doc);
 // =============================================================================
 // Document Method Dispatcher
 // =============================================================================
-
-/**
- * Dispatch document.method(args) calls.
- * Supported methods: getElementById, getElementsByClassName, getElementsByTagName,
- *   querySelector, querySelectorAll, createElement, createTextNode
- * @param method_name String Item with method name
- * @param args        Array of argument Items
- * @param argc        Argument count
- * @return Result Item
- */
-Item js_document_method(Item method_name, Item* args, int argc);
 
 /**
  * Dispatch document.property access.
@@ -315,40 +293,8 @@ bool js_is_computed_style_item(Item item);
 bool js_is_inline_style_item(Item item);
 
 // =============================================================================
-// Element Method Dispatcher
-// =============================================================================
-
-/**
- * Dispatch elem.method(args) calls on DOM elements.
- * Supported: getAttribute, setAttribute, hasAttribute, removeAttribute,
- *   querySelector, querySelectorAll, matches, closest,
- *   appendChild, removeChild, insertBefore,
- *   hasChildNodes, normalize, cloneNode
- * @param elem        Wrapped DOM element Item
- * @param method_name String Item with method name
- * @param args        Array of argument Items
- * @param argc        Argument count
- * @return Result Item
- */
-Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
-
-// =============================================================================
 // classList API (v12)
 // =============================================================================
-
-/**
- * Dispatch classList.method(args) calls.
- * Supported: add, remove, toggle, contains, item, replace, entries, forEach, toString
- * @param elem        Wrapped DOM element Item
- * @param method_name String Item with method name
- * @param args        Array of argument Items
- * @param argc        Argument count
- * @return Result Item
- */
-Item js_classlist_method(Item elem, Item method_name, Item* args, int argc);
-
-/** Dispatch classList.method(...argsArray) after spread expansion. */
-Item js_classlist_method_apply(Item elem, Item method_name, Item args_array);
 
 /**
  * Get a classList property.
@@ -409,6 +355,7 @@ Item js_dom_contains(Item elem, Item other);
  * @return Boolean Item
  */
 Item js_dom_is_equal_node(Item node, Item other);
+Item js_dom_is_same_node(Item node, Item other);
 
 // =============================================================================
 // style.setProperty() / style.removeProperty() (v12b)

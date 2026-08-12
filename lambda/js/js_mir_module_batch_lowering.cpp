@@ -1686,6 +1686,11 @@ static bool jm_path_has_known_js_ext(const char* path) {
            jm_path_has_lambda_ext(path);
 }
 
+static bool jm_path_is_lambda_source(const char* path) {
+    int len = path ? (int)strlen(path) : 0;
+    return len >= 3 && strcmp(path + len - 3, ".ls") == 0;
+}
+
 // Resolve a module specifier relative to the importing file's directory
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size) {
@@ -3124,8 +3129,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Assign module var indices for non-literal top-level declarations.
     // These are runtime-computed values (const som = {...}, const X = new Y(), etc.)
     // that need to be accessible from class method closures via js_get_module_var().
-    mt->module_var_count = (mt->preamble_entries && mt->preamble_entry_count > 0)
-        ? mt->preamble_var_count : 0;
+    // A filtered realm preamble can retain no names while still reserving
+    // sparse caller-slot indices; dropping that count undersizes the fresh
+    // eval slab before its prefix copy.
+    mt->module_var_count = mt->preamble_var_count;
     {
         JsAstNode* s = program->body;
         while (s) {
@@ -6163,6 +6170,9 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
                     MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                         MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
+                    // D5.2/D5.3.3: copied scalar captures initially point into
+                    // this activation; retain and rehome the env at epilogue.
+                    jm_register_owned_env(mt, env);
 
                     // Track which env slot is the self-reference (for recursive fn decls)
                     int self_ref_slot = -1;
@@ -6674,11 +6684,10 @@ void jm_discover_js_imports_recursive(
         char resolved[512];
         jm_resolve_module_path(parent_path, src_text, src_len, resolved, sizeof(resolved));
 
-        if (jm_path_has_lambda_ext(resolved)) {
-            // Lambda modules use the cross-language loader during the serial
-            // import phase; the JS-only graph cannot parse their .ls syntax.
-            continue;
-        }
+        // The JS precompiler owns only same-language dependencies; parsing a
+        // Lambda package as JavaScript bypasses the D7.2.2 module boundary.
+        // The normal import loader compiles and publishes the Lambda namespace.
+        if (jm_path_is_lambda_source(resolved)) continue;
 
         // dedup check
         JsPathIndexEntry key = { .path = resolved, .index = 0 };
@@ -7586,8 +7595,7 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
                 js_module_register(spec_item, placeholder_ns);
 
                 // Detect cross-language import: .ls extension → Lambda module
-                size_t rlen = strlen(resolved);
-                bool is_lambda_module = (rlen > 3 && strcmp(resolved + rlen - 3, ".ls") == 0);
+                bool is_lambda_module = jm_path_is_lambda_source(resolved);
 
                 if (is_lambda_module) {
                     // Cross-language import: JS importing a Lambda module

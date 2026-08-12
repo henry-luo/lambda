@@ -64,7 +64,9 @@ static void node_punycode_set_property(Item value, const char* name, Item proper
     node_punycode_host->node->roots->root_frame_end(&frame);
 }
 
-static void node_punycode_set_method(Item value, const char* name, void* function_ptr) {
+template <typename Target>
+static void node_punycode_set_method(Item value, const char* name,
+        Target target) {
     JubeRootFrame frame = {};
     if (!node_punycode_roots_begin(&frame, 2)) return;
     uint64_t* namespace_root = node_punycode_host->node->roots->root_frame_take_slot(&frame);
@@ -74,7 +76,7 @@ static void node_punycode_set_method(Item value, const char* name, void* functio
         return;
     }
     *namespace_root = value.item;
-    Item function = node_punycode_host->script->new_function(function_ptr, 1);
+    Item function = jube_new_function(node_punycode_host->script, target, 1);
     *function_root = function.item;
     value = node_punycode_root_value(namespace_root);
     function = node_punycode_root_value(function_root);
@@ -87,10 +89,10 @@ Item node_punycode_namespace(void) {
     if (!node_punycode_host || !node_punycode_session) return ItemNull;
 
     node_punycode_cached_namespace = node_punycode_host->value->new_object();
-    node_punycode_set_method(node_punycode_cached_namespace, "encode", (void*)node_punycode_noop);
-    node_punycode_set_method(node_punycode_cached_namespace, "decode", (void*)node_punycode_noop);
-    node_punycode_set_method(node_punycode_cached_namespace, "toASCII", (void*)node_punycode_noop);
-    node_punycode_set_method(node_punycode_cached_namespace, "toUnicode", (void*)node_punycode_noop);
+    node_punycode_set_method(node_punycode_cached_namespace, "encode", node_punycode_noop);
+    node_punycode_set_method(node_punycode_cached_namespace, "decode", node_punycode_noop);
+    node_punycode_set_method(node_punycode_cached_namespace, "toASCII", node_punycode_noop);
+    node_punycode_set_method(node_punycode_cached_namespace, "toUnicode", node_punycode_noop);
     node_punycode_set_property(node_punycode_cached_namespace, "version",
                                node_punycode_string("2.3.1"));
     node_punycode_set_property(node_punycode_cached_namespace, "ucs2",

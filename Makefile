@@ -527,7 +527,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
-	    ensure-test262-gtest test-js-exception-catalog test262-baseline test262-full \
+	    ensure-test262-gtest test-js-exception-catalog test-js-callable-catalog test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
@@ -1623,6 +1623,11 @@ ensure-test262-gtest:
 # an in-band error-lane contract that the emitter cannot transport.
 test-js-exception-catalog:
 	@python3 utils/js_exception_catalog_census.py --prefix js_ --violations
+
+# D6.2.2v2 standing gate: executable targets, visible bindings, identity
+# aliases, and call/construct capabilities remain one coherent catalog.
+test-js-callable-catalog:
+	@python3 utils/js_callable_census.py --check
 
 # test262 baseline: run only tests in baseline, must pass 100%
 # Add VERBOSE=1 to dump per-batch timing (top 20/top 5) and top-20 memory growth.

@@ -155,4 +155,25 @@ console.log(oldColor); // blue
 console.log(styEl.style.color); // (empty string)
 console.log(styEl.style.marginTop); // 10px (unchanged)
 
+// === ChildNode.after / replaceWith relative insertion ===
+var relativeParent = document.createElement("div");
+var relativeAnchor = document.createElement("i");
+relativeAnchor.textContent = "anchor";
+var relativeMoved = document.createElement("b");
+relativeMoved.textContent = "moved";
+var relativeTail = document.createElement("u");
+relativeTail.textContent = "tail";
+relativeParent.appendChild(relativeAnchor);
+relativeParent.appendChild(relativeMoved);
+relativeParent.appendChild(relativeTail);
+console.log(typeof relativeAnchor.after); // function
+console.log(relativeAnchor.after("text", relativeTail, relativeMoved) === undefined); // true
+console.log(relativeParent.textContent); // anchortexttailmoved
+console.log(relativeAnchor.nextSibling.nodeType); // 3
+
+// replaceWith shares the conversion and viable-sibling kernel.  Keeping the
+// receiver in the replacement list must reinsert it rather than lose it.
+relativeAnchor.replaceWith("head", relativeAnchor);
+console.log(relativeParent.textContent); // headanchortexttailmoved
+
 "DOM v12b tests complete";

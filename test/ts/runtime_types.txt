@@ -10,4 +10,5 @@ boolean
 object
 undefined
 function
+shadowed
 function

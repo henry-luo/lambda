@@ -12,13 +12,13 @@ extern __thread EvalContext* context;
 // Function object wrappers
 // =============================================================================
 
-#define JS_FUNCTION_SIZE_CLASS 7
-static_assert(sizeof(JsFunction) <= 384,
-              "JsFunction must fit its GC object-zone size class");
+#define JS_FUNCTION_SIZE_CLASS 6
+static_assert(sizeof(JsFunction) == 256,
+              "JsFunction must exactly fill its GC object-zone size class");
 
 extern "C" JsFunction* js_alloc_gc_function_object(void) {
-    // JsFunction exceeds the old 256-byte ceiling; keeping it in a dedicated
-    // pooled class avoids a malloc/memset pair for every loop-created closure.
+    // The callable layout fits the 256-byte class exactly; selecting the next
+    // class would waste 128 bytes for every GC-managed function object.
     JsFunction* fn = (JsFunction*)heap_calloc_class(
         sizeof(JsFunction), LMD_TYPE_FUNC, JS_FUNCTION_SIZE_CLASS);
     if (!fn) return NULL;
@@ -36,17 +36,150 @@ extern "C" void js_function_root_item_if_needed(void* function, Item* slot) {
     heap_register_gc_root(&slot->item);
 }
 
-void js_function_call_lane_recompute(JsFunction* fn) {
+static int js_function_metadata_length(JsFunction* fn) {
+    int length = fn->formal_length >= 0 ? fn->formal_length : fn->param_count;
+    if (length < 0) length = -length - 1;
+    if (fn->bound_args) {
+        length -= fn->bound_argc;
+        if (length < 0) length = 0;
+    }
+    return length;
+}
+
+static void js_function_store_metadata_property(JsFunction* fn,
+        const char* name, int name_length, Item value) {
     if (!fn) return;
+    RootFrame roots(3);
+    Rooted<Item> function_root(roots,
+        (Item){.function = (Function*)fn});
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> key_root(roots,
+        (Item){.item = s2it(heap_create_name(name, name_length))});
+    // Function metadata is initialized by [[DefineOwnProperty]], not ordinary
+    // assignment: its non-writable descriptor must still accept a later
+    // SetFunctionName/SetFunctionLength before publication (D6.2.2v2).
+    js_func_init_property(function_root.get(), key_root.get(), value_root.get());
+    js_mark_non_writable(function_root.get(), key_root.get());
+    js_mark_non_enumerable(function_root.get(), key_root.get());
+}
+
+static void js_function_ensure_metadata_properties(JsFunction* fn) {
+    if (!fn) return;
+    RootFrame roots(1);
+    Rooted<Item> function_root(roots,
+        (Item){.function = (Function*)fn});
+    fn = (JsFunction*)function_root.get().function;
+    JsShapeSlotStatus name_status = JS_SHAPE_SLOT_ABSENT;
+    JsShapeSlotStatus length_status = JS_SHAPE_SLOT_ABSENT;
+    if (get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+        name_status = js_own_shape_slot_status(
+            fn->properties_map, "name", 4, NULL, NULL);
+        length_status = js_own_shape_slot_status(
+            fn->properties_map, "length", 6, NULL, NULL);
+    }
+    if (length_status == JS_SHAPE_SLOT_ABSENT) {
+        js_function_store_metadata_property(fn, "length", 6,
+            (Item){.item = i2it(js_function_metadata_length(fn))});
+    }
+    if (name_status == JS_SHAPE_SLOT_ABSENT) {
+        Item name_value = (Item){.item = s2it(fn->name
+            ? fn->name : heap_create_name("", 0))};
+        js_function_store_metadata_property(fn, "name", 4, name_value);
+    }
+}
+
+extern "C" bool js_function_has_own_prototype(Item function) {
+    if (get_type_id(function) != LMD_TYPE_FUNC) return false;
+    JsFunction* fn = (JsFunction*)function.function;
+    if (!fn || (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) ||
+        (fn->flags & JS_FUNC_FLAG_ARROW) ||
+        ((fn->flags & JS_FUNC_FLAG_ASYNC) &&
+            !(fn->flags & JS_FUNC_FLAG_GENERATOR)) ||
+        ((fn->flags & JS_FUNC_FLAG_METHOD) &&
+            !(fn->flags & JS_FUNC_FLAG_GENERATOR)) ||
+        (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD) ||
+        fn->native_construct == js_intrinsic_ctor_proxy_construct_body) {
+        return false;
+    }
+    if (fn->intrinsic_class == JS_CLASS_SYMBOL ||
+            fn->intrinsic_class == JS_CLASS_BIGINT) {
+        // D6.2.2v2: [[Construct]] and own properties are independent.
+        // Symbol and BigInt deliberately reject construction but still own
+        // their specification-defined prototype objects.
+        return true;
+    }
+    // D6.2.2v2: the finalized construct entry is the authoritative capability;
+    // catalog IDs and mutable function names cannot create an own prototype.
+    return fn->construct != NULL ||
+        (fn->flags & JS_FUNC_FLAG_GENERATOR) != 0;
+}
+
+static void js_function_refresh_name_property(JsFunction* fn) {
+    if (!fn) return;
+    RootFrame roots(1);
+    Rooted<Item> function_root(roots,
+        (Item){.function = (Function*)fn});
+    fn = (JsFunction*)function_root.get().function;
+    Item name_value = (Item){.item = s2it(fn && fn->name
+        ? fn->name : heap_create_name("", 0))};
+    js_function_store_metadata_property(fn, "name", 4, name_value);
+}
+
+static void js_function_refresh_length_property(JsFunction* fn) {
+    if (!fn) return;
+    js_function_store_metadata_property(fn, "length", 6,
+        (Item){.item = i2it(js_function_metadata_length(fn))});
+}
+
+static void js_function_register_pool_pointer_roots(JsFunction* fn) {
+    if (!fn || fn->pool_pointer_roots_registered || !context ||
+            !context->heap || !context->heap->gc ||
+            gc_is_managed(context->heap->gc, fn)) return;
+    // D5.3.3/D5.4.3: rooting a pool-backed function Item does not trace its
+    // fields. Register raw metadata slots before finalization allocates, or a
+    // freshly assigned name/source can be collected through the pool record.
+    bool registered = heap_try_register_gc_root((uint64_t*)&fn->name);
+    registered = heap_try_register_gc_root((uint64_t*)&fn->source_text) &&
+        registered;
+    registered = heap_try_register_gc_root((uint64_t*)&fn->vm_stack_filename) &&
+        registered;
+    registered = heap_try_register_gc_root((uint64_t*)&fn->vm_stack_source) &&
+        registered;
+    if (registered) {
+        fn->pool_pointer_roots_registered =
+            JS_FUNC_POOL_POINTER_ROOTS_REGISTERED;
+    }
+}
+
+void js_function_finalize_capabilities(JsFunction* fn) {
+    if (!fn) return;
+    js_function_register_pool_pointer_roots(fn);
+    JsConstructEntry inherited_construct = fn->construct;
     fn->call_lane_kind = JS_CALL_LANE_GENERIC;
-    // This is the single writer of the executable classification. Everything
-    // that mutates the metadata an entry relies on funnels back here, so a
-    // stamped entry can never outlive the facts it was chosen from.
-    fn->invoke = js_call_entry_generic;
+    // D6.2.2v2 requires one writer for published executable capabilities;
+    // metadata mutation must re-finalize before the value is republished.
+    fn->invoke = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
+        ? js_call_entry_bound : js_call_entry_generic;
+    fn->construct = NULL;
+    bool syntax_forbids_construct = (fn->flags & (JS_FUNC_FLAG_ARROW |
+        JS_FUNC_FLAG_METHOD | JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC |
+        JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) != 0;
+    if (syntax_forbids_construct) {
+        fn->construct = NULL;
+    } else if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) {
+        if (inherited_construct) fn->construct = js_construct_entry_bound;
+    } else if (fn->native_construct) {
+        fn->construct = js_construct_entry_native;
+    } else if (inherited_construct) {
+        fn->construct = inherited_construct;
+    } else if (!fn->native_call && fn->func_ptr) {
+        fn->construct = js_construct_entry_ordinary;
+    }
+    js_function_ensure_metadata_properties(fn);
     // A stale fast classification is wrongness, not merely slowness. New or
     // dynamically-created wrappers stay generic until finalization supplies
     // every fact the ordinary lane relies on.
-    if (!(fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) || fn->builtin_id != 0 ||
+    if (!(fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) || fn->native_call ||
         (fn->flags & (JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_GENERATOR |
             JS_FUNC_FLAG_ASYNC_GEN | JS_FUNC_FLAG_DERIVED_CTOR |
             JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) ||
@@ -66,7 +199,7 @@ extern "C" void js_set_function_home_class(Item fn_item, Item home_class) {
     if (!fn) return;
     fn->home_class = home_class;
     js_function_root_item_if_needed(fn, &fn->home_class);
-    js_function_call_lane_recompute(fn);
+    js_function_finalize_capabilities(fn);
 }
 
 extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
@@ -94,6 +227,7 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
         gc_mark_object_ptr(gc, fn->bound_args);
         for (int i = 0; i < fn->bound_argc; i++) gc_mark_item(gc, fn->bound_args[i].item);
     }
+    gc_mark_item(gc, fn->bound_target.item);
     gc_mark_object_ptr(gc, fn->name);
     gc_mark_item(gc, fn->properties_map.item);
     gc_mark_item(gc, fn->home_global.item);
@@ -128,24 +262,64 @@ extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc) {
     return 1;
 }
 
-// Cache: func_ptr → JsFunction*  (ensures same MIR function → same wrapper → same .prototype)
+// Cache: executable identity → JsFunction*. MIR and native target kinds are
+// disjoint so the same machine address can never alias a different ABI.
 // It is context-owned because both the wrapper identity and its GC lifetime are
 // semantic state.  No cache operation synchronizes: one context has one owner
 // thread, and the arrays have a fixed address for the capsule lifetime.
 
-static JsFunction* js_func_cache_lookup(void* func_ptr) {
+enum JsFunctionCacheKind : uint8_t {
+    JS_FUNCTION_CACHE_MIR = 1,
+    JS_FUNCTION_CACHE_NATIVE = 2,
+};
+
+static bool js_function_cache_key_equal(
+        const JsRuntimeState::JsFunctionCacheKey& left,
+        const JsRuntimeState::JsFunctionCacheKey& right) {
+    return left.target_bits == right.target_bits && left.arity == right.arity &&
+        left.kind == right.kind && left.policy == right.policy &&
+        left.capabilities == right.capabilities;
+}
+
+static JsRuntimeState::JsFunctionCacheKey js_mir_cache_key(void* target,
+        int arity) {
+    uint64_t bits = 0;
+    static_assert(sizeof(target) <= sizeof(bits),
+        "MIR target must fit the callable identity key");
+    memcpy(&bits, &target, sizeof(target));
+    return {bits, (int16_t)arity, JS_FUNCTION_CACHE_MIR,
+        JS_NATIVE_CALL_NONE, 0};
+}
+
+template <typename Target>
+static JsRuntimeState::JsFunctionCacheKey js_native_cache_key(Target target,
+        int arity, JsNativeCallPolicy policy, bool constructable = false) {
+    uint64_t bits = 0;
+    static_assert(sizeof(target) <= sizeof(bits),
+        "native target must fit the callable identity key");
+    memcpy(&bits, &target, sizeof(target));
+    // D6.2.2v2: call-only and constructable bindings using one C target have
+    // different capabilities and must never alias through the target cache.
+    return {bits, (int16_t)arity, JS_FUNCTION_CACHE_NATIVE, (uint8_t)policy,
+        (uint8_t)(constructable ? 1 : 0)};
+}
+
+static JsFunction* js_func_cache_lookup(
+        const JsRuntimeState::JsFunctionCacheKey& key) {
     for (int i = 0; i < js_runtime_state.function_cache_count; i++) {
-        if (js_runtime_state.function_cache_keys[i] == func_ptr) {
+        if (js_function_cache_key_equal(js_runtime_state.function_cache_keys[i],
+                key)) {
             return js_runtime_state.function_cache_values[i];
         }
     }
     return NULL;
 }
 
-static void js_func_cache_insert(void* func_ptr, JsFunction* fn) {
+static void js_func_cache_insert(const JsRuntimeState::JsFunctionCacheKey& key,
+        JsFunction* fn) {
     if (js_runtime_state.function_cache_count < JS_FUNCTION_CACHE_CAPACITY) {
         int slot = js_runtime_state.function_cache_count++;
-        js_runtime_state.function_cache_keys[slot] = func_ptr;
+        js_runtime_state.function_cache_keys[slot] = key;
         js_runtime_state.function_cache_values[slot] = fn;
     }
 }
@@ -180,9 +354,10 @@ static void js_function_capture_with_env(JsFunction* fn) {
 
 extern "C" void* js_function_get_ptr(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return NULL;
-    // Try JsFunction layout first (func_ptr at offset 8)
+    // Typed native functions deliberately have no MIR pointer; the layout
+    // marker prevents them from being reinterpreted as the legacy prefix.
     JsFunction* jsfn = (JsFunction*)fn_item.function;
-    if (jsfn->func_ptr) return jsfn->func_ptr;
+    if (jsfn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) return jsfn->func_ptr;
     // Fall back to Function layout (ptr at offset 16)
     Function* fn = fn_item.function;
     return (void*)fn->ptr;
@@ -192,8 +367,10 @@ extern "C" void* js_function_get_ptr(Item fn_item) {
 extern "C" int js_function_get_arity(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return 0;
     JsFunction* jsfn = (JsFunction*)fn_item.function;
-    // If func_ptr (offset 8) is set, it's JsFunction layout
-    if (jsfn->func_ptr) return jsfn->param_count;
+    // The layout marker, not a target field, distinguishes JsFunction from the
+    // compact legacy Function prefix; typed native targets intentionally leave
+    // the MIR-only func_ptr null.
+    if (jsfn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) return jsfn->param_count;
     // Otherwise it's Function layout — arity at offset 1
     Function* fn = fn_item.function;
     return fn->arity;
@@ -222,7 +399,10 @@ static Item js_new_function_impl(void* func_ptr, int param_count,
     // This ensures Foo.prototype = {...} and (new Foo()) share the same JsFunction*.
     bool has_with_env = js_with_depth_active() != 0;
     bool suppress_cache = js_runtime_state.function_cache_suppress_depth > 0;
-    JsFunction* cached = (has_with_env || suppress_cache) ? NULL : js_func_cache_lookup(func_ptr);
+    JsRuntimeState::JsFunctionCacheKey cache_key = js_mir_cache_key(func_ptr,
+        param_count);
+    JsFunction* cached = (has_with_env || suppress_cache) ? NULL
+        : js_func_cache_lookup(cache_key);
     if (cached) return (Item){.function = (Function*)cached};
 
     // Only cache-addressable compiled wrappers are module-lifetime. A wrapper
@@ -236,6 +416,10 @@ static Item js_new_function_impl(void* func_ptr, int param_count,
     fn_root.set((Item){.function = (Function*)fn});
     js_function_init_native_module_scope(fn);
     fn->type_id = LMD_TYPE_FUNC;
+    // D6.2.2v2: pool-backed and GC-backed callables share one canonical
+    // layout. Without the marker, cross-language arity/target queries decoded
+    // these compiled wrappers as legacy Function records and passed zero args.
+    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
     fn->func_ptr = func_ptr;
     fn->runtime_context = runtime;
     fn->param_count = param_count;
@@ -249,27 +433,525 @@ static Item js_new_function_impl(void* func_ptr, int param_count,
     js_function_capture_with_env(fn);
     // A fresh wrapper has no analysis yet, so this stamps the generic entry;
     // finalization reclassifies once the compiler's facts are applied.
-    js_function_call_lane_recompute(fn);
-    if (!has_with_env && !suppress_cache) js_func_cache_insert(func_ptr, fn);
+    js_function_finalize_capabilities(fn);
+    if (!has_with_env && !suppress_cache) js_func_cache_insert(cache_key, fn);
     return (Item){.function = (Function*)fn};
 }
 
-extern "C" Item js_new_function(void* func_ptr, int param_count) {
-    return js_new_function_impl(func_ptr, param_count, false);
+#define JS_DEFINE_NATIVE_CALL_ADAPTER(arity, member, params, call_args) \
+    static Item js_native_call_##arity(Item fn_item, Item this_value, \
+            Item* args, int argc, uint64_t* result_home) { \
+        (void)this_value; (void)result_home; \
+        JsFunction* fn = (JsFunction*)fn_item.function; \
+        if (!fn || argc != arity || (arity > 0 && !args)) { \
+            log_error("js-native-call-%d: adapted arity mismatch argc=%d", \
+                arity, argc); \
+            return ItemError; \
+        } \
+        params \
+        return fn->native_target.member call_args; \
+    }
+
+JS_DEFINE_NATIVE_CALL_ADAPTER(0, p0, (void)args;, ())
+JS_DEFINE_NATIVE_CALL_ADAPTER(1, p1, , (args[0]))
+JS_DEFINE_NATIVE_CALL_ADAPTER(2, p2, , (args[0], args[1]))
+JS_DEFINE_NATIVE_CALL_ADAPTER(3, p3, , (args[0], args[1], args[2]))
+JS_DEFINE_NATIVE_CALL_ADAPTER(4, p4, , (args[0], args[1], args[2], args[3]))
+JS_DEFINE_NATIVE_CALL_ADAPTER(5, p5, , (args[0], args[1], args[2], args[3], args[4]))
+JS_DEFINE_NATIVE_CALL_ADAPTER(6, p6, , (args[0], args[1], args[2], args[3], args[4], args[5]))
+JS_DEFINE_NATIVE_CALL_ADAPTER(7, p7, , (args[0], args[1], args[2], args[3], args[4], args[5], args[6]))
+JS_DEFINE_NATIVE_CALL_ADAPTER(8, p8, , (args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]))
+
+#undef JS_DEFINE_NATIVE_CALL_ADAPTER
+
+static Item js_new_native_function_impl(JsNativeTarget target,
+        JsNativeCallBody call_body,
+        JsNativeConstructBody construct_body,
+        const JsRuntimeState::JsFunctionCacheKey& cache_key,
+        int arity, JsNativeCallPolicy policy, bool constructable,
+        bool distinct) {
+    if (!call_body) return ItemError;
+    bool has_with_env = js_with_depth_active() != 0;
+    bool suppress_cache = distinct ||
+        js_runtime_state.function_cache_suppress_depth > 0;
+    JsFunction* cached = (has_with_env || suppress_cache) ? NULL
+        : js_func_cache_lookup(cache_key);
+    if (cached) return (Item){.function = (Function*)cached};
+
+    RootFrame roots(1);
+    Rooted<Item> fn_root(roots, ItemNull);
+    JsFunction* fn = (has_with_env || suppress_cache)
+        ? js_alloc_gc_function_object()
+        : (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    if (!fn) return ItemError;
+    fn_root.set((Item){.function = (Function*)fn});
+    js_function_init_native_module_scope(fn);
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
+    fn->native_target = target;
+    fn->native_call = call_body;
+    fn->native_construct = constructable
+        ? (construct_body ? construct_body : js_native_construct_via_call_body)
+        : NULL;
+    fn->native_arity = (uint8_t)arity;
+    fn->native_policy = (uint8_t)policy;
+    fn->param_count = policy == JS_NATIVE_CALL_REST ? -arity : arity;
+    fn->formal_length = -1;
+    fn->prototype = ItemNull;
+    fn->module_state_id = js_get_active_module_state_id();
+    fn->home_global = js_get_global_this();
+    js_function_root_item_if_needed(fn, &fn->home_global);
+    js_function_capture_with_env(fn);
+    js_function_finalize_capabilities(fn);
+    if (!has_with_env && !suppress_cache) js_func_cache_insert(cache_key, fn);
+    return fn_root.get();
 }
 
-extern "C" Item js_new_distinct_function(void* func_ptr, int param_count) {
-    // Native callbacks can need distinct JS identity/prototype state. Suppress
-    // only wrapper caching; using the compiled-method constructor here would
-    // incorrectly impose its Context* ABI on an ordinary native callback.
-    js_func_cache_suppress_push();
-    Item fn = js_new_function_impl(func_ptr, param_count, false);
-    js_func_cache_suppress_pop();
-    return fn;
+#define JS_DEFINE_NATIVE_FACTORIES(arity, type, member) \
+    Item js_new_native_function(type target) { \
+        JsNativeTarget stored = {}; stored.member = target; \
+        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
+            js_native_cache_key(target, arity, JS_NATIVE_CALL_FIXED), arity, JS_NATIVE_CALL_FIXED, \
+            false, false); \
+    } \
+    Item js_new_native_constructor(type target) { \
+        JsNativeTarget stored = {}; stored.member = target; \
+        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
+            js_native_cache_key(target, arity, JS_NATIVE_CALL_FIXED, true), arity, JS_NATIVE_CALL_FIXED, \
+            true, false); \
+    } \
+    Item js_new_distinct_native_function(type target) { \
+        JsNativeTarget stored = {}; stored.member = target; \
+        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
+            js_native_cache_key(target, arity, JS_NATIVE_CALL_FIXED), arity, JS_NATIVE_CALL_FIXED, \
+            false, true); \
+    } \
+    Item js_new_distinct_native_constructor(type target) { \
+        JsNativeTarget stored = {}; stored.member = target; \
+        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
+            js_native_cache_key(target, arity, JS_NATIVE_CALL_FIXED, true), arity, JS_NATIVE_CALL_FIXED, \
+            true, true); \
+    }
+
+JS_DEFINE_NATIVE_FACTORIES(0, JsNativeP0, p0)
+JS_DEFINE_NATIVE_FACTORIES(1, JsNativeP1, p1)
+JS_DEFINE_NATIVE_FACTORIES(2, JsNativeP2, p2)
+JS_DEFINE_NATIVE_FACTORIES(3, JsNativeP3, p3)
+JS_DEFINE_NATIVE_FACTORIES(4, JsNativeP4, p4)
+JS_DEFINE_NATIVE_FACTORIES(5, JsNativeP5, p5)
+JS_DEFINE_NATIVE_FACTORIES(6, JsNativeP6, p6)
+JS_DEFINE_NATIVE_FACTORIES(7, JsNativeP7, p7)
+JS_DEFINE_NATIVE_FACTORIES(8, JsNativeP8, p8)
+
+#undef JS_DEFINE_NATIVE_FACTORIES
+
+static Item js_new_distinct_native_rest_function(JsNativeP1 target);
+static Item js_new_distinct_native_rest_function(JsNativeP2 target);
+static Item js_new_distinct_native_rest_function(JsNativeP3 target);
+static Item js_new_distinct_native_rest_function(JsNativeP4 target);
+static Item js_new_distinct_native_rest_function(JsNativeP5 target);
+static Item js_new_distinct_native_rest_function(JsNativeP6 target);
+static Item js_new_distinct_native_rest_function(JsNativeP7 target);
+static Item js_new_distinct_native_rest_function(JsNativeP8 target);
+static Item js_new_distinct_native_rest_constructor(JsNativeP1 target);
+static Item js_new_distinct_native_rest_constructor(JsNativeP2 target);
+static Item js_new_distinct_native_rest_constructor(JsNativeP3 target);
+static Item js_new_distinct_native_rest_constructor(JsNativeP4 target);
+static Item js_new_distinct_native_rest_constructor(JsNativeP5 target);
+static Item js_new_distinct_native_rest_constructor(JsNativeP6 target);
+static Item js_new_distinct_native_rest_constructor(JsNativeP7 target);
+static Item js_new_distinct_native_rest_constructor(JsNativeP8 target);
+
+// Publication helpers need binding identity, not target identity.  These
+// private overloads preserve the adapter contract while forcing one function
+// object per installed property; D6.2.2v2 permits body sharing but JC7 makes
+// distinct identity the default unless an owner explicitly publishes an alias.
+#define JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(arity, type) \
+    static Item js_new_distinct_native_function(type target, int adapter_arity) { \
+        if (adapter_arity == arity) return js_new_distinct_native_function(target); \
+        if (arity > 0 && adapter_arity == -arity) \
+            return js_new_distinct_native_rest_function(target); \
+        log_error("js-distinct-native-factory: target arity %d mismatches adapter %d", \
+            arity, adapter_arity); \
+        return ItemError; \
+    } \
+    static Item js_new_distinct_native_constructor(type target, int adapter_arity) { \
+        if (adapter_arity == arity) return js_new_distinct_native_constructor(target); \
+        if (arity > 0 && adapter_arity == -arity) \
+            return js_new_distinct_native_rest_constructor(target); \
+        log_error("js-distinct-native-constructor-factory: target arity %d mismatches adapter %d", \
+            arity, adapter_arity); \
+        return ItemError; \
+    }
+
+static Item js_new_distinct_native_function(JsNativeP0 target,
+        int adapter_arity) {
+    if (adapter_arity == 0) return js_new_distinct_native_function(target);
+    log_error("js-distinct-native-factory: target arity 0 mismatches adapter %d",
+        adapter_arity);
+    return ItemError;
 }
+
+static Item js_new_distinct_native_constructor(JsNativeP0 target,
+        int adapter_arity) {
+    if (adapter_arity == 0) return js_new_distinct_native_constructor(target);
+    log_error("js-distinct-native-constructor-factory: target arity 0 mismatches adapter %d",
+        adapter_arity);
+    return ItemError;
+}
+
+JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(1, JsNativeP1)
+JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(2, JsNativeP2)
+JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(3, JsNativeP3)
+JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(4, JsNativeP4)
+JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(5, JsNativeP5)
+JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(6, JsNativeP6)
+JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(7, JsNativeP7)
+JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY(8, JsNativeP8)
+
+#undef JS_DEFINE_DISTINCT_NATIVE_ADAPTER_FACTORY
+
+#define JS_DEFINE_NATIVE_ARITY_FACTORY(arity, type) \
+    Item js_new_native_function(type target, int adapter_arity) { \
+        if (adapter_arity == arity) return js_new_native_function(target); \
+        if (arity > 0 && adapter_arity == -arity) \
+            return js_new_native_rest_function(target); \
+        /* D6.2.2v2: reject ABI/adapter disagreement at publication so call \
+         * dispatch never reinterprets the target from mutable metadata. */ \
+        log_error("js-native-factory: target arity %d mismatches adapter %d", \
+            arity, adapter_arity); \
+        return ItemError; \
+    } \
+    Item js_new_native_constructor(type target, int adapter_arity) { \
+        if (adapter_arity == arity) return js_new_native_constructor(target); \
+        if (arity > 0 && adapter_arity == -arity) \
+            return js_new_native_rest_constructor(target); \
+        log_error("js-native-constructor-factory: target arity %d mismatches adapter %d", \
+            arity, adapter_arity); \
+        return ItemError; \
+    }
+
+Item js_new_native_function(JsNativeP0 target, int adapter_arity) {
+    if (adapter_arity == 0) return js_new_native_function(target);
+    // D6.2.2v2 rejects metadata that would reinterpret a zero-arity target.
+    log_error("js-native-factory: target arity 0 mismatches adapter %d",
+        adapter_arity);
+    return ItemError;
+}
+Item js_new_native_constructor(JsNativeP0 target, int adapter_arity) {
+    if (adapter_arity == 0) return js_new_native_constructor(target);
+    // D6.2.2v2 rejects metadata that would reinterpret a zero-arity target.
+    log_error("js-native-constructor-factory: target arity 0 mismatches adapter %d",
+        adapter_arity);
+    return ItemError;
+}
+JS_DEFINE_NATIVE_ARITY_FACTORY(1, JsNativeP1)
+JS_DEFINE_NATIVE_ARITY_FACTORY(2, JsNativeP2)
+JS_DEFINE_NATIVE_ARITY_FACTORY(3, JsNativeP3)
+JS_DEFINE_NATIVE_ARITY_FACTORY(4, JsNativeP4)
+JS_DEFINE_NATIVE_ARITY_FACTORY(5, JsNativeP5)
+JS_DEFINE_NATIVE_ARITY_FACTORY(6, JsNativeP6)
+JS_DEFINE_NATIVE_ARITY_FACTORY(7, JsNativeP7)
+JS_DEFINE_NATIVE_ARITY_FACTORY(8, JsNativeP8)
+
+#undef JS_DEFINE_NATIVE_ARITY_FACTORY
+
+#define JS_DEFINE_NATIVE_INSTALLER(name_suffix, factory, arity, type, adapter_param, adapter_arg) \
+    Item js_install_native_##name_suffix(Item object, const char* name, \
+            type target adapter_param) { \
+        RootFrame roots(3); \
+        Rooted<Item> object_root(roots, object); \
+        Rooted<Item> key_root(roots, make_string_item(name)); \
+        /* Function creation can collect before Set owns the key/value. */ \
+        Rooted<Item> function_root(roots, \
+            factory(target adapter_arg)); \
+        js_property_set(object_root.get(), key_root.get(), function_root.get()); \
+        return function_root.get(); \
+    }
+
+#define JS_DEFINE_NATIVE_METHOD_INSTALLER(arity, type) \
+    JS_DEFINE_NATIVE_INSTALLER(method, js_new_distinct_native_function, arity, type, \
+        JS_COMMA int adapter_arity, JS_COMMA adapter_arity) \
+    Item js_install_native_method(Item object, const char* name, type target) { \
+        return js_install_native_method(object, name, target, arity); \
+    }
+
+#define JS_COMMA ,
+
+#define JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(arity, type) \
+    JS_DEFINE_NATIVE_INSTALLER(constructor, js_new_distinct_native_constructor, arity, \
+        type, JS_COMMA int adapter_arity, JS_COMMA adapter_arity) \
+    Item js_install_native_constructor(Item object, const char* name, \
+            type target) { \
+        return js_install_native_constructor(object, name, target, arity); \
+    }
+
+// D5.2/D6.2.2v2: all native-method publication uses one exact-rooted shape;
+// argument evaluation order must never decide whether the key survives GC.
+JS_DEFINE_NATIVE_METHOD_INSTALLER(0, JsNativeP0)
+JS_DEFINE_NATIVE_METHOD_INSTALLER(1, JsNativeP1)
+JS_DEFINE_NATIVE_METHOD_INSTALLER(2, JsNativeP2)
+JS_DEFINE_NATIVE_METHOD_INSTALLER(3, JsNativeP3)
+JS_DEFINE_NATIVE_METHOD_INSTALLER(4, JsNativeP4)
+JS_DEFINE_NATIVE_METHOD_INSTALLER(5, JsNativeP5)
+JS_DEFINE_NATIVE_METHOD_INSTALLER(6, JsNativeP6)
+JS_DEFINE_NATIVE_METHOD_INSTALLER(7, JsNativeP7)
+JS_DEFINE_NATIVE_METHOD_INSTALLER(8, JsNativeP8)
+
+JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(0, JsNativeP0)
+JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(1, JsNativeP1)
+JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(2, JsNativeP2)
+JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(3, JsNativeP3)
+JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(4, JsNativeP4)
+JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(5, JsNativeP5)
+JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(6, JsNativeP6)
+JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(7, JsNativeP7)
+JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER(8, JsNativeP8)
+
+#undef JS_DEFINE_NATIVE_METHOD_INSTALLER
+#undef JS_DEFINE_NATIVE_CONSTRUCTOR_INSTALLER
+#undef JS_DEFINE_NATIVE_INSTALLER
+#undef JS_COMMA
+
+Item js_initialize_native_constructor_prototype(Item constructor,
+        Item prototype) {
+    RootFrame roots(3);
+    Rooted<Item> constructor_root(roots, constructor);
+    Rooted<Item> prototype_root(roots, prototype);
+    Rooted<Item> key_root(roots, make_string_item("prototype"));
+    if (get_type_id(constructor_root.get()) != LMD_TYPE_FUNC ||
+            !js_function_has_own_prototype(constructor_root.get())) {
+        return js_throw_type_error(
+            "native prototype initialization requires a constructor");
+    }
+    JsFunction* fn = (JsFunction*)constructor_root.get().function;
+    // D5.4.3/D6.2.2v2: native publication initializes the hidden construct
+    // payload and the real own data property in one exact-rooted transaction.
+    // Ordinary Set cannot do this because a built-in prototype is non-writable
+    // once its lazy descriptor has been materialized.
+    fn->prototype = prototype_root.get();
+    js_function_root_item_if_needed(fn, &fn->prototype);
+    js_func_init_property(constructor_root.get(), key_root.get(),
+        prototype_root.get());
+    js_mark_non_writable(constructor_root.get(), key_root.get());
+    js_mark_non_enumerable(constructor_root.get(), key_root.get());
+    js_mark_non_configurable(constructor_root.get(), key_root.get());
+    return prototype_root.get();
+}
+
+#define JS_DEFINE_NATIVE_REST_FACTORY(arity, type, member) \
+    Item js_new_native_rest_function(type target) { \
+        JsNativeTarget stored = {}; stored.member = target; \
+        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
+            js_native_cache_key(target, arity, JS_NATIVE_CALL_REST), arity, JS_NATIVE_CALL_REST, \
+            false, false); \
+    } \
+    Item js_new_native_rest_constructor(type target) { \
+        JsNativeTarget stored = {}; stored.member = target; \
+        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
+            js_native_cache_key(target, arity, JS_NATIVE_CALL_REST, true), arity, \
+            JS_NATIVE_CALL_REST, true, false); \
+    } \
+    static Item js_new_distinct_native_rest_function(type target) { \
+        JsNativeTarget stored = {}; stored.member = target; \
+        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
+            js_native_cache_key(target, arity, JS_NATIVE_CALL_REST), arity, \
+            JS_NATIVE_CALL_REST, false, true); \
+    } \
+    static Item js_new_distinct_native_rest_constructor(type target) { \
+        JsNativeTarget stored = {}; stored.member = target; \
+        return js_new_native_function_impl(stored, js_native_call_##arity, NULL, \
+            js_native_cache_key(target, arity, JS_NATIVE_CALL_REST, true), arity, \
+            JS_NATIVE_CALL_REST, true, true); \
+    }
+
+JS_DEFINE_NATIVE_REST_FACTORY(1, JsNativeP1, p1)
+JS_DEFINE_NATIVE_REST_FACTORY(2, JsNativeP2, p2)
+JS_DEFINE_NATIVE_REST_FACTORY(3, JsNativeP3, p3)
+JS_DEFINE_NATIVE_REST_FACTORY(4, JsNativeP4, p4)
+JS_DEFINE_NATIVE_REST_FACTORY(5, JsNativeP5, p5)
+JS_DEFINE_NATIVE_REST_FACTORY(6, JsNativeP6, p6)
+JS_DEFINE_NATIVE_REST_FACTORY(7, JsNativeP7, p7)
+JS_DEFINE_NATIVE_REST_FACTORY(8, JsNativeP8, p8)
+
+#undef JS_DEFINE_NATIVE_REST_FACTORY
+
+static Item js_native_call_span(Item fn_item, Item this_value, Item* args,
+        int argc, uint64_t* result_home) {
+    (void)this_value; (void)result_home;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    return fn && fn->native_target.span
+        ? fn->native_target.span(args, argc) : ItemError;
+}
+
+static Item js_native_call_this_span(Item fn_item, Item this_value, Item* args,
+        int argc, uint64_t* result_home) {
+    (void)result_home;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    return fn && fn->native_target.this_span
+        ? fn->native_target.this_span(this_value, args, argc) : ItemError;
+}
+
+Item js_new_native_span_function(JsNativeSpan target) {
+    JsNativeTarget stored = {};
+    stored.span = target;
+    return js_new_native_function_impl(stored, js_native_call_span, NULL,
+        js_native_cache_key(target, 0, JS_NATIVE_CALL_SPAN), 0,
+        JS_NATIVE_CALL_SPAN, false, false);
+}
+
+Item js_new_native_this_span_function(JsNativeThisSpan target) {
+    JsNativeTarget stored = {};
+    stored.this_span = target;
+    return js_new_native_function_impl(stored, js_native_call_this_span, NULL,
+        js_native_cache_key(target, 0, JS_NATIVE_CALL_THIS_SPAN), 0,
+        JS_NATIVE_CALL_THIS_SPAN, false, false);
+}
+
+Item js_new_native_span_constructor(JsNativeSpan target) {
+    JsNativeTarget stored = {};
+    stored.span = target;
+    return js_new_native_function_impl(stored, js_native_call_span, NULL,
+        js_native_cache_key(target, 0, JS_NATIVE_CALL_SPAN, true), 0,
+        JS_NATIVE_CALL_SPAN, true, false);
+}
+
+Item js_new_native_body_constructor(JsNativeCallBody call_body,
+        JsNativeConstructBody construct_body, int formal_length) {
+    JsNativeTarget stored = {};
+    return js_new_native_function_impl(stored, call_body, construct_body,
+        js_native_cache_key(call_body, formal_length, JS_NATIVE_CALL_BODY, true),
+        formal_length, JS_NATIVE_CALL_BODY, true, true);
+}
+
+Item js_new_native_payload_function(JsNativeCallBody call_body,
+        uint64_t payload, int formal_length) {
+    JsNativeTarget stored = {};
+    stored.bits = payload;
+    // D5.3.3/D6.2.2v2: executable host payloads are not Item edges. Keeping
+    // them in the native target union prevents precise closure tracing from
+    // interpreting a process-stable record pointer as a JavaScript value.
+    return js_new_native_function_impl(stored, call_body, NULL,
+        js_native_cache_key(call_body, formal_length, JS_NATIVE_CALL_BODY),
+        formal_length, JS_NATIVE_CALL_BODY, false, true);
+}
+
+static Item js_native_call_env_span(Item fn_item, Item this_value, Item* args,
+        int argc, uint64_t* result_home) {
+    (void)this_value; (void)result_home;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    if (!fn || !fn->native_target.env_span) return ItemError;
+    Item env_item = {.item = (uint64_t)(uintptr_t)fn->env};
+    return fn->native_target.env_span(env_item, args, argc);
+}
+
+Item js_new_native_env_span_closure(JsNativeEnvSpan target, int formal_length,
+        Item* env, int env_size) {
+    JsNativeTarget stored = {};
+    stored.env_span = target;
+    RootFrame roots(2);
+    Rooted<Item> env_owner_root(roots,
+        (Item){.item = (uint64_t)(uintptr_t)env});
+    Rooted<Item> fn_root(roots, js_new_native_function_impl(stored,
+        js_native_call_env_span, NULL,
+        js_native_cache_key(target, 0, JS_NATIVE_CALL_ENV_SPAN), 0,
+        JS_NATIVE_CALL_ENV_SPAN, false, true));
+    if (get_type_id(fn_root.get()) != LMD_TYPE_FUNC) return fn_root.get();
+    JsFunction* fn = (JsFunction*)fn_root.get().function;
+    // D5.3.3/D6.2.2v2: attach the precisely traced environment before any
+    // scalar rehoming while the unpublished wrapper remains rooted.
+    fn->env = env;
+    fn->env_size = env_size;
+    js_set_formal_length(fn_root.get(), formal_length);
+    js_env_rehome_scalars(fn->env);
+    js_function_finalize_capabilities(fn);
+    return fn_root.get();
+}
+
+#define JS_DEFINE_NATIVE_CLOSURE_ADAPTER(exposed_arity, member, call_args) \
+    static Item js_native_closure_call_##exposed_arity(Item fn_item, \
+            Item this_value, Item* args, int argc, uint64_t* result_home) { \
+        (void)this_value; (void)result_home; \
+        JsFunction* fn = (JsFunction*)fn_item.function; \
+        if (!fn || argc != exposed_arity || \
+                (exposed_arity > 0 && !args)) { \
+            log_error("js-native-closure-%d: adapted arity mismatch argc=%d", \
+                exposed_arity, argc); \
+            return ItemError; \
+        } \
+        Item env_item = {.item = (uint64_t)(uintptr_t)fn->env}; \
+        return fn->native_target.member call_args; \
+    }
+
+JS_DEFINE_NATIVE_CLOSURE_ADAPTER(0, p1, (env_item))
+JS_DEFINE_NATIVE_CLOSURE_ADAPTER(1, p2, (env_item, args[0]))
+JS_DEFINE_NATIVE_CLOSURE_ADAPTER(2, p3, (env_item, args[0], args[1]))
+JS_DEFINE_NATIVE_CLOSURE_ADAPTER(3, p4, (env_item, args[0], args[1], args[2]))
+JS_DEFINE_NATIVE_CLOSURE_ADAPTER(4, p5, (env_item, args[0], args[1], args[2], args[3]))
+
+#undef JS_DEFINE_NATIVE_CLOSURE_ADAPTER
+
+static Item js_new_native_closure_impl(JsNativeTarget target,
+        JsNativeCallBody call_body,
+        const JsRuntimeState::JsFunctionCacheKey& cache_key,
+        int exposed_arity, JsNativeCallPolicy policy, Item* env,
+        int env_size) {
+    RootFrame roots(2);
+    Rooted<Item> env_owner_root(roots,
+        (Item){.item = (uint64_t)(uintptr_t)env});
+    // D5.4.3: the caller-built GC environment has no object owner until the
+    // fresh callable is attached; root the raw environment across allocation.
+    Rooted<Item> fn_root(roots, js_new_native_function_impl(target, call_body,
+        NULL,
+        cache_key, exposed_arity, policy, false, true));
+    if (get_type_id(fn_root.get()) != LMD_TYPE_FUNC) return fn_root.get();
+    JsFunction* fn = (JsFunction*)fn_root.get().function;
+    // D5.3.3/D6.2.2v2: the typed closure owns its environment before scalar
+    // rehoming can allocate; invocation reads it without an ABI cast.
+    fn->env = env;
+    fn->env_size = env_size;
+    js_env_rehome_scalars(fn->env);
+    js_function_finalize_capabilities(fn);
+    return fn_root.get();
+}
+
+#define JS_DEFINE_NATIVE_CLOSURE_FACTORY(exposed_arity, type, member) \
+    Item js_new_native_closure(type target, int adapter_arity, Item* env, \
+            int env_size) { \
+        JsNativeCallPolicy policy = adapter_arity == exposed_arity \
+            ? JS_NATIVE_CALL_FIXED : JS_NATIVE_CALL_REST; \
+        if (adapter_arity != exposed_arity && \
+                adapter_arity != -exposed_arity) { \
+            log_error("js-native-closure-factory: target arity %d mismatches adapter %d", \
+                exposed_arity, adapter_arity); \
+            return ItemError; \
+        } \
+        JsNativeTarget stored = {}; stored.member = target; \
+        return js_new_native_closure_impl(stored, \
+            js_native_closure_call_##exposed_arity, \
+            js_native_cache_key(target, exposed_arity, policy), exposed_arity, \
+            policy, env, env_size); \
+    }
+
+JS_DEFINE_NATIVE_CLOSURE_FACTORY(0, JsNativeP1, p1)
+JS_DEFINE_NATIVE_CLOSURE_FACTORY(1, JsNativeP2, p2)
+JS_DEFINE_NATIVE_CLOSURE_FACTORY(2, JsNativeP3, p3)
+JS_DEFINE_NATIVE_CLOSURE_FACTORY(3, JsNativeP4, p4)
+JS_DEFINE_NATIVE_CLOSURE_FACTORY(4, JsNativeP5, p5)
+
+#undef JS_DEFINE_NATIVE_CLOSURE_FACTORY
 
 extern "C" Item js_new_function_mir(void* func_ptr, int param_count) {
     return js_new_function_impl(func_ptr, param_count, true);
+}
+
+extern "C" Item js_new_distinct_function_mir(void* func_ptr, int param_count) {
+    // D6.2.2v2: evaluating a function expression creates a fresh callable;
+    // the MIR-pointer cache is only valid for a stable binding materialization.
+    js_func_cache_suppress_push();
+    Item result = js_new_function_impl(func_ptr, param_count, true);
+    js_func_cache_suppress_pop();
+    return result;
 }
 
 static Item js_new_method_function_impl(void* func_ptr, int param_count,
@@ -309,12 +991,8 @@ static Item js_new_method_function_impl(void* func_ptr, int param_count,
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
-    js_function_call_lane_recompute(fn);
+    js_function_finalize_capabilities(fn);
     return (Item){.function = (Function*)fn};
-}
-
-extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
-    return js_new_method_function_impl(func_ptr, param_count, false);
 }
 
 extern "C" Item js_new_method_function_mir(void* func_ptr, int param_count) {
@@ -353,13 +1031,8 @@ static Item js_new_closure_impl(void* func_ptr, int param_count, Item* env,
     fn->home_global = js_get_global_this();
     js_env_rehome_scalars(fn->env);
     js_function_capture_with_env(fn);
-    js_function_call_lane_recompute(fn);
+    js_function_finalize_capabilities(fn);
     return (Item){.function = (Function*)fn};
-}
-
-extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env,
-        int env_size) {
-    return js_new_closure_impl(func_ptr, param_count, env, env_size, false);
 }
 
 extern "C" Item js_new_closure_mir(void* func_ptr, int param_count,
@@ -372,6 +1045,7 @@ extern "C" void js_set_formal_length(Item fn_item, int length) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->formal_length = (int16_t)length;
+    js_function_refresh_length_property(fn);
 }
 
 // Allocate a traced raw Item environment. Its owning closure/function keeps the
@@ -421,7 +1095,7 @@ static void js_mark_function_flags(Item fn_item, uint32_t flags) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->flags |= flags;
-    js_function_call_lane_recompute(fn);
+    js_function_finalize_capabilities(fn);
 }
 
 // v20: Mark a function as a generator (generator prototype has no constructor)
@@ -457,7 +1131,7 @@ extern "C" void js_mark_eval_initializer_func_if_active(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->eval_initializer_context = true;
-    js_function_call_lane_recompute(fn);
+    js_function_finalize_capabilities(fn);
 }
 
 // Mark a function as strict mode (ES spec [[Strict]] internal slot)
@@ -465,14 +1139,28 @@ extern "C" void js_mark_strict_func(Item fn_item) {
     js_mark_function_flags(fn_item, JS_FUNC_FLAG_STRICT);
 }
 
-extern "C" void js_finalize_function(Item fn_item, Item name_item,
-        Item source_item, int formal_length, int init_flags) {
+extern "C" void js_finalize_function(Item fn_item, const char* name_chars,
+        const char* source_chars, uint64_t span_lengths,
+        int64_t formal_length, int64_t init_flags) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    // Lowering already canonicalizes private display names. Direct field setup
-    // keeps this pre-publication transaction allocation-free and non-reentrant.
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    if (get_type_id(name_item) == LMD_TYPE_STRING) fn->name = it2s(name_item);
-    if (get_type_id(source_item) == LMD_TYPE_STRING) fn->source_text = it2s(source_item);
+    RootFrame roots(1);
+    Rooted<Item> function_root(roots, fn_item);
+    uint32_t name_length = (uint32_t)(span_lengths & UINT32_MAX);
+    uint32_t source_length = (uint32_t)(span_lengths >> 32);
+    // D5.4.3: name/source materialization can collect. Root the newly created
+    // callable before either allocation, then publish each edge immediately so
+    // the function itself owns the strings for the rest of finalization.
+    JsFunction* fn = (JsFunction*)function_root.get().function;
+    if (name_chars) {
+        Item name_item = js_make_string_len(name_chars, (int)name_length);
+        fn = (JsFunction*)function_root.get().function;
+        if (get_type_id(name_item) == LMD_TYPE_STRING) fn->name = it2s(name_item);
+    }
+    if (source_chars) {
+        Item source_item = js_make_string_len(source_chars, (int)source_length);
+        fn = (JsFunction*)function_root.get().function;
+        if (get_type_id(source_item) == LMD_TYPE_STRING) fn->source_text = it2s(source_item);
+    }
     if (formal_length >= 0) fn->formal_length = (int16_t)formal_length;
     if (init_flags & JS_FUNC_INIT_GENERATOR) fn->flags |= JS_FUNC_FLAG_GENERATOR;
     if (init_flags & JS_FUNC_INIT_ASYNC_GENERATOR) {
@@ -487,10 +1175,18 @@ extern "C" void js_finalize_function(Item fn_item, Item name_item,
     if (init_flags & JS_FUNC_INIT_READS_THIS) fn->flags |= JS_FUNC_FLAG_READS_THIS;
     if (init_flags & JS_FUNC_INIT_READS_NEW_TARGET) fn->flags |= JS_FUNC_FLAG_READS_NEW_TARGET;
     if (init_flags & JS_FUNC_INIT_MIR_CONTEXT_ABI) fn->flags |= JS_FUNC_FLAG_MIR_CONTEXT_ABI;
+    if (init_flags & JS_FUNC_INIT_CLASS_FIELD_INITIALIZER) {
+        // Synthetic field callables are finalized during class evaluation, not
+        // while fields run; without this capability direct eval loses the class
+        // initializer PrivateEnvironment at its later invocation.
+        fn->eval_initializer_context = true;
+    }
     if (js_private_field_initializing || js_eval_initializer_context) {
         fn->eval_initializer_context = true;
     }
-    js_function_call_lane_recompute(fn);
+    js_function_refresh_name_property(fn);
+    js_function_refresh_length_property(fn);
+    js_function_finalize_capabilities(fn);
 }
 
 extern "C" void js_set_class_name(Item cls_item, Item name_item);
@@ -506,8 +1202,9 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
-    if (fn->func_ptr) { // is JsFunction layout
+    if (fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) {
         fn->name = it2s(name_item);
+        js_function_refresh_name_property(fn);
     }
 }
 extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) {
@@ -519,8 +1216,10 @@ extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) 
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
-    if (fn->func_ptr && (!fn->name || fn->name->len == 0)) {
+    if (fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC &&
+            (!fn->name || fn->name->len == 0)) {
         fn->name = it2s(name_item);
+        js_function_refresh_name_property(fn);
     }
 }
 
@@ -586,7 +1285,7 @@ extern "C" void js_set_class_name(Item cls_item, Item name_item) {
             String* current_name = it2s(current);
             if (current_name && current_name->len == 0) {
                 String* name_key_str = heap_create_name("name", 4);
-                map_put(cls_item.map, name_key_str, name_item, js_input);
+                map_put_heap(cls_item.map, name_key_str, name_item, js_input);
                 js_attr_set_writable(cls_item, "name", 4, false);
                 js_attr_set_enumerable(cls_item, "name", 4, false);
                 js_attr_set_configurable(cls_item, "name", 4, true);
@@ -595,7 +1294,7 @@ extern "C" void js_set_class_name(Item cls_item, Item name_item) {
         return;
     }
     String* name_key_str = heap_create_name("name", 4);
-    map_put(cls_item.map, name_key_str, name_item, js_input);
+    map_put_heap(cls_item.map, name_key_str, name_item, js_input);
     js_attr_set_writable(cls_item, "name", 4, false);
     js_attr_set_enumerable(cls_item, "name", 4, false);
     js_attr_set_configurable(cls_item, "name", 4, true);
@@ -633,7 +1332,7 @@ extern "C" void js_set_function_source(Item fn_item, Item source_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     if (get_type_id(source_item) != LMD_TYPE_STRING) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
-    if (fn->func_ptr) {
+    if (fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) {
         fn->source_text = it2s(source_item);
     }
 }

@@ -45,7 +45,8 @@ static void node_v8_set_property(Item object, const char* name, Item value) {
     node_v8_host->node->roots->root_frame_end(&frame);
 }
 
-static void node_v8_set_method(Item object, const char* name, void* function) {
+template <typename Target>
+static void node_v8_set_method(Item object, const char* name, Target target) {
     JubeRootFrame frame = {};
     if (!node_v8_host->node->roots->root_frame_begin(&frame, 2)) return;
     uint64_t* object_root = node_v8_host->node->roots->root_frame_take_slot(&frame);
@@ -55,7 +56,7 @@ static void node_v8_set_method(Item object, const char* name, void* function) {
         return;
     }
     *object_root = object.item;
-    Item method = node_v8_host->script->new_function(function, 1);
+    Item method = jube_new_function(node_v8_host->script, target, 1);
     *function_root = method.item;
     node_v8_set_property(node_v8_root_value(object_root), name, node_v8_root_value(function_root));
     node_v8_host->node->roots->root_frame_end(&frame);
@@ -81,24 +82,24 @@ Item node_v8_namespace(void) {
     *promise_hooks_root = promise_hooks.item;
     // Method creation can compact the heap, so reload the temporary child
     // through its root before every call that receives it by value.
-    node_v8_set_method(node_v8_root_value(promise_hooks_root), "onInit", (void*)node_v8_undefined);
-    node_v8_set_method(node_v8_root_value(promise_hooks_root), "onBefore", (void*)node_v8_undefined);
-    node_v8_set_method(node_v8_root_value(promise_hooks_root), "onAfter", (void*)node_v8_undefined);
-    node_v8_set_method(node_v8_root_value(promise_hooks_root), "onSettled", (void*)node_v8_undefined);
-    node_v8_set_method(node_v8_root_value(promise_hooks_root), "createHook", (void*)node_v8_undefined);
+    node_v8_set_method(node_v8_root_value(promise_hooks_root), "onInit", node_v8_undefined);
+    node_v8_set_method(node_v8_root_value(promise_hooks_root), "onBefore", node_v8_undefined);
+    node_v8_set_method(node_v8_root_value(promise_hooks_root), "onAfter", node_v8_undefined);
+    node_v8_set_method(node_v8_root_value(promise_hooks_root), "onSettled", node_v8_undefined);
+    node_v8_set_method(node_v8_root_value(promise_hooks_root), "createHook", node_v8_undefined);
     node_v8_set_property(node_v8_cached_namespace, "promiseHooks", node_v8_root_value(promise_hooks_root));
-    node_v8_set_method(node_v8_cached_namespace, "getHeapStatistics", (void*)node_v8_new_object);
-    node_v8_set_method(node_v8_cached_namespace, "getHeapSpaceStatistics", (void*)node_v8_new_object);
-    node_v8_set_method(node_v8_cached_namespace, "setFlagsFromString", (void*)node_v8_undefined);
-    node_v8_set_method(node_v8_cached_namespace, "serialize", (void*)node_v8_undefined);
-    node_v8_set_method(node_v8_cached_namespace, "deserialize", (void*)node_v8_undefined);
+    node_v8_set_method(node_v8_cached_namespace, "getHeapStatistics", node_v8_new_object);
+    node_v8_set_method(node_v8_cached_namespace, "getHeapSpaceStatistics", node_v8_new_object);
+    node_v8_set_method(node_v8_cached_namespace, "setFlagsFromString", node_v8_undefined);
+    node_v8_set_method(node_v8_cached_namespace, "serialize", node_v8_undefined);
+    node_v8_set_method(node_v8_cached_namespace, "deserialize", node_v8_undefined);
     Item startup_snapshot = node_v8_host->value->new_object();
     *startup_snapshot_root = startup_snapshot.item;
     node_v8_set_method(node_v8_root_value(startup_snapshot_root),
-        "setDeserializeMainFunction", (void*)node_v8_undefined);
+        "setDeserializeMainFunction", node_v8_undefined);
     node_v8_set_property(node_v8_cached_namespace, "startupSnapshot",
         node_v8_root_value(startup_snapshot_root));
-    node_v8_set_method(node_v8_cached_namespace, "GCProfiler", (void*)node_v8_new_object);
+    node_v8_set_method(node_v8_cached_namespace, "GCProfiler", node_v8_new_object);
     node_v8_set_property(node_v8_cached_namespace, "default", node_v8_cached_namespace);
     node_v8_host->node->roots->root_frame_end(&frame);
     return node_v8_cached_namespace;

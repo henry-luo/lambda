@@ -51,3 +51,8 @@ blue
 blue
 
 10px
+function
+true
+anchortexttailmoved
+3
+headanchortexttailmoved

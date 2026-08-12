@@ -46,31 +46,6 @@ static inline bool js_coerce_is_bigint(Item value) {
     return dec && dec->unlimited == DECIMAL_BIGINT;
 }
 
-static Item js_proxy_has_get_trap(Item value) {
-    JsProxyData* pd = js_get_proxy_data(value);
-    if (!pd) return (Item){.item = b2it(true)};
-    Item handler = (Item){.item = pd->handler};
-    Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
-    JS_ASSIGN_OR_RETURN(trap, js_property_get(handler, get_key));
-    TypeId trap_type = get_type_id(trap);
-    return (Item){.item = b2it(trap.item != ItemNull.item &&
-        trap_type != LMD_TYPE_UNDEFINED && trap_type != LMD_TYPE_NULL)};
-}
-
-static bool js_is_class_constructor_map_for_coerce(Item value) {
-    if (get_type_id(value) != LMD_TYPE_MAP || !value.map) return false;
-    bool has_instance_proto = false;
-    js_map_get_fast_ext(value.map, "__instance_proto__", 18, &has_instance_proto);
-    if (has_instance_proto) return true;
-    bool has_ctor = false;
-    js_map_get_fast_ext(value.map, "__ctor__", 8, &has_ctor);
-    return has_ctor;
-}
-
-static bool js_is_callable_proxy_target_for_coerce(Item value) {
-    return get_type_id(value) == LMD_TYPE_FUNC || js_is_class_constructor_map_for_coerce(value);
-}
-
 extern "C" Item js_to_primitive(Item value, JsHint hint) {
     TypeId vt = get_type_id(value);
     if (!is_object_type(vt)) return value;
@@ -104,7 +79,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
                        tp_type != LMD_TYPE_UNDEFINED &&
                        tp_type != LMD_TYPE_NULL);
 
-    if (tp_present && tp_type != LMD_TYPE_FUNC) {
+    if (tp_present && !js_is_callable(to_prim)) {
         // ES §7.1.1 step 2.b.i: callable check.
         return js_throw_type_error("@@toPrimitive is not a function");
     }
@@ -141,21 +116,6 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
         }
     }
 
-    if (vt == LMD_TYPE_MAP && js_is_proxy(value)) {
-        JS_ASSIGN_OR_RETURN(has_get_trap, js_proxy_has_get_trap(value));
-        if (!it2b(has_get_trap)) {
-        Item target = js_proxy_get_target(value);
-        if (js_is_callable_proxy_target_for_coerce(target)) {
-                Item fn = js_lookup_builtin_method(LMD_TYPE_FUNC, "toString", 8);
-                if (fn.item != ItemNull.item && get_type_id(fn) == LMD_TYPE_FUNC) {
-                    Item result = js_call_function(fn, value, NULL, 0);
-                if (item_is_error(result)) return result;
-                if (!result_is_object(get_type_id(result))) return result;
-            }
-        }
-        }
-    }
-
     // Step 3: OrdinaryToPrimitive — method order depends on hint.
     // For "string" hint: toString, then valueOf.
     // For "default" / "number" hint: valueOf, then toString.
@@ -170,7 +130,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
 
     for (int i = 0; i < 2; i++) {
         JS_ASSIGN_OR_RETURN(fn, js_property_get(value, method_keys[i]));
-        if (fn.item == ItemNull.item || get_type_id(fn) != LMD_TYPE_FUNC) continue;
+        if (fn.item == ItemNull.item || !js_is_callable(fn)) continue;
         JS_ASSIGN_OR_RETURN(result, js_call_function(fn, value, NULL, 0));
         if (!result_is_object(get_type_id(result))) {
             return result;

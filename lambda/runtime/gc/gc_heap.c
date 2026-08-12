@@ -1310,6 +1310,11 @@ static void gc_trace_data_words(gc_heap_t* gc, void* data_ptr, int64_t byte_size
     }
 }
 
+static int64_t gc_packed_data_allocation_size(void* type_ptr, int data_cap) {
+    if (data_cap > 0) return (int64_t)data_cap;
+    return type_ptr ? *(int64_t*)((uint8_t*)type_ptr + 16) : 0;
+}
+
 // trace outgoing Item pointers from a type-aware object
 // This is the core tracing logic that knows Lambda's struct layouts.
 static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
@@ -1416,6 +1421,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         uint8_t map_kind = p[3];
         void* type_ptr = *(void**)(p + 8);    // TypeMap*
         void* data_ptr = *(void**)(p + 16);   // data buffer
+        int data_cap = *(int*)(p + 24);
         if (tag == LMD_TYPE_MAP_ && gc->js_native_trace) {
             gc->js_native_trace(obj, gc);
         }
@@ -1441,7 +1447,10 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // TypeMap layout: { Type(2+6pad=8), length(8@8), byte_size(8@16),
         //   type_index(4@24), pad(4), shape*(8@32), last*(8@40) }
         uint8_t* tp = (uint8_t*)type_ptr;
-        int64_t byte_size = *(int64_t*)(tp + 16);     // TypeMap.byte_size
+        // D4.3.1: the object owns one fixup for its complete data allocation.
+        // Dynamic JS shapes may reserve pointer-width slots beyond byte_size;
+        // bounding tracing by the packed logical size skipped those live slots.
+        int64_t byte_size = gc_packed_data_allocation_size(type_ptr, data_cap);
         void* shape_ptr = *(void**)(tp + 32);          // TypeMap.shape (ShapeEntry*)
 
         // Walk ShapeEntry linked list
@@ -1530,6 +1539,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         int64_t capacity = *(int64_t*)(p + 32);
         void* type_ptr = *(void**)(p + 40);
         void* data_ptr = *(void**)(p + 48);
+        int data_cap = *(int*)(p + 56);
         int64_t dense_count = length < capacity ? length : capacity;
 
         // trace children items
@@ -1543,7 +1553,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // trace attributes (same shape-walk as Map)
         if (type_ptr && data_ptr) {
             uint8_t* tp = (uint8_t*)type_ptr;
-            int64_t byte_size = *(int64_t*)(tp + 16);
+            int64_t byte_size = gc_packed_data_allocation_size(type_ptr, data_cap);
             void* shape_ptr = *(void**)(tp + 32);
             uint8_t* shape = (uint8_t*)shape_ptr;
             while (shape) {
@@ -1829,7 +1839,12 @@ static void gc_compact_data(gc_heap_t* gc) {
             void** data_slot = (void**)(p + 16);   // map->data
             void* type_ptr = *(void**)(p + 8);      // map->type
             if (*data_slot && gc_data_zone_owns(gc->data_zone, *data_slot) && type_ptr) {
-                int64_t byte_size = *(int64_t*)((uint8_t*)type_ptr + 16);
+                int data_cap = *(int*)(p + 24);
+                // D4.3.1: data_cap is the allocation contract. TypeMap.byte_size
+                // can be smaller than a JS constructor's reserved fixed slots;
+                // copying only byte_size left the live object pointing at a
+                // truncated buffer after the nursery reset.
+                int64_t byte_size = gc_packed_data_allocation_size(type_ptr, data_cap);
                 if (byte_size > 0) {
                     void* new_data = gc_data_zone_copy(gc->tenured_data, *data_slot, byte_size);
                     if (new_data) {
@@ -1870,7 +1885,8 @@ static void gc_compact_data(gc_heap_t* gc) {
             void** data_slot = (void**)(p + 48);
             void* type_ptr = *(void**)(p + 40);
             if (*data_slot && gc_data_zone_owns(gc->data_zone, *data_slot) && type_ptr) {
-                int64_t byte_size = *(int64_t*)((uint8_t*)type_ptr + 16);
+                int data_cap = *(int*)(p + 56);
+                int64_t byte_size = gc_packed_data_allocation_size(type_ptr, data_cap);
                 if (byte_size > 0) {
                     void* new_data = gc_data_zone_copy(gc->tenured_data, *data_slot, byte_size);
                     if (new_data) {

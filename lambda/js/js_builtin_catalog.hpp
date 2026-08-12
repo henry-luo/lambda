@@ -70,44 +70,17 @@ enum JsConstructorId {
 enum JsBuiltinOwner {
     JS_BUILTIN_OWNER_NONE = 0,
 #define JS_BUILTIN_OWNER(owner) owner,
-#define JS_BUILTIN_ID(id, dispatch_group, mir_kind)
-#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, use_cache)
-#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, arity, flags)
+#define JS_BUILTIN_ID(id, call_body, mir_kind)
+#define JS_BUILTIN_CONSTRUCTOR_TARGET(id, call_body, construct_body, mir_kind)
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, identity_alias)
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, target_id, arity, flags)
 #include "js_builtin_catalog.def"
 #undef JS_BUILTIN_GLOBAL
 #undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_CONSTRUCTOR_TARGET
 #undef JS_BUILTIN_ID
 #undef JS_BUILTIN_OWNER
     JS_BUILTIN_OWNER_MAX
-};
-
-enum JsBuiltinDispatchGroup {
-    JS_BUILTIN_DISPATCH_NONE = 0,
-    JS_BUILTIN_DISPATCH_OBJECT,
-    JS_BUILTIN_DISPATCH_ARRAY,
-    JS_BUILTIN_DISPATCH_ARRAY_STATIC,
-    JS_BUILTIN_DISPATCH_FUNCTION,
-    JS_BUILTIN_DISPATCH_STRING,
-    JS_BUILTIN_DISPATCH_STRING_STATIC,
-    JS_BUILTIN_DISPATCH_NUMBER,
-    JS_BUILTIN_DISPATCH_BIGINT,
-    JS_BUILTIN_DISPATCH_SYMBOL,
-    JS_BUILTIN_DISPATCH_MATH,
-    JS_BUILTIN_DISPATCH_JSON,
-    JS_BUILTIN_DISPATCH_DATE,
-    JS_BUILTIN_DISPATCH_PROMISE,
-    JS_BUILTIN_DISPATCH_REGEXP,
-    JS_BUILTIN_DISPATCH_COLLECTION,
-    JS_BUILTIN_DISPATCH_WEAK,
-    JS_BUILTIN_DISPATCH_BUFFER,
-    JS_BUILTIN_DISPATCH_TYPED_ARRAY,
-    JS_BUILTIN_DISPATCH_REFLECT,
-    JS_BUILTIN_DISPATCH_ITERATOR,
-    JS_BUILTIN_DISPATCH_PROXY,
-    JS_BUILTIN_DISPATCH_HOST,
-    JS_BUILTIN_DISPATCH_ATOMICS,
-    JS_BUILTIN_DISPATCH_CSS,
-    JS_BUILTIN_DISPATCH_PRIMITIVE
 };
 
 enum JsBuiltinMirLoweringKind {
@@ -124,12 +97,14 @@ enum JsBuiltinPropertyKind {
 enum JsBuiltinId {
     JS_BUILTIN_NONE = 0,
 #define JS_BUILTIN_OWNER(owner)
-#define JS_BUILTIN_ID(id, dispatch_group, mir_kind) id,
-#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, use_cache)
-#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, arity, flags)
+#define JS_BUILTIN_ID(id, call_body, mir_kind) id,
+#define JS_BUILTIN_CONSTRUCTOR_TARGET(id, call_body, construct_body, mir_kind) id,
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, identity_alias)
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, target_id, arity, flags)
 #include "js_builtin_catalog.def"
 #undef JS_BUILTIN_GLOBAL
 #undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_CONSTRUCTOR_TARGET
 #undef JS_BUILTIN_ID
 #undef JS_BUILTIN_OWNER
     JS_BUILTIN_MAX
@@ -153,15 +128,42 @@ enum JsBuiltinGlobalKind {
 enum JsBuiltinGlobalId {
     JS_BUILTIN_GLOBAL_NONE = 0,
 #define JS_BUILTIN_OWNER(owner)
-#define JS_BUILTIN_ID(id, dispatch_group, mir_kind)
-#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, use_cache)
-#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, arity, flags) id,
+#define JS_BUILTIN_ID(id, call_body, mir_kind)
+#define JS_BUILTIN_CONSTRUCTOR_TARGET(id, call_body, construct_body, mir_kind)
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, identity_alias)
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, target_id, arity, flags) id,
 #include "js_builtin_catalog.def"
 #undef JS_BUILTIN_GLOBAL
 #undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_CONSTRUCTOR_TARGET
 #undef JS_BUILTIN_ID
 #undef JS_BUILTIN_OWNER
     JS_BUILTIN_GLOBAL_MAX
+};
+
+enum JsIntrinsicBindingAlias {
+    JS_INTRINSIC_ALIAS_NONE = 0,
+    JS_INTRINSIC_ALIAS_STRING_TRIM_START,
+    JS_INTRINSIC_ALIAS_STRING_TRIM_END,
+    JS_INTRINSIC_ALIAS_DATE_UTC_STRING,
+    JS_INTRINSIC_ALIAS_ARRAY_ITERATOR,
+    JS_INTRINSIC_ALIAS_MAP_ITERATOR,
+    JS_INTRINSIC_ALIAS_SET_ITERATOR
+};
+
+enum {
+    JS_INTRINSIC_BINDING_COUNT = 0
+#define JS_BUILTIN_OWNER(owner)
+#define JS_BUILTIN_ID(id, call_body, mir_kind)
+#define JS_BUILTIN_CONSTRUCTOR_TARGET(id, call_body, construct_body, mir_kind)
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, identity_alias) + 1
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, target_id, arity, flags)
+#include "js_builtin_catalog.def"
+#undef JS_BUILTIN_GLOBAL
+#undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_CONSTRUCTOR_TARGET
+#undef JS_BUILTIN_ID
+#undef JS_BUILTIN_OWNER
 };
 
 struct JsBuiltinMethodSpec {
@@ -173,8 +175,36 @@ struct JsBuiltinMethodSpec {
     const char* display_name;
     JsBuiltinPropertyKind property_kind;
     int flags;
-    bool use_cache;
+    JsIntrinsicBindingAlias identity_alias;
 };
+
+struct JsIntrinsicTargetSpec {
+    int catalog_id;
+    JsNativeCallBody call_body;
+    JsNativeConstructBody construct_body;
+    JsBuiltinMirLoweringKind mir_kind;
+};
+
+// Target bodies are declared from the same catalog that stores their pointers;
+// adding a direct target cannot silently omit its typed declaration.
+#define JS_BUILTIN_OWNER(owner)
+#define JS_BUILTIN_ID(id, call_body, mir_kind) \
+    Item call_body(Item callee, Item this_value, Item* args, int argc, \
+                   uint64_t* result_home);
+#define JS_BUILTIN_CONSTRUCTOR_TARGET(id, call_body, construct_body, mir_kind) \
+    Item call_body(Item callee, Item this_value, Item* args, int argc, \
+                   uint64_t* result_home); \
+    Item construct_body(Item callee, Item* args, int argc, Item new_target, \
+                        uint64_t* result_home);
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, identity_alias)
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, target_id, arity, flags)
+#include "js_builtin_catalog.def"
+#undef JS_BUILTIN_GLOBAL
+#undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_CONSTRUCTOR_TARGET
+#undef JS_BUILTIN_ID
+#undef JS_BUILTIN_OWNER
+const JsIntrinsicTargetSpec* js_intrinsic_target_find(int catalog_id);
 
 struct JsBuiltinGlobalSpec {
     JsBuiltinGlobalId id;
@@ -182,6 +212,7 @@ struct JsBuiltinGlobalSpec {
     int len;
     JsBuiltinGlobalKind kind;
     int runtime_id;
+    int target_id;
     int param_count;
     int flags;
 };
@@ -193,19 +224,14 @@ int js_builtin_catalog_lookup_constructor_id(const char* ctor_name, int ctor_len
                                              const char* prop_name, int prop_len);
 int js_builtin_catalog_lookup_member_id(const char* owner_name, int owner_len,
                                         const char* prop_name, int prop_len);
-JsBuiltinDispatchGroup js_builtin_dispatch_group(int builtin_id);
 JsBuiltinMirLoweringKind js_builtin_mir_kind(int builtin_id);
 const JsBuiltinGlobalSpec* js_builtin_global_find(const char* name, int len);
 bool js_builtin_global_has_flag(const char* name, int len, int flag);
-int js_builtin_typed_array_type(const char* name, int len);
 int js_builtin_global_count();
 const JsBuiltinGlobalSpec* js_builtin_global_at(int index);
-Item js_lookup_builtin_method_spec(JsBuiltinOwner owner, const char* name, int len);
+Item js_intrinsic_binding_get(JsBuiltinOwner owner, const char* name, int len);
 void js_install_builtin_method_specs(Item object, JsBuiltinOwner owner);
 void js_install_builtin_function_specs(Item object, JsBuiltinOwner owner);
 void js_install_builtin_accessor_specs(Item object, JsBuiltinOwner owner);
 void js_populate_builtin_prototype_methods(Item prototype, const char* ctor_name, int ctor_len);
 void js_populate_dataview_prototype_methods(Item prototype);
-Item js_lookup_builtin_prototype_method_for_class(JsClass cls, const char* name, int len);
-Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count);
-Item js_lookup_constructor_static(const char* ctor_name, int ctor_len, const char* prop_name, int prop_len);

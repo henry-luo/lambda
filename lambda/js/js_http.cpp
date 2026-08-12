@@ -61,7 +61,7 @@ static bool http_ensure_roots(void) {
 #define HTTP_CONN_HIGH_WATER_MARK (16 * 1024)
 
 static inline bool js_http_is_callable(Item item) {
-    return get_type_id(item) == LMD_TYPE_FUNC;
+    return js_is_callable(item);
 }
 
 static bool js_http_is_object_like(Item item) {
@@ -796,7 +796,7 @@ static void http_response_schedule_error(Item res, Item err) {
     Item* env = js_alloc_env(2);
     env[0] = res;
     env[1] = err;
-    Item tick = js_new_closure((void*)http_response_error_tick, 0, env, 2);
+    Item tick = js_new_native_closure(http_response_error_tick, 0, env, 2);
     js_next_tick_enqueue(tick);
 }
 
@@ -2188,35 +2188,35 @@ static Item make_response_object(JsHttpConn* conn) {
     }
 
     js_property_set(res, make_string_item("writeHead"),
-                    js_new_function((void*)js_http_res_inst_writeHead, 3));
+                    js_new_native_function(js_http_res_inst_writeHead));
     js_property_set(res, make_string_item("setHeader"),
-                    js_new_function((void*)js_http_res_inst_setHeader, 3));
+                    js_new_native_function(js_http_res_inst_setHeader));
     js_property_set(res, make_string_item("getHeader"),
-                    js_new_function((void*)js_http_res_inst_getHeader, 2));
+                    js_new_native_function(js_http_res_inst_getHeader));
     js_property_set(res, make_string_item("getHeaders"),
-                    js_new_function((void*)js_http_res_inst_getHeaders, 1));
+                    js_new_native_function(js_http_res_inst_getHeaders));
     js_property_set(res, make_string_item("getHeaderNames"),
-                    js_new_function((void*)js_http_res_inst_getHeaderNames, 1));
+                    js_new_native_function(js_http_res_inst_getHeaderNames));
     js_property_set(res, make_string_item("getRawHeaderNames"),
-                    js_new_function((void*)js_http_res_inst_getRawHeaderNames, 1));
+                    js_new_native_function(js_http_res_inst_getRawHeaderNames));
     js_property_set(res, make_string_item("hasHeader"),
-                    js_new_function((void*)js_http_res_inst_hasHeader, 2));
+                    js_new_native_function(js_http_res_inst_hasHeader));
     js_property_set(res, make_string_item("removeHeader"),
-                    js_new_function((void*)js_http_res_inst_removeHeader, 2));
+                    js_new_native_function(js_http_res_inst_removeHeader));
     js_property_set(res, make_string_item("write"),
-                    js_new_function((void*)js_http_res_inst_write, 3));
+                    js_new_native_function(js_http_res_inst_write));
     js_property_set(res, make_string_item("_send"),
-                    js_new_function((void*)js_http_res_inst_send_internal, 2));
+                    js_new_native_function(js_http_res_inst_send_internal));
     js_property_set(res, make_string_item("end"),
-                    js_new_function((void*)js_http_res_inst_end, 3));
+                    js_new_native_function(js_http_res_inst_end));
     js_property_set(res, make_string_item("flushHeaders"),
-                    js_new_function((void*)js_http_res_inst_flushHeaders, 1));
+                    js_new_native_function(js_http_res_inst_flushHeaders));
     js_property_set(res, make_string_item("writeContinue"),
-                    js_new_function((void*)js_http_res_inst_writeContinue, 1));
+                    js_new_native_function(js_http_res_inst_writeContinue));
     js_property_set(res, make_string_item("setTimeout"),
-                    js_new_function((void*)js_http_res_inst_setTimeout, 3));
+                    js_new_native_function(js_http_res_inst_setTimeout));
     js_property_set(res, make_string_item("on"),
-                    js_new_function((void*)js_http_res_inst_on, 3));
+                    js_new_native_function(js_http_res_inst_on));
 
     if (conn && conn->server) {
         Item ctor = conn->server->server_response_ctor;
@@ -2292,9 +2292,9 @@ static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
         js_property_set(msg, make_string_item("__server_req_conn__"),
                         (Item){.item = i2it((int64_t)(uintptr_t)conn)});
         js_property_set(msg, make_string_item("destroy"),
-                        js_new_function((void*)js_http_server_req_destroy, 2));
+                        js_new_native_function(js_http_server_req_destroy));
         js_property_set(msg, make_string_item("setTimeout"),
-                        js_new_function((void*)js_http_server_req_setTimeout, 3));
+                        js_new_native_function(js_http_server_req_setTimeout));
     }
     Item async_resource = js_async_hooks_create_resource("HTTPINCOMINGMESSAGE", 19);
     js_property_set(msg, make_string_item("__async_resource__"), async_resource);
@@ -2417,7 +2417,7 @@ static void http_server_maybe_finish_close(JsHttpServer* srv) {
     if (!srv->close_event_emitted) {
         srv->close_event_emitted = true;
         Item on_close = js_property_get(srv->js_object, make_string_item("__on_close__"));
-        if (get_type_id(on_close) == LMD_TYPE_FUNC) {
+        if (js_is_callable(on_close)) {
             js_call_function(on_close, srv->js_object, NULL, 0);
         }
     }
@@ -2445,7 +2445,7 @@ static Item http_server_error_tick(Item env_item) {
         failed_srv = (JsHttpServer*)(uintptr_t)it2i(env[2]);
     }
     Item on_err = js_property_get(self, make_string_item("__on_error__"));
-    if (get_type_id(on_err) == LMD_TYPE_FUNC) {
+    if (js_is_callable(on_err)) {
         js_call_function(on_err, self, &err, 1);
         js_microtask_flush();
     }
@@ -2460,7 +2460,7 @@ static void http_server_schedule_error(Item self, Item err, JsHttpServer* failed
     env[0] = self;
     env[1] = err;
     env[2] = failed_srv ? (Item){.item = i2it((int64_t)(uintptr_t)failed_srv)} : make_js_undefined();
-    Item tick = js_new_closure((void*)http_server_error_tick, 0, env, 3);
+    Item tick = js_new_native_closure(http_server_error_tick, 0, env, 3);
     js_next_tick_enqueue(tick);
 }
 
@@ -2505,7 +2505,7 @@ static void http_request_emit_close_now(Item req) {
     // them when the message closes so async_hooks init/destroy pairs balance.
     js_async_hooks_emit_destroy_resource(async_resource);
     Item emit_fn = js_property_get(req, make_string_item("emit"));
-    if (get_type_id(emit_fn) == LMD_TYPE_FUNC) {
+    if (js_is_callable(emit_fn)) {
         Item close_event = make_string_item("close");
         js_call_function(emit_fn, req, &close_event, 1);
         js_microtask_flush();
@@ -2753,7 +2753,7 @@ static void http_conn_start_timeout(JsHttpConn* conn, int64_t delay) {
     env[0] = (Item){.item = i2it((int64_t)(uintptr_t)conn)};
     // all HTTP timeout APIs share the accepted socket timer; creating separate
     // timers per request/response leaves closed servers alive until the drain watchdog.
-    Item timer = js_setTimeout(js_new_closure((void*)js_http_conn_socket_timeout_fire, 0, env, 1),
+    Item timer = js_setTimeout(js_new_native_closure(js_http_conn_socket_timeout_fire, 0, env, 1),
                                (Item){.item = i2it(delay)});
     conn->timeout_timer = timer;
     conn->timeout_timer_active = true;
@@ -2849,17 +2849,17 @@ static Item http_conn_socket_object(JsHttpConn* conn) {
     js_property_set(obj, make_string_item("__http_conn__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)conn)});
     js_property_set(obj, make_string_item("on"),
-                    js_new_function((void*)js_http_conn_socket_on, 3));
+                    js_new_native_function(js_http_conn_socket_on));
     js_property_set(obj, make_string_item("once"),
-                    js_new_function((void*)js_http_conn_socket_on, 3));
+                    js_new_native_function(js_http_conn_socket_on));
     js_property_set(obj, make_string_item("write"),
-                    js_new_function((void*)js_http_conn_socket_write, 2));
+                    js_new_native_function(js_http_conn_socket_write));
     js_property_set(obj, make_string_item("end"),
-                    js_new_function((void*)js_http_conn_socket_end, 2));
+                    js_new_native_function(js_http_conn_socket_end));
     js_property_set(obj, make_string_item("destroy"),
-                    js_new_function((void*)js_http_conn_socket_destroy, 1));
+                    js_new_native_function(js_http_conn_socket_destroy));
     js_property_set(obj, make_string_item("setTimeout"),
-                    js_new_function((void*)js_http_conn_socket_setTimeout, 3));
+                    js_new_native_function(js_http_conn_socket_setTimeout));
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
     js_property_set(obj, make_string_item("bytesRead"), js_make_number((double)conn->bytes_read));
     js_property_set(obj, make_string_item("bytesWritten"), js_make_number((double)conn->bytes_written));
@@ -3208,9 +3208,9 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                     (expect_unknown ?
                      js_property_get(srv->js_object, make_string_item("__on_checkExpectation__")) :
                      make_js_undefined());
-                bool has_handler = get_type_id(srv->request_handler) == LMD_TYPE_FUNC;
-                bool has_request_event = get_type_id(on_req) == LMD_TYPE_FUNC;
-                bool has_expect_handler = get_type_id(on_expect) == LMD_TYPE_FUNC;
+                bool has_handler = js_is_callable(srv->request_handler);
+                bool has_request_event = js_is_callable(on_req);
+                bool has_expect_handler = js_is_callable(on_expect);
                 if (expect_unknown && !has_expect_handler) {
                     // unknown Expect values are answered at header time; waiting for a body can deadlock chunked clients.
                     http_server_send_expectation_failed(conn, &req, has_buffered_request);
@@ -3259,9 +3259,9 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                         (expect_unknown ?
                          js_property_get(srv->js_object, make_string_item("__on_checkExpectation__")) :
                          make_js_undefined());
-                    bool has_handler = get_type_id(srv->request_handler) == LMD_TYPE_FUNC;
-                    bool has_request_event = get_type_id(on_req) == LMD_TYPE_FUNC;
-                    bool has_expect_handler = get_type_id(on_expect) == LMD_TYPE_FUNC;
+                    bool has_handler = js_is_callable(srv->request_handler);
+                    bool has_request_event = js_is_callable(on_req);
+                    bool has_expect_handler = js_is_callable(on_expect);
                     if (expect_unknown && !has_expect_handler) {
                         // unknown Expect values are answered at header time; waiting for a body can deadlock chunked clients.
                         http_server_send_expectation_failed(conn, &req, false);
@@ -3334,11 +3334,11 @@ static Item js_http_server_listening_tick(Item env_item) {
     Item self = env[0];
     Item callback = env[1];
     Item on_listening = js_property_get(self, make_string_item("__on_listening__"));
-    if (get_type_id(on_listening) == LMD_TYPE_FUNC) {
+    if (js_is_callable(on_listening)) {
         js_call_function(on_listening, self, NULL, 0);
     }
     js_cluster_notify_worker_listening();
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         js_call_function(callback, self, NULL, 0);
     }
     js_microtask_flush();
@@ -3355,7 +3355,7 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
     bool use_pipe = false;
     char pipe_path[4096];
     pipe_path[0] = '\0';
-    if (get_type_id(port_item) == LMD_TYPE_FUNC) {
+    if (js_is_callable(port_item)) {
         callback = port_item;
         host_item = make_js_undefined();
         port = 0;
@@ -3376,7 +3376,7 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
     }
 
     char host_buf[256] = "0.0.0.0";
-    if (get_type_id(host_item) == LMD_TYPE_FUNC) {
+    if (js_is_callable(host_item)) {
         callback = host_item;
     } else if (get_type_id(host_item) == LMD_TYPE_STRING) {
         String* h = it2s(host_item);
@@ -3420,7 +3420,7 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
         Item* env = js_alloc_env(2);
         env[0] = self;
         env[1] = callback;
-        Item tick = js_new_closure((void*)js_http_server_listening_tick, 0, env, 2);
+        Item tick = js_new_native_closure(js_http_server_listening_tick, 0, env, 2);
         http_server_schedule_after_stack(tick);
         return self;
     }
@@ -3462,7 +3462,7 @@ extern "C" Item js_http_server_listen(Item self, Item port_item, Item host_item,
     Item* env = js_alloc_env(2);
     env[0] = self;
     env[1] = callback;
-    Item tick = js_new_closure((void*)js_http_server_listening_tick, 0, env, 2);
+    Item tick = js_new_native_closure(js_http_server_listening_tick, 0, env, 2);
     http_server_schedule_after_stack(tick);
 
     return self;
@@ -3474,7 +3474,7 @@ extern "C" Item js_http_server_close(Item self, Item callback) {
     if (handle_item.item == 0 ||
         get_type_id(handle_item) == LMD_TYPE_NULL ||
         get_type_id(handle_item) == LMD_TYPE_UNDEFINED) {
-        if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        if (js_is_callable(callback)) {
             Item err = http_error_with_code("ERR_SERVER_NOT_RUNNING", "Server is not running.");
             js_call_function(callback, self, &err, 1);
             js_microtask_flush();
@@ -3483,7 +3483,7 @@ extern "C" Item js_http_server_close(Item self, Item callback) {
     }
     JsHttpServer* srv = (JsHttpServer*)(uintptr_t)it2i(handle_item);
     if (!srv || !srv->handle_initialized) {
-        if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        if (js_is_callable(callback)) {
             Item err = http_error_with_code("ERR_SERVER_NOT_RUNNING", "Server is not running.");
             js_call_function(callback, self, &err, 1);
             js_microtask_flush();
@@ -3507,7 +3507,7 @@ extern "C" Item js_http_server_close(Item self, Item callback) {
         });
     }
 
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         js_call_function(callback, self, NULL, 0);
     }
 
@@ -3519,7 +3519,7 @@ extern "C" Item js_http_server_getConnections(Item self, Item callback) {
     if (handle_item.item == 0) return self;
     JsHttpServer* srv = (JsHttpServer*)(uintptr_t)it2i(handle_item);
     if (!srv) return self;
-    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(callback)) {
         Item args[2] = { ItemNull, (Item){.item = i2it(srv->connection_count)} };
         js_call_function(callback, self, args, 2);
         js_microtask_flush();
@@ -3535,7 +3535,7 @@ extern "C" Item js_http_server_on(Item self, Item event_item, Item callback) {
     snprintf(key, sizeof(key), "__on_%.*s__", (int)ev->len, ev->chars);
     js_property_set(self, make_string_item(key), callback);
     if (ev->len == 7 && memcmp(ev->chars, "request", 7) == 0 &&
-        get_type_id(callback) == LMD_TYPE_FUNC) {
+        js_is_callable(callback)) {
         Item handle_item = js_property_get(self, make_string_item("__server__"));
         if (get_type_id(handle_item) == LMD_TYPE_INT) {
             JsHttpServer* srv = (JsHttpServer*)(uintptr_t)it2i(handle_item);
@@ -3658,7 +3658,7 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
     Item response_ctor = make_js_undefined();
     TypeId options_type = get_type_id(options_or_handler);
     if ((options_type == LMD_TYPE_MAP || options_type == LMD_TYPE_OBJECT) &&
-        get_type_id(maybe_handler) == LMD_TYPE_FUNC) {
+        js_is_callable(maybe_handler)) {
         handler = maybe_handler;
         incoming_ctor = js_property_get(options_or_handler, make_string_item("IncomingMessage"));
         response_ctor = js_property_get(options_or_handler, make_string_item("ServerResponse"));
@@ -3681,21 +3681,21 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
     js_property_set(obj, make_string_item("__server__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)srv)});
     js_property_set(obj, make_string_item("listen"),
-                    js_new_function((void*)js_http_server_inst_listen, 4));
+                    js_new_native_function(js_http_server_inst_listen));
     js_property_set(obj, make_string_item("close"),
-                    js_new_function((void*)js_http_server_inst_close, 2));
+                    js_new_native_function(js_http_server_inst_close));
     js_property_set(obj, make_string_item("getConnections"),
-                    js_new_function((void*)js_http_server_inst_getConnections, 2));
+                    js_new_native_function(js_http_server_inst_getConnections));
     js_property_set(obj, make_string_item("on"),
-                    js_new_function((void*)js_http_server_inst_on, 3));
+                    js_new_native_function(js_http_server_inst_on));
     js_property_set(obj, make_string_item("setTimeout"),
-                    js_new_function((void*)js_http_server_inst_setTimeout, 3));
+                    js_new_native_function(js_http_server_inst_setTimeout));
     js_property_set(obj, make_string_item("address"),
-                    js_new_function((void*)js_http_server_inst_address, 1));
+                    js_new_native_function(js_http_server_inst_address));
     js_property_set(obj, make_string_item("ref"),
-                    js_new_function((void*)js_http_server_inst_ref, 1));
+                    js_new_native_function(js_http_server_inst_ref));
     js_property_set(obj, make_string_item("unref"),
-                    js_new_function((void*)js_http_server_inst_unref, 1));
+                    js_new_native_function(js_http_server_inst_unref));
     js_property_set(obj, make_string_item("listening"), (Item){.item = b2it(false)});
 
     srv->js_object = obj;
@@ -3836,7 +3836,7 @@ static void http_client_schedule_finish(Item req_obj) {
     Item scheduled = js_property_get(req_obj, make_string_item("__finish_scheduled__"));
     if (get_type_id(scheduled) == LMD_TYPE_BOOL && it2b(scheduled)) return;
     js_property_set(req_obj, make_string_item("__finish_scheduled__"), (Item){.item = b2it(true)});
-    Item tick = js_bind_function(js_new_function((void*)http_client_finish_tick, 1),
+    Item tick = js_bind_function(js_new_native_function(http_client_finish_tick),
                                  make_js_undefined(), &req_obj, 1);
     js_next_tick_enqueue(tick);
 }
@@ -4110,7 +4110,7 @@ static Item js_http_abort_reason(JsHttpClientReq* creq) {
 static void js_http_client_remove_abort_listener(JsHttpClientReq* creq) {
     if (!creq || !creq->abort_handler_set) return;
     Item remove_fn = js_property_get(creq->abort_signal, make_string_item("removeEventListener"));
-    if (get_type_id(remove_fn) == LMD_TYPE_FUNC) {
+    if (js_is_callable(remove_fn)) {
         Item args[2] = { make_string_item("abort"), creq->abort_handler };
         js_call_function(remove_fn, creq->abort_signal, args, 2);
         js_microtask_flush();
@@ -4136,7 +4136,7 @@ static Item js_http_client_abort_scheduled(Item env_item) {
     js_property_set(req_obj, make_string_item("destroyed"), (Item){.item = b2it(true)});
 
     Item on_err = js_property_get(req_obj, make_string_item("__on_error__"));
-    if (get_type_id(on_err) == LMD_TYPE_FUNC) {
+    if (js_is_callable(on_err)) {
         js_call_function(on_err, req_obj, &err, 1);
         js_microtask_flush();
     }
@@ -4149,7 +4149,7 @@ static void js_http_client_schedule_abort(JsHttpClientReq* creq) {
     creq->abort_scheduled = true;
     Item* env = js_alloc_env(1);
     env[0] = creq->js_object;
-    Item fn = js_new_closure((void*)js_http_client_abort_scheduled, 0, env, 1);
+    Item fn = js_new_native_closure(js_http_client_abort_scheduled, 0, env, 1);
     js_next_tick_enqueue(fn);
 }
 
@@ -4177,11 +4177,11 @@ static bool js_http_client_configure_abort_signal(JsHttpClientReq* creq, Item si
     }
 
     Item add_fn = js_property_get(signal, make_string_item("addEventListener"));
-    if (get_type_id(add_fn) != LMD_TYPE_FUNC) return false;
+    if (!js_is_callable(add_fn)) return false;
 
     Item* env = js_alloc_env(1);
     env[0] = creq->js_object;
-    Item handler = js_new_closure((void*)js_http_client_abort_signal_event, 1, env, 1);
+    Item handler = js_new_native_closure(js_http_client_abort_signal_event, 1, env, 1);
     Item args[2] = { make_string_item("abort"), handler };
     js_call_function(add_fn, signal, args, 2);
     js_microtask_flush();
@@ -4244,13 +4244,13 @@ extern "C" Item js_http_agent_socket_error_tick(Item req_obj, Item err) {
     js_property_set(req_obj, make_string_item("destroyed"), (Item){.item = b2it(true)});
 
     Item on_err = js_property_get(req_obj, make_string_item("__on_error__"));
-    if (get_type_id(on_err) == LMD_TYPE_FUNC) {
+    if (js_is_callable(on_err)) {
         js_call_function(on_err, req_obj, &err, 1);
         js_microtask_flush();
     }
 
     Item on_close = js_property_get(req_obj, make_string_item("__on_close__"));
-    if (get_type_id(on_close) == LMD_TYPE_FUNC) {
+    if (js_is_callable(on_close)) {
         js_call_function(on_close, req_obj, NULL, 0);
         js_microtask_flush();
     }
@@ -4263,7 +4263,7 @@ extern "C" Item js_http_agent_socket_cb(Item req_obj, Item err, Item socket) {
     TypeId err_type = get_type_id(err);
     if (err.item != 0 && err_type != LMD_TYPE_UNDEFINED && err_type != LMD_TYPE_NULL) {
         Item bound_args[2] = { req_obj, err };
-        Item tick = js_bind_function(js_new_function((void*)js_http_agent_socket_error_tick, 2),
+        Item tick = js_bind_function(js_new_native_function(js_http_agent_socket_error_tick),
                                      make_js_undefined(), bound_args, 2);
         js_setImmediate(tick);
         return make_js_undefined();
@@ -4277,11 +4277,11 @@ static void js_http_emit_client_response(JsHttpClientReq* creq, Item res) {
     if (!creq || creq->response_emitted) return;
     creq->response_emitted = true;
     Item on_response = js_property_get(creq->js_object, make_string_item("__on_response__"));
-    if (get_type_id(creq->callback) == LMD_TYPE_FUNC) {
+    if (js_is_callable(creq->callback)) {
         js_als_context_call(creq->als_context, creq->callback, creq->js_object, res, 1);
         js_microtask_flush();
     }
-    if (get_type_id(on_response) == LMD_TYPE_FUNC) {
+    if (js_is_callable(on_response)) {
         js_als_context_call(creq->als_context, on_response, creq->js_object, res, 1);
         js_microtask_flush();
     }
@@ -4411,11 +4411,11 @@ static bool js_http_client_try_emit_response(JsHttpClientReq* creq) {
     js_property_set(res, make_string_item("socket"), socket);
     js_property_set(creq->js_object, make_string_item("socket"), socket);
     js_property_set(res, make_string_item("destroy"),
-                    js_new_function((void*)js_http_client_res_inst_destroy, 2));
+                    js_new_native_function(js_http_client_res_inst_destroy));
     js_property_set(res, make_string_item("on"),
-                    js_new_function((void*)js_http_client_res_inst_on, 3));
+                    js_new_native_function(js_http_client_res_inst_on));
     js_property_set(res, make_string_item("once"),
-                    js_new_function((void*)js_http_client_res_inst_on, 3));
+                    js_new_native_function(js_http_client_res_inst_on));
 
     int body_len = creq->recv_len - hdr_size;
     bool chunked = strcmp(creq->method, "HEAD") != 0 &&
@@ -4564,11 +4564,11 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 js_property_set(res, make_string_item("headers"), headers);
                 js_property_set(res, make_string_item("rawHeaders"), raw_headers);
                 js_property_set(res, make_string_item("destroy"),
-                                js_new_function((void*)js_http_client_res_inst_destroy, 2));
+                                js_new_native_function(js_http_client_res_inst_destroy));
                 js_property_set(res, make_string_item("on"),
-                                js_new_function((void*)js_http_client_res_inst_on, 3));
+                                js_new_native_function(js_http_client_res_inst_on));
                 js_property_set(res, make_string_item("once"),
-                                js_new_function((void*)js_http_client_res_inst_on, 3));
+                                js_new_native_function(js_http_client_res_inst_on));
 
                 int body_len = creq->recv_len - hdr_size;
                 if (body_len > 0) {
@@ -4593,7 +4593,7 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
             // not a quiet EOF; server-side req.destroy() relies on this.
             Item err = js_http_econnreset_error(make_js_undefined());
             Item on_err = js_property_get(creq->js_object, make_string_item("__on_error__"));
-            if (get_type_id(on_err) == LMD_TYPE_FUNC) {
+            if (js_is_callable(on_err)) {
                 js_call_function(on_err, creq->js_object, &err, 1);
                 js_microtask_flush();
             }
@@ -4841,7 +4841,7 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
         if (creq) {
             Item err = js_new_error(make_string_item(uv_strerror(status)));
             Item on_err = js_property_get(creq->js_object, make_string_item("__on_error__"));
-            if (get_type_id(on_err) == LMD_TYPE_FUNC) {
+            if (js_is_callable(on_err)) {
                 js_call_function(on_err, creq->js_object, &err, 1);
             }
             creq->destroyed = true;
@@ -5032,7 +5032,7 @@ extern "C" Item js_http_client_destroy(Item self, Item err_item) {
     js_http_client_remove_abort_listener(creq);
     Item err = js_http_econnreset_error(err_item);
     Item on_err = js_property_get(self, make_string_item("__on_error__"));
-    if (get_type_id(on_err) == LMD_TYPE_FUNC) {
+    if (js_is_callable(on_err)) {
         js_call_function(on_err, self, &err, 1);
     }
     if (creq->response.item != 0) {
@@ -5162,21 +5162,21 @@ static Item http_client_make_request_object(JsHttpClientReq* creq,
     js_property_set(obj, make_string_item("method"),
                     make_string_item((method && method[0]) ? method : "GET"));
     js_property_set(obj, make_string_item("write"),
-                    js_new_function((void*)js_http_client_inst_write, 3));
+                    js_new_native_function(js_http_client_inst_write));
     js_property_set(obj, make_string_item("end"),
-                    js_new_function((void*)js_http_client_inst_end, 3));
+                    js_new_native_function(js_http_client_inst_end));
     js_property_set(obj, make_string_item("on"),
-                    js_new_function((void*)js_http_client_inst_on, 3));
+                    js_new_native_function(js_http_client_inst_on));
     js_property_set(obj, make_string_item("once"),
-                    js_new_function((void*)js_http_client_inst_on, 3));
+                    js_new_native_function(js_http_client_inst_on));
     js_property_set(obj, make_string_item("setHeader"),
-                    js_new_function((void*)js_http_client_inst_setHeader, 3));
+                    js_new_native_function(js_http_client_inst_setHeader));
     js_property_set(obj, make_string_item("getHeaderNames"),
-                    js_new_function((void*)js_http_client_inst_getHeaderNames, 1));
+                    js_new_native_function(js_http_client_inst_getHeaderNames));
     js_property_set(obj, make_string_item("getRawHeaderNames"),
-                    js_new_function((void*)js_http_client_inst_getRawHeaderNames, 1));
+                    js_new_native_function(js_http_client_inst_getRawHeaderNames));
     js_property_set(obj, make_string_item("destroy"),
-                    js_new_function((void*)js_http_client_inst_destroy, 2));
+                    js_new_native_function(js_http_client_inst_destroy));
     js_property_set(obj, make_string_item("destroyed"), (Item){.item = b2it(false)});
     js_property_set(obj, make_string_item("writable"), (Item){.item = b2it(true)});
     js_property_set(obj, make_string_item("writableEnded"), (Item){.item = b2it(false)});
@@ -5688,7 +5688,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         // request leaves an idle handle that waits for the drain watchdog.
         Item err = js_permission_make_net_error("connect", host_buf);
         Item bound_args[2] = { obj, err };
-        Item tick = js_bind_function(js_new_function((void*)js_http_agent_socket_error_tick, 2),
+        Item tick = js_bind_function(js_new_native_function(js_http_agent_socket_error_tick),
                                      make_js_undefined(), bound_args, 2);
         js_next_tick_enqueue(tick);
         return obj;
@@ -5698,9 +5698,9 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         Item agent = js_property_get(options_item, make_string_item("agent"));
         if (get_type_id(agent) == LMD_TYPE_MAP) {
             Item create_socket = js_property_get(agent, make_string_item("createSocket"));
-            if (get_type_id(create_socket) == LMD_TYPE_FUNC) {
+            if (js_is_callable(create_socket)) {
                 Item cb_arg = obj;
-                Item cb = js_bind_function(js_new_function((void*)js_http_agent_socket_cb, 3),
+                Item cb = js_bind_function(js_new_native_function(js_http_agent_socket_cb),
                                            make_js_undefined(), &cb_arg, 1);
                 Item args[3] = { obj, options_item, cb };
                 js_call_function(create_socket, agent, args, 3);
@@ -5863,7 +5863,7 @@ extern "C" Item js_http_agent_destroy(void) {
 extern "C" Item js_http_agent_createConnection(Item options, Item callback) {
     Item args = js_array_new(0);
     js_array_push(args, options);
-    if (get_type_id(callback) == LMD_TYPE_FUNC) js_array_push(args, callback);
+    if (js_is_callable(callback)) js_array_push(args, callback);
     return js_net_createConnection(args);
 }
 
@@ -5889,7 +5889,7 @@ static Item js_http_agent_take_free_socket(Item agent, Item name) {
         return make_js_undefined();
     }
     Item pop = js_property_get(sockets, make_string_item("pop"));
-    Item socket = get_type_id(pop) == LMD_TYPE_FUNC
+    Item socket = js_is_callable(pop)
         ? js_call_function(pop, sockets, NULL, 0) : make_js_undefined();
     if (js_array_length(sockets) == 0) js_delete_property(free_sockets, name);
     return socket;
@@ -5897,7 +5897,7 @@ static Item js_http_agent_take_free_socket(Item agent, Item name) {
 
 static void js_http_agent_assign_socket(Item request, Item socket) {
     Item on_socket = js_property_get(request, make_string_item("onSocket"));
-    if (get_type_id(on_socket) == LMD_TYPE_FUNC) {
+    if (js_is_callable(on_socket)) {
         js_call_function(on_socket, request, &socket, 1);
     }
 }
@@ -5929,7 +5929,7 @@ extern "C" Item js_http_agent_addRequest(Item request, Item options,
     }
 
     Item get_name = js_property_get(agent_root.get(), make_string_item("getName"));
-    if (get_type_id(get_name) != LMD_TYPE_FUNC) return make_js_undefined();
+    if (!js_is_callable(get_name)) return make_js_undefined();
     Item get_name_args[1] = { normalized_root.get() };
     name_root.set(js_call_function(get_name, agent_root.get(), get_name_args, 1));
     if (item_is_error(name_root.get())) return name_root.get();
@@ -5959,7 +5959,7 @@ extern "C" Item js_http_agent_addRequest(Item request, Item options,
             return make_js_undefined();
         }
         Item create_connection = js_property_get(agent_root.get(), make_string_item("createConnection"));
-        if (get_type_id(create_connection) != LMD_TYPE_FUNC) {
+        if (!js_is_callable(create_connection)) {
             js_http_agent_queue_request(agent_root.get(), name_root.get(), request_root.get());
             return make_js_undefined();
         }
@@ -5977,13 +5977,13 @@ static void js_http_agent_install_methods(Item agent) {
     // Agent instances previously omitted addRequest, so direct Node Agent users
     // called undefined even though request() itself bypasses this public entry point.
     js_property_set(agent, make_string_item("getName"),
-        js_new_function((void*)js_http_agent_getName, 1));
+        js_new_native_function(js_http_agent_getName));
     js_property_set(agent, make_string_item("destroy"),
-        js_new_function((void*)js_http_agent_destroy, 0));
+        js_new_native_function(js_http_agent_destroy));
     js_property_set(agent, make_string_item("createConnection"),
-        js_new_function((void*)js_http_agent_createConnection, 2));
+        js_new_native_function(js_http_agent_createConnection));
     js_property_set(agent, make_string_item("addRequest"),
-        js_new_function((void*)js_http_agent_addRequest, 4));
+        js_new_native_function(js_http_agent_addRequest));
 }
 
 extern "C" Item js_http_ClientRequest(Item options_item, Item callback) {
@@ -6037,10 +6037,10 @@ extern "C" Item js_http_stub_ctor(void) {
 // http Module Namespace
 // =============================================================================
 
-static void http_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    Item key = make_string_item(name);
-    Item fn = js_new_function(func_ptr, param_count);
-    js_property_set(ns, key, fn);
+template <typename Target>
+static void http_set_method(Item ns, const char* name, Target target,
+        int adapter_arity) {
+    js_install_native_method(ns, name, target, adapter_arity);
 }
 
 static Item http_constructor_prototype(Item ctor, JsClass cls) {
@@ -6064,12 +6064,12 @@ extern "C" Item js_get_http_namespace(void) {
 
     http_namespace = js_new_object();
 
-    http_set_method(http_namespace, "createServer", (void*)js_http_createServer, 2);
-    http_set_method(http_namespace, "request",      (void*)js_http_request, 2);
-    http_set_method(http_namespace, "get",           (void*)js_http_get, 2);
+    http_set_method(http_namespace, "createServer", js_http_createServer, 2);
+    http_set_method(http_namespace, "request",      js_http_request, 2);
+    http_set_method(http_namespace, "get",           js_http_get, 2);
 
     // Server — alias for createServer (Node.js allows http.Server(cb))
-    Item server_fn = js_new_function((void*)js_http_createServer, 2);
+    Item server_fn = js_new_native_constructor(js_http_createServer);
     js_property_set(http_namespace, make_string_item("Server"), server_fn);
     http_server_prototype = http_constructor_prototype(server_fn, JS_CLASS_SERVER);
 
@@ -6087,7 +6087,7 @@ extern "C" Item js_get_http_namespace(void) {
     js_property_set(http_namespace, make_string_item("METHODS"), methods);
 
     // Agent constructor
-    http_set_method(http_namespace, "Agent", (void*)js_http_Agent, 1);
+    js_install_native_constructor(http_namespace, "Agent", js_http_Agent, 1);
 
     // globalAgent — stub Agent instance
     Item agent = js_new_object();
@@ -6100,22 +6100,23 @@ extern "C" Item js_get_http_namespace(void) {
     js_property_set(http_namespace, make_string_item("globalAgent"), agent);
 
     // Stub constructors for IncomingMessage, ServerResponse, ClientRequest, OutgoingMessage
-    Item incoming_fn = js_new_function((void*)js_http_stub_ctor, 0);
+    Item incoming_fn = js_new_distinct_native_constructor(js_http_stub_ctor);
     js_property_set(http_namespace, make_string_item("IncomingMessage"), incoming_fn);
     http_incoming_message_prototype =
         http_constructor_prototype(incoming_fn, JS_CLASS_INCOMING_MESSAGE);
-    Item outgoing_fn = js_new_function((void*)js_http_stub_ctor, 0);
+    Item outgoing_fn = js_new_distinct_native_constructor(js_http_stub_ctor);
     js_property_set(http_namespace, make_string_item("OutgoingMessage"), outgoing_fn);
     http_outgoing_message_prototype =
         http_constructor_prototype(outgoing_fn, JS_CLASS_OBJECT);
-    Item response_fn = js_new_function((void*)js_http_stub_ctor, 0);
+    Item response_fn = js_new_distinct_native_constructor(js_http_stub_ctor);
     js_property_set(http_namespace, make_string_item("ServerResponse"), response_fn);
     http_server_response_prototype =
         http_constructor_prototype(response_fn, JS_CLASS_SERVER_RESPONSE);
     if (get_type_id(http_outgoing_message_prototype) == LMD_TYPE_MAP) {
         js_set_prototype(http_server_response_prototype, http_outgoing_message_prototype);
     }
-    http_set_method(http_namespace, "ClientRequest",   (void*)js_http_ClientRequest, 2);
+    js_install_native_constructor(http_namespace, "ClientRequest",
+        js_http_ClientRequest, 2);
 
     Item default_key = make_string_item("default");
     js_property_set(http_namespace, default_key, http_namespace);

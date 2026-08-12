@@ -14,6 +14,10 @@ LambdaJS reuses Lambda's runtime instead of shipping a separate JS VM. A `.js` s
 - **DOM integration** — JS manipulates Radiant `DomElement` trees through standard DOM/CSSOM APIs; see [JS_13 — Web Platform](JS_13_Web_DOM.md).
 - **Reuse over reimplementation** — JSON, URL, regex (RE2), interning, the GC, and the JIT are shared Lambda subsystems, not JS-specific copies.
 
+Across this design set, callable values follow **D6.2.2v2**: dynamic call and
+construction use distinct per-callee capabilities, `newTarget` is explicit,
+and an ordinary member call observes property `Get -> Call`.
+
 ---
 
 ## 2. Architecture (C4)
@@ -66,7 +70,7 @@ The set is organized in five parts. Read JS_01–JS_04 first for the engine; the
 | Doc | Covers |
 |---|---|
 | [JS_05 — Functions, Closures & Scope](JS_05_Functions_Closures.md) | `JsFunction`, native/boxed dual versions, parameter inference, capture analysis, the scope-environment model, `this`/`arguments`/`new.target`, TCO, inlining. |
-| [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) | `Map`/`TypeMap`/`ShapeEntry`, the `JSPD_*` flag model, MapKind dispatch, get/set pipelines, `defineProperty`, the prototype chain, built-in method dispatch, symbol keys, shape pre-allocation. |
+| [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) | `Map`/`TypeMap`/`ShapeEntry`, the `JSPD_*` flag model, MapKind dispatch, get/set pipelines, `defineProperty`, the prototype chain, real intrinsic properties and observable member `Get -> Call`, symbol keys, shape pre-allocation. |
 | [JS_07 — Classes](JS_07_Classes.md) | Class collection, constructor compilation, prototype/static methods, inheritance & `super`, private members, computed keys, subclassable builtins, devirtualization. |
 | [JS_08 — Iterators, Generators & Destructuring](JS_08_Iterators_Generators.md) | The iterator protocol & done sentinel, fast-path iterators, for-of compilation with IteratorClose, generator state machines, destructuring & spread/rest. |
 
@@ -75,7 +79,7 @@ The set is organized in five parts. Read JS_01–JS_04 first for the engine; the
 | Doc | Covers |
 |---|---|
 | [JS_09 — Async, Promises, Event Loop & Modules](JS_09_Async_Modules.md) | `JsPromise` & the resolution procedure, the microtask/job queue, the libuv event loop, async/await suspension, ES modules, top-level await, dynamic import, CommonJS `require`. |
-| [JS_10 — Standard Built-in Library](JS_10_Builtins.md) | The built-in registry, Object/Reflect, Symbol, JSON, Math/Number, Date, collections (Map/Set/Weak*), Proxy, BigInt, global functions, template literals, `globalThis`. |
+| [JS_10 — Standard Built-in Library](JS_10_Builtins.md) | Typed target/binding catalog, realm identity, Object/Reflect, Symbol, JSON, Math/Number, Date, collections, Proxy, BigInt, globals, template literals, `globalThis`. |
 | [JS_11 — RegExp Engine](JS_11_RegExp.md) | `JsRegexData`, the RE2/wrapper/backtracking back-ends, JS→RE2 transpilation & post-filters, named groups, `/d` and `/v`, Unicode tables, caching, legacy statics. |
 | [JS_12 — TypedArrays, Binary Data & Atomics](JS_12_TypedArrays.md) | `JsTypedArray`/`JsArrayBuffer`/`JsDataView`, element access & the native-backed map, resizable buffers & transfer, detach validation, raw bulk paths, Atomics & waiters, Node `Buffer`. |
 

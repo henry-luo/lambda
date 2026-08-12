@@ -162,8 +162,8 @@ typedef struct JitImportMetadata {
 } JitImportMetadata;
 
 enum {
-    // The returned Item is inline or already persistent/canonical and therefore
-    // cannot expose an activation-temporary scalar payload.
+    // The returned Item is inline/persistent, or a scalar payload was already
+    // written into an explicit caller-donated home by this import.
     JIT_IMPORT_RESULT_SCALAR_STABLE = 1u << 0,
     JIT_IMPORT_NUMBER_STACK_PRESERVES = 1u << 1,
     JIT_IMPORT_ARGS_BORROWED_AUDITED = 1u << 2,

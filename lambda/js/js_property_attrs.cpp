@@ -19,7 +19,6 @@
 extern __thread EvalContext* context;
 
 String* heap_create_name(const char* name, size_t len);
-extern void map_put(Map* mp, String* key, Item value, Input* input);
 
 extern "C" JsAccessorPair* js_alloc_accessor_pair(Item getter, Item setter) {
     // Allocate as LMD_TYPE_FUNC so the GC tracer (if any) treats it like a Function
@@ -84,13 +83,6 @@ extern "C" ShapeEntry* js_find_shape_entry_name_id(Item obj, NameId name_id) {
     return name && property_key_kind(name) == NAME_KEY_STRING
         ? typemap_hash_lookup_idless(tm, name->chars, (int)name->len) : nullptr;
 }
-
-// Locate the underlying Map* whose `type` field would receive a cloned TypeMap
-// when an attribute mutation is applied to `obj`. Mirrors js_obj_typemap()'s
-// per-TypeId dispatch but returns the Map (not its TypeMap), so the caller can
-// rewire `m->type` after cloning. Forward-declared; defined below alongside the
-// accessor write path that already uses the same helper.
-static Map* js_obj_underlying_map(Item obj);
 
 // A2-T1: clone the underlying TypeMap + ShapeEntry chain for `obj` so that any
 // subsequent ShapeEntry mutation (flags, accessor flip, future delete bit) does
@@ -459,7 +451,7 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
     }
 
     if (get_type_id(target) == LMD_TYPE_MAP && js_input) {
-        map_put(target.map, it2s(name_item), slot_value, js_input);
+        map_put_heap(target.map, it2s(name_item), slot_value, js_input);
     } else {
         js_property_set(target, name_item, slot_value);
     }
@@ -593,6 +585,17 @@ extern "C" void js_attr_set_configurable(Item obj, const char* name, int name_le
     else              js_attr_apply_shape_flags(obj, name, name_len, JSPD_NON_CONFIGURABLE, 0);
 }
 
+static Item js_store_accessor_pair_slot(Item obj, Item name, Item pair) {
+    if (get_type_id(obj) == LMD_TYPE_FUNC) {
+        // Function name/length are non-writable but configurable. Descriptor
+        // replacement is [[DefineOwnProperty]], so routing the pair through
+        // ordinary [[Set]] leaves the old data value under an accessor shape.
+        js_func_init_property(obj, name, pair);
+        return js_status_ok();
+    }
+    return js_property_set(obj, name, pair);
+}
+
 // =============================================================================
 // Phase 3+4 Stage C: unified accessor producer (single-mode storage)
 // =============================================================================
@@ -633,7 +636,7 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
         // The accessor installation path can allocate repeatedly; keep every
         // participating value rooted until both the slot and shape are durable.
         pair_root.set(js_accessor_pair_to_item(pair));
-        js_property_set(obj_root.get(), name_root.get(), pair_root.get());
+        js_store_accessor_pair_slot(obj_root.get(), name_root.get(), pair_root.get());
         // Set IS_ACCESSOR + force NON_ENUMERABLE on the shape entry so the
         // pair slot is not visible to enumeration/JSON/spread.
         uint8_t set_mask = JSPD_IS_ACCESSOR | JSPD_NON_ENUMERABLE;
@@ -666,7 +669,7 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
 //   - Slot at name X holds a JsAccessorPair* Item.
 //   - Shape entry for X has JSPD_IS_ACCESSOR + caller-requested attrs bits.
 //   - No legacy __get_X/__set_X writes.
-static Map* js_obj_underlying_map(Item obj) {
+extern "C" Map* js_obj_underlying_map(Item obj) {
     TypeId t = get_type_id(obj);
     if (t == LMD_TYPE_MAP) return obj.map;
     if (t == LMD_TYPE_ARRAY) {
@@ -758,7 +761,8 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
         else           pair->getter = fn;
         // Re-store to keep slot value canonical (idempotent — same pointer bits).
         pair_root.set(js_accessor_pair_to_item(pair));
-        JS_ASSIGN_OR_RETURN(set_result, js_property_set(obj_root.get(), name_root.get(), pair_root.get()));
+        JS_ASSIGN_OR_RETURN(set_result, js_store_accessor_pair_slot(
+            obj_root.get(), name_root.get(), pair_root.get()));
     } else {
         // Allocate fresh pair with the requested half populated.
         Item g = is_setter ? ItemNull : fn;
@@ -767,7 +771,8 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
         if (!pair) return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
                                                    "accessor pair allocation failed");
         pair_root.set(js_accessor_pair_to_item(pair));
-        JS_ASSIGN_OR_RETURN(set_result, js_property_set(obj_root.get(), name_root.get(), pair_root.get()));
+        JS_ASSIGN_OR_RETURN(set_result, js_store_accessor_pair_slot(
+            obj_root.get(), name_root.get(), pair_root.get()));
     }
 
     // Set IS_ACCESSOR + caller-requested attribute bits on the shape entry.
@@ -808,16 +813,17 @@ extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
 extern "C" JsAccessorPair* js_find_accessor_pair_inheritable_name_id(Item obj,
         NameId name_id) {
     if (name_id == NAME_ID_NONE) return nullptr;
-    Item cur = obj;
+    RootFrame roots(1);
+    Rooted<Item> cur(roots, obj);
     int depth = 0;
     while (depth < 16) {
-        ShapeEntry* se = js_find_shape_entry_name_id(cur, name_id);
-        Map* m = se ? js_obj_underlying_map(cur) : NULL;
+        ShapeEntry* se = js_find_shape_entry_name_id(cur.get(), name_id);
+        Map* m = se ? js_obj_underlying_map(cur.get()) : NULL;
         if (se && m && map_ctor_offset_is_reserved(m, se->byte_offset)) se = NULL;
         if (se) {
             if (jspd_is_accessor(se)) {
                 Item slot_val = ItemNull;
-                if (js_own_shape_slot_status_name_id(cur, name_id,
+                if (js_own_shape_slot_status_name_id(cur.get(), name_id,
                         &slot_val, NULL) == JS_SHAPE_SLOT_ACCESSOR &&
                         slot_val.item != ItemNull.item) {
                     return js_item_to_accessor_pair(slot_val);
@@ -825,11 +831,16 @@ extern "C" JsAccessorPair* js_find_accessor_pair_inheritable_name_id(Item obj,
             }
             return nullptr;
         }
-        if (get_type_id(cur) != LMD_TYPE_MAP) break;
-        Item proto = js_get_prototype_of(cur);
+        TypeId cur_type = get_type_id(cur.get());
+        if (cur_type != LMD_TYPE_MAP && cur_type != LMD_TYPE_ARRAY &&
+                cur_type != LMD_TYPE_FUNC && cur_type != LMD_TYPE_ELEMENT) break;
+        // Function.prototype is itself callable. Stopping at non-Map values
+        // skipped its inherited %ThrowTypeError% accessors and let assignments
+        // create own caller/arguments properties instead.
+        Item proto = js_get_prototype_of(cur.get());
         if (proto.item == ItemNull.item || get_type_id(proto) == LMD_TYPE_UNDEFINED ||
                 get_type_id(proto) == LMD_TYPE_NULL) break;
-        cur = proto;
+        cur.set(proto);
         depth++;
     }
     return nullptr;

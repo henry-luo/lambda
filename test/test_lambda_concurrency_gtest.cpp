@@ -13,6 +13,8 @@
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
+#include "../lambda/js/js_runtime.h"
+#include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/core/lambda-decimal.hpp"
 #include "../lambda/core/name_pool.hpp"
 #include "../lambda/input/input.hpp"
@@ -26,6 +28,84 @@ extern __thread EvalContext* context;
 #ifndef _WIN32
 extern __thread Context* input_context;
 #endif
+
+struct CallableRealmSnapshot {
+    Item math_abs = ItemNull;
+    Item array_constructor = ItemNull;
+    bool stable_lookup = false;
+    bool iterator_alias = false;
+};
+
+static bool capture_callable_realm(Runtime* runtime,
+                                   CallableRealmSnapshot* snapshot) {
+    if (!runtime || !snapshot) return false;
+    runtime_init(runtime);
+    uint64_t result_home = 0;
+    Item result = transpile_js_to_mir(runtime, "0;", "<callable-realm>",
+        &result_home);
+    if (item_is_error(result)) {
+        runtime_cleanup(runtime);
+        return false;
+    }
+
+    bool captured = false;
+    {
+        RootFrame roots(7);
+        Rooted<Item> global_root(roots, js_get_global_this());
+        Rooted<Item> math_root(roots, js_property_get(global_root.get(),
+            js_make_string("Math")));
+        Rooted<Item> abs_root(roots, js_property_get(math_root.get(),
+            js_make_string("abs")));
+        Rooted<Item> array_root(roots, js_property_get(global_root.get(),
+            js_make_string("Array")));
+        Rooted<Item> prototype_root(roots, js_property_get(array_root.get(),
+            js_make_string("prototype")));
+        Rooted<Item> values_root(roots, js_property_get(prototype_root.get(),
+            js_make_string("values")));
+        Rooted<Item> iterator_root(roots, js_property_get(prototype_root.get(),
+            js_well_known_symbol_key(1)));
+
+        snapshot->math_abs = abs_root.get();
+        snapshot->array_constructor = array_root.get();
+        snapshot->stable_lookup = abs_root.get().item ==
+            js_property_get(math_root.get(), js_make_string("abs")).item;
+        snapshot->iterator_alias = values_root.get().item == iterator_root.get().item;
+        captured = get_type_id(snapshot->math_abs) == LMD_TYPE_FUNC &&
+            get_type_id(snapshot->array_constructor) == LMD_TYPE_FUNC;
+    }
+
+    EvalContext* owner = runtime_get_eval_context(runtime);
+    // D5.2/D6.2.2v2: leave both heaps alive while comparing identity, but
+    // detach every derived TLS cache before another realm becomes current.
+    if (!js_runtime_state_thread_shutdown(owner) ||
+            !eval_context_thread_shutdown(owner)) {
+        return false;
+    }
+    return captured;
+}
+
+TEST(JsCallableRealmIdentity, IntrinsicsAreStableWithinAndDistinctAcrossContexts) {
+    Runtime first = {};
+    Runtime second = {};
+    CallableRealmSnapshot first_snapshot = {};
+    CallableRealmSnapshot second_snapshot = {};
+
+    bool first_captured = capture_callable_realm(&first, &first_snapshot);
+    bool second_captured = capture_callable_realm(&second, &second_snapshot);
+
+    EXPECT_TRUE(first_captured);
+    EXPECT_TRUE(second_captured);
+    EXPECT_TRUE(first_snapshot.stable_lookup);
+    EXPECT_TRUE(second_snapshot.stable_lookup);
+    EXPECT_TRUE(first_snapshot.iterator_alias);
+    EXPECT_TRUE(second_snapshot.iterator_alias);
+    EXPECT_NE(first_snapshot.math_abs.item, second_snapshot.math_abs.item);
+    EXPECT_NE(first_snapshot.array_constructor.item,
+              second_snapshot.array_constructor.item);
+
+    runtime_cleanup(&second);
+    runtime_cleanup(&first);
+}
 
 static gc_heap_t* concurrency_test_gc;
 
