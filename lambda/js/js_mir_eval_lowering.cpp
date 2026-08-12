@@ -799,7 +799,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     }
 
     TSNode root = ts_tree_root_node(tp->tree);
-    JsAstNode* js_ast = build_js_ast(tp, root);
+    JsAstNode* js_ast = build_js_ast_indexed(tp, root);
     if (!js_ast) {
         log_error("js-new-function: AST build failed");
         js_transpiler_destroy(tp);
@@ -1814,7 +1814,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         }
 
         TSNode root = ts_tree_root_node(tp->tree);
-        JsAstNode* js_ast = build_js_ast(tp, root);
+        JsAstNode* js_ast = build_js_ast_indexed(tp, root);
         if (!js_ast) {
             log_error("js-eval: AST build failed for direct script");
             js_transpiler_destroy(tp);

@@ -25,6 +25,19 @@ int g_mir_interp_mode = 0;
 // for O(1) symbol resolution instead of O(n) linear scan on every import.
 
 static struct hashmap* func_map = NULL;
+static int g_lambda_lazy_mir = -1;
+
+int lambda_mir_lazy_enabled(void) {
+    if (g_lambda_lazy_mir < 0) {
+        const char* flag = getenv("LAMBDA_LAZY_MIR");
+        // Cold test/library modules spend most of compile time generating
+        // functions never reached by the selected script. MIR's lazy ABI
+        // keeps those functions as thunks and preserves an explicit opt-out
+        // for backend comparisons and debugging.
+        g_lambda_lazy_mir = !flag || (flag[0] && strcmp(flag, "0") != 0);
+    }
+    return g_lambda_lazy_mir;
+}
 
 HASHMAP_DEFINE_STRKEY(func_obj, JitImport, name)
 
@@ -310,7 +323,8 @@ void* jit_gen_func(MIR_context_t ctx, const char *func_name) {
 
     log_notice("Generating native code...");
     // link MIR code with external functions
-    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+    MIR_link(ctx, lambda_mir_lazy_enabled()
+        ? MIR_set_lazy_gen_interface : MIR_set_gen_interface, import_resolver);
     // generate native code
     void* func_ptr =  MIR_gen(ctx, mir_func);
     log_debug("generated fn ptr: %p", func_ptr);

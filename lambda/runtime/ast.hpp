@@ -416,6 +416,7 @@ struct Script : Input {
 
     // AST-specific fields (beyond Input)
     AstNode *ast_root;
+    AstIndex ast_index;          // one dense identity/index table for all post-CST passes
     NameScope* current_scope;   // current name scope
     ArrayList* const_list;      // list of constants (Script-specific)
 

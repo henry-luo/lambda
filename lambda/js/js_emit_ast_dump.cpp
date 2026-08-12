@@ -469,7 +469,7 @@ extern "C" int emit_js_ast_dump_file(const char* script_path) {
     }
 
     TSNode root = ts_tree_root_node(tp->tree);
-    JsAstNode* ast = build_js_ast(tp, root);
+    JsAstNode* ast = build_js_ast_indexed(tp, root);
     if (!ast) {
         fprintf(stderr, "Error: Failed to build JS AST for '%s'\n", script_path);
         js_transpiler_destroy(tp);

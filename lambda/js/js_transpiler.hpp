@@ -10,6 +10,7 @@ extern "C" {
 // Forward declarations
 typedef struct JsTranspiler JsTranspiler;
 typedef NameScope JsScope;
+struct hashmap;
 
 // JavaScript variable declaration types
 typedef enum JsVarKind {
@@ -35,6 +36,8 @@ typedef struct JsTranspiler {
     size_t source_length;           // Source code length
     char* normalized_source;        // Owned parse buffer when source normalization is applied
     LangProfile* profile;           // dormant Phase-1 language profile hook table
+    AstIndex ast_index;             // shared dense identity/index table for post-CST passes
+    struct hashmap* scope_lookup_cache; // immutable post-build (scope,name) binding cache
     
     // Scoping and symbol management
     JsScope* current_scope;         // Current lexical scope
@@ -86,6 +89,35 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
 
 // AST building functions (build_js_ast.cpp)
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root);
+void js_scope_lookup_cache_enable(JsTranspiler* tp);
+typedef struct JsAstIndexPassContext {
+    JsTranspiler* transpiler;
+    JsAstNode* root;
+} JsAstIndexPassContext;
+static inline int js_index_compiler_pass(void* opaque) {
+    JsAstIndexPassContext* pass = (JsAstIndexPassContext*)opaque;
+    return pass && pass->transpiler && pass->root &&
+        ast_index_build_profile(&pass->transpiler->ast_index,
+            (AstNode*)pass->root, pass->transpiler->profile);
+}
+static inline JsAstNode* build_js_ast_indexed(JsTranspiler* tp, TSNode root) {
+    JsAstNode* ast = build_js_ast(tp, root);
+    if (!ast) return NULL;
+    js_scope_lookup_cache_enable(tp);
+    JsAstIndexPassContext pass_context = {tp, ast};
+    CompilerPassManager pass_manager;
+    compiler_pass_manager_init(&pass_manager, COMPILER_FACT_AST |
+        COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED);
+    CompilerPassSpec index_pass = {"index",
+        COMPILER_FACT_AST | COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED,
+        COMPILER_FACT_INDEXED, js_index_compiler_pass};
+    if (!compiler_pass_manager_add(&pass_manager, &index_pass) ||
+            !compiler_pass_manager_run(&pass_manager, &pass_context)) {
+        log_error("js-ast: failed to run indexed AST pass");
+        return NULL;
+    }
+    return ast;
+}
 JsAstNode* build_js_program(JsTranspiler* tp, TSNode program_node);
 JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node);
 JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node);

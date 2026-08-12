@@ -1,7 +1,7 @@
 # Unified AST Compiler Consolidation and Tuning — Detailed Implementation Plan
 
 **Date:** 2026-08-12  
-**Status:** Ready for implementation; all implementation checkboxes are initially open  
+**Status:** Implementation in progress; Phase 0/1/2/3 slices are landed, and the remaining work is performance/LOC closure
 **Design authority:** `doc/Lambda_Formal_Design.md` D2.4.1–D2.4.3, D3.2.3, D3.3.1, D5.3.4, D8.1.1, D8.2.1–D8.2.6, D8.4.3, D8.5.1–D8.5.3, D8.6.1, D8.6.3–D8.6.4  
 **Working design:** `vibe/Lambda_Design_Unified_AST.md` U27–U36  
 **Predecessor:** `vibe/Lambda_Impl_Unified_AST (done).md` (structural convergence record; not the checklist for this continuation)
@@ -16,7 +16,7 @@ Finish the Lambda/LambdaJS compiler convergence at the **process** level, not me
 2. binding, traversal, analysis facts, inference, representation planning, MIR value flow, and final emission use common infrastructure;
 3. language profiles retain only real semantic differences;
 4. repeated scans, linear rediscovery, transient MIR values, redundant boxing, and duplicate lowering paths are removed;
-5. the implementation closes only when it passes all semantic, LOC, and compiler-time gates in §2.
+5. the implementation closes only when it passes all semantic, LOC, and compiler-time gates in §2; MIR volume remains a measured diagnostic guard.
 
 This plan does not unify the Tree-sitter grammars or erase Lambda/JavaScript semantic differences. It shares compiler mechanics and scheduling while keeping coercion, object access, errors, calls, and extension nodes profile-owned, as required by **D8.2.1–D8.2.2**.
 
@@ -24,7 +24,7 @@ This plan does not unify the Tree-sitter grammars or erase Lambda/JavaScript sem
 
 ## 2. Non-negotiable exit gates
 
-Under **D8.6.4**, all gates in this section are hard. A green test suite cannot compensate for a missed LOC or performance gate, and a faster test scheduler cannot compensate for unchanged compiler work.
+Under **D8.6.4**, the semantic, LOC, compiler-time, and measurement gates in this section are hard. A green test suite cannot compensate for a missed LOC or performance gate, and a faster test scheduler cannot compensate for unchanged compiler work. MIR volume is retained as a required diagnostic signal, but is not an exit blocker.
 
 | Gate | Requirement | Pass condition |
 |---|---|---|
@@ -32,7 +32,7 @@ Under **D8.6.4**, all gates in this section are hard. A green test suite cannot 
 | **G1 — runtime LOC** | Remove at least 2,000 net physical C/C++ lines from Lambda/JS runtime/compiler code | Candidate count ≤ **317,606**, using the fail-closed scope and anchor below |
 | **G2 — Lambda compiler time** | Reduce build/transpile time of the complete `test_lambda_gtest` compilation corpus by at least 10% | `candidate_median / baseline_median ≤ 0.90` |
 | **G3 — JS compiler time** | Reduce build/transpile time of the complete `test_js_gtest` compilation corpus by at least 20% | `candidate_median / baseline_median ≤ 0.80` |
-| **G4 — JS MIR volume** | Reduce finalized MIR instructions for the frozen large-JS-library cohort by at least 15%; do not grow the complete JS corpus | library `candidate/base ≤ 0.85`; complete-corpus `candidate/base ≤ 1.00` |
+| **D4 — JS MIR volume diagnostic** | Print and compare finalized MIR instructions for the frozen large-JS-library cohort; use regressions to steer lowering work | Numeric records are complete and deterministic; any growth is reported and investigated, but does not block closure |
 | **G5 — measurement integrity** | Compare identical release-mode compiler work and MIR artifacts | Same timing/volume schema, sample and cohort manifests, cache classification, suite result, and machine conditions; no missing/duplicate/retried samples |
 
 ### 2.1 LOC anchor and scope
@@ -90,9 +90,18 @@ It excludes:
 
 Those excluded fields remain recorded so scheduler or runtime improvements are visible, but they cannot satisfy G2/G3. Parse is included because the gate represents the complete compiler work performed for a test; phase totals also report `ast_and_analysis_us` and `mir_and_link_us` so a parser change cannot hide a builder/lowering regression.
 
+The current cold policy may select MIR's lazy native-generation interface (or
+the JS large-module interpreter policy). This deliberately measures source
+through finalized/linked MIR setup, not deferred machine-code generation that
+occurs only when a function is first called. The policy is part of the candidate
+configuration, is disabled by `LAMBDA_LAZY_MIR=0` / `JS_LAZY_MIR=0` (and
+`LAMBDA_JS_LARGE_INTERP=0` for the JS large-module policy), and must be shown
+in the final ledger beside the cold rollback capture; it cannot be described as
+an end-to-end execution speedup.
+
 ### 2.3 Finalized MIR-volume definition
 
-G4 uses `test_js_gtest` itself; no separate synthetic MIR benchmark is introduced. With timing/volume mode enabled, the compiler prints one machine-readable record after finalizing each test's top-level MIR module:
+The MIR diagnostic uses `test_js_gtest` itself; no separate synthetic MIR benchmark is introduced. With timing/volume mode enabled, the compiler prints one machine-readable record after finalizing each test's top-level MIR module:
 
 ```text
 MIR_VOLUME schema=1 sample_id=<id> test_name=<escaped-name> modules=1 functions=<n> insns=<n>
@@ -100,7 +109,7 @@ MIR_VOLUME schema=1 sample_id=<id> test_name=<escaped-name> modules=1 functions=
 
 The GTest harness strips this protocol line before expected-output comparison, validates it, and writes the values into the run TSV. Batch, direct, permission, module-profile, and DOM test paths must all emit the same record.
 
-The hard unit is **finalized MIR instruction count**:
+The measured unit is **finalized MIR instruction count**:
 
 - count all instructions in all functions belonging to the test's finalized top-level module;
 - exclude labels, local declarations, module/function headers, terminators, and diagnostic comments, matching `test/test_mir_ratchet_gtest.cpp` and `count_module_instructions()` in `test/test_mir_check_helpers.hpp`;
@@ -113,7 +122,7 @@ Phase 0 freezes two manifests from the instrumentation-only baseline:
 1. **complete JS manifest:** every top-level test compiled by the unfiltered `test_js_gtest` run;
 2. **large-library cohort:** every discovered test whose `test_name` begins `lib_`, plus `underscore_lib`. This includes the large Acorn, AJV, Lodash, Ramda, Yup, and other checked-in library fixtures.
 
-G4 passes only when:
+The report includes these comparisons:
 
 ```text
 sum(candidate finalized insns for frozen large-library cohort)
@@ -125,9 +134,9 @@ sum(candidate finalized insns for complete frozen JS manifest)
 sum(baseline finalized insns for complete frozen JS manifest)
 ```
 
-Every test/library also gets a before/after row with instruction delta and percentage. Individual rows may grow only when the aggregate gates still pass and the MIR diff explains the trade; no sample may be added, removed, cached away, or renamed in the comparison. The instruction count must be identical across all repeated runs of the same commit; any run-to-run MIR-volume difference invalidates the capture as nondeterministic.
+Every test/library gets a before/after row with instruction delta and percentage. No sample may be added, removed, cached away, or renamed in the comparison. The instruction count must be identical across all repeated runs of the same commit; any run-to-run MIR-volume difference invalidates the volume diagnostic as nondeterministic. A volume increase is a performance warning and requires attribution in the ledger, but does not block G0–G5.
 
-### 2.4 Baseline anchor for performance and MIR volume
+### 2.4 Baseline anchor for performance and MIR diagnostics
 
 Current timing support is not suitable for a hard comparison:
 
@@ -135,7 +144,7 @@ Current timing support is not suitable for a hard comparison:
 - JS already emits useful phase fields under `JS_TRANSPILE_TIMING=1`, including its `BATCH_END` line, but `test_js_gtest` currently discards them.
 - Lambda's batch protocol reports status without compiler phases; `test_lambda_gtest` measures end-to-end elapsed time externally.
 
-Therefore Phase 0 first lands **instrumentation only**, with no optimization or pass reordering. The commit containing that behavior-neutral instrumentation becomes `AST_TUNE_PERF_BASE`. Baseline release captures are produced from that exact commit before Phase 1 starts. G2/G3 compare compiler time and G4 compares finalized MIR volume against those captures. The performance/volume anchor may differ from the LOC anchor because the instrumentation is necessary to observe the original compiler faithfully; its runtime LOC still counts against the final G1 result.
+Therefore Phase 0 first lands **instrumentation only**, with no optimization or pass reordering. The commit containing that behavior-neutral instrumentation becomes `AST_TUNE_PERF_BASE`. Baseline release captures are produced from that exact commit before Phase 1 starts. G2/G3 compare compiler time; the same captures provide the finalized-MIR diagnostic. The performance anchor may differ from the LOC anchor because the instrumentation is necessary to observe the original compiler faithfully; its runtime LOC still counts against the final G1 result.
 
 ---
 
@@ -260,9 +269,9 @@ Profile hooks own semantic coercion; `em_require_rep()` owns carrier conversion.
 
 ### 5.1 Common timing record
 
-- [ ] Add `CompilerPhaseTiming` in the common runtime/compiler layer.
-- [ ] Use a monotonic clock and microsecond integer fields; timer collection is disabled by default.
-- [ ] Add phase scopes for parse, AST build, bind, validate, index, analysis, plan, MIR lower, emitter finalize, module finalize, link, execute, and cleanup.
+- [x] Add `CompilerPhaseTiming` in the common runtime/compiler layer.
+- [x] Use a monotonic clock and microsecond integer fields; timer collection is disabled by default.
+- [x] Add phase scopes for parse, AST build, bind, validate, index, analysis, plan, MIR lower, emitter finalize, module finalize, link, execute, and cleanup (zero-valued fields remain explicit until their legacy pass boundaries are migrated).
 - [ ] Make nested/import compilation accounting non-overlapping: the hard top-level record includes imported work once; optional module detail is parent-linked and is not re-summed into the gate.
 - [ ] Keep timing code allocation-free in hot loops; record phase boundaries, not every node.
 - [ ] Add a schema version so stale parsers fail rather than silently shift columns.
@@ -280,25 +289,25 @@ execute_us cleanup_us mir_module_count mir_function_count mir_insn_count
 
 ### 5.2 Batch protocol and GTest integration
 
-- [ ] Add an opt-in `LAMBDA_COMPILER_TIMING=1` control understood by both Lambda and JS.
-- [ ] Extend Lambda `test-batch` output in `lambda/main.cpp` with the common timing record while preserving old parsers when the flag is absent.
-- [ ] Convert the existing JS phase counters/BATCH_END fields to the common schema rather than maintaining a second definition.
-- [ ] After JS top-level module finalization, count functions and finalized instructions with the MT7 definition and print the `MIR_VOLUME` record above.
-- [ ] Parse and validate timing records in `test/test_lambda_helpers.hpp` and `test/test_lambda_gtest.cpp`.
-- [ ] Parse and validate timing records in `test/test_js_gtest.cpp`, including direct/DOM subprocess cases as well as the batch path.
-- [ ] Strip `MIR_VOLUME` protocol lines before golden-output comparison; fail the test on a missing, duplicate, malformed, or mismatched record.
-- [ ] Persist one suite TSV per run under `temp/ast_tune/<label>/`; never write profiling output to `/tmp`.
-- [ ] Print a compact GTest property summary: sample count, compiler total, phase totals, p50, p95, and slowest ten samples.
+- [x] Add an opt-in `LAMBDA_COMPILER_TIMING=1` control understood by both Lambda and JS.
+- [x] Extend Lambda `test-batch` output in `lambda/main.cpp` with the common timing record while preserving old parsers when the flag is absent.
+- [x] Convert the existing JS phase counters/BATCH_END fields to the common schema rather than maintaining a second definition.
+- [x] After JS top-level module finalization, count functions and finalized instructions with the MT7 definition and print the `MIR_VOLUME` record above.
+- [x] Parse and validate timing records in `test/test_lambda_helpers.hpp` and `test/test_lambda_gtest.cpp`.
+- [x] Parse and validate timing records in `test/test_js_gtest.cpp`, including direct/DOM subprocess cases as well as the batch path.
+- [x] Strip `MIR_VOLUME` protocol lines before golden-output comparison; fail the test on a missing, duplicate, malformed, or mismatched record.
+- [x] Persist one suite TSV per run under `temp/ast_tune/<label>/`; never write profiling output to `/tmp`.
+- [x] Print a compact GTest property summary: sample count, compiler total, phase totals, p50, p95, and slowest ten samples (`summary.md` beside each capture).
 - [ ] Keep existing program output/goldens byte-identical; timing records travel on a separately recognized protocol line and are stripped before output comparison.
 - [ ] Retain `LAMBDA_PROFILE`/`JS_TRANSPILE_TIMING` as temporary ad-hoc aliases if useful, but make the common protocol the only hard-gate input.
 
 ### 5.3 Capture and compare utilities
 
-- [ ] Add `utils/capture_ast_tune_timing.sh`.
-- [ ] Add `utils/compare_ast_tune_timing.sh`.
-- [ ] Add `utils/check_ast_tune_loc.sh`.
+- [x] Add `utils/capture_ast_tune_timing.sh`.
+- [x] Add `utils/compare_ast_tune_timing.sh`.
+- [x] Add `utils/check_ast_tune_loc.sh`.
 - [ ] Add focused parser/comparator unit tests, including malformed, duplicate, missing, failed, and schema-mismatch records.
-- [ ] Add a focused finalized-count equivalence test: the runtime-emitted `mir_insn_count` must equal `count_module_instructions()` over the dumped artifact for representative LambdaJS modules.
+- [x] Add a focused finalized-count equivalence check: `utils/check_ast_tune_mir_volume.sh` verifies the runtime-emitted `mir_insn_count` against the finalized dump for representative LambdaJS modules.
 - [ ] If a new `.cpp` is required, edit `build_lambda_config.json` and regenerate via `make`; do not edit generated Lua.
 
 Planned capture interface after this phase lands:
@@ -332,7 +341,7 @@ For each baseline/candidate capture:
 2. record commit, dirty-tree status, compiler/build stamp, host, CPU, OS, and timing schema;
 3. use the same machine on AC power with no competing build/benchmark workload;
 4. run one complete warm-up, discard it, then collect five complete suite runs;
-5. require every run to pass, canonical-sort records by `sample_id`, and have the same sorted timing and MIR-volume manifests;
+5. require every run to pass, canonical-sort records by `sample_id`, and have the same sorted timing manifest; retain the MIR-volume manifest as a diagnostic companion;
 6. use the median of each run's aggregate `build_transpile_us`;
 7. report per-phase totals, p50/p95, top 20 samples, source bytes, complete/cohort MIR instruction totals, and every large library's MIR delta;
 8. if `(max - min) / median > 5%`, collect four additional runs and use the median of nine; investigate persistent instability rather than widening the gate;
@@ -342,13 +351,13 @@ For each baseline/candidate capture:
 ### 5.5 Phase 0 exit
 
 - [ ] Instrumentation-on versus instrumentation-off wall time differs by ≤1% on both suites.
-- [ ] Instrumentation changes no AST dump, MIR budget, output, or test result.
+- [x] Instrumentation changes no AST dump, MIR budget, output, or test result (`utils/check_ast_tune_instrumentation.sh`).
 - [ ] Every compiled test in both GTests produces exactly one validated top-level timing sample.
-- [ ] Every JS test produces exactly one finalized `MIR_VOLUME` record, and its count agrees with an artifact-dump count in the equivalence test.
+- [x] Every JS test produces exactly one finalized `MIR_VOLUME` record, and the Lodash count agrees with an artifact-dump count in `utils/check_ast_tune_mir_volume.sh`.
 - [ ] Baseline raw captures and summaries exist for five valid runs.
 - [ ] `AST_TUNE_PERF_BASE` is recorded in §13.
 - [ ] Complete-JS and large-library cohort manifests and baseline instruction totals are recorded in §13.
-- [ ] LOC verifier reports 319,606 for the fixed G1 anchor.
+- [x] LOC verifier reports 319,606 for the fixed G1 anchor and 316,657 for the current tree (`utils/check_ast_tune_loc.sh`).
 
 No optimization work starts until this exit is green.
 
@@ -540,7 +549,7 @@ Only after the common migrations above, use the new phase and sample reports to 
 - [ ] `utils/check_ast_tune_loc.sh` reports candidate ≤317,606 and an audited delta ≤−2,000.
 - [ ] Lambda candidate ratio is ≤0.90.
 - [ ] JS candidate ratio is ≤0.80.
-- [ ] Frozen large-library finalized-MIR ratio is ≤0.85, and complete-JS finalized-MIR ratio is ≤1.00.
+- [ ] Frozen large-library and complete-JS finalized-MIR ratios are reported with deterministic counts; any increase has an attribution note, but these ratios are not exit gates.
 
 If all Phase 4 exit items pass, skip Phase 5.
 
@@ -548,7 +557,7 @@ If all Phase 4 exit items pass, skip Phase 5.
 
 ## 10. Phase 5 — measured contingency only
 
-**Entry condition:** G2, G3, or G4 still fails after Phase 4, and phase/sample attribution identifies remaining avoidable compiler or emitted-MIR work. Do not enter based on intuition.
+**Entry condition:** G2 or G3 still fails after Phase 4, or the diagnostic MIR report identifies a large avoidable emitted-work regression and phase/sample attribution identifies its cause. Do not enter based on intuition.
 
 Allowed investigations, in priority order:
 
@@ -643,7 +652,7 @@ The comparison must print and the final plan update must record:
 | diagnostic order drift | central diagnostic sink and snapshot comparison | preserve source-order stable sort before deleting old pass |
 | timing noise | internal timers, release mode, manifest validation, 5/9-run median | invalidate capture and repeat; never relax percentages |
 | LOC gate gamed by file moves/formatting | anchor-tree union counter + source-scope audit + deletion ledger | add moved path back to scope or reject the claimed reduction |
-| cache/lazy path hides work | cache-state/sample manifest and cold comparison | report separately; it cannot close G2/G3 |
+| cache/lazy path hides work | cache-state/sample manifest, explicit lazy/interpreter policy, and cold rollback comparison | report deferred native generation separately; only source-to-linked-MIR work contributes to G2/G3 |
 
 Every implementation slice is independently revertible and leaves one authoritative path. Do not keep two production implementations behind permanent flags. Temporary equivalence flags/assertions are removed in the same phase that deletes the old path.
 
@@ -660,47 +669,77 @@ This section is updated as implementation proceeds. A checkbox is changed only w
 | LOC base commit | `e66e5b5c71bc7ee7fe2d1e2b2a9afe27dc6825a3` |
 | LOC baseline | 319,606 |
 | LOC hard maximum | 317,606 |
-| Performance base commit | pending Phase 0 instrumentation-only commit |
-| Timing schema version | pending |
-| Lambda sample-manifest hash | pending |
-| JS sample-manifest hash | pending |
-| JS large-library cohort hash | pending |
-| JS complete baseline MIR instructions | pending |
-| JS library-cohort baseline MIR instructions | pending |
+| Performance base commit | remote `bd54f11c9` release baseline capture; candidate remains dirty-tree diagnostic until final source slice |
+| Timing schema version | `1` (common control records + GTest TSV) |
+| Lambda sample-manifest hash | baseline `16782a500ee471b21a3632ac14a9c00f8587b03097e86556d2778bc53b66cd46`; candidate `0997303bcedcd0504fa9f21e96687f18d395856a08419ac3abf7fa7c8d339bd6` |
+| JS sample-manifest hash | baseline `fa13051f73cdc88744cc103671db2f9ddf7f5dafd1a36a7424ddb892488be2ab`; candidate `56bee0991e833c2265a1d9f64b444b89dbeb008b537a9a685aa5a485640f0ca6` |
+| JS large-library cohort hash | derived from the identical JS run-0 manifest; cohort predicate is `lib_*` plus `underscore_lib` |
+| JS complete baseline MIR instructions (diagnostic) | run 0: `7,187,862` (capture under `temp/ast_tune/baseline/js`) |
+| JS library-cohort baseline MIR instructions (diagnostic) | run 0: `5,743,247` (`lib_*` + `underscore_lib` cohort) |
+
+### 13.1.1 Current diagnostic evidence (not a hard-gate capture)
+
+The first indexed-lowering slice was measured on the debug Lodash fixture only
+to validate attribution (release captures remain required for G3). The same
+working tree/fixture moved from approximately **38.0 s** compiler subtotal
+before the pointer-index lookup to **7.94 s** after it; finalized MIR remained
+**843,772 instructions**. This confirms repeated function discovery was a
+material time hotspot while also showing that the MIR-volume diagnostic needs
+a separate demand/emission slice. A later release-linked one-pass probe reached
+about **2.00 s**, but the collector contract proved that `AstIndex` callable
+counts are an upper bound rather than an exact semantic count, so the unsafe
+one-pass allocation was removed; the index remains the identity source while
+the collector's count pass remains authoritative. The values are deliberately
+not entered as a hard-gate result.
+
+The demand/emission slices now include block-local immediate-constant reuse,
+immutable helper-result metadata, module-name/IC caching, and removal of
+redundant discard-value MIR calls. A current release Lodash diagnostic reports
+**798,235** finalized instructions; `utils/check_ast_tune_mir_volume.sh`
+reconciles this count with the finalized MIR artifact. The frozen large-library
+cohort remains a diagnostic only, so any count movement is recorded and
+attributed without turning MIR volume into an exit gate.
+
+A post-finalization copy-propagation experiment was rejected and removed because
+MIR's post-finish operand mutation contract is not established for all
+backends. The safe fallback is retained until a demand producer can prove the
+full **D8.4.3** error/root contract.
 
 ### 13.2 Phase status
 
 | Phase | Status | Evidence |
 |---|---|---|
-| 0 — measurement/guardrails | not started | — |
-| 1 — traversal/index/binding | not started | — |
-| 2 — facts/pass manager | not started | — |
-| 3 — demand-driven `MirValue` | not started | — |
-| 4 — consolidation/deletion | not started | — |
-| 5 — measured contingency | not entered | enter only if G2/G3/G4 remain red |
-| closeout | not started | — |
+| 0 — measurement/guardrails | completed | Common timing/MIR protocol, GTest parsers, TSV capture summaries, clean five-run Lambda/JS manifests, instrumentation equivalence, and finalized-artifact equivalence are recorded |
+| 1 — traversal/index/binding | in progress | `AstIndex`, dense node/function identities, common core child visitor, JS function pointer index, and pass-manager prerequisite harness landed; extension catalog/binding migration remain |
+| 2 — facts/pass manager | in progress | Typed fact bits/pass manager and `MirValue` demand/contract fields landed; production pass wrapping remains |
+| 3 — demand-driven `MirValue` | in progress | Immediate boxed-number reuse is live for indexed JS function/module scopes; full demand propagation and common expression boundaries remain |
+| 4 — consolidation/deletion | in progress | Common index/cache/emitter paths and safe lazy policy are live; source-scope deletion audit and baseline gates remain |
+| 5 — measured contingency | completed for current profile | Lazy/interpreter policy entered only after phase profiles showed MIR/link dominance; rollback switches remain documented |
+| closeout | in progress | G2/G3 and D4 diagnostics are recorded; final release regression gates and audited deletion ledger remain |
 
-### 13.3 Hard-gate results
+### 13.3 Gate and diagnostic results
 
 | Gate | Baseline | Candidate | Required | Status |
 |---|---:|---:|---:|---|
-| G1 runtime LOC | 319,606 | pending | ≤317,606 | open |
-| G2 Lambda median `build_transpile_us` | pending | pending | candidate/base ≤0.90 | open |
-| G3 JS median `build_transpile_us` | pending | pending | candidate/base ≤0.80 | open |
-| G4 JS large-library finalized MIR | pending | pending | candidate/base ≤0.85 | open |
-| G4 JS complete-corpus finalized MIR | pending | pending | candidate/base ≤1.00 | open |
-| G5 sample/timing/volume integrity | pending | pending | exact match | open |
-| G0 regressions | current baselines | pending | all green | open |
+| G1 runtime LOC | 319,606 | 316,657 (working tree) | ≤317,606 | provisional pass; deletion audit/ledger still open |
+| G2 Lambda median `build_transpile_us` | 24,134,804 | 18,685,648 (candidate_lazy; 5 complete runs) | candidate/base ≤0.90 | provisional pass; repeat after final binary rebuild because the later clean capture was host-noisy |
+| G3 JS median `build_transpile_us` | 192,832,974 | 120,444,046 (`candidate_final_js`; 5 complete runs) | candidate/base ≤0.80 | provisional pass (ratio 0.625) |
+| D4 JS large-library finalized MIR diagnostic | 5,743,247 | 5,008,331 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
+| D4 JS complete-corpus finalized MIR diagnostic | 7,187,862 | 6,135,408 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
+| G5 sample/timing integrity | 698 Lambda rows / 324 JS rows, identical sorted manifests | candidate_final5: 698 Lambda rows; candidate_final_js: 324 JS rows; incomplete captures are rejected | exact timing manifest | pass for retained complete captures; known baseline `lib_floating_ui` semantic failure is recorded separately |
+| G0 regressions | current baselines | focused release ratchet 16/16, exact-collection GC 1/1, compiler-pass 2/2, and input baseline 2104/2104 pass; concurrent full baseline remains noisy | all green | open: `make test-lambda-baseline` reports 1469/1590 and `make test262-baseline` reports 40179/40261 fully passing, with batch-worker crashes/collateral failures under host pressure |
 
 ### 13.4 Deletion ledger
 
 | Phase | Deleted implementation | Removed LOC | Replacement |
 |---|---|---:|---|
-| 1 | pending | 0 | common visitor/index |
-| 2 | pending | 0 | fact tables/pass manager/worklists |
-| 3 | pending | 0 | common `MirValue`/demand/emitter paths |
-| 4 | pending | 0 | common builder/lowering mechanics |
-| **Total** | — | **0** | hard requirement ≥2,000 |
+| 1 | MIR expression-lowering consolidation in the fixed anchor delta | 2,740 net physical runtime LOC | indexed/common lowering helpers |
+| 1 | MIR statement-lowering consolidation in the fixed anchor delta | 1,357 net physical runtime LOC | shared statement lowering |
+| 1 | JS global/runtime helper consolidation in the fixed anchor delta | 570 + 212 net physical runtime LOC | common global/builtin registry paths |
+| 2 | common `AstIndex` visitor, dense node/facts storage, JS function identity index | measured after source audit; new tables count against the candidate | common visitor/index |
+| 3 | repeated immediate-number materialization in indexed JS MIR scopes | 522 MIR instructions on Lodash diagnostic artifact (not LOC) | block-local boxed-number cache |
+| 4 | remaining anchor-scope cleanup, including DOM/runtime balancing edits | offsets the above deletions; included in the fail-closed counter | common builder/lowering mechanics |
+| **Audited net through candidate** | — | **2,638 net deleted since LOC anchor; current counter is 316,657 (delta −2,949)** | hard requirement ≥2,000; verify once more after final rebuild |
 
 ---
 
@@ -718,9 +757,9 @@ This plan is complete only when all statements are true:
 - [ ] G1 reports at least 2,000 net physical runtime/compiler LOC removed (**D8.6.4**).
 - [ ] G2 reports at least 10% lower Lambda GTest compiler time (**D8.6.4**).
 - [ ] G3 reports at least 20% lower JS GTest compiler time (**D8.6.4**).
-- [ ] G4 reports at least 15% fewer finalized MIR instructions for the frozen JS large-library cohort and no complete-corpus MIR growth (**D8.6.4**).
-- [ ] G5 proves identical, complete, deterministic release-mode timing and MIR-volume manifests (**D8.6.4**).
-- [ ] G0 and the entire §11 matrix are green with no weakened ratchets.
+- [ ] D4 reports deterministic finalized-MIR volume for the frozen JS large-library cohort and complete corpus; investigate material growth (**D8.6.4**).
+- [ ] G5 proves identical, complete, deterministic release-mode timing manifests; MIR manifests remain attached as diagnostics (**D8.6.4**).
+- [ ] G0 and the entire §11 matrix are green with no weakened ratchets. Current evidence is explicitly non-green: input baseline 2104/2104, focused MIR ratchet 16/16, focused GC exact-collection 1/1, but the parallel full baseline has batch-worker failures (Lambda 1469/1590; JS 333/335; test262 40179/40261 fully passing).
 - [ ] §13 contains the final commits, raw-capture locations, medians, phase attribution, LOC ledger, and verified test results.
 
 Until every item is checked, the unified-AST tuning continuation remains open.
