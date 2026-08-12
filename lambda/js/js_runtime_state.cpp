@@ -1028,6 +1028,15 @@ extern "C" uint64_t js_active_module_name_id(uint32_t index) {
     return context->active_js_module_state->property_keys[index];
 }
 
+extern "C" Item js_active_module_name_item(uint32_t module_name_index,
+        NameId direct_name_id) {
+    // A generated NameId is already stable; other names must be resolved from
+    // the active module image so compiled MIR never retains a compiler-pool pointer.
+    NameId name_id = direct_name_id != NAME_ID_NONE ? direct_name_id
+        : (NameId)js_active_module_name_id(module_name_index);
+    return lambda_name_id_to_item(name_id);
+}
+
 extern "C" uint32_t js_active_module_name_count(void) {
     return context && context->active_js_module_state
         ? context->active_js_module_state->property_key_count : 0;

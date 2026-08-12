@@ -693,6 +693,19 @@ typedef struct Corner {
     bool tl_percent_y, tr_percent_y, br_percent_y, bl_percent_y;  // true if vertical radius is a percentage (0-100)
 } Corner;
 
+inline Corner radiant_corner_scaled(const Corner* radius, float scale) {
+    Corner out = *radius;
+    out.top_left *= scale;
+    out.top_right *= scale;
+    out.bottom_right *= scale;
+    out.bottom_left *= scale;
+    out.top_left_y *= scale;
+    out.top_right_y *= scale;
+    out.bottom_right_y *= scale;
+    out.bottom_left_y *= scale;
+    return out;
+}
+
 // Gradient types for CSS background and border-image gradients
 typedef enum {
     GRADIENT_NONE = 0,
@@ -717,6 +730,132 @@ typedef struct {
     bool has_border_image_width;
     CssEnum border_image_repeat;
 } BorderProp;
+
+// physical side access is shared by cascade, layout, and table border code;
+// keeping the value and specificity lanes together prevents side updates from
+// silently selecting different fields.
+enum CssBoxSide : uint8_t {
+    CSS_BOX_SIDE_TOP = 0,
+    CSS_BOX_SIDE_RIGHT = 1,
+    CSS_BOX_SIDE_BOTTOM = 2,
+    CSS_BOX_SIDE_LEFT = 3,
+};
+
+inline float* radiant_spacing_value(Spacing* spacing, CssBoxSide side) {
+    if (!spacing) return nullptr;
+    switch (side) {
+        case CSS_BOX_SIDE_TOP: return &spacing->top;
+        case CSS_BOX_SIDE_RIGHT: return &spacing->right;
+        case CSS_BOX_SIDE_BOTTOM: return &spacing->bottom;
+        case CSS_BOX_SIDE_LEFT: return &spacing->left;
+    }
+    return &spacing->top;
+}
+
+inline int64_t* radiant_spacing_specificity(Spacing* spacing, CssBoxSide side) {
+    if (!spacing) return nullptr;
+    switch (side) {
+        case CSS_BOX_SIDE_TOP: return &spacing->top_specificity;
+        case CSS_BOX_SIDE_RIGHT: return &spacing->right_specificity;
+        case CSS_BOX_SIDE_BOTTOM: return &spacing->bottom_specificity;
+        case CSS_BOX_SIDE_LEFT: return &spacing->left_specificity;
+    }
+    return &spacing->top_specificity;
+}
+
+inline CssEnum* radiant_margin_type(Margin* margin, CssBoxSide side) {
+    if (!margin) return nullptr;
+    switch (side) {
+        case CSS_BOX_SIDE_TOP: return &margin->top_type;
+        case CSS_BOX_SIDE_RIGHT: return &margin->right_type;
+        case CSS_BOX_SIDE_BOTTOM: return &margin->bottom_type;
+        case CSS_BOX_SIDE_LEFT: return &margin->left_type;
+    }
+    return &margin->top_type;
+}
+
+inline void radiant_spacing_set_all(Spacing* spacing, float value,
+                                    int64_t specificity = -1) {
+    if (!spacing) return;
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        *radiant_spacing_value(spacing, (CssBoxSide)side) = value;
+        *radiant_spacing_specificity(spacing, (CssBoxSide)side) = specificity;
+    }
+}
+
+inline void radiant_spacing_set_specificity_all(Spacing* spacing,
+                                                int64_t specificity = -1) {
+    if (!spacing) return;
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        *radiant_spacing_specificity(spacing, (CssBoxSide)side) = specificity;
+    }
+}
+
+inline void radiant_spacing_set_pair(Spacing* spacing, CssBoxSide first,
+                                     CssBoxSide second, float value,
+                                     int64_t specificity = -1) {
+    if (!spacing) return;
+    *radiant_spacing_value(spacing, first) = value;
+    *radiant_spacing_value(spacing, second) = value;
+    *radiant_spacing_specificity(spacing, first) = specificity;
+    *radiant_spacing_specificity(spacing, second) = specificity;
+}
+
+inline void radiant_margin_set_type_all(Margin* margin, CssEnum type) {
+    if (!margin) return;
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        *radiant_margin_type(margin, (CssBoxSide)side) = type;
+    }
+}
+
+struct RadiantBorderSide {
+    float* width;
+    int64_t* width_specificity;
+    CssEnum* style;
+    int64_t* style_specificity;
+    Color* color;
+    int64_t* color_specificity;
+};
+
+inline RadiantBorderSide radiant_border_side(BorderProp* border, CssBoxSide side) {
+    RadiantBorderSide result = {};
+    if (!border) return result;
+    switch (side) {
+        case CSS_BOX_SIDE_TOP:
+            result.width = &border->width.top;
+            result.width_specificity = &border->width.top_specificity;
+            result.style = &border->top_style;
+            result.style_specificity = &border->top_style_specificity;
+            result.color = &border->top_color;
+            result.color_specificity = &border->top_color_specificity;
+            break;
+        case CSS_BOX_SIDE_RIGHT:
+            result.width = &border->width.right;
+            result.width_specificity = &border->width.right_specificity;
+            result.style = &border->right_style;
+            result.style_specificity = &border->right_style_specificity;
+            result.color = &border->right_color;
+            result.color_specificity = &border->right_color_specificity;
+            break;
+        case CSS_BOX_SIDE_BOTTOM:
+            result.width = &border->width.bottom;
+            result.width_specificity = &border->width.bottom_specificity;
+            result.style = &border->bottom_style;
+            result.style_specificity = &border->bottom_style_specificity;
+            result.color = &border->bottom_color;
+            result.color_specificity = &border->bottom_color_specificity;
+            break;
+        case CSS_BOX_SIDE_LEFT:
+            result.width = &border->width.left;
+            result.width_specificity = &border->width.left_specificity;
+            result.style = &border->left_style;
+            result.style_specificity = &border->left_style_specificity;
+            result.color = &border->left_color;
+            result.color_specificity = &border->left_color_specificity;
+            break;
+    }
+    return result;
+}
 
 // Color stop for gradients
 // tier-2: view-pool, rebuilt each relayout
@@ -1095,6 +1234,24 @@ typedef struct PositionProp {
     float static_parent_offset_y;       // parent-to-containing-block offset when static y was set
 } PositionProp;
 
+// Keep the three physical inset lanes coupled so logical-position resolution
+// cannot update a value without its percentage and presence metadata.
+typedef struct RadiantInsetSide {
+    float* value;
+    float* percent;
+    bool* has;
+} RadiantInsetSide;
+
+inline RadiantInsetSide radiant_inset_side(PositionProp* position, CssBoxSide side) {
+    switch (side) {
+        case CSS_BOX_SIDE_TOP: return {&position->top, &position->top_percent, &position->has_top};
+        case CSS_BOX_SIDE_RIGHT: return {&position->right, &position->right_percent, &position->has_right};
+        case CSS_BOX_SIDE_BOTTOM: return {&position->bottom, &position->bottom_percent, &position->has_bottom};
+        case CSS_BOX_SIDE_LEFT: return {&position->left, &position->left_percent, &position->has_left};
+    }
+    return {&position->top, &position->top_percent, &position->has_top};
+}
+
 /**
  * MarkerProp - Stores list marker (bullet) properties
  * Used for ::marker pseudo-element rendering with fixed width and vector graphics
@@ -1123,33 +1280,12 @@ typedef struct MarkerProp {
  * is resolved, and laid out as part of normal block layout flow.
  */
 
-// Content value types for pseudo-elements (CSS 2.1 Section 12.2)
-enum ContentType {
-    CONTENT_TYPE_NONE = 0,      // no content
-    CONTENT_TYPE_STRING = 1,     // string literal
-    CONTENT_TYPE_URI = 2,        // url()
-    CONTENT_TYPE_COUNTER = 3,    // counter()
-    CONTENT_TYPE_COUNTERS = 4,   // counters()
-    CONTENT_TYPE_ATTR = 5,       // attr()
-    CONTENT_TYPE_OPEN_QUOTE = 6,
-    CONTENT_TYPE_CLOSE_QUOTE = 7
-};
-
 // tier-2: view-pool, rebuilt each relayout
 typedef struct PseudoContentProp {
     DomElement* before;    // ::before pseudo-element (NULL if none)
     DomElement* after;     // ::after pseudo-element (NULL if none)
     DomElement* marker;    // ::marker pseudo-element (NULL if none)
 
-    // Content value storage for generation
-    char* before_content;         // Parsed content string/template (or counter name for counters)
-    char* after_content;
-    char* before_separator;       // Separator for counters() function
-    char* after_separator;
-    uint32_t before_counter_style;  // CSS enum value for counter style
-    uint32_t after_counter_style;
-    uint8_t before_content_type;  // ContentType enum
-    uint8_t after_content_type;
     bool before_generated;         // True if before element created
     bool after_generated;          // True if after element created
     bool marker_generated;         // True if marker element created
@@ -1490,6 +1626,16 @@ typedef struct ViewTable : ViewBlock {
     // Usage: for (auto row = table->first_row(); row; row = table->next_row(row))
     ViewTableRow* next_row(ViewTableRow* current);
 
+    // Table traversal belongs to the table view because anonymous wrappers and
+    // direct-child rows are part of the table's structural contract.
+    template <typename Fn> void each_row(Fn fn);
+    template <typename Fn> void each_cell(Fn fn);
+    template <typename Fn> void each_direct_block(Fn fn);
+    template <typename Fn> void each_row_group(Fn fn);
+    template <typename Fn> void each_body_row(Fn fn);
+    template <typename Fn> void each_column_source(Fn fn);
+    template <typename Predicate> ViewTableCell* find_cell(Predicate predicate);
+
     // Get first cell when table acts as its own row (is_annoy_tr)
     // Returns nullptr if table doesn't act as a row
     ViewTableCell* first_direct_cell();
@@ -1524,6 +1670,8 @@ typedef struct ViewTableRowGroup : ViewBlock {
 
     // Get next row in this group
     ViewTableRow* next_row(ViewTableRow* current);
+
+    template <typename Fn> void each_row_with_block(Fn fn);
 } ViewTableRowGroup;
 
 // tier-2: view-pool, rebuilt each relayout
@@ -1535,6 +1683,8 @@ typedef struct ViewTableRow : ViewBlock {
 
     // Get next cell in this row
     ViewTableCell* next_cell(ViewTableCell* current);
+
+    template <typename Fn> void each_cell(Fn fn);
 
     // Get parent row group (or table if row is direct child)
     ViewBlock* parent_row_group();
@@ -1597,6 +1747,86 @@ struct TableCellProp {
 typedef struct ViewTableCell : ViewBlock {
     TableCellProp* cell() const { return role_kind() == ROLE_CELL ? td : nullptr; }
 } ViewTableCell;
+
+template <typename Fn>
+inline void ViewTable::each_row(Fn fn) {
+    for (ViewTableRow* row = first_row(); row; row = next_row(row)) fn(row);
+}
+
+template <typename Fn>
+inline void ViewTableRowGroup::each_row_with_block(Fn fn) {
+    for (ViewTableRow* row = first_row(); row; row = next_row(row)) {
+        fn(row, static_cast<ViewBlock*>(row));
+    }
+}
+
+template <typename Fn>
+inline void ViewTableRow::each_cell(Fn fn) {
+    for (ViewTableCell* cell = first_cell(); cell; cell = next_cell(cell)) fn(cell);
+}
+
+template <typename Fn>
+inline void ViewTable::each_cell(Fn fn) {
+    each_row([&](ViewTableRow* row) {
+        row->each_cell([&](ViewTableCell* cell) { fn(row, cell); });
+    });
+}
+
+template <typename Fn>
+inline void ViewTable::each_direct_block(Fn fn) {
+    for (View* child = static_cast<View*>(first_child); child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (child->is_block()) fn(static_cast<ViewBlock*>(child));
+    }
+}
+
+template <typename Fn>
+inline void ViewTable::each_row_group(Fn fn) {
+    each_direct_block([&](ViewBlock* child) {
+        if (child->view_type != RDT_VIEW_TABLE_ROW_GROUP) return;
+        fn(static_cast<ViewTableRowGroup*>(child), child);
+    });
+}
+
+template <typename Fn>
+inline void ViewTable::each_body_row(Fn fn) {
+    each_row_group([&](ViewTableRowGroup* group, ViewBlock*) {
+        if (group->get_section_type() != TABLE_SECTION_TBODY) return;
+        group->each_row_with_block([&](ViewTableRow* row, ViewBlock*) { fn(group, row); });
+    });
+}
+
+template <typename Fn>
+inline void radiant_each_table_colgroup_column(ViewElement* colgroup, Fn fn) {
+    if (!colgroup) return;
+    for (View* child = static_cast<View*>(colgroup->first_child); child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (child->view_type == RDT_VIEW_TABLE_COLUMN) fn(static_cast<ViewElement*>(child));
+    }
+}
+
+template <typename Fn>
+inline void ViewTable::each_column_source(Fn fn) {
+    for (View* child = static_cast<View*>(first_child); child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP ||
+            child->view_type == RDT_VIEW_TABLE_COLUMN) {
+            fn(static_cast<ViewElement*>(child));
+        }
+    }
+}
+
+template <typename Predicate>
+inline ViewTableCell* ViewTable::find_cell(Predicate predicate) {
+    ViewTableCell* result = nullptr;
+    each_row([&](ViewTableRow* row) {
+        if (result) return;
+        row->each_cell([&](ViewTableCell* cell) {
+            if (!result && predicate(row, cell)) result = cell;
+        });
+    });
+    return result;
+}
 
 // Direct fi/gi/tb/td/form reads outside these tag-checking accessors are invalid;
 // parent-item role and the element's own role occupy separate tagged unions.
@@ -1888,6 +2118,8 @@ struct CssStylesheet;
 
 // Parse and register @font-face rules from a CSS rule node
 void parse_font_face_rule(struct LayoutContext* lycon, void* rule);
+
+bool radiant_is_supported_web_font_source(const char* url, const char* format);
 
 // Register a font face descriptor with UiContext (and bridge to unified FontContext)
 void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor);
@@ -2249,6 +2481,14 @@ struct FormControlProp {
     // FormControlProp is a POD (no C++ ctor/dtor) per the C+ convention; use
     // form_control_prop_init / form_control_prop_release for lifecycle.
 };
+
+// Native select popups keep their option-row metric even when author CSS makes
+// the closed control taller. Keeping this in the shared view header prevents
+// event geometry and overlay rendering from deriving different popup sizes.
+inline float form_select_dropdown_row_height(const FormControlProp* form) {
+    return form && form->intrinsic_height > 0.0f
+        ? form->intrinsic_height : FormDefaults::SELECT_HEIGHT;
+}
 
 // Apply the non-zero default field values. Memory pointed to by `f` must be
 // either zeroed (e.g. from pool_calloc / mem_calloc) or freshly-allocated

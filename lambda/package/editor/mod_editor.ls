@@ -38,7 +38,8 @@ pub fn edit_mount(editor, window, preset) =>
    stored_marks: editor.stored_marks, events: [*editor.events, {kind: 'mount', window: window, preset: preset}],
    mounted: true, preset: preset}
 
-pub fn edit_set_selection(editor, selection) =>
+// keep this pure state transition total when its public signature crosses a module boundary.
+pub fn edit_set_selection(editor, selection) map =>
   {kind: 'editor', doc: editor.doc, schema: editor.schema, selection: selection,
    history: editor.history, decorations: editor.decorations, composition: editor.composition,
    stored_marks: null, events: [*editor.events, {kind: 'selection', selection: selection}],

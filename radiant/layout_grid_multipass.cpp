@@ -1144,18 +1144,19 @@ static void layout_grid_abs_prepare_child(LayoutContext* lycon, ViewBlock* conta
 }
 
 static float grid_abs_axis_position(float area_start, float area_size, float child_size,
-                                    bool has_start, bool has_end, float start, float end,
-                                    float margin_start, float margin_end, float* used_size) {
-    if (has_start && has_end) {
-        *used_size = area_size - start - end - margin_start - margin_end;
-        return area_start + start + margin_start;
+                                    LayoutAxisPlacementRefs& refs, float* used_size) {
+    if (refs.has_start() && refs.has_end()) {
+        *used_size = area_size - *refs.insets.start.value - *refs.insets.end.value -
+            refs.margin_start() - refs.margin_end();
+        return area_start + *refs.insets.start.value + refs.margin_start();
     }
-    if (has_start) {
-        return area_start + start + (margin_start > 0.0f ? margin_start : 0.0f);
+    if (refs.has_start()) {
+        return area_start + *refs.insets.start.value +
+            (refs.margin_start() > 0.0f ? refs.margin_start() : 0.0f);
     }
-    if (has_end) {
-        return area_start + area_size - end - child_size -
-            (margin_end > 0.0f ? margin_end : 0.0f);
+    if (refs.has_end()) {
+        return area_start + area_size - *refs.insets.end.value - child_size -
+            (refs.margin_end() > 0.0f ? refs.margin_end() : 0.0f);
     }
     return area_start;
 }
@@ -1170,52 +1171,36 @@ static void layout_grid_abs_after_child(LayoutContext* lycon, ViewBlock* contain
     GridContainerLayout* grid_layout = ctx->grid;
 
     if (state->has_grid_area) {
-        float old_x = child_block->x;
-        float old_y = child_block->y;
-        PositionProp* pos = child_block->position;
-        float new_x = old_x;
-        float new_y = old_y;
-
-        float margin_left = child_block->bound ? child_block->boundary()->margin.left : 0.0f;
-        float margin_right = child_block->bound ? child_block->boundary()->margin.right : 0.0f;
-        float margin_top = child_block->bound ? child_block->boundary()->margin.top : 0.0f;
-        float margin_bottom = child_block->bound ? child_block->boundary()->margin.bottom : 0.0f;
-        new_x = grid_abs_axis_position(
+        LayoutAxisPlacementRefs horizontal(child_block, LAYOUT_AXIS_X);
+        LayoutAxisPlacementRefs vertical(child_block, LAYOUT_AXIS_Y);
+        child_block->x = grid_abs_axis_position(
             state->grid_area_x, state->grid_area_width, child_block->width,
-            pos->has_left, pos->has_right, pos->left, pos->right,
-            margin_left, margin_right, &child_block->width);
-        new_y = grid_abs_axis_position(
+            horizontal, &child_block->width);
+        child_block->y = grid_abs_axis_position(
             state->grid_area_y, state->grid_area_height, child_block->height,
-            pos->has_top, pos->has_bottom, pos->top, pos->bottom,
-            margin_top, margin_bottom, &child_block->height);
-
-        child_block->x = new_x;
-        child_block->y = new_y;
+            vertical, &child_block->height);
         return;
     }
 
     GridItemProp* gi = grid_item_prop(child_block);
     if (!gi) return;
 
-    PositionProp* pos = child_block->position;
-    bool no_horiz = !pos->has_left && !pos->has_right;
-    bool no_vert = !pos->has_top && !pos->has_bottom;
-    float ml = child_block->bound ? child_block->boundary()->margin.left : 0.0f;
-    float mr = child_block->bound ? child_block->boundary()->margin.right : 0.0f;
-    float mt = child_block->bound ? child_block->boundary()->margin.top : 0.0f;
-    float mb = child_block->bound ? child_block->boundary()->margin.bottom : 0.0f;
+    LayoutAxisPlacementRefs horizontal(child_block, LAYOUT_AXIS_X);
+    LayoutAxisPlacementRefs vertical(child_block, LAYOUT_AXIS_Y);
 
-    if (no_horiz) {
+    if (!horizontal.has_any_inset()) {
         int justify = radiant::resolve_justify_self(gi->justify_self,
             grid_layout ? grid_layout->justify_items : CSS_VALUE_STRETCH);
-        float free_w = cb.padding_width - child_block->width - ml - mr;
+        float free_w = cb.padding_width - child_block->width -
+            horizontal.margin_start() - horizontal.margin_end();
         float offset = radiant::compute_alignment_offset_simple(justify, free_w);
         if (offset != 0.0f) child_block->x += offset;
     }
-    if (no_vert) {
+    if (!vertical.has_any_inset()) {
         int align = radiant::resolve_align_self(gi->align_self_grid,
             grid_layout ? grid_layout->align_items : CSS_VALUE_STRETCH);
-        float free_h = cb.padding_height - child_block->height - mt - mb;
+        float free_h = cb.padding_height - child_block->height -
+            vertical.margin_start() - vertical.margin_end();
         float offset = radiant::compute_alignment_offset_simple(align, free_h);
         if (offset != 0.0f) child_block->y += offset;
     }

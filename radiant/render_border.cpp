@@ -53,19 +53,6 @@ static void inset_outset_side_colors(Color base, CssEnum style,
     }
 }
 
-static Corner corner_scaled(const Corner* radius, float scale) {
-    Corner out = *radius;
-    out.top_left *= scale;
-    out.top_right *= scale;
-    out.bottom_right *= scale;
-    out.bottom_left *= scale;
-    out.top_left_y *= scale;
-    out.top_right_y *= scale;
-    out.bottom_right_y *= scale;
-    out.bottom_left_y *= scale;
-    return out;
-}
-
 static Corner corner_inset(const Corner* radius, float inset_x, float inset_y) {
     Corner out = *radius;
     out.top_left = max(0.0f, out.top_left - inset_x);
@@ -543,7 +530,7 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     BorderProp* border = view->boundary()->border;
     float s = rdcon->scale;
 
-    Corner scaled_radius = corner_scaled(&border->radius, s);
+    Corner scaled_radius = radiant_corner_scaled(&border->radius, s);
     Corner orig_radius = border->radius;
     border->radius = scaled_radius;
     constrain_border_radii(border, rect.width, rect.height);
@@ -623,24 +610,12 @@ static bool render_border_image_gradient(RenderContext* rdcon, BorderProp* borde
         stops[i] = {pos, stop->color.r, stop->color.g, stop->color.b, stop->color.a};
     }
 
-    float angle_rad = gradient->angle * (float)M_PI / 180.0f;
-    float dx = sinf(angle_rad);
-    float dy = -cosf(angle_rad);
-    float half_w = rect.width * 0.5f;
-    float half_h = rect.height * 0.5f;
-    float cx = rect.x + half_w;
-    float cy = rect.y + half_h;
-    float abs_dx = fabsf(dx);
-    float abs_dy = fabsf(dy);
-    float dist = (abs_dx * rect.height < abs_dy * rect.width)
-        ? (abs_dy > 1e-7f ? half_h / abs_dy : half_w)
-        : (abs_dx > 1e-7f ? half_w / abs_dx : half_h);
+    RadiantGradientLine line = radiant_linear_gradient_line(rect, gradient->angle);
 
     RdtPath* clip = render_path_create_clip_path(rdcon);
     rc_push_clip(rdcon, clip, NULL);
     rc_fill_linear_gradient(rdcon, ring,
-        cx - dx * dist, cy - dy * dist,
-        cx + dx * dist, cy + dy * dist,
+        line.x1, line.y1, line.x2, line.y2,
         stops, stop_count, RDT_FILL_EVEN_ODD,
         render_state_current_transform(rdcon));
     rc_pop_clip(rdcon);
@@ -857,7 +832,7 @@ void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
     if (has_radius) {
         BorderProp* border = view->boundary()->border;
-        Corner scaled_radius = corner_scaled(&border->radius, s);
+        Corner scaled_radius = radiant_corner_scaled(&border->radius, s);
         Corner outline_radius = corner_expand(&scaled_radius, expand, expand);
         constrain_corner_radii(&outline_radius, outline_rect.width, outline_rect.height);
         p = render_path_create_rounded_rect(outline_rect, &outline_radius);

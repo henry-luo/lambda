@@ -14,6 +14,7 @@
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #elif defined(_WIN32)
+#include <direct.h>
 #include <windows.h>
 #include <psapi.h>
 #endif
@@ -294,11 +295,14 @@ static Item node_process_throw_type_error(const char* code, const char* message)
     return node_process_host->node->error->throw_type_error_code(node_process_session, code, message);
 }
 
+// windows bypasses the POSIX umask validation path, so keep its helper out of the DLL.
+#ifndef _WIN32
 static Item node_process_throw_range_error(const char* code, const char* message) {
     if (!node_process_host || !node_process_host->node || !node_process_host->node->error ||
             !node_process_host->node->error->throw_range_error_code) return ItemNull;
     return node_process_host->node->error->throw_range_error_code(node_process_session, code, message);
 }
+#endif
 
 static Item node_process_umask(Item mask_item) {
 #ifdef _WIN32

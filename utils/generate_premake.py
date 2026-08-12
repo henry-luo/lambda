@@ -679,6 +679,11 @@ class PremakeGenerator:
             '        buildoptions { "-fno-omit-frame-pointer" }',
         ])
 
+        # apply the configured Windows stack reserve to the default debug binary;
+        # leaving this filter on debug_profile made recursive scripts start with the PE 1 MB default.
+        if self.use_windows_config:
+            self.premake_content.append('    filter "configurations:debug"')
+
         # Add Windows-specific linker flags to debug configuration
         if self.use_windows_config:
             platforms_config = self.config.get('platforms', {})
@@ -1244,13 +1249,16 @@ class PremakeGenerator:
                     '    '
                 ])
 
-        # Add target exclusions plus Linux platform exclusions. Library targets
-        # expand their own source patterns here, so the main-project platform
-        # filter must also protect them from platform-incompatible sources.
+        # add target exclusions plus platform exclusions. Library targets expand
+        # their own source patterns here, so each platform filter must protect
+        # them from platform-incompatible sources.
         exclude_patterns = list(lib.get('exclude_patterns', []))
         if self.use_linux_config:
             linux_config = self.config.get('platforms', {}).get('linux', {})
             exclude_patterns.extend(linux_config.get('exclude_source_files', []))
+        elif self.use_windows_config:
+            windows_config = self.config.get('platforms', {}).get('windows', {})
+            exclude_patterns.extend(windows_config.get('exclude_source_files', []))
         if exclude_patterns:
             self.premake_content.extend([
                 '    removefiles {',

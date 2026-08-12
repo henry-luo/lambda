@@ -628,38 +628,58 @@ static Item js_private_environment_for_class(Item class_item, bool create) {
     return environment_root.get();
 }
 
+static bool js_private_key_item_is_valid(Item key) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* key_string = it2s(key);
+    return key_string && property_key_requires_identity(key_string) &&
+        property_key_kind(key_string) == NAME_KEY_PRIVATE;
+}
+
+static Item js_private_key_for_class_environment(Item environment_item,
+        NameRef source_name) {
+    if (get_type_id(environment_item) != LMD_TYPE_MAP || !source_name) return ItemNull;
+
+    bool found = false;
+    Item cached_key = js_map_get_fast(environment_item.map, source_name->chars,
+        (int)source_name->len, &found);
+    if (found && js_private_key_item_is_valid(cached_key)) return cached_key;
+
+    if (!context || !context->name_pool) return ItemNull;
+    NameRef private_key = name_pool_create_unique_private(context->name_pool,
+        {source_name->chars, source_name->len});
+    if (!private_key) return ItemNull;
+    Item private_key_item = (Item){.item = s2it(private_key)};
+
+    // class metadata resolves thousands of private names in one batch.  The
+    // environment is engine-owned and the source key is already canonical, so
+    // append directly after the own-cache miss instead of rebuilding the full
+    // JS property path for every declaration.
+    if (js_input) {
+        map_put(environment_item.map, source_name, private_key_item, js_input);
+        return private_key_item;
+    }
+    return js_property_set(environment_item, (Item){.item = s2it(source_name)},
+        private_key_item);
+}
+
 extern "C" Item js_private_key_for_class(Item class_item, Item source_name) {
     if (!js_private_source_name(source_name) || !context || !context->name_pool) {
         return js_throw_type_error("Invalid private name binding");
     }
-    RootFrame roots(4);
+    RootFrame roots(3);
     Rooted<Item> class_root(roots, class_item);
     Rooted<Item> source_root(roots, source_name);
     Rooted<Item> environment_root(roots,
         js_private_environment_for_class(class_root.get(), true));
-    Rooted<Item> key_root(roots, ItemNull);
     if (!roots.valid() || get_type_id(environment_root.get()) != LMD_TYPE_MAP) return ItemNull;
     String* source = it2s(source_root.get());
     NameRef binding_name = name_pool_create_len(context->name_pool,
         source->chars, source->len);
     if (!binding_name) return ItemNull;
-    // Private source literals are distinct heap strings; the class environment
-    // must index their shared spelling with the ordinary pooled NameRecord.
+    // private source literals are distinct heap strings; canonicalize their
+    // spelling once before consulting the class-owned identity cache.
     source_root.set((Item){.item = s2it(binding_name)});
-    Item key = js_property_get(environment_root.get(), source_root.get());
-    if (get_type_id(key) == LMD_TYPE_STRING &&
-        property_key_requires_identity(it2s(key)) &&
-        property_key_kind(it2s(key)) == NAME_KEY_PRIVATE) {
-        return key;
-    }
-    NameRef private_key = name_pool_create_unique_private(context->name_pool,
-        {source->chars, source->len});
-    if (!private_key) return ItemNull;
-    key_root.set((Item){.item = s2it(private_key)});
-    // Source spelling resolves a lexical private binding only inside this hidden
-    // environment; the installed object property always uses the unique record.
-    JS_ASSIGN_OR_RETURN(set_result, js_property_set(environment_root.get(), source_root.get(), key_root.get()));
-    return key_root.get();
+    return js_private_key_for_class_environment(environment_root.get(), binding_name);
 }
 
 extern "C" Item js_private_key_for_current_class(Item source_name) {
@@ -2170,26 +2190,30 @@ extern "C" void js_set_class_instance_field_metadata_name_id_range(
             (uint32_t)count > state->property_key_count - module_name_base) return;
     RootFrame roots(4);
     Rooted<Item> class_root(roots, class_item);
-    Rooted<Item> source_root(roots, ItemNull);
-    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> environment_root(roots, ItemNull);
     if (!roots.valid()) return;
+
+    bool keys_found = false;
+    bool kinds_found = false;
+    Item keys = js_map_get_fast(class_root.get().map, "__if_keys__", 11, &keys_found);
+    Item kinds = js_map_get_fast(class_root.get().map, "__if_kinds__", 12, &kinds_found);
+    if (!keys_found || get_type_id(keys) != LMD_TYPE_ARRAY ||
+            index + count > keys.array->length) return;
     for (int offset = 0; offset < count; offset++) {
         NameId source_name_id = state->property_keys[module_name_base + (uint32_t)offset];
         NameRef source_name = name_pool_resolve_id(context->name_pool, source_name_id);
         if (!source_name) return;
-        source_root.set((Item){.item = s2it(source_name)});
-        Item key = js_private_source_name(source_root.get())
-            ? js_private_key_for_class(class_root.get(), source_root.get())
-            : source_root.get();
-        key_root.set(key);
-        if (item_is_error(key_root.get())) return;
-        bool found = false;
-        Item keys = js_map_get_fast(class_root.get().map, "__if_keys__", 11, &found);
-        if (!found || get_type_id(keys) != LMD_TYPE_ARRAY ||
-                index + offset >= keys.array->length) return;
-        keys.array->items[index + offset] = key_root.get();
-        Item kinds = js_map_get_fast(class_root.get().map, "__if_kinds__", 12, &found);
-        if (found && get_type_id(kinds) == LMD_TYPE_ARRAY &&
+        bool private_source = js_private_source_name((Item){.item = s2it(source_name)});
+        if (private_source && get_type_id(environment_root.get()) != LMD_TYPE_MAP) {
+            environment_root.set(js_private_environment_for_class(class_root.get(), true));
+            if (get_type_id(environment_root.get()) != LMD_TYPE_MAP) return;
+        }
+        Item key = private_source
+            ? js_private_key_for_class_environment(environment_root.get(), source_name)
+            : (Item){.item = s2it(source_name)};
+        if (item_is_error(key) || key.item == ItemNull.item) return;
+        keys.array->items[index + offset] = key;
+        if (kinds_found && get_type_id(kinds) == LMD_TYPE_ARRAY &&
                 index + offset < kinds.array->length) {
             kinds.array->items[index + offset] = (Item){.item = i2it(
                 (method_mask >> offset) & 1u)};
@@ -6897,6 +6921,19 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     return value;
 }
 
+extern "C" Item js_property_set_cstr(Item object, const char* key, Item value) {
+    if (!key) return value;
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> key_root(roots, ItemNull);
+    // A native caller cannot root a GC key until this call starts. Create it
+    // after rooting the object/value so an allocating property write cannot
+    // collect either argument before js_property_set() sees them.
+    key_root.set(make_string_item(key, (int)strlen(key)));
+    return js_property_set(object_root.get(), key_root.get(), value_root.get());
+}
+
 static Item js_strict_property_set_check(Item object, Item key, Item result) {
     if (item_is_error(result) || !js_is_proxy(object) ||
         result.item != (uint64_t)b2it(false)) return js_status_ok();
@@ -8204,13 +8241,17 @@ extern "C" int64_t js_get_length(Item object) {
 
 // Direct JS array push shares Lambda's owned-scalar tail representation.
 extern "C" void js_array_push_item_direct(Array* arr, Item value) {
+    if (!arr) return;
     if (arr->length + arr->extra + 2 > arr->capacity) {
         JS_PROPERTY_SET_BRANCH("array_push_direct_expand");
-        // The value must survive the growth allocation before it is stored.
-        RootFrame roots(1);
+        // Growth can compact the Array object as well as its item buffer, so
+        // reload both exact roots before the post-growth length/store access.
+        RootFrame roots(2);
+        Rooted<Item> rooted_array(roots, (Item){.array = arr});
         Rooted<Item> rooted_value(roots, value);
-        int64_t old_capacity = arr->capacity;
-        expand_list((List*)arr);
+        int64_t old_capacity = rooted_array.get().array->capacity;
+        expand_list((List*)rooted_array.get().array);
+        arr = rooted_array.get().array;
         value = rooted_value.get();
         // P8: expand_list copies the old buffer and leaves new slots at the
         // tail uninitialized (heap_data_alloc returns zero-init memory, which
@@ -8941,9 +8982,11 @@ extern "C" Item js_array_push(Item array, Item value) {
         return (Item){.item = i2it(0)};
     }
 
-    Array* arr = array.array;
-    js_array_push_item_direct(arr, value);
-    return (Item){.item = i2it(arr->length)};
+    RootFrame roots(2);
+    Rooted<Item> array_root(roots, array);
+    Rooted<Item> value_root(roots, value);
+    js_array_push_item_direct(array_root.get().array, value_root.get());
+    return (Item){.item = i2it(array_root.get().array->length)};
 }
 
 // =============================================================================
@@ -18478,14 +18521,37 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     return regex_obj_root.get();
 }
 
+static const char* js_regex_copy_stable_span(const char* text, int length) {
+    if (!text || length <= 0) return "";
+    // Regex compilation performs GC allocations before it finishes reading the
+    // span; copy moving JS strings into the input pool at this ABI boundary.
+    char* copy = (char*)pool_calloc(js_input->pool, (size_t)length + 1);
+    memcpy(copy, text, (size_t)length);
+    return copy;
+}
+
 extern "C" Item js_create_regex(const char* pattern, int pattern_len,
         const char* flags, int flags_len) {
-    return js_create_regex_impl(pattern, pattern_len, flags, flags_len, false);
+    return js_create_regex_impl(js_regex_copy_stable_span(pattern, pattern_len),
+        pattern_len, js_regex_copy_stable_span(flags, flags_len), flags_len, false);
 }
 
 extern "C" Item js_create_regex_literal(const char* pattern, int pattern_len,
         const char* flags, int flags_len) {
-    return js_create_regex_impl(pattern, pattern_len, flags, flags_len, true);
+    return js_create_regex_impl(js_regex_copy_stable_span(pattern, pattern_len),
+        pattern_len, js_regex_copy_stable_span(flags, flags_len), flags_len, true);
+}
+
+extern "C" Item js_create_regex_literal_items(Item pattern_item, Item flags_item) {
+    RootFrame regex_roots(2);
+    Rooted<Item> pattern_root(regex_roots, pattern_item);
+    Rooted<Item> flags_root(regex_roots, flags_item);
+    String* pattern = get_type_id(pattern_root.get()) == LMD_TYPE_STRING
+        ? it2s(pattern_root.get()) : NULL;
+    String* flags = get_type_id(flags_root.get()) == LMD_TYPE_STRING
+        ? it2s(flags_root.get()) : NULL;
+    return js_create_regex_literal(pattern ? pattern->chars : "", pattern ? (int)pattern->len : 0,
+        flags ? flags->chars : "", flags ? (int)flags->len : 0);
 }
 
 // Create a RegExp from a source literal string like "/pattern/flags".
@@ -18532,6 +18598,13 @@ extern "C" Item js_create_regexp_from_source(const char* src, size_t len) {
 
 // new RegExp(pattern, flags) — construct regex from string arguments at runtime
 extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
+    RootFrame regex_roots(4);
+    Rooted<Item> pattern_arg_root(regex_roots, pattern_item);
+    Rooted<Item> flags_arg_root(regex_roots, flags_item);
+    Rooted<Item> pattern_text_root(regex_roots, make_js_undefined());
+    Rooted<Item> flags_text_root(regex_roots, make_js_undefined());
+    pattern_item = pattern_arg_root.get();
+    flags_item = flags_arg_root.get();
     const char* pattern = "";
     int pattern_len = 0;
     const char* flags = "";
@@ -18558,8 +18631,7 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
             JS_ASSIGN_OR_RETURN(src_val, js_property_get(pattern_item, src_key));
             JS_ASSIGN_OR_RETURN(src_str, (get_type_id(src_val) == LMD_TYPE_STRING) ? src_val : js_to_string(src_val));
             if (get_type_id(src_str) == LMD_TYPE_STRING) {
-                String* ps = it2s(src_str);
-                if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+                pattern_text_root.set(src_str);
             }
             if (!flags_provided) {
                 Item fl_key = (Item){.item = s2it(heap_create_name("flags", 5))};
@@ -18567,8 +18639,7 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
                 if (get_type_id(fl_val) != LMD_TYPE_UNDEFINED && get_type_id(fl_val) != LMD_TYPE_NULL) {
                     JS_ASSIGN_OR_RETURN(fl_str, (get_type_id(fl_val) == LMD_TYPE_STRING) ? fl_val : js_to_string(fl_val));
                     if (get_type_id(fl_str) == LMD_TYPE_STRING) {
-                        String* fs = it2s(fl_str);
-                        if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+                        flags_text_root.set(fl_str);
                     }
                 }
             }
@@ -18576,30 +18647,38 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
             // Non-regexp object — convert to string
             JS_ASSIGN_OR_RETURN(s, js_to_string(pattern_item));
             if (get_type_id(s) == LMD_TYPE_STRING) {
-                String* ps = it2s(s);
-                if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+                pattern_text_root.set(s);
             }
         }
     } else if (get_type_id(pattern_item) == LMD_TYPE_STRING) {
-        String* ps = it2s(pattern_item);
-        if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+        pattern_text_root.set(pattern_item);
     } else if (get_type_id(pattern_item) != LMD_TYPE_UNDEFINED) {
         // ToString other primitives
         JS_ASSIGN_OR_RETURN(s, js_to_string(pattern_item));
         if (get_type_id(s) == LMD_TYPE_STRING) {
-            String* ps = it2s(s);
-            if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+            pattern_text_root.set(s);
         }
     }
     if (flags_provided && get_type_id(flags_item) == LMD_TYPE_STRING) {
-        String* fs = it2s(flags_item);
-        if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+        flags_text_root.set(flags_item);
     } else if (flags_provided && get_type_id(flags_item) != LMD_TYPE_UNDEFINED) {
         JS_ASSIGN_OR_RETURN(s, js_to_string(flags_item));
         if (get_type_id(s) == LMD_TYPE_STRING) {
-            String* fs = it2s(s);
-            if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+            flags_text_root.set(s);
         }
+    }
+    // RegExp conversion may allocate while converting either argument. Keep both
+    // resulting strings rooted until js_create_regex copies their spans into the
+    // input pool; the compiler then consumes only those stable copies.
+    String* pattern_string = it2s(pattern_text_root.get());
+    if (pattern_string) {
+        pattern_len = (int)pattern_string->len;
+        pattern = pattern_string->chars;
+    }
+    String* flags_string = it2s(flags_text_root.get());
+    if (flags_string) {
+        flags_len = (int)flags_string->len;
+        flags = flags_string->chars;
     }
     return js_create_regex(pattern, pattern_len, flags, flags_len);
 }
@@ -38820,7 +38899,10 @@ extern "C" Item js_module_enable_compile_cache(Item arg) {
 
     char abs_dir[4096];
     js_cc_make_absolute(dir, abs_dir, (int)sizeof(abs_dir));
-    if (!js_cc_write_allowed(abs_dir)) {
+    // The permission layer canonicalizes relative paths with its own cwd
+    // representation; checking the original spelling avoids a Windows uv_cwd
+    // versus CRT getcwd mismatch that rejected an explicitly granted directory.
+    if (!js_cc_write_allowed(dir)) {
         const char* msg = "Skipping compile cache because write permission for path is not granted";
         if (js_cc_debug_enabled()) {
             js_cc_debugf("Skipping compile cache because write permission for %s is not granted\n", abs_dir);

@@ -309,14 +309,6 @@ static void free_backdrop_filter_payload(DomElement* elem, ViewTree* tree) {
     free_filter_chain(tree, elem ? elem->backdrop_filter_prop() : nullptr);
 }
 
-static void free_pseudo_payload(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->pseudo) return;
-    view_pool_free_ptr(tree, elem->pseudo->before_content);
-    view_pool_free_ptr(tree, elem->pseudo->after_content);
-    view_pool_free_ptr(tree, elem->pseudo->before_separator);
-    view_pool_free_ptr(tree, elem->pseudo->after_separator);
-}
-
 static void free_vector_path_payload(DomElement* elem, ViewTree* tree) {
     VectorPathProp* path = elem ? elem->vector_path() : nullptr;
     if (!path) return;
@@ -553,7 +545,7 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "multicol",        nullptr,                   nullptr,                   view_prop_get_multicol,        view_prop_clear_multicol,        nullptr,         nullptr,       &MULTICOL_PROP_DEFAULT,      sizeof(MultiColumnProp),   nullptr },
     { "form",            release_form_prop,         nullptr,                   nullptr,                       nullptr,                       nullptr,         nullptr,       nullptr,                      0,                         nullptr },
     { "item",            nullptr,                   nullptr,                   nullptr,                       nullptr,                       clear_item_prop, free_item_prop, nullptr,                   0,                         free_item_prop },
-    { "pseudo",          release_pseudo_content_prop_entry, free_pseudo_payload, view_prop_get_pseudo,        view_prop_clear_pseudo,          nullptr,         nullptr,       &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), reset_pseudo_content_prop },
+    { "pseudo",          release_pseudo_content_prop_entry, nullptr,             view_prop_get_pseudo,        view_prop_clear_pseudo,          nullptr,         nullptr,       &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), reset_pseudo_content_prop },
     { "vector-path",     nullptr,                   free_vector_path_payload,  view_prop_get_vpath,           view_prop_clear_vpath,           nullptr,         nullptr,       &VECTOR_PATH_PROP_DEFAULT,   sizeof(VectorPathProp),    nullptr },
     { "layout-cache",    nullptr,                   nullptr,                   view_prop_get_layout_cache,    view_prop_clear_layout_cache,    nullptr,         nullptr,       nullptr,                      sizeof(radiant::LayoutCache), reset_layout_cache },
 };

@@ -1672,13 +1672,18 @@ void jm_finish_last_deferred_mir() {
     }
 }
 
+static bool jm_path_has_lambda_ext(const char* path) {
+    int len = path ? (int)strlen(path) : 0;
+    return len >= 3 && strcmp(path + len - 3, ".ls") == 0;
+}
+
 static bool jm_path_has_known_js_ext(const char* path) {
     int len = path ? (int)strlen(path) : 0;
     return (len >= 3 && strcmp(path + len - 3, ".js") == 0) ||
            (len >= 4 && strcmp(path + len - 4, ".mjs") == 0) ||
            (len >= 4 && strcmp(path + len - 4, ".cjs") == 0) ||
            (len >= 5 && strcmp(path + len - 5, ".json") == 0) ||
-           (len >= 3 && strcmp(path + len - 3, ".ls") == 0);
+           jm_path_has_lambda_ext(path);
 }
 
 static bool jm_path_is_lambda_source(const char* path) {
@@ -3767,6 +3772,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 // wrapper frame; capture analysis must not mistake the original
                 // wrapper-local declaration for a normal ancestor capture.
                 mce.is_iife_func_decl = true;
+                fc->is_iife_func_decl = true;
                 mce.int_val = mt->module_var_count++;
                 hashmap_set(mt->module_consts, &mce);
                 log_debug("js-mir: iife func '%s' → module_var[%d]", mce.name, (int)mce.int_val);
@@ -5606,8 +5612,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 mt->tp->ast_pool, sizeof(FnParamAnalysis) * (size_t)physical_param_count);
             for (int p = 0; p < physical_param_count; p++) {
                 bool env = env_param_count && p == 0;
-                public_entry->params[p] = {env ? LMD_TYPE_ANY :
-                    jm_param_type(fc, p - env_param_count),
+                // the conditional mixes an enum constant with TypeId; make the ABI-width field explicit for Clang.
+                TypeId param_type = env ? (TypeId)LMD_TYPE_ANY :
+                    jm_param_type(fc, p - env_param_count);
+                public_entry->params[p] = {param_type,
                     env ? VALUE_REP_RAW_GC_POINTER : VALUE_REP_ITEM, 0};
             }
         }
@@ -5625,11 +5633,12 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         body->param_count = physical_param_count;
         if (physical_param_count > 0) {
             body->params = (FnParamAnalysis*)pool_calloc(
-                mt->tp->ast_pool, sizeof(FnParamAnalysis) * (size_t)physical_param_count);
+            mt->tp->ast_pool, sizeof(FnParamAnalysis) * (size_t)physical_param_count);
             for (int p = 0; p < physical_param_count; p++) {
                 bool env = env_param_count && p == 0;
-                body->params[p] = {env ? LMD_TYPE_ANY :
-                    jm_param_type(fc, p - env_param_count),
+                TypeId param_type = env ? (TypeId)LMD_TYPE_ANY :
+                    jm_param_type(fc, p - env_param_count);
+                body->params[p] = {param_type,
                     env ? VALUE_REP_RAW_GC_POINTER : VALUE_REP_ITEM, 0};
             }
         }
@@ -7146,6 +7155,8 @@ static void jm_log_module_phase_progress(const char* filename, const char* phase
         filename ? filename : "<module>", phase);
 }
 
+#ifndef _WIN32
+// windows does not compile the POSIX import-precompile path that consumes this helper.
 static bool jm_module_has_static_imports(JsAstNode* ast) {
     if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return false;
     JsProgramNode* program = (JsProgramNode*)ast;
@@ -7154,6 +7165,7 @@ static bool jm_module_has_static_imports(JsAstNode* ast) {
     }
     return false;
 }
+#endif
 
 static bool jm_module_has_top_level_await(JsAstNode* ast) {
     if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return false;
@@ -7299,8 +7311,12 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return ItemNull;
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
-    mt->module_name_base = 0;
-    mt->module_ic_base = 0;
+    // A dynamic module compiled while a Test262 preamble is active inherits
+    // that sealed name/IC image; local indexes must start after the inherited
+    // entries or globalThis member loads resolve to another preamble name.
+    mt->module_name_base = g_jm_preamble_in
+        ? g_jm_preamble_in->module_property_count : 0;
+    mt->module_ic_base = g_jm_preamble_in ? g_jm_preamble_in->ic_count : 0;
 
     mt->module = MIR_new_module(ctx, "js_module");
 

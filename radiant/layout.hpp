@@ -105,6 +105,7 @@ constexpr int MAX_LAYOUT_NODES = 50000;
 constexpr int MAX_FLEX_DEPTH = 16;
 constexpr int MAX_GRID_DEPTH = 4;
 constexpr int MAX_IFRAME_DEPTH = 3;
+constexpr int MAX_MULTICOL_BLOCKS = 1024;
 
 // browser layout coordinates use a signed 2^25 CSS-pixel range.
 constexpr float MAX_LAYOUT_DIMENSION = 33554432.0f;
@@ -756,6 +757,36 @@ static inline const CssValue* css_box_shorthand_side_value(const CssValue* value
     return index < count ? values[index] : nullptr;
 }
 
+typedef struct CssCascadeCandidate {
+    CssDeclaration* decl;
+    CssValue* value;
+    int64_t priority;
+} CssCascadeCandidate;
+
+static inline CssValue* css_pair_side_value(const CssValue* value, bool end_side) {
+    if (!value) return nullptr;
+    if (value->type != CSS_VALUE_TYPE_LIST) return (CssValue*)value;
+    int count = value->data.list.count;
+    CssValue** values = value->data.list.values;
+    if (count <= 0 || !values) return nullptr;
+    int index = (end_side && count >= 2) ? 1 : 0;
+    return index < count ? values[index] : nullptr;
+}
+
+// Cascade selection is shared by used-value reparsing and intrinsic sizing;
+// keeping the priority comparison in one helper prevents the two passes from
+// choosing different declarations for the same logical side.
+static inline void css_consider_cascade_candidate(CssCascadeCandidate* candidate,
+                                                  CssDeclaration* decl, CssValue* value) {
+    if (!candidate || !decl || !value) return;
+    int64_t priority = get_cascade_priority(decl);
+    if (!candidate->decl || priority >= candidate->priority) {
+        candidate->decl = decl;
+        candidate->value = value;
+        candidate->priority = priority;
+    }
+}
+
 static inline float layout_non_negative_free_space(float value) {
     return value > 0.0f ? value : 0.0f;
 }
@@ -785,6 +816,28 @@ static inline void layout_resolve_auto_margin_pair(float available_size, float b
     } else if (end_auto) {
         *end_margin = layout_non_negative_free_space(
             available_size - border_box_size - *start_margin);
+    }
+}
+
+// Keep normal-flow horizontal auto margins on one axis path. Floats and inline-level
+// boxes use zero auto margins; ordinary blocks resolve against the float-reduced space.
+static inline void layout_resolve_in_flow_horizontal_margins(ViewBlock* block,
+                                                             float available_size,
+                                                             bool is_rtl,
+                                                             bool zero_auto) {
+    if (!block || !block->bound) return;
+    Margin* margin = &block->boundary_mut()->margin;
+    bool start_auto = margin->left_type == CSS_VALUE_AUTO;
+    bool end_auto = margin->right_type == CSS_VALUE_AUTO;
+    if (zero_auto) {
+        if (start_auto) margin->left = 0.0f;
+        if (end_auto) margin->right = 0.0f;
+    } else if (start_auto || end_auto) {
+        layout_resolve_auto_margin_pair(
+            available_size, block->width, start_auto, end_auto,
+            &margin->left, &margin->right);
+    } else if (is_rtl) {
+        margin->left = available_size - block->width - margin->right;
     }
 }
 
@@ -1107,11 +1160,16 @@ float compute_view_last_text_baseline(
 // ============================================================================
 
 CssEnum get_white_space_value(DomNode* node);
+inline bool layout_white_space_collapses(CssEnum white_space) {
+    return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
+           white_space == CSS_VALUE_PRE_LINE || white_space == 0;
+}
 inline bool white_space_preserves_space_advance(CssEnum white_space) {
     return white_space == CSS_VALUE_PRE ||
         white_space == CSS_VALUE_PRE_WRAP ||
         white_space == CSS_VALUE_BREAK_SPACES;
 }
+CssEnum layout_inherited_text_transform(DomNode* node);
 float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
 
@@ -1308,6 +1366,61 @@ typedef struct ColumnFragment {
     float target_height;
     float used_height;
 } ColumnFragment;
+
+// All multicol balancing passes use the same bounded group scratch shape.
+// Keeping allocation and reverse-order release together prevents the nested
+// spanner path and the ordinary container path from drifting in ownership.
+struct MulticolGroupScratch {
+    float* heights;
+    bool* can_fragment;
+    bool* break_before;
+    bool* break_after;
+    ColumnFragment* fragments;
+
+    bool init(ScratchArena* scratch) {
+        heights = (float*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(float));
+        can_fragment = (bool*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(bool));
+        break_before = (bool*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(bool));
+        break_after = (bool*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(bool));
+        fragments = (ColumnFragment*)scratch_calloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(ColumnFragment));
+        return heights && can_fragment && break_before && break_after && fragments;
+    }
+
+    void release(ScratchArena* scratch) {
+        if (fragments) scratch_free(scratch, fragments);
+        if (break_after) scratch_free(scratch, break_after);
+        if (break_before) scratch_free(scratch, break_before);
+        if (can_fragment) scratch_free(scratch, can_fragment);
+        if (heights) scratch_free(scratch, heights);
+        fragments = nullptr;
+        break_after = nullptr;
+        break_before = nullptr;
+        can_fragment = nullptr;
+        heights = nullptr;
+    }
+};
+
+// Keep the bounded flow-item buffer paired with its scratch lifetime; nested
+// and top-level multicol passes otherwise duplicate the same allocation path.
+struct MulticolFlowScratch {
+    MulticolFlowItem* items;
+
+    bool init(ScratchArena* scratch) {
+        items = (MulticolFlowItem*)scratch_calloc(
+            scratch, MAX_MULTICOL_BLOCKS * sizeof(MulticolFlowItem));
+        return items != nullptr;
+    }
+
+    void release(ScratchArena* scratch) {
+        if (items) scratch_free(scratch, items);
+        items = nullptr;
+    }
+};
 
 // tier-3: layout-transient, valid while distributing one multicol group
 typedef struct ColumnGroup {
@@ -1941,7 +2054,77 @@ typedef struct LayoutAxisConstraintRefs {
         minimum_type = horizontal ? &block->given_min_width_type : &block->given_min_height_type;
         maximum_type = horizontal ? &block->given_max_width_type : &block->given_max_height_type;
     }
+    LayoutAxisConstraintRefs(BlockProp* block, LayoutAxis axis)
+        : LayoutAxisConstraintRefs(block, axis == LAYOUT_AXIS_X) {}
 } LayoutAxisConstraintRefs;
+
+// Keep physical start/end selection in one value object.  Layout algorithms
+// use physical axes after writing-mode resolution, so every caller should use
+// the same left/right or top/bottom mapping for insets and margins.
+inline CssBoxSide layout_axis_side(LayoutAxis axis, bool start) {
+    if (axis == LAYOUT_AXIS_X) return start ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT;
+    return start ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_BOTTOM;
+}
+
+typedef struct LayoutAxisInsetRefs {
+    RadiantInsetSide start;
+    RadiantInsetSide end;
+
+    LayoutAxisInsetRefs(PositionProp* position, LayoutAxis axis)
+        : start{}, end{} {
+        if (!position) return;
+        start = radiant_inset_side(position, layout_axis_side(axis, true));
+        end = radiant_inset_side(position, layout_axis_side(axis, false));
+    }
+} LayoutAxisInsetRefs;
+
+typedef struct LayoutAxisMarginRefs {
+    float* start;
+    float* end;
+    CssEnum* start_type;
+    CssEnum* end_type;
+
+    LayoutAxisMarginRefs(Margin* margin, LayoutAxis axis)
+        : start(nullptr), end(nullptr), start_type(nullptr), end_type(nullptr) {
+        if (!margin) return;
+        start = radiant_spacing_value(margin, layout_axis_side(axis, true));
+        end = radiant_spacing_value(margin, layout_axis_side(axis, false));
+        start_type = radiant_margin_type(margin, layout_axis_side(axis, true));
+        end_type = radiant_margin_type(margin, layout_axis_side(axis, false));
+    }
+} LayoutAxisMarginRefs;
+
+// Keep an absolute/static-position axis as one unit; callers must not mix an
+// inset from one physical axis with margins from the other.
+typedef struct LayoutAxisPlacementRefs {
+    LayoutAxisInsetRefs insets;
+    LayoutAxisMarginRefs margins;
+
+    LayoutAxisPlacementRefs(ViewBlock* block, LayoutAxis axis)
+        : insets(block ? block->position : nullptr, axis),
+          margins(block && block->bound ? &block->boundary_mut()->margin : nullptr, axis) {}
+
+    bool has_start() const { return insets.start.has && *insets.start.has; }
+    bool has_end() const { return insets.end.has && *insets.end.has; }
+    bool has_any_inset() const { return has_start() || has_end(); }
+    float margin_start() const { return margins.start ? *margins.start : 0.0f; }
+    float margin_end() const { return margins.end ? *margins.end : 0.0f; }
+} LayoutAxisPlacementRefs;
+
+inline CssEnum layout_axis_given_type(const BlockProp* block, LayoutAxis axis) {
+    if (!block) return CSS_VALUE_AUTO;
+    return axis == LAYOUT_AXIS_X ? block->given_width_type : block->given_height_type;
+}
+
+inline bool layout_axis_uses_intrinsic_size(const BlockProp* block, LayoutAxis axis) {
+    CssEnum type = layout_axis_given_type(block, axis);
+    return type == CSS_VALUE_MIN_CONTENT || type == CSS_VALUE_MAX_CONTENT ||
+        type == CSS_VALUE_FIT_CONTENT;
+}
+
+inline bool layout_axis_uses_stretch_size(const BlockProp* block, LayoutAxis axis) {
+    return layout_axis_given_type(block, axis) == CSS_VALUE_STRETCH;
+}
 
 inline float layout_axis_given_size(const BlockProp* block, LayoutAxis axis) {
     if (!block) return -1.0f;
@@ -2667,6 +2850,17 @@ void adjust_cell_text_positions_final(struct ViewBlock* cell, float text_abs_x);
 bool wrap_orphaned_table_children(LayoutContext* lycon, struct DomElement* parent);
 bool is_table_internal_display(CssEnum display);
 
+inline bool layout_display_is_table_row_group(CssEnum display) {
+    return display == CSS_VALUE_TABLE_ROW_GROUP ||
+           display == CSS_VALUE_TABLE_HEADER_GROUP ||
+           display == CSS_VALUE_TABLE_FOOTER_GROUP;
+}
+
+inline bool layout_display_is_table_structure(CssEnum display) {
+    return display == CSS_VALUE_TABLE || display == CSS_VALUE_TABLE_ROW ||
+           layout_display_is_table_row_group(display);
+}
+
 // ============================================================================
 // Absolute Children
 // ============================================================================
@@ -2826,6 +3020,10 @@ FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float h
                                               bool line_query = false,
                                               bool float_placement_query = false);
 
+// Return the next lower edge of any float strictly below the candidate Y.
+// Float-avoidance and positioned static placement share this boundary rule.
+float block_context_next_float_boundary(BlockContext* ctx, float y);
+
 /**
  * Find the lowest Y where a given width is available
  * @param element_height Height of the element to place (queries full height range for floats)
@@ -2881,11 +3079,42 @@ void reset_flex_item_prop_for_style(LayoutContext* lycon, ViewSpan* block);
 void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span);
 PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
-void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before);
+
+// Shared computed-property allocation keeps CSS and HTML hint resolution on
+// one boundary ownership path; divergent lazy allocation leaves partially
+// initialized styles that later layout passes interpret differently.
+inline BackgroundProp* layout_ensure_background(LayoutContext* lycon, ViewSpan* view) {
+    if (!view) return nullptr;
+    BoundaryProp* bound = view->ensure_boundary(lycon);
+    if (!bound) return nullptr;
+    if (!bound->background) {
+        bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+    }
+    return bound->background;
+}
+
+inline BorderProp* layout_ensure_border(LayoutContext* lycon, ViewSpan* view) {
+    if (!view) return nullptr;
+    BoundaryProp* bound = view->ensure_boundary(lycon);
+    if (!bound) return nullptr;
+    if (!bound->border) {
+        bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+    }
+    return bound->border;
+}
+
+inline OutlineProp* layout_ensure_outline(LayoutContext* lycon, ViewSpan* view) {
+    if (!view) return nullptr;
+    BoundaryProp* bound = view->ensure_boundary(lycon);
+    if (!bound) return nullptr;
+    if (!bound->outline) {
+        bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp));
+    }
+    return bound->outline;
+}
+
 void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before);
 void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
-                                       bool generate_before = true,
-                                       bool generate_after = true,
                                        bool include_marker = false,
                                        bool create_first_letter = false);
 void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
@@ -2910,6 +3139,166 @@ int map_css_keyword_to_lexbor(const char* keyword);
  * @return float font size in pixels
  */
 float map_lambda_font_size_keyword(CssEnum keyword_enum);
+CssEnum map_font_weight(const CssValue* value);
+int16_t map_font_weight_numeric(const CssValue* value);
+
+struct LayoutFontSizeResult {
+    float value;
+    bool from_medium;
+};
+
+inline LayoutFontSizeResult layout_resolve_font_size_value(
+    LayoutContext* lycon, const CssValue* raw_value, FontProp* base_font,
+    bool resolve_vars) {
+    LayoutFontSizeResult result = {-1.0f, false};
+    if (!lycon || !raw_value) return result;
+
+    // Intrinsic sizing and pseudo-style resolution must use the same parent
+    // font baseline; only their custom-property expansion policy differs.
+    const CssValue* value = resolve_vars ? resolve_var_function(lycon, raw_value) : raw_value;
+    if (!value) return result;
+    float parent_font_size = base_font && base_font->font_size > 0.0f
+        ? base_font->font_size : 16.0f;
+    bool parent_from_medium = base_font && base_font->font_size_from_medium;
+
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        if (value->data.length.unit == CSS_UNIT_EM) {
+            result.value = (float)value->data.length.value * parent_font_size;
+            result.from_medium = parent_from_medium;
+        } else {
+            result.value = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, value);
+        }
+    } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        result.value = (float)(value->data.percentage.value / 100.0 * parent_font_size);
+        result.from_medium = parent_from_medium;
+    } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        result.from_medium = true;
+        if (keyword == CSS_VALUE_INHERIT) {
+            result.value = parent_font_size;
+            result.from_medium = parent_from_medium;
+        } else if (keyword == CSS_VALUE_LARGER || keyword == CSS_VALUE_SMALLER) {
+            float scale = keyword == CSS_VALUE_LARGER ? 1.2f : (1.0f / 1.2f);
+            result.value = parent_font_size * scale;
+        } else {
+            result.value = map_lambda_font_size_keyword(keyword);
+        }
+    } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        if (value->data.number.value == 0.0) result.value = 0.0f;
+    } else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+        result.value = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, value);
+    }
+    return result;
+}
+
+inline float layout_resolve_font_size(LayoutContext* lycon, const CssValue* value,
+                                      FontProp* base_font, bool resolve_vars,
+                                      bool* from_medium) {
+    LayoutFontSizeResult result = layout_resolve_font_size_value(
+        lycon, value, base_font, resolve_vars);
+    if (from_medium) *from_medium = result.from_medium;
+    return result.value;
+}
+
+struct LayoutFontShorthandParts {
+    const CssValue* group;
+    const CssValue* size;
+    const CssValue* line_height;
+    const CssValue* weight;
+    const CssValue* style;
+    size_t family_start;
+    bool small_caps;
+};
+
+inline bool layout_parse_font_shorthand(const CssValue* value,
+                                        LayoutFontShorthandParts* parts) {
+    if (!parts) return false;
+    *parts = {nullptr, nullptr, nullptr, nullptr, nullptr, 0, false};
+    if (!value || value->type != CSS_VALUE_TYPE_LIST || value->data.list.count < 2) {
+        return false;
+    }
+    const CssValue* group = value;
+    if (value->data.list.values[0] &&
+        value->data.list.values[0]->type == CSS_VALUE_TYPE_LIST) {
+        group = value->data.list.values[0];
+    }
+    size_t count = group->data.list.count;
+    if (count < 2) return false;
+    parts->group = group;
+    parts->family_start = count;
+
+    // A global keyword mixed into a shorthand invalidates the declaration;
+    // sharing this boundary keeps intrinsic and computed font parsing aligned.
+    for (size_t i = 0; i < count; i++) {
+        const CssValue* item = group->data.list.values[i];
+        if (item && item->type == CSS_VALUE_TYPE_KEYWORD) {
+            const CssEnumInfo* info = css_enum_info(item->data.keyword);
+            if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return false;
+        }
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        const CssValue* item = group->data.list.values[i];
+        if (!item) continue;
+        if ((item->type == CSS_VALUE_TYPE_LENGTH ||
+             item->type == CSS_VALUE_TYPE_PERCENTAGE) && !parts->size) {
+            parts->size = item;
+            size_t next = i + 1;
+            if (next < count) {
+                const CssValue* slash = group->data.list.values[next];
+                bool is_slash = slash && slash->type == CSS_VALUE_TYPE_CUSTOM &&
+                    slash->data.custom_property.name &&
+                    strcmp(slash->data.custom_property.name, "/") == 0;
+                if (is_slash && next + 1 < count) {
+                    const CssValue* line_height = group->data.list.values[next + 1];
+                    bool valid_line_height = line_height &&
+                        (line_height->type == CSS_VALUE_TYPE_LENGTH ||
+                         line_height->type == CSS_VALUE_TYPE_PERCENTAGE ||
+                         line_height->type == CSS_VALUE_TYPE_NUMBER ||
+                         (line_height->type == CSS_VALUE_TYPE_KEYWORD &&
+                          (line_height->data.keyword == CSS_VALUE_NORMAL ||
+                           line_height->data.keyword == CSS_VALUE_INHERIT)));
+                    if (valid_line_height) {
+                        parts->line_height = line_height;
+                        next += 2;
+                    }
+                }
+            }
+            parts->family_start = next;
+            break;
+        }
+        if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+            const CssEnumInfo* info = css_enum_info(item->data.keyword);
+            if (!info) continue;
+            if (info->group == CSS_VALUE_GROUP_FONT_WEIGHT) {
+                parts->weight = item;
+            } else if (info->group == CSS_VALUE_GROUP_FONT_STYLE) {
+                parts->style = item;
+            } else if (item->data.keyword == CSS_VALUE_SMALL_CAPS) {
+                parts->small_caps = true;
+            } else if (info->group == CSS_VALUE_GROUP_FONT_SIZE && !parts->size) {
+                parts->size = item;
+                if (i + 2 < count) {
+                    const CssValue* slash = group->data.list.values[i + 1];
+                    bool is_slash = slash && slash->type == CSS_VALUE_TYPE_CUSTOM &&
+                        slash->data.custom_property.name &&
+                        strcmp(slash->data.custom_property.name, "/") == 0;
+                    if (is_slash) {
+                        parts->line_height = group->data.list.values[i + 2];
+                        parts->family_start = i + 3;
+                        break;
+                    }
+                }
+                parts->family_start = i + 1;
+                break;
+            }
+        } else if (item->type == CSS_VALUE_TYPE_NUMBER && !parts->weight) {
+            int weight = (int)item->data.number.value; // INT_CAST_OK: CSS numeric weight.
+            if (weight >= 1 && weight <= 1000) parts->weight = item;
+        }
+    }
+    return parts->size != nullptr;
+}
 
 /**
  * Map Lambda font-weight keyword to numeric value
@@ -2962,6 +3351,20 @@ static inline bool layout_text_node_has_content(DomNode* node) {
     return text && !is_only_whitespace(text);
 }
 
+// Grid ignores text nodes while flex treats non-whitespace text as anonymous
+// items; one counter keeps both scratch-array bounds derived from the same walk.
+static inline int layout_count_potential_items(ViewBlock* container,
+                                                bool include_text) {
+    int count = 0;
+    for (DomNode* child = container ? container->first_child : nullptr;
+         child; child = child->next_sibling) {
+        if (child->is_element() || (include_text && layout_text_node_has_content(child))) {
+            count++;
+        }
+    }
+    return count;
+}
+
 inline bool layout_dom_text_has_non_whitespace(DomText* text) {
     if (!text || !text->text || text->length == 0) return false;
     for (size_t i = 0; i < text->length; i++) {
@@ -3012,6 +3415,84 @@ static inline bool layout_position_is_floated(const PositionProp* position) {
             position->float_prop == CSS_VALUE_RIGHT);
 }
 
+struct LayoutLogicalSides {
+    CssBoxSide inline_start;
+    CssBoxSide inline_end;
+    CssBoxSide block_start;
+    CssBoxSide block_end;
+    CssBoxSide block_pair_start;
+    CssBoxSide block_pair_end;
+};
+
+static inline LayoutLogicalSides layout_logical_sides(bool inline_vertical,
+                                                       bool block_start_right) {
+    LayoutLogicalSides sides = {};
+    sides.inline_start = inline_vertical ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_LEFT;
+    sides.inline_end = inline_vertical ? CSS_BOX_SIDE_BOTTOM : CSS_BOX_SIDE_RIGHT;
+    sides.block_start = inline_vertical
+        ? (block_start_right ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_LEFT)
+        : CSS_BOX_SIDE_TOP;
+    sides.block_end = inline_vertical
+        ? (block_start_right ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT)
+        : CSS_BOX_SIDE_BOTTOM;
+    sides.block_pair_start = inline_vertical ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_TOP;
+    sides.block_pair_end = inline_vertical ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_BOTTOM;
+    return sides;
+}
+
+struct LayoutShadowValue {
+    float offset_x;
+    float offset_y;
+    float blur_radius;
+    float spread_radius;
+    Color color;
+    bool inset;
+};
+
+// CSS values use the same nested list/function shape across sizing, images,
+// and shorthand parsing; callers should provide only the leaf predicate.
+template <typename Predicate>
+static inline bool layout_css_value_any(const CssValue* value, Predicate predicate) {
+    if (!value) return false;
+    if (predicate(value)) return true;
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.values) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (layout_css_value_any(value->data.list.values[i], predicate)) return true;
+        }
+    } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+               value->data.function->args) {
+        for (int i = 0; i < value->data.function->arg_count; i++) {
+            if (layout_css_value_any(value->data.function->args[i], predicate)) return true;
+        }
+    }
+    return false;
+}
+
+static inline bool layout_element_is_floated(const DomElement* element) {
+    if (!element) return false;
+    // Intrinsic passes may run before PositionProp exists, so consult cascaded
+    // position/float values instead of treating an unresolved element as static.
+    if (element->position) {
+        return !layout_position_is_abs_fixed(element->position) &&
+            layout_position_is_floated(element->position);
+    }
+    if (!element->specified_style) return false;
+    CssDeclaration* position_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_POSITION);
+    if (position_decl && position_decl->value &&
+        position_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+        (position_decl->value->data.keyword == CSS_VALUE_ABSOLUTE ||
+         position_decl->value->data.keyword == CSS_VALUE_FIXED)) {
+        return false;
+    }
+    CssDeclaration* float_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_FLOAT);
+    return float_decl && float_decl->value &&
+        float_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+        (float_decl->value->data.keyword == CSS_VALUE_LEFT ||
+         float_decl->value->data.keyword == CSS_VALUE_RIGHT);
+}
+
 static inline bool layout_view_is_out_of_flow_positioned(const View* view) {
     const DomNode* node = static_cast<const DomNode*>(view);
     const DomElement* element = node ? node->as_element() : nullptr;
@@ -3024,6 +3505,70 @@ static inline bool layout_view_is_out_of_flow(const View* view) {
     return element &&
            (layout_position_is_abs_fixed(element->position) ||
             layout_position_is_floated(element->position));
+}
+
+// Inline operations differ in their per-view action, not in their tree walk.
+// Keeping the walk here prevents line alignment and inline measurement from
+// drifting on out-of-flow filtering or nested span handling.
+template <typename Enter, typename Leave>
+static inline bool layout_walk_inline_views(View* view, Enter enter, Leave leave,
+                                            bool skip_out_of_flow = true) {
+    bool changed = false;
+    while (view) {
+        if (!skip_out_of_flow || !layout_view_is_out_of_flow(view)) {
+            bool view_changed = enter(view);
+            if (view->view_type == RDT_VIEW_INLINE) {
+                ViewSpan* span = static_cast<ViewSpan*>(view);
+                if (span->first_child) {
+                    view_changed |= layout_walk_inline_views(
+                        span->first_child, enter, leave, skip_out_of_flow);
+                }
+            }
+            if (view_changed) leave(view);
+            changed |= view_changed;
+        }
+        view = view->next();
+    }
+    return changed;
+}
+
+// Generic inline-tree traversal carries depth for algorithms such as bidi
+// collection; the callback decides whether an inline node has descendants.
+template <typename Visit, typename Leave>
+static inline void layout_walk_view_tree(View* view, Visit visit, Leave leave,
+                                         bool skip_out_of_flow = true, int depth = 0) {
+    while (view) {
+        bool descend = false;
+        if (!skip_out_of_flow || !layout_view_is_out_of_flow(view)) {
+            descend = visit(view, depth);
+            if (descend && view->view_type == RDT_VIEW_INLINE) {
+                ViewSpan* span = static_cast<ViewSpan*>(view);
+                layout_walk_view_tree(span->first_child, visit, leave,
+                                      skip_out_of_flow, depth + 1);
+            }
+            leave(view, depth);
+        }
+        view = view->next();
+    }
+}
+
+template <typename Visit, typename Leave>
+static inline void layout_walk_view_descendants(View* view, Visit visit, Leave leave,
+                                                bool skip_out_of_flow = true,
+                                                int depth = 0) {
+    while (view) {
+        bool descend = false;
+        if (!skip_out_of_flow || !layout_view_is_out_of_flow(view)) {
+            descend = visit(view, depth);
+            if (descend && view->is_element()) {
+                layout_walk_view_descendants(
+                    static_cast<View*>(view->as_element()->first_child), visit, leave,
+                    skip_out_of_flow, depth + 1);
+            }
+            leave(view, depth);
+        }
+        view = view->next();
+    }
 }
 
 inline bool layout_span_children_have_no_line_content(ViewSpan* span);
@@ -3113,6 +3658,18 @@ bool layout_quirky_container_ignores_child_margin_bottom(
 CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
                                  CssEnum fallback = (CssEnum)0);
 
+struct LayoutBorderSpacingValue {
+    float horizontal;
+    float vertical;
+    bool resolved;
+    bool keep_inheriting;
+};
+
+LayoutBorderSpacingValue layout_resolve_border_spacing_value(
+    LayoutContext* lycon, const CssValue* value);
+bool layout_image_orientation_uses_from_image(DomElement* element);
+float layout_view_children_bottom(ViewBlock* block, bool block_only);
+
 inline bool layout_element_is_abs_or_fixed(DomElement* element) {
     if (!element) return false;
     CssEnum position = layout_specified_keyword(
@@ -3129,6 +3686,22 @@ inline bool layout_view_is_block_flow_box(View* view) {
         view->view_type == RDT_VIEW_INLINE_BLOCK ||
         view->view_type == RDT_VIEW_LIST_ITEM ||
         view->view_type == RDT_VIEW_TABLE;
+}
+
+inline View* layout_first_view_with_type(View* view, int required_type = -1) {
+    while (view && (!view->view_type ||
+                    (required_type >= 0 && view->view_type != required_type))) {
+        view = static_cast<View*>(view->next_sibling);
+    }
+    return view;
+}
+
+inline View* layout_previous_view_with_type(View* view, int required_type = -1) {
+    while (view && (!view->view_type ||
+                    (required_type >= 0 && view->view_type != required_type))) {
+        view = static_cast<View*>(view->prev_sibling);
+    }
+    return view;
 }
 
 inline bool layout_view_is_flex_item_box(View* view) {

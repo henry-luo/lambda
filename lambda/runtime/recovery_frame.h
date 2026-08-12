@@ -69,6 +69,12 @@ extern __thread LambdaRecoveryFrame* lambda_recovery_frame_tls_top;
 #define LAMBDA_RECOVERY_FRAME_SETJMP(frame) sigsetjmp((frame)->jump_buffer, 1)
 #define LAMBDA_RECOVERY_FRAME_LONGJMP(frame) siglongjmp((frame)->jump_buffer, 1)
 #define LAMBDA_RECOVERY_FRAME_MIR_CHECKPOINT_NAME "sigsetjmp"
+#elif defined(__MINGW32__)
+// mingw's x64 _setjmp second parameter carries an SEH frame shape that is not
+// valid when the target frame may be skipped by a JIT-side recovery jump.
+#define LAMBDA_RECOVERY_FRAME_SETJMP(frame) _setjmp((frame)->jump_buffer, NULL)
+#define LAMBDA_RECOVERY_FRAME_LONGJMP(frame) longjmp((frame)->jump_buffer, 1)
+#define LAMBDA_RECOVERY_FRAME_MIR_CHECKPOINT_NAME "setjmp"
 #else
 #define LAMBDA_RECOVERY_FRAME_SETJMP(frame) setjmp((frame)->jump_buffer)
 #define LAMBDA_RECOVERY_FRAME_LONGJMP(frame) longjmp((frame)->jump_buffer, 1)

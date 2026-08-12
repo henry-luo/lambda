@@ -16,6 +16,11 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef _WIN32
+#include <direct.h>
+// windows mkdir accepts only the path; map the POSIX mode-bearing test call.
+#define mkdir(path, mode) _mkdir(path)
+#endif
 
 extern "C" {
 

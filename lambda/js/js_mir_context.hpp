@@ -207,6 +207,7 @@ struct JsFuncCollected {
     // TCO:
     bool is_tco_eligible;           // has tail-recursive calls → loop transform
     bool is_iife_body;              // true if this function is a top-level IIFE body
+    bool is_iife_func_decl;         // true if declared directly inside a promoted IIFE body
     // P3: Constructor flag (set for class constructor methods only)
     bool is_constructor;            // true if this function is a class constructor
     bool is_derived_constructor;    // true if class constructor has [[ConstructorKind]] derived

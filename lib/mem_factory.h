@@ -27,6 +27,8 @@ extern "C" {
 
 // ---- Pools ----
 Pool* mem_pool_create(MemContext* ctx, MemRole role, const char* label);
+Pool* mem_pool_create_sized(MemContext* ctx, size_t initial_extent_size,
+                            MemRole role, const char* label);
 // Unregister + destroy. Safe on NULL and on untracked pools.
 void  mem_pool_destroy(Pool* pool);
 

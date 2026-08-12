@@ -1705,17 +1705,7 @@ static void pdf_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x
     }
 
     if (rule_height <= 0.0f) {
-        View* child = static_cast<View*>(block->first_child);
-        float max_bottom = 0.0f;
-        while (child) {
-            if (child->is_element()) {
-                ViewBlock* child_block = lam::view_require_block(child);
-                float child_bottom = child_block->y + child_block->height;
-                if (child_bottom > max_bottom) max_bottom = child_bottom;
-            }
-            child = child->next();
-        }
-        rule_height = max_bottom;
+        rule_height = layout_view_children_bottom(block, false);
     }
     if (rule_height <= 0.0f) return;
 
@@ -1956,17 +1946,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     trace.paint_ir_unsupported = ctx.paint_state.unsupported_count;
     const RenderExportTargetCaps* caps =
         render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF);
-    if (caps) {
-        trace.backend_vector_paths = caps->paths;
-        trace.backend_gradients = caps->gradients;
-        trace.backend_nested_clips = caps->clips;
-        trace.backend_picture_svg = true;
-        trace.backend_opacity_group = caps->opacity_groups;
-        trace.backend_blend_modes = caps->blend_modes;
-        trace.backend_gaussian_blur = caps->filters;
-        trace.backend_color_matrix_filters = caps->filters;
-        trace.backend_native_text_runs = caps->glyph_runs;
-    }
+    radiant_apply_export_caps(&trace, caps);
     render_profiler_emit_path_trace(nullptr, uicon, nullptr, &trace);
 
     paint_list_destroy(&ctx.paint_list);

@@ -856,22 +856,13 @@ static inline void em_store_frame_top(MirEmitter* em, MIR_reg_t runtime,
         // counter inferred only from the finalized slots can miss this
         // watermark consumer (D5.2, D5.3).
         em->frame.number_frame_required = true;
-#ifndef NDEBUG
-        // debug keeps the checked restore because it validates that every
-        // activation home was adopted before the number extent is reclaimed
-        // (D5.2, D5.3).
-        MIR_type_t types[1] = {MIR_T_P};
-        MIR_op_t args[1] = {MIR_new_reg_op(em->ctx, value)};
-        (void)em_call_with_args(em, "lambda_restore_number_frame_top",
-            MIR_T_I64, 1, types, args, true);
-#else
-        // release only needs the already-proven watermark store; routing this
-        // balanced epilogue through C paid one call on every scalar edge.
+        // The emitter has already ordered scalar adoption before this reset;
+        // keep the proven direct store in every build so MIR shape and
+        // safepoint accounting do not depend on NDEBUG (D5.2, D5.3).
         em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
             MIR_new_mem_op(em->ctx, MIR_T_I64, (MIR_disp_t)context_offset,
                 runtime, 0, 1),
             MIR_new_reg_op(em->ctx, value)));
-#endif
         return;
     }
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
@@ -958,19 +949,9 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
                                                    MIR_reg_t item,
                                                    MIR_reg_t target_home) {
     if (mode == MIR_SCALAR_RETURN_NONE) return item;
-#ifndef NDEBUG
-    // debug keeps the helper call so its no-GC assertion and scalar-home
-    // predicate remain observable while reclaiming an activation extent
-    // (D5.2, D5.3).
-    MIR_type_t types[2] = {MIR_T_I64, MIR_T_P};
-    MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item),
-        MIR_new_reg_op(em->ctx, target_home)};
-    return em_call_with_args(em,
-        "lambda_item_adopt_scalar_home", MIR_T_I64, 2, types, args, true);
-#else
-    // release only calls the adopter for the three scalar-home encodings;
-    // packed int/float Items already own their payload and can pass through
-    // without a native call on every scalar return (D5.2, D5.3).
+    // Classify the result in MIR so packed values pass through while only
+    // frame-backed scalar encodings call the adopter; doing this in every
+    // build keeps the ownership protocol and emitted MIR identical.
     MIR_reg_t item_type = em_new_reg(em, "adopt_type", MIR_T_I64);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH,
         MIR_new_reg_op(em->ctx, item_type), MIR_new_reg_op(em->ctx, item),
@@ -1048,8 +1029,12 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, adopted)));
     em_emit_label(em, l_done);
+    // Scalar-home adoption creates the carrier that callers keep after an
+    // await; publish it to the async spill tracker just like a raw call result.
+    if (em->after_call_result) {
+        em->after_call_result(em->call_owner, result, MIR_T_I64);
+    }
     return result;
-#endif
 }
 
 // Adopt a temporary boxed scalar before restoring its source number extent.

@@ -8755,6 +8755,9 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
         // heterogeneous for-in walking must not expose that runtime key.
         (name_len == JS_INTERNAL_PROTO_KEY_LEN &&
             strncmp(name, JS_INTERNAL_PROTO_KEY, JS_INTERNAL_PROTO_KEY_LEN) == 0) ||
+        // collection backing data is an internal slot, not a public own key;
+        // exposing it lets generic object clones copy the native table pointer.
+        (name_len == 4 && strncmp(name, "__cd", 4) == 0) ||
         (name_len == 15 && strncmp(name, "__source_text__", 15) == 0) ||
         (name_len == 18 && strncmp(name, "__instance_proto__", 18) == 0) ||
         (name_len == 18 && strncmp(name, "__primitiveValue__", 18) == 0) ||
@@ -8764,6 +8767,8 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
         (name_len == 10 && strncmp(name, "__frozen__", 10) == 0) ||
         (name_len == 12 && strncmp(name, "__is_proto__", 12) == 0) ||
         (name_len == 18 && strncmp(name, "__json_own_proto__", 18) == 0) ||
+        // Math and Date keep their native state in ordinary map slots; those
+        // implementation slots must not enter Object.keys or descriptor enumeration.
         (name_len == 11 && strncmp(name, "__is_math__", 11) == 0) ||
         (name_len == 8 && strncmp(name, "__time__", 8) == 0) ||
         (name_len == 4 && strncmp(name, "__rd", 4) == 0) ||
@@ -8772,9 +8777,6 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
         (name_len == 18 && strncmp(name, "__weakref_target__", 18) == 0) ||
         (name_len == 14 && strncmp(name, "__fr_cleanup__", 14) == 0) ||
         (name_len == 12 && strncmp(name, "__fr_cells__", 12) == 0)) {
-        // Date/WeakRef/FinalizationRegistry slots are internal state;
-        // publishing them as own names makes descriptor consumers interpret
-        // representation values as user-authored property descriptors.
         return true;
     }
     return false;
@@ -13688,7 +13690,9 @@ static void js_window_event_ensure_rooted() {
 }
 
 extern "C" int js_is_window_event_global_property(Item object, Item key) {
-    return js_window_event_intercept_enabled &&
+    // native DOM hit-testing can build JS-shaped objects outside an eval frame;
+    // window.event interception has no meaning until the owning runtime is bound.
+    return js_active_runtime_state && js_window_event_intercept_enabled &&
         js_global_this_obj.item != 0 &&
         object.item == js_global_this_obj.item &&
         js_key_is_event_name(key);
@@ -14892,9 +14896,9 @@ extern "C" Item js_get_global_this() {
             js_install_native_method(perf, "getEntriesByType",
                 js_performance_entries_by_type);
             origin_root.set(push_d(js_performance_time_origin_ms()));
-            js_property_set(perf, make_string_item("timeOrigin"), origin_root.get());
+            js_property_set_cstr(perf, "timeOrigin", origin_root.get());
             timing_root.set(js_new_object());
-            js_property_set(perf, make_string_item("timing"), timing_root.get());
+            js_property_set_cstr(perf, "timing", timing_root.get());
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("performance", 11))}, perf);
             Item perf_observer = js_new_native_constructor(
@@ -14903,10 +14907,9 @@ extern "C" Item js_get_global_this() {
             Item supported_types = js_array_new(0);
             supported_types_root.set(supported_types);
             js_array_push(supported_types, make_string_item("layout-shift"));
-            js_property_set(perf_observer, make_string_item("supportedEntryTypes"),
+            js_property_set_cstr(perf_observer, "supportedEntryTypes",
                 supported_types);
-            js_property_set(js_global_this_obj,
-                make_string_item("PerformanceObserver"), perf_observer);
+            js_property_set_cstr(js_global_this_obj, "PerformanceObserver", perf_observer);
         }
 
         // globalThis.MessageChannel / MessagePort stubs

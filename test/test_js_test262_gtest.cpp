@@ -2458,10 +2458,13 @@ static int hard_timeout_per_test_secs() {
     return std::max(T262_HARD_TIMEOUT_PER_TEST, timeout_secs);
 }
 
+#ifndef _WIN32
+// the steady-clock watchdog is compiled only for the POSIX worker path below.
 static long long t262_steady_now_ms() {
     auto now = std::chrono::steady_clock::now().time_since_epoch();
     return std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
 }
+#endif
 
 // Run a sub-batch of tests from a pre-written manifest file + stdout pipe
 // Run a sub-batch from a manifest file using posix_spawn (avoids fork's page table copy)

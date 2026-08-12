@@ -158,20 +158,23 @@ static bool text_is_all_collapsible_space(DomText* text, ViewSpan* span) {
 }
 
 static bool view_has_non_trailing_line_content(View* view, ViewSpan* span) {
-    if (!view || view->view_type == RDT_VIEW_NONE) return false;
-    if (view->view_type == RDT_VIEW_TEXT) {
-        return (view->width > 0.0f || view->height > 0.0f) &&
-            !text_is_all_collapsible_space(
-                layout_inline_as_text(static_cast<DomNode*>(view)), span);
-    }
-    if (view->view_type == RDT_VIEW_INLINE) {
-        ViewSpan* child_span = lam::view_require<RDT_VIEW_INLINE>(view);
-        for (View* child = child_span->first_child; child; child = child->next()) {
-            if (view_has_non_trailing_line_content(child, span)) return true;
+    if (!view) return false;
+    bool found = false;
+    auto inspect = [&](View* candidate) -> bool {
+        if (found) return false;
+        if (candidate->view_type == RDT_VIEW_NONE) return false;
+        if (candidate->view_type == RDT_VIEW_TEXT) {
+            found = (candidate->width > 0.0f || candidate->height > 0.0f) &&
+                !text_is_all_collapsible_space(
+                    layout_inline_as_text(static_cast<DomNode*>(candidate)), span);
+        } else if (candidate->view_type != RDT_VIEW_INLINE) {
+            found = candidate->width > 0.0f || candidate->height > 0.0f;
         }
         return false;
-    }
-    return view->width > 0.0f || view->height > 0.0f;
+    };
+    auto no_finish = [](View*) {};
+    layout_walk_inline_views(view, inspect, no_finish, false);
+    return found;
 }
 
 static bool has_following_content(DomNode* node, bool inline_only) {
@@ -441,13 +444,14 @@ static View* inline_span_first_line_fragment_child(ViewSpan* span) {
 
 static bool inline_span_has_forced_break_view(View* view) {
     if (!view) return false;
-    if (view->view_type == RDT_VIEW_BR) return true;
-    if (view->view_type != RDT_VIEW_INLINE) return false;
-    ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-    for (View* child = span->first_child; child; child = child->next()) {
-        if (inline_span_has_forced_break_view(child)) return true;
-    }
-    return false;
+    bool found = false;
+    auto inspect = [&](View* candidate) -> bool {
+        if (candidate->view_type == RDT_VIEW_BR) found = true;
+        return false;
+    };
+    auto no_finish = [](View*) {};
+    layout_walk_inline_views(view, inspect, no_finish, false);
+    return found;
 }
 
 static bool inline_fragment_union_extends_child_bounds(ViewSpan* span) {

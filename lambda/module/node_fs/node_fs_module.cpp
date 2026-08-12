@@ -2999,10 +2999,17 @@ static void node_fs_install_constants(Item namespace_item) {
                     NODE_FS_CONSTANT(O_APPEND) && NODE_FS_CONSTANT(O_EXCL) &&
                     NODE_FS_CONSTANT(S_IFMT) && NODE_FS_CONSTANT(S_IFREG) && NODE_FS_CONSTANT(S_IFDIR) &&
                     NODE_FS_CONSTANT(S_IFCHR) && NODE_FS_CONSTANT(S_IFBLK) && NODE_FS_CONSTANT(S_IFIFO) &&
-                    NODE_FS_CONSTANT(S_IFLNK) && NODE_FS_CONSTANT(S_IFSOCK) &&
                     NODE_FS_CONSTANT(S_IRUSR) && NODE_FS_CONSTANT(S_IWUSR) && NODE_FS_CONSTANT(S_IXUSR) &&
                     NODE_FS_CONSTANT(S_IRGRP) && NODE_FS_CONSTANT(S_IWGRP) && NODE_FS_CONSTANT(S_IXGRP) &&
                     NODE_FS_CONSTANT(S_IROTH) && NODE_FS_CONSTANT(S_IWOTH) && NODE_FS_CONSTANT(S_IXOTH);
+    // windows CRT headers omit POSIX link/socket mode macros; expose only the
+    // constants the active platform can define instead of failing compilation.
+#ifdef S_IFLNK
+    complete = complete && NODE_FS_CONSTANT(S_IFLNK);
+#endif
+#ifdef S_IFSOCK
+    complete = complete && NODE_FS_CONSTANT(S_IFSOCK);
+#endif
 #undef NODE_FS_CONSTANT
     // libuv's public dirent and copy flags are stable Node constants.  Keep
     // their values module-local so the compatibility boundary exposes no uv API.

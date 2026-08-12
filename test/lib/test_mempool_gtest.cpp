@@ -19,6 +19,7 @@
  */
 
 #include "../../lib/mempool.h"
+#include "../../lib/mem_vm.h"
 #include "../../lib/log.h"
 #include <gtest/gtest.h>
 #include <cstdio>
@@ -70,6 +71,11 @@ static bool is_memory_accessible(void* ptr, size_t size) {
     return true;
 }
 
+static uint32_t next_test_random(uint32_t* state) {
+    *state = *state * 1664525u + 1013904223u;
+    return *state;
+}
+
 // ========================================================================
 // Test Fixture
 // ========================================================================
@@ -118,12 +124,27 @@ TEST_F(MemoryPoolTest, DetailedStatisticsTrackLiveAndCumulativeBytes) {
     EXPECT_EQ(stats.free_count, 0u);
     EXPECT_GT(pool_allocation_size(pool, first), 0u);
 
-    size_t owned = pool_allocation_size(pool, first);
+    size_t cumulative = 0;
+    size_t allocation_count = 0;
+    pool_get_stats(pool, &cumulative, &allocation_count);
+    EXPECT_EQ(cumulative, 300u);
+    EXPECT_EQ(allocation_count, 2u);
+
+    size_t reserved = 0;
+    size_t in_use = 0;
+    size_t mem_alloc_count = 0;
+    pool_get_mem_stats(pool, &reserved, &in_use, &mem_alloc_count);
+    EXPECT_GT(reserved, 0u);
+    EXPECT_EQ(in_use, 300u);
+    EXPECT_EQ(mem_alloc_count, 2u);
+
     size_t before = stats.live_bytes;
     pool_free(pool, first);
     pool_get_detailed_stats(pool, &stats);
-    EXPECT_EQ(stats.live_bytes, before - owned);
+    EXPECT_EQ(stats.live_bytes, before - 100u);
     EXPECT_EQ(stats.free_count, 1u);
+    pool_get_mem_stats(pool, nullptr, &in_use, nullptr);
+    EXPECT_EQ(in_use, 200u);
 
     pool_free(pool, second);
 }
@@ -139,6 +160,396 @@ TEST_F(MemoryPoolTest, BasicCalloc) {
     }
 
     pool_free(pool, ptr);
+}
+
+TEST(MemoryPoolDesignTest, SizedInitialExtentRoundsToKilobytePower) {
+    Pool* pool = pool_create_sized(1500);
+    ASSERT_NE(pool, nullptr);
+
+    void* ptr = pool_alloc(pool, 1);
+    ASSERT_NE(ptr, nullptr);
+
+    PoolStats stats;
+    pool_get_detailed_stats(pool, &stats);
+    EXPECT_EQ(stats.reserved_bytes, 2048u);
+    EXPECT_EQ(stats.live_bytes, 1u);
+
+    pool_free(pool, ptr);
+    pool_destroy(pool);
+}
+
+TEST(MemoryPoolDesignTest, SizedInitialExtentClampsAndRejectsOversize) {
+    Pool* minimum = pool_create_sized(0);
+    ASSERT_NE(minimum, nullptr);
+    void* minimum_ptr = pool_alloc(minimum, 1);
+    ASSERT_NE(minimum_ptr, nullptr);
+    PoolStats minimum_stats;
+    pool_get_detailed_stats(minimum, &minimum_stats);
+    EXPECT_EQ(minimum_stats.reserved_bytes, 1024u);
+    pool_destroy(minimum);
+
+    Pool* rounded = pool_create_sized(1025);
+    ASSERT_NE(rounded, nullptr);
+    void* rounded_ptr = pool_alloc(rounded, 1);
+    ASSERT_NE(rounded_ptr, nullptr);
+    PoolStats rounded_stats;
+    pool_get_detailed_stats(rounded, &rounded_stats);
+    EXPECT_EQ(rounded_stats.reserved_bytes, 2048u);
+    pool_destroy(rounded);
+
+    const size_t over_limit = (size_t)1024 * 1024 * 1024 + 1;
+    EXPECT_EQ(pool_create_sized(over_limit), nullptr);
+}
+
+TEST(MemoryPoolDesignTest, VmExtentCommitsAdditionalPagesWithoutNewReservation) {
+    const size_t page = mem_vm_page_size();
+    ASSERT_GT(page, 0u);
+    ASSERT_GT(page, sizeof(void*));
+
+    Pool* pool = pool_create_sized(page * 2);
+    ASSERT_NE(pool, nullptr);
+
+    void* first = pool_alloc(pool, page - 64);
+    ASSERT_NE(first, nullptr);
+
+    PoolStats before_commit;
+    pool_get_detailed_stats(pool, &before_commit);
+    EXPECT_GE(before_commit.reserved_bytes, page * 2);
+    EXPECT_GE(before_commit.committed_bytes, page);
+    EXPECT_LT(before_commit.committed_bytes, before_commit.reserved_bytes);
+
+    void* second = pool_alloc(pool, 1);
+    ASSERT_NE(second, nullptr);
+
+    PoolStats after_commit;
+    pool_get_detailed_stats(pool, &after_commit);
+    EXPECT_EQ(after_commit.reserved_bytes, before_commit.reserved_bytes);
+    EXPECT_EQ(after_commit.committed_bytes, after_commit.reserved_bytes);
+
+    pool_free(pool, first);
+    pool_free(pool, second);
+    pool_destroy(pool);
+}
+
+TEST(MemoryPoolDesignTest, AllocationNearExtentBoundaryCanBeReallocated) {
+    const size_t page = mem_vm_page_size();
+    ASSERT_GT(page, 0u);
+
+    Pool* probe_pool = pool_create_sized(page);
+    ASSERT_NE(probe_pool, nullptr);
+    void* probe_first = pool_alloc(probe_pool, 1);
+    void* probe_second = pool_alloc(probe_pool, 1);
+    ASSERT_NE(probe_first, nullptr);
+    ASSERT_NE(probe_second, nullptr);
+    size_t header_size = (uintptr_t)probe_first % page;
+    size_t small_block_span = (size_t)((uintptr_t)probe_second -
+                                       (uintptr_t)probe_first);
+    pool_destroy(probe_pool);
+
+    ASSERT_GT(header_size, 0u);
+    ASSERT_GT(small_block_span, header_size);
+    ASSERT_LT(small_block_span + header_size, page);
+
+    Pool* pool = pool_create_sized(page);
+    ASSERT_NE(pool, nullptr);
+
+    size_t prefix_size = page - small_block_span - header_size;
+    void* prefix = pool_alloc(pool, prefix_size);
+    void* boundary = pool_alloc(pool, 1);
+    ASSERT_NE(prefix, nullptr);
+    ASSERT_NE(boundary, nullptr);
+    EXPECT_GT((uintptr_t)boundary % page, page - header_size);
+    fill_pattern(boundary, 1, 0x4C);
+
+    void* resized = pool_realloc(pool, boundary, 32);
+    ASSERT_NE(resized, nullptr);
+    EXPECT_TRUE(verify_pattern(resized, 1, 0x4C));
+    pool_free(pool, resized);
+    pool_free(pool, prefix);
+    pool_destroy(pool);
+}
+
+TEST(MemoryPoolDesignTest, UserStringAndOversizeAllocationContracts) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+
+    char* copy = pool_strdup(pool, "pool-owned string");
+    ASSERT_NE(copy, nullptr);
+    EXPECT_STREQ(copy, "pool-owned string");
+    EXPECT_EQ(pool_strdup(pool, nullptr), nullptr);
+    EXPECT_EQ(pool_strdup(nullptr, "invalid"), nullptr);
+
+    const size_t over_limit = (size_t)1024 * 1024 * 1024 + 1;
+    EXPECT_EQ(pool_alloc(pool, over_limit), nullptr);
+    EXPECT_EQ(pool_calloc(pool, over_limit), nullptr);
+
+    pool_free(pool, copy);
+    pool_destroy(pool);
+}
+
+TEST_F(MemoryPoolTest, SplitAndCoalesceAdjacentFreeBlocks) {
+    void* first = pool_alloc(pool, 128);
+    void* second = pool_alloc(pool, 128);
+    void* third = pool_alloc(pool, 128);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    ASSERT_NE(third, nullptr);
+
+    fill_pattern(third, 128, 0x5A);
+    pool_free(pool, first);
+    pool_free(pool, second);
+
+    void* joined = pool_alloc(pool, 320);
+    ASSERT_NE(joined, nullptr);
+    EXPECT_EQ(joined, first);
+    EXPECT_TRUE(verify_pattern(third, 128, 0x5A));
+
+    pool_free(pool, joined);
+    pool_free(pool, third);
+}
+
+TEST_F(MemoryPoolTest, ResetReusesCommittedExtents) {
+    void* first = pool_alloc(pool, 900);
+    ASSERT_NE(first, nullptr);
+
+    PoolStats before;
+    pool_get_detailed_stats(pool, &before);
+    ASSERT_GT(before.reserved_bytes, 0u);
+
+    pool_reset(pool);
+
+    PoolStats after_reset;
+    pool_get_detailed_stats(pool, &after_reset);
+    EXPECT_EQ(after_reset.reserved_bytes, before.reserved_bytes);
+    EXPECT_EQ(after_reset.live_bytes, 0u);
+
+    void* reused = pool_alloc(pool, 900);
+    ASSERT_NE(reused, nullptr);
+    EXPECT_EQ(reused, first);
+    pool_free(pool, reused);
+}
+
+TEST_F(MemoryPoolTest, ReallocUsesAdjacentFreeBlockInPlace) {
+    void* first = pool_alloc(pool, 128);
+    void* second = pool_alloc(pool, 128);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+
+    fill_pattern(first, 128, 0x31);
+    pool_free(pool, second);
+
+    void* grown = pool_realloc(pool, first, 256);
+    ASSERT_NE(grown, nullptr);
+    EXPECT_EQ(grown, first);
+    EXPECT_TRUE(verify_pattern(grown, 128, 0x31));
+
+    void* shrunk = pool_realloc(pool, grown, 64);
+    ASSERT_NE(shrunk, nullptr);
+    EXPECT_EQ(shrunk, first);
+    EXPECT_TRUE(verify_pattern(shrunk, 64, 0x31));
+    pool_free(pool, shrunk);
+}
+
+TEST_F(MemoryPoolTest, ReallocMovesWhenAdjacentBlockIsUnavailable) {
+    void* first = pool_alloc(pool, 128);
+    void* blocker = pool_alloc(pool, 128);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(blocker, nullptr);
+
+    fill_pattern(first, 128, 0x47);
+    fill_pattern(blocker, 128, 0x63);
+
+    void* moved = pool_realloc(pool, first, 512);
+    ASSERT_NE(moved, nullptr);
+    EXPECT_NE(moved, first);
+    EXPECT_TRUE(verify_pattern(moved, 128, 0x47));
+    EXPECT_TRUE(verify_pattern(blocker, 128, 0x63));
+
+    pool_free(pool, blocker);
+    pool_free(pool, moved);
+}
+
+TEST_F(MemoryPoolTest, ReallocFailurePreservesOriginalAllocation) {
+    void* ptr = pool_alloc(pool, 128);
+    ASSERT_NE(ptr, nullptr);
+    fill_pattern(ptr, 128, 0x2D);
+
+    PoolStats before;
+    pool_get_detailed_stats(pool, &before);
+    const size_t over_limit = (size_t)1024 * 1024 * 1024 + 1;
+    EXPECT_EQ(pool_realloc(pool, ptr, over_limit), nullptr);
+
+    PoolStats after;
+    pool_get_detailed_stats(pool, &after);
+    EXPECT_EQ(after.live_bytes, before.live_bytes);
+    EXPECT_EQ(after.cumulative_bytes, before.cumulative_bytes);
+    EXPECT_EQ(after.allocation_count, before.allocation_count);
+    EXPECT_TRUE(verify_pattern(ptr, 128, 0x2D));
+    pool_free(pool, ptr);
+}
+
+TEST_F(MemoryPoolTest, RandomizedAllocationFreeReallocModel) {
+    enum { SLOT_COUNT = 64, OPERATION_COUNT = 2500 };
+    void* pointers[SLOT_COUNT] = {};
+    size_t sizes[SLOT_COUNT] = {};
+    uint8_t patterns[SLOT_COUNT] = {};
+    uint32_t state = 0xC0FFEEu;
+
+    for (int operation = 0; operation < OPERATION_COUNT; operation++) {
+        unsigned slot = next_test_random(&state) % SLOT_COUNT;
+        unsigned action = next_test_random(&state) % 100u;
+
+        if (!pointers[slot]) {
+            size_t size = 1u + next_test_random(&state) % 2048u;
+            uint8_t pattern = (uint8_t)next_test_random(&state);
+            pointers[slot] = pool_alloc(pool, size);
+            ASSERT_NE(pointers[slot], nullptr) << "operation " << operation;
+            sizes[slot] = size;
+            patterns[slot] = pattern;
+            fill_pattern(pointers[slot], size, pattern);
+        } else if (action < 40u) {
+            ASSERT_TRUE(verify_pattern(pointers[slot], sizes[slot], patterns[slot]))
+                << "operation " << operation;
+            pool_free(pool, pointers[slot]);
+            pointers[slot] = nullptr;
+            sizes[slot] = 0;
+        } else if (action < 80u) {
+            size_t old_size = sizes[slot];
+            size_t new_size = 1u + next_test_random(&state) % 3072u;
+            void* resized = pool_realloc(pool, pointers[slot], new_size);
+            ASSERT_NE(resized, nullptr)
+                << "operation " << operation << ", slot " << slot;
+            size_t preserved = old_size < new_size ? old_size : new_size;
+            ASSERT_TRUE(verify_pattern(resized, preserved, patterns[slot]))
+                << "operation " << operation;
+            pointers[slot] = resized;
+            sizes[slot] = new_size;
+            fill_pattern(resized, new_size, patterns[slot]);
+        } else {
+            ASSERT_TRUE(verify_pattern(pointers[slot], sizes[slot], patterns[slot]))
+                << "operation " << operation;
+        }
+
+        if (operation % 100 == 0) {
+            for (int index = 0; index < SLOT_COUNT; index++) {
+                if (pointers[index]) {
+                    ASSERT_TRUE(verify_pattern(pointers[index], sizes[index],
+                                               patterns[index]))
+                        << "operation " << operation << ", slot " << index;
+                }
+            }
+        }
+    }
+
+    for (int index = 0; index < SLOT_COUNT; index++) {
+        if (pointers[index]) {
+            ASSERT_TRUE(verify_pattern(pointers[index], sizes[index], patterns[index]));
+            pool_free(pool, pointers[index]);
+        }
+    }
+
+    PoolStats stats;
+    pool_get_detailed_stats(pool, &stats);
+    EXPECT_EQ(stats.live_bytes, 0u);
+}
+
+TEST_F(MemoryPoolTest, WrongOwnerOperationsDoNotChangeSourcePool) {
+    Pool* other = pool_create();
+    ASSERT_NE(other, nullptr);
+    void* ptr = pool_alloc(pool, 128);
+    ASSERT_NE(ptr, nullptr);
+    fill_pattern(ptr, 128, 0x71);
+
+    PoolStats before;
+    pool_get_detailed_stats(pool, &before);
+    pool_free(other, ptr);
+    EXPECT_EQ(pool_realloc(other, ptr, 256), nullptr);
+
+    PoolStats after;
+    pool_get_detailed_stats(pool, &after);
+    EXPECT_EQ(after.live_bytes, before.live_bytes);
+    EXPECT_EQ(after.free_count, before.free_count);
+    EXPECT_TRUE(verify_pattern(ptr, 128, 0x71));
+
+    pool_free(pool, ptr);
+    pool_destroy(other);
+}
+
+TEST_F(MemoryPoolTest, ResetRejectsStalePointerAndCanBeRepeatedAcrossExtents) {
+    void* first = pool_alloc(pool, 900);
+    void* second = pool_alloc(pool, 900);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+
+    PoolStats before;
+    pool_get_detailed_stats(pool, &before);
+    ASSERT_GT(before.reserved_bytes, 1024u);
+
+    pool_reset(pool);
+    pool_free(pool, first);
+
+    PoolStats after_reset;
+    pool_get_detailed_stats(pool, &after_reset);
+    EXPECT_EQ(after_reset.live_bytes, 0u);
+    EXPECT_EQ(after_reset.free_count, before.free_count);
+
+    pool_reset(pool);
+    void* reused_first = pool_alloc(pool, 900);
+    void* reused_second = pool_alloc(pool, 900);
+    ASSERT_NE(reused_first, nullptr);
+    ASSERT_NE(reused_second, nullptr);
+
+    PoolStats after_reuse;
+    pool_get_detailed_stats(pool, &after_reuse);
+    EXPECT_EQ(after_reuse.reserved_bytes, before.reserved_bytes);
+    EXPECT_EQ(after_reuse.committed_bytes, before.committed_bytes);
+    pool_free(pool, reused_first);
+    pool_free(pool, reused_second);
+}
+
+TEST(MemoryPoolBasicTest, DrainInvalidatesDataAndDestroyReleasesPoolStruct) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    ASSERT_NE(pool_alloc(pool, 64), nullptr);
+
+    pool_drain(pool);
+
+    PoolStats stats;
+    pool_get_detailed_stats(pool, &stats);
+    EXPECT_EQ(stats.reserved_bytes, 0u);
+    EXPECT_EQ(stats.committed_bytes, 0u);
+    EXPECT_EQ(stats.live_bytes, 0u);
+    EXPECT_EQ(pool_alloc(pool, 64), nullptr);
+    EXPECT_EQ(pool_realloc(pool, nullptr, 64), nullptr);
+
+    pool_destroy(pool);
+}
+
+TEST_F(MemoryPoolTest, GrowthDoublesExtentsAndUsesPageSizedLargeExtent) {
+    void* first = pool_alloc(pool, 900);
+    ASSERT_NE(first, nullptr);
+
+    PoolStats first_growth;
+    pool_get_detailed_stats(pool, &first_growth);
+    EXPECT_EQ(first_growth.reserved_bytes, 1024u);
+
+    void* second = pool_alloc(pool, 900);
+    ASSERT_NE(second, nullptr);
+
+    PoolStats second_growth;
+    pool_get_detailed_stats(pool, &second_growth);
+    EXPECT_EQ(second_growth.reserved_bytes, 3072u);
+
+    void* page_backed = pool_alloc(pool, 4096);
+    ASSERT_NE(page_backed, nullptr);
+
+    PoolStats page_growth;
+    pool_get_detailed_stats(pool, &page_growth);
+    EXPECT_GE(page_growth.reserved_bytes, 7168u);
+
+    pool_free(pool, first);
+    pool_free(pool, second);
+    pool_free(pool, page_backed);
 }
 
 TEST_F(MemoryPoolTest, MultipleAllocations) {

@@ -26,6 +26,7 @@
 #include "../../lib/hashmap.h"
 #include "../../lib/str.h"
 #include "../../lib/utf.h"
+#include "../../lib/windows_compat.h"
 #include <cstring>
 #include <cmath>
 #include "../../lib/mem.h"
@@ -40,28 +41,6 @@
 #include <utf8proc.h>
 #ifndef _WIN32
 #include <execinfo.h>
-#else
-// Windows stubs for POSIX functions
-#include <direct.h>
-#include <io.h>
-#include <stdlib.h>
-static inline int setenv(const char* name, const char* value, int overwrite) {
-    if (!overwrite && getenv(name)) return 0;
-    return _putenv_s(name, value) == 0 ? 0 : -1;
-}
-static inline int unsetenv(const char* name) {
-    return _putenv_s(name, "") == 0 ? 0 : -1;
-}
-static inline void* memmem(const void* haystack, size_t hlen, const void* needle, size_t nlen) {
-    if (nlen == 0) return (void*)haystack;
-    if (nlen > hlen) return NULL;
-    const char* h = (const char*)haystack;
-    const char* n = (const char*)needle;
-    for (size_t i = 0; i <= hlen - nlen; i++) {
-        if (memcmp(h + i, n, nlen) == 0) return (void*)(h + i);
-    }
-    return NULL;
-}
 #endif
 
 

@@ -1818,6 +1818,10 @@
             "named": true
           },
           {
+            "type": "content",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },

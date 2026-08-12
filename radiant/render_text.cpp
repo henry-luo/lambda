@@ -811,27 +811,12 @@ static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect r
         return gradient->stops[0].color;
     }
 
-    float angle_rad = gradient->angle * (float)M_PI / 180.0f;
-    float dx = sinf(angle_rad);
-    float dy = -cosf(angle_rad);
-    float half_w = rect.width * 0.5f;
-    float half_h = rect.height * 0.5f;
-    float cx = rect.x + half_w;
-    float cy = rect.y + half_h;
-    float abs_dx = fabsf(dx);
-    float abs_dy = fabsf(dy);
-    float dist = (abs_dx * rect.height < abs_dy * rect.width)
-        ? (abs_dy > 1e-7f ? half_h / abs_dy : half_w)
-        : (abs_dx > 1e-7f ? half_w / abs_dx : half_h);
-    float x1 = cx - dx * dist;
-    float y1 = cy - dy * dist;
-    float x2 = cx + dx * dist;
-    float y2 = cy + dy * dist;
-    float vx = x2 - x1;
-    float vy = y2 - y1;
+    RadiantGradientLine line = radiant_linear_gradient_line(rect, gradient->angle);
+    float vx = line.x2 - line.x1;
+    float vy = line.y2 - line.y1;
     float len2 = vx * vx + vy * vy;
     float pos = len2 > 1e-7f
-        ? ((px - x1) * vx + (py - y1) * vy) / len2
+        ? ((px - line.x1) * vx + (py - line.y1) * vy) / len2
         : 0.0f;
     pos = fminf(1.0f, fmaxf(0.0f, pos));
 

@@ -14,16 +14,6 @@ extern "C" {
 // Forward declarations
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout);
 
-static int count_potential_grid_items(ViewBlock* container) {
-    int count = 0;
-    DomNode* child = container ? container->first_child : NULL;
-    while (child) {
-        if (child->is_element()) count++;
-        child = child->next_sibling;
-    }
-    return count;
-}
-
 char* grid_scratch_strdup(ScratchArena* scratch, const char* source) {
     if (!scratch || !source) return NULL;
     size_t length = strlen(source);
@@ -182,7 +172,7 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Immediate children bound the pass-local grid item array; scratch arrays are
     // released by the container mark instead of individual heap frees.
-    int item_capacity = count_potential_grid_items(container);
+    int item_capacity = layout_count_potential_items(container, false);
     grid->allocated_items = item_capacity;
     if (item_capacity > 0) {
         grid->grid_items = (ViewBlock**)scratch_calloc(&lycon->scratch,

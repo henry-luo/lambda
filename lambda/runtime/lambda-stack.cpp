@@ -88,7 +88,12 @@ static void init_stack_bounds(void) {
     ULONG_PTR low, high;
     GetCurrentThreadStackLimits(&low, &high);
     _lambda_stack_base = (uintptr_t)high;
-    _lambda_stack_limit = (uintptr_t)low + LAMBDA_STACK_SAFETY_MARGIN;
+    uintptr_t jit_budget = 8 * 1024 * 1024;
+    uintptr_t jit_limit = high > jit_budget ? (uintptr_t)high - jit_budget : (uintptr_t)low;
+    uintptr_t os_limit = (uintptr_t)low + LAMBDA_STACK_SAFETY_MARGIN;
+    // JIT frames have no unwind metadata, so reserve a recoverable runtime
+    // budget instead of waiting for the PE guard page at the full stack limit.
+    _lambda_stack_limit = jit_limit > os_limit ? jit_limit : os_limit;
 
 #else
     char stack_var;

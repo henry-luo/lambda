@@ -26,6 +26,50 @@
 
 // consolidated Radiant render API (DD4); declarations below retain their source-file section names for history lookup.
 
+struct RadiantGradientLine {
+    float x1;
+    float y1;
+    float x2;
+    float y2;
+};
+
+inline RadiantGradientLine radiant_linear_gradient_line(Rect rect, float angle) {
+    float angle_rad = angle * (float)M_PI / 180.0f;
+    float dx = sinf(angle_rad);
+    float dy = -cosf(angle_rad);
+    float half_w = rect.width * 0.5f;
+    float half_h = rect.height * 0.5f;
+    float cx = rect.x + half_w;
+    float cy = rect.y + half_h;
+    float abs_dx = fabsf(dx);
+    float abs_dy = fabsf(dy);
+    float dist = (abs_dx * rect.height < abs_dy * rect.width)
+        ? (abs_dy > 1e-7f ? half_h / abs_dy : half_w)
+        : (abs_dx > 1e-7f ? half_w / abs_dx : half_h);
+    return {cx - dx * dist, cy - dy * dist,
+            cx + dx * dist, cy + dy * dist};
+}
+
+inline void radiant_blur_adjust(uint32_t pixel, bool add,
+                                uint32_t* red, uint32_t* green,
+                                uint32_t* blue, uint32_t* alpha) {
+    uint32_t r = (pixel >> 24) & 0xFF;
+    uint32_t g = (pixel >> 16) & 0xFF;
+    uint32_t b = (pixel >> 8) & 0xFF;
+    uint32_t a = pixel & 0xFF;
+    if (add) {
+        *red += r; *green += g; *blue += b; *alpha += a;
+    } else {
+        *red -= r; *green -= g; *blue -= b; *alpha -= a;
+    }
+}
+
+inline uint32_t radiant_blur_average(uint32_t red, uint32_t green,
+                                     uint32_t blue, uint32_t alpha, int count) {
+    return ((red / count) << 24) | ((green / count) << 16) |
+           ((blue / count) << 8) | (alpha / count);
+}
+
 // ===== rdt_vector.hpp =====
 // ============================================================================
 // RdtVector — Radiant's Immediate-Mode Vector Rendering API
@@ -2262,6 +2306,75 @@ inline void radiant_clear_font_family(FontProp* font) {
     field.clear();
 }
 
+inline void radiant_copy_font_values(FontProp* target, const FontProp* source) {
+    if (!target || !source) return;
+    if (source->family) radiant_retain_font_family(
+        target, lam::PoolPtr<char>(source->family));
+    else radiant_clear_font_family(target);
+    target->font_size = source->font_size;
+    target->initial_letter_computed_font_size = source->initial_letter_computed_font_size;
+    target->font_style = source->font_style;
+    target->font_weight = source->font_weight;
+    target->font_weight_numeric = source->font_weight_numeric;
+    target->font_variant = source->font_variant;
+    target->font_kerning = source->font_kerning;
+    target->font_size_from_medium = source->font_size_from_medium;
+    target->text_deco = source->text_deco;
+    target->text_deco_color = source->text_deco_color;
+    target->text_deco_style = source->text_deco_style;
+    target->text_deco_thickness = source->text_deco_thickness;
+    target->text_underline_offset = source->text_underline_offset;
+    target->letter_spacing = source->letter_spacing;
+    target->letter_spacing_percent = source->letter_spacing_percent;
+    target->letter_spacing_is_percent = source->letter_spacing_is_percent;
+    target->word_spacing = source->word_spacing;
+    target->word_spacing_percent = source->word_spacing_percent;
+    target->word_spacing_is_percent = source->word_spacing_is_percent;
+}
+
+inline void radiant_fill_missing_font_values(FontProp* target, const FontProp* source,
+                                             bool preserve_zero_size) {
+    if (!target || !source) return;
+    if (!target->family && source->family) {
+        radiant_retain_font_family(target, lam::PoolPtr<char>(source->family));
+    }
+    if (target->font_size <= 0.0f && !preserve_zero_size) {
+        // zero is a valid authored size; only unresolved size inherits from the parent.
+        target->font_size = source->font_size;
+        target->font_size_from_medium = source->font_size_from_medium;
+    }
+    if (target->font_weight == 0) {
+        target->font_weight = source->font_weight;
+        target->font_weight_numeric = source->font_weight_numeric;
+    }
+    if (target->font_style == 0) target->font_style = source->font_style;
+    if (target->font_variant == 0) target->font_variant = source->font_variant;
+    if (target->font_kerning == 0) target->font_kerning = source->font_kerning;
+    if (target->text_deco == 0) target->text_deco = source->text_deco;
+    if (target->text_deco_color.a == 0 && source->text_deco_color.a > 0) {
+        target->text_deco_color = source->text_deco_color;
+    }
+    if (target->text_deco_style == 0 && source->text_deco_style != 0) {
+        target->text_deco_style = source->text_deco_style;
+    }
+    if (target->text_deco_thickness == 0.0f && source->text_deco_thickness > 0.0f) {
+        target->text_deco_thickness = source->text_deco_thickness;
+    }
+    if (target->text_underline_offset == 0.0f && source->text_underline_offset != 0.0f) {
+        target->text_underline_offset = source->text_underline_offset;
+    }
+    if (target->letter_spacing == 0.0f) {
+        target->letter_spacing = source->letter_spacing;
+        target->letter_spacing_percent = source->letter_spacing_percent;
+        target->letter_spacing_is_percent = source->letter_spacing_is_percent;
+    }
+    if (target->word_spacing == 0.0f) {
+        target->word_spacing = source->word_spacing;
+        target->word_spacing_percent = source->word_spacing_percent;
+        target->word_spacing_is_percent = source->word_spacing_is_percent;
+    }
+}
+
 inline void radiant_retain_background_image(BackgroundProp* background, lam::PoolPtr<char> image) {
     lam::PersistentFieldRef<char, lam::PoolDomain> field(background->image);
     field.set(image);
@@ -3138,6 +3251,20 @@ typedef struct RenderPathTrace {
     int paint_ir_fallbacks;
     int paint_ir_unsupported;
 } RenderPathTrace;
+
+inline void radiant_apply_export_caps(RenderPathTrace* trace,
+                                      const RenderExportTargetCaps* caps) {
+    if (!trace || !caps) return;
+    trace->backend_vector_paths = caps->paths;
+    trace->backend_gradients = caps->gradients;
+    trace->backend_nested_clips = caps->clips;
+    trace->backend_picture_svg = true;
+    trace->backend_opacity_group = caps->opacity_groups;
+    trace->backend_blend_modes = caps->blend_modes;
+    trace->backend_gaussian_blur = caps->filters;
+    trace->backend_color_matrix_filters = caps->filters;
+    trace->backend_native_text_runs = caps->glyph_runs;
+}
 
 void render_profiler_reset(RenderProfiler* profiler);
 double render_profiler_now_ms();

@@ -322,6 +322,11 @@
     ],
     "link_options_linux": [
       "-Wl,--allow-shlib-undefined"
+    ],
+    "link_options_windows": [
+      "-Wl,/force:unresolved",
+      "-Wl,--enable-auto-import",
+      "../../modules/lambda-host.lib"
     ]
   },
   "node_modules": [
@@ -411,6 +416,9 @@
       ],
       "link_options_linux": [
         "-Wl,--allow-shlib-undefined"
+      ],
+      "link_options_windows": [
+        "-Wl,/force:unresolved"
       ]
     },
     {
@@ -446,10 +454,36 @@
         "png",
         "turbojpeg",
         "gif",
+        "ThorVG",
         "pthread"
       ],
+      "windows": {
+        "additional_libraries": [
+          "dwrite",
+          "ole32",
+          "dbghelp",
+          "iphlpapi",
+          "userenv",
+          "webp",
+          "opengl32",
+          "imm32",
+          "ws2_32",
+          "gdi32",
+          "crypt32",
+          "bcrypt",
+          "advapi32",
+          "user32",
+          "shell32",
+          "winmm",
+          "rpcrt4",
+          "wsock32",
+          "secur32",
+          "wldap32"
+        ]
+      },
       "defines": [
-        "UTF8PROC_STATIC"
+        "UTF8PROC_STATIC",
+        "MEMPOOL_RUNTIME_VM_PROVIDER"
       ]
     },
     {
@@ -747,6 +781,9 @@
       "link_options_linux": [
         "-Wl,--allow-shlib-undefined"
       ],
+      "link_options_windows": [
+        "-Wl,/force:unresolved"
+      ],
       "link": "dynamic"
     },
     {
@@ -761,6 +798,9 @@
       ],
       "link_options_linux": [
         "-Wl,--allow-shlib-undefined"
+      ],
+      "link_options_windows": [
+        "-Wl,/force:unresolved"
       ],
       "link": "dynamic"
     },
@@ -820,6 +860,9 @@
       ],
       "link_options_linux": [
         "-Wl,--allow-shlib-undefined"
+      ],
+      "link_options_windows": [
+        "-Wl,/force:unresolved"
       ],
       "source_files": [
         "lambda/runtime/parse.c",
@@ -1094,8 +1137,14 @@
     "windows": {
       "output": "lambda.exe",
       "compiler": "clang",
+      "includes": [
+        "win-native-deps/include"
+      ],
       "exclude_source_files": [
-        "lib/clock_compat.c"
+        "lib/clock_compat.c",
+        "radiant/ime_mac_static.cpp",
+        "radiant/webview_child_mac_static.cpp",
+        "radiant/webview_layer_mac_static.cpp"
       ],
       "libraries": [
         {
@@ -2423,6 +2472,11 @@
               "gtest_main"
             ],
             "additional_sources": [
+              "lib/mem_vm.c",
+              "lib/mem_context.c",
+              "lib/memtrack.c",
+              "lib/hashmap.c",
+              "lib/arena.c",
               "lib/mempool.c",
               "lib/str.c",
               "lib/utf.c",
@@ -2616,6 +2670,9 @@
             "additional_sources": [
               "lib/mem_factory.c",
               "lib/mem_context.c",
+              "lib/mem_vm.c",
+              "lib/memtrack.c",
+              "lib/hashmap.c",
               "lib/arena.c",
               "lib/scratch_arena.c",
               "lib/mempool.c",
@@ -4778,6 +4835,12 @@
               "SystemConfiguration"
             ],
             "linux": {
+              "exclude_libraries": [
+                "CoreFoundation",
+                "SystemConfiguration"
+              ]
+            },
+            "windows": {
               "exclude_libraries": [
                 "CoreFoundation",
                 "SystemConfiguration"

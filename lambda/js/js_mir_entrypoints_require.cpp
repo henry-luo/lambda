@@ -197,9 +197,18 @@ bool js_capture_compiled_name_table(const JsMirTranspiler* mt,
         state->module_property_count = 0;
         state->module_property_bytes_size = 0;
     }
-    state->ic_count = mt ? mt->ic_count : 0;
-    if (!mt || !mt->module_name_specs || mt->module_name_specs->length == 0) return true;
-    return jm_build_property_key_image(NULL, 0, 0, mt->module_name_specs,
+    uint32_t inherited_count = g_jm_preamble_in
+        ? g_jm_preamble_in->module_property_count : 0;
+    uint32_t inherited_bytes = g_jm_preamble_in
+        ? g_jm_preamble_in->module_property_bytes_size : 0;
+    uint32_t inherited_ic = g_jm_preamble_in ? g_jm_preamble_in->ic_count : 0;
+    state->ic_count = inherited_ic + (mt ? mt->ic_count : 0);
+    if ((!mt || !mt->module_name_specs || mt->module_name_specs->length == 0) &&
+            inherited_count == 0) return true;
+    return jm_build_property_key_image(
+        g_jm_preamble_in ? g_jm_preamble_in->module_property_specs : NULL,
+        inherited_count, inherited_bytes,
+        mt ? mt->module_name_specs : NULL,
         &state->module_property_specs, &state->module_property_count,
         &state->module_property_bytes_size);
 }
@@ -1198,8 +1207,15 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         return (Item){.item = ITEM_ERROR};
     }
     if (!g_jm_preamble_compile_only && g_jm_preamble_in) {
-        if (!js_ensure_active_module_var_capacity((uint32_t)mt->module_var_count)) {
-            log_error("js-mir: failed to grow inherited preamble module state");
+        // Each preamble consumer has its own property-key image. Reusing the
+        // previous consumer slab leaves its sealed key count attached to the
+        // next MIR unit, whose local property set is necessarily different.
+        uint32_t source_state_id = js_get_active_module_state_id();
+        if (!js_activate_module_state((uint32_t)mt->module_var_count) ||
+                !js_copy_module_state_var_prefix(
+                    source_state_id, js_get_active_module_state_id(),
+                    (uint32_t)g_jm_preamble_in->module_var_count)) {
+            log_error("js-mir: failed to create preamble consumer module state");
             return (Item){.item = ITEM_ERROR};
         }
     } else if (!g_jm_preamble_compile_only) {

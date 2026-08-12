@@ -249,9 +249,9 @@ static bool jm_test262_fast_paths_enabled(JsMirTranspiler* mt) {
 #endif
 }
 
-// The callee probe is purely observational: it logs a non-function target and
-// returns the callee unchanged. Its log_debug compiles out of release, so the
-// emitted call would only add a C-call boundary to every dynamic call site.
+// Disabled because this observational probe added a debug-only C-call boundary
+// to MIR and made debug emission differ from release emission.
+/*
 static void jm_emit_debug_check_callee(JsMirTranspiler* mt, MIR_reg_t callee,
         int64_t site_id) {
 #ifndef NDEBUG
@@ -262,6 +262,7 @@ static void jm_emit_debug_check_callee(JsMirTranspiler* mt, MIR_reg_t callee,
     (void)mt; (void)callee; (void)site_id;
 #endif
 }
+*/
 
 static void jm_emit_pending_call_source(JsMirTranspiler* mt, JsCallNode* call) {
     if (!mt || !call || !mt->tp || !mt->tp->source) return;
@@ -619,11 +620,17 @@ static bool jm_current_function_captures_with_scope(JsMirTranspiler* mt) {
 }
 
 static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
-    if (!mt || mt->current_func_index < 0 || mt->func_count <= 0) return false;
+    if (!mt || !mt->current_fc) return false;
+    // Synthetic/native body lowering can leave current_func_index unset even
+    // though current_fc identifies a direct IIFE declaration. Keep its
+    // promoted lexical bindings visible; otherwise a retained function reads
+    // them as unresolved globals after the original IIFE has returned.
+    if (mt->current_fc->is_iife_func_decl || mt->current_fc->is_iife_body) return true;
+    if (mt->current_func_index < 0 || mt->func_count <= 0) return false;
     int idx = mt->current_func_index;
     while (idx >= 0 && idx < mt->func_count) {
         JsFuncCollected* fc = &mt->func_entries[idx];
-        if (fc->is_iife_body) return true;
+        if (fc->is_iife_func_decl || fc->is_iife_body) return true;
         idx = fc->parent_index;
     }
     return false;
@@ -1571,34 +1578,22 @@ static MIR_reg_t jm_emit_int32_bitwise_binary(JsMirTranspiler* mt,
     return jm_emit_int_to_double(mt, result);
 }
 
-static MIR_reg_t jm_unbox_string_chars(JsMirTranspiler* mt, MIR_reg_t string_item) {
-    MIR_reg_t string_ptr = jm_call_1(mt, "it2s", MIR_T_P,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, string_item));
-    MIR_reg_t chars = jm_new_reg(mt, "string_chars", MIR_T_P);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-        MIR_new_reg_op(mt->ctx, chars),
-        MIR_new_reg_op(mt->ctx, string_ptr),
-        MIR_new_int_op(mt->ctx, offsetof(String, chars))));
-    return chars;
+static MIR_reg_t jm_box_bigint_literal(JsMirTranspiler* mt, String* spelling) {
+    // bigint_from_string consumes character bytes, not the String object returned by it2s;
+    // passing that object pointer makes every literal parse as invalid input.
+    return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
+        MIR_T_P, MIR_new_str_op(mt->ctx, {(size_t)spelling->len, spelling->chars}),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)spelling->len));
 }
 
 MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
     switch (lit->literal_type) {
     case JS_LITERAL_NUMBER: {
-        // BigInt literal: materialize bigint_str at runtime.
+        // bigint literal: store the dedicated digit spelling and parse it at runtime.
         if (lit->is_bigint) {
-            // bigint_str is outside the numeric value union; reading the union's
-            // number bits as String* corrupted generic call arguments (D6.2.2v2).
-            String* s = lit->bigint_str;
-            // Materialize the literal through the context NamePool; a delayed
-            // MIR function must not retain the compiler-pool spelling.
-            MIR_reg_t str_item = jm_box_string_literal(mt, s->chars, s->len);
-            // it2s returns the String header; the parser requires its character
-            // payload or the length byte is misread as source text (D6.2.2v2).
-            MIR_reg_t str_ptr = jm_unbox_string_chars(mt, str_item);
-            return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, str_ptr),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
+            // bigint AST literals keep their digits in bigint_str; value.string_value is unset,
+            // so reading the generic literal slot turns every n-suffixed literal into bad input.
+            return jm_box_bigint_literal(mt, lit->bigint_str);
         }
         double val = lit->value.number_value;
         return jm_box_float_const(mt, val);
@@ -1623,6 +1618,9 @@ MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
             MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
         return u;
     }
+    default:
+        // shared AST tags include Python-only literals; JS lowers unknown tags to null.
+        break;
     }
     return jm_emit_null(mt);
 }
@@ -5801,7 +5799,7 @@ static MIR_reg_t jm_emit_optional_function_call(JsMirTranspiler* mt, MIR_reg_t c
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     jm_emit_label(mt, l_call);
-    jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
+    // jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
     MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
     MIR_reg_t call_result;
     if (has_spread) {
@@ -7184,8 +7182,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             fallback_has_spread, callee_spill_slot, "optc", "optk");
     }
 
-    // Debug: emit runtime check with site_id
-    jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
+    // jm_emit_debug_check_callee(mt, callee, (int64_t)site_id);
 
     if (fallback_has_spread) {
         MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
@@ -8568,6 +8565,15 @@ MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
     return result;
 }
 
+static MIR_reg_t jm_string_chars_ptr(JsMirTranspiler* mt, MIR_reg_t string_ptr) {
+    MIR_reg_t chars = jm_new_reg(mt, "chars", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+        MIR_new_reg_op(mt->ctx, chars),
+        MIR_new_reg_op(mt->ctx, string_ptr),
+        MIR_new_int_op(mt->ctx, offsetof(String, chars))));
+    return chars;
+}
+
 // Template literal
 MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNode* tmpl) {
     // The function frame owns the explicit context register.  Template
@@ -8580,7 +8586,9 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
             mt->em.frame.runtime, 0, 1)));
 
     // Create StringBuf: stringbuf_new(pool)
-    MIR_reg_t sb = jm_call_1(mt, "stringbuf_new", MIR_T_I64,
+    // StringBuf is a pointer-valued helper; using an integer return type here
+    // truncated its address on Windows before the first template fragment.
+    MIR_reg_t sb = jm_call_1(mt, "stringbuf_new", MIR_T_P,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, pool_reg));
 
     JsAstNode* quasi = tmpl->quasis;
@@ -8595,10 +8603,14 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
                 // character pointers (D5.4.3).
                 MIR_reg_t str_item = jm_box_string_literal(mt,
                     elem->cooked->chars, (int)elem->cooked->len);
-                MIR_reg_t str_ptr = jm_unbox_string_chars(mt, str_item);
+                MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_P,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
+                // `it2s` returns the String header; StringBuf consumes the
+                // flexible-array character payload, not the header's length byte.
+                MIR_reg_t chars = jm_string_chars_ptr(mt, str_ptr);
                 jm_call_void_3(mt, "stringbuf_append_str_n",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sb),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, str_ptr),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, chars),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)elem->cooked->len));
             }
         }
@@ -8620,7 +8632,9 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, eval));
             jm_emit_error_lane_propagate_check(mt);
             // Unbox string: it2s(str_item) -> String*
-            MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_I64,
+            // it2s returns a String pointer; declaring an integer return here
+            // truncated the pointer before template interpolation copied it.
+            MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_P,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
             // Guard: if js_to_string threw (e.g. Symbol), str_ptr is null — skip append
             MIR_label_t skip_append = jm_new_label(mt);
@@ -8630,11 +8644,7 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
                 MIR_new_int_op(mt->ctx, 0)));
             // Compute chars address: str_ptr + offsetof(String, chars)
             // (chars is a flexible array member, not a pointer)
-            MIR_reg_t chars = jm_new_reg(mt, "chars", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-                MIR_new_reg_op(mt->ctx, chars),
-                MIR_new_reg_op(mt->ctx, str_ptr),
-                MIR_new_int_op(mt->ctx, offsetof(String, chars))));
+            MIR_reg_t chars = jm_string_chars_ptr(mt, str_ptr);
             // Load String.len (uint32_t at offset 0)
             MIR_reg_t len = jm_new_reg(mt, "slen", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -8653,7 +8663,7 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
     }
 
     // stringbuf_to_string(sb) -> String*
-    MIR_reg_t result_str = jm_call_1(mt, "stringbuf_to_string", MIR_T_I64,
+    MIR_reg_t result_str = jm_call_1(mt, "stringbuf_to_string", MIR_T_P,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, sb));
     // Box as string
     return jm_box_string(mt, result_str);
@@ -9587,14 +9597,7 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         case JS_LITERAL_NUMBER: {
             // BigInt literal: store bigint_str and call bigint_from_string at runtime
             if (lit->is_bigint) {
-                String* s = lit->bigint_str;
-                MIR_reg_t str_item = jm_box_string_literal(mt, s->chars, s->len);
-                // BigInt literal parsing consumes character bytes, not the
-                // String header returned by it2s (D6.2.2v2).
-                MIR_reg_t str_ptr = jm_unbox_string_chars(mt, str_item);
-                return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, str_ptr),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
+                return jm_box_bigint_literal(mt, lit->bigint_str);
             }
             double val = lit->value.number_value;
             return jm_box_float_const(mt, val);
@@ -9619,6 +9622,8 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
                 MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
             return r;
         }
+        default:
+            return jm_emit_null(mt);
         }
     }
 
@@ -9908,16 +9913,16 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         return result;
     }
     case JS_AST_NODE_REGEX: {
+        // Embed literal bytes in MIR; compiler name-pool pointers can be retired
+        // before a later event executes this generated code.
         JsRegexNode* re = (JsRegexNode*)expr;
-        // D5.4.3: precompiled modules outlive their temporary AST pool, so the
-        // artifact must own literal bytes instead of baking pool addresses.
-        MIR_reg_t pat_ptr = jm_string_literal_chars(mt, re->pattern, re->pattern_len);
-        MIR_reg_t flags_ptr = jm_string_literal_chars(mt, re->flags, re->flags_len);
-        return jm_call_4(mt, "js_create_regex_literal", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, pat_ptr),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, re->pattern_len),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, flags_ptr),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, re->flags_len));
+        MIR_reg_t pattern = jm_box_string_literal(mt, re->pattern, re->pattern_len);
+        MIR_reg_t flags = re->flags
+            ? jm_box_string_literal(mt, re->flags, re->flags_len)
+            : jm_box_string_literal(mt, "", 0);
+        return jm_call_2(mt, "js_create_regex_literal_items", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, pattern),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, flags));
     }
     case JS_AST_NODE_YIELD_EXPRESSION: {
         JsYieldNode* yield_node = (JsYieldNode*)expr;
@@ -10056,9 +10061,16 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         // for settled Promises / non-Promises so `export default await
         // Promise.resolve(42)` still unwraps to 42. The chain-pending case is
         // what gives the dynamic-import chain its spec-order property.
+        extern int js_dynamic_import_suppress_module_drain;
+        // Dynamic imports enter module compilation at depth one, but their
+        // pending top-level await still has to suspend the import promise;
+        // otherwise js_await_sync returns an undefined placeholder instead of
+        // preserving the module's evaluation dependency.
+        bool is_dynamic_import_module = js_dynamic_import_suppress_module_drain > 0;
         bool is_p5_module_tla = (mt->is_module && mt->in_main &&
-            mt->current_func_index < 0 && !mt->in_generator && !mt->in_async &&
-            js_tla_module_depth_get() >= 2 && mt->filename);
+            !mt->in_generator && !mt->in_async && mt->filename &&
+            ((mt->current_func_index < 0 && js_tla_module_depth_get() >= 2) ||
+             is_dynamic_import_module));
         if (is_p5_module_tla) {
             MIR_reg_t spec_reg = jm_box_string_literal(mt, mt->filename,
                 (int)strlen(mt->filename));

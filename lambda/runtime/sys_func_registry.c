@@ -1115,6 +1115,8 @@ extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t i
 extern Item lambda_name_id_to_item(NameId name_id);
 extern uint64_t lambda_module_name_id_at(void* module_state, uint32_t index);
 extern uint64_t js_active_module_name_id(uint32_t index);
+extern Item js_active_module_name_item(uint32_t module_name_index,
+                                       NameId direct_name_id);
 extern Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 
 // Debug tracing helpers
@@ -1317,7 +1319,9 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
 #else
-    {"setjmp", FPTR(setjmp),
+    // MinGW exposes setjmp as a macro that needs the caller frame, so it has
+    // no address for FPTR to take; register its underlying primitive instead.
+    {"setjmp", FPTR(_setjmp),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER)}},
 #endif
@@ -1448,9 +1452,13 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
 
+    // int2it_lane returns an inline Item; stable metadata keeps the live
+    // result out of an activation scalar home.
     {"int2it_lane", FPTR(int2it_lane),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_NUMBER_STACK_PRESERVES}},
 
     {"lambda_int_lane_to_double_c", FPTR(lambda_int_lane_to_double_c),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
@@ -1542,7 +1550,18 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED,
-      JIT_EXCEPTION_PRESERVES, 0}},
+      // Name-id lookup only reads the active module table and cannot publish
+      // an error carrier, so its raw scalar result preserves the lane.
+      JIT_EXCEPTION_PRESERVES}},
+    {"js_active_module_name_item", FPTR(js_active_module_name_item),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED |
+      // The helper only selects a sealed NameId and resolves an existing
+      // NamePool entry; it neither allocates nor publishes an error carrier.
+      JIT_EXCEPTION_PRESERVES}},
     {"push_d_safe", FPTR(push_d_safe),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -2100,6 +2119,7 @@ JitImport jit_runtime_imports[] = {
     {"js_builtin_eval", FPTR(js_builtin_eval)},
     {"js_create_regex", FPTR(js_create_regex)},
     {"js_create_regex_literal", FPTR(js_create_regex_literal)},
+    {"js_create_regex_literal_items", FPTR(js_create_regex_literal_items)},
     {"js_regexp_construct", FPTR(js_regexp_construct)},
     {"js_url_construct", FPTR(js_url_construct)},
     {"js_url_construct_with_base", FPTR(js_url_construct_with_base)},
@@ -3338,7 +3358,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_item_adopt_scalar_home", "lambda_restore_number_frame_top",
         "owned_item_slot_store", "lambda_module_var_store",
         "lambda_module_name_id_at",
-        "js_active_module_name_id",
+        "js_active_module_name_id", "js_active_module_name_item",
         "js_active_module_ic",
         "lambda_async_frame_get_word",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
@@ -3346,7 +3366,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_int_lane_to_double_c", "lambda_float_null_lane_c",
         "lambda_double_to_int_lane_c", "lambda_item_to_int_lane_c",
         "lambda_int_lane_add_slow", "lambda_int_lane_sub_slow", "lambda_int_lane_mul_slow",
-        "lambda_int_lane_divmod_slow",
+        "lambda_int_lane_divmod_slow", "int2it_lane",
         "js_is_truthy", "js_is_nullish",
         "js_error_lane_payload",
         "js_set_this", "js_get_new_target",

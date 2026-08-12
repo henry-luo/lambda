@@ -64,6 +64,10 @@ extern void jm_cleanup_active_mir(void);
 extern void jm_abandon_active_mir_after_signal(void);
 
 // Crash guard for JS JIT execution (catches SIGSEGV/SIGBUS in compiled code)
+// Keep the teardown flag platform-wide because the public cleanup query and
+// reset path run on Windows even though the POSIX signal watchdog does not.
+static volatile sig_atomic_t js_batch_cleanup_unsafe = 0;
+
 #ifndef _WIN32
 static sigjmp_buf js_exec_jmpbuf;
 static volatile sig_atomic_t js_exec_guarded = 0;
@@ -75,8 +79,6 @@ static struct sigaction js_exec_old_prof;
 #define JS_EXEC_TIMEOUT_BASE_SECONDS 5
 #define JS_EXEC_TIMEOUT_MAX_SECONDS 120
 #define JS_EXEC_TIMEOUT_ENV_MAX_SECONDS 600
-static volatile sig_atomic_t js_batch_cleanup_unsafe = 0;
-
 static void js_exec_timeout_handler(int sig) {
     if (js_exec_guarded) {
         js_exec_timed_out = 1;
@@ -2086,9 +2088,9 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 
     if (s_js_mir_cache && !s_retain_js_state) {
         if (!cached_preamble) {
-            result = compile_js_mir_preamble_len(runtime, preamble_buf->str,
-                                                 preamble_buf->length,
-                                                 preamble_filename, preamble);
+            result = transpile_js_to_mir_preamble_len(runtime, preamble_buf->str,
+                                                      preamble_buf->length,
+                                                      preamble_filename, preamble, NULL);
             js_mir_accumulate_last_phase_timing(true);
             if (get_type_id(result) != LMD_TYPE_ERROR) {
                 cached_preamble = js_mir_cache_adopt(

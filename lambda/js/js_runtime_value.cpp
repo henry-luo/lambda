@@ -1322,8 +1322,8 @@ extern "C" Item js_add(Item left, Item right) {
     Rooted<Item> right_root(roots, right);
     Rooted<Item> left_string_root(roots, ItemNull);
     Rooted<Item> right_string_root(roots, ItemNull);
-    TypeId left_type = get_type_id(left);
-    TypeId right_type = get_type_id(right);
+    TypeId left_type = get_type_id(left_root.get());
+    TypeId right_type = get_type_id(right_root.get());
 
     // ES spec §13.15.3 / §7.1.1: ApplyStringOrNumericBinaryOperator for `+`
     // 1. lprim = ToPrimitive(left, default).  2. rprim = ToPrimitive(right, default).
@@ -1335,7 +1335,7 @@ extern "C" Item js_add(Item left, Item right) {
         if (item_is_error(primitive)) return primitive;
         left_root.set(primitive);
         left = left_root.get();
-        left_type = get_type_id(left);
+        left_type = get_type_id(left_root.get());
     }
     if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY ||
         right_type == LMD_TYPE_ELEMENT || right_type == LMD_TYPE_FUNC) {
@@ -1343,12 +1343,12 @@ extern "C" Item js_add(Item left, Item right) {
         if (item_is_error(primitive)) return primitive;
         right_root.set(primitive);
         right = right_root.get();
-        right_type = get_type_id(right);
+        right_type = get_type_id(right_root.get());
     }
 
     // String concatenation if either operand is a string
     if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
-        return js_concat_strings_fast(it2s(left), it2s(right));
+        return js_concat_strings_fast(it2s(left_root.get()), it2s(right_root.get()));
     }
     if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
         Item left_string = js_to_string(left_root.get());
@@ -1359,6 +1359,8 @@ extern "C" Item js_add(Item left, Item right) {
         right_string_root.set(right_string);
         // D5.4.3: the first conversion result is otherwise a native local while
         // the second conversion allocates, which poisoned chained `+` output.
+        // ToString can allocate twice before concatenation; keep both results
+        // rooted because the second conversion may collect the first string.
         return js_concat_strings_fast(it2s(left_string_root.get()),
             it2s(right_string_root.get()));
     }

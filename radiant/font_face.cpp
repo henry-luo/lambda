@@ -20,7 +20,7 @@ static bool is_http_url(const char* url) {
     return url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
 }
 
-static bool is_supported_web_font_source(const char* url, const char* format) {
+bool radiant_is_supported_web_font_source(const char* url, const char* format) {
     if (format && *format) {
         if (strcasecmp(format, "woff2") == 0 ||
             strcasecmp(format, "woff") == 0 ||
@@ -192,7 +192,8 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         if (css_desc->src_urls) {
             for (int j = 0; j < css_desc->src_count; j++) {
                 if (is_http_url(css_desc->src_urls[j].url)) {
-                    if (!is_supported_web_font_source(css_desc->src_urls[j].url, css_desc->src_urls[j].format)) {
+                    if (!radiant_is_supported_web_font_source(
+                            css_desc->src_urls[j].url, css_desc->src_urls[j].format)) {
                         clog_debug(font_log, "Skipping unsupported remote font source: %s (format: %s)",
                                    css_desc->src_urls[j].url,
                                    css_desc->src_urls[j].format ? css_desc->src_urls[j].format : "?");

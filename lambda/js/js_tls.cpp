@@ -1166,14 +1166,12 @@ typedef struct TlsOpenSslPfxBackend {
 
 static TlsOpenSslPfxBackend tls_pfx_backend;
 
+#ifndef _WIN32
+// windows returns before the dynamic OpenSSL loader path, so this POSIX symbol lookup helper is not needed.
 static void* tls_dlsym_required(void* handle, const char* name) {
-#ifdef _WIN32
-    (void)handle; (void)name;
-    return NULL;
-#else
     return handle ? dlsym(handle, name) : NULL;
-#endif
 }
+#endif
 
 static bool tls_openssl_pfx_load(void) {
     TlsOpenSslPfxBackend* b = &tls_pfx_backend;

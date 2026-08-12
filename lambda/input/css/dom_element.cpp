@@ -2099,34 +2099,7 @@ bool DomElement::append_child(DomElement* child) {
 }
 
 bool DomElement::remove_child(DomElement* child) {
-    DomElement* parent = this;
-    if (!child || child->parent != parent) {
-        return false;
-    }
-
-    // Update sibling links - polymorphic base class handles this
-    if (child->prev_sibling) {
-        child->prev_sibling->next_sibling = child->next_sibling;
-    } else {
-        // Child was first child
-        parent->first_child = child->next_sibling;
-    }
-
-    if (child->next_sibling) {
-        child->next_sibling->prev_sibling = child->prev_sibling;
-    } else {
-        // Child was last child
-        parent->last_child = child->prev_sibling;
-    }
-
-    // Clear child's parent relationship
-    child->parent = NULL;
-    child->prev_sibling = NULL;
-    child->next_sibling = NULL;
-
-    dom_node_schedule_detached(parent->doc, child);
-
-    return true;
+    return child && DomNode::remove_child(static_cast<DomNode*>(child));
 }
 
 bool DomElement::insert_before(DomElement* new_child, DomElement* reference_child) {
@@ -2800,9 +2773,8 @@ bool dom_text_remove(DomText* text_node) {
         return false;
     }
 
-    // MarkEditor rebuilds surviving UI-mode siblings, but the removed Text
-    // wrapper still owns the old links.  The base unlinker clears that wrapper
-    // and schedules its lifecycle teardown without disturbing the new chain.
+    // DomNode::remove_child handles both the current chain and wrappers whose
+    // links were superseded by MarkEditor relinking.
     if (!((DomNode*)parent)->remove_child(text_node)) {
         log_error("dom_text_remove: failed to unlink DOM text node");
         return false;
