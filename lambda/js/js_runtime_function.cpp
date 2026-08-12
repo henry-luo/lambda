@@ -498,7 +498,9 @@ static Item js_new_native_function_impl(JsNativeTarget target,
     fn->param_count = policy == JS_NATIVE_CALL_REST ? -arity : arity;
     fn->formal_length = -1;
     fn->prototype = ItemNull;
-    fn->module_state_id = js_get_active_module_state_id();
+    // D6.2.2v2: host-native callbacks execute in the caller's module scope; assigning
+    // the publication scope here makes nested eval copy from an unrelated
+    // state and fails Test262's $262.evalScript/agent callbacks.
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
