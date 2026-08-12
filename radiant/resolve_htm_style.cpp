@@ -552,6 +552,22 @@ static void apply_html_table_rules_cell_border(LayoutContext* lycon, ViewBlock* 
     }
 }
 
+static void apply_html_table_rules_group_border(LayoutContext* lycon, ViewBlock* block,
+                                                const char* rules_attr) {
+    if (!rules_attr || !block) return;
+    size_t rules_len = strlen(rules_attr);
+    if (!str_ieq_const(rules_attr, rules_len, "groups") &&
+        !str_ieq_const(rules_attr, rules_len, "all")) return;
+    // HTML rules=groups supplies the inter-row-group border; author CSS may
+    // override its width or color through the normal cascade.
+    BorderProp* border = layout_ensure_border(lycon, block);
+    RadiantBorderSide refs = radiant_border_side(border, CSS_BOX_SIDE_BOTTOM);
+    *refs.width = 1.0f;
+    *refs.width_specificity = -1;
+    *refs.style = CSS_VALUE_SOLID;
+    *refs.color = (Color){ .r=128, .g=128, .b=128, .a=255 };
+}
+
 // get parent TR's valign attribute (for TD/TH cells)
 static const char* get_parent_tr_valign(DomNode* elmt) {
     // TD/TH -> TR, check TR's valign attribute
@@ -1157,6 +1173,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             Color bg_color = parse_html_color(bgcolor_attr);
             apply_html_background_color(lycon, block, bg_color);
         }
+        break;
+    }
+    case MARKUP_NAME_THEAD:
+    case MARKUP_NAME_TBODY:
+    case MARKUP_NAME_TFOOT: {
+        apply_html_table_rules_group_border(
+            lycon, block, get_parent_table_rules(elmt));
         break;
     }
     case MARKUP_NAME_TH: {

@@ -38,6 +38,17 @@ LayoutContainingBlock layout_containing_block_for_view(ViewBlock* block) {
     cb.content_y = box.border.top + box.padding.top;
     cb.content_width = max(cb.border_width - box.pad_border_h, 0.0f);
     cb.content_height = max(cb.border_height - box.pad_border_v, 0.0f);
+    if (block->view_type == RDT_VIEW_TABLE_CELL) {
+        ViewTableCell* cell = lam::view_require<RDT_VIEW_TABLE_CELL>(block);
+        float collapsed_top = cell->td && cell->td->top_resolved
+            ? cell->td->top_resolved->width / 2.0f : 0.0f;
+        // Positioned descendants of a collapsed-border cell use the cell's
+        // padding edge, which begins after the shared top half-border.
+        cb.padding_y += collapsed_top;
+        cb.padding_height = max(cb.padding_height - collapsed_top, 0.0f);
+        cb.content_y += collapsed_top;
+        cb.content_height = max(cb.content_height - collapsed_top, 0.0f);
+    }
 
     cb.has_definite_width = block->blk && block->block_mut()->given_width >= 0.0f;
     cb.has_definite_height = block->blk && block->block_mut()->given_height >= 0.0f;

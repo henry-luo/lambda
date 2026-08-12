@@ -575,7 +575,9 @@ static bool positioned_prepare_axis(LayoutContext* lycon, ViewBlock* block,
         layout_axis_is_horizontal(axis));
     return positioned_resolve_basic_axis(
         lycon, block, containing_size, static_start, axis, is_stretch,
-        has_size, !is_intrinsic && can_inset_stretch, out_size);
+        has_size,
+        !is_intrinsic && can_inset_stretch && block->display.inner != CSS_VALUE_TABLE,
+        out_size);
 }
 
 static bool distribute_abs_auto_margins(ViewBlock* block, LayoutAxis axis,
