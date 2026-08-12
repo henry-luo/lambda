@@ -1027,36 +1027,16 @@ static bool intrinsic_resolve_margin_value(LayoutContext* lycon, CssValue* value
 static bool intrinsic_resolve_vertical_margins(LayoutContext* lycon, DomElement* element,
                                                float inline_base, float* mt, float* mb) {
     if (!element || !element->specified_style || !mt || !mb) return false;
-
-    CssCascadeCandidate top = {};
-    CssCascadeCandidate bottom = {};
-
-    CssDeclaration* margin = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN);
-    if (margin && margin->value) {
-        css_consider_cascade_candidate(&top, margin, (CssValue*)css_box_shorthand_side_value(margin->value, 0));
-        css_consider_cascade_candidate(&bottom, margin, (CssValue*)css_box_shorthand_side_value(margin->value, 2));
-    }
-
-    CssDeclaration* mt_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_TOP);
-    css_consider_cascade_candidate(&top, mt_decl, mt_decl ? mt_decl->value : nullptr);
-    CssDeclaration* mb_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_BOTTOM);
-    css_consider_cascade_candidate(&bottom, mb_decl, mb_decl ? mb_decl->value : nullptr);
-
-    CssDeclaration* block = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_BLOCK);
-    if (block && block->value) {
-        css_consider_cascade_candidate(&top, block, css_pair_side_value(block->value, false));
-        css_consider_cascade_candidate(&bottom, block, css_pair_side_value(block->value, true));
-    }
-    CssDeclaration* block_start = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_BLOCK_START);
-    css_consider_cascade_candidate(&top, block_start, block_start ? block_start->value : nullptr);
-    CssDeclaration* block_end = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_BLOCK_END);
-    css_consider_cascade_candidate(&bottom, block_end, block_end ? block_end->value : nullptr);
+    LayoutCssBoxCandidates candidates = {};
+    candidates.collect(element->specified_style, true);
 
     bool resolved = false;
-    if (top.value && intrinsic_resolve_margin_value(lycon, top.value, inline_base, mt)) {
+    if (candidates.sides[0].value && intrinsic_resolve_margin_value(
+            lycon, candidates.sides[0].value, inline_base, mt)) {
         resolved = true;
     }
-    if (bottom.value && intrinsic_resolve_margin_value(lycon, bottom.value, inline_base, mb)) {
+    if (candidates.sides[2].value && intrinsic_resolve_margin_value(
+            lycon, candidates.sides[2].value, inline_base, mb)) {
         resolved = true;
     }
     return resolved;
@@ -2397,23 +2377,6 @@ static float intrinsic_resolved_height_limit_or(LayoutContext* lycon,
                    : layout_explicit_max_axis_or(view, false, -1.0f);
 }
 
-static bool intrinsic_element_is_abs_or_fixed(DomElement* element) {
-    if (!element) return false;
-    if (layout_position_is_abs_fixed(element->position)) {
-        return true;
-    }
-    if (!element->specified_style) return false;
-    CssDeclaration* pos_decl = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_POSITION);
-    if (!pos_decl || !pos_decl->value ||
-        pos_decl->value->type != CSS_VALUE_TYPE_KEYWORD) {
-        return false;
-    }
-    CssEnum position_value = pos_decl->value->data.keyword;
-    return position_value == CSS_VALUE_ABSOLUTE ||
-           position_value == CSS_VALUE_FIXED;
-}
-
 CssEnum get_element_text_transform(DomElement* element) {
     // Walk up the DOM tree to find inherited text-transform value.
     // During intrinsic sizing, the view tree hasn't been created yet,
@@ -2647,7 +2610,7 @@ CssEnum get_element_font_variant(DomElement* element) {
 
 void layout_resolve_intrinsic_horizontal_margins(
         LayoutContext* lycon, DomElement* element, bool include_logical,
-        float* margin_left, float* margin_right) {
+        float* margin_left, float* margin_right, bool include_shorthand) {
     if (!element || !element->specified_style || !margin_left || !margin_right) return;
     StyleTree* style = element->specified_style;
     CssDeclaration* decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_LEFT);
@@ -2681,7 +2644,7 @@ void layout_resolve_intrinsic_horizontal_margins(
                 lycon, CSS_PROPERTY_MARGIN_INLINE, decl->value);
         }
     }
-    if (*margin_left != 0.0f || *margin_right != 0.0f) return;
+    if (!include_shorthand || *margin_left != 0.0f || *margin_right != 0.0f) return;
 
     decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN);
     if (!decl || !decl->value) return;
@@ -4010,37 +3973,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     return margin_left + margin_right;
                 }
                 if (!child_elem->specified_style) return 0.0f;
-
-                CssDeclaration* margin_left_decl = style_tree_get_declaration(
-                    child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
-                if (margin_left_decl && margin_left_decl->value &&
-                    margin_left_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                    margin_left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT,
-                                                       margin_left_decl->value);
-                }
-                CssDeclaration* margin_right_decl = style_tree_get_declaration(
-                    child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
-                if (margin_right_decl && margin_right_decl->value &&
-                    margin_right_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                    margin_right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT,
-                                                        margin_right_decl->value);
-                }
-                if (margin_left != 0.0f || margin_right != 0.0f) {
-                    return margin_left + margin_right;
-                }
-
-                CssDeclaration* margin_decl = style_tree_get_declaration(
-                    child_elem->specified_style, CSS_PROPERTY_MARGIN);
-                if (!margin_decl || !margin_decl->value) return 0.0f;
-                const CssValue* val = margin_decl->value;
-                const CssValue* right_value = css_box_shorthand_side_value(val, 1);
-                const CssValue* left_value = css_box_shorthand_side_value(val, 3);
-                if (right_value && left_value) {
-                    float right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, right_value);
-                    float left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, left_value);
-                    return left + right;
-                }
-                return 0.0f;
+                layout_resolve_intrinsic_horizontal_margins(
+                    lycon, child_elem, false, &margin_left, &margin_right);
+                return margin_left + margin_right;
             };
 
             auto measure_anonymous_cell_run = [&should_skip_anonymous_row_child,
@@ -4115,7 +4050,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     bool item_is_float = layout_element_is_floated(item_elem);
                     if (!item_is_float && item_display.inner == CSS_VALUE_TABLE_CELL) break;
                     if (layout_display_is_none(item_display) ||
-                        intrinsic_element_is_abs_or_fixed(item_elem)) {
+                        layout_element_is_abs_or_fixed(item_elem)) {
                         continue;
                     }
 
@@ -5087,18 +5022,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             // CSS 2.1 §9.3.1: Absolutely positioned elements are out of normal flow
             // and do not contribute to the containing block's intrinsic size.
-            if (layout_block_is_out_of_flow_positioned(child_vb)) {
+            if (layout_block_is_out_of_flow_positioned(child_vb) ||
+                (!child_vb->position && layout_element_is_abs_or_fixed(child_elem))) {
                 continue;
-            }
-            if (!child_vb->position && child_elem->specified_style) {
-                CssDeclaration* pos_decl = style_tree_get_declaration(
-                    child_elem->specified_style, CSS_PROPERTY_POSITION);
-                if (pos_decl && pos_decl->value && pos_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                    CssEnum pos_val = pos_decl->value->data.keyword;
-                    if (pos_val == CSS_VALUE_ABSOLUTE || pos_val == CSS_VALUE_FIXED) {
-                        continue;
-                    }
-                }
             }
 
             child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
@@ -5177,12 +5103,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 if (layout_block_is_out_of_flow_positioned(child_block)) {
                     child_is_absolute = true;
                 } else if (child_elem->specified_style) {
-                    CssDeclaration* pos_decl = style_tree_get_declaration(
-                        child_elem->specified_style, CSS_PROPERTY_POSITION);
-                    if (pos_decl && pos_decl->value && pos_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                        CssEnum pos_val = pos_decl->value->data.keyword;
-                        child_is_absolute = (pos_val == CSS_VALUE_ABSOLUTE || pos_val == CSS_VALUE_FIXED);
-                    }
+                    child_is_absolute = layout_element_is_abs_or_fixed(child_elem);
                 }
                 if (child_is_absolute) {
                     continue;
@@ -5412,45 +5333,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 } else if (child_elem->specified_style) {
                     // Read margins directly from specified CSS style
                     // This handles the case during intrinsic sizing when bound isn't allocated yet
-                    // First check for individual margin properties
-                    CssDeclaration* margin_left_decl = style_tree_get_declaration(
-                        child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
-                    if (margin_left_decl && margin_left_decl->value &&
-                        margin_left_decl->value->type != CSS_VALUE_TYPE_PERCENTAGE) {
-                        margin_left = intrinsic_resolve_horizontal_margin_value(
-                            lycon, CSS_PROPERTY_MARGIN_LEFT, margin_left_decl->value);
-                        child_width += margin_left;
-                    }
-                    CssDeclaration* margin_right_decl = style_tree_get_declaration(
-                        child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
-                    if (margin_right_decl && margin_right_decl->value &&
-                        margin_right_decl->value->type != CSS_VALUE_TYPE_PERCENTAGE) {
-                        margin_right = intrinsic_resolve_horizontal_margin_value(
-                            lycon, CSS_PROPERTY_MARGIN_RIGHT, margin_right_decl->value);
-                        child_width += margin_right;
-                    }
-                    // If individual properties not found, check shorthand margin property
-                    if (margin_left == 0 && margin_right == 0) {
-                        CssDeclaration* margin_decl = style_tree_get_declaration(
-                            child_elem->specified_style, CSS_PROPERTY_MARGIN);
-                        if (margin_decl && margin_decl->value) {
-                            // Handle shorthand: margin: value or margin: v1 v2 v3 v4
-                            const CssValue* val = margin_decl->value;
-                            const CssValue* right_value = css_box_shorthand_side_value(val, 1);
-                            const CssValue* left_value = css_box_shorthand_side_value(val, 3);
-                            if (right_value && right_value->type != CSS_VALUE_TYPE_PERCENTAGE) {
-                                margin_right = intrinsic_resolve_horizontal_margin_value(
-                                    lycon, CSS_PROPERTY_MARGIN, (CssValue*)right_value);
-                            }
-                            if (left_value && left_value->type != CSS_VALUE_TYPE_PERCENTAGE) {
-                                margin_left = intrinsic_resolve_horizontal_margin_value(
-                                    lycon, CSS_PROPERTY_MARGIN, (CssValue*)left_value);
-                            }
-                            if (right_value || left_value) {
-                                child_width += margin_left + margin_right;
-                            }
-                        }
-                    }
+                    layout_resolve_intrinsic_horizontal_margins(
+                        lycon, child_elem, false, &margin_left, &margin_right);
+                    child_width += margin_left + margin_right;
                 }
             }
             // a float's outer min/max contributions share its margins; otherwise a negative
@@ -6889,17 +6774,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                      (child_block->position && element_has_float(child_block)))) {
                     continue;
                 }
-                if ((!child_block || !child_block->position) && child_elem->specified_style) {
-                    CssDeclaration* pos_decl = style_tree_get_declaration(
-                        child_elem->specified_style, CSS_PROPERTY_POSITION);
-                    if (pos_decl && pos_decl->value &&
-                        pos_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                        CssEnum pos_val = pos_decl->value->data.keyword;
-                        if (pos_val == CSS_VALUE_ABSOLUTE || pos_val == CSS_VALUE_FIXED) {
-                            continue;
-                        }
-                    }
-                }
+                if ((!child_block || !child_block->position) &&
+                    layout_element_is_abs_or_fixed(child_elem)) continue;
             }
             // CSS 2.1 §10.3.3: The available width for a child element's content
             // is the parent's content width minus the child's own padding and border.
@@ -6964,36 +6840,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     mb = child_ve->boundary()->margin.bottom;
                 }
 
-                // Older styles can arrive without bounds during early measurement.
-                if (!resolved_from_style && mt == 0 && mb == 0 && child_elem->specified_style) {
-                    CssDeclaration* mt_decl = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_TOP);
-                    if (mt_decl && mt_decl->value) {
-                        if (mt_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE)
-                            mt = (float)(mt_decl->value->data.percentage.value / 100.0) * content_w;
-                        else if (mt_decl->value->type == CSS_VALUE_TYPE_LENGTH)
-                            mt = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_TOP, mt_decl->value);
-                    }
-                    CssDeclaration* mb_decl = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_BOTTOM);
-                    if (mb_decl && mb_decl->value) {
-                        if (mb_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE)
-                            mb = (float)(mb_decl->value->data.percentage.value / 100.0) * content_w;
-                        else if (mb_decl->value->type == CSS_VALUE_TYPE_LENGTH)
-                            mb = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_BOTTOM, mb_decl->value);
-                    }
-                    if (mt == 0 && mb == 0) {
-                        CssDeclaration* m_decl = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN);
-                        if (m_decl && m_decl->value) {
-                            if (m_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                                float m = (float)(m_decl->value->data.percentage.value / 100.0) * content_w;
-                                mt = mb = m;
-                            } else if (m_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                float m = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, m_decl->value);
-                                mt = mb = m;
-                            }
-                        }
-                    }
-                }
-
                 if (is_grid_container || is_flex_container) {
                     // Flex/grid: margins don't collapse, add full margins
                     child_height += mt + mb;
@@ -7034,10 +6880,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     float pad_top = 0, pad_bottom = 0;
     float border_top = 0, border_bottom = 0;
 
-    // CSS percentage padding (top/bottom) resolves against the containing block's WIDTH.
-    // During intrinsic sizing, view->bound may have padding=0 from stylesheet defaults
-    // while specified_style has an unresolved percentage override. Check specified_style
-    // for percentage padding FIRST, since percentages must be resolved against 'width'.
     bool resolved_pad_from_pct = false;
     if (element->specified_style && width > 0) {
         CssDeclaration* pt = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_TOP);

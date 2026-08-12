@@ -1792,6 +1792,9 @@ extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
     if (!predicate) return -1;
     if (predicate(user)) return 0;
     js_microtask_flush();
+    if (js_animation_frame_has_pending()) {
+        js_animation_frame_flush(js_performance_monotonic_now_ms());
+    }
     if (predicate(user)) return 0;
 
     uv_loop_t* loop = lambda_uv_loop();
@@ -1809,10 +1812,12 @@ extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
         int before = next_tick_count + microtask_count;
         uv_run(loop, UV_RUN_NOWAIT);
         int after_uv = next_tick_count + microtask_count;
+        int frame_callbacks = js_animation_frame_has_pending()
+            ? js_animation_frame_flush(js_performance_monotonic_now_ms()) : 0;
         js_microtask_flush();
         if (predicate(user)) return 0;
 
-        bool made_progress = (after_uv > before) || (after_uv != 0);
+        bool made_progress = frame_callbacks > 0 || (after_uv > before) || (after_uv != 0);
         if (made_progress) {
             no_progress = 0;
         } else {
@@ -1919,7 +1924,14 @@ extern "C" int js_event_loop_drain(void) {
         for (int turn = 0; turn < 4; turn++) {
             int active = uv_run(loop, UV_RUN_NOWAIT);
             js_event_loop_render_checkpoint();
-            if (!active || timer_handle_count == 0) break;
+            // Headless layout has no native frame clock; drain queued rAF work
+            // so scripts using two-frame rendering checkpoints can commit their
+            // final DOM mutations before the one-shot document is serialized.
+            int frame_callbacks = js_animation_frame_has_pending()
+                ? js_animation_frame_flush(js_performance_monotonic_now_ms()) : 0;
+            js_microtask_flush();
+            if (!active && timer_handle_count == 0 && frame_callbacks == 0 &&
+                !js_animation_frame_has_pending()) break;
         }
         close_all_timer_handles();
         uv_run(loop, UV_RUN_NOWAIT);

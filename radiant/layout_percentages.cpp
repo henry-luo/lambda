@@ -83,92 +83,16 @@ static void layout_apply_percentage_spacing_candidate(ViewBlock* block, int side
     }
 }
 
-static void layout_collect_spacing_candidates(
-    ViewBlock* block,
-    bool margin,
-    CssCascadeCandidate* top,
-    CssCascadeCandidate* right,
-    CssCascadeCandidate* bottom,
-    CssCascadeCandidate* left) {
-    if (!block || !block->specified_style) return;
-
-    CssCascadeCandidate* candidates[4] = {top, right, bottom, left};
-    CssPropertyCode physical[4] = {
-        margin ? CSS_PROPERTY_MARGIN_TOP : CSS_PROPERTY_PADDING_TOP,
-        margin ? CSS_PROPERTY_MARGIN_RIGHT : CSS_PROPERTY_PADDING_RIGHT,
-        margin ? CSS_PROPERTY_MARGIN_BOTTOM : CSS_PROPERTY_PADDING_BOTTOM,
-        margin ? CSS_PROPERTY_MARGIN_LEFT : CSS_PROPERTY_PADDING_LEFT
-    };
-    CssPropertyCode shorthand = margin ? CSS_PROPERTY_MARGIN : CSS_PROPERTY_PADDING;
-    CssDeclaration* decl = style_tree_get_declaration(block->specified_style, shorthand);
-    if (decl && decl->value) {
-        for (int side = 0; side < 4; side++) {
-            css_consider_cascade_candidate(
-                candidates[side], decl,
-                (CssValue*)css_box_shorthand_side_value(decl->value, side));
-        }
-    }
-    for (int side = 0; side < 4; side++) {
-        decl = style_tree_get_declaration(block->specified_style, physical[side]);
-        css_consider_cascade_candidate(
-            candidates[side], decl, decl ? decl->value : nullptr);
-    }
-
-    CssPropertyCode inline_prop = margin ? CSS_PROPERTY_MARGIN_INLINE : CSS_PROPERTY_PADDING_INLINE;
-    CssCascadeCandidate* inline_candidates[2] = {left, right};
-    decl = style_tree_get_declaration(block->specified_style, inline_prop);
-    if (decl && decl->value) {
-        for (int side = 0; side < 2; side++) {
-            css_consider_cascade_candidate(
-                inline_candidates[side], decl, css_pair_side_value(decl->value, side != 0));
-        }
-    }
-
-    CssPropertyCode inline_properties[2] = {
-        margin ? CSS_PROPERTY_MARGIN_INLINE_START : CSS_PROPERTY_PADDING_INLINE_START,
-        margin ? CSS_PROPERTY_MARGIN_INLINE_END : CSS_PROPERTY_PADDING_INLINE_END
-    };
-    for (int side = 0; side < 2; side++) {
-        decl = style_tree_get_declaration(block->specified_style, inline_properties[side]);
-        css_consider_cascade_candidate(
-            inline_candidates[side], decl, decl ? decl->value : nullptr);
-    }
-
-    CssPropertyCode block_prop = margin ? CSS_PROPERTY_MARGIN_BLOCK : CSS_PROPERTY_PADDING_BLOCK;
-    decl = style_tree_get_declaration(block->specified_style, block_prop);
-    CssCascadeCandidate* block_candidates[2] = {top, bottom};
-    if (decl && decl->value) {
-        for (int side = 0; side < 2; side++) {
-            css_consider_cascade_candidate(
-                block_candidates[side], decl, css_pair_side_value(decl->value, side != 0));
-        }
-    }
-
-    CssPropertyCode block_properties[2] = {
-        margin ? CSS_PROPERTY_MARGIN_BLOCK_START : CSS_PROPERTY_PADDING_BLOCK_START,
-        margin ? CSS_PROPERTY_MARGIN_BLOCK_END : CSS_PROPERTY_PADDING_BLOCK_END
-    };
-    for (int side = 0; side < 2; side++) {
-        decl = style_tree_get_declaration(block->specified_style, block_properties[side]);
-        css_consider_cascade_candidate(
-            block_candidates[side], decl, decl ? decl->value : nullptr);
-    }
-}
-
 static void layout_reresolve_percentage_spacing(ViewBlock* block, float inline_base, bool margin) {
     if (!block || !block->bound || !block->specified_style || inline_base < 0.0f) return;
 
-    CssCascadeCandidate top = {};
-    CssCascadeCandidate right = {};
-    CssCascadeCandidate bottom = {};
-    CssCascadeCandidate left = {};
+    LayoutCssBoxCandidates candidates = {};
+    candidates.collect(block->specified_style, margin);
 
-    layout_collect_spacing_candidates(block, margin, &top, &right, &bottom, &left);
-
-    layout_apply_percentage_spacing_candidate(block, 0, &top, inline_base, margin);
-    layout_apply_percentage_spacing_candidate(block, 1, &right, inline_base, margin);
-    layout_apply_percentage_spacing_candidate(block, 2, &bottom, inline_base, margin);
-    layout_apply_percentage_spacing_candidate(block, 3, &left, inline_base, margin);
+    for (int side = 0; side < 4; side++) {
+        layout_apply_percentage_spacing_candidate(
+            block, side, &candidates.sides[side], inline_base, margin);
+    }
 }
 
 void layout_reresolve_percentage_box(ViewBlock* block, float inline_base) {
@@ -176,26 +100,14 @@ void layout_reresolve_percentage_box(ViewBlock* block, float inline_base) {
     layout_reresolve_percentage_spacing(block, inline_base, true);
 }
 
-static bool layout_spacing_candidate_is_percentage(
-    const CssCascadeCandidate& candidate) {
-    return candidate.value && candidate.value->type == CSS_VALUE_TYPE_PERCENTAGE;
-}
-
 static bool layout_element_has_percentage_spacing(ViewBlock* block) {
     if (!block || !block->specified_style) return false;
 
     for (int pass = 0; pass < 2; pass++) {
         bool margin = pass != 0;
-        CssCascadeCandidate top = {};
-        CssCascadeCandidate right = {};
-        CssCascadeCandidate bottom = {};
-        CssCascadeCandidate left = {};
-        layout_collect_spacing_candidates(
-            block, margin, &top, &right, &bottom, &left);
-        if (layout_spacing_candidate_is_percentage(top) ||
-            layout_spacing_candidate_is_percentage(right) ||
-            layout_spacing_candidate_is_percentage(bottom) ||
-            layout_spacing_candidate_is_percentage(left)) {
+        LayoutCssBoxCandidates candidates = {};
+        candidates.collect(block->specified_style, margin);
+        if (candidates.has_percentage()) {
             return true;
         }
     }

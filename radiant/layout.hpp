@@ -339,7 +339,8 @@ void layout_resolve_intrinsic_horizontal_margins(LayoutContext* lycon,
                                                   DomElement* element,
                                                   bool include_logical,
                                                   float* margin_left,
-                                                  float* margin_right);
+                                                  float* margin_right,
+                                                  bool include_shorthand = true);
 
 // tier-3: layout-transient, valid within pass
 struct IntrinsicSizesBidirectional {
@@ -822,6 +823,84 @@ static inline void css_consider_cascade_candidate(CssCascadeCandidate* candidate
         candidate->priority = priority;
     }
 }
+
+// A box property's physical and logical declarations all compete for the same
+// four used-value slots. Keeping that candidate assembly beside the priority
+// rule prevents percentage re-resolution and intrinsic sizing from drifting.
+struct LayoutCssBoxCandidates {
+    CssCascadeCandidate sides[4];
+
+    void collect(StyleTree* style, bool margin) {
+        if (!style) return;
+
+        CssPropertyCode physical[4] = {
+            margin ? CSS_PROPERTY_MARGIN_TOP : CSS_PROPERTY_PADDING_TOP,
+            margin ? CSS_PROPERTY_MARGIN_RIGHT : CSS_PROPERTY_PADDING_RIGHT,
+            margin ? CSS_PROPERTY_MARGIN_BOTTOM : CSS_PROPERTY_PADDING_BOTTOM,
+            margin ? CSS_PROPERTY_MARGIN_LEFT : CSS_PROPERTY_PADDING_LEFT
+        };
+        CssDeclaration* decl = style_tree_get_declaration(
+            style, margin ? CSS_PROPERTY_MARGIN : CSS_PROPERTY_PADDING);
+        if (decl && decl->value) {
+            for (int side = 0; side < 4; side++) {
+                css_consider_cascade_candidate(
+                    &sides[side], decl,
+                    (CssValue*)css_box_shorthand_side_value(decl->value, side));
+            }
+        }
+        for (int side = 0; side < 4; side++) {
+            decl = style_tree_get_declaration(style, physical[side]);
+            css_consider_cascade_candidate(
+                &sides[side], decl, decl ? decl->value : nullptr);
+        }
+
+        CssPropertyCode inline_prop = margin
+            ? CSS_PROPERTY_MARGIN_INLINE : CSS_PROPERTY_PADDING_INLINE;
+        decl = style_tree_get_declaration(style, inline_prop);
+        if (decl && decl->value) {
+            css_consider_cascade_candidate(&sides[3], decl,
+                css_pair_side_value(decl->value, false));
+            css_consider_cascade_candidate(&sides[1], decl,
+                css_pair_side_value(decl->value, true));
+        }
+        CssPropertyCode inline_properties[2] = {
+            margin ? CSS_PROPERTY_MARGIN_INLINE_START : CSS_PROPERTY_PADDING_INLINE_START,
+            margin ? CSS_PROPERTY_MARGIN_INLINE_END : CSS_PROPERTY_PADDING_INLINE_END
+        };
+        for (int side = 0; side < 2; side++) {
+            decl = style_tree_get_declaration(style, inline_properties[side]);
+            css_consider_cascade_candidate(
+                &sides[side == 0 ? 3 : 1], decl, decl ? decl->value : nullptr);
+        }
+
+        CssPropertyCode block_prop = margin
+            ? CSS_PROPERTY_MARGIN_BLOCK : CSS_PROPERTY_PADDING_BLOCK;
+        decl = style_tree_get_declaration(style, block_prop);
+        if (decl && decl->value) {
+            css_consider_cascade_candidate(&sides[0], decl,
+                css_pair_side_value(decl->value, false));
+            css_consider_cascade_candidate(&sides[2], decl,
+                css_pair_side_value(decl->value, true));
+        }
+        CssPropertyCode block_properties[2] = {
+            margin ? CSS_PROPERTY_MARGIN_BLOCK_START : CSS_PROPERTY_PADDING_BLOCK_START,
+            margin ? CSS_PROPERTY_MARGIN_BLOCK_END : CSS_PROPERTY_PADDING_BLOCK_END
+        };
+        for (int side = 0; side < 2; side++) {
+            decl = style_tree_get_declaration(style, block_properties[side]);
+            css_consider_cascade_candidate(
+                &sides[side * 2], decl, decl ? decl->value : nullptr);
+        }
+    }
+
+    bool has_percentage() const {
+        for (int side = 0; side < 4; side++) {
+            if (sides[side].value &&
+                sides[side].value->type == CSS_VALUE_TYPE_PERCENTAGE) return true;
+        }
+        return false;
+    }
+};
 
 static inline float layout_non_negative_free_space(float value) {
     return value > 0.0f ? value : 0.0f;

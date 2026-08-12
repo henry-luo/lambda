@@ -4841,37 +4841,13 @@ static float table_intrinsic_child_horizontal_margin(LayoutContext* lycon,
         // resolved; fall through so specified margins still affect max-content.
     }
     if (!child_elem->specified_style) return 0.0f;
-    if (include_shorthand) {
-        float margin_left = 0.0f;
-        float margin_right = 0.0f;
-        // CSS Sizing 3 §5.2: table-cell intrinsic sizing must preserve the
-        // fixed term in calc(percentage + length) while resolving its percentage
-        layout_resolve_intrinsic_horizontal_margins(
-            lycon, child_elem, false, &margin_left, &margin_right);
-        return margin_left + margin_right;
-    }
-    CssDeclaration* ml = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
-    if (ml && ml->value && ml->value->type == CSS_VALUE_TYPE_LENGTH) {
-        margin_h += resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml->value);
-    }
-    CssDeclaration* mr = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
-    if (mr && mr->value && mr->value->type == CSS_VALUE_TYPE_LENGTH) {
-        margin_h += resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr->value);
-    }
-    if (!include_shorthand || margin_h != 0.0f) return margin_h;
-    CssDeclaration* m = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN);
-    if (!m || !m->value) return margin_h;
-    if (m->value->type == CSS_VALUE_TYPE_LENGTH) {
-        return 2.0f * resolve_length_value(lycon, CSS_PROPERTY_MARGIN, m->value);
-    }
-    if (m->value->type == CSS_VALUE_TYPE_LIST) {
-        const CssValue* ml_value = css_box_shorthand_side_value(m->value, 3);
-        const CssValue* mr_value = css_box_shorthand_side_value(m->value, 1);
-        float ml_resolved = ml_value ? resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml_value) : 0.0f;
-        float mr_resolved = mr_value ? resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr_value) : 0.0f;
-        return ml_resolved + mr_resolved;
-    }
-    return margin_h;
+    float margin_left = 0.0f;
+    float margin_right = 0.0f;
+    // intrinsic table measurement and used-value resolution share the same
+    // fixed-term handling for calc() margins; only the shorthand policy differs.
+    layout_resolve_intrinsic_horizontal_margins(
+        lycon, child_elem, false, &margin_left, &margin_right, include_shorthand);
+    return margin_left + margin_right;
 }
 
 static void table_intrinsic_flush_inline_run(float* inline_run_max, float* float_run_max,
