@@ -14,7 +14,6 @@
 #else
 #define RDT_HAS_FRIBIDI 0
 #endif
-
 // This pass deliberately works on the already-built line fragments. Inline
 // boxes are not reorderable DOM nodes: UAX #9 reorders their text and their
 // inline-edge fragments together, which is why a text-only reorder is wrong.
@@ -257,7 +256,6 @@ static void bidi_scale_rect_widths(BidiCharFragment* chars, BidiRectInfo* rects,
         }
     }
 }
-
 // use the pass's stable index type here; FriBidi is optional and its type is unavailable
 // when the platform omits the header even though these shared helpers still compile.
 static void bidi_update_span_visual_ranges(BidiCharFragment* chars,

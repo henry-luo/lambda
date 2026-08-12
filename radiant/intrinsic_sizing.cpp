@@ -618,10 +618,9 @@ static float intrinsic_border_width_from_shorthand_value(LayoutContext* lycon, C
     bool has_visible_style = false;
 
     auto consider_keyword = [&](CssEnum kw) {
-        if (kw == CSS_VALUE_THIN) border_width = 1.0f;
-        else if (kw == CSS_VALUE_MEDIUM) border_width = 3.0f;
-        else if (kw == CSS_VALUE_THICK) border_width = 5.0f;
-        else if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DASHED ||
+        if (kw == CSS_VALUE_THIN || kw == CSS_VALUE_MEDIUM || kw == CSS_VALUE_THICK) {
+            border_width = layout_css_border_width_keyword(kw);
+        } else if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DASHED ||
                  kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DOUBLE ||
                  kw == CSS_VALUE_GROOVE || kw == CSS_VALUE_RIDGE ||
                  kw == CSS_VALUE_INSET || kw == CSS_VALUE_OUTSET) {
@@ -840,10 +839,6 @@ float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* ele
     return padding_start + padding_end + border_start + border_end;
 }
 
-static inline bool intrinsic_is_simple_latin_shaping_byte(unsigned char ch) {
-    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
-}
-
 static bool intrinsic_apply_small_caps(uint32_t* codepoint, CssEnum font_variant) {
     if (!codepoint || font_variant != CSS_VALUE_SMALL_CAPS) return false;
     uint32_t original = *codepoint;
@@ -884,24 +879,15 @@ static bool intrinsic_measure_shaped_simple_latin_run(LayoutContext* lycon,
                                               font_variant, break_anywhere, break_word)) {
         return false;
     }
-    if (!intrinsic_is_simple_latin_shaping_byte(*str)) return false;
-
-    size_t run_len = 0;
-    while (run_len < remaining && intrinsic_is_simple_latin_shaping_byte(str[run_len])) {
-        GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, (uint32_t)str[run_len]);
-        if (ginfo.id == 0) return false;
-        run_len++;
+    LayoutSimpleLatinRun result = {};
+    if (!layout_measure_simple_latin_run(
+            lycon, lycon->font.font_handle, str, remaining, &result)) {
+        return false;
     }
-    if (run_len < 2) return false;
-
-    int byte_len = (int)run_len; // INT_CAST_OK: text byte count
-    TextExtents ext = font_measure_text(lycon->font.font_handle, (const char*)str, byte_len);
-    if (ext.glyph_count <= 0 && ext.width <= 0.0f) return false;
-
-    *out_bytes = run_len;
-    *out_width = ext.width;
-    *out_first_codepoint = (uint32_t)*str;
-    *out_last_codepoint = (uint32_t)str[run_len - 1];
+    *out_bytes = result.bytes;
+    *out_width = result.width;
+    *out_first_codepoint = result.first_codepoint;
+    *out_last_codepoint = result.last_codepoint;
     return true;
 }
 
@@ -1197,6 +1183,22 @@ static bool intrinsic_is_table_row_box(DomElement* elem) {
            intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_ROW);
 }
 
+static int intrinsic_table_row_count(DomElement* elem) {
+    if (!elem) return 0;
+    if (intrinsic_is_table_row_box(elem)) return 1;
+
+    int row_count = 0;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* child_elem = child->as_element();
+        if (intrinsic_is_table_row_box(child_elem) ||
+            intrinsic_is_table_row_group_box(child_elem)) {
+            row_count += intrinsic_table_row_count(child_elem);
+        }
+    }
+    return row_count;
+}
+
 static bool intrinsic_should_skip_height_child(DomElement* elem) {
     if (!elem) return true;
     if (layout_element_is_display_none(elem)) {
@@ -1240,6 +1242,16 @@ static float intrinsic_table_structure_height(LayoutContext* lycon, DomElement* 
             total_height += intrinsic_table_structure_height(lycon, child_elem, width);
         } else {
             total_height += calculate_max_content_height(lycon, child, width);
+        }
+    }
+
+    if (intrinsic_is_table_box(elem) && elem->tag() == MARKUP_NAME_TABLE) {
+        ViewTable* table = lam::unsafe_view_table_storage(elem);
+        if (table && table->tb && !table->tb->border_collapse) {
+            // Intrinsic table height must include the outer border-spacing gaps;
+            // otherwise a flex/grid query sees a shorter table than table layout.
+            int row_count = intrinsic_table_row_count(elem);
+            total_height += table->tb->border_spacing_v * (row_count + 1);
         }
     }
     return total_height;

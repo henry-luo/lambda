@@ -12,16 +12,10 @@
 #include <string.h>
 #include <ctype.h>
 #include <limits.h>
-
-// ============================================================================
 // Counter HashMap Helpers
-// ============================================================================
 
 HASHMAP_DEFINE_STRKEY(counter, CounterValue, name)
-
-// ============================================================================
 // Counter Context Management
-// ============================================================================
 
 CounterContext* counter_context_create(Arena* arena) {
     if (!arena) return nullptr;
@@ -45,7 +39,6 @@ bool CounterContext::init(Arena* backing_arena) {
     void* stack_mem = mem_alloc(sizeof(lam::ArrayList<CounterScope*>), MEM_CAT_LAYOUT);
     if (!stack_mem) return false;
     scope_stack = new (stack_mem) lam::ArrayList<CounterScope*>(MEM_CAT_LAYOUT, 16); // NEW_DELETE_OK: single audited construction of scope_stack inside CounterContext::init.
-
     // Create root scope
     push_scope();
 
@@ -87,11 +80,9 @@ void CounterContext::push_scope() {
     // Allocate new scope
     CounterScope* scope = (CounterScope*)arena_alloc(arena, sizeof(CounterScope));
     if (!scope) return;
-
     // Create hash map for counters in this scope
     scope->counters = counter_new(16);
     scope->parent = current_scope;
-
     // Push onto stack
     if (scope_stack) {
         scope_stack->append(scope);
@@ -108,16 +99,13 @@ void CounterContext::pop_scope() {
         // Don't pop root scope
         return;
     }
-
     // Free the hash map before removing
     CounterScope* scope = (*scope_stack)[size - 1];
     if (scope && scope->counters) {
         hashmap_free(scope->counters);
     }
-
     // Pop from stack
     scope_stack->remove(size - 1);
-
     // Update current scope to parent
     if (size > 1) {
         current_scope = (*scope_stack)[size - 2];
@@ -139,7 +127,6 @@ void CounterContext::pop_scope_propagate(bool propagate_resets) {
 
     CounterScope* scope = (*scope_stack)[size - 1];
     CounterScope* parent = (size > 1) ? (*scope_stack)[size - 2] : nullptr;
-
     // Propagate counters from popped scope to parent.
     // CSS 2.1 §12.4.1: "The scope of a counter starts at the first element in the
     // document that has a 'counter-reset' for that counter, and includes the element's
@@ -208,15 +195,12 @@ void CounterContext::pop_scope_propagate(bool propagate_resets) {
             }
         }
     }
-
     // Free the hash map before removing
     if (scope && scope->counters) {
         hashmap_free(scope->counters);
     }
-
     // Pop from stack
     scope_stack->remove(size - 1);
-
     // Update current scope to parent
     if (size > 1) {
         current_scope = (*scope_stack)[size - 2];
@@ -224,10 +208,7 @@ void CounterContext::pop_scope_propagate(bool propagate_resets) {
         current_scope = nullptr;
     }
 }
-
-// ============================================================================
 // Counter Parsing Helpers
-// ============================================================================
 
 /**
  * Parse counter specification string like "chapter 0 section 1"
@@ -241,12 +222,10 @@ static void parse_counter_spec(const char* spec,
     *names_out = nullptr;
     *values_out = nullptr;
     *count_out = 0;
-
     // Check for "none"
     if (strcmp(spec, "none") == 0) {
         return;
     }
-
     // Count tokens
     int token_count = 0;
     const char* p = spec;
@@ -262,14 +241,12 @@ static void parse_counter_spec(const char* spec,
     }
 
     if (token_count == 0) return;
-
     // Allocate arrays (max possible pairs)
     int max_pairs = (token_count + 1) / 2;
     char** names = (char**)arena_alloc(arena, sizeof(char*) * max_pairs);
     int* values = (int*)arena_alloc(arena, sizeof(int) * max_pairs); // INT_CAST_OK: pointer cast
 
     if (!names || !values) return;
-
     // Parse name-value pairs
     int pair_count = 0;
     p = spec;
@@ -278,13 +255,11 @@ static void parse_counter_spec(const char* spec,
         // Skip whitespace
         while (*p && str_char_is_ascii_space(*p)) p++;
         if (!*p) break;
-
         // Parse name: read until whitespace (CSS <custom-ident> can contain hyphens, underscores, digits)
         const char* name_start = p;
         while (*p && !str_char_is_ascii_space(*p)) p++;
 
         if (p == name_start) break;
-
         // verify it looks like a CSS identifier (starts with letter, underscore, or hyphen)
         if (!str_char_is_alpha(name_start[0]) && name_start[0] != '_' && name_start[0] != '-') break;
 
@@ -294,16 +269,13 @@ static void parse_counter_spec(const char* spec,
 
         memcpy(name, name_start, name_len);
         name[name_len] = '\0';
-
         // Skip whitespace
         while (*p && str_char_is_ascii_space(*p)) p++;
-
         // Parse optional integer value (sign must be followed by digit)
         int value = default_value;
         if (*p && (str_char_is_digit(*p) || ((*p == '-' || *p == '+') && *(p+1) && str_char_is_digit(*(p+1))))) {
             char* endptr = nullptr;
             long long_value = strtol(p, &endptr, 10);
-
             // Check for overflow/underflow
             if (long_value > INT_MAX) {
                 value = INT_MAX;
@@ -312,7 +284,6 @@ static void parse_counter_spec(const char* spec,
             } else {
                 value = (int)long_value;
             }
-
             // Move pointer past the parsed number
             if (endptr > p) {
                 p = endptr;
@@ -328,10 +299,7 @@ static void parse_counter_spec(const char* spec,
     *values_out = values;
     *count_out = pair_count;
 }
-
-// ============================================================================
 // Counter Operations
-// ============================================================================
 
 static CounterValue* counter_find(CounterScope* scope, CounterValue* search_key) {
     while (scope) {
@@ -365,7 +333,6 @@ static ParsedCounterSpec counter_parse(CounterContext* ctx, const char* spec,
 void counter_reset(CounterContext* ctx, const char* counter_spec) {
     if (!ctx || !ctx->current_scope || !counter_spec) return;
 
-
     ParsedCounterSpec parsed = counter_parse(ctx, counter_spec);
 
     for (int i = 0; i < parsed.count; i++) {
@@ -384,7 +351,6 @@ void counter_reset(CounterContext* ctx, const char* counter_spec) {
                     hashmap_delete(ctx->current_scope->parent->counters, &search_key);
                 }
             }
-
             // Create new counter
             counter_create(ctx->current_scope, parsed.names[i], parsed.values[i], true);
         } else {
@@ -397,14 +363,11 @@ void counter_reset(CounterContext* ctx, const char* counter_spec) {
 void counter_increment(CounterContext* ctx, const char* counter_spec) {
     if (!ctx || !ctx->current_scope || !counter_spec) return;
 
-
     ParsedCounterSpec parsed = counter_parse(ctx, counter_spec, 1);
-
 
     for (int i = 0; i < parsed.count; i++) {
 
         int increment = parsed.values[i];
-
         // Search for counter in current and parent scopes
         CounterValue search_key = {parsed.names[i], 0, false, false};
         CounterValue* cv = counter_find(ctx->current_scope, &search_key);
@@ -444,7 +407,6 @@ void counter_set(CounterContext* ctx, const char* counter_spec) {
 
 int counter_get_value(CounterContext* ctx, const char* name) {
     if (!ctx || !ctx->current_scope || !name) return 0;
-
     // Search for counter in current and parent scopes
     CounterScope* scope = ctx->current_scope;
     CounterValue search_key = {name, 0, false, false};
@@ -467,7 +429,6 @@ void counter_get_all_values(CounterContext* ctx, const char* name, int** values,
     *count = 0;
 
     CounterValue search_key = {name, 0, false, false};
-
     // Count how many counters with this name exist in the scope chain
     int counter_count = 0;
     CounterScope* scope = ctx->current_scope;
@@ -479,11 +440,9 @@ void counter_get_all_values(CounterContext* ctx, const char* name, int** values,
     }
 
     if (counter_count == 0) return;
-
     // Allocate array (from innermost to innermost)
     *values = (int*)arena_alloc(ctx->arena, sizeof(int) * counter_count); // INT_CAST_OK: pointer cast
     if (!*values) return;
-
     // Collect values from outermost to innermost
     int* temp = (int*)mem_alloc(sizeof(int) * counter_count, MEM_CAT_LAYOUT); // INT_CAST_OK: pointer cast
     int idx = 0;
@@ -497,22 +456,16 @@ void counter_get_all_values(CounterContext* ctx, const char* name, int** values,
         }
         scope = scope->parent;
     }
-
     // Copy to output array
     memcpy(*values, temp, sizeof(int) * counter_count); // INT_CAST_OK: size comparison
     mem_free(temp);
 
     *count = counter_count;
 }
-
-// ============================================================================
 // Counter Formatting
-// ============================================================================
 
-/**
- * Convert integer to lowercase roman numerals
- */
-static int int_to_lower_roman(int value, char* buffer, size_t buffer_size) {
+static int format_roman_counter(int value, char* buffer, size_t buffer_size,
+                                bool uppercase) {
     if (value <= 0 || value >= 4000 || buffer_size < 20) {
         return snprintf(buffer, buffer_size, "%d", value);
     }
@@ -528,25 +481,12 @@ static int int_to_lower_roman(int value, char* buffer, size_t buffer_size) {
     len += snprintf(buffer + len, buffer_size - len, "%s", tens[(value % 100) / 10]);
     len += snprintf(buffer + len, buffer_size - len, "%s", ones[value % 10]);
 
+    if (uppercase) str_upper_inplace(buffer, len);
     return len;
 }
 
-/**
- * Convert integer to uppercase roman numerals
- */
-static int int_to_upper_roman(int value, char* buffer, size_t buffer_size) {
-    int len = int_to_lower_roman(value, buffer, buffer_size);
-
-    // Convert to uppercase
-    str_upper_inplace(buffer, len);
-
-    return len;
-}
-
-/**
- * Convert integer to lowercase latin letters (a, b, c, ..., z, aa, ab, ...)
- */
-static int int_to_lower_latin(int value, char* buffer, size_t buffer_size) {
+static int format_latin_counter(int value, char* buffer, size_t buffer_size,
+                                bool uppercase) {
     if (value <= 0 || buffer_size < 10) {
         return snprintf(buffer, buffer_size, "%d", value);
     }
@@ -558,7 +498,6 @@ static int int_to_lower_latin(int value, char* buffer, size_t buffer_size) {
         buffer[len++] = 'a' + (value % 26);
         value = value / 26 - 1;
     } while (value >= 0 && len < (int)buffer_size - 1); // INT_CAST_OK: size comparison
-
     // Reverse the string
     for (int i = 0; i < len / 2; i++) {
         char temp = buffer[i];
@@ -567,18 +506,7 @@ static int int_to_lower_latin(int value, char* buffer, size_t buffer_size) {
     }
 
     buffer[len] = '\0';
-    return len;
-}
-
-/**
- * Convert integer to uppercase latin letters
- */
-static int int_to_upper_latin(int value, char* buffer, size_t buffer_size) {
-    int len = int_to_lower_latin(value, buffer, buffer_size);
-
-    // Convert to uppercase
-    str_upper_inplace(buffer, len);
-
+    if (uppercase) str_upper_inplace(buffer, len);
     return len;
 }
 
@@ -598,7 +526,6 @@ static int int_to_lower_greek(int value, char* buffer, size_t buffer_size) {
     if (value <= 0 || buffer_size < 10) {
         return snprintf(buffer, buffer_size, "%d", value);
     }
-
     // Alphabetic numbering: 1=α, 2=β, ..., 24=ω, 25=αα, ...
     char temp[64];
     int temp_len = 0;
@@ -610,7 +537,6 @@ static int int_to_lower_greek(int value, char* buffer, size_t buffer_size) {
         temp[temp_len++] = (char)(0x80 + (greek_letters[idx] & 0x3F));
         value = value / count - 1;
     } while (value >= 0 && temp_len < (int)sizeof(temp) - 2);
-
     // Reverse pairs
     int len = 0;
     for (int i = temp_len - 2; i >= 0 && len < (int)buffer_size - 2; i -= 2) { // INT_CAST_OK: size comparison
@@ -673,7 +599,6 @@ static int int_to_georgian(int value, char* buffer, size_t buffer_size) {
     static const int geo_thousands[] = {0, 0x10E9, 0x10EA, 0x10EB, 0x10EC, 0x10ED, 0x10EE, 0x10F4, 0x10EF, 0x10F0};
 
     int len = 0;
-
     // handle 10000 prefix (ჵ = U+10F5)
     if (value >= 10000) {
         if (len < (int)buffer_size - 3) { // INT_CAST_OK: size comparison
@@ -707,6 +632,21 @@ static int int_to_georgian(int value, char* buffer, size_t buffer_size) {
     return len;
 }
 
+static int format_bullet_counter(uint32_t style, char* buffer, size_t buffer_size) {
+    static const unsigned char bullets[][3] = {
+        {0xE2, 0x80, 0xA2}, // disc
+        {0xE2, 0x97, 0xA6}, // circle
+        {0xE2, 0x96, 0xA0}  // square
+    };
+    int index = style == CSS_VALUE_DISC ? 0
+        : style == CSS_VALUE_CIRCLE ? 1
+        : style == CSS_VALUE_SQUARE ? 2 : -1;
+    if (index < 0 || buffer_size < 4) return 0;
+    memcpy(buffer, bullets[index], 3);
+    buffer[3] = '\0';
+    return 3;
+}
+
 int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_size) {
     if (!buffer || buffer_size == 0) return 0;
 
@@ -715,49 +655,24 @@ int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_
             buffer[0] = '\0';
             return 0;
 
-        case CSS_VALUE_DISC: // bullet point "•"
-            if (buffer_size >= 4) {
-                buffer[0] = '\xE2';
-                buffer[1] = '\x80';
-                buffer[2] = '\xA2';
-                buffer[3] = '\0';
-                return 3;
-            }
-            return 0;
-
-        case CSS_VALUE_CIRCLE: // white circle "◦"
-            if (buffer_size >= 4) {
-                buffer[0] = '\xE2';
-                buffer[1] = '\x97';
-                buffer[2] = '\xA6';
-                buffer[3] = '\0';
-                return 3;
-            }
-            return 0;
-
-        case CSS_VALUE_SQUARE: // black square U+25A0
-            if (buffer_size >= 4) {
-                buffer[0] = '\xE2';
-                buffer[1] = '\x96';
-                buffer[2] = '\xA0';
-                buffer[3] = '\0';
-                return 3;
-            }
-            return 0;
+        case CSS_VALUE_DISC:
+        case CSS_VALUE_CIRCLE:
+        case CSS_VALUE_SQUARE:
+            return format_bullet_counter(style, buffer, buffer_size);
 
         case CSS_VALUE_LOWER_ROMAN:
-            return int_to_lower_roman(value, buffer, buffer_size);
+            return format_roman_counter(value, buffer, buffer_size, false);
 
         case CSS_VALUE_UPPER_ROMAN:
-            return int_to_upper_roman(value, buffer, buffer_size);
+            return format_roman_counter(value, buffer, buffer_size, true);
 
         case CSS_VALUE_LOWER_ALPHA:
         case CSS_VALUE_LOWER_LATIN:
-            return int_to_lower_latin(value, buffer, buffer_size);
+            return format_latin_counter(value, buffer, buffer_size, false);
 
         case CSS_VALUE_UPPER_ALPHA:
         case CSS_VALUE_UPPER_LATIN:
-            return int_to_upper_latin(value, buffer, buffer_size);
+            return format_latin_counter(value, buffer, buffer_size, true);
 
         case CSS_VALUE_DECIMAL_LEADING_ZERO:
             return snprintf(buffer, buffer_size, "%02d", value);

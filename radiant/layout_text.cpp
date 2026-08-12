@@ -27,7 +27,6 @@ static float line_terminal_letter_spacing_trim(float letter_spacing) {
     return max(letter_spacing, 0.0f);
 }
 
-
 struct SimpleCaseMapping { uint32_t from; uint32_t to; };
 
 static int simple_case_cmp(const void* record, const void* key, void* udata) {
@@ -120,7 +119,6 @@ static inline bool has_small_caps(LayoutContext* lycon) {
     }
     return false;
 }
-
 // CSS Text 3 §2.1: "the full case mappings for Unicode code points are used"
 struct FullCaseMapping { uint32_t from; uint32_t to[3]; uint8_t len; };
 
@@ -597,7 +595,6 @@ static inline bool is_lang_japanese(const char* lang) {
     return false;
 }
 
-
 /**
  * Check if a codepoint has UAX#14 line break class ID (Ideographic).
  * Characters with ID class allow line breaks before and after them
@@ -690,7 +687,6 @@ bool has_id_line_break_class(uint32_t cp) {
 
     return false;
 }
-
 // Unicode Line Break Class Helpers (UAX #14 / CSS Text 3 §5.2)
 
 /**
@@ -818,7 +814,6 @@ static inline bool is_line_break_ex_is_sy(uint32_t cp) {
     if (cp == 0x002F) return true;                    // /
     return false;
 }
-
 
 /**
  * Peek at the next Unicode codepoint without advancing the string pointer.
@@ -983,6 +978,34 @@ static inline bool is_simple_latin_shaping_byte(unsigned char ch) {
     return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
 }
 
+bool layout_measure_simple_latin_run(LayoutContext* lycon,
+                                     struct FontHandle* handle,
+                                     const unsigned char* text,
+                                     size_t remaining,
+                                     LayoutSimpleLatinRun* result) {
+    if (!lycon || !handle || !text || remaining < 2 || !result ||
+        !is_simple_latin_shaping_byte(*text)) {
+        return false;
+    }
+    size_t bytes = 0;
+    while (bytes < remaining && is_simple_latin_shaping_byte(text[bytes])) {
+        GlyphInfo glyph = font_get_glyph(handle, (uint32_t)text[bytes]);
+        if (glyph.id == 0) return false;
+        bytes++;
+    }
+    if (bytes < 2) return false;
+
+    int byte_count = (int)bytes; // INT_CAST_OK: text byte count
+    TextExtents ext = font_measure_text(handle, (const char*)text, byte_count);
+    if (ext.glyph_count <= 0 && ext.width <= 0.0f) return false;
+
+    result->bytes = bytes;
+    result->width = ext.width;
+    result->first_codepoint = (uint32_t)*text;
+    result->last_codepoint = (uint32_t)text[bytes - 1];
+    return true;
+}
+
 static bool can_shape_simple_latin_run(LayoutContext* lycon, CssEnum text_transform,
                                        bool trim_cjk_spacing, bool break_all,
                                        bool break_word) {
@@ -1014,23 +1037,17 @@ static bool measure_shaped_simple_latin_run(LayoutContext* lycon, const unsigned
     }
     if (!is_simple_latin_shaping_byte(*str)) return false;
 
-    FontHandle* handle = lycon->font.font_handle ? lycon->font.font_handle : lycon->font.style->font_handle;
-    const unsigned char* run_end = str;
-    while (run_end < text_end && is_simple_latin_shaping_byte(*run_end)) {
-        GlyphInfo ginfo = font_get_glyph(handle, (uint32_t)*run_end);
-        if (ginfo.id == 0) return false;
-        run_end++;
+    FontHandle* handle = lycon->font.font_handle ? lycon->font.font_handle
+                                                  : lycon->font.style->font_handle;
+    LayoutSimpleLatinRun result = {};
+    if (!layout_measure_simple_latin_run(
+            lycon, handle, str, (size_t)(text_end - str), &result)) {
+        return false;
     }
-    if (run_end - str < 2) return false;
-
-    int byte_len = (int)(run_end - str);
-    TextExtents ext = font_measure_text(handle, (const char*)str, byte_len);
-    if (ext.glyph_count <= 0 && ext.width <= 0.0f) return false;
-
-    *out_bytes = byte_len;
-    *out_width = ext.width;
-    *out_first_codepoint = (uint32_t)*str;
-    *out_last_codepoint = (uint32_t)*(run_end - 1);
+    *out_bytes = (int)result.bytes; // INT_CAST_OK: text byte count
+    *out_width = result.width;
+    *out_first_codepoint = result.first_codepoint;
+    *out_last_codepoint = result.last_codepoint;
     return true;
 }
 
@@ -1124,7 +1141,6 @@ static inline float c1_control_normal_line_height(uint32_t cp, FontProp* font) {
     if (cp == 0x0080) {
         return font->font_size * (79.0f / 64.0f);
     }
-
     // CSS Text requires C1 controls to render visibly, but browser engines use
     return font->font_size * (45.0f / 32.0f);
 }
@@ -1265,7 +1281,6 @@ int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
         collapse_spaces && trim_trailing_space);
 }
 
-
 /**
  * Check if layout is in max-content measurement mode.
  * In max-content mode, never break lines - measure full unwrapped width.
@@ -1297,7 +1312,6 @@ static inline bool is_min_content_mode(LayoutContext* lycon, DomNode* text_node)
     return false;
 }
 
-
 /**
  * Update effective line bounds based on floats in the current BlockContext.
  * Called at line start and potentially mid-line when floats are encountered.
@@ -1322,7 +1336,6 @@ void update_line_for_bfc_floats(LayoutContext* lycon, float query_height) {
     // CSS 2.1 §9.5.1: For inline-blocks, query using the element's full height
     float effective_height = query_height > 0 ? query_height :
         (lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f);
-
 
     FloatAvailableSpace space = block_context_space_at_y(bfc, current_y_bfc, effective_height,
         query_height <= 0.0f);
@@ -1446,10 +1459,8 @@ static void propagate_text_trim(ViewText* text_view, float trim_amount) {
         float span_right = parent->x + parent->width;
         float content_right = span_right;
         if (parent->bound) {
-            if (parent->boundary()->border)
-                content_right -= parent->boundary()->border->width.right;
-            if (parent->boundary()->padding.right > 0)
-                content_right -= parent->boundary()->padding.right;
+            content_right -= layout_axis_decoration_end(
+                parent->boundary(), LAYOUT_AXIS_X);
         }
         float old_text_right = text_view->x + text_view->width + trim_amount;
         if ((int)old_text_right < (int)content_right) { // INT_CAST_OK: intentional
@@ -1511,47 +1522,41 @@ static void apply_bfc_initial_letter_exclusions(LayoutContext* lycon, BlockConte
 }
 
 void line_reset(LayoutContext* lycon) {
-    lycon->line.max_ascender = lycon->line.max_descender = 0;
-    lycon->line.max_css_baseline_ascender = 0;
-    lycon->line.ruby_annotation_min_line_height = 0;
-    lycon->line.ruby_annotation_over_shift = 0;
+    lycon->line.max_ascender = lycon->line.max_descender =
+        lycon->line.max_css_baseline_ascender = 0;
+    lycon->line.ruby_annotation_min_line_height =
+        lycon->line.ruby_annotation_over_shift = 0;
     lycon->line.initial_letter_origin_advance = 0;
     lycon->line.has_initial_letter = false;
     lycon->line.has_drop_initial_letter = false;
-    lycon->line.is_line_start = true;  lycon->line.has_space = false;
-    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;  lycon->line.last_space_kind = BRK_TEXT;
-    lycon->line.last_non_shy_space = NULL;  lycon->line.last_non_shy_space_pos = 0;
-    lycon->line.last_non_shy_space_kind = BRK_TEXT;
-    lycon->line.last_non_shy_space_hanging_width = 0;
-    lycon->line.last_non_shy_space_hanging_text_trim = 0;
+    lycon->line.reset_space();
+    lycon->line.is_line_start = true;
     lycon->line.start_view = NULL;
     lycon->line.has_phantom_inline_fragment = false;
     lycon->line.line_start_font = lycon->font;
     lycon->line.prev_glyph_index = 0; // reset kerning state
     lycon->line.prev_codepoint = 0;   // reset codepoint kerning state
     lycon->line.prev_kerning_font_handle = nullptr;
-
     // IMPORTANT: Reset effective bounds to container bounds before float adjustment
     lycon->line.effective_left = lycon->line.left;
     lycon->line.effective_right = lycon->line.right;
-    lycon->line.has_float_intrusion = false;
-    lycon->line.has_replaced_content = false;
+    lycon->line.has_float_intrusion = lycon->line.has_replaced_content = false;
     lycon->line.atomic_inline_count = 0;
     lycon->line.has_cjk_text = false;
-    lycon->line.max_top_bottom_height = 0;
-    lycon->line.max_top_height = 0;
-    lycon->line.max_bottom_height = 0;
-    lycon->line.max_text_ascender = 0;
-    lycon->line.max_text_descender = 0;
+    lycon->line.max_top_bottom_height = lycon->line.max_top_height =
+        lycon->line.max_bottom_height = 0;
+    lycon->line.max_text_ascender = lycon->line.max_text_descender = 0;
+    // line boxes are reused across breaks; stale clamped-baseline state would
+    // leak a prior scroll-container tail into the next line's vertical map.
+    lycon->line.clamped_baseline_tail = 0;
+    lycon->line.has_clamped_baseline_tail = false;
     lycon->line.max_desc_before_last_text = 0;
     lycon->line.has_expanded_inline_lh = false;
-    lycon->line.max_inline_line_height = 0;
-    lycon->line.max_atomic_inline_height = 0;
+    lycon->line.max_inline_line_height = lycon->line.max_atomic_inline_height = 0;
     lycon->line.has_different_inline_font = false;
     lycon->line.max_normal_line_height = 0;
-    lycon->line.has_c1_control_text = false;
-    lycon->line.has_non_c1_text = false;
-    lycon->line.has_direct_block_text = false;
+    lycon->line.has_c1_control_text = lycon->line.has_non_c1_text =
+        lycon->line.has_direct_block_text = false;
     lycon->line.c1_control_line_height = 0;
     lycon->line.trailing_letter_spacing = 0;
     // CSS 2.1 §10.8.1: top-level inline content inherits the block strut metrics.
@@ -1570,10 +1575,8 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.wrap_opportunity_before_nowrap = false;
     lycon->line.is_last_line = false;
     lycon->line.advance_x = lycon->line.left;  // Start at container left
-
     // CSS 2.1 §8.3: Re-apply pending inline left edges from spans that haven't
     lycon->line.advance_x += lycon->line.inline_start_edge_pending;
-
     // This must happen BEFORE text-indent, because CSS 2.1 §16.1 says indent is
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
     if (bfc) {
@@ -1616,7 +1619,6 @@ void line_reset(LayoutContext* lycon) {
         }
     }
     if (count_exclusion) lycon->block.initial_letter_exclusion_lines--;
-
     // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
     lycon->line.text_indent_offset = 0;
     if (lycon->block.is_first_line && lycon->block.text_indent != 0) {
@@ -1729,7 +1731,6 @@ static float fixup_inline_dom_rect_height(LayoutContext* lycon, ViewSpan* span) 
 static void record_collapsed_line_fragment_for_inline_ancestors(
     LayoutContext* lycon, ViewText* text_view, TextRect* rect) {
     if (!lycon || !text_view || !rect || rect->height <= 0.0f) return;
-
     // The collapsed text fragment should materialize an inline box only when it
     if (!lycon->line.start_view || lycon->line.start_view == static_cast<View*>(text_view)) {
         return;
@@ -1829,7 +1830,6 @@ static void contribute_block_root_strut(LayoutContext* lycon) {
     float descender = lycon->block.init_descender;
     float content_height = ascender + descender;
     if (content_height <= 0.0f) return;
-
     // CSS Inline 3: the block container generates a root inline box whose
     float half_leading = (lycon->block.line_height - content_height) / 2.0f;
     ascender += half_leading;
@@ -1935,7 +1935,6 @@ void line_break(LayoutContext* lycon) {
     if (lycon->line.trailing_letter_spacing != 0) {
         lycon->line.trailing_letter_spacing = 0;
     }
-
     // CSS Inline §5.2.1: When trailing whitespace is "collapsed away" at the end of a line,
     if (lycon->line.has_replaced_content &&
         lycon->line.last_text_rect && lycon->line.last_text_rect->width <= 0 &&
@@ -1980,13 +1979,11 @@ void line_break(LayoutContext* lycon) {
 
     line_align(lycon);
     place_rtl_initial_letter_line(lycon);
-
     // CSS Text 3 §4.1.3: RTL hanging space text rect adjustment.
     if (lycon->line.rtl_hanging_space > 0 && lycon->line.last_text_rect) {
         lycon->line.last_text_rect->x -= lycon->line.rtl_hanging_space;
         lycon->line.rtl_hanging_space = 0;
     }
-
     // CSS 2.1 10.8.1: Line height controls vertical spacing between line boxes
     ViewBlock* line_owner = lycon->block.establishing_element;
     if ((!line_owner || !line_owner->blk ||
@@ -2018,12 +2015,10 @@ void line_break(LayoutContext* lycon) {
     }
     float font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
     float css_line_height = lycon->block.line_height;
-
     // CSS 2.1: line-height: 0 is a valid explicit value (not a fallback case)
     if (lycon->block.line_height_is_normal && css_line_height <= 0) {
         css_line_height = font_line_height;
     }
-
     // CSS 2.1 10.8.1 half-leading model:
     // CSS 2.1 §10.8.1: For lines with inline-blocks/replaced elements, always use
     bool has_mixed_fonts;
@@ -2033,7 +2028,6 @@ void line_break(LayoutContext* lycon) {
         has_mixed_fonts = (font_line_height > css_line_height + 2);
     }
     float used_line_height;
-
     // CSS 2.1 §10.8.1: font backends may round ascender/descender metrics to integer
     float base_metric_excess = (lycon->block.init_ascender + lycon->block.init_descender) - css_line_height;
     if (base_metric_excess > 0 && base_metric_excess <= 2 && !lycon->line.has_replaced_content &&
@@ -2105,7 +2099,6 @@ void line_break(LayoutContext* lycon) {
             used_line_height = css_line_height;
         }
     }
-
     // CSS 2.1 §10.8.1: Fix height of collapsed-content inline elements.
     // CSS 2.1 §9.4.2: Line boxes with no text/content/etc. are zero-height, so
     if (used_line_height > 0 && lycon->line.start_view) {
@@ -2120,14 +2113,12 @@ void line_break(LayoutContext* lycon) {
             v = next;
         }
     }
-
     // CSS 2.1 §10.8.1 second pass: expand line box for vertical-align:top/bottom elements.
     float max_tb = max(lycon->line.max_top_bottom_height,
         max(lycon->line.max_top_height, lycon->line.max_bottom_height));
     if (max_tb > used_line_height) {
         used_line_height = max_tb;
     }
-
     // CSS Writing Modes uses the physical inline-level box width as the
     ViewElement* line_parent_view = lycon->view ? lycon->view->parent_view() : nullptr;
     ViewBlock* line_parent = layout_nearest_block_ancestor(line_parent_view);
@@ -2141,15 +2132,12 @@ void line_break(LayoutContext* lycon) {
     bool reached_line_clamp = lycon->block.line_clamp > 0 &&
         lycon->block.line_number >= lycon->block.line_clamp &&
         !lycon->block.line_clamped;
-
     // CSS 2.1 10.8.1: Track last line's baseline offset for inline-block baseline alignment.
     lycon->block.last_line_ascender = lycon->block.advance_y - used_line_height + lycon->line.max_ascender;
-
     // CSS Flexbox §9.4: Track first line's baseline offset for flex baseline alignment.
     if (lycon->block.first_line_ascender == 0) {
         lycon->block.first_line_ascender = lycon->block.last_line_ascender;
     }
-
     // CSS Inline 3 §5: Track first/last line box metrics for text-box-trim.
     float trim_max_ascender = lycon->line.max_ascender;
     float trim_max_descender = lycon->line.max_descender;
@@ -2201,7 +2189,6 @@ void line_break(LayoutContext* lycon) {
         lycon->line.parent_font_handle = lycon->line.line_start_font.font_handle;
     }
 }
-
 // CSS Text 3 §5.2: Measure the width of the first word starting from `str`.
 static float measure_first_word_width(LayoutContext* lycon, const unsigned char* str,
                                       const unsigned char* text_end, CssEnum text_transform,
@@ -2348,7 +2335,6 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             if (bytes <= 0) codepoint = *str;
             else char_bytes = bytes;
         }
-
         // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE is hangable — treat as space
         if (codepoint == 0x3000) return RDT_LINE_NOT_FILLED;
         {
@@ -2429,8 +2415,6 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
             else if (outer_display == CSS_VALUE_INLINE) {
                 result = span_has_line_filled(lycon, node);
             }
-        }
-        else {
         }
         if (result) {
             lycon->line.advance_x = saved_advance_x;
@@ -2734,7 +2718,6 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         }
         lycon->block.initial_letter_origin_offset_applied = true;
     }
-
     // CSS 2.1 10.8.1: Half-leading model for text inline boxes
     float ascender = 0, descender = 0;
     if (lycon->block.line_height_is_normal && lycon->font.font_handle) {
@@ -3014,7 +2997,6 @@ static bool clear_initial_letter_continuation(LayoutContext* lycon) {
         }
     }
     if (clear_y_bfc <= origin_y_bfc) return false;
-
     // CSS Inline 3 §7.9.2 clears a following initial at the previous initial's
     lycon->block.advance_y = clear_y_bfc - lycon->block.bfc_offset_y;
     lycon->block.initial_letter_continuation_cleared = true;
@@ -3037,7 +3019,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     if (!text_start) return;  // null check for text data
     unsigned char* str = text_start;
     unsigned char* text_end = text_start + strlen((const char*)text_start);
-
     // CSS Inline 3 §2.1: Zero-length text nodes generate no inline boxes and
     if (str == text_end) {
         text_node->view_type = RDT_VIEW_NONE;
@@ -3066,7 +3047,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // line-break: anywhere allows break at any typographic letter unit (CSS Text 3 §5.2)
     bool break_all = (word_break == CSS_VALUE_BREAK_ALL || line_break_val == CSS_VALUE_ANYWHERE);
     bool keep_all = (word_break == CSS_VALUE_KEEP_ALL && line_break_val != CSS_VALUE_ANYWHERE);
-
     // CSS Text 3 §5.2: word-break: break-word behaves as overflow-wrap: anywhere
     CssEnum overflow_wrap = get_inherited_text_enum(
         lycon, &BlockProp::overflow_wrap, CSS_VALUE_NORMAL);
@@ -3079,16 +3059,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     bool is_word_start = true;  // Track word boundaries for capitalize
     int layout_text_iterations = 0;  // guard against infinite goto loops
     float soft_hyphen_leading_width = 0.0f;
-
     // CSS Text 3 §6.2: Resolve lang for CJ class behavior.
     const char* lang = resolve_lang(text_node);
     bool cj_is_non_starter = (line_break_val == CSS_VALUE_STRICT)
         || (line_break_val != CSS_VALUE_LOOSE && is_lang_japanese(lang));
-
     // CSS Text 3 §4.1.2: Track last non-whitespace codepoint for segment break
     uint32_t last_processed_cp = 0;
-
-
     // CSS Text 3 §5.2: Track whether the text had a leading space before collapsing.
     bool had_leading_space = is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r'));
 
@@ -3551,7 +3527,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             // CSS 2.1 §16.4: letter-spacing is added after every character
             wd += text_letter_spacing(lycon->font.style, codepoint, collapse_spaces);
-
             // CSS 2.1 §16.4: word-spacing affects each space (U+0020) and
             // branch above. U+00A0 must be handled here since it's not collapsible
             if (codepoint == 0x00A0) {
@@ -3809,7 +3784,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     str++;
                     if ((*str == '\n' || *str == '\r') && collapse_newlines) has_segment_break = true;
                 } while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r')));
-
                 // CSS Text 3 §4.1.2: Segment Break Transformation Rules
                 if (has_segment_break && collapse_newlines) {
                     bool remove_break = false;

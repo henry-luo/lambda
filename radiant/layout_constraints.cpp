@@ -1,7 +1,6 @@
 #include "layout.hpp"
 
 #include "../lib/tagged.hpp"
-
 // Advanced constraint policy depends on formatting-context and writing-mode
 // helpers, so it stays separate from primitive box geometry used by lightweight clients.
 static bool layout_stretch_fit_block_margins_can_adjoin(ViewBlock* block, bool horizontal) {
@@ -16,7 +15,6 @@ static bool layout_stretch_fit_block_margins_can_adjoin(ViewBlock* block, bool h
                              element_has_float(block)))) {
         return false;
     }
-
     // flow-root and orthogonal writing only change the child; adjoining margins
     // are defined by the parent Block Layout context that contains its outer box.
     return !block_context_establishes_bfc(parent);
@@ -33,18 +31,11 @@ bool layout_parent_block_edge_is_unedged(ViewBlock* block,
     bool use_right = horizontal &&
         (writing_mode == WM_VERTICAL_RL ? start : !start);
     bool use_bottom = !horizontal && !start;
-    float padding = horizontal
-        ? (use_right ? parent->boundary()->padding.right : parent->boundary()->padding.left)
-        : (use_bottom ? parent->boundary()->padding.bottom : parent->boundary()->padding.top);
-    float border = 0.0f;
-    if (parent->boundary()->border) {
-        border = horizontal
-            ? (use_right ? parent->boundary()->border->width.right
-                         : parent->boundary()->border->width.left)
-            : (use_bottom ? parent->boundary()->border->width.bottom
-                          : parent->boundary()->border->width.top);
-    }
-    return padding <= 0.0f && border <= 0.0f;
+    CssBoxSide side = horizontal
+        ? (use_right ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_LEFT)
+        : (use_bottom ? CSS_BOX_SIDE_BOTTOM : CSS_BOX_SIDE_TOP);
+    BoxMetrics box = layout_box_metrics(parent);
+    return box.padding.values[side] <= 0.0f && box.border.values[side] <= 0.0f;
 }
 
 static void layout_stretch_fit_zero_adjoining_block_margins(ViewBlock* block,
@@ -55,7 +46,6 @@ static void layout_stretch_fit_zero_adjoining_block_margins(ViewBlock* block,
         !layout_stretch_fit_block_margins_can_adjoin(block, horizontal)) {
         return;
     }
-
     // adjoining block margins are already outside an unedged non-BFC parent,
     // so stretch-fit must not subtract them a second time from the used size.
     if (layout_parent_block_edge_is_unedged(block, horizontal, true)) {
@@ -108,7 +98,6 @@ float layout_stretch_fit_border_box_size(ViewBlock* block, float available_margi
 
     layout_stretch_fit_zero_adjoining_block_margins(
         block, horizontal, &start_margin, &end_margin);
-
     // Stretch-fit targets the margin box; auto margins are zero and the border
     // box cannot shrink below its padding and border.
     float border_size = available_margin_box_size - start_margin - end_margin;
@@ -119,9 +108,7 @@ float layout_stretch_fit_used_css_size(ViewBlock* block, float available_margin_
                                        bool horizontal) {
     float border_size = layout_stretch_fit_border_box_size(
         block, available_margin_box_size, horizontal);
-    float css_size = layout_uses_border_box(block)
-        ? border_size
-        : layout_content_size_from_border_box(block, border_size, horizontal);
+    float css_size = layout_used_css_size_from_border_box(block, border_size, horizontal);
     return layout_apply_min_max_axis(block, css_size, horizontal, false);
 }
 
@@ -147,9 +134,7 @@ void layout_resolve_stretch_minmax_axis(ViewBlock* block, float available_margin
 
     float border_size = layout_stretch_fit_border_box_size(
         block, available_margin_box_size, horizontal);
-    float css_size = layout_uses_border_box(block)
-        ? border_size
-        : layout_content_size_from_border_box(block, border_size, horizontal);
+    float css_size = layout_used_css_size_from_border_box(block, border_size, horizontal);
     if (minimum_type == CSS_VALUE_STRETCH) *minimum = css_size;
     if (maximum_type == CSS_VALUE_STRETCH) *maximum = css_size;
 }

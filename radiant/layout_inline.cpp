@@ -202,26 +202,6 @@ static bool ruby_annotation_node(DomNode* node) {
     return node && node->is_element() && node->tag() == MARKUP_NAME_RT;
 }
 
-void layout_offset_ruby_annotation_tree(View* view, float offset_x, float offset_y) {
-    if (!view) return;
-    view->x += offset_x;
-    view->y += offset_y;
-    if (view->view_type == RDT_VIEW_TEXT) {
-        for (TextRect* rect = lam::view_require<RDT_VIEW_TEXT>(view)->rect;
-             rect; rect = rect->next) {
-            rect->x += offset_x;
-            rect->y += offset_y;
-        }
-        return;
-    }
-    if (!view->is_group()) return;
-    View* child = lam::view_require_element(view)->first_placed_child();
-    while (child) {
-        layout_offset_ruby_annotation_tree(child, offset_x, offset_y);
-        child = child->next();
-    }
-}
-
 static bool ruby_has_text_box_trim_ancestor(const ViewSpan* ruby, uint8_t trim) {
     for (const DomNode* node = ruby ? static_cast<const DomNode*>(ruby) : nullptr;
          node; node = node->parent) {
@@ -618,7 +598,6 @@ static void compute_empty_span_bounding_box(ViewSpan* span, FontHandle* fallback
         compute_span_from_collapsed_line_fragment(span);
         return;
     }
-
     // CSS 2.1 section 9.4.2: only inline-axis decorations keep an empty span present.
     float margin_left = 0.0f, margin_right = 0.0f;
     LayoutInlineDecorationEdges edges = layout_inline_decoration_edges(span);
@@ -645,7 +624,6 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         compute_empty_span_bounding_box(span, fallback_fh);
         return;
     }
-
     // by their containing block, not the inline span (CSS 2.1 §9.3.1, §10.6.3)
     while (child && (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
            (child->is_block() && layout_block_is_self_collapsing(lam::view_require_block(child))) ||
@@ -660,7 +638,6 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         compute_empty_span_bounding_box(span, fallback_fh);
         return;
     }
-
     // CSS 2.1 §8.3: inline-level child margins are part of the inline flow and
     auto get_child_relative_offset = [](View* c, float* offset_x, float* offset_y) {
         if (offset_x) *offset_x = 0.0f;
@@ -767,9 +744,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         float right = get_child_static_right(c);
         return right + get_child_inline_margin(c, false);
     };
-
     // CSS 2.1 §10.6.1: For inline non-replaced elements, vertical borders/padding
-
     // CSS 2.1 §9.4.3: Relative positioning moves a box visually but does not
     auto get_child_static_y_edge = [&get_child_relative_offset](
         View* c, bool bottom_edge) -> float {
@@ -849,7 +824,6 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     }
 
     LayoutInlineDecorationEdges edges = layout_inline_decoration_edges(span);
-
     // CSS 2.1 §9.4.2: If children have zero content extent AND the span has no
     float left_edge = edges.left;
     float right_edge = edges.right;
@@ -873,7 +847,6 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         span->height = 0;
         return;
     }
-
     // CSS 2.1 §10.6.1: For inline non-replaced elements, vertical borders/padding
     float parent_border_top_y = content_min_y - roundf(edges.top);
     float parent_border_bottom_y = content_max_y + roundf(edges.bottom);
@@ -887,7 +860,6 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         content_width = max_x - min_x;
         final_min_y = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_y - roundf(edges.top);
         final_max_y = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_y + roundf(edges.bottom);
-
         // CSS 2.1 §9.2.1.1: split inline boxes expose the union of their own
         span->x = min_x;
         span->y = final_min_y;
@@ -902,7 +874,6 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         if (span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_x > max_x) max_x = span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_x;
         content_width = max_x - min_x;
     }
-
     // CSS 2.1 §8.5.1: Inline elements' border/padding appear at the start and end
     // first line fragment and right on the last — the union bounding box cannot simply
     if (is_multi_line && !clone_forced_break) {
@@ -945,7 +916,6 @@ void recompute_span_bounding_box_after_line_layout(
         span->height = finalized_height;
     }
 }
-
 // split inline flow around block-level children per CSS 2.1 §9.2.1.1.
 void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_elem,
                                         ViewSpan* span, DomNode* first_child,
@@ -970,7 +940,6 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
     while (child) {
         DisplayValue child_display = child->is_element() ?
             resolve_display_value(child) : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
-
         // CSS 2.1 §9.2.1.1 and §17.2.1: Block children and orphaned table-internal children
         // CSS 2.1 §9.5: Floats are out of flow and should not break the inline
         bool child_is_float = false;
@@ -1018,7 +987,6 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                 in_inline_sequence = false;
                 visible_inline_in_sequence = false;
             }
-
             // IMPORTANT: Save/restore max_width because block layout will set it to container width,
             float saved_max_width = lycon->block.max_width;
             layout_block(lycon, child, child_display);
@@ -1028,7 +996,6 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             if (lycon->line.is_line_start) {
                 lycon->line.advance_x = lycon->line.left;
             }
-
             // CSS 2.1 §9.2.1.1 + §8.3.1: Parent-child margin collapse for
             if (child->is_element()) {
                 DomElement* child_elem = lam::dom_as<DOM_NODE_ELEMENT>(child);
@@ -1086,7 +1053,6 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             if (!in_inline_sequence) {
                 in_inline_sequence = true;
                 visible_inline_in_sequence = false;
-
                 // IMPORTANT: Don't restore advance_x - let it continue from current position
                 float current_advance_x = lycon->line.advance_x;
                 lycon->line = saved_line;
@@ -1124,7 +1090,6 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         (visible_inline_in_sequence || start_edge_pending_active)) {
         span_record_current_split_line_fragment(lycon, span, span_line_height);
     }
-
     // CSS 2.1 §9.2.1.1 + §8.3.1: Bottom margin collapse for block-in-inline.
     if (last_block_child_elem && !visible_inline_after_last_block &&
         !has_following_content(inline_elem, false) &&
@@ -1162,7 +1127,6 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             }
         }
     }
-
     // CSS 2.1 §9.2.1.1: When an inline element with border/padding is split by
     // Per CSS 2.1 §9.4.2, a line box is non-zero-height when it contains an inline
     if (!visible_inline_after_last_block && (!in_inline_sequence || lycon->line.is_line_start) &&
@@ -1268,7 +1232,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     }
                     if (local_clear_y > lycon->block.advance_y) {
                         lycon->block.advance_y = local_clear_y;
-
                         // CSS 2.1 §9.5.2: After clearing, re-adjust the line's effective
                         lycon->line.effective_left = lycon->line.left;
                         lycon->line.effective_right = lycon->line.right;
@@ -1305,7 +1268,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     dom_node_resolve_style(elmt, lycon);
     DomElement* elmt_elem = lam::dom_as<DOM_NODE_ELEMENT>(elmt);
-
     // CSS Counter handling (CSS 2.1 Section 12.4, CSS Lists 3)
     bool pushed_counter_scope = false;
     bool is_before_pseudo = elmt_elem && elmt_elem->tag_name &&
@@ -1371,7 +1333,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->line.vertical_align = span->inl()->vertical_align;
         lycon->line.vertical_align_offset = span->inl()->vertical_align_offset;
     }
-
     // CSS 2.1 §10.8.1: Each inline box uses its own 'line-height' property for
     float pa_line_height = lycon->block.line_height;
     bool pa_line_height_is_normal = lycon->block.line_height_is_normal;
@@ -1423,7 +1384,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (elmt->is_element()) {
         child = elmt_elem ? elmt_elem->first_child : nullptr;
     }
-
     // CSS 2.1 §8.3: Inline elements' margin/border/padding push content inward.
     float inline_left_edge = 0;
     float inline_right_edge = layout_inline_end_edge(span);
@@ -1434,7 +1394,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         inline_right_edge = inline_span_edge_extent(span, rtl, false, true);
     }
     float saved_inline_pending = lycon->line.inline_start_edge_pending;
-
     // CSS 2.1 §9.2.1.1 and §17.2.1: Check for block-level and table-internal children
     bool has_block_children = false;
     bool has_table_internal = false;
@@ -1461,7 +1420,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
         scan = scan->next_sibling;
     }
-
     // CSS 2.1 §17.2.1: When only table-internal children exist (no block children),
     if (has_table_internal && !has_block_children) {
         wrap_orphaned_table_children(lycon, elmt_elem);
@@ -1475,7 +1433,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             lycon, elmt_elem, span, child, inline_left_edge, span_resolved_line_height);
 
         lycon->line.advance_x += inline_right_edge;
-
         // CSS 2.1 §9.2.1.1: When an inline element contains block-level children,
         compute_span_bounding_box(span, true, lycon->font.font_handle);  // get vertical bounds from children
         float containing_line_width = lycon->line.right - lycon->line.left;
@@ -1484,12 +1441,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         float measured_width = measured_right - span->x;
         if (measured_width < 0.0f) measured_width = 0.0f;
         span->width = span->has_split_inline_fragment_union() ? max(measured_width, containing_line_width) : measured_width; // empty split inlines do not stretch across the containing block.
-
         // CSS 2.1 §9.2.1.1: For relatively-positioned block-in-inline spans,
         if (span->position && span->positionp()->position == CSS_VALUE_RELATIVE) {
             span->y = pre_split_advance_y;
         }
-
         // CSS 2.1 §9.2.1.1: Extend span bounding box upward to cover the leading
         {
             bool has_inline_start = inline_has_axis_edge_decoration(
@@ -1510,7 +1465,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
             }
         }
-
         // CSS 2.1 §9.2.1.1: Extend span bounding box to cover the trailing anonymous
         {
             bool has_inline_end = inline_has_axis_edge_decoration(
@@ -1632,12 +1586,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 float annotation_y = ruby_position == CSS_VALUE_UNDER
                     ? base_top_y + span->height
                     : base_top_y - annotation_span->height;
-                layout_offset_ruby_annotation_tree(
+                layout_shift_view_tree(
                     static_cast<View*>(annotation_span),
                     annotation_x - annotation_span->x,
                     annotation_y - annotation_span->y);
             }
-
             // Annotation layout must not alter the base line's cursor or
             // persistent formatting context: it has its own inline context.
             lycon->block = saved_base_block;
@@ -1666,19 +1619,16 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         } while (child);
     }
     float collapsed_inline_fragment_x = lycon->line.advance_x;
-
     // completed fragment and must not be applied to that fresh line.
     bool ended_at_new_line_start = lycon->block.line_number > inline_start_line_number &&
         lycon->line.is_line_start;
     if (!ended_at_new_line_start) {
         lycon->line.advance_x += inline_right_edge;
     }
-
     // CSS 2.1 §8.3: Now that this span is closing, remove its contribution from
     if (lycon->line.inline_start_edge_pending > saved_inline_pending) {
         lycon->line.inline_start_edge_pending = saved_inline_pending;
     }
-
     // CSS 2.1 §10.8.1: For non-replaced inline elements, the inline box height
     if (!had_children) {
         if (lycon->line.is_line_start && !lycon->line.has_phantom_inline_fragment) {
@@ -1696,10 +1646,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         contribute_inline_strut(lycon, elmt, span);
         lycon->line.is_line_start = false;
     }
-
     // CSS 2.1 §8.5.1: Detect multi-line by checking if children are on different lines.
     bool span_is_multi_line = inline_span_has_multiple_line_fragments(span);
-
     // CSS 2.1 §16.6.1: Trailing whitespace at end of a line should not expand
     // span bounding box only when the span is the last inline content on the line
     float saved_trailing = 0;
@@ -1719,7 +1667,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
         }
     }
-
     // CSS 2.1 §10.6.1: Store span's resolved line-height for use by
     span->content_height = span_resolved_line_height;
     if (had_children && has_inline_axis_decoration && layout_span_children_have_no_line_content(span)) {
@@ -1729,7 +1676,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_y = lycon->block.advance_y;
         span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_y = lycon->block.advance_y;
     }
-
     // CSS 2.1 §10.8.1: vertical-align applies to the inline box generated by
     if (span->in_line && span->inl()->vertical_align &&
         span->inl()->vertical_align != CSS_VALUE_BASELINE &&
@@ -1809,7 +1755,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             update_line_for_bfc_floats(lycon, lycon->block.line_height);
         }
     }
-
     // CSS 2.1 §10.6.1: For inline non-replaced elements, the bounding box height
     if (span->height > 0) {
         struct FontHandle* fh = span->font ? span->fontp()->font_handle : lycon->font.font_handle;
@@ -1851,7 +1796,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
         }
     }
-
     // CSS 2.1 §10.8.1: Mark collapsed-content inline spans for line-break fixup.
     // the span gets 0×0 from compute_span_bounding_box. However, per CSS 2.1, the
     // inline box still contributes its line-height to the line box only when
@@ -1868,7 +1812,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (last_child_for_trim && saved_trailing > 0) {
         last_child_for_trim->width += saved_trailing;
     }
-
     // CSS 2.1 §9.4.3: Relatively positioned inline elements are offset from their normal position
     if (span->position && span->positionp()->position == CSS_VALUE_RELATIVE) {
         layout_relative_positioned(lycon, lam::unsafe_view_block_api_span(span));

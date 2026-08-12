@@ -579,9 +579,7 @@ static void resolve_border_side_part(LayoutContext* lycon, ViewSpan* span,
                 *refs.width_specificity = specificity;
             }
         } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-            float width = value->data.keyword == CSS_VALUE_THIN ? 1.0f :
-                value->data.keyword == CSS_VALUE_THICK ? 5.0f : 3.0f;
-            *refs.width = width;
+            *refs.width = layout_css_border_width_keyword(value->data.keyword);
             *refs.width_specificity = specificity;
         }
     } else if (part == CSS_BORDER_SIDE_STYLE) {
@@ -674,17 +672,10 @@ static void resolve_logical_spacing_property(LayoutContext* lycon, ViewSpan* spa
     if (!logical.valid) return;
     LayoutLogicalSides sides = layout_logical_sides(
         inline_axis_is_vertical, vertical_block_start_is_right);
-    CssBoxSide first;
-    CssBoxSide second;
-    if (logical.block_axis) {
-        first = logical.pair ? sides.block_pair_start
-                             : (logical.start ? sides.block_start : sides.block_end);
-        second = logical.pair ? sides.block_pair_end : first;
-    } else {
-        first = logical.start ? sides.inline_start : sides.inline_end;
-        second = logical.pair ? sides.inline_end : first;
-    }
-    resolve_spacing_sides(lycon, span, first, second, property, value, specificity, is_margin);
+    LayoutPhysicalSides physical = layout_logical_physical_sides(logical, sides);
+    resolve_spacing_sides(lycon, span, physical.first,
+                          physical.pair ? physical.second : physical.first,
+                          property, value, specificity, is_margin);
 }
 
 static PositionProp* ensure_span_position(LayoutContext* lycon, ViewSpan* span) {
@@ -796,13 +787,14 @@ static bool resolve_logical_inset_property(LayoutContext* lycon, ViewSpan* span,
     if (!logical.valid) return false;
     LayoutLogicalSides sides = layout_logical_sides(
         inline_axis_is_vertical, vertical_block_start_is_right);
-    CssBoxSide first = logical.block_axis
-        ? (logical.start ? sides.block_start : sides.block_end)
-        : (logical.start ? sides.inline_start : sides.inline_end);
-    CssBoxSide second = logical.block_axis ? sides.block_end : sides.inline_end;
+    LayoutPhysicalSides physical_sides = layout_logical_physical_sides(
+        logical, sides, true);
+    CssBoxSide first = physical_sides.first;
     CssPropertyCode physical = radiant_inset_property(first);
     // Logical insets are resolved to physical storage only after writing mode
-    resolve_inset_sides(lycon, span, first, logical.pair ? second : first, physical, value, false);
+    resolve_inset_sides(lycon, span, first,
+                        physical_sides.pair ? physical_sides.second : first,
+                        physical, value, false);
     return true;
 }
 
@@ -2091,18 +2083,16 @@ static const CssValue* css_find_background_url_layer(const CssValue* value) {
     return nullptr;
 }
 
-static const CssValue* css_find_background_linear_gradient_layer(const CssValue* value) {
-    static const char* const names[] = {"linear-gradient", "repeating-linear-gradient"};
-    return css_find_background_function(value, names, 2);
-}
-
-static const CssValue* css_find_background_radial_gradient_layer(const CssValue* value) {
-    static const char* const names[] = {"radial-gradient", "repeating-radial-gradient"};
-    return css_find_background_function(value, names, 2);
-}
-
-static const CssValue* css_find_background_conic_gradient_layer(const CssValue* value) {
-    static const char* const names[] = {"conic-gradient", "repeating-conic-gradient"};
+static const CssValue* css_find_background_gradient_layer(const CssValue* value,
+                                                          GradientType type) {
+    static const char* const linear_names[] = {
+        "linear-gradient", "repeating-linear-gradient"};
+    static const char* const radial_names[] = {
+        "radial-gradient", "repeating-radial-gradient"};
+    static const char* const conic_names[] = {
+        "conic-gradient", "repeating-conic-gradient"};
+    const char* const* names = type == GRADIENT_LINEAR ? linear_names
+        : type == GRADIENT_RADIAL ? radial_names : conic_names;
     return css_find_background_function(value, names, 2);
 }
 
@@ -2371,8 +2361,7 @@ static void resolve_css_line_decoration_component(LayoutContext* lycon,
         // width keywords must be classified before named colors in every line-decoration shorthand.
         } else if (keyword == CSS_VALUE_THIN || keyword == CSS_VALUE_MEDIUM ||
                    keyword == CSS_VALUE_THICK) {
-            *width = keyword == CSS_VALUE_THIN ? 1.0f :
-                (keyword == CSS_VALUE_MEDIUM ? 3.0f : 5.0f);
+            *width = layout_css_border_width_keyword(keyword);
         } else {
             *color = color_name_to_rgb(keyword);
         }
@@ -3825,15 +3814,10 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         if (keyword == CSS_VALUE_AUTO) {
             log_info("length value: auto");
             result = 0.0f;  // auto represented as 0, caller should check keyword separately
-        } else if (keyword == CSS_VALUE_THIN) {
-            // CSS 2.1 §8.5.1: border-width keyword 'thin' → 1px
-            result = 1.0f;
-        } else if (keyword == CSS_VALUE_MEDIUM) {
-            // CSS 2.1 §8.5.1: border-width keyword 'medium' → 3px
-            result = 3.0f;
-        } else if (keyword == CSS_VALUE_THICK) {
-            // CSS 2.1 §8.5.1: border-width keyword 'thick' → 5px
-            result = 5.0f;
+        } else if (keyword == CSS_VALUE_THIN || keyword == CSS_VALUE_MEDIUM ||
+                   keyword == CSS_VALUE_THICK) {
+            // CSS 2.1 §8.5.1 maps the three border-width keywords to fixed pixels.
+            result = layout_css_border_width_keyword(keyword);
         } else {
             result = 0.0f;
         }
@@ -4018,14 +4002,8 @@ static bool copy_border_side_inherit(LayoutContext* lycon, ViewSpan* span, CssBo
     BorderProp* parent = parent_border_prop(lycon);
     if (!parent) return false;
     BorderProp* border = layout_ensure_border(lycon, span);
-    RadiantBorderSide target = radiant_border_side(border, side);
-    RadiantBorderSide source = radiant_border_side(parent, side);
-    *target.width = *source.width;
-    *target.width_specificity = specificity;
-    *target.style = *source.style;
-    *target.style_specificity = specificity;
-    *target.color = *source.color;
-    *target.color_specificity = specificity;
+    radiant_border_side_copy(radiant_border_side(border, side),
+                             radiant_border_side(parent, side), specificity);
     return true;
 }
 
@@ -5208,9 +5186,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
             CssBoxSide box_side = (CssBoxSide)side;
             RadiantBorderSide refs = radiant_border_side(border, box_side);
-            bool hidden = *refs.style == CSS_VALUE_NONE || *refs.style == CSS_VALUE_HIDDEN ||
-                          *refs.style == CSS_VALUE__UNDEF;
-            if (hidden) {
+            if (radiant_border_side_is_hidden(refs)) {
                 if (*refs.width != 0.0f) *refs.width = 0.0f;
             } else if (*refs.width == 0.0f && *refs.width_specificity == 0) {
                 *refs.width = 3.0f;
@@ -5345,37 +5321,31 @@ static void apply_border_side_shorthand(LayoutContext* lycon, ViewSpan* span, Cs
     }
     BorderProp* border = layout_ensure_border(lycon, span);
     RadiantBorderSide refs = radiant_border_side(border, side);
-    float* width = refs.width;
-    int64_t* width_specificity = refs.width_specificity;
-    CssEnum* style = refs.style;
-    int64_t* style_specificity = refs.style_specificity;
-    Color* color = refs.color;
-    int64_t* color_specificity = refs.color_specificity;
     MultiValue parts = {0};
     set_multi_value(&parts, value);
     // Physical and logical aliases must share cascade and none/hidden width semantics.
-    bool style_applied = parts.style && specificity >= *style_specificity;
+    bool style_applied = parts.style && specificity >= *refs.style_specificity;
     bool hidden_style = false;
     if (style_applied) {
-        *style = parts.style->data.keyword;
-        *style_specificity = specificity;
-        hidden_style = *style == CSS_VALUE_NONE || *style == CSS_VALUE_HIDDEN;
-        if (specificity >= *width_specificity && (hidden_style || !parts.length)) {
-            *width = hidden_style ? 0.0f : 3.0f;
-            *width_specificity = specificity;
+        *refs.style = parts.style->data.keyword;
+        *refs.style_specificity = specificity;
+        hidden_style = *refs.style == CSS_VALUE_NONE || *refs.style == CSS_VALUE_HIDDEN;
+        if (specificity >= *refs.width_specificity && (hidden_style || !parts.length)) {
+            *refs.width = hidden_style ? 0.0f : 3.0f;
+            *refs.width_specificity = specificity;
         }
     }
-    if (parts.length && !hidden_style && specificity >= *width_specificity) {
-        *width = resolve_length_value(lycon, radiant_border_width_property(side), parts.length);
-        *width_specificity = specificity;
+    if (parts.length && !hidden_style && specificity >= *refs.width_specificity) {
+        *refs.width = resolve_length_value(lycon, radiant_border_width_property(side), parts.length);
+        *refs.width_specificity = specificity;
     }
-    if (parts.color && specificity >= *color_specificity) {
-        *color = resolve_color_value(lycon, parts.color);
-        *color_specificity = specificity;
-    } else if (style_applied && *style != CSS_VALUE_NONE && *style != CSS_VALUE_HIDDEN &&
-               specificity >= *color_specificity) {
-        *color = get_current_color(lycon);
-        *color_specificity = specificity;
+    if (parts.color && specificity >= *refs.color_specificity) {
+        *refs.color = resolve_color_value(lycon, parts.color);
+        *refs.color_specificity = specificity;
+    } else if (style_applied && *refs.style != CSS_VALUE_NONE &&
+               *refs.style != CSS_VALUE_HIDDEN && specificity >= *refs.color_specificity) {
+        *refs.color = get_current_color(lycon);
+        *refs.color_specificity = specificity;
     }
 }
 
@@ -5712,6 +5682,33 @@ static void resolve_gap_property(LayoutContext* lycon, ViewBlock* block,
     }
 }
 
+static bool css_background_repeat_keyword(CssEnum keyword) {
+    return keyword == CSS_VALUE_REPEAT || keyword == CSS_VALUE_NO_REPEAT ||
+           keyword == CSS_VALUE_ROUND || keyword == CSS_VALUE_SPACE;
+}
+
+static void resolve_background_repeat_property(ViewSpan* span, const CssValue* value) {
+    if (!span || !value) return;
+    BackgroundProp* background = span->boundary()->background;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (css_background_repeat_keyword(value->data.keyword)) {
+            background->bg_repeat_x = background->bg_repeat_y = value->data.keyword;
+        }
+        return;
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST || value->data.list.count < 2) return;
+    CssValue* x = value->data.list.values[0];
+    CssValue* y = value->data.list.values[1];
+    if (x && x->type == CSS_VALUE_TYPE_KEYWORD &&
+        css_background_repeat_keyword(x->data.keyword)) {
+        background->bg_repeat_x = x->data.keyword;
+    }
+    if (y && y->type == CSS_VALUE_TYPE_KEYWORD &&
+        css_background_repeat_keyword(y->data.keyword)) {
+        background->bg_repeat_y = y->data.keyword;
+    }
+}
+
 static MultiColumnProp* resolve_multicol_prop(LayoutContext* lycon, ViewBlock* block) {
     if (!block) return nullptr;
     block->ensure_multicol(lycon);
@@ -5767,12 +5764,10 @@ static void resolve_multicol_rule_property(LayoutContext* lycon, ViewBlock* bloc
         multicol->rule_width = resolve_length_value(
             lycon, CSS_PROPERTY_COLUMN_RULE_WIDTH, value);
     } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        switch (value->data.keyword) {
-            case CSS_VALUE_THIN: multicol->rule_width = 1.0f; break;
-            case CSS_VALUE_MEDIUM: multicol->rule_width = 3.0f; break;
-            case CSS_VALUE_THICK: multicol->rule_width = 5.0f; break;
-            default: return;
-        }
+        if (value->data.keyword != CSS_VALUE_THIN &&
+            value->data.keyword != CSS_VALUE_MEDIUM &&
+            value->data.keyword != CSS_VALUE_THICK) return;
+        multicol->rule_width = layout_css_border_width_keyword(value->data.keyword);
     } else {
         return;
     }
@@ -6185,6 +6180,30 @@ static CssBackgroundComponent resolve_background_size_component(
     return result;
 }
 
+static void css_store_background_size_axis(BackgroundProp* background, bool horizontal,
+                                           CssBackgroundComponent component) {
+    if (horizontal) {
+        background->bg_size_width = component.value;
+        background->bg_size_width_is_percent = component.is_percent;
+        background->bg_size_width_auto = component.is_auto;
+    } else {
+        background->bg_size_height = component.value;
+        background->bg_size_height_is_percent = component.is_percent;
+        background->bg_size_height_auto = component.is_auto;
+    }
+}
+
+static void css_store_background_position_axis(BackgroundProp* background, bool horizontal,
+                                               CssBackgroundComponent component) {
+    if (horizontal) {
+        background->bg_position_x = component.value;
+        background->bg_position_x_is_percent = component.is_percent;
+    } else {
+        background->bg_position_y = component.value;
+        background->bg_position_y_is_percent = component.is_percent;
+    }
+}
+
 static void resolve_background_size(LayoutContext* lycon, ViewSpan* span,
                                     const CssValue* value, CssPropertyCode property) {
     layout_ensure_background(lycon, span);
@@ -6204,9 +6223,7 @@ static void resolve_background_size(LayoutContext* lycon, ViewSpan* span,
         CssBackgroundComponent width = resolve_background_size_component(
             lycon, property, value, background->bg_size_width,
             background->bg_size_width_is_percent, background->bg_size_width_auto);
-        background->bg_size_width = width.value;
-        background->bg_size_width_is_percent = width.is_percent;
-        background->bg_size_width_auto = width.is_auto;
+        css_store_background_size_axis(background, true, width);
         background->bg_size_height_auto = true;
     } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 2) {
         background->bg_size_type = (CssEnum)0;
@@ -6216,12 +6233,8 @@ static void resolve_background_size(LayoutContext* lycon, ViewSpan* span,
         CssBackgroundComponent height = resolve_background_size_component(
             lycon, property, value->data.list.values[1], background->bg_size_height,
             background->bg_size_height_is_percent, background->bg_size_height_auto);
-        background->bg_size_width = width.value;
-        background->bg_size_width_is_percent = width.is_percent;
-        background->bg_size_width_auto = width.is_auto;
-        background->bg_size_height = height.value;
-        background->bg_size_height_is_percent = height.is_percent;
-        background->bg_size_height_auto = height.is_auto;
+        css_store_background_size_axis(background, true, width);
+        css_store_background_size_axis(background, false, height);
     }
 }
 
@@ -6237,18 +6250,15 @@ static void resolve_background_position(LayoutContext* lycon, ViewSpan* span,
         CssBackgroundComponent y = resolve_background_position_component(
             lycon, property, value->data.list.values[1], background->bg_position_y,
             background->bg_position_y_is_percent, false);
-        background->bg_position_x = x.value;
-        background->bg_position_x_is_percent = x.is_percent;
-        background->bg_position_y = y.value;
-        background->bg_position_y_is_percent = y.is_percent;
+        css_store_background_position_axis(background, true, x);
+        css_store_background_position_axis(background, false, y);
         return;
     }
     if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE) {
         CssBackgroundComponent x = resolve_background_position_component(
             lycon, property, value, background->bg_position_x,
             background->bg_position_x_is_percent, true);
-        background->bg_position_x = x.value;
-        background->bg_position_x_is_percent = x.is_percent;
+        css_store_background_position_axis(background, true, x);
         background->bg_position_y = 50.0f;
         background->bg_position_y_is_percent = true;
     } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6259,14 +6269,12 @@ static void resolve_background_position(LayoutContext* lycon, ViewSpan* span,
             CssBackgroundComponent y = resolve_background_position_component(
                 lycon, property, value, background->bg_position_y,
                 background->bg_position_y_is_percent, false);
-            background->bg_position_y = y.value;
-            background->bg_position_y_is_percent = y.is_percent;
+            css_store_background_position_axis(background, false, y);
         } else {
             CssBackgroundComponent x = resolve_background_position_component(
                 lycon, property, value, background->bg_position_x,
                 background->bg_position_x_is_percent, true);
-            background->bg_position_x = x.value;
-            background->bg_position_x_is_percent = x.is_percent;
+            css_store_background_position_axis(background, true, x);
             background->bg_position_y = 50.0f;
             background->bg_position_y_is_percent = true;
         }
@@ -6994,22 +7002,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             break;
         case CSS_PROPERTY_BACKGROUND_REPEAT: {
             layout_ensure_background(lycon, span);
-            BackgroundProp* bg = span->boundary()->background;
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum kw = value->data.keyword;
-                if (kw == CSS_VALUE_REPEAT || kw == CSS_VALUE_NO_REPEAT ||
-                    kw == CSS_VALUE_ROUND || kw == CSS_VALUE_SPACE) {
-                    bg->bg_repeat_x = kw;
-                    bg->bg_repeat_y = kw;
-                }
-            } else if (value->type == CSS_VALUE_TYPE_LIST) {
-                if (value->data.list.count >= 2) {
-                    if (value->data.list.values[0]->type == CSS_VALUE_TYPE_KEYWORD)
-                        bg->bg_repeat_x = value->data.list.values[0]->data.keyword;
-                    if (value->data.list.values[1]->type == CSS_VALUE_TYPE_KEYWORD)
-                        bg->bg_repeat_y = value->data.list.values[1]->data.keyword;
-                }
-            }
+            resolve_background_repeat_property(span, value);
             break;
         }
         case CSS_PROPERTY_BACKGROUND_POSITION:
@@ -7350,47 +7343,35 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_BORDER_INLINE_END:
         case CSS_PROPERTY_BORDER_BLOCK_START:
         case CSS_PROPERTY_BORDER_BLOCK_END: {
-            CssBoxSide first = CSS_BOX_SIDE_TOP;
-            CssBoxSide second = CSS_BOX_SIDE_TOP;
-            bool has_second = false;
-            switch (prop_id) {
-                case CSS_PROPERTY_BORDER_INLINE:
-                    first = CSS_BOX_SIDE_RIGHT; second = CSS_BOX_SIDE_LEFT; has_second = true; break;
-                case CSS_PROPERTY_BORDER_BLOCK:
-                    first = CSS_BOX_SIDE_TOP; second = CSS_BOX_SIDE_BOTTOM; has_second = true; break;
-                case CSS_PROPERTY_BORDER_INLINE_START: first = CSS_BOX_SIDE_LEFT; break;
-                case CSS_PROPERTY_BORDER_INLINE_END: first = CSS_BOX_SIDE_RIGHT; break;
-                case CSS_PROPERTY_BORDER_BLOCK_START: first = CSS_BOX_SIDE_TOP; break;
-                case CSS_PROPERTY_BORDER_BLOCK_END: first = CSS_BOX_SIDE_BOTTOM; break;
-                default: break;
-            }
-            apply_border_side_shorthand(lycon, span, first, value, specificity);
-            if (has_second) {
-                apply_border_side_shorthand(lycon, span, second, value, specificity);
+            LayoutLogicalProperty logical = layout_logical_property(prop_id);
+            LayoutPhysicalSides physical = layout_logical_physical_sides(
+                logical, layout_logical_sides(inline_axis_is_vertical,
+                                              vertical_block_start_is_right), true);
+            apply_border_side_shorthand(lycon, span, physical.first, value, specificity);
+            if (physical.pair) {
+                apply_border_side_shorthand(lycon, span, physical.second, value, specificity);
             }
             break;
         }
         case CSS_PROPERTY_BORDER_BLOCK_END_COLOR:
         case CSS_PROPERTY_BORDER_BLOCK_START_COLOR:
         case CSS_PROPERTY_BORDER_BLOCK_END_WIDTH:
-        case CSS_PROPERTY_BORDER_BLOCK_START_WIDTH: {
-            bool width = prop_id == CSS_PROPERTY_BORDER_BLOCK_END_WIDTH ||
-                prop_id == CSS_PROPERTY_BORDER_BLOCK_START_WIDTH;
-            bool end = prop_id == CSS_PROPERTY_BORDER_BLOCK_END_WIDTH ||
-                prop_id == CSS_PROPERTY_BORDER_BLOCK_END_COLOR;
-            CssBoxSide side = end ? CSS_BOX_SIDE_BOTTOM : CSS_BOX_SIDE_TOP;
-            resolve_border_side_part(lycon, span, radiant_inset_property(side), value,
-                specificity, width ? CSS_BORDER_SIDE_WIDTH : CSS_BORDER_SIDE_COLOR);
-            break;
-        }
+        case CSS_PROPERTY_BORDER_BLOCK_START_WIDTH:
         case CSS_PROPERTY_BORDER_BLOCK_WIDTH:
         case CSS_PROPERTY_BORDER_BLOCK_COLOR: {
-            bool width = prop_id == CSS_PROPERTY_BORDER_BLOCK_WIDTH;
-            CssBoxSide sides[2] = {CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM};
-            for (int i = 0; i < 2; i++) {
-                CssBoxSide side = sides[i];
-                resolve_border_side_part(lycon, span, radiant_inset_property(side), value,
-                    specificity, width ? CSS_BORDER_SIDE_WIDTH : CSS_BORDER_SIDE_COLOR);
+            LayoutLogicalProperty logical = layout_logical_property(prop_id);
+            LayoutPhysicalSides physical = layout_logical_physical_sides(
+                logical, layout_logical_sides(inline_axis_is_vertical,
+                                              vertical_block_start_is_right), true);
+            CssBorderSidePart part = prop_id == CSS_PROPERTY_BORDER_BLOCK_COLOR ||
+                prop_id == CSS_PROPERTY_BORDER_BLOCK_START_COLOR ||
+                prop_id == CSS_PROPERTY_BORDER_BLOCK_END_COLOR
+                ? CSS_BORDER_SIDE_COLOR : CSS_BORDER_SIDE_WIDTH;
+            resolve_border_side_part(lycon, span,
+                radiant_inset_property(physical.first), value, specificity, part);
+            if (physical.pair) {
+                resolve_border_side_part(lycon, span,
+                    radiant_inset_property(physical.second), value, specificity, part);
             }
             break;
         }
@@ -8088,11 +8069,11 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 int linear_count = 0;
                 for (int i = 0; i < count - 1; i++) {  // exclude last layer (base color)
                     CssValue* layer = layers[i];
-                    if (css_find_background_radial_gradient_layer(layer)) radial_count++;
-                    else if (css_find_background_linear_gradient_layer(layer)) linear_count++;
+                    if (css_find_background_gradient_layer(layer, GRADIENT_RADIAL)) radial_count++;
+                    else if (css_find_background_gradient_layer(layer, GRADIENT_LINEAR)) linear_count++;
                 }
-                if (css_find_background_linear_gradient_layer(last_layer)) linear_count++;
-                else if (css_find_background_radial_gradient_layer(last_layer)) radial_count++;
+                if (css_find_background_gradient_layer(last_layer, GRADIENT_LINEAR)) linear_count++;
+                else if (css_find_background_gradient_layer(last_layer, GRADIENT_RADIAL)) radial_count++;
                 if (radial_count > 0) {
                     bg->radial_layers = (RadialGradient**)alloc_prop(lycon, sizeof(RadialGradient*) * radial_count);
                     bg->radial_layer_count = 0;
@@ -8103,9 +8084,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 }
                 for (int i = count - 1; i >= 0; i--) {
                     CssValue* layer = layers[i];
-                    const CssValue* radial_layer = css_find_background_radial_gradient_layer(layer);
-                    const CssValue* linear_layer = css_find_background_linear_gradient_layer(layer);
-                    const CssValue* conic_layer = css_find_background_conic_gradient_layer(layer);
+                    const CssValue* radial_layer = css_find_background_gradient_layer(layer, GRADIENT_RADIAL);
+                    const CssValue* linear_layer = css_find_background_gradient_layer(layer, GRADIENT_LINEAR);
+                    const CssValue* conic_layer = css_find_background_gradient_layer(layer, GRADIENT_CONIC);
                     const CssValue* url_layer = css_find_background_url_layer(layer);
                     if (radial_layer) {
                         lam::CssTempDecl gradient_decl(decl, CSS_PROPERTY_BACKGROUND, (CssValue*)radial_layer);
@@ -8233,20 +8214,19 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         case CSS_PROPERTY_GRID_GAP:
         case CSS_PROPERTY_GAP: {
-            if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER ||
-                value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                lam::CssTempDecl row_gap_decl(decl, CSS_PROPERTY_ROW_GAP, decl->value);
-                row_gap_decl.resolve(lycon);
-                lam::CssTempDecl col_gap_decl(decl, CSS_PROPERTY_COLUMN_GAP, decl->value);
-                col_gap_decl.resolve(lycon);
-                return;
-            } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count == 2) {
-                CssValue** values = value->data.list.values;
-                lam::CssTempDecl row_gap_decl(decl, CSS_PROPERTY_ROW_GAP, values[0]);
-                row_gap_decl.resolve(lycon);
-                lam::CssTempDecl col_gap_decl(decl, CSS_PROPERTY_COLUMN_GAP, values[1]);
-                col_gap_decl.resolve(lycon);
-                return;
+            const CssValue* row_value = value;
+            const CssValue* column_value = value;
+            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count == 2) {
+                row_value = value->data.list.values[0];
+                column_value = value->data.list.values[1];
+            }
+            bool scalar = value->type == CSS_VALUE_TYPE_LENGTH ||
+                value->type == CSS_VALUE_TYPE_NUMBER ||
+                value->type == CSS_VALUE_TYPE_PERCENTAGE;
+            if (scalar || (value->type == CSS_VALUE_TYPE_LIST &&
+                           value->data.list.count == 2)) {
+                resolve_gap_property(lycon, block, CSS_PROPERTY_ROW_GAP, row_value, true);
+                resolve_gap_property(lycon, block, CSS_PROPERTY_COLUMN_GAP, column_value, false);
             }
             return;
         }

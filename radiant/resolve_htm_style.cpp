@@ -185,11 +185,8 @@ static BorderProp* apply_html_uniform_border(LayoutContext* lycon, ViewBlock* bl
                                              bool set_specificity = true) {
     BorderProp* border = layout_ensure_border(lycon, block);
     for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-        RadiantBorderSide refs = radiant_border_side(border, (CssBoxSide)side);
-        *refs.width = width;
-        *refs.style = style;
-        if (set_specificity) *refs.width_specificity = -1;
-        if (color) *refs.color = *color;
+        radiant_border_side_set(radiant_border_side(border, (CssBoxSide)side),
+                                width, style, color, set_specificity);
     }
     return border;
 }
@@ -202,7 +199,8 @@ static BorderProp* apply_html_inset_border_colors(LayoutContext* lycon,
     Color light = {}; light.r = light.g = light.b = 192; light.a = 255;
     Color colors[4] = {dark, light, light, dark};
     for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-        *radiant_border_side(border, (CssBoxSide)side).color = colors[side];
+        RadiantBorderSide refs = radiant_border_side(border, (CssBoxSide)side);
+        *refs.color = colors[side];
     }
     return border;
 }
@@ -563,11 +561,8 @@ static void apply_html_table_rules_cell_border(LayoutContext* lycon, ViewBlock* 
         bool is_column_rule = side == CSS_BOX_SIDE_LEFT || side == CSS_BOX_SIDE_RIGHT;
         bool is_row_rule = side == CSS_BOX_SIDE_TOP || side == CSS_BOX_SIDE_BOTTOM;
         if (!(rules_all || (is_column_rule && rules_cols) || (is_row_rule && rules_rows))) continue;
-        RadiantBorderSide refs = radiant_border_side(border, (CssBoxSide)side);
-        *refs.width = 1.0f;
-        *refs.width_specificity = -1;
-        *refs.style = CSS_VALUE_SOLID;
-        *refs.color = grey;
+        radiant_border_side_set(radiant_border_side(border, (CssBoxSide)side),
+                                1.0f, CSS_VALUE_SOLID, &grey, true);
     }
 }
 
@@ -904,7 +899,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     }
     case MARKUP_NAME_IFRAME: {
         // HTML spec §15.5.14: iframe { border: 2px inset; }
-        BorderProp* iframe_border = apply_html_inset_border_colors(lycon, block, 2.0f);
+        apply_html_inset_border_colors(lycon, block, 2.0f);
         const char* frameborder_attr = elmt->get_attribute("frameborder");
         if (frameborder_attr) {
             size_t frameborder_len = strlen(frameborder_attr);
@@ -972,7 +967,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case MARKUP_NAME_HR: {
         // hr default: 1px border on all sides (creates 2px height from border-top + border-bottom)
         // This matches browser UA stylesheet behavior (CSS logical pixels)
-        BorderProp* hr_border = apply_html_inset_border_colors(lycon, block, 1.0f);
+        apply_html_inset_border_colors(lycon, block, 1.0f);
         // 8px margin top/bottom, auto left/right for horizontal centering (browser default)
         radiant_spacing_set_pair(&block->boundary_mut()->margin,
             CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, 8);

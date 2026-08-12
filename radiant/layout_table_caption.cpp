@@ -7,7 +7,6 @@
 float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_width) {
     (void)table_width;
     DomElement* dom_elem = lam::dom_require_element(cap);
-
     // reset child text views before re-layout
     if (dom_elem) {
         for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
@@ -36,15 +35,10 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
     lycon->block.content_height = 10000;
     lycon->block.advance_y = 0;
 
-    float inner_left = 0;
-    if (cap->bound) {
-        if (cap->boundary()->border) {
-            inner_left += cap->boundary()->border->width.left;
-            lycon->block.advance_y += cap->boundary()->border->width.top;
-        }
-        inner_left += cap->boundary()->padding.left;
-        lycon->block.advance_y += cap->boundary()->padding.top;
-    }
+    float inner_left = layout_axis_decoration_start(
+        cap->bound ? cap->boundary() : nullptr, LAYOUT_AXIS_X);
+    lycon->block.advance_y += layout_axis_decoration_start(
+        cap->bound ? cap->boundary() : nullptr, LAYOUT_AXIS_Y);
     lycon->line.left = inner_left;
     lycon->line.right = inner_left + content_width;
 
@@ -89,12 +83,8 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
         cap->height += cap_box.pad_border_v;
     } else {
         cap->height = caption_content_height;
-        if (cap->bound) {
-            cap->height += cap->boundary()->padding.bottom;
-            if (cap->boundary()->border) {
-                cap->height += cap->boundary()->border->width.bottom;
-            }
-        }
+        cap->height += layout_axis_decoration_end(
+            cap->bound ? cap->boundary() : nullptr, LAYOUT_AXIS_Y);
     }
     if (cap->blk) {
         cap->height = layout_apply_min_max_axis(cap, cap->height, false, true);

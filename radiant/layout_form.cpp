@@ -131,7 +131,6 @@ static float textarea_used_line_height(LayoutContext* lycon, ViewBlock* block,
         }
     }
     if (line_height > 0.0f) return line_height;
-
     // Keep the same UA fallback used for intrinsic textarea sizing.
     return has_css_font ? font->font_size * 1.2f : 15.0f;
 }
@@ -176,7 +175,6 @@ static int textarea_visual_line_count(LayoutContext* lycon, FontProp* font,
 static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
                                  FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
-
     // Special fixed widths for date/time control types (Chrome UA intrinsic widths)
     // These are content-area widths (border-box minus 6px border+padding).
     // Chrome renders these at specific widths based on their picker format.
@@ -203,7 +201,6 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
     }
 
     int size = form->size > 0 ? form->size : FormDefaults::TEXT_SIZE_CHARS;
-
     // HTML spec §4.10.5.3.7: The size attribute specifies the width in "average character widths".
     // Chrome uses the advance width of '0' (U+0030) in the input's resolved font (the CSS 'ch'
     // unit). The calibrated default (145px for 20 chars at 13.3333px) matches Chrome's system
@@ -265,7 +262,6 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
         content_w += FormDefaults::TEXT_SIZE_CONTENT_GUTTER_H;
     }
     form->intrinsic_width = content_w;
-
     // Height: Chrome uses max(default_content_height, normal_line_height).
     // Default content height = TEXT_HEIGHT - border - padding = 17px.
     // When font-size is larger than default, line-height dominates.
@@ -323,7 +319,6 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
         bool has_css_font = form_control_has_specified_font(block) ||
             !font->font_size_from_medium;
         float font_size = font->font_size;
-
         // Width: cols × char_width + scrollbar_reserve
         float char_w;
         float scrollbar_reserve;
@@ -339,7 +334,6 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
         }
         float content_w = cols * char_w + scrollbar_reserve;
         form->intrinsic_width = content_w * pr;
-
         // Height: rows × the same used line-height that establishes editable baselines.
         float line_ht = textarea_used_line_height(lycon, block, font, has_css_font);
         float content_h = rows * line_ht;
@@ -373,7 +367,6 @@ const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
 static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
     float zoom = layout_effective_zoom((View*)block);
-
     // Get button text from live value, value attribute, or input-type default.
     const char* text = form_button_label_text(block, form);
 
@@ -385,7 +378,6 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
         // Empty button: content width is 0 (border/padding added by layout)
         form->intrinsic_width = 0;
     }
-
     // Content height: border-box height should match TEXT_HEIGHT (21px) minus border and padding.
     // Using font_size directly would give incorrect height (font_size + border + padding != 21).
     // CSS UA stylesheets size buttons to match text input height for visual consistency.
@@ -419,6 +411,39 @@ float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arro
     return calculated > min_select_width ? calculated : min_select_width;
 }
 
+float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,
+                                      bool use_min_content) {
+    if (!select) return 0.0f;
+
+    float max_text_width = 0.0f;
+    for (DomElement* option = dom_select_next_option(select, nullptr); option;
+         option = dom_select_next_option(select, option)) {
+        float option_width = measure_direct_text_children_intrinsic_width(
+            lycon, option, use_min_content, CSS_VALUE_NONE);
+        DomElement* parent = option->parent ? option->parent->as_element() : nullptr;
+        if (parent && parent->tag() == MARKUP_NAME_OPTGROUP) {
+            option_width += FormDefaults::OPTGROUP_OPTION_INDENT;
+            if (option_width < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH) {
+                option_width = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
+            }
+        }
+        if (option_width > max_text_width) max_text_width = option_width;
+    }
+
+    for (DomNode* child = select->first_child; child; child = child->next_sibling) {
+        if (!child->is_element() || child->as_element()->tag() != MARKUP_NAME_OPTGROUP) {
+            continue;
+        }
+        const char* label = child->as_element()->get_attribute("label");
+        if (!label || !*label) continue;
+        TextIntrinsicWidths widths = measure_text_intrinsic_widths(
+            lycon, label, strlen(label));
+        float label_width = use_min_content ? widths.min_content : widths.max_content;
+        if (label_width > max_text_width) max_text_width = label_width;
+    }
+    return max_text_width;
+}
+
 static float layout_select_listbox_row_height(const FormControlProp* form) {
     // Empty native listboxes use the compact anonymous-option metric; real
     // option rows use the 17px metric measured by their option layout.
@@ -433,7 +458,8 @@ static float layout_select_listbox_row_height(const FormControlProp* form) {
  * Chrome sizes select width to fit the longest option + dropdown arrow.
  */
 static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
-    float max_text_width = 0;
+    float max_text_width = layout_select_option_text_width(
+        lycon, block->as_element(), form && form->appearance_none);
     float selected_text_width = 0;
     // CSS `appearance: none` removes the UA chrome; treat option text as min-content
     // (longest unbreakable word) so the SELECT collapses toward author intent — matches
@@ -449,48 +475,12 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
          option = dom_select_next_option(block, option), option_index++) {
         float width = measure_direct_text_children_intrinsic_width(
             lycon, option, use_min_content, CSS_VALUE_NONE);
-        if (width > max_text_width) max_text_width = width;
         if (option_index == selected_index) selected_text_width = width;
     }
-
-    // Iterate through children to find longest option text
-    for (DomNode* child = block->first_child; child; child = child->next_sibling) {
-        if (!child->is_element()) continue;
-        DomElement* child_elem = child->as_element();
-        NameId ctag = child_elem->tag();
-
-        if (ctag == MARKUP_NAME_OPTGROUP) {
-            // Measure optgroup label — shown as a header row in the dropdown (no indent)
-            const char* label_attr = child_elem->get_attribute("label");
-            if (label_attr) {
-                size_t label_len = strlen(label_attr);
-                if (label_len > 0) {
-                    TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, label_attr, label_len);
-                    float w = use_min_content ? tw.min_content : tw.max_content;
-                    if (w > max_text_width) max_text_width = w;
-                }
-            }
-            // Check options inside optgroup — they are indented in the dropdown on macOS Chrome
-            for (DomNode* gc = child_elem->first_child; gc; gc = gc->next_sibling) {
-                if (gc->is_element() && gc->as_element()->tag() == MARKUP_NAME_OPTION) {
-                    float opt_text_width = measure_direct_text_children_intrinsic_width(
-                        lycon, gc->as_element(), use_min_content, CSS_VALUE_NONE);
-                    // Apply indent; blank options in an optgroup still occupy at least OPTGROUP_OPTION_MIN_WIDTH
-                    float effective = opt_text_width + FormDefaults::OPTGROUP_OPTION_INDENT;
-                    if (effective < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH)
-                        effective = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
-                    if (effective > max_text_width)
-                        max_text_width = effective;
-                }
-            }
-        }
-    }
-
     // Chrome select border-box width includes text + arrow area + internal padding.
     // Chrome uses the system font for select text, which differs from the page font.
     // backend metrics measure with the page font — sometimes wider, sometimes narrower than Chrome.
     // A moderate overhead balances both cases across the test suite.
-
     // HTML §4.10.7: listbox mode when multiple attr is set OR size > 1
     // Listbox: no arrow, width = text content; height = visible_rows * row_height + 2px border
     bool is_listbox = form->multiple || form->select_size > 1;
@@ -550,7 +540,6 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
             }
         }
         if (!form->appearance_base_select) form->intrinsic_width += pad_h + border_h;
-
         // Combo-box border-box height = content (font normal line-height)
         // + actual CSS padding + border. The UA default of 19px (font 13.3333,
         // padding 0, border 1) was a special case; once CSS overrides padding
@@ -572,7 +561,6 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         }
         form->intrinsic_height = content_h + pad_v + border_v;
     }
-
     // Update given_width only if CSS didn't specify an explicit width
     if (block->blk && block->block_mut()->given_width < 0) {
         block->blk->given_width = form->intrinsic_width;
@@ -609,8 +597,6 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         // Materialize that value before deriving the editable line-baseline set.
         tc_ensure_init(static_cast<DomElement*>(block));
     }
-
-
     // Calculate intrinsic size based on control type
     switch (form->control_type) {
     case FORM_CONTROL_TEXT:
@@ -667,10 +653,8 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     default:
         break;
     }
-
     // Check box-sizing model (default is content-box per CSS spec)
     bool is_border_box = layout_uses_border_box(block);
-
     // Apply CSS width/height if specified, otherwise use intrinsic
     // Note: intrinsic sizes are CONTENT-AREA (no border/padding included).
     // CSS width/height follows box-sizing model.
@@ -680,8 +664,6 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
 
     width = form_resolve_axis_size(block, form->intrinsic_width, true, &content_width);
     height = form_resolve_axis_size(block, form->intrinsic_height, false, &content_height);
-
-
     // Set final dimensions
     // Apply CSS min-width/max-width constraints (e.g., max-width: 100px on textarea).
     // Per CSS spec: for content-box, min/max-width constrains content area;
@@ -708,7 +690,6 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
 
     if (block->content_width < 0) block->content_width = 0;
     if (block->content_height < 0) block->content_height = 0;
-
     // Set internal text baseline for inline-block baseline alignment.
     // Form controls with text have a virtual internal
     // baseline where their text content would sit. Without this, the parent's
@@ -760,7 +741,6 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                 block->content_width);
             float last_baseline = first_baseline +
                 (float)(visual_lines - 1) * line_height;
-
             // CSS Box Alignment clamps a scroll container's line baseline to
             // its block-end border edge when editable content overflows.
             form->last_text_baseline_overflow = max(
@@ -769,8 +749,6 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
             form->last_text_baseline = min(last_baseline, block->height);
         }
     }
-
-
     // For select (and other form controls with option/optgroup children):
     // - Listbox mode (multiple or size>1): position each option as a row inside the select.
     //   Each option gets the full content-area width and row_height, stacked from top.
