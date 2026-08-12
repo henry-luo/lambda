@@ -20,14 +20,10 @@ static RdtPath* render_clip_create_rounded_rect_path(float x, float y, float w, 
     if (r_br > max_rx) r_br = max_rx; if (r_br > max_ry) r_br = max_ry;
     if (r_bl > max_rx) r_bl = max_rx; if (r_bl > max_ry) r_bl = max_ry;
     Corner radius = {};
-    radius.top_left = r_tl;
-    radius.top_right = r_tr;
-    radius.bottom_right = r_br;
-    radius.bottom_left = r_bl;
-    radius.top_left_y = r_tl;
-    radius.top_right_y = r_tr;
-    radius.bottom_right_y = r_br;
-    radius.bottom_left_y = r_bl;
+    radius.horizontal[0] = radius.vertical[0] = r_tl;
+    radius.horizontal[1] = radius.vertical[1] = r_tr;
+    radius.horizontal[2] = radius.vertical[2] = r_br;
+    radius.horizontal[3] = radius.vertical[3] = r_bl;
     Rect rect = {x, y, w, h};
     return render_path_create_rounded_rect(rect, &radius);
 }

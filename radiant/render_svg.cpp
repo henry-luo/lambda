@@ -524,17 +524,14 @@ static void svg_append_rounded_rect_path(StrBuf* buf, float x, float y, float w,
  * Convenience: test whether a border has any non-zero corner radius.
  */
 static bool svg_has_border_radius(BorderProp* border) {
-    return border && (border->radius.top_left > 0 || border->radius.top_right > 0 ||
-                      border->radius.bottom_right > 0 || border->radius.bottom_left > 0);
+    return border && radiant_corner_has_radius(&border->radius);
 }
 
 static bool svg_get_uniform_border_radius(BorderProp* border, float* radius) {
     if (!svg_has_border_radius(border)) return false;
-    float value = border->radius.top_left;
-    if (border->radius.top_right != value ||
-        border->radius.bottom_right != value ||
-        border->radius.bottom_left != value) {
-        return false;
+    float value = border->radius.horizontal[0];
+    for (int i = 1; i < 4; i++) {
+        if (border->radius.horizontal[i] != value) return false;
     }
     if (radius) *radius = value;
     return true;
@@ -711,14 +708,10 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             } else {
                 Rect rect = {x, y, width, height};
                 Corner radius_shape = {};
-                radius_shape.top_left = border->radius.top_left;
-                radius_shape.top_right = border->radius.top_right;
-                radius_shape.bottom_right = border->radius.bottom_right;
-                radius_shape.bottom_left = border->radius.bottom_left;
-                radius_shape.top_left_y = border->radius.top_left;
-                radius_shape.top_right_y = border->radius.top_right;
-                radius_shape.bottom_right_y = border->radius.bottom_right;
-                radius_shape.bottom_left_y = border->radius.bottom_left;
+                for (int corner = 0; corner < 4; corner++) {
+                    radius_shape.horizontal[corner] = border->radius.horizontal[corner];
+                    radius_shape.vertical[corner] = border->radius.horizontal[corner];
+                }
                 RdtPath* path = render_path_create_rounded_rect(rect, &radius_shape);
                 paint_fill_path(svg_active_paint_list(ctx), path, view->boundary()->background->color,
                                 RDT_FILL_WINDING, nullptr);
@@ -779,18 +772,15 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         const char* img_url = bg->image;
 
         // Border widths and padding in CSS px (same coordinate space as x/y/width/height in SVG path)
-        float bwt = 0, bwr = 0, bwb = 0, bwl = 0;
-        float pt = 0, pr = 0, pb = 0, pl = 0;
-        if (view->boundary()->border) {
-            bwt = view->boundary()->border->width.top;
-            bwr = view->boundary()->border->width.right;
-            bwb = view->boundary()->border->width.bottom;
-            bwl = view->boundary()->border->width.left;
-        }
-        pt = view->boundary()->padding.top;
-        pr = view->boundary()->padding.right;
-        pb = view->boundary()->padding.bottom;
-        pl = view->boundary()->padding.left;
+        const float* border_widths = view->boundary()->border
+            ? view->boundary()->border->width.values : nullptr;
+        float bwt = border_widths ? border_widths[0] : 0.0f;
+        float bwr = border_widths ? border_widths[1] : 0.0f;
+        float bwb = border_widths ? border_widths[2] : 0.0f;
+        float bwl = border_widths ? border_widths[3] : 0.0f;
+        const float* padding_values = view->boundary()->padding.values;
+        float pt = padding_values[0], pr = padding_values[1];
+        float pb = padding_values[2], pl = padding_values[3];
 
         // Compute positioning area (background-origin, default: padding-box)
         CssEnum origin = bg->bg_origin ? bg->bg_origin : CSS_VALUE_PADDING_BOX;
@@ -891,8 +881,8 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     // Render borders with style-aware per-side SVG polygons
     if (view->boundary()->border) {
         BorderProp* border = view->boundary()->border;
-        float bwt = border->width.top, bwr = border->width.right;
-        float bwb = border->width.bottom, bwl = border->width.left;
+        float bwt = border->width.values[0], bwr = border->width.values[1];
+        float bwb = border->width.values[2], bwl = border->width.values[3];
 
         // When border-radius is present, clip border polygons to the outer
         // rounded rect — matching the raster path's radius_clip approach.
@@ -910,18 +900,10 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             strbuf_append_format(ctx->svg_content, "<g clip-path=\"url(#%s)\">\n", clip_id);
         }
 
-        // Top
-        svg_emit_border_side(ctx, border->top_style, border->top_color,
-            x, y, width, height, bwt, bwr, bwb, bwl, 0);
-        // Right
-        svg_emit_border_side(ctx, border->right_style, border->right_color,
-            x, y, width, height, bwt, bwr, bwb, bwl, 1);
-        // Bottom
-        svg_emit_border_side(ctx, border->bottom_style, border->bottom_color,
-            x, y, width, height, bwt, bwr, bwb, bwl, 2);
-        // Left
-        svg_emit_border_side(ctx, border->left_style, border->left_color,
-            x, y, width, height, bwt, bwr, bwb, bwl, 3);
+        for (int i = 0; i < 4; i++) {
+            svg_emit_border_side(ctx, border->styles[i], border->colors[i],
+                x, y, width, height, bwt, bwr, bwb, bwl, i);
+        }
 
         if (has_radius) {
             svg_indent(ctx);

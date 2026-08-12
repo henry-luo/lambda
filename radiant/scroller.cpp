@@ -110,14 +110,12 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
     float s = rdcon->scale;
     if (block->scroll()->has_clip) {
         // Inset clip by border widths for padding-box clipping (CSS spec: overflow clips to padding edge)
-        float bl = 0, bt = 0, br = 0, bb = 0;
-        if (block->bound && block->boundary_mut()->border) {
-            BorderProp* border = block->boundary()->border;
-            bl = border->width.left;
-            bt = border->width.top;
-            br = border->width.right;
-            bb = border->width.bottom;
-        }
+        BoxEdges border = layout_boundary_border_edges(
+            block->bound ? block->boundary() : nullptr);
+        float bl = border.left;
+        float bt = border.top;
+        float br = border.right;
+        float bb = border.bottom;
         log_debug("setup scroller clip: left:%f, top:%f, right:%f, bottom:%f",
             block->scroll()->clip.left, block->scroll()->clip.top, block->scroll()->clip.right, block->scroll()->clip.bottom);
         rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + (block->scroll()->clip.left + bl) * s);
@@ -133,14 +131,14 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
             if (corner_has_radius(&border->radius)) {
                 rdcon->block.has_clip_radius = true;
                 // Use inner radius (outer minus border width) for padding-box clipping
-                rdcon->block.clip_radius.top_left = fmaxf(0, border->radius.top_left - bl) * s;
-                rdcon->block.clip_radius.top_right = fmaxf(0, border->radius.top_right - br) * s;
-                rdcon->block.clip_radius.bottom_left = fmaxf(0, border->radius.bottom_left - bl) * s;
-                rdcon->block.clip_radius.bottom_right = fmaxf(0, border->radius.bottom_right - br) * s;
-                rdcon->block.clip_radius.top_left_y = fmaxf(0, border->radius.top_left_y - bt) * s;
-                rdcon->block.clip_radius.top_right_y = fmaxf(0, border->radius.top_right_y - bt) * s;
-                rdcon->block.clip_radius.bottom_left_y = fmaxf(0, border->radius.bottom_left_y - bb) * s;
-                rdcon->block.clip_radius.bottom_right_y = fmaxf(0, border->radius.bottom_right_y - bb) * s;
+                float horizontal_inset[4] = {bl, br, br, bl};
+                float vertical_inset[4] = {bt, bt, bb, bb};
+                for (int corner = 0; corner < 4; corner++) {
+                    rdcon->block.clip_radius.horizontal[corner] =
+                        fmaxf(0, border->radius.horizontal[corner] - horizontal_inset[corner]) * s;
+                    rdcon->block.clip_radius.vertical[corner] =
+                        fmaxf(0, border->radius.vertical[corner] - vertical_inset[corner]) * s;
+                }
                 constrain_corner_radii(&rdcon->block.clip_radius,
                     rdcon->block.clip.right - rdcon->block.clip.left,
                     rdcon->block.clip.bottom - rdcon->block.clip.top);

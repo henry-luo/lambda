@@ -34,10 +34,15 @@ struct InitialLetterInfo {
 };
 
 struct InitialLetterBoxInsets {
-    float top;
-    float right;
-    float bottom;
-    float left;
+    union {
+        struct {
+            float top;
+            float right;
+            float bottom;
+            float left;
+        };
+        float values[4];
+    };
 };
 
 // tier-1: immutable shape describing a text fragment union
@@ -603,11 +608,71 @@ inline void layout_cache_store(
 
 // tier-3: layout-transient, valid within pass
 typedef struct BoxEdges {
-    float left;
-    float right;
-    float top;
-    float bottom;
+    union {
+        struct {
+            float top;
+            float right;
+            float bottom;
+            float left;
+        };
+        float values[4];
+    };
 } BoxEdges;
+
+inline float layout_edge_value(const BoxEdges& edges, CssBoxSide side) {
+    return edges.values[side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP];
+}
+
+inline float layout_spacing_edge(const Spacing* spacing, CssBoxSide side) {
+    const float* value = radiant_spacing_value(spacing, side);
+    return value ? *value : 0.0f;
+}
+
+inline float layout_margin_edge(const BoundaryProp* bound, CssBoxSide side) {
+    return layout_spacing_edge(bound ? &bound->margin : nullptr, side);
+}
+
+inline float layout_padding_edge(const BoundaryProp* bound, CssBoxSide side) {
+    return layout_spacing_edge(bound ? &bound->padding : nullptr, side);
+}
+
+inline float layout_edges_axis_sum(const BoxEdges& edges, bool horizontal) {
+    return horizontal ? edges.left + edges.right : edges.top + edges.bottom;
+}
+
+inline BoxEdges layout_spacing_edges(const Spacing* spacing) {
+    BoxEdges edges = {};
+    if (!spacing) return edges;
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        edges.values[side] = *radiant_spacing_value(spacing, (CssBoxSide)side);
+    }
+    return edges;
+}
+
+inline BoxEdges layout_border_width_edges(const BorderProp* border) {
+    BoxEdges edges = {};
+    if (!border) return edges;
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        edges.values[side] = border->width.values[side];
+    }
+    return edges;
+}
+
+inline BoxEdges layout_boundary_margin_edges(const BoundaryProp* bound) {
+    return layout_spacing_edges(bound ? &bound->margin : nullptr);
+}
+
+inline BoxEdges layout_boundary_padding_edges(const BoundaryProp* bound) {
+    return layout_spacing_edges(bound ? &bound->padding : nullptr);
+}
+
+inline BoxEdges layout_boundary_border_edges(const BoundaryProp* bound) {
+    return layout_border_width_edges(bound ? bound->border : nullptr);
+}
+
+inline float layout_border_edge(const BoundaryProp* bound, CssBoxSide side) {
+    return layout_edge_value(layout_boundary_border_edges(bound), side);
+}
 
 // tier-3: layout-transient, valid within pass
 typedef struct BoxMetrics {
@@ -624,26 +689,16 @@ typedef struct BoxMetrics {
     float pad_border_v;
 } BoxMetrics;
 
-typedef struct LayoutInlineDecorationEdges {
-    float left;
-    float right;
-    float top;
-    float bottom;
-} LayoutInlineDecorationEdges;
+typedef BoxEdges LayoutInlineDecorationEdges;
 
 inline LayoutInlineDecorationEdges layout_inline_decoration_edges(ViewSpan* span) {
     LayoutInlineDecorationEdges edges = {};
     if (!span || !span->bound) return edges;
-    if (span->boundary()->border) {
-        edges.left = span->boundary()->border->width.left;
-        edges.right = span->boundary()->border->width.right;
-        edges.top = span->boundary()->border->width.top;
-        edges.bottom = span->boundary()->border->width.bottom;
+    BoxEdges border = layout_boundary_border_edges(span->boundary());
+    BoxEdges padding = layout_boundary_padding_edges(span->boundary());
+    for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+        edges.values[side] = border.values[side] + fmaxf(padding.values[side], 0.0f);
     }
-    edges.left += fmaxf(span->boundary()->padding.left, 0.0f);
-    edges.right += fmaxf(span->boundary()->padding.right, 0.0f);
-    edges.top += fmaxf(span->boundary()->padding.top, 0.0f);
-    edges.bottom += fmaxf(span->boundary()->padding.bottom, 0.0f);
     return edges;
 }
 
@@ -1227,12 +1282,7 @@ typedef struct VelmtBox {
 } VelmtBox;
 
 // tier-3: layout-transient, valid within pass
-typedef struct VelmtEdges {
-    float left;
-    float right;
-    float top;
-    float bottom;
-} VelmtEdges;
+typedef BoxEdges VelmtEdges;
 
 // tier-3: layout-transient, valid within pass
 typedef struct Velmt {
@@ -2176,6 +2226,11 @@ inline float layout_axis_padding_start(const BoundaryProp* bound, LayoutAxis axi
     return bound ? layout_axis_spacing_start(&bound->padding, axis) : 0.0f;
 }
 
+inline float layout_axis_decoration_start(const BoundaryProp* bound, LayoutAxis axis) {
+    return layout_axis_padding_start(bound, axis) +
+        layout_axis_border_start(bound ? bound->border : nullptr, axis);
+}
+
 inline float layout_axis_margin_start(const BoundaryProp* bound, LayoutAxis axis) {
     return bound ? layout_axis_spacing_start(&bound->margin, axis) : 0.0f;
 }
@@ -2818,8 +2873,8 @@ float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width);
 // ============================================================================
 
 typedef struct TableCellInsets {
-    float border_left, border_right, border_top, border_bottom;
-    float padding_left, padding_right, padding_top, padding_bottom;
+    BoxEdges border;
+    BoxEdges padding;
 } TableCellInsets;
 
 // tier-3: layout-transient, valid within a table-cell measurement pass
@@ -3057,15 +3112,13 @@ void update_line_for_bfc_floats(LayoutContext* lycon, float query_height = 0);
  */
 BlockContext* block_context_find_bfc(BlockContext* ctx);
 
-/**
- * Calculate the offset from BFC origin to a view's border-box origin
- * This is used to convert between BFC coordinates and local coordinates
- * @param view The view to calculate offset for
- * @param bfc The BFC root context
- * @param offset_x Output: X offset from BFC to view's border-box
- * @param offset_y Output: Y offset from BFC to view's border-box
- */
-void block_context_calc_bfc_offset(ViewElement* view, BlockContext* bfc, float* offset_x, float* offset_y);
+// coordinates shared by float placement, clearance, and inline intrusion queries.
+typedef struct BlockContextOffset {
+    float x;
+    float y;
+} BlockContextOffset;
+
+BlockContextOffset block_context_offset_to_bfc(ViewElement* view, BlockContext* bfc);
 
 // ============================================================================
 // Property Allocation
@@ -3424,6 +3477,59 @@ struct LayoutLogicalSides {
     CssBoxSide block_pair_end;
 };
 
+struct LayoutLogicalProperty {
+    bool valid;
+    bool block_axis;
+    bool pair;
+    bool start;
+};
+
+static inline LayoutLogicalProperty layout_logical_property(CssPropertyCode property) {
+    LayoutLogicalProperty result = {false, false, false, true};
+    switch (property) {
+        case CSS_PROPERTY_MARGIN_INLINE:
+        case CSS_PROPERTY_PADDING_INLINE:
+        case CSS_PROPERTY_INSET_INLINE:
+            result.valid = true;
+            result.pair = true;
+            break;
+        case CSS_PROPERTY_MARGIN_INLINE_START:
+        case CSS_PROPERTY_PADDING_INLINE_START:
+        case CSS_PROPERTY_INSET_INLINE_START:
+            result.valid = true;
+            break;
+        case CSS_PROPERTY_MARGIN_INLINE_END:
+        case CSS_PROPERTY_PADDING_INLINE_END:
+        case CSS_PROPERTY_INSET_INLINE_END:
+            result.valid = true;
+            result.start = false;
+            break;
+        case CSS_PROPERTY_MARGIN_BLOCK:
+        case CSS_PROPERTY_PADDING_BLOCK:
+        case CSS_PROPERTY_INSET_BLOCK:
+            result.valid = true;
+            result.block_axis = true;
+            result.pair = true;
+            break;
+        case CSS_PROPERTY_MARGIN_BLOCK_START:
+        case CSS_PROPERTY_PADDING_BLOCK_START:
+        case CSS_PROPERTY_INSET_BLOCK_START:
+            result.valid = true;
+            result.block_axis = true;
+            break;
+        case CSS_PROPERTY_MARGIN_BLOCK_END:
+        case CSS_PROPERTY_PADDING_BLOCK_END:
+        case CSS_PROPERTY_INSET_BLOCK_END:
+            result.valid = true;
+            result.block_axis = true;
+            result.start = false;
+            break;
+        default:
+            break;
+    }
+    return result;
+}
+
 static inline LayoutLogicalSides layout_logical_sides(bool inline_vertical,
                                                        bool block_start_right) {
     LayoutLogicalSides sides = {};
@@ -3657,6 +3763,7 @@ bool layout_quirky_container_ignores_child_margin_bottom(
     LayoutContext* lycon, ViewBlock* container, ViewBlock* child);
 CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
                                  CssEnum fallback = (CssEnum)0);
+bool layout_element_was_inline(DomElement* element, bool include_replaced = true);
 
 struct LayoutBorderSpacingValue {
     float horizontal;

@@ -188,17 +188,8 @@ static float get_explicit_dom_css_height(LayoutContext* lycon, DomElement* elem)
 }
 
 static CssValue* flex_margin_side_value(const CssValue* value, CssPropertyCode property_code) {
-    int side = 0;
-    if (property_code == CSS_PROPERTY_MARGIN_TOP) {
-        side = 0;
-    } else if (property_code == CSS_PROPERTY_MARGIN_RIGHT) {
-        side = 1;
-    } else if (property_code == CSS_PROPERTY_MARGIN_BOTTOM) {
-        side = 2;
-    } else {
-        side = 3;
-    }
-    return (CssValue*)css_box_shorthand_side_value(value, side);
+    return (CssValue*)css_box_shorthand_side_value(
+        value, radiant_css_box_side(property_code));
 }
 
 static bool resolve_flex_margin_value(LayoutContext* lycon, CssPropertyCode property_code,
@@ -245,14 +236,9 @@ static float get_css_margin(LayoutContext* lycon, ViewElement* elem,
     }
 
     if (elem->bound) {
-        float val = 0.0f;
-        switch (property_code) {
-            case CSS_PROPERTY_MARGIN_LEFT:   val = elem->boundary()->margin.left; break;
-            case CSS_PROPERTY_MARGIN_RIGHT:  val = elem->boundary()->margin.right; break;
-            case CSS_PROPERTY_MARGIN_TOP:    val = elem->boundary()->margin.top; break;
-            case CSS_PROPERTY_MARGIN_BOTTOM: val = elem->boundary()->margin.bottom; break;
-            default: break;
-        }
+        float* margin = radiant_spacing_value(
+            &elem->boundary_mut()->margin, radiant_css_box_side(property_code));
+        float val = margin ? *margin : 0.0f;
         if (!isnan(val) && val >= 0.0f) return val;
     }
 

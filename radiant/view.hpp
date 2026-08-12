@@ -675,34 +675,80 @@ struct InlineProp {
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct Spacing {
-    struct { float top, right, bottom, left; };  // for margin, padding, border
-    int64_t top_specificity, right_specificity, bottom_specificity, left_specificity;
+    union {
+        struct { float top, right, bottom, left; };  // for margin, padding, border
+        float values[4];
+    };
+    union {
+        struct { int64_t top_specificity, right_specificity, bottom_specificity, left_specificity; };
+        int64_t specificities[4];
+    };
 } Spacing;
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct Margin : Spacing {
-    CssEnum top_type, right_type, bottom_type, left_type;   // for CSS enum values, like 'auto'
+    union {
+        struct { CssEnum top_type, right_type, bottom_type, left_type; };
+        CssEnum types[4];
+    };   // for CSS enum values, like 'auto'
 } Margin;
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct Corner {
-    struct { float top_left, top_right, bottom_right, bottom_left; };  // horizontal border radius
-    struct { float top_left_y, top_right_y, bottom_right_y, bottom_left_y; };  // vertical border radius
-    int64_t tl_specificity, tr_specificity, br_specificity, bl_specificity;
-    bool tl_percent, tr_percent, br_percent, bl_percent;  // true if horizontal radius is a percentage (0-100)
-    bool tl_percent_y, tr_percent_y, br_percent_y, bl_percent_y;  // true if vertical radius is a percentage (0-100)
+    union {
+        struct { float top_left, top_right, bottom_right, bottom_left; };  // horizontal border radius
+        float horizontal[4];
+    };
+    union {
+        struct { float top_left_y, top_right_y, bottom_right_y, bottom_left_y; };  // vertical border radius
+        float vertical[4];
+    };
+    union {
+        struct { int64_t tl_specificity, tr_specificity, br_specificity, bl_specificity; };
+        int64_t specificities[4];
+    };
+    union {
+        struct { bool tl_percent, tr_percent, br_percent, bl_percent; };  // horizontal percentages
+        bool horizontal_percent[4];
+    };
+    union {
+        struct { bool tl_percent_y, tr_percent_y, br_percent_y, bl_percent_y; };  // vertical percentages
+        bool vertical_percent[4];
+    };
 } Corner;
 
 inline Corner radiant_corner_scaled(const Corner* radius, float scale) {
     Corner out = *radius;
-    out.top_left *= scale;
-    out.top_right *= scale;
-    out.bottom_right *= scale;
-    out.bottom_left *= scale;
-    out.top_left_y *= scale;
-    out.top_right_y *= scale;
-    out.bottom_right_y *= scale;
-    out.bottom_left_y *= scale;
+    for (int i = 0; i < 4; i++) {
+        out.horizontal[i] *= scale;
+        out.vertical[i] *= scale;
+    }
+    return out;
+}
+
+inline bool radiant_corner_has_radius(const Corner* radius) {
+    if (!radius) return false;
+    for (int i = 0; i < 4; i++) {
+        if (radius->horizontal[i] > 0.0f || radius->vertical[i] > 0.0f) return true;
+    }
+    return false;
+}
+
+inline Corner radiant_corner_inset(const Corner* radius, float inset_x, float inset_y) {
+    Corner out = *radius;
+    for (int i = 0; i < 4; i++) {
+        out.horizontal[i] = max(0.0f, out.horizontal[i] - inset_x);
+        out.vertical[i] = max(0.0f, out.vertical[i] - inset_y);
+    }
+    return out;
+}
+
+inline Corner radiant_corner_expand(const Corner* radius, float expand_x, float expand_y) {
+    Corner out = *radius;
+    for (int i = 0; i < 4; i++) {
+        out.horizontal[i] = max(0.0f, out.horizontal[i] + expand_x);
+        out.vertical[i] = max(0.0f, out.vertical[i] + expand_y);
+    }
     return out;
 }
 
@@ -719,10 +765,24 @@ typedef struct LinearGradient LinearGradient;
 // tier-2: view-pool, rebuilt each relayout
 typedef struct {
     Spacing width;
-    CssEnum top_style, right_style, bottom_style, left_style;
-    int64_t top_style_specificity, right_style_specificity, bottom_style_specificity, left_style_specificity;
-    Color top_color, right_color, bottom_color, left_color;
-    int64_t top_color_specificity, right_color_specificity, bottom_color_specificity, left_color_specificity;
+    union {
+        struct { CssEnum top_style, right_style, bottom_style, left_style; };
+        CssEnum styles[4];
+    };
+    union {
+        struct { int64_t top_style_specificity, right_style_specificity,
+                 bottom_style_specificity, left_style_specificity; };
+        int64_t style_specificities[4];
+    };
+    union {
+        struct { Color top_color, right_color, bottom_color, left_color; };
+        Color colors[4];
+    };
+    union {
+        struct { int64_t top_color_specificity, right_color_specificity,
+                 bottom_color_specificity, left_color_specificity; };
+        int64_t color_specificities[4];
+    };
     Corner radius;
     GradientType border_image_type;
     LinearGradient* border_image_linear_gradient;
@@ -741,37 +801,77 @@ enum CssBoxSide : uint8_t {
     CSS_BOX_SIDE_LEFT = 3,
 };
 
+inline CssBoxSide radiant_css_box_side(CssPropertyCode property) {
+    switch (property) {
+        case CSS_PROPERTY_RIGHT:
+        case CSS_PROPERTY_MARGIN_RIGHT:
+        case CSS_PROPERTY_PADDING_RIGHT:
+        case CSS_PROPERTY_BORDER_RIGHT:
+        case CSS_PROPERTY_BORDER_RIGHT_WIDTH:
+        case CSS_PROPERTY_BORDER_RIGHT_STYLE:
+        case CSS_PROPERTY_BORDER_RIGHT_COLOR:
+            return CSS_BOX_SIDE_RIGHT;
+        case CSS_PROPERTY_BOTTOM:
+        case CSS_PROPERTY_MARGIN_BOTTOM:
+        case CSS_PROPERTY_PADDING_BOTTOM:
+        case CSS_PROPERTY_BORDER_BOTTOM:
+        case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
+        case CSS_PROPERTY_BORDER_BOTTOM_STYLE:
+        case CSS_PROPERTY_BORDER_BOTTOM_COLOR:
+            return CSS_BOX_SIDE_BOTTOM;
+        case CSS_PROPERTY_LEFT:
+        case CSS_PROPERTY_MARGIN_LEFT:
+        case CSS_PROPERTY_PADDING_LEFT:
+        case CSS_PROPERTY_BORDER_LEFT:
+        case CSS_PROPERTY_BORDER_LEFT_WIDTH:
+        case CSS_PROPERTY_BORDER_LEFT_STYLE:
+        case CSS_PROPERTY_BORDER_LEFT_COLOR:
+            return CSS_BOX_SIDE_LEFT;
+        default:
+            return CSS_BOX_SIDE_TOP;
+    }
+}
+
+inline CssPropertyCode radiant_border_width_property(CssBoxSide side) {
+    static const CssPropertyCode properties[4] = {
+        CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_RIGHT_WIDTH,
+        CSS_PROPERTY_BORDER_BOTTOM_WIDTH, CSS_PROPERTY_BORDER_LEFT_WIDTH
+    };
+    int index = side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP;
+    return properties[index];
+}
+
+inline CssPropertyCode radiant_inset_property(CssBoxSide side) {
+    static const CssPropertyCode properties[4] = {
+        CSS_PROPERTY_TOP, CSS_PROPERTY_RIGHT,
+        CSS_PROPERTY_BOTTOM, CSS_PROPERTY_LEFT
+    };
+    int index = side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP;
+    return properties[index];
+}
+
 inline float* radiant_spacing_value(Spacing* spacing, CssBoxSide side) {
     if (!spacing) return nullptr;
-    switch (side) {
-        case CSS_BOX_SIDE_TOP: return &spacing->top;
-        case CSS_BOX_SIDE_RIGHT: return &spacing->right;
-        case CSS_BOX_SIDE_BOTTOM: return &spacing->bottom;
-        case CSS_BOX_SIDE_LEFT: return &spacing->left;
-    }
-    return &spacing->top;
+    int index = side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP;
+    return &spacing->values[index];
+}
+
+inline const float* radiant_spacing_value(const Spacing* spacing, CssBoxSide side) {
+    if (!spacing) return nullptr;
+    int index = side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP;
+    return &spacing->values[index];
 }
 
 inline int64_t* radiant_spacing_specificity(Spacing* spacing, CssBoxSide side) {
     if (!spacing) return nullptr;
-    switch (side) {
-        case CSS_BOX_SIDE_TOP: return &spacing->top_specificity;
-        case CSS_BOX_SIDE_RIGHT: return &spacing->right_specificity;
-        case CSS_BOX_SIDE_BOTTOM: return &spacing->bottom_specificity;
-        case CSS_BOX_SIDE_LEFT: return &spacing->left_specificity;
-    }
-    return &spacing->top_specificity;
+    int index = side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP;
+    return &spacing->specificities[index];
 }
 
 inline CssEnum* radiant_margin_type(Margin* margin, CssBoxSide side) {
     if (!margin) return nullptr;
-    switch (side) {
-        case CSS_BOX_SIDE_TOP: return &margin->top_type;
-        case CSS_BOX_SIDE_RIGHT: return &margin->right_type;
-        case CSS_BOX_SIDE_BOTTOM: return &margin->bottom_type;
-        case CSS_BOX_SIDE_LEFT: return &margin->left_type;
-    }
-    return &margin->top_type;
+    int index = side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP;
+    return &margin->types[index];
 }
 
 inline void radiant_spacing_set_all(Spacing* spacing, float value,
@@ -820,40 +920,13 @@ struct RadiantBorderSide {
 inline RadiantBorderSide radiant_border_side(BorderProp* border, CssBoxSide side) {
     RadiantBorderSide result = {};
     if (!border) return result;
-    switch (side) {
-        case CSS_BOX_SIDE_TOP:
-            result.width = &border->width.top;
-            result.width_specificity = &border->width.top_specificity;
-            result.style = &border->top_style;
-            result.style_specificity = &border->top_style_specificity;
-            result.color = &border->top_color;
-            result.color_specificity = &border->top_color_specificity;
-            break;
-        case CSS_BOX_SIDE_RIGHT:
-            result.width = &border->width.right;
-            result.width_specificity = &border->width.right_specificity;
-            result.style = &border->right_style;
-            result.style_specificity = &border->right_style_specificity;
-            result.color = &border->right_color;
-            result.color_specificity = &border->right_color_specificity;
-            break;
-        case CSS_BOX_SIDE_BOTTOM:
-            result.width = &border->width.bottom;
-            result.width_specificity = &border->width.bottom_specificity;
-            result.style = &border->bottom_style;
-            result.style_specificity = &border->bottom_style_specificity;
-            result.color = &border->bottom_color;
-            result.color_specificity = &border->bottom_color_specificity;
-            break;
-        case CSS_BOX_SIDE_LEFT:
-            result.width = &border->width.left;
-            result.width_specificity = &border->width.left_specificity;
-            result.style = &border->left_style;
-            result.style_specificity = &border->left_style_specificity;
-            result.color = &border->left_color;
-            result.color_specificity = &border->left_color_specificity;
-            break;
-    }
+    int index = side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP;
+    result.width = &border->width.values[index];
+    result.width_specificity = &border->width.specificities[index];
+    result.style = &border->styles[index];
+    result.style_specificity = &border->style_specificities[index];
+    result.color = &border->colors[index];
+    result.color_specificity = &border->color_specificities[index];
     return result;
 }
 
@@ -1215,11 +1288,20 @@ typedef struct VectorPathProp {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct PositionProp {
     CssEnum position;     // static, relative, absolute, fixed, sticky
-    float top, right, bottom, left;  // offset values in pixels
-    float top_percent, right_percent, bottom_percent, left_percent;  // raw percentage if percentage value (NaN if not percentage)
+    union {
+        struct { float top, right, bottom, left; };  // offset values in pixels
+        float inset_values[4];
+    };
+    union {
+        struct { float top_percent, right_percent, bottom_percent, left_percent; };
+        float inset_percents[4];
+    };
     int z_index;            // stacking order
     int custom_layout_z_index; // layout(fn) pass-scoped stacking overlay
-    bool has_top, has_right, has_bottom, has_left;  // which offsets are set
+    union {
+        struct { bool has_top, has_right, has_bottom, has_left; };
+        bool inset_present[4];
+    };  // which offsets are set
     bool has_custom_layout_z_index;
     CssEnum clear;        // clear property for floats
     CssEnum float_prop;   // float property (left, right, none)
@@ -1243,13 +1325,9 @@ typedef struct RadiantInsetSide {
 } RadiantInsetSide;
 
 inline RadiantInsetSide radiant_inset_side(PositionProp* position, CssBoxSide side) {
-    switch (side) {
-        case CSS_BOX_SIDE_TOP: return {&position->top, &position->top_percent, &position->has_top};
-        case CSS_BOX_SIDE_RIGHT: return {&position->right, &position->right_percent, &position->has_right};
-        case CSS_BOX_SIDE_BOTTOM: return {&position->bottom, &position->bottom_percent, &position->has_bottom};
-        case CSS_BOX_SIDE_LEFT: return {&position->left, &position->left_percent, &position->has_left};
-    }
-    return {&position->top, &position->top_percent, &position->has_top};
+    int index = side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP;
+    return {&position->inset_values[index], &position->inset_percents[index],
+            &position->inset_present[index]};
 }
 
 /**

@@ -3,12 +3,7 @@
 #include <math.h>
 
 static bool boundary_has_radius(const BorderProp* border) {
-    if (!border) return false;
-    const Corner* radius = &border->radius;
-    return radius->top_left > 0.0f || radius->top_right > 0.0f ||
-           radius->bottom_right > 0.0f || radius->bottom_left > 0.0f ||
-           radius->top_left_y > 0.0f || radius->top_right_y > 0.0f ||
-           radius->bottom_right_y > 0.0f || radius->bottom_left_y > 0.0f;
+    return border && radiant_corner_has_radius(&border->radius);
 }
 
 static bool boundary_uniform_circular_radius(const BorderProp* border,
@@ -20,16 +15,10 @@ static bool boundary_uniform_circular_radius(const BorderProp* border,
     }
 
     const Corner* radius = &border->radius;
-    float value = radius->top_left;
-    if (value <= 0.0f ||
-        radius->top_right != value ||
-        radius->bottom_right != value ||
-        radius->bottom_left != value ||
-        radius->top_left_y != value ||
-        radius->top_right_y != value ||
-        radius->bottom_right_y != value ||
-        radius->bottom_left_y != value) {
-        return false;
+    float value = radius->horizontal[0];
+    if (value <= 0.0f) return false;
+    for (int i = 0; i < 4; i++) {
+        if (radius->horizontal[i] != value || radius->vertical[i] != value) return false;
     }
     if (value * 2.0f > width || value * 2.0f > height) {
         return false;
@@ -60,48 +49,38 @@ static bool boundary_border_side_simple(float width, CssEnum style, Color color)
 
 static bool boundary_border_has_visible_side(const BorderProp* border) {
     if (!border) return false;
-    return boundary_border_side_visible(border->width.top, border->top_style, border->top_color) ||
-           boundary_border_side_visible(border->width.right, border->right_style, border->right_color) ||
-           boundary_border_side_visible(border->width.bottom, border->bottom_style, border->bottom_color) ||
-           boundary_border_side_visible(border->width.left, border->left_style, border->left_color);
+    for (int i = 0; i < 4; i++) {
+        if (boundary_border_side_visible(border->width.values[i], border->styles[i],
+                                         border->colors[i])) return true;
+    }
+    return false;
 }
 
 static bool boundary_border_all_sides_visible(const BorderProp* border) {
     if (!border) return false;
-    return boundary_border_side_visible(border->width.top, border->top_style, border->top_color) &&
-           boundary_border_side_visible(border->width.right, border->right_style, border->right_color) &&
-           boundary_border_side_visible(border->width.bottom, border->bottom_style, border->bottom_color) &&
-           boundary_border_side_visible(border->width.left, border->left_style, border->left_color);
+    for (int i = 0; i < 4; i++) {
+        if (!boundary_border_side_visible(border->width.values[i], border->styles[i],
+                                          border->colors[i])) return false;
+    }
+    return true;
 }
 
 static bool boundary_border_simple(const BorderProp* border) {
     if (!border) return true;
     if (boundary_has_radius(border) && boundary_border_has_visible_side(border)) return false;
-    if (!boundary_border_side_simple(border->width.top, border->top_style, border->top_color) ||
-        !boundary_border_side_simple(border->width.right, border->right_style, border->right_color) ||
-        !boundary_border_side_simple(border->width.bottom, border->bottom_style, border->bottom_color) ||
-        !boundary_border_side_simple(border->width.left, border->left_style, border->left_color)) {
-        return false;
+    for (int i = 0; i < 4; i++) {
+        if (!boundary_border_side_simple(border->width.values[i], border->styles[i],
+                                         border->colors[i])) return false;
     }
 
     bool have_color = false;
     Color color = {};
-    if (boundary_border_side_visible(border->width.top, border->top_style, border->top_color)) {
-        color = border->top_color;
+    for (int i = 0; i < 4; i++) {
+        if (!boundary_border_side_visible(border->width.values[i], border->styles[i],
+                                          border->colors[i])) continue;
+        if (have_color && border->colors[i].c != color.c) return false;
+        color = border->colors[i];
         have_color = true;
-    }
-    if (boundary_border_side_visible(border->width.right, border->right_style, border->right_color)) {
-        if (have_color && border->right_color.c != color.c) return false;
-        color = border->right_color;
-        have_color = true;
-    }
-    if (boundary_border_side_visible(border->width.bottom, border->bottom_style, border->bottom_color)) {
-        if (have_color && border->bottom_color.c != color.c) return false;
-        color = border->bottom_color;
-        have_color = true;
-    }
-    if (boundary_border_side_visible(border->width.left, border->left_style, border->left_color)) {
-        if (have_color && border->left_color.c != color.c) return false;
     }
     return true;
 }
@@ -112,24 +91,12 @@ static bool boundary_rounded_border_fill_supported(const BoundaryProp* bound) {
     const BackgroundProp* bg = bound->background;
     if (bg->color.a != 255) return false;
     if (!boundary_border_all_sides_visible(border)) return false;
-    if (border->top_style != CSS_VALUE_SOLID ||
-        border->right_style != CSS_VALUE_SOLID ||
-        border->bottom_style != CSS_VALUE_SOLID ||
-        border->left_style != CSS_VALUE_SOLID) {
-        return false;
+    for (int i = 0; i < 4; i++) {
+        if (border->styles[i] != CSS_VALUE_SOLID || border->colors[i].a != 255) return false;
+        if (i > 0 && (border->width.values[i] != border->width.values[0] ||
+                      border->colors[i].c != border->colors[0].c)) return false;
     }
-    if (border->top_color.a != 255 ||
-        border->right_color.a != 255 ||
-        border->bottom_color.a != 255 ||
-        border->left_color.a != 255) {
-        return false;
-    }
-    return border->width.top == border->width.right &&
-           border->width.right == border->width.bottom &&
-           border->width.bottom == border->width.left &&
-           border->top_color.c == border->right_color.c &&
-           border->right_color.c == border->bottom_color.c &&
-           border->bottom_color.c == border->left_color.c;
+    return true;
 }
 
 static void boundary_emit_border_side(PaintList* paint_list, float x, float y,
@@ -197,24 +164,16 @@ bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
 
     if (!border) return true;
 
-    if (boundary_border_side_visible(border->width.top, border->top_style, border->top_color)) {
-        boundary_emit_border_side(paint_list, x, y, width,
-                                  border->width.top, border->top_color);
-    }
-    if (boundary_border_side_visible(border->width.right, border->right_style,
-                                     border->right_color)) {
-        boundary_emit_border_side(paint_list, x + width - border->width.right, y,
-                                  border->width.right, height, border->right_color);
-    }
-    if (boundary_border_side_visible(border->width.bottom, border->bottom_style,
-                                     border->bottom_color)) {
-        boundary_emit_border_side(paint_list, x, y + height - border->width.bottom,
-                                  width, border->width.bottom, border->bottom_color);
-    }
-    if (boundary_border_side_visible(border->width.left, border->left_style,
-                                     border->left_color)) {
-        boundary_emit_border_side(paint_list, x, y,
-                                  border->width.left, height, border->left_color);
+    const float* widths = border->width.values;
+    const float side_x[4] = {x, x + width - widths[1], x, x};
+    const float side_y[4] = {y, y, y + height - widths[2], y};
+    const float side_w[4] = {width, widths[1], width, widths[3]};
+    const float side_h[4] = {widths[0], height, widths[2], height};
+    for (int i = 0; i < 4; i++) {
+        if (boundary_border_side_visible(widths[i], border->styles[i], border->colors[i])) {
+            boundary_emit_border_side(paint_list, side_x[i], side_y[i],
+                                      side_w[i], side_h[i], border->colors[i]);
+        }
     }
     return true;
 }
@@ -229,16 +188,10 @@ bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* 
     float height = view->height;
     if (width <= 0.0f || height <= 0.0f) return false;
 
-    float r_tl = 0.0f;
-    float r_tr = 0.0f;
-    float r_br = 0.0f;
-    float r_bl = 0.0f;
+    float radii[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     if (view->boundary()->border) {
         BorderProp* border = view->boundary()->border;
-        r_tl = border->radius.top_left;
-        r_tr = border->radius.top_right;
-        r_br = border->radius.bottom_right;
-        r_bl = border->radius.bottom_left;
+        for (int i = 0; i < 4; i++) radii[i] = border->radius.horizontal[i];
     }
 
     int shadow_count = 0;
@@ -265,19 +218,17 @@ bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* 
             continue;
         }
 
-        float sr_tl = fmaxf(0.0f, r_tl + spread);
-        float sr_tr = fmaxf(0.0f, r_tr + spread);
-        float sr_br = fmaxf(0.0f, r_br + spread);
-        float sr_bl = fmaxf(0.0f, r_bl + spread);
+        float shadow_radii[4];
+        for (int i = 0; i < 4; i++) shadow_radii[i] = fmaxf(0.0f, radii[i] + spread);
 
         float exclude_params[8] = {
             x, y, width, height,
-            r_tl, r_tr, r_br, r_bl
+            radii[0], radii[1], radii[2], radii[3]
         };
 
         paint_outer_shadow(paint_list,
                            shadow_x, shadow_y, shadow_w, shadow_h,
-                           sr_tl, sr_tr, sr_br, sr_bl,
+                           shadow_radii[0], shadow_radii[1], shadow_radii[2], shadow_radii[3],
                            shadow->color,
                            shadow->blur_radius,
                            CLIP_SHAPE_ROUNDED_RECT, exclude_params,

@@ -68,28 +68,21 @@ static Corner background_corner_inset_box(const Corner* radius, CssEnum box,
                                           const Spacing* padding,
                                           float scale) {
     Corner out = radiant_corner_scaled(radius, scale);
-    float top = 0.0f, right = 0.0f, bottom = 0.0f, left = 0.0f;
+    float insets[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     if (box == CSS_VALUE_PADDING_BOX || box == CSS_VALUE_CONTENT_BOX) {
-        top += border ? border->width.top * scale : 0.0f;
-        right += border ? border->width.right * scale : 0.0f;
-        bottom += border ? border->width.bottom * scale : 0.0f;
-        left += border ? border->width.left * scale : 0.0f;
+        for (int i = 0; i < 4; i++) {
+            insets[i] += border ? border->width.values[i] * scale : 0.0f;
+        }
     }
     if (box == CSS_VALUE_CONTENT_BOX && padding) {
-        top += padding->top * scale;
-        right += padding->right * scale;
-        bottom += padding->bottom * scale;
-        left += padding->left * scale;
+        for (int i = 0; i < 4; i++) insets[i] += padding->values[i] * scale;
     }
-
-    out.top_left = max(0.0f, out.top_left - left);
-    out.top_right = max(0.0f, out.top_right - right);
-    out.bottom_right = max(0.0f, out.bottom_right - right);
-    out.bottom_left = max(0.0f, out.bottom_left - left);
-    out.top_left_y = max(0.0f, out.top_left_y - top);
-    out.top_right_y = max(0.0f, out.top_right_y - top);
-    out.bottom_right_y = max(0.0f, out.bottom_right_y - bottom);
-    out.bottom_left_y = max(0.0f, out.bottom_left_y - bottom);
+    static const uint8_t horizontal_inset[4] = {3, 1, 1, 3};
+    static const uint8_t vertical_inset[4] = {0, 0, 2, 2};
+    for (int i = 0; i < 4; i++) {
+        out.horizontal[i] = max(0.0f, out.horizontal[i] - insets[horizontal_inset[i]]);
+        out.vertical[i] = max(0.0f, out.vertical[i] - insets[vertical_inset[i]]);
+    }
     return out;
 }
 
@@ -1310,14 +1303,11 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             RdtPath* shadow_path = nullptr;
             if (sr_tl > 0 || sr_tr > 0 || sr_br > 0 || sr_bl > 0) {
                 Corner shadow_radius = {};
-                shadow_radius.top_left = sr_tl;
-                shadow_radius.top_right = sr_tr;
-                shadow_radius.bottom_right = sr_br;
-                shadow_radius.bottom_left = sr_bl;
-                shadow_radius.top_left_y = sr_tl;
-                shadow_radius.top_right_y = sr_tr;
-                shadow_radius.bottom_right_y = sr_br;
-                shadow_radius.bottom_left_y = sr_bl;
+                float radii[4] = {sr_tl, sr_tr, sr_br, sr_bl};
+                for (int corner = 0; corner < 4; corner++) {
+                    shadow_radius.horizontal[corner] = radii[corner];
+                    shadow_radius.vertical[corner] = radii[corner];
+                }
                 shadow_path = render_path_create_rounded_rect(shadow_rect, &shadow_radius);
             } else {
                 shadow_path = render_path_create_rounded_rect(shadow_rect, nullptr);
@@ -1387,10 +1377,11 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     // Get border radius if present (scaled to physical pixels)
     float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
     if (view->boundary()->border) {
-        r_tl = view->boundary()->border->radius.top_left * sc;
-        r_tr = view->boundary()->border->radius.top_right * sc;
-        r_br = view->boundary()->border->radius.bottom_right * sc;
-        r_bl = view->boundary()->border->radius.bottom_left * sc;
+        Corner* radius = &view->boundary_mut()->border->radius;
+        r_tl = radius->horizontal[0] * sc;
+        r_tr = radius->horizontal[1] * sc;
+        r_br = radius->horizontal[2] * sc;
+        r_bl = radius->horizontal[3] * sc;
     }
 
     const RdtMatrix* xform = render_state_current_transform(rdcon);

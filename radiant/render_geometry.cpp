@@ -9,24 +9,22 @@ Rect render_geometry_adjust_box_rect(Rect rect, CssEnum box, float scale,
                                      const Spacing* padding) {
     Rect out = rect;
     if (box == CSS_VALUE_PADDING_BOX || box == CSS_VALUE_CONTENT_BOX) {
-        float border_top = border ? border->width.top * scale : 0.0f;
-        float border_right = border ? border->width.right * scale : 0.0f;
-        float border_bottom = border ? border->width.bottom * scale : 0.0f;
-        float border_left = border ? border->width.left * scale : 0.0f;
-        out.x += border_left;
-        out.y += border_top;
-        out.width -= border_left + border_right;
-        out.height -= border_top + border_bottom;
+        const float* widths = border ? border->width.values : nullptr;
+        float edges[4] = {};
+        for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
+            edges[side] = widths ? widths[side] * scale : 0.0f;
+        }
+        out.x += edges[CSS_BOX_SIDE_LEFT];
+        out.y += edges[CSS_BOX_SIDE_TOP];
+        out.width -= edges[CSS_BOX_SIDE_LEFT] + edges[CSS_BOX_SIDE_RIGHT];
+        out.height -= edges[CSS_BOX_SIDE_TOP] + edges[CSS_BOX_SIDE_BOTTOM];
     }
     if (box == CSS_VALUE_CONTENT_BOX && padding) {
-        float padding_top = padding->top * scale;
-        float padding_right = padding->right * scale;
-        float padding_bottom = padding->bottom * scale;
-        float padding_left = padding->left * scale;
-        out.x += padding_left;
-        out.y += padding_top;
-        out.width -= padding_left + padding_right;
-        out.height -= padding_top + padding_bottom;
+        const float* edges = padding->values;
+        out.x += edges[CSS_BOX_SIDE_LEFT] * scale;
+        out.y += edges[CSS_BOX_SIDE_TOP] * scale;
+        out.width -= (edges[CSS_BOX_SIDE_LEFT] + edges[CSS_BOX_SIDE_RIGHT]) * scale;
+        out.height -= (edges[CSS_BOX_SIDE_TOP] + edges[CSS_BOX_SIDE_BOTTOM]) * scale;
     }
     if (out.width < 0.0f) out.width = 0.0f;
     if (out.height < 0.0f) out.height = 0.0f;
