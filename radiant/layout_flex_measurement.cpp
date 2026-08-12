@@ -36,81 +36,6 @@ static void flex_store_intrinsic_sizes(ViewElement* item, float min_width, float
     item->fi->has_intrinsic_height = true;
 }
 
-static bool flex_measurement_style_declares_display(ViewElement* elem,
-                                                    CssEnum display,
-                                                    CssEnum inline_display) {
-    if (!elem) return false;
-    CssEnum display_val = layout_specified_keyword(
-        elem->as_element(), CSS_PROPERTY_DISPLAY, CSS_VALUE__UNDEF);
-    return display_val == display || display_val == inline_display;
-}
-
-static bool flex_measurement_style_declares_flex_display(ViewElement* elem) {
-    return flex_measurement_style_declares_display(
-        elem, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX);
-}
-
-static FlexProp* flex_measurement_embedded_flex(ViewElement* elem) {
-    if (!elem) return nullptr;
-    if (elem->view_type != RDT_VIEW_BLOCK && elem->view_type != RDT_VIEW_INLINE_BLOCK) {
-        return nullptr;
-    }
-    ViewBlock* block_view = lam::view_as_block(elem);
-    return block_view && block_view->embed ? block_view->embedp()->flex : nullptr;
-}
-
-static bool flex_measurement_direction_is_row(ViewElement* elem) {
-    if (!elem) return true;
-    FlexDeclaredStyleInfo style_info =
-        layout_flex_declared_style_info(nullptr, elem->as_element());
-    if (style_info.has_direction) {
-        return style_info.row;
-    }
-
-    FlexProp* flex = flex_measurement_embedded_flex(elem);
-    if (flex) {
-        return flex->direction == DIR_ROW || flex->direction == DIR_ROW_REVERSE;
-    }
-
-    return true;
-}
-
-static bool flex_measurement_is_flex_container(ViewElement* elem) {
-    if (!elem) return false;
-    if (elem->display.inner == CSS_VALUE_FLEX) return true;
-
-    if (flex_measurement_style_declares_flex_display(elem)) return true;
-
-    return flex_measurement_embedded_flex(elem) != nullptr;
-}
-
-static float flex_measurement_embedded_column_gap(ViewElement* elem) {
-    FlexProp* flex = flex_measurement_embedded_flex(elem);
-    return flex ? flex->column_gap : 0.0f;
-}
-
-static bool flex_measurement_wrap_keyword_is_wrapping(CssEnum keyword) {
-    return keyword == CSS_VALUE_WRAP || keyword == CSS_VALUE_WRAP_REVERSE;
-}
-
-static bool flex_measurement_style_declares_wrap(ViewElement* elem) {
-    if (!elem) return false;
-    FlexDeclaredStyleInfo style_info =
-        layout_flex_declared_style_info(nullptr, elem->as_element());
-    return style_info.has_wrap && style_info.wrapping;
-}
-
-static bool flex_measurement_wraps(ViewElement* elem) {
-    if (!elem) return false;
-
-    FlexProp* flex = flex_measurement_embedded_flex(elem);
-    if (flex && flex_measurement_wrap_keyword_is_wrapping((CssEnum)flex->wrap)) {
-        return true;
-    }
-
-    return flex_measurement_style_declares_wrap(elem);
-}
-
 static bool flex_measurement_child_is_skipped_flex_item(ViewElement* child_view,
                                                         DisplayValue child_display) {
     if (layout_display_is_none(child_display)) return true;
@@ -661,7 +586,7 @@ static float flex_measure_row_child_height_at_estimated_share(LayoutContext* lyc
     }
     if (row_width <= 0.0f) row_width = flex_layout->cross_axis_size;
 
-    float gap = flex_measurement_embedded_column_gap(item);
+    float gap = layout_flex_column_gap(item);
     int n_flex_children = 0;
     for (DomNode* sibling = item->first_child; sibling; sibling = sibling->next_sibling) {
         if (sibling->is_element()) n_flex_children++;
@@ -739,8 +664,8 @@ static FlexHeightMeasurement flex_measure_direct_element_height(LayoutContext* l
         bool is_list_flex_row = false;
         if (elem) {
             ViewElement* list_view = lam::view_require_element(elem);
-            if (flex_measurement_is_flex_container(list_view)) {
-                is_list_flex_row = flex_measurement_direction_is_row(list_view);
+            if (layout_is_flex_container(list_view)) {
+                is_list_flex_row = layout_flex_direction_is_row(list_view);
             }
         }
         if (is_list_flex_row) {
@@ -754,7 +679,7 @@ static FlexHeightMeasurement flex_measure_direct_element_height(LayoutContext* l
              tag == MARKUP_NAME_HEADER || tag == MARKUP_NAME_FOOTER ||
              tag == MARKUP_NAME_ASIDE || tag == MARKUP_NAME_MAIN) {
         ViewElement* nested_view = lam::view_require_element(elem);
-        bool is_nested_flex = flex_measurement_is_flex_container(nested_view);
+        bool is_nested_flex = layout_is_flex_container(nested_view);
 
         if (is_nested_flex) {
             FlexHeightMeasurement nested_height =
@@ -1031,7 +956,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             // Check display property directly on the DOM element
             if (elem_view->display.inner == CSS_VALUE_FLEX) {
                 // It's a flex container - check direction
-                is_row_flex = flex_measurement_direction_is_row(elem_view);
+                is_row_flex = layout_flex_direction_is_row(elem_view);
             }
         }
 
@@ -1665,9 +1590,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // Check if this item is a row flex container
         // For row flex containers, the cached height from measure_flex_child_content might be incorrect
         // because it sums child heights instead of taking the max
-        bool is_flex_container = flex_measurement_is_flex_container(item);
+        bool is_flex_container = layout_is_flex_container(item);
         bool is_row_flex_container = is_flex_container ?
-            flex_measurement_direction_is_row(item) : false;
+            layout_flex_direction_is_row(item) : false;
 
         // CRITICAL FIX: For non-flex containers (regular block elements with inline content),
         // use measure_element_intrinsic_widths which correctly sums inline children's widths.
@@ -1759,7 +1684,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // - wrap: min-content = max of individual item outer min-content sizes
         bool is_wrapping_flex = false;
         if (is_flex_container && is_row_flex_container) {
-            is_wrapping_flex = flex_measurement_wraps(item);
+            is_wrapping_flex = layout_flex_wraps(item);
         }
 
         // First, try to calculate intrinsic sizes from children
@@ -1995,7 +1920,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             // For row flex containers, add gaps to total width
             if (is_row_flex_container && child_count > 1) {
                 // Get gap from the flex container properties
-                float gap = flex_measurement_embedded_column_gap(item);
+                float gap = layout_flex_column_gap(item);
                 total_child_width += gap * (child_count - 1);
             }
 

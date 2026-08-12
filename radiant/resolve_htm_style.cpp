@@ -122,14 +122,10 @@ static void apply_html_background_color(LayoutContext* lycon, ViewBlock* block, 
     layout_ensure_background(lycon, block)->color = color;
 }
 
-static void apply_html_font_weight_bold(FontProp* font) {
-    font->font_weight = CSS_VALUE_BOLD;
-    font->font_weight_numeric = 700;
-}
-
-static void apply_html_font_weight_normal(FontProp* font) {
-    font->font_weight = CSS_VALUE_NORMAL;
-    font->font_weight_numeric = 400;
+static void apply_html_font_weight(FontProp* font, CssEnum weight, int numeric) {
+    if (!font) return;
+    font->font_weight = weight;
+    font->font_weight_numeric = numeric;
 }
 
 static void apply_html_font_size(FontProp* font, float size, bool from_medium) {
@@ -180,7 +176,7 @@ static void apply_html_textarea_font(LayoutContext* lycon, ViewBlock* block) {
     radiant_retain_font_family(font, lam::GcPtr<char>((char*)"monospace"));
     apply_html_font_size(font, 13.333333f, true);
     font->font_style = CSS_VALUE_NORMAL;
-    apply_html_font_weight_normal(font);
+    apply_html_font_weight(font, CSS_VALUE_NORMAL, 400);
 }
 
 static BorderProp* apply_html_uniform_border_base(LayoutContext* lycon, ViewBlock* block,
@@ -207,11 +203,6 @@ static void apply_html_uniform_border(LayoutContext* lycon, ViewBlock* block,
     }
 }
 
-static void apply_html_uniform_border_style(LayoutContext* lycon, ViewBlock* block,
-                                            float width, CssEnum style) {
-    apply_html_uniform_border_base(lycon, block, width, style, true);
-}
-
 static void apply_html_button_box_defaults(LayoutContext* lycon, ViewBlock* block) {
     block->ensure_boundary(lycon);
     // Native button padding and border are UA lengths, so they must follow the
@@ -221,8 +212,8 @@ static void apply_html_button_box_defaults(LayoutContext* lycon, ViewBlock* bloc
         CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, FormDefaults::BUTTON_PADDING_V * zoom);
     radiant_spacing_set_pair(&block->boundary_mut()->padding,
         CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, FormDefaults::BUTTON_PADDING_H * zoom);
-    apply_html_uniform_border_style(
-        lycon, block, FormDefaults::BUTTON_BORDER * zoom, CSS_VALUE_OUTSET);
+    apply_html_uniform_border_base(
+        lycon, block, FormDefaults::BUTTON_BORDER * zoom, CSS_VALUE_OUTSET, true);
 }
 
 static void apply_html_fixed_replaced_size(LayoutContext* lycon, ViewBlock* block,
@@ -456,21 +447,10 @@ static DomElement* parent_table_element(DomNode* element) {
 }
 
 // table presentational hints all resolve from the nearest table ancestor.
-static float get_parent_table_border(DomNode* element) {
+static float get_parent_table_number(DomNode* element, const char* attribute_name) {
     DomElement* table = parent_table_element(element);
-    const char* attr = table ? table->get_attribute("border") : nullptr;
-    if (!attr) return -1.0f;
-    StrView view = strview_init(attr, strlen(attr));
-    float value = strview_to_int(&view);
-    return value >= 0.0f ? value : -1.0f;
-}
-
-// Get the cellpadding attribute value from the parent TABLE element
-// Returns -1 if no cellpadding attribute is found, otherwise returns the pixel value (CSS logical pixels)
-// The HTML spec says: cellpadding on TABLE maps to padding on TD/TH cells
-static float get_parent_table_cellpadding(DomNode* element) {
-    DomElement* table = parent_table_element(element);
-    const char* attr = table ? table->get_attribute("cellpadding") : nullptr;
+    const char* attr = table && attribute_name
+        ? table->get_attribute(attribute_name) : nullptr;
     if (!attr) return -1.0f;
     StrView view = strview_init(attr, strlen(attr));
     float value = strview_to_int(&view);
@@ -589,7 +569,7 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
                                            ViewBlock* block, bool is_header) {
     DomElement* cell = cell_node->as_element();
     if (is_header) {
-        apply_html_font_weight_bold(block->ensure_font(lycon));
+        apply_html_font_weight(block->ensure_font(lycon), CSS_VALUE_BOLD, 700);
     }
 
     BlockProp* block_prop = block->ensure_block(lycon);
@@ -600,7 +580,7 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
     block->ensure_inline(lycon);
     block->in_line->vertical_align = CSS_VALUE_MIDDLE;
 
-    float cellpadding = get_parent_table_cellpadding(cell_node);
+    float cellpadding = get_parent_table_number(cell_node, "cellpadding");
     float padding = cellpadding >= 0.0f ? cellpadding : 1.0f;
     block->ensure_boundary(lycon);
     radiant_spacing_set_all(&block->boundary_mut()->padding, padding);
@@ -644,7 +624,7 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
         apply_html_background_color(lycon, block, bg_color);
     }
 
-    if (get_parent_table_border(cell_node) > 0.0f) {
+    if (get_parent_table_number(cell_node, "border") > 0.0f) {
         Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
         apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_INSET, grey);
     }
@@ -712,7 +692,7 @@ static void apply_html_heading_default(LayoutContext* lycon, DomNode* element,
     FontProp* font = block->ensure_font(lycon);
     float heading_size = lycon->font.style->font_size * font_scales[level];
     apply_html_font_size(font, heading_size, false);
-    apply_html_font_weight_bold(font);
+    apply_html_font_weight(font, CSS_VALUE_BOLD, 700);
     block->ensure_boundary(lycon);
     radiant_spacing_set_pair(&block->boundary_mut()->margin,
         CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, heading_size * margin_scales[level]);
@@ -747,7 +727,7 @@ static bool apply_html_inline_text_default(LayoutContext* lycon, ViewSpan* span,
     }
     FontProp* font = span->ensure_font(lycon);
     if (style != CSS_VALUE__UNDEF) font->font_style = style;
-    if (weight == CSS_VALUE_BOLD) apply_html_font_weight_bold(font);
+    if (weight == CSS_VALUE_BOLD) apply_html_font_weight(font, CSS_VALUE_BOLD, 700);
     if (decoration != CSS_VALUE__UNDEF) font->text_deco = decoration;
     if (size_scale != 1.0f) {
         apply_html_font_size(font, lycon->font.style->font_size * size_scale, false);

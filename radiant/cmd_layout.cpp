@@ -107,20 +107,19 @@ extern __thread Context* input_context;
 // Forward declarations
 Element* get_html_root_element(Input* input);
 extern void fontface_cleanup(UiContext* uicon);
-void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine, int depth = 0);
-void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
-static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out = nullptr);
 void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
                                 CssStylesheet*** stylesheets, int* count, int* capacity,
                                 int depth = 0, bool recurse = true);
-void collect_inline_styles_to_list(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
-                                   CssStylesheet*** stylesheets, int* count, int* capacity,
-                                   int depth = 0, bool recurse = true);
-void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
+static void populate_layout_document(DomDocument* doc, DomElement* root,
+                                     Element* html_root, HtmlVersion version,
+                                     Url* url, Runtime* runtime);
+static CssStylesheet* load_pool_backed_stylesheet(CssEngine* css_engine, Pool* pool,
+                                                  const char* css_filename,
+                                                  const char* log_prefix,
+                                                  const char* label, bool warn_missing);
 static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context,
                                                            DomDocument* doc);
-static const int MAX_CSS_TREE_DEPTH = 512;
 
 // Current document charset for CSS fallback encoding (set before collect_linked_stylesheets)
 const char* g_css_document_charset = nullptr;
@@ -169,7 +168,7 @@ static bool css_file_url_to_local_path(const char* href, char* out_path, size_t 
 
 // Forward declaration for charset conversion.
 char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset);
-void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool, int depth = 0);
+void apply_inline_styles_to_tree(DomElement* dom_elem, Pool* pool, int depth = 0);
 void log_root_item(Item item, const char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
 
@@ -357,116 +356,22 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
     return HTML4_01_TRANSITIONAL;
 }
 
-/**
- * Apply inline style attribute to a single DOM element
- * Inline styles have highest specificity (1,0,0,0)
- */
-void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool) {
-    if (!dom_elem || !html_elem || !pool) return;
+// Apply live inline attributes directly from the DOM tree. The old parallel
+// Element/DOM walk duplicated build_dom_tree's filtering rules and drifted
+// whenever scripts inserted or removed nodes.
+void apply_inline_styles_to_tree(DomElement* dom_elem, Pool* pool, int depth) {
+    if (!dom_elem || !pool) return;
+    if (depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
 
-    // CSSOM updates the live DomElement attribute; reading the parse-time
-    // Element snapshot here discarded script-created inline styles at recascade.
+    // CSSOM writes live on DomElement; reading that attribute preserves
+    // script-created inline styles during later subtree recascades.
     const char* style_text = dom_elem->get_attribute("style");
-
-    if (style_text && strlen(style_text) > 0) {
-
-        // Apply the inline style using the DOM element API
-        dom_element_apply_inline_style(dom_elem, style_text);
-    }
-}
-
-/**
- * Recursively apply inline style attributes to entire DOM tree
- */
-void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool, int depth) {
-    if (!dom_elem || !html_elem || !pool) return;
-    if (depth > MAX_CSS_TREE_DEPTH) return;
-
-    // Apply inline style to current element
-    apply_inline_style_attributes(dom_elem, html_elem, pool);
-
-    // Process children - need to match DOM children with HTML children
-    // NOTE: Both HTML and DOM trees contain text nodes, so we need to skip them in parallel
-    DomNode* dom_child = dom_elem->first_child;
-
-    // Iterate through HTML children to find matching elements
-    for (int64_t i = 0; i < html_elem->length; i++) {
-        Item child_item = html_elem->items[i];
-        TypeId child_type_id = get_type_id(child_item);
-
-        if (child_type_id == LMD_TYPE_ELEMENT) {
-            Element* html_child = child_item.element;
-
-            // Skip HTML elements that are absent from the DOM tree.
-            // build_dom_tree_from_element returns nullptr (and does NOT create a
-            // DomElement sibling) for:
-            //   - comments ("!--") and DOCTYPE → stored as DomComment, not DomElement
-            //   - <script> elements WITHOUT an inline display override → skipped
-            //     (display:none, no layout role); but a <script style="display:block">
-            //     IS kept so its text contributes to Selection.toString().
-            //   - XML declarations (tag starting with "?") → not HTML elements
-            // For all such cases we must NOT advance dom_child, because there is
-            // no corresponding DomElement in the DOM sibling chain to consume.
-            TypeElmt* child_type = (TypeElmt*)html_child->type;
-            if (child_type) {
-                const char* ctn = child_type->name.str;
-                size_t ctn_len = strlen(ctn);
-                bool is_dom_absent =
-                    strcmp(ctn, "!--") == 0 ||
-                    strcmp(ctn, "#comment") == 0 ||
-                    str_ieq_const(ctn, ctn_len, "!DOCTYPE") ||
-                    (ctn_len > 0 && ctn[0] == '?');  // XML declarations
-                if (!is_dom_absent && str_ieq_const(ctn, ctn_len, "script")) {
-                    // Match dom_element.cpp's conditional skip.
-                    const char* sty = extract_element_attribute(html_child, "style", nullptr);
-                    bool has_display_override = false;
-                    if (sty) {
-                        const char* d = strstr(sty, "display");
-                        if (d) {
-                            const char* colon = strchr(d, ':');
-                            if (colon) {
-                                const char* v = colon + 1;
-                                while (*v == ' ' || *v == '\t') v++;
-                                if (strncmp(v, "none", 4) != 0) has_display_override = true;
-                            }
-                        }
-                    }
-                    if (!has_display_override) is_dom_absent = true;
-                }
-                if (is_dom_absent) {
-                    continue;  // No corresponding DomElement — do NOT advance dom_child
-                }
-            }
-
-            if (!dom_child) {
-                // HTML has more element children than DOM - shouldn't happen
-                break;
-            }
-
-            // Skip non-element DOM nodes (text, comments) until we find an element
-            while (dom_child && !dom_child->is_element()) {
-                dom_child = dom_child->next_sibling;
-            }
-
-            if (!dom_child) {
-                // Ran out of DOM children
-                break;
-            }
-
-            DomElement* dom_child_elem = lam::dom_require_element(dom_child);
-
-            // Recursively apply to this child
-            apply_inline_styles_to_tree(dom_child_elem, html_child, pool, depth + 1);
-
-            // Move to next DOM sibling
-            dom_child = dom_child_elem->next_sibling;
-        } else if (child_type_id == LMD_TYPE_STRING) {
-            // HTML text node - skip corresponding DOM text node
-            if (dom_child && dom_child->is_text()) {
-                dom_child = dom_child->next_sibling;
-            }
+    if (style_text && *style_text) dom_element_apply_inline_style(dom_elem, style_text);
+    for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
+        if (child->is_element()) {
+            apply_inline_styles_to_tree(
+                lam::dom_require_element(child), pool, depth + 1);
         }
-        // Skip other non-element HTML children (comments, etc.)
     }
 }
 
@@ -1293,7 +1198,7 @@ static void append_external_resource_url(char* url, char*** out_urls,
 static void collect_external_resource_urls(Element* elem, const char* base_path,
                                             char*** out_urls, int* out_count, int* out_capacity,
                                             int depth) {
-    if (!elem || depth > MAX_CSS_TREE_DEPTH) return;
+    if (!elem || depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
     TypeElmt* type = (TypeElmt*)elem->type;
     if (!type || !type->name.str) goto recurse;
 
@@ -1356,7 +1261,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                                 CssStylesheet*** stylesheets, int* count, int* capacity,
                                 int depth, bool recurse) {
     if (!elem || !engine || !pool || !stylesheets || !count || !capacity) return;
-    if (depth > MAX_CSS_TREE_DEPTH) return;
+    if (depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
 
     TypeElmt* type = (TypeElmt*)elem->type;
     if (!type) return;
@@ -1589,75 +1494,6 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
     }
 }
 
-static void parse_inline_style_children(Element* elem, CssEngine* engine,
-                                        const char* base_path, Pool* pool,
-                                        CssStylesheet*** stylesheets, int* count,
-                                        int* capacity) {
-    bool collect_to_list = stylesheets && count && capacity;
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child_item = elem->items[i];
-        int type_id = get_type_id(child_item);
-        if (type_id != LMD_TYPE_STRING) continue;
-
-        String* css_text = (String*)child_item.string_ptr;
-        if (!css_text || css_text->len <= 0) continue;
-        CssStylesheet* stylesheet = nullptr;
-        if (collect_to_list) {
-            stylesheet = parse_and_collect_stylesheet(
-                engine, css_text->chars, "<inline-style>", base_path,
-                pool, stylesheets, count, capacity, 0);
-        } else {
-            stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
-            annotate_css_stylesheet_source_file(stylesheet, "<inline-style>");
-        }
-    }
-}
-
-/**
- * Recursively collect <style> inline CSS from HTML
- * Parses and returns list of stylesheets
- */
-static void collect_inline_styles_impl(Element* elem, CssEngine* engine,
-                                       const char* base_path, Pool* pool,
-                                       CssStylesheet*** stylesheets, int* count,
-                                       int* capacity, int depth, bool recurse) {
-    if (!elem || !engine || !pool ||
-        (stylesheets && (!count || !capacity)) ||
-        (!stylesheets && (count || capacity))) return;
-    if (depth > MAX_CSS_TREE_DEPTH) return;
-
-    TypeElmt* type = (TypeElmt*)elem->type;
-    if (!type) return;
-
-    // Check if this is a <style> element
-    if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
-        // Check media attribute - skip styles that don't apply to screen
-        const char* media = extract_element_attribute(elem, "media", nullptr);
-        if (!media || css_evaluate_media_query(engine, media)) {
-        parse_inline_style_children(
-            elem, engine, base_path, pool, stylesheets, count, capacity);
-        }
-    }
-
-    // Recursively process children
-    if (recurse) {
-        for (int64_t i = 0; i < elem->length; i++) {
-            Item child_item = elem->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                collect_inline_styles_impl(child_item.element, engine, base_path, pool,
-                                           stylesheets, count, capacity, depth + 1, true);
-            }
-        }
-    }
-}
-
-void collect_inline_styles_to_list(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
-                                   CssStylesheet*** stylesheets, int* count, int* capacity,
-                                   int depth, bool recurse) {
-    collect_inline_styles_impl(elem, engine, base_path, pool,
-                               stylesheets, count, capacity, depth, recurse);
-}
-
 static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engine,
                                                   const char* base_path, Pool* pool,
                                                   CssStylesheet*** stylesheets,
@@ -1665,7 +1501,7 @@ static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engi
                                                   int* linked_count,
                                                   int depth = 0) {
     if (!elem || !engine || !pool || !stylesheets || !count || !capacity) return;
-    if (depth > MAX_CSS_TREE_DEPTH) return;
+    if (depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
 
     TypeElmt* type = (TypeElmt*)elem->type;
     if (type) {
@@ -1677,8 +1513,19 @@ static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engi
                 *linked_count += *count - before;
             }
         } else if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
-            collect_inline_styles_to_list(elem, engine, base_path, pool,
-                                          stylesheets, count, capacity, depth, false);
+            const char* media = extract_element_attribute(elem, "media", nullptr);
+            if (!media || css_evaluate_media_query(engine, media)) {
+                for (int64_t i = 0; i < elem->length; i++) {
+                    Item child_item = elem->items[i];
+                    if (get_type_id(child_item) != LMD_TYPE_STRING) continue;
+                    String* css_text = (String*)child_item.string_ptr;
+                    if (css_text && css_text->len > 0) {
+                        parse_and_collect_stylesheet(
+                            engine, css_text->chars, "<inline-style>", base_path,
+                            pool, stylesheets, count, capacity, 0);
+                    }
+                }
+            }
         }
     }
 
@@ -1707,7 +1554,7 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const c
                                     CssStylesheet*** stylesheets, int* count,
                                     int* capacity, int depth = 0) {
     if (!elem || !engine || !pool || !stylesheets || !count || !capacity) return;
-    if (depth > MAX_CSS_TREE_DEPTH) return;
+    if (depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
 
     // Check if this is a <style> element
     if (elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
@@ -1818,499 +1665,6 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
     return stylesheets;
 }
 
-/**
- * Apply a single CSS rule to a DOM element (and recursively to its children)
- * Handles style rules directly, and recursively processes media rules
- */
-
-// ============================================================================
-// Selector Index for O(1) Rule Lookup
-// ============================================================================
-
-// Maximum classes per selector for fixed array
-#define MAX_SELECTOR_CLASSES 16
-
-// A rule entry in the index
-struct IndexedRule {
-    CssRule* rule;
-    CssSelector* selector;  // The specific selector that matched the index key
-    int rule_index;         // Original position for source order
-};
-
-// Rule list entry for hashmap: key string + ArrayList of IndexedRule
-struct RuleListEntry {
-    const char* key;        // hash key (tag/class/id name)
-    ArrayList* rules;       // ArrayList of IndexedRule*
-};
-
-static uint64_t rule_list_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const RuleListEntry* entry = (const RuleListEntry*)item;
-    if (!entry || !entry->key) return 0;
-    return hashmap_xxhash3(entry->key, strlen(entry->key), seed0, seed1);
-}
-
-static int rule_list_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const RuleListEntry* ea = (const RuleListEntry*)a;
-    const RuleListEntry* eb = (const RuleListEntry*)b;
-    if (!ea->key && !eb->key) return 0;
-    if (!ea->key) return -1;
-    if (!eb->key) return 1;
-    return strcmp(ea->key, eb->key);
-}
-
-static uint64_t tag_rule_list_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    (void)seed0;
-    (void)seed1;
-    const RuleListEntry* entry = (const RuleListEntry*)item;
-    if (!entry || !entry->key) return 0;
-    return str_ihash(entry->key, strlen(entry->key));
-}
-
-static int tag_rule_list_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const RuleListEntry* ea = (const RuleListEntry*)a;
-    const RuleListEntry* eb = (const RuleListEntry*)b;
-    if (!ea->key && !eb->key) return 0;
-    if (!ea->key) return -1;
-    if (!eb->key) return 1;
-    return str_icmp(ea->key, strlen(ea->key), eb->key, strlen(eb->key));
-}
-
-// Hash function for CssRule pointers (for seen-set)
-static uint64_t rule_ptr_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const CssRule* ptr = *(const CssRule**)item;
-    return hashmap_xxhash3(&ptr, sizeof(ptr), seed0, seed1);
-}
-
-static int rule_ptr_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const CssRule* pa = *(const CssRule**)a;
-    const CssRule* pb = *(const CssRule**)b;
-    if (pa == pb) return 0;
-    return (pa < pb) ? -1 : 1;
-}
-
-// Selector index for fast rule lookup
-struct SelectorIndex {
-    HashMap* by_tag;        // RuleListEntry: rules indexed by tag name
-    HashMap* by_class;      // RuleListEntry: rules indexed by class
-    HashMap* by_id;         // RuleListEntry: rules indexed by id
-    ArrayList* universal;   // IndexedRule*: rules that match any element (*, etc.)
-    ArrayList* media_rules; // CssRule*: @media rules requiring runtime evaluation
-    Pool* pool;
-};
-
-// Helper to add a rule to a hashmap bucket
-static void add_rule_to_map(HashMap* map, const char* key, IndexedRule* entry, Pool* pool) {
-    RuleListEntry search = { .key = key, .rules = nullptr };
-    RuleListEntry* existing = (RuleListEntry*)hashmap_get(map, &search);
-
-    if (existing) {
-        // Add to existing list
-        arraylist_append(existing->rules, entry);
-    } else {
-        // Create new list
-        ArrayList* list = arraylist_new(8);
-        arraylist_append(list, entry);
-        RuleListEntry new_entry = { .key = key, .rules = list };
-        hashmap_set(map, &new_entry);
-    }
-}
-
-// Helper to get rules from a hashmap bucket
-static ArrayList* get_rules_from_map(HashMap* map, const char* key) {
-    if (!map || !key) return nullptr;
-    RuleListEntry search = { .key = key, .rules = nullptr };
-    RuleListEntry* entry = (RuleListEntry*)hashmap_get(map, &search);
-    return entry ? entry->rules : nullptr;
-}
-
-// Get the key selector (rightmost compound selector) from a selector
-static CssCompoundSelector* get_key_selector(CssSelector* selector) {
-    if (!selector || selector->compound_selector_count == 0) return nullptr;
-    return selector->compound_selectors[selector->compound_selector_count - 1];
-}
-
-// Extract indexing keys from a compound selector (using fixed array for classes)
-static void extract_index_keys(CssCompoundSelector* compound,
-                               const char** out_tag,
-                               const char** out_classes,
-                               int* out_class_count,
-                               const char** out_id) {
-    *out_tag = nullptr;
-    *out_id = nullptr;
-    *out_class_count = 0;
-
-    if (!compound) return;
-
-    for (size_t i = 0; i < compound->simple_selector_count; i++) {
-        CssSimpleSelector* simple = compound->simple_selectors[i];
-        if (!simple) continue;
-
-        switch (simple->type) {
-            case CSS_SELECTOR_TYPE_ELEMENT:
-                if (simple->value && strcmp(simple->value, "*") != 0) {
-                    *out_tag = simple->value;
-                }
-                break;
-            case CSS_SELECTOR_TYPE_CLASS:
-                if (simple->value && *out_class_count < MAX_SELECTOR_CLASSES) {
-                    out_classes[(*out_class_count)++] = simple->value;
-                }
-                break;
-            case CSS_SELECTOR_TYPE_ID:
-                if (simple->value) {
-                    *out_id = simple->value;
-                }
-                break;
-            default:
-                break;
-        }
-    }
-}
-
-// Build selector index from a stylesheet
-static SelectorIndex* build_selector_index(CssStylesheet* stylesheet, Pool* pool) {
-    SelectorIndex* index = (SelectorIndex*)mem_calloc(1, sizeof(SelectorIndex), MEM_CAT_LAYOUT);
-    if (!index) return nullptr;
-
-    index->pool = pool;
-    // html type selectors are ASCII case-insensitive; the candidate index must preserve that equivalence.
-    index->by_tag = hashmap_new(sizeof(RuleListEntry), 64, 0, 0,
-                                tag_rule_list_hash, tag_rule_list_compare, nullptr, nullptr);
-    index->by_class = hashmap_new(sizeof(RuleListEntry), 64, 0, 0, rule_list_hash, rule_list_compare, nullptr, nullptr);
-    index->by_id = hashmap_new(sizeof(RuleListEntry), 32, 0, 0, rule_list_hash, rule_list_compare, nullptr, nullptr);
-    index->universal = arraylist_new(16);
-    index->media_rules = arraylist_new(8);
-
-    for (size_t rule_idx = 0; rule_idx < stylesheet->rule_count; rule_idx++) {
-        CssRule* rule = stylesheet->rules[rule_idx];
-        if (!rule) continue;
-
-        // Keep media rules in the same source-ordered candidate stream as
-        // normal rules. CSS cascade order is based on the @media rule's
-        // position in the stylesheet; applying media rules after all normal
-        // candidates reverses equal-specificity ties.
-        if (rule->type == CSS_RULE_MEDIA) {
-            IndexedRule* entry = (IndexedRule*)pool_calloc(pool, sizeof(IndexedRule));
-            if (entry) {
-                entry->rule = rule;
-                entry->selector = nullptr;
-                entry->rule_index = (int)rule_idx;
-                arraylist_append(index->universal, entry);
-            }
-            continue;
-        }
-
-        if (rule->type != CSS_RULE_STYLE) continue;
-
-        // Handle selector groups (comma-separated)
-        CssSelectorGroup* group = rule->data.style_rule.selector_group;
-        CssSelector* single = rule->data.style_rule.selector;
-
-        // Collect selectors to index
-        // CSS reset stylesheets often have 80+ comma-separated selectors
-        CssSelector* selectors_buf[128];
-        CssSelector** selectors_to_index = selectors_buf;
-        int selector_count = 0;
-        int selector_capacity = 128;
-
-        if (group && group->selector_count > 0) {
-            if (group->selector_count > 128) {
-                selector_capacity = (int)group->selector_count;
-                selectors_to_index = (CssSelector**)pool_calloc(pool, selector_capacity * sizeof(CssSelector*));
-                if (!selectors_to_index) {
-                    selectors_to_index = selectors_buf;
-                    selector_capacity = 128;
-                }
-            }
-            for (size_t i = 0; i < group->selector_count && selector_count < selector_capacity; i++) {
-                if (group->selectors[i]) {
-                    selectors_to_index[selector_count++] = group->selectors[i];
-                }
-            }
-        } else if (single) {
-            selectors_to_index[selector_count++] = single;
-        }
-
-        for (int si = 0; si < selector_count; si++) {
-            CssSelector* selector = selectors_to_index[si];
-            CssCompoundSelector* key_compound = get_key_selector(selector);
-            if (!key_compound) continue;
-
-            const char* tag = nullptr;
-            const char* id = nullptr;
-            const char* classes[MAX_SELECTOR_CLASSES];
-            int class_count = 0;
-            extract_index_keys(key_compound, &tag, classes, &class_count, &id);
-
-            // Allocate IndexedRule in pool
-            IndexedRule* entry = (IndexedRule*)pool_calloc(pool, sizeof(IndexedRule));
-            entry->rule = rule;
-            entry->selector = selector;
-            entry->rule_index = (int)rule_idx;
-
-            // Index by most specific key first (ID > class > tag)
-            bool indexed = false;
-
-            if (id) {
-                add_rule_to_map(index->by_id, id, entry, pool);
-                indexed = true;
-            }
-
-            if (class_count > 0) {
-                // Index by first class (could index by all, but one is usually enough)
-                add_rule_to_map(index->by_class, classes[0], entry, pool);
-                indexed = true;
-            }
-
-            if (tag) {
-                add_rule_to_map(index->by_tag, tag, entry, pool);
-                indexed = true;
-            }
-
-            // If no specific key, it's a universal rule
-            if (!indexed) {
-                arraylist_append(index->universal, entry);
-            }
-        }
-    }
-
-    return index;
-}
-
-// Callback for freeing rule lists in hashmap
-static bool free_rule_list_cb(const void* item, void* udata) {
-    (void)udata;
-    const RuleListEntry* entry = (const RuleListEntry*)item;
-    if (entry && entry->rules) {
-        arraylist_free(entry->rules);
-    }
-    return true;
-}
-
-// Free selector index
-static void free_selector_index(SelectorIndex* index) {
-    if (!index) return;
-
-    if (index->by_tag) {
-        hashmap_scan(index->by_tag, free_rule_list_cb, nullptr);
-        hashmap_free(index->by_tag);
-    }
-    if (index->by_class) {
-        hashmap_scan(index->by_class, free_rule_list_cb, nullptr);
-        hashmap_free(index->by_class);
-    }
-    if (index->by_id) {
-        hashmap_scan(index->by_id, free_rule_list_cb, nullptr);
-        hashmap_free(index->by_id);
-    }
-    if (index->universal) arraylist_free(index->universal);
-    if (index->media_rules) arraylist_free(index->media_rules);
-
-    mem_free(index);
-}
-
-// Comparison function for qsort on IndexedRule pointers (by rule_index)
-static int compare_indexed_rules(const void* a, const void* b) {
-    const IndexedRule* ra = *(const IndexedRule**)a;
-    const IndexedRule* rb = *(const IndexedRule**)b;
-    return ra->rule_index - rb->rule_index;
-}
-
-// Get candidate rules for an element from the index
-static void get_candidate_rules(SelectorIndex* index, DomElement* elem,
-                                ArrayList* candidates) {
-    // Clear candidates
-    candidates->length = 0;
-
-    // Use hashmap for seen rules (deduplication)
-    HashMap* seen = hashmap_new(sizeof(CssRule*), 64, 0, 0, rule_ptr_hash, rule_ptr_compare, nullptr, nullptr);
-
-    // Add universal rules
-    for (int i = 0; i < index->universal->length; i++) {
-        IndexedRule* entry = (IndexedRule*)index->universal->data[i];
-        if (!hashmap_get(seen, &entry->rule)) {
-            arraylist_append(candidates, entry);
-            hashmap_set(seen, &entry->rule);
-        }
-    }
-
-    // Add rules by tag
-    if (elem->tag_name) {
-        ArrayList* tag_rules = get_rules_from_map(index->by_tag, elem->tag_name);
-        if (tag_rules) {
-            for (int i = 0; i < tag_rules->length; i++) {
-                IndexedRule* entry = (IndexedRule*)tag_rules->data[i];
-                if (!hashmap_get(seen, &entry->rule)) {
-                    arraylist_append(candidates, entry);
-                    hashmap_set(seen, &entry->rule);
-                }
-            }
-        }
-    }
-
-    // Add rules by ID
-    if (elem->id) {
-        ArrayList* id_rules = get_rules_from_map(index->by_id, elem->id);
-        if (id_rules) {
-            for (int i = 0; i < id_rules->length; i++) {
-                IndexedRule* entry = (IndexedRule*)id_rules->data[i];
-                if (!hashmap_get(seen, &entry->rule)) {
-                    arraylist_append(candidates, entry);
-                    hashmap_set(seen, &entry->rule);
-                }
-            }
-        }
-    }
-
-    // Add rules by class
-    if (elem->class_count > 0 && elem->class_names) {
-        for (int i = 0; i < elem->class_count; i++) {
-            if (elem->class_names[i]) {
-                ArrayList* class_rules = get_rules_from_map(index->by_class, elem->class_names[i]);
-                if (class_rules) {
-                    for (int j = 0; j < class_rules->length; j++) {
-                        IndexedRule* entry = (IndexedRule*)class_rules->data[j];
-                        if (!hashmap_get(seen, &entry->rule)) {
-                            arraylist_append(candidates, entry);
-                            hashmap_set(seen, &entry->rule);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    hashmap_free(seen);
-
-    // Sort by rule_index to maintain source order
-    if (candidates->length > 1) {
-        qsort(candidates->data, candidates->length, sizeof(void*), compare_indexed_rules);
-    }
-}
-
-// ============================================================================
-// Timing accumulators for CSS cascade analysis
-// ============================================================================
-
-static thread_local int64_t g_selector_match_count = 0;
-static thread_local int64_t g_selector_match_success = 0;
-static thread_local int64_t g_property_apply_count = 0;
-static thread_local int64_t g_element_count = 0;
-static thread_local int64_t g_candidate_rule_count = 0;
-
-static void reset_cascade_timing() {
-    g_selector_match_count = 0;
-    g_selector_match_success = 0;
-    g_property_apply_count = 0;
-    g_element_count = 0;
-    g_candidate_rule_count = 0;
-}
-
-static void log_cascade_timing_summary() {
-    log_info("[TIMING] cascade: elements: %lld, candidates: %lld, selectors: %lld matches (%lld hits, %.1f%%), properties: %lld",
-        g_element_count, g_candidate_rule_count, g_selector_match_count, g_selector_match_success,
-        g_selector_match_count > 0 ? (100.0 * g_selector_match_success / g_selector_match_count) : 0.0,
-        g_property_apply_count);
-}
-
-static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule,
-                                      SelectorMatcher* matcher, Pool* pool,
-                                      CssEngine* engine) {
-    radiant_apply_css_rule_to_element(elem, rule, matcher, pool, engine);
-}
-
-/**
- * Apply CSS stylesheet rules to DOM tree (original O(n×m) version)
- * Walks the tree recursively and matches selectors to elements
- */
-void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine, int depth) {
-    if (!root || !stylesheet || !matcher || !pool) return;
-    if (depth > MAX_CSS_TREE_DEPTH) return;
-
-    g_element_count++;
-
-    // Iterate through all rules in the stylesheet
-    for (int rule_idx = 0; rule_idx < (int)stylesheet->rule_count; rule_idx++) {
-        CssRule* rule = stylesheet->rules[rule_idx];
-        if (!rule) continue;
-        apply_rule_to_dom_element(root, rule, matcher, pool, engine);
-    }
-
-    // Recursively apply to children (only element children)
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            DomElement* child_elem = lam::dom_require_element(child);
-            apply_stylesheet_to_dom_tree(child_elem, stylesheet, matcher, pool, engine, depth + 1);
-        }
-        child = child->next_sibling;
-    }
-}
-
-/**
- * Apply CSS stylesheet rules to DOM tree using selector index
- * This is an optimized O(n) version that uses pre-built index
- */
-static void apply_stylesheet_to_dom_tree_indexed(DomElement* root, SelectorIndex* index,
-                                                  SelectorMatcher* matcher, Pool* pool, CssEngine* engine, int depth) {
-    if (!root || !index || !matcher || !pool) return;
-    if (depth > MAX_CSS_TREE_DEPTH) return;
-
-    g_element_count++;
-
-    // Get candidate rules for this element from the index
-    ArrayList* candidates = arraylist_new(32);
-    get_candidate_rules(index, root, candidates);
-    g_candidate_rule_count += candidates->length;
-
-    // Only check candidate rules (much fewer than all rules)
-    for (int i = 0; i < candidates->length; i++) {
-        IndexedRule* entry = (IndexedRule*)candidates->data[i];
-        apply_rule_to_dom_element(root, entry->rule, matcher, pool, engine);
-    }
-    arraylist_free(candidates);
-
-    // Recursively apply to children (only element children)
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            DomElement* child_elem = lam::dom_require_element(child);
-            apply_stylesheet_to_dom_tree_indexed(child_elem, index, matcher, pool, engine, depth + 1);
-        }
-        child = child->next_sibling;
-    }
-}
-
-/**
- * Apply CSS stylesheet to DOM tree with index optimization
- * Builds index first, then applies using indexed lookup
- */
-void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* stylesheet,
-                                        SelectorMatcher* matcher, Pool* pool, CssEngine* engine) {
-    if (!root || !stylesheet || !matcher || !pool) return;
-
-    bool epoch_scope = style_epoch_cascade_begin(
-        root->doc, root, engine, false);
-
-    // Build selector index
-    SelectorIndex* index = build_selector_index(stylesheet, pool);
-
-    // Apply using index
-    apply_stylesheet_to_dom_tree_indexed(root, index, matcher, pool, engine, 0);
-
-    // Free index
-    free_selector_index(index);
-    if (epoch_scope) style_epoch_cascade_end(root->doc);
-}
-
-static bool load_scripts_before_cascade_legacy() {
-    const char* env = getenv("RADIANT_SCRIPT_BEFORE_CASCADE");
-    return env && env[0] && env[0] != '0';
-}
-
 static void clear_load_stylesheet_cascade_recursive(DomNode* node) {
     if (!node) return;
     if (node->is_element()) {
@@ -2332,9 +1686,7 @@ static void store_document_stylesheet_bundle(DomDocument* dom_doc,
                                              CssStylesheet* third_stylesheet,
                                              CssStylesheet** inline_stylesheets,
                                              int inline_stylesheet_count,
-                                             Pool* pool,
-                                             const char* log_prefix,
-                                             const char* reason) {
+                                             Pool* pool) {
     if (!dom_doc || !pool) return;
 
     int total_stylesheets = inline_stylesheet_count;
@@ -2367,25 +1719,21 @@ static void store_document_stylesheets(DomDocument* dom_doc,
                                        CssStylesheet* external_stylesheet,
                                        CssStylesheet** inline_stylesheets,
                                        int inline_stylesheet_count,
-                                       Pool* pool,
-                                       const char* reason) {
+                                       Pool* pool) {
     store_document_stylesheet_bundle(dom_doc, external_stylesheet, nullptr, nullptr,
                                      inline_stylesheets, inline_stylesheet_count,
-                                     pool, "Lambda CSS", reason);
+                                     pool);
 }
 
-static void apply_stylesheet_to_dom_tree_if_nonempty(DomElement* dom_root,
-                                                     CssStylesheet* stylesheet,
-                                                     SelectorMatcher* matcher,
-                                                     Pool* pool,
-                                                     CssEngine* css_engine) {
-    if (!dom_root || !stylesheet || stylesheet->rule_count == 0 ||
-        !matcher || !pool || !css_engine) {
-        return;
-    }
-    // Loader cascades share the same matcher across sheets; centralize the
-    // non-empty guard without changing each loader's stylesheet ownership.
-    apply_stylesheet_to_dom_tree_fast(dom_root, stylesheet, matcher, pool, css_engine);
+static void layout_apply_css_stylesheets(DomDocument* doc, DomElement* root,
+                                         CssStylesheet** stylesheets, int count,
+                                         Pool* pool, CssEngine* engine) {
+    if (!doc || !root || !pool || !engine || count <= 0) return;
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    if (!matcher) return;
+    state_configure_selector_matcher((DocState*)doc->state, matcher);
+    radiant_apply_css_stylesheets_to_tree(
+        doc, root, stylesheets, count, pool, engine, matcher);
 }
 
 static void apply_load_css_cascade(DomDocument* dom_doc,
@@ -2398,44 +1746,23 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
                                    const char* phase) {
     if (!dom_doc || !dom_root || !pool || !css_engine) return;
     using namespace std::chrono;
-
-    SelectorMatcher* matcher = selector_matcher_create(pool);
-    state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
-
     auto t_cascade_start = high_resolution_clock::now();
-    reset_cascade_timing();
-    reset_dom_element_timing();
-    bool epoch_scope = style_epoch_cascade_begin(
-        dom_doc, dom_root, css_engine, false);
-
-    if (external_stylesheet && external_stylesheet->rule_count > 0) {
-        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, external_stylesheet, matcher, pool, css_engine);
-    }
-
-    auto t_external = high_resolution_clock::now();
-    log_info("[TIMING] cascade(%s): external stylesheet: %.1fms",
-             phase ? phase : "load",
-             duration<double, std::milli>(t_external - t_cascade_start).count());
-
+    int stylesheet_capacity = inline_stylesheet_count + (external_stylesheet ? 1 : 0);
+    CssStylesheet** stylesheets = stylesheet_capacity > 0
+        ? (CssStylesheet**)pool_alloc(pool, stylesheet_capacity * sizeof(CssStylesheet*)) : nullptr;
+    if (stylesheet_capacity > 0 && !stylesheets) return;
+    int stylesheet_count = 0;
+    if (external_stylesheet) stylesheets[stylesheet_count++] = external_stylesheet;
     for (int i = 0; i < inline_stylesheet_count; i++) {
-        if (inline_stylesheets && inline_stylesheets[i] &&
-            inline_stylesheets[i]->rule_count > 0) {
-                auto t_inline_start = high_resolution_clock::now();
-                apply_stylesheet_to_dom_tree_if_nonempty(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
-                auto t_inline_end = high_resolution_clock::now();
-                log_info("[TIMING] cascade(%s): inline stylesheet %d (%zu rules): %.1fms",
-                    phase ? phase : "load", i, inline_stylesheets[i]->rule_count,
-                    duration<double, std::milli>(t_inline_end - t_inline_start).count());
+        if (inline_stylesheets && inline_stylesheets[i]) {
+            stylesheets[stylesheet_count++] = inline_stylesheets[i];
         }
     }
-
-    auto t_cascade = high_resolution_clock::now();
-    if (epoch_scope) style_epoch_cascade_end(dom_doc);
-    log_cascade_timing_summary();
-    log_dom_element_timing();
+    layout_apply_css_stylesheets(
+        dom_doc, dom_root, stylesheets, stylesheet_count, pool, css_engine);
     log_info("[TIMING] load: CSS cascade (%s): %.1fms",
              phase ? phase : "load",
-             duration<double, std::milli>(t_cascade - t_cascade_start).count());
+             duration<double, std::milli>(high_resolution_clock::now() - t_cascade_start).count());
 }
 
 /**
@@ -2877,16 +2204,6 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     mem_free(html_filepath);
     html_filepath = nullptr;
 
-    // [debug] write html tree to 'html_tree.txt' — disabled; enable locally for inspection
-    // if (log_default_category && log_default_category->output &&
-    //     log_default_category->output != stdout && log_default_category->output != stderr) {
-    //     StrBuf* htm_buf = strbuf_new();
-    //     print_item(htm_buf, input->root, 0);
-    //     FILE* htm_file = fopen("html_tree.txt", "w");
-    //     if (htm_file) { fwrite(htm_buf->str, 1, htm_buf->length, htm_file); fclose(htm_file); }
-    //     strbuf_free(htm_buf);
-    // }
-
     auto t_debug = high_resolution_clock::now();
     log_info("[TIMING] load: debug output: %.1fms", duration<double, std::milli>(t_debug - t_parse).count());
 
@@ -2977,23 +2294,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // Load external CSS if provided
     CssStylesheet* external_stylesheet = nullptr;
     if (css_filename) {
-        char* css_content = read_text_file(css_filename);
-        if (css_content) {
-            size_t css_len = strlen(css_content);
-            char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
-            if (css_pool_copy) {
-                str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-                mem_free(css_content);
-                external_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
-                if (!external_stylesheet) {
-                    log_warn("Failed to parse CSS file: %s", css_filename);
-                }
-            } else {
-                mem_free(css_content);
-            }
-        } else {
-            log_warn("Failed to load CSS file: %s", css_filename);
-        }
+        external_stylesheet = load_pool_backed_stylesheet(
+            css_engine, pool, css_filename, "CSS", "stylesheet", true);
     }
 
     // Extract and parse <link rel="stylesheet"> and <style> elements
@@ -3012,8 +2314,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // Store stylesheets before scripts so getComputedStyle and @font-face share
     // the same sheet list that the pre-script cascade uses.
     store_document_stylesheets(dom_doc, external_stylesheet, inline_stylesheets,
-                               inline_stylesheet_count, pool,
-                               "getComputedStyle + @font-face");
+                               inline_stylesheet_count, pool);
     auto t_stylesheet_setup = timing ? high_resolution_clock::now() : t_css_parse;
 
     // Step 2c: Apply inline style="" attributes BEFORE scripts
@@ -3023,24 +2324,20 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // correctly override the original HTML inline styles in the cascade.
     // This also ensures the HTML→DOM tree mapping is pristine (no JS mutations yet).
     log_mem_stage("load_html: before_inline_attrs");
-    apply_inline_styles_to_tree(dom_root, html_root, pool);
+    apply_inline_styles_to_tree(dom_root, pool);
     log_mem_stage("load_html: after_inline_attrs");
     auto t_inline_style = timing ? high_resolution_clock::now() : t_stylesheet_setup;
 
     dom_doc->root = dom_root;  // set root for CSSOM and JS DOM API access
 
-    bool legacy_scripts_before_cascade = load_scripts_before_cascade_legacy();
-    bool css_cascade_current = false;
-    if (!legacy_scripts_before_cascade) {
-        log_mem_stage("load_html: before_pre_script_cascade");
-        apply_load_css_cascade(dom_doc, dom_root, external_stylesheet,
-                               inline_stylesheets, inline_stylesheet_count,
-                               css_engine, pool, "pre-script");
-        css_cascade_current = true;
-        log_mem_stage("load_html: pre_script_cascade_done");
-    } else {
-        log_warn("[P17] RADIANT_SCRIPT_BEFORE_CASCADE enabled; using legacy load order");
-    }
+    // Scripts read computed styles during load, so the initial cascade is the
+    // single ordering invariant; the retired pre-cascade mode made that state
+    // dependent on an environment variable.
+    log_mem_stage("load_html: before_pre_script_cascade");
+    apply_load_css_cascade(dom_doc, dom_root, external_stylesheet,
+                           inline_stylesheets, inline_stylesheet_count,
+                           css_engine, pool, "pre-script");
+    log_mem_stage("load_html: pre_script_cascade_done");
     auto t_initial_cascade = timing ? high_resolution_clock::now() : t_inline_style;
     auto t_post_script = t_initial_cascade;
 
@@ -3098,17 +2395,13 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
             }
 
             store_document_stylesheets(dom_doc, external_stylesheet, inline_stylesheets,
-                                       inline_stylesheet_count, pool,
-                                       "post-script getComputedStyle + @font-face");
+                                       inline_stylesheet_count, pool);
 
-            if (!legacy_scripts_before_cascade) {
-                clear_load_stylesheet_cascade_recursive(static_cast<DomNode*>(dom_root));
-                apply_load_css_cascade(dom_doc, dom_root, external_stylesheet,
-                                       inline_stylesheets, inline_stylesheet_count,
-                                       css_engine, pool, "post-script");
-                css_cascade_current = true;
-                log_mem_stage("load_html: post_script_cascade_done");
-            }
+            clear_load_stylesheet_cascade_recursive(static_cast<DomNode*>(dom_root));
+            apply_load_css_cascade(dom_doc, dom_root, external_stylesheet,
+                                   inline_stylesheets, inline_stylesheet_count,
+                                   css_engine, pool, "post-script");
+            log_mem_stage("load_html: post_script_cascade_done");
         }
 
         // Step 2e: Install inline event handler attributes into EventTarget slots.
@@ -3124,13 +2417,6 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         }
     }
 
-    if (!css_cascade_current) {
-        apply_load_css_cascade(dom_doc, dom_root, external_stylesheet,
-                               inline_stylesheets, inline_stylesheet_count,
-                               css_engine, pool,
-                               legacy_scripts_before_cascade ? "legacy-post-script" : "no-script");
-        css_cascade_current = true;
-    }
     log_mem_stage("load_html: cascade_done");
     auto t_final_cascade = timing ? high_resolution_clock::now() : t_post_script;
 
@@ -3143,12 +2429,9 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         strbuf_free(str_buf);
     }
 
-    // Step 8: Create DomDocument structure (already created by dom_document_create)
-    // Just populate the additional fields
-    dom_doc->root = dom_root;
-    dom_doc->html_root = html_root;
-    dom_doc->html_version = detected_version;
-    dom_doc->url = html_url;
+    // Step 8: Publish the document roots after scripts and cascade are complete.
+    populate_layout_document(dom_doc, dom_root, html_root,
+                             (HtmlVersion)detected_version, html_url, nullptr);
     for (int i = 0; i < superseded_html_url_count; i++) {
         if (superseded_html_urls[i] && superseded_html_urls[i] != html_url) {
             url_destroy(superseded_html_urls[i]);
@@ -3609,6 +2892,19 @@ static Input* read_layout_input_file(Url* url, const char* filepath,
     return input;
 }
 
+static void populate_layout_document(DomDocument* doc, DomElement* root,
+                                      Element* html_root, HtmlVersion version,
+                                      Url* url, Runtime* runtime) {
+    if (!doc) return;
+    doc->root = root;
+    doc->html_root = html_root;
+    doc->html_version = version;
+    doc->url = url;
+    doc->view_tree = nullptr;
+    doc->state = nullptr;
+    doc->lambda_runtime = runtime;
+}
+
 static CssStylesheet* load_pool_backed_stylesheet(CssEngine* css_engine, Pool* pool,
                                                   const char* css_filename,
                                                   const char* log_prefix,
@@ -3649,6 +2945,11 @@ static CssStylesheet* load_home_stylesheet(CssEngine* css_engine, Pool* pool,
     mem_free(css_filename);
     return stylesheet;
 }
+
+static DomDocument* create_layout_css_document(
+        Input* input, Element* root, const char* document_kind,
+        Runtime* owned_runtime, int viewport_width, int viewport_height,
+        Pool* pool, DomElement** out_root, CssEngine** out_engine);
 
 /**
  * Load text document as source view
@@ -3761,81 +3062,13 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     log_info("[TIMING] Step 3 - Build HTML: %.1fms",
         std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
 
-    // Step 4: Parse HTML using Lambda parser
-    auto step4_start = std::chrono::high_resolution_clock::now();
-
-    Input* input = parse_layout_source_as(html_content, text_url, "html", "load_text_doc");
+    // The normal HTML loader already owns parsing, DOM construction, CSS
+    // collection, and cascade ordering; text documents only provide a wrapper.
+    DomDocument* document = load_lambda_html_doc(
+        text_url, nullptr, viewport_width, viewport_height, pool,
+        html_content, false, false);
     mem_free(html_content);
-
-    if (!input || !input->root.item || input->root.item == ITEM_ERROR) {
-        log_error("Failed to parse HTML wrapper for text file");
-        return nullptr;
-    }
-
-    auto step4_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 4 - Parse HTML: %.1fms",
-        std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
-
-    // Step 5: Build DOM tree and apply CSS (reuse lambda_html_doc logic)
-    auto step5_start = std::chrono::high_resolution_clock::now();
-
-    Element* html_root = get_html_root_element(input);
-    if (!html_root) {
-        log_error("Failed to get HTML root from text file wrapper");
-        return nullptr;
-    }
-
-    // Create DomDocument
-    DomDocument* dom_doc = dom_document_create(input);
-    if (!dom_doc) {
-        log_error("Failed to create DomDocument for text file");
-        return nullptr;
-    }
-
-    // Build DomElement tree
-    DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
-    if (!dom_root) {
-        log_error("Failed to build DomElement tree from text file");
-        dom_document_destroy(dom_doc);
-        return nullptr;
-    }
-
-    // Initialize CSS engine
-    CssEngine* css_engine = css_engine_create(pool);
-    if (!css_engine) {
-        log_error("Failed to create CSS engine for text file");
-        return nullptr;
-    }
-    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
-
-    // Extract and apply inline styles from the HTML
-    int stylesheet_count = 0;
-    CssStylesheet** stylesheets = extract_and_collect_css(html_root, css_engine, text_filepath, pool, &stylesheet_count);
-
-    // Create selector matcher
-    SelectorMatcher* matcher = selector_matcher_create(pool);
-    state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
-
-    // Apply stylesheets to DOM tree
-    for (int i = 0; i < stylesheet_count; i++) {
-        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, stylesheets[i], matcher, pool, css_engine);
-    }
-
-    auto step5_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 5 - Build DOM & apply CSS: %.1fms",
-        std::chrono::duration<double, std::milli>(step5_end - step5_start).count());
-
-    // Set document properties
-    dom_doc->root = dom_root;
-    dom_doc->html_root = html_root;
-    dom_doc->html_version = HTML5;
-    dom_doc->url = text_url;
-
-    auto total_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] load_text_doc total: %.1fms",
-        std::chrono::duration<double, std::milli>(total_end - total_start).count());
-
-    return dom_doc;
+    return document;
 }
 
 /**
@@ -3865,6 +3098,14 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
         release_layout_runtime(owned_runtime);
         return nullptr;
     }
+    // Inline declarations are parsed while building DomElement nodes, so the
+    // property table must exist before the tree is materialized.
+    if (!css_property_system_init(document->document_pool)) {
+        log_error("[LAYOUT DOC INIT] failed to initialize CSS properties for %s", document_kind);
+        dom_document_destroy(document);
+        release_layout_runtime(owned_runtime);
+        return nullptr;
+    }
     DomElement* dom_root = build_dom_tree_from_element(root, document, nullptr);
     if (!dom_root) {
         log_error("[LAYOUT DOC INIT] failed to build %s DOM tree", document_kind);
@@ -3874,6 +3115,27 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
         return nullptr;
     }
     if (out_root) *out_root = dom_root;
+    return document;
+}
+
+static DomDocument* create_layout_css_document(
+        Input* input, Element* root, const char* document_kind,
+        Runtime* owned_runtime, int viewport_width, int viewport_height,
+        Pool* pool, DomElement** out_root, CssEngine** out_engine) {
+    if (out_engine) *out_engine = nullptr;
+    DomDocument* document = create_layout_dom(
+        input, root, document_kind, owned_runtime, out_root);
+    if (!document) return nullptr;
+
+    CssEngine* engine = css_engine_create(pool);
+    if (!engine) {
+        log_error("[LAYOUT DOC INIT] failed to create %s CSS engine", document_kind);
+        dom_document_destroy(document);
+        release_layout_runtime(owned_runtime);
+        return nullptr;
+    }
+    css_engine_set_viewport(engine, viewport_width, viewport_height);
+    if (out_engine) *out_engine = engine;
     return document;
 }
 
@@ -4081,28 +3343,21 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
             std::chrono::duration<double, std::milli>(math_end - math_start).count());
     }
 
-    // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
+    // Step 2: Create DomDocument, CSS engine, and build the DOM tree.
     auto step2_start = std::chrono::high_resolution_clock::now();
     DomElement* dom_root = nullptr;
-    DomDocument* dom_doc = create_layout_dom(
-        input, markdown_root, "markdown", markdown_math_runtime, &dom_root);
+    CssEngine* css_engine = nullptr;
+    DomDocument* dom_doc = create_layout_css_document(
+        input, markdown_root, "markdown", markdown_math_runtime,
+        viewport_width, viewport_height, pool, &dom_root, &css_engine);
     if (!dom_doc) return nullptr;
 
     auto step2_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 2 - Build DOM tree: %.1fms",
         std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
 
-    // Step 3: Initialize CSS engine
+    // Step 3: Load the document stylesheet.
     auto step3_start = std::chrono::high_resolution_clock::now();
-    CssEngine* css_engine = css_engine_create(pool);
-    if (!css_engine) {
-        log_error("Failed to create CSS engine");
-        dom_document_destroy(dom_doc);
-        release_layout_runtime(markdown_math_runtime);
-        return nullptr;
-    }
-    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
-
     CssStylesheet* markdown_stylesheet = load_home_stylesheet(
         css_engine, pool, "input/markdown.css", "Lambda Markdown", "markdown stylesheet", true);
     if (!markdown_stylesheet) {
@@ -4125,31 +3380,22 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
     // Step 5: Apply CSS cascade to DOM tree
     auto step4_start = std::chrono::high_resolution_clock::now();
-    {
-        SelectorMatcher* matcher = selector_matcher_create(pool);
-        state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
-        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, markdown_stylesheet, matcher, pool, css_engine);
-        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, math_stylesheet, matcher, pool, css_engine);
-        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, katex_stylesheet, matcher, pool, css_engine);
-    }
+    CssStylesheet* markdown_stylesheets[3] = {
+        markdown_stylesheet, math_stylesheet, katex_stylesheet};
+    layout_apply_css_stylesheets(dom_doc, dom_root, markdown_stylesheets, 3, pool, css_engine);
     auto step4_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 4 - CSS cascade: %.1fms",
         std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
 
     // Step 5.5: Apply inline style="" attributes (highest priority, after stylesheet cascade)
-    apply_inline_styles_to_tree(dom_root, markdown_root, pool);
+    apply_inline_styles_to_tree(dom_root, pool);
 
     // Step 6: Populate DomDocument structure
-    dom_doc->root = dom_root;
-    dom_doc->html_root = markdown_root;
-    dom_doc->html_version = HTML5;  // Treat markdown as HTML5
-    dom_doc->url = markdown_url;
-    dom_doc->view_tree = nullptr;  // Will be created during layout
-    dom_doc->state = nullptr;
-    dom_doc->lambda_runtime = markdown_math_runtime;
+    populate_layout_document(dom_doc, dom_root, markdown_root, HTML5,
+                             markdown_url, markdown_math_runtime);
 
     store_document_stylesheet_bundle(dom_doc, markdown_stylesheet, math_stylesheet, katex_stylesheet,
-                                     nullptr, 0, pool, "Lambda Markdown", "@font-face processing");
+                                     nullptr, 0, pool);
 
     auto total_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] load_markdown_doc total: %.1fms",
@@ -4204,26 +3450,21 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
     log_info("[TIMING] Step 1 - Parse wiki: %.1fms",
         std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
 
-    // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
+    // Step 2: Create DomDocument, CSS engine, and build the DOM tree.
     auto step2_start = std::chrono::high_resolution_clock::now();
     DomElement* dom_root = nullptr;
-    DomDocument* dom_doc = create_layout_dom(
-        input, wiki_root, "wiki", nullptr, &dom_root);
+    CssEngine* css_engine = nullptr;
+    DomDocument* dom_doc = create_layout_css_document(
+        input, wiki_root, "wiki", nullptr, viewport_width, viewport_height,
+        pool, &dom_root, &css_engine);
     if (!dom_doc) return nullptr;
 
     auto step2_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 2 - Build DOM tree: %.1fms",
         std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
 
-    // Step 3: Initialize CSS engine
+    // Step 3: Load the document stylesheet.
     auto step3_start = std::chrono::high_resolution_clock::now();
-    CssEngine* css_engine = css_engine_create(pool);
-    if (!css_engine) {
-        log_error("Failed to create CSS engine");
-        return nullptr;
-    }
-    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
-
     CssStylesheet* wiki_stylesheet = load_home_stylesheet(
         css_engine, pool, "input/wiki.css", "Lambda Wiki", "wiki stylesheet", true);
     if (!wiki_stylesheet) {
@@ -4236,22 +3477,14 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
 
     // Step 5: Apply CSS cascade to DOM tree
     auto step4_start = std::chrono::high_resolution_clock::now();
-    if (wiki_stylesheet && wiki_stylesheet->rule_count > 0) {
-        SelectorMatcher* matcher = selector_matcher_create(pool);
-        state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
-        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, wiki_stylesheet, matcher, pool, css_engine);
-    }
+    CssStylesheet* wiki_stylesheets[1] = {wiki_stylesheet};
+    layout_apply_css_stylesheets(dom_doc, dom_root, wiki_stylesheets, 1, pool, css_engine);
     auto step4_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 4 - CSS cascade: %.1fms",
         std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
 
     // Step 6: Populate DomDocument structure
-    dom_doc->root = dom_root;
-    dom_doc->html_root = wiki_root;
-    dom_doc->html_version = HTML5;  // Treat wiki as HTML5
-    dom_doc->url = wiki_url;
-    dom_doc->view_tree = nullptr;  // Will be created during layout
-    dom_doc->state = nullptr;
+    populate_layout_document(dom_doc, dom_root, wiki_root, HTML5, wiki_url, nullptr);
 
     auto total_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] load_wiki_doc total: %.1fms",
@@ -4365,39 +3598,16 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     }
 
 
-    // Step 3: Create DomDocument and build DomElement tree from HTML Element tree
-    DomDocument* dom_doc = dom_document_create(result_input);
+    // Step 3: Create the DOM and CSS engine before loading document sheets.
+    DomElement* dom_root = nullptr;
+    CssEngine* css_engine = nullptr;
+    DomDocument* dom_doc = create_layout_css_document(
+        result_input, html_root, "LaTeX", latex_runtime,
+        viewport_width, viewport_height, pool, &dom_root, &css_engine);
     if (!dom_doc) {
-        log_error("Failed to create DomDocument");
-        release_layout_runtime(latex_runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
-
-    // Ensure CSS property system is initialized before building DOM tree,
-    // so that inline style declarations get correct property IDs.
-    css_property_system_init(dom_doc->document_pool);
-
-    DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
-    if (!dom_root) {
-        log_error("Failed to build DomElement tree from HTML");
-        dom_document_destroy(dom_doc);
-        release_layout_runtime(latex_runtime);
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-
-
-    // Step 4: Initialize CSS engine
-    CssEngine* css_engine = css_engine_create(pool);
-    if (!css_engine) {
-        log_error("Failed to create CSS engine");
-        dom_document_destroy(dom_doc);
-        release_layout_runtime(latex_runtime);
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
     CssStylesheet* latex_stylesheet = load_home_stylesheet(
         css_engine, pool, "input/latex/css/article.css", "Lambda LaTeX", "LaTeX stylesheet", false);
@@ -4410,37 +3620,22 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         html_root, css_engine, latex_filepath, pool, &inline_stylesheet_count);
 
     // Step 7: Apply CSS cascade to DOM tree
-    SelectorMatcher* matcher = selector_matcher_create(pool);
-    state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
-
-    // Apply LaTeX stylesheet first if available
-    if (latex_stylesheet && latex_stylesheet->rule_count > 0) {
-        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, latex_stylesheet, matcher, pool, css_engine);
-    }
-
-    // Apply inline stylesheets from LaTeX-generated HTML
-    for (int i = 0; i < inline_stylesheet_count; i++) {
-        if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
-            apply_stylesheet_to_dom_tree_if_nonempty(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
-        }
-    }
+    CssStylesheet* latex_stylesheets[1] = {latex_stylesheet};
+    layout_apply_css_stylesheets(dom_doc, dom_root, latex_stylesheets, 1, pool, css_engine);
+    layout_apply_css_stylesheets(dom_doc, dom_root, inline_stylesheets,
+                             inline_stylesheet_count, pool, css_engine);
 
     // Apply inline style="" attributes (highest priority)
-    apply_inline_styles_to_tree(dom_root, html_root, pool);
+    apply_inline_styles_to_tree(dom_root, pool);
 
 
     store_document_stylesheet_bundle(dom_doc, latex_stylesheet, katex_stylesheet, nullptr,
                                      inline_stylesheets, inline_stylesheet_count,
-                                     pool, "Lambda LaTeX", "@font-face processing");
+                                     pool);
 
     // Step 8: Populate DomDocument structure
-    dom_doc->root = dom_root;
-    dom_doc->html_root = html_root;
-    dom_doc->html_version = HTML5;  // Treat LaTeX-generated HTML as HTML5
-    dom_doc->url = latex_url;
-    dom_doc->view_tree = nullptr;  // Will be created during layout
-    dom_doc->state = nullptr;
-    dom_doc->lambda_runtime = latex_runtime;
+    populate_layout_document(dom_doc, dom_root, html_root, HTML5,
+                             latex_url, latex_runtime);
 
     return dom_doc;
 }
@@ -4551,26 +3746,11 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
-    // Step 5: Load external CSS stylesheet
-
-    CssStylesheet* external_stylesheet = nullptr;
-    char* css_content = read_text_file(xml_input->xml_stylesheet_href);
-    if (css_content) {
-        size_t css_len = strlen(css_content);
-        external_stylesheet = css_parse_stylesheet(css_engine, css_content, xml_filepath);
-        if (external_stylesheet) {
-            log_info("[Lambda XML] Loaded external stylesheet: %s (%zu bytes)",
-                     xml_input->xml_stylesheet_href, css_len);
-        } else {
-            log_error("[Lambda XML] Failed to parse CSS stylesheet");
-            mem_free(css_content);
-            return nullptr;
-        }
-        mem_free(css_content);
-    } else {
-        log_error("[Lambda XML] Failed to read CSS file: %s", xml_input->xml_stylesheet_href);
-        return nullptr;
-    }
+    // Step 5: Load external CSS stylesheet.
+    CssStylesheet* external_stylesheet = load_pool_backed_stylesheet(
+        css_engine, pool, xml_input->xml_stylesheet_href,
+        "Lambda XML", "XML stylesheet", true);
+    if (!external_stylesheet) return nullptr;
 
     auto t_dom = high_resolution_clock::now();
     log_info("[TIMING] load: parse CSS: %.1fms",
@@ -4631,36 +3811,17 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     log_info("[TIMING] load: build DOM: %.1fms",
              duration_cast<duration<double, std::milli>>(t_cascade - t_dom).count());
 
-    // Step 8: Store stylesheet in DOM document
-    dom_doc->stylesheet_capacity = 1;
-    dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, sizeof(CssStylesheet*));
-    dom_doc->stylesheet_count = 0;
-    if (external_stylesheet) {
-        dom_doc->stylesheets[dom_doc->stylesheet_count++] = external_stylesheet;
-    }
+    // Step 8: Store stylesheet in DOM document.
+    store_document_stylesheets(dom_doc, external_stylesheet, nullptr, 0, pool);
 
     // Step 9: Apply CSS cascade to DOM tree
 
-    // Create selector matcher
-    SelectorMatcher* matcher = selector_matcher_create(pool);
-    if (!matcher) {
-        log_error("[Lambda XML] Failed to create selector matcher");
-        return nullptr;
-    }
-    state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
-
-    // Reset timing stats before cascade
-    reset_cascade_timing();
-
     // Apply external stylesheet to the entire tree (starting from html)
-    if (external_stylesheet && external_stylesheet->rule_count > 0) {
-        apply_stylesheet_to_dom_tree_if_nonempty(html_elem, external_stylesheet, matcher, pool, css_engine);
-    }
-
-    log_cascade_timing_summary();  // Output cascade stats
+    CssStylesheet* xml_stylesheets[1] = {external_stylesheet};
+    layout_apply_css_stylesheets(dom_doc, html_elem, xml_stylesheets, 1, pool, css_engine);
 
     // Apply inline style="" attributes (if XML elements have them)
-    apply_inline_styles_to_tree(html_elem, xml_root, pool);
+    apply_inline_styles_to_tree(html_elem, pool);
 
     auto t_complete = high_resolution_clock::now();
     log_info("[TIMING] load: apply cascade: %.1fms",
@@ -4938,27 +4099,15 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             std::chrono::duration<double, std::milli>(step2_start - step1_end).count());
     }
 
-    // Step 5: Create DomDocument and build DomElement tree
-    // Use result_input so dom_doc->input->ui_mode enables fat allocation path
+    // Step 5: Create the DOM and CSS engine from the retained script input.
     auto step5_start = std::chrono::high_resolution_clock::now();
-    DomDocument* dom_doc = dom_document_create(result_input);
+    DomElement* dom_root = nullptr;
+    CssEngine* css_engine = nullptr;
+    DomDocument* dom_doc = create_layout_css_document(
+        result_input, html_elem, "Lambda Script", runtime,
+        viewport_width, viewport_height, pool, &dom_root, &css_engine);
     if (!dom_doc) {
-        log_error("[Lambda Script] Failed to create DomDocument");
         pool_destroy(result_pool);
-        release_layout_runtime(runtime);
-        return nullptr;
-    }
-
-    // Ensure CSS property system is initialized before building DOM tree,
-    // so that inline style declarations get correct property IDs.
-    css_property_system_init(dom_doc->document_pool);
-
-    DomElement* dom_root = build_dom_tree_from_element(html_elem, dom_doc, nullptr);
-    if (!dom_root) {
-        log_error("[Lambda Script] Failed to build DomElement tree");
-        dom_document_destroy(dom_doc);
-        pool_destroy(result_pool);
-        release_layout_runtime(runtime);
         return nullptr;
     }
 
@@ -4966,17 +4115,8 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     log_info("[TIMING] Step 5 - Build DOM tree: %.1fms",
         std::chrono::duration<double, std::milli>(step5_end - step5_start).count());
 
-    // Step 6: Initialize CSS engine
+    // Step 6: Load stylesheets
     auto step6_start = std::chrono::high_resolution_clock::now();
-    CssEngine* css_engine = css_engine_create(pool);
-    if (!css_engine) {
-        log_error("[Lambda Script] Failed to create CSS engine");
-        release_layout_runtime(runtime);
-        return nullptr;
-    }
-    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
-
-    // Step 7: Load stylesheets
     CssStylesheet* script_stylesheet = nullptr;
     int inline_stylesheet_count = 0;
     CssStylesheet** inline_stylesheets = nullptr;
@@ -4984,22 +4124,8 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     if (!is_html_document) {
         // For non-HTML elements, load the default script.css
         char* css_filename = lambda_home_path("input/script.css");
-
-        char* css_content = read_text_file(css_filename);
-        if (css_content) {
-            size_t css_len = strlen(css_content);
-            char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
-            if (css_pool_copy) {
-                str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-                mem_free(css_content);
-                script_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
-                if (!script_stylesheet) {
-                    log_warn("[Lambda Script] Failed to parse script.css");
-                }
-            } else {
-                mem_free(css_content);
-            }
-        }
+        script_stylesheet = load_pool_backed_stylesheet(
+            css_engine, pool, css_filename, "Lambda Script", "script.css", true);
         mem_free(css_filename);
     } else {
         // For complete HTML documents, extract inline <style> elements
@@ -5013,34 +4139,17 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
 
     // Step 8: Apply CSS cascade to DOM tree
     auto step7_start = std::chrono::high_resolution_clock::now();
-    SelectorMatcher* matcher = selector_matcher_create(pool);
-    state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
-
-    // Apply script.css if loaded
-    if (script_stylesheet && script_stylesheet->rule_count > 0) {
-        apply_stylesheet_to_dom_tree_if_nonempty(dom_root, script_stylesheet, matcher, pool, css_engine);
-    }
-
-    // Apply inline stylesheets for HTML documents
-    if (inline_stylesheets && inline_stylesheet_count > 0) {
-        for (int i = 0; i < inline_stylesheet_count; i++) {
-            if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
-                apply_stylesheet_to_dom_tree_if_nonempty(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
-            }
-        }
-    }
+    CssStylesheet* script_stylesheets[1] = {script_stylesheet};
+    layout_apply_css_stylesheets(dom_doc, dom_root, script_stylesheets, 1, pool, css_engine);
+    layout_apply_css_stylesheets(dom_doc, dom_root, inline_stylesheets,
+                             inline_stylesheet_count, pool, css_engine);
 
     auto step7_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 7 - CSS cascade: %.1fms",
         std::chrono::duration<double, std::milli>(step7_end - step7_start).count());
 
     // Step 9: Populate DomDocument structure
-    dom_doc->root = dom_root;
-    dom_doc->html_root = html_elem;
-    dom_doc->html_version = HTML5;
-    dom_doc->url = script_url;
-    dom_doc->view_tree = nullptr;  // Will be created during layout
-    dom_doc->state = nullptr;
+    populate_layout_document(dom_doc, dom_root, html_elem, HTML5, script_url, nullptr);
 
     int total_stylesheets = inline_stylesheet_count + (script_stylesheet ? 1 : 0);
     if (total_stylesheets > 0) {
@@ -5380,13 +4489,13 @@ void rebuild_lambda_doc(UiContext* uicon) {
         SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
         state_configure_selector_matcher((DocState*)doc->state, matcher);
         for (int i = 0; i < inline_count; i++) {
-            apply_stylesheet_to_dom_tree_if_nonempty(new_root, inline_sheets[i],
+            radiant_apply_css_stylesheet_to_tree(new_root, inline_sheets[i],
                                                      matcher, doc->document_pool, css_engine);
         }
     }
 
     // apply inline style attributes
-    apply_inline_styles_to_tree(new_root, html_elem, doc->document_pool);
+    apply_inline_styles_to_tree(new_root, doc->document_pool);
     auto t_css = high_resolution_clock::now();
 
     // layout_html_doc owns the retained-tree reset; clearing this pointer would
@@ -5601,13 +4710,13 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
             state_configure_selector_matcher((DocState*)doc->state, matcher);
             for (int s = 0; s < inline_count; s++) {
-                apply_stylesheet_to_dom_tree_if_nonempty(new_dom, inline_sheets[s],
+                radiant_apply_css_stylesheet_to_tree(new_dom, inline_sheets[s],
                                                          matcher, doc->document_pool, css_engine);
             }
         }
 
         // Apply inline styles to new subtree only
-        apply_inline_styles_to_tree(new_dom, new_elem, doc->document_pool);
+        apply_inline_styles_to_tree(new_dom, doc->document_pool);
     }
     auto t_dom_css = high_resolution_clock::now();
 

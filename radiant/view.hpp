@@ -53,6 +53,10 @@ struct CssPropAccessor;
 struct CssRule;
 struct SelectorMatcher;
 struct CssEngine;
+struct CssStylesheet;
+
+constexpr int MAX_RADIANT_CSS_TREE_DEPTH = 512;
+void state_configure_selector_matcher(struct DocState* state, SelectorMatcher* matcher);
 typedef bool (*CssPropSerializeFn)(const CssPropAccessor* accessor,
                                    DomElement* element, int pseudo_type,
                                    char* out, size_t out_size);
@@ -81,6 +85,20 @@ void radiant_cascade_styles_for_element(DomElement* element);
 void radiant_apply_css_rule_to_element(DomElement* element, CssRule* rule,
                                        SelectorMatcher* matcher, Pool* pool,
                                        CssEngine* engine);
+// Apply one stylesheet to a DOM subtree in source order.  Layout, event
+// recascade, and CSSOM paths share this walker so selector matching and style
+// epoch ownership cannot drift between subsystems.
+void radiant_apply_css_stylesheet_to_tree(DomElement* root,
+                                          CssStylesheet* stylesheet,
+                                          SelectorMatcher* matcher, Pool* pool,
+                                          CssEngine* engine);
+// Apply an ordered stylesheet list with one matcher and one cascade epoch.
+// Document loaders and event recascade paths use this to keep source order and
+// selector-state setup in one place.
+void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
+                                           CssStylesheet** stylesheets, int count,
+                                           Pool* pool, CssEngine* engine,
+                                           SelectorMatcher* matcher = nullptr);
 
 // Return a committed view's visual CSS-pixel bounds, including transforms on
 // the view and its ancestors. Geometry consumers must share this with painting
