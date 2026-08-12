@@ -9,13 +9,15 @@
 #include "js_state_guards.h"
 #include "../lambda-data.hpp"
 #include "../core/name_pool.hpp"
+#include <math.h>
 
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern String* heap_create_name(const char* name, size_t len);
 extern __thread EvalContext* context;
+extern "C" NameId js_symbol_name_id(Item sym);
 
 // js_runtime.cpp internals we need. Public header counterparts:
-//   js_map_get_fast_ext   — js_runtime.h
+//   js_map_shape_lookup_ext   — js_runtime.h
 //   js_call_function      — js_runtime.h
 //   js_throw_type_error   — js_runtime.h
 //   js_find_shape_entry   — js_property_attrs.h
@@ -32,8 +34,116 @@ static inline bool js_props_is_deleted_sentinel(Item v) {
     return v.item == JS_DELETED_SENTINEL_VAL;
 }
 
+static inline bool js_props_is_array(Item object) {
+    return get_type_id(object) == LMD_TYPE_ARRAY ||
+        js_is_ordinary_numeric_array(object);
+}
+
 static inline Item js_props_undefined() {
     return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static inline bool js_props_key_is_symbol(Item key) {
+    return get_type_id(key) == LMD_TYPE_INT &&
+        it2i(key) <= -(int64_t)JS_SYMBOL_BASE;
+}
+
+extern "C" bool js_property_name_to_array_index(const char* name,
+                                                   int name_len,
+                                                   uint32_t* out_index) {
+    if (!name || name_len <= 0) return false;
+    NameClassification classification = name_classify_ordinary(
+        name, (size_t)name_len);
+    if (classification.array_index == NAME_ARRAY_INDEX_NONE) return false;
+    if (out_index) *out_index = classification.array_index;
+    return true;
+}
+
+extern "C" bool js_property_key_to_array_index(Item key,
+                                                  uint32_t* out_index) {
+    TypeId type = get_type_id(key);
+    if (type == LMD_TYPE_STRING) {
+        String* string_key = it2s(key);
+        return string_key && js_property_name_to_array_index(
+            string_key->chars, (int)string_key->len, out_index);
+    }
+    if (type == LMD_TYPE_INT) {
+        int64_t index = it2i(key);
+        if (index < 0 || index > (int64_t)JS_PROPERTY_INDEX_MAX) return false;
+        if (out_index) *out_index = (uint32_t)index;
+        return true;
+    }
+    if (type == LMD_TYPE_INT64) {
+        int64_t index = it2l(key);
+        if (index < 0 || index > (int64_t)JS_PROPERTY_INDEX_MAX) return false;
+        if (out_index) *out_index = (uint32_t)index;
+        return true;
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double index = it2d(key);
+        if (!isfinite(index) || index < 0.0 || floor(index) != index ||
+                index > (double)JS_PROPERTY_INDEX_MAX) return false;
+        uint32_t result = (uint32_t)index;
+        if ((double)result != index) return false;
+        if (out_index) *out_index = result;
+        return true;
+    }
+    return false;
+}
+
+extern "C" bool js_property_lane_from_key(Item key,
+                                             JsPropertyLane* out_lane) {
+    if (!out_lane) return false;
+    *out_lane = 0;
+    uint32_t index = 0;
+    if (js_property_key_to_array_index(key, &index)) {
+        *out_lane = js_property_lane_from_index(index);
+        return true;
+    }
+    NameId name_id = NAME_ID_NONE;
+    if (js_props_key_is_symbol(key)) {
+        name_id = js_symbol_name_id(key);
+    } else if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* string_key = it2s(key);
+        name_id = string_key ? property_key_id(string_key) : NAME_ID_NONE;
+    }
+    if (name_id == NAME_ID_NONE) return false;
+    *out_lane = js_property_lane_from_name_id(name_id);
+    return true;
+}
+
+extern "C" JsPropertyLane js_property_lane_for_canonical_key(Item key) {
+    JsPropertyLane lane = 0;
+    return js_property_lane_from_key(key, &lane) ? lane : 0;
+}
+
+extern "C" Item js_property_key_from_lane(JsPropertyLane lane) {
+    if (!js_property_lane_is_valid(lane)) return ItemNull;
+    if (js_property_lane_is_index(lane)) {
+        return (Item){.item = i2it((int64_t)js_property_lane_payload(lane))};
+    }
+    NameRef name = name_pool_resolve_id(context ? context->name_pool : NULL,
+                                        (NameId)js_property_lane_payload(lane));
+    return name ? (Item){.item = s2it(name)} : ItemNull;
+}
+
+extern "C" Item js_property_index_key(int64_t index) {
+    if (index < 0 || index > (int64_t)JS_PROPERTY_INDEX_MAX) return ItemError;
+    return (Item){.item = i2it(index)};
+}
+
+extern "C" String* js_property_index_name(int64_t index) {
+    Item key = js_property_index_key(index);
+    if (item_is_error(key)) return NULL;
+    Item property_key = js_to_property_key(key);
+    return item_is_error(property_key) || get_type_id(property_key) != LMD_TYPE_STRING
+        ? NULL : it2s(property_key);
+}
+
+extern "C" const char* js_property_index_chars(int64_t index, int* out_len) {
+    String* name = js_property_index_name(index);
+    if (out_len) *out_len = name ? (int)name->len : 0;
+    return name ? name->chars : NULL;
 }
 
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
@@ -43,8 +153,7 @@ extern void fn_map_set(Item map_item, Item key, Item value);
 // Debug-only property-storage invariants. Empty-string keys are valid.
 #ifndef NDEBUG
 #  include <cassert>
-#  define JS_PROPS_ASSERT_KEY(name, len) \
-       assert((name) != NULL && (len) >= 0)
+#  define JS_PROPS_ASSERT_KEY(name, len)      assert((name) != NULL && (len) >= 0)
 #  define JS_PROPS_ASSERT_NOT_DEL_ACCESSOR(slot, se) \
        assert(!(js_props_is_deleted_sentinel(slot) && (se) && jspd_is_accessor(se)))
 #  define JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se) \
@@ -59,7 +168,7 @@ extern void fn_map_set(Item map_item, Item key, Item value);
 static Map* js_props_storage_map(Item object) {
     TypeId t = get_type_id(object);
     if (t == LMD_TYPE_MAP) return object.map;
-    if (t == LMD_TYPE_ARRAY) {
+    if (t == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(object)) {
         Array* arr = object.array;
         return js_array_props(arr);
     }
@@ -104,7 +213,7 @@ static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
 
     if (!allow_ext || !name) return JS_SHAPE_SLOT_ABSENT;
     bool found = false;
-    Item slot = js_map_get_fast_ext(m, name, name_len, &found);
+    Item slot = js_map_shape_lookup_ext(m, name, name_len, &found);
     if (out_slot) *out_slot = slot;
 
     if (se && jspd_is_deleted(se)) return JS_SHAPE_SLOT_DELETED;
@@ -320,8 +429,7 @@ extern "C" bool js_shape_mark_deleted_own(Item object, const char* name, int nam
     if (!se && create_if_missing) {
         Item key = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
         {
-            ScopedSkipAccessorDispatch _skip_guard;
-            js_property_set(object, key, js_props_undefined());
+            js_define_own_key_storage(object, key, js_props_undefined());
         }
         se = js_find_shape_entry(object, name, name_len);
     }
@@ -490,7 +598,7 @@ static bool js_get_own_property_descriptor_impl(Item object, NameId name_id,
             : js_props_desc_from_storage(object, fn->properties_map.map,
                 name, name_len, out);
     }
-    if (t == LMD_TYPE_ARRAY) {
+    if (t == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(object)) {
         // ARRAY: own properties (named keys + numeric-index accessors) live
         // in the companion map. The bare-data slot at arr->items[idx] is
         // synthesized as a data descriptor when no accessor is present.
@@ -545,19 +653,14 @@ static void js_props_fill_sparse_accessor_index(Item object,
     // ES array exotic define: accessor descriptors at sparse numeric indices
     // materialize holes up to the index so later length/iteration paths see
     // the descriptor as an own array property.
-    if (!is_accessor_desc || get_type_id(object) != LMD_TYPE_ARRAY ||
+    if (!is_accessor_desc || !js_props_is_array(object) ||
         name_len <= 0 || name_len > 10) {
         return;
     }
 
-    bool is_idx = true;
-    int64_t idx = 0;
-    for (int i = 0; i < name_len; i++) {
-        char ch = name[i];
-        if (ch < '0' || ch > '9') { is_idx = false; break; }
-        idx = idx * 10 + (ch - '0');
-    }
-    if (!is_idx || (name_len > 1 && name[0] == '0') || idx < 0) return;
+    uint32_t index = 0;
+    if (!js_property_name_to_array_index(name, name_len, &index)) return;
+    int64_t idx = (int64_t)index;
 
     Array* arr = object.array;
     int64_t gap = idx - (int64_t)arr->length;
@@ -572,23 +675,12 @@ static void js_props_fill_sparse_accessor_index(Item object,
 static Item js_props_array_numeric_storage_target(Item object,
                                                   const char* name,
                                                   int name_len) {
-    if (name_len <= 0) return ItemNull;
-    bool is_numeric_index = true;
-    if (name_len == 1 && name[0] == '0') {
-        is_numeric_index = true;
-    } else if (name[0] >= '1' && name[0] <= '9') {
-        for (int i = 1; i < name_len; i++) {
-            if (name[i] < '0' || name[i] > '9') {
-                is_numeric_index = false;
-                break;
-            }
-        }
-    } else {
-        is_numeric_index = false;
+    uint32_t index = 0;
+    if (!js_property_name_to_array_index(name, name_len, &index)) {
+        return ItemNull;
     }
-    if (!is_numeric_index) return ItemNull;
 
-    if (get_type_id(object) == LMD_TYPE_ARRAY) {
+    if (js_props_is_array(object)) {
         Array* arr = object.array;
         if (!js_array_has_props(arr)) return ItemNull;
         return (Item){.map = js_array_props(arr)};
@@ -601,7 +693,7 @@ static Item js_props_array_numeric_storage_target(Item object,
 }
 
 static Item js_props_array_companion_storage_target(Item object) {
-    if (get_type_id(object) == LMD_TYPE_ARRAY) {
+    if (js_props_is_array(object)) {
         Array* arr = object.array;
         if (!js_array_has_props(arr)) return ItemNull;
         return (Item){.map = js_array_props(arr)};
@@ -747,17 +839,17 @@ extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* o
 
     if (has_val) {
         out->flags |= JS_PD_HAS_VALUE;
-        out->value = js_property_get(desc_obj, k_value);
+        out->value = js_get_key_default(desc_obj, k_value);
         if (item_is_error(out->value)) return out->value;
     }
     if (has_wri) {
         out->flags |= JS_PD_HAS_WRITABLE;
-        JS_ASSIGN_OR_RETURN(writable, js_property_get(desc_obj, k_writable));
+        JS_ASSIGN_OR_RETURN(writable, js_get_key_default(desc_obj, k_writable));
         if (js_is_truthy(writable))
             out->flags |= JS_PD_WRITABLE;
     }
     if (has_get) {
-        JS_ASSIGN_OR_RETURN(getter, js_property_get(desc_obj, k_get));
+        JS_ASSIGN_OR_RETURN(getter, js_get_key_default(desc_obj, k_get));
         TypeId gt = get_type_id(getter);
         if (gt != LMD_TYPE_UNDEFINED && !js_is_callable(getter)) {
             // ToPropertyDescriptor uses IsCallable, so callable Proxy accessors
@@ -768,7 +860,7 @@ extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* o
         out->getter = js_is_callable(getter) ? getter : js_props_undefined();
     }
     if (has_set) {
-        JS_ASSIGN_OR_RETURN(setter, js_property_get(desc_obj, k_set));
+        JS_ASSIGN_OR_RETURN(setter, js_get_key_default(desc_obj, k_set));
         TypeId st = get_type_id(setter);
         if (st != LMD_TYPE_UNDEFINED && !js_is_callable(setter)) {
             return js_props_throw_type("Setter must be a function");
@@ -778,13 +870,13 @@ extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* o
     }
     if (has_enum) {
         out->flags |= JS_PD_HAS_ENUMERABLE;
-        JS_ASSIGN_OR_RETURN(enumerable, js_property_get(desc_obj, k_enum));
+        JS_ASSIGN_OR_RETURN(enumerable, js_get_key_default(desc_obj, k_enum));
         if (js_is_truthy(enumerable))
             out->flags |= JS_PD_ENUMERABLE;
     }
     if (has_cfg) {
         out->flags |= JS_PD_HAS_CONFIGURABLE;
-        JS_ASSIGN_OR_RETURN(configurable, js_property_get(desc_obj, k_config));
+        JS_ASSIGN_OR_RETURN(configurable, js_get_key_default(desc_obj, k_config));
         if (js_is_truthy(configurable))
             out->flags2 |= 0x01u;
     }
@@ -813,7 +905,7 @@ static void js_props_set_descriptor_attribute(Item object, Item name_item,
                                               uint8_t attr_flag, bool enabled) {
     // Array dense indices and length have no initial ShapeEntry; routing their
     // pooled names through the identity path skipped companion-map materialization.
-    bool array_exotic_name = get_type_id(object) == LMD_TYPE_ARRAY && name && name_len > 0 &&
+    bool array_exotic_name = js_props_is_array(object) && name && name_len > 0 &&
         ((name_len == 6 && strncmp(name, "length", 6) == 0) ||
          (name[0] >= '0' && name[0] <= '9'));
     if (array_exotic_name) {
@@ -829,7 +921,7 @@ static void js_props_set_descriptor_attribute(Item object, Item name_item,
     String* key = it2s(name_item);
     // array index and length attributes must materialize in the companion map;
     // the identity-key fast path only updates the array's primary shape.
-    if (get_type_id(object) != LMD_TYPE_ARRAY &&
+    if (!js_props_is_array(object) &&
         key && property_key_id(key) != NAME_ID_NONE) {
         js_shape_entry_update_flags_name_id(object, property_key_id(key),
             enabled ? 0 : attr_flag, enabled ? attr_flag : 0);
@@ -881,8 +973,6 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
     bool identity_key = name_key && property_key_id(name_key) != NAME_ID_NONE;
 
     // [[DefineOwnProperty]] — must NOT trigger inherited accessor logic.
-    // Stage D: RAII guard restores js_skip_accessor_dispatch on every exit.
-    ScopedSkipAccessorDispatch _skip_guard;
 
     bool is_accessor_desc = js_pd_is_accessor(pd);
     bool was_accessor = false;  // accessor→data conversion track
@@ -896,8 +986,8 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
     if (!is_accessor_desc && !is_data_desc) {
         JS_ASSIGN_OR_RETURN(has_own, js_has_own_property(object, name_item));
         if (!it2b(has_own)) {
-            JS_ASSIGN_OR_RETURN(set_result, js_property_set(object, name_item,
-                                              (Item){.item = ITEM_JS_UNDEFINED}));
+            JS_ASSIGN_OR_RETURN(set_result, js_define_own_key_storage(
+                object, name_item, (Item){.item = ITEM_JS_UNDEFINED}));
         }
     }
 
@@ -906,7 +996,7 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
         // Detect array exotic: dense array slots do not carry shape entries, so
         // numeric-index accessors are stored under the digit-string key in the
         // array companion map with IS_ACCESSOR set there.
-        bool is_array_exotic = (get_type_id(object) == LMD_TYPE_ARRAY) ||
+        bool is_array_exotic = js_props_is_array(object) ||
             (get_type_id(object) == LMD_TYPE_MAP && object.map &&
              map_kind_is_array_props(object.map->map_kind));
 
@@ -919,38 +1009,26 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
             // chokepoint just like regular objects. The companion map carries
             // the bare-name shape entry, and js_obj_typemap() returns it for
             // arrays via the reserved props slot, so JSPD_IS_ACCESSOR works end-to-end.
-            bool is_numeric_index = false;
-            if (name_len > 0) {
-                is_numeric_index = true;
-                if (name_len == 1 && name[0] == '0') {
-                    is_numeric_index = true;
-                } else if (name[0] >= '1' && name[0] <= '9') {
-                    for (int i = 1; i < name_len; i++) {
-                        if (name[i] < '0' || name[i] > '9') {
-                            is_numeric_index = false;
-                            break;
-                        }
-                    }
-                } else {
-                    is_numeric_index = false;
-                }
-            }
+            // Ordinary array-index spelling is owned by the shared classifier;
+            // a digit-only test would incorrectly admit 01 and 4294967295.
+            bool is_numeric_index = js_property_name_to_array_index(
+                name, name_len, NULL);
 
             if (is_numeric_index) {
                 // Route numeric-index accessors through the IS_ACCESSOR
                 // chokepoint *on the companion map* (not the array itself).
                 // Calling js_define_accessor_partial(arr, ...) would recurse into
-                // js_property_set(arr, "<idx>", pair) which routes to js_array_set
+                // js_set_key_default(arr, "<idx>", pair) which routes to js_elements_set
                 // and clobbers arr->items[idx]. Targeting the companion map keeps
                 // the bare-name slot under the digit-string key with IS_ACCESSOR
                 // on its shape entry.
                 Item target;
-                if (get_type_id(object) == LMD_TYPE_ARRAY) {
+                if (js_props_is_array(object)) {
                     Array* arr = object.array;
                     if (!js_array_has_props(arr)) {
                         Item nm = js_new_object();
                         nm.map->map_kind = MAP_KIND_ARRAY_PROPS;
-                        js_array_set_props(arr, nm.map);
+                        js_elements_set_props(arr, nm.map);
                     }
                     target = (Item){.map = js_array_props(arr)};
                 } else {
@@ -1005,7 +1083,7 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
             }
         }
 
-        // Temporarily clear non-writable so js_property_set's writable guard
+        // Temporarily clear non-writable so js_set_key_default's writable guard
         // does not block the [[DefineOwnProperty]] write (validation already
         // performed by caller). Probe + clear via the flag helper; restore
         // after the value write only if it was originally set.
@@ -1014,7 +1092,7 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
                 object, name_item, name, name_len, JSPD_NON_WRITABLE) == 0) {
             // [[DefineOwnProperty]] may legally replace the value of an existing
             // configurable/non-writable property while also making it writable.
-            // The writable guard in js_property_set is shape-flag aware, so this
+            // The writable guard in js_set_key_default is shape-flag aware, so this
             // descriptor kernel must clear the shape bit before writing the value.
             had_nw = true;
             js_props_set_descriptor_attribute(object, name_item, name, name_len,
@@ -1040,7 +1118,8 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
             ShapeEntry* accessor_value_se = js_props_find_descriptor_shape(
                 accessor_data_target, name_item, name, name_len);
             if (!js_props_store_raw_data_slot(accessor_data_target, accessor_value_se, pd->value)) {
-                JS_ASSIGN_OR_RETURN(set_result, js_property_set(accessor_data_target, name_item, pd->value));
+                JS_ASSIGN_OR_RETURN(set_result, js_define_own_key_storage(
+                    accessor_data_target, name_item, pd->value));
             }
             // Clear IS_ACCESSOR only after replacing the JsAccessorPair slot.
             // Attribute probes between the two operations must continue to see
@@ -1075,7 +1154,8 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
             }
             js_func_init_property(object, name_item, pd->value);
         } else {
-            JS_ASSIGN_OR_RETURN(set_result, js_property_set(object, name_item, pd->value));
+            JS_ASSIGN_OR_RETURN(set_result, js_define_own_key_storage(
+                object, name_item, pd->value));
         }
 
         // AT-3: legacy __get_/__set_ marker cleanup retired. Post-AT-1 accessors
@@ -1147,4 +1227,169 @@ extern "C" Item js_define_own_property_from_descriptor_name_id(Item object,
     Item key_item = (Item){.item = s2it(key)};
     return js_define_own_property_from_descriptor_impl(object, key_item,
         key->chars, (int)key->len, pd, is_new_property, existing_accessor);
+}
+
+// Tune5 P1 bridge: the semantic entry points below own the lane/key boundary
+// while the old public callers are migrated.  Keeping the bridge in this
+// module prevents a second property algorithm from forming during migration.
+static Item js_property_lane_bridge_key(JsPropertyLane lane,
+                                        Item observable_key) {
+    return observable_key.item != ItemNull.item
+        ? observable_key : js_property_key_from_lane(lane);
+}
+
+static Item js_property_descriptor_field(const char* name, int length) {
+    return (Item){.item = s2it(heap_create_name(name, (size_t)length))};
+}
+
+static Item js_property_descriptor_set(Item descriptor, const char* name,
+                                       int length, Item value) {
+    Item field = js_property_descriptor_field(name, length);
+    if (field.item == ItemNull.item) return ItemError;
+    // Descriptor records are internal DefineOwn operands; routing their
+    // fields through ordinary Set would re-enter receiver/prototype
+    // completion and can recursively build another descriptor record.
+    return js_define_own_key_storage(descriptor, field, value);
+}
+
+static Item js_property_lane_bridge_key_or_error(JsPropertyLane lane,
+                                                  Item observable_key) {
+    Item key = js_property_lane_bridge_key(lane, observable_key);
+    return key.item == ItemNull.item ? ItemError : key;
+}
+
+extern "C" Item js_get(Item target, JsPropertyLane lane, Item observable_key,
+                        Item receiver) {
+    RootFrame roots(3);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> key_root(roots,
+        js_property_lane_bridge_key_or_error(lane, observable_key));
+    Rooted<Item> receiver_root(roots,
+        receiver.item == ItemNull.item ? target_root.get() : receiver);
+    if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
+    if (get_type_id(target_root.get()) == LMD_TYPE_NULL ||
+            get_type_id(target_root.get()) == LMD_TYPE_UNDEFINED) {
+        // D8.4.3: the optimized Get kernel may box primitives, but nullish
+        // receivers still need the reference-level TypeError completion.
+        return js_get_reference(target_root.get(), key_root.get());
+    }
+    // D6.2.2v2: the semantic Get kernel also owns primitive boxing. Reflect's
+    // public target validation is a caller policy and would reject valid
+    // primitive member reads emitted by MIR.
+    return js_get_key_core(target_root.get(), key_root.get(),
+                                         receiver_root.get());
+}
+
+extern "C" Item js_set(Item target, JsPropertyLane lane, Item observable_key,
+                        Item value, Item receiver) {
+    RootFrame roots(4);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> key_root(roots,
+        js_property_lane_bridge_key_or_error(lane, observable_key));
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> receiver_root(roots,
+        receiver.item == ItemNull.item ? target_root.get() : receiver);
+    if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
+    // Set owns the completion; Reflect.set is only a public caller policy.
+    return js_set_completion_with_key(target_root.get(), key_root.get(),
+                                      value_root.get(), receiver_root.get());
+}
+
+extern "C" Item js_define_own(Item target, JsPropertyLane lane,
+                               Item observable_key, uint32_t descriptor_bits,
+                               Item value, Item getter, Item setter) {
+    RootFrame roots(4);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> key_root(roots,
+        js_property_lane_bridge_key_or_error(lane, observable_key));
+    Rooted<Item> descriptor_root(roots, js_new_object());
+    Rooted<Item> value_root(roots, value);
+    if (!roots.valid() || key_root.get().item == ItemError.item ||
+            descriptor_root.get().item == ItemNull.item) return ItemError;
+
+    uint8_t flags = (uint8_t)(descriptor_bits & 0xffu);
+    if (flags & JS_PD_HAS_VALUE) {
+        Item status = js_property_descriptor_set(descriptor_root.get(),
+            "value", 5, value_root.get());
+        if (item_is_error(status)) return status;
+    }
+    if (flags & JS_PD_HAS_GET) {
+        Item status = js_property_descriptor_set(descriptor_root.get(),
+            "get", 3, getter);
+        if (item_is_error(status)) return status;
+    }
+    if (flags & JS_PD_HAS_SET) {
+        Item status = js_property_descriptor_set(descriptor_root.get(),
+            "set", 3, setter);
+        if (item_is_error(status)) return status;
+    }
+    if (flags & JS_PD_HAS_WRITABLE) {
+        Item status = js_property_descriptor_set(descriptor_root.get(),
+            "writable", 8,
+            (Item){.item = b2it((flags & JS_PD_WRITABLE) != 0)});
+        if (item_is_error(status)) return status;
+    }
+    if (flags & JS_PD_HAS_ENUMERABLE) {
+        Item status = js_property_descriptor_set(descriptor_root.get(),
+            "enumerable", 10,
+            (Item){.item = b2it((flags & JS_PD_ENUMERABLE) != 0)});
+        if (item_is_error(status)) return status;
+    }
+    if (flags & JS_PD_HAS_CONFIGURABLE) {
+        Item status = js_property_descriptor_set(descriptor_root.get(),
+            "configurable", 12,
+            (Item){.item = b2it((descriptor_bits &
+                JS_PD_CONFIGURABLE_VALUE) != 0)});
+        if (item_is_error(status)) return status;
+    }
+    // DefineOwn is a completion-producing kernel; Object.defineProperty's
+    // caller policy must not turn a rejected completion into an exception here.
+    return js_reflect_define_property(target_root.get(), key_root.get(),
+                                      descriptor_root.get());
+}
+
+extern "C" Item js_delete(Item target, JsPropertyLane lane,
+                           Item observable_key) {
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> key_root(roots,
+        js_property_lane_bridge_key_or_error(lane, observable_key));
+    if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
+    return js_reflect_delete_property(target_root.get(), key_root.get());
+}
+
+extern "C" Item js_has_property(Item target, JsPropertyLane lane,
+                                 Item observable_key) {
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> key_root(roots,
+        js_property_lane_bridge_key_or_error(lane, observable_key));
+    if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
+    return js_in(key_root.get(), target_root.get());
+}
+
+extern "C" Item js_has_own(Item target, JsPropertyLane lane,
+                            Item observable_key) {
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> key_root(roots,
+        js_property_lane_bridge_key_or_error(lane, observable_key));
+    if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
+    return js_has_own_property(target_root.get(), key_root.get());
+}
+
+extern "C" Item js_get_own_property_descriptor_lane(Item target,
+                                                     JsPropertyLane lane,
+                                                     Item observable_key) {
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> key_root(roots,
+        js_property_lane_bridge_key_or_error(lane, observable_key));
+    if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
+    return js_reflect_get_own_property_descriptor(target_root.get(),
+                                                  key_root.get());
+}
+
+extern "C" Item js_own_keys(Item target) {
+    return js_reflect_own_keys(target);
 }

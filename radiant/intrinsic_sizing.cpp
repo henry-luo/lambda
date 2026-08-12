@@ -3270,15 +3270,17 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         !percentage_size_resolves_to_zero &&
         !is_table_display && !is_inline_non_replaced &&
         !physical_width_is_vertical_block_axis) {
-        CssDeclaration* width_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_WIDTH);
+        // intrinsic sizing must honor the logical inline-size that normal
+        // layout maps to this physical axis; reading width alone drops it.
+        CssDeclaration* width_decl = layout_specified_physical_size_declaration(
+            element, true);
         if (width_decl && width_decl->value &&
             (width_decl->value->type == CSS_VALUE_TYPE_LENGTH ||
              width_decl->value->type == CSS_VALUE_TYPE_FUNCTION ||
              (width_decl->value->type == CSS_VALUE_TYPE_NUMBER &&
               width_decl->value->data.number.value == 0))) {
-            float explicit_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH,
-                                                            width_decl->value);
+                float explicit_width = resolve_length_value(
+                    lycon, width_decl->property_code, width_decl->value);
             if (explicit_width >= 0) {
                 // CSS width property sets content width by default (box-sizing: content-box)
                 // We need to add padding and border for the total intrinsic width
@@ -4359,6 +4361,21 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 get_intrinsic_box_side_widths_from_css(
                     lycon, element, true, true, 0.0f, &bdr_left, &bdr_right);
             }
+            bool table_inline_axis_vertical =
+                layout_block_inline_axis_is_vertical(tbl_view);
+            if (bdr_left == 0 && bdr_right == 0 && element->specified_style &&
+                !table_inline_axis_vertical) {
+                // logical border-inline contributes to the table's intrinsic
+                // inline size before physical border sides are materialized.
+                CssDeclaration* inline_border = style_tree_get_declaration(
+                    element->specified_style, CSS_PROPERTY_BORDER_INLINE);
+                if (inline_border && inline_border->value) {
+                    float width = intrinsic_border_width_from_shorthand_value(
+                        lycon, CSS_PROPERTY_BORDER_WIDTH, inline_border->value);
+                    bdr_left = width;
+                    bdr_right = width;
+                }
+            }
             // Fallback: read border from HTML border attribute if still not found
             // WHATWG 15.3.10: table[border] → border-width = N pixels
             if (bdr_left == 0 && bdr_right == 0 && element->tag() == MARKUP_NAME_TABLE) {
@@ -5283,7 +5300,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     // Read margins directly from specified CSS style
                     // This handles the case during intrinsic sizing when bound isn't allocated yet
                     layout_resolve_intrinsic_horizontal_margins(
-                        lycon, child_elem, false, &margin_left, &margin_right);
+                        lycon, child_elem, true, &margin_left, &margin_right);
                     child_width += margin_left + margin_right;
                 }
             }

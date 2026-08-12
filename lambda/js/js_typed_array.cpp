@@ -150,7 +150,7 @@ static void js_dataview_link_prototype(Item view) {
     Item ctor = js_get_constructor(ctor_name);
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
     Item proto_key = (Item){.item = s2it(heap_create_name("prototype"))};
-    Item proto = js_property_get(ctor, proto_key);
+    Item proto = js_get_key_default(ctor, proto_key);
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(view, proto);
 }
 
@@ -1029,7 +1029,7 @@ static Item js_atomics_wait_result(const char* value, int len) {
 static bool js_atomics_host_can_suspend() {
     Item global = js_get_global_this();
     Item key = (Item){.item = s2it(heap_create_name("__lambda_can_block"))};
-    Item flag = js_property_get(global, key);
+    Item flag = js_get_key_default(global, key);
     if (get_type_id(flag) == LMD_TYPE_BOOL) return it2b(flag);
     return true;
 }
@@ -1120,8 +1120,8 @@ static void js_atomics_set_waiter_status(JsAtomicsWaiter* waiter, JsAtomicsWaite
 
 static Item js_atomics_wait_async_result(bool async, Item value) {
     Item result = js_new_object();
-    js_property_set(result, (Item){.item = s2it(heap_create_name("async"))}, (Item){.item = b2it(async)});
-    js_property_set(result, (Item){.item = s2it(heap_create_name("value"))}, value);
+    js_set_key_default(result, (Item){.item = s2it(heap_create_name("async"))}, (Item){.item = b2it(async)});
+    js_set_key_default(result, (Item){.item = s2it(heap_create_name("value"))}, value);
     return result;
 }
 
@@ -1586,7 +1586,7 @@ static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
         (Item){.item = s2it(heap_create_name(is_shared ? "SharedArrayBuffer" : "ArrayBuffer"))}));
     Rooted<Item> proto_root(roots, ItemNull);
     if (get_type_id(ctor_root.get()) != LMD_TYPE_FUNC) return;
-    proto_root.set(js_property_get(ctor_root.get(),
+    proto_root.set(js_get_key_default(ctor_root.get(),
         (Item){.item = s2it(heap_create_name("prototype"))}));
     if (get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
         js_set_prototype(buffer_root.get(), proto_root.get());
@@ -1648,7 +1648,7 @@ static Item js_arraybuffer_parse_construct_options(Item length_arg,
     out->resizable = false;
     if (get_type_id(options_arg) == LMD_TYPE_MAP) {
         Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength"))};
-        JS_ASSIGN_OR_RETURN(max_item, js_property_get(options_arg, max_key));
+        JS_ASSIGN_OR_RETURN(max_item, js_get_key_default(options_arg, max_key));
         if (get_type_id(max_item) != LMD_TYPE_UNDEFINED && max_item.item != ITEM_NULL) {
             JS_ASSIGN_OR_RETURN_INTO(validation, js_to_index_i64(
                 max_item, &out->max_byte_length, max_error));
@@ -1731,7 +1731,7 @@ static JsArrayBuffer* js_get_arraybuffer_ptr(Map* m) {
         return (JsArrayBuffer*)m->data;
     // Upgraded: retrieve from __ab__ internal property
     bool found = false;
-    Item ab_val = js_map_get_fast_ext(m, "__ab__", 6, &found);
+    Item ab_val = js_map_shape_lookup_ext(m, "__ab__", 6, &found);
     if (found) return (JsArrayBuffer*)(uintptr_t)it2i(ab_val);
     return NULL;
 }
@@ -1920,7 +1920,7 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
 
     Item result_item = ItemNull;
     Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-    JS_ASSIGN_OR_RETURN(ctor, js_property_get(val, ctor_key));
+    JS_ASSIGN_OR_RETURN(ctor, js_get_key_default(val, ctor_key));
 
     bool use_default_ctor = get_type_id(ctor) == LMD_TYPE_UNDEFINED;
     if (!use_default_ctor) {
@@ -1930,7 +1930,7 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
             return js_throw_type_error("ArrayBuffer species constructor must be an object");
         }
         Item species_key = js_well_known_symbol_key(6);
-        JS_ASSIGN_OR_RETURN(species, js_property_get(ctor, species_key));
+        JS_ASSIGN_OR_RETURN(species, js_get_key_default(ctor, species_key));
         TypeId species_type = get_type_id(species);
         if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
             use_default_ctor = true;
@@ -2093,7 +2093,7 @@ extern "C" Item js_sharedarraybuffer_operation(Item sab,
 
         Item result_item = ItemNull;
         Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-        JS_ASSIGN_OR_RETURN(ctor, js_property_get(sab, ctor_key));
+        JS_ASSIGN_OR_RETURN(ctor, js_get_key_default(sab, ctor_key));
 
         bool use_default_ctor = get_type_id(ctor) == LMD_TYPE_UNDEFINED;
         if (!use_default_ctor) {
@@ -2103,7 +2103,7 @@ extern "C" Item js_sharedarraybuffer_operation(Item sab,
                 return js_throw_type_error("SharedArrayBuffer species constructor must be an object");
             }
             Item species_key = js_well_known_symbol_key(6);
-            JS_ASSIGN_OR_RETURN(species, js_property_get(ctor, species_key));
+            JS_ASSIGN_OR_RETURN(species, js_get_key_default(ctor, species_key));
             TypeId species_type = get_type_id(species);
             if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
                 use_default_ctor = true;
@@ -2165,7 +2165,9 @@ extern "C" bool js_is_typed_array(Item val) {
     Map* m = val.map;
     // %TypedArray%.prototype carries the typed-array map kind for native
     // property dispatch but has no [[ViewedArrayBuffer]] internal slot.
-    return m && m->map_kind == MAP_KIND_TYPED_ARRAY && js_get_typed_array_ptr(m);
+    JsTypedArray* ptr = m && m->map_kind == MAP_KIND_TYPED_ARRAY
+        ? js_get_typed_array_ptr(m) : NULL;
+    return ptr != NULL;
 }
 
 // Get the JsTypedArray* from a Map, handling both original and upgraded layouts.
@@ -2176,7 +2178,7 @@ extern "C" JsTypedArray* js_get_typed_array_ptr(Map* m) {
         return (JsTypedArray*)m->data;
     // upgraded: retrieve from __ta__ internal property
     bool found = false;
-    Item ta_val = js_map_get_fast_ext(m, "__ta__", 6, &found);
+    Item ta_val = js_map_shape_lookup_ext(m, "__ta__", 6, &found);
     if (found) return (JsTypedArray*)(uintptr_t)it2i(ta_val);
     return NULL;
 }
@@ -2439,15 +2441,20 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
         return result_root.get();
     }
 
-    if (src_type == LMD_TYPE_ARRAY) {
-        // Copy from regular array
-        Array* arr = source.array;
-        int len = (int)arr->length;
+    if (src_type == LMD_TYPE_ARRAY || src_type == LMD_TYPE_ARRAY_NUM) {
+        // Copy from a regular or compact numeric array. MIR Direct may keep a
+        // literal numeric array in ArrayNum form, and treating that value as a
+        // scalar length silently constructs an empty TypedArray.
+        Array* arr = src_type == LMD_TYPE_ARRAY ? source.array : NULL;
+        ArrayNum* num_arr = src_type == LMD_TYPE_ARRAY_NUM ? source.array_num : NULL;
+        int len = (int)(arr ? arr->length : (num_arr ? num_arr->length : 0));
         result_root.set(js_typed_array_new(type_id, len));
         Item result = result_root.get();
-        if (js_typed_array_try_raw_from_dense_number_array(result, arr, len)) return result;
+        if (arr && js_typed_array_try_raw_from_dense_number_array(result, arr, len)) return result;
         Item* values = len > 0 ? (Item*)mem_alloc(sizeof(Item) * len, MEM_CAT_JS_RUNTIME) : NULL;
-        for (int i = 0; i < len; i++) values[i] = arr->items[i];
+        for (int i = 0; i < len; i++) {
+            values[i] = arr ? arr->items[i] : array_num_get(num_arr, i);
+        }
         for (int i = 0; i < len; i++) {
             Item idx = (Item){.item = i2it(i)};
             Item val = values ? values[i] : ItemNull;
@@ -2513,9 +2520,12 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
     if (js_is_typed_array(arg)) {
         return js_typed_array_new_from_array(type_id, arg);
     }
-    if (arg_type == LMD_TYPE_ARRAY) {
+    if (arg_type == LMD_TYPE_ARRAY || arg_type == LMD_TYPE_ARRAY_NUM) {
+        if (arg_type == LMD_TYPE_ARRAY_NUM) {
+            return js_typed_array_new_from_array(type_id, arg_root.get());
+        }
         Item iter_key = js_well_known_symbol_key(1);
-        JS_ASSIGN_OR_RETURN(iter_method, js_property_get(arg_root.get(), iter_key));
+        JS_ASSIGN_OR_RETURN(iter_method, js_get_key_default(arg_root.get(), iter_key));
         TypeId iter_type = get_type_id(iter_method);
         bool has_iter = iter_type != LMD_TYPE_UNDEFINED && iter_type != LMD_TYPE_NULL &&
             iter_method.item != ITEM_JS_UNDEFINED;
@@ -2536,7 +2546,7 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
             return js_typed_array_new_from_array(type_id, values);
         }
         Item iter_key = js_well_known_symbol_key(1);
-        JS_ASSIGN_OR_RETURN_INTO(iter_method, js_property_get(arg_root.get(), iter_key));
+        JS_ASSIGN_OR_RETURN_INTO(iter_method, js_get_key_default(arg_root.get(), iter_key));
         TypeId iter_type = get_type_id(iter_method);
         bool has_iter = iter_type != LMD_TYPE_UNDEFINED && iter_type != LMD_TYPE_NULL && iter_method.item != ITEM_JS_UNDEFINED;
         if (has_iter) {
@@ -2548,12 +2558,12 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
         }
 
         Item length_key = (Item){.item = s2it(heap_create_name("length"))};
-        JS_ASSIGN_OR_RETURN(length_value, js_property_get(arg_root.get(), length_key));
+        JS_ASSIGN_OR_RETURN(length_value, js_get_key_default(arg_root.get(), length_key));
         int len = 0;
         JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(length_value, &len));
         Item result = js_typed_array_new(type_id, len);
         for (int i = 0; i < len; i++) {
-            JS_ASSIGN_OR_RETURN(value, js_property_get(arg_root.get(), (Item){.item = i2it(i)}));
+            JS_ASSIGN_OR_RETURN(value, js_get_key_default(arg_root.get(), (Item){.item = i2it(i)}));
             JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(result, (Item){.item = i2it(i)}, value));
         }
         return result;
@@ -3051,7 +3061,7 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
     JS_ASSIGN_OR_RETURN(src_obj, js_to_object(source));
 
     Item length_key = (Item){.item = s2it(heap_create_name("length"))};
-    JS_ASSIGN_OR_RETURN(length_item, js_property_get(src_obj, length_key));
+    JS_ASSIGN_OR_RETURN(length_item, js_get_key_default(src_obj, length_key));
     JS_ASSIGN_OR_RETURN(length_num, js_to_number(length_item));
     double length_double = js_get_number(length_num);
     int64_t src_len = 0;
@@ -3080,7 +3090,7 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
 
     if (ta_set_stats_enabled) js_ta_set_stats_add(&g_js_ta_set_stats.array_like_loop_elements, src_len);
     for (int64_t i = 0; i < src_len; i++) {
-        JS_ASSIGN_OR_RETURN(value, js_property_get(src_obj, (Item){.item = i2it(i)}));
+        JS_ASSIGN_OR_RETURN(value, js_get_key_default(src_obj, (Item){.item = i2it(i)}));
         JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(ta_item, (Item){.item = i2it((int64_t)offset + i)}, value));
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
@@ -3215,7 +3225,7 @@ static JsDataView* js_get_dataview_ptr_from_map(Map* m) {
     if (m->type == (void*)&js_dataview_type_marker)
         return (JsDataView*)m->data;
     bool found = false;
-    Item dv_val = js_map_get_fast_ext(m, "__dv__", 6, &found);
+    Item dv_val = js_map_shape_lookup_ext(m, "__dv__", 6, &found);
     if (found) return (JsDataView*)(uintptr_t)it2i(dv_val);
     return NULL;
 }

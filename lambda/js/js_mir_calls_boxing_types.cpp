@@ -256,8 +256,12 @@ JsMirImportEntry* jm_ensure_import_v_i(JsMirTranspiler* mt, const char* name) {
 
 static bool js_ast_tune_boxed_const_reuse_enabled() {
     static int enabled = -1;
-    if (enabled < 0)
-        enabled = getenv("LAMBDA_AST_TUNE_NO_BOXED_CONST_REUSE") ? 0 : 1;
+    if (enabled < 0) {
+        // Reusing a sentinel register across MIR control-flow blocks is not
+        // yet dominance-aware; callback lowering can observe the stale value.
+        // Keep this experiment opt-in until the cache tracks block dominance.
+        enabled = getenv("LAMBDA_AST_TUNE_BOXED_CONST_REUSE") ? 1 : 0;
+    }
     return enabled != 0;
 }
 
@@ -1013,7 +1017,7 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
         MIR_T_I64, MIR_new_int_op(mt->ctx, flags));
 }
 
-// Helper: emit js_property_set(cls_obj, "__source_text__", source) so that
+// Helper: emit js_set_key_default(cls_obj, "__source_text__", source) so that
 // Function.prototype.toString on the class returns the original source text
 // (per ES spec: Function.prototype.toString on a class returns its source).
 // Avoids the slow validateNativeFunctionSource fallback in test262 harness.
@@ -1033,7 +1037,7 @@ void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNod
     while (len > 1 && text[len - 1] != '}') len--;
     MIR_reg_t key = jm_box_property_name_literal(mt, "__source_text__", 15);
     MIR_reg_t src_reg = jm_box_string_literal(mt, text, len);
-    jm_call_3(mt, "js_property_set", MIR_T_I64,
+    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, src_reg));
@@ -1977,7 +1981,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
 
             // A3: Regular array element access — get boxed Item then unbox to target.
             // When used in a float expression (target_type == FLOAT), the caller needs
-            // a native double. Get the boxed result via js_array_get_int (avoiding
+            // a native double. Get the boxed result via js_elements_get_int (avoiding
             // boxing the index), then unbox to float directly.
             TypeId idx_type = jm_get_effective_type(mt, mem->property);
             if (idx_type == LMD_TYPE_INT) {
@@ -1989,7 +1993,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                         idx_native, arr_var->hoisted_data_reg, arr_var->hoisted_len_reg);
                 } else {
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
-                    boxed_result = jm_call_2(mt, "js_array_get_int", MIR_T_I64,
+                    boxed_result = jm_call_2(mt, "js_elements_get_int", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
                 }

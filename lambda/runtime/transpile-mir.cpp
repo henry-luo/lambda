@@ -19393,35 +19393,6 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             return replacement;
         }
 
-        // ==================================================================
-        // Phase 3: Direct field write optimization for typed maps/objects
-        // ==================================================================
-        if (false && ca->object->type && ca->key->node_type == AST_NODE_IDENT) {
-            TypeId obj_type_id = ca->object->type->type_id;
-            if (obj_type_id == LMD_TYPE_MAP || obj_type_id == LMD_TYPE_OBJECT) {
-                TypeMap* map_type = (TypeMap*)ca->object->type;
-                if (has_fixed_shape(map_type)) {
-                    AstIdentNode* ident = (AstIdentNode*)ca->key;
-                    ShapeEntry* se = find_shape_field_by_name(map_type,
-                        ident->name->chars, ident->name->len);
-                    TypeId storage_type = se ? shape_entry_storage_type_id(se) : LMD_TYPE_NULL;
-                    if (se && se->type && is_direct_access_type(storage_type)) {
-                        log_debug("mir: direct field write: %.*s (type=%d offset=%lld)",
-                            (int)ident->name->len, ident->name->chars,
-                            storage_type, (long long)se->byte_offset);
-                        bool skip_null_guard = false; // typed variables can still hold null
-                        emit_mir_direct_field_write(mt, ca->object, se, ca->value, skip_null_guard);
-                        // Return null (void statement)
-                        MIR_reg_t r = new_reg(mt, "void", MIR_T_I64);
-                        uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                            MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-                        return r;
-                    }
-                }
-            }
-        }
-
         // Fallback: runtime fn_map_set
         MIR_reg_t obj = transpile_box_item(mt, ca->object);
         // Key: if it's an ident, emit as string constant; otherwise box it

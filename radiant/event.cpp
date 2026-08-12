@@ -29,7 +29,7 @@
 #include "../lambda/io/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
 #include "../lambda/js/js_dom_events.h" // js_dom_dispatch_event + native event factories
-#include "../lambda/js/js_runtime.h"   // js_new_object / js_property_set / js_array_new / js_array_push
+#include "../lambda/js/js_runtime.h"   // js_new_object / js_set_key_default / js_array_new / js_array_push
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/js/js_dom_platform.h"
 #include "../lambda/js/js_dom_observers.h"
@@ -5102,13 +5102,13 @@ static Item ce_build_static_range_item(const EditingTargetRange* r) {
     Item so_key    = (Item){.item = s2it(heap_create_name("startOffset"))};
     Item eo_key    = (Item){.item = s2it(heap_create_name("endOffset"))};
     Item col_key   = (Item){.item = s2it(heap_create_name("collapsed"))};
-    js_property_set(obj, start_key, start);
-    js_property_set(obj, end_key,   end);
-    js_property_set(obj, so_key,    (Item){.item = i2it((long)r->start.offset)});
-    js_property_set(obj, eo_key,    (Item){.item = i2it((long)r->end.offset)});
+    js_set_key_default(obj, start_key, start);
+    js_set_key_default(obj, end_key,   end);
+    js_set_key_default(obj, so_key,    (Item){.item = i2it((long)r->start.offset)});
+    js_set_key_default(obj, eo_key,    (Item){.item = i2it((long)r->end.offset)});
     bool collapsed = (r->start.node == r->end.node) &&
                      (r->start.offset == r->end.offset);
-    js_property_set(obj, col_key, (Item){.item = b2it(collapsed)});
+    js_set_key_default(obj, col_key, (Item){.item = b2it(collapsed)});
     return obj;
 }
 

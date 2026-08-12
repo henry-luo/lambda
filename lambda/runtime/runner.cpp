@@ -36,7 +36,7 @@
 #include "../../lib/uv_loop.h"
 #include "compiler_timing.hpp"
 
-extern "C" Item js_property_get(Item object, Item key);
+extern "C" Item js_get_key_default(Item object, Item key);
 extern "C" void js_dom_shutdown(void);
 struct DomDocument;
 extern void free_document(DomDocument* doc);
@@ -563,7 +563,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                         if (((TypeFunc*)func_node->type)->is_public) {
                             Item key = {.item = s2it(heap_create_name(
                                 func_node->name->chars, func_node->name->len))};
-                            Item fn_item = js_property_get(ns, key);
+                            Item fn_item = js_get_key_default(ns, key);
                             if (get_type_id(fn_item) == LMD_TYPE_FUNC) {
                                 void* fn_ptr = js_function_get_ptr(fn_item);
                                 *(main_func_t*)mod_def = (main_func_t)fn_ptr;

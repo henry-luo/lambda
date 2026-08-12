@@ -122,8 +122,10 @@ static bool jm_node_has_direct_eval_call(JsAstNode* node) {
 JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode* call) {
     if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
-    NameEntry* entry = id->entry;
-    if (!entry) entry = js_scope_lookup(mt->tp, id->name);
+    // The scope table is authoritative after Annex B rewrites; the AST entry
+    // can still point at a suppressed declaration from the pre-rewrite pass.
+    NameEntry* entry = js_scope_lookup(mt->tp, id->name);
+    if (!entry) entry = id->entry;
     if (!entry || !entry->node) return NULL;
     JsFunctionNode* fn = NULL;
     JsAstNodeType ntype = ((JsAstNode*)entry->node)->node_type;
@@ -153,8 +155,11 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
 
     // Resolve to a function declaration or expression
-    NameEntry* entry = id->entry;
-    if (!entry) entry = js_scope_lookup(mt->tp, id->name);
+    // Native-call resolution must observe the post-Annex-B scope table before
+    // consulting the AST fallback, otherwise a stale declaration can recurse
+    // through the wrong MIR body and crash the batch worker.
+    NameEntry* entry = js_scope_lookup(mt->tp, id->name);
+    if (!entry) entry = id->entry;
     if (!entry || !entry->node) return NULL;
 
     JsFunctionNode* fn = NULL;
@@ -2785,7 +2790,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             // Box through the funnel: an int Item is not a tagged payload, so
             // OR-ing the tag onto a raw index no longer produces that index.
             MIR_reg_t idx_boxed = jm_box_int_reg(mt, i_reg);
-            MIR_reg_t elem = jm_call_2(mt, "js_array_get", MIR_T_I64,
+            MIR_reg_t elem = jm_call_2(mt, "js_elements_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
             jm_emit_error_lane_propagate_check(mt);

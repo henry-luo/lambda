@@ -16,6 +16,9 @@ extern "C" {
 #endif
 void* heap_data_alloc(size_t size);
 void* heap_data_calloc(size_t size);
+// Retag an identity-preserving managed container only across a proven
+// same-layout transition; the visible header and GC allocation tag move as one.
+void heap_retag_container(Container* object, TypeId expected, TypeId replacement);
 void heap_register_gc_root(uint64_t* slot);
 void heap_unregister_gc_root(uint64_t* slot);
 bool heap_try_register_gc_root_range(uint64_t* base, int count);

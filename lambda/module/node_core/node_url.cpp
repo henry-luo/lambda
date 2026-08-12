@@ -178,10 +178,10 @@ static Item node_url_set_item_property(Item object, const char* name, Item value
 #define js_array_new(CAPACITY) node_url_host->value->array_new(CAPACITY)
 #define js_array_push(ARRAY, VALUE) node_url_host->value->array_push(ARRAY, VALUE)
 #define js_array_length(ARRAY) node_url_host->value->array_length(ARRAY)
-#define js_array_get_int(ARRAY, INDEX) node_url_host->value->array_get(ARRAY, INDEX)
-#define js_array_set_int(ARRAY, INDEX, VALUE) node_url_host->value->array_set(ARRAY, INDEX, VALUE)
-#define js_property_get(OBJECT, KEY) node_url_host->value->property_get(OBJECT, KEY)
-#define js_property_set(OBJECT, KEY, VALUE) node_url_host->value->property_set(OBJECT, KEY, VALUE)
+#define js_elements_get_int(ARRAY, INDEX) node_url_host->value->array_get(ARRAY, INDEX)
+#define js_elements_set_int(ARRAY, INDEX, VALUE) node_url_host->value->array_set(ARRAY, INDEX, VALUE)
+#define js_get_key_default(OBJECT, KEY) node_url_host->value->property_get(OBJECT, KEY)
+#define js_set_key_default(OBJECT, KEY, VALUE) node_url_host->value->property_set(OBJECT, KEY, VALUE)
 #define js_mark_non_enumerable(OBJECT, KEY) node_url_host->script->mark_non_enumerable(OBJECT, KEY)
 #define js_get_this() node_url_host->script->current_this()
 #define js_to_string(VALUE) node_url_host->script->to_string(VALUE)
@@ -460,7 +460,7 @@ static Item node_url_legacy_query(const char* search) {
             Item value = make_string_item(decoded_value, (int)value_length);
             *key_root = key.item;
             *value_root = value.item;
-            Item existing = js_property_get(node_url_root_value(query_root),
+            Item existing = js_get_key_default(node_url_root_value(query_root),
                 node_url_root_value(key_root));
             *existing_root = existing.item;
             if (node_url_host->value->property_has_own(node_url_root_value(query_root),
@@ -650,7 +650,7 @@ extern "C" Item js_url_format(Item obj_item) {
     if (get_type_id(obj_item) != LMD_TYPE_MAP) return make_string_item("");
 
     // try to get href directly
-    Item href = js_property_get(obj_item, make_string_item("href"));
+    Item href = js_get_key_default(obj_item, make_string_item("href"));
     char href_buf[4096] = {};
     if (item_to_cstr(href, href_buf, sizeof(href_buf)) && href_buf[0]) {
         return href;
@@ -661,7 +661,7 @@ extern "C" Item js_url_format(Item obj_item) {
     int pos = 0;
 
     char part[4096] = {};
-    Item protocol = js_property_get(obj_item, make_string_item("protocol"));
+    Item protocol = js_get_key_default(obj_item, make_string_item("protocol"));
     if (item_to_cstr(protocol, part, sizeof(part))) {
         int part_len = (int)strlen(part);
         memcpy(buf + pos, part, (size_t)part_len);
@@ -670,8 +670,8 @@ extern "C" Item js_url_format(Item obj_item) {
         buf[pos++] = '/'; buf[pos++] = '/';
     }
 
-    Item hostname = js_property_get(obj_item, make_string_item("hostname"));
-    Item host = js_property_get(obj_item, make_string_item("host"));
+    Item hostname = js_get_key_default(obj_item, make_string_item("hostname"));
+    Item host = js_get_key_default(obj_item, make_string_item("host"));
     if (item_to_cstr(host, part, sizeof(part)) && part[0]) {
         int part_len = (int)strlen(part);
         memcpy(buf + pos, part, (size_t)part_len);
@@ -682,7 +682,7 @@ extern "C" Item js_url_format(Item obj_item) {
         pos += part_len;
     }
 
-    Item pathname = js_property_get(obj_item, make_string_item("pathname"));
+    Item pathname = js_get_key_default(obj_item, make_string_item("pathname"));
     if (item_to_cstr(pathname, part, sizeof(part))) {
         int part_len = (int)strlen(part);
         if (part_len > 0 && part[0] != '/') buf[pos++] = '/';
@@ -690,14 +690,14 @@ extern "C" Item js_url_format(Item obj_item) {
         pos += part_len;
     }
 
-    Item search = js_property_get(obj_item, make_string_item("search"));
+    Item search = js_get_key_default(obj_item, make_string_item("search"));
     if (item_to_cstr(search, part, sizeof(part)) && part[0]) {
         int part_len = (int)strlen(part);
         memcpy(buf + pos, part, (size_t)part_len);
         pos += part_len;
     }
 
-    Item hash = js_property_get(obj_item, make_string_item("hash"));
+    Item hash = js_get_key_default(obj_item, make_string_item("hash"));
     if (item_to_cstr(hash, part, sizeof(part)) && part[0]) {
         int part_len = (int)strlen(part);
         memcpy(buf + pos, part, (size_t)part_len);
@@ -897,18 +897,18 @@ extern "C" Item js_url_to_http_options(Item url_item) {
         node_url_set_string_property(options, "path", "");
         Item nan = node_url_host->script->make_number(NAN);
         *value_root = nan.item;
-        js_property_set(options, make_string_item("port"), nan);
+        js_set_key_default(options, make_string_item("port"), nan);
         node_url_host->node->roots->root_frame_end(&frame);
         return options;
     }
     const char* names[] = {"protocol", "hostname", "pathname", "search", "hash", "href", NULL};
     for (int index = 0; names[index]; index++) {
         Item key = make_string_item(names[index]);
-        Item value = js_property_get(url_item, key);
+        Item value = js_get_key_default(url_item, key);
         *value_root = value.item;
-        if (get_type_id(value) != LMD_TYPE_UNDEFINED) js_property_set(options, key, value);
+        if (get_type_id(value) != LMD_TYPE_UNDEFINED) js_set_key_default(options, key, value);
     }
-    Item hostname = js_property_get(url_item, make_string_item("hostname"));
+    Item hostname = js_get_key_default(url_item, make_string_item("hostname"));
     if (get_type_id(hostname) == LMD_TYPE_STRING) {
         char host_text[4096] = {};
         if (item_to_cstr(hostname, host_text, sizeof(host_text))) {
@@ -919,9 +919,9 @@ extern "C" Item js_url_to_http_options(Item url_item) {
             }
         }
     }
-    Item username = js_property_get(url_item, make_string_item("username"));
+    Item username = js_get_key_default(url_item, make_string_item("username"));
     *value_root = username.item;
-    Item password = js_property_get(url_item, make_string_item("password"));
+    Item password = js_get_key_default(url_item, make_string_item("password"));
     if (get_type_id(username) == LMD_TYPE_STRING) {
         char user[1024] = {};
         char pass[1024] = {};
@@ -933,8 +933,8 @@ extern "C" Item js_url_to_http_options(Item url_item) {
             node_url_set_string_property(options, "auth", auth);
         }
     }
-    Item pathname = js_property_get(url_item, make_string_item("pathname"));
-    Item search = js_property_get(url_item, make_string_item("search"));
+    Item pathname = js_get_key_default(url_item, make_string_item("pathname"));
+    Item search = js_get_key_default(url_item, make_string_item("search"));
     char path[4096] = {};
     char search_text[4096] = {};
     item_to_cstr(pathname, path, sizeof(path));
@@ -942,13 +942,13 @@ extern "C" Item js_url_to_http_options(Item url_item) {
     char request_path[8192] = {};
     snprintf(request_path, sizeof(request_path), "%s%s", path, search_text);
     node_url_set_string_property(options, "path", request_path);
-    Item port = js_property_get(url_item, make_string_item("port"));
+    Item port = js_get_key_default(url_item, make_string_item("port"));
     if (get_type_id(port) == LMD_TYPE_STRING) {
         char port_text[64] = {};
         if (item_to_cstr(port, port_text, sizeof(port_text)) && port_text[0]) {
             Item number = node_url_host->script->make_number(atof(port_text));
             *value_root = number.item;
-            js_property_set(options, make_string_item("port"), number);
+            js_set_key_default(options, make_string_item("port"), number);
         }
     }
     node_url_host->node->roots->root_frame_end(&frame);
@@ -1013,7 +1013,7 @@ static Item parse_query_entries(const char* qs, int qs_len) {
 // URLSearchParams.prototype.append(name, value)
 extern "C" Item js_usp_append(Item name_item, Item value_item) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     Item name_str = js_to_string(name_item);
     Item value_str = js_to_string(value_item);
     Item entry = js_array_new(0);
@@ -1026,7 +1026,7 @@ extern "C" Item js_usp_append(Item name_item, Item value_item) {
 // URLSearchParams.prototype.delete(name[, value])
 extern "C" Item js_usp_delete(Item name_item, Item value_item) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     Item name_str = js_to_string(name_item);
     bool check_value = get_type_id(value_item) != LMD_TYPE_UNDEFINED;
     Item value_str = check_value ? js_to_string(value_item) : (Item){0};
@@ -1034,12 +1034,12 @@ extern "C" Item js_usp_delete(Item name_item, Item value_item) {
     Item new_entries = js_array_new(0);
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_array_get_int(entries, i);
-        Item ek = js_array_get_int(entry, 0);
+        Item entry = js_elements_get_int(entries, i);
+        Item ek = js_elements_get_int(entry, 0);
         Item match = js_strict_equal(ek, name_str);
         if (js_is_truthy(match)) {
             if (check_value) {
-                Item ev = js_array_get_int(entry, 1);
+                Item ev = js_elements_get_int(entry, 1);
                 Item vm = js_strict_equal(ev, value_str);
                 if (js_is_truthy(vm)) continue; // delete matching
                 js_array_push(new_entries, entry);
@@ -1048,21 +1048,21 @@ extern "C" Item js_usp_delete(Item name_item, Item value_item) {
         }
         js_array_push(new_entries, entry);
     }
-    js_property_set(self, make_string_item("__entries__"), new_entries);
+    js_set_key_default(self, make_string_item("__entries__"), new_entries);
     return make_js_undefined();
 }
 
 // URLSearchParams.prototype.get(name)
 extern "C" Item js_usp_get(Item name_item) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     Item name_str = js_to_string(name_item);
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_array_get_int(entries, i);
-        Item ek = js_array_get_int(entry, 0);
+        Item entry = js_elements_get_int(entries, i);
+        Item ek = js_elements_get_int(entry, 0);
         Item match = js_strict_equal(ek, name_str);
-        if (js_is_truthy(match)) return js_array_get_int(entry, 1);
+        if (js_is_truthy(match)) return js_elements_get_int(entry, 1);
     }
     return ItemNull;
 }
@@ -1070,15 +1070,15 @@ extern "C" Item js_usp_get(Item name_item) {
 // URLSearchParams.prototype.getAll(name)
 extern "C" Item js_usp_getAll(Item name_item) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     Item name_str = js_to_string(name_item);
     Item result = js_array_new(0);
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_array_get_int(entries, i);
-        Item ek = js_array_get_int(entry, 0);
+        Item entry = js_elements_get_int(entries, i);
+        Item ek = js_elements_get_int(entry, 0);
         Item match = js_strict_equal(ek, name_str);
-        if (js_is_truthy(match)) js_array_push(result, js_array_get_int(entry, 1));
+        if (js_is_truthy(match)) js_array_push(result, js_elements_get_int(entry, 1));
     }
     return result;
 }
@@ -1086,17 +1086,17 @@ extern "C" Item js_usp_getAll(Item name_item) {
 // URLSearchParams.prototype.has(name[, value])
 extern "C" Item js_usp_has(Item name_item, Item value_item) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     Item name_str = js_to_string(name_item);
     bool check_value = get_type_id(value_item) != LMD_TYPE_UNDEFINED;
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_array_get_int(entries, i);
-        Item ek = js_array_get_int(entry, 0);
+        Item entry = js_elements_get_int(entries, i);
+        Item ek = js_elements_get_int(entry, 0);
         Item match = js_strict_equal(ek, name_str);
         if (js_is_truthy(match)) {
             if (check_value) {
-                Item ev = js_array_get_int(entry, 1);
+                Item ev = js_elements_get_int(entry, 1);
                 Item value_str = js_to_string(value_item);
                 Item vm = js_strict_equal(ev, value_str);
                 if (js_is_truthy(vm)) return (Item){.item = b2it(true)};
@@ -1111,15 +1111,15 @@ extern "C" Item js_usp_has(Item name_item, Item value_item) {
 // URLSearchParams.prototype.set(name, value)
 extern "C" Item js_usp_set(Item name_item, Item value_item) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     Item name_str = js_to_string(name_item);
     Item value_str = js_to_string(value_item);
     bool found = false;
     Item new_entries = js_array_new(0);
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_array_get_int(entries, i);
-        Item ek = js_array_get_int(entry, 0);
+        Item entry = js_elements_get_int(entries, i);
+        Item ek = js_elements_get_int(entry, 0);
         Item match = js_strict_equal(ek, name_str);
         if (js_is_truthy(match)) {
             if (!found) {
@@ -1140,29 +1140,29 @@ extern "C" Item js_usp_set(Item name_item, Item value_item) {
         js_array_push(new_entry, value_str);
         js_array_push(new_entries, new_entry);
     }
-    js_property_set(self, make_string_item("__entries__"), new_entries);
+    js_set_key_default(self, make_string_item("__entries__"), new_entries);
     return make_js_undefined();
 }
 
 // URLSearchParams.prototype.sort()
 extern "C" Item js_usp_sort(void) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     // simple bubble sort by key
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len - 1; i++) {
         for (int64_t j = 0; j < len - 1 - i; j++) {
-            Item a = js_array_get_int(entries, j);
-            Item b = js_array_get_int(entries, j + 1);
-            Item ak = js_array_get_int(a, 0);
-            Item bk = js_array_get_int(b, 0);
+            Item a = js_elements_get_int(entries, j);
+            Item b = js_elements_get_int(entries, j + 1);
+            Item ak = js_elements_get_int(a, 0);
+            Item bk = js_elements_get_int(b, 0);
             char sa[4096] = {};
             char sb[4096] = {};
             if (item_to_cstr(ak, sa, sizeof(sa)) && item_to_cstr(bk, sb, sizeof(sb))) {
                 int cmp = strcmp(sa, sb);
                 if (cmp > 0) {
-                    js_array_set_int(entries, j, b);
-                    js_array_set_int(entries, j + 1, a);
+                    js_elements_set_int(entries, j, b);
+                    js_elements_set_int(entries, j + 1, a);
                 }
             }
         }
@@ -1173,7 +1173,7 @@ extern "C" Item js_usp_sort(void) {
 // URLSearchParams.prototype.toString()
 extern "C" Item js_usp_toString(void) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     int64_t len = js_array_length(entries);
     if (len == 0) return make_string_item("", 0);
 
@@ -1181,9 +1181,9 @@ extern "C" Item js_usp_toString(void) {
     int pos = 0;
     for (int64_t i = 0; i < len && pos < (int)sizeof(buf) - 100; i++) {
         if (i > 0) buf[pos++] = '&';
-        Item entry = js_array_get_int(entries, i);
-        Item ek = js_array_get_int(entry, 0);
-        Item ev = js_array_get_int(entry, 1);
+        Item entry = js_elements_get_int(entries, i);
+        Item ek = js_elements_get_int(entry, 0);
+        Item ev = js_elements_get_int(entry, 1);
         // URL-encode key and value
         auto url_encode = [&](Item s) {
             if (get_type_id(s) != LMD_TYPE_STRING) return;
@@ -1216,13 +1216,13 @@ extern "C" Item js_usp_toString(void) {
 // URLSearchParams.prototype.forEach(callback[, thisArg])
 extern "C" Item js_usp_forEach(Item callback, Item this_arg) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     int64_t len = js_array_length(entries);
     Item this_val = get_type_id(this_arg) != LMD_TYPE_UNDEFINED ? this_arg : self;
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_array_get_int(entries, i);
-        Item value = js_array_get_int(entry, 1);
-        Item key = js_array_get_int(entry, 0);
+        Item entry = js_elements_get_int(entries, i);
+        Item value = js_elements_get_int(entry, 1);
+        Item key = js_elements_get_int(entry, 0);
         Item args[3] = {value, key, self};
         js_call_function(callback, this_val, args, 3);
     }
@@ -1232,12 +1232,12 @@ extern "C" Item js_usp_forEach(Item callback, Item this_arg) {
 // URLSearchParams.prototype.keys() — returns iterator
 extern "C" Item js_usp_keys(void) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     int64_t len = js_array_length(entries);
     Item result = js_array_new(0);
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_array_get_int(entries, i);
-        js_array_push(result, js_array_get_int(entry, 0));
+        Item entry = js_elements_get_int(entries, i);
+        js_array_push(result, js_elements_get_int(entry, 0));
     }
     return result;
 }
@@ -1245,12 +1245,12 @@ extern "C" Item js_usp_keys(void) {
 // URLSearchParams.prototype.values() — returns iterator
 extern "C" Item js_usp_values(void) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     int64_t len = js_array_length(entries);
     Item result = js_array_new(0);
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_array_get_int(entries, i);
-        js_array_push(result, js_array_get_int(entry, 1));
+        Item entry = js_elements_get_int(entries, i);
+        js_array_push(result, js_elements_get_int(entry, 1));
     }
     return result;
 }
@@ -1258,7 +1258,7 @@ extern "C" Item js_usp_values(void) {
 // URLSearchParams.prototype.entries() — returns iterator
 extern "C" Item js_usp_entries(void) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     return entries;
 }
 
@@ -1268,7 +1268,7 @@ extern "C" Item js_usp_entries(void) {
 // size getter
 extern "C" Item js_usp_size(void) {
     Item self = js_get_this();
-    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item entries = js_get_key_default(self, make_string_item("__entries__"));
     return (Item){.item = i2it((int)js_array_length(entries))};
 }
 
@@ -1308,8 +1308,8 @@ extern "C" Item js_url_search_params_new(Item init) {
         Item keys = js_object_keys(init);
         int64_t klen = js_array_length(keys);
         for (int64_t i = 0; i < klen; i++) {
-            Item key = js_array_get_int(keys, i);
-            Item val = js_property_get(init, key);
+            Item key = js_elements_get_int(keys, i);
+            Item val = js_get_key_default(init, key);
             Item entry = js_array_new(0);
             js_array_push(entry, js_to_string(key));
             js_array_push(entry, js_to_string(val));
@@ -1320,10 +1320,10 @@ extern "C" Item js_url_search_params_new(Item init) {
         *entries_root = entries.item;
         int64_t len = js_array_length(init);
         for (int64_t i = 0; i < len; i++) {
-            Item pair = js_array_get_int(init, i);
+            Item pair = js_elements_get_int(init, i);
             Item entry = js_array_new(0);
-            js_array_push(entry, js_to_string(js_array_get_int(pair, 0)));
-            js_array_push(entry, js_to_string(js_array_get_int(pair, 1)));
+            js_array_push(entry, js_to_string(js_elements_get_int(pair, 0)));
+            js_array_push(entry, js_to_string(js_elements_get_int(pair, 1)));
             js_array_push(entries, entry);
         }
     } else {
@@ -1332,7 +1332,7 @@ extern "C" Item js_url_search_params_new(Item init) {
     }
 
     Item entries_key = make_string_item("__entries__");
-    js_property_set(obj, entries_key, entries);
+    js_set_key_default(obj, entries_key, entries);
     // URLSearchParams entries are an internal list; exposing the backing array
     // as enumerable makes assert deep-equality compare implementation storage.
     js_mark_non_enumerable(obj, entries_key);
@@ -1340,7 +1340,7 @@ extern "C" Item js_url_search_params_new(Item init) {
     // set methods
     auto usp_method = [&](const char* name, auto target, int adapter_arity) {
         Item key = make_string_item(name);
-        js_property_set(obj, key,
+        js_set_key_default(obj, key,
             jube_new_function(node_url_host->script, target, adapter_arity));
         // URLSearchParams methods live on the prototype in Node; keeping these
         // fallback own methods enumerable leaks per-instance functions.
@@ -1362,7 +1362,7 @@ extern "C" Item js_url_search_params_new(Item init) {
     // size as getter
     int64_t sz = js_array_length(entries);
     Item size_key = make_string_item("size");
-    js_property_set(obj, size_key, (Item){.item = i2it((int)sz)});
+    js_set_key_default(obj, size_key, (Item){.item = i2it((int)sz)});
     // size is observable as state, but it is not an enumerable data field.
     js_mark_non_enumerable(obj, size_key);
 
@@ -1390,7 +1390,7 @@ static Item js_url_set_method(Item ns, const char* name, Target target,
     Item fn = jube_new_function(node_url_host->script, target,
         adapter_arity);
     *function_root = fn.item;
-    js_property_set(ns, key, fn);
+    js_set_key_default(ns, key, fn);
     node_url_host->node->roots->root_frame_end(&frame);
     return fn;
 }
@@ -1434,7 +1434,7 @@ Item node_url_namespace(void) {
     // default export
     Item default_key = make_string_item("default");
     *key_root = default_key.item;
-    js_property_set(url_module_namespace, default_key, url_module_namespace);
+    js_set_key_default(url_module_namespace, default_key, url_module_namespace);
     node_url_host->node->roots->root_frame_end(&frame);
 
     return url_module_namespace;

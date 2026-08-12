@@ -667,7 +667,7 @@ JS_DEFINE_NATIVE_ARITY_FACTORY(8, JsNativeP8)
         /* Function creation can collect before Set owns the key/value. */ \
         Rooted<Item> function_root(roots, \
             factory(target adapter_arg)); \
-        js_property_set(object_root.get(), key_root.get(), function_root.get()); \
+        js_set_key_default(object_root.get(), key_root.get(), function_root.get()); \
         return function_root.get(); \
     }
 
@@ -1282,7 +1282,7 @@ extern "C" void js_set_class_name(Item cls_item, Item name_item) {
     ShapeEntry* existing = js_find_shape_entry(cls_item, "name", 4);
     if (existing && !jspd_is_deleted(existing)) {
         Item key = (Item){.item = s2it(heap_create_name("name", 4))};
-        Item current = js_property_get(cls_item, key);
+        Item current = js_get_key_default(cls_item, key);
         if (get_type_id(current) == LMD_TYPE_STRING) {
             String* current_name = it2s(current);
             if (current_name && current_name->len == 0) {
@@ -1307,7 +1307,7 @@ extern "C" void js_set_default_constructor_property(Item proto_item, Item cls_it
     ShapeEntry* existing = js_find_shape_entry(proto_item, "constructor", 11);
     if (existing && !jspd_is_deleted(existing)) return;
     Item key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-    js_property_set(proto_item, key, cls_item);
+    js_set_key_default(proto_item, key, cls_item);
     js_attr_set_enumerable(proto_item, "constructor", 11, false);
 }
 

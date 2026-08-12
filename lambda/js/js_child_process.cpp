@@ -75,7 +75,7 @@ static Item make_spawn_error_args_array(Item args_array) {
     if (get_type_id(args_array) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(args_array);
         for (int64_t i = 0; i < len; i++) {
-            js_array_push(result, js_array_get_int(args_array, i));
+            js_array_push(result, js_elements_get_int(args_array, i));
         }
     }
     return result;
@@ -88,24 +88,24 @@ static Item make_uv_spawn_error(int status, const char* file, Item spawnargs) {
     snprintf(msg, sizeof(msg), "spawn %s %s", file ? file : "", code);
 
     Item err = js_new_error(make_string_item(msg));
-    js_property_set(err, make_string_item("code"), make_string_item(code));
-    js_property_set(err, make_string_item("errno"), (Item){.item = i2it(status)});
+    js_set_key_default(err, make_string_item("code"), make_string_item(code));
+    js_set_key_default(err, make_string_item("errno"), (Item){.item = i2it(status)});
     char syscall[512];
     snprintf(syscall, sizeof(syscall), "spawn %s", file ? file : "");
-    js_property_set(err, make_string_item("syscall"), make_string_item(syscall));
-    if (file) js_property_set(err, make_string_item("path"), make_string_item(file));
-    js_property_set(err, make_string_item("spawnargs"), spawnargs);
+    js_set_key_default(err, make_string_item("syscall"), make_string_item(syscall));
+    if (file) js_set_key_default(err, make_string_item("path"), make_string_item(file));
+    js_set_key_default(err, make_string_item("spawnargs"), spawnargs);
     (void)errstr;
     return err;
 }
 
 static void emit_shell_args_warning(void) {
     Item warning = js_new_object();
-    js_property_set(warning, make_string_item("name"), make_string_item("DeprecationWarning"));
-    js_property_set(warning, make_string_item("message"), make_string_item(
+    js_set_key_default(warning, make_string_item("name"), make_string_item("DeprecationWarning"));
+    js_set_key_default(warning, make_string_item("message"), make_string_item(
         "Passing args to a child process with shell option true can lead to security "
         "vulnerabilities, as the arguments are not escaped, only concatenated."));
-    js_property_set(warning, make_string_item("code"), make_string_item("DEP0190"));
+    js_set_key_default(warning, make_string_item("code"), make_string_item("DEP0190"));
     js_process_emit(make_string_item("warning"), warning);
 }
 
@@ -165,7 +165,7 @@ static bool should_spawn_lambda_js_mode(const char* file, Item args) {
     if (get_type_id(args) != LMD_TYPE_ARRAY || js_array_length(args) <= 0) return false;
     int64_t len = js_array_length(args);
     for (int64_t i = 0; i < len; i++) {
-        Item arg = js_array_get_int(args, i);
+        Item arg = js_elements_get_int(args, i);
         if (get_type_id(arg) != LMD_TYPE_STRING) continue;
         String* s = it2s(arg);
         if ((s->len == 2 && memcmp(s->chars, "-e", 2) == 0) ||
@@ -370,7 +370,7 @@ static void maybe_complete(JsChildProcess* cp) {
             snprintf(emsg, sizeof(emsg), "%s maxBuffer length exceeded",
                      cp->max_buffer_stream[0] ? cp->max_buffer_stream : "stdout");
             err = js_new_error_with_name(make_string_item("RangeError"), make_string_item(emsg));
-            js_property_set(err, make_string_item("code"),
+            js_set_key_default(err, make_string_item("code"),
                             make_string_item("ERR_CHILD_PROCESS_STDIO_MAXBUFFER"));
         } else if (cp->exit_code != 0) {
             char emsg[1024];
@@ -402,10 +402,10 @@ static void maybe_complete(JsChildProcess* cp) {
 static Item child_abort_error(Item reason) {
     Item err = js_new_error_with_name(make_string_item("AbortError"),
                                       make_string_item("The operation was aborted"));
-    js_property_set(err, make_string_item("name"), make_string_item("AbortError"));
-    js_property_set(err, make_string_item("code"), make_string_item("ABORT_ERR"));
+    js_set_key_default(err, make_string_item("name"), make_string_item("AbortError"));
+    js_set_key_default(err, make_string_item("code"), make_string_item("ABORT_ERR"));
     if (!is_nullish_item(reason)) {
-        js_property_set(err, make_string_item("cause"), reason);
+        js_set_key_default(err, make_string_item("cause"), reason);
     }
     return err;
 }
@@ -419,7 +419,7 @@ static Item child_abort_with_env(Item env_item, Item event_item) {
     }
     cp->aborted = true;
     cp->abort_reason = is_object_item(cp->abort_signal)
-        ? js_property_get(cp->abort_signal, make_string_item("reason"))
+        ? js_get_key_default(cp->abort_signal, make_string_item("reason"))
         : make_js_undefined();
     // AbortSignal owns cancellation for exec(); without killing the shell child,
     // long-running commands stay as refed UV_PROCESS handles until the drain watchdog.
@@ -433,14 +433,14 @@ static Item child_abort_later(Item env_item) {
 
 static bool child_signal_is_abort_signal(Item signal) {
     if (!is_object_item(signal)) return false;
-    Item add_listener = js_property_get(signal, make_string_item("addEventListener"));
-    Item aborted = js_property_get(signal, make_string_item("aborted"));
+    Item add_listener = js_get_key_default(signal, make_string_item("addEventListener"));
+    Item aborted = js_get_key_default(signal, make_string_item("aborted"));
     return is_callable(add_listener) && get_type_id(aborted) == LMD_TYPE_BOOL;
 }
 
 static void child_install_abort_signal(JsChildProcess* cp, Item options) {
     if (!cp || !is_object_item(options)) return;
-    Item signal = js_property_get(options, make_string_item("signal"));
+    Item signal = js_get_key_default(options, make_string_item("signal"));
     if (is_nullish_item(signal)) return;
     cp->abort_signal = signal;
     cp->abort_kill_signal = SIGTERM;
@@ -449,11 +449,11 @@ static void child_install_abort_signal(JsChildProcess* cp, Item options) {
     cp->abort_env = abort_env;
     Item listener = js_new_native_closure(child_abort_with_env, 1, abort_env, 1);
     cp->abort_listener = listener;
-    Item add_listener = js_property_get(signal, make_string_item("addEventListener"));
+    Item add_listener = js_get_key_default(signal, make_string_item("addEventListener"));
     Item args[2] = {make_string_item("abort"), listener};
     js_call_function(add_listener, signal, args, 2);
     js_microtask_flush();
-    Item aborted = js_property_get(signal, make_string_item("aborted"));
+    Item aborted = js_get_key_default(signal, make_string_item("aborted"));
     if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
         Item abort_tick = js_new_native_closure(child_abort_later, 0, abort_env, 1);
         js_next_tick_enqueue(abort_tick);
@@ -462,7 +462,7 @@ static void child_install_abort_signal(JsChildProcess* cp, Item options) {
 
 static void child_remove_abort_signal(JsChildProcess* cp) {
     if (!cp || !is_object_item(cp->abort_signal) || !is_callable(cp->abort_listener)) return;
-    Item remove_listener = js_property_get(cp->abort_signal, make_string_item("removeEventListener"));
+    Item remove_listener = js_get_key_default(cp->abort_signal, make_string_item("removeEventListener"));
     if (is_callable(remove_listener)) {
         Item args[2] = {make_string_item("abort"), cp->abort_listener};
         js_call_function(remove_listener, cp->abort_signal, args, 2);
@@ -554,14 +554,14 @@ static Item js_cp_exec_with_options(Item command_item, Item options_item,
 
 static Item validate_exec_args(Item rest_args, Item* out_command, Item* out_options, Item* out_callback) {
     int64_t argc = js_array_length(rest_args);
-    Item command = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
+    Item command = argc > 0 ? js_elements_get_int(rest_args, 0) : make_js_undefined();
     if (get_type_id(command) != LMD_TYPE_STRING) {
         return js_throw_invalid_arg_type("command", "string", command);
     }
     Item options = make_js_undefined();
     Item callback = make_js_undefined();
-    Item second = argc > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
-    Item third = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
+    Item second = argc > 1 ? js_elements_get_int(rest_args, 1) : make_js_undefined();
+    Item third = argc > 2 ? js_elements_get_int(rest_args, 2) : make_js_undefined();
     if (is_callable(second)) {
         callback = second;
     } else if (is_object_item(second) || is_nullish_item(second)) {
@@ -576,7 +576,7 @@ static Item validate_exec_args(Item rest_args, Item* out_command, Item* out_opti
         return js_throw_invalid_arg_type("options", "object", second);
     }
     if (is_object_item(options)) {
-        JS_ASSIGN_OR_RETURN(signal, js_property_get(options, make_string_item("signal")));
+        JS_ASSIGN_OR_RETURN(signal, js_get_key_default(options, make_string_item("signal")));
         if (!is_nullish_item(signal) && !child_signal_is_abort_signal(signal)) {
             return js_throw_invalid_arg_type("options.signal", "AbortSignal", signal);
         }
@@ -747,19 +747,19 @@ static Item spawn_signal_name_item(int signal_number);
 #define CP_STDIO_HANDLE 5
 
 static void spawn_set_connected(Item obj, bool connected) {
-    js_property_set(obj, make_string_item("connected"),
+    js_set_key_default(obj, make_string_item("connected"),
                     (Item){.item = b2it(connected)});
 }
 
 static Item spawn_listener_callback(Item record) {
     if (is_callable(record)) return record;
-    if (is_object_item(record)) return js_property_get(record, make_string_item("listener"));
+    if (is_object_item(record)) return js_get_key_default(record, make_string_item("listener"));
     return make_js_undefined();
 }
 
 static bool spawn_listener_once(Item record) {
     if (!is_object_item(record)) return false;
-    Item once = js_property_get(record, make_string_item("once"));
+    Item once = js_get_key_default(record, make_string_item("once"));
     return once.item == ITEM_TRUE || once.item == b2it(true);
 }
 
@@ -767,7 +767,7 @@ static void spawn_emit_event(Item obj, const char* event, Item* args, int argc) 
     char key_buf[64];
     snprintf(key_buf, sizeof(key_buf), "__on_%s__", event);
     Item key = make_string_item(key_buf);
-    Item listeners = js_property_get(obj, key);
+    Item listeners = js_get_key_default(obj, key);
     if (is_callable(listeners)) {
         js_call_function(listeners, obj, args, argc);
         js_microtask_flush();
@@ -775,12 +775,12 @@ static void spawn_emit_event(Item obj, const char* event, Item* args, int argc) 
         int64_t count = js_array_length(listeners);
         Item next = js_array_new(0);
         for (int64_t i = 0; i < count; i++) {
-            Item record = js_array_get_int(listeners, i);
+            Item record = js_elements_get_int(listeners, i);
             if (!spawn_listener_once(record)) js_array_push(next, record);
         }
-        js_property_set(obj, key, next);
+        js_set_key_default(obj, key, next);
         for (int64_t i = 0; i < count; i++) {
-            Item record = js_array_get_int(listeners, i);
+            Item record = js_elements_get_int(listeners, i);
             Item cb = spawn_listener_callback(record);
             if (is_callable(cb)) {
                 js_call_function(cb, obj, args, argc);
@@ -808,7 +808,7 @@ static void spawn_maybe_emit_process_close(JsSpawnProcess* sp) {
 static bool spawn_has_event_listener(Item obj, const char* event) {
     char key_buf[64];
     snprintf(key_buf, sizeof(key_buf), "__on_%s__", event);
-    Item listeners = js_property_get(obj, make_string_item(key_buf));
+    Item listeners = js_get_key_default(obj, make_string_item(key_buf));
     if (is_callable(listeners)) return true;
     return get_type_id(listeners) == LMD_TYPE_ARRAY && js_array_length(listeners) > 0;
 }
@@ -827,14 +827,14 @@ static Item spawn_pending_cluster_online_key(void) {
 
 static void spawn_queue_ipc_message(Item obj, Item message, Item handle) {
     Item key = spawn_pending_messages_key();
-    Item pending = js_property_get(obj, key);
+    Item pending = js_get_key_default(obj, key);
     if (get_type_id(pending) != LMD_TYPE_ARRAY) {
         pending = js_array_new(0);
-        js_property_set(obj, key, pending);
+        js_set_key_default(obj, key, pending);
     }
     Item entry = js_new_object();
-    js_property_set(entry, make_string_item("message"), message);
-    js_property_set(entry, make_string_item("handle"), handle);
+    js_set_key_default(entry, make_string_item("message"), message);
+    js_set_key_default(entry, make_string_item("handle"), handle);
     js_array_push(pending, entry);
 }
 
@@ -856,14 +856,14 @@ static void spawn_emit_ipc_message_or_queue(Item obj, Item message, Item handle)
 static void spawn_flush_queued_ipc_messages(Item obj) {
     if (!spawn_has_event_listener(obj, "message")) return;
     Item key = spawn_pending_messages_key();
-    Item pending = js_property_get(obj, key);
+    Item pending = js_get_key_default(obj, key);
     if (get_type_id(pending) != LMD_TYPE_ARRAY) return;
-    js_property_set(obj, key, js_array_new(0));
+    js_set_key_default(obj, key, js_array_new(0));
     int64_t len = js_array_length(pending);
     for (int64_t i = 0; i < len; i++) {
-        Item entry = js_array_get_int(pending, i);
-        Item message = js_property_get(entry, make_string_item("message"));
-        Item handle = js_property_get(entry, make_string_item("handle"));
+        Item entry = js_elements_get_int(pending, i);
+        Item message = js_get_key_default(entry, make_string_item("message"));
+        Item handle = js_get_key_default(entry, make_string_item("handle"));
         spawn_emit_ipc_message_or_queue(obj, message, handle);
     }
 }
@@ -873,7 +873,7 @@ static bool spawn_ipc_is_cluster_listening(Item message) {
         get_type_id(message) != LMD_TYPE_VMAP) {
         return false;
     }
-    Item value = js_property_get(message, make_string_item("__lambda_cluster_listening__"));
+    Item value = js_get_key_default(message, make_string_item("__lambda_cluster_listening__"));
     return value.item == ITEM_TRUE || value.item == b2it(true);
 }
 
@@ -882,7 +882,7 @@ static bool spawn_ipc_is_socket_closed_control(Item message) {
         get_type_id(message) != LMD_TYPE_VMAP) {
         return false;
     }
-    Item value = js_property_get(message, make_string_item("__lambda_ipc_socket_closed__"));
+    Item value = js_get_key_default(message, make_string_item("__lambda_ipc_socket_closed__"));
     return value.item == ITEM_TRUE || value.item == b2it(true);
 }
 
@@ -891,29 +891,29 @@ static bool spawn_ipc_is_handle_accepted_control(Item message) {
         get_type_id(message) != LMD_TYPE_VMAP) {
         return false;
     }
-    Item value = js_property_get(message, make_string_item("__lambda_ipc_handle_accepted__"));
+    Item value = js_get_key_default(message, make_string_item("__lambda_ipc_handle_accepted__"));
     return value.item == ITEM_TRUE || value.item == b2it(true);
 }
 
 static void spawn_emit_or_queue_cluster_listening(Item obj) {
     if (!spawn_has_event_listener(obj, "listening")) {
-        js_property_set(obj, spawn_pending_cluster_listening_key(), (Item){.item = ITEM_TRUE});
+        js_set_key_default(obj, spawn_pending_cluster_listening_key(), (Item){.item = ITEM_TRUE});
         return;
     }
     spawn_emit_event(obj, "listening", NULL, 0);
 }
 
 static void spawn_flush_cluster_listening(Item obj) {
-    Item pending = js_property_get(obj, spawn_pending_cluster_listening_key());
+    Item pending = js_get_key_default(obj, spawn_pending_cluster_listening_key());
     if (pending.item != ITEM_TRUE && pending.item != b2it(true)) return;
     if (!spawn_has_event_listener(obj, "listening")) return;
-    js_property_set(obj, spawn_pending_cluster_listening_key(), (Item){.item = ITEM_FALSE});
+    js_set_key_default(obj, spawn_pending_cluster_listening_key(), (Item){.item = ITEM_FALSE});
     spawn_emit_event(obj, "listening", NULL, 0);
 }
 
 static void spawn_emit_or_queue_cluster_online(Item obj) {
     if (!spawn_has_event_listener(obj, "online")) {
-        js_property_set(obj, spawn_pending_cluster_online_key(), (Item){.item = ITEM_TRUE});
+        js_set_key_default(obj, spawn_pending_cluster_online_key(), (Item){.item = ITEM_TRUE});
         return;
     }
     spawn_emit_event(obj, "online", NULL, 0);
@@ -933,10 +933,10 @@ static void spawn_schedule_cluster_online(Item obj) {
 }
 
 static void spawn_flush_cluster_online(Item obj) {
-    Item pending = js_property_get(obj, spawn_pending_cluster_online_key());
+    Item pending = js_get_key_default(obj, spawn_pending_cluster_online_key());
     if (pending.item != ITEM_TRUE && pending.item != b2it(true)) return;
     if (!spawn_has_event_listener(obj, "online")) return;
-    js_property_set(obj, spawn_pending_cluster_online_key(), (Item){.item = ITEM_FALSE});
+    js_set_key_default(obj, spawn_pending_cluster_online_key(), (Item){.item = ITEM_FALSE});
     // `fork().on('online', cb)` registers while the fork expression is still
     // evaluating; delivering the queued event synchronously exposes a const
     // initializer's TDZ to cb instead of Node's next-turn ordering.
@@ -965,10 +965,10 @@ static Item spawn_emit_spawn_later(Item env_item) {
 static Item spawn_make_abort_error(Item reason) {
     Item err = js_new_error_with_name(make_string_item("AbortError"),
                                       make_string_item("The operation was aborted"));
-    js_property_set(err, make_string_item("name"), make_string_item("AbortError"));
-    js_property_set(err, make_string_item("code"), make_string_item("ABORT_ERR"));
+    js_set_key_default(err, make_string_item("name"), make_string_item("AbortError"));
+    js_set_key_default(err, make_string_item("code"), make_string_item("ABORT_ERR"));
     if (!is_nullish_item(reason)) {
-        js_property_set(err, make_string_item("cause"), reason);
+        js_set_key_default(err, make_string_item("cause"), reason);
     }
     return err;
 }
@@ -1008,7 +1008,7 @@ static void schedule_spawn_event(Item obj) {
 
 static Item make_ipc_channel_closed_error(void) {
     Item err = js_new_error(make_string_item("Channel closed"));
-    js_property_set(err, make_string_item("code"), make_string_item("ERR_IPC_CHANNEL_CLOSED"));
+    js_set_key_default(err, make_string_item("code"), make_string_item("ERR_IPC_CHANNEL_CLOSED"));
     return err;
 }
 
@@ -1039,7 +1039,7 @@ static Item spawn_signal_name_item(int signal_number) {
 
 static void spawn_set_process_signal_state(JsSpawnProcess* sp, int signal_number) {
     if (!sp) return;
-    js_property_set(sp->js_object, make_string_item("signalCode"),
+    js_set_key_default(sp->js_object, make_string_item("signalCode"),
                     signal_number == 0 ? ItemNull : spawn_signal_name_item(signal_number));
 }
 
@@ -1052,7 +1052,7 @@ static Item spawn_kill_with_env(Item env_item, Item signal_item) {
     int signal_number = spawn_signal_number(signal_item);
     int r = uv_process_kill(&sp->process, signal_number);
     if (r == 0) {
-        js_property_set(sp->js_object, make_string_item("killed"), (Item){.item = ITEM_TRUE});
+        js_set_key_default(sp->js_object, make_string_item("killed"), (Item){.item = ITEM_TRUE});
     }
     return (Item){.item = b2it(r == 0)};
 }
@@ -1309,7 +1309,7 @@ static Item spawn_abort_with_env(Item env_item, Item event_item) {
         return make_js_undefined();
     }
     Item reason = is_object_item(sp->abort_signal)
-        ? js_property_get(sp->abort_signal, make_string_item("reason"))
+        ? js_get_key_default(sp->abort_signal, make_string_item("reason"))
         : make_js_undefined();
     uv_process_kill(&sp->process, sp->abort_kill_signal ? sp->abort_kill_signal : SIGTERM);
     spawn_emit_abort_error_once(sp, reason);
@@ -1322,11 +1322,11 @@ static Item spawn_abort_later(Item env_item) {
 
 static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item options) {
     if (!sp || !is_object_item(options)) return;
-    Item signal = js_property_get(options, make_string_item("signal"));
+    Item signal = js_get_key_default(options, make_string_item("signal"));
     if (!is_object_item(signal)) return;
 
     sp->abort_signal = signal;
-    sp->abort_kill_signal = spawn_signal_number(js_property_get(options, make_string_item("killSignal")));
+    sp->abort_kill_signal = spawn_signal_number(js_get_key_default(options, make_string_item("killSignal")));
 
     Item* abort_env = js_alloc_env(1);
     abort_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
@@ -1334,14 +1334,14 @@ static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item option
     Item listener = js_new_native_closure(spawn_abort_with_env, 1, abort_env, 1);
     sp->abort_listener = listener;
 
-    Item add_listener = js_property_get(signal, make_string_item("addEventListener"));
+    Item add_listener = js_get_key_default(signal, make_string_item("addEventListener"));
     if (is_callable(add_listener)) {
         Item args[2] = {make_string_item("abort"), listener};
         js_call_function(add_listener, signal, args, 2);
         js_microtask_flush();
     }
 
-    Item aborted = js_property_get(signal, make_string_item("aborted"));
+    Item aborted = js_get_key_default(signal, make_string_item("aborted"));
     if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
         Item abort_tick = js_new_native_closure(spawn_abort_later, 0, abort_env, 1);
         js_next_tick_enqueue(abort_tick);
@@ -1351,7 +1351,7 @@ static void spawn_install_abort_signal(Item obj, JsSpawnProcess* sp, Item option
 
 static void spawn_remove_abort_signal(JsSpawnProcess* sp) {
     if (!sp || !is_object_item(sp->abort_signal) || !is_callable(sp->abort_listener)) return;
-    Item remove_listener = js_property_get(sp->abort_signal, make_string_item("removeEventListener"));
+    Item remove_listener = js_get_key_default(sp->abort_signal, make_string_item("removeEventListener"));
     if (is_callable(remove_listener)) {
         Item args[2] = {make_string_item("abort"), sp->abort_listener};
         js_call_function(remove_listener, sp->abort_signal, args, 2);
@@ -1367,9 +1367,9 @@ static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* 
     Item wire_message = message;
     if (send_handle) {
         wire_message = js_new_object();
-        js_property_set(wire_message, make_string_item("__lambda_ipc_has_handle__"),
+        js_set_key_default(wire_message, make_string_item("__lambda_ipc_has_handle__"),
                         (Item){.item = ITEM_TRUE});
-        js_property_set(wire_message, make_string_item("__lambda_ipc_payload__"), message);
+        js_set_key_default(wire_message, make_string_item("__lambda_ipc_payload__"), message);
     }
     Item json = js_json_stringify(wire_message);
     if (item_is_error(json) || get_type_id(json) != LMD_TYPE_STRING) return false;
@@ -1444,7 +1444,7 @@ static uv_stream_t* spawn_duplicate_tcp_send_handle(Item handle_item) {
 static void spawn_ipc_send_disconnect_and_close(JsSpawnProcess* sp) {
     if (!sp || !sp->ipc_pipe_active || uv_is_closing((uv_handle_t*)&sp->ipc_pipe)) return;
     Item control = js_new_object();
-    js_property_set(control, make_string_item("__lambda_ipc_disconnect__"), (Item){.item = ITEM_TRUE});
+    js_set_key_default(control, make_string_item("__lambda_ipc_disconnect__"), (Item){.item = ITEM_TRUE});
     Item json = js_json_stringify(control);
     if (!item_is_error(json) && get_type_id(json) == LMD_TYPE_STRING) {
         String* s = it2s(json);
@@ -1638,7 +1638,7 @@ static void spawn_emit_data(Item stream_obj, const char* data, int len) {
 
 static void spawn_stdout_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
     JsSpawnProcess* sp = (JsSpawnProcess*)stream->data;
-    Item stdout_obj = sp ? js_property_get(sp->js_object, make_string_item("stdout")) : ItemNull;
+    Item stdout_obj = sp ? js_get_key_default(sp->js_object, make_string_item("stdout")) : ItemNull;
     if (nread > 0 && sp) {
         spawn_emit_data(stdout_obj, buf->base, (int)nread);
     }
@@ -1657,7 +1657,7 @@ static void spawn_stdout_read_cb(uv_stream_t* stream, ssize_t nread, const uv_bu
 
 static void spawn_stderr_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
     JsSpawnProcess* sp = (JsSpawnProcess*)stream->data;
-    Item stderr_obj = sp ? js_property_get(sp->js_object, make_string_item("stderr")) : ItemNull;
+    Item stderr_obj = sp ? js_get_key_default(sp->js_object, make_string_item("stderr")) : ItemNull;
     if (nread > 0 && sp) {
         spawn_emit_data(stderr_obj, buf->base, (int)nread);
     }
@@ -1682,7 +1682,7 @@ static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_s
     sp->process_exited = true;
     spawn_drain_transferred_connections(sp);
     spawn_remove_abort_signal(sp);
-    js_property_set(sp->js_object, make_string_item("exitCode"),
+    js_set_key_default(sp->js_object, make_string_item("exitCode"),
                     term_signal == 0 ? (Item){.item = i2it(exit_status)} : ItemNull);
     spawn_set_process_signal_state(sp, term_signal);
 
@@ -1725,7 +1725,7 @@ static Item js_spawn_stream_resume(void) {
 static Item spawn_stream_pipe_on_data(Item env_item, Item chunk) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     Item dest = env ? env[0] : make_js_undefined();
-    Item write = js_property_get(dest, make_string_item("write"));
+    Item write = js_get_key_default(dest, make_string_item("write"));
     if (is_callable(write)) {
         js_call_function(write, dest, &chunk, 1);
         js_microtask_flush();
@@ -1738,7 +1738,7 @@ static Item spawn_stream_pipe_on_end(Item env_item) {
     Item dest = env ? env[0] : make_js_undefined();
     bool should_end = !env || env[1].item != ITEM_FALSE;
     if (should_end) {
-        Item end = js_property_get(dest, make_string_item("end"));
+        Item end = js_get_key_default(dest, make_string_item("end"));
         if (is_callable(end)) {
             js_call_function(end, dest, NULL, 0);
             js_microtask_flush();
@@ -1756,7 +1756,7 @@ static Item js_spawn_stream_pipe(Item dest, Item options) {
 
     Item should_end = (Item){.item = ITEM_TRUE};
     if (is_object_item(options)) {
-        Item end_opt = js_property_get(options, make_string_item("end"));
+        Item end_opt = js_get_key_default(options, make_string_item("end"));
         if (end_opt.item == ITEM_FALSE) should_end = (Item){.item = ITEM_FALSE};
     }
     Item* end_env = js_alloc_env(2);
@@ -1772,15 +1772,15 @@ static Item js_spawn_stream_pipe(Item dest, Item options) {
 // create a stream-like object with on('data', cb) / on('close', cb)
 static Item make_stream_object(void) {
     Item obj = js_new_object();
-    js_property_set(obj, make_string_item("on"),
+    js_set_key_default(obj, make_string_item("on"),
                     js_new_native_function(js_spawn_stream_on));
-    js_property_set(obj, make_string_item("once"),
+    js_set_key_default(obj, make_string_item("once"),
                     js_new_native_function(js_spawn_stream_once));
-    js_property_set(obj, make_string_item("setEncoding"),
+    js_set_key_default(obj, make_string_item("setEncoding"),
                     js_new_native_function(js_spawn_stream_set_encoding));
-    js_property_set(obj, make_string_item("pipe"),
+    js_set_key_default(obj, make_string_item("pipe"),
                     js_new_native_function(js_spawn_stream_pipe));
-    js_property_set(obj, make_string_item("resume"),
+    js_set_key_default(obj, make_string_item("resume"),
                     js_new_native_function(js_spawn_stream_resume));
     return obj;
 }
@@ -1789,8 +1789,8 @@ static Item make_stream_object(void) {
 static Item spawn_make_listener_record(Item callback, bool once) {
     if (!once) return callback;
     Item record = js_new_object();
-    js_property_set(record, make_string_item("listener"), callback);
-    js_property_set(record, make_string_item("once"), (Item){.item = ITEM_TRUE});
+    js_set_key_default(record, make_string_item("listener"), callback);
+    js_set_key_default(record, make_string_item("once"), (Item){.item = ITEM_TRUE});
     return record;
 }
 
@@ -1800,22 +1800,22 @@ static Item spawn_add_listener(Item self, Item event_item, Item callback, bool o
     char key_buf[64];
     snprintf(key_buf, sizeof(key_buf), "__on_%.*s__", (int)ev->len, ev->chars);
     Item key = make_string_item(key_buf);
-    Item existing = js_property_get(self, key);
+    Item existing = js_get_key_default(self, key);
     Item record = spawn_make_listener_record(callback, once);
     if (is_callable(existing)) {
         Item listeners = js_array_new(0);
         js_array_push(listeners, existing);
         js_array_push(listeners, record);
-        js_property_set(self, key, listeners);
+        js_set_key_default(self, key, listeners);
     } else if (get_type_id(existing) == LMD_TYPE_ARRAY) {
         js_array_push(existing, record);
     } else {
         if (once) {
             Item listeners = js_array_new(0);
             js_array_push(listeners, record);
-            js_property_set(self, key, listeners);
+            js_set_key_default(self, key, listeners);
         } else {
-            js_property_set(self, key, callback);
+            js_set_key_default(self, key, callback);
         }
     }
     if (ev->len == 7 && memcmp(ev->chars, "message", 7) == 0) {
@@ -1850,10 +1850,10 @@ extern "C" Item js_spawn_stream_once(Item event_item, Item callback) {
 }
 
 static void spawn_mark_stream_destroyed(Item stream_obj) {
-    js_property_set(stream_obj, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
-    js_property_set(stream_obj, make_string_item("closed"), (Item){.item = ITEM_TRUE});
-    js_property_set(stream_obj, make_string_item("readable"), (Item){.item = ITEM_FALSE});
-    js_property_set(stream_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
+    js_set_key_default(stream_obj, make_string_item("destroyed"), (Item){.item = ITEM_TRUE});
+    js_set_key_default(stream_obj, make_string_item("closed"), (Item){.item = ITEM_TRUE});
+    js_set_key_default(stream_obj, make_string_item("readable"), (Item){.item = ITEM_FALSE});
+    js_set_key_default(stream_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
 }
 
 static void spawn_destroy_stdio_pipe(JsSpawnProcess* sp, int kind, Item stream_obj) {
@@ -1898,13 +1898,13 @@ static void install_spawn_stream_destroy(Item stream_obj, JsSpawnProcess* sp,
     env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     env[1] = (Item){.item = i2it(kind)};
     if (out_env) *out_env = env;
-    js_property_set(stream_obj, make_string_item("destroy"),
+    js_set_key_default(stream_obj, make_string_item("destroy"),
                     js_new_native_closure(js_spawn_stream_destroy, 1, env, 2));
-    js_property_set(stream_obj, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
-    js_property_set(stream_obj, make_string_item("closed"), (Item){.item = ITEM_FALSE});
-    js_property_set(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"),
+    js_set_key_default(stream_obj, make_string_item("destroyed"), (Item){.item = ITEM_FALSE});
+    js_set_key_default(stream_obj, make_string_item("closed"), (Item){.item = ITEM_FALSE});
+    js_set_key_default(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)sp)});
-    js_property_set(stream_obj, make_string_item("__lambda_spawn_stdio_kind__"),
+    js_set_key_default(stream_obj, make_string_item("__lambda_spawn_stdio_kind__"),
                     (Item){.item = i2it(kind)});
 }
 
@@ -1912,19 +1912,19 @@ static void spawn_clear_stdio_handle_properties(JsSpawnProcess* sp) {
     if (!sp || !sp->js_object.item) return;
     const char* names[3] = {"stdin", "stdout", "stderr"};
     for (int i = 0; i < 3; i++) {
-        Item stream_obj = js_property_get(sp->js_object, make_string_item(names[i]));
+        Item stream_obj = js_get_key_default(sp->js_object, make_string_item(names[i]));
         if (!is_object_item(stream_obj)) continue;
-        js_property_set(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"),
+        js_set_key_default(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"),
                         make_js_undefined());
-        js_property_set(stream_obj, make_string_item("__lambda_spawn_stdio_kind__"),
+        js_set_key_default(stream_obj, make_string_item("__lambda_spawn_stdio_kind__"),
                         make_js_undefined());
     }
 }
 
 static void spawn_resume_stdio_stream(Item stream_obj) {
     if (!is_object_item(stream_obj)) return;
-    Item owner_item = js_property_get(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"));
-    Item kind_item = js_property_get(stream_obj, make_string_item("__lambda_spawn_stdio_kind__"));
+    Item owner_item = js_get_key_default(stream_obj, make_string_item("__lambda_spawn_stdio_owner__"));
+    Item kind_item = js_get_key_default(stream_obj, make_string_item("__lambda_spawn_stdio_kind__"));
     if (get_type_id(owner_item) != LMD_TYPE_INT || get_type_id(kind_item) != LMD_TYPE_INT) return;
     JsSpawnProcess* owner = (JsSpawnProcess*)(uintptr_t)it2i(owner_item);
     int kind = (int)it2i(kind_item);
@@ -1949,8 +1949,8 @@ static int spawn_dup_uv_fd(const uv_handle_t* handle) {
 
 static int spawn_dup_stdio_handle_fd(Item handle_item) {
     if (!is_object_item(handle_item)) return js_net_dup_ipc_stdio_fd(handle_item);
-    Item owner_item = js_property_get(handle_item, make_string_item("__lambda_spawn_stdio_owner__"));
-    Item kind_item = js_property_get(handle_item, make_string_item("__lambda_spawn_stdio_kind__"));
+    Item owner_item = js_get_key_default(handle_item, make_string_item("__lambda_spawn_stdio_owner__"));
+    Item kind_item = js_get_key_default(handle_item, make_string_item("__lambda_spawn_stdio_kind__"));
     if (get_type_id(owner_item) != LMD_TYPE_INT || get_type_id(kind_item) != LMD_TYPE_INT) {
         return js_net_dup_ipc_stdio_fd(handle_item);
     }
@@ -2019,7 +2019,7 @@ static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle
         return validation_error;
     }
 
-    Item connected = js_property_get(self, make_string_item("connected"));
+    Item connected = js_get_key_default(self, make_string_item("connected"));
     if (connected.item == ITEM_FALSE || !sp || !sp->ipc_pipe_active) {
         Item err = make_ipc_channel_closed_error();
         if (is_callable(cb)) schedule_spawn_send_callback(cb, err);
@@ -2036,7 +2036,7 @@ static Item js_spawn_send_with_env(Item env_item, Item message, Item send_handle
             return js_throw_type_error_code("ERR_INVALID_HANDLE_TYPE", "This handle type cannot be sent");
         }
         Item keep_open = is_object_item(options)
-            ? js_property_get(options, make_string_item("keepOpen"))
+            ? js_get_key_default(options, make_string_item("keepOpen"))
             : make_js_undefined();
         close_send_handle_after = keep_open.item != ITEM_TRUE && keep_open.item != b2it(true);
         if (!close_send_handle_after) {
@@ -2070,7 +2070,7 @@ extern "C" Item js_spawn_send(Item message, Item send_handle, Item options, Item
         return validation_error;
     }
 
-    Item connected = js_property_get(self, make_string_item("connected"));
+    Item connected = js_get_key_default(self, make_string_item("connected"));
     if (connected.item == ITEM_FALSE) {
         Item err = make_ipc_channel_closed_error();
         if (is_callable(cb)) schedule_spawn_send_callback(cb, err);
@@ -2111,18 +2111,18 @@ static Item make_child_process_object(void) {
     js_array_push(stdio, stdout_obj);
     js_array_push(stdio, stderr_obj);
 
-    js_property_set(obj, make_string_item("stdin"), stdin_obj);
-    js_property_set(obj, make_string_item("stdout"), stdout_obj);
-    js_property_set(obj, make_string_item("stderr"), stderr_obj);
-    js_property_set(obj, make_string_item("stdio"), stdio);
-    js_property_set(obj, make_string_item("on"),
+    js_set_key_default(obj, make_string_item("stdin"), stdin_obj);
+    js_set_key_default(obj, make_string_item("stdout"), stdout_obj);
+    js_set_key_default(obj, make_string_item("stderr"), stderr_obj);
+    js_set_key_default(obj, make_string_item("stdio"), stdio);
+    js_set_key_default(obj, make_string_item("on"),
                     js_new_native_function(js_spawn_on));
-    js_property_set(obj, make_string_item("once"),
+    js_set_key_default(obj, make_string_item("once"),
                     js_new_native_function(js_spawn_once));
-    js_property_set(obj, make_string_item("pid"), make_js_undefined());
-    js_property_set(obj, make_string_item("killed"), (Item){.item = ITEM_FALSE});
-    js_property_set(obj, make_string_item("exitCode"), ItemNull);
-    js_property_set(obj, make_string_item("signalCode"), ItemNull);
+    js_set_key_default(obj, make_string_item("pid"), make_js_undefined());
+    js_set_key_default(obj, make_string_item("killed"), (Item){.item = ITEM_FALSE});
+    js_set_key_default(obj, make_string_item("exitCode"), ItemNull);
+    js_set_key_default(obj, make_string_item("signalCode"), ItemNull);
     return obj;
 }
 
@@ -2131,12 +2131,12 @@ static void install_ipc_surface(Item obj, JsSpawnProcess* sp) {
     Item* send_env = js_alloc_env(1);
     send_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->send_env = send_env;
-    js_property_set(obj, make_string_item("send"),
+    js_set_key_default(obj, make_string_item("send"),
                     js_new_native_closure(js_spawn_send_with_env, 4, send_env, 1));
     Item* disconnect_env = js_alloc_env(1);
     disconnect_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->disconnect_env = disconnect_env;
-    js_property_set(obj, make_string_item("disconnect"),
+    js_set_key_default(obj, make_string_item("disconnect"),
                     js_new_native_closure(js_spawn_disconnect_with_env, 0, disconnect_env, 1));
 }
 
@@ -2144,7 +2144,7 @@ static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
     Item* kill_env = js_alloc_env(1);
     kill_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->kill_env = kill_env;
-    js_property_set(obj, make_string_item("kill"),
+    js_set_key_default(obj, make_string_item("kill"),
                     js_new_native_closure(spawn_kill_with_env, 1, kill_env, 1));
     Item* dispose_env = js_alloc_env(1);
     dispose_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
@@ -2152,27 +2152,27 @@ static void install_spawn_lifecycle_surface(Item obj, JsSpawnProcess* sp) {
     Item dispose_key = js_symbol_well_known(make_string_item("dispose"));
     // Symbol.dispose must drive the native kill path; treating it as a missing
     // JS method leaves cat-style children alive until the drain watchdog.
-    js_property_set(obj, dispose_key,
+    js_set_key_default(obj, dispose_key,
                     js_new_native_closure(spawn_dispose_with_env, 0, dispose_env, 1));
 
     Item* ref_env = js_alloc_env(1);
     ref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->ref_env = ref_env;
-    js_property_set(obj, make_string_item("ref"),
+    js_set_key_default(obj, make_string_item("ref"),
                     js_new_native_closure(spawn_ref_with_env, 0, ref_env, 1));
 
     Item* unref_env = js_alloc_env(1);
     unref_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
     sp->unref_env = unref_env;
-    js_property_set(obj, make_string_item("unref"),
+    js_set_key_default(obj, make_string_item("unref"),
                     js_new_native_closure(spawn_unref_with_env, 0, unref_env, 1));
 }
 
 static void install_ipc_legacy_surface(Item obj) {
     spawn_set_connected(obj, true);
-    js_property_set(obj, make_string_item("send"),
+    js_set_key_default(obj, make_string_item("send"),
                     js_new_native_function(js_spawn_send));
-    js_property_set(obj, make_string_item("disconnect"),
+    js_set_key_default(obj, make_string_item("disconnect"),
                     js_new_native_function(js_spawn_disconnect));
 }
 
@@ -2193,7 +2193,7 @@ typedef struct SpawnRequest {
 
 static Item validate_uid_gid_option(Item options, const char* name) {
     if (!is_object_item(options)) return js_status_ok();
-    JS_ASSIGN_OR_RETURN(value, js_property_get(options, make_string_item(name)));
+    JS_ASSIGN_OR_RETURN(value, js_get_key_default(options, make_string_item(name)));
     if (is_nullish_item(value)) return js_status_ok();
     TypeId type = get_type_id(value);
     double number = 0;
@@ -2265,7 +2265,7 @@ static Item apply_stdio_entry(SpawnRequest* req, int index, Item entry) {
 
 static Item normalize_stdio_options(SpawnRequest* req) {
     if (!is_object_item(req->options)) return js_status_ok();
-    JS_ASSIGN_OR_RETURN(stdio, js_property_get(req->options, make_string_item("stdio")));
+    JS_ASSIGN_OR_RETURN(stdio, js_get_key_default(req->options, make_string_item("stdio")));
     if (is_nullish_item(stdio)) return js_status_ok();
     if (item_string_equals(stdio, "inherit")) {
         req->stdio_mode[0] = CP_STDIO_INHERIT;
@@ -2296,7 +2296,7 @@ static Item normalize_stdio_options(SpawnRequest* req) {
         if (len > CP_STDIO_MAX) return throw_invalid_stdio_value();
         req->stdio_count = len > 3 ? (int)len : 3;
         for (int i = 0; i < len; i++) {
-            JS_RETURN_IF_ERROR(apply_stdio_entry(req, i, js_array_get_int(stdio, i)));
+            JS_RETURN_IF_ERROR(apply_stdio_entry(req, i, js_elements_get_int(stdio, i)));
         }
         return js_status_ok();
     }
@@ -2320,12 +2320,12 @@ static Item normalize_spawn_request(Item rest_args, SpawnRequest* req) {
     req->env = make_js_undefined();
     Item process_obj = js_get_process_object_value();
     if (is_object_item(process_obj)) {
-        Item process_env = js_property_get(process_obj, make_string_item("env"));
+        Item process_env = js_get_key_default(process_obj, make_string_item("env"));
         if (is_object_item(process_env)) req->env = process_env;
     }
 
     int64_t argc64 = js_array_length(rest_args);
-    Item command_item = argc64 > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
+    Item command_item = argc64 > 0 ? js_elements_get_int(rest_args, 0) : make_js_undefined();
     if (get_type_id(command_item) != LMD_TYPE_STRING) {
         return js_throw_invalid_arg_type("file", "string", command_item);
     }
@@ -2337,8 +2337,8 @@ static Item normalize_spawn_request(Item rest_args, SpawnRequest* req) {
     memcpy(req->file, cmd->chars, (size_t)cmd_len);
     req->file[cmd_len] = '\0';
 
-    Item second = argc64 > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
-    Item third = argc64 > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
+    Item second = argc64 > 1 ? js_elements_get_int(rest_args, 1) : make_js_undefined();
+    Item third = argc64 > 2 ? js_elements_get_int(rest_args, 2) : make_js_undefined();
 
     if (get_type_id(second) == LMD_TYPE_ARRAY) {
         req->args = second;
@@ -2367,11 +2367,11 @@ static Item normalize_spawn_request(Item rest_args, SpawnRequest* req) {
     if (is_object_item(req->options)) {
         JS_RETURN_IF_ERROR(validate_uid_gid_option(req->options, "uid"));
         JS_RETURN_IF_ERROR(validate_uid_gid_option(req->options, "gid"));
-        JS_ASSIGN_OR_RETURN(shell, js_property_get(req->options, make_string_item("shell")));
+        JS_ASSIGN_OR_RETURN(shell, js_get_key_default(req->options, make_string_item("shell")));
         req->shell = get_type_id(shell) == LMD_TYPE_BOOL && it2b(shell);
-        JS_ASSIGN_OR_RETURN(detached, js_property_get(req->options, make_string_item("detached")));
+        JS_ASSIGN_OR_RETURN(detached, js_get_key_default(req->options, make_string_item("detached")));
         req->detached = get_type_id(detached) == LMD_TYPE_BOOL && it2b(detached);
-        JS_ASSIGN_OR_RETURN(env, js_property_get(req->options, make_string_item("env")));
+        JS_ASSIGN_OR_RETURN(env, js_get_key_default(req->options, make_string_item("env")));
         if (is_object_item(env)) req->env = env;
         JS_RETURN_IF_ERROR(normalize_stdio_options(req));
     }
@@ -2387,9 +2387,9 @@ static char** build_envp(Item env_item, int* out_count) {
     char** envp = (char**)mem_calloc((size_t)len64 + 1, sizeof(char*), MEM_CAT_JS_RUNTIME);
     int count = 0;
     for (int64_t i = 0; i < len64; i++) {
-        Item key = js_array_get_int(keys, i);
+        Item key = js_elements_get_int(keys, i);
         if (get_type_id(key) != LMD_TYPE_STRING) continue;
-        Item value = js_property_get(env_item, key);
+        Item value = js_get_key_default(env_item, key);
         if (is_nullish_item(value)) continue;
         if (get_type_id(value) != LMD_TYPE_STRING) value = js_to_string(value);
         if (get_type_id(value) != LMD_TYPE_STRING) continue;
@@ -2474,7 +2474,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         if (command_line_pos < 0) command_line_pos = 0;
         if (command_line_pos >= (int)sizeof(command_line)) command_line_pos = (int)sizeof(command_line) - 1;
         for (int i = 0; i < argc; i++) {
-            append_shell_arg(command_line, sizeof(command_line), &command_line_pos, js_array_get_int(req.args, i));
+            append_shell_arg(command_line, sizeof(command_line), &command_line_pos, js_elements_get_int(req.args, i));
         }
         if (argc > 0) emit_shell_args_warning();
     }
@@ -2507,7 +2507,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
             argv[arg_index++] = (char*)"js";
         }
         for (int i = 0; i < argc; i++) {
-            Item arg = js_array_get_int(req.args, i);
+            Item arg = js_elements_get_int(req.args, i);
             if (get_type_id(arg) != LMD_TYPE_STRING) {
                 arg = js_to_string(arg);
                 if (item_is_error(arg)) {
@@ -2544,9 +2544,9 @@ extern "C" Item js_cp_spawn(Item rest_args) {
 
     // create JS object with stdout/stderr sub-objects
     Item obj = make_child_process_object();
-    js_property_set(obj, make_string_item("spawnfile"),
+    js_set_key_default(obj, make_string_item("spawnfile"),
                     make_string_item(req.shell ? argv[0] : req.file));
-    js_property_set(obj, make_string_item("spawnargs"), spawnargs);
+    js_set_key_default(obj, make_string_item("spawnargs"), spawnargs);
 
     sp->js_object = obj;
     install_spawn_lifecycle_surface(obj, sp);
@@ -2560,35 +2560,35 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         uv_pipe_init(loop, &sp->stdin_pipe, 0);
         sp->stdin_pipe.data = sp;
         sp->handles_expected++;
-        Item stdin_obj = js_property_get(obj, make_string_item("stdin"));
+        Item stdin_obj = js_get_key_default(obj, make_string_item("stdin"));
         Item* stdin_env = js_alloc_env(1);
         stdin_env[0] = (Item){.item = (uint64_t)(uintptr_t)sp};
         sp->stdin_env = stdin_env;
-        js_property_set(stdin_obj, make_string_item("write"),
+        js_set_key_default(stdin_obj, make_string_item("write"),
                         js_new_native_closure(js_spawn_stdin_write, 1, stdin_env, 1));
-        js_property_set(stdin_obj, make_string_item("end"),
+        js_set_key_default(stdin_obj, make_string_item("end"),
                         js_new_native_closure(js_spawn_stdin_end, 1, stdin_env, 1));
         install_spawn_stream_destroy(stdin_obj, sp, 0, &sp->stdin_destroy_env);
-        js_property_set(stdin_obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
-        js_property_set(stdin_obj, make_string_item("readable"), (Item){.item = ITEM_FALSE});
+        js_set_key_default(stdin_obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
+        js_set_key_default(stdin_obj, make_string_item("readable"), (Item){.item = ITEM_FALSE});
     }
     if (sp->stdout_pipe_active) {
         uv_pipe_init(loop, &sp->stdout_pipe, 0);
         sp->stdout_pipe.data = sp;
         sp->handles_expected++;
-        Item stdout_obj = js_property_get(obj, make_string_item("stdout"));
+        Item stdout_obj = js_get_key_default(obj, make_string_item("stdout"));
         install_spawn_stream_destroy(stdout_obj, sp, 1, &sp->stdout_env);
-        js_property_set(stdout_obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
-        js_property_set(stdout_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
+        js_set_key_default(stdout_obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
+        js_set_key_default(stdout_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
     }
     if (sp->stderr_pipe_active) {
         uv_pipe_init(loop, &sp->stderr_pipe, 0);
         sp->stderr_pipe.data = sp;
         sp->handles_expected++;
-        Item stderr_obj = js_property_get(obj, make_string_item("stderr"));
+        Item stderr_obj = js_get_key_default(obj, make_string_item("stderr"));
         install_spawn_stream_destroy(stderr_obj, sp, 2, &sp->stderr_env);
-        js_property_set(stderr_obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
-        js_property_set(stderr_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
+        js_set_key_default(stderr_obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
+        js_set_key_default(stderr_obj, make_string_item("writable"), (Item){.item = ITEM_FALSE});
     }
     if (req.ipc) {
         // ipc stdio pipes need descriptor passing enabled for sendHandle.
@@ -2734,7 +2734,7 @@ extern "C" Item js_cp_spawn(Item rest_args) {
         return obj;
     }
 
-    js_property_set(obj, make_string_item("pid"),
+    js_set_key_default(obj, make_string_item("pid"),
                     (Item){.item = i2it(sp->process.pid)});
 
     spawn_install_abort_signal(obj, sp, req.options);
@@ -2775,12 +2775,12 @@ static Item copy_required_file(Item file_item, char* out, int out_size) {
 static Item validate_execfile_args(Item rest_args) {
     int64_t argc = js_array_length(rest_args);
     char file_buf[4096];
-    Item file = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
+    Item file = argc > 0 ? js_elements_get_int(rest_args, 0) : make_js_undefined();
     JS_RETURN_IF_ERROR(copy_required_file(file, file_buf, sizeof(file_buf)));
 
-    Item second = argc > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
-    Item third = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
-    Item fourth = argc > 3 ? js_array_get_int(rest_args, 3) : make_js_undefined();
+    Item second = argc > 1 ? js_elements_get_int(rest_args, 1) : make_js_undefined();
+    Item third = argc > 2 ? js_elements_get_int(rest_args, 2) : make_js_undefined();
+    Item fourth = argc > 3 ? js_elements_get_int(rest_args, 3) : make_js_undefined();
 
     if (get_type_id(second) == LMD_TYPE_ARRAY) {
         if (!(is_nullish_item(third) || is_object_item(third) || is_callable(third))) {
@@ -2828,7 +2828,7 @@ static Item validate_execfile_args(Item rest_args) {
 
 static size_t execfile_max_buffer_from_options(Item options) {
     if (!is_object_item(options)) return 1024 * 1024;
-    Item value = js_property_get(options, make_string_item("maxBuffer"));
+    Item value = js_get_key_default(options, make_string_item("maxBuffer"));
     if (is_nullish_item(value)) return 1024 * 1024;
     TypeId type = get_type_id(value);
     double number = 0;
@@ -2843,23 +2843,23 @@ static size_t execfile_max_buffer_from_options(Item options) {
 extern "C" Item js_cp_execFile(Item rest_args) {
     JS_RETURN_IF_ERROR(validate_execfile_args(rest_args));
     int64_t argc = js_array_length(rest_args);
-    Item file_item = js_array_get_int(rest_args, 0);
+    Item file_item = js_elements_get_int(rest_args, 0);
     Item args_item = make_js_undefined();
     Item options_item = make_js_undefined();
     Item callback_item = make_js_undefined();
 
     if (argc > 1) {
-        Item second = js_array_get_int(rest_args, 1);
+        Item second = js_elements_get_int(rest_args, 1);
         if (get_type_id(second) == LMD_TYPE_ARRAY) {
             args_item = second;
             if (argc > 2) {
-                Item third = js_array_get_int(rest_args, 2);
+                Item third = js_elements_get_int(rest_args, 2);
                 if (is_callable(third)) callback_item = third;
                 else {
                     options_item = third;
                 }
                 if (argc > 3) {
-                    Item fourth = js_array_get_int(rest_args, 3);
+                    Item fourth = js_elements_get_int(rest_args, 3);
                     if (is_callable(fourth)) callback_item = fourth;
                 }
             }
@@ -2868,7 +2868,7 @@ extern "C" Item js_cp_execFile(Item rest_args) {
         } else if (is_object_item(second) || is_nullish_item(second)) {
             options_item = second;
             if (argc > 2) {
-                Item third = js_array_get_int(rest_args, 2);
+                Item third = js_elements_get_int(rest_args, 2);
                 if (is_callable(third)) callback_item = third;
             }
         }
@@ -2893,7 +2893,7 @@ extern "C" Item js_cp_execFile(Item rest_args) {
     if (get_type_id(args_item) == LMD_TYPE_ARRAY) {
         int64_t args_len = js_array_length(args_item);
         for (int64_t i = 0; i < args_len; i++) {
-            if (!append_shell_arg(cmd, sizeof(cmd), &pos, js_array_get_int(args_item, i))) {
+            if (!append_shell_arg(cmd, sizeof(cmd), &pos, js_elements_get_int(args_item, i))) {
                 return js_throw_invalid_arg_type("args", "Array of strings", args_item);
             }
         }
@@ -2907,11 +2907,11 @@ extern "C" Item js_cp_execFile(Item rest_args) {
 static Item validate_fork_args(Item rest_args) {
     int64_t argc = js_array_length(rest_args);
     char file_buf[4096];
-    Item file = argc > 0 ? js_array_get_int(rest_args, 0) : make_js_undefined();
+    Item file = argc > 0 ? js_elements_get_int(rest_args, 0) : make_js_undefined();
     JS_RETURN_IF_ERROR(copy_required_file(file, file_buf, sizeof(file_buf)));
 
-    Item second = argc > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
-    Item third = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
+    Item second = argc > 1 ? js_elements_get_int(rest_args, 1) : make_js_undefined();
+    Item third = argc > 2 ? js_elements_get_int(rest_args, 2) : make_js_undefined();
 
     if (get_type_id(second) == LMD_TYPE_ARRAY) {
         if (!(is_nullish_item(third) || is_object_item(third))) {
@@ -2934,12 +2934,12 @@ extern "C" Item js_cp_fork(Item rest_args) {
     js_host_hooks_set_cluster_online_hook(js_child_process_emit_or_queue_cluster_online);
     JS_RETURN_IF_ERROR(validate_fork_args(rest_args));
     int64_t argc = js_array_length(rest_args);
-    Item module_path = js_array_get_int(rest_args, 0);
+    Item module_path = js_elements_get_int(rest_args, 0);
     Item fork_args = js_array_new(0);
     Item options = make_js_undefined();
 
-    Item second = argc > 1 ? js_array_get_int(rest_args, 1) : make_js_undefined();
-    Item third = argc > 2 ? js_array_get_int(rest_args, 2) : make_js_undefined();
+    Item second = argc > 1 ? js_elements_get_int(rest_args, 1) : make_js_undefined();
+    Item third = argc > 2 ? js_elements_get_int(rest_args, 2) : make_js_undefined();
     if (get_type_id(second) == LMD_TYPE_ARRAY) {
         fork_args = second;
         if (is_object_item(third)) options = third;
@@ -2948,15 +2948,15 @@ extern "C" Item js_cp_fork(Item rest_args) {
     }
 
     Item process_obj = js_get_process_object_value();
-    Item exec_path = js_property_get(process_obj, make_string_item("execPath"));
+    Item exec_path = js_get_key_default(process_obj, make_string_item("execPath"));
     if (is_object_item(options)) {
-        Item opt_exec_path = js_property_get(options, make_string_item("execPath"));
+        Item opt_exec_path = js_get_key_default(options, make_string_item("execPath"));
         if (get_type_id(opt_exec_path) == LMD_TYPE_STRING) exec_path = opt_exec_path;
     }
 
-    Item exec_argv = js_property_get(process_obj, make_string_item("execArgv"));
+    Item exec_argv = js_get_key_default(process_obj, make_string_item("execArgv"));
     if (is_object_item(options)) {
-        Item opt_exec_argv = js_property_get(options, make_string_item("execArgv"));
+        Item opt_exec_argv = js_get_key_default(options, make_string_item("execArgv"));
         if (get_type_id(opt_exec_argv) == LMD_TYPE_ARRAY) exec_argv = opt_exec_argv;
     }
 
@@ -2964,29 +2964,29 @@ extern "C" Item js_cp_fork(Item rest_args) {
     if (get_type_id(exec_argv) == LMD_TYPE_ARRAY) {
         int64_t exec_len = js_array_length(exec_argv);
         for (int64_t i = 0; i < exec_len; i++) {
-            js_array_push(spawn_args, js_array_get_int(exec_argv, i));
+            js_array_push(spawn_args, js_elements_get_int(exec_argv, i));
         }
     }
     js_array_push(spawn_args, module_path);
     int64_t fork_argc = js_array_length(fork_args);
     for (int64_t i = 0; i < fork_argc; i++) {
-        js_array_push(spawn_args, js_array_get_int(fork_args, i));
+        js_array_push(spawn_args, js_elements_get_int(fork_args, i));
     }
 
     Item spawn_options = js_new_object();
     if (is_object_item(options)) {
-        JS_ASSIGN_OR_RETURN(env, js_property_get(options, make_string_item("env")));
-        if (is_object_item(env)) js_property_set(spawn_options, make_string_item("env"), env);
-        JS_ASSIGN_OR_RETURN(detached, js_property_get(options, make_string_item("detached")));
+        JS_ASSIGN_OR_RETURN(env, js_get_key_default(options, make_string_item("env")));
+        if (is_object_item(env)) js_set_key_default(spawn_options, make_string_item("env"), env);
+        JS_ASSIGN_OR_RETURN(detached, js_get_key_default(options, make_string_item("detached")));
         if (get_type_id(detached) == LMD_TYPE_BOOL) {
-            js_property_set(spawn_options, make_string_item("detached"), detached);
+            js_set_key_default(spawn_options, make_string_item("detached"), detached);
         }
     }
     Item stdio = js_array_new(0);
     bool copied_stdio = false;
     bool stdio_has_ipc = false;
     if (is_object_item(options)) {
-        JS_ASSIGN_OR_RETURN(opt_stdio, js_property_get(options, make_string_item("stdio")));
+        JS_ASSIGN_OR_RETURN(opt_stdio, js_get_key_default(options, make_string_item("stdio")));
         if (!is_nullish_item(opt_stdio)) {
             if (item_string_equals(opt_stdio, "pipe") ||
                 item_string_equals(opt_stdio, "inherit") ||
@@ -3000,7 +3000,7 @@ extern "C" Item js_cp_fork(Item rest_args) {
             } else if (get_type_id(opt_stdio) == LMD_TYPE_ARRAY) {
                 int64_t opt_len = js_array_length(opt_stdio);
                 for (int64_t i = 0; i < opt_len; i++) {
-                    Item entry = js_array_get_int(opt_stdio, i);
+                    Item entry = js_elements_get_int(opt_stdio, i);
                     if (item_string_equals(entry, "ipc")) stdio_has_ipc = true;
                     js_array_push(stdio, entry);
                 }
@@ -3011,7 +3011,7 @@ extern "C" Item js_cp_fork(Item rest_args) {
         }
     }
     if (!copied_stdio) {
-        JS_ASSIGN_OR_RETURN(silent, is_object_item(options) ? js_property_get(options, make_string_item("silent")) : make_js_undefined());
+        JS_ASSIGN_OR_RETURN(silent, is_object_item(options) ? js_get_key_default(options, make_string_item("silent")) : make_js_undefined());
         const char* default_stdio = (get_type_id(silent) == LMD_TYPE_BOOL && it2b(silent)) ? "pipe" : "ignore";
         // fork({ silent: true }) exposes child stdout/stderr; using the default
         // ignore mode hides child output and breaks detached child handshakes.
@@ -3020,7 +3020,7 @@ extern "C" Item js_cp_fork(Item rest_args) {
         js_array_push(stdio, make_string_item(default_stdio));
     }
     if (!stdio_has_ipc) js_array_push(stdio, make_string_item("ipc"));
-    js_property_set(spawn_options, make_string_item("stdio"), stdio);
+    js_set_key_default(spawn_options, make_string_item("stdio"), stdio);
 
     Item spawn_rest = js_array_new(0);
     js_array_push(spawn_rest, exec_path);
@@ -3035,7 +3035,7 @@ extern "C" Item js_cp_fork(Item rest_args) {
 
 static bool cp_get_string_prop(Item obj, const char* name, char* out, int out_size) {
     if (!is_object_item(obj) || !name || !out || out_size <= 0) return false;
-    Item value = js_property_get(obj, make_string_item(name));
+    Item value = js_get_key_default(obj, make_string_item(name));
     const char* s = item_to_cstr(value, out, out_size);
     return s != NULL;
 }
@@ -3045,7 +3045,7 @@ static bool cp_args_contain_string(Item args_item, const char* needle) {
     int64_t len = js_array_length(args_item);
     int64_t needle_len = (int64_t)strlen(needle);
     for (int64_t i = 0; i < len; i++) {
-        Item arg = js_array_get_int(args_item, i);
+        Item arg = js_elements_get_int(args_item, i);
         if (get_type_id(arg) != LMD_TYPE_STRING) continue;
         String* s = it2s(arg);
         if (s->len == needle_len && memcmp(s->chars, needle, (size_t)needle_len) == 0) return true;
@@ -3063,19 +3063,19 @@ static bool cp_snapshot_args(Item args_item, char* blob_path, int blob_path_size
     *build_snapshot = false;
     int64_t len = js_array_length(args_item);
     for (int64_t i = 0; i < len; i++) {
-        Item arg = js_array_get_int(args_item, i);
+        Item arg = js_elements_get_int(args_item, i);
         if (get_type_id(arg) != LMD_TYPE_STRING) continue;
         String* s = it2s(arg);
         if (s->len == 15 && memcmp(s->chars, "--snapshot-blob", 15) == 0) {
             if (i + 1 >= len) return false;
-            if (!item_to_cstr(js_array_get_int(args_item, i + 1), blob_path, blob_path_size)) return false;
+            if (!item_to_cstr(js_elements_get_int(args_item, i + 1), blob_path, blob_path_size)) return false;
             i++;
             continue;
         }
         if (s->len == 16 && memcmp(s->chars, "--build-snapshot", 16) == 0) {
             *build_snapshot = true;
             if (i + 1 < len) {
-                item_to_cstr(js_array_get_int(args_item, i + 1), entry_path, entry_path_size);
+                item_to_cstr(js_elements_get_int(args_item, i + 1), entry_path, entry_path_size);
                 i++;
             }
             continue;
@@ -3089,7 +3089,7 @@ static bool cp_snapshot_args(Item args_item, char* blob_path, int blob_path_size
 
 static void cp_append_env_assignment(char* cmd, int cmd_size, int* pos, const char* key, Item env) {
     if (!cmd || !pos || !key || !is_object_item(env)) return;
-    Item value = js_property_get(env, make_string_item(key));
+    Item value = js_get_key_default(env, make_string_item(key));
     if (get_type_id(value) != LMD_TYPE_STRING) return;
     if (*pos >= cmd_size - 1) return;
     int wrote = snprintf(cmd + *pos, (size_t)(cmd_size - *pos), "%s=", key);
@@ -3145,8 +3145,8 @@ static void cp_append_env_assignments(char* cmd, int cmd_size, int* pos, Item en
     Item keys = js_object_keys(env);
     int64_t key_count = get_type_id(keys) == LMD_TYPE_ARRAY ? js_array_length(keys) : 0;
     for (int64_t i = 0; i < key_count; i++) {
-        Item key = js_array_get_int(keys, i);
-        Item value = js_property_get(env, key);
+        Item key = js_elements_get_int(keys, i);
+        Item value = js_get_key_default(env, key);
         cp_append_env_assignment_value(cmd, cmd_size, pos, key, value);
     }
 }
@@ -3180,7 +3180,7 @@ static bool cp_spawnSync_prepare_lambda_snapshot(const char* cmd, Item args_item
         append_shell_arg(full_cmd, full_cmd_size, &pos, cwd_item);
         pos += snprintf(full_cmd + pos, (size_t)(full_cmd_size - pos), " && ");
     }
-    Item env = is_object_item(options_item) ? js_property_get(options_item, make_string_item("env")) : make_js_undefined();
+    Item env = is_object_item(options_item) ? js_get_key_default(options_item, make_string_item("env")) : make_js_undefined();
     cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_HOST", env);
     cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_PROMISE", env);
     cp_append_env_assignment(full_cmd, full_cmd_size, &pos, "NODE_TEST_DNS", env);
@@ -3206,7 +3206,7 @@ static int cp_spawnSync_append_args(char* full_cmd, int full_cmd_size, int pos, 
     if (get_type_id(args_item) != LMD_TYPE_ARRAY) return pos;
     int64_t alen = js_array_length(args_item);
     for (int64_t i = 0; i < alen && pos < full_cmd_size - 1; i++) {
-        Item arg = js_array_get_int(args_item, i);
+        Item arg = js_elements_get_int(args_item, i);
         if (get_type_id(arg) != LMD_TYPE_STRING) {
             arg = js_to_string(arg);
             if (item_is_error(arg)) return pos;
@@ -3228,7 +3228,7 @@ static bool cp_spawnSync_prepare_shell_command(const char* cmd, Item args_item, 
         append_shell_arg(full_cmd, full_cmd_size, &pos, cwd_item);
         pos += snprintf(full_cmd + pos, (size_t)(full_cmd_size - pos), " && ");
     }
-    Item env = is_object_item(options_item) ? js_property_get(options_item, make_string_item("env")) : make_js_undefined();
+    Item env = is_object_item(options_item) ? js_get_key_default(options_item, make_string_item("env")) : make_js_undefined();
     cp_append_env_assignments(full_cmd, full_cmd_size, &pos, env);
     Item cmd_item = make_string_item(cmd);
     if (!append_shell_arg(full_cmd, full_cmd_size, &pos, cmd_item)) return false;
@@ -3276,7 +3276,7 @@ static char* cp_read_file_to_buffer(const char* path, size_t* out_len) {
 
 static bool cp_sync_output_wants_string(Item options_item) {
     if (!is_object_item(options_item)) return false;
-    Item encoding = js_property_get(options_item, make_string_item("encoding"));
+    Item encoding = js_get_key_default(options_item, make_string_item("encoding"));
     if (is_nullish_item(encoding)) return false;
     if (get_type_id(encoding) != LMD_TYPE_STRING) return false;
     String* s = it2s(encoding);
@@ -3335,7 +3335,7 @@ static bool cp_sync_input_bytes(Item input, const char** data, size_t* len) {
 
 static Item cp_sync_write_input_file(Item options_item, const char* input_path) {
     if (!is_object_item(options_item) || !input_path) return js_status_ok();
-    JS_ASSIGN_OR_RETURN(input, js_property_get(options_item, make_string_item("input")));
+    JS_ASSIGN_OR_RETURN(input, js_get_key_default(options_item, make_string_item("input")));
     if (is_nullish_item(input)) return js_status_ok();
     const char* data = NULL;
     size_t len = 0;
@@ -3361,7 +3361,7 @@ static Item cp_sync_write_input_file(Item options_item, const char* input_path) 
 
 static bool cp_sync_has_input(Item options_item) {
     if (!is_object_item(options_item)) return false;
-    Item input = js_property_get(options_item, make_string_item("input"));
+    Item input = js_get_key_default(options_item, make_string_item("input"));
     return !is_nullish_item(input);
 }
 
@@ -3400,7 +3400,7 @@ static const char* cp_sync_null_device(void) {
 
 static bool cp_get_number_prop(Item obj, const char* name, double* out) {
     if (!out || !is_object_item(obj)) return false;
-    Item value = js_property_get(obj, make_string_item(name));
+    Item value = js_get_key_default(obj, make_string_item(name));
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) {
         *out = (double)it2i(value);
@@ -3437,7 +3437,7 @@ static int cp_get_kill_signal(Item options_item, const char** signal_name) {
     int sig = SIGTERM;
     const char* name = "SIGTERM";
     if (is_object_item(options_item)) {
-        Item value = js_property_get(options_item, make_string_item("killSignal"));
+        Item value = js_get_key_default(options_item, make_string_item("killSignal"));
         TypeId type = get_type_id(value);
         if (type == LMD_TYPE_INT) {
             int requested = (int)it2i(value);
@@ -3529,13 +3529,13 @@ static int cp_spawnSync_run_shell_command(const char* full_cmd, int64_t timeout_
 
 static Item cp_make_spawn_sync_timeout_error(const char* cmd, Item args_item) {
     Item err = js_new_error(make_string_item("spawnSync ETIMEDOUT"));
-    js_property_set(err, make_string_item("code"), make_string_item("ETIMEDOUT"));
-    js_property_set(err, make_string_item("errno"), (Item){.item = i2it((int64_t)UV_ETIMEDOUT)});
+    js_set_key_default(err, make_string_item("code"), make_string_item("ETIMEDOUT"));
+    js_set_key_default(err, make_string_item("errno"), (Item){.item = i2it((int64_t)UV_ETIMEDOUT)});
     char syscall[512];
     snprintf(syscall, sizeof(syscall), "spawnSync %s", cmd ? cmd : "");
-    js_property_set(err, make_string_item("syscall"), make_string_item(syscall));
-    if (cmd) js_property_set(err, make_string_item("path"), make_string_item(cmd));
-    js_property_set(err, make_string_item("spawnargs"), make_spawn_error_args_array(args_item));
+    js_set_key_default(err, make_string_item("syscall"), make_string_item(syscall));
+    if (cmd) js_set_key_default(err, make_string_item("path"), make_string_item(cmd));
+    js_set_key_default(err, make_string_item("spawnargs"), make_spawn_error_args_array(args_item));
     return err;
 }
 
@@ -3651,17 +3651,17 @@ extern "C" Item js_cp_spawnSync(Item command_item, Item args_item, Item options_
 
     Item result = js_new_object();
     if (timed_out) {
-        js_property_set(result, make_string_item("status"), ItemNull);
-        js_property_set(result, make_string_item("signal"), make_string_item(timeout_signal_name));
-        js_property_set(result, make_string_item("error"), cp_make_spawn_sync_timeout_error(cmd, effective_args));
+        js_set_key_default(result, make_string_item("status"), ItemNull);
+        js_set_key_default(result, make_string_item("signal"), make_string_item(timeout_signal_name));
+        js_set_key_default(result, make_string_item("error"), cp_make_spawn_sync_timeout_error(cmd, effective_args));
     } else {
-        js_property_set(result, make_string_item("status"), (Item){.item = i2it(exit_code)});
-        js_property_set(result, make_string_item("signal"), ItemNull);
+        js_set_key_default(result, make_string_item("status"), (Item){.item = i2it(exit_code)});
+        js_set_key_default(result, make_string_item("signal"), ItemNull);
     }
     bool output_as_string = cp_sync_output_wants_string(effective_options);
-    js_property_set(result, make_string_item("stdout"),
+    js_set_key_default(result, make_string_item("stdout"),
                     cp_sync_stdio_output_item(stdio_mode[1], out_buf, out_len, output_as_string));
-    js_property_set(result, make_string_item("stderr"),
+    js_set_key_default(result, make_string_item("stderr"),
                     cp_sync_stdio_output_item(stdio_mode[2], err_buf, err_len, output_as_string));
     if (out_buf) mem_free(out_buf);
     if (err_buf) mem_free(err_buf);
@@ -3708,7 +3708,7 @@ extern "C" Item js_get_child_process_namespace(void) {
 
     // set "default" for `import cp from 'child_process'`
     Item default_key = make_string_item("default");
-    js_property_set(namespace_root.get(), default_key, namespace_root.get());
+    js_set_key_default(namespace_root.get(), default_key, namespace_root.get());
 
     // Module creation allocates before its static namespace is fully populated.
     cp_namespace = namespace_root.get();

@@ -749,6 +749,23 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         // A table keeps its own role while gi describes participation in this grid.
         LayoutViewScope view_scope(lycon);
         lycon->view = grid_item;
+        bool has_table_max_constraint = false;
+        if (grid_item->is_element() && grid_item->as_element()->specified_style) {
+            CssDeclaration* max_width = style_tree_get_declaration(
+                grid_item->as_element()->specified_style, CSS_PROPERTY_MAX_WIDTH);
+            CssDeclaration* max_height = style_tree_get_declaration(
+                grid_item->as_element()->specified_style, CSS_PROPERTY_MAX_HEIGHT);
+            has_table_max_constraint = (max_width && max_width->value) ||
+                (max_height && max_height->value);
+        }
+        if (has_table_max_constraint && grid_item->blk) {
+            // max-constrained grid tables receive a definite used box from grid
+            // stretch before their empty table tracks are distributed.
+            grid_item->block_mut()->given_width = content_width;
+            grid_item->block_mut()->given_width_type = CSS_VALUE__UNDEF;
+            grid_item->block_mut()->given_height = content_height;
+            grid_item->block_mut()->given_height_type = CSS_VALUE__UNDEF;
+        }
         layout_table_content(lycon, grid_item, grid_item->display);
     } else {
         // Standard flow layout for grid item content

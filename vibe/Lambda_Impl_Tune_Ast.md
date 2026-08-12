@@ -183,6 +183,31 @@ The first optimization order is therefore:
 
 AST allocation alone is too small to produce G3. Builder consolidation is still required for structure and G1, but MIR lowering must carry most of the time reduction.
 
+### 3.3 Regression root cause: cached capture facts had two owners
+
+The timeout symptom was not a scheduler-only regression. The indexed/cached
+capture slice added `JsFuncCollected::cached_annexb_suppressed` so Annex-B
+lexical suppression could be reused while determining closure captures. The
+copy helper still freed that map after copying it, although the function table
+owned it and later capture passes reused the pointer. AddressSanitizer reduced
+the failure to `hashmap_get -> jm_name_set_has ->
+jm_copy_cached_function_locals`: a stale suppression-map read in an Annex-B
+batch worker. A worker crash then looked like a transpilation timeout because
+the batch controller waited for a lost result and retried the work.
+
+The ownership invariant is now explicit and follows **D5.3.4**: cached
+analysis facts live for the whole MIR-transpiler compilation and are released
+only by `jm_free_scope_env_names`/transpiler cleanup; copy helpers never free
+borrowed cached maps. An attempted whole-path memo was rejected: the lexical
+collector's result depends on destination binding-kind state and made the
+`lib_codemirror` large-library fixture stop making progress even in isolation.
+Only the per-function declaration caches, whose inputs and ownership are
+explicit, remain enabled. A focused three-test Annex-B batch passes 3/3 after
+the ownership fix. This distinction is important for G2/G3:
+first eliminate crash/retry work, then compare source-to-linked-MIR time with
+identical complete manifests; a timeout reduction caused only by fewer crashed
+workers is not compiler credit.
+
 ---
 
 ## 4. Target compiler process
@@ -721,13 +746,13 @@ full **D8.4.3** error/root contract.
 
 | Gate | Baseline | Candidate | Required | Status |
 |---|---:|---:|---:|---|
-| G1 runtime LOC | 319,606 | 316,657 (working tree) | ≤317,606 | provisional pass; deletion audit/ledger still open |
-| G2 Lambda median `build_transpile_us` | 24,134,804 | 18,685,648 (candidate_lazy; 5 complete runs) | candidate/base ≤0.90 | provisional pass; repeat after final binary rebuild because the later clean capture was host-noisy |
-| G3 JS median `build_transpile_us` | 192,832,974 | 120,444,046 (`candidate_final_js`; 5 complete runs) | candidate/base ≤0.80 | provisional pass (ratio 0.625) |
+| G1 runtime LOC | 319,606 | 318,358 (working tree after rejecting unsafe lexical-path memo) | ≤317,606 | open; 752 additional audited runtime/compiler LOC must be deleted before closeout |
+| G2 Lambda median `build_transpile_us` | 24,134,804 | 18,685,648 (historical candidate_lazy; 5 complete runs) | candidate/base ≤0.90 | provisional evidence invalidated for closeout; recapture after unsafe lexical-path memo removal |
+| G3 JS median `build_transpile_us` | 192,832,974 | 120,444,046 (historical `candidate_final_js`; 5 complete runs) | candidate/base ≤0.80 | provisional evidence invalidated for closeout; recapture after unsafe lexical-path memo removal |
 | D4 JS large-library finalized MIR diagnostic | 5,743,247 | 5,008,331 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
 | D4 JS complete-corpus finalized MIR diagnostic | 7,187,862 | 6,135,408 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
-| G5 sample/timing integrity | 698 Lambda rows / 324 JS rows, identical sorted manifests | candidate_final5: 698 Lambda rows; candidate_final_js: 324 JS rows; incomplete captures are rejected | exact timing manifest | pass for retained complete captures; known baseline `lib_floating_ui` semantic failure is recorded separately |
-| G0 regressions | current baselines | focused release ratchet 16/16, exact-collection GC 1/1, compiler-pass 2/2, and input baseline 2104/2104 pass; concurrent full baseline remains noisy | all green | open: `make test-lambda-baseline` reports 1469/1590 and `make test262-baseline` reports 40179/40261 fully passing, with batch-worker crashes/collateral failures under host pressure |
+| G5 sample/timing integrity | 698 Lambda rows / 324 JS rows, identical sorted manifests | historical captures retained for diagnosis only; incomplete captures are rejected | exact timing manifest | open until post-rejection recapture |
+| G0 regressions | current baselines | focused release ratchet 16/16, exact-collection GC 1/1, compiler-pass 2/2, input baseline 2104/2104, prior full Lambda baseline 3694/3694, and current Annex-B cache-fix batch 3/3 | all green | full post-fix `make test-lambda-baseline`/`make test262-baseline` closeout remains to be rerun; the prior failures were worker crashes/collateral timeout symptoms, not accepted results |
 
 ### 13.4 Deletion ledger
 
@@ -739,7 +764,7 @@ full **D8.4.3** error/root contract.
 | 2 | common `AstIndex` visitor, dense node/facts storage, JS function identity index | measured after source audit; new tables count against the candidate | common visitor/index |
 | 3 | repeated immediate-number materialization in indexed JS MIR scopes | 522 MIR instructions on Lodash diagnostic artifact (not LOC) | block-local boxed-number cache |
 | 4 | remaining anchor-scope cleanup, including DOM/runtime balancing edits | offsets the above deletions; included in the fail-closed counter | common builder/lowering mechanics |
-| **Audited net through candidate** | — | **2,638 net deleted since LOC anchor; current counter is 316,657 (delta −2,949)** | hard requirement ≥2,000; verify once more after final rebuild |
+| **Audited net through candidate** | — | **1,248 net deleted since LOC anchor; current counter is 318,358 (delta −1,248)** | hard requirement ≥2,000; 752 audited deletions remain |
 
 ---
 

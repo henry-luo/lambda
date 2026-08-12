@@ -861,7 +861,7 @@ extern "C" Item js_cssom_rule_get_css_rules(Item rule_item) {
                 Item nd_obj = js_new_object();
                 js_class_stamp(nd_obj, JS_CLASS_CSS_NESTED_DECLARATIONS);
                 Item style_key = make_string_item("style");
-                js_property_set(nd_obj, style_key, style_decl);
+                js_set_key_default(nd_obj, style_key, style_decl);
                 array_push(arr, nd_obj);
             } else {
                 array_push(arr, js_cssom_wrap_rule(nr[i], pool));

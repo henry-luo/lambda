@@ -2454,6 +2454,13 @@ static void prepare_all_tests(
 static constexpr int T262_HARD_TIMEOUT_PER_TEST = 15;
 static constexpr int T262_HARD_TIMEOUT_MIN = 30;
 static constexpr int T262_SLOW_HARD_TIMEOUT_PER_TEST = 60;
+// A batch normally emits one BATCH_END record per test.  Bound the silent
+// interval independently of batch size so a native crash-recovery loop cannot
+// hold a 100-test worker for the full 25-minute aggregate timeout.  The
+// 120-second budget leaves headroom above the measured 64.6-second slowest
+// healthy batch while still making the baseline gate fail-fast and recoverable.
+static constexpr int T262_BATCH_NO_PROGRESS_TIMEOUT = 120;
+static constexpr int T262_SLOW_BATCH_NO_PROGRESS_TIMEOUT = 300;
 static int hard_timeout_per_test_secs(bool slow_test = false) {
     int timeout_secs = current_js_timeout_secs() + 5;
     // Slow isolated tests may spend tens of seconds compiling their preamble;
@@ -2462,13 +2469,12 @@ static int hard_timeout_per_test_secs(bool slow_test = false) {
     return std::max(minimum_secs, timeout_secs);
 }
 
-#ifndef _WIN32
-// the steady-clock watchdog is compiled only for the POSIX worker path below.
+// use a monotonic clock for both worker implementations so wall-clock changes
+// cannot extend a silent-batch watchdog interval.
 static long long t262_steady_now_ms() {
     auto now = std::chrono::steady_clock::now().time_since_epoch();
     return std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
 }
-#endif
 
 // Run a sub-batch of tests from a pre-written manifest file + stdout pipe
 // Run a sub-batch from a manifest file using posix_spawn (avoids fork's page table copy)
@@ -2524,15 +2530,19 @@ static int run_t262_sub_batch(
     CloseHandle(manifest_h);
     CloseHandle(pipe_wr);
 
-    int hard_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN,
-                                     (int)(num_tests * hard_timeout_per_test_secs(slow_test)));
+    int no_progress_timeout_secs = num_tests == 1
+        ? hard_timeout_per_test_secs(slow_test)
+        : slow_test ? T262_SLOW_BATCH_NO_PROGRESS_TIMEOUT
+                    : T262_BATCH_NO_PROGRESS_TIMEOUT;
     std::atomic<bool> worker_done{false};
-    std::thread watchdog([&pi, hard_timeout_secs, &worker_done]() {
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(hard_timeout_secs);
+    std::atomic<long long> last_progress_ms{t262_steady_now_ms()};
+    std::thread watchdog([&pi, no_progress_timeout_secs, &worker_done, &last_progress_ms]() {
         while (!worker_done.load(std::memory_order_relaxed)) {
-            if (std::chrono::steady_clock::now() >= deadline) {
-                fprintf(stderr, "\n[test262] WARNING: Worker PID %lu exceeded hard timeout (%ds) — terminating\n",
-                        pi.dwProcessId, hard_timeout_secs);
+            long long idle_ms = t262_steady_now_ms() -
+                last_progress_ms.load(std::memory_order_relaxed);
+            if (idle_ms >= (long long)no_progress_timeout_secs * 1000LL) {
+                fprintf(stderr, "\n[test262] WARNING: Worker PID %lu made no progress for %ds — terminating\n",
+                        pi.dwProcessId, no_progress_timeout_secs);
                 TerminateProcess(pi.hProcess, 1);
                 return;
             }
@@ -2576,6 +2586,7 @@ static int run_t262_sub_batch(
                     results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after,
                                                parse_us, ast_us, early_us, imports_us, mir_us,
                                                link_us, execute_us, cleanup_us, phase_total_us, cpu_us};
+                    last_progress_ms.store(t262_steady_now_ms(), std::memory_order_relaxed);
                     in_script = false;
                 } else if (strncmp(buf + 1, "BATCH_EXIT ", 11) == 0 ||
                            strncmp(buf + 1, "BATCH_DIAG ", 11) == 0) {
@@ -2676,15 +2687,19 @@ static int run_t262_sub_batch(
     // This catches hangs in JIT compilation, parsing, or native code that the
     // internal js-test-batch timeout can't interrupt. Killing the process closes its
     // stdout pipe, which unblocks the fgets loop below.
-    int hard_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN,
-                                     (int)(num_tests * hard_timeout_per_test_secs(slow_test)));
+    int no_progress_timeout_secs = num_tests == 1
+        ? hard_timeout_per_test_secs(slow_test)
+        : slow_test ? T262_SLOW_BATCH_NO_PROGRESS_TIMEOUT
+                    : T262_BATCH_NO_PROGRESS_TIMEOUT;
     std::atomic<bool> worker_done{false};
-    std::thread watchdog([pid, hard_timeout_secs, &worker_done]() {
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(hard_timeout_secs);
+    std::atomic<long long> last_progress_ms{t262_steady_now_ms()};
+    std::thread watchdog([pid, no_progress_timeout_secs, &worker_done, &last_progress_ms]() {
         while (!worker_done.load(std::memory_order_relaxed)) {
-            if (std::chrono::steady_clock::now() >= deadline) {
-                fprintf(stderr, "\n[test262] WARNING: Worker PID %d exceeded hard timeout (%ds) — sending SIGKILL\n",
-                        pid, hard_timeout_secs);
+            long long idle_ms = t262_steady_now_ms() -
+                last_progress_ms.load(std::memory_order_relaxed);
+            if (idle_ms >= (long long)no_progress_timeout_secs * 1000LL) {
+                fprintf(stderr, "\n[test262] WARNING: Worker PID %d made no progress for %ds — sending SIGKILL\n",
+                        pid, no_progress_timeout_secs);
                 kill(pid, SIGKILL);
                 return;
             }
@@ -2721,6 +2736,7 @@ static int run_t262_sub_batch(
                     results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after,
                                                parse_us, ast_us, early_us, imports_us, mir_us,
                                                link_us, execute_us, cleanup_us, phase_total_us, cpu_us};
+                    last_progress_ms.store(t262_steady_now_ms(), std::memory_order_relaxed);
                     in_script = false;
                 } else if (strncmp(buffer + 1, "BATCH_EXIT ", 11) == 0 ||
                            strncmp(buffer + 1, "BATCH_DIAG ", 11) == 0) {

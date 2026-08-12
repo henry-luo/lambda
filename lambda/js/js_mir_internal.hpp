@@ -102,6 +102,7 @@ typedef struct JsMirReference {
     bool uninitialized_this;
     bool is_private;
     bool computed_key;
+    bool property_key_canonicalized;
     uint32_t named_key_index;
     NameId named_key_id;
     uint32_t named_ic_index;

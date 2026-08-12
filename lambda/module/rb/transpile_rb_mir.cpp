@@ -40,10 +40,10 @@ extern __thread EvalContext* context;
 extern "C" void rb_reset_module_vars();
 
 // cross-language interop
-extern "C" Item js_property_get(Item object, Item key);
+extern "C" Item js_get_key_default(Item object, Item key);
 extern "C" Item js_new_object();
 extern "C" Item js_new_function_mir(void* func_ptr, int param_count);
-extern "C" Item js_property_set(Item object, Item key, Item value);
+extern "C" Item js_set_key_default(Item object, Item key, Item value);
 extern "C" void* js_function_get_ptr(Item fn_item);
 extern "C" void js_runtime_set_input(void* input);
 extern "C" char* read_text_file(const char* filename);

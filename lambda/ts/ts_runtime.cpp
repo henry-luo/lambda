@@ -324,12 +324,12 @@ extern "C" Item ts_enum_create(int member_count) {
 
 extern "C" Item ts_enum_add_member(Item enum_obj, Item name, Item value) {
     // add forward mapping (name → value) and reverse mapping (value → name)
-    extern Item js_property_set(Item, Item, Item);
-    js_property_set(enum_obj, name, value);
+    extern Item js_set_key_default(Item, Item, Item);
+    js_set_key_default(enum_obj, name, value);
     // reverse mapping for numeric enums
     TypeId value_type = get_type_id(value);
     if (value_type == LMD_TYPE_INT || value_type == LMD_TYPE_FLOAT) {
-        js_property_set(enum_obj, value, name);
+        js_set_key_default(enum_obj, value, name);
     }
     return enum_obj;
 }

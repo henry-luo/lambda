@@ -215,7 +215,16 @@ Item array_get(Array *array, int64_t index) {
 // ============================================================================
 // Unified ArrayNum factory
 // ============================================================================
+ArrayNum* array_num_new_with_extra(ArrayNumElemType elem_type, int64_t length,
+                                   int64_t extra);
+
 ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
+    return array_num_new_with_extra(elem_type, length, 0);
+}
+
+ArrayNum* array_num_new_with_extra(ArrayNumElemType elem_type, int64_t length,
+                                   int64_t extra) {
+    if (length < 0 || extra < 0 || length > INT64_MAX - extra) return NULL;
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!arr) return NULL;
     // The data-zone allocation can force GC before this helper returns the new
@@ -225,15 +234,20 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     Rooted<ArrayNum*> rooted_arr(roots, arr);
     arr->type_id = LMD_TYPE_ARRAY_NUM;
     arr->set_elem_type(elem_type);  // stored in map_kind/elem_type byte
+    arr->extra = extra;
     int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
     size_t bytes;
-    if (length > 0 && lam::checked_mul((size_t)length, (size_t)elem_size, &bytes)) {
+    if (elem_size <= 0 ||
+            !lam::checked_mul((size_t)(length + extra), (size_t)elem_size, &bytes)) {
+        return arr;
+    }
+    if (bytes > 0) {
         void* data = heap_data_alloc(bytes);
         arr = rooted_arr.get();
         arr->data = data;
     }
     if (arr->data) {                          // length/capacity stay 0 on overflow/OOM
-        arr->length = length;  arr->capacity = length;
+        arr->length = length;  arr->capacity = length + extra;
     }
     return arr;
 }
@@ -1221,6 +1235,9 @@ Item list_end(List *list) {
             return list->items[0];
         } else {
             list->is_content = 1;
+            // content lists use Lambda's heterogeneous element contract, so
+            // they must never be mistaken for published ordinary JS arrays.
+            container_set_js_elements_kind((Container*)list, JS_ELEMENTS_NONE);
             return {.array = list};
         }
     }
