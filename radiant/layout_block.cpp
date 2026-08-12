@@ -1424,11 +1424,6 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
 bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent);
 
-
-static bool is_block_self_collapsing(ViewBlock* vb);
-
-
-
 static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* parent,
                                           const char* content, bool is_before,
                                           FontProp* parent_font) {
@@ -1739,7 +1734,6 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     text_node->prev_sibling = fl_elem;
 }
 
-
 static View* margin_collapse_last_in_flow_child(ViewBlock* block) {
     View* last = nullptr;
     for (View* child = static_cast<View*>(block->first_child); child;
@@ -1765,7 +1759,7 @@ static View* margin_collapse_effective_last_child(View* child) {
             ViewBlock* block = lam::view_require_block(child);
             float margin_bottom = block->bound ? block->boundary()->margin.bottom : 0.0f;
             bool has_chain = block->bound && has_margin_chain(block->bound);
-            if (margin_bottom == 0.0f && !has_chain && is_block_self_collapsing(block)) {
+            if (margin_bottom == 0.0f && !has_chain && layout_block_is_self_collapsing(block)) {
                 // A collapsed-through wrapper must search the previous
                 // in-flow sibling; abspos/floated siblings do not separate margins.
                 child = previous_collapsible_sibling(block);
@@ -3315,7 +3309,6 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
     bool have_previous_multicol_inline_offset = false;
     ViewBlock* previous_vertical_multicol_child = nullptr;
     float vertical_inline_gap_total = 0.0f;
-
 
     for (View* child = element->first_placed_child(); child; child = child->next()) {
         LayoutVerticalFlowChild info = {};
@@ -4892,7 +4885,6 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
             continue;  // Skip non-float non-block elements
         }
 
-
         display.outer = CSS_VALUE_BLOCK;  // Floats become block per CSS 9.7
         elem->set_float_prelaid(true);
         layout_block(lycon, child, display);
@@ -5289,7 +5281,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             if (last && last->is_block()) {
                 ViewBlock* last_block = lam::view_require_block(last);
                 if (last_block->bound) {
-                    bool is_sc = is_block_self_collapsing(last_block);
+                    bool is_sc = layout_block_is_self_collapsing(last_block);
                     if (is_sc) {
                         // CSS Box 4 §3.1: When the last in-flow child is self-collapsing,
                         View* prev = last_block;
@@ -5310,7 +5302,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                                 }
                                 break;
                             }
-                            if (p && p->is_block() && is_block_self_collapsing(lam::view_require_block(p))) {
+                            if (p && p->is_block() && layout_block_is_self_collapsing(lam::view_require_block(p))) {
                                 prev = p;
                                 continue;
                             }
@@ -5486,7 +5478,6 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // Must be set BEFORE line_reset() so text-indent RTL handling works correctly
     if (block->blk) lycon->block.direction = block->block()->direction;
     lycon->line.vertical_align = CSS_VALUE_BASELINE;
-
 
     line_reset(lycon);
     if (block->font) {
@@ -5794,7 +5785,8 @@ static bool is_inline_substantial(ViewElement* ve) {
             // make their inline ancestor's otherwise phantom line box substantial.
             bool is_out_of_flow = (child_block->position && element_has_float(child_block)) ||
                 layout_block_is_out_of_flow_positioned(child_block);
-            if (!is_out_of_flow) return true;
+            // collapsed-through fragments do not create a line box.
+            if (!is_out_of_flow && !layout_block_is_self_collapsing(child_block)) return true;
         } else if (c->view_type) {
             return true;
         }
@@ -5806,7 +5798,7 @@ static bool is_inline_substantial(ViewElement* ve) {
 }
 
 // CSS 2.1 §8.3.1: Check if an in-flow block can be considered self-collapsing
-static bool is_block_self_collapsing(ViewBlock* vb) {
+bool layout_block_is_self_collapsing(ViewBlock* vb) {
     if (vb->height > 0) return false;
     // Tables and table internals are never self-collapsing (CSS 2.1 §17)
     if (vb->view_type == RDT_VIEW_TABLE || vb->view_type == RDT_VIEW_TABLE_ROW ||
@@ -5833,7 +5825,7 @@ static bool is_block_self_collapsing(ViewBlock* vb) {
             ViewBlock* cvb = lam::view_require_block(child);
             bool is_out_of_flow = (cvb->position && element_has_float(cvb)) ||
                 layout_block_is_out_of_flow_positioned(cvb);
-            if (!is_out_of_flow && !is_block_self_collapsing(cvb)) return false;
+            if (!is_out_of_flow && !layout_block_is_self_collapsing(cvb)) return false;
         } else {
             // CSS 2.1 §9.4.2: Line boxes that contain no text, no preserved
             // or borders, and no other in-flow content must be treated as not
@@ -8070,7 +8062,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                         layout_block_is_out_of_flow_positioned(vb);
                     if (!oof) {
                         has_any_in_flow = true;
-                        if (!is_block_self_collapsing(vb)) {
+                        if (!layout_block_is_self_collapsing(vb)) {
                             all_self_collapsing = false;
                             break;
                         }
@@ -9048,7 +9040,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         }
                         // CSS 2.1 §17 + §8.3.1: Tables and other BFC-establishing elements
                         // Only truly self-collapsing blocks can be skipped.
-                        if (!is_block_self_collapsing(vb)) {
+                        if (!layout_block_is_self_collapsing(vb)) {
                             break;
                         }
                         BoxEdges border = layout_boundary_border_edges(
@@ -9085,7 +9077,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     float parent_border_top = parent && parent->bound && parent->boundary_mut()->border ? parent->boundary_mut()->border->width.top : 0;
                     float parent_margin_top = parent && parent->bound ? parent->boundary()->margin.top : 0;
                     // CSS 2.1 §8.3.1: Parent-child top margin collapse.
-                    bool first_child_self_collapsing = is_block_self_collapsing(block);
+                    bool first_child_self_collapsing = layout_block_is_self_collapsing(block);
                     bool has_self_collapsing_margins = first_child_self_collapsing &&
                         (block->boundary()->margin.bottom != 0 || has_margin_chain(block->bound));
                     bool stretch_margin_after_float_avoidance =
@@ -9209,7 +9201,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // CSS 2.1 §8.3.1: Elements with clearance CAN be self-collapsing.
                 // Clearance only prevents the element's margins from being adjoining with
                 // the preceding sibling's margins, not the element's own top/bottom margins.
-                bool is_self_collapsing = is_block_self_collapsing(block);
+                bool is_self_collapsing = layout_block_is_self_collapsing(block);
                 // CSS 2.1 §8.3.1: Track if this block (or its margin chain) includes
                 // a self-collapsing element with clearance. Such margins must NOT
                 bool block_has_clearance = (lycon->block.saved_clear_y >= 0);

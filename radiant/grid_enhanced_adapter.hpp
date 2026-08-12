@@ -834,6 +834,18 @@ inline void run_enhanced_track_sizing(
     if (!grid_layout->computed_columns || !grid_layout->computed_rows) return;
     TrackArray& col_tracks = *grid_layout->computed_columns;
     TrackArray& row_tracks = *grid_layout->computed_rows;
+    auto collapse_auto_fit = [&](TrackArray& tracks, const bool* flags, int limit, bool horizontal) { // CSS Grid §7.2.3.2
+        for (int i = 0; i < limit && i < tracks.size(); i++) if (flags[i]) {
+            bool occupied = false;
+            for (int j = 0; j < item_count && !occupied; j++) {
+                GridItemProp* item = grid_item_prop(items[j]);
+                occupied = item && (horizontal ? item->computed_grid_column_start : item->computed_grid_row_start) <= i + 1 &&
+                    (horizontal ? item->computed_grid_column_end : item->computed_grid_row_end) > i + 1;
+            }
+            if (!occupied) tracks[i].collapse();
+        }
+    };
+    collapse_auto_fit(col_tracks, grid_layout->auto_fit_columns, grid_layout->auto_fit_col_count, true); collapse_auto_fit(row_tracks, grid_layout->auto_fit_rows, grid_layout->auto_fit_row_count, false);
     // Percentage sizing temporarily rewrites functions; preserve only the pass input definitions.
     TrackArray col_track_definitions = col_tracks;
     TrackArray row_track_definitions = row_tracks;

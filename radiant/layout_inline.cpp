@@ -677,6 +677,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     // they don't participate in normal flow layout and have positions determined
     // by their containing block, not the inline span (CSS 2.1 §9.3.1, §10.6.3)
     while (child && (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
+           (child->is_block() && layout_block_is_self_collapsing(lam::view_require_block(child))) ||
            ruby_annotation_is_outside_base_bounds(span, child) ||
            view_is_collapsed_whitespace_text(child, span))) {
         if (view_is_collapsed_whitespace_text(child, span)) {
@@ -867,6 +868,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     while (child) {
         // Skip nil-views and out-of-flow children (absolute/fixed positioned)
         if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
+            (child->is_block() && layout_block_is_self_collapsing(lam::view_require_block(child))) ||
             ruby_annotation_is_outside_base_bounds(span, child) ||
             view_is_collapsed_whitespace_text(child, span)) {
             if (view_is_collapsed_whitespace_text(child, span)) {
@@ -1164,11 +1166,10 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             }
 
             View* block_fragment = static_cast<View*>(child);
-            if (block_fragment->width > 0.0f || block_fragment->height > 0.0f) {
+            // self-collapsing blocks contribute margins, not inline fragments.
+            if (ViewBlock* fragment_block = lam::view_as_block(block_fragment); (!fragment_block || !layout_block_is_self_collapsing(fragment_block)) && (block_fragment->width > 0.0f || block_fragment->height > 0.0f)) {
                 float relative_x = 0.0f, relative_y = 0.0f;
-                if (ViewBlock* fragment_block = lam::view_as_block(block_fragment)) {
-                    layout_relative_position_offset(fragment_block, &relative_x, &relative_y);
-                }
+                layout_relative_position_offset(fragment_block, &relative_x, &relative_y);
                 // margin collapse finalizes normal-flow coordinates before the split
                 // ancestor records its fragment; relative offsets remain visual-only.
                 span_record_split_inline_fragment(
@@ -1686,8 +1687,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         span->x = lycon->line.left;
         float measured_width = measured_right - span->x;
         if (measured_width < 0.0f) measured_width = 0.0f;
-        span->width = measured_width > containing_line_width ?
-            measured_width : containing_line_width;
+        span->width = span->has_split_inline_fragment_union() ? max(measured_width, containing_line_width) : measured_width; // empty split inlines do not stretch across the containing block.
 
         // CSS 2.1 §9.2.1.1: For relatively-positioned block-in-inline spans,
         // override y with the flow position. compute_span_bounding_box uses

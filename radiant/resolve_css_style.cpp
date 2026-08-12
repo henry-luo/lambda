@@ -6569,8 +6569,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         return;  // Custom properties don't have standard processing
     }
-    DomElement* current_element = lycon->elmt && lycon->elmt->is_element()
-        ? lycon->elmt->as_element() : nullptr;
+    DomElement* current_element = lycon->view && lycon->view->is_element()
+        ? lycon->view->as_element() : nullptr;
     bool inline_axis_is_vertical = layout_element_inline_axis_is_vertical(current_element);
     WritingMode current_writing_mode = layout_element_writing_mode(current_element);
     bool vertical_block_start_is_right = current_writing_mode == WM_VERTICAL_RL;

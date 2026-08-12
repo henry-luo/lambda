@@ -3819,6 +3819,7 @@ static inline bool layout_block_is_out_of_flow_positioned(const ViewBlock* block
     return block && layout_position_is_abs_fixed(block->position);
 }
 
+bool layout_block_is_self_collapsing(ViewBlock* block);
 static inline bool layout_block_is_out_of_flow(const ViewBlock* block) {
     return block &&
            (layout_position_is_abs_fixed(block->position) ||
