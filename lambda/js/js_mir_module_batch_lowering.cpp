@@ -1603,6 +1603,49 @@ static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
     }
 }
 
+uint64_t jm_lexical_path_hash(const void* item, uint64_t seed0,
+        uint64_t seed1) {
+    const JsLexicalPathCacheEntry* entry =
+        (const JsLexicalPathCacheEntry*)item;
+    uintptr_t root = (uintptr_t)entry->root >> 3;
+    uintptr_t target = (uintptr_t)entry->target >> 3;
+    uint64_t mixed = (uint64_t)root ^ ((uint64_t)target * 0x9e3779b97f4a7c15ULL);
+    return hashmap_sip(&mixed, sizeof(mixed), seed0, seed1);
+}
+
+int jm_lexical_path_cmp(const void* lhs, const void* rhs, void* udata) {
+    (void)udata;
+    const JsLexicalPathCacheEntry* a = (const JsLexicalPathCacheEntry*)lhs;
+    const JsLexicalPathCacheEntry* b = (const JsLexicalPathCacheEntry*)rhs;
+    return a->root == b->root && a->target == b->target ? 0 : 1;
+}
+
+static void jm_collect_enclosing_lexicals_cached(JsMirTranspiler* mt,
+        JsAstNode* root, JsAstNode* target, struct hashmap* names) {
+    if (!root || !target || !names) return;
+    if (!mt || !mt->lexical_path_cache ||
+            getenv("LAMBDA_AST_TUNE_NO_LEXICAL_PATH_CACHE")) {
+        jm_collect_enclosing_lexicals_for_target(root, target, names);
+        return;
+    }
+    JsLexicalPathCacheEntry key = {root, target, NULL};
+    JsLexicalPathCacheEntry* cached = (JsLexicalPathCacheEntry*)hashmap_get(
+        mt->lexical_path_cache, &key);
+    if (!cached) {
+        struct hashmap* cached_names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        if (!cached_names) {
+            jm_collect_enclosing_lexicals_for_target(root, target, names);
+            return;
+        }
+        jm_collect_enclosing_lexicals_for_target(root, target, cached_names);
+        JsLexicalPathCacheEntry entry = {root, target, cached_names};
+        hashmap_set(mt->lexical_path_cache, &entry);
+        cached = (JsLexicalPathCacheEntry*)hashmap_get(mt->lexical_path_cache, &key);
+    }
+    if (cached && cached->names) jm_copy_cached_names(cached->names, names);
+}
+
 static void jm_cleanup_active_mir_state(JsMirCompileRecoveryState* state) {
     if (!state) return;
     for (int i = state->count - 1; i >= 0; i--) {
@@ -4213,7 +4256,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 JsNameSetEntry* e = (JsNameSetEntry*)copy_item;
                 jm_name_set_add(ancestor_names, e->name);
             }
-            jm_collect_enclosing_lexicals_for_target((JsAstNode*)program,
+            jm_collect_enclosing_lexicals_cached(mt, (JsAstNode*)program,
                 (JsAstNode*)fc->node, ancestor_names);
 
             // Now REMOVE function-level names from all_names that were added from
@@ -4231,7 +4274,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             // closure cell; copying ordinary wrapper locals freezes their TDZ value.
             struct hashmap* program_lexicals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
-            jm_collect_enclosing_lexicals_for_target((JsAstNode*)program,
+            jm_collect_enclosing_lexicals_cached(mt, (JsAstNode*)program,
                 (JsAstNode*)fc->node, program_lexicals);
             size_t pl_iter = 0;
             void* pl_item = NULL;
@@ -4267,7 +4310,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         jm_name_hash, jm_name_cmp, NULL, NULL);
                     jm_copy_cached_function_locals(anc, true, anc->is_strict,
                         anc_locals, true);
-                    jm_collect_enclosing_lexicals_for_target(afn->body,
+                    jm_collect_enclosing_lexicals_cached(mt, afn->body,
                         (JsAstNode*)fc->node, anc_locals);
                     size_t al_iter = 0; void* al_item;
                     while (hashmap_iter(anc_locals, &al_iter, &al_item)) {
@@ -4322,7 +4365,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         }
                         s = s->next;
                     }
-                    jm_collect_enclosing_lexicals_for_target((JsAstNode*)program,
+                    jm_collect_enclosing_lexicals_cached(mt, (JsAstNode*)program,
                         (JsAstNode*)fc->node, let_const_names);
                 }
                 // Collect from ancestor function bodies
@@ -4332,7 +4375,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     if (anc->node && anc->node->body) {
                         jm_copy_cached_names(jm_cached_function_direct_lexicals(anc),
                             let_const_names);
-                        jm_collect_enclosing_lexicals_for_target(anc->node->body,
+                        jm_collect_enclosing_lexicals_cached(mt, anc->node->body,
                             (JsAstNode*)fc->node, let_const_names);
                     }
                     anc_idx = anc->parent_index;
@@ -4445,7 +4488,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         hashmap_free(body_locals);
                     }
                     if (pfn->body && child->node) {
-                        jm_collect_enclosing_lexicals_for_target(pfn->body,
+                        jm_collect_enclosing_lexicals_cached(mt, pfn->body,
                             (JsAstNode*)child->node, parent_own);
                     }
                     // Also add parent's existing captures as "own" (already available)

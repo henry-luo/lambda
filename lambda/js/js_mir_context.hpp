@@ -241,6 +241,15 @@ struct JsFuncCollected {
     bool cached_annexb_suppressed_ready;
 };
 
+// A lexical-path query is immutable after AST construction. Keep the source
+// root and target in the key because capture analysis asks both for the whole
+// program path and for each enclosing function-body path.
+struct JsLexicalPathCacheEntry {
+    JsAstNode* root;
+    JsAstNode* target;
+    struct hashmap* names;
+};
+
 static inline FnParamTypeInfo* jm_param_info(JsFuncCollected* fc, int index) {
     if (!fc || index < 0 || index >= fc->analysis.param_count ||
             !fc->analysis.param_types) return NULL;
@@ -409,6 +418,10 @@ struct JsMirTranspiler {
     MIR_context_t ctx;
     MIR_module_t module;
     MirEmitter em;
+
+    // Capture/TDZ analysis used to rescan the same immutable AST path once per
+    // query. Nested name sets are released with this transpiler.
+    struct hashmap* lexical_path_cache;
 
     // Local function items: name -> MIR_item_t
     struct hashmap* local_funcs;
@@ -630,6 +643,17 @@ struct JsMirTranspiler {
 
 static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
     if (!mt) return;
+    if (mt->lexical_path_cache) {
+        size_t iter = 0;
+        void* item = NULL;
+        while (hashmap_iter(mt->lexical_path_cache, &iter, &item)) {
+            JsLexicalPathCacheEntry* entry = (JsLexicalPathCacheEntry*)item;
+            if (entry->names) hashmap_free(entry->names);
+            entry->names = NULL;
+        }
+        hashmap_free(mt->lexical_path_cache);
+        mt->lexical_path_cache = NULL;
+    }
     if (mt->em.import_cache) {
         hashmap_free(mt->em.import_cache);
         mt->em.import_cache = NULL;
