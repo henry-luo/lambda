@@ -13728,6 +13728,21 @@ extern "C" void js_globals_batch_reset() {
     js_global_this_obj = (Item){0};
     js_window_event_value = make_js_undefined();
     js_window_event_intercept_enabled = false;
+    // Partial batch resets retain the heap but recreate realm builtins; clear
+    // URI/character fast-cache Items so a later decode cannot retain a stale
+    // error/prototype graph from the prior test realm.
+    js_runtime_state.global_string_caches.uri_last_four_byte_string = (Item){0};
+    js_runtime_state.global_string_caches.last_from_char_code_string = (Item){0};
+    js_runtime_state.global_string_caches.decode_uri_component_error = (Item){0};
+    js_runtime_state.global_string_caches.decode_uri_error = (Item){0};
+    memset(js_runtime_state.global_string_caches.ascii_chars, 0,
+           sizeof(js_runtime_state.global_string_caches.ascii_chars));
+    js_runtime_state.global_string_caches.uri_last_four_byte_epoch = 0;
+    js_runtime_state.global_string_caches.last_from_char_code_cp = -1;
+    js_runtime_state.global_string_caches.last_from_char_code_epoch = 0;
+    js_runtime_state.global_string_caches.ascii_chars_epoch = ~0ULL;
+    js_runtime_state.global_string_caches.decode_uri_component_error_epoch = 0;
+    js_runtime_state.global_string_caches.decode_uri_error_epoch = 0;
     js_global_var_define_cache_reset();
     // reset constructor cache (function objects from old pool)
     extern void js_ctor_cache_reset();

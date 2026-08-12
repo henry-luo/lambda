@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.13.0 (2026-08-11)
+**Spec version:** 1.14.0 (2026-08-12)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -983,6 +983,24 @@ loosely across the corpus — context disambiguates, and we live with it.
   extracted only after two working clients exist; the G1 rooting fix is a
   Phase-0 prerequisite baked into `MirEmitter`; Python is the first guest
   port and the acceptance test. [U12/U21, K17 doctrine]
+- **D8.2.4*** The unified compiler has one **indexed compilation unit**:
+  dense stable IDs name nodes/scopes/bindings/functions/classes; one common
+  child-enumeration contract builds parent, owner, binding, use/def and graph
+  indexes; lowering consumes resolved identities and never repairs binding.
+  Core passes may not grow private core-child walks. [U27, U28]
+- **D8.2.5*** One typed pass manager owns build → bind → validate → index →
+  capture/effect → type/representation inference → function planning → MIR
+  lowering/finalization/link. Passes declare required/produced facts;
+  source contracts remain on the AST and erasable optimization facts remain
+  in ID-keyed side tables (D2.4.1, D3.2.3, D3.3.1). Profiles answer typed
+  semantic questions and extension nodes; they do not own alternate pass
+  schedules. [U29, U30]
+- **D8.2.6*** Core expression lowering is demand-driven and returns the full
+  `MirValue` of D2.4.2. `DISCARD`, `ANY`, `REQUIRED_REP`, `DEST_REG`, and
+  `BRANCH` may avoid materialization but never change semantics; unsupported
+  demand falls back to generic lowering. Carrier conversion remains
+  `em_require_rep()` (D2.4.3), semantic coercion remains profile-owned, and
+  root/final-store ownership remains emitter-only (D5.3.4). [U31, U32]
 
 ### D8.3 Dual-function compiling
 
@@ -1077,12 +1095,27 @@ loosely across the corpus — context disambiguates, and we live with it.
   byte-match unstressed), gated in the baseline; a static liveness
   duplicate is rejected. The independent structural verifier is deferred
   until emission is final. [MT4, MT3]
+- **D8.6.4*** Unified-AST consolidation has four **hard, fail-closed exit
+  ratchets**: at least 2,000 net physical C/C++ lines removed from the
+  anchored `lambda/runtime` + `lambda/js` scope; at least 10% lower internal
+  parse-through-link compiler time for the complete `test_lambda_gtest`
+  corpus; at least 20% lower for `test_js_gtest`; and at least 15% fewer
+  **finalized MIR instructions** for the frozen large-library cohort discovered
+  by `test_js_gtest`, while the complete JS corpus may not grow. MIR volume is
+  counted from finalized top-level module functions with the same instruction
+  definition as the MT7 artifact ratchet (labels/declarations are not
+  instructions), printed as a machine-readable per-test record, and compared
+  on identical manifests. Timings use identical release-mode sample manifests
+  and the median of five complete measured runs after one warm-up; execution,
+  process, cleanup and scheduler time do not count. Cache hits, missing/retried
+  samples, code moves out of the LOC scope, formatting, and comment stripping
+  cannot satisfy a ratchet. [U33–U36]
 
 ---
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-11.
+Status of `*`-marked rulings as of 2026-08-12.
 
 | Ruling | Status |
 |---|---|
@@ -1116,11 +1149,13 @@ Status of `*`-marked rulings as of 2026-08-11.
 | D7.4.3 | Hosted-language layering: `lang-python` is the landed DSO reference chain, but Python is currently statically linked and its ten follow-up ADRs (Lang_Hosting §17) are unwritten. |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
-| D8.2 | Unified AST design settled (U1–U26); phased migration not recorded as started; Python port is the acceptance test and its entry is disabled until it emits through `MirEmitter` (CR6). |
+| D8.2.1–D8.2.3 | Structural Unified AST convergence is substantially landed for Lambda/JS: common core catalog, node aliases, `FnAnalysis`, and `MirEmitter`; Python remains the guest acceptance test. |
+| D8.2.4–D8.2.6 | Indexed compilation unit, authoritative traversal, typed fact/pass process, and demand-driven full-contract `MirValue` continuation are designed in U27–U32; implementation not started. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
 | D8.4.3 | Landed 2026-08-07 with JS Tune1: JS/Jube fallible helpers use one merged Item error lane; pending-exception polling and the legacy flag are deleted. |
 | D8.5.1 | MIR cache L1 landed; L2 lazy codegen approved but `mir.c` still eager. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
+| D8.6.4 | Instrumentation and all four Unified-AST consolidation ratchets are not started; LOC anchor is `e66e5b5c71bc7ee7fe2d1e2b2a9afe27dc6825a3` at 319,606 lines; the JS large-library MIR-volume manifest and count await Phase 0 capture. |
 
 ## Appendix B — Open Design Issues (DO#)
 
@@ -1260,11 +1295,11 @@ Numbered `DO#` (design-open); each links to its record.
 | D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md` |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md` |
-| D8.1–D8.2 | U1–U26 | `Lambda_Design_Unified_AST.md` |
+| D8.1–D8.2 | U1–U36 | `Lambda_Design_Unified_AST.md`, `Lambda_Impl_Tune_Ast.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1 + call-ABI notes | `Lambda_Design_Compiling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md` |
-| D8.6 | MT1–MT8 | `Lambda_Design_MIR_Emission_Test.md` |
+| D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `Lambda_Impl_Tune_Ast.md` |
 
 The decision records preserve the full deliberations — every alternative
 that lost and the arguments that did not persuade. This specification is

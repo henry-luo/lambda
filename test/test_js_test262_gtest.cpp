@@ -2453,9 +2453,13 @@ static void prepare_all_tests(
 // (the internal js-test-batch timeout only catches JS-level loops, not hangs in JIT/parser).
 static constexpr int T262_HARD_TIMEOUT_PER_TEST = 15;
 static constexpr int T262_HARD_TIMEOUT_MIN = 30;
-static int hard_timeout_per_test_secs() {
+static constexpr int T262_SLOW_HARD_TIMEOUT_PER_TEST = 60;
+static int hard_timeout_per_test_secs(bool slow_test = false) {
     int timeout_secs = current_js_timeout_secs() + 5;
-    return std::max(T262_HARD_TIMEOUT_PER_TEST, timeout_secs);
+    // Slow isolated tests may spend tens of seconds compiling their preamble;
+    // the normal watchdog would kill a healthy worker before it emits a result.
+    int minimum_secs = slow_test ? T262_SLOW_HARD_TIMEOUT_PER_TEST : T262_HARD_TIMEOUT_PER_TEST;
+    return std::max(minimum_secs, timeout_secs);
 }
 
 #ifndef _WIN32
@@ -2472,7 +2476,8 @@ static long long t262_steady_now_ms() {
 static int run_t262_sub_batch(
     const char* manifest_path,
     std::unordered_map<std::string, BatchResult>& results,
-    size_t num_tests = T262_DEFAULT_BATCH_CHUNK_SIZE)
+    size_t num_tests = T262_DEFAULT_BATCH_CHUNK_SIZE,
+    bool slow_test = false)
 {
     // Windows implementation using CreateProcess + anonymous pipes
     HANDLE pipe_rd = NULL, pipe_wr = NULL;
@@ -2487,8 +2492,17 @@ static int run_t262_sub_batch(
         return -1;
     }
 
-    // Build command line
-    std::string cmd = std::string("lambda.exe js-test-batch ") + g_js_timeout_arg;
+    // Build command line.  Slow isolated tests need the same extended JS-level
+    // timeout as their watchdog; otherwise a healthy long preamble is reported
+    // as a timeout before the 60-second native watchdog can observe it.
+    char slow_timeout_arg[20];
+    const char* worker_timeout_arg = g_js_timeout_arg;
+    if (slow_test && current_js_timeout_secs() < T262_PHASE4_RETRY_TIMEOUT_SECS) {
+        snprintf(slow_timeout_arg, sizeof(slow_timeout_arg), "--timeout=%d",
+                 T262_PHASE4_RETRY_TIMEOUT_SECS);
+        worker_timeout_arg = slow_timeout_arg;
+    }
+    std::string cmd = std::string("lambda.exe js-test-batch ") + worker_timeout_arg;
     if (g_no_hot_reload) cmd += " --no-hot-reload";
     if (g_opt_level >= 0) cmd += std::string(" ") + g_opt_level_arg;
     if (g_mir_interp) cmd += " --mir-interp";
@@ -2510,7 +2524,8 @@ static int run_t262_sub_batch(
     CloseHandle(manifest_h);
     CloseHandle(pipe_wr);
 
-    int hard_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN, (int)(num_tests * hard_timeout_per_test_secs()));
+    int hard_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN,
+                                     (int)(num_tests * hard_timeout_per_test_secs(slow_test)));
     std::atomic<bool> worker_done{false};
     std::thread watchdog([&pi, hard_timeout_secs, &worker_done]() {
         auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(hard_timeout_secs);
@@ -2590,7 +2605,8 @@ static int run_t262_sub_batch(
 static int run_t262_sub_batch(
     const char* manifest_path,
     std::unordered_map<std::string, BatchResult>& results,
-    size_t num_tests = T262_DEFAULT_BATCH_CHUNK_SIZE)
+    size_t num_tests = T262_DEFAULT_BATCH_CHUNK_SIZE,
+    bool slow_test = false)
 {
     int stdout_pipe[2];
     if (pipe(stdout_pipe) != 0) return -1;
@@ -2618,8 +2634,17 @@ static int run_t262_sub_batch(
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[0]);
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[1]);
 
+    // Match the slow-worker watchdog above so long preamble compilation is not
+    // converted into a JS-level timeout before it can report its result.
+    char slow_timeout_arg[20];
+    const char* worker_timeout_arg = g_js_timeout_arg;
+    if (slow_test && current_js_timeout_secs() < T262_PHASE4_RETRY_TIMEOUT_SECS) {
+        snprintf(slow_timeout_arg, sizeof(slow_timeout_arg), "--timeout=%d",
+                 T262_PHASE4_RETRY_TIMEOUT_SECS);
+        worker_timeout_arg = slow_timeout_arg;
+    }
     char* argv[10] = {
-        (char*)"lambda.exe", (char*)"js-test-batch", g_js_timeout_arg, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        (char*)"lambda.exe", (char*)"js-test-batch", (char*)worker_timeout_arg, NULL, NULL, NULL, NULL, NULL, NULL, NULL
     };
     int argi = 3;
     if (g_no_hot_reload) {
@@ -2651,7 +2676,8 @@ static int run_t262_sub_batch(
     // This catches hangs in JIT compilation, parsing, or native code that the
     // internal js-test-batch timeout can't interrupt. Killing the process closes its
     // stdout pipe, which unblocks the fgets loop below.
-    int hard_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN, (int)(num_tests * hard_timeout_per_test_secs()));
+    int hard_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN,
+                                     (int)(num_tests * hard_timeout_per_test_secs(slow_test)));
     std::atomic<bool> worker_done{false};
     std::thread watchdog([pid, hard_timeout_secs, &worker_done]() {
         auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(hard_timeout_secs);
@@ -3172,7 +3198,8 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 bool is_non_batched = batch_num_tests == 1;
                 // per-batch "start" line intentionally omitted to keep progress output
                 // to one line per batch; the "finished" line below carries the outcome.
-                int worker_status = run_t262_sub_batch(manifest_path, thread_results[i], batch_num_tests);
+                int worker_status = run_t262_sub_batch(manifest_path, thread_results[i], batch_num_tests,
+                                                        batches[i].slow_test);
                 auto t1 = std::chrono::steady_clock::now();
                 bool is_async_batch = !batches[i].native && js_groups[batches[i].group].is_async;
                 batch_timings[i] = {i, std::chrono::duration<double>(t1 - t0).count(),
@@ -3529,7 +3556,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                         }
                         fclose(mf);
                         size_t retry_num_tests = retry_batches[i].end - retry_batches[i].start;
-                        run_t262_sub_batch(manifest_path, thread_results[i], retry_num_tests);
+                        run_t262_sub_batch(manifest_path, thread_results[i], retry_num_tests,
+                                           prepared[lost_indices[i]].is_slow_test);
                     }
                     unlink(manifest_path);
                 });
@@ -4784,7 +4812,16 @@ int main(int argc, char** argv) {
         if (!g_baseline_passing.empty()) {
             std::set<std::string> pass_set(current_passing.begin(), current_passing.end());
             for (auto& name : g_baseline_passing) {
-                if (pass_set.find(name) == pass_set.end()) regressions.push_back(name);
+                if (pass_set.find(name) != pass_set.end()) continue;
+                auto cached = g_cached_results.find(name);
+                // T262_SKIP is an intentional admission decision (async,
+                // module, or another unsupported harness mode), not a runtime
+                // regression against the synchronous baseline.
+                if (cached != g_cached_results.end() &&
+                        cached->second.result == T262_SKIP) {
+                    continue;
+                }
+                regressions.push_back(name);
             }
         }
 
