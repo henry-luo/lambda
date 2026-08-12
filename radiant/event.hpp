@@ -2070,6 +2070,7 @@ void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
 
 void setup_scroller(RenderContext* rdcon, ViewBlock* block);
 void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block);
+void update_scroller(ViewBlock* block, float content_width, float content_height);
 void scroll_apply_pending_element_scroll(ViewBlock* block);
 
 bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp);

@@ -185,11 +185,8 @@ static BorderProp* apply_html_uniform_border(LayoutContext* lycon, ViewBlock* bl
                                              bool set_specificity = true) {
     BorderProp* border = layout_ensure_border(lycon, block);
     for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-        RadiantBorderSide refs = radiant_border_side(border, (CssBoxSide)side);
-        *refs.width = width;
-        *refs.style = style;
-        if (set_specificity) *refs.width_specificity = -1;
-        if (color) *refs.color = *color;
+        radiant_border_side_set(radiant_border_side(border, (CssBoxSide)side),
+                                width, style, color, set_specificity);
     }
     return border;
 }
@@ -202,7 +199,8 @@ static BorderProp* apply_html_inset_border_colors(LayoutContext* lycon,
     Color light = {}; light.r = light.g = light.b = 192; light.a = 255;
     Color colors[4] = {dark, light, light, dark};
     for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
-        *radiant_border_side(border, (CssBoxSide)side).color = colors[side];
+        RadiantBorderSide refs = radiant_border_side(border, (CssBoxSide)side);
+        *refs.color = colors[side];
     }
     return border;
 }
@@ -476,19 +474,31 @@ static float get_parent_table_number(DomNode* element, const char* attribute_nam
     return value >= 0.0f ? value : -1.0f;
 }
 
+static float parse_html_table_border_width(const char* attribute, bool is_present) {
+    if (!is_present) return -1.0f;
+    if (!attribute) return 1.0f;
+    const char* cursor = str_skip_ascii_space(attribute);
+    if (*cursor < '0' || *cursor > '9') {
+        // HTML's boolean border attribute defaults to one CSS pixel; only an
+        // explicit numeric zero suppresses the legacy table and cell borders.
+        return 1.0f;
+    }
+    StrView view = strview_init(cursor, strlen(cursor));
+    float width = strview_to_int(&view);
+    return width >= 0.0f ? width : 1.0f;
+}
+
+static float get_parent_table_border_width(DomNode* element) {
+    DomElement* table = parent_table_element(element);
+    return parse_html_table_border_width(table ? table->get_attribute("border") : nullptr,
+                                         table && table->has_attribute("border"));
+}
+
 static float html_font_size_for_level(int level) {
     if (level < 1) level = 1;
     if (level > 7) level = 7;
-    switch (level) {
-        case 1: return 10.0f;
-        case 2: return 13.0f;
-        case 3: return 16.0f;
-        case 4: return 18.0f;
-        case 5: return 24.0f;
-        case 6: return 32.0f;
-        case 7: return 48.0f;
-    }
-    return 16.0f;
+    static const float sizes[] = {10.0f, 13.0f, 16.0f, 18.0f, 24.0f, 32.0f, 48.0f};
+    return sizes[level - 1];
 }
 
 static bool parse_legacy_font_size_level(const char* input, int* out_level) {
@@ -563,11 +573,8 @@ static void apply_html_table_rules_cell_border(LayoutContext* lycon, ViewBlock* 
         bool is_column_rule = side == CSS_BOX_SIDE_LEFT || side == CSS_BOX_SIDE_RIGHT;
         bool is_row_rule = side == CSS_BOX_SIDE_TOP || side == CSS_BOX_SIDE_BOTTOM;
         if (!(rules_all || (is_column_rule && rules_cols) || (is_row_rule && rules_rows))) continue;
-        RadiantBorderSide refs = radiant_border_side(border, (CssBoxSide)side);
-        *refs.width = 1.0f;
-        *refs.width_specificity = -1;
-        *refs.style = CSS_VALUE_SOLID;
-        *refs.color = grey;
+        radiant_border_side_set(radiant_border_side(border, (CssBoxSide)side),
+                                1.0f, CSS_VALUE_SOLID, &grey, true);
     }
 }
 
@@ -659,7 +666,7 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
         apply_html_background_color(lycon, block, bg_color);
     }
 
-    if (get_parent_table_number(cell_node, "border") > 0.0f) {
+    if (get_parent_table_border_width(cell_node) > 0.0f) {
         Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };
         apply_html_uniform_border(lycon, block, 1.0f, CSS_VALUE_INSET, &grey);
     }
@@ -920,7 +927,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     }
     case MARKUP_NAME_IFRAME: {
         // HTML spec §15.5.14: iframe { border: 2px inset; }
-        BorderProp* iframe_border = apply_html_inset_border_colors(lycon, block, 2.0f);
+        apply_html_inset_border_colors(lycon, block, 2.0f);
         const char* frameborder_attr = elmt->get_attribute("frameborder");
         if (frameborder_attr) {
             size_t frameborder_len = strlen(frameborder_attr);
@@ -988,7 +995,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case MARKUP_NAME_HR: {
         // hr default: 1px border on all sides (creates 2px height from border-top + border-bottom)
         // This matches browser UA stylesheet behavior (CSS logical pixels)
-        BorderProp* hr_border = apply_html_inset_border_colors(lycon, block, 1.0f);
+        apply_html_inset_border_colors(lycon, block, 1.0f);
         // 8px margin top/bottom, auto left/right for horizontal centering (browser default)
         radiant_spacing_set_pair(&block->boundary_mut()->margin,
             CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, 8);
@@ -1135,9 +1142,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Per WHATWG 15.3.10: table[border] { border-style: outset; border-color: grey; }
         // border-width is the attribute value in pixels
         const char* border_attr = elmt->get_attribute("border");
-        if (border_attr) {
-            StrView bv = strview_init(border_attr, strlen(border_attr));
-            float border_width = strview_to_int(&bv);
+        if (elmt->has_attribute("border")) {
+            float border_width = parse_html_table_border_width(border_attr, true);
             if (border_width >= 0) {
                 // border-color: grey (128, 128, 128)
                 Color grey = (Color){ .r=128, .g=128, .b=128, .a=255 };

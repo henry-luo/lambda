@@ -1509,10 +1509,12 @@ static void clear_load_stylesheet_cascade_recursive(DomNode* node) {
     if (!node) return;
     if (node->is_element()) {
         DomElement* elem = lam::dom_require_element(node);
-        dom_element_clear_cascaded_styles(elem);
-        // Keep pseudo declarations in the same cascade epoch as element styles.
-        dom_element_clear_pseudo_styles(elem);
-        elem->set_styles_resolved(false);
+        if (!layout_element_is_anonymous_table_fixup(elem)) {
+            dom_element_clear_cascaded_styles(elem);
+            // Keep pseudo declarations in the same cascade epoch as element styles.
+            dom_element_clear_pseudo_styles(elem);
+            elem->set_styles_resolved(false);
+        }
 
         for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
             clear_load_stylesheet_cascade_recursive(child);

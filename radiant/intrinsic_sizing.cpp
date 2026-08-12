@@ -141,13 +141,10 @@ float layout_preferred_aspect_ratio(ViewBlock* block) {
     return decl ? layout_aspect_ratio_value(decl->value) : 0.0f;
 }
 
-static float intrinsic_element_preferred_aspect_ratio(DomElement* element, ViewBlock* view) {
-    float ratio = view ? layout_preferred_aspect_ratio(view) : 0.0f;
-    if (ratio > 0.0f) return ratio;
-    if (!element || !element->specified_style) return 0.0f;
-    CssDeclaration* declaration = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_ASPECT_RATIO);
-    return declaration ? layout_aspect_ratio_value(declaration->value) : 0.0f;
+static float intrinsic_element_preferred_aspect_ratio(ViewBlock* view) {
+    // The view resolver already falls back to the DOM style before materialization;
+    // re-reading the declaration here used to create two ratio resolution paths.
+    return view ? layout_preferred_aspect_ratio(view) : 0.0f;
 }
 
 float layout_used_preferred_aspect_ratio(ViewBlock* block) {
@@ -410,10 +407,13 @@ static bool intrinsic_specified_display_keyword(DomElement* element, CssEnum* ke
     return element && intrinsic_style_display_keyword(element->specified_style, keyword);
 }
 
-static bool intrinsic_element_display_matches(DomElement* element, ViewBlock* view,
+static bool intrinsic_element_display_matches(DomElement* element,
                                               CssEnum display_inner,
-                                              CssEnum inline_display) {
-    if (view && view->display.inner == display_inner) return true;
+                                              CssEnum inline_display = CSS_VALUE__UNDEF) {
+    if (!element) return false;
+    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    if (view && (view->display.inner == display_inner ||
+                 view->display.outer == display_inner)) return true;
     CssEnum value = (CssEnum)0;
     if (!intrinsic_specified_display_keyword(element, &value)) return false;
     return value == display_inner || value == inline_display;
@@ -618,10 +618,9 @@ static float intrinsic_border_width_from_shorthand_value(LayoutContext* lycon, C
     bool has_visible_style = false;
 
     auto consider_keyword = [&](CssEnum kw) {
-        if (kw == CSS_VALUE_THIN) border_width = 1.0f;
-        else if (kw == CSS_VALUE_MEDIUM) border_width = 3.0f;
-        else if (kw == CSS_VALUE_THICK) border_width = 5.0f;
-        else if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DASHED ||
+        if (kw == CSS_VALUE_THIN || kw == CSS_VALUE_MEDIUM || kw == CSS_VALUE_THICK) {
+            border_width = layout_css_border_width_keyword(kw);
+        } else if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DASHED ||
                  kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DOUBLE ||
                  kw == CSS_VALUE_GROOVE || kw == CSS_VALUE_RIDGE ||
                  kw == CSS_VALUE_INSET || kw == CSS_VALUE_OUTSET) {
@@ -840,14 +839,12 @@ float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* ele
     return padding_start + padding_end + border_start + border_end;
 }
 
-static inline bool intrinsic_is_simple_latin_shaping_byte(unsigned char ch) {
-    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
-}
-
 static bool intrinsic_apply_small_caps(uint32_t* codepoint, CssEnum font_variant) {
     if (!codepoint || font_variant != CSS_VALUE_SMALL_CAPS) return false;
     uint32_t original = *codepoint;
-    *codepoint = apply_text_transform(*codepoint, CSS_VALUE_UPPERCASE, false);
+    uint32_t transformed[3];
+    apply_text_transform_full(*codepoint, CSS_VALUE_UPPERCASE, false, transformed);
+    *codepoint = transformed[0];
     return *codepoint != original;
 }
 
@@ -884,24 +881,15 @@ static bool intrinsic_measure_shaped_simple_latin_run(LayoutContext* lycon,
                                               font_variant, break_anywhere, break_word)) {
         return false;
     }
-    if (!intrinsic_is_simple_latin_shaping_byte(*str)) return false;
-
-    size_t run_len = 0;
-    while (run_len < remaining && intrinsic_is_simple_latin_shaping_byte(str[run_len])) {
-        GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, (uint32_t)str[run_len]);
-        if (ginfo.id == 0) return false;
-        run_len++;
+    LayoutSimpleLatinRun result = {};
+    if (!layout_measure_simple_latin_run(
+            lycon, lycon->font.font_handle, str, remaining, &result)) {
+        return false;
     }
-    if (run_len < 2) return false;
-
-    int byte_len = (int)run_len; // INT_CAST_OK: text byte count
-    TextExtents ext = font_measure_text(lycon->font.font_handle, (const char*)str, byte_len);
-    if (ext.glyph_count <= 0 && ext.width <= 0.0f) return false;
-
-    *out_bytes = run_len;
-    *out_width = ext.width;
-    *out_first_codepoint = (uint32_t)*str;
-    *out_last_codepoint = (uint32_t)str[run_len - 1];
+    *out_bytes = result.bytes;
+    *out_width = result.width;
+    *out_first_codepoint = result.first_codepoint;
+    *out_last_codepoint = result.last_codepoint;
     return true;
 }
 
@@ -1159,42 +1147,62 @@ float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
     return 0.0f;
 }
 
-static bool intrinsic_element_matches_display(DomElement* elem, CssEnum display_value) {
-    if (!elem) return false;
-    if (elem->display.inner == display_value || elem->display.outer == display_value) {
-        return true;
-    }
-    CssEnum value = (CssEnum)0;
-    return intrinsic_specified_display_keyword(elem, &value) && value == display_value;
-}
 
 static bool node_is_table_cell_like(DomNode* node) {
     if (!node || !node->is_element()) return false;
     DomElement* elem = node->as_element();
     return elem->view_type == RDT_VIEW_TABLE_CELL ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_CELL);
+           intrinsic_element_display_matches(elem, CSS_VALUE_TABLE_CELL);
 }
 
 static bool intrinsic_is_table_box(DomElement* elem) {
     if (!elem) return false;
     return elem->tag() == MARKUP_NAME_TABLE ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE) ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_INLINE_TABLE);
+           intrinsic_element_display_matches(elem, CSS_VALUE_TABLE) ||
+           intrinsic_element_display_matches(elem, CSS_VALUE_INLINE_TABLE);
 }
 
 static bool intrinsic_is_table_row_group_box(DomElement* elem) {
     if (!elem) return false;
     NameId tag = elem->tag();
     return tag == MARKUP_NAME_TBODY || tag == MARKUP_NAME_THEAD || tag == MARKUP_NAME_TFOOT ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_ROW_GROUP) ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_HEADER_GROUP) ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_FOOTER_GROUP);
+           intrinsic_element_display_matches(elem, CSS_VALUE_TABLE_ROW_GROUP) ||
+           intrinsic_element_display_matches(elem, CSS_VALUE_TABLE_HEADER_GROUP) ||
+           intrinsic_element_display_matches(elem, CSS_VALUE_TABLE_FOOTER_GROUP);
 }
 
 static bool intrinsic_is_table_row_box(DomElement* elem) {
     if (!elem) return false;
     return elem->tag() == MARKUP_NAME_TR ||
-           intrinsic_element_matches_display(elem, CSS_VALUE_TABLE_ROW);
+           intrinsic_element_display_matches(elem, CSS_VALUE_TABLE_ROW);
+}
+
+static int intrinsic_table_row_count(DomElement* elem) {
+    if (!elem) return 0;
+    if (intrinsic_is_table_row_box(elem)) return 1;
+
+    int row_count = 0;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* child_elem = child->as_element();
+        if (intrinsic_is_table_row_box(child_elem) ||
+            intrinsic_is_table_row_group_box(child_elem)) {
+            row_count += intrinsic_table_row_count(child_elem);
+        }
+    }
+    return row_count;
+}
+
+static bool intrinsic_child_is_out_of_flow(DomElement* element, ViewBlock* block) {
+    if (!element) return true;
+    if (block && layout_block_is_out_of_flow_positioned(block)) {
+        return true;
+    }
+    // Floats are out of normal flow but still contribute to intrinsic inline
+    // sizing; the float-run accumulation below must be able to observe them.
+    // Script changes can leave an allocated PositionProp stale until the next
+    // layout pass, so intrinsic sizing must also consult the current cascade.
+    return layout_element_is_abs_or_fixed(element);
 }
 
 static bool intrinsic_should_skip_height_child(DomElement* elem) {
@@ -1203,12 +1211,10 @@ static bool intrinsic_should_skip_height_child(DomElement* elem) {
         return true;
     }
     ViewBlock* block = lam::view_as_block(elem);
-    if (block &&
-        (layout_block_is_out_of_flow_positioned(block) ||
-         (block->position && element_has_float(block)))) {
-        return true;
-    }
-    return false;
+    // Floats contribute to intrinsic width but not their parent's normal-flow
+    // block-size, matching CSS 2.2 §9.5's removal from block flow.
+    return (block && block->position && element_has_float(block)) ||
+        intrinsic_child_is_out_of_flow(elem, block);
 }
 
 static float intrinsic_table_structure_height(LayoutContext* lycon, DomElement* elem, float width) {
@@ -1242,34 +1248,17 @@ static float intrinsic_table_structure_height(LayoutContext* lycon, DomElement* 
             total_height += calculate_max_content_height(lycon, child, width);
         }
     }
-    return total_height;
-}
 
-static bool intrinsic_text_edge_has_whitespace(const char* text, bool end) {
-    if (!text || !*text) return false;
-    size_t length = strlen(text);
-    unsigned char ch = (unsigned char)text[end ? length - 1 : 0];
-    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
-}
-
-static bool intrinsic_element_edge_has_whitespace(DomNode* element, bool end) {
-    if (!element || !element->is_element()) return false;
-
-    DomNode* node = end ? element->as_element()->last_child : element->as_element()->first_child;
-    while (node) {
-        if (node->is_text()) {
-            return intrinsic_text_edge_has_whitespace((const char*)node->text_data(), end);
-        }
-        DomElement* child = node->is_element() ? node->as_element() : nullptr;
-        DomNode* edge_child = child
-            ? (end ? child->last_child : child->first_child) : nullptr;
-        if (edge_child) {
-            node = edge_child;
-        } else {
-            return false;
+    if (intrinsic_is_table_box(elem) && elem->tag() == MARKUP_NAME_TABLE) {
+        ViewTable* table = lam::unsafe_view_table_storage(elem);
+        if (table && table->tb && !table->tb->border_collapse) {
+            // Intrinsic table height must include the outer border-spacing gaps;
+            // otherwise a flex/grid query sees a shorter table than table layout.
+            int row_count = intrinsic_table_row_count(elem);
+            total_height += table->tb->border_spacing_v * (row_count + 1);
         }
     }
-    return false;
+    return total_height;
 }
 
 static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
@@ -2012,22 +2001,6 @@ static bool is_inline_level_element(DomElement* element) {
     return false;
 }
 
-static bool intrinsic_element_is_replaced(DomElement* element) {
-    if (!element) return false;
-
-    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
-    NameId tag = element->tag();
-    // HTML object/audio elements are replaced only when they expose external content.
-    return view->display.inner == RDT_DISPLAY_REPLACED ||
-        tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_IFRAME ||
-        tag == MARKUP_NAME_HR || tag == MARKUP_NAME_SVG || tag == MARKUP_NAME_CANVAS ||
-        (tag == MARKUP_NAME_OBJECT && element->get_attribute(MARKUP_NAME_DATA)) ||
-        (tag == MARKUP_NAME_AUDIO && element->has_attribute(MARKUP_NAME_CONTROLS)) ||
-        tag == MARKUP_NAME_EMBED || tag == MARKUP_NAME_INPUT || tag == MARKUP_NAME_SELECT ||
-        tag == MARKUP_NAME_TEXTAREA || tag == MARKUP_NAME_METER || tag == MARKUP_NAME_PROGRESS ||
-        (view->form_control());
-}
-
 static bool intrinsic_element_has_percentage_height(DomElement* element) {
     if (!element) return false;
 
@@ -2055,8 +2028,8 @@ static bool intrinsic_has_cyclic_percentage_descendant(
         }
         bool matches = intrinsic_element_has_percentage_height(child_element) &&
             (!require_ratio || intrinsic_element_preferred_aspect_ratio(
-                child_element, child_view) > 0.0f);
-        if ((!require_ratio && intrinsic_element_is_replaced(child_element) && matches) ||
+                child_view) > 0.0f);
+        if ((!require_ratio && layout_element_is_replaced(child_element) && matches) ||
             (require_ratio && matches)) {
             return true;
         }
@@ -2078,7 +2051,7 @@ bool layout_has_cyclic_percentage_ratio_descendant(LayoutContext* lycon, DomElem
 
 static bool intrinsic_element_is_atomic_inline(DomElement* element) {
     if (!element || !is_inline_level_element(element)) return false;
-    if (intrinsic_element_is_replaced(element)) return true;
+    if (layout_element_is_replaced(element)) return true;
 
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
     if (view->display.outer == CSS_VALUE_INLINE_BLOCK ||
@@ -2138,7 +2111,7 @@ static bool intrinsic_node_has_inline_boundary_content(DomNode* node) {
     if (intrinsic_element_is_atomic_inline(element)) return true;
     if (!is_inline_level_element(element)) return false;
     // Replaced boxes are atomic inline content even though they have no DOM children.
-    if (intrinsic_element_is_replaced(element)) return true;
+    if (layout_element_is_replaced(element)) return true;
     for (int pseudo = 1; pseudo <= 2; pseudo++) {
         bool has_content = pseudo == 1 ? dom_element_has_before_content(element)
                                        : dom_element_has_after_content(element);
@@ -2208,7 +2181,7 @@ static bool intrinsic_node_ends_with_forced_break(DomNode* node) {
 static bool intrinsic_node_has_collapsible_space_at_edge(DomNode* node, bool end) {
     if (!node) return false;
     if (node->is_text()) {
-        return intrinsic_text_edge_has_whitespace((const char*)node->text_data(), end) &&
+        return layout_text_edge_has_whitespace((const char*)node->text_data(), end) &&
             intrinsic_white_space_collapses_space_advance(get_white_space_value(node));
     }
     if (!node->is_element()) return false;
@@ -2251,48 +2224,6 @@ static float intrinsic_collapsed_space_width(LayoutContext* lycon) {
         width += lycon->font.style->letter_spacing;
     }
     return width;
-}
-
-static bool intrinsic_table_inherit_border_spacing(LayoutContext* lycon, DomElement* element,
-        float* spacing) {
-    for (DomNode* ancestor = element ? element->parent : nullptr; ancestor; ancestor = ancestor->parent) {
-        if (!ancestor->is_element()) continue;
-
-        DomElement* anc_elem = ancestor->as_element();
-        if (anc_elem->specified_style) {
-            CssDeclaration* decl = style_tree_get_declaration(
-                anc_elem->specified_style,
-                CSS_PROPERTY_BORDER_SPACING);
-            if (decl && decl->value) {
-                bool keep_inheriting = false;
-                LayoutBorderSpacingValue resolved =
-                    layout_resolve_border_spacing_value(lycon, decl->value);
-                if (resolved.resolved) {
-                    *spacing = resolved.horizontal;
-                    return true;
-                }
-                keep_inheriting = resolved.keep_inheriting;
-                if (!keep_inheriting) return false;
-            }
-        }
-
-        if (anc_elem->table_prop()) {
-            *spacing = anc_elem->tb->border_spacing_h;
-            return true;
-        }
-        if (anc_elem->tag() == MARKUP_NAME_TABLE) {
-            float inherited_spacing = 2.0f;
-            const char* cellspacing_attr = anc_elem->get_attribute("cellspacing");
-            if (cellspacing_attr) {
-                inherited_spacing = (float)str_to_double_default(
-                    cellspacing_attr, strlen(cellspacing_attr), 0.0);
-                if (inherited_spacing < 0.0f) inherited_spacing = 0.0f;
-            }
-            *spacing = inherited_spacing;
-            return true;
-        }
-    }
-    return false;
 }
 
 static bool intrinsic_pseudo_child_is_materialized(DomElement* element, bool is_before) {
@@ -2670,6 +2601,39 @@ void layout_resolve_intrinsic_horizontal_margins(
     resolve_decl(CSS_PROPERTY_MARGIN, css_box_shorthand_side_value(decl->value, 3), margin_left);
 }
 
+LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
+        LayoutContext* lycon, DomElement* element,
+        LayoutIntrinsicMarginOptions options) {
+    LayoutIntrinsicMarginPair result = {0.0f, 0.0f, false};
+    if (!element) return result;
+
+    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    if (options.include_bound && view && view->bound) {
+        result.used_bound = true;
+        const Margin& margin = view->boundary()->margin;
+        if (margin.left_type != CSS_VALUE_AUTO &&
+            (!options.nonnegative_bound || margin.left >= 0.0f)) {
+            result.left = margin.left;
+        }
+        if (margin.right_type != CSS_VALUE_AUTO &&
+            (!options.nonnegative_bound || margin.right >= 0.0f)) {
+            result.right = margin.right;
+        }
+        if (!options.fallback_zero_bound ||
+            result.left != 0.0f || result.right != 0.0f || !element->specified_style) {
+            return result;
+        }
+        result.used_bound = false;
+    }
+
+    if (element->specified_style) {
+        layout_resolve_intrinsic_horizontal_margins(
+            lycon, element, options.include_logical,
+            &result.left, &result.right, options.include_shorthand);
+    }
+    return result;
+}
+
 static float intrinsic_inline_edge(LayoutContext* lycon, DomElement* element,
                                    bool inline_start, bool include_margin = true) {
     if (!lycon || !element) return 0.0f;
@@ -3037,9 +3001,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     bool is_table_display = false;
     {
-        ViewBlock* tview = lam::unsafe_view_block_element_storage(element);
         if (intrinsic_element_display_matches(
-                element, tview, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE)) {
+                element, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE)) {
             is_table_display = true;
         }
         if (!is_table_display && element->tag() == MARKUP_NAME_TABLE) is_table_display = true;
@@ -3118,7 +3081,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         (lycon->available_space.width.is_intrinsic() || parent_has_intrinsic_width ||
          parent_has_auto_inline_width);
     bool percentage_replaced_size_is_intrinsic_auto = max_width_is_percentage &&
-        intrinsic_element_is_replaced(element) &&
+        layout_element_is_replaced(element) &&
         ((has_definite_width &&
           (lycon->available_space.width.is_intrinsic() || parent_has_intrinsic_width ||
            parent_has_auto_inline_width)) ||
@@ -3227,71 +3190,50 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // preserving the box's own padding, borders, and fixed multicol tracks.
         return {intrinsic_width, intrinsic_width};
     }
-    if (!content_only && !has_intrinsic_min_width && !has_intrinsic_preferred_width &&
-        !has_intrinsic_max_width &&
-        !(percentage_width_is_intrinsic_auto || percentage_replaced_size_is_intrinsic_auto) &&
-        !percentage_size_resolves_to_zero &&
-        !is_table_display && !is_inline_non_replaced &&
-        !physical_width_is_vertical_block_axis &&
-        resolved_width_view->blk && resolved_width_view->block_mut()->given_width >= 0.0f) {
-        float resolved_width = resolved_width_view->block()->given_width;
-        bool is_border_box = layout_uses_border_box(resolved_width_view);
-        float pad_border_width = layout_intrinsic_padding_border_axis(
-            lycon, element, true, lycon->block.content_width);
-
-        if (!is_border_box) {
-            resolved_width += pad_border_width;
-        } else if (resolved_width < pad_border_width) {
-            // border-box widths cannot make the content box negative, including before bounds exist.
-            resolved_width = pad_border_width;
-        }
-
-        resolved_width = intrinsic_apply_definite_width_constraints(resolved_width);
-        sizes.min_content = resolved_width;
-        sizes.max_content = resolved_width;
-        return sizes;
-    }
-
-    if (element->specified_style && !content_only && !has_intrinsic_min_width &&
+    bool can_use_definite_width = !content_only && !has_intrinsic_min_width &&
         !has_intrinsic_preferred_width && !has_intrinsic_max_width &&
         !(percentage_width_is_intrinsic_auto || percentage_replaced_size_is_intrinsic_auto) &&
         !percentage_size_resolves_to_zero &&
         !is_table_display && !is_inline_non_replaced &&
-        !physical_width_is_vertical_block_axis) {
-        // intrinsic sizing must honor the logical inline-size that normal
-        // layout maps to this physical axis; reading width alone drops it.
-        CssDeclaration* width_decl = layout_specified_physical_size_declaration(
-            element, true);
-        if (width_decl && width_decl->value &&
-            (width_decl->value->type == CSS_VALUE_TYPE_LENGTH ||
-             width_decl->value->type == CSS_VALUE_TYPE_FUNCTION ||
-             (width_decl->value->type == CSS_VALUE_TYPE_NUMBER &&
-              width_decl->value->data.number.value == 0))) {
-                float explicit_width = resolve_length_value(
+        !physical_width_is_vertical_block_axis;
+    if (can_use_definite_width) {
+        float explicit_width = -1.0f;
+        bool width_is_from_resolved_style = resolved_width_view->blk &&
+            resolved_width_view->block()->given_width >= 0.0f;
+        if (width_is_from_resolved_style) {
+            explicit_width = resolved_width_view->block()->given_width;
+        } else if (element->specified_style) {
+            // intrinsic sizing must honor the logical inline-size that normal
+            // layout maps to this physical axis; reading width alone drops it.
+            CssDeclaration* width_decl = layout_specified_physical_size_declaration(
+                element, true);
+            bool supported_width = width_decl && width_decl->value &&
+                (width_decl->value->type == CSS_VALUE_TYPE_LENGTH ||
+                 width_decl->value->type == CSS_VALUE_TYPE_FUNCTION ||
+                 (width_decl->value->type == CSS_VALUE_TYPE_NUMBER &&
+                  width_decl->value->data.number.value == 0));
+            if (supported_width) {
+                explicit_width = resolve_length_value(
                     lycon, width_decl->property_code, width_decl->value);
-            if (explicit_width >= 0) {
-                // CSS width property sets content width by default (box-sizing: content-box)
-                // We need to add padding and border for the total intrinsic width
-                // Check box-sizing first
-                ViewBlock* view_for_box = lam::unsafe_view_block_element_storage(element);
-                bool is_border_box = intrinsic_view_uses_border_box(view_for_box, element);
-
-                float pad_border_width = layout_intrinsic_padding_border_axis(
-                    lycon, element, true, lycon->block.content_width);
-                if (!is_border_box) {
-                    explicit_width += pad_border_width;
-                } else {
-                    if (explicit_width < pad_border_width) {
-                        // early intrinsic passes must enforce the same nonnegative content-box floor.
-                        explicit_width = pad_border_width;
-                    }
-                }
-
-                explicit_width = intrinsic_apply_definite_width_constraints(explicit_width);
-                sizes.min_content = explicit_width;
-                sizes.max_content = explicit_width;
-                return sizes;
             }
+        }
+        if (explicit_width >= 0.0f) {
+            ViewBlock* view_for_box = lam::unsafe_view_block_element_storage(element);
+            bool is_border_box = width_is_from_resolved_style
+                ? layout_uses_border_box(resolved_width_view)
+                : intrinsic_view_uses_border_box(view_for_box, element);
+            float pad_border_width = layout_intrinsic_padding_border_axis(
+                lycon, element, true, lycon->block.content_width);
+            if (!is_border_box) {
+                explicit_width += pad_border_width;
+            } else if (explicit_width < pad_border_width) {
+                // border-box widths cannot make the content box negative, including before bounds exist.
+                explicit_width = pad_border_width;
+            }
+            explicit_width = intrinsic_apply_definite_width_constraints(explicit_width);
+            sizes.min_content = explicit_width;
+            sizes.max_content = explicit_width;
+            return sizes;
         }
     }
 
@@ -3345,7 +3287,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         bool declared_percentage_height = aspect_height_decl && aspect_height_decl->value &&
             aspect_height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE;
         bool percentage_height_is_intrinsic_auto =
-            intrinsic_element_is_replaced(element) &&
+            layout_element_is_replaced(element) &&
             element->tag() != MARKUP_NAME_CANVAS &&
             (declared_percentage_height ||
              (view_block_for_aspect->blk &&
@@ -3428,7 +3370,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
 
-        bool is_scroll_container = !intrinsic_element_is_replaced(element) &&
+        bool is_scroll_container = !layout_element_is_replaced(element) &&
             view_block_for_aspect->scroller &&
             view_block_for_aspect->scroll()->overflow_x != CSS_VALUE_VISIBLE;
         if (height > 0) {
@@ -3462,7 +3404,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 lycon, element, view_block_for_aspect, aspect_ratio, ratio_height,
                 false, layout_uses_border_box(view_block_for_aspect),
                 is_scroll_container, &sizes);
-            if (!is_scroll_container && !intrinsic_element_is_replaced(element) &&
+            if (!is_scroll_container && !layout_element_is_replaced(element) &&
                 element_has_in_flow_intrinsic_content(element)) {
                 // A non-replaced preferred ratio is an intrinsic-width floor;
                 // in-flow content must still contribute before flex auto-min sizing.
@@ -3480,7 +3422,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 float aspect_width = intrinsic_store_ratio_width_from_height(
                     lycon, element, view_block_for_aspect, aspect_ratio, min_height,
                     true, false, is_scroll_container, &sizes);
-                if (!is_scroll_container && !intrinsic_element_is_replaced(element) &&
+                if (!is_scroll_container && !layout_element_is_replaced(element) &&
                     element_has_in_flow_intrinsic_content(element)) {
                     aspect_ratio_min_width = aspect_width;
                     sizes = {0.0f, 0.0f};
@@ -3522,7 +3464,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // Detection also uses HTML tag semantics because early intrinsic passes may
     // run before display and form-control state are fully resolved.
     NameId replaced_tag = element->tag();
-    bool is_replaced_element = intrinsic_element_is_replaced(element);
+    bool is_replaced_element = layout_element_is_replaced(element);
     if (is_replaced_element) {
         float replaced_width = -1;
 
@@ -3591,6 +3533,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // Canvas bitmap attributes are its intrinsic contribution, not a CSS 300px fallback.
                 if (layout_canvas_natural_size(view_block_replaced, &natural_width, &natural_height)) {
                     replaced_width = natural_width;
+                    // A definite max-height constrains canvas's intrinsic inline
+                    // contribution through its natural ratio, like other replaced boxes.
+                    replaced_width = intrinsic_replaced_width_with_max_height(
+                        lycon, element, view_block_replaced, replaced_width,
+                        natural_width, natural_height);
                 } else {
                     replaced_width = 300.0f;
                 }
@@ -3813,12 +3760,16 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     {
         ViewBlock* tbl_view = lam::unsafe_view_block_element_storage(element);
         bool is_table_element = intrinsic_element_display_matches(
-            element, tbl_view, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE);
+            element, CSS_VALUE_TABLE, CSS_VALUE_INLINE_TABLE);
         if (!is_table_element && element->tag() == MARKUP_NAME_TABLE) is_table_element = true;
 
         if (is_table_element) {
             float border_spacing = 0;
-            if (element->tb) {
+            bool border_collapse = layout_table_has_collapsed_borders(lycon, element);
+            if (border_collapse) {
+                // CSS 2.1 §17.6.2 suppresses border-spacing for collapsed borders.
+                border_spacing = 0.0f;
+            } else if (element->tb) {
                 border_spacing = element->tb->border_spacing_h;
             } else {
                 // Table metadata not yet created during intrinsic measurement.
@@ -3833,9 +3784,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         if (resolved.resolved) {
                             border_spacing = resolved.horizontal;
                             found_css = true;
-                        } else if (resolved.keep_inheriting &&
-                                   intrinsic_table_inherit_border_spacing(lycon, element, &border_spacing)) {
-                            found_css = true;
+                        } else if (resolved.keep_inheriting) {
+                            float inherited_spacing_v = 0.0f;
+                            found_css = layout_inherit_table_border_spacing(
+                                lycon, element, &border_spacing, &inherited_spacing_v);
                         }
                     }
                 }
@@ -3851,7 +3803,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     // CSS 2.1 §17.6.1: border-spacing is inherited. Anonymous
                     // table boxes have no TableProp during intrinsic sizing, but
                     // their shrink-to-fit width must still include inherited spacing.
-                    intrinsic_table_inherit_border_spacing(lycon, element, &border_spacing);
+                    float inherited_spacing_v = 0.0f;
+                    layout_inherit_table_border_spacing(
+                        lycon, element, &border_spacing, &inherited_spacing_v);
                 }
             }
 
@@ -3981,7 +3935,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             ? item->parent->as_element() : nullptr;
                         const char* text = (const char*)item->text_data();
                         if (!text || !*text) continue;
-                        if (inline_run_has_content && intrinsic_text_edge_has_whitespace(text, false)) {
+                        if (inline_run_has_content && layout_text_edge_has_whitespace(text, false)) {
                             inline_run_max += layout_measure_space_advance(
                                 lycon, lycon->font.font_handle, lycon->font.style);
                         }
@@ -3994,7 +3948,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             inline_run_min = text_widths.min_content;
                         }
                         inline_run_has_content = true;
-                        prev_ended_with_space = intrinsic_text_edge_has_whitespace(text, true);
+                        prev_ended_with_space = layout_text_edge_has_whitespace(text, true);
                         inline_run_last_content_was_text = true;
                         continue;
                     }
@@ -4034,7 +3988,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             float_run_min = child_sizes.min_content;
                         }
                     } else if (item_is_inline_level) {
-                        bool starts_with_ws = intrinsic_element_edge_has_whitespace(item, false);
+                        bool starts_with_ws = layout_element_edge_has_whitespace(item, false);
                         if (inline_run_has_content && (prev_ended_with_space || starts_with_ws)) {
                             inline_run_max += layout_measure_space_advance(
                                 lycon, lycon->font.font_handle, lycon->font.style);
@@ -4044,7 +3998,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             inline_run_min = child_sizes.min_content;
                         }
                         inline_run_has_content = true;
-                        prev_ended_with_space = intrinsic_element_edge_has_whitespace(item, true);
+                        prev_ended_with_space = layout_element_edge_has_whitespace(item, true);
                         inline_run_last_content_was_text = false;
                     } else {
                         flush_current_run();
@@ -4514,7 +4468,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     int flex_child_count = 0;  // Count of flex children for gap calculation
     // Check if this is a grid container.
     bool is_grid_container = intrinsic_element_display_matches(
-        element, view_block, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
+        element, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
     if (is_grid_container) {
 
         // CSS Grid §10.1: Grid container intrinsic widths are computed column-by-column.
@@ -4624,7 +4578,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
 
     is_flex_container = intrinsic_element_display_matches(
-        element, view_block, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX);
+        element, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX);
     // Check flex direction for row vs column
     bool is_vertical_wm = false;
     if (is_flex_container) {
@@ -4977,8 +4931,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             // CSS 2.1 §9.3.1: Absolutely positioned elements are out of normal flow
             // and do not contribute to the containing block's intrinsic size.
-            if (layout_block_is_out_of_flow_positioned(child_vb) ||
-                (!child_vb->position && layout_element_is_abs_or_fixed(child_elem))) {
+            if (intrinsic_child_is_out_of_flow(child_elem, child_vb)) {
                 continue;
             }
 
@@ -5019,27 +4972,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // For inline elements, also add horizontal margins
             // CSS Sizing 3 §4: Negative margins reduce the element's outer size contribution
             if (is_inline) {
-                ViewBlock* child_view = lam::unsafe_view_block_element_storage(child_elem);
-                if (child_view->bound) {
-                    if (child_view->boundary()->margin.left_type != CSS_VALUE_AUTO) {
-                        child_sizes.max_content += child_view->boundary()->margin.left;
-                        if (explicit_box_decoration_run_sizing) {
-                            child_sizes.min_content += child_view->boundary()->margin.left;
-                        }
-                    }
-                    if (child_view->boundary()->margin.right_type != CSS_VALUE_AUTO) {
-                        child_sizes.max_content += child_view->boundary()->margin.right;
-                        if (explicit_box_decoration_run_sizing) {
-                            child_sizes.min_content += child_view->boundary()->margin.right;
-                        }
-                    }
-                } else if (child_elem->specified_style) {
-                    // Fallback: read margins from specified CSS style when bound isn't allocated
-                    float ml = 0, mr = 0;
-                    layout_resolve_intrinsic_horizontal_margins(
-                        lycon, child_elem, false, &ml, &mr);
-                    child_sizes.max_content += ml + mr;
-                    child_sizes.min_content += ml + mr;
+                LayoutIntrinsicMarginPair margins =
+                    layout_intrinsic_horizontal_margin_pair(lycon, child_elem);
+                float margin_sum = margins.left + margins.right;
+                child_sizes.max_content += margin_sum;
+                if (explicit_box_decoration_run_sizing || !margins.used_bound) {
+                    child_sizes.min_content += margin_sum;
                 }
             }
         }
@@ -5069,21 +5007,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // Add flex item margins to child_sizes before accumulating.
             if (child->is_element()) {
                 DomElement* child_elem = child->as_element();
-                ViewBlock* child_view = lam::unsafe_view_block_element_storage(child_elem);
-                float ml = 0, mr = 0;
-                if (child_view->bound) {
-                    if (child_view->boundary()->margin.left_type != CSS_VALUE_AUTO &&
-                        child_view->boundary()->margin.left >= 0)
-                        ml = child_view->boundary()->margin.left;
-                    if (child_view->boundary()->margin.right_type != CSS_VALUE_AUTO &&
-                        child_view->boundary()->margin.right >= 0)
-                        mr = child_view->boundary()->margin.right;
-                } else if (child_elem->specified_style) {
-                    layout_resolve_intrinsic_horizontal_margins(
-                        lycon, child_elem, true, &ml, &mr);
-                }
-                child_sizes.min_content += ml + mr;
-                child_sizes.max_content += ml + mr;
+                LayoutIntrinsicMarginPair margins =
+                    layout_intrinsic_horizontal_margin_pair(lycon, child_elem,
+                        {true, true, true, true, false});
+                child_sizes.min_content += margins.left + margins.right;
+                child_sizes.max_content += margins.left + margins.right;
             }
 
             if (is_row_flex) {
@@ -5272,25 +5200,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             float margin_left = 0, margin_right = 0;
             if (child->is_element()) {
                 DomElement* child_elem = child->as_element();
-                ViewBlock* child_view = lam::unsafe_view_block_element_storage(child_elem);
-                if (child_view->bound) {
-                    // Add margins to the child's width for proper shrink-to-fit
-                    // CSS Sizing 3 §4: Negative margins reduce the element's outer size
-                    if (child_view->boundary()->margin.left_type != CSS_VALUE_AUTO) {
-                        margin_left = child_view->boundary()->margin.left;
-                        child_width += margin_left;
-                    }
-                    if (child_view->boundary()->margin.right_type != CSS_VALUE_AUTO) {
-                        margin_right = child_view->boundary()->margin.right;
-                        child_width += margin_right;
-                    }
-                } else if (child_elem->specified_style) {
-                    // Read margins directly from specified CSS style
-                    // This handles the case during intrinsic sizing when bound isn't allocated yet
-                    layout_resolve_intrinsic_horizontal_margins(
-                        lycon, child_elem, true, &margin_left, &margin_right);
-                    child_width += margin_left + margin_right;
-                }
+                LayoutIntrinsicMarginPair margins =
+                    layout_intrinsic_horizontal_margin_pair(lycon, child_elem,
+                        {true, true, true, false, false});
+                margin_left = margins.left;
+                margin_right = margins.right;
+                child_width += margin_left + margin_right;
             }
             // a float's outer min/max contributions share its margins; otherwise a negative
             // margin can make min-content exceed max-content and force an oversized clamp.
@@ -5874,11 +5789,6 @@ float calculate_max_content_width(LayoutContext* lycon, DomNode* node) {
     return calculate_node_intrinsic_widths(lycon, node).max_content;
 }
 
-float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float width) {
-    // For block containers, min-content height == max-content height
-    // (CSS Sizing Level 3: https://www.w3.org/TR/css-sizing-3/#min-content-block-size)
-    return calculate_max_content_height(lycon, node, width);
-}
 
 static bool intrinsic_declared_css_height_is_definite(LayoutContext* lycon,
                                                       DomElement* element) {
@@ -5905,14 +5815,7 @@ static bool intrinsic_has_definite_css_height(LayoutContext* lycon, DomElement* 
     return intrinsic_declared_css_height_is_definite(lycon, element);
 }
 
-static bool intrinsic_height_should_collapse_whitespace(CssEnum white_space) {
-    return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
-           white_space == CSS_VALUE_PRE_LINE || white_space == 0;
-}
 
-static bool intrinsic_is_collapsible_ascii_whitespace(char ch) {
-    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
-}
 
 static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* element,
                                               ViewBlock* view, float width) {
@@ -5927,7 +5830,8 @@ static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* 
             const char* data = reinterpret_cast<const char*>(child->text_data());
             if (data && data[0] != '\0') {
                 for (size_t i = 0; data[i] != '\0'; i++) {
-                    if (intrinsic_is_collapsible_ascii_whitespace(data[i])) {
+                    if (data[i] == ' ' || data[i] == '\t' ||
+                        data[i] == '\n' || data[i] == '\r') {
                         pending_space = true;
                     } else {
                         if (pending_space && text->length > 0 &&
@@ -5974,17 +5878,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         const char* text = (const char*)node->text_data();
         if (!text || *text == '\0') return 0;
 
-        bool is_whitespace_only = true;
-        for (const char* p = text; *p; p++) {
-            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
-                is_whitespace_only = false;
-                break;
-            }
-        }
-        if (is_whitespace_only) {
-            return 0;  // Whitespace-only text doesn't contribute to height
-        }
 
+        if (text_node_is_ascii_whitespace(node)) return 0;
         // Calculate line height
         float font_size = 16.0f;
         if (lycon->font.style && lycon->font.style->font_size > 0) {
@@ -6028,7 +5923,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 	            const char* measure_text = text;
 	            size_t measure_len = text_len;
 	            static thread_local char normalized_text[4096];  // LARGE_ARRAY_OK: static buffer — not on call stack.
-	            if (intrinsic_height_should_collapse_whitespace(ws_val)) {
+            if (layout_white_space_collapses(ws_val)) {
 	                measure_len = layout_normalize_collapsible_whitespace(text, text_len,
 	                                                              normalized_text,
 	                                                              sizeof(normalized_text));
@@ -6342,7 +6237,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
     // Check if this is a grid container - need to detect column count
     bool is_grid_container = intrinsic_element_display_matches(
-        element, view, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
+        element, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
     int grid_column_count = 1;  // Default: single column = vertical stacking
     float grid_row_gap = 0;
     float empty_grid_fixed_row_extent = -1.0f;
@@ -6388,8 +6283,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     float flex_row_gap = 0;
     float flex_column_gap = 0;
     bool is_flex_container = intrinsic_element_display_matches(
-        element, view, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX);
 
+        element, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX);
     if (is_flex_container) {
         LayoutFlexStyleInfo flex_style = layout_flex_style_info(lycon, view);
         is_flex_row = flex_style.row;
@@ -6667,13 +6562,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     continue;
                 }
                 ViewBlock* child_block = lam::view_as_block(child_ve);
-                if (child_block &&
-                    (layout_block_is_out_of_flow_positioned(child_block) ||
-                     (child_block->position && element_has_float(child_block)))) {
-                    continue;
-                }
-                if ((!child_block || !child_block->position) &&
-                    layout_element_is_abs_or_fixed(child_elem)) continue;
+                if (intrinsic_should_skip_height_child(child_elem)) continue;
             }
             // CSS 2.1 §10.3.3: The available width for a child element's content
             // is the parent's content width minus the child's own padding and border.
@@ -6710,7 +6599,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 !intrinsic_declared_css_height_is_definite(lycon, element)) {
                 DomElement* child_elem = child->as_element();
                 ViewBlock* child_block = lam::unsafe_view_block_element_storage(child_elem);
-                float child_ratio = intrinsic_element_preferred_aspect_ratio(child_elem, child_block);
+                float child_ratio = intrinsic_element_preferred_aspect_ratio(child_block);
                 cyclic_percentage_ratio_child = intrinsic_element_has_percentage_height(child_elem) &&
                     child_block && child_ratio > 0.0f;
                 if (cyclic_percentage_ratio_child && !element_has_in_flow_intrinsic_content(child_elem)) {
@@ -6909,11 +6798,9 @@ IntrinsicSizesBidirectional measure_intrinsic_sizes(
     // Step 3: Measure height intrinsic sizes at the determined width
     // IMPORTANT: When a definite width is available, use it for BOTH min and max height
     // This matches the original grid behavior where both heights are computed at the same width
-    result.min_content_height = calculate_min_content_height(lycon, node, width_for_height);
-    result.max_content_height = calculate_max_content_height(lycon, node, width_for_height);
 
+    float content_height = calculate_max_content_height(lycon, node, width_for_height);
+    result.min_content_height = content_height;
+    result.max_content_height = content_height;
     return result;
 }
-
-// the scalar intrinsic queries remain the compatibility boundary for callers
-// that need one axis instead of the bidirectional result.

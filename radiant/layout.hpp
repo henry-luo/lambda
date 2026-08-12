@@ -1,7 +1,6 @@
 #ifndef LAYOUT_HPP
 #define LAYOUT_HPP
 #pragma once
-
 // layout coordinates and dimensions are float; justified integer casts use INT_CAST_OK.
 
 #include "view.hpp"
@@ -18,7 +17,6 @@
 #include <math.h>
 
 typedef struct LayoutContext LayoutContext;
-
 // CSS Inline 3 §7.3 initial-letter value after resolving the size and sink.
 // `raised` also covers the equivalent explicit sink of one line.
 struct InitialLetterInfo {
@@ -38,7 +36,6 @@ struct InitialLetterBoxInsets {
         float values[4];
     };
 };
-
 // tier-1: immutable shape describing a text fragment union
 typedef struct LayoutTextRectBounds {
     bool valid;
@@ -87,7 +84,6 @@ bool layout_get_initial_letter_info(const DomElement* element,
 bool layout_get_text_initial_letter_info(const DomNode* text_node,
                                          InitialLetterInfo* out_info);
 InitialLetterBoxInsets layout_initial_letter_box_insets(ViewText* text);
-
 // maximum DOM nesting depth. guards call-stack overflow in layout_flow_node()
 // and layout_abs_block() — both use the same lycon->depth counter.
 #ifdef NDEBUG
@@ -101,7 +97,6 @@ constexpr int MAX_FLEX_DEPTH = 16;
 constexpr int MAX_GRID_DEPTH = 4;
 constexpr int MAX_IFRAME_DEPTH = 3;
 constexpr int MAX_MULTICOL_BLOCKS = 1024;
-
 // browser layout coordinates use a signed 2^25 CSS-pixel range.
 constexpr float MAX_LAYOUT_DIMENSION = 33554432.0f;
 
@@ -117,7 +112,6 @@ enum AvailableSizeType {
     AVAILABLE_SIZE_MIN_CONTENT,
     AVAILABLE_SIZE_MAX_CONTENT
 };
-
 // tier-3: layout-transient, valid within pass
 struct AvailableSize {
     AvailableSizeType type;
@@ -170,7 +164,6 @@ struct AvailableSize {
         return 0;
     }
 };
-
 // tier-3: layout-transient, valid within pass
 struct AvailableSpace {
     AvailableSize width;
@@ -236,13 +229,26 @@ inline float compute_shrink_to_fit_width(float min_content, float max_content, A
     if (avail > max_content) return max_content;
     return avail;
 }
-
 // tier-3: layout-transient, valid within pass
 struct TextIntrinsicWidths {
     float min_content;
     float max_content;
 };
+// The fast text paths share the same glyph-run probe; only their CSS
+// eligibility rules differ. Keeping the byte scan and font measurement here
+// prevents intrinsic sizing from maintaining a second shaping implementation.
+struct LayoutSimpleLatinRun {
+    size_t bytes;
+    float width;
+    uint32_t first_codepoint;
+    uint32_t last_codepoint;
+};
 
+bool layout_measure_simple_latin_run(LayoutContext* lycon,
+                                     struct FontHandle* handle,
+                                     const unsigned char* text,
+                                     size_t remaining,
+                                     LayoutSimpleLatinRun* result);
 // Intrinsic measurements may temporarily replace the active font and allocate
 // pooled font props. One scope owns both restorations so early exits cannot
 // leave speculative font state in the parent layout pass.
@@ -261,7 +267,6 @@ struct IntrinsicFontScope {
 
 float calculate_min_content_width(LayoutContext* lycon, DomNode* node);
 float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
-float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float width);
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width,
                                    bool ignore_definite_block_size = false);
 bool layout_has_cyclic_percentage_replaced_descendant(DomElement* element);
@@ -323,12 +328,28 @@ void layout_resolve_intrinsic_horizontal_margins(LayoutContext* lycon,
                                                   float* margin_left,
                                                   float* margin_right,
                                                   bool include_shorthand = true);
+typedef struct LayoutIntrinsicMarginOptions {
+    bool include_logical;
+    bool include_shorthand;
+    bool include_bound;
+    bool nonnegative_bound;
+    bool fallback_zero_bound;
+} LayoutIntrinsicMarginOptions;
+
+typedef struct LayoutIntrinsicMarginPair {
+    float left;
+    float right;
+    bool used_bound;
+} LayoutIntrinsicMarginPair;
+
+LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
+        LayoutContext* lycon, DomElement* element,
+        LayoutIntrinsicMarginOptions options = {false, true, true, false, false});
 float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
                                             ViewElement* element,
                                             CssPropertyCode property,
                                             float inline_base = -1.0f,
                                             bool include_bound = true);
-
 // tier-3: layout-transient, valid within pass
 struct IntrinsicSizesBidirectional {
     float min_content_width;
@@ -344,18 +365,15 @@ IntrinsicSizesBidirectional measure_intrinsic_sizes(
 );
 
 inline IntrinsicSizes intrinsic_sizes_for_axis(IntrinsicSizesBidirectional sizes, bool is_row_axis) {
-    if (is_row_axis) {
-        return {sizes.min_content_width, sizes.max_content_width};
-    }
-    return {sizes.min_content_height, sizes.max_content_height};
+    return is_row_axis
+        ? IntrinsicSizes{sizes.min_content_width, sizes.max_content_width}
+        : IntrinsicSizes{sizes.min_content_height, sizes.max_content_height};
 }
-
 // tier-3: layout-transient, valid within pass
 struct CellIntrinsicWidths {
     float min_width;
     float max_width;
 };
-
 // tier-3: layout-transient, valid within pass
 typedef struct IntrinsicSize {
     float min_width;
@@ -370,6 +388,8 @@ typedef struct IntrinsicSize {
 IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
 IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
 float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arrow);
+float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,
+                                      bool use_min_content);
 
 IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement* element,
     bool content_only = false);
@@ -381,7 +401,6 @@ TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
     CssEnum white_space = CSS_VALUE_NORMAL,
     CssEnum overflow_wrap = CSS_VALUE_NORMAL,
     CssEnum word_break = CSS_VALUE_NORMAL);
-
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
 float layout_aspect_ratio_height(float width, float aspect_ratio);
@@ -417,7 +436,6 @@ extern int64_t g_layout_cache_stores;
 namespace radiant {
 
 #define LAYOUT_CACHE_SIZE 9
-
 // tier-3: layout-transient, valid within pass
 struct KnownDimensions {
     float width;
@@ -429,7 +447,6 @@ struct KnownDimensions {
 inline KnownDimensions known_dimensions_none() {
     return {0.0f, 0.0f, false, false};
 }
-
 // tier-3: layout-transient, valid within pass
 struct SizeF {
     float width;
@@ -443,7 +460,6 @@ inline SizeF size_f(float w, float h) {
 inline SizeF size_f_zero() {
     return {0.0f, 0.0f};
 }
-
 // tier-3: layout-transient, valid within pass
 struct CacheEntry {
     KnownDimensions known_dimensions;
@@ -451,7 +467,6 @@ struct CacheEntry {
     SizeF computed_size;
     bool valid;
 };
-
 // tier-3: layout-transient, valid within pass
 struct LayoutCache {
     CacheEntry final_layout;
@@ -586,7 +601,6 @@ inline void layout_cache_store(
 }
 
 } // namespace radiant
-
 // tier-3: layout-transient, valid within pass
 typedef struct BoxEdges {
     union {
@@ -600,13 +614,9 @@ typedef struct BoxEdges {
     };
 } BoxEdges;
 
-inline float layout_edge_value(const BoxEdges& edges, CssBoxSide side) {
-    return edges.values[side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP];
-}
-
-inline float layout_spacing_edge(const Spacing* spacing, CssBoxSide side) {
-    const float* value = radiant_spacing_value(spacing, side);
-    return value ? *value : 0.0f;
+static inline float layout_css_border_width_keyword(CssEnum keyword) {
+    return keyword == CSS_VALUE_THIN ? 1.0f
+        : keyword == CSS_VALUE_THICK ? 5.0f : 3.0f;
 }
 
 inline BoxEdges layout_spacing_edges(const Spacing* spacing) {
@@ -638,7 +648,6 @@ inline BoxEdges layout_boundary_padding_edges(const BoundaryProp* bound) {
 inline BoxEdges layout_boundary_border_edges(const BoundaryProp* bound) {
     return layout_border_width_edges(bound ? bound->border : nullptr);
 }
-
 // tier-3: layout-transient, valid within pass
 typedef struct BoxMetrics {
     BoxEdges margin;
@@ -653,6 +662,13 @@ typedef struct BoxMetrics {
     float pad_border_h;
     float pad_border_v;
 } BoxMetrics;
+// tier-3: layout-transient content-box geometry derived from a border box
+struct LayoutContentBox {
+    float width;
+    float height;
+    float offset_x;
+    float offset_y;
+};
 
 typedef BoxEdges LayoutInlineDecorationEdges;
 
@@ -669,6 +685,7 @@ inline LayoutInlineDecorationEdges layout_inline_decoration_edges(ViewSpan* span
 
 BoxMetrics layout_box_metrics(ViewBlock* block);
 BoxMetrics layout_boundary_metrics(const BoundaryProp* bound);
+LayoutContentBox layout_content_box(ViewBlock* block);
 void layout_store_given_axis(LayoutContext* lycon, ViewBlock* block, float size,
                              bool horizontal, bool reset_type = false);
 void layout_clear_given_axis(LayoutContext* lycon, ViewBlock* block, bool horizontal);
@@ -683,6 +700,9 @@ float layout_border_size_from_content_box(ViewBlock* block, float content_size, 
 float layout_css_size_to_content_box(const BoundaryProp* bound, CssEnum box_sizing, float css_size, bool horizontal);
 float layout_css_size_to_border_box(const BoundaryProp* bound, CssEnum box_sizing, float css_size, bool horizontal);
 float layout_floor_border_box_axis(ViewBlock* block, float border_size, bool horizontal);
+float layout_ratio_transfer_axis(ViewBlock* block, float size, bool source_horizontal,
+                                 float aspect_ratio, bool size_is_border_box,
+                                 bool result_is_border_box, bool ratio_is_border_box);
 float layout_stretch_fit_border_box_size(ViewBlock* block, float available_margin_box_size,
                                          bool horizontal);
 float layout_stretch_fit_used_css_size(ViewBlock* block, float available_margin_box_size,
@@ -696,6 +716,27 @@ static inline CssEnum layout_box_sizing(ViewBlock* block) {
 
 static inline bool layout_uses_border_box(ViewBlock* block) {
     return layout_box_sizing(block) == CSS_VALUE_BORDER_BOX;
+}
+
+inline float layout_content_size_if_border_box(ViewBlock* block, float size, bool horizontal) {
+    return layout_uses_border_box(block)
+        ? layout_content_size_from_border_box(block, size, horizontal) : size;
+}
+
+inline float layout_used_css_size_from_border_box(ViewBlock* block, float size, bool horizontal) {
+    // stretch and inset sizing produce a border-box result; only content-box sizing converts it.
+    return layout_uses_border_box(block)
+        ? size : layout_content_size_from_border_box(block, size, horizontal);
+}
+
+inline float layout_border_size_if_content_box(ViewBlock* block, float size, bool horizontal) {
+    return layout_uses_border_box(block)
+        ? layout_border_size_from_content_box(block, size, horizontal) : size;
+}
+
+inline float layout_used_border_box_size(ViewBlock* block, float size, bool horizontal) {
+    return layout_uses_border_box(block)
+        ? size : layout_border_size_from_content_box(block, size, horizontal);
 }
 
 float layout_apply_min_max_axis(ViewBlock* block, float size, bool horizontal, bool size_is_border_box);
@@ -758,25 +799,21 @@ static inline void layout_apply_positive_min_max_contribution(ViewBlock* block, 
     if (max_size && maximum > 0.0f && *max_size > maximum) *max_size = maximum;
 }
 
-static inline const CssValue* css_box_shorthand_side_value(const CssValue* value, int side) {
-    if (!value) return nullptr;
-    if (value->type != CSS_VALUE_TYPE_LIST) return value;
-    int count = value->data.list.count;
-    CssValue** values = value->data.list.values;
-    if (count <= 0 || !values) return nullptr;
-    int index = 0;
-    if (side == 0) {
-        index = 0;                                // top
-    } else if (side == 1) {
-        index = (count >= 2) ? 1 : 0;             // right
-    } else if (side == 2) {
-        index = (count >= 3) ? 2 : 0;             // bottom
-    } else {
-        index = (count >= 4) ? 3 : ((count >= 2) ? 1 : 0); // left
-    }
-    return index < count ? values[index] : nullptr;
+static inline int css_quad_value_index(int count, int side) {
+    static const uint8_t indices[4][4] = {
+        {0, 0, 0, 0}, {0, 1, 0, 1},
+        {0, 1, 2, 1}, {0, 1, 2, 3}
+    };
+    return count >= 1 && count <= 4 && side >= 0 && side < 4
+        ? indices[count - 1][side] : -1;
 }
 
+static inline const CssValue* css_box_shorthand_side_value(const CssValue* value, int side) {
+    if (!value || value->type != CSS_VALUE_TYPE_LIST) return value;
+    int index = css_quad_value_index(value->data.list.count, side);
+    CssValue** values = value->data.list.values;
+    return index >= 0 && values ? values[index] : nullptr;
+}
 // CSS quad shorthands use the same clockwise expansion for borders, spacing, and insets.
 struct CssQuadValues {
     const CssValue* side[4];
@@ -790,7 +827,7 @@ struct CssQuadValues {
         int count = value->data.list.count;
         if (count < 1 || count > 4 || !value->data.list.values) return false;
         for (int i = 0; i < 4; i++) {
-            side[i] = css_box_shorthand_side_value(value, i);
+            side[i] = value->data.list.values[css_quad_value_index(count, i)];
             if (!side[i]) return false;
         }
         return true;
@@ -812,7 +849,6 @@ static inline CssValue* css_pair_side_value(const CssValue* value, bool end_side
     int index = (end_side && count >= 2) ? 1 : 0;
     return index < count ? values[index] : nullptr;
 }
-
 // Cascade selection is shared by used-value reparsing and intrinsic sizing;
 // keeping the priority comparison in one helper prevents the two passes from
 // choosing different declarations for the same logical side.
@@ -826,7 +862,6 @@ static inline void css_consider_cascade_candidate(CssCascadeCandidate* candidate
         candidate->priority = priority;
     }
 }
-
 // A box property's physical and logical declarations all compete for the same
 // four used-value slots. Keeping that candidate assembly beside the priority
 // rule prevents percentage re-resolution and intrinsic sizing from drifting.
@@ -936,7 +971,6 @@ static inline void layout_resolve_auto_margin_pair(float available_size, float b
             available_size - border_box_size - *start_margin);
     }
 }
-
 // Keep normal-flow horizontal auto margins on one axis path. Floats and inline-level
 // boxes use zero auto margins; ordinary blocks resolve against the float-reduced space.
 static inline void layout_resolve_in_flow_horizontal_margins(ViewBlock* block,
@@ -958,7 +992,6 @@ static inline void layout_resolve_in_flow_horizontal_margins(ViewBlock* block,
         margin->left = available_size - block->width - margin->right;
     }
 }
-
 // tier-3: layout-transient, valid within pass
 typedef struct LayoutContainingBlock {
     ViewBlock* view;
@@ -997,7 +1030,6 @@ void layout_resolve_percent_offsets_for_child(ViewBlock* child,
 
 typedef struct Arena Arena;
 typedef struct DomElement DomElement;
-
 // tier-3: layout-transient, valid within pass
 typedef struct CounterValue {
     const char* name;
@@ -1005,13 +1037,11 @@ typedef struct CounterValue {
     bool propagated;
     bool created_by_reset;
 } CounterValue;
-
 // tier-3: layout-transient, valid within pass
 typedef struct CounterScope {
     HashMap* counters;
     CounterScope* parent;
 } CounterScope;
-
 // tier-3: layout-transient, valid within pass
 typedef struct CounterContext {
     Arena* arena;
@@ -1054,7 +1084,6 @@ enum LayoutDebugCategory : uint32_t {
     LAYOUT_DEBUG_CACHE = 1u << 7,
     LAYOUT_DEBUG_ALL   = 0xffffffffu
 };
-
 // tier-3: layout-transient, valid within pass
 typedef struct LayoutDebugState {
     uint32_t enabled_categories;
@@ -1073,14 +1102,12 @@ enum LayoutProfileBucket : uint8_t {
     LAYOUT_PROFILE_IMAGE,
     LAYOUT_PROFILE_BUCKET_COUNT
 };
-
 // tier-3: layout-transient, valid within pass
 typedef struct LayoutProfileNode {
     const DomNode* node;
     LayoutProfileBucket bucket;
     double elapsed_ms;
 } LayoutProfileNode;
-
 // tier-3: layout-transient, valid within pass
 typedef struct LayoutProfiler {
     double block_ms;
@@ -1119,7 +1146,6 @@ void layout_profiler_note_cache_miss(LayoutProfiler* profiler);
 void layout_profiler_set_cache(LayoutProfiler* profiler, int64_t hits, int64_t misses);
 void layout_profiler_report(LayoutContext* lycon);
 double layout_profiler_now_ms();
-
 // tier-3: layout-transient, valid within pass
 struct LayoutProfileScope {
     LayoutContext* lycon;
@@ -1137,7 +1163,6 @@ struct LayoutProfileScope {
 } // namespace radiant
 
 namespace radiant {
-
 // tier-3: layout-transient, valid within pass
 struct SpaceDistribution {
     float gap_before_first;
@@ -1167,7 +1192,6 @@ bool alignment_is_baseline(int32_t alignment);
 bool alignment_is_stretch(int32_t alignment);
 int32_t resolve_align_self(int32_t align_self, int32_t align_items);
 int32_t resolve_justify_self(int32_t justify_self, int32_t justify_items);
-
 // CSS Inline 3: auto selects an inline-block's last baseline, while all other
 // inline-level boxes use their first baseline.
 inline bool layout_prefers_last_baseline(const ViewBlock* block,
@@ -1205,7 +1229,6 @@ inline bool layout_uses_explicit_baseline_source(const ViewBlock* block) {
 
 bool layout_inline_context_has_explicit_baseline_source(
     ViewBlock* block);
-
 // Form controls own editable line boxes without exposing child ViewText nodes.
 // Select their baseline set directly so explicit baseline-source does not fall
 // back to the generic replaced-element border-edge baseline.
@@ -1244,7 +1267,6 @@ float compute_view_first_text_baseline(
     bool skip_block_children_of_table,
     FirstBaselineRowCallback row_baseline
 );
-
 // Return the last descendant text baseline relative to `parent`. Multicol
 // fragmentation uses this after child boxes have moved to their final columns.
 float compute_view_last_text_baseline(
@@ -1270,7 +1292,6 @@ inline bool white_space_preserves_space_advance(CssEnum white_space) {
 CssEnum layout_inherited_text_transform(DomNode* node);
 float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
-
 // tier-3: layout-transient, valid within pass
 struct TableMetadata {
     int column_count;
@@ -1282,11 +1303,14 @@ struct TableMetadata {
     float* col_max_widths;
     float* col_percent_widths;
     float* row_heights;
+    float* row_base_heights;
+    float* row_reference_heights;
     float* row_y_positions;
     bool* row_collapsed;
     bool* col_collapsed;
     float* col_original_widths;
     bool* row_has_percent_height;
+    bool* row_has_specified_height;
     float* col_edge_max_border;
     bool* col_has_explicit_width;
 
@@ -1305,9 +1329,58 @@ struct TableMetadata {
     }
 };
 
+// Border-collapse visits the same edge grid in both physical directions;
+// keeping index and winning-border side selection together prevents the two
+// traversals from growing separate row/column coordinate branches.
+struct LayoutTableAxis {
+    bool horizontal;
+    int edge_count;
+    int slot_count;
+    LayoutTableAxis(const TableMetadata* meta, bool horizontal_axis)
+        : horizontal(horizontal_axis),
+          edge_count(meta ? (horizontal ? meta->row_count : meta->column_count) : 0),
+          slot_count(meta ? (horizontal ? meta->column_count : meta->row_count) : 0) {}
+    int row(int edge, int slot) const { return horizontal ? edge : slot; }
+    int col(int edge, int slot) const { return horizontal ? slot : edge; }
+    int fixed_index(bool start) const {
+        return start ? 0 : edge_count - 1;
+    }
+    int edge(int row_value, int col_value) const {
+        return horizontal ? row_value : col_value;
+    }
+    bool has_previous(int row_value, int col_value) const {
+        return edge(row_value, col_value) > 0;
+    }
+    bool has_next(int row_value, int col_value) const {
+        return edge(row_value, col_value) < edge_count;
+    }
+    int previous_row(int row_value, int col_value) const {
+        return horizontal ? row_value - 1 : row_value;
+    }
+    int previous_col(int row_value, int col_value) const {
+        return horizontal ? col_value : col_value - 1;
+    }
+    CssBoxSide previous_side() const {
+        return horizontal ? CSS_BOX_SIDE_BOTTOM : CSS_BOX_SIDE_RIGHT;
+    }
+    CssBoxSide next_side() const {
+        return horizontal ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_LEFT;
+    }
+    CssBoxSide table_side(bool start) const {
+        return horizontal
+            ? (start ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_BOTTOM)
+            : (start ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT);
+    }
+    float* collapsed_edge(TableMetadata* meta, bool start) const {
+        if (!meta) return nullptr;
+        if (horizontal) return start
+            ? &meta->collapsed_border_top : &meta->collapsed_border_bottom;
+        return start ? &meta->collapsed_border_left : &meta->collapsed_border_right;
+    }
+};
+
 TableMetadata* table_metadata_create(ScratchArena* scratch, int cols, int rows);
 void table_metadata_destroy(TableMetadata* meta);
-
 // tier-3: layout-transient, valid within pass
 typedef struct VelmtBox {
     float x;
@@ -1315,10 +1388,8 @@ typedef struct VelmtBox {
     float width;
     float height;
 } VelmtBox;
-
 // tier-3: layout-transient, valid within pass
 typedef BoxEdges VelmtEdges;
-
 // tier-3: layout-transient, valid within pass
 typedef struct Velmt {
     View* view;
@@ -1329,7 +1400,6 @@ typedef struct Velmt {
     VelmtEdges border;
     VelmtEdges padding;
 } Velmt;
-
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutContext {
     LayoutContext* lycon;
@@ -1350,7 +1420,6 @@ typedef struct CustomLayoutContext {
     CssEnum direction;
     const char* writing_mode;
 } CustomLayoutContext;
-
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutPlacement {
     int child_index;
@@ -1359,20 +1428,17 @@ typedef struct CustomLayoutPlacement {
     int z;
     bool has_z;
 } CustomLayoutPlacement;
-
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutPaintLayer {
     Element* content;
     int z;
     int order;
 } CustomLayoutPaintLayer;
-
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutPaintState {
     CustomLayoutPaintLayer* layers;
     int layer_count;
 } CustomLayoutPaintState;
-
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutResult {
     CustomLayoutPlacement* placements;
@@ -1407,7 +1473,6 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
 const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode css_property,
                                             LayoutContext* lycon);
 void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
-
 // One in-flow item used by both direct and nested multicol distribution.
 // Keeping the break and fragmentation facts beside the measured extent avoids
 // two collectors drifting when a new fragmentation rule is added.
@@ -1421,7 +1486,6 @@ typedef struct MulticolFlowItem {
     bool break_before_column;
     bool break_after_column;
 } MulticolFlowItem;
-
 // tier-3: layout-transient, valid within one multicol pass
 typedef struct ColumnState {
     int column_index;
@@ -1431,7 +1495,6 @@ typedef struct ColumnState {
     float balanced_height;
     bool balancing;
 } ColumnState;
-
 // tier-3: layout-transient, owned by the scratch-backed ColumnGroup
 typedef struct ColumnFragment {
     int fragment_index;
@@ -1443,7 +1506,6 @@ typedef struct ColumnFragment {
     float target_height;
     float used_height;
 } ColumnFragment;
-
 // All multicol balancing passes use the same bounded group scratch shape.
 // Keeping allocation and reverse-order release together prevents the nested
 // spanner path and the ordinary container path from drifting in ownership.
@@ -1481,7 +1543,6 @@ struct MulticolGroupScratch {
         heights = nullptr;
     }
 };
-
 // Keep the bounded flow-item buffer paired with its scratch lifetime; nested
 // and top-level multicol passes otherwise duplicate the same allocation path.
 struct MulticolFlowScratch {
@@ -1498,7 +1559,6 @@ struct MulticolFlowScratch {
         items = nullptr;
     }
 };
-
 // tier-3: layout-transient, valid while distributing one multicol group
 typedef struct ColumnGroup {
     ViewBlock* container;
@@ -1514,14 +1574,12 @@ typedef struct ColumnGroup {
     bool wraps_rows;
     bool vertical_writing;
 } ColumnGroup;
-
 // tier-3: layout-transient, cursor into a ColumnGroup
 typedef struct FragmentedFlowCursor {
     ColumnGroup* group;
     int current_fragment;
     float block_offset;
 } FragmentedFlowCursor;
-
 // A normalized projection avoids separate fragment-index math in text and
 // block paths; both must clamp negative offsets and use the same row pitch.
 // tier-3: layout-transient, returned by one projection calculation
@@ -1551,15 +1609,6 @@ void calculate_multicol_dimensions(
     float* out_gap
 );
 void layout_multicol_content(LayoutContext* lycon, ViewBlock* block);
-
-// tier-3: layout-transient, valid within pass
-typedef struct StyleContext {
-    struct StyleElement* parent;
-    struct StyleNode* prev_node;
-    // lxb_css_parser_t *css_parser;  // Removed: lexbor dependency
-    void *css_parser;  // Placeholder for future CSS parser if needed
-} StyleContext;
-
 // tier-3: layout-transient, valid within pass
 typedef struct FloatBox {
     ViewBlock* element;
@@ -1574,7 +1623,6 @@ typedef struct FloatBox {
     bool initial_letter_clearance; // float was lowered below a sunk initial letter
     struct FloatBox* next;      // Linked list for multiple floats
 } FloatBox;
-
 // tier-3: layout-transient, valid within pass
 typedef struct InitialLetterBox {
     ViewBlock* element;         // block containing the initial letter
@@ -1586,7 +1634,6 @@ typedef struct InitialLetterBox {
     bool source_is_short;
     struct InitialLetterBox* next;
 } InitialLetterBox;
-
 // tier-3: layout-transient, valid within pass
 typedef struct FloatAvailableSpace {
     float left;
@@ -1594,7 +1641,6 @@ typedef struct FloatAvailableSpace {
     bool has_left_float;
     bool has_right_float;
 } FloatAvailableSpace;
-
 // tier-3: layout-transient, valid within pass
 typedef struct BlockContext {
     float content_width;
@@ -1615,7 +1661,6 @@ typedef struct BlockContext {
     float given_height;
     float first_line_ascender;
     float last_line_ascender;
-
     // CSS Inline 3 §5: line box metrics for text-box-trim calculation.
     // These store the max ascender/descender of the first and last line boxes,
     // capturing inline descendants' contributions to line box extent.
@@ -1626,7 +1671,6 @@ typedef struct BlockContext {
 
     float text_indent;
     bool is_first_line;
-
     // CSS Inline 3 §7.7: an initial letter shortens following line boxes at
     // its inline-start margin edge while the letter occupies those lines.
     float initial_letter_exclusion_width;
@@ -1685,29 +1729,24 @@ typedef struct BlockContext {
 
     Pool* pool;
 } BlockContext;
-
 // Semantic break kind classification (CSS Text 3 §4–5 + UAX #14)
 // Used to track the type of the last recorded break opportunity in a line box.
 typedef enum BreakKind {
     // Content (not a break character itself)
     BRK_TEXT = 0,               // ordinary word/grapheme content
-
     // Whitespace kinds (CSS Text 3 §4)
     BRK_SPACE,                  // collapsible space (U+0020 in white-space: normal/nowrap/pre-line)
     BRK_PRESERVED_SPACE,        // non-collapsible space (U+0020 in pre/pre-wrap/break-spaces)
     BRK_TAB,                    // tab character (advance to next tab stop; CSS Text 3 §4.2)
     BRK_HARD_BREAK,             // newline (\n in pre/pre-wrap/pre-line; CSS Text 3 §4.1)
-
     // Non-breaking / glue (UAX #14 GL, WJ, ZWJ)
     BRK_GLUE,                   // visible non-breaking: NBSP U+00A0, NNBSP U+202F
     BRK_GLUE_ZW,                // zero-width non-breaking: WJ U+2060, ZWNBSP U+FEFF
     BRK_ZWJ,                    // zero-width joiner U+200D (suppresses break, joins emoji sequences)
-
     // Break opportunities (CSS Text 3 §5)
     BRK_ZERO_WIDTH_BREAK,       // ZWSP U+200B (invisible, breakable)
     BRK_SOFT_HYPHEN,            // SHY U+00AD (invisible unless broken, then visible '-')
     BRK_HYPHEN,                 // explicit hyphen U+002D, U+2010 (break after, includes width)
-
     // UAX #14 line break classes (CSS Text 3 §5.2)
     BRK_CJK,                    // CJK ideograph (break after, unless word-break: keep-all)
     BRK_OP,                     // opening punctuation — no break after (UAX #14 LB14)
@@ -1715,11 +1754,9 @@ typedef enum BreakKind {
     BRK_NS,                     // non-starter — no break before when after CJK (UAX #14 LB20)
     BRK_EX_IS_SY,               // EX/IS/SY — no break before (UAX #14 LB13)
     BRK_CJ,                     // conditional Japanese starter (resolved to NS or ID per line-break mode)
-
     // Ideographic space
     BRK_IDEOGRAPHIC_SPACE,      // U+3000 (full-width space, hangable, break opportunity)
 } BreakKind;
-
 // tier-3: layout-transient, valid within pass
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
@@ -1762,7 +1799,6 @@ typedef struct Linebox {
     // the alignment baseline; vertical publication consumes this separately.
     float clamped_baseline_tail;
     bool has_clamped_baseline_tail;
-    bool has_inline_spans;          // true if line contains inline span elements (for bbox correction)
     bool has_different_inline_font; // true if any inline text uses a different font from the block's strut
     float max_normal_line_height;   // max normal line-height across all inline boxes on this line
     bool has_c1_control_text;       // true when line contains visible C1 control glyphs
@@ -1830,18 +1866,7 @@ typedef enum LineFillStatus {
     RDT_LINE_NOT_FILLED = 1,
     RDT_LINE_FILLED = 2,
 } LineFillStatus;
-
-// Stacking context for absolute/fixed positioned elements
-// typedef struct StackingBox : BlockContext {
-//     ViewBlock* establishing_element;  // element that creates the context
-//     int z_index;                     // z-index of this context
-//     struct StackingBox* parent;       // parent stacking context
-//     ArrayList* positioned_children; // list of positioned child elements
-// } StackingBox;
-
-// ============================================================================
 // Flex Layout
-// ============================================================================
 
 typedef enum {
     DIR_ROW = CSS_VALUE_ROW,
@@ -1864,7 +1889,6 @@ typedef enum {
     JUSTIFY_SPACE_AROUND = CSS_VALUE_SPACE_AROUND,
     JUSTIFY_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY
 } JustifyContent;
-
 // tier-2: style-derived, valid for one intrinsic/layout query
 typedef struct LayoutFlexStyleInfo {
     bool row;
@@ -1927,7 +1951,6 @@ inline float layout_flex_column_gap(ViewElement* element) {
 inline bool layout_flex_wraps(ViewElement* element) {
     return layout_flex_style_info(nullptr, element).wrapping;
 }
-
 // tier-3: layout-transient, valid within pass
 typedef struct FlexLineInfo {
     View** items;
@@ -1941,28 +1964,6 @@ typedef struct FlexLineInfo {
     float baseline;
 } FlexLineInfo;
 
-// tier-3: layout-transient, valid within flex intrinsic measurement
-typedef struct FlexHeightMeasurement {
-    float height;
-    bool has_explicit_height_css;
-} FlexHeightMeasurement;
-
-typedef struct FlexAxisConstraintValues {
-    float minimum;
-    float maximum;
-    FlexAxisConstraintValues(const FlexItemProp* item, bool horizontal)
-        : minimum(0.0f), maximum(0.0f) {
-        if (!item) return;
-        if (horizontal) {
-            minimum = item->resolved_min_width;
-            maximum = item->resolved_max_width;
-        } else {
-            minimum = item->resolved_min_height;
-            maximum = item->resolved_max_height;
-        }
-    }
-} FlexAxisConstraintValues;
-
 // tier-3: layout-transient, valid while resolving one flex item
 typedef struct FlexResolvedAxis {
     bool horizontal;
@@ -1973,41 +1974,33 @@ typedef struct FlexResolvedAxis {
     float specified_suggestion;
     bool minimum_is_auto;
 } FlexResolvedAxis;
-
 // tier-3: layout-transient, valid within pass
 typedef struct FlexContainerLayout : FlexProp {
     // Layout state (computed during layout)
     View** flex_items;  // Array of child flex items
     int item_count;
     int allocated_items;  // For dynamic array growth
-
     // Line information
     struct FlexLineInfo* lines;
     int line_count;
     int allocated_lines;
-
     // Cached calculations
     float main_axis_size;
     float cross_axis_size;
     bool needs_reflow;
-
     // Sizing mode flags (CSS Flexbox spec §9.2)
     // When true, the axis size is indefinite (fit-content/shrink-to-fit)
     // and flex-grow should NOT distribute additional space
     bool main_axis_is_indefinite;
-
     // A min-size can enlarge the used flex container without making its
     // automatic main size a definite percentage basis for descendants.
     bool main_axis_available_size_is_definite;
-
     // CSS Flexbox §9.4: Whether container has a definite cross size
     // True if container has explicit CSS height (row flex) or width (column flex)
     // False for auto-size containers that derive cross size from content
     bool has_definite_cross_size;
-
     // Layout context for intrinsic sizing (set during init_flex_container)
     struct LayoutContext* lycon;
-
     // pass-local flex state lives above this mark and is released together.
     ScratchMark scratch_mark;
 } FlexContainerLayout;
@@ -2020,22 +2013,30 @@ float flex_column_item_content_extent(LayoutContext* lycon,
                                       FlexContainerLayout* flex_layout);
 float flex_column_content_contribution(LayoutContext* lycon, ViewElement* container);
 void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout);
+float flex_measure_intrinsic_max_height(LayoutContext* lycon, DomNode* node, float width,
+                                        float percentage_containing_width = -1.0f);
 bool flex_height_is_parent_constrained(ViewBlock* container,
                                        bool include_column_main_size,
                                        bool include_row_cross_stretch);
 
-typedef struct FlexMeasureTextRun {
+typedef enum LayoutTextRunMode {
+    LAYOUT_TEXT_RUN_RAW,
+    LAYOUT_TEXT_RUN_TRIM,
+    LAYOUT_TEXT_RUN_COLLAPSE
+} LayoutTextRunMode;
+
+typedef struct LayoutTextRun {
     const char* text;
     size_t length;
-} FlexMeasureTextRun;
+} LayoutTextRun;
 
-FlexMeasureTextRun flex_measure_prepare_text_run(DomNode* text_node,
-                                                  const char* text,
-                                                  size_t length);
+LayoutTextRun layout_prepare_text_run(const char* text, size_t length,
+                                      LayoutTextRunMode mode);
 
-// ============================================================================
+LayoutTextRun flex_measure_prepare_text_run(DomNode* text_node,
+                                            const char* text,
+                                            size_t length);
 // Layout Axis Helpers
-// ============================================================================
 
 typedef enum LayoutAxis {
     LAYOUT_AXIS_X,
@@ -2085,7 +2086,6 @@ inline CssBoxSide layout_axis_side(LayoutAxis axis, bool start) {
     if (axis == LAYOUT_AXIS_X) return start ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_RIGHT;
     return start ? CSS_BOX_SIDE_TOP : CSS_BOX_SIDE_BOTTOM;
 }
-
 // One physical-axis view. Geometry, used-size slots, constraints, and
 // positioned edges share a lifetime and a physical direction, so keeping them
 // together prevents partial axis conversions from mixing X and Y state.
@@ -2103,7 +2103,8 @@ typedef struct LayoutAxisRefs {
     } AxisMargins;
 
     LayoutAxis axis;
-    float* size;
+    ViewElement* item;
+    float* size_slot;
     float* position;
     float* given;
     float* minimum;
@@ -2120,7 +2121,7 @@ typedef struct LayoutAxisRefs {
     AxisMargins margins;
 
     LayoutAxisRefs(LayoutAxis selected)
-        : axis(selected), size(nullptr), position(nullptr), given(nullptr),
+        : axis(selected), item(nullptr), size_slot(nullptr), position(nullptr), given(nullptr),
           minimum(nullptr), maximum(nullptr), given_percent(nullptr),
           minimum_percent(nullptr), maximum_percent(nullptr),
           given_fit_content_limit(nullptr), given_fit_content_percent(nullptr),
@@ -2128,12 +2129,14 @@ typedef struct LayoutAxisRefs {
           insets{}, margins{} {}
 
     void bind_geometry(ViewElement* item) {
+        this->item = item;
         if (!item) return;
+        if (item->bound) bind_margins(&item->boundary_mut()->margin);
         if (axis == LAYOUT_AXIS_X) {
-            size = &item->width;
+            size_slot = &item->width;
             position = &item->x;
         } else {
-            size = &item->height;
+            size_slot = &item->height;
             position = &item->y;
         }
     }
@@ -2177,6 +2180,18 @@ typedef struct LayoutAxisRefs {
         bind_geometry(item);
     }
 
+    LayoutAxisRefs(ViewElement* item, bool horizontal)
+        : LayoutAxisRefs(item, horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y) {}
+    LayoutAxisRefs(FlexItemProp* item, LayoutAxis selected)
+        : LayoutAxisRefs(selected) {
+        if (!item) return;
+        minimum = selected == LAYOUT_AXIS_X
+            ? &item->resolved_min_width : &item->resolved_min_height;
+        maximum = selected == LAYOUT_AXIS_X
+            ? &item->resolved_max_width : &item->resolved_max_height;
+    }
+    LayoutAxisRefs(FlexItemProp* item, bool horizontal)
+        : LayoutAxisRefs(item, horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y) {}
     LayoutAxisRefs(BlockContext* context, LayoutAxis selected)
         : LayoutAxisRefs(selected) {
         if (context) given = selected == LAYOUT_AXIS_X
@@ -2201,20 +2216,53 @@ typedef struct LayoutAxisRefs {
         if (!block) return;
         bind_constraints(block->block_mut());
         bind_insets(block->position);
-        bind_margins(block->bound ? &block->boundary_mut()->margin : nullptr);
     }
 
-    float get_size() const { return size ? *size : 0.0f; }
+    float get_size() const { return size_slot ? *size_slot : 0.0f; }
     float get_position() const { return position ? *position : 0.0f; }
-    void set_size(float value) const { if (size) *size = value; }
+    void set_size(float value) const { if (size_slot) *size_slot = value; }
     void set_position(float value) const { if (position) *position = value; }
+
+
+    bool horizontal() const { return axis == LAYOUT_AXIS_X; }
+    IntrinsicSizes* intrinsic() const {
+        return item && item->fi
+            ? (horizontal() ? &item->fi->intrinsic_width : &item->fi->intrinsic_height)
+            : nullptr;
+    }
+    bool has_intrinsic() const {
+        return item && item->fi &&
+            (horizontal() ? item->fi->has_intrinsic_width : item->fi->has_intrinsic_height);
+    }
+    void set_has_explicit(bool value) const {
+        if (!item || !item->fi) return;
+        if (horizontal()) item->fi->has_explicit_width = value;
+        else item->fi->has_explicit_height = value;
+    }
+    float form_size() const {
+        return item && item->form
+            ? (horizontal() ? item->form->intrinsic_width : item->form->intrinsic_height)
+            : 0.0f;
+    }
+    void set_form_size(float value) const {
+        if (!item || !item->form) return;
+        if (horizontal()) item->form->intrinsic_width = value;
+        else item->form->intrinsic_height = value;
+    }
     bool has_start() const { return insets.start.has && *insets.start.has; }
     bool has_end() const { return insets.end.has && *insets.end.has; }
     bool has_any_inset() const { return has_start() || has_end(); }
+    bool margin_start_is_auto() const {
+        return margins.start_type && *margins.start_type == CSS_VALUE_AUTO;
+    }
+    bool margin_end_is_auto() const {
+        return margins.end_type && *margins.end_type == CSS_VALUE_AUTO;
+    }
     float margin_start() const { return margins.start ? *margins.start : 0.0f; }
     float margin_end() const { return margins.end ? *margins.end : 0.0f; }
+    float non_auto_margin_start() const { return margin_start_is_auto() ? 0.0f : margin_start(); }
+    float non_auto_margin_end() const { return margin_end_is_auto() ? 0.0f : margin_end(); }
 } LayoutAxisRefs;
-
 // tier-3: layout-transient, describes one child during vertical-flow sizing
 typedef struct LayoutVerticalFlowChild {
     ViewBlock* block;
@@ -2247,8 +2295,20 @@ inline bool layout_axis_is_horizontal(LayoutAxis axis) {
     return axis == LAYOUT_AXIS_X;
 }
 
-inline const char* layout_axis_name(LayoutAxis axis) {
-    return layout_axis_is_horizontal(axis) ? "width" : "height";
+inline bool layout_is_shrink_to_fit_width(ViewBlock* block) {
+    if (!block) return false;
+    if (block->display.outer == CSS_VALUE_INLINE_BLOCK &&
+        (!block->blk || block->block()->given_width < 0.0f)) {
+        return true;
+    }
+    if (!block->position ||
+        (block->positionp()->position != CSS_VALUE_ABSOLUTE &&
+         block->positionp()->position != CSS_VALUE_FIXED)) {
+        return false;
+    }
+    bool has_explicit_width = block->blk && block->block()->given_width > 0.0f;
+    bool has_left_right = block->positionp()->has_left && block->positionp()->has_right;
+    return !has_explicit_width && !has_left_right;
 }
 
 typedef struct LayoutAxisBoxMetrics {
@@ -2343,6 +2403,18 @@ inline float layout_axis_padding_start(const BoundaryProp* bound, LayoutAxis axi
 inline float layout_axis_decoration_start(const BoundaryProp* bound, LayoutAxis axis) {
     return layout_axis_padding_start(bound, axis) +
         layout_axis_border_start(bound ? bound->border : nullptr, axis);
+}
+
+inline float layout_axis_padding_end(const BoundaryProp* bound, LayoutAxis axis) {
+    return bound ? layout_axis_spacing_end(&bound->padding, axis) : 0.0f;
+}
+
+inline float layout_axis_border_end(const BoundaryProp* bound, LayoutAxis axis) {
+    return bound ? layout_axis_spacing_end(bound->border ? &bound->border->width : nullptr, axis) : 0.0f;
+}
+
+inline float layout_axis_decoration_end(const BoundaryProp* bound, LayoutAxis axis) {
+    return layout_axis_padding_end(bound, axis) + layout_axis_border_end(bound, axis);
 }
 
 inline float layout_axis_margin_start(const BoundaryProp* bound, LayoutAxis axis) {
@@ -2469,7 +2541,6 @@ inline float calculate_gap_space(FlexContainerLayout* flex, int item_count,
 
 void init_flex_container(LayoutContext* lycon, ViewBlock* container);
 void cleanup_flex_container(LayoutContext* lycon);
-
 // Mirrors BlockContextScope: pass-local flex scratch and parent context must
 // unwind together, even when nested layout exits early.
 // tier-3: layout-transient, valid within pass
@@ -2494,9 +2565,8 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout);
 void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_layout);
 void apply_constraints_to_flex_items(FlexContainerLayout* flex_layout);
 float apply_flex_constraint(ViewElement* item, float computed_size, bool is_main_axis,
-                          FlexContainerLayout* flex_layout, bool* hit_min, bool* hit_max);
-float apply_flex_constraint(ViewElement* item, float computed_size, bool is_main_axis,
-                          FlexContainerLayout* flex_layout);
+                          FlexContainerLayout* flex_layout, bool* hit_min = nullptr,
+                          bool* hit_max = nullptr);
 float apply_stretch_constraint(ViewElement* item, float container_cross_size,
                              FlexContainerLayout* flex_layout);
 void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
@@ -2510,7 +2580,6 @@ void set_cross_axis_position(ViewElement* item, float position, FlexContainerLay
 void set_main_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout);
 void set_cross_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout);
 float find_max_baseline(FlexLineInfo* line, int container_align_items);
-
 // tier-3: layout-transient, valid within pass
 typedef struct MeasurementCacheEntry {
     DomNode* node;
@@ -2524,11 +2593,7 @@ typedef struct MeasurementCacheEntry {
 
 void measure_flex_child_content(LayoutContext* lycon, DomNode* child);
 float flex_resolve_inherited_line_height(LayoutContext* lycon, DomElement* target);
-void calculate_intrinsic_sizes(ViewBlock* view, LayoutContext* lycon);
 void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout);
-void measure_text_content_accurate(LayoutContext* lycon, DomNode* text_node,
-    int* min_width, int* max_width, int* height);
-void store_measured_sizes(DomNode* node, ViewBlock* measured_view, LayoutContext* lycon);
 void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
 void clear_measurement_cache(ViewTree* tree);
@@ -2536,16 +2601,10 @@ void destroy_measurement_cache(ViewTree* tree);
 void invalidate_measurement_cache_for_node(DomNode* node);
 void advance_measurement_cache_generation(ViewTree* tree);
 void init_flex_item_view(LayoutContext* lycon, DomNode* node);
-void layout_block_with_measured_size(LayoutContext* lycon, DomNode* node,
-    DisplayValue display, MeasurementCacheEntry* cached);
 
 void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container);
 void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
-void layout_flex_item_final_content(LayoutContext* lycon, ViewBlock* flex_item);
-
-// ============================================================================
 // Grid Layout
-// ============================================================================
 
 #ifdef min
 #undef min
@@ -2574,7 +2633,6 @@ enum class CellOccupancyState : uint8_t {
     DefinitelyPlaced = 1,
     AutoPlaced = 2
 };
-
 // tier-3: layout-transient, valid within pass
 struct OriginZeroLine {
     int16_t value;
@@ -2606,7 +2664,6 @@ struct OriginZeroLine {
     constexpr bool operator>(OriginZeroLine other) const { return value > other.value; }
     constexpr bool operator>=(OriginZeroLine other) const { return value >= other.value; }
 };
-
 // tier-3: layout-transient, valid within pass
 struct GridLine {
     int16_t value;
@@ -2616,7 +2673,6 @@ struct GridLine {
 
     constexpr bool is_valid() const { return value != 0; }
 };
-
 // tier-3: layout-transient, valid within pass
 struct LineSpan {
     OriginZeroLine start;
@@ -2630,7 +2686,6 @@ struct LineSpan {
         return diff > 0 ? static_cast<uint16_t>(diff) : 0;
     }
 };
-
 // tier-3: layout-transient, valid within pass
 struct TrackCounts {
     uint16_t negative_implicit;
@@ -2698,7 +2753,6 @@ typedef enum GridTrackSizeType {
     GRID_TRACK_SIZE_MINMAX,
     GRID_TRACK_SIZE_REPEAT
 } GridTrackSizeType;
-
 // tier-3: layout-transient, valid within pass
 typedef struct GridTrackSize {
     GridTrackSizeType type;
@@ -2713,7 +2767,6 @@ typedef struct GridTrackSize {
     bool is_auto_fill;
     bool is_auto_fit;
 } GridTrackSize;
-
 // tier-3: layout-transient, valid within pass
 typedef struct GridTrackList {
     GridTrackSize** tracks;
@@ -2724,7 +2777,6 @@ typedef struct GridTrackList {
     bool is_repeat;
     int repeat_count;
 } GridTrackList;
-
 // tier-3: layout-transient, valid within pass
 typedef struct GridArea {
     char* name;
@@ -2733,14 +2785,12 @@ typedef struct GridArea {
     int column_start;
     int column_end;
 } GridArea;
-
 // tier-3: layout-transient, valid within pass
 typedef struct GridLineName {
     char* name;
     int line_number;
     bool is_row;
 } GridLineName;
-
 // tier-3: layout-transient, valid within pass
 typedef struct GridContainerLayout : GridProp {
     radiant::grid::TrackArray* computed_rows;
@@ -2782,7 +2832,6 @@ void init_grid_container(LayoutContext* lycon, struct ViewBlock* container);
 void cleanup_grid_container(LayoutContext* lycon);
 float layout_grid_row_border_box_extent(struct ViewBlock* container,
                                         GridContainerLayout* grid_layout);
-
 // Mirrors BlockContextScope: pass-local grid scratch and parent context must
 // unwind together, even when no-item or absolute-only grid paths return early.
 // tier-3: layout-transient, valid within pass
@@ -2818,7 +2867,6 @@ void align_grid_items(GridContainerLayout* grid_layout);
 void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
 void clear_grid_template_areas(GridProp* grid_layout);
 void parse_grid_template_areas(GridProp* grid_layout, const char* areas_string, ScratchArena* sa);
-void resolve_grid_template_areas(GridContainerLayout* grid_layout);
 IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis);
 void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
@@ -2830,7 +2878,6 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
                                   float* min_height, float* max_height);
 void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_layout);
 void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container);
-
 // tier-3: layout-transient, valid within pass
 typedef struct LayoutContext {
     View* view;  // current view
@@ -2840,7 +2887,6 @@ typedef struct LayoutContext {
     Linebox line;  // current linebox
     FontBox font;  // current font style
     float root_font_size;
-    // StackingBox* stacking;  // current stacking context for positioned elements
     FlexContainerLayout* flex_container; // integrated flex container layout
     GridContainerLayout* grid_container; // integrated grid container layout
 
@@ -2850,50 +2896,42 @@ typedef struct LayoutContext {
     float width, height;  // context dimensions
     float dpi;           // dots per inch
     Pool* pool;  // memory pool for view allocation
-
     // Available space constraints for current layout
     // This enables layout code to distinguish between:
     // - Normal layout (definite width/height)
     // - Intrinsic sizing (min-content/max-content measurement)
     AvailableSpace available_space;
-
     // Run mode for layout optimization (Taffy-inspired)
     // - ComputeSize: Only compute dimensions, skip positioning (for measurement)
     // - PerformLayout: Full layout with final positioning
     // - PerformHiddenLayout: Minimal layout for display:none
     radiant::RunMode run_mode;
-
     // Sizing mode for intrinsic size computation
     // - InherentSize: Use element's own CSS size properties
     // - ContentSize: Use content-based size (ignore CSS width/height)
     radiant::SizingMode sizing_mode;
-
     // Counter tracking for CSS counters (counter-reset, counter-increment, counter(), counters())
     CounterContext* counter_context;
-
     // LIFO scratch allocator for scoped temporary buffers (table metadata, grid arrays, etc.)
     ScratchArena scratch;
-
     // Recursion depth guard against deeply nested DOM trees (fuzzer-found stack overflow)
     int depth;
-
     // Flex-specific nesting depth guard (flex-in-flex recursion)
     int flex_depth;
-
     // Grid-specific nesting depth guard (grid-in-grid multipass recursion)
     int grid_depth;
 
+    // CSS Tables 3 §3.10.2 first cell-content layout uses special handling for
+    // direct percentage-height descendants while row heights are provisional.
+    bool table_cell_first_row_layout;
+
     // Total node count guard against pathological layouts (fuzzer-found timeouts)
     int node_count;
-
     // Structured layout debug categories and optional release profiling buckets
     radiant::LayoutDebugState layout_debug;
     radiant::LayoutProfiler profiler;
 } LayoutContext;
-
-// ============================================================================
 // LayoutContext Run Mode Helpers
-// ============================================================================
 
 /**
  * Check if layout is in measurement mode (only computing sizes)
@@ -2905,9 +2943,7 @@ inline bool layout_context_is_measuring(LayoutContext* lycon) {
 /**
  * Check if layout should perform full positioning
  */
-// ============================================================================
 // Percentage Resolution
-// ============================================================================
 
 bool layout_resolve_percentage_value(const CssValue* value, float percentage_base, float* out);
 bool layout_css_value_has_nonzero_percentage(const CssValue* value);
@@ -2991,23 +3027,16 @@ float layout_block_stable_scrollbar_gutter(ViewBlock* block, bool horizontal);
 float layout_block_auto_content_width_from_inline_base(ViewBlock* block, float inline_base);
 void layout_reresolve_percentage_box(ViewBlock* block, float inline_base);
 bool layout_view_tree_has_percentage_spacing(View* root);
-
-// ============================================================================
 // Table Captions
-// ============================================================================
 
 float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_width);
 float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width);
-
-// ============================================================================
 // Table Layout
-// ============================================================================
 
 typedef struct TableCellInsets {
     BoxEdges border;
     BoxEdges padding;
 } TableCellInsets;
-
 // tier-3: layout-transient, valid within a table-cell measurement pass
 struct TableCellContentExtent {
     bool has_content;
@@ -3022,19 +3051,20 @@ struct TableCellContentExtent {
 };
 
 TableCellInsets table_cell_insets(ViewTableCell* cell);
+bool layout_table_has_collapsed_borders(LayoutContext* lycon, DomElement* element);
 void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 struct ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt);
 void table_auto_layout(LayoutContext* lycon, struct ViewTable* table);
-void adjust_table_text_positions_final(struct ViewTable* table);
 float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh = false);
 float find_last_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_x, bool use_normal_lh = false);
 float layout_table_baseline_for_source(LayoutContext* lycon, ViewBlock* table,
                                        bool prefer_last);
 void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row,
     float table_abs_x, float cell_border, float cell_padding);
-void adjust_cell_text_positions_final(struct ViewBlock* cell, float text_abs_x);
 bool wrap_orphaned_table_children(LayoutContext* lycon, struct DomElement* parent);
 bool is_table_internal_display(CssEnum display);
+bool layout_element_is_anonymous_table_fixup(const struct DomElement* element);
+void layout_unwrap_anonymous_table_fixups_for_child_insertion(struct DomElement* parent);
 
 inline bool layout_display_is_table_row_group(CssEnum display) {
     return display == CSS_VALUE_TABLE_ROW_GROUP ||
@@ -3046,10 +3076,7 @@ inline bool layout_display_is_table_structure(CssEnum display) {
     return display == CSS_VALUE_TABLE || display == CSS_VALUE_TABLE_ROW ||
            layout_display_is_table_row_group(display);
 }
-
-// ============================================================================
 // Absolute Children
-// ============================================================================
 
 typedef enum AbsStaticContextKind {
     ABS_STATIC_BLOCK,
@@ -3058,7 +3085,6 @@ typedef enum AbsStaticContextKind {
 } AbsStaticContextKind;
 
 struct AbsStaticContext;
-
 // tier-3: layout-transient, valid within pass
 typedef struct AbsChildLayoutState {
     DomNode* child;
@@ -3079,7 +3105,6 @@ typedef void (*AbsPrepareChildFn)(LayoutContext* lycon, ViewBlock* container,
     AbsStaticContext* ctx, AbsChildLayoutState* state);
 typedef void (*AbsAfterChildFn)(LayoutContext* lycon, ViewBlock* container,
     AbsStaticContext* ctx, AbsChildLayoutState* state);
-
 // tier-3: layout-transient, valid within pass
 typedef struct AbsStaticContext {
     AbsStaticContextKind kind;
@@ -3095,7 +3120,6 @@ void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* contai
     AbsStaticContext* ctx);
 
 namespace radiant {
-
 // tier-3: layout-transient, valid within pass
 struct LayoutRunModeScope {
     ::LayoutContext* lycon;
@@ -3107,7 +3131,6 @@ struct LayoutRunModeScope {
     LayoutRunModeScope(const LayoutRunModeScope&) = delete;
     LayoutRunModeScope& operator=(const LayoutRunModeScope&) = delete;
 };
-
 // tier-3: layout-transient, valid within pass
 struct LayoutMeasureScope {
     ::LayoutContext* lycon;
@@ -3147,10 +3170,7 @@ void layout_pass_cache_store_for_space(::LayoutContext* lycon, ::DomElement* ele
 LayoutCache* layout_pass_ensure_cache(::LayoutContext* lycon, ::DomElement* element);
 
 } // namespace radiant
-
-// ============================================================================
 // BlockContext API - Unified Block Formatting Context Functions
-// ============================================================================
 
 /**
  * Initialize a BlockContext for an element
@@ -3163,10 +3183,8 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool);
  * Clears float lists but keeps layout state
  */
 void block_context_reset_floats(BlockContext* ctx);
-
 // Clears the initial-letter continuations when entering a nested BFC.
 void block_context_reset_initial_letters(BlockContext* ctx);
-
 // Registers an initial letter's used margin box in BFC coordinates.
 void block_context_add_initial_letter(BlockContext* ctx, ViewBlock* element,
                                       float left, float top, float right, float bottom,
@@ -3182,7 +3200,6 @@ bool block_context_establishes_bfc(ViewBlock* block);
  * Add a positioned float to the BlockContext
  */
 void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem);
-
 // recompute the cached lowest edge after existing float boxes are translated.
 void block_context_recompute_lowest_float_bottom(BlockContext* ctx);
 
@@ -3204,7 +3221,6 @@ void block_context_recompute_lowest_float_bottom(BlockContext* ctx);
 FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height,
                                               bool line_query = false,
                                               bool float_placement_query = false);
-
 // Return the next lower edge of any float strictly below the candidate Y.
 // Float-avoidance and positioned static placement share this boundary rule.
 float block_context_next_float_boundary(BlockContext* ctx, float y);
@@ -3241,7 +3257,6 @@ void update_line_for_bfc_floats(LayoutContext* lycon, float query_height = 0);
  * @return The BFC root BlockContext, or NULL if none found
  */
 BlockContext* block_context_find_bfc(BlockContext* ctx);
-
 // coordinates shared by float placement, clearance, and inline intrusion queries.
 typedef struct BlockContextOffset {
     float x;
@@ -3249,10 +3264,7 @@ typedef struct BlockContextOffset {
 } BlockContextOffset;
 
 BlockContextOffset block_context_offset_to_bfc(ViewElement* view, BlockContext* bfc);
-
-// ============================================================================
 // Property Allocation
-// ============================================================================
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
 FontProp* alloc_font_prop(LayoutContext* lycon);
@@ -3262,7 +3274,6 @@ void reset_flex_item_prop_for_style(LayoutContext* lycon, ViewSpan* block);
 void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span);
 PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
-
 // Shared computed-property allocation keeps CSS and HTML hint resolution on
 // one boundary ownership path; divergent lazy allocation leaves partially
 // initialized styles that later layout passes interpret differently.
@@ -3303,10 +3314,7 @@ void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
 void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
                                 int iframe_width, int iframe_height);
 View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
-
-// ============================================================================
 // Keyword Mapping: Lambda CSS strings → Lexbor enum values
-// ============================================================================
 
 /**
  * Map CSS keyword string to Lexbor enum value
@@ -3314,7 +3322,6 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
  * @param keyword CSS keyword string (e.g., "block", "inline", "flex")
  * @return Lexbor CSS_VALUE_* constant, or 0 if unknown
  */
-int map_css_keyword_to_lexbor(const char* keyword);
 
 /**
  * Map Lambda font-size keyword to pixel value
@@ -3335,7 +3342,6 @@ inline LayoutFontSizeResult layout_resolve_font_size_value(
     bool resolve_vars) {
     LayoutFontSizeResult result = {-1.0f, false};
     if (!lycon || !raw_value) return result;
-
     // Intrinsic sizing and pseudo-style resolution must use the same parent
     // font baseline; only their custom-property expansion policy differs.
     const CssValue* value = resolve_vars ? resolve_var_function(lycon, raw_value) : raw_value;
@@ -3409,7 +3415,6 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
     if (count < 2) return false;
     parts->group = group;
     parts->family_start = count;
-
     // A global keyword mixed into a shorthand invalidates the declaration;
     // sharing this boundary keeps intrinsic and computed font parsing aligned.
     for (size_t i = 0; i < count; i++) {
@@ -3488,14 +3493,12 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
  * @param keyword const char* keyword string (e.g., "normal", "bold")
  * @return int font weight (100-900)
  */
-int map_lambda_font_weight_keyword(const char* keyword);
 
 /**
  * Map Lambda font-family keyword to font name
  * @param keyword const char* keyword string (e.g., "serif", "sans-serif")
  * @return const char* font family name
  */
-const char* map_lambda_font_family_keyword(const char* keyword);
 
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);
@@ -3532,7 +3535,6 @@ static inline bool layout_text_node_has_content(DomNode* node) {
     const char* text = (const char*)node->text_data();
     return text && !is_only_whitespace(text);
 }
-
 // Grid ignores text nodes while flex treats non-whitespace text as anonymous
 // items; one counter keeps both scratch-array bounds derived from the same walk.
 static inline int layout_count_potential_items(ViewBlock* container,
@@ -3568,7 +3570,6 @@ static inline bool layout_block_is_display_none(const ViewBlock* block) {
 static inline bool layout_element_is_display_none(const DomElement* element) {
     return !element || layout_display_is_none(element->display);
 }
-
 // CSS Positioning functions
 void layout_relative_position_offset(ViewBlock* block, float* offset_x, float* offset_y);
 float layout_relative_axis_offset(ViewBlock* block, bool horizontal, float containing_size);
@@ -3619,23 +3620,29 @@ static inline LayoutLogicalProperty layout_logical_property(CssPropertyCode prop
         case CSS_PROPERTY_MARGIN_INLINE:
         case CSS_PROPERTY_PADDING_INLINE:
         case CSS_PROPERTY_INSET_INLINE:
+        case CSS_PROPERTY_BORDER_INLINE:
             result.valid = true;
             result.pair = true;
             break;
         case CSS_PROPERTY_MARGIN_INLINE_START:
         case CSS_PROPERTY_PADDING_INLINE_START:
         case CSS_PROPERTY_INSET_INLINE_START:
+        case CSS_PROPERTY_BORDER_INLINE_START:
             result.valid = true;
             break;
         case CSS_PROPERTY_MARGIN_INLINE_END:
         case CSS_PROPERTY_PADDING_INLINE_END:
         case CSS_PROPERTY_INSET_INLINE_END:
+        case CSS_PROPERTY_BORDER_INLINE_END:
             result.valid = true;
             result.start = false;
             break;
         case CSS_PROPERTY_MARGIN_BLOCK:
         case CSS_PROPERTY_PADDING_BLOCK:
         case CSS_PROPERTY_INSET_BLOCK:
+        case CSS_PROPERTY_BORDER_BLOCK:
+        case CSS_PROPERTY_BORDER_BLOCK_WIDTH:
+        case CSS_PROPERTY_BORDER_BLOCK_COLOR:
             result.valid = true;
             result.block_axis = true;
             result.pair = true;
@@ -3643,12 +3650,18 @@ static inline LayoutLogicalProperty layout_logical_property(CssPropertyCode prop
         case CSS_PROPERTY_MARGIN_BLOCK_START:
         case CSS_PROPERTY_PADDING_BLOCK_START:
         case CSS_PROPERTY_INSET_BLOCK_START:
+        case CSS_PROPERTY_BORDER_BLOCK_START:
+        case CSS_PROPERTY_BORDER_BLOCK_START_WIDTH:
+        case CSS_PROPERTY_BORDER_BLOCK_START_COLOR:
             result.valid = true;
             result.block_axis = true;
             break;
         case CSS_PROPERTY_MARGIN_BLOCK_END:
         case CSS_PROPERTY_PADDING_BLOCK_END:
         case CSS_PROPERTY_INSET_BLOCK_END:
+        case CSS_PROPERTY_BORDER_BLOCK_END:
+        case CSS_PROPERTY_BORDER_BLOCK_END_WIDTH:
+        case CSS_PROPERTY_BORDER_BLOCK_END_COLOR:
             result.valid = true;
             result.block_axis = true;
             result.start = false;
@@ -3674,6 +3687,36 @@ static inline LayoutLogicalSides layout_logical_sides(bool inline_vertical,
     sides.block_pair_end = inline_vertical ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_BOTTOM;
     return sides;
 }
+// Logical box properties all resolve to the same physical side pair. Keeping
+// the pair selection here prevents margin, padding, and inset from drifting
+// when writing-mode handling changes.
+struct LayoutPhysicalSides {
+    CssBoxSide first;
+    CssBoxSide second;
+    bool pair;
+};
+
+static inline LayoutPhysicalSides layout_logical_physical_sides(
+    const LayoutLogicalProperty& logical, const LayoutLogicalSides& sides,
+    bool pair_uses_block_start = false) {
+    LayoutPhysicalSides result = {};
+    if (logical.block_axis) {
+        if (logical.pair) {
+            result.first = pair_uses_block_start
+                ? sides.block_start : sides.block_pair_start;
+            result.second = pair_uses_block_start
+                ? sides.block_end : sides.block_pair_end;
+        } else {
+            result.first = logical.start ? sides.block_start : sides.block_end;
+            result.second = result.first;
+        }
+    } else {
+        result.first = logical.start ? sides.inline_start : sides.inline_end;
+        result.second = logical.pair ? sides.inline_end : result.first;
+    }
+    result.pair = logical.pair;
+    return result;
+}
 
 struct LayoutShadowValue {
     float offset_x;
@@ -3683,7 +3726,6 @@ struct LayoutShadowValue {
     Color color;
     bool inset;
 };
-
 // CSS values use the same nested list/function shape across sizing, images,
 // and shorthand parsing; callers should provide only the leaf predicate.
 template <typename Predicate>
@@ -3741,7 +3783,6 @@ static inline bool layout_view_is_out_of_flow(const View* view) {
            (layout_position_is_abs_fixed(element->position) ||
             layout_position_is_floated(element->position));
 }
-
 // Inline operations differ in their per-view action, not in their tree walk.
 // Keeping the walk here prevents line alignment and inline measurement from
 // drifting on out-of-flow filtering or nested span handling.
@@ -3766,7 +3807,6 @@ static inline bool layout_walk_inline_views(View* view, Enter enter, Leave leave
     }
     return changed;
 }
-
 // Generic inline-tree traversal carries depth for algorithms such as bidi
 // collection; the callback decides whether an inline node has descendants.
 template <typename Visit, typename Leave>
@@ -3857,14 +3897,22 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
 bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block);
 float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell);
 void view_vertical_align(LayoutContext* lycon, View* view);
-void layout_offset_ruby_annotation_tree(View* view, float offset_x, float offset_y);
+// Shift a view subtree and its text fragments as one coordinate-space unit.
+// Fragmentation, ruby annotation, and positioned inline correction all need
+// this same projection; keeping it here prevents each layout phase from
+// maintaining a subtly different recursive walker.
+void layout_shift_view_tree(View* view, float offset_x, float offset_y);
+void layout_shift_view_children(View* view, float offset_x, float offset_y);
+// Shift inline descendants while preserving block-child local coordinates.
+// Relative and sticky inline positioning use this narrower projection.
+void layout_shift_inline_descendants(ViewElement* view, float offset_x, float offset_y);
+void layout_shift_text_rects(ViewText* text, float offset_x, float offset_y);
 float line_baseline_position(LayoutContext* lycon, float* out_line_height);
 bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* block);
 float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
                                float span_line_height,
                                float ascender, float descender,
                                float baseline_pos, float border_top, float padding_top);
-
 // Structure for OS/2 sTypo metrics (shared across layout modules)
 // tier-3: layout-transient, valid within pass
 struct TypoMetrics {
@@ -3874,11 +3922,9 @@ struct TypoMetrics {
     bool valid;
     bool use_typo_metrics;  // fsSelection bit 7
 };
-
 // Get OS/2 sTypo metrics for a font handle
 // Returns metrics with valid=false if no OS/2 table is available
 TypoMetrics get_os2_typo_metrics(struct FontHandle* handle);
-
 // Calculate normal line height following Chrome's algorithm
 // Delegates to font_calc_normal_line_height() from lib/font/
 float calc_normal_line_height(struct FontHandle* handle);
@@ -3886,6 +3932,7 @@ float layout_br_line_box_extent(LayoutContext* lycon, struct FontHandle* handle)
 bool layout_quirky_container_ignores_child_margin_bottom(
     LayoutContext* lycon, ViewBlock* container, ViewBlock* child);
 bool layout_element_was_inline(DomElement* element, bool include_replaced = true);
+bool layout_element_is_replaced(DomElement* element);
 
 struct LayoutBorderSpacingValue {
     float horizontal;
@@ -3896,6 +3943,8 @@ struct LayoutBorderSpacingValue {
 
 LayoutBorderSpacingValue layout_resolve_border_spacing_value(
     LayoutContext* lycon, const CssValue* value);
+bool layout_inherit_table_border_spacing(LayoutContext* lycon, DomNode* element,
+                                        float* spacing_h, float* spacing_v);
 bool layout_image_orientation_uses_from_image(DomElement* element);
 float layout_view_children_bottom(ViewBlock* block, bool block_only);
 
@@ -3906,7 +3955,6 @@ inline bool layout_element_is_abs_or_fixed(DomElement* element) {
     return layout_position_is_abs_fixed(element->position) ||
         position == CSS_VALUE_ABSOLUTE || position == CSS_VALUE_FIXED;
 }
-
 // shared flow-box classification keeps flex finalization and descendant extent
 // scans aligned; table boxes participate in both traversals.
 inline bool layout_view_is_block_flow_box(View* view) {
@@ -3945,14 +3993,14 @@ float layout_measure_space_advance(LayoutContext* lycon, struct FontHandle* hand
                                    FontProp* style);
 size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
                                                char* buffer, size_t buffer_size);
-
+bool layout_text_edge_has_whitespace(const char* text, bool end);
+bool layout_element_edge_has_whitespace(DomNode* element, bool end);
 // DomNode style resolution
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
 CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block);
 void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 void layout_setup_block_font_metrics(LayoutContext* lycon);
-
 // ViewSpan bounding box computation
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struct FontHandle* fallback_fh = nullptr);
 void recompute_span_bounding_box_after_line_layout(
@@ -3961,19 +4009,7 @@ void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
 bool inline_span_float_continuation_x(
     ViewSpan* span, float* continuation_x, bool* has_left_float);
-
-// ============================================================================
 // CSS text-transform
-// ============================================================================
-
-/**
- * Apply CSS text-transform to a single Unicode codepoint.
- * @param codepoint Input Unicode codepoint
- * @param text_transform CSS text-transform value (CSS_VALUE_UPPERCASE, etc.)
- * @param is_word_start True if this is the first character of a word (for capitalize)
- * @return Transformed codepoint
- */
-uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start);
 
 /**
  * Apply CSS text-transform with full Unicode case mapping (1-to-many expansion).
@@ -3989,10 +4025,7 @@ int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
  */
 CssEnum get_text_transform_from_block(BlockProp* blk);
 CssEnum get_text_transform_from_node(DomNode* node);
-
-// ============================================================================
 // CJK Justification Utilities (CSS Text 3 §7.3)
-// ============================================================================
 
 /**
  * Check if a codepoint has UAX#14 line break class ID (Ideographic).
@@ -4013,10 +4046,7 @@ int count_justify_opportunities(const char* str, int len);
 int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
                                          bool trim_trailing_space,
                                          bool* out_suppressed = nullptr);
-
-// ============================================================================
 // Context Scope Guards (§1.8: Prevent context leaks on early returns)
-// ============================================================================
 
 /**
  * RAII guard that saves and restores lycon->block on scope exit.
@@ -4099,17 +4129,19 @@ struct LayoutContextScope {
     BlockContext saved_block;
     Linebox saved_line;
     FontBox saved_font;
+    bool saved_table_cell_first_row_layout;
     explicit LayoutContextScope(LayoutContext* l)
-        : lycon(l), saved_block(l->block), saved_line(l->line), saved_font(l->font) {}
+        : lycon(l), saved_block(l->block), saved_line(l->line), saved_font(l->font),
+          saved_table_cell_first_row_layout(l->table_cell_first_row_layout) {}
     ~LayoutContextScope() {
         lycon->block = saved_block;
         lycon->line  = saved_line;
         lycon->font  = saved_font;
+        lycon->table_cell_first_row_layout = saved_table_cell_first_row_layout;
     }
     LayoutContextScope(const LayoutContextScope&) = delete;
     LayoutContextScope& operator=(const LayoutContextScope&) = delete;
 };
-
 // Intrinsic width recursion changes both the element cycle bit and active view;
 // one owner keeps those temporary states paired on every return path.
 // tier-3: layout-transient, valid within pass
@@ -4130,7 +4162,6 @@ struct IntrinsicMeasureScope {
     IntrinsicMeasureScope(const IntrinsicMeasureScope&) = delete;
     IntrinsicMeasureScope& operator=(const IntrinsicMeasureScope&) = delete;
 };
-
 // Nested DOM/view work must restore both handles together; restoring only the
 // view leaves style resolution attached to the previous element on early exit.
 // tier-3: layout-transient, valid within pass
@@ -4148,7 +4179,6 @@ struct LayoutViewScope {
     LayoutViewScope(const LayoutViewScope&) = delete;
     LayoutViewScope& operator=(const LayoutViewScope&) = delete;
 };
-
 // Font setup is a borrowed mutation of the surrounding layout pass; every
 // measurement helper must restore it even when the measured subtree returns
 // early.
@@ -4172,7 +4202,6 @@ struct LayoutFontScope {
  */
 void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon);
 void layout_cleanup(LayoutContext* lycon);
-
 // tier-3: layout-transient, valid within pass
 struct LayoutPassScope {
     LayoutContext* lycon;
@@ -4191,16 +4220,13 @@ struct LayoutPassScope {
     LayoutPassScope(const LayoutPassScope&) = delete;
     LayoutPassScope& operator=(const LayoutPassScope&) = delete;
 };
-
 // Forward declaration
 struct DocState;
-
 // View tree printing functions (output CSS logical pixels directly)
 void print_view_tree(ViewElement* view_root, Url* url, const char* output_path = nullptr);
 void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_path = nullptr);
 bool view_memory_profile_write(DomDocument* doc, const char* input_file,
                                const char* output_path);
-
 // Print caret state to view_tree.txt (appends caret info)
 void print_caret_state(DocState* state, const char* output_path = nullptr);
 void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root = false);
@@ -4209,11 +4235,9 @@ void print_br_json(View* br, StrBuf* buf, int indent);
 void print_inline_json(ViewSpan* span, StrBuf* buf, int indent);
 
 const char* form_button_label_text(ViewBlock* block, FormControlProp* form);
-
 // Text combination control for view tree output
 // When false, consecutive text nodes are output separately (useful for PDF testing)
 void set_combine_text_nodes(bool combine);
-
 // HTML version detection functions
 int detect_html_version_lambda_css(DomDocument* doc);
 HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* input);

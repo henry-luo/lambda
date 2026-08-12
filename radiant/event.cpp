@@ -101,7 +101,6 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree);
 void target_block_view(EventContext* evcon, ViewBlock* block);
 void target_inline_view(EventContext* evcon, ViewSpan* view_span);
 void target_text_view(EventContext* evcon, ViewText* text);
-void update_scroller(ViewBlock* block, float content_width, float content_height);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard);
 
@@ -5450,11 +5449,13 @@ static void clear_cascaded_styles_recursive(DomNode* node) {
     if (!node) return;
     if (node->is_element()) {
         DomElement* e = lam::dom_require_element(node);
-        dom_element_clear_cascaded_styles(e);
-        // Pseudo declarations share the base cascade epoch; otherwise a :hover
-        // recascade reads declarations that no longer match.
-        dom_element_clear_pseudo_styles(e);
-        e->set_styles_resolved(false);
+        if (!layout_element_is_anonymous_table_fixup(e)) {
+            dom_element_clear_cascaded_styles(e);
+            // Pseudo declarations share the base cascade epoch; otherwise a :hover
+            // recascade reads declarations that no longer match.
+            dom_element_clear_pseudo_styles(e);
+            e->set_styles_resolved(false);
+        }
         for (DomNode* c = e->first_child; c; c = c->next_sibling) {
             if ((uintptr_t)c < 4096) {
                 log_error("drawing recascade invalid child link: parent=%p tag=%s child=%p",

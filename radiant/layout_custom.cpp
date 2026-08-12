@@ -175,7 +175,6 @@ static void custom_layout_warn_auto_axis_percent_children(const CustomLayoutCont
         "CUSTOM_LAYOUT_PERCENT_CHILD_AUTO_WIDTH" :
         "CUSTOM_LAYOUT_PERCENT_CHILD_AUTO_HEIGHT";
     const char* axis = horizontal ? "width" : "height";
-
     // Percent child sizes need a containing size before custom placement, but
     // auto custom parents may derive that axis only after placements return.
     log_warn("%s %s layout='%s' children=%d first_child=%d first_loc=%s child_%s=%.1f child_%s_definite=%d child_%s_source=%s",
@@ -214,7 +213,6 @@ static void custom_layout_set_axis_constraint(float css_size,
         *out_source = CUSTOM_LAYOUT_CONSTRAINT_SOURCE_INTRINSIC;
         return;
     }
-
     // Auto custom parents may derive final size after placement, so callbacks
     // get the visible fallback without treating it as a definite CSS constraint.
     *out_size = fallback_size;

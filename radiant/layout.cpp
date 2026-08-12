@@ -50,6 +50,54 @@ int64_t g_text_layout_count = 0;
 int64_t g_block_layout_count = 0;
 int64_t g_inline_layout_count = 0;
 
+void layout_shift_text_rects(ViewText* text, float offset_x, float offset_y) {
+    if (!text) return;
+    for (TextRect* rect = text->rect; rect; rect = rect->next) {
+        rect->x += offset_x;
+        rect->y += offset_y;
+    }
+}
+
+void layout_shift_view_tree(View* view, float offset_x, float offset_y) {
+    if (!view) return;
+    view->x += offset_x;
+    view->y += offset_y;
+    if (view->view_type == RDT_VIEW_TEXT) {
+        layout_shift_text_rects(lam::view_require<RDT_VIEW_TEXT>(view), offset_x, offset_y);
+        return;
+    }
+    if (!view->is_group()) return;
+    for (View* child = lam::view_require_element(view)->first_placed_child();
+         child; child = child->next()) {
+        layout_shift_view_tree(child, offset_x, offset_y);
+    }
+}
+
+void layout_shift_view_children(View* view, float offset_x, float offset_y) {
+    if (!view || !view->is_group()) return;
+    for (View* child = lam::view_require_element(view)->first_placed_child();
+         child; child = child->next()) {
+        layout_shift_view_tree(child, offset_x, offset_y);
+    }
+}
+
+void layout_shift_inline_descendants(ViewElement* view, float offset_x, float offset_y) {
+    if (!view) return;
+    for (View* child = view->first_child; child; child = child->next_sibling) {
+        child->x += offset_x;
+        child->y += offset_y;
+        if (child->view_type == RDT_VIEW_TEXT) {
+            layout_shift_text_rects(
+                lam::view_require<RDT_VIEW_TEXT>(child), offset_x, offset_y);
+        }
+        // block descendants establish their own coordinate space for inline layout.
+        if (child->is_element() && child->view_type != RDT_VIEW_BLOCK) {
+            layout_shift_inline_descendants(
+                lam::view_require_element(child), offset_x, offset_y);
+        }
+    }
+}
+
 static bool initial_letter_value_has_identifier(const CssValue* value,
                                                 const char* identifier) {
     if (!value || !identifier) return false;
@@ -275,7 +323,6 @@ static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
         padding.top > 0.0f || padding.bottom > 0.0f) {
         return false;
     }
-
     // make an otherwise empty body count both adjoining margins in root height.
     bool creates_bfc = block_context_establishes_bfc(block);
     if (creates_bfc) return false;
@@ -468,7 +515,6 @@ static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
 
     const char* str = (const char*)text_node->text_data();
     if (!is_only_whitespace(str)) return false;
-
     // CSS 2.1 §9.2.2.1: Whitespace between/around block-level elements is always
     if (!text_node->prev_sibling && text_node->next_sibling) {
         if (is_block_level_element(text_node->next_sibling)) {
@@ -491,7 +537,6 @@ static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
             return true;
         }
     }
-
     // CSS 2.1 §16.6.1: When white-space preserves spaces (pre, pre-wrap, break-spaces),
     if (!text_node->next_sibling) {
         if (parent_preserves_inter_element_whitespace(text_node)) {
@@ -502,7 +547,6 @@ static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
 
     return false;
 }
-
 // Run-in box helper functions (CSS 2.1 Section 9.2.3)
 
 /**
@@ -594,7 +638,6 @@ static bool run_in_should_merge_with_next(DomNode* run_in_node) {
 static void merge_run_in_with_next_block(LayoutContext* lycon, DomElement* run_in, DomElement* next_block) {
     if (!lycon || !run_in || !next_block) return;
 
-
     DomNode* first_run_in_child = run_in->first_child;
     DomNode* last_run_in_child = run_in->last_child;
 
@@ -639,12 +682,10 @@ static DisplayValue resolve_run_in_display(LayoutContext* lycon, DomNode* node) 
 
     if (!node || !node->is_element()) return result;
     DomElement* elem = node->as_element();
-
     // CSS 2.1: If run-in contains a block-level element, it becomes block
     if (run_in_contains_block_child(node)) {
         return result;
     }
-
     // CSS 2.1: If run-in is immediately followed by a block box, merge into it
     DomNode* next = get_next_element_sibling(node);
     if (next && run_in_should_merge_with_next(node)) {
@@ -656,7 +697,6 @@ static DisplayValue resolve_run_in_display(LayoutContext* lycon, DomNode* node) 
         result.inner = CSS_VALUE_NONE;
         return result;
     }
-
     // CSS 2.1: Otherwise, run-in becomes a block box
     return result;
 }
@@ -748,6 +788,23 @@ bool layout_element_was_inline(DomElement* element, bool include_replaced) {
                               sizeof(replaced_tags) / sizeof(replaced_tags[0]));
 }
 
+bool layout_element_is_replaced(DomElement* element) {
+    if (!element) return false;
+    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    NameId tag = element->tag();
+    // Object and audio become replaced only when they expose external content.
+    return (view && view->display.inner == RDT_DISPLAY_REPLACED) ||
+        tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_VIDEO ||
+        tag == MARKUP_NAME_IFRAME || tag == MARKUP_NAME_HR ||
+        tag == MARKUP_NAME_SVG || tag == MARKUP_NAME_CANVAS ||
+        tag == MARKUP_NAME_EMBED || tag == MARKUP_NAME_INPUT ||
+        tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA ||
+        tag == MARKUP_NAME_METER || tag == MARKUP_NAME_PROGRESS ||
+        (tag == MARKUP_NAME_OBJECT && element->get_attribute(MARKUP_NAME_DATA)) ||
+        (tag == MARKUP_NAME_AUDIO && element->has_attribute(MARKUP_NAME_CONTROLS)) ||
+        (view && view->form_control());
+}
+
 LayoutBorderSpacingValue layout_resolve_border_spacing_value(
         LayoutContext* lycon, const CssValue* value) {
     LayoutBorderSpacingValue result = {0.0f, 0.0f, false, false};
@@ -785,6 +842,52 @@ LayoutBorderSpacingValue layout_resolve_border_spacing_value(
         }
     }
     return result;
+}
+
+bool layout_inherit_table_border_spacing(LayoutContext* lycon, DomNode* element,
+                                        float* spacing_h, float* spacing_v) {
+    if (!spacing_h || !spacing_v) return false;
+    for (DomNode* ancestor = element ? element->parent : nullptr;
+         ancestor; ancestor = ancestor->parent) {
+        if (!ancestor->is_element()) continue;
+
+        DomElement* ancestor_element = ancestor->as_element();
+        if (ancestor_element->specified_style) {
+            CssDeclaration* declaration = style_tree_get_declaration(
+                ancestor_element->specified_style, CSS_PROPERTY_BORDER_SPACING);
+            if (declaration && declaration->value) {
+                LayoutBorderSpacingValue resolved =
+                    layout_resolve_border_spacing_value(lycon, declaration->value);
+                if (resolved.resolved) {
+                    *spacing_h = resolved.horizontal;
+                    *spacing_v = resolved.vertical;
+                    return true;
+                }
+                if (!resolved.keep_inheriting) return false;
+            }
+        }
+
+        if (ancestor_element->table_prop()) {
+            *spacing_h = ancestor_element->tb->border_spacing_h;
+            *spacing_v = ancestor_element->tb->border_spacing_v;
+            return true;
+        }
+        if (ancestor_element->tag() == MARKUP_NAME_TABLE) {
+            // CSS 2.1 §17.6.1 inheritance must retain the HTML table UA value
+            // when display:block prevents the source table from allocating TableProp.
+            float spacing = 2.0f;
+            const char* cellspacing = ancestor_element->get_attribute("cellspacing");
+            if (cellspacing) {
+                spacing = (float)str_to_double_default(
+                    cellspacing, strlen(cellspacing), 0.0);
+                if (spacing < 0.0f) spacing = 0.0f;
+            }
+            *spacing_h = spacing;
+            *spacing_v = spacing;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool layout_image_orientation_uses_from_image(DomElement* element) {
@@ -962,6 +1065,40 @@ size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
     return out_pos;
 }
 
+LayoutTextRun layout_prepare_text_run(const char* text, size_t length,
+                                      LayoutTextRunMode mode) {
+    LayoutTextRun run = {text, length};
+    if (!text || mode == LAYOUT_TEXT_RUN_RAW || length == 0) return run;
+
+    static thread_local char buffer[4096];  // LARGE_ARRAY_OK: reusable text scratch.
+    if (mode == LAYOUT_TEXT_RUN_COLLAPSE) {
+        run.length = layout_normalize_collapsible_whitespace(
+            text, length, buffer, sizeof(buffer));
+        run.text = buffer;
+        return run;
+    }
+
+    size_t start = 0;
+    while (start < length && is_space(text[start])) start++;
+    size_t end = length;
+    while (end > start && is_space(text[end - 1])) end--;
+    size_t trimmed_length = end - start;
+    if (start == 0) {
+        run.length = trimmed_length;
+        return run;
+    }
+    if (trimmed_length >= sizeof(buffer)) {
+        run.text = text;
+        run.length = 0;
+        return run;
+    }
+    memcpy(buffer, text + start, trimmed_length);
+    buffer[trimmed_length] = '\0';
+    run.text = buffer;
+    run.length = trimmed_length;
+    return run;
+}
+
 CssEnum layout_inherited_text_transform(DomNode* start) {
     for (DomNode* node = start; node; node = node->parent) {
         if (!node->is_element()) continue;
@@ -1079,7 +1216,6 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         resolved_value->type == CSS_VALUE_TYPE_NUMBER ?
             resolved_value->data.number.value * font_size_for_lh :
             resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, resolved_value);
-
         // CSS 2.1 §10.8.1: "Negative values are not allowed" for line-height
         if (resolved_height < 0 || isnan(resolved_height)) {
             lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
@@ -1154,7 +1290,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             }
             if (!element_has_author_all_reset(dom_elem)) {
                 apply_element_default_style(lycon, dom_elem);
-            } else {
             }
 
             if (layout_context_is_measuring(lycon)) {
@@ -1196,9 +1331,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
         } else {
             if (!element_has_author_all_reset(dom_elem)) {
                 apply_element_default_style(lycon, dom_elem);
-            } else {
             }
-
             // CSS 2.1: Elements without specified styles still have computed values
             if (lycon->font.style) {
                 if (!dom_elem->font) {
@@ -1538,7 +1671,10 @@ static bool table_caption_has_box_contribution(DomElement* elem) {
 static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* elem,
                                              DisplayValue display) {
     if (!lycon || !elem) return false;
-    bool is_column_marker = display_is_table_column_marker(display);
+    // CSS Tables 3 §2.1 only suppresses a table-column marker's principal box.
+    // Replaced elements retain their intrinsic box even with a table-internal display.
+    bool is_column_marker = display_is_table_column_marker(display) &&
+        !layout_element_is_replaced(elem);
     bool is_empty_caption_marker = table_caption_is_empty_inline_marker(elem, display);
     if (!is_column_marker && !is_empty_caption_marker) return false;
 
@@ -1974,12 +2110,11 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 }
                 ViewSpan* annotation = lam::view_require<RDT_VIEW_INLINE>(child);
                 float target_y = span->y - annotation->height;
-                layout_offset_ruby_annotation_tree(child, 0.0f, target_y - annotation->y);
+                layout_shift_view_tree(child, 0.0f, target_y - annotation->y);
             }
         }
     }
 }
-
 // CSS 2.1 §16.2: Shift current-line text rects inside a span that was laid out
 static bool shift_text_current_line_rects(float offset, int line_number, ViewText* text) {
     bool shifted = false;
@@ -2192,7 +2327,6 @@ void place_rtl_initial_letter_line(LayoutContext* lycon) {
         &line_width, &initial_width, &initial_margin_left,
         &initial_margin_right);
     if (line_width <= 0.0f || initial_width <= 0.0f) return;
-
     // CSS Inline 3 §7.5.2 places the initial at the inline-end in RTL;
     // CSS Inline 3 §7.8.2 applies text-indent to the originating line and then
     float initial_letter_indent = lycon->line.text_indent_offset;
@@ -2214,11 +2348,7 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
         view->x += offset;
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
-            TextRect* rect = text->rect;
-            while (rect) {
-                rect->x += offset;
-                rect = rect->next;
-            }
+            layout_shift_text_rects(text, offset, 0.0f);
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
@@ -2230,7 +2360,6 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
     (void)lycon;
     layout_walk_inline_views(view, align_view, no_finish);
 }
-
 // CSS Text 3 §7.3: counts word spaces AND CJK inter-character gaps.
 static int count_spaces_in_view(LayoutContext* lycon, View* view, int line_number) {
     int count = 0;
@@ -2253,7 +2382,6 @@ static int count_spaces_in_view(LayoutContext* lycon, View* view, int line_numbe
     layout_walk_inline_views(view, count_view, no_finish);
     return count;
 }
-
 // CSS Text 3 §7.3: For auto justification, expand word spaces and CJK inter-character gaps.
 static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, View* view,
                                     int line_number, float cumulative_offset,
@@ -2308,7 +2436,6 @@ static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* v
     TextRect* last_rect = nullptr;
     float cumulative_offset = view_line_justify_walk(lycon, space_per_gap, view,
         lycon->block.line_number, 0.0f, &last_view, &last_rect);
-
     // otherwise a single-word line would be incorrectly stretched to fill the line.
     if (cumulative_offset > 0 && last_rect && last_view && last_view->view_type == RDT_VIEW_TEXT) {
         float line_end = lycon->block.content_width;
@@ -2356,11 +2483,9 @@ float layout_rtl_inline_item_x(Linebox* line, float item_width) {
 
 void line_align(LayoutContext* lycon) {
     layout_bidi_line(lycon);
-
     // CSS 2.1 §16.2: 'start' maps to 'left' for LTR and 'right' for RTL
     bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
     CssEnum text_align = lycon->block.text_align;
-
     // CSS Text 3 §7.2: text-align-last overrides text-align on the last line
     bool text_align_last_applied = false;
     if (lycon->line.is_last_line && lycon->block.text_align_last != 0 &&
@@ -2368,7 +2493,6 @@ void line_align(LayoutContext* lycon) {
         text_align = lycon->block.text_align_last;
         text_align_last_applied = true;
     }
-
     // CSS Text 3 §7.1: justify-all computes to justify but eliminates the
     if (text_align == CSS_VALUE_JUSTIFY_ALL) {
         text_align = CSS_VALUE_JUSTIFY;
@@ -2401,8 +2525,6 @@ void line_align(LayoutContext* lycon) {
         float line_width = lycon->line.advance_x - line_left;
         // CSS 2.1 §16.1: RTL text-indent narrows the available width for alignment
         float available_width = (line_right - line_left) - lycon->line.text_indent_offset;
-
-
         // Skip centering/right alignment only when laying out content INSIDE an inline-block
         ViewBlock* container = lycon->block.establishing_element;
         bool container_is_shrink_inline_block = container &&
@@ -2480,7 +2602,6 @@ void line_align(LayoutContext* lycon) {
                     }
                     return;
                 }
-
                 // CSS Text 3 §7.3: Distribute extra space across word gaps.
                 if (view->view_type == RDT_VIEW_TEXT) {
                     ViewText* text = lam::view_require_text(view);
@@ -2550,7 +2671,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     }
 
     lycon->depth++;
-
     // hidden. CSS selectors cannot target text nodes, so this must be handled
     if (node->parent && node->parent->is_element()) {
         DomElement* parent_elem = node->parent->as_element();
@@ -2680,7 +2800,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 }
             }
         }
-
         // CSS 2.2 Section 9.7: Absolutely positioned (position: absolute/fixed) elements
         CssEnum position_value = CSS_VALUE_STATIC;
         if (elem->position) {
@@ -2696,7 +2815,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 display.outer = CSS_VALUE_BLOCK;
             }
         }
-
         // CSS 2.1 Section 9.2.3: Run-in boxes
         if (display.outer == CSS_VALUE_RUN_IN) {
             DisplayValue resolved = resolve_run_in_display(lycon, node);
@@ -2706,11 +2824,19 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             }
             display = resolved;
         }
-
         // CSS 2.1 §17.2.1: table-column and table-column-group elements do not
         if (layout_non_rendered_table_marker(lycon, elem, display)) {
             lycon->depth--;
             return;
+        }
+
+        bool replaced_table_internal = layout_element_is_replaced(elem) &&
+            is_table_internal_display(display.inner);
+        DisplayValue layout_display = display;
+        if (replaced_table_internal) {
+            // CSS Tables 3 §2.1 preserves the replaced principal box while its
+            // computed table-internal display remains observable to CSSOM.
+            layout_display.inner = RDT_DISPLAY_REPLACED;
         }
 
         if (elem->tag() == MARKUP_NAME_BR && display.outer != CSS_VALUE_NONE) {
@@ -2720,7 +2846,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         switch (display.outer) {
         case CSS_VALUE_BLOCK:  case CSS_VALUE_INLINE_BLOCK:  case CSS_VALUE_LIST_ITEM:
         case CSS_VALUE_TABLE_CELL:  // CSS display: table-cell on non-table elements
-            layout_block(lycon, node, display);
+            layout_block(lycon, node, layout_display);
+            if (replaced_table_internal) elem->display = display;
             // CSS Text 3 §5.2: Atomic inlines (inline-block, inline-table, replaced
             if (display.outer == CSS_VALUE_INLINE_BLOCK && node->parent && node->parent->is_element()) {
                 DomElement* parent_elem = node->parent->as_element();
@@ -2788,7 +2915,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 dom_node_resolve_style(node, lycon);
             }
 
-
             for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
                 layout_flow_node(lycon, child);
             }
@@ -2807,15 +2933,12 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             layout_text(lycon, node);
         }
     }
-    else {
-    }
     lycon->depth--;
 }
 
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
-
 
     lycon->elmt = elmt;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
@@ -2840,7 +2963,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->block.given_width = physical_width;
     lycon->block.given_height = -1;  // -1 means auto height
     html->ensure_position(lycon);
-
     // CSS 2.2: The root element establishes the initial BFC
     html->content_width = physical_width;
     Pool* layout_pool = lycon->doc->view_tree->prop_pool;
@@ -2885,7 +3007,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     }
 
     DomNode* body_node = nullptr;
-
     // CSS 2.1 §10.3, §9.3: Root element explicit sizing and positioning.
     bool root_is_abspos = layout_block_is_out_of_flow_positioned(html);
     bool root_is_relative = html->position && (html->positionp()->position == CSS_VALUE_RELATIVE ||
@@ -3012,7 +3133,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             }
         }
     }
-
     // CSS 2.1 §10.3.3: Apply root element border and padding to reduce content area
     {
         float bp_h = root_bp_left + root_bp_right;
@@ -3029,12 +3149,10 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         }
         line_init(lycon, root_bp_left, lycon->block.content_width + root_bp_left);
     }
-
     // CSS 2.1 §12.2: Generate pseudo-elements for the root <html> element
     if (elmt->is_element()) {
         layout_materialize_pseudo_content(lycon, html);
     }
-
     // CSS 2.1 §9.2: Lay out ALL visible children of <html>, not just <body>.
     DomNode* child = nullptr;
     if (elmt->is_element()) {
@@ -3189,7 +3307,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             vc = vc->next();
         }
     }
-
     // CSS 2.1 §9.4.3: Apply position:relative offsets to root element after layout
     if (root_is_relative && html->position) {
         if (html->positionp()->position == CSS_VALUE_RELATIVE) {
@@ -3242,7 +3359,9 @@ static void reset_styles_resolved_recursive(DomNode* node) {
 
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        elem->set_styles_resolved(false);
+        if (!layout_element_is_anonymous_table_fixup(elem)) {
+            elem->set_styles_resolved(false);
+        }
 
         DomNode* child = elem->first_child;
         while (child) {
@@ -3277,7 +3396,6 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
         lycon->height = (float)doc->viewport.height;
         log_info("layout_init: viewport meta override height=%d", doc->viewport.height);
     }
-
 
     lycon->available_space = AvailableSpace::make_indefinite();
 
@@ -3356,7 +3474,6 @@ static void layout_store_last_remembered_sizes(DomNode* node) {
                 remembered_height += fragment->height;
             }
         }
-
         // first fragment's clipped border box; hidden sizing otherwise loses
         if (element->block()->contain_intrinsic_width_auto) {
             element->set_last_remembered_width(remembered_width);
@@ -3478,7 +3595,6 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         webview_manager_sync_layout(uicon, doc->view_tree);
     }
     js_dom_observers_post_layout();
-
 
     auto t_end = high_resolution_clock::now();
     log_info("[TIMING] print_view_tree: %.1fms", duration<double, std::milli>(t_end - t_layout).count());

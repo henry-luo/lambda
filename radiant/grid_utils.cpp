@@ -390,23 +390,6 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string, Scratch
 
 }
 
-// Resolve grid template areas
-void resolve_grid_template_areas(GridContainerLayout* grid_layout) {
-    if (!grid_layout) return;
-
-
-    // Validate that all areas form rectangles and don't overlap
-    for (int i = 0; i < grid_layout->area_count; i++) {
-        GridArea* area = &grid_layout->grid_areas[i];
-
-        // Ensure area forms a valid rectangle
-        if (area->row_start >= area->row_end || area->column_start >= area->column_end) {
-            continue;
-        }
-
-    }
-}
-
 // Calculate intrinsic sizes for grid items using unified intrinsic sizing API
 IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis) {
     IntrinsicSizes sizes = {0};

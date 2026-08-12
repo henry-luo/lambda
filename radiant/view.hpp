@@ -948,6 +948,33 @@ inline RadiantBorderSide radiant_border_side(BorderProp* border, CssBoxSide side
     return result;
 }
 
+inline bool radiant_border_side_is_hidden(RadiantBorderSide side) {
+    return !side.style || *side.style == CSS_VALUE_NONE ||
+        *side.style == CSS_VALUE_HIDDEN || *side.style == CSS_VALUE__UNDEF;
+}
+
+inline void radiant_border_side_copy(RadiantBorderSide target,
+                                     RadiantBorderSide source,
+                                     int64_t specificity) {
+    if (!target.width || !source.width) return;
+    *target.width = *source.width;
+    *target.width_specificity = specificity;
+    *target.style = *source.style;
+    *target.style_specificity = specificity;
+    *target.color = *source.color;
+    *target.color_specificity = specificity;
+}
+
+inline void radiant_border_side_set(RadiantBorderSide side, float width,
+                                    CssEnum style, const Color* color,
+                                    bool set_width_specificity = false) {
+    if (!side.width) return;
+    *side.width = width;
+    *side.style = style;
+    if (set_width_specificity) *side.width_specificity = -1;
+    if (color) *side.color = *color;
+}
+
 // Color stop for gradients
 // tier-2: view-pool, rebuilt each relayout
 typedef struct {
@@ -2966,8 +2993,6 @@ char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
                                const char* url);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
 const char* css_font_family_name_from_value(const CssValue* value);
-const char* css_join_font_family_values(LayoutContext* lycon, const CssValue* list,
-                                        size_t start, size_t end);
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value,
                                    bool require_loadable_face_source);
 const char* css_select_font_shorthand_family(LayoutContext* lycon,

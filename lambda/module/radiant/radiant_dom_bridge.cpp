@@ -13,6 +13,7 @@
 #include "../../js/js_class.h"
 #include "../../js/js_dom.h"
 #include "../../../radiant/view.hpp"
+#include "../../../radiant/render.hpp"
 #include "../../../radiant/event.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/hashmap.h"
@@ -190,6 +191,7 @@ static __thread RadiantDomWrapperCacheEntry* s_radiant_dom_wrapper_free = nullpt
 static __thread RadiantDomWrapperCacheEntry* s_radiant_dom_wrapper_sweep = nullptr;
 static __thread bool s_radiant_dom_cache_owner_set = false;
 static __thread pthread_t s_radiant_dom_cache_owner;
+static __thread bool s_radiant_dom_initial_geometry_layout;
 
 static void* radiant_dom_cache_malloc(size_t size) {
     return mem_alloc(size, MEM_CAT_JS_RUNTIME);
@@ -2869,6 +2871,7 @@ RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_get_root_node, JUBE_DOM_GET_ROOT_N
 RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove2, JUBE_DOM_REMOVE)
 RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_replace_with, JUBE_DOM_REPLACE_WITH)
 RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_after, JUBE_DOM_AFTER)
+RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_before, JUBE_DOM_BEFORE)
 RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_has_child_nodes, JUBE_DOM_HAS_CHILD_NODES)
 RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_clone_node, JUBE_DOM_CLONE_NODE)
 RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_replace_data, JUBE_DOM_REPLACE_DATA)
@@ -3658,6 +3661,24 @@ static bool radiant_dom_element_operation_basic(Item elem_item, JubeDomElementOp
     return false;
 }
 
+static void radiant_dom_commit_initial_geometry_layout(DomDocument* doc) {
+    if (!doc || !doc->root || (doc->view_tree && doc->view_tree->root) ||
+        s_radiant_dom_initial_geometry_layout) {
+        return;
+    }
+    UiContext* uicon = (UiContext*)doc->js.host_ui_context;
+    if (!uicon) return;
+
+    // CSSOM View geometry reads establish the first layout snapshot. This also
+    // fixes the CSS Tables 3 §2.2 anonymous-box structure before later DOM edits.
+    s_radiant_dom_initial_geometry_layout = true;
+    DomDocument* saved_document = uicon->document;
+    uicon->document = doc;
+    layout_html_doc(uicon, doc, false);
+    uicon->document = saved_document;
+    s_radiant_dom_initial_geometry_layout = false;
+}
+
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
     Item result = ItemNull;
     if (radiant_dom_get_basic_property(elem_item, prop_name, &result)) {
@@ -3670,6 +3691,7 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
          strcmp(prop, "offsetTop") == 0 || strcmp(prop, "offsetLeft") == 0 ||
          strcmp(prop, "offsetParent") == 0 || strncmp(prop, "client", 6) == 0 ||
          strncmp(prop, "scroll", 6) == 0)) {
+        radiant_dom_commit_initial_geometry_layout(node->as_element()->doc);
         radiant_dom_has_committed_geometry_snapshot(node->as_element()->doc);
     }
     return js_dom_get_property_impl(elem_item, prop_name);

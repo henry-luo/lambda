@@ -221,6 +221,7 @@ const char radiant_dom_interface_decl[] =
     "    get_root_node: fn(a0: any) any,\n"
     "    replace_with: fn(a0: any) any,\n"
     "    after: fn(a0: any) any,\n"
+    "    before: fn(a0: any) any,\n"
     "    has_child_nodes: fn() any,\n"
     "    clone_node: fn(a0: any) any,\n"
     "    replace_data: fn(a0: any, a1: any, a2: any) any,\n"
@@ -977,6 +978,7 @@ extern "C" int radiant_dom_m4d_get_root_node(Item r, Item* args, int argc, Item*
 extern "C" int radiant_dom_m4d_remove2(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_replace_with(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_after(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_before(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_has_child_nodes(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_clone_node(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_replace_data(Item r, Item* args, int argc, Item* out);
@@ -1292,9 +1294,10 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     {"get_root_node", "getRootNode", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_get_root_node, NULL, 0},
     {"remove", NULL, NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_remove2, NULL, 0},
     {"replace_with", "replaceWith", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_replace_with, NULL, 0},
-    // D6.2.2v2 requires ChildNode.after to be a published callable property;
-    // the retired receiver/name dispatcher can no longer hide a missing member.
+    // ChildNode sibling insertion must be published as callable properties;
+    // the receiver/name dispatcher cannot supply missing DOM members.
     {"after", NULL, NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_after, NULL, 0},
+    {"before", NULL, NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_before, NULL, 0},
     {"has_child_nodes", "hasChildNodes", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_has_child_nodes, NULL, 0},
     {"clone_node", "cloneNode", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_clone_node, NULL, 0},
     {"replace_data", "replaceData", NULL, radiant_dom_guard_text, NULL, NULL, radiant_dom_m4d_replace_data, NULL, 0},

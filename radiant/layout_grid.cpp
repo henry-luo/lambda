@@ -10,7 +10,6 @@ extern "C" {
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 }
-
 // Forward declarations
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout);
 
@@ -109,7 +108,6 @@ float layout_grid_row_border_box_extent(ViewBlock* container,
     }
     return content_extent + layout_axis_box_metrics(container, LAYOUT_AXIS_Y).pad_border;
 }
-
 // Initialize grid container layout state
 void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     if (!lycon || !container) return;
@@ -124,7 +122,6 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     lycon->grid_container = grid;
     grid->scratch_mark = mark;
     grid->lycon = lycon;  // Store layout context for intrinsic sizing
-
     // Initialize auto-placement cursors (grid lines are 1-indexed)
     grid->auto_row_cursor = 1;
     grid->auto_col_cursor = 1;
@@ -146,7 +143,6 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid->row_gap = 0;
         grid->column_gap = 0;
     }
-
     // Pass-local mutations must never alias the persistent CSS GridProp graph;
     // clone every area and name into this container's scratch lifetime.
     GridArea* source_areas = grid->grid_areas;
@@ -185,7 +181,6 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         cleanup_grid_container(lycon);
         return;
     }
-
     // Immediate children bound the pass-local grid item array; scratch arrays are
     // released by the container mark instead of individual heap frees.
     int item_capacity = layout_count_potential_items(container, false);
@@ -217,7 +212,6 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     grid->needs_reflow = false;
 
 }
-
 // Cleanup grid container resources
 void cleanup_grid_container(LayoutContext* lycon) {
     if (!lycon || !lycon->grid_container) return;
@@ -247,12 +241,10 @@ void GridLayoutScope::close() {
     lycon->grid_container = saved;
     active = false;
 }
-
 // Main grid layout algorithm entry point
 void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // validate before diagnostics; a null container cannot provide a source location.
     if (!container) return;
-
     // Check if this is actually a grid container by display type
     // Note: embed->grid may be NULL if grid-template-* properties weren't resolved,
     // but we can still run grid layout with auto-placement
@@ -261,22 +253,9 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     }
 
     GridContainerLayout* grid_layout = lycon->grid_container;
-
     // Check if container is shrink-to-fit (absolutely positioned with no explicit width,
     // or inline-grid which uses shrink-to-fit sizing)
-    bool is_shrink_to_fit_width = false;
-    if (container->display.outer == CSS_VALUE_INLINE_BLOCK &&
-        (!container->blk || container->block()->given_width < 0)) {
-        is_shrink_to_fit_width = true;
-    } else if (container->position &&
-        (container->positionp()->position == CSS_VALUE_ABSOLUTE ||
-         container->positionp()->position == CSS_VALUE_FIXED)) {
-        bool has_explicit_width = container->blk && container->block_mut()->given_width > 0;
-        bool has_left_right = container->positionp()->has_left && container->positionp()->has_right;
-        if (!has_explicit_width && !has_left_right) {
-            is_shrink_to_fit_width = true;
-        }
-    }
+    bool is_shrink_to_fit_width = layout_is_shrink_to_fit_width(container);
     grid_layout->is_shrink_to_fit_width = is_shrink_to_fit_width;
     // An intrinsic width keyword constrains track sizing itself; treating its
     // post-layout used width as definite incorrectly lets auto tracks consume free space.
@@ -292,23 +271,16 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         (lycon->available_space.is_width_max_content() ||
          (container->blk && container->block()->given_width_type == CSS_VALUE_MAX_CONTENT));
     grid_layout->row_intrinsic_height = -1.0f;
-
     // Set container dimensions
     grid_layout->container_width = container->width;
     grid_layout->container_height = container->height;
-
     // Determine if container has an explicit height (not auto)
     // This affects whether auto row tracks should stretch to fill the container
     grid_layout->has_explicit_height = (container->blk && container->block_mut()->given_height >= 0);
-
     // Calculate content dimensions (excluding borders and padding)
-    grid_layout->content_width = container->width;
-    grid_layout->content_height = container->height;
-
-    BoxMetrics container_box = layout_box_metrics(container);
-    grid_layout->content_width -= container_box.pad_border_h;
-    grid_layout->content_height -= container_box.pad_border_v;
-
+    LayoutContentBox container_content = layout_content_box(container);
+    grid_layout->content_width = container_content.width;
+    grid_layout->content_height = container_content.height;
     // Resolve percentage gaps against the container dimensions.
     // For definite containers, resolve immediately. For indefinite (shrink-to-fit),
     // the enhanced adapter handles the two-pass resolution.
@@ -328,11 +300,9 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             *gap_is_percent[axis] = false;
         }
     }
-
     // Phase 1: Collect grid items (need count for auto-fit)
     ViewBlock** items;
     int item_count = collect_grid_items(grid_layout, container, &items);
-
     // Expand auto-fill/auto-fit repeat() tracks now that we know content_width and item_count
     expand_auto_repeat_tracks(grid_layout);
 
@@ -342,7 +312,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         // 2. The container gets the correct height from explicit grid-template-rows + padding.
         determine_grid_size(grid_layout);
         resolve_track_sizes_enhanced(grid_layout, container);
-
         // Update container height from explicit row heights + padding (mirroring the shrink-to-fit path)
         if (!grid_layout->has_explicit_height && grid_layout->computed_row_count > 0) {
             float new_h = layout_grid_row_border_box_extent(container, grid_layout);
@@ -353,10 +322,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid_layout->needs_reflow = false;
         return;
     }
-
     // Phase 2: Resolve grid template areas
-    resolve_grid_template_areas(grid_layout);
-
     // Phase 2.5: Register named grid lines from track lists and template areas
     LayoutAxisPair<GridTrackList*> template_tracks = {
         grid_layout->grid_template_columns, grid_layout->grid_template_rows
@@ -385,10 +351,8 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             add_grid_line_name(grid_layout, name_buf, area->row_end, true);
         }
     }
-
     // Phase 3: Determine initial grid size from templates (before placement)
     determine_grid_size(grid_layout);
-
     // Phase 3.5: Resolve named line references into integer line numbers
     for (int idx = 0; idx < item_count; idx++) {
         ViewBlock* item = items[idx];
@@ -411,7 +375,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             if (ln > 0) { gi->grid_row_end = ln; gi->has_explicit_grid_row_end = true; }
         }
     }
-
     // Phase 4: Place grid items (using enhanced CellOccupancyMatrix algorithm)
     // Use enhanced placement algorithm with proper collision detection.
     radiant::grid_adapter::place_items_with_occupancy(
@@ -421,7 +384,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid_layout->grid_auto_flow,
         grid_layout->is_dense_packing
     );
-
     // Phase 5: Update grid size after placement (may have grown due to auto-placement)
     // NOTE: place_items_with_occupancy already sets computed_column_count and computed_row_count
     // from the occupancy matrix which correctly accounts for negative implicit tracks.
@@ -435,7 +397,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         int prev_implicit_rows = grid_layout->implicit_row_count;
 
         determine_grid_size(grid_layout);
-
         // Restore if placement knew about more tracks (e.g. negative implicit)
         if (grid_layout->computed_column_count < prev_col_count) {
             grid_layout->computed_column_count = prev_col_count;
@@ -446,7 +407,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             grid_layout->implicit_row_count = prev_implicit_rows;
         }
     }
-
     // Phase 5.6: CSS Grid §11.7.1 — Adjust orthogonal flow items' width contributions.
     // For grid items with a vertical writing mode, the physical min-content width
     // (block size) depends on the available inline size (physical height from row tracks).
@@ -459,13 +419,11 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             ViewBlock* item = items[idx];
             GridItemProp* gi = grid_item_prop(item);
             if (!item || !gi || !gi->has_measured_size) continue;
-
             // Check if item has orthogonal writing mode
             bool is_orthogonal = false;
             WritingMode wm = layout_block_writing_mode(item);
             is_orthogonal = wm == WM_VERTICAL_LR || wm == WM_VERTICAL_RL;
             if (!is_orthogonal) continue;
-
             // Get definite row height from template definitions.
             // Note: computed_rows are not yet allocated at this stage;
             // use grid_template_rows for explicit tracks directly.
@@ -507,7 +465,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             }
 
             if (!all_definite || definite_row_height <= 0) continue;
-
             // Re-measure: compute block size (physical width) at the given inline size
             // (physical height) by walking the item's text children.
             float font_size = 16.0f;
@@ -516,7 +473,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             } else if (lycon->font.style) {
                 font_size = lycon->font.style->font_size;
             }
-
             // Set up font context for text measurement
             LayoutFontScope font_scope(lycon);
             if (item->font && lycon->ui_context) {
@@ -540,7 +496,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
                         }
                         TextIntrinsicWidths tw = measure_text_intrinsic_widths(
                             lycon, text, text_len, text_transform, font_variant);
-
                         // For vertical writing mode, horizontal text measurements
                         // approximate the inline-direction measurements (exact for
                         // monospaced/square fonts like Ahem).
@@ -570,7 +525,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
                 }
                 child = child->next_sibling;
             }
-
             // Add padding and border in the block direction (horizontal)
             BoxMetrics item_box = layout_box_metrics(item);
             max_block_size += item_box.pad_border_h;
@@ -581,29 +535,22 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             }
         }
     }
-
     // Phase 6: Resolve track sizes (using enhanced algorithm with intrinsic sizing)
     resolve_track_sizes_enhanced(grid_layout, container);
-
     // An intrinsic width constraint is resolved by the track-sizing result, just like
     // shrink-to-fit; retaining the provisional width makes auto tracks visibly too wide.
     if ((grid_layout->is_shrink_to_fit_width || grid_layout->is_min_content_width ||
          grid_layout->is_max_content_width) && grid_layout->computed_column_count > 0) {
         float total_column_width = grid_layout->content_width;
 
-        // Add padding and border back to get container width
-        float container_width = total_column_width + container_box.pad_border_h;
-
-        container->width = container_width;
+        container->width = layout_border_size_from_content_box(
+            container, total_column_width, true);
         grid_layout->container_width = container->width;
     }
-
     // Phase 6: Position grid items
     position_grid_items(grid_layout, container, &lycon->scratch);
-
     // Phase 7: Align grid items
     align_grid_items(grid_layout);
-
     // Phase 7.5: Apply relative/sticky positioning offsets to grid items
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
@@ -622,13 +569,11 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             refs.set_position(refs.get_position() + offset);
         }
     }
-
     // Note: Phase 8 (content layout) is now handled by layout_grid_multipass.cpp Pass 3
     // The multipass flow calls layout_final_grid_content() after this function returns
 
     grid_layout->needs_reflow = false;
 }
-
 // Collect grid items from container children
 int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, ViewBlock*** items) {
     // validate before diagnostics; this helper is also called by empty-grid paths.
@@ -672,7 +617,6 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     }
 
     grid_layout->item_count = count;
-
     // Sort items by CSS order property (stable sort - preserve DOM order for equal orders)
     // CSS Grid spec: items are placed in order-modified document order
     if (count > 1) {
@@ -699,17 +643,14 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     *items = grid_layout->grid_items;
     return count;
 }
-
 // Determine the size of the grid
 void determine_grid_size(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
-
     // Count explicit tracks from template
     grid_layout->explicit_row_count = grid_layout->grid_template_rows ?
                                      grid_layout->grid_template_rows->track_count : 0;
     grid_layout->explicit_column_count = grid_layout->grid_template_columns ?
                                         grid_layout->grid_template_columns->track_count : 0;
-
     // Find maximum implicit tracks needed based on item placement
     int max_row = grid_layout->explicit_row_count;
     int max_column = grid_layout->explicit_column_count;
@@ -718,20 +659,17 @@ void determine_grid_size(GridContainerLayout* grid_layout) {
         ViewBlock* item = grid_layout->grid_items[i];
         GridItemProp* gi = grid_item_prop(item);
         if (!gi) continue;  // Skip items without grid item properties
-
         // CRITICAL FIX: Grid positions are 1-indexed, but we need the actual track count
         // If an item ends at position 2, it uses tracks 0 and 1 (2 tracks total)
         max_row = fmax(max_row, gi->computed_grid_row_end - 1);
         max_column = fmax(max_column, gi->computed_grid_column_end - 1);
     }
-
     // Ensure minimum grid size matches explicit template
     if (max_row < grid_layout->explicit_row_count) max_row = grid_layout->explicit_row_count;
     if (max_column < grid_layout->explicit_column_count) max_column = grid_layout->explicit_column_count;
 
     grid_layout->implicit_row_count = max_row - grid_layout->explicit_row_count;
     grid_layout->implicit_column_count = max_column - grid_layout->explicit_column_count;
-
     // Ensure non-negative implicit counts
     if (grid_layout->implicit_row_count < 0) grid_layout->implicit_row_count = 0;
     if (grid_layout->implicit_column_count < 0) grid_layout->implicit_column_count = 0;
@@ -740,7 +678,6 @@ void determine_grid_size(GridContainerLayout* grid_layout) {
     grid_layout->computed_column_count = max_column;
 
 }
-
 // Calculate minimum size of a track pattern for auto-fill/auto-fit expansion
 static int calculate_track_pattern_min_size(GridTrackSize** tracks, int track_count) {
     int pattern_size = 0;
@@ -868,7 +805,6 @@ static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_co
             }
             *auto_fit_count = new_track_count;
         }
-
         // Auto-repeat mutates only the pass-local clone; abandoned generations
         // remain owned by the container scratch mark and need no free chain.
         tracks->tracks = new_tracks;
@@ -886,7 +822,6 @@ static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_co
     }
     return true;
 }
-
 // Expand auto-fill/auto-fit repeat() tracks based on available space.
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
     if (!grid_layout || !expand_auto_repeat_axis(grid_layout, true)) return;

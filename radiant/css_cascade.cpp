@@ -1,4 +1,5 @@
 #include "view.hpp"
+#include "layout.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
@@ -86,9 +87,13 @@ static void apply_stylesheet_to_tree(DomElement* root, CssStylesheet* stylesheet
         return;
     }
 
-    for (size_t i = 0; i < stylesheet->rule_count; i++) {
-        CssRule* rule = stylesheet->rules[i];
-        if (rule) apply_rule_to_element(root, rule, matcher, pool, engine);
+    // css_cascade is also linked without table layout by animation tests, so
+    // query the persistent DOM flag directly instead of taking a layout symbol.
+    if (!root->is_table_fixup()) {
+        for (size_t i = 0; i < stylesheet->rule_count; i++) {
+            CssRule* rule = stylesheet->rules[i];
+            if (rule) apply_rule_to_element(root, rule, matcher, pool, engine);
+        }
     }
 
     for (DomNode* child = root->first_child; child; child = child->next_sibling) {
