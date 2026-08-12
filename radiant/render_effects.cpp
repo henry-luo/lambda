@@ -167,10 +167,6 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
         group.mix_blend_backdrop = render_effect_backdrop_begin(rdcon,
             effect_x0, effect_y0, effect_x1, effect_y1);
         if (group.mix_blend_backdrop.pixels) {
-            log_debug("[MIX-BLEND] Saved backdrop %dx%d for <%s>",
-                      group.mix_blend_backdrop.width,
-                      group.mix_blend_backdrop.height,
-                      block->node_name());
         }
     }
 
@@ -178,10 +174,6 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
         group.opacity_backdrop = render_effect_backdrop_begin(rdcon,
             effect_x0, effect_y0, effect_x1, effect_y1);
         if (group.opacity_backdrop.pixels) {
-            log_debug("[OPACITY] Saved backdrop %dx%d for <%s>",
-                      group.opacity_backdrop.width,
-                      group.opacity_backdrop.height,
-                      block->node_name());
         }
     }
 
@@ -199,10 +191,6 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
                 x0 - backdrop_expand, y0 - backdrop_expand,
                 x1 + backdrop_expand, y1 + backdrop_expand);
             if (group.filter_backdrop.pixels) {
-                log_debug("[DROP-SHADOW] Saved backdrop %dx%d for <%s>",
-                          group.filter_backdrop.width,
-                          group.filter_backdrop.height,
-                          block->node_name());
             }
         }
     }
@@ -216,12 +204,6 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
                         border_rect.height,
                         block->backdrop_filter_prop(),
                         &rdcon->block.clip);
-        log_debug("[BACKDROP-FILTER] Applied backdrop-filter to <%s> at (%.0f,%.0f) size %.0fx%.0f",
-                  block->node_name(),
-                  border_rect.x,
-                  border_rect.y,
-                  border_rect.width,
-                  border_rect.height);
     }
 
     return group;
@@ -240,9 +222,6 @@ static bool render_effect_group_apply_filter(RenderEffectGroup* group,
     RenderContext* rdcon = group->context;
     Rect filter_rect = group->filter_rect;
 
-    log_debug("[FILTER] Applying filters to element %s at (%.0f,%.0f) size %.0fx%.0f",
-              block->node_name(), filter_rect.x, filter_rect.y,
-              filter_rect.width, filter_rect.height);
 
     rc_apply_filter(rdcon, filter_rect.x, filter_rect.y,
                     filter_rect.width, filter_rect.height,
@@ -257,14 +236,7 @@ static bool render_effect_group_finish_filter_backdrop(RenderEffectGroup* group,
         !render_effect_backdrop_active(&group->filter_backdrop)) {
         return false;
     }
-    bool direct_backdrop = group->filter_backdrop.pixels != nullptr;
-    int width = group->filter_backdrop.width;
-    int height = group->filter_backdrop.height;
     render_effect_backdrop_finish_source_over(&group->filter_backdrop);
-    if (direct_backdrop) {
-        log_debug("[FILTER] Composited filtered element over backdrop %dx%d",
-                  width, height);
-    }
     return true;
 }
 
@@ -274,17 +246,7 @@ static bool render_effect_group_finish_opacity(RenderEffectGroup* group,
         !render_effect_backdrop_active(&group->opacity_backdrop)) {
         return false;
     }
-    bool direct_backdrop = group->opacity_backdrop.pixels != nullptr;
-    int x = group->opacity_backdrop.x;
-    int y = group->opacity_backdrop.y;
-    int width = group->opacity_backdrop.width;
-    int height = group->opacity_backdrop.height;
     render_effect_backdrop_finish_opacity(&group->opacity_backdrop, group->opacity);
-    if (direct_backdrop) {
-        log_debug("[OPACITY] Composited opacity=%.2f on <%s> region (%d,%d) %dx%d",
-                  group->opacity, block ? block->node_name() : "unknown",
-                  x, y, width, height);
-    }
     return true;
 }
 
@@ -294,15 +256,8 @@ static bool render_effect_group_finish_blend(RenderEffectGroup* group,
         !render_effect_backdrop_active(&group->mix_blend_backdrop)) {
         return false;
     }
-    bool direct_backdrop = group->mix_blend_backdrop.pixels != nullptr;
-    int width = group->mix_blend_backdrop.width;
-    int height = group->mix_blend_backdrop.height;
     render_effect_backdrop_finish_blend(&group->mix_blend_backdrop,
                                         group->mix_blend_mode);
-    if (direct_backdrop) {
-        log_debug("[MIX-BLEND] Applied mix-blend-mode on <%s> %dx%d",
-                  block ? block->node_name() : "unknown", width, height);
-    }
     return true;
 }
 

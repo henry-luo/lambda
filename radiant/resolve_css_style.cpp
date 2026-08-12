@@ -1397,13 +1397,7 @@ const char* css_select_font_shorthand_family(LayoutContext* lycon,
     return combined;
 }
 
-/**
- * Look up a CSS custom property (variable) value
- * Searches current element and ancestors (CSS variables inherit)
- * @param lycon Layout context containing current element
- * @param var_name Variable name (e.g., "--primary-color")
- * @return CssValue* if found, nullptr otherwise
- */
+// look up an inherited CSS custom property.
 static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name) {
     if (!lycon || !lycon->view || !var_name) return nullptr;
     DomNode* current = lycon->view;
@@ -2237,8 +2231,6 @@ static void resolve_css_mask_image(LayoutContext* lycon, ViewSpan* span,
                 else if (item->data.keyword == CSS_VALUE_RIGHT) mask->cx = 1.0f;
                 else if (item->data.keyword == CSS_VALUE_TOP) mask->cy = 0.0f;
                 else if (item->data.keyword == CSS_VALUE_BOTTOM) mask->cy = 1.0f;
-                else if (item->data.keyword == CSS_VALUE_CENTER) {
-                }
                 const CssEnumInfo* info = css_enum_info(item->data.keyword);
                 if (info && info->name && strcmp(info->name, "at") == 0) {
                     at_idx = i;
@@ -2246,7 +2238,6 @@ static void resolve_css_mask_image(LayoutContext* lycon, ViewSpan* span,
             } else if (at_idx >= 0 && item->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 if (i == at_idx + 1) mask->cx = (float)(item->data.percentage.value / 100.0);
                 else if (i == at_idx + 2) mask->cy = (float)(item->data.percentage.value / 100.0);
-            } else if (at_idx >= 0 && item->type == CSS_VALUE_TYPE_LENGTH) {
             }
         }
         arg_idx = 1;
@@ -3248,104 +3239,86 @@ static bool css_display_list_value(const CssValue* value, bool is_replaced,
 
 static DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNode* node) {
     NameId tag_id = dom_elem ? dom_elem->tag_id : NAME_ID_NONE;
-    DisplayValue display = {CSS_VALUE_INLINE, CSS_VALUE_FLOW};
-    switch (tag_id) {
-        case MARKUP_NAME_HTML: case MARKUP_NAME_BODY: case MARKUP_NAME_H1:
-        case MARKUP_NAME_H2: case MARKUP_NAME_H3: case MARKUP_NAME_H4:
-        case MARKUP_NAME_H5: case MARKUP_NAME_H6: case MARKUP_NAME_P:
-        case MARKUP_NAME_DIV: case MARKUP_NAME_CENTER: case MARKUP_NAME_UL:
-        case MARKUP_NAME_OL: case MARKUP_NAME_DL: case MARKUP_NAME_DT:
-        case MARKUP_NAME_DD: case MARKUP_NAME_HEADER: case MARKUP_NAME_MAIN:
-        case MARKUP_NAME_SECTION: case MARKUP_NAME_FOOTER: case MARKUP_NAME_ARTICLE:
-        case MARKUP_NAME_ASIDE: case MARKUP_NAME_NAV: case MARKUP_NAME_ADDRESS:
-        case MARKUP_NAME_BLOCKQUOTE: case MARKUP_NAME_DETAILS: case MARKUP_NAME_DIALOG:
-        case MARKUP_NAME_FIGURE: case MARKUP_NAME_FIGCAPTION: case MARKUP_NAME_HGROUP:
-        case MARKUP_NAME_PRE: case MARKUP_NAME_FIELDSET: case MARKUP_NAME_LEGEND:
-        case MARKUP_NAME_FORM: case MARKUP_NAME_MENU: case MARKUP_NAME_FRAMESET:
-            display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
-            break;
-        case MARKUP_NAME_LI: case MARKUP_NAME_SUMMARY:
-            display = {CSS_VALUE_LIST_ITEM, CSS_VALUE_FLOW};
-            display.list_item = true;
-            break;
-        case MARKUP_NAME_IMG: case MARKUP_NAME_VIDEO: case MARKUP_NAME_INPUT:
-        case MARKUP_NAME_SELECT: case MARKUP_NAME_TEXTAREA: case MARKUP_NAME_IFRAME:
-        case MARKUP_NAME_METER: case MARKUP_NAME_PROGRESS: case MARKUP_NAME_CANVAS:
-        case MARKUP_NAME_WEBVIEW: case MARKUP_NAME_EMBED:
-            display = {CSS_VALUE_INLINE_BLOCK, RDT_DISPLAY_REPLACED};
-            break;
-        case MARKUP_NAME_OBJECT:
-            display = dom_elem && dom_elem->get_attribute(MARKUP_NAME_DATA)
-                ? DisplayValue{CSS_VALUE_INLINE_BLOCK, RDT_DISPLAY_REPLACED}
-                : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
-            break;
-        case MARKUP_NAME_AUDIO:
-            display = dom_elem && dom_elem->has_attribute(MARKUP_NAME_CONTROLS)
-                ? DisplayValue{CSS_VALUE_INLINE_BLOCK, RDT_DISPLAY_REPLACED}
-                : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
-            break;
-        case MARKUP_NAME_BUTTON:
-            display = {CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW};
-            break;
-        case MARKUP_NAME_HR:
-            display = {CSS_VALUE_BLOCK, RDT_DISPLAY_REPLACED};
-            break;
-        case MARKUP_NAME_RUBY:
-            display = {CSS_VALUE_INLINE, CSS_VALUE_RUBY};
-            break;
-        case MARKUP_NAME_SVG:
-            display = {CSS_VALUE_INLINE, RDT_DISPLAY_REPLACED};
-            break;
-        case MARKUP_NAME_SCRIPT: case MARKUP_NAME_STYLE: case MARKUP_NAME_HEAD:
-        case MARKUP_NAME_TITLE: case MARKUP_NAME_META: case MARKUP_NAME_LINK:
-        case MARKUP_NAME_BASE: case MARKUP_NAME_NOSCRIPT: case MARKUP_NAME_TEMPLATE:
-        case MARKUP_NAME_MAP: case MARKUP_NAME_AREA: case MARKUP_NAME_RP:
-        case MARKUP_NAME_DATALIST:
-            display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
-            break;
-        case MARKUP_NAME_OPTION: case MARKUP_NAME_OPTGROUP: case MARKUP_NAME_CAPTION:
-            display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
-            break;
-        case MARKUP_NAME_TABLE:
-            display = {CSS_VALUE_BLOCK, CSS_VALUE_TABLE};
-            break;
-        case MARKUP_NAME_THEAD: case MARKUP_NAME_TBODY: case MARKUP_NAME_TFOOT:
-            display = {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW_GROUP};
-            break;
-        case MARKUP_NAME_TR:
-            display = {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW};
-            break;
-        case MARKUP_NAME_TH: case MARKUP_NAME_TD:
-            display = {CSS_VALUE_TABLE_CELL, CSS_VALUE_TABLE_CELL};
-            break;
-        case MARKUP_NAME_COLGROUP:
-            display = {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_COLUMN_GROUP};
-            break;
-        case MARKUP_NAME_COL:
-            display = {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_COLUMN};
-            break;
-        default: {
-            const char* tag_name = node ? node->node_name() : nullptr;
-            if (!tag_name) break;
-            if (strcmp(tag_name, "table") == 0) display = {CSS_VALUE_BLOCK, CSS_VALUE_TABLE};
-            else if (strcmp(tag_name, "thead") == 0 || strcmp(tag_name, "tbody") == 0 ||
-                     strcmp(tag_name, "tfoot") == 0) {
-                display = {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW_GROUP};
-            } else if (strcmp(tag_name, "tr") == 0) {
-                display = {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW};
-            } else if (strcmp(tag_name, "th") == 0 || strcmp(tag_name, "td") == 0) {
-                display = {CSS_VALUE_TABLE_CELL, CSS_VALUE_TABLE_CELL};
-            } else if (strcmp(tag_name, "caption") == 0) {
-                display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
-            } else if (strcmp(tag_name, "colgroup") == 0) {
-                display = {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_COLUMN_GROUP};
-            } else if (strcmp(tag_name, "col") == 0) {
-                display = {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_COLUMN};
-            }
-            break;
-        }
+    static const NameId block_tags[] = {
+        MARKUP_NAME_HTML, MARKUP_NAME_BODY, MARKUP_NAME_H1, MARKUP_NAME_H2,
+        MARKUP_NAME_H3, MARKUP_NAME_H4, MARKUP_NAME_H5, MARKUP_NAME_H6,
+        MARKUP_NAME_P, MARKUP_NAME_DIV, MARKUP_NAME_CENTER, MARKUP_NAME_UL,
+        MARKUP_NAME_OL, MARKUP_NAME_DL, MARKUP_NAME_DT, MARKUP_NAME_DD,
+        MARKUP_NAME_HEADER, MARKUP_NAME_MAIN, MARKUP_NAME_SECTION,
+        MARKUP_NAME_FOOTER, MARKUP_NAME_ARTICLE, MARKUP_NAME_ASIDE,
+        MARKUP_NAME_NAV, MARKUP_NAME_ADDRESS, MARKUP_NAME_BLOCKQUOTE,
+        MARKUP_NAME_DETAILS, MARKUP_NAME_DIALOG, MARKUP_NAME_FIGURE,
+        MARKUP_NAME_FIGCAPTION, MARKUP_NAME_HGROUP, MARKUP_NAME_PRE,
+        MARKUP_NAME_FIELDSET, MARKUP_NAME_LEGEND, MARKUP_NAME_FORM,
+        MARKUP_NAME_MENU, MARKUP_NAME_FRAMESET};
+    static const NameId replaced_tags[] = {
+        MARKUP_NAME_IMG, MARKUP_NAME_VIDEO, MARKUP_NAME_INPUT, MARKUP_NAME_SELECT,
+        MARKUP_NAME_TEXTAREA, MARKUP_NAME_IFRAME, MARKUP_NAME_METER,
+        MARKUP_NAME_PROGRESS, MARKUP_NAME_CANVAS, MARKUP_NAME_WEBVIEW,
+        MARKUP_NAME_EMBED};
+    static const NameId hidden_tags[] = {
+        MARKUP_NAME_SCRIPT, MARKUP_NAME_STYLE, MARKUP_NAME_HEAD, MARKUP_NAME_TITLE,
+        MARKUP_NAME_META, MARKUP_NAME_LINK, MARKUP_NAME_BASE, MARKUP_NAME_NOSCRIPT,
+        MARKUP_NAME_TEMPLATE, MARKUP_NAME_MAP, MARKUP_NAME_AREA, MARKUP_NAME_RP,
+        MARKUP_NAME_DATALIST};
+    static const NameId flow_block_tags[] = {
+        MARKUP_NAME_OPTION, MARKUP_NAME_OPTGROUP, MARKUP_NAME_CAPTION};
+    if (layout_tag_in_list(tag_id, block_tags, sizeof(block_tags) / sizeof(*block_tags)) ||
+        layout_tag_in_list(tag_id, flow_block_tags,
+                           sizeof(flow_block_tags) / sizeof(*flow_block_tags))) {
+        return {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
     }
-    return display;
+    if (layout_tag_in_list(tag_id, replaced_tags,
+                           sizeof(replaced_tags) / sizeof(*replaced_tags))) {
+        return {CSS_VALUE_INLINE_BLOCK, RDT_DISPLAY_REPLACED};
+    }
+    if (layout_tag_in_list(tag_id, hidden_tags,
+                           sizeof(hidden_tags) / sizeof(*hidden_tags))) {
+        return {CSS_VALUE_NONE, CSS_VALUE_NONE};
+    }
+    if (tag_id == MARKUP_NAME_LI || tag_id == MARKUP_NAME_SUMMARY) {
+        DisplayValue display = {CSS_VALUE_LIST_ITEM, CSS_VALUE_FLOW};
+        display.list_item = true;
+        return display;
+    }
+    if (tag_id == MARKUP_NAME_OBJECT) {
+        return dom_elem && dom_elem->get_attribute(MARKUP_NAME_DATA)
+            ? DisplayValue{CSS_VALUE_INLINE_BLOCK, RDT_DISPLAY_REPLACED}
+            : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
+    }
+    if (tag_id == MARKUP_NAME_AUDIO) {
+        return dom_elem && dom_elem->has_attribute(MARKUP_NAME_CONTROLS)
+            ? DisplayValue{CSS_VALUE_INLINE_BLOCK, RDT_DISPLAY_REPLACED}
+            : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
+    }
+    if (tag_id == MARKUP_NAME_BUTTON) return {CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW};
+    if (tag_id == MARKUP_NAME_HR) return {CSS_VALUE_BLOCK, RDT_DISPLAY_REPLACED};
+    if (tag_id == MARKUP_NAME_RUBY) return {CSS_VALUE_INLINE, CSS_VALUE_RUBY};
+    if (tag_id == MARKUP_NAME_SVG) return {CSS_VALUE_INLINE, RDT_DISPLAY_REPLACED};
+    if (tag_id == MARKUP_NAME_TABLE) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE};
+    if (tag_id == MARKUP_NAME_THEAD || tag_id == MARKUP_NAME_TBODY ||
+        tag_id == MARKUP_NAME_TFOOT) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW_GROUP};
+    if (tag_id == MARKUP_NAME_TR) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW};
+    if (tag_id == MARKUP_NAME_TH || tag_id == MARKUP_NAME_TD) {
+        return {CSS_VALUE_TABLE_CELL, CSS_VALUE_TABLE_CELL};
+    }
+    if (tag_id == MARKUP_NAME_COLGROUP) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_COLUMN_GROUP};
+    if (tag_id == MARKUP_NAME_COL) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_COLUMN};
+
+    const char* tag_name = node ? node->node_name() : nullptr;
+    if (tag_name) {
+        if (strcmp(tag_name, "table") == 0) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE};
+        if (strcmp(tag_name, "thead") == 0 || strcmp(tag_name, "tbody") == 0 ||
+            strcmp(tag_name, "tfoot") == 0) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW_GROUP};
+        if (strcmp(tag_name, "tr") == 0) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW};
+        if (strcmp(tag_name, "th") == 0 || strcmp(tag_name, "td") == 0) {
+            return {CSS_VALUE_TABLE_CELL, CSS_VALUE_TABLE_CELL};
+        }
+        if (strcmp(tag_name, "caption") == 0) return {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
+        if (strcmp(tag_name, "colgroup") == 0) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_COLUMN_GROUP};
+        if (strcmp(tag_name, "col") == 0) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE_COLUMN};
+    }
+    return {CSS_VALUE_INLINE, CSS_VALUE_FLOW};
 }
 
 DisplayValue resolve_display_value(void* child) {
@@ -3421,16 +3394,17 @@ DisplayValue resolve_display_value(void* child) {
         // HTML §4.8.9: <audio> is replaced only when it has a controls attribute
         // Note: <button> is NOT replaced — it contains flow content (text, spans, etc.)
         // per HTML spec. Its children are laid out normally via CSS_VALUE_FLOW.
-        bool is_replaced = (tag_id == MARKUP_NAME_IMG || tag_id == MARKUP_NAME_VIDEO ||
-                            tag_id == MARKUP_NAME_INPUT || tag_id == MARKUP_NAME_SELECT ||
-                            tag_id == MARKUP_NAME_TEXTAREA ||
-                            tag_id == MARKUP_NAME_IFRAME || tag_id == MARKUP_NAME_HR ||
-                            tag_id == MARKUP_NAME_SVG || tag_id == MARKUP_NAME_METER ||
-                            tag_id == MARKUP_NAME_PROGRESS || tag_id == MARKUP_NAME_CANVAS ||
-                            tag_id == MARKUP_NAME_WEBVIEW ||
-                            (tag_id == MARKUP_NAME_OBJECT && dom_elem && dom_elem->get_attribute(MARKUP_NAME_DATA)) ||
-                            (tag_id == MARKUP_NAME_AUDIO && dom_elem && dom_elem->has_attribute(MARKUP_NAME_CONTROLS)) ||
-                            tag_id == MARKUP_NAME_EMBED);
+        static const NameId replaced_tags[] = {
+            MARKUP_NAME_IMG, MARKUP_NAME_VIDEO, MARKUP_NAME_INPUT, MARKUP_NAME_SELECT,
+            MARKUP_NAME_TEXTAREA, MARKUP_NAME_IFRAME, MARKUP_NAME_HR, MARKUP_NAME_SVG,
+            MARKUP_NAME_METER, MARKUP_NAME_PROGRESS, MARKUP_NAME_CANVAS,
+            MARKUP_NAME_WEBVIEW, MARKUP_NAME_EMBED};
+        bool is_replaced = layout_tag_in_list(
+            tag_id, replaced_tags, sizeof(replaced_tags) / sizeof(*replaced_tags)) ||
+            (tag_id == MARKUP_NAME_OBJECT && dom_elem &&
+             dom_elem->get_attribute(MARKUP_NAME_DATA)) ||
+            (tag_id == MARKUP_NAME_AUDIO && dom_elem &&
+             dom_elem->has_attribute(MARKUP_NAME_CONTROLS));
         if (dom_elem && dom_elem->specified_style) {
             CssDeclaration* content_decl = style_tree_get_declaration(
                 dom_elem->specified_style, CSS_PROPERTY_CONTENT);
@@ -3517,14 +3491,7 @@ static void resolve_current_font_size(LayoutContext* lycon) {
         lycon->font.style->font_size > 0.0f ? lycon->font.style->font_size : 16.0f;
 }
 
-/**
- * Evaluate a calc() expression list with operator precedence and parentheses.
- * Items are: values (LENGTH, NUMBER, PERCENTAGE...), operators (CUSTOM with +, -, *, /),
- * and parentheses (KEYWORD with keyword=0, produced by CSS_TOKEN_LEFT/RIGHT_PAREN).
- * Uses two accumulators for * / precedence over + -, and recursion for parentheses.
- * @param pos  Current index in the list; updated on return to point past consumed items.
- * @param depth  Recursion depth for parenthesized sub-expressions.
- */
+// evaluate calc() terms with precedence and nested parentheses.
 static float evaluate_calc_expression(LayoutContext* lycon, uintptr_t raw_prop,
                                       CssValue** items, int count, int* pos, int depth) {
     constexpr int kMaxCalcDepth = 32;
@@ -3684,16 +3651,7 @@ static bool css_absolute_unit_scale(CssUnit unit, double* scale) {
     return true;
 }
 
-/**
- * Resolve length/percentage value to pixels using Lambda CSS value structures
- *
- * @param lycon Layout context for font size, viewport, and parent dimensions
- * @param property CSS property ID for context-specific resolution.
- *                 Use negative value to suppress line-height NUMBER multiplication (for calc() operands)
- *                 while still using absolute value for percentage base selection.
- * @param value Lambda CssValue pointer (CSS_VALUE_LENGTH, CSS_VALUE_PERCENTAGE, or CSS_VALUE_NUMBER)
- * @return Resolved value in pixels
- */
+// resolve a CSS length, percentage, or number to pixels.
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value) {
     if (!value) { log_debug("resolve_length_value: null value");  return 0.0f; }
     static thread_local int length_resolve_depth = 0;
@@ -4731,16 +4689,17 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
     form->placeholder_opacity = 1.0f;
     form->placeholder_has_color = 0;
     form->placeholder_has_opacity = 0;
-    if (!dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER) || !dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER)->tree) {
+    StyleTree* pseudo_style = dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER);
+    if (!pseudo_style || !pseudo_style->tree) {
         form->placeholder_font = nullptr;
         return;
     }
     FontProp* base_font = dom_elem->font ? dom_elem->font : lycon->font.style;
     bool has_placeholder_font_prop =
-        style_tree_get_declaration(dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER), CSS_PROPERTY_FONT_SIZE) ||
-        style_tree_get_declaration(dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER), CSS_PROPERTY_FONT_WEIGHT) ||
-        style_tree_get_declaration(dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER), CSS_PROPERTY_FONT_STYLE) ||
-        style_tree_get_declaration(dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER), CSS_PROPERTY_FONT_FAMILY);
+        style_tree_get_declaration(pseudo_style, CSS_PROPERTY_FONT_SIZE) ||
+        style_tree_get_declaration(pseudo_style, CSS_PROPERTY_FONT_WEIGHT) ||
+        style_tree_get_declaration(pseudo_style, CSS_PROPERTY_FONT_STYLE) ||
+        style_tree_get_declaration(pseudo_style, CSS_PROPERTY_FONT_FAMILY);
     if (has_placeholder_font_prop && base_font) {
         FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
         if (placeholder_font) {
@@ -4751,7 +4710,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
         form->placeholder_font = nullptr;
     }
     CssDeclaration* color_decl = style_tree_get_declaration(
-        dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER), CSS_PROPERTY_COLOR);
+        pseudo_style, CSS_PROPERTY_COLOR);
     if (color_decl && color_decl->value) {
         Color color = resolve_color_value(lycon, color_decl->value);
         form->placeholder_color_r = color.r;
@@ -4761,7 +4720,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
         form->placeholder_has_color = 1;
     }
     CssDeclaration* opacity_decl = style_tree_get_declaration(
-        dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER), CSS_PROPERTY_OPACITY);
+        pseudo_style, CSS_PROPERTY_OPACITY);
     if (opacity_decl && opacity_decl->value) {
         const CssValue* value = resolve_var_function(lycon, opacity_decl->value);
         float opacity = 1.0f;
@@ -4776,7 +4735,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
         form->placeholder_has_opacity = 1;
     }
     CssDeclaration* font_size_decl = style_tree_get_declaration(
-        dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER), CSS_PROPERTY_FONT_SIZE);
+        pseudo_style, CSS_PROPERTY_FONT_SIZE);
     if (font_size_decl && font_size_decl->value && base_font) {
         float font_size = layout_resolve_font_size(
             lycon, font_size_decl->value, base_font, true, nullptr);
@@ -4789,7 +4748,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
         }
     }
     CssDeclaration* font_weight_decl = style_tree_get_declaration(
-        dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER), CSS_PROPERTY_FONT_WEIGHT);
+        pseudo_style, CSS_PROPERTY_FONT_WEIGHT);
     if (font_weight_decl && font_weight_decl->value && base_font) {
         FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
         if (placeholder_font) {
@@ -4798,7 +4757,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
         }
     }
     CssDeclaration* font_style_decl = style_tree_get_declaration(
-        dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER), CSS_PROPERTY_FONT_STYLE);
+        pseudo_style, CSS_PROPERTY_FONT_STYLE);
     if (font_style_decl && font_style_decl->value &&
         font_style_decl->value->type == CSS_VALUE_TYPE_KEYWORD && base_font) {
         FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
@@ -4807,7 +4766,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
         }
     }
     CssDeclaration* font_family_decl = style_tree_get_declaration(
-        dom_elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER), CSS_PROPERTY_FONT_FAMILY);
+        pseudo_style, CSS_PROPERTY_FONT_FAMILY);
     if (font_family_decl && font_family_decl->value && base_font) {
         FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
         if (placeholder_font) {
@@ -5441,8 +5400,8 @@ static void apply_dimension_constraint(LayoutContext* lycon, ViewBlock* block,
         prop_id == CSS_PROPERTY_MAX_HEIGHT;
     if (prop_id != CSS_PROPERTY_MIN_WIDTH && prop_id != CSS_PROPERTY_MAX_WIDTH &&
         prop_id != CSS_PROPERTY_MIN_HEIGHT && prop_id != CSS_PROPERTY_MAX_HEIGHT) return;
-    LayoutAxisConstraintRefs axis(props, horizontal);
-    LayoutAxisConstraintRefs parent_axis(parent_props, horizontal);
+    LayoutAxisRefs axis(props, horizontal);
+    LayoutAxisRefs parent_axis(parent_props, horizontal);
     float* constraint = is_maximum ? axis.maximum : axis.minimum;
     float* percentage = is_maximum ? axis.maximum_percent : axis.minimum_percent;
     CssEnum* constraint_type = is_maximum ? axis.maximum_type : axis.minimum_type;
@@ -5677,8 +5636,9 @@ static void resolve_grid_auto_track(LayoutContext* lycon, ViewBlock* block,
 
 static void resolve_css_axis_size(LayoutContext* lycon, ViewBlock* block,
                                   const CssValue* value,
-                                  bool horizontal) {
+                                  LayoutAxis axis) {
     const CssValue* fit_limit = css_fit_content_function_limit(value);
+    bool horizontal = axis == LAYOUT_AXIS_X;
     CssPropertyCode axis_property = horizontal ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
     float size = -1.0f;
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
@@ -5701,18 +5661,16 @@ static void resolve_css_axis_size(LayoutContext* lycon, ViewBlock* block,
         size = resolve_length_value(lycon, axis_property, value);
         size = isnan(size) ? -1.0f : max(size, 0.0f);
     }
-    if (horizontal) lycon->block.given_width = size;
-    else lycon->block.given_height = size;
+    LayoutAxisRefs context(&lycon->block, axis);
+    if (context.given) *context.given = size;
     if (!block) return;
     block->ensure_block(lycon);
-    LayoutAxisConstraintRefs refs(block->block_mut(), horizontal);
+    LayoutAxisRefs refs(block->block_mut(), axis);
     *refs.given = size;
     *refs.given_type = fit_limit ? CSS_VALUE_FIT_CONTENT
         : value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
-    float* fit_size = horizontal ? &block->blk->given_width_fit_content_limit
-                                 : &block->blk->given_height_fit_content_limit;
-    float* fit_percent = horizontal ? &block->blk->given_width_fit_content_percent
-                                    : &block->blk->given_height_fit_content_percent;
+    float* fit_size = refs.given_fit_content_limit;
+    float* fit_percent = refs.given_fit_content_percent;
     *fit_size = -1.0f;
     *fit_percent = NAN;
     if (fit_limit) {
@@ -6573,8 +6531,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         return;  // Custom properties don't have standard processing
     }
-    DomElement* current_element = lycon->elmt && lycon->elmt->is_element()
-        ? lycon->elmt->as_element() : nullptr;
+    DomElement* current_element = lycon->view && lycon->view->is_element()
+        ? lycon->view->as_element() : nullptr;
     bool inline_axis_is_vertical = layout_element_inline_axis_is_vertical(current_element);
     WritingMode current_writing_mode = layout_element_writing_mode(current_element);
     bool vertical_block_start_is_right = current_writing_mode == WM_VERTICAL_RL;
@@ -6917,7 +6875,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         case CSS_PROPERTY_WIDTH:
         case CSS_PROPERTY_HEIGHT:
-            resolve_css_axis_size(lycon, block, value, prop_id == CSS_PROPERTY_WIDTH);
+            resolve_css_axis_size(lycon, block, value,
+                prop_id == CSS_PROPERTY_WIDTH ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y);
             break;
         case CSS_PROPERTY_MIN_WIDTH:
         case CSS_PROPERTY_MAX_WIDTH:
@@ -7021,10 +6980,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             }
             break;
         }
-        case CSS_PROPERTY_MASK_IMAGE: {
+        case CSS_PROPERTY_MASK_IMAGE:
             resolve_css_mask_image(lycon, span, value);
             break;
-        }
         case CSS_PROPERTY_BACKGROUND_ATTACHMENT:
         case CSS_PROPERTY_BACKGROUND_ORIGIN:
         case CSS_PROPERTY_BACKGROUND_CLIP:
@@ -7039,10 +6997,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 prop_id == CSS_PROPERTY_BACKGROUND_POSITION_X);
             break;
         }
-        case CSS_PROPERTY_BACKGROUND_SIZE: {
+        case CSS_PROPERTY_BACKGROUND_SIZE:
             resolve_background_size(lycon, span, value, prop_id);
             break;
-        }
         case CSS_PROPERTY_BACKGROUND_REPEAT: {
             layout_ensure_background(lycon, span);
             BackgroundProp* bg = span->boundary()->background;
@@ -7063,10 +7020,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             }
             break;
         }
-        case CSS_PROPERTY_BACKGROUND_POSITION: {
+        case CSS_PROPERTY_BACKGROUND_POSITION:
             resolve_background_position(lycon, span, value, prop_id);
             break;
-        }
         case CSS_PROPERTY_BOX_SHADOW: {
             span->ensure_boundary(lycon);
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
@@ -7200,10 +7156,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             }
             break;
         }
-        case CSS_PROPERTY_COLUMN_COUNT: {
+        case CSS_PROPERTY_COLUMN_COUNT:
             resolve_multicol_count(lycon, block, value);
             break;
-        }
         case CSS_PROPERTY_COLUMN_WIDTH: {
             if (block) resolve_multicol_dimension(lycon, block, value, prop_id,
                 false, false, "column-width");
@@ -7227,6 +7182,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 const CssValue* v = vals[vi];
                 if (!v) continue;
                 if (v->type == CSS_VALUE_TYPE_KEYWORD && v->data.keyword == CSS_VALUE_AUTO) {
+                    continue;
                 } else if (v->type == CSS_VALUE_TYPE_NUMBER && v->data.number.is_integer) {
                     int count = (int)v->data.number.value;
                     if (count > 0) {
@@ -7264,10 +7220,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         case CSS_PROPERTY_COLUMN_RULE_WIDTH:
         case CSS_PROPERTY_COLUMN_RULE_STYLE:
-        case CSS_PROPERTY_COLUMN_RULE_COLOR: {
+        case CSS_PROPERTY_COLUMN_RULE_COLOR:
             resolve_multicol_rule_property(lycon, block, prop_id, value);
             break;
-        }
         case CSS_PROPERTY_COLUMN_SPAN: {
             if (!block) break;
             block->ensure_multicol(lycon);
@@ -7447,19 +7402,17 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             }
             break;
         }
-        case CSS_PROPERTY_BORDER_STYLE: {
+        case CSS_PROPERTY_BORDER_STYLE:
             resolve_border_box_part(lycon, span, value, specificity, CSS_BORDER_SIDE_STYLE);
             break;
-        }
         case CSS_PROPERTY_BORDER_WIDTH: {
             layout_ensure_border(lycon, span);
             resolve_spacing_prop(lycon, CSS_PROPERTY_BORDER_WIDTH, value, specificity, &span->boundary_mut()->border->width);
             break;
         }
-        case CSS_PROPERTY_BORDER_COLOR: {
+        case CSS_PROPERTY_BORDER_COLOR:
             resolve_border_box_part(lycon, span, value, specificity, CSS_BORDER_SIDE_COLOR);
             break;
-        }
         case CSS_PROPERTY_BORDER_RADIUS: {
             layout_ensure_border(lycon, span);
             apply_border_radius_shorthand(lycon, prop_id, &span->boundary_mut()->border->radius, value, specificity);
@@ -7495,10 +7448,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             }
             break;
         }
-        case CSS_PROPERTY_INSET: {
+        case CSS_PROPERTY_INSET:
             resolve_inset_shorthand(lycon, span, value);
             break;
-        }
         case CSS_PROPERTY_INSET_INLINE:
         case CSS_PROPERTY_INSET_INLINE_START:
         case CSS_PROPERTY_INSET_INLINE_END:
@@ -7651,8 +7603,6 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         case CSS_PROPERTY_JUSTIFY_CONTENT:
         case CSS_PROPERTY_ALIGN_ITEMS:
-            resolve_flex_grid_container_alignment(lycon, block, prop_id, value);
-            break;
         case CSS_PROPERTY_ALIGN_CONTENT:
             resolve_flex_grid_container_alignment(lycon, block, prop_id, value);
             break;

@@ -14,7 +14,6 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
     MarkerProp* marker_prop = (MarkerProp*)elem->blk;
     if (!marker_prop) {
-        log_debug("[MARKER RENDER] No marker_prop found");
         return;
     }
 
@@ -25,8 +24,6 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     CssEnum marker_type = marker_prop->marker_type;
     Color color = rdcon->color;
 
-    log_debug("[MARKER RENDER] type=%d, x=%.1f, y=%.1f, width=%.1f, bullet_size=%.1f",
-              marker_type, x, y, width, bullet_size);
 
     if (marker_prop->image_url && strcmp(marker_prop->image_url, "none") != 0) {
         if (!marker_prop->loaded_image) {
@@ -61,11 +58,8 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             int src_h = img->decoded_height > 0 ? img->decoded_height : img->height;
             rc_draw_image(rdcon, (uint32_t*)img->pixels, src_w, src_h,
                           img->pitch / 4, ix, iy, img_w, img_h, 255, nullptr, img);
-            log_debug("[MARKER RENDER] Drew list-style-image at (%.1f, %.1f) size %.0fx%.0f",
-                      ix, iy, img_w, img_h);
             return;
         }
-        log_debug("[MARKER RENDER] list-style-image failed to load, falling back to marker_type");
     }
 
     const FontMetrics* marker_metrics = rdcon->font.font_handle
@@ -83,7 +77,6 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             rdt_path_add_circle(p, marker_cx, marker_cy, radius, radius);
             rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, NULL);
             rdt_path_free(p);
-            log_debug("[MARKER RENDER] Drew disc at (%.1f, %.1f) r=%.1f", marker_cx, marker_cy, radius);
             break;
         }
 
@@ -95,7 +88,6 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             rdt_path_add_circle(p, marker_cx, marker_cy, radius - stroke_width/2, radius - stroke_width/2);
             rc_stroke_path(rdcon, p, color, stroke_width, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
             rdt_path_free(p);
-            log_debug("[MARKER RENDER] Drew circle outline at (%.1f, %.1f) r=%.1f", marker_cx, marker_cy, radius);
             break;
         }
 
@@ -104,7 +96,6 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             float sy = marker_cy - bullet_size / 2.0f;
 
             rc_fill_rect(rdcon, sx, sy, bullet_size, bullet_size, color);
-            log_debug("[MARKER RENDER] Drew square at (%.1f, %.1f) size=%.1f", sx, sy, bullet_size);
             break;
         }
 
@@ -118,7 +109,6 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             rdt_path_close(p);
             rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, NULL);
             rdt_path_free(p);
-            log_debug("[MARKER RENDER] Drew disclosure-closed triangle at (%.1f, %.1f)", marker_cx, marker_cy);
             break;
         }
 
@@ -132,7 +122,6 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             rdt_path_close(p);
             rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, NULL);
             rdt_path_free(p);
-            log_debug("[MARKER RENDER] Drew disclosure-open triangle at (%.1f, %.1f)", marker_cx, marker_cy);
             break;
         }
 
@@ -187,27 +176,22 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
                     }
                 }
 
-                log_debug("[MARKER RENDER] Text marker: '%s' at x=%.1f y=%.1f w=%.1f",
-                          marker_prop->text_content, x, y, width);
             }
             break;
         }
 
         default:
-            log_debug("[MARKER RENDER] Unsupported marker type: %d", marker_type);
             break;
     }
 }
 
 void render_litem_view(RenderContext* rdcon, ViewBlock* list_item) {
-    log_debug("view list item:%s", list_item->node_name());
     rdcon->list.item_index++;
     render_block_view(rdcon, list_item);
 }
 
 void render_list_view(RenderContext* rdcon, ViewBlock* view) {
     ViewBlock* list = lam::view_require_block(view);
-    log_debug("view list:%s", list->node_name());
     ListBlot pa_list = rdcon->list;
     rdcon->list.item_index = 0;
     rdcon->list.list_style_type = list->block()->list_style_type;

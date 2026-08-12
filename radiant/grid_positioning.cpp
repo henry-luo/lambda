@@ -38,7 +38,7 @@ static float grid_item_placed_axis_size(ViewBlock* item, float track_size,
                                         bool horizontal) {
     if (!item || !item->blk) return track_size;
 
-    LayoutAxisConstraintRefs axis(item->block_mut(), horizontal);
+    LayoutAxisRefs axis(item->block_mut(), horizontal);
     if (axis.given_percent && !isnan(*axis.given_percent)) {
         float content_size = track_size * *axis.given_percent / 100.0f;
         *axis.given = content_size;
@@ -70,20 +70,42 @@ static void grid_track_positions(const Tracks* tracks, int count, float gap,
                                  const char* label) {
     if (!tracks || !positions || count < 0) return;
     float current = offset;
-    log_debug(" Calculating %s positions for %d tracks:", label, count);
     for (int index = 0; index <= count; index++) {
         positions[index] = current;
-        log_debug(" %s %d position: %.1f", label, index, current);
         if (index >= count) continue;
         float track_size = (*tracks)[index].base_size;
-        log_debug(" %s %d size: %.1f", label, index, track_size);
         current += track_size;
         if (index >= count - 1) continue;
         current += gap;
         if (add_distribution_spacing) current += distribution_spacing;
-        log_debug(" Added %s gap: %.1f + spacing %.1f, new current: %.1f",
-                  label, gap, distribution_spacing, current);
     }
+}
+
+typedef struct GridContentDistribution {
+    float offset;
+    float spacing;
+} GridContentDistribution;
+
+static GridContentDistribution grid_content_distribution(int32_t alignment,
+                                                          float free_space,
+                                                          int track_count) {
+    GridContentDistribution result = {0.0f, 0.0f};
+    if (track_count <= 0) return result;
+    if (free_space > 0.0f && radiant::alignment_is_space_distribution(alignment)) {
+        radiant::SpaceDistribution distribution = radiant::compute_space_distribution(
+            alignment, free_space, track_count);
+        result.offset = distribution.gap_before_first;
+        result.spacing = distribution.gap_between;
+        return result;
+    }
+    int32_t effective_alignment = alignment;
+    if (free_space < 0.0f && radiant::alignment_is_space_distribution(alignment)) {
+        // space distribution falls back to start when the tracks overflow.
+        effective_alignment = CSS_VALUE_START;
+    }
+    result.offset = radiant::compute_alignment_offset_simple(
+        effective_alignment, free_space);
+    return result;
 }
 
 // Position grid items based on computed track sizes
@@ -92,18 +114,9 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
 
     // guard against zero-track grids — items cannot be positioned (fuzzer-found)
     if (grid_layout->computed_row_count <= 0 || grid_layout->computed_column_count <= 0) {
-        log_debug("position_grid_items: zero rows(%d) or cols(%d), skipping",
-                  grid_layout->computed_row_count, grid_layout->computed_column_count);
         return;
     }
 
-    log_debug(" Positioning grid items - container: %.0fx%.0f at (%.0f,%.0f)\n",
-           container->width, container->height, container->x, container->y);
-    log_debug(" Grid content dimensions: %.1fx%.1f\n",
-           grid_layout->content_width, grid_layout->content_height);
-    log_debug(" Grid gaps - row: %.1f, column: %.1f\n",
-           grid_layout->row_gap, grid_layout->column_gap);
-    log_debug("Positioning grid items\n");
 
     // Calculate track positions
     float* row_positions = (float*)scratch_calloc(sa, (grid_layout->computed_row_count + 1) * sizeof(float));
@@ -116,74 +129,26 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         grid_layout->computed_columns, grid_layout->computed_column_count,
         grid_layout->column_gap);
 
-    log_debug(" Total grid content: %.1fx%.1f, container content: %.1fx%.1f\n",
-              total_column_size, total_row_size,
-              grid_layout->content_width, grid_layout->content_height);
 
-    // Calculate justify-content offset and spacing (horizontal)
-    // Using unified alignment functions from layout_alignment.hpp
-    float justify_offset = 0;
-    float justify_spacing = 0;  // Additional spacing between tracks
+    // Calculate both track-axis distributions with the same Box Alignment rule.
     float extra_column_space = grid_layout->content_width - total_column_size;
-    int col_count = grid_layout->computed_column_count;
-    if (col_count > 0) {
-        int32_t justify = grid_layout->justify_content;
-        if (extra_column_space > 0 && radiant::alignment_is_space_distribution(justify)) {
-            // Use space distribution for space-between/around/evenly (only with positive space)
-            radiant::SpaceDistribution dist = radiant::compute_space_distribution(
-                justify, extra_column_space, col_count);
-            justify_offset = dist.gap_before_first;
-            justify_spacing = dist.gap_between;
-        } else {
-            // Use single offset for start/end/center
-            // Also handles negative free space (overflow centering)
-            // Space distribution types fall back to start with negative space
-            int32_t effective_align = justify;
-            if (extra_column_space < 0 && radiant::alignment_is_space_distribution(justify)) {
-                effective_align = CSS_VALUE_START;  // Fall back to start for overflow
-            }
-            justify_offset = radiant::compute_alignment_offset_simple(effective_align, extra_column_space);
-        }
-    }
-    log_debug(" justify-content=%d, extra_space=%.1f, offset=%.1f, spacing=%.1f\n",
-              grid_layout->justify_content, extra_column_space, justify_offset, justify_spacing);
+    GridContentDistribution justify_distribution = grid_content_distribution(
+        grid_layout->justify_content, extra_column_space,
+        grid_layout->computed_column_count);
 
-    // Calculate align-content offset and spacing (vertical)
-    // Using unified alignment functions from layout_alignment.hpp
-    float align_offset = 0;
-    float align_spacing = 0;  // Additional spacing between tracks
     float extra_row_space = grid_layout->content_height - total_row_size;
-    int row_count = grid_layout->computed_row_count;
-    if (row_count > 0) {
-        int32_t align = grid_layout->align_content;
-        if (extra_row_space > 0 && radiant::alignment_is_space_distribution(align)) {
-            // Use space distribution for space-between/around/evenly (only with positive space)
-            radiant::SpaceDistribution dist = radiant::compute_space_distribution(
-                align, extra_row_space, row_count);
-            align_offset = dist.gap_before_first;
-            align_spacing = dist.gap_between;
-        } else {
-            // Use single offset for start/end/center
-            // Also handles negative free space (overflow centering)
-            // Space distribution types fall back to start with negative space
-            int32_t effective_align = align;
-            if (extra_row_space < 0 && radiant::alignment_is_space_distribution(align)) {
-                effective_align = CSS_VALUE_START;  // Fall back to start for overflow
-            }
-            align_offset = radiant::compute_alignment_offset_simple(effective_align, extra_row_space);
-        }
-    }
-    log_debug(" align-content=%d, extra_space=%.1f, offset=%.1f, spacing=%.1f\n",
-              grid_layout->align_content, extra_row_space, align_offset, align_spacing);
+    GridContentDistribution align_distribution = grid_content_distribution(
+        grid_layout->align_content, extra_row_space,
+        grid_layout->computed_row_count);
 
     grid_track_positions(
-        grid_layout->computed_rows, grid_layout->computed_row_count,
-        grid_layout->row_gap, align_offset, align_spacing,
+        grid_layout->computed_rows, grid_layout->computed_row_count, grid_layout->row_gap,
+        align_distribution.offset, align_distribution.spacing,
         radiant::alignment_is_space_distribution(grid_layout->align_content),
         row_positions, "row");
     grid_track_positions(
         grid_layout->computed_columns, grid_layout->computed_column_count,
-        grid_layout->column_gap, justify_offset, justify_spacing,
+        grid_layout->column_gap, justify_distribution.offset, justify_distribution.spacing,
         radiant::alignment_is_space_distribution(grid_layout->justify_content),
         column_positions, "column");
 
@@ -191,7 +156,6 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* item = grid_layout->grid_items[i];
         GridItemProp* gi = grid_item_prop(item);
-        log_debug(" Item pointer %d: %p, gi=%p\n", i, (void*)item, (void*)gi);
         if (!gi) continue;  // Skip items without grid item properties
 
         // Get grid area bounds (convert from 1-indexed to 0-indexed)
@@ -279,33 +243,17 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         gi->track_base_x = new_x;
         gi->track_base_y = new_y;
 
-        log_debug(" Assigning item %d: x=%.0f (%.0f+%.0f), y=%.0f, width=%.1f, height=%.1f\n",
-               i, new_x, container_offset_x, item_x, new_y, item_width, item_height);
-        log_debug(" Before assignment - item->x=%.0f, item->y=%.0f, item=%p\n", item->x, item->y, (void*)item);
         item->x = new_x;
         item->y = new_y;
         item->width = item_width;
         item->height = item_height;
-        log_debug(" After assignment item %d: x=%.0f, y=%.0f, width=%.0f, height=%.0f at item=%p\n",
-               i, item->x, item->y, item->width, item->height, (void*)item);
 
-        log_debug(" Grid item %d positioning:\n", i);
-        log_debug("  Grid area: row %d-%d, col %d-%d\n", row_start, row_end, col_start, col_end);
-        log_debug("  Track positions: x=%.1f, y=%.1f\n", item_x, item_y);
-        log_debug("  Track sizes: width=%.1f, height=%.1f\n", item_width, item_height);
-        log_debug("  Container: offset=(%.1f,%.1f)\n", container_offset_x, container_offset_y);
-        log_debug("  Final position: (%.0f,%.0f), size: %.0fx%.0f\n",
-               item->x, item->y, item->width, item->height);
 
-        log_debug("Positioned grid item %d: pos=(%.0f,%.0f), size=%.0fx%.0f, grid_area=(%d-%d, %d-%d)\n",
-                  i, item->x, item->y, item->width, item->height,
-                  row_start + 1, row_end, col_start + 1, col_end);
     }
 
     scratch_free(sa, column_positions);
     scratch_free(sa, row_positions);
 
-    log_debug("Grid items positioned\n");
 }
 
 // Helper: read the CSS percentage value for a horizontal margin side (left or right).
@@ -390,7 +338,6 @@ static float compute_grid_item_baseline_alignment_height(GridContainerLayout* gr
 void align_grid_items(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
 
-    log_debug("Aligning grid items\n");
 
     // Pre-pass: baseline alignment for rows with align-items: baseline
     bool has_baseline_alignment = radiant::alignment_is_baseline(grid_layout->align_items);
@@ -553,7 +500,6 @@ void align_grid_items(GridContainerLayout* grid_layout) {
         scratch_free(sa, row_baseline_count);
         scratch_free(sa, row_max_below);
         scratch_free(sa, row_max_baseline);
-        log_debug("Grid items aligned\n");
         return;
     }
 
@@ -561,7 +507,6 @@ void align_grid_items(GridContainerLayout* grid_layout) {
         align_grid_item(grid_layout->grid_items[i], grid_layout);
     }
 
-    log_debug("Grid items aligned\n");
 }
 
 static bool grid_axis_stretches_aspect_ratio(int self_alignment,
@@ -627,7 +572,7 @@ static void grid_stretch_axis(ViewBlock* item, LayoutAxis axis, float available,
     if (!item || has_explicit_size || use_aspect_ratio) return;
     layout_axis_set_size(static_cast<ViewElement*>(item), axis, available);
 
-    LayoutAxisConstraintRefs constraints(item->block_mut(), axis);
+    LayoutAxisRefs constraints(item->block_mut(), axis);
     LayoutAxisBoxMetrics box = layout_axis_box_metrics(item, axis);
     if (maximum > 0.0f) {
         float border_box_max = maximum;
@@ -677,34 +622,35 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     ViewBlock* grid_container = item->parent && item->parent->is_block() ? lam::view_require_block(item->parent) : NULL;
     uint8_t grid_margin_trim = (grid_container && grid_container->blk) ? grid_container->block()->margin_trim : 0;
     if (grid_margin_trim) {
-        int row_start = gi->computed_grid_row_start - 1;
-        int row_end = gi->computed_grid_row_end - 1;
-        int col_start = gi->computed_grid_column_start - 1;
-        int col_end = gi->computed_grid_column_end - 1;
-        // block-start: first row items
-        if ((grid_margin_trim & MARGIN_TRIM_BLOCK_START) && row_start == 0) {
-            log_debug("[MARGIN-TRIM] grid block-start: trimming margin_top=%f", margin_top);
-            margin_top = 0;
-            if (item->bound) item->boundary_mut()->margin.top = 0;
+        const LayoutAxis axes[2] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
+        const uint8_t trim_start[2] = {
+            MARGIN_TRIM_INLINE_START, MARGIN_TRIM_BLOCK_START};
+        const uint8_t trim_end[2] = {
+            MARGIN_TRIM_INLINE_END, MARGIN_TRIM_BLOCK_END};
+        const int starts[2] = {
+            gi->computed_grid_column_start - 1,
+            gi->computed_grid_row_start - 1};
+        const int ends[2] = {
+            gi->computed_grid_column_end - 1,
+            gi->computed_grid_row_end - 1};
+        const int track_counts[2] = {
+            grid_layout->computed_column_count,
+            grid_layout->computed_row_count};
+        for (int i = 0; i < 2; i++) {
+            LayoutAxisRefs refs(item, axes[i]);
+            if ((grid_margin_trim & trim_start[i]) && starts[i] == 0) {
+                if (refs.margins.start) *refs.margins.start = 0.0f;
+            }
+            if ((grid_margin_trim & trim_end[i]) && ends[i] >= track_counts[i]) {
+                if (refs.margins.end) *refs.margins.end = 0.0f;
+            }
         }
-        // block-end: last row items
-        if ((grid_margin_trim & MARGIN_TRIM_BLOCK_END) && row_end >= grid_layout->computed_row_count) {
-            log_debug("[MARGIN-TRIM] grid block-end: trimming margin_bottom=%f", margin_bottom);
-            margin_bottom = 0;
-            if (item->bound) item->boundary_mut()->margin.bottom = 0;
-        }
-        // inline-start: first column items
-        if ((grid_margin_trim & MARGIN_TRIM_INLINE_START) && col_start == 0) {
-            log_debug("[MARGIN-TRIM] grid inline-start: trimming margin_left=%f", margin_left);
-            margin_left = 0;
-            if (item->bound) item->boundary_mut()->margin.left = 0;
-        }
-        // inline-end: last column items
-        if ((grid_margin_trim & MARGIN_TRIM_INLINE_END) && col_end >= grid_layout->computed_column_count) {
-            log_debug("[MARGIN-TRIM] grid inline-end: trimming margin_right=%f", margin_right);
-            margin_right = 0;
-            if (item->bound) item->boundary_mut()->margin.right = 0;
-        }
+        LayoutAxisRefs x_margins(item, LAYOUT_AXIS_X);
+        LayoutAxisRefs y_margins(item, LAYOUT_AXIS_Y);
+        margin_left = x_margins.margin_start();
+        margin_right = x_margins.margin_end();
+        margin_top = y_margins.margin_start();
+        margin_bottom = y_margins.margin_end();
     }
 
     // Reduce available area by the fixed margins before any alignment calculation
@@ -738,6 +684,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         !has_intrinsic_height_constraint);
     float max_width = (item->blk && item->block_mut()->given_max_width > 0) ? item->block_mut()->given_max_width : 0;
     float max_height = (item->blk && item->block_mut()->given_max_height > 0) ? item->block_mut()->given_max_height : 0;
+    float min_width = (item->blk && item->block_mut()->given_min_width > 0) ? item->block_mut()->given_min_width : 0;
+    float min_height = (item->blk && item->block_mut()->given_min_height > 0) ? item->block_mut()->given_min_height : 0;
     bool definite_inline_area = grid_item_inline_area_is_definite(gi, grid_layout);
     if (definite_inline_area && item->blk && !isnan(item->block()->given_max_width_percent)) {
         // Grid-item percentage constraints resolve against the grid area, not
@@ -756,102 +704,58 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         (has_explicit_height && inline_stretches_ratio);
     bool use_aspect_ratio = aspect_ratio > 0.0f && !ratio_is_ignored;
 
-    log_debug("align_grid_item: aspect_ratio=%.6f, available=%dx%d",
-              aspect_ratio, available_width, available_height);
 
-    // If aspect-ratio is set, compute the missing dimension
+    // If aspect-ratio is set, choose one primary axis and derive the other.
     if (use_aspect_ratio) {
+        LayoutAxisRefs width_refs(item, LAYOUT_AXIS_X);
+        LayoutAxisRefs height_refs(item, LAYOUT_AXIS_Y);
         if (has_explicit_width && !has_explicit_height) {
-            // Width is explicit, compute height from aspect ratio
-            item->height = item->width / aspect_ratio;
-            log_debug("align_grid_item: computed height=%.1f from width=%.1f and aspect_ratio=%.3f",
-                      item->height, item->width, aspect_ratio);
-        } else if (has_explicit_height && !has_explicit_width) {
-            // Height is explicit, compute width from aspect ratio
-            item->width = item->height * aspect_ratio;
-            log_debug("align_grid_item: computed width=%.1f from height=%.1f and aspect_ratio=%.3f",
-                      item->width, item->height, aspect_ratio);
-        } else if (!has_explicit_width && !has_explicit_height) {
-            // Neither dimension is explicit
-            // Check for max-width/max-height constraints first
-            if (max_width > 0 && max_height > 0) {
-                // Both max constraints - use whichever is more constraining
-                float w1 = max_width;
-                float h1 = max_width / aspect_ratio;
-                float w2 = max_height * aspect_ratio;
-                float h2 = max_height;
-                if (h1 <= max_height) {
-                    item->width = w1;
-                    item->height = h1;
-                } else {
-                    item->width = w2;
-                    item->height = h2;
-                }
-            } else if (max_width > 0) {
-                // max-width constraint, compute height from it
-                item->width = max_width;
-                item->height = max_width / aspect_ratio;
-                log_debug("align_grid_item: computed from max_width=%.1f: width=%.1f, height=%.1f",
-                          max_width, item->width, item->height);
-            } else if (max_height > 0) {
-                // max-height constraint, compute width from it
-                item->height = max_height;
-                item->width = max_height * aspect_ratio;
-                log_debug("align_grid_item: computed from max_height=%.1f: width=%.1f, height=%.1f",
-                          max_height, item->width, item->height);
+            height_refs.set_size(width_refs.get_size() / aspect_ratio);
+        } else if (!has_explicit_width && has_explicit_height) {
+            width_refs.set_size(height_refs.get_size() * aspect_ratio);
+        } else if (!has_explicit_width) {
+            LayoutAxis primary = LAYOUT_AXIS_X;
+            if (max_width > 0.0f && max_height > 0.0f) {
+                primary = max_width / aspect_ratio <= max_height
+                    ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+            } else if (max_height > 0.0f ||
+                       (block_stretches_ratio && !inline_stretches_ratio) ||
+                       (min_height > 0.0f && min_width == 0.0f)) {
+                primary = LAYOUT_AXIS_Y;
+            }
+            float primary_size;
+            if (primary == LAYOUT_AXIS_X) {
+                primary_size = max_width > 0.0f ? max_width : available_width;
+                width_refs.set_size(primary_size);
+                height_refs.set_size(primary_size / aspect_ratio);
             } else {
-                // No explicit size, no max constraints.
-                // An explicit stretch axis supplies the ratio's definite axis.
-                // With neither axis stretched, prefer the inline normal axis.
-                float min_h = (item->blk && item->block_mut()->given_min_height > 0) ? item->block_mut()->given_min_height : 0;
-                float min_w = (item->blk && item->block_mut()->given_min_width > 0) ? item->block_mut()->given_min_width : 0;
-                if (block_stretches_ratio && !inline_stretches_ratio) {
-                    item->height = available_height;
-                    item->width = item->height * aspect_ratio;
-                    log_debug("align_grid_item: aspect-ratio block stretch: width=%.1f, height=%.1f",
-                              item->width, item->height);
-                } else if (inline_stretches_ratio && !block_stretches_ratio) {
-                    item->width = available_width;
-                    item->height = item->width / aspect_ratio;
-                    log_debug("align_grid_item: aspect-ratio inline stretch: width=%.1f, height=%.1f",
-                              item->width, item->height);
-                } else if (min_h > 0 && min_w == 0) {
-                    // Block-axis minimum: anchor at available_height (stretch), derive width
-                    item->height = (float)available_height;
-                    item->width = item->height * aspect_ratio;
-                    log_debug("align_grid_item: aspect-ratio block-primary (min-height=%.1f): width=%.1f, height=%.1f",
-                              min_h, item->width, item->height);
-                } else {
-                    // Inline-axis priority: anchor at available_width (stretch), derive height
-                    item->width = (float)available_width;
-                    item->height = (float)available_width / aspect_ratio;
-                    log_debug("align_grid_item: aspect-ratio from available_width=%d: width=%.1f, height=%.1f",
-                              available_width, item->width, item->height);
-                }
+                primary_size = max_height > 0.0f ? max_height : available_height;
+                height_refs.set_size(primary_size);
+                width_refs.set_size(primary_size * aspect_ratio);
             }
         }
 
-        // Apply max-width/max-height constraints after aspect-ratio calculation
-        if (max_width > 0 && item->width > max_width) {
-            item->width = max_width;
-            // A definite block size wins when an inline constraint clamps width.
-            if (!has_explicit_height) item->height = max_width / aspect_ratio;
-        }
-        if (max_height > 0 && item->height > max_height) {
-            item->height = max_height;
-            // A definite inline size remains fixed when its derived height clamps.
-            if (!has_explicit_width) item->width = max_height * aspect_ratio;
-        }
-        // Apply min-width/min-height constraints (min wins over max per CSS spec)
-        float min_width = (item->blk && item->block_mut()->given_min_width > 0) ? item->block_mut()->given_min_width : 0;
-        float min_height = (item->blk && item->block_mut()->given_min_height > 0) ? item->block_mut()->given_min_height : 0;
-        if (min_width > 0 && item->width < min_width) {
-            item->width = min_width;
-            if (!has_explicit_height) item->height = min_width / aspect_ratio;
-        }
-        if (min_height > 0 && item->height < min_height) {
-            item->height = min_height;
-            if (!has_explicit_width) item->width = min_height * aspect_ratio;
+        const float maximums[2] = {max_width, max_height};
+        const float minimums[2] = {min_width, min_height};
+        const bool explicit_sizes[2] = {has_explicit_width, has_explicit_height};
+        LayoutAxisRefs sizes[2] = {width_refs, height_refs};
+        for (int i = 0; i < 2; i++) {
+            if (maximums[i] > 0.0f && sizes[i].get_size() > maximums[i]) {
+                sizes[i].set_size(maximums[i]);
+                int other = 1 - i;
+                if (!explicit_sizes[other]) {
+                    sizes[other].set_size(i == 0
+                        ? maximums[i] / aspect_ratio : maximums[i] * aspect_ratio);
+                }
+            }
+            if (minimums[i] > 0.0f && sizes[i].get_size() < minimums[i]) {
+                sizes[i].set_size(minimums[i]);
+                int other = 1 - i;
+                if (!explicit_sizes[other]) {
+                    sizes[other].set_size(i == 0
+                        ? minimums[i] / aspect_ratio : minimums[i] * aspect_ratio);
+                }
+            }
         }
     }
 
@@ -893,40 +797,31 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     // P6: Auto margins override justify-self/align-self, consuming available free space (CSS Grid §8.1)
     bool applied_horiz_auto = false, applied_vert_auto = false;
     if (item->bound) {
-        bool left_auto  = (item->boundary()->margin.left_type   == CSS_VALUE_AUTO);
-        bool right_auto = (item->boundary()->margin.right_type  == CSS_VALUE_AUTO);
-        bool top_auto   = (item->boundary()->margin.top_type    == CSS_VALUE_AUTO);
-        bool bot_auto   = (item->boundary()->margin.bottom_type == CSS_VALUE_AUTO);
-        // CSS Grid §8.1: auto margins consume the free space between the item's margin box and the
-        // grid area.  The item's actual (content) size must be used, not the stretch-assigned size.
-        // Pass 3 sets content_width/content_height; fall back to current item->width/height if not set.
-        // When the item has an explicit size (given_width/given_height > 0), the explicit size takes
-        // priority over content_height (which may be 0 for an empty flex container despite height: Npx).
-        // For items WITHOUT explicit size, content_height=0 is valid (empty element), so >= 0 is used
-        // to correctly center empty elements at height=0 with margin:auto.
-        float actual_item_width  = has_explicit_width
-                                   ? (float)item->block()->given_width
-                                   : ((item->content_width > 0 && item->content_width < (float)available_width)
-                                      ? item->content_width : item->width);
-        float actual_item_height = has_explicit_height
-                                   ? (float)item->block()->given_height
-                                   : ((item->content_height >= 0 && item->content_height < (float)available_height)
-                                      ? item->content_height : item->height);
-        float horiz_free = (float)available_width  - actual_item_width;
-        float vert_free  = (float)available_height - actual_item_height;
-        if (left_auto || right_auto) {
-            applied_horiz_auto = true;
-            item->width = actual_item_width;   // shrink to content size before shifting
-            if (left_auto && right_auto) item->x += horiz_free * 0.5f;
-            else if (left_auto)          item->x += horiz_free;
-            // right_auto alone: item stays at track start (no shift)
-        }
-        if (top_auto || bot_auto) {
-            applied_vert_auto = true;
-            item->height = actual_item_height; // shrink to content size before shifting
-            if (top_auto && bot_auto) item->y += vert_free * 0.5f;
-            else if (top_auto)        item->y += vert_free;
-            // bot_auto alone: item stays at track start (no shift)
+        const LayoutAxis axes[2] = {LAYOUT_AXIS_X, LAYOUT_AXIS_Y};
+        const bool explicit_sizes[2] = {has_explicit_width, has_explicit_height};
+        const float available[2] = {available_width, available_height};
+        const float content[2] = {item->content_width, item->content_height};
+        bool* applied[2] = {&applied_horiz_auto, &applied_vert_auto};
+        for (int i = 0; i < 2; i++) {
+            LayoutAxisRefs refs(item, axes[i]);
+            bool start_auto = refs.margins.start_type &&
+                *refs.margins.start_type == CSS_VALUE_AUTO;
+            bool end_auto = refs.margins.end_type &&
+                *refs.margins.end_type == CSS_VALUE_AUTO;
+            if (!start_auto && !end_auto) continue;
+            *applied[i] = true;
+            bool content_is_usable = i == 0
+                ? content[i] > 0.0f && content[i] < available[i]
+                : content[i] >= 0.0f && content[i] < available[i];
+            float actual = explicit_sizes[i] && refs.given ? *refs.given
+                : (content_is_usable ? content[i] : refs.get_size());
+            float free_space = available[i] - actual;
+            refs.set_size(actual);
+            if (start_auto && end_auto) {
+                refs.set_position(refs.get_position() + free_space * 0.5f);
+            } else if (start_auto) {
+                refs.set_position(refs.get_position() + free_space);
+            }
         }
     }
 
@@ -995,7 +890,6 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         if (item->content_height > 0) {
             actual_height = item->content_height;
             item->height = actual_height;
-            log_debug("align_grid_item: using content_height=%.1f for non-stretch alignment", item->content_height);
         } else {
             // Empty replaced items bypass flow measurement; retaining the track size
             // here makes an auto-sized item fill a finite row despite start alignment.
@@ -1018,14 +912,11 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         !cyclic_replaced_percentage_height) {
         actual_height = item->content_height;
         item->height = actual_height;
-        log_debug("align_grid_item: intrinsic height keyword, using content_height=%.1f", item->content_height);
     }
 
     align_axis(LAYOUT_AXIS_Y, align, applied_vert_auto, has_explicit_height,
                available_height, actual_height, max_height);
 
-    log_debug("Aligned grid item: justify=%d, align=%d, final_pos=(%.0f,%.0f), final_size=%.0fx%.0f\n",
-              justify, align, item->x, item->y, item->width, item->height);
     layout_shift_static_positioned_abs_descendants(
         lam::view_require_element(item), item->x - old_x, item->y - old_y);
 }

@@ -28,13 +28,14 @@ BoxMetrics layout_box_metrics(ViewBlock* block) {
 void layout_store_given_axis(LayoutContext* lycon, ViewBlock* block, float size,
                              bool horizontal, bool reset_type) {
     if (!lycon || !block) return;
-    float* context_size = horizontal ? &lycon->block.given_width : &lycon->block.given_height;
-    *context_size = size;
+    LayoutAxis axis = horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+    LayoutAxisRefs context(&lycon->block, axis);
+    if (context.given) *context.given = size;
     if (!block->blk) return;
-    LayoutAxisConstraintRefs axis(block->block_mut(), horizontal);
-    *axis.given = size;
+    LayoutAxisRefs slots(block->block_mut(), axis);
+    *slots.given = size;
     if (reset_type) {
-        *axis.given_type = CSS_VALUE__UNDEF;
+        *slots.given_type = CSS_VALUE__UNDEF;
     }
 }
 
@@ -43,8 +44,8 @@ void layout_clear_given_axis(LayoutContext* lycon, ViewBlock* block, bool horizo
 }
 
 float layout_padding_border_axis(ViewBlock* block, bool horizontal) {
-    BoxMetrics metrics = layout_box_metrics(block);
-    return horizontal ? metrics.pad_border_h : metrics.pad_border_v;
+    return layout_axis_box_metrics(
+        block, horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y).pad_border;
 }
 
 static float layout_content_from_border_axis(ViewBlock* block, float border_size,
@@ -60,8 +61,8 @@ static float layout_border_from_content_axis(ViewBlock* block, float content_siz
 }
 
 float layout_boundary_padding_border_axis(const BoundaryProp* bound, bool horizontal) {
-    BoxMetrics metrics = layout_boundary_metrics(bound);
-    return horizontal ? metrics.pad_border_h : metrics.pad_border_v;
+    return layout_axis_box_metrics(
+        layout_boundary_metrics(bound), horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y).pad_border;
 }
 
 float layout_boundary_content_size_from_border_box(const BoundaryProp* bound, float border_size, bool horizontal) {
@@ -102,18 +103,21 @@ float layout_floor_border_box_axis(ViewBlock* block, float border_size, bool hor
 float layout_clamp_min_max_axis(ViewBlock* block, float size, bool horizontal) {
     if (!block || !block->blk) return size;
 
-    LayoutAxisConstraintRefs axis(block->block_mut(), horizontal);
-    float maximum = *axis.maximum;
-    float minimum = *axis.minimum;
+    LayoutAxis axis = horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+    LayoutAxisRefs slots(block->block_mut(), axis);
+    float maximum = *slots.maximum;
+    float minimum = *slots.minimum;
     float constrained = size;
     if (maximum >= 0.0f && constrained > maximum) {
         constrained = maximum;
-        if (horizontal) log_debug("[LAYOUT_BOX] width clamped to max: %.2f", constrained);
+        log_debug("[LAYOUT_BOX] %s clamped to max: %.2f",
+                  horizontal ? "width" : "height", constrained);
     }
     // the minimum wins when declarations overlap, matching CSS used-value resolution.
     if (minimum >= 0.0f && constrained < minimum) {
         constrained = minimum;
-        if (horizontal) log_debug("[LAYOUT_BOX] width clamped to min: %.2f", constrained);
+        log_debug("[LAYOUT_BOX] %s clamped to min: %.2f",
+                  horizontal ? "width" : "height", constrained);
     }
     return constrained;
 }
@@ -134,10 +138,8 @@ static float layout_apply_min_max_axis_value(ViewBlock* block, float size,
     if (size_is_border_box || layout_uses_border_box(block)) {
         float floor = layout_padding_border_axis(block, horizontal);
         if (constrained < floor) {
-            if (horizontal) {
-                log_debug("[LAYOUT_BOX] width border-box floor: %.2f -> %.2f (padding+border)",
-                          constrained, floor);
-            }
+            log_debug("[LAYOUT_BOX] %s border-box floor: %.2f -> %.2f (padding+border)",
+                      horizontal ? "width" : "height", constrained, floor);
             constrained = floor;
         }
     }

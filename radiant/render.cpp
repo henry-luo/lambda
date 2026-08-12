@@ -74,9 +74,6 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     rdcon->block.clip.right = min(rdcon->block.clip.right, content_right);
     rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, content_bottom);
 
-    log_debug("iframe clip set to: left:%.0f, top:%.0f, right:%.0f, bottom:%.0f (content box)",
-              rdcon->block.clip.left, rdcon->block.clip.top,
-              rdcon->block.clip.right, rdcon->block.clip.bottom);
 
     // setup clip box for scrolling
     if (block->scroller) { setup_scroller(rdcon, block); }
@@ -90,7 +87,6 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
         if (doc && doc->view_tree && doc->view_tree->root) {
             View* root_view = doc->view_tree->root;
             if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
-                log_debug("render doc root view:");
                 // Save parent context and reset for embedded document
                 FontBox pa_font = rdcon->font;
                 Color pa_color = rdcon->color;
@@ -104,7 +100,6 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 
                 // load default font
                 FontProp* default_font = doc->view_tree->html_version == HTML5 ? &rdcon->ui_context->default_font : &rdcon->ui_context->legacy_default_font;
-                log_debug("render_init default font: %s, html version: %d", default_font->family, doc->view_tree->html_version);
                 setup_font(rdcon->ui_context, &rdcon->font, default_font);
 
                 ViewBlock* root_block = lam::view_require_block(root_view);
@@ -152,7 +147,6 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 
                 // Check if root element is SVG - if so, render directly without background
                 if (root_block->tag_id == MARKUP_NAME_SVG) {
-                    log_debug("render embedded SVG document (no background)");
                     render_inline_svg(rdcon, root_block);
                 } else if (root_block->embed && root_block->embedp()->img) {
                     // Image/SVG document root — use render_image_view
@@ -170,7 +164,6 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 if (rdcon->ui_context) rdcon->ui_context->document = pa_doc;
             }
             else {
-                log_debug("Invalid root view");
             }
         }
     }
@@ -189,7 +182,6 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_INLINE);
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
-    log_debug("render inline view");
 
     bool self_hidden = view_span->in_line && view_span->inl()->visibility == VIS_HIDDEN;
 
@@ -222,24 +214,15 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
         }
         if (view_span->in_line && view_span->inl()->has_color) {
             if (render_inline_trace_enabled()) {
-                log_debug("[RENDER COLOR INLINE] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
-                          view_span->node_name(),
-                          view_span->inl()->color.r, view_span->inl()->color.g, view_span->inl()->color.b,
-                          pa_color.r, pa_color.g, pa_color.b,
-                          view_span->inl()->color.c);
             }
             rdcon->color = view_span->inl()->color;
         } else {
             if (render_inline_trace_enabled()) {
-                log_debug("[RENDER COLOR INLINE] element=%s inheriting color #%02x%02x%02x (in_line=%p, color.c=%u)",
-                          view_span->node_name(), pa_color.r, pa_color.g, pa_color.b,
-                          view_span->in_line, view_span->in_line ? view_span->inl()->color.c : 0);
             }
         }
         render_children(rdcon, view);
     }
     else {
-        log_debug("view has no child");
     }
     rdcon->font = pa_font;  rdcon->color = pa_color;
 }

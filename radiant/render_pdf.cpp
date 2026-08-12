@@ -1595,7 +1595,6 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
 
     DomElement* dom_elem = lam::dom_require_element(lam::view_dom_node(block));
     if (!dom_elem || dom_elem->is_synthetic()) {
-        log_debug("[PDF_SVG_SUBSCENE] inline SVG missing native element");
         return;
     }
 
@@ -1604,8 +1603,6 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
     block_context.y = abs_y - block->y;
     Rect content_rect = render_geometry_block_content_rect(&block_context, block, 1.0f);
     if (content_rect.width <= 0.0f || content_rect.height <= 0.0f) {
-        log_debug("[PDF_SVG_SUBSCENE] skipped empty inline SVG %.1fx%.1f",
-                  content_rect.width, content_rect.height);
         return;
     }
 
@@ -1956,8 +1953,6 @@ static bool save_pdf_to_file(HPDF_Doc pdf_doc, const char* filename) {
 
 // Main function to layout HTML and render to PDF
 int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width, int viewport_height, float scale) {
-    log_debug("render_html_to_pdf called with html_file='%s', pdf_file='%s', viewport=%dx%d, scale=%.2f",
-              html_file, pdf_file, viewport_width, viewport_height, scale);
 
     RenderExportSession session;
     if (!render_export_session_begin(
@@ -1969,7 +1964,6 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
 
     // Render to PDF (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
-        log_debug("Rendering view tree to PDF...");
         // PDF output dimensions are scaled; coordinates inside are in CSS pixels with transform
         float pdf_width = session.content_width * session.scale;
         float pdf_height = session.content_height * session.scale;
@@ -1982,14 +1976,11 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
                 render_export_session_end(&session);
                 return 0;
             } else {
-                log_debug("Failed to save PDF to file: %s", pdf_file);
                 HPDF_Free(pdf_doc);
             }
         } else {
-            log_debug("Failed to render view tree to PDF");
         }
     } else {
-        log_debug("No view tree available for rendering");
     }
 
     // Cleanup

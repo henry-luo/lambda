@@ -301,8 +301,6 @@ static bool render_filter_apply_native_backend(const RenderBackendCaps* caps,
                            (uint8_t*)src.data + (size_t)row * row_bytes,
                            row_bytes);
                 }
-                log_debug("[FILTER] Applied blur(%.1fpx) via Accelerate/vImage to region (%d,%d,%d,%d)",
-                          br, blur_x, blur_y, blur_w, blur_h);
             } else {
                 log_debug("[FILTER] vImage blur failed error=%ld; falling back to software",
                           (long)error);
@@ -353,7 +351,6 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
 
     FilterPixelRegion region;
     if (!render_filter_pixel_region(surface, rect, clip, &region)) {
-        log_debug("[FILTER] Region outside clip bounds, skipping");
         return;
     }
     int left = region.left;
@@ -361,7 +358,6 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
     int right = region.right;
     int bottom = region.bottom;
 
-    log_debug("[FILTER] Applying filters to region (%d,%d)-(%d,%d)", left, top, right, bottom);
 
     // Process each pixel in the region
     uint32_t* pixels = (uint32_t*)surface->pixels;
@@ -422,14 +418,12 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
                         // Drop shadow is similar to box-shadow but follows element shape
                         // Would need separate rendering pass
                         if (x == left && y == top) {
-                            log_debug("[FILTER] drop-shadow not supported yet");
                         }
                         break;
 
                     case FILTER_URL:
                         // SVG filter reference - not supported
                         if (x == left && y == top) {
-                            log_debug("[FILTER] url() SVG filter not supported");
                         }
                         break;
 
@@ -454,7 +448,6 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
         }
     }
 
-    log_debug("[FILTER] Applied filters to %d pixels", (right - left) * (bottom - top));
 
     // Apply blur filter as a post-processing step (operates on entire region, not per-pixel)
     // CSS filter: blur() extends the visual effect beyond the element's bounding box
@@ -477,8 +470,6 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
             int blur_h = blur_b - blur_y;
             if (blur_w > 0 && blur_h > 0) {
                 box_blur_region(sa, surface, blur_x, blur_y, blur_w, blur_h, kernel_b);
-                log_debug("[FILTER] Applied blur(%.1fpx) via software box blur to region (%d,%d,%d,%d)",
-                          br, blur_x, blur_y, blur_w, blur_h);
             }
         }
         blur_func = blur_func->next;
@@ -569,8 +560,6 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
             }
 
             scratch_free(sa, shadow_px);
-            log_debug("[FILTER] Applied drop-shadow(%d,%d,%.1fpx rgba(%d,%d,%d,%d)) to region (%d,%d,%d,%d)",
-                      dx, dy, blur_r, sc.r, sc.g, sc.b, sc.a, left, top, ew, eh);
         }
         ds_func = ds_func->next;
     }

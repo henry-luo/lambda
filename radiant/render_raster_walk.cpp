@@ -58,9 +58,6 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
     }
 
     if (render_trace_enabled()) {
-        log_debug("[RENDER DISPATCH] view_type=%d, embed=%p, img=%p, width=%.0f, height=%.0f",
-                  block->view_type, block->embed,
-                  block->embed ? block->embedp()->img : NULL, block->width, block->height);
     }
     if (block->form_control()) {
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_block_view for form control");
@@ -95,7 +92,6 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
         if (skip_positioned_in_normal_flow && block->position &&
             (block->positionp()->position == CSS_VALUE_ABSOLUTE ||
              block->positionp()->position == CSS_VALUE_FIXED)) {
-            log_debug("absolute/fixed positioned block, skip in normal rendering");
         } else {
             render_block_view(rdcon, block);
         }
@@ -234,7 +230,6 @@ void render_raster_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
 
     View* root_view = view_tree->root;
     if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
-        log_debug("Render root view");
         render_children(rdcon, root_view);
     } else {
         log_error("Invalid root view");

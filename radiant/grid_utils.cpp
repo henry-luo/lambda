@@ -196,8 +196,6 @@ void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_nu
 
     grid->line_name_count++;
 
-    log_debug("Added grid line name '%s' at line %d (%s)\n",
-              name, line_number, is_row ? "row" : "column");
 }
 
 // Find a grid line by name
@@ -232,7 +230,6 @@ void clear_grid_template_areas(GridProp* grid) {
 //   "sidebar main aside"
 //   "footer footer footer"
 void parse_grid_template_areas(GridProp* grid, const char* areas_string, ScratchArena* sa) {
-    log_debug("parse_grid_template_areas: grid=%p, areas='%s'", grid, areas_string ? areas_string : "NULL");
     if (!grid || !areas_string || areas_string[0] == '\0') {
         return;
     }
@@ -250,7 +247,6 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string, Scratch
     // Scratch-allocated grid cell storage
     char*** grid_cells = (char***)scratch_calloc(sa, MAX_GRID_SIZE * sizeof(char**));
     if (!grid_cells) {
-        log_debug("parse_grid_template_areas: allocation failed");
         scratch_restore(sa, mark);
         return;
     }
@@ -302,7 +298,6 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string, Scratch
         if (*p == '"') p++;
     }
 
-    log_debug("parse_grid_template_areas: parsed %d rows x %d cols", rows, cols);
 
     if (rows == 0 || cols == 0) {
         scratch_restore(sa, mark);
@@ -372,7 +367,6 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string, Scratch
             for (int c = min_col; c <= max_col && is_rectangle; c++) {
                 if (strcmp(grid_cells[r][c], area_name) != 0) {
                     is_rectangle = false;
-                    log_debug("parse_grid_template_areas: area '%s' is not rectangular", area_name);
                 }
             }
         }
@@ -388,22 +382,18 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string, Scratch
             area->column_end = max_col + 2;
             grid->area_count++;
 
-            log_debug("parse_grid_template_areas: area '%s' -> rows %d-%d, cols %d-%d",
-                      area_name, area->row_start, area->row_end, area->column_start, area->column_end);
         }
     }
 
     // Cleanup all scratch allocations at once
     scratch_restore(sa, mark);
 
-    log_debug("parse_grid_template_areas: successfully parsed %d areas", grid->area_count);
 }
 
 // Resolve grid template areas
 void resolve_grid_template_areas(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
 
-    log_debug("Resolving grid template areas\n");
 
     // Validate that all areas form rectangles and don't overlap
     for (int i = 0; i < grid_layout->area_count; i++) {
@@ -411,25 +401,10 @@ void resolve_grid_template_areas(GridContainerLayout* grid_layout) {
 
         // Ensure area forms a valid rectangle
         if (area->row_start >= area->row_end || area->column_start >= area->column_end) {
-            log_debug("Warning: Invalid grid area '%s' - not a valid rectangle\n", area->name);
             continue;
         }
 
-        // Check for overlaps with other areas
-        for (int j = i + 1; j < grid_layout->area_count; j++) {
-            GridArea* other_area = &grid_layout->grid_areas[j];
-
-            // Check if areas overlap
-            bool row_overlap = !(area->row_end <= other_area->row_start || other_area->row_end <= area->row_start);
-            bool col_overlap = !(area->column_end <= other_area->column_start || other_area->column_end <= area->column_start);
-
-            if (row_overlap && col_overlap) {
-                log_debug("Warning: Grid areas '%s' and '%s' overlap\n", area->name, other_area->name);
-            }
-        }
     }
-
-    log_debug("Grid template areas resolved\n");
 }
 
 // Calculate intrinsic sizes for grid items using unified intrinsic sizing API
@@ -444,10 +419,6 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
     if (gi) {
         if (is_row_axis) {
             // Use pre-computed height measurements if available
-            log_debug("Checking pre-computed height for %s (gi=%p): min=%.1f, max=%.1f, has_measured=%d",
-                      item->node_name(), gi,
-                      gi->measured_min_height, gi->measured_max_height,
-                      gi->has_measured_size);
             if (gi->has_measured_size && (gi->measured_min_height > 0 || gi->measured_max_height > 0)) {
                 sizes.min_content = gi->measured_min_height;
                 sizes.max_content = gi->measured_max_height;
@@ -457,8 +428,6 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                     sizes.max_content = sizes.min_content;
                 }
 
-                log_debug("Using pre-computed height for %s: min=%.1f, max=%.1f",
-                          item->node_name(), sizes.min_content, sizes.max_content);
 
                 layout_apply_positive_min_max_contribution(item, false,
                     &sizes.min_content, &sizes.max_content);
@@ -476,8 +445,6 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                     sizes.max_content = sizes.min_content;
                 }
 
-                log_debug("Using pre-computed width for %s: min=%.1f, max=%.1f",
-                          item->node_name(), sizes.min_content, sizes.max_content);
 
                 layout_apply_positive_min_max_contribution(item, true,
                     &sizes.min_content, &sizes.max_content);
@@ -559,8 +526,6 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                         // tolerance avoids false wrapping due to float→int rounding loss.
                         if (width > 10) width += 0.5f;
                         if (width < 10) width = 10;
-                        log_debug("Row sizing: using column span width %.1f for %s (cols %d-%d)",
-                                  width, item->node_name(), col_start + 1, col_end);
                     } else if (grid->content_width > 0) {
                         // FR tracks not sized yet - estimate from container width
                         int col_count = grid->computed_column_count > 0 ? grid->computed_column_count : 1;
@@ -573,8 +538,6 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                             width -= layout_boundary_metrics(item->bound).pad_border_h;
                         }
                         if (width < 10) width = 10;
-                        log_debug("Row sizing: estimating width %.1f for %s (FR tracks, container=%d, cols=%d)",
-                                  width, item->node_name(), grid->content_width, col_count);
                     }
                 }
             }
@@ -649,8 +612,6 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                     float h_from_ratio = track_width / aspect_ratio;
                     sizes.min_content = h_from_ratio;
                     sizes.max_content = h_from_ratio;
-                    log_debug("calc_grid_intrinsic: aspect-ratio %.3f track_w=%.1f -> h=%.1f for %s",
-                              aspect_ratio, track_width, h_from_ratio, item->node_name());
                 }
             }
         }

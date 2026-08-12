@@ -453,6 +453,11 @@ static char* try_layout_support_script_resource(const char* support_root, const 
 static char* resolve_wpt_absolute_script_path(const char* src, Url* base_url) {
     if (!src || src[0] != '/' || src[1] == '/') return nullptr;
 
+    // Local layout has no WPT server substitution pass; executing a `.sub.js`
+    // helper with its unresolved origin data changes cross-origin fixtures that
+    // the static browser reference captured before the remote setup exists.
+    if (strstr(src, ".sub.js") != nullptr) return nullptr;
+
     if (strcmp(src, "/resources/testharness.js") == 0) {
         return mem_strdup("builtin:wpt-testharness.js", MEM_CAT_JS_RUNTIME);
     }
@@ -1701,94 +1706,20 @@ static const char LIFECYCLE_COMPLETE_FILENAME[] =
     "<document-readystatechange-complete>";
 static const char LIFECYCLE_WINDOW_LOAD_FILENAME[] = "<window-load>";
 
-typedef struct JsLifecycleCacheUnits {
-    const JsPreambleState* interactive;
-    const JsPreambleState* dom_content_loaded;
-    const JsPreambleState* complete;
-    const JsPreambleState* window_load;
-} JsLifecycleCacheUnits;
-
 static bool execute_lifecycle_snippet(Runtime* runtime, JsPreambleState* preamble,
-                                      const JsPreambleState* cached,
-                                      const char* source, const char* filename,
-                                      DocumentScriptPhaseTiming* timing) {
+                                      const char* source, const char* filename) {
     Item result;
-    if (cached) {
-        result = execute_compiled_js_in_current_realm(runtime, preamble, cached);
-        js_mir_cache_record_instantiation(s_js_mir_cache);
-        if (timing) timing->cache_instantiations++;
-        js_mir_accumulate_last_phase_timing(false);
-        // Cached lifecycle MIR bypasses the transpiler epilogue; preserve its
-        // headless rAF drain so window-load callbacks can mutate the document.
-        js_event_loop_drain_script_turn(runtime->dom_doc != nullptr, true);
-    } else {
-        uint64_t result_home = 0;
-        result = execute_js_source_with_preamble(
-            runtime, preamble, source, strlen(source), filename, false, &result_home);
-    }
+    uint64_t result_home = 0;
+    // Lifecycle dispatch targets the current document's listener graph; keep
+    // it in the document realm instead of reusing a cross-document MIR unit.
+    result = execute_js_source_with_preamble(
+        runtime, preamble, source, strlen(source), filename, false, &result_home);
     js_microtask_flush();
     if (get_type_id(result) == LMD_TYPE_ERROR) {
         log_error("execute_document_scripts: lifecycle task failed: %s", filename);
         return false;
     }
     return true;
-}
-
-static const JsPreambleState* prepare_cached_lifecycle_unit(
-    Runtime* runtime, const JsPreambleState* base_preamble,
-    const char* source, const char* filename,
-    DocumentScriptPhaseTiming* timing) {
-    if (!s_js_mir_cache || !runtime || !base_preamble) return nullptr;
-
-    if (timing) timing->cache_lookups++;
-    const JsPreambleState* cached = js_mir_cache_lookup(
-        s_js_mir_cache, JS_MIR_CACHE_LIFECYCLE,
-        source, strlen(source), filename, base_preamble);
-    if (cached) {
-        if (timing) timing->cache_hits++;
-        return cached;
-    }
-    if (timing) timing->cache_misses++;
-
-    JsPreambleState compiled = {};
-    Item result = compile_js_mir_with_preamble_len(
-        runtime, source, strlen(source), filename, base_preamble, &compiled);
-    js_mir_accumulate_last_phase_timing(false);
-    if (get_type_id(result) != LMD_TYPE_ERROR) {
-        cached = js_mir_cache_adopt(
-            s_js_mir_cache, JS_MIR_CACHE_LIFECYCLE,
-            source, strlen(source), filename, base_preamble, &compiled);
-        if (cached && timing) timing->cache_compiles++;
-    }
-    if (!cached) preamble_state_destroy(&compiled);
-
-    // Compile-only lowering may create temporary heap values. Discard them
-    // before the document preamble is instantiated so cached code never makes
-    // a prior document heap part of its execution contract.
-    js_batch_reset();
-    runtime_reset_heap(runtime);
-    return cached;
-}
-
-static void prepare_cached_lifecycle_units(
-    Runtime* runtime, const JsPreambleState* base_preamble,
-    JsLifecycleCacheUnits* units, DocumentScriptPhaseTiming* timing) {
-    if (!units) return;
-    memset(units, 0, sizeof(*units));
-    if (!s_js_mir_cache || !base_preamble) return;
-
-    units->interactive = prepare_cached_lifecycle_unit(
-        runtime, base_preamble, LIFECYCLE_INTERACTIVE_SOURCE,
-        LIFECYCLE_INTERACTIVE_FILENAME, timing);
-    units->dom_content_loaded = prepare_cached_lifecycle_unit(
-        runtime, base_preamble, LIFECYCLE_DOM_CONTENT_LOADED_SOURCE,
-        LIFECYCLE_DOM_CONTENT_LOADED_FILENAME, timing);
-    units->complete = prepare_cached_lifecycle_unit(
-        runtime, base_preamble, LIFECYCLE_INTERACTIVE_SOURCE,
-        LIFECYCLE_COMPLETE_FILENAME, timing);
-    units->window_load = prepare_cached_lifecycle_unit(
-        runtime, base_preamble, LIFECYCLE_WINDOW_LOAD_SOURCE,
-        LIFECYCLE_WINDOW_LOAD_FILENAME, timing);
 }
 
 static bool prepare_browser_preamble_consumer(const JsPreambleState* preamble) {
@@ -2064,7 +1995,6 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     long preamble_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
 #endif
     Item result;
-    JsLifecycleCacheUnits lifecycle_units = {};
     // Parser-blocking classic scripts execute while the document is loading;
     // the previous post-DOM scheduler entered interactive before user code.
     script_runner_set_ready_state(runtime, "loading");
@@ -2107,8 +2037,6 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         }
 
         if (cached_preamble) {
-            prepare_cached_lifecycle_units(
-                runtime, cached_preamble, &lifecycle_units, timing);
             result = instantiate_js_preamble(runtime, cached_preamble, preamble);
             js_mir_cache_record_instantiation(s_js_mir_cache);
             if (timing) timing->cache_instantiations++;
@@ -2178,8 +2106,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     phase_start_us = timing ? time_now_us() : 0;
     script_runner_set_ready_state(runtime, "interactive");
     if (!execute_lifecycle_snippet(
-        runtime, preamble, lifecycle_units.interactive,
-        LIFECYCLE_INTERACTIVE_SOURCE, LIFECYCLE_INTERACTIVE_FILENAME, timing)) {
+        runtime, preamble, LIFECYCLE_INTERACTIVE_SOURCE,
+        LIFECYCLE_INTERACTIVE_FILENAME)) {
         any_error = true;
     }
     if (timing) timing->interactive_us += time_now_us() - phase_start_us;
@@ -2192,9 +2120,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 
     phase_start_us = timing ? time_now_us() : 0;
     if (!execute_lifecycle_snippet(
-        runtime, preamble, lifecycle_units.dom_content_loaded,
-        LIFECYCLE_DOM_CONTENT_LOADED_SOURCE,
-        LIFECYCLE_DOM_CONTENT_LOADED_FILENAME, timing)) {
+        runtime, preamble, LIFECYCLE_DOM_CONTENT_LOADED_SOURCE,
+        LIFECYCLE_DOM_CONTENT_LOADED_FILENAME)) {
         any_error = true;
     }
     if (timing) timing->dom_content_loaded_us += time_now_us() - phase_start_us;
@@ -2216,8 +2143,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     phase_start_us = timing ? time_now_us() : 0;
     script_runner_set_ready_state(runtime, "complete");
     if (!execute_lifecycle_snippet(
-        runtime, preamble, lifecycle_units.complete,
-        LIFECYCLE_INTERACTIVE_SOURCE, LIFECYCLE_COMPLETE_FILENAME, timing)) {
+        runtime, preamble, LIFECYCLE_INTERACTIVE_SOURCE,
+        LIFECYCLE_COMPLETE_FILENAME)) {
         any_error = true;
     }
     if (timing) timing->complete_us += time_now_us() - phase_start_us;
@@ -2230,8 +2157,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 
     phase_start_us = timing ? time_now_us() : 0;
     if (!execute_lifecycle_snippet(
-        runtime, preamble, lifecycle_units.window_load,
-        LIFECYCLE_WINDOW_LOAD_SOURCE, LIFECYCLE_WINDOW_LOAD_FILENAME, timing)) {
+        runtime, preamble, LIFECYCLE_WINDOW_LOAD_SOURCE,
+        LIFECYCLE_WINDOW_LOAD_FILENAME)) {
         any_error = true;
     }
     if (timing) timing->window_load_us += time_now_us() - phase_start_us;

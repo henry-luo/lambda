@@ -57,7 +57,6 @@ static void render_focus_outline(RenderContext* rdcon, DocState* state) {
     rc_stroke_path(rdcon, path, focus_color, outline_width, RDT_CAP_BUTT, RDT_JOIN_MITER,
         dash_pattern, 2, nullptr);
     rdt_path_free(path);
-    log_debug("[FOCUS] Rendered focus outline at (%.0f,%.0f) size %.0fx%.0f", ox, oy, ow, oh);
 }
 
 static void render_caret(RenderContext* rdcon, DocState* state) {
@@ -145,14 +144,10 @@ static void render_caret(RenderContext* rdcon, DocState* state) {
     float height = caret_height * s;
     float caret_width = 3.0f * s;
 
-    log_debug("[CARET] Before render: CSS pos (%.1f,%.1f), physical pos (%.1f,%.1f) height=%.1f",
-        css_x, css_y, x, y, height);
 
     Color caret_color = {0};
     caret_color.r = 0x66; caret_color.g = 0x66; caret_color.b = 0x66; caret_color.a = 0xCC;
     rc_fill_rect(rdcon, x, y, caret_width, height, caret_color);
-    log_debug("[CARET] Drew caret at (%.0f,%.0f) size %.0fx%.0f", x, y, caret_width, height);
-    log_debug("[CARET] Rendered caret at (%.0f,%.0f) height=%.0f", x, y, height);
 }
 
 static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud) {
@@ -247,8 +242,6 @@ static DomRange* selection_paint_range_for_current_tree(RenderContext* rdcon,
     scratch->layout_valid = false;
     scratch->start_view = NULL;
     scratch->end_view = NULL;
-    log_debug("[SELECTION PAINT REBIND] rebound stale paint range endpoints start=%p end=%p",
-        (void*)rebound_start.node, (void*)rebound_end.node);
     return scratch;
 }
 
@@ -273,27 +266,21 @@ static void render_selection(RenderContext* rdcon, DocState* state) {
     DomRange paint_range;
     r = selection_paint_range_for_current_tree(rdcon, r, &paint_range);
     if (render_text_control_selection(rdcon, r, &ctx)) {
-        log_debug("[SELECTION] Rendered text-control DomSelection range via editing geometry");
         return;
     }
 
     if (!dom_range_resolve_layout(r)) {
-        log_debug("[SELECTION] dom_range_resolve_layout failed");
         return;
     }
 
     dom_range_for_each_rect(r, rdcon->ui_context, selection_paint_rect_cb, &ctx);
-    log_debug("[SELECTION] Rendered DomSelection range via dom_range_for_each_rect");
 }
 
 void render_ui_overlays(RenderContext* rdcon, DocState* state) {
     if (!state) {
-        log_debug("[UI_OVERLAY] No state");
         return;
     }
 
-    log_debug("[UI_OVERLAY] Rendering overlays: caret=%s",
-        caret_has_projection(state) ? "present" : "none");
 
     render_selection(rdcon, state);
 
@@ -337,7 +324,6 @@ void render_ui_overlays(RenderContext* rdcon, DocState* state) {
             drop_fill_color.r = 0x33; drop_fill_color.g = 0x99; drop_fill_color.b = 0xFF;
             drop_fill_color.a = 0x20;
             rc_fill_rect(rdcon, dx, dy, dw, dh, drop_fill_color);
-            log_debug("[DRAG] Drop target highlight at (%.0f,%.0f) size %.0fx%.0f", dx, dy, dw, dh);
         }
 
         float cx = dd->current_x;
