@@ -1266,8 +1266,14 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     // promise callback or assertion hook behind leaks the prior ERROR lane.
     js_eval_state_assert_clear(&js_runtime_state.eval, reason);
     js_reset_transient_call_state();
-    js_reset_heap_bound_runtime_state();
     js_decimal_number_egress_warning_reset();
+    // Hot batches retain one heap/input arena across tests. Preserve its Input
+    // owner while clearing transient heap-bound state so the intrinsic
+    // prototype snapshot can restore mutations in that same realm; full heap
+    // teardown must leave the pointer cleared (D6.2.2v2).
+    Input* retained_input = js_input;
+    js_reset_heap_bound_runtime_state();
+    if (!full_reset) js_input = retained_input;
     js_reset_cached_realm_objects();
     if (full_reset) js_proto_snapshot_invalidate();
     js_fs_runtime_detach();

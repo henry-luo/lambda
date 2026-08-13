@@ -535,7 +535,8 @@ static Item js_define_property_validate_descriptor_object(Item descriptor) {
     // Any object type is valid (Map, Function, Array, Element, etc.); reject primitives.
     TypeId desc_type = get_type_id(descriptor);
     if (desc_type != LMD_TYPE_MAP && desc_type != LMD_TYPE_FUNC &&
-        desc_type != LMD_TYPE_ARRAY && desc_type != LMD_TYPE_ELEMENT) {
+        desc_type != LMD_TYPE_ARRAY && !js_is_ordinary_numeric_array(descriptor) &&
+        desc_type != LMD_TYPE_ELEMENT) {
         return js_define_property_throw_type_error("Property description must be an object");
     }
 
@@ -6929,11 +6930,36 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     Rooted<Item> descriptor_root(roots, ItemNull);
     Rooted<Item> current_root(roots, ItemNull);
     Rooted<Item> receiver_descriptor_root(roots, ItemNull);
+    TypeId target_type = get_type_id(target_root.get());
+    bool primitive_target = target_type == LMD_TYPE_BOOL ||
+        target_type == LMD_TYPE_NUM_SIZED || target_type == LMD_TYPE_INT ||
+        target_type == LMD_TYPE_INT64 || target_type == LMD_TYPE_UINT64 ||
+        target_type == LMD_TYPE_FLOAT || target_type == LMD_TYPE_FLOAT64 ||
+        target_type == LMD_TYPE_DECIMAL || target_type == LMD_TYPE_SYMBOL ||
+        target_type == LMD_TYPE_STRING;
+    if (primitive_target) {
+        // Ordinary Set boxes primitive bases so prototype accessors and Proxy
+        // traps still observe the write; strictness is applied by the caller
+        // after this boolean completion (S#7.4).
+        return js_set_primitive_completion(target_root.get(), key_root.get(),
+            value_root.get());
+    }
     JS_RETURN_IF_ERROR(js_require_object_type(target_root.get(), "set"));
     // 3-arg call sites (old transpiler path) pass ItemNull; treat as receiver = target.
     if (receiver.item == ItemNull.item) {
         receiver = target;
         receiver_root.set(receiver);
+    }
+    if (receiver.item == target.item && get_type_id(target_root.get()) == LMD_TYPE_FUNC &&
+        get_type_id(key_root.get()) == LMD_TYPE_STRING) {
+        String* function_key = it2s(key_root.get());
+        if (function_key && function_key->len == 9 &&
+            memcmp(function_key->chars, "prototype", 9) == 0) {
+            Item function_result = js_set_function_prototype_completion(
+                target_root.get(), value_root.get());
+            return item_is_error(function_result) ? function_result :
+                (Item){.item = b2it(true)};
+        }
     }
 
     // Proxy/TypedArray fast paths BEFORE ToPropertyKey: integer index dispatch
@@ -6995,6 +7021,13 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     key = key_root.get();
     value = value_root.get();
     receiver = receiver_root.get();
+    if ((get_type_id(target_root.get()) == LMD_TYPE_ERROR ||
+         js_is_resting_error(target_root.get())) &&
+        receiver_root.get().item == target_root.get().item) {
+        Item stored = js_set_error_property_completion(target_root.get(),
+            key_root.get(), value_root.get());
+        return item_is_error(stored) ? stored : (Item){.item = b2it(true)};
+    }
     if (receiver.item == target.item && js_is_js_array(target) &&
         get_type_id(key) == LMD_TYPE_STRING) {
         String* set_key = it2s(key);
@@ -7804,6 +7837,26 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 js_pd_is_configurable(&pd));
         }
         if (!m || !m->type) return make_js_undefined();
+
+        // String wrappers expose `length` through the String exotic object
+        // even though the ordinary shape may not retain the synthetic slot
+        // after the Tune5 Set migration.  Descriptor lookup must therefore
+        // consult [[StringData]] before the ordinary own-property probe.
+        if (name_str->len == 6 &&
+            memcmp(name_str->chars, "length", 6) == 0) {
+            bool primitive_found = false;
+            Item primitive = js_map_shape_lookup_ext(
+                m, "__primitiveValue__", 18, &primitive_found);
+            if (primitive_found && get_type_id(primitive) == LMD_TYPE_STRING) {
+                String* primitive_string = it2s(primitive);
+                int string_length = primitive_string
+                    ? js_utf16_len(primitive_string->chars,
+                        (int)primitive_string->len,
+                        (bool)primitive_string->is_ascii) : 0;
+                return js_make_data_descriptor(
+                    (Item){.item = i2it(string_length)}, false, false, false);
+            }
+        }
 
         // Stage A2.1: route accessor/legacy-marker descriptor synthesis
         // through unified js_get_own_property_descriptor inspector. Falls
@@ -9026,7 +9079,6 @@ extern "C" Item js_object_keys(Item object) {
         Rooted<Item> object_root(roots, object);
         Rooted<Item> result_root(roots, js_array_new(0));
         int64_t len = object_root.get().array->length;
-        Map* pm = js_array_props_map(object_root.get().array);
         // Limit iteration to logical dense storage; sparse entries are picked
         // up by the companion-map walk below and the owned tail is excluded.
         int64_t dense_lim = len;
@@ -9038,6 +9090,7 @@ extern "C" Item js_object_keys(Item object) {
             // on an array index installs the data slot as a hole and stores get/set in pm).
             if (object_root.get().array->items[i].item == JS_DELETED_SENTINEL_VAL) {
                 bool has_companion_index = false;
+                Map* pm = js_array_props_map(object_root.get().array);
                 if (pm) {
                     // AT-3: IS_ACCESSOR shape-flag probe under digit-string name
                     // (post-AT-1 the intercept routes accessor writes here).
@@ -9051,6 +9104,7 @@ extern "C" Item js_object_keys(Item object) {
                 if (!has_companion_index) continue;
             }
             // v27: skip non-enumerable elements (defineProperty with enumerable: false)
+            Map* pm = js_array_props_map(object_root.get().array);
             if (pm) {
                 int idx_len = 0;
                 const char* idx_buf = js_property_index_chars(i, &idx_len);
@@ -9082,6 +9136,7 @@ extern "C" Item js_object_keys(Item object) {
             }
         }
         // v25: also include custom (non-index) properties from companion map
+        Map* pm = js_array_props_map(object_root.get().array);
         if (pm && pm->type) {
             TypeMap* pmt = (TypeMap*)pm->type;
             ShapeEntry* e = pmt->shape;
@@ -11125,6 +11180,17 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     bool identity_key = string_is_pooled(ks) && property_key_requires_identity(ks);
     Map* m = obj.map;
     if (!m || !m->type) return (Item){.item = b2it(false)};
+    if (ks->len == 6 && strncmp(ks->chars, "length", 6) == 0) {
+        bool primitive_found = false;
+        Item primitive = js_map_shape_lookup_ext(
+            m, "__primitiveValue__", 18, &primitive_found);
+        if (primitive_found && get_type_id(primitive) == LMD_TYPE_STRING) {
+            // String exotic objects always own the immutable length slot;
+            // it is derived from [[StringData]] even when the synthetic map
+            // slot was not retained through a shape transition.
+            return (Item){.item = b2it(true)};
+        }
+    }
     if (!identity_key && ks->len == 9 && strncmp(ks->chars, "__proto__", 9) == 0) {
         bool own_proto_marker = false;
         Item own_proto_val = js_map_shape_lookup_ext(m, "__json_own_proto__", 18, &own_proto_marker);

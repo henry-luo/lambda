@@ -183,10 +183,11 @@ static Map* js_props_storage_map(Item object) {
 
 static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
         const char* name, int name_len, NameId name_id, bool allow_ext,
-        Item* out_slot, ShapeEntry** out_se) {
+        Item* out_slot, ShapeEntry** out_se, bool* out_borrowed) {
     if (name_id == NAME_ID_NONE) JS_PROPS_ASSERT_KEY(name, name_len);
     if (out_slot) *out_slot = ItemNull;
     if (out_se) *out_se = NULL;
+    if (out_borrowed) *out_borrowed = false;
 
     Map* m = js_props_storage_map(object);
     if (!m) return JS_SHAPE_SLOT_ABSENT;
@@ -208,6 +209,7 @@ static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
         if (jspd_is_deleted(se)) return JS_SHAPE_SLOT_DELETED;
         if (js_props_is_deleted_sentinel(slot)) return JS_SHAPE_SLOT_DELETED;
         if (jspd_is_accessor(se)) return JS_SHAPE_SLOT_ACCESSOR;
+        if (out_borrowed) *out_borrowed = lambda_item_uses_scalar_home(slot);
         return JS_SHAPE_SLOT_DATA;
     }
 
@@ -226,7 +228,7 @@ static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
 extern "C" JsShapeSlotStatus js_own_shape_slot_status(Item object,
         const char* name, int name_len, Item* out_slot, ShapeEntry** out_se) {
     return js_own_shape_slot_status_impl(object, name, name_len,
-        NAME_ID_NONE, true, out_slot, out_se);
+        NAME_ID_NONE, true, out_slot, out_se, NULL);
 }
 
 extern "C" JsShapeSlotStatus js_own_shape_slot_status_name_id(Item object,
@@ -237,11 +239,17 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status_name_id(Item object,
     bool allow_ext = key && property_key_kind(key) == NAME_KEY_STRING;
     return js_own_shape_slot_status_impl(object,
         allow_ext ? key->chars : NULL, allow_ext ? (int)key->len : 0,
-        name_id, allow_ext, out_slot, out_se);
+        name_id, allow_ext, out_slot, out_se, NULL);
 }
 
 extern "C" JsShapeSlotStatus js_own_shape_slot_status_key(Item object, Item key,
         Item* out_slot, ShapeEntry** out_se) {
+    return js_own_shape_slot_status_key_ex(object, key, out_slot, out_se, NULL);
+}
+
+extern "C" JsShapeSlotStatus js_own_shape_slot_status_key_ex(Item object, Item key,
+        Item* out_slot, ShapeEntry** out_se, bool* out_borrowed) {
+    if (out_borrowed) *out_borrowed = false;
     TypeId type = get_type_id(key);
     if (type != LMD_TYPE_STRING && type != LMD_TYPE_SYMBOL) {
         if (out_slot) *out_slot = ItemNull;
@@ -252,14 +260,18 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status_key(Item object, Item key,
     if (!name) return JS_SHAPE_SLOT_ABSENT;
     NameId name_id = name && string_is_pooled(name) ? name_ref_id(name)
         : NAME_ID_NONE;
+    // Keep this path on the same NameId/byte-confirmed seam as the legacy
+    // wrapper, while preserving the packed-data provenance for the hot Get.
     return name_id != NAME_ID_NONE
-        ? js_own_shape_slot_status_name_id(object, name_id, out_slot, out_se)
-        : js_own_shape_slot_status(object, name->chars, (int)name->len,
-            out_slot, out_se);
+        ? js_own_shape_slot_status_impl(object, NULL, 0, name_id, false,
+            out_slot, out_se, out_borrowed)
+        : js_own_shape_slot_status_impl(object, name->chars, (int)name->len,
+            NAME_ID_NONE, true, out_slot, out_se, out_borrowed);
 }
 
-extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
-                                              Item Receiver, Item* out_value) {
+extern "C" JsOwnGetStatus js_ordinary_get_own_ex(Item object, Item key,
+        Item Receiver, Item* out_value, bool* out_borrowed) {
+    if (out_borrowed) *out_borrowed = false;
     // This is the shared property-key boundary for direct and generic gets.
     // Parser/Input STRING records are pooled but not runtime-canonical, so
     // canonicalize by bytes before resolving the shape's NameId.
@@ -280,8 +292,8 @@ extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
         int kl = (int)key.get_len();
         Item slot = ItemNull;
         ShapeEntry* se = NULL;
-        JsShapeSlotStatus status = js_own_shape_slot_status_key(object, key,
-            &slot, &se);
+        JsShapeSlotStatus status = js_own_shape_slot_status_key_ex(object, key,
+            &slot, &se, out_borrowed);
         if (status == JS_SHAPE_SLOT_ABSENT) return JS_OWN_NOT_FOUND;
         if (status == JS_SHAPE_SLOT_DELETED) return JS_OWN_DELETED;
         if (status == JS_SHAPE_SLOT_ACCESSOR) {
@@ -319,6 +331,11 @@ extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
     if (js_props_is_deleted_sentinel(slot)) return JS_OWN_DELETED;
     *out_value = slot;
     return JS_OWN_READY;
+}
+
+extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
+        Item Receiver, Item* out_value) {
+    return js_ordinary_get_own_ex(object, key, Receiver, out_value, NULL);
 }
 
 // External: defined in js_property_attrs.cpp; walks own + proto chain looking
@@ -807,7 +824,8 @@ extern "C" Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* o
     // Reject primitive descriptors per ES §6.2.5.5 step 1 (Type(Obj) is Object).
     TypeId dt = get_type_id(desc_obj);
     if (dt != LMD_TYPE_MAP && dt != LMD_TYPE_FUNC &&
-        dt != LMD_TYPE_ARRAY && dt != LMD_TYPE_ELEMENT) {
+        dt != LMD_TYPE_ARRAY && !js_is_ordinary_numeric_array(desc_obj) &&
+        dt != LMD_TYPE_ELEMENT) {
         return js_props_throw_type("Property description must be an object");
     }
 
@@ -1290,6 +1308,24 @@ extern "C" Item js_set(Item target, JsPropertyLane lane, Item observable_key,
     Rooted<Item> receiver_root(roots,
         receiver.item == ItemNull.item ? target_root.get() : receiver);
     if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
+    TypeId target_type = get_type_id(target_root.get());
+    bool primitive_target = target_type == LMD_TYPE_BOOL ||
+        target_type == LMD_TYPE_NUM_SIZED || target_type == LMD_TYPE_INT ||
+        target_type == LMD_TYPE_INT64 || target_type == LMD_TYPE_UINT64 ||
+        target_type == LMD_TYPE_FLOAT || target_type == LMD_TYPE_FLOAT64 ||
+        target_type == LMD_TYPE_DECIMAL || target_type == LMD_TYPE_SYMBOL ||
+        target_type == LMD_TYPE_STRING;
+    if (primitive_target) {
+        return js_set_primitive_completion(target_root.get(), key_root.get(),
+            value_root.get());
+    }
+    if (get_type_id(target_root.get()) == LMD_TYPE_ARRAY &&
+            receiver_root.get().item == target_root.get().item &&
+            js_property_lane_is_index(lane)) {
+        Item fast_result = js_elements_set_int_completion(target_root.get(),
+            (int64_t)js_property_lane_payload(lane), value_root.get());
+        if (fast_result.item != ItemNull.item) return fast_result;
+    }
     // Set owns the completion; Reflect.set is only a public caller policy.
     return js_set_completion_with_key(target_root.get(), key_root.get(),
                                       value_root.get(), receiver_root.get());

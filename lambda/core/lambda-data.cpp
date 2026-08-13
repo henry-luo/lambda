@@ -609,11 +609,23 @@ Item scalar_storage_read(Item item, bool immortal) {
 #else
     // Owned storage may move or die independently of the reader. Re-home its
     // interior scalar references in the current number frame before escape.
+    // Inline float Items and packed narrow values already carry their payload;
+    // avoid routing those stable values through the scalar-home helpers.
+    if (!lambda_item_uses_scalar_home(item)) return item;
     switch (get_type_id(item)) {
-    case LMD_TYPE_INT64:
-        return box_int64_value(item.get_int64());
-    case LMD_TYPE_UINT64:
-        return box_uint64_value(item.get_uint64());
+    case LMD_TYPE_INT64: {
+        int64_t value = item.get_int64();
+        // Most JS numeric fields fit the inline int53 lane. Re-homing those
+        // values on the side-number stack made every property read allocate;
+        // reserve transient homes for the genuinely out-of-band values.
+        if (value >= INT53_MIN && value <= INT53_MAX) return (Item){.item = i2it(value)};
+        return box_int64_value(value);
+    }
+    case LMD_TYPE_UINT64: {
+        uint64_t value = item.get_uint64();
+        if (value <= (uint64_t)INT53_MAX) return (Item){.item = i2it((int64_t)value)};
+        return box_uint64_value(value);
+    }
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64:
         return push_d(item.get_double());

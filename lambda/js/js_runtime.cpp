@@ -118,6 +118,7 @@ extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
     NameId operation_name_id, TypeId value_type);
 Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
+static bool js_array_companion_has_array_index_shape(Array* arr);
 
 extern "C" void js_map_promote_descriptor_kind(Map* m) {
     if (m && m->map_kind == MAP_KIND_PLAIN) m->map_kind = MAP_KIND_DESC;
@@ -2107,6 +2108,7 @@ extern "C" Item js_constructor_create_object(Item callee, Item new_target) {
         bool instance_proto_is_object = instance_proto_type == LMD_TYPE_MAP ||
             instance_proto_type == LMD_TYPE_FUNC ||
             instance_proto_type == LMD_TYPE_ARRAY ||
+            js_is_ordinary_numeric_array(instance_proto_root.get()) ||
             instance_proto_type == LMD_TYPE_ELEMENT;
         if (!instance_proto_is_object && js_is_proxy(proto_source_root.get())) {
             JsProxyData* pd = js_get_proxy_data(proto_source_root.get());
@@ -4401,6 +4403,10 @@ extern "C" Item js_get_key_core(Item object, Item key,
     receiver = receiver_root.get();
     TypeId type = get_type_id(object);
     if (type == LMD_TYPE_ERROR || js_is_resting_error(object)) {
+        if (!js_key_is_symbol(key)) {
+            JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
+            key_root.set(key);
+        }
         LambdaError* error = js_error_from_value(object);
         String* property = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
         if (!error) return make_js_undefined();
@@ -4566,8 +4572,10 @@ extern "C" Item js_get_key_core(Item object, Item key,
         bool own_found = false;
         {
             Item ord_val = ItemNull;
+            bool borrowed_shape_value = false;
             Item recv = receiver_root.get();
-            JsOwnGetStatus st = js_ordinary_get_own(object, key, recv, &ord_val);
+            JsOwnGetStatus st = js_ordinary_get_own_ex(object, key, recv, &ord_val,
+                &borrowed_shape_value);
             if (st == JS_OWN_READY) {
                 if (ord_val.item == ITEM_JS_LAZY_GLOBAL_SENTINEL &&
                         js_is_global_this_object_value(object)) {
@@ -4594,13 +4602,18 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 // D5.3/D5.4.3: shaped map fields can expose a pointer into
                 // movable scalar storage; publish a current number-home Item
                 // before later property/call allocations can compact it.
-                return scalar_storage_read(ord_val, false);
+                return borrowed_shape_value
+                    ? scalar_storage_read(ord_val, false) : ord_val;
             }
             if (st == JS_OWN_DELETED) {
                 own_found = true;
             }
             // JS_OWN_NOT_FOUND: own_found stays false; result stays ItemNull.
         }
+        // Own lookup may canonicalize a key or invoke an accessor, either of
+        // which can compact the heap and move the receiver map.
+        object = object_root.get();
+        m = object.map;
 
         if (!own_found && get_type_id(key) == LMD_TYPE_STRING &&
                 js_is_process_object_value(object)) {
@@ -5498,7 +5511,7 @@ static bool js_is_property_reference_primitive(TypeId type, Item value) {
 }
 
 static Item js_set_on_primitive_base(Item object, Item key, Item value,
-                                     bool strict) {
+                                     bool strict, bool completion) {
     JS_ASSIGN_OR_RETURN(boxed, js_to_object(object));
     TypeId boxed_type = get_type_id(boxed);
     if (boxed_type == LMD_TYPE_MAP || boxed_type == LMD_TYPE_ARRAY || boxed_type == LMD_TYPE_FUNC) {
@@ -5507,8 +5520,10 @@ static Item js_set_on_primitive_base(Item object, Item key, Item value,
         int depth = 0;
         while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
             if (js_is_proxy(proto)) {
-                js_proxy_trap_set_with_receiver(proto, key, value, object);
-                return value;
+                Item proxy_result = js_proxy_trap_set_with_receiver(
+                    proto, key, value, object);
+                if (item_is_error(proxy_result)) return proxy_result;
+                return completion ? proxy_result : value;
             }
             if (get_type_id(key) == LMD_TYPE_STRING) {
                 String* sk = it2s(key);
@@ -5518,7 +5533,9 @@ static Item js_set_on_primitive_base(Item object, Item key, Item value,
                         JsSetterDispatchResult st = js_ordinary_set_via_accessor(
                             proto, sk->chars, (int)sk->len, value, object);
                         if (st.status == JS_SET_DISPATCH_ERROR) return st.error_lane;
-                        if (st.status == JS_SET_DISPATCHED) return value;
+                        if (st.status == JS_SET_DISPATCHED) {
+                            return completion ? (Item){.item = b2it(true)} : value;
+                        }
                         if (st.status == JS_SET_NO_SETTER) break;
                     }
                     break;
@@ -5530,6 +5547,7 @@ static Item js_set_on_primitive_base(Item object, Item key, Item value,
             depth++;
         }
     }
+    if (completion) return (Item){.item = b2it(false)};
     if (strict) {
         const char* prop_name = NULL;
         int prop_len = 0;
@@ -5542,6 +5560,18 @@ static Item js_set_on_primitive_base(Item object, Item key, Item value,
             prop_name, prop_len));
     }
     return value;
+}
+
+extern "C" Item js_set_primitive_completion(Item object, Item key, Item value) {
+    // Primitive assignment is a successful completion only when a prototype
+    // setter/proxy handled it; ordinary primitives stay a false completion so
+    // the caller's strictness policy can decide whether to throw (S#7.4).
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> value_root(roots, value);
+    return js_set_on_primitive_base(object_root.get(), key_root.get(),
+        value_root.get(), false, true);
 }
 
 typedef struct JsArraySparseHashEntry {
@@ -7044,6 +7074,19 @@ static Item js_set_function_core(Item object, Item key, Item value,
     return value;
 }
 
+extern "C" Item js_set_function_prototype_completion(Item object, Item value) {
+    // Keep the constructor payload and public `prototype` property coupled;
+    // otherwise `new F()` retains the stale default object after `F.prototype`
+    // is assigned through the unified Set kernel (D6.2.2v2).
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> key_root(roots,
+        (Item){.item = s2it(heap_create_name("prototype", 9))});
+    return js_set_function_core(object_root.get(), key_root.get(),
+        value_root.get(), object_root.get(), false, false);
+}
+
 static Item js_set_storage_mode(Item object, Item key,
                                                Item value, Item receiver,
                                                bool bypass_accessor_dispatch,
@@ -7162,7 +7205,7 @@ static Item js_set_storage_mode(Item object, Item key,
     }
     if (js_is_property_reference_primitive(type, object)) {
         JS_PROPERTY_SET_BRANCH("top_primitive");
-        return js_set_on_primitive_base(object, key, value, strict);
+        return js_set_on_primitive_base(object, key, value, strict, false);
     }
     if (js_is_symbol(object)) {
         const char* prop_name = NULL;
@@ -7257,6 +7300,38 @@ static Item js_set_storage_mode(Item object, Item key,
 
     JS_PROPERTY_SET_BRANCH("top_other");
     return value;
+}
+
+extern "C" Item js_set_error_property_completion(Item object, Item key,
+                                                   Item value) {
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> value_root(roots, value);
+    LambdaError* error = js_error_from_value(object_root.get());
+    if (!error) return (Item){.item = b2it(false)};
+    String* property = get_type_id(key_root.get()) == LMD_TYPE_STRING
+        ? it2s(key_root.get()) : NULL;
+    if (property && property->len == 4 && memcmp(property->chars, "name", 4) == 0) {
+        error->js_name_item = value_root.get().item;
+        error->js_own_flags |= JS_ERROR_OWN_NAME;
+        return (Item){.item = b2it(true)};
+    }
+    if (property && property->len == 7 && memcmp(property->chars, "message", 7) == 0) {
+        error->js_message_item = value_root.get().item;
+        error->js_own_flags |= JS_ERROR_OWN_MESSAGE;
+        return (Item){.item = b2it(true)};
+    }
+    if (property && property->len == 5 && memcmp(property->chars, "cause", 5) == 0) {
+        error->js_cause_item = value_root.get().item;
+        error->js_own_flags |= JS_ERROR_OWN_CAUSE;
+        return (Item){.item = b2it(true)};
+    }
+    Item properties = js_error_properties_map(object_root.get(), true);
+    if (get_type_id(properties) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
+    Item stored = js_set_storage_mode(properties, key_root.get(), value_root.get(),
+        properties, false, false);
+    return item_is_error(stored) ? stored : (Item){.item = b2it(true)};
 }
 
 extern "C" Item js_set_key_core(Item object, Item key,
@@ -8922,17 +8997,14 @@ static Item js_array_get_index(Item array, int64_t idx, Item fallback_key,
         }
         return js_get_key_default(array, fallback_key);
     }
-
     if (idx >= 0 && js_array_has_props(arr)) {
         int idx_len = 0;
         const char* idx_buf = js_property_index_chars(idx, &idx_len);
         Map* props = js_array_props(arr);
-        // check for accessor (getter) on companion map
-        // AT-3: IS_ACCESSOR shape-flag dispatch under digit-string name
-        // (post-AT-1 the intercept routes accessor writes here).
         Item pm_item = (Item){.map = props};
         Item slot_val = ItemNull;
-        JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &slot_val, NULL);
+        JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf,
+            idx_len, &slot_val, NULL);
         if (status == JS_SHAPE_SLOT_ACCESSOR) {
             JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
             if (pair && pair->getter.item != ItemNull.item) {
@@ -8945,19 +9017,14 @@ static Item js_array_get_index(Item array, int64_t idx, Item fallback_key,
             if (!dense_present) return slot_val;
         }
     }
-
     if (idx >= 0 && !js_array_dense_present(arr, idx)) {
         Item sparse_val = ItemNull;
         if (js_array_sparse_get(arr, idx, &sparse_val)) return sparse_val;
     }
-
     if (idx >= 0 && idx < arr->length && idx < js_array_dense_capacity(arr)) {
-        // return undefined for holes (deleted sentinel)
-        if (arr->items[idx].item != JS_DELETED_SENTINEL_VAL)
-            return arr->items[idx];
+        if (arr->items[idx].item != JS_DELETED_SENTINEL_VAL) return arr->items[idx];
         if (!lookup_prototype) return make_js_undefined();
     }
-
     if (lookup_prototype) {
         Item proto = js_get_prototype_of(array);
         if (proto.item != ItemNull.item && get_type_id(proto) != LMD_TYPE_UNDEFINED) {
@@ -9280,6 +9347,48 @@ static Item js_elements_set_int_mode(Item array, int64_t index, Item value,
 
 extern "C" Item js_elements_set_int(Item array, int64_t index, Item value) {
     return js_elements_set_int_mode(array, index, value, false, false);
+}
+
+extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
+                                                 Item value) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY || index < 0 ||
+            index > 0xFFFFFFFELL) return ItemNull;
+    Array* arr = array.array;
+    if (!arr || arr->is_content == 1 ||
+            js_array_companion_has_array_index_shape(arr) ||
+            js_array_proto_index_guard_is_dirty(array)) return ItemNull;
+
+    // A present dense own element is writable in this narrow path: descriptor
+    // overlays and prototype numeric hooks were excluded above.
+    if (index < arr->length && index < js_array_dense_capacity(arr)) {
+        if (arr->items[index].item != JS_DELETED_SENTINEL_VAL) {
+            js_array_store_owned(arr, index, value);
+            return (Item){.item = b2it(true)};
+        }
+        // Filling a hole creates an own element, so the ordinary extensibility
+        // check still applies even though the array length is unchanged.
+        if (!js_is_extensible(array)) return ItemNull;
+        js_array_store_owned(arr, index, value);
+        return (Item){.item = b2it(true)};
+    }
+
+    // Only a contiguous append is safe without the full gap/sparse policy.
+    if (index != arr->length || !js_is_extensible(array) ||
+            js_array_length_is_non_writable(array) ||
+            js_array_should_store_sparse_for_index(arr, index)) return ItemNull;
+    js_array_push_item_direct(arr, value);
+    return (Item){.item = b2it(true)};
+}
+
+extern "C" Item js_elements_set_number(Item array, Item index, Item value) {
+    int64_t native_index = -1;
+    // JavaScript numeric keys use the dense array lane only when they are
+    // canonical non-negative integer indices; NaN, fractions, and infinities
+    // remain ordinary property keys and must retain the full fallback path.
+    if (js_key_as_array_index(index, &native_index)) {
+        return js_elements_set_int(array, native_index, value);
+    }
+    return js_set_key_default(array, index, value);
 }
 
 extern "C" Item js_elements_set_int_direct(Item array, int64_t index, Item value) {
@@ -20537,6 +20646,7 @@ extern "C" Item js_set_collection_new(void) {
 static bool js_collection_entry_is_object(Item entry) {
     TypeId eid = get_type_id(entry);
     return eid == LMD_TYPE_MAP || eid == LMD_TYPE_ARRAY ||
+           js_is_ordinary_numeric_array(entry) ||
            eid == LMD_TYPE_FUNC || eid == LMD_TYPE_ELEMENT;
 }
 
@@ -25033,7 +25143,13 @@ static Item js_array_index_key(int64_t index) {
     // Array-method element keys stay numeric until the property kernel needs
     // an observable ToPropertyKey result; formatting every loop iteration was
     // an alternate identity path and added avoidable allocation pressure.
-    return js_property_index_key(index);
+    // Array-index lanes stop at 2^32-2, but generic array-like methods accept
+    // integer property keys through 2^53-1 (S#5.3). Keep those keys as int64
+    // Items so copyWithin/shift/etc. do not silently turn a present source
+    // property into a hole before the unified Set/Get kernel sees it.
+    if (index < 0 || index > 9007199254740991LL) return ItemError;
+    return index <= (int64_t)JS_PROPERTY_INDEX_MAX
+        ? js_property_index_key(index) : (Item){.item = i2it(index)};
 }
 
 static bool js_array_try_fast_fill(Item object, Item value, int64_t start, int64_t end) {
@@ -28684,6 +28800,11 @@ extern "C" void js_object_proto_setter(Item object, Item value) {
 
 // Set the prototype of an object (stores as __proto__ property on Map)
 extern "C" void js_set_prototype(Item object, Item prototype) {
+    // Numeric arrays are compact storage until they become a prototype.  The
+    // ordinary prototype slot is carried by the tagged-array companion map;
+    // promote once at this boundary instead of silently dropping the link.
+    if (js_is_ordinary_numeric_array(prototype) &&
+            !js_array_promote_numeric_to_tagged(prototype)) return;
     if (get_type_id(object) == LMD_TYPE_MAP && get_type_id(prototype) == LMD_TYPE_MAP) {
     }
     // Proxy [[SetPrototypeOf]] trap
@@ -29955,6 +30076,9 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         // consumes the value; re-home the scalar while the source is rooted.
         value_root.set(scalar_storage_read(value_root.get(), false));
         value = value_root.get();
+        // scalar_storage_read may compact the heap, so do not keep the old
+        // native Array* across that allocation boundary.
+        arr = result_root.get().array;
         int64_t next_state = -1;
         if (arr->length > 1 && get_type_id(arr->items[1]) == LMD_TYPE_INT) {
             next_state = it2i(arr->items[1]);

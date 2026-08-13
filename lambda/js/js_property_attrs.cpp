@@ -4,6 +4,8 @@
  */
 
 #include "js_property_attrs.h"
+
+extern "C" bool js_proto_snapshot_is_valid();
 #include "js_props.h"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
@@ -113,12 +115,12 @@ extern "C" ShapeEntry* js_find_shape_entry_name_id(Item obj, NameId name_id) {
 // immutable; entries created with separate StrView allocations carry an external
 // pointer that is also immutable). Sharing is safe because attribute mutation
 // only touches `flags`, never `name`.
-static TypeMap* js_typemap_clone_for_mutation(Item obj) {
+static TypeMap* js_typemap_clone_for_mutation_ex(Item obj, bool force_clone) {
     Map* underlying = js_obj_underlying_map(obj);
     if (!underlying) return nullptr;
     TypeMap* tm = (TypeMap*)underlying->type;
     if (!tm) return nullptr;
-    if (tm->is_private_clone) return tm;
+    if (tm->is_private_clone && !force_clone) return tm;
     if (!js_input || !js_input->pool) return nullptr;
     Pool* pool = js_input->pool;
 
@@ -190,6 +192,10 @@ static TypeMap* js_typemap_clone_for_mutation(Item obj) {
               (void*)tm, (void*)clone, (void*)underlying,
               (long long)tm->length, tm->slot_count);
     return clone;
+}
+
+static TypeMap* js_typemap_clone_for_mutation(Item obj) {
+    return js_typemap_clone_for_mutation_ex(obj, false);
 }
 
 static void js_shape_entry_update_flags_impl(Item obj, NameId name_id,
@@ -727,6 +733,12 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     if (get_type_id(name) != LMD_TYPE_STRING) return js_status_ok();
     String* ns = it2s(name);
     if (!ns) return js_status_ok();
+
+    // Accessor installation can add a new shape before setting its descriptor
+    // flags. Detach the target's TypeMap first so intrinsic prototype
+    // snapshots keep their immutable shape blueprint across hot-batch realm
+    // resets (D6.2.2v2).
+    js_typemap_clone_for_mutation_ex(obj_root.get(), js_proto_snapshot_is_valid());
 
     // Normalize "absent half" to ItemNull so read paths that gate on
     // `pair->getter.item != ItemNull.item` correctly treat an explicit-undefined

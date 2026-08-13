@@ -5063,25 +5063,46 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             TypeId idx_type = jm_get_effective_type(mt, member->property);
             bool strict_member_set = mt->is_global_strict || mt->is_module ||
                 (mt->current_fc && mt->current_fc->is_strict);
-            if (idx_type == LMD_TYPE_INT && !strict_member_set) {
+            if ((idx_type == LMD_TYPE_INT || idx_type == LMD_TYPE_FLOAT) && !strict_member_set) {
                 MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
-                MIR_reg_t idx_native = jm_transpile_as_native(mt, member->property, idx_type, LMD_TYPE_INT);
                 MIR_reg_t new_val;
                 if (asgn->op == JS_OP_ASSIGN) {
                     new_val = jm_transpile_box_item(mt, asgn->right);
                 } else {
                     // compound: read current, apply op, write result
-                    MIR_reg_t cur_val = jm_call_2(mt, "js_elements_get_int", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+                    MIR_reg_t cur_val;
+                    if (idx_type == LMD_TYPE_FLOAT) {
+                        // A fractional numeric key is an ordinary property;
+                        // truncating it through the integer lane would read
+                        // a different array element before the fallback write.
+                        MIR_reg_t idx_item = jm_transpile_box_item(mt, member->property);
+                        cur_val = jm_call_2(mt, "js_elements_get", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_item));
+                    } else {
+                        cur_val = jm_call_2(mt, "js_elements_get_int", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx,
+                                jm_transpile_as_native(mt, member->property, idx_type, LMD_TYPE_INT)));
+                    }
                     MIR_reg_t rval = jm_transpile_box_item(mt, asgn->right);
                     new_val = jm_call_2(mt, jm_compound_assign_fn(asgn->op), MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, rval));
                 }
-                MIR_reg_t a4_result = jm_call_3(mt, "js_elements_set_int", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native),
+                const char* set_fn = idx_type == LMD_TYPE_FLOAT
+                    ? "js_elements_set_number" : "js_elements_set_int";
+                MIR_reg_t idx_arg = idx_type == LMD_TYPE_FLOAT
+                    ? jm_transpile_box_item(mt, member->property)
+                    : jm_transpile_as_native(mt, member->property, idx_type, LMD_TYPE_INT);
+                MIR_reg_t a4_result = idx_type == LMD_TYPE_FLOAT
+                    ? jm_call_3(mt, set_fn, MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_arg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val))
+                    : jm_call_3(mt, set_fn, MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_arg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
 
                 // v20: update the mapped formal after the fast-path write.

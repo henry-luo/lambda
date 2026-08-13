@@ -208,6 +208,123 @@ first eliminate crash/retry work, then compare source-to-linked-MIR time with
 identical complete manifests; a timeout reduction caused only by fewer crashed
 workers is not compiler credit.
 
+### 3.4 Regression root cause: scalar re-homing on every property read
+
+The next timeout was a genuine compiler/runtime performance regression from the
+GC-lifetime fix merged in `f29e93c75`. `js_get_key_core` began routing every
+ordinary shaped-property result through `scalar_storage_read`. That helper is
+correct for an interior pointer into a packed wide scalar lane, but it boxes a
+new number home for `int64`/`uint64`/`float` values. Large libraries perform
+millions of ordinary property reads, so the fix changed a cheap load into
+repeated number-home allocation and GC pressure. The observed symptom was a
+worker running for hundreds of seconds and exceeding the RSS limit, which
+surfaced as a batch timeout or missing-result retry.
+
+The property boundary now returns a borrowed-storage bit from
+`js_ordinary_get_own_ex`: only a packed, wide scalar slot is re-homed; narrow
+values, strings, extension-map entries, and accessor results return directly.
+The semantic safety rule remains **D5.3.4**—a movable interior scalar never
+crosses the property boundary un-rehomed—while the hot path no longer allocates
+for already-stable Items. The direct `lib_fast_diff.js` release probe dropped
+from a 653-second / 4.8-GB run to about 53 seconds with the same output and
+status. This is the root-cause fix for the performance timeout, not a harness
+timeout adjustment.
+
+### 3.5 Regression root cause: successful hot boundaries skipped reclamation
+
+The large-library worker had a second lifetime defect. Successful hot-reload
+boundaries used `heap_discard_unfinalized()`, the signal-safe recovery path.
+That path deliberately skips finalizers and native cache teardown, so module
+roots and JS state accumulated across otherwise successful libraries. The
+worker then paid an increasing GC/transpile cost and eventually reported a
+timeout or lost batch result. Crash recovery must keep the discard path, but a
+successful boundary must use the ordinary `js_batch_reset()` /
+`runtime_reset_heap()` lifecycle so finalizers, module roots, and heap-bound
+caches are released under **D5.3.4**.
+
+The batch controller also checked its 4-GB RSS stop before attempting that
+successful recycle. A single large library could therefore make the reclaim
+branch unreachable. The normal path now recycles first and applies the hard
+cap to the post-recycle RSS. This preserves the OOM guard without mistaking a
+reclaimable transient heap for a persistent leak. The seven-library sequence
+(`acorn`, `ajv`, `alpine`, `bn`, `chalk`, `codemirror`, `fast_diff`) now reaches
+the final test with all expected output/status markers and no `BATCH_EXIT`.
+Remote commit `f0d079e` then regressed the cleanup watermark from 1 GB to the
+4-GB crash cap, recreating the same retention cliff for successful tests.
+Restoring the 1-GB watermark reduced the complete Test262 batch phase from
+**427.5 s to 153.0 s** and peak RSS from **1,376.9 MB to 800.4 MB**. These are
+source/runtime lifetime improvements, not timeout-policy changes.
+
+The GC fix also exposed two relocation hazards that are part of the same
+boundary contract: generator state-result code refreshed its `Array*` after
+number re-homing, and array-key enumeration refreshes the companion `Map*`
+after result-array growth. Native container pointers must never survive an
+allocation/compaction boundary unless they are reacquired from an exact root.
+
+### 3.6 Regression root cause: unified Set routed dynamic array writes through the slow kernel
+
+The remaining large-library timeout was a separate **D8.4.3** lowering
+regression. Tune5 correctly moved ordinary member writes to the shared
+`js_set` lane shell, but the shell treated a canonical numeric lane like an
+arbitrary property. A loop such as
+
+```js
+var a = new Array(10000);
+for (var j = 0; j < 10000; j++) a[j] = 0;
+```
+
+therefore paid key bridging, completion bookkeeping, descriptor/prototype
+dispatch, and generic array storage on every write, even though the receiver
+was the same ordinary array and the key was a canonical index. The current
+release control took about **7.4 s** versus **0.05 s** on the pre-regression
+binary; `lib_fast_diff.js` took about **30.8 s** versus **3.0 s**. Compiler
+timing showed parse/AST/MIR/link changes were small; generated-code execution
+and repeated indexed writes dominated the timeout.
+
+The fix keeps one semantic Set entry point and adds a narrow runtime completion
+probe, `js_elements_set_int_completion`. It handles only an ordinary tagged
+Array with a canonical non-negative index, no numeric companion descriptor,
+no dirty prototype numeric guard, no arguments/DOM exotic state, and writable
+extensibility/length conditions. It writes an existing dense value or hole, or
+appends contiguously, and returns the normal boolean Set completion. Any
+descriptor, accessor, prototype, sparse-gap, proxy, strict-policy, or exotic
+case returns `ItemNull` from the probe and stays on `js_set_completion_with_key`.
+Thus strict assignment still receives a false completion for
+`js_assignment_set_result`, while the hot path avoids repeating semantic work.
+This is a shared numeric-index dispatch contract, not a JS-only bypass: the
+same lane is available to the common MIR assignment boundary and falls back
+without changing observable behavior.
+
+Focused controls after the fix: the hole-array loop is about **0.65 s** in the
+release executable, `lib_fast_diff.js` is about **2.6–2.9 s**, and strict/sloppy
+non-writable-array probes retain their expected TypeError/no-op behavior. The
+MIR diagnostic remains informational; the timing gate credits only the
+source-to-linked-MIR interval defined in §2.2 and separately records execution
+to prevent this regression from being misdiagnosed as test orchestration.
+
+### 3.7 Semantic regressions from the same unified Set/Get migration
+
+The initial 118 Test262 regressions were not runner instability. They were
+observable omissions in the new shared property boundary (**D8.4.3**, **D6.2.2v2**):
+
+- primitive-base assignment rejected the base before prototype Proxy/accessor
+  dispatch; a boolean completion adapter now boxes it and leaves strict
+  throwing to the assignment policy;
+- String wrapper `length` was synthesized for reads but not own-descriptor and
+  `hasOwn` queries;
+- generic Array-method keys were limited to the 32-bit array-index lane, losing
+  valid `2^32-1..2^53-1` keys on array-like objects;
+- compact numeric-array prototypes were accepted by storage but dropped by
+  `js_set_prototype`, and Error objects bypassed their special property store.
+
+Focused probes for these kernels pass. The current merged tree's complete run
+executes all **40,261** baseline tests; after the 1-GB recycle it reaches
+**34,632 fully passing / 54 regressions / 359 non-fully-passing entries**. The
+recycle fixes the timeout/RSS regression, but the remaining failures reproduce
+in a fresh single-test process (for example, the TypedArray length-descriptor
+case), so they are semantic baseline work rather than batch scheduling noise.
+No baseline or partial manifest was changed to hide them.
+
 ---
 
 ## 4. Target compiler process
@@ -730,6 +847,14 @@ MIR's post-finish operand mutation contract is not established for all
 backends. The safe fallback is retained until a demand producer can prove the
 full **D8.4.3** error/root contract.
 
+The Tune5 indexed-write repair is now included in the diagnostic ledger: the
+release `new Array(10000)` dynamic-write control is **~0.65 s** after the
+completion probe (about **7.4 s** before it), and `test/js/lib_fast_diff.js`
+is **~2.6–2.9 s** (about **30.8 s** before it). The emitted MIR record for the
+library remains deterministic at `functions=73`, `insns=36848`; the reduction
+is deliberately attributed to runtime execution of the generated indexed
+write path, not claimed as MIR-volume credit.
+
 ### 13.2 Phase status
 
 | Phase | Status | Evidence |
@@ -752,7 +877,7 @@ full **D8.4.3** error/root contract.
 | D4 JS large-library finalized MIR diagnostic | 5,743,247 | 5,008,331 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
 | D4 JS complete-corpus finalized MIR diagnostic | 7,187,862 | 6,135,408 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
 | G5 sample/timing integrity | 698 Lambda rows / 324 JS rows, identical sorted manifests | historical captures retained for diagnosis only; incomplete captures are rejected | exact timing manifest | open until post-rejection recapture |
-| G0 regressions | current baselines | focused release ratchet 16/16, exact-collection GC 1/1, compiler-pass 2/2, input baseline 2104/2104, prior full Lambda baseline 3694/3694, and current Annex-B cache-fix batch 3/3 | all green | full post-fix `make test-lambda-baseline`/`make test262-baseline` closeout remains to be rerun; the prior failures were worker crashes/collateral timeout symptoms, not accepted results |
+| G0 regressions | current baselines | `make test-lambda-baseline` passed 2104/2104 input, 1597/1597 runtime, 38/38 MIR, 16/16 ratchet, 16/16 JS MIR, 19/19 TS, 62/62 GC, 341/341 JS GTest, 716/716 Lambda GTest; Test262 executed 40261 with 40161 fully passing, 80 regressions, 20 retry-only partials; focused property probes and performance controls pass | open | remaining Test262 semantic clusters must be fixed and both real baseline gates rerun |
 
 ### 13.4 Deletion ledger
 
@@ -784,7 +909,7 @@ This plan is complete only when all statements are true:
 - [ ] G3 reports at least 20% lower JS GTest compiler time (**D8.6.4**).
 - [ ] D4 reports deterministic finalized-MIR volume for the frozen JS large-library cohort and complete corpus; investigate material growth (**D8.6.4**).
 - [ ] G5 proves identical, complete, deterministic release-mode timing manifests; MIR manifests remain attached as diagnostics (**D8.6.4**).
-- [ ] G0 and the entire §11 matrix are green with no weakened ratchets. Current evidence is explicitly non-green: input baseline 2104/2104, focused MIR ratchet 16/16, focused GC exact-collection 1/1, but the parallel full baseline has batch-worker failures (Lambda 1469/1590; JS 333/335; test262 40179/40261 fully passing).
+- [ ] G0 and the entire §11 matrix are green with no weakened ratchets. Lambda baseline is currently green; Test262 is explicitly non-green at 40161/40261 fully passing with 80 regressions and 20 retry-only partials, so semantic follow-up remains open.
 - [ ] §13 contains the final commits, raw-capture locations, medians, phase attribution, LOC ledger, and verified test results.
 
 Until every item is checked, the unified-AST tuning continuation remains open.
