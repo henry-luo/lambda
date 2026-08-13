@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "D5.3.3: URI errors and character-cache values survive exact-root forced-GC execution.",
+  "checks": [
+    {
+      "in_func": "js_main",
+      "expect": [
+        "call\tjs_call_function_prerooted_args_into"
+      ]
+    }
+  ]
+}

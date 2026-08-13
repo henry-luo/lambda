@@ -21,6 +21,7 @@
 #include "js_coerce.h"
 #include "js_runtime_state.hpp"
 #include "js_runtime_internal.hpp"
+#include "js_exec_profile.h"
 
 extern "C" bool js_promise_vmap_is(Item value);
 #include "js_function.hpp"
@@ -4967,6 +4968,13 @@ extern "C" uint64_t js_get_heap_epoch();
 #define js_decode_uri_error (js_runtime_state.global_string_caches.decode_uri_error)
 #define js_decode_uri_error_epoch (js_runtime_state.global_string_caches.decode_uri_error_epoch)
 
+static bool js_global_string_caches_ensure_roots(void) {
+    if (!js_active_runtime_state) return false;
+    JsRootRange* roots = &js_runtime_state.global_string_caches.roots;
+    if (roots->roots_epoch == js_get_heap_epoch()) return true;
+    return js_root_range_ensure_registered(roots);
+}
+
 static inline Item js_uri_make_four_byte_string(char* decoded) {
     String* result = (String*)heap_alloc(sizeof(String) + 5, LMD_TYPE_STRING);
     result->len = 4;
@@ -4986,6 +4994,7 @@ static inline Item js_uri_make_four_byte_string(char* decoded) {
 // invalidates the cache automatically — same idiom used by the four-byte URI
 // and fromCharCode caches above.
 static inline String* js_ascii_char_intern(int code) {
+    bool cache_rooted = js_global_string_caches_ensure_roots();
     uint64_t epoch = js_get_heap_epoch();
     if (epoch != g_ascii_char_pool_epoch) {
         for (int i = 0; i < 128; i++) g_ascii_char_pool[i] = ItemNull;
@@ -4995,7 +5004,9 @@ static inline String* js_ascii_char_intern(int code) {
     if (!s) {
         char c = (char)code;
         s = heap_create_name(&c, 1);
-        g_ascii_char_pool[code] = (Item){.item = s2it(s)};
+        // D5.3.3: a context cache is an owning GC edge only after its exact
+        // slot range is registered; otherwise collection can leave stale Items.
+        if (cache_rooted) g_ascii_char_pool[code] = (Item){.item = s2it(s)};
     }
     return s;
 }
@@ -5078,9 +5089,11 @@ static Item js_string_from_char_code_uint16(int code) {
     buf[len] = '\0';
 
     Item result = js_make_small_string(buf, len, code < 128);
-    g_last_from_char_code_string = result;
-    g_last_from_char_code_cp = code;
-    g_last_from_char_code_epoch = js_get_heap_epoch();
+    if (js_global_string_caches_ensure_roots()) {
+        g_last_from_char_code_string = result;
+        g_last_from_char_code_cp = code;
+        g_last_from_char_code_epoch = js_get_heap_epoch();
+    }
     return result;
 }
 
@@ -5108,7 +5121,8 @@ extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
     int pos = 0;
     if (utf_is_high_surrogate((uint32_t)first) && utf_is_low_surrogate((uint32_t)second)) {
         uint32_t cp = utf16_decode_pair((uint16_t)first, (uint16_t)second);
-        if (g_uri_last_four_byte_string.item &&
+        if (js_global_string_caches_ensure_roots() &&
+            g_uri_last_four_byte_string.item &&
             g_uri_last_four_byte_cp == cp &&
             g_uri_last_four_byte_epoch == js_get_heap_epoch()) {
             return g_uri_last_four_byte_string;
@@ -9487,6 +9501,14 @@ extern "C" Item js_for_in_keys(Item object) {
         return js_for_in_keys(js_proxy_get_target(object));
     }
 
+    RootFrame roots(5);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> str_result_root(roots, js_array_new(0));
+    Rooted<Item> current_root(roots, object_root.get());
+    Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> key_root(roots, ItemNull);
+    if (!roots.valid()) return ItemError;
+
     // walk prototype chain collecting enumerable string keys
     // use a simple seen-set via hashmap to deduplicate
     HashMap* seen = hashmap_new(sizeof(JsForInSeenEntry), 64, 0, 0,
@@ -9495,9 +9517,6 @@ extern "C" Item js_for_in_keys(Item object) {
     // v20: separate index keys and string keys for spec-compliant ordering
     int idx_cap = 16, idx_count = 0;
     int64_t* idx_vals = LAMBDA_ALLOCA(idx_cap, int64_t);
-    Item* idx_items = LAMBDA_ALLOCA(idx_cap, Item);
-
-    Item str_result = js_array_new(0); // non-index string keys in creation order
 
     // Js55 P16: TypedArray integer-indexed properties are enumerable own
     // properties per ES2024 §10.4.5 — seed the index pass with them so the
@@ -9510,20 +9529,14 @@ extern "C" Item js_for_in_keys(Item object) {
             int new_cap = idx_cap;
             while (new_cap < ta_len) new_cap *= 2;
             int64_t* new_vals = LAMBDA_ALLOCA(new_cap, int64_t);
-            Item* new_items = LAMBDA_ALLOCA(new_cap, Item);
             idx_vals = new_vals;
-            idx_items = new_items;
             idx_cap = new_cap;
         }
         for (int i = 0; i < ta_len; i++) {
             int blen = 0;
             const char* buf = js_property_index_chars(i, &blen);
             if (!buf) return ItemError;
-            String* index_name = js_property_index_name(i);
-            if (!index_name) return ItemError;
-            Item key_str = (Item){.item = s2it(index_name)};
             idx_vals[idx_count] = i;
-            idx_items[idx_count] = key_str;
             idx_count++;
             JsForInSeenEntry probe;
             js_for_in_seen_entry_set(&probe, buf, blen);
@@ -9531,10 +9544,10 @@ extern "C" Item js_for_in_keys(Item object) {
         }
     }
 
-    Item current = object;
     int depth = 0;
-    while (current.item != ItemNull.item && get_type_id(current) == LMD_TYPE_MAP && depth < 64) {
-        Map* m = current.map;
+    while (current_root.get().item != ItemNull.item &&
+            get_type_id(current_root.get()) == LMD_TYPE_MAP && depth < 64) {
+        Map* m = current_root.get().map;
         if (m && m->type) {
             TypeMap* tm = (TypeMap*)m->type;
             ShapeEntry* e = tm->shape;
@@ -9554,7 +9567,8 @@ extern "C" Item js_for_in_keys(Item object) {
 
                 if (!skip) {
                     // skip deleted properties
-                    JsShapeSlotStatus status = js_own_shape_slot_status(current, s, len, NULL, NULL);
+                    JsShapeSlotStatus status = js_own_shape_slot_status(
+                        current_root.get(), s, len, NULL, NULL);
                     if (status != JS_SHAPE_SLOT_DATA && status != JS_SHAPE_SLOT_ACCESSOR) skip = true;
                 }
 
@@ -9567,15 +9581,17 @@ extern "C" Item js_for_in_keys(Item object) {
                     if (!existing) {
                         hashmap_set(seen, &probe);
                         if (js_props_query_enumerable(m, e, s, len)) {
-                            Item key_str = (Item){.item = s2it(heap_create_name(s, len))};
                             // v20: classify as index or string key
                             int64_t idx = js_parse_array_index(s, len);
                             if (idx >= 0 && idx_count < idx_cap) {
                                 idx_vals[idx_count] = idx;
-                                idx_items[idx_count] = key_str;
                                 idx_count++;
                             } else {
-                                js_array_push(str_result, key_str);
+                                // D5.3.3: heap_create_name and array growth are
+                                // safepoints; keep the key and result rooted.
+                                key_root.set((Item){.item = s2it(
+                                    heap_create_name(s, len))});
+                                js_array_push(str_result_root.get(), key_root.get());
                             }
                         }
                     }
@@ -9588,7 +9604,7 @@ extern "C" Item js_for_in_keys(Item object) {
         // shape entries — pass 1 above already enumerates them.
 
         // walk up prototype chain
-        current = js_get_prototype(current);
+        current_root.set(js_get_prototype(current_root.get()));
         depth++;
     }
 
@@ -9597,59 +9613,75 @@ extern "C" Item js_for_in_keys(Item object) {
     // v20: sort index keys numerically (insertion sort, typically few)
     for (int i = 1; i < idx_count; i++) {
         int64_t iv = idx_vals[i];
-        Item ii = idx_items[i];
         int j = i - 1;
         while (j >= 0 && idx_vals[j] > iv) {
             idx_vals[j + 1] = idx_vals[j];
-            idx_items[j + 1] = idx_items[j];
             j--;
         }
         idx_vals[j + 1] = iv;
-        idx_items[j + 1] = ii;
     }
 
     // Build final result: index keys first, then string keys
-    Array* str_arr = str_result.array;
-    Item result = js_array_new(idx_count + str_arr->length);
-    Array* arr = result.array;
-    arr->length = 0;
-    for (int i = 0; i < idx_count; i++) array_push(arr, idx_items[i]);
-    for (int i = 0; i < str_arr->length; i++) array_push(arr, str_arr->items[i]);
+    int string_count = str_result_root.get().array->length;
+    result_root.set(js_array_new(idx_count + string_count));
+    result_root.get().array->length = 0;
+    for (int i = 0; i < idx_count; i++) {
+        String* index_name = js_property_index_name(idx_vals[i]);
+        if (!index_name) return ItemError;
+        key_root.set((Item){.item = s2it(index_name)});
+        array_push(result_root.get().array, key_root.get());
+    }
+    for (int i = 0; i < string_count; i++) {
+        key_root.set(str_result_root.get().array->items[i]);
+        array_push(result_root.get().array, key_root.get());
+    }
 
-    return result;
+    return result_root.get();
 }
 
 extern "C" bool js_for_in_key_is_live(Item object, Item key) {
-    TypeId key_type = get_type_id(key);
+    RootFrame roots(4);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> current_root(roots, ItemNull);
+    Rooted<Item> desc_root(roots, ItemNull);
+    if (!roots.valid()) return false;
+
+    TypeId key_type = get_type_id(key_root.get());
     if (key_type != LMD_TYPE_STRING && key_type != LMD_TYPE_SYMBOL) {
-        key = js_to_property_key(key);
-        key_type = get_type_id(key);
+        key_root.set(js_to_property_key(key_root.get()));
+        key_type = get_type_id(key_root.get());
     }
     if (key_type != LMD_TYPE_STRING) return false;
 
-    TypeId object_type = get_type_id(object);
-    if (object.item == ItemNull.item || object_type == LMD_TYPE_UNDEFINED) return false;
+    TypeId object_type = get_type_id(object_root.get());
+    if (object_root.get().item == ItemNull.item || object_type == LMD_TYPE_UNDEFINED) return false;
     if (object_type != LMD_TYPE_MAP && !js_is_js_array(object) &&
         object_type != LMD_TYPE_FUNC && object_type != LMD_TYPE_ELEMENT) {
-        object = js_to_object(object);
+        object_root.set(js_to_object(object_root.get()));
     }
 
-    Item current = object;
+    current_root.set(object_root.get());
     int depth = 0;
-    while (current.item != ItemNull.item && depth < 64) {
-        TypeId current_type = get_type_id(current);
-        if (current_type != LMD_TYPE_MAP && !js_is_js_array(current) &&
+    while (current_root.get().item != ItemNull.item && depth < 64) {
+        TypeId current_type = get_type_id(current_root.get());
+        if (current_type != LMD_TYPE_MAP && !js_is_js_array(current_root.get()) &&
             current_type != LMD_TYPE_FUNC && current_type != LMD_TYPE_ELEMENT) {
             break;
         }
-        Item desc = js_object_get_own_property_descriptor(current, key);
-        if (item_is_error(desc)) return false;
-        if (desc.item != ITEM_JS_UNDEFINED && desc.item != ItemNull.item) {
-            Item enumerable_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
-            Item enumerable = js_get_key_default(desc, enumerable_key);
+        desc_root.set(js_object_get_own_property_descriptor(
+            current_root.get(), key_root.get()));
+        if (item_is_error(desc_root.get())) return false;
+        if (desc_root.get().item != ITEM_JS_UNDEFINED &&
+                desc_root.get().item != ItemNull.item) {
+            key_root.set((Item){.item = s2it(
+                heap_create_name("enumerable", 10))});
+            Item enumerable = js_get_key_default(desc_root.get(), key_root.get());
             return js_is_truthy(enumerable);
         }
-        current = current_type == LMD_TYPE_FUNC ? js_get_prototype_of(current) : js_get_prototype(current);
+        current_root.set(current_type == LMD_TYPE_FUNC
+            ? js_get_prototype_of(current_root.get())
+            : js_get_prototype(current_root.get()));
         depth++;
     }
     return false;
@@ -13580,13 +13612,16 @@ static Item js_uri_make_four_byte_string_from_cp(uint32_t cp) {
     decoded[2] = (char)b2;
     decoded[3] = (char)b3;
     Item result = js_uri_make_four_byte_string(decoded);
-    g_uri_last_four_byte_string = result;
-    g_uri_last_four_byte_cp = cp;
-    g_uri_last_four_byte_epoch = js_get_heap_epoch();
+    if (js_global_string_caches_ensure_roots()) {
+        g_uri_last_four_byte_string = result;
+        g_uri_last_four_byte_cp = cp;
+        g_uri_last_four_byte_epoch = js_get_heap_epoch();
+    }
     return result;
 }
 
 extern "C" Item js_decodeURIComponent(Item str_item) {
+    bool cache_rooted = js_global_string_caches_ensure_roots();
     Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
@@ -13599,13 +13634,18 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
     size_t decoded_len = 0;
     char* decoded = url_decode_component(s->chars, s->len, &decoded_len);
     if (!decoded) {
+        if (!cache_rooted) return js_throw_named_error_text("URIError", "URI malformed");
+        bool cache_hit = js_decode_uri_component_error.item &&
+            js_decode_uri_component_error_epoch == js_get_heap_epoch();
+        js_opt_trace_record(cache_hit ? JS_OPT_URI_ERROR_CACHE_HIT :
+            JS_OPT_URI_ERROR_CACHE_MISS, JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
         // Cache URIError object per-epoch to avoid expensive error creation
         // in hot loops (e.g., test262 tests that iterate 65000+ code points).
-        if (!js_decode_uri_component_error.item ||
-            js_decode_uri_component_error_epoch != js_get_heap_epoch()) {
-            Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
-            Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
-            js_decode_uri_component_error = js_new_error_with_name(tn, msg);
+        if (!cache_hit) {
+            // D5.3.3: the canonical constructor roots name and message across
+            // both allocations; two local heap_create_name calls did not.
+            js_decode_uri_component_error =
+                js_new_named_error("URIError", "URI malformed");
             js_decode_uri_component_error_epoch = js_get_heap_epoch();
         }
         return js_throw_value(js_decode_uri_component_error);
@@ -13634,6 +13674,7 @@ extern "C" Item js_encodeURI(Item str_item) {
 }
 
 extern "C" Item js_decodeURI(Item str_item) {
+    bool cache_rooted = js_global_string_caches_ensure_roots();
     Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
@@ -13646,10 +13687,13 @@ extern "C" Item js_decodeURI(Item str_item) {
     size_t decoded_len = 0;
     char* decoded = url_decode_uri(s->chars, s->len, &decoded_len);
     if (!decoded) {
-        if (!js_decode_uri_error.item || js_decode_uri_error_epoch != js_get_heap_epoch()) {
-            Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
-            Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
-            js_decode_uri_error = js_new_error_with_name(tn, msg);
+        if (!cache_rooted) return js_throw_named_error_text("URIError", "URI malformed");
+        bool cache_hit = js_decode_uri_error.item &&
+            js_decode_uri_error_epoch == js_get_heap_epoch();
+        js_opt_trace_record(cache_hit ? JS_OPT_URI_ERROR_CACHE_HIT :
+            JS_OPT_URI_ERROR_CACHE_MISS, JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+        if (!cache_hit) {
+            js_decode_uri_error = js_new_named_error("URIError", "URI malformed");
             js_decode_uri_error_epoch = js_get_heap_epoch();
         }
         return js_throw_value(js_decode_uri_error);

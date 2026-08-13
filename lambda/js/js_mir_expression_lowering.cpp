@@ -2808,6 +2808,10 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
 
         jm_emit_label_with_state(mt, l_end,
             jm_error_lane_merge(short_circuit_exit, right_exit));
+        // D8.4.3: the ERROR-lane carrier must be the value defined by both
+        // short-circuit arms. Keeping the RHS helper register here reads an
+        // uninitialized path-local value when the RHS is skipped.
+        mt->last_call_result_reg = result;
         return result;
     }
 
@@ -8541,6 +8545,7 @@ MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond)
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_false),
         MIR_new_reg_op(mt->ctx, truthy)));
     JsErrorLaneTrack branch_exc = jm_error_lane_state(mt);
+    MIR_reg_t branch_carrier = mt->last_call_result_reg;
 
     JsMirBranchState branch_state;
     jm_save_branch_state(mt, &branch_state);
@@ -8554,6 +8559,9 @@ MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond)
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     jm_emit_label_with_state(mt, l_false, branch_exc);
+    // The consequent's last helper is path-local; the alternate begins from
+    // the condition carrier that dominates both arms (D8.4.3).
+    mt->last_call_result_reg = branch_carrier;
     jm_save_branch_state(mt, &branch_state);
     jm_push_scope(mt);
     MIR_reg_t alt = jm_transpile_box_item(mt, cond->alternate);
@@ -8564,6 +8572,9 @@ MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond)
     JsErrorLaneTrack alt_exit = jm_error_lane_state(mt);
 
     jm_emit_label_with_state(mt, l_end, jm_error_lane_merge(cons_exit, alt_exit));
+    // Both arms define the boxed ternary value, making it the only valid
+    // carrier for an ERROR-lane test emitted after the join (D8.4.3).
+    mt->last_call_result_reg = result;
     return result;
 }
 

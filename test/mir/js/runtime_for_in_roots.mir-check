@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "description": "D5.3.3: for-in key collection and liveness checks preserve all live Items across safepoints.",
+  "checks": [
+    {
+      "in_func": "js_main",
+      "expect": [
+        "call\tjs_for_in_keys",
+        "call\tjs_for_in_key_is_live"
+      ]
+    }
+  ]
+}

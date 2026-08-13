@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "D8.4.3: ordinary top-level undefined vars retain the bulk MIR lowering path.",
+  "checks": [
+    {
+      "in_func": "js_main",
+      "expect": [
+        "call\tjs_init_module_vars_undefined_bulk"
+      ],
+      "count": {
+        "call\tjs_init_module_vars_undefined_bulk": 1
+      }
+    }
+  ]
+}

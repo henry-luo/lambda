@@ -88,7 +88,6 @@ static bool jm_is_undefined_module_var_batch_entry(JsMirTranspiler* mt,
 
 static bool jm_emit_undefined_module_var_batch(JsMirTranspiler* mt,
         int preamble_var_limit, bool define_global_var_properties) {
-    return false;
     if (!mt || !mt->module_consts || mt->is_eval_direct) return true;
     int count = 0;
     size_t count_iter = 0;

@@ -18617,7 +18617,6 @@ static void js_regex_apply_casefold_fixups(std::string& pat, bool has_unicode, b
 
 static Item js_create_regex_impl(const char* pattern, int pattern_len,
         const char* flags, int flags_len, bool cache_static_literal) {
-    cache_static_literal = false;
     // The compile-cache entry owns a whole JsRegexData payload, not just the
     // immutable matcher. Sharing that payload for medium literals made release
     // builds reuse instance-local matching metadata (lib_moment exposed this as
@@ -20110,35 +20109,44 @@ static void js_regex_attach_indices(Item result, JsRegexData* rd,
                                     bool code_unit_indices) {
     if (!rd || !rd->has_indices) return;
 
-    Item indices = js_array_new(num_groups);
+    RootFrame roots(6);
+    Rooted<Item> result_root(roots, result);
+    Rooted<Item> indices_root(roots, js_array_new(num_groups));
+    Rooted<Item> groups_key_root(roots, ItemNull);
+    Rooted<Item> groups_obj_root(roots, make_js_undefined());
+    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> val_root(roots, make_js_undefined());
+    if (!roots.valid()) return;
     for (int i = 0; i < num_groups; i++) {
-        js_elements_set_int_direct(indices, i, js_regex_make_indices_pair(input, input_len,
+        val_root.set(js_regex_make_indices_pair(input, input_len,
             matches[i], code_unit_indices));
+        js_elements_set_int_direct(indices_root.get(), i, val_root.get());
     }
 
-    Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
-    Item groups_obj = make_js_undefined();
+    groups_key_root.set(
+        (Item){.item = s2it(heap_create_name("groups", 6))});
     if (rd->bt) {
         int nc = js_bt_named_count(rd->bt);
         if (nc > 0) {
-            groups_obj = js_object_create(ItemNull);
+            groups_obj_root.set(js_object_create(ItemNull));
             for (int gi = 0; gi < nc; gi++) {
                 int nl = 0;
                 const char* nm = js_bt_named_name(rd->bt, gi, &nl);
                 int idx = js_bt_named_index(rd->bt, gi);
-                Item val = make_js_undefined();
+                val_root.set(make_js_undefined());
                 if (idx >= 0 && idx < num_groups) {
-                    val = js_regex_make_indices_pair(input, input_len, matches[idx],
-                        code_unit_indices);
+                    val_root.set(js_regex_make_indices_pair(input, input_len,
+                        matches[idx], code_unit_indices));
                 }
-                Item key = (Item){.item = s2it(heap_create_name(nm, nl))};
-                js_create_data_property(groups_obj, key, val);
+                key_root.set((Item){.item = s2it(heap_create_name(nm, nl))});
+                js_create_data_property(groups_obj_root.get(), key_root.get(),
+                    val_root.get());
             }
         }
     } else if (!rd->literal_fast && rd->re2) {
         const auto& named = rd->re2->NamedCapturingGroups();
         if (!named.empty()) {
-            groups_obj = js_object_create(ItemNull);
+            groups_obj_root.set(js_object_create(ItemNull));
             for (auto& pair : named) {
                 int re2_idx = pair.second;
                 int idx = re2_idx;
@@ -20150,36 +20158,50 @@ static void js_regex_attach_indices(Item result, JsRegexData* rd,
                         }
                     }
                 }
-                Item val = make_js_undefined();
+                val_root.set(make_js_undefined());
                 if (idx >= 0 && idx < num_groups) {
-                    val = js_regex_make_indices_pair(input, input_len, matches[idx],
-                        code_unit_indices);
+                    val_root.set(js_regex_make_indices_pair(input, input_len,
+                        matches[idx], code_unit_indices));
                 }
                 int js_name_len = (int)pair.first.size();
                 const char* js_name = js_regex_original_group_name(rd, pair.first.c_str(),
                     (int)pair.first.size(), &js_name_len);
-                Item key = (Item){.item = s2it(heap_create_name(js_name, js_name_len))};
-                js_create_data_property(groups_obj, key, val);
+                key_root.set((Item){.item = s2it(
+                    heap_create_name(js_name, js_name_len))});
+                js_create_data_property(groups_obj_root.get(), key_root.get(),
+                    val_root.get());
             }
         }
     }
-    js_create_data_property(indices, groups_key, groups_obj);
+    js_create_data_property(indices_root.get(), groups_key_root.get(),
+        groups_obj_root.get());
 
-    Item indices_key = (Item){.item = s2it(heap_create_name("indices", 7))};
-    js_create_data_property(result, indices_key, indices);
+    key_root.set((Item){.item = s2it(heap_create_name("indices", 7))});
+    js_create_data_property(result_root.get(), key_root.get(), indices_root.get());
 }
 
 extern "C" Item js_regex_exec(Item regex, Item str) {
-    JsRegexData* rd = js_get_regex_data(regex);
+    RootFrame roots(7);
+    Rooted<Item> regex_root(roots, regex);
+    Rooted<Item> str_root(roots, str);
+    Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> groups_obj_root(roots, make_js_undefined());
+    Rooted<Item> val_root(roots, make_js_undefined());
+    Rooted<Item> group_key_root(roots, ItemNull);
+    if (!roots.valid()) return ItemError;
+
+    JsRegexData* rd = js_get_regex_data(regex_root.get());
     if (!rd) return js_throw_type_error("Method RegExp.prototype.exec called on incompatible receiver");
     // v46: convert argument to string (handles new String(), numbers, etc.)
-    TypeId tid = get_type_id(str);
+    TypeId tid = get_type_id(str_root.get());
     if (tid != LMD_TYPE_STRING) {
-        JS_ASSIGN_OR_RETURN_INTO(str, js_to_string(str));
-        tid = get_type_id(str);
+        JS_ASSIGN_OR_RETURN(string_value, js_to_string(str_root.get()));
+        str_root.set(string_value);
+        tid = get_type_id(str_root.get());
         if (tid != LMD_TYPE_STRING) return ItemNull;
     }
-    String* input_s = it2s(str);
+    String* input_s = it2s(str_root.get());
     const char* chars = input_s ? input_s->chars : "";
     int len = input_s ? (int)input_s->len : 0;
     bool utf16_subject = rd->needs_utf16_subject;
@@ -20196,16 +20218,18 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // match should use it; non-global/non-sticky regexes then reset the search
     // start to zero without writing the property.
     int start_pos = 0;
-    Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
+    key_root.set((Item){.item = s2it(heap_create_name("lastIndex", 9))});
     bool uses_last_index = rd->global || rd->sticky;
     // ES spec §21.2.5.2.2 step 4: let lastIndex = ? ToLength(? Get(R, "lastIndex"))
     // ToLength calls ToNumber which triggers valueOf/toString on objects.
-    JS_ASSIGN_OR_RETURN(lastindex_status, js_regex_read_lastindex(regex, li_key, &start_pos));
+    JS_ASSIGN_OR_RETURN(lastindex_status, js_regex_read_lastindex(
+        regex_root.get(), key_root.get(), &start_pos));
     if (uses_last_index) {
         if (start_pos < 0) start_pos = 0;
         int64_t limit = code_unit_indices ? subject_units : len;
         if (start_pos > limit) {
-            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex, li_key, 0));
+            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(
+                regex_root.get(), key_root.get(), 0));
             return ItemNull;
         }
     } else {
@@ -20224,7 +20248,8 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
         anchor, matches, num_groups);
     if (!matched) {
         if (uses_last_index) {
-            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex, li_key, 0));
+            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(
+                regex_root.get(), key_root.get(), 0));
         }
         return ItemNull;
     }
@@ -20236,14 +20261,17 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     if (uses_last_index) {
         int match_end = (int)(matches[0].data() - match_chars) + (int)matches[0].size();
         if (code_unit_indices) match_end = (int)js_utf16_index_from_byte(match_chars, match_len, match_end);
-        JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex, li_key, match_end));
+        JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(
+            regex_root.get(), key_root.get(), match_end));
     }
 
     // update legacy RegExp static properties ($1-$9, input, lastMatch, etc.)
     js_regexp_update_last_match(utf16_subject ? match_s : input_s, matches, num_groups);
 
     // build result as an Array with .index, .input, .groups properties (per ES spec)
-    Item result = js_array_new(num_groups);
+    // D5.3.3: named-property creation below can grow the companion Map and
+    // collect. The match array must remain rooted until it is handed back.
+    result_root.set(js_array_new(num_groups));
     // J39-7: spec uses CreateDataProperty for capture-group writes — bypass
     // proto-chain accessor dispatch (poisoned-stdlib test poisons Array.prototype
     // indices 0..4 with throwing setters that must not fire here).
@@ -20256,60 +20284,66 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
                     (int)(matches[i].data() - match_chars));
                 int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
                     (int)(matches[i].data() - match_chars) + mlen);
-                s = js_str_substring_utf16(str, start_units, end_units);
+                s = js_str_substring_utf16(str_root.get(), start_units, end_units);
             } else if (full_unicode) {
                 int start_units = (int)js_utf16_index_from_byte(chars, len,
                     (int)(matches[i].data() - match_chars));
                 int end_units = (int)js_utf16_index_from_byte(chars, len,
                     (int)(matches[i].data() - match_chars) + mlen);
-                s = js_str_substring_utf16(str, start_units, end_units);
+                s = js_str_substring_utf16(str_root.get(), start_units, end_units);
             } else {
                 s = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), mlen))};
             }
-            js_elements_set_int_direct(result, i, s);
+            js_elements_set_int_direct(result_root.get(), i, s);
         } else {
             // unmatched group → undefined
-            js_elements_set_int_direct(result, i, make_js_undefined());
+            js_elements_set_int_direct(result_root.get(), i, make_js_undefined());
         }
     }
     // Set named properties (index, input, groups) via companion map
     int match_index = (int)(matches[0].data() - match_chars);
     if (code_unit_indices) match_index = (int)js_utf16_index_from_byte(match_chars, match_len, match_index);
-    Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
-    js_set_key_default(result, index_key, (Item){.item = i2it(match_index)});
+    key_root.set((Item){.item = s2it(heap_create_name("index", 5))});
+    js_set_key_default(result_root.get(), key_root.get(),
+        (Item){.item = i2it(match_index)});
     // v46: add input property (the original string passed to exec)
-    Item input_key = (Item){.item = s2it(heap_create_name("input", 5))};
-    js_set_key_default(result, input_key, str);
+    key_root.set((Item){.item = s2it(heap_create_name("input", 5))});
+    js_set_key_default(result_root.get(), key_root.get(), str_root.get());
     // groups property — populated with named captures if regex has named groups
     // ES spec: groups object must be a null-prototype object (Object.create(null))
-    Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
+    key_root.set((Item){.item = s2it(heap_create_name("groups", 6))});
     if (rd->bt) {
         int nc = js_bt_named_count(rd->bt);
         if (nc > 0) {
-            Item groups_obj = js_object_create(ItemNull);
+            groups_obj_root.set(js_object_create(ItemNull));
             for (int gi = 0; gi < nc; gi++) {
                 int nl = 0; const char* nm = js_bt_named_name(rd->bt, gi, &nl);
                 int idx = js_bt_named_index(rd->bt, gi);
-                Item val = make_js_undefined();
+                val_root.set(make_js_undefined());
                 if (idx >= 0 && idx < num_groups && matches[idx].data()) {
                     int mlen = (int)matches[idx].size();
-                    val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
+                    val_root.set((Item){.item = s2it(
+                        heap_strcpy((char*)matches[idx].data(), mlen))});
                 }
-                Item key = (Item){.item = s2it(heap_create_name(nm, nl))};
-                js_create_data_property(groups_obj, key, val);
+                group_key_root.set(
+                    (Item){.item = s2it(heap_create_name(nm, nl))});
+                js_create_data_property(groups_obj_root.get(), group_key_root.get(),
+                    val_root.get());
             }
-            js_create_data_property(result, groups_key, groups_obj);
+            js_create_data_property(result_root.get(), key_root.get(),
+                groups_obj_root.get());
         } else {
-            js_create_data_property(result, groups_key, make_js_undefined());
+            js_create_data_property(result_root.get(), key_root.get(),
+                make_js_undefined());
         }
-        js_regex_attach_indices(result, rd, match_chars, match_len, matches, num_groups,
-            code_unit_indices);
-        return result;
+        js_regex_attach_indices(result_root.get(), rd, match_chars, match_len,
+            matches, num_groups, code_unit_indices);
+        return result_root.get();
     }
     if (!rd->literal_fast && rd->re2) {
         const auto& named = rd->re2->NamedCapturingGroups();
         if (!named.empty()) {
-            Item groups_obj = js_object_create(ItemNull);
+            groups_obj_root.set(js_object_create(ItemNull));
             for (auto& pair : named) {
                 int re2_idx = pair.second;
                 // when wrapper is active, matches[] uses original JS indices (already remapped)
@@ -20324,7 +20358,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
                         }
                     }
                 }
-                Item val = make_js_undefined();
+                val_root.set(make_js_undefined());
                 if (idx < num_groups && matches[idx].data()) {
                     int mlen = (int)matches[idx].size();
                     if (utf16_subject) {
@@ -20332,38 +20366,45 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
                             (int)(matches[idx].data() - match_chars));
                         int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
                             (int)(matches[idx].data() - match_chars) + mlen);
-                        val = js_str_substring_utf16(str, start_units, end_units);
+                        val_root.set(js_str_substring_utf16(
+                            str_root.get(), start_units, end_units));
                     } else if (full_unicode) {
                         int start_units = (int)js_utf16_index_from_byte(chars, len,
                             (int)(matches[idx].data() - match_chars));
                         int end_units = (int)js_utf16_index_from_byte(chars, len,
                             (int)(matches[idx].data() - match_chars) + mlen);
-                        val = js_str_substring_utf16(str, start_units, end_units);
+                        val_root.set(js_str_substring_utf16(
+                            str_root.get(), start_units, end_units));
                     } else {
-                        val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
+                        val_root.set((Item){.item = s2it(
+                            heap_strcpy((char*)matches[idx].data(), mlen))});
                     }
                 }
                 int js_name_len = (int)pair.first.size();
                 const char* js_name = js_regex_original_group_name(rd, pair.first.c_str(),
                     (int)pair.first.size(), &js_name_len);
-                Item key = (Item){.item = s2it(heap_create_name(js_name, js_name_len))};
+                group_key_root.set((Item){.item = s2it(
+                    heap_create_name(js_name, js_name_len))});
                 // CreateDataProperty: a group literally named "__proto__" must become
                 // an own data property of the null-prototype groups object, not set
                 // its [[Prototype]].
-                js_create_data_property(groups_obj, key, val);
+                js_create_data_property(groups_obj_root.get(), group_key_root.get(),
+                    val_root.get());
             }
             // CreateDataProperty per spec — define `groups` as an own data property,
             // bypassing any Array.prototype "groups" setter on the result array.
-            js_create_data_property(result, groups_key, groups_obj);
-            js_regex_attach_indices(result, rd, match_chars, match_len, matches, num_groups,
-                code_unit_indices);
-            return result;
+            js_create_data_property(result_root.get(), key_root.get(),
+                groups_obj_root.get());
+            js_regex_attach_indices(result_root.get(), rd, match_chars,
+                match_len, matches, num_groups, code_unit_indices);
+            return result_root.get();
         }
     }
-    js_create_data_property(result, groups_key, make_js_undefined());
-    js_regex_attach_indices(result, rd, match_chars, match_len, matches, num_groups,
-        code_unit_indices);
-    return result;
+    js_create_data_property(result_root.get(), key_root.get(),
+        make_js_undefined());
+    js_regex_attach_indices(result_root.get(), rd, match_chars, match_len,
+        matches, num_groups, code_unit_indices);
+    return result_root.get();
 }
 
 // =============================================================================

@@ -1396,9 +1396,15 @@ extern "C" Item js_new_error(Item message) {
 }
 
 extern "C" Item js_new_named_error(const char* type_name, const char* message) {
-    Item name = (Item){.item = s2it(heap_create_name(type_name ? type_name : "Error"))};
-    Item text = (Item){.item = s2it(heap_create_name(message ? message : ""))};
-    return js_new_error_with_name(name, text);
+    RootFrame roots(2);
+    Rooted<Item> name_root(roots,
+        (Item){.item = s2it(heap_create_name(type_name ? type_name : "Error"))});
+    Rooted<Item> text_root(roots,
+        (Item){.item = s2it(heap_create_name(message ? message : ""))});
+    if (!roots.valid()) return ItemError;
+    // D5.3.3: constructing the message and Error object can collect; an
+    // unrooted name/text pair produced anonymous [object Object] exceptions.
+    return js_new_error_with_name(name_root.get(), text_root.get());
 }
 
 extern "C" Item js_throw_named_error_text(const char* type_name, const char* message) {
