@@ -349,6 +349,15 @@ void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem
     }
 }
 // List Item Counter + Marker Generation
+static float list_marker_bullet_inline_size(float font_size, bool is_outside,
+                                            bool reserves_first_line) {
+    // Inside bullets participate in inline flow using the full marker-plus-gap
+    // box; outside markers only need their paint box and following half-em gap.
+    return (!is_outside || reserves_first_line)
+        ? font_size * 1.375f
+        : font_size * 0.35f + font_size * 0.5f;
+}
+
 // Create a ::marker element with the given properties
 static DomElement* create_marker_element(LayoutContext* lycon, DomElement* parent_elem,
                                          CssEnum marker_style, float font_size,
@@ -417,11 +426,8 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
                                                  (int)strlen(marker_prop->text_content)); // INT_CAST_OK: string length
         marker_prop->width = extents.width;
     } else if (is_bullet_marker) {
-        // Inside bullets participate in inline flow using Blink's full
-        // marker-plus-gap box; the smaller paint box otherwise shifts split text.
-        marker_prop->width = (!is_outside || marker_prop->reserves_first_line)
-            ? font_size * 1.375f
-            : bullet_size + font_size * 0.5f;
+        marker_prop->width = list_marker_bullet_inline_size(
+            font_size, is_outside, marker_prop->reserves_first_line);
     } else {
         // fallback: use em-based estimate
         marker_prop->width = font_size * 1.375f;
@@ -538,6 +544,10 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         memset(block->pseudo, 0, sizeof(PseudoContentProp));
     }
 
+    float marker_font_size = 16.0f;
+    if (block->font && block->fontp()->font_size > 0.0f) {
+        marker_font_size = block->fontp()->font_size;
+    }
     if (block->pseudo->marker_generated && block->pseudo->marker &&
         block->pseudo->marker->blk) {
         // Retained marker boxes outlive style-only reflows, so refresh inherited
@@ -545,13 +555,17 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         MarkerProp* marker_prop = reinterpret_cast<MarkerProp*>(
             block->pseudo->marker->blk);
         marker_prop->is_outside = is_outside_position;
+        if (is_bullet_marker && !marker_prop->loaded_image) {
+            // Marker placement and its inline reservation form one retained
+            // invariant; switching inside/outside must refresh both values.
+            marker_prop->bullet_size = marker_font_size * 0.35f;
+            marker_prop->width = list_marker_bullet_inline_size(
+                marker_font_size, is_outside_position,
+                marker_prop->reserves_first_line);
+        }
     }
 
     if (!block->pseudo->marker_generated) {
-        float font_size = 16.0f;
-        if (block->font && block->fontp()->font_size > 0) {
-            font_size = block->fontp()->font_size;
-        }
         // CSS 2.1 §12.5: list-style-image is inherited; check self then parent
         const char* image_url = (block->blk) ? block->block()->list_style_image : nullptr;
         if (!image_url || strcmp(image_url, "none") == 0) {
@@ -563,7 +577,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
 
         DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(elmt);
         DomElement* marker_elem = create_marker_element(
-            lycon, parent_elem, marker_style, font_size,
+            lycon, parent_elem, marker_style, marker_font_size,
             is_bullet_marker, is_outside_position,
             is_string_marker, string_marker, marker_css_content,
             lycon->font.font_handle, image_url);

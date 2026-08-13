@@ -3065,6 +3065,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, struct DomElement* paren
 bool is_table_internal_display(CssEnum display);
 bool layout_element_is_anonymous_table_fixup(const struct DomElement* element);
 void layout_unwrap_anonymous_table_fixups_for_dom_mutation(struct DomElement* parent);
+void layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(struct DomElement* root);
 
 inline bool layout_display_is_table_row_group(CssEnum display) {
     return display == CSS_VALUE_TABLE_ROW_GROUP ||

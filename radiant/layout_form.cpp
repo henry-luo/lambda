@@ -485,6 +485,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
     // Listbox: no arrow, width = text content; height = visible_rows * row_height + 2px border
     bool is_listbox = form->multiple || form->select_size > 1;
     if (is_listbox) {
+        layout_materialize_pseudo_content(lycon, block);
         // HTML §4.10.7: visible rows = size if given, else 4 for multiple, else max(1, option_count)
         int visible_rows;
         if (form->select_size > 0) {
@@ -506,6 +507,20 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
             // Native listboxes include each option's inline padding and the select border.
             float content_width = max_text_width + 2.0f * FormDefaults::OPTION_PADDING_H +
                 2.0f * FormDefaults::SELECT_BORDER;
+            for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+                bool is_generated = block->pseudo &&
+                    (child == static_cast<DomNode*>(block->pseudo->before) ||
+                     child == static_cast<DomNode*>(block->pseudo->after));
+                if (!is_generated || !child->is_element()) {
+                    continue;
+                }
+                IntrinsicSizes generated = measure_element_intrinsic_widths(
+                    lycon, child->as_element());
+                BoxMetrics box = layout_box_metrics(block);
+                // Listbox generated blocks participate in its intrinsic content;
+                // native option metrics must not overwrite that wider contribution.
+                content_width = max(content_width, generated.max_content + box.pad_border_h);
+            }
             float min_listbox_width = FormDefaults::SELECT_HEIGHT; // at least square
             form->intrinsic_width = content_width > min_listbox_width ? content_width : min_listbox_width;
             form->intrinsic_height = visible_rows * row_height + 2.0f;

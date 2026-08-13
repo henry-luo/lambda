@@ -267,7 +267,13 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
 // Helper function to process all @font-face rules from a document's stylesheets
 void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
     if (!uicon || !doc) return;
-    if (!doc->stylesheets || doc->stylesheet_count == 0) return;
+    if (doc->font_faces_processed) return;
+    // Geometry can be queried while load scripts run; make this idempotent so
+    // that early font readiness and the normal final-load phase share one registry.
+    if (!doc->stylesheets || doc->stylesheet_count == 0) {
+        doc->font_faces_processed = true;
+        return;
+    }
 
     // Default base path from document URL (used for inline styles).
     const char* doc_base_path = nullptr;
@@ -339,6 +345,7 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
     if (owned_doc_base_path) {
         mem_free(owned_doc_base_path);  // from url_to_local_path()
     }
+    doc->font_faces_processed = true;
 }
 
 void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {

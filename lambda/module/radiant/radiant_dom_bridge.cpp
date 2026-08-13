@@ -191,7 +191,7 @@ static __thread RadiantDomWrapperCacheEntry* s_radiant_dom_wrapper_free = nullpt
 static __thread RadiantDomWrapperCacheEntry* s_radiant_dom_wrapper_sweep = nullptr;
 static __thread bool s_radiant_dom_cache_owner_set = false;
 static __thread pthread_t s_radiant_dom_cache_owner;
-static __thread bool s_radiant_dom_initial_geometry_layout;
+static __thread bool s_radiant_dom_geometry_layout_active;
 
 static void* radiant_dom_cache_malloc(size_t size) {
     return mem_alloc(size, MEM_CAT_JS_RUNTIME);
@@ -3661,22 +3661,28 @@ static bool radiant_dom_element_operation_basic(Item elem_item, JubeDomElementOp
     return false;
 }
 
-static void radiant_dom_commit_initial_geometry_layout(DomDocument* doc) {
-    if (!doc || !doc->root || (doc->view_tree && doc->view_tree->root) ||
-        s_radiant_dom_initial_geometry_layout) {
+static void radiant_dom_commit_geometry_layout(DomDocument* doc) {
+    if (!doc || !doc->root || s_radiant_dom_geometry_layout_active) {
         return;
     }
     UiContext* uicon = (UiContext*)doc->js.host_ui_context;
     if (!uicon) return;
 
-    // CSSOM View geometry reads establish the first layout snapshot. This also
-    // fixes the CSS Tables 3 §2.2 anonymous-box structure before later DOM edits.
-    s_radiant_dom_initial_geometry_layout = true;
+    // CSSOM View geometry reads must include the current cascade and loaded
+    // document fonts; otherwise the first snapshot poisons later measurements.
+    s_radiant_dom_geometry_layout_active = true;
     DomDocument* saved_document = uicon->document;
     uicon->document = doc;
-    layout_html_doc(uicon, doc, false);
+    process_document_font_faces(uicon, doc);
+    if (!doc->js.host_driven_loop && doc->js.mutation_count > 0) {
+        radiant_reconcile_js_dom_mutations(uicon, doc);
+    } else if (!doc->view_tree || !doc->view_tree->root) {
+        // The initial snapshot also establishes anonymous table fixup boxes
+        // before a later DOM edit observes their geometry.
+        layout_html_doc(uicon, doc, false);
+    }
     uicon->document = saved_document;
-    s_radiant_dom_initial_geometry_layout = false;
+    s_radiant_dom_geometry_layout_active = false;
 }
 
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
@@ -3691,7 +3697,7 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
          strcmp(prop, "offsetTop") == 0 || strcmp(prop, "offsetLeft") == 0 ||
          strcmp(prop, "offsetParent") == 0 || strncmp(prop, "client", 6) == 0 ||
          strncmp(prop, "scroll", 6) == 0)) {
-        radiant_dom_commit_initial_geometry_layout(node->as_element()->doc);
+        radiant_dom_commit_geometry_layout(node->as_element()->doc);
         radiant_dom_has_committed_geometry_snapshot(node->as_element()->doc);
     }
     return js_dom_get_property_impl(elem_item, prop_name);

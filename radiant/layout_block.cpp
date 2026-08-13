@@ -3214,8 +3214,11 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
     ViewElement* element = lam::view_require_element(block);
     bool atomic_block_flow = vertical_parent_has_atomic_block_flow(block);
     bool has_block_flow_child = vertical_parent_has_block_flow_child(block);
+    // Vertical table cells defer geometry publication until track sizing, so
+    // their surrogate y offsets still identify forced-break columns here.
     bool has_explicit_baseline_child =
-        radiant::layout_inline_context_has_explicit_baseline_source(block);
+        radiant::layout_inline_context_has_explicit_baseline_source(block) ||
+        block->view_type == RDT_VIEW_TABLE_CELL;
     float logical_block_cursor = 0.0f;
     float logical_inline_cursor = 0.0f;
     float previous_atomic_x_end = 0.0f;
@@ -6112,6 +6115,18 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         layout_apply_preferred_ratio_to_replaced_auto_axes(lycon, block);
     } else if (elmt_name == MARKUP_NAME_VIDEO) {
         layout_apply_preferred_ratio_to_replaced_auto_axes(lycon, block);
+        if (!contain_intrinsic_used_axes.height &&
+            layout_used_preferred_aspect_ratio(block) <= 0.0f &&
+            layout_block_has_automatic_size(block, false)) {
+            // A ratio-less video still has the replaced-element 150px intrinsic
+            // block size; treating its empty DOM contents as the auto height
+            // collapses the remembered content-visibility size to its borders.
+            IntrinsicSize intrinsic = layout_measure_replaced(
+                lycon, block, AvailableSpace::make_max_content());
+            layout_store_given_axis(
+                lycon, block, intrinsic.max_height, false, false);
+            layout_clear_auto_axis_type(block, false);
+        }
     } else if (elmt_name == MARKUP_NAME_EMBED ||
                (elmt_name == MARKUP_NAME_OBJECT && block->get_attribute(MARKUP_NAME_DATA))) {
         if (block->is_element() && layout_aspect_ratio_uses_content_box(block)) {
