@@ -69,7 +69,9 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "module_cache_hit",
     "module_cache_miss",
     "tla_deferred_body",
-    "tla_drain"
+    "tla_drain",
+    "uri_error_cache_hit",
+    "uri_error_cache_miss"
 };
 
 static const char* kReasonNames[JS_OPT_REASON_COUNT] = {
@@ -397,6 +399,87 @@ static void expect_ok_output(const char* output) {
     ASSERT_NE(strstr(output, "OPT_OK"), nullptr) << output;
 }
 
+static const char* find_last_before(const char* begin, const char* end,
+        const char* pattern) {
+    if (!begin || !end || !pattern || begin >= end) return NULL;
+    const char* last = NULL;
+    const char* cursor = begin;
+    while ((cursor = strstr(cursor, pattern)) && cursor < end) {
+        last = cursor;
+        cursor++;
+    }
+    return last;
+}
+
+static bool mir_branch_join_uses_merged_carrier(const char* mir,
+        const char* function_prefix, const char* branch_anchor,
+        const char* branch_opcode) {
+    const char* function = mir && function_prefix
+        ? strstr(mir, function_prefix) : NULL;
+    const char* function_end = function ? strstr(function, "\n\tendfunc") : NULL;
+    const char* anchor = function ? strstr(function, branch_anchor) : NULL;
+    char branch_pattern[16];
+    snprintf(branch_pattern, sizeof(branch_pattern), "\n\t%s\tL", branch_opcode);
+    const char* branch = anchor ? strstr(anchor, branch_pattern) : NULL;
+    if (!function || !function_end || !anchor || !branch ||
+            branch >= function_end) return false;
+
+    const char* branch_label = branch + strlen(branch_pattern) - 1;
+    const char* branch_label_end = strchr(branch_label, ',');
+    if (!branch_label_end || branch_label_end >= function_end) return false;
+    char branch_marker[40];
+    int branch_label_len = (int)(branch_label_end - branch_label);
+    if (branch_label_len <= 0 || branch_label_len + 3 >=
+            (int)sizeof(branch_marker)) return false;
+    branch_marker[0] = '\n';
+    memcpy(branch_marker + 1, branch_label, (size_t)branch_label_len);
+    branch_marker[branch_label_len + 1] = ':';
+    branch_marker[branch_label_len + 2] = '\n';
+    branch_marker[branch_label_len + 3] = '\0';
+
+    const char* branch_target = strstr(branch_label_end, branch_marker);
+    if (!branch_target || branch_target >= function_end) return false;
+    const char* join_jump = find_last_before(branch_label_end, branch_target,
+        "\n\tjmp\tL");
+    const char* merge_move = find_last_before(branch_label_end, join_jump,
+        "\n\tmov\t%");
+    if (!merge_move || !join_jump) return false;
+
+    const char* destination = merge_move + strlen("\n\tmov\t");
+    const char* destination_end = strchr(destination, ',');
+    if (!destination_end || destination_end >= function_end) return false;
+    char merged[32];
+    int merged_len = (int)(destination_end - destination);
+    if (merged_len <= 0 || merged_len >= (int)sizeof(merged)) return false;
+    memcpy(merged, destination, (size_t)merged_len);
+    merged[merged_len] = '\0';
+
+    const char* label = join_jump + strlen("\n\tjmp\t");
+    const char* label_end = strchr(label, '\n');
+    if (!label_end || label_end >= function_end) return false;
+    char join_marker[40];
+    int label_len = (int)(label_end - label);
+    if (label_len <= 0 || label_len + 3 >= (int)sizeof(join_marker)) return false;
+    join_marker[0] = '\n';
+    memcpy(join_marker + 1, label, (size_t)label_len);
+    join_marker[label_len + 1] = ':';
+    join_marker[label_len + 2] = '\n';
+    join_marker[label_len + 3] = '\0';
+
+    const char* join = strstr(branch_target, join_marker);
+    const char* error_test = join ? strstr(join, "\n\tursh\t") : NULL;
+    if (!error_test || error_test >= function_end) return false;
+    const char* first_comma = strchr(error_test, ',');
+    if (!first_comma || first_comma >= function_end) return false;
+    const char* carrier = first_comma + 1;
+    while (*carrier == ' ' || *carrier == '\t') carrier++;
+    size_t carrier_len = 0;
+    while (carrier[carrier_len] && carrier[carrier_len] != ',' &&
+            carrier[carrier_len] != '\n') carrier_len++;
+    return carrier_len == strlen(merged) &&
+        strncmp(carrier, merged, carrier_len) == 0;
+}
+
 }  // namespace
 
 TEST(JsOpt, TraceParserFailsClosed) {
@@ -536,6 +619,79 @@ TEST(JsOpt, NamedLoadStoreICWarms) {
     EXPECT_GT(trace.events[JS_OPT_STORE_IC_HIT_MONO][1] +
                   trace.events[JS_OPT_STORE_IC_HIT_POLY][1], 0u);
     expect_trace_off_same("named_ic_warm", source, output);
+}
+
+TEST(JsOpt, MirLogicalJoinPublishesMergedCarrier) {
+    const char* source =
+        "function logicalJoinCarrier(e) {\n"
+        "  return (null == e._pf && (e._pf = {ready: true}), e._pf);\n"
+        "}\n"
+        "var state = {_pf: {ready: true}};\n"
+        "if (!logicalJoinCarrier(state).ready) throw new Error('bad join');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("mir_logical_join_carrier", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+
+    char mir_path[512];
+    snprintf(mir_path, sizeof(mir_path), "%s/%s.mir", kOptDir,
+        "mir_logical_join_carrier");
+    char* mir = read_text(mir_path);
+    ASSERT_NE(mir, nullptr);
+    // D8.4.3: a branch-local RHS register is undefined on the short-circuit
+    // edge; the post-join ERROR test must consume the merged expression value.
+    EXPECT_TRUE(mir_branch_join_uses_merged_carrier(
+        mir, "_js_logicalJoinCarrier_", "js_equal,", "bt"));
+    free(mir);
+    expect_trace_off_same("mir_logical_join_carrier", source, output);
+}
+
+TEST(JsOpt, MirConditionalJoinPublishesMergedCarrier) {
+    const char* source =
+        "function conditionalJoinCarrier(flag, state) {\n"
+        "  return ((flag ? (state.x = {ready: true}) : state.x), state.x);\n"
+        "}\n"
+        "var state = {x: {ready: true}};\n"
+        "if (!conditionalJoinCarrier(false, state).ready) throw new Error('bad join');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("mir_conditional_join_carrier", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+
+    char mir_path[512];
+    snprintf(mir_path, sizeof(mir_path), "%s/%s.mir", kOptDir,
+        "mir_conditional_join_carrier");
+    char* mir = read_text(mir_path);
+    ASSERT_NE(mir, nullptr);
+    // D8.4.3: both conditional arms must publish the merged destination before
+    // the post-join ERROR test; neither arm-local helper register dominates it.
+    EXPECT_TRUE(mir_branch_join_uses_merged_carrier(
+        mir, "_js_conditionalJoinCarrier_", "js_is_truthy,", "bf"));
+    free(mir);
+    expect_trace_off_same("mir_conditional_join_carrier", source, output);
+}
+
+TEST(JsOpt, UriErrorCacheRegistersRootAndHits) {
+    const char* source =
+        "for (let i = 0; i < 256; i++) {\n"
+        "  try { decodeURIComponent('%E0%00'); }\n"
+        "  catch (error) { if (!(error instanceof URIError)) throw error; }\n"
+        "}\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("uri_error_cache", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    // D5.3.3: hits are recorded only after the cache's exact Item range is a
+    // registered GC root, so the contract covers the ownership precondition.
+    EXPECT_GE(trace.events[JS_OPT_URI_ERROR_CACHE_MISS][1], 1u);
+    EXPECT_GE(trace.events[JS_OPT_URI_ERROR_CACHE_HIT][1], 255u);
+    expect_trace_off_same("uri_error_cache", source, output);
 }
 
 TEST(JsOpt, DynamicFunctionReturnIdentifierFastPath) {

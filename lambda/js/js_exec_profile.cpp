@@ -126,7 +126,9 @@ static const char* g_js_opt_event_names[JS_OPT_EVENT_COUNT] = {
     "module_cache_hit",
     "module_cache_miss",
     "tla_deferred_body",
-    "tla_drain"
+    "tla_drain",
+    "uri_error_cache_hit",
+    "uri_error_cache_miss"
 };
 
 static const char* g_js_opt_reason_names[JS_OPT_REASON_COUNT] = {

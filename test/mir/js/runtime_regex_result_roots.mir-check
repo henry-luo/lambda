@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "D5.3.3: RegExp named-capture and indices result graphs survive allocation safepoints.",
+  "checks": [
+    {
+      "in_func": "js_main",
+      "expect": [
+        "call\tjs_call_function_prerooted_args_into"
+      ]
+    }
+  ]
+}
