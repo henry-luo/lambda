@@ -5088,12 +5088,6 @@ extern "C" Item js_string_fromCharCode(Item code_item) {
     return js_string_from_char_code_uint16(code);
 }
 
-extern "C" Item js_string_fromCharCode_int(int64_t code_value) {
-    int64_t mod = code_value % 65536;
-    if (mod < 0) mod += 65536;
-    return js_string_from_char_code_uint16((int)mod);
-}
-
 extern "C" int64_t js_string_last_fromCharCode_cp(Item str_item) {
     if (str_item.item == g_last_from_char_code_string.item &&
         g_last_from_char_code_epoch == js_get_heap_epoch()) {
@@ -7345,21 +7339,6 @@ extern "C" Item js_reflect_prevent_extensions(Item obj) {
     return (Item){.item = b2it(true)};
 }
 
-// Reflect.get(target, key [, receiver]) — ES §28.1.6
-extern "C" Item js_reflect_get(Item target, Item key) {
-    JS_RETURN_IF_ERROR(js_require_object_type(target, "get"));
-    return js_reflect_get_with_receiver(target, key, target);
-}
-
-// Reflect.has(target, key) — ES §28.1.9
-extern "C" Item js_reflect_has(Item target, Item key) {
-    JS_RETURN_IF_ERROR(js_require_object_type(target, "has"));
-    if (!js_key_is_symbol_c(key)) {
-        JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
-    }
-    return js_in(key, target);
-}
-
 // Reflect.getPrototypeOf(target) — ES §28.1.8
 extern "C" Item js_reflect_get_prototype_of(Item target) {
     JS_RETURN_IF_ERROR(js_require_object_type(target, "getPrototypeOf"));
@@ -8455,17 +8434,6 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
     return obj;
 }
 
-// Wrapper for Object.create(O, Properties): per ES §19.1.2.2 step 4, only call
-// ObjectDefineProperties when Properties is not undefined. Object.defineProperties
-// itself throws TypeError on undefined/null, but Object.create only allows undefined.
-// Per ES §19.1.2.2 step 3: "If Properties is not undefined, return ? ObjectDefineProperties..."
-// — null still flows through and ObjectDefineProperties step 1 ToObject throws TypeError.
-extern "C" Item js_object_create_define_properties(Item obj, Item props) {
-    TypeId pt = get_type_id(props);
-    if (pt == LMD_TYPE_UNDEFINED) return obj;
-    return js_object_define_properties(obj, props);
-}
-
 // =============================================================================
 // Array.isArray — check if value is an array
 // =============================================================================
@@ -8493,15 +8461,6 @@ extern "C" Item js_array_is_array(Item value) {
     // must keep the same IsArray result until its identity-preserving promotion.
     if (type == LMD_TYPE_ARRAY && js_is_arguments_exotic_array(value)) return (Item){.item = ITEM_FALSE};
     return (Item){.item = js_is_js_array(value) ? ITEM_TRUE : ITEM_FALSE};
-}
-
-// =============================================================================
-// alert() — shim for benchmarks (outputs to console)
-// =============================================================================
-
-extern "C" Item js_alert(Item msg) {
-    js_console_log(msg);
-    return ItemNull;
 }
 
 // =============================================================================
@@ -9676,41 +9635,6 @@ extern "C" Item js_to_string_val(Item value) {
         return js_symbol_to_string(value);
     }
     return js_to_string(value);
-}
-
-// =============================================================================
-// Number property access — MAX_SAFE_INTEGER, MIN_SAFE_INTEGER, etc.
-// =============================================================================
-
-static Item make_double(double val) {
-    return push_d(val);
-}
-
-extern "C" Item js_number_property(Item prop_name) {
-    TypeId type = get_type_id(prop_name);
-    if (type != LMD_TYPE_STRING) return ItemNull;
-
-    String* s = it2s(prop_name);
-    if (!s) return ItemNull;
-
-    if (s->len == 16 && strncmp(s->chars, "MAX_SAFE_INTEGER", 16) == 0) return make_double(9007199254740991.0);
-    if (s->len == 16 && strncmp(s->chars, "MIN_SAFE_INTEGER", 16) == 0) return make_double(-9007199254740991.0);
-    if (s->len == 9 && strncmp(s->chars, "MAX_VALUE", 9) == 0) return make_double(1.7976931348623157e+308);
-    if (s->len == 9 && strncmp(s->chars, "MIN_VALUE", 9) == 0) return make_double(5e-324);
-    if (s->len == 17 && strncmp(s->chars, "POSITIVE_INFINITY", 17) == 0) return make_double(1.0/0.0);
-    if (s->len == 17 && strncmp(s->chars, "NEGATIVE_INFINITY", 17) == 0) return make_double(-1.0/0.0);
-    if (s->len == 3 && strncmp(s->chars, "NaN", 3) == 0) return make_double(0.0/0.0);
-    if (s->len == 7 && strncmp(s->chars, "EPSILON", 7) == 0) return make_double(2.220446049250313e-16);
-
-    // v18k: Fall through to constructor property access for static methods
-    // (isInteger, isFinite, isNaN, isSafeInteger, parseInt, parseFloat)
-    Item ctor_name = (Item){.item = s2it(heap_create_name("Number", 6))};
-    Item ctor = js_get_constructor(ctor_name);
-    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
-        return js_get_key_default(ctor, prop_name);
-    }
-
-    return ItemNull;
 }
 
 // =============================================================================
@@ -13189,26 +13113,6 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         return js_delete_array_property(obj, key, false);
     }
     return js_delete_map_property(obj, key, false);
-}
-
-extern "C" Item js_delete_property_strict(Item obj, Item key) {
-    JS_ASSIGN_OR_RETURN(prop_key, js_to_property_key(key));
-    JS_ASSIGN_OR_RETURN(desc, js_object_get_own_property_descriptor(obj, prop_key));
-    TypeId desc_type = get_type_id(desc);
-    bool desc_present = desc.item != ItemNull.item && desc.item != ITEM_JS_UNDEFINED &&
-        desc_type != LMD_TYPE_UNDEFINED && desc_type != LMD_TYPE_NULL;
-    if (desc_present) {
-        Item cfg_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
-        Item cfg = js_get_key_default(desc, cfg_key);
-        if (!js_is_truthy(cfg)) {
-            return js_throw_type_error("Cannot delete non-configurable property");
-        }
-    }
-    JS_ASSIGN_OR_RETURN(result, js_delete_property(obj, prop_key));
-    if (!js_is_truthy(result)) {
-        return js_throw_type_error("Cannot delete non-configurable property");
-    }
-    return result;
 }
 
 // =============================================================================
@@ -17015,7 +16919,7 @@ static void js_populate_number_ctor(Item fn_item) {
     };
     for (int i = 0; i < 8; i++) {
         Item key = (Item){.item = s2it(heap_create_name(constants[i].name, constants[i].len))};
-        js_func_init_property(fn_item, key, make_double(constants[i].value));
+        js_func_init_property(fn_item, key, push_d(constants[i].value));
         js_mark_non_enumerable(fn_item, key);
         js_mark_non_writable(fn_item, key);
         js_mark_non_configurable(fn_item, key);
@@ -18068,30 +17972,6 @@ extern "C" Item js_url_construct_with_base(Item input, Item base) {
     mem_free(input_cstr);
     url_destroy(base_url);
     return js_url_to_object(url);
-}
-
-extern "C" Item js_url_parse(Item input, Item base) {
-    TypeId tid = get_type_id(input);
-    if (tid != LMD_TYPE_STRING) return ItemNull;
-
-    TypeId tid_base = get_type_id(base);
-    if (tid_base == LMD_TYPE_STRING) {
-        return js_url_construct_with_base(input, base);
-    }
-    return js_url_construct(input);
-}
-
-extern "C" Item js_url_can_parse(Item input) {
-    TypeId tid = get_type_id(input);
-    if (tid != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(input);
-    if (!s || s->len == 0) return (Item){.item = b2it(false)};
-
-    Url* url = url_parse(s->chars);
-    if (!url) return (Item){.item = b2it(false)};
-    bool valid = url->is_valid;
-    url_destroy(url);
-    return valid ? (Item){.item = b2it(true)} : (Item){.item = b2it(false)};
 }
 
 static Item js_web_stream_key(const char* name) {

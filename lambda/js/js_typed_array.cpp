@@ -1976,13 +1976,9 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
     return result_item;
 }
 
-extern "C" bool js_arraybuffer_is_view(Item val) {
-    return js_is_typed_array(val) || js_is_dataview(val);
-}
-
 // Item-returning wrapper for MIR JIT calls (MIR expects Item return type)
 extern "C" Item js_arraybuffer_is_view_item(Item val) {
-    bool result = js_arraybuffer_is_view(val);
+    bool result = js_is_typed_array(val) || js_is_dataview(val);
     return (Item){.item = result ? (ITEM_TRUE) : (ITEM_FALSE)};
 }
 

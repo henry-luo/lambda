@@ -1103,40 +1103,12 @@ static void js_mark_function_flags(Item fn_item, uint32_t flags) {
     js_function_finalize_capabilities(fn);
 }
 
-// v20: Mark a function as a generator (generator prototype has no constructor)
-extern "C" void js_mark_generator_func(Item fn_item) {
-    js_mark_function_flags(fn_item, JS_FUNC_FLAG_GENERATOR);
-}
-
-// Mark a function as an async generator function (sets both GENERATOR and ASYNC_GEN flags)
-extern "C" void js_mark_async_generator_func(Item fn_item) {
-    js_mark_function_flags(fn_item, JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN);
-}
-
-// Mark a function as an async (non-generator) function — affects [[Prototype]]/.constructor
-extern "C" void js_mark_async_func(Item fn_item) {
-    js_mark_function_flags(fn_item, JS_FUNC_FLAG_ASYNC);
-}
-
 extern "C" void js_mark_derived_constructor_func(Item fn_item) {
     js_mark_function_flags(fn_item, JS_FUNC_FLAG_DERIVED_CTOR);
 }
 
-// Mark a function as an arrow function (non-constructable)
-extern "C" void js_mark_arrow_func(Item fn_item) {
-    js_mark_function_flags(fn_item, JS_FUNC_FLAG_ARROW);
-}
-
 extern "C" void js_mark_method_func(Item fn_item) {
     js_mark_function_flags(fn_item, JS_FUNC_FLAG_METHOD);
-}
-
-extern "C" void js_mark_eval_initializer_func_if_active(Item fn_item) {
-    if (!js_private_field_initializing && !js_eval_initializer_context) return;
-    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->eval_initializer_context = true;
-    js_function_finalize_capabilities(fn);
 }
 
 // Mark a function as strict mode (ES spec [[Strict]] internal slot)

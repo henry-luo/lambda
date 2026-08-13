@@ -1240,20 +1240,6 @@ static Item js_property_lane_bridge_key(JsPropertyLane lane,
         ? observable_key : js_property_key_from_lane(lane);
 }
 
-static Item js_property_descriptor_field(const char* name, int length) {
-    return (Item){.item = s2it(heap_create_name(name, (size_t)length))};
-}
-
-static Item js_property_descriptor_set(Item descriptor, const char* name,
-                                       int length, Item value) {
-    Item field = js_property_descriptor_field(name, length);
-    if (field.item == ItemNull.item) return ItemError;
-    // Descriptor records are internal DefineOwn operands; routing their
-    // fields through ordinary Set would re-enter receiver/prototype
-    // completion and can recursively build another descriptor record.
-    return js_define_own_key_storage(descriptor, field, value);
-}
-
 static Item js_property_lane_bridge_key_or_error(JsPropertyLane lane,
                                                   Item observable_key) {
     Item key = js_property_lane_bridge_key(lane, observable_key);
@@ -1297,59 +1283,6 @@ extern "C" Item js_set(Item target, JsPropertyLane lane, Item observable_key,
                                       value_root.get(), receiver_root.get());
 }
 
-extern "C" Item js_define_own(Item target, JsPropertyLane lane,
-                               Item observable_key, uint32_t descriptor_bits,
-                               Item value, Item getter, Item setter) {
-    RootFrame roots(4);
-    Rooted<Item> target_root(roots, target);
-    Rooted<Item> key_root(roots,
-        js_property_lane_bridge_key_or_error(lane, observable_key));
-    Rooted<Item> descriptor_root(roots, js_new_object());
-    Rooted<Item> value_root(roots, value);
-    if (!roots.valid() || key_root.get().item == ItemError.item ||
-            descriptor_root.get().item == ItemNull.item) return ItemError;
-
-    uint8_t flags = (uint8_t)(descriptor_bits & 0xffu);
-    if (flags & JS_PD_HAS_VALUE) {
-        Item status = js_property_descriptor_set(descriptor_root.get(),
-            "value", 5, value_root.get());
-        if (item_is_error(status)) return status;
-    }
-    if (flags & JS_PD_HAS_GET) {
-        Item status = js_property_descriptor_set(descriptor_root.get(),
-            "get", 3, getter);
-        if (item_is_error(status)) return status;
-    }
-    if (flags & JS_PD_HAS_SET) {
-        Item status = js_property_descriptor_set(descriptor_root.get(),
-            "set", 3, setter);
-        if (item_is_error(status)) return status;
-    }
-    if (flags & JS_PD_HAS_WRITABLE) {
-        Item status = js_property_descriptor_set(descriptor_root.get(),
-            "writable", 8,
-            (Item){.item = b2it((flags & JS_PD_WRITABLE) != 0)});
-        if (item_is_error(status)) return status;
-    }
-    if (flags & JS_PD_HAS_ENUMERABLE) {
-        Item status = js_property_descriptor_set(descriptor_root.get(),
-            "enumerable", 10,
-            (Item){.item = b2it((flags & JS_PD_ENUMERABLE) != 0)});
-        if (item_is_error(status)) return status;
-    }
-    if (flags & JS_PD_HAS_CONFIGURABLE) {
-        Item status = js_property_descriptor_set(descriptor_root.get(),
-            "configurable", 12,
-            (Item){.item = b2it((descriptor_bits &
-                JS_PD_CONFIGURABLE_VALUE) != 0)});
-        if (item_is_error(status)) return status;
-    }
-    // DefineOwn is a completion-producing kernel; Object.defineProperty's
-    // caller policy must not turn a rejected completion into an exception here.
-    return js_reflect_define_property(target_root.get(), key_root.get(),
-                                      descriptor_root.get());
-}
-
 extern "C" Item js_delete(Item target, JsPropertyLane lane,
                            Item observable_key) {
     RootFrame roots(2);
@@ -1379,30 +1312,4 @@ extern "C" Item js_has_property(Item target, JsPropertyLane lane,
         js_property_lane_bridge_key_or_error(lane, observable_key));
     if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
     return js_in(key_root.get(), target_root.get());
-}
-
-extern "C" Item js_has_own(Item target, JsPropertyLane lane,
-                            Item observable_key) {
-    RootFrame roots(2);
-    Rooted<Item> target_root(roots, target);
-    Rooted<Item> key_root(roots,
-        js_property_lane_bridge_key_or_error(lane, observable_key));
-    if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
-    return js_has_own_property(target_root.get(), key_root.get());
-}
-
-extern "C" Item js_get_own_property_descriptor_lane(Item target,
-                                                     JsPropertyLane lane,
-                                                     Item observable_key) {
-    RootFrame roots(2);
-    Rooted<Item> target_root(roots, target);
-    Rooted<Item> key_root(roots,
-        js_property_lane_bridge_key_or_error(lane, observable_key));
-    if (!roots.valid() || key_root.get().item == ItemError.item) return ItemError;
-    return js_reflect_get_own_property_descriptor(target_root.get(),
-                                                  key_root.get());
-}
-
-extern "C" Item js_own_keys(Item target) {
-    return js_reflect_own_keys(target);
 }
