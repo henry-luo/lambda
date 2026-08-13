@@ -526,6 +526,7 @@ The first required rows are:
 | Module/TLA settlement | deferred body is drained before namespace resolution | pending async module is not resolved early and a module is not drained twice |
 | Scope/fact indexes | repeated lookups/fact requests hit the indexed cache | mutation or unavailable fact records a miss and rebuild/fallback |
 | URI error cache | repeated malformed URI decoding records a miss followed by rooted cache hits | absent runtime/root registration uses the uncached rooted constructor and cannot report a hit (**D5.3.3**) |
+| MIR branch-join carrier | logical and conditional joins publish the merged `Item` destination to the post-join ERROR-lane test | neither short-circuit nor alternate edges may expose a path-local helper register (**D8.4.3**) |
 
 Each positive case must also assert the ordinary result. Each negative case
 must assert the result/error and the reasoned fallback. This is important for
@@ -976,8 +977,9 @@ retry rule was changed. Five coupled root causes were fixed:
    intermittently contained the bare `ItemError` bit pattern. Logical joins now
    publish the merged result as the carrier, and conditional branches both
    start from the pre-split carrier and publish their merged result at the join.
-   `JsOpt.MirLogicalJoinPublishesMergedCarrier` checks the ordinary result and
-   the finalized-MIR dataflow without pinning a register number.
+   `JsOpt.MirLogicalJoinPublishesMergedCarrier` and
+   `JsOpt.MirConditionalJoinPublishesMergedCarrier` check the ordinary results
+   and finalized-MIR dataflow without pinning register numbers.
 5. The context-local URI/ASCII cache had an exact `JsRootRange` descriptor but
    never registered it before publishing cached Items. Under a long hot batch,
    GC could reclaim or relocate the cached `URIError` and later dereference a
@@ -989,23 +991,38 @@ retry rule was changed. Five coupled root causes were fixed:
    the worker after 69/100 tests, and peaked at 1,371.5 MB RSS; afterwards the
    same batch completed 100/100 on every stability run.
 
-Eight consecutive post-fix release `make test262-baseline` runs collected all
+The runtime ownership fixes now have named **D5.3.3** fixtures in
+`test_mir_gc_stress_gtest`: global URI/character caches, `for...in` key/result
+construction, and RegExp named-group/indices result construction. Each fixture
+must match its unstressed output under collect-every plus poison, deterministic
+randomized GC plus poison, and collect-every through the MIR interpreter. The
+same source fixtures participate in `test_js_mir_emission_gtest`; an additional
+**D8.4.3** fixture requires exactly one
+`js_init_module_vars_undefined_bulk` call so the batch-lowering path cannot be
+silently disabled again.
+
+Nine consecutive post-fix release `make test262-baseline` runs collected all
 40,261 baseline results, each with **40,261 fully passing, 0
 non-fully-passing, 0 failed, no retry phase, no crash exit, and no killed
 batch**. The final minimized-source run completed in **164.2 s** at **677.9 MB**
 peak RSS; the immediately preceding three exact trace-hook candidate runs took
-160.8 s, 163.9 s, and 163.5 s at 676.6 MB, 678.8 MB, and 678.5 MB. The final
-source also passed `make test-lambda-baseline` at 3,705/3,705 and the
-optimization-contract executable at 11/11. This closes the instability
-regression without weakening a gate; the broader G1/G2/G3 Unified-AST closeout
-remains open.
+160.8 s, 163.9 s, and 163.5 s at 676.6 MB, 678.8 MB, and 678.5 MB. After adding
+the focused regression GTests, the ninth validation run completed in 195.6 s
+at 676.9 MB peak RSS. The current source passed `make test-lambda-baseline` at
+3,713/3,713: JS MIR emission 20/20 and MIR forced-GC stress 66/66 include the
+new fixtures. The optimization-contract executable passed 12/12. This closes
+the instability regression without weakening a gate. The standalone
+`make test-gc-rooting-core` gate also passed: all dynamic root oracles, 45
+`NO_GC` imports over 81 call-graph nodes, 14,945 native-function hazard checks,
+and the 66/66 corpus sweep. The broader G1/G2/G3 Unified-AST closeout remains
+open.
 
 ### 13.2 Phase status
 
 | Phase | Status | Evidence |
 |---|---|---|
 | 0 — measurement/guardrails | completed | Common timing/MIR protocol, GTest parsers, TSV capture summaries, clean five-run Lambda/JS manifests, instrumentation equivalence, and finalized-artifact equivalence are recorded |
-| 0.5 — optimization contract testing | core implementation landed; matrix expansion remains | `test_js_opt_gtest` passes 11/11 with profile tracing, including the medium capture-free regex cache/fresh-object contract, the D8.4.3 logical-join carrier contract, the D5.3.3 rooted URI cache contract, trace-off semantic/finalized-MIR differential, and fail-closed parser checks; runtime ownership migration and the remaining optimization rows remain |
+| 0.5 — optimization contract testing | core implementation landed; matrix expansion remains | `test_js_opt_gtest` passes 12/12 with profile tracing, including the medium capture-free regex cache/fresh-object contract, D8.4.3 logical and conditional join-carrier contracts, the D5.3.3 rooted URI cache contract, trace-off semantic/finalized-MIR differential, and fail-closed parser checks; `test_mir_gc_stress_gtest` passes 66/66 with named fixtures for all repaired ownership paths; runtime ownership migration and the remaining optimization rows remain |
 | 1 — traversal/index/binding | in progress | `AstIndex`, dense node/function identities, common core child visitor, JS function pointer index, and pass-manager prerequisite harness landed; extension catalog/binding migration remain |
 | 2 — facts/pass manager | in progress | Typed fact bits/pass manager and `MirValue` demand/contract fields landed; production pass wrapping remains |
 | 3 — demand-driven `MirValue` | in progress | Immediate boxed-number reuse is live for indexed JS function/module scopes; full demand propagation and common expression boundaries remain |
@@ -1023,7 +1040,7 @@ remains open.
 | D4 JS large-library finalized MIR diagnostic | 5,743,247 | 5,008,331 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
 | D4 JS complete-corpus finalized MIR diagnostic | 7,187,862 | 6,135,408 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
 | G5 sample/timing integrity | 698 Lambda rows / 324 JS rows, identical sorted manifests | historical captures retained for diagnosis only; incomplete captures are rejected | exact timing manifest | open until post-rejection recapture |
-| G0 regressions | current baselines | `make test-lambda-baseline`: input 2104/2104 plus Lambda runtime 1601/1601 (3705/3705 total); eight consecutive post-fix `make test262-baseline` runs: 40261/40261 fully passing, 0 non-fully-passing, 0 failed, 0 retries/crash exits/killed batches; `test_js_opt_gtest`: 11/11 | Lambda and Test262 baselines green | verified 2026-08-13 with the final minimized source and release Test262 runtime; final Test262 run 164.2 s at 677.9 MB peak RSS; `test/js262/t262_partial.txt` is empty and no Test262 test/runner source was changed |
+| G0 regressions | current baselines | `make test-lambda-baseline`: input 2104/2104 plus Lambda runtime 1609/1609 (3713/3713 total), including JS MIR 20/20 and forced-GC 66/66; nine consecutive post-fix `make test262-baseline` runs: 40261/40261 fully passing, 0 non-fully-passing, 0 failed, 0 retries/crash exits/killed batches; `test_js_opt_gtest`: 12/12 | Lambda and Test262 baselines green | verified 2026-08-13 after adding the focused GTests; latest Test262 run 195.6 s at 676.9 MB peak RSS; `test/js262/t262_partial.txt` is empty and no Test262 test/runner source was changed |
 
 ### 13.4 Deletion ledger
 
@@ -1056,7 +1073,7 @@ This plan is complete only when all statements are true:
 - [ ] D4 reports deterministic finalized-MIR volume for the frozen JS large-library cohort and complete corpus; investigate material growth (**D8.6.4v2**).
 - [ ] G5 proves identical, complete, deterministic release-mode timing manifests; MIR manifests remain attached as diagnostics (**D8.6.4v2**).
 - [ ] Optimization Contract Testing passes: each material tuning path has a positive and guard/fallback fixture with deterministic `JsOptTrace` events; trace-on/trace-off output, errors, and finalized MIR are identical (**D8.2.5–D8.2.6**, **D8.6.4v2**).
-- [ ] G0 and the entire §11 matrix are green with no weakened ratchets. Current evidence has `make test-lambda-baseline` green at 3705/3705 (input 2104/2104 plus Lambda runtime 1601/1601), eight consecutive post-fix `make test262-baseline` runs green at 40261/40261 with zero non-fully-passing tests, retries, crash exits, or killed batches, and `test_js_opt_gtest` green at 11/11; the remaining §11 commands still require final closeout execution.
+- [ ] G0 and the entire §11 matrix are green with no weakened ratchets. Current evidence has `make test-lambda-baseline` green at 3713/3713 (input 2104/2104 plus Lambda runtime 1609/1609, including JS MIR 20/20 and forced-GC 66/66), nine consecutive post-fix `make test262-baseline` runs green at 40261/40261 with zero non-fully-passing tests, retries, crash exits, or killed batches, and `test_js_opt_gtest` green at 12/12; the remaining §11 commands still require final closeout execution.
 - [ ] §13 contains the final commits, raw-capture locations, medians, phase attribution, LOC ledger, and verified test results.
 
 Until every item is checked, the unified-AST tuning continuation remains open.

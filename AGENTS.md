@@ -19,6 +19,7 @@ These rules MUST be followed. Violations are considered errors.
 15. **NEVER restore or rely on conservative native-stack GC scanning.** It is retired. Fix GC lifetime bugs with precise `RootFrame` / `Rooted` ownership only.
 16. **NEVER patch third-party vendor code.** MIR (`lambda/mir/`), Tree-sitter (`lambda/tree-sitter*/`), ThorVG, re2, curl and every other vendored dependency are off limits — do not edit them in place. Fix the defect on the Lambda side instead. If the fix genuinely belongs upstream, STOP and ask for approval first, explaining the root cause. Once approved, record the change as a patch under `patches/` so the delta versus upstream stays auditable — see `lambda/mir/VENDOR.md` for the pattern.
 17. **Cite rulings by formal-spec ID.** `doc/Lambda_Formal_Semantics.md` (`S#`) and `doc/Lambda_Formal_Design.md` (`D#`) are the single sources of truth. In chat/discussion and in every new or updated design/impl doc, quote the `S#`/`D#` point when one covers the topic; only when none exists, quote the vibe design-doc ledger ID (e.g. TE-16, K13, CW9). When a semantics or design ruling changes, update BOTH the `./doc` formal spec (revise the ruling in place: `v2` suffix + doc semver bump) and the relevant `./vibe` working design doc.
+18. **When js262/Test262 tests fail, crash, or time out, NEVER modify `test_js_test262_gtest` to mask the issue. Investigate and fix the root cause or instability in the JS runtime.**
 
 | DON'T | DO |
 |-------|-----|
