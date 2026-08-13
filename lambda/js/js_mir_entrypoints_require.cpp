@@ -2462,6 +2462,7 @@ extern "C" Item js_dynamic_import(Item specifier) {
         mem_free(source);
     }
     js_dynamic_import_suppress_module_drain--;
+    Rooted<Item> namespace_root(roots, ns);
     if (js_module_needs_async_settle(resolved_spec_root.get())) {
         js_tla_flush_for_dynamic_import();
     }
@@ -2479,11 +2480,20 @@ extern "C" Item js_dynamic_import(Item specifier) {
     // target so dynamic-import .then/.finally callbacks fire in spec order
     // (importing modules' callbacks fire after the underlying TLA settles).
     extern Item js_p5_chain_dynamic_import(Item, Item);
-    Rooted<Item> namespace_root(roots, ns);
-    Rooted<Item> awaited_root(roots,
-        js_module_get_awaited_target(resolved_spec_root.get()));
-    if (get_type_id(awaited_root.get()) != LMD_TYPE_NULL) {
-        return js_p5_chain_dynamic_import(awaited_root.get(), namespace_root.get());
+    Item awaited = js_module_get_awaited_target(resolved_spec_root.get());
+    if (get_type_id(awaited) == LMD_TYPE_NULL &&
+            js_module_needs_async_settle(resolved_spec_root.get())) {
+        // A nested module can suspend at a non-Promise await (for example
+        // `await 1`) and therefore has no awaited target to chain.  The
+        // importer is still required to see the module only after its deferred
+        // post-await body publishes exports; finish that local continuation
+        // before resolving the dynamic-import Promise (ECMA-262
+        // ContinueDynamicImport).
+        js_tla_drain_pending_modules();
+        awaited = js_module_get_awaited_target(resolved_spec_root.get());
+    }
+    if (get_type_id(awaited) != LMD_TYPE_NULL) {
+        return js_p5_chain_dynamic_import(awaited, namespace_root.get());
     }
     // Wrap the namespace in a resolved Promise
     return js_promise_resolve(namespace_root.get());

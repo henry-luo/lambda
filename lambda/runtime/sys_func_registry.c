@@ -2181,6 +2181,7 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_elements_get_int", FPTR(js_elements_get_int)},
     {"js_elements_set_int", FPTR(js_elements_set_int)},
+    {"js_elements_set_number", FPTR(js_elements_set_number)},
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},
     {"js_get_this", FPTR(js_get_this)},
     {"js_get_lexical_this_binding", FPTR(js_get_lexical_this_binding)},

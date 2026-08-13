@@ -260,7 +260,9 @@ Item js_set_key_core(Item object, Item key, Item value,
                                    Item receiver);
 Item js_set_completion_with_key(Item target, Item key, Item value,
                                 Item receiver);
-Item js_set_primitive_completion(Item object, Item key, Item value);
+Item js_set_primitive_completion(Item target, Item key, Item value);
+Item js_set_function_prototype_completion(Item target, Item value);
+Item js_set_error_property_completion(Item target, Item key, Item value);
 // Internal DefineOwn storage write; it never dispatches inherited accessors.
 Item js_define_own_key_storage(Item object, Item key, Item value);
 Item js_set_key_cstr(Item object, const char* key, Item value);
@@ -301,6 +303,10 @@ Item js_elements_get(Item array, Item index);
 Item js_elements_set(Item array, Item index, Item value);
 Item js_elements_get_int(Item array, int64_t index);
 Item js_elements_set_int(Item array, int64_t index, Item value);
+// Returns a boolean Set completion for the narrow ordinary-array index fast
+// path, or ItemNull when descriptor/prototype/exotic checks require fallback.
+Item js_elements_set_int_completion(Item array, int64_t index, Item value);
+Item js_elements_set_number(Item array, Item index, Item value);
 Item js_elements_set_int_direct(Item array, int64_t index, Item value);
 int64_t js_array_sparse_delete_index(Item array, int64_t index);
 int64_t js_array_sparse_has_index(Item array, int64_t index);
@@ -1228,6 +1234,7 @@ Item js_module_get_evaluation_error(Item specifier);
 void js_module_mark_has_tla(Item specifier);
 int  js_module_get_has_tla(Item specifier);
 int  js_module_needs_async_settle(Item specifier);
+void js_tla_drain_pending_modules(void);
 void js_module_register_async_parent(Item dep_specifier, Item parent_specifier);
 void js_module_set_deferred_main_ptr(Item specifier, void* main_ptr);
 int  js_module_pending_async_deps(Item specifier);

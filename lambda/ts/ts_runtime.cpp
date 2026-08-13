@@ -178,7 +178,8 @@ static void ts_format_type(Type* type, StrBuf* buf) {
     case LMD_TYPE_ANY:       sbuf_add(buf, "any", 3); break;
     case LMD_TYPE_ERROR:     sbuf_add(buf, "never", 5); break;
 
-    case LMD_TYPE_ARRAY: {
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_NUM: { // numeric backing is an implementation detail of TS array values
         TypeArray* arr = (TypeArray*)type;
         if (arr && arr->nested) {
             ts_format_type(arr->nested, buf);
@@ -303,7 +304,7 @@ extern "C" Item ts_type_info(Item value) {
     case LMD_TYPE_SYMBOL:    ts_name = "symbol"; break;
     case LMD_TYPE_FUNC:      ts_name = "function"; break;
     case LMD_TYPE_ARRAY:
-    case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_ARRAY_NUM: // packed numeric arrays have the same TS runtime surface
         // numeric arrays share the JavaScript/TypeScript array surface; the
         // packed numeric carrier is an internal Lambda representation.
         ts_name = "array";

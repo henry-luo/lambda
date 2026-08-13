@@ -1,6 +1,12 @@
 #include "js_mir_internal.hpp"
 #include "js_runtime_state.hpp"
+#include "js_function.hpp"
+#include "js_exec_profile.h"
 #include "../../lib/hash.h"
+
+void js_function_finalize_capabilities(JsFunction* fn);
+Item js_native_construct_via_call_body(Item callee, Item* args, int argc,
+        Item new_target, uint64_t* result_home);
 #ifdef _WIN32
 #include <direct.h>
 #include <fcntl.h>
@@ -191,6 +197,12 @@ static void js_dynfunc_stats_write_line(int fd, const char* line);
 static int js_dynfunc_kind_from_prefix(const char* parse_prefix);
 static const char* js_dynfunc_kind_name(int kind);
 static bool js_dynfunc_body_is_return(String* body);
+static bool js_dynfunc_extract_return_identifier(String* body,
+        size_t* name_offset, size_t* name_len);
+static Item js_dynfunc_return_identifier_call(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home);
+static Item js_dynfunc_new_return_identifier_function(String* body,
+        Item* args, int argc, const char* source_prefix);
 static void js_dynfunc_copy_sample(char* dst, int dst_cap, const char* source, size_t source_len);
 static uint64_t js_dynfunc_preamble_hash(void);
 static JsDynFuncDependency js_dynfunc_scan_preamble_dependency(const char* source, size_t source_len);
@@ -256,6 +268,202 @@ static bool js_dynfunc_body_is_return(String* body) {
         }
     }
     return true;
+}
+
+// A Function-constructor body containing only `return <Identifier>` has no
+// statement/control-flow state to lower. Keep the identifier lookup dynamic,
+// but avoid creating a one-use parser/MIR context for this common shape. The
+// scanner is deliberately conservative: a line terminator after `return`, a
+// non-ASCII identifier, a keyword expression, or any trailing statement falls
+// back to the full compiler so ASI, TDZ, and syntax errors retain D8.4.3's
+// normal completion path.
+static bool js_dynfunc_extract_return_identifier(String* body,
+        size_t* name_offset, size_t* name_len) {
+    if (!body || !name_offset || !name_len) return false;
+    const char* source = body->chars;
+    size_t length = body->len;
+    size_t pos = 0;
+    bool line_break = false;
+    while (pos < length) {
+        char ch = source[pos];
+        if (ch == ' ' || ch == '\t' || ch == '\f' || ch == '\v') {
+            pos++;
+            continue;
+        }
+        size_t width = 0;
+        if (js_eval_at_line_terminator(source, length, pos, &width)) {
+            pos += width;
+            line_break = true;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < length && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < length && !js_eval_at_line_terminator(source, length,
+                    pos, &width)) pos++;
+            if (pos < length) {
+                pos += width;
+                line_break = true;
+            }
+            continue;
+        }
+        if (ch == '/' && pos + 1 < length && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < length && !(source[pos] == '*' &&
+                    source[pos + 1] == '/')) {
+                if (js_eval_at_line_terminator(source, length, pos, &width)) {
+                    pos += width;
+                    line_break = true;
+                } else {
+                    pos++;
+                }
+            }
+            if (pos + 1 >= length) return false;
+            pos += 2;
+            continue;
+        }
+        break;
+    }
+    if (line_break || pos + 6 > length || memcmp(source + pos, "return", 6) != 0 ||
+            (pos + 6 < length && js_dynfunc_is_ident_part(source[pos + 6]))) {
+        return false;
+    }
+    pos += 6;
+
+    // A line terminator immediately after return changes the body to an empty
+    // return under ASI, so it cannot use the identifier callback.
+    line_break = false;
+    while (pos < length) {
+        char ch = source[pos];
+        if (ch == ' ' || ch == '\t' || ch == '\f' || ch == '\v') {
+            pos++;
+            continue;
+        }
+        size_t width = 0;
+        if (js_eval_at_line_terminator(source, length, pos, &width)) {
+            return false;
+        }
+        if (ch == '/' && pos + 1 < length && source[pos + 1] == '/') {
+            return false;
+        }
+        if (ch == '/' && pos + 1 < length && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < length && !(source[pos] == '*' &&
+                    source[pos + 1] == '/')) {
+                if (js_eval_at_line_terminator(source, length, pos, &width)) {
+                    return false;
+                }
+                pos++;
+            }
+            if (pos + 1 >= length) return false;
+            pos += 2;
+            continue;
+        }
+        break;
+    }
+    if (pos >= length || !js_dynfunc_is_ident_start(source[pos])) return false;
+    size_t start = pos++;
+    while (pos < length && js_dynfunc_is_ident_part(source[pos])) pos++;
+    size_t identifier_length = pos - start;
+
+    // These spellings are expressions with semantics that are not global
+    // property reads (or are syntactically reserved), so let the parser handle
+    // them. `undefined` remains eligible because the realm binding lookup
+    // supplies the same mutable global binding used by generated MIR.
+    static const char* reserved[] = {
+        "true", "false", "null", "this", "super", "new", "class",
+        "function", "delete", "void", "typeof", "import", "export",
+        "yield", "await", NULL
+    };
+    for (int i = 0; reserved[i]; i++) {
+        size_t reserved_length = strlen(reserved[i]);
+        if (identifier_length == reserved_length &&
+                memcmp(source + start, reserved[i], reserved_length) == 0) {
+            return false;
+        }
+    }
+
+    bool consumed_semicolon = false;
+    while (pos < length) {
+        char ch = source[pos];
+        if (ch == ' ' || ch == '\t' || ch == '\f' || ch == '\v') {
+            pos++;
+            continue;
+        }
+        size_t width = 0;
+        if (js_eval_at_line_terminator(source, length, pos, &width)) {
+            pos += width;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < length && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < length && !js_eval_at_line_terminator(source, length,
+                    pos, &width)) pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < length && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < length && !(source[pos] == '*' &&
+                    source[pos + 1] == '/')) pos++;
+            if (pos + 1 >= length) return false;
+            pos += 2;
+            continue;
+        }
+        if (ch == ';' && !consumed_semicolon) {
+            consumed_semicolon = true;
+            pos++;
+            continue;
+        }
+        return false;
+    }
+    *name_offset = start;
+    *name_len = identifier_length;
+    return true;
+}
+
+static Item js_dynfunc_return_identifier_call(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    (void)this_value;
+    (void)args;
+    (void)argc;
+    (void)result_home;
+    if (get_type_id(callee) != LMD_TYPE_FUNC) return ItemError;
+    JsFunction* fn = (JsFunction*)callee.function;
+    if (!fn || !fn->env || fn->env_size < 1) return ItemError;
+    // Function-constructor code is global code. The function's home global is
+    // switched by the ordinary call boundary before this callback runs, so the
+    // strict helper preserves global lexical bindings and ReferenceError.
+    return js_get_global_property_strict(fn->env[0]);
+}
+
+static Item js_dynfunc_new_return_identifier_function(String* body,
+        Item* args, int argc, const char* source_prefix) {
+    if (!body || argc != 1 || !source_prefix ||
+            strcmp(source_prefix, "function anonymous") != 0) return ItemNull;
+    size_t name_offset = 0;
+    size_t name_len = 0;
+    if (!js_dynfunc_extract_return_identifier(body, &name_offset, &name_len)) {
+        return ItemNull;
+    }
+
+    RootFrame roots(3);
+    Rooted<Item> fn_root(roots, js_new_native_body_constructor(
+        js_dynfunc_return_identifier_call, js_native_construct_via_call_body, 0));
+    if (get_type_id(fn_root.get()) != LMD_TYPE_FUNC) return fn_root.get();
+    Rooted<Item> name_root(roots,
+        js_make_string_len(body->chars + name_offset, (int)name_len));
+    if (get_type_id(name_root.get()) != LMD_TYPE_STRING) return ItemError;
+    Item* env = js_alloc_env(1);
+    if (!env) return ItemError;
+    env[0] = name_root.get();
+    JsFunction* fn = (JsFunction*)fn_root.get().function;
+    fn->env = env;
+    fn->env_size = 1;
+    js_env_rehome_scalars(env);
+    js_function_finalize_capabilities(fn);
+    // Preserve Function.prototype.toString, name, and lazy prototype behavior;
+    // only execution of the already-validated return identifier is specialized.
+    js_dynfunc_apply_function_metadata(fn_root.get(), args, argc, source_prefix);
+    return fn_root.get();
 }
 
 static void js_dynfunc_copy_sample(char* dst, int dst_cap, const char* source, size_t source_len) {
@@ -740,6 +948,26 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         strbuf_append_str(sb, "\n");
         strbuf_append_str_n(sb, body->chars, (int)body->len);
         strbuf_append_str(sb, "\n");
+
+        // The Test262 harness and other host code frequently construct a
+        // zero-argument function solely to return one realm binding. Keep the
+        // lookup live, but share the native callback instead of paying for a
+        // parser, AST, MIR context, and link for each unique spelling. This is
+        // a semantic specialization of one validated grammar shape, not a
+        // name-specific shortcut (D8.4.3).
+        if (!inherit_caller_environment && strcmp(parse_prefix, "function") == 0 &&
+                argc == 1) {
+            Item fast_fn = js_dynfunc_new_return_identifier_function(
+                body, args, argc, source_prefix);
+            if (get_type_id(fast_fn) == LMD_TYPE_FUNC || item_is_error(fast_fn)) {
+                if (get_type_id(fast_fn) == LMD_TYPE_FUNC) {
+                    js_opt_trace_record(JS_OPT_DYNAMIC_FUNCTION_FASTPATH,
+                        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+                }
+                strbuf_free(sb);
+                return fast_fn;
+            }
+        }
     }
 
     strbuf_append_str(sb, "})");
@@ -771,10 +999,17 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
             argc, dynfunc_kind);
         if (cached) {
             js_dynfunc_stats_record(parse_prefix, source, source_len, body, argc, &dep, true, true);
+            js_opt_trace_record(JS_OPT_DYNAMIC_FUNCTION_CACHE_HIT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
             Item cached_fn = js_dynfunc_cache_execute(cached, args, argc, source_prefix);
             mem_free(source);
             return cached_fn;
         }
+    }
+
+    if (cacheable) {
+        js_opt_trace_record(JS_OPT_DYNAMIC_FUNCTION_CACHE_MISS,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
     }
 
     js_dynfunc_stats_record(parse_prefix, source, source_len, body, argc, &dep, cacheable, false);

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.16.0 (2026-08-13)
+**Spec version:** 1.18.0 (2026-08-13)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -937,6 +937,32 @@ loosely across the corpus — context disambiguates, and we live with it.
   guests never construct contexts or touch global runtime pointers (the
   G1 gate). The JS merged Item error lane (D8.4.3) is not reused as another
   guest's exception model.* [Lang_Hosting §5–§7, §13, D8.4.3]
+- **D7.4.4*** **Declared interfaces + record-owned hooks are the ONLY
+  host-object protocol — one way to be a host object, no fallback tier.**
+  A host type's surface is its Lambda-type-syntax interface declaration
+  compiled to member records, plus the record-owned open-name/indexed
+  hooks (`named_get`/`named_set`/`object_*`, `indexed_get`) and
+  `JubeTypeDef.destroy` for lifecycle. The type-level dispatch fallbacks
+  (`JubeTypeDef.host_ops`, `JubeTypeBinding.legacy_ops`) are **retired**:
+  no instances, consumer paths deleted, struct surface removed with a
+  `JUBE_ABI_VERSION` bump. Corollary: property keys cross the member ABI
+  as `Item`s (string | symbol | number), are resolved internally via one
+  borrowed byte view, and are never re-materialized for a fallback
+  consumer. [DOM4 D4k, D4j]
+- **D7.4.5*** **Three virtual carriers mirror the container taxonomy:
+  `vmap`, `varray`, `velmt`.** Host data crosses as the virtual carrier
+  matching its shape — virtual map (exists), virtual array (indexed face +
+  length via vtable, `type()` = "array"; live by reading, not materialized
+  copies kept fresh by mutation sweeps), virtual element (Lambda
+  `Element`'s dual list+map nature: children list face, named map face,
+  tag). Refines D7.4.1's "VMap projections": VMap was never the shape
+  ruling, only the first carrier; representation still selects the
+  carrier. Declared interfaces / member records (D7.4.4) are the
+  named-member protocol on ALL carriers; the carrier decides which
+  structural faces exist virtually. Flattening element-shaped data into a
+  map projection, or materializing array-shaped host state into real
+  arrays with liveness-by-invalidation, are both anti-patterns this
+  ruling retires. [DOM4 D4l, D7.4.1, D7.4.4]
 
 ### D7.5 Jube modules: trust and IO
 
@@ -1156,6 +1182,8 @@ Status of `*`-marked rulings as of 2026-08-13.
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
 | D7.4.1v2 | Native-module POC 1 remains unstarted; the engine-owned Promise VMap is designed by JR7/Tune7 but not yet implemented. |
 | D7.4.3 | Hosted-language layering: `lang-python` is the landed DSO reference chain, but Python is currently statically linked and its ten follow-up ADRs (Lang_Hosting §17) are unwritten. |
+| D7.4.4 | Retirement not started (DOM4 P0.6): `legacy_ops` already has zero users; `host_ops` has two instances — range/selection (dead for property traffic, `invalidate` caller check pending) and `velmt` (live; migration template = node_fs OWNING_NATIVE rows). The vmap `string_key_item` key re-materialization shim dies in the same sweep. |
+| D7.4.5 | Direction only; implementation deferred past DOM4 (user ruling 2026-08-13: DOM4 settles vmap first; the runtime is likely not ready for new carriers). `varray` and `velmt` do not exist: DOM collections are materialized Arrays with companion-map decoration and a 4096-entry issued-collection cache refreshed per mutation (js_dom.cpp); Radiant `Velmt` handles are struct-copied into VMap payloads with strcmp projection. varray + collection conversion = future Jube stage; DOM-node carrier move to velmt = DOM4 OQ9 (DOM5-scale). |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
 | D8.2.1–D8.2.3 | Structural Unified AST convergence is substantially landed for Lambda/JS: common core catalog, node aliases, `FnAnalysis`, and `MirEmitter`; Python remains the guest acceptance test. |

@@ -85,6 +85,63 @@ typedef struct JsExecProfileStoreICSite {
 
 int g_js_exec_profile_mode = -1;
 
+static JsOptTraceSnapshot g_js_opt_trace = {
+    1, 0, {}, {}
+};
+static int g_js_opt_trace_mode = -1;
+
+static const char* g_js_opt_event_names[JS_OPT_EVENT_COUNT] = {
+    "scope_lookup_cache_hit",
+    "scope_lookup_cache_miss",
+    "fact_cache_hit",
+    "fact_cache_miss",
+    "load_ic_hit_mono",
+    "load_ic_hit_poly",
+    "load_ic_miss",
+    "load_ic_install_mono",
+    "load_ic_install_poly",
+    "store_ic_hit_mono",
+    "store_ic_hit_poly",
+    "store_ic_miss",
+    "store_ic_install_mono",
+    "store_ic_install_poly",
+    "regex_compile_cache_hit",
+    "regex_compile_cache_miss",
+    "regex_permanent_cache_hit",
+    "regex_fresh_wrapper",
+    "regex_keyless_reject",
+    "regex_cache_invalidate",
+    "array_set_fast_hit",
+    "array_set_guard_fail",
+    "dynamic_function_fastpath",
+    "dynamic_function_cache_hit",
+    "dynamic_function_cache_miss",
+    "mir_direct_destination",
+    "mir_discard_elision",
+    "mir_branch_direct",
+    "mir_generic_fallback",
+    "mir_box_value",
+    "mir_unbox_value",
+    "mir_root_store",
+    "module_cache_hit",
+    "module_cache_miss",
+    "tla_deferred_body",
+    "tla_drain"
+};
+
+static const char* g_js_opt_reason_names[JS_OPT_REASON_COUNT] = {
+    "none",
+    "hole_or_sparse",
+    "prototype_accessor",
+    "not_extensible",
+    "length_not_writable",
+    "capture_bearing_short_regex",
+    "keyless_cache_entry",
+    "shape_changed",
+    "representation_mismatch",
+    "tla_pending"
+};
+
 static JsExecProfileSlot g_js_exec_profile_slots[JS_EXEC_PROF_EVENT_COUNT] = {
     {"property_get", 0, 0, 0, 0},
     {"property_set", 0, 0, 0, 0},
@@ -196,9 +253,93 @@ static int js_exec_profile_truthy(const char* s) {
         strcmp(s, "off") != 0 && strcmp(s, "no") != 0;
 }
 
+int js_opt_trace_is_enabled(void) {
+    if (g_js_opt_trace_mode >= 0) return g_js_opt_trace_mode;
+    const char* env = getenv("JS_OPT_TRACE");
+    g_js_opt_trace_mode = js_exec_profile_truthy(env) ? 1 : 0;
+    g_js_opt_trace.enabled = (uint32_t)g_js_opt_trace_mode;
+    if (g_js_opt_trace_mode) {
+        // Reuse the existing profile lifecycle so direct, batch, and runtime
+        // cleanup paths all flush the contract snapshot before _exit.
+        (void)js_exec_profile_mode();
+    }
+    return g_js_opt_trace_mode;
+}
+
+void js_opt_trace_set_enabled(int enabled) {
+    g_js_opt_trace_mode = enabled ? 1 : 0;
+    g_js_opt_trace.enabled = (uint32_t)g_js_opt_trace_mode;
+}
+
+void js_opt_trace_reset(void) {
+    uint32_t enabled = g_js_opt_trace.enabled;
+    memset(&g_js_opt_trace, 0, sizeof(g_js_opt_trace));
+    g_js_opt_trace.schema = 1;
+    g_js_opt_trace.enabled = enabled;
+}
+
+void js_opt_trace_record(JsOptEvent event, JsOptReason reason,
+        JsOptTraceOutcome outcome) {
+    if (!js_opt_trace_is_enabled() || event < 0 ||
+            event >= JS_OPT_EVENT_COUNT) return;
+    JsOptTraceCounter* counter = &g_js_opt_trace.events[event];
+    switch (outcome) {
+    case JS_OPT_OUTCOME_ATTEMPT: counter->attempts++; break;
+    case JS_OPT_OUTCOME_TAKEN: counter->taken++; break;
+    case JS_OPT_OUTCOME_FALLBACK: counter->fallback++; break;
+    case JS_OPT_OUTCOME_INVALIDATED: counter->invalidated++; break;
+    default: break;
+    }
+    if (reason >= 0 && reason < JS_OPT_REASON_COUNT) {
+        g_js_opt_trace.reason_counts[reason]++;
+    }
+}
+
+void js_opt_trace_snapshot(JsOptTraceSnapshot* out) {
+    if (out) *out = g_js_opt_trace;
+}
+
+void js_opt_trace_dump(void) {
+    if (!js_opt_trace_is_enabled()) return;
+    create_dir_recursive("temp");
+
+    char default_path[128];
+    snprintf(default_path, sizeof(default_path), "temp/js_opt_trace_%ld.tsv",
+        (long)js_profile_getpid());
+    const char* out_path = getenv("JS_OPT_TRACE_OUT");
+    if (!out_path || !out_path[0]) out_path = default_path;
+
+    StrBuf* buf = strbuf_new();
+    if (!buf) return;
+    strbuf_append_str(buf, "JS_OPT_TRACE schema=1 events=");
+    for (int i = 0; i < JS_OPT_EVENT_COUNT; i++) {
+        if (i != 0) strbuf_append_char(buf, ',');
+        JsOptTraceCounter* c = &g_js_opt_trace.events[i];
+        strbuf_append_str(buf, g_js_opt_event_names[i]);
+        strbuf_append_format(buf, "=%llu/%llu/%llu/%llu",
+            (unsigned long long)c->attempts,
+            (unsigned long long)c->taken,
+            (unsigned long long)c->fallback,
+            (unsigned long long)c->invalidated);
+    }
+    strbuf_append_str(buf, " reasons=");
+    for (int i = 0; i < JS_OPT_REASON_COUNT; i++) {
+        if (i != 0) strbuf_append_char(buf, ',');
+        strbuf_append_str(buf, g_js_opt_reason_names[i]);
+        strbuf_append_format(buf, "=%llu",
+            (unsigned long long)g_js_opt_trace.reason_counts[i]);
+    }
+    strbuf_append_char(buf, '\n');
+    if (write_text_file_atomic(out_path, buf->str ? buf->str : "") != 0) {
+        log_error("js-opt-trace: failed to write '%s'", out_path);
+    }
+    strbuf_free(buf);
+}
+
 int js_exec_profile_mode(void) {
     if (g_js_exec_profile_mode >= 0) return g_js_exec_profile_mode;
     const char* env = getenv("JS_EXEC_PROFILE");
+    if (!js_exec_profile_truthy(env)) env = getenv("JS_OPT_TRACE");
     if (!js_exec_profile_truthy(env)) {
         g_js_exec_profile_mode = 0;
         return 0;
@@ -213,6 +354,7 @@ int js_exec_profile_mode(void) {
 }
 
 void js_exec_profile_reset(void) {
+    js_opt_trace_reset();
     for (int i = 0; i < JS_EXEC_PROF_EVENT_COUNT; i++) {
         g_js_exec_profile_slots[i].calls = 0;
         g_js_exec_profile_slots[i].inclusive_ns = 0;
@@ -458,9 +600,66 @@ extern "C" void js_profile_property_set_branch_add_count(const char* label, uint
     branch->calls += count;
 }
 
+static void js_opt_trace_load_ic_reason(JsLoadICProfileReason reason) {
+    switch (reason) {
+    case JS_LOAD_IC_SITE_HIT_MONO:
+        js_opt_trace_record(JS_OPT_LOAD_IC_HIT_MONO, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        break;
+    case JS_LOAD_IC_SITE_HIT_POLY:
+        js_opt_trace_record(JS_OPT_LOAD_IC_HIT_POLY, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        break;
+    case JS_LOAD_IC_SITE_INSTALL_MONO:
+        js_opt_trace_record(JS_OPT_LOAD_IC_INSTALL_MONO, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        break;
+    case JS_LOAD_IC_SITE_INSTALL_POLY:
+        js_opt_trace_record(JS_OPT_LOAD_IC_INSTALL_POLY, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        break;
+    case JS_LOAD_IC_SITE_PROBE:
+    case JS_LOAD_IC_SITE_MEGAMORPHIC:
+        break;
+    default:
+        js_opt_trace_record(JS_OPT_LOAD_IC_MISS, JS_OPT_REASON_SHAPE_CHANGED,
+            JS_OPT_OUTCOME_FALLBACK);
+        break;
+    }
+}
+
+static void js_opt_trace_store_ic_reason(JsStoreICProfileReason reason) {
+    switch (reason) {
+    case JS_STORE_IC_SITE_HIT_MONO:
+        js_opt_trace_record(JS_OPT_STORE_IC_HIT_MONO, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        break;
+    case JS_STORE_IC_SITE_HIT_POLY:
+        js_opt_trace_record(JS_OPT_STORE_IC_HIT_POLY, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        break;
+    case JS_STORE_IC_SITE_INSTALL_MONO:
+        js_opt_trace_record(JS_OPT_STORE_IC_INSTALL_MONO, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        break;
+    case JS_STORE_IC_SITE_INSTALL_POLY:
+        js_opt_trace_record(JS_OPT_STORE_IC_INSTALL_POLY, JS_OPT_REASON_NONE,
+            JS_OPT_OUTCOME_TAKEN);
+        break;
+    case JS_STORE_IC_SITE_PROBE:
+    case JS_STORE_IC_SITE_MEGAMORPHIC:
+        break;
+    default:
+        js_opt_trace_record(JS_OPT_STORE_IC_MISS, JS_OPT_REASON_SHAPE_CHANGED,
+            JS_OPT_OUTCOME_FALLBACK);
+        break;
+    }
+}
+
 extern "C" void js_profile_load_ic_site(const char* label, JsLoadICProfileReason reason) {
     int mode = g_js_exec_profile_mode >= 0 ? g_js_exec_profile_mode : js_exec_profile_mode();
     if (mode <= 0 || reason < 0 || reason >= JS_LOAD_IC_SITE_REASON_COUNT) return;
+    js_opt_trace_load_ic_reason(reason);
     const char* safe_label = (label && label[0]) ? label : "unknown";
     for (int i = 0; i < g_js_exec_profile_load_ic_site_count; i++) {
         JsExecProfileLoadICSite* site = &g_js_exec_profile_load_ic_sites[i];
@@ -483,6 +682,7 @@ extern "C" void js_profile_load_ic_site(const char* label, JsLoadICProfileReason
 extern "C" void js_profile_store_ic_site(const char* label, JsStoreICProfileReason reason) {
     int mode = g_js_exec_profile_mode >= 0 ? g_js_exec_profile_mode : js_exec_profile_mode();
     if (mode <= 0 || reason < 0 || reason >= JS_STORE_IC_SITE_REASON_COUNT) return;
+    js_opt_trace_store_ic_reason(reason);
     const char* safe_label = (label && label[0]) ? label : "unknown";
     for (int i = 0; i < g_js_exec_profile_store_ic_site_count; i++) {
         JsExecProfileStoreICSite* site = &g_js_exec_profile_store_ic_sites[i];
@@ -754,6 +954,7 @@ void js_exec_profile_dump(void) {
         log_error("js-exec-profile: failed to write '%s'", out_path);
     }
     strbuf_free(buf);
+    js_opt_trace_dump();
 }
 
 #endif // LAMBDA_JS_EXEC_PROFILE

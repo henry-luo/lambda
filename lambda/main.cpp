@@ -366,6 +366,31 @@ static void js_test262_hot_context_destroy(Runtime* runtime, EvalContext* batch_
     runtime->type_list = NULL;
 }
 
+static bool js_test262_hot_context_recycle(Runtime* runtime,
+        EvalContext* batch_context) {
+    if (!runtime || !batch_context || !eval_context_thread_matches(batch_context)) {
+        log_error("test262-hot-context: owner mismatch during normal recycle");
+        return false;
+    }
+    // Normal file boundaries may run finalizers and native cache cleanup.  The
+    // signal-safe discard path above intentionally skips those operations, but
+    // using it for successful tests leaks module roots and retained JS state;
+    // the next large library then pays for an ever-growing heap/cache set.
+    js_batch_reset();
+    runtime_reset_heap(runtime);
+    // runtime_reset_heap keeps the canonical EvalContext and its JS capsule
+    // bound; clearing it here would leave js_active_runtime_state pointing at
+    // a lost capsule and the next MIR entry would reject the context switch.
+    heap_init();
+    batch_context->pool = batch_context->heap->pool;
+    batch_context->name_pool = name_pool_create_runtime(batch_context->pool);
+    batch_context->type_list = arraylist_new(64);
+    runtime->heap = batch_context->heap;
+    runtime->name_pool = batch_context->name_pool;
+    runtime->type_list = (ArrayList*)batch_context->type_list;
+    return true;
+}
+
 static void js_test262_clear_preamble(
     JsPreambleState* preamble,
     bool* has_preamble,
@@ -2335,6 +2360,12 @@ int main(int argc, char *argv[]) {
             const char* tune6_timing_env = getenv("JS_TRANSPILE_TIMING");
             bool tune6_timing = tune6_timing_env && tune6_timing_env[0] &&
                                 strcmp(tune6_timing_env, "0") != 0;
+            if (getenv("JS_OPT_TRACE")) {
+                // Initialize the profile lifecycle even when a fixture takes
+                // no instrumented branch; otherwise a zero-event contract
+                // sample would never register its final trace record.
+                (void)js_exec_profile_mode();
+            }
             const char* compiler_timing_env = getenv("LAMBDA_COMPILER_TIMING");
             bool compiler_timing = compiler_timing_env && compiler_timing_env[0] &&
                                    strcmp(compiler_timing_env, "0") != 0;
@@ -4061,8 +4092,7 @@ int main(int argc, char *argv[]) {
                     // Finish deferred code while its JS capsule is active;
                     // teardown clears that owner and would otherwise leak it.
                     jm_cleanup_deferred_mir();
-                    js_test262_hot_context_destroy(&runtime, batch_context);
-                    js_test262_hot_context_create(&runtime, batch_context);
+                    if (!js_test262_hot_context_recycle(&runtime, batch_context)) break;
                 } else {
                     js_batch_reset();
                     runtime_reset_heap(&runtime);
@@ -4445,9 +4475,13 @@ int main(int argc, char *argv[]) {
             // but memory-hungry tests (like RegExp CharacterClassEscapes) only
             // exist in a few batches, so actual peak is much lower.
             static const size_t RSS_LIMIT = 4096UL * 1024 * 1024; // 4 GB
-            // Per-test MIR cleanup keeps the retained heap below the hard cap;
-            // the old lower watermark recycled a live preamble mid-batch.
-            static const size_t RSS_RESET_LIMIT = RSS_LIMIT;
+            // Successful hot-batch tests retain MIR code pages and arena slabs
+            // until the realm is recycled; using the 4 GB crash cap as the
+            // cleanup watermark lets hundreds of tests accumulate >1 GB per
+            // worker and turns allocator pressure into timeout/crash retries.
+            // Keep the reset below the hard cap so cleanup happens before the
+            // next compile, while the preamble is restored on the fresh heap.
+            static const size_t RSS_RESET_LIMIT = 1024UL * 1024 * 1024; // 1 GB
             static const int MAX_CRASH_COUNT = 10;
 
             if (hot_reload) {
@@ -4508,24 +4542,19 @@ int main(int argc, char *argv[]) {
                             }
                         }
                     }
-                } else if (rss_after > RSS_LIMIT) {
-                    // Normal test but RSS too high — exit to prevent OOM.
-                    printf("\x01" "BATCH_EXIT rss_exceeded RSS=%zuMB limit=%zuMB tests=%d\n",
-                            rss_after / (1024*1024), RSS_LIMIT / (1024*1024), batch_test_count);
-                    fflush(stdout);
-                    js_batch_reset();
-                    js_batch_document_finish(&runtime, &batch_document);
-                    break;
                 } else if (rss_after > RSS_RESET_LIMIT) {
-                    // Successful but memory-heavy test. Recycle the hot heap before
-                    // the next test so large temporary strings from generated
-                    // Unicode/URI suites do not make later tests hit the alarm.
+                    // Reclaim a successful test heap before enforcing the hard
+                    // RSS cap. Checking first made the cleanup branch unreachable
+                    // for a large library: one transient heap crossed the limit,
+                    // the worker exited, and later tests appeared to time out.
                     js_test262_abandon_preamble_for_recovery(&preamble, &has_preamble);
+                    // Clear heap-bound JS caches before the realm is discarded;
+                    // otherwise the next large library inherits stale Items.
+                    js_batch_reset();
                     jm_cleanup_deferred_mir();
-                    js_test262_hot_context_destroy(&runtime, batch_context);
-                    js_test262_hot_context_create(&runtime, batch_context);
-
                     if (saved_harness_src) {
+                        js_test262_hot_context_destroy(&runtime, batch_context);
+                        js_test262_hot_context_create(&runtime, batch_context);
                         memset(&preamble, 0, sizeof(preamble));
                         uint64_t preamble_result_home = 0;
                         Item pres = transpile_js_to_mir_preamble_len(
@@ -4540,6 +4569,17 @@ int main(int argc, char *argv[]) {
                                 has_preamble = false;
                             }
                         }
+                    } else if (!js_test262_hot_context_recycle(&runtime, batch_context)) {
+                        break;
+                    }
+                    rss_after = get_rss_bytes();
+                    if (rss_after > RSS_LIMIT) {
+                        printf("\x01" "BATCH_EXIT rss_exceeded RSS=%zuMB limit=%zuMB tests=%d\n",
+                                rss_after / (1024*1024), RSS_LIMIT / (1024*1024), batch_test_count);
+                        fflush(stdout);
+                        js_batch_reset();
+                        js_batch_document_finish(&runtime, &batch_document);
+                        break;
                     }
                 } else if (has_preamble) {
                     if (js_test262_restore_preamble_module_state(&preamble)) {
@@ -4558,8 +4598,7 @@ int main(int argc, char *argv[]) {
                     // Finish deferred code while its JS capsule is active;
                     // teardown clears that owner and would otherwise leak it.
                     jm_cleanup_deferred_mir();
-                    js_test262_hot_context_destroy(&runtime, batch_context);
-                    js_test262_hot_context_create(&runtime, batch_context);
+                    if (!js_test262_hot_context_recycle(&runtime, batch_context)) break;
                 }
             } else {
                 // Normal mode: transpile_js_to_mir created/destroyed its own heap.

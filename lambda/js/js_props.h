@@ -140,6 +140,14 @@ JsShapeSlotStatus js_own_shape_slot_status_key(Item object, Item key,
                                                Item* out_slot,
                                                ShapeEntry** out_se);
 
+// Hot ordinary-Get variant. The storage walk already knows whether the slot
+// came from packed map data, so it reports scalar-home provenance without a
+// second object/map lookup in the Get kernel.
+JsShapeSlotStatus js_own_shape_slot_status_key_ex(Item object, Item key,
+                                                  Item* out_slot,
+                                                  ShapeEntry** out_se,
+                                                  bool* out_borrowed);
+
 // Return the ordinary property-storage map for Map, Array, or Function values.
 // Callers use this only after validating that the value has ordinary storage.
 Map* js_obj_underlying_map(Item object);
@@ -155,6 +163,13 @@ bool js_shape_mark_deleted_own(Item object, const char* name, int name_len,
 // Own-only [[Get]]. `key` must be canonical; JS_OWN_READY sets out_value.
 JsOwnGetStatus js_ordinary_get_own(Item object, Item key, Item Receiver,
                                     Item* out_value);
+
+// Variant used by the hot Get kernel.  `out_borrowed` is true only when the
+// returned data value is read from movable shape storage and must be re-homed
+// before it crosses the property boundary; extension-map and getter results
+// already own their scalar homes.
+JsOwnGetStatus js_ordinary_get_own_ex(Item object, Item key, Item Receiver,
+                                      Item* out_value, bool* out_borrowed);
 
 // Outcome of inherited accessor-setter dispatch.
 typedef enum {

@@ -1363,6 +1363,18 @@ MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref) {
     case JS_MIR_REF_PROPERTY: {
         if (!ref->is_private && ref->named_key_index != UINT32_MAX) {
             MIR_reg_t lane = jm_emit_reference_name_id(mt, ref);
+            // consume the site reserved by reference construction; bypassing
+            // it sent warmed named accesses back through the generic helper.
+            if (ref->named_ic_index != UINT32_MAX && JS_EXEC_PROFILE_ENABLED) {
+                MIR_reg_t ic = jm_active_module_ic_at_index(mt,
+                    ref->named_ic_index);
+                if (ic) {
+                    return jm_call_3(mt, "js_get_name_id_ic", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, lane),
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, ic));
+                }
+            }
             return jm_call_4(mt, "js_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lane),
@@ -1430,6 +1442,22 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
                 ? jm_emit_reference_name_id(mt, ref)
                 : jm_call_1(mt, "js_property_lane_for_canonical_key",
                     MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+            // stores share the reference-owned IC slot as loads do; otherwise
+            // store warming remains invisible to the contract trace.
+            if (!ref->is_private && ref->named_ic_index != UINT32_MAX &&
+                    JS_EXEC_PROFILE_ENABLED) {
+                MIR_reg_t ic = jm_active_module_ic_at_index(mt,
+                    ref->named_ic_index);
+                if (ic) {
+                    result = jm_call_5(mt, "js_set_name_id_ic", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, lane),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0),
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, ic));
+                    break;
+                }
+            }
             result = jm_call_5(mt, "js_set", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lane),
@@ -3857,6 +3885,7 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
         }
         MIR_reg_t obj = jm_transpile_box_item(mt, member->object);
         MIR_reg_t prop_key;
+        bool is_private = false;
         if (member->computed) {
             if (need_spill) {
                 obj_spill = jm_gen_spill_save(mt, obj);
@@ -3874,6 +3903,7 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
             // Destructuring writes bypass ordinary Reference lowering, so a
             // private member must still use its lexical class identity.
             if (jm_is_private_name(key_name)) {
+                is_private = true;
                 prop_key = jm_emit_private_key_for_access(mt, (JsAstNode*)member->property, key_name);
             } else {
                 prop_key = jm_box_property_name_literal(mt, key_name->chars,
@@ -3882,12 +3912,25 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
         } else {
             prop_key = jm_transpile_box_item(mt, member->property);
         }
-        // Tune8 §2.2: js_private_property_set now takes strict flag (always sloppy here).
-        jm_call_4(mt, "js_private_property_set", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, prop_key),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+        // Object-pattern member targets use OrdinarySet unless the syntax is
+        // an actual private name. Routing every rest/destructure target to
+        // PrivateSet rejected ordinary keys that merely happened to share a
+        // NameId (S#7.3.32).
+        if (is_private) {
+            jm_call_4(mt, "js_private_property_set", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, prop_key),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+        } else {
+            bool strict_put = mt->is_global_strict || mt->is_module ||
+                (mt->current_fc && mt->current_fc->is_strict);
+            jm_call_4(mt, "js_set_key_policy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, prop_key),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, strict_put ? 1 : 0));
+        }
         jm_emit_error_lane_propagate_check(mt);
     }
 }
@@ -5061,25 +5104,46 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             TypeId idx_type = jm_get_effective_type(mt, member->property);
             bool strict_member_set = mt->is_global_strict || mt->is_module ||
                 (mt->current_fc && mt->current_fc->is_strict);
-            if (idx_type == LMD_TYPE_INT && !strict_member_set) {
+            if ((idx_type == LMD_TYPE_INT || idx_type == LMD_TYPE_FLOAT) && !strict_member_set) {
                 MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
-                MIR_reg_t idx_native = jm_transpile_as_native(mt, member->property, idx_type, LMD_TYPE_INT);
                 MIR_reg_t new_val;
                 if (asgn->op == JS_OP_ASSIGN) {
                     new_val = jm_transpile_box_item(mt, asgn->right);
                 } else {
                     // compound: read current, apply op, write result
-                    MIR_reg_t cur_val = jm_call_2(mt, "js_elements_get_int", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+                    MIR_reg_t cur_val;
+                    if (idx_type == LMD_TYPE_FLOAT) {
+                        // A fractional numeric key is an ordinary property;
+                        // truncating it through the integer lane would read
+                        // a different array element before the fallback write.
+                        MIR_reg_t idx_item = jm_transpile_box_item(mt, member->property);
+                        cur_val = jm_call_2(mt, "js_elements_get", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_item));
+                    } else {
+                        cur_val = jm_call_2(mt, "js_elements_get_int", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx,
+                                jm_transpile_as_native(mt, member->property, idx_type, LMD_TYPE_INT)));
+                    }
                     MIR_reg_t rval = jm_transpile_box_item(mt, asgn->right);
                     new_val = jm_call_2(mt, jm_compound_assign_fn(asgn->op), MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, rval));
                 }
-                MIR_reg_t a4_result = jm_call_3(mt, "js_elements_set_int", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native),
+                const char* set_fn = idx_type == LMD_TYPE_FLOAT
+                    ? "js_elements_set_number" : "js_elements_set_int";
+                MIR_reg_t idx_arg = idx_type == LMD_TYPE_FLOAT
+                    ? jm_transpile_box_item(mt, member->property)
+                    : jm_transpile_as_native(mt, member->property, idx_type, LMD_TYPE_INT);
+                MIR_reg_t a4_result = idx_type == LMD_TYPE_FLOAT
+                    ? jm_call_3(mt, set_fn, MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_arg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val))
+                    : jm_call_3(mt, set_fn, MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_arg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
 
                 // v20: update the mapped formal after the fast-path write.
@@ -7990,11 +8054,29 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     key_name->len);
                 MIR_reg_t key_item = jm_box_property_name_literal(mt,
                     key_name->chars, key_name->len);
-                MIR_reg_t val = jm_call_4(mt, "js_get", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_id),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj));
+                MIR_reg_t val = 0;
+#if LAMBDA_INLINE_CACHE
+                // direct member reads do not pass through Reference lowering,
+                // so they must consume their own module IC site here.
+                if (jm_load_ic_enabled() && JS_EXEC_PROFILE_ENABLED) {
+                    uint32_t ic_index = jm_module_ic_index(mt);
+                    MIR_reg_t ic = ic_index != UINT32_MAX
+                        ? jm_active_module_ic_at_index(mt, ic_index) : 0;
+                    if (ic) {
+                        val = jm_call_3(mt, "js_get_name_id_ic", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, name_id),
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, ic));
+                    }
+                }
+#endif
+                if (!val) {
+                    val = jm_call_4(mt, "js_get", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_id),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj));
+                }
                 jm_emit_error_lane_propagate_check(mt);
                 return val;
             }

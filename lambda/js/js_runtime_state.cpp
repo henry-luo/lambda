@@ -50,7 +50,6 @@ static void js_reset_cached_realm_objects(void) {
     js_iterator_proto_cache_reset();
     js_symbol_registry_batch_reset();
     js_func_cache_reset();
-    js_builtin_cache_reset();
     js_deep_batch_reset();
     js_reset_constructor_prototypes();
 }
@@ -461,6 +460,12 @@ void js_root_range_reset_all(void) {
     for (int i = 0; i < js_runtime_state.root_range_registry_count; i++) {
         JsRootRange* range = js_runtime_state.root_range_registry[i];
         if (!range) continue;
+        // Catalog-backed intrinsic callables are realm identity anchors.  Their
+        // cache is reset explicitly for a full teardown and must survive a
+        // partial preamble reset; clearing the registered root range here made
+        // the next strict arguments object allocate a second %ThrowTypeError%
+        // despite the restored Function.prototype snapshot (D6.2.2v2).
+        if (range == &js_runtime_state.builtin_cache.roots) continue;
         js_root_range_clear(range);
         if (range->reset) range->reset(range->reset_owner);
     }
@@ -1180,9 +1185,7 @@ extern "C" Item js_error_lane_payload(Item lane) {
         // is the first safe boundary at which their Map-compatible view exists.
         error->type = js_error_carrier_type_map();
     }
-    if (error) error->type = js_error_carrier_type_map();
-    Item result = error ? js_error_as_object(error) : lane;
-    return result;
+    return error ? js_error_as_object(error) : lane;
 }
 
 extern "C" void js_error_lane_format(Item lane, char* out, int out_size) {
@@ -1269,9 +1272,19 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     // promise callback or assertion hook behind leaks the prior ERROR lane.
     js_eval_state_assert_clear(&js_runtime_state.eval, reason);
     js_reset_transient_call_state();
-    js_reset_heap_bound_runtime_state();
     js_decimal_number_egress_warning_reset();
+    // Hot batches retain one heap/input arena across tests. Preserve its Input
+    // owner while clearing transient heap-bound state so the intrinsic
+    // prototype snapshot can restore mutations in that same realm; full heap
+    // teardown must leave the pointer cleared (D6.2.2v2).
+    Input* retained_input = js_input;
+    js_reset_heap_bound_runtime_state();
+    if (!full_reset) js_input = retained_input;
     js_reset_cached_realm_objects();
+    // A partial hot reset restores the same constructor/prototype snapshot;
+    // clearing catalog callables here would lazily create a second
+    // %ThrowTypeError%/parseFloat object and break realm identity (D6.2.2v2).
+    if (full_reset) js_builtin_cache_reset();
     if (full_reset) js_proto_snapshot_invalidate();
     js_fs_runtime_detach();
     jube_modules_runtime_reset();
@@ -1400,6 +1413,15 @@ extern "C" Item js_new_aggregate_error(Item errors, Item message) {
     Rooted<Item> err_root(roots, ItemNull);
     Rooted<Item> errors_array_root(roots, ItemNull);
     Item err_name = (Item){.item = s2it(heap_create_name("AggregateError", 14))};
+    if (get_type_id(message_root.get()) != LMD_TYPE_UNDEFINED &&
+            message_root.get().item != ITEM_JS_UNDEFINED) {
+        // AggregateError performs ToString(message) before publishing the
+        // message own property; preserve the user's abrupt completion instead
+        // of letting tagged Error storage turn it into a generic TypeError.
+        Item message_string = js_to_string(message_root.get());
+        if (item_is_error(message_string)) return message_string;
+        message_root.set(message_string);
+    }
     err_root.set(js_new_error_with_name(err_name, message_root.get()));
     // ToString(message) is evaluated while allocating the error carrier; an
     // abrupt completion must escape before IterableToList attempts to mutate
