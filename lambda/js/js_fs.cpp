@@ -796,57 +796,6 @@ static Item js_fs_read_file_buffer(const char* path) {
     return chunk;
 }
 
-static Item js_fs_readstream_drain(Item stream) {
-    Item drained = js_get_key_default(stream, make_string_item("__readstream_drained__"));
-    if (drained.item != 0 && get_type_id(drained) == LMD_TYPE_BOOL && it2b(drained)) {
-        return make_js_undefined();
-    }
-
-    Item data_cb = js_get_key_default(stream, make_string_item("__readstream_data_cb__"));
-    Item end_cb = js_get_key_default(stream, make_string_item("__readstream_end_cb__"));
-    Item close_cb = js_get_key_default(stream, make_string_item("__readstream_close_cb__"));
-    bool has_data = js_is_callable(data_cb);
-    bool has_terminal = js_is_callable(end_cb) || js_is_callable(close_cb);
-    if (!has_data || !has_terminal) return make_js_undefined();
-
-    Item path_item = js_get_key_default(stream, make_string_item("__readstream_path__"));
-    char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
-
-    JS_ASSIGN_OR_RETURN(chunk, js_fs_read_file_buffer(path));
-
-    js_set_key_default(stream, make_string_item("__readstream_drained__"), (Item){.item = b2it(true)});
-    Item data_args[1] = {chunk};
-    JS_ASSIGN_OR_RETURN(callback_result, js_call_function(data_cb, stream, data_args, 1));
-
-    if (js_is_callable(end_cb)) {
-        JS_ASSIGN_OR_RETURN_INTO(callback_result, js_call_function(end_cb, stream, NULL, 0));
-    }
-    if (js_is_callable(close_cb)) {
-        JS_ASSIGN_OR_RETURN_INTO(callback_result, js_call_function(close_cb, stream, NULL, 0));
-    }
-    return make_js_undefined();
-}
-
-extern "C" Item js_fs_readstream_on(Item event_item, Item callback_item) {
-    Item stream = js_get_this();
-    if (get_type_id(event_item) != LMD_TYPE_STRING || !js_is_callable(callback_item)) {
-        return stream;
-    }
-
-    String* event = it2s(event_item);
-    if (event->len == 4 && memcmp(event->chars, "data", 4) == 0) {
-        js_set_key_default(stream, make_string_item("__readstream_data_cb__"), callback_item);
-    } else if (event->len == 3 && memcmp(event->chars, "end", 3) == 0) {
-        js_set_key_default(stream, make_string_item("__readstream_end_cb__"), callback_item);
-    } else if (event->len == 5 && memcmp(event->chars, "close", 5) == 0) {
-        js_set_key_default(stream, make_string_item("__readstream_close_cb__"), callback_item);
-    }
-    js_fs_readstream_drain(stream);
-    return stream;
-}
-
 extern "C" Item js_fs_readstream_pipe(Item dest_item) {
     Item stream = js_get_this();
     Item path_item = js_get_key_default(stream, make_string_item("__readstream_path__"));

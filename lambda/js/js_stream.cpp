@@ -57,11 +57,6 @@ extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_
 extern "C" Item js_async_hooks_enter_resource(Item resource);
 extern "C" void js_async_hooks_restore_resource(Item previous);
 
-// noop function for use as callbacks
-extern "C" Item js_noop(void) {
-    return make_js_undefined();
-}
-
 // cached key items
 #define key_on (js_runtime_state.stream.key_on)
 #define key_emit (js_runtime_state.stream.key_emit)
@@ -2656,10 +2651,6 @@ extern "C" Item js_readable_unshift_encoded(Item self, Item chunk, Item encoding
         js_stream_emit_readable(self);
     }
     return js_bool_item(js_stream_readable_accepts_more(self, new_buf));
-}
-
-extern "C" Item js_readable_unshift(Item self, Item chunk) {
-    return js_readable_unshift_encoded(self, chunk, make_js_undefined());
 }
 
 static int64_t js_stream_readable_chunk_length(Item self, Item chunk) {
@@ -8026,10 +8017,6 @@ static Item js_stream_pipeline_pair(Item source, Item dest, Item callback) {
                                         js_stream_pipeline_pair_streams(source, dest));
 }
 
-extern "C" Item js_stream_pipeline(Item source, Item dest, Item callback) {
-    return js_stream_pipeline_pair(source, dest, callback);
-}
-
 static Item js_stream_pipeline_function_sink_call_done(Item env_item, Item err) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env || js_item_is_true(env[3])) return make_js_undefined();
@@ -8732,10 +8719,6 @@ static Item js_stream_finished_impl(Item stream, Item options, Item callback) {
     js_stream_finished_add_listener(stream, close_event, env[6]);
 
     return dispose;
-}
-
-extern "C" Item js_stream_finished(Item stream, Item callback) {
-    return js_stream_finished_impl(stream, make_js_undefined(), callback);
 }
 
 static Item js_stream_finished_rest(Item rest_args) {

@@ -2072,32 +2072,13 @@ static Item js_cjs_key(const char* name) {
 #define js_cjs_module_stack_state (js_runtime_state.cjs.module_stack)
 #define js_cjs_module_stack (js_cjs_module_stack_state.roots.slots)
 #define js_cjs_module_stack_count (js_cjs_module_stack_state.depth)
-#define js_cjs_module_names (js_runtime_state.cjs.module_names)
-#define js_cjs_module_objects (js_runtime_state.cjs.module_objects)
-#define js_cjs_module_count (js_runtime_state.cjs.module_count)
-#define js_cjs_module_name_roots (js_runtime_state.cjs.module_name_roots)
-#define js_cjs_module_object_roots (js_runtime_state.cjs.module_object_roots)
 
 static bool js_cjs_register_roots(void) {
-    if (!js_root_range_ensure_registered(&js_cjs_module_stack_state.roots)) return false;
-    if (!js_root_range_ensure_registered(&js_cjs_module_name_roots)) return false;
-    return js_root_range_ensure_registered(&js_cjs_module_object_roots);
+    return js_root_range_ensure_registered(&js_cjs_module_stack_state.roots);
 }
 
 extern "C" void js_cjs_metadata_reset(void) {
     js_item_stack_clear(&js_cjs_module_stack_state);
-    memset(js_cjs_module_names, 0, sizeof(js_cjs_module_names));
-    memset(js_cjs_module_objects, 0, sizeof(js_cjs_module_objects));
-    js_cjs_module_count = 0;
-}
-
-static bool js_cjs_same_string(Item left, Item right) {
-    if (left.item == right.item) return true;
-    if (get_type_id(left) != LMD_TYPE_STRING || get_type_id(right) != LMD_TYPE_STRING) return false;
-    String* ls = it2s(left);
-    String* rs = it2s(right);
-    if (!ls || !rs || ls->len != rs->len) return false;
-    return memcmp(ls->chars, rs->chars, (size_t)ls->len) == 0;
 }
 
 static Item js_cjs_current_module(void) {
@@ -2106,26 +2087,26 @@ static Item js_cjs_current_module(void) {
 }
 
 static Item js_cjs_find_module(Item filename) {
-    for (int i = 0; i < js_cjs_module_count; i++) {
-        if (js_cjs_same_string(js_cjs_module_names[i], filename)) return js_cjs_module_objects[i];
+    if (get_type_id(filename) != LMD_TYPE_STRING) return ItemNull;
+    String* spec = it2s(filename);
+    ModuleDescriptor* desc = module_get_for_runtime(
+        context ? context->runtime : NULL, spec ? spec->chars : NULL);
+    if (desc && desc->source_lang && strcmp(desc->source_lang, "js-cjs") == 0) {
+        return desc->namespace_obj;
     }
     return ItemNull;
 }
 
 static void js_cjs_store_module(Item filename, Item module) {
-    for (int i = 0; i < js_cjs_module_count; i++) {
-        if (js_cjs_same_string(js_cjs_module_names[i], filename)) {
-            js_cjs_module_objects[i] = module;
-            return;
-        }
-    }
-    if (js_cjs_module_count >= JS_CJS_MODULE_MAX) {
-        log_error("cjs-metadata: module registry overflow (%d)", JS_CJS_MODULE_MAX);
-        return;
-    }
-    js_cjs_module_names[js_cjs_module_count] = filename;
-    js_cjs_module_objects[js_cjs_module_count] = module;
-    js_cjs_module_count++;
+    if (get_type_id(filename) != LMD_TYPE_STRING) return;
+    String* spec = it2s(filename);
+    if (!spec) return;
+    ModuleDescriptor* existing = module_get_for_runtime(
+        context ? context->runtime : NULL, spec->chars);
+    if (existing && existing->source_lang &&
+            strcmp(existing->source_lang, "js-cjs") != 0) return;
+    module_register_for_runtime(context ? context->runtime : NULL,
+        spec->chars, "js-cjs", module, NULL);
 }
 
 static Item js_cjs_exports(Item module) {

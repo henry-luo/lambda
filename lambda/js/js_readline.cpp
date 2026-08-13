@@ -1493,11 +1493,6 @@ static void readline_enqueue_input_data(Item rl, Item data_item) {
     js_enqueue_promise_job(job);
 }
 
-extern "C" Item js_readline_bound_input_data_deferred(Item rl, Item data_item) {
-    readline_enqueue_input_data(rl, data_item);
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
 extern "C" Item js_readline_bound_input_end(Item rl, Item data_item) {
     if (get_type_id(data_item) != LMD_TYPE_UNDEFINED && data_item.item != ITEM_NULL) {
         if (readline_get(rl, "__promises_mode__").item == ITEM_TRUE) {
@@ -1710,15 +1705,8 @@ extern "C" Item js_readline_createInterface(Item options_item) {
     if (input.item != ITEM_NULL && get_type_id(input) != LMD_TYPE_UNDEFINED) {
         readline_map_input(input, rl);
         Item bound_args[1] = {rl};
-        bool promises_mode = readline_get(rl, "__promises_mode__").item == ITEM_TRUE;
-        Item listener = ItemNull;
-        if (promises_mode) {
-            Item listener_base = js_new_native_function(js_readline_bound_input_data);
-            listener = js_bind_function(listener_base, ItemNull, bound_args, 1);
-        } else {
-            Item listener_base = js_new_native_function(js_readline_bound_input_data);
-            listener = js_bind_function(listener_base, ItemNull, bound_args, 1);
-        }
+        Item listener_base = js_new_native_function(js_readline_bound_input_data);
+        Item listener = js_bind_function(listener_base, ItemNull, bound_args, 1);
         bool input_event_hooked = false;
         if (readline_is_stream_like(input)) {
             js_stream_on(input, make_string_item("data"), listener);
@@ -1737,14 +1725,8 @@ extern "C" Item js_readline_createInterface(Item options_item) {
         }
         Item output = readline_get(rl, "output");
         if (output.item != input.item) {
-            Item write_fn = ItemNull;
-            if (promises_mode) {
-                Item write_base = js_new_native_function(js_readline_bound_input_data);
-                write_fn = js_bind_function(write_base, ItemNull, bound_args, 1);
-            } else {
-                Item write_base = js_new_native_function(js_readline_bound_input_data);
-                write_fn = js_bind_function(write_base, ItemNull, bound_args, 1);
-            }
+            Item write_base = js_new_native_function(js_readline_bound_input_data);
+            Item write_fn = js_bind_function(write_base, ItemNull, bound_args, 1);
             Item end_fn = js_bind_function(js_new_native_function(js_readline_bound_input_end),
                                            ItemNull, bound_args, 1);
             readline_set(input, "write", write_fn);

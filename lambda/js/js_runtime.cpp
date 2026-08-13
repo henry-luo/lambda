@@ -9045,47 +9045,6 @@ extern "C" int64_t js_get_length(Item object) {
 // Array Functions
 // =============================================================================
 
-extern "C" bool js_array_validate_elements_kind(Item value) {
-    if (get_type_id(value) == LMD_TYPE_ARRAY_NUM) {
-        if (!js_is_ordinary_numeric_array(value)) return true;
-        ArrayNum* numeric = value.array_num;
-        int64_t dense_capacity = container_dense_capacity((Array*)numeric);
-        return numeric->length >= 0 && numeric->length <= dense_capacity &&
-            numeric->extra == 1 &&
-            container_js_elements_kind((Container*)numeric) == JS_ELEMENTS_PACKED_NUMERIC;
-    }
-    if (get_type_id(value) != LMD_TYPE_ARRAY || !value.array) return true;
-    Array* arr = value.array;
-    JsElementsKind kind = container_js_elements_kind((Container*)arr);
-    if (arr->is_content) return kind == JS_ELEMENTS_NONE;
-    if (kind == JS_ELEMENTS_NONE) return false;
-    if (kind == JS_ELEMENTS_PACKED_NUMERIC) {
-        int64_t dense_capacity = js_array_dense_capacity(arr);
-        if (arr->length > dense_capacity) return false;
-        for (int64_t i = 0; i < arr->length && i < dense_capacity; i++) {
-            if (arr->items[i].item == JS_DELETED_SENTINEL_VAL ||
-                    !js_array_value_is_numeric(arr->items[i])) return false;
-        }
-    }
-    if (kind == JS_ELEMENTS_PACKED_TAGGED) {
-        int64_t dense_capacity = js_array_dense_capacity(arr);
-        if (arr->length > dense_capacity) return false;
-        for (int64_t i = 0; i < arr->length; i++) {
-            if (arr->items[i].item == JS_DELETED_SENTINEL_VAL) return false;
-        }
-    }
-    if (kind == JS_ELEMENTS_SPARSE_TAGGED) {
-        Map* props = js_array_props(arr);
-        // A length-only large array is published sparse before its first
-        // indexed store, so its companion overlay is legitimately absent.
-        if (props && props->map_kind != MAP_KIND_ARRAY_SPARSE) return false;
-    }
-    return kind == JS_ELEMENTS_PACKED_NUMERIC ||
-        kind == JS_ELEMENTS_PACKED_TAGGED ||
-        kind == JS_ELEMENTS_HOLEY_TAGGED ||
-        kind == JS_ELEMENTS_SPARSE_TAGGED;
-}
-
 // Direct JS array push shares Lambda's owned-scalar tail representation.
 extern "C" void js_array_push_item_direct(Array* arr, Item value) {
     if (!arr) return;
@@ -9238,16 +9197,6 @@ extern "C" Item js_elements_set_numeric_direct(Item array, int64_t index,
 // Return a hole sentinel value for array elisions
 extern "C" Item js_array_hole() {
     return lam::hole_sentinel_item();
-}
-
-// v18q: Create arguments array (stub — kept for sys_func_registry compatibility)
-extern "C" Item js_create_arguments() {
-    Item result = js_array_new(0);
-    if (get_type_id(result) == LMD_TYPE_ARRAY) {
-        container_set_js_elements_kind((Container*)result.array,
-                                       JS_ELEMENTS_NONE);
-    }
-    return result;
 }
 
 extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value) {
@@ -14732,15 +14681,6 @@ extern "C" Item js_super_call_class_into(Item callee, Item this_val, Item* args,
         return ItemError;
     }
     return js_super_call_class_impl(callee, this_val, args, argc, result_home);
-}
-
-extern "C" Item js_super_apply_class(Item callee, Item this_val, Item args_array) {
-    int argc = js_array_length(args_array);
-    Item* args = argc > 0 ? LAMBDA_ALLOCA(argc, Item) : NULL;
-    for (int i = 0; i < argc; i++) {
-        args[i] = js_elements_get(args_array, (Item){.item = i2it(i)});
-    }
-    return js_super_call_class(callee, this_val, args, argc);
 }
 
 extern "C" Item js_super_apply_class_into(Item callee, Item this_val, Item args_array,
@@ -25326,83 +25266,6 @@ static bool js_array_find_prev_own_element_cached(Item arr, lam::GcPtr<Array> a,
         true, out_index, out_elem, cursor);
 }
 
-extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
-    if (js_is_ordinary_numeric_array(arr)) {
-        Item search_value = (Item){.item = i2it(search)};
-        int64_t length = arr.array_num->length;
-        for (int64_t index = 0; index < length; index++) {
-            Item element = array_num_get(arr.array_num, index);
-            if (it2b(js_strict_equal(element, search_value))) {
-                return (Item){.item = i2it(index)};
-            }
-        }
-        return (Item){.item = i2it(-1)};
-    }
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
-    Array* array = arr.array;
-    if (array->length == 0) return (Item){.item = i2it(-1)};
-    int64_t dense_capacity = js_array_dense_capacity(array);
-    int64_t dense_limit = dense_capacity < array->length ? dense_capacity : array->length;
-    Item search_val = (Item){.item = i2it((int)search)};
-    bool check_proto = false;
-    bool checked_proto = false;
-    if (js_array_has_props(array) && !js_array_has_numeric_own_accessors(lam::gc_borrow(array)) && !js_array_proto_index_guard_is_dirty(arr)) {
-        int64_t idx = 0;
-        Item elem = ItemNull;
-        JsArraySparseKeyCursor sparse_cursor;
-        js_array_sparse_key_cursor_init(&sparse_cursor);
-        while (js_array_find_next_own_element_cached(arr, lam::gc_borrow(array), idx, array->length, &idx, &elem, &sparse_cursor)) {
-            if (elem.item == search_val.item) {
-                js_array_sparse_key_cursor_free(&sparse_cursor);
-                return (Item){.item = i2it((int)idx)};
-            }
-            if (get_type_id(elem) != LMD_TYPE_INT && it2b(js_strict_equal(elem, search_val))) {
-                js_array_sparse_key_cursor_free(&sparse_cursor);
-                return (Item){.item = i2it((int)idx)};
-            }
-            idx++;
-        }
-        js_array_sparse_key_cursor_free(&sparse_cursor);
-        return (Item){.item = i2it(-1)};
-    }
-    if (!js_array_has_props(array)) {
-        bool all_dense_int = true;
-        for (int64_t int_idx = 0; int_idx < dense_limit; int_idx++) {
-            Item elem = array->items[int_idx];
-            if (elem.item == JS_DELETED_SENTINEL_VAL || get_type_id(elem) != LMD_TYPE_INT) {
-                all_dense_int = false;
-                break;
-            }
-            if (elem.item == search_val.item) return (Item){.item = i2it((int)int_idx)};
-        }
-        if (all_dense_int) return (Item){.item = i2it(-1)};
-        for (int64_t int_idx = 0; int_idx < dense_limit; int_idx++) {
-            Item elem = array->items[int_idx];
-            if (elem.item == JS_DELETED_SENTINEL_VAL) {
-                if (!checked_proto) {
-                    check_proto = js_array_proto_index_guard_is_dirty(arr);
-                    checked_proto = true;
-                }
-                if (!check_proto) continue;
-                if (!js_array_has_element(arr, lam::gc_borrow(array), (int)int_idx, &elem, true)) continue;
-            }
-            if (elem.item == search_val.item) return (Item){.item = i2it((int)int_idx)};
-            if (get_type_id(elem) == LMD_TYPE_INT) continue;
-            if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it((int)int_idx)};
-        }
-        return (Item){.item = i2it(-1)};
-    }
-    check_proto = js_array_proto_index_guard_is_dirty(arr);
-    for (int64_t int_idx = 0; int_idx < dense_limit; int_idx++) {
-        Item elem;
-        if (!js_array_has_element(arr, lam::gc_borrow(array), (int)int_idx, &elem, check_proto)) continue;
-        if (elem.item == search_val.item) return (Item){.item = i2it((int)int_idx)};
-        if (get_type_id(elem) == LMD_TYPE_INT) continue;
-        if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it((int)int_idx)};
-    }
-    return (Item){.item = i2it(-1)};
-}
-
 // J39-7: returns true if length is non-writable (frozen array or
 // defineProperty(arr, "length", {writable:false}) set the length ShapeEntry flag).
 static bool js_array_length_is_non_writable(Item arr) {
@@ -29017,23 +28880,6 @@ JS_MATH_INTRINSIC_BODY(js_intrinsic_math_atanh_body, JS_MATH_INTRINSIC_ATANH)
 JS_MATH_INTRINSIC_BODY(js_intrinsic_math_expm1_body, JS_MATH_INTRINSIC_EXPM1)
 JS_MATH_INTRINSIC_BODY(js_intrinsic_math_log1p_body, JS_MATH_INTRINSIC_LOG1P)
 #undef JS_MATH_INTRINSIC_BODY
-
-// array slice from index to end — used for rest destructuring
-extern "C" Item js_array_slice_from(Item arr, Item start_item) {
-    TypeId tid = get_type_id(arr);
-    if (tid != LMD_TYPE_ARRAY) return js_array_new(0);
-    Array* src = arr.array;
-    int start = (int)js_get_number(start_item);
-    if (start < 0) start = src->length + start;
-    if (start < 0) start = 0;
-    if (start >= src->length) return js_array_new(0);
-    Item result = js_array_new(0);
-    Array* dst = result.array;
-    for (int i = start; i < src->length; i++) {
-        js_array_push_item_direct(dst, src->items[i]);
-    }
-    return result;
-}
 
 // =============================================================================
 // Prototype chain support
@@ -34398,15 +34244,9 @@ static Item js_promise_all_settled_iterable(Item iterable) {
 #define js_modules (js_runtime_state.modules.modules)
 #define js_module_count_v14 (js_runtime_state.modules.module_count)
 #define js_active_module_namespace (js_runtime_state.modules.active_namespace)
-#define g_tla_continuations (js_runtime_state.modules.continuations)
-#define g_tla_continuation_count (js_runtime_state.modules.continuation_count)
 #define g_tla_module_depth (js_runtime_state.modules.module_depth)
 #define g_async_eval_order_counter (js_runtime_state.modules.async_eval_order_counter)
-#define g_tla_ready_queue (js_runtime_state.modules.ready_queue)
-#define g_tla_ready_queue_count (js_runtime_state.modules.ready_queue_count)
 #define g_tla_draining_depth (js_runtime_state.modules.draining_depth)
-#define g_p5_slot_namespace (js_runtime_state.modules.p5_slot_namespace)
-#define g_p5_next_slot (js_runtime_state.modules.p5_next_slot)
 
 static void js_module_ensure_roots() {
     if (!js_active_runtime_state || !context || !context->heap || !context->heap->gc) return;
@@ -34420,8 +34260,6 @@ static void js_module_ensure_roots() {
         heap_register_gc_root(&state->modules[i].evaluation_error.item);
     }
     heap_register_gc_root(&state->active_namespace.item);
-    if (!js_root_range_ensure_registered(&state->continuation_roots) ||
-        !js_root_range_ensure_registered(&state->p5_roots)) return;
     state->roots_epoch = epoch;
 }
 
@@ -34436,14 +34274,9 @@ void js_module_cache_reset() {
     memset(js_modules, 0, sizeof(js_runtime_state.modules.modules));
     js_module_count_v14 = 0;
     js_active_module_namespace = ItemNull;
-    memset(g_tla_continuations, 0, sizeof(js_runtime_state.modules.continuations));
-    g_tla_continuation_count = 0;
     g_tla_module_depth = 0;
     g_async_eval_order_counter = 0;
-    g_tla_ready_queue_count = 0;
     g_tla_draining_depth = 0;
-    memset(g_p5_slot_namespace, 0, sizeof(js_runtime_state.modules.p5_slot_namespace));
-    g_p5_next_slot = 0;
 }
 
 extern "C" Item js_get_active_module_namespace() {
@@ -34475,11 +34308,9 @@ extern "C" Item js_get_import_meta() {
 // to suspend at `await`. To approximate suspension well enough for the sibling-
 // observability tests, we compile such a module body in two halves: pre-await
 // and post-await. The pre-await chunk runs first (registers the post-await
-// chunk via js_tla_register_continuation, then returns the namespace); sibling
-// modules then load and observe whatever the pre-await chunk did to global /
-// module state; once the outermost transpile_js_module_to_mir call unwinds the
-// queue is flushed in registration order so the post-await chunks run after
-// the importing module's body has finished.
+// chunk via the module's deferred-main record, then returns the namespace);
+// sibling modules then load and observe whatever the pre-await chunk did to
+// global / module state.
 //
 // The queue is intentionally NOT the regular microtask queue (which drains
 // after every module's js_main via js_event_loop_drain); that drain would fire
@@ -34492,14 +34323,6 @@ extern "C" Item js_get_import_meta() {
 // pre-await state at evaluation time). 1 = compiling entry, >= 2 = nested.
 extern "C" int js_tla_module_depth_get(void) {
     return js_active_runtime_state ? g_tla_module_depth : 0;
-}
-
-extern "C" void js_tla_register_continuation(Item func) {
-    if (g_tla_continuation_count >= JS_TLA_MAX_CONTINUATIONS) {
-        log_error("TLA: continuation queue overflow (%d)", JS_TLA_MAX_CONTINUATIONS);
-        return;
-    }
-    g_tla_continuations[g_tla_continuation_count++] = func;
 }
 
 extern "C" void js_tla_enter_module(void) {
@@ -34593,35 +34416,6 @@ extern "C" void js_tla_flush_for_dynamic_import(void) {
 extern "C" void js_tla_exit_module(void) {
     if (g_tla_module_depth > 0) g_tla_module_depth--;
     if (g_tla_module_depth != 0) return;
-    // Outermost transpile_js_module_to_mir is unwinding: flush queued post-
-    // await chunks in registration order. Snapshot the list because each
-    // continuation may itself register more (rare in practice, but supported).
-    int snapshot = g_tla_continuation_count;
-    int idx = 0;
-    while (idx < snapshot) {
-        Item func = g_tla_continuations[idx++];
-        if (js_is_callable(func)) {
-            js_call_function(func, ItemNull, NULL, 0);
-        }
-    }
-    // Compact: drop the consumed prefix, keep any newly-appended tail.
-    int tail = g_tla_continuation_count - snapshot;
-    for (int i = 0; i < tail; i++) {
-        g_tla_continuations[i] = g_tla_continuations[snapshot + i];
-    }
-    g_tla_continuation_count = tail;
-    // If new ones got queued during the drain, keep flushing until empty.
-    while (g_tla_continuation_count > 0) {
-        Item func = g_tla_continuations[0];
-        for (int i = 1; i < g_tla_continuation_count; i++) {
-            g_tla_continuations[i - 1] = g_tla_continuations[i];
-        }
-        g_tla_continuation_count--;
-        if (js_is_callable(func)) {
-            js_call_function(func, ItemNull, NULL, 0);
-        }
-    }
-
     // Js57 P7d: module bodies are drained in async-evaluation order only after
     // their pending dependencies have completed.
     js_tla_flush_pending_modules(false);
@@ -34835,11 +34629,6 @@ extern "C" void js_module_save_context(Item specifier, uint32_t module_state_id)
     m->saved_module_state_id = module_state_id;
 }
 
-extern "C" uint32_t js_module_get_saved_module_state_id(Item specifier) {
-    JsModule* m = js_module_find(specifier);
-    return m ? m->saved_module_state_id : UINT32_MAX;
-}
-
 // Returns 1 if the module needs deferral — either it has TLA itself OR its
 // pending_async_deps counter is still positive (a TLA-transitive dep hasn't
 // settled yet). Used by jm_load_imports to decide whether an importer should
@@ -34929,50 +34718,11 @@ extern "C" int js_module_assign_async_eval_order(Item specifier) {
     return m->async_eval_order;
 }
 
-extern "C" void js_module_reset_aeo_counter(void) {
-    g_async_eval_order_counter = 0;
-}
-
-// Ready queue: modules whose pending_async_deps just reached 0 and need their
-// deferred body invoked. Drained in AEO order from js_tla_exit_module after
-// the existing g_tla_continuations queue.
-
-static void js_tla_ready_enqueue(int module_idx) {
-    if (g_tla_ready_queue_count >= JS_TLA_READY_QUEUE_MAX) {
-        log_error("P7d: ready queue overflow (%d)", JS_TLA_READY_QUEUE_MAX);
-        return;
-    }
-    for (int i = 0; i < g_tla_ready_queue_count; i++) {
-        if (g_tla_ready_queue[i] == module_idx) return;  // already queued
-    }
-    g_tla_ready_queue[g_tla_ready_queue_count++] = module_idx;
-}
-
-// Pop the module with the lowest AEO. Returns -1 if queue is empty.
-static int js_tla_ready_pop_lowest_aeo(void) {
-    if (g_tla_ready_queue_count == 0) return -1;
-    int best = 0;
-    int best_aeo = js_modules[g_tla_ready_queue[0]].async_eval_order;
-    for (int i = 1; i < g_tla_ready_queue_count; i++) {
-        int aeo = js_modules[g_tla_ready_queue[i]].async_eval_order;
-        if (aeo >= 0 && (best_aeo < 0 || aeo < best_aeo)) {
-            best = i;
-            best_aeo = aeo;
-        }
-    }
-    int idx = g_tla_ready_queue[best];
-    // Compact: shift remaining entries left
-    for (int i = best + 1; i < g_tla_ready_queue_count; i++) {
-        g_tla_ready_queue[i - 1] = g_tla_ready_queue[i];
-    }
-    g_tla_ready_queue_count--;
-    return idx;
-}
-
 // Called when a module's body fully completes (either a non-TLA body finishing,
 // or a TLA module's post-await continuation finishing). Notifies async parents
-// by decrementing their pending_async_deps; when a parent's counter reaches
-// zero, its deferred body is invoked.
+// by decrementing their pending_async_deps. The existing AEO-ordered scan is
+// the single scheduler; a second ready queue only duplicated that eligibility
+// state and could diverge from the scan during nested completion.
 extern "C" void js_module_complete_tla_body(Item specifier) {
     int idx = js_module_find_index(specifier);
     if (idx < 0) return;
@@ -34988,133 +34738,37 @@ extern "C" void js_module_complete_tla_body(Item specifier) {
     int parent_count = m->async_parent_count;
     for (int i = 0; i < parent_count; i++) parents[i] = m->async_parents[i];
 
-    // First pass: just decrement and enqueue ready parents. Do NOT execute
-    // them yet — the AEO-order drain below handles execution.
+    // First pass: just decrement parent dependency counts. Do not execute
+    // bodies while the parent list is being traversed.
     for (int i = 0; i < parent_count; i++) {
         JsModule* par = &js_modules[parents[i]];
         if (par->pending_async_deps > 0) par->pending_async_deps--;
         if (par->pending_async_deps == 0 && !par->body_executed && par->deferred_main_ptr) {
-            log_debug("P7d: module '%.*s' all deps settled — enqueued for AEO drain",
+            log_debug("P7d: module '%.*s' all deps settled — eligible for AEO drain",
                 (int)par->specifier->len, par->specifier->chars);
-            js_tla_ready_enqueue(parents[i]);
         }
     }
 
-    // Drain the ready queue in AEO order, but only at the outermost
-    // js_module_complete_tla_body invocation. Nested calls (e.g. when a child
-    // module's body itself completes synchronously) just enqueue.
+    // Drain the same AEO-ordered module scan used at module-exit. Nested calls
+    // only update dependency counters; the outer scan observes them.
     if (g_tla_draining_depth > 0) return;
     g_tla_draining_depth++;
-    while (1) {
-        int next = js_tla_ready_pop_lowest_aeo();
-        if (next < 0) break;
-        JsModule* par = &js_modules[next];
-        if (par->body_executed) continue;
-        if (!par->deferred_main_ptr) continue;
-        log_debug("P7d: module '%.*s' invoking deferred main (AEO=%d)",
-            (int)par->specifier->len, par->specifier->chars, par->async_eval_order);
-        typedef Item (*js_main_fn)(Context*);
-        js_main_fn main_fn = (js_main_fn)par->deferred_main_ptr;
-        par->deferred_main_ptr = NULL;  // single-shot
-        // Restore the module's evaluation context (module-vars and namespace)
-        // so the deferred body sees its own state, not the
-        // drain caller's.
-        uint32_t prev_module_state_id = js_get_active_module_state_id();
-        Item prev_ns = js_set_active_module_namespace(par->namespace_obj);
-        if (par->saved_module_state_id != UINT32_MAX) {
-            js_set_active_module_state_id(par->saved_module_state_id);
-        }
-        Item continuation_result = main_fn(context);
-        // Drain microtasks scheduled by the deferred body before propagating
-        // completion. Without this, Promise.then handlers queued by the body
-        // never fire and async-flagged tests miss $DONE().
-        extern int js_dynamic_import_suppress_module_drain;
-        if (js_dynamic_import_suppress_module_drain <= 0) {
-            js_event_loop_drain();
-        }
-        if (prev_module_state_id != UINT32_MAX) {
-            js_set_active_module_state_id(prev_module_state_id);
-        }
-        js_set_active_module_namespace(prev_ns);
-        // After the parent's body returns, mark it complete unless its own
-        // TLA pre-await split scheduled a post-await continuation.
-        if (item_is_error(continuation_result)) {
-            js_module_record_evaluation_error(par->specifier_item, continuation_result);
-        } else if (!par->post_await_pending) {
-            Item par_spec = (Item){.item = s2it(par->specifier)};
-            js_module_complete_tla_body(par_spec);
-        }
-    }
+    js_tla_flush_pending_modules(false);
     g_tla_draining_depth--;
 }
 
-// Js57 P5: per-dynamic-import namespace slots. A pre-allocated bank of C
-// thunks lets us build a `promise.then(() => namespace)` chain from C without
-// going through Lambda's closure-with-captured-value path. Each thunk's only
-// job is to return the namespace its slot was seeded with — the thunk's slot
-// index is baked into its function pointer.
-#define P5_SLOTS JS_P5_DYNAMIC_IMPORT_SLOTS
-
-#define P5_DEFINE_THUNK(N) \
-    extern "C" Item js_p5_dyn_import_thunk_##N(Item arg) { \
-        (void)arg; return g_p5_slot_namespace[N]; \
-    }
-P5_DEFINE_THUNK(0)  P5_DEFINE_THUNK(1)  P5_DEFINE_THUNK(2)  P5_DEFINE_THUNK(3)
-P5_DEFINE_THUNK(4)  P5_DEFINE_THUNK(5)  P5_DEFINE_THUNK(6)  P5_DEFINE_THUNK(7)
-P5_DEFINE_THUNK(8)  P5_DEFINE_THUNK(9)  P5_DEFINE_THUNK(10) P5_DEFINE_THUNK(11)
-P5_DEFINE_THUNK(12) P5_DEFINE_THUNK(13) P5_DEFINE_THUNK(14) P5_DEFINE_THUNK(15)
-P5_DEFINE_THUNK(16) P5_DEFINE_THUNK(17) P5_DEFINE_THUNK(18) P5_DEFINE_THUNK(19)
-P5_DEFINE_THUNK(20) P5_DEFINE_THUNK(21) P5_DEFINE_THUNK(22) P5_DEFINE_THUNK(23)
-P5_DEFINE_THUNK(24) P5_DEFINE_THUNK(25) P5_DEFINE_THUNK(26) P5_DEFINE_THUNK(27)
-P5_DEFINE_THUNK(28) P5_DEFINE_THUNK(29) P5_DEFINE_THUNK(30) P5_DEFINE_THUNK(31)
-P5_DEFINE_THUNK(32) P5_DEFINE_THUNK(33) P5_DEFINE_THUNK(34) P5_DEFINE_THUNK(35)
-P5_DEFINE_THUNK(36) P5_DEFINE_THUNK(37) P5_DEFINE_THUNK(38) P5_DEFINE_THUNK(39)
-P5_DEFINE_THUNK(40) P5_DEFINE_THUNK(41) P5_DEFINE_THUNK(42) P5_DEFINE_THUNK(43)
-P5_DEFINE_THUNK(44) P5_DEFINE_THUNK(45) P5_DEFINE_THUNK(46) P5_DEFINE_THUNK(47)
-P5_DEFINE_THUNK(48) P5_DEFINE_THUNK(49) P5_DEFINE_THUNK(50) P5_DEFINE_THUNK(51)
-P5_DEFINE_THUNK(52) P5_DEFINE_THUNK(53) P5_DEFINE_THUNK(54) P5_DEFINE_THUNK(55)
-P5_DEFINE_THUNK(56) P5_DEFINE_THUNK(57) P5_DEFINE_THUNK(58) P5_DEFINE_THUNK(59)
-P5_DEFINE_THUNK(60) P5_DEFINE_THUNK(61) P5_DEFINE_THUNK(62) P5_DEFINE_THUNK(63)
-
-static JsNativeP1 g_p5_thunk_fns[P5_SLOTS] = {
-    js_p5_dyn_import_thunk_0,  js_p5_dyn_import_thunk_1,
-    js_p5_dyn_import_thunk_2,  js_p5_dyn_import_thunk_3,
-    js_p5_dyn_import_thunk_4,  js_p5_dyn_import_thunk_5,
-    js_p5_dyn_import_thunk_6,  js_p5_dyn_import_thunk_7,
-    js_p5_dyn_import_thunk_8,  js_p5_dyn_import_thunk_9,
-    js_p5_dyn_import_thunk_10, js_p5_dyn_import_thunk_11,
-    js_p5_dyn_import_thunk_12, js_p5_dyn_import_thunk_13,
-    js_p5_dyn_import_thunk_14, js_p5_dyn_import_thunk_15,
-    js_p5_dyn_import_thunk_16, js_p5_dyn_import_thunk_17,
-    js_p5_dyn_import_thunk_18, js_p5_dyn_import_thunk_19,
-    js_p5_dyn_import_thunk_20, js_p5_dyn_import_thunk_21,
-    js_p5_dyn_import_thunk_22, js_p5_dyn_import_thunk_23,
-    js_p5_dyn_import_thunk_24, js_p5_dyn_import_thunk_25,
-    js_p5_dyn_import_thunk_26, js_p5_dyn_import_thunk_27,
-    js_p5_dyn_import_thunk_28, js_p5_dyn_import_thunk_29,
-    js_p5_dyn_import_thunk_30, js_p5_dyn_import_thunk_31,
-    js_p5_dyn_import_thunk_32, js_p5_dyn_import_thunk_33,
-    js_p5_dyn_import_thunk_34, js_p5_dyn_import_thunk_35,
-    js_p5_dyn_import_thunk_36, js_p5_dyn_import_thunk_37,
-    js_p5_dyn_import_thunk_38, js_p5_dyn_import_thunk_39,
-    js_p5_dyn_import_thunk_40, js_p5_dyn_import_thunk_41,
-    js_p5_dyn_import_thunk_42, js_p5_dyn_import_thunk_43,
-    js_p5_dyn_import_thunk_44, js_p5_dyn_import_thunk_45,
-    js_p5_dyn_import_thunk_46, js_p5_dyn_import_thunk_47,
-    js_p5_dyn_import_thunk_48, js_p5_dyn_import_thunk_49,
-    js_p5_dyn_import_thunk_50, js_p5_dyn_import_thunk_51,
-    js_p5_dyn_import_thunk_52, js_p5_dyn_import_thunk_53,
-    js_p5_dyn_import_thunk_54, js_p5_dyn_import_thunk_55,
-    js_p5_dyn_import_thunk_56, js_p5_dyn_import_thunk_57,
-    js_p5_dyn_import_thunk_58, js_p5_dyn_import_thunk_59,
-    js_p5_dyn_import_thunk_60, js_p5_dyn_import_thunk_61,
-    js_p5_dyn_import_thunk_62, js_p5_dyn_import_thunk_63,
-};
+// P5's old 64-slot thunk bank made namespace capture a global mutable table.
+// A native closure owns the captured Item directly, so concurrent dynamic
+// imports no longer alias slots or require a fixed root range.
+static Item js_p5_dynamic_import_handler(Item namespace_obj) {
+    return namespace_obj;
+}
 
 extern "C" Item js_p5_chain_dynamic_import(Item awaited, Item namespace_obj) {
-    int slot = g_p5_next_slot++ % P5_SLOTS;
-    g_p5_slot_namespace[slot] = namespace_obj;
-    Item handler = js_new_native_function(g_p5_thunk_fns[slot]);
+    Item* env = js_alloc_env(1);
+    if (!env) return ItemError;
+    env[0] = namespace_obj;
+    Item handler = js_new_native_closure(js_p5_dynamic_import_handler, 0, env, 1);
     return js_promise_then(awaited, handler, ItemNull);
 }
 
@@ -40387,11 +40041,6 @@ extern "C" Item js_module_create_require(Item filename) {
     return js_new_native_function(js_require);
 }
 
-extern "C" Item js_module_namespace_create(Item exports_map) {
-    // Module namespace is just a frozen map object
-    return exports_map;
-}
-
 // =============================================================================
 // TextEncoder / TextDecoder (UTF-8 only)
 // =============================================================================
@@ -40876,11 +40525,6 @@ extern "C" bool js_is_map_instance(Item obj) {
 extern "C" bool js_is_set_instance(Item obj) {
     JsCollectionData* cd = js_get_collection_data(obj);
     return cd && cd->type == JS_COLLECTION_SET;
-}
-
-extern "C" bool js_is_weak_collection_instance(Item obj) {
-    JsCollectionData* cd = js_get_collection_data(obj);
-    return cd && cd->is_weak;
 }
 
 // =============================================================================

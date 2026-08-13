@@ -2691,11 +2691,6 @@ extern "C" Item js_process_exit(Item code_item) {
     exit(code);
 }
 
-// process.exitCode getter/setter
-extern "C" Item js_process_get_exitCode(void) {
-    return (Item){.item = i2it(js_process_exit_code_value)};
-}
-
 extern "C" Item js_process_set_exitCode(Item code_item) {
     if (!js_active_runtime_state) return make_js_undefined();
     TypeId type = get_type_id(code_item);
@@ -3694,11 +3689,6 @@ extern "C" void js_process_ipc_notify_handle_accepted(void) {
     // descriptor ownership transfers only after uv_accept succeeds in the
     // receiver; this internal frame lets the sender close its endpoint then.
     (void)js_process_send(control, make_js_undefined());
-}
-
-extern "C" Item js_process_send_compat(Item msg) {
-    (void)msg;
-    return (Item){.item = b2it(true)};
 }
 
 extern "C" Item js_process_disconnect(void) {
@@ -5813,29 +5803,6 @@ extern "C" Item js_console_assert_fn(Item cond, Item msg) {
         js_console_write_to_stderr(buf, n);
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-// =============================================================================
-// Array fill (regular arrays)
-// =============================================================================
-
-extern "C" Item js_array_fill(Item arr_item, Item value) {
-    TypeId type = get_type_id(arr_item);
-
-    // Check if typed array first
-    if (type == LMD_TYPE_MAP && js_is_typed_array(arr_item)) {
-        return js_typed_array_fill(arr_item, value, 0, INT_MAX, false);
-    }
-
-    if (!js_is_js_array(arr_item)) return arr_item;
-
-    int len = fn_len(arr_item);
-    Array* arr = it2arr(arr_item);
-    for (int i = 0; i < len; i++) {
-        fn_array_set(arr, i, value);
-    }
-
-    return arr_item;
 }
 
 // =============================================================================
@@ -14089,12 +14056,6 @@ extern "C" Item js_abort_signal_timeout(Item ms_item) {
     // TODO: actually schedule a timeout to abort after ms
     // for now just return the un-aborted signal
     return signal;
-}
-
-// generic stub constructor — returns a new empty object
-extern "C" Item js_stub_constructor(Item arg) {
-    (void)arg;
-    return js_new_object();
 }
 
 // Option(text, value, defaultSelected, selected) — HTMLOptionElement constructor stub

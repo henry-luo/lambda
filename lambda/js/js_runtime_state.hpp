@@ -18,7 +18,6 @@
 #define JS_EVENT_TIMER_CAPACITY 1024
 #define JS_EVENT_MOCK_WAIT_CAPACITY 128
 #define JS_CJS_STACK_MAX 128
-#define JS_CJS_MODULE_MAX 256
 #define JS_WITH_STACK_MAX 16
 #define JS_DEFERRED_MIR_MAX 4096
 #define JS_FUNCTION_CACHE_CAPACITY 512
@@ -37,9 +36,6 @@
 #define JS_DOMAIN_STACK_MAX 64
 #define JS_MAX_MODULES 64
 #define JS_MAX_ASYNC_PARENTS 16
-#define JS_TLA_MAX_CONTINUATIONS 64
-#define JS_TLA_READY_QUEUE_MAX 128
-#define JS_P5_DYNAMIC_IMPORT_SLOTS 64
 #define JS_MAX_ALS_INSTANCES 256
 #define JS_TRACE_MAX_CATEGORIES 64
 #define JS_TRACE_MAX_EVENTS 2048
@@ -140,11 +136,6 @@ struct JsItemStack {
 struct JsCjsState {
     Item module_stack_slots[JS_CJS_STACK_MAX] = {};
     JsItemStack module_stack = {};
-    Item module_names[JS_CJS_MODULE_MAX] = {};
-    Item module_objects[JS_CJS_MODULE_MAX] = {};
-    JsRootRange module_name_roots = {};
-    JsRootRange module_object_roots = {};
-    int module_count = 0;
 };
 
 struct JsWithScopeState {
@@ -723,18 +714,10 @@ struct JsModuleRuntimeState {
     JsModule modules[JS_MAX_MODULES] = {};
     int module_count = 0;
     Item active_namespace = {};
-    Item continuations[JS_TLA_MAX_CONTINUATIONS] = {};
-    int continuation_count = 0;
     int module_depth = 0;
     int async_eval_order_counter = 0;
-    int ready_queue[JS_TLA_READY_QUEUE_MAX] = {};
-    int ready_queue_count = 0;
     int draining_depth = 0;
-    Item p5_slot_namespace[JS_P5_DYNAMIC_IMPORT_SLOTS] = {};
-    int p5_next_slot = 0;
     uint64_t roots_epoch = 0;
-    JsRootRange continuation_roots = {};
-    JsRootRange p5_roots = {};
 };
 
 struct JsClusterState {

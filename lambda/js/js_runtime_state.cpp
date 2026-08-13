@@ -319,10 +319,6 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     JsCjsState* cjs = &state->cjs;
     js_root_range_set_storage(&cjs->module_stack.roots, cjs->module_stack_slots,
         JS_CJS_STACK_MAX, "CommonJS module stack");
-    js_root_range_set_storage(&cjs->module_name_roots, cjs->module_names,
-        JS_CJS_MODULE_MAX, "CommonJS module names");
-    js_root_range_set_storage(&cjs->module_object_roots, cjs->module_objects,
-        JS_CJS_MODULE_MAX, "CommonJS module objects");
 
     JsWithScopeState* with_scope = &state->with_scope;
     js_root_range_set_storage(&with_scope->stack.roots, with_scope->stack_slots,
@@ -413,12 +409,6 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
         "Promise unhandled queue and domain state");
     js_root_range_set_storage(&state->promises.domain_stack.roots,
         state->promises.domain_stack_slots, JS_DOMAIN_STACK_MAX, "domain stack");
-    js_root_range_set_storage(&state->modules.continuation_roots,
-        state->modules.continuations, JS_TLA_MAX_CONTINUATIONS,
-        "module TLA continuations");
-    js_root_range_set_storage(&state->modules.p5_roots,
-        state->modules.p5_slot_namespace, JS_P5_DYNAMIC_IMPORT_SLOTS,
-        "dynamic import namespace slots");
     js_root_range_set_storage(&state->async_local_storage.roots,
         state->async_local_storage.instances, JS_MAX_ALS_INSTANCES,
         "AsyncLocalStorage instances");

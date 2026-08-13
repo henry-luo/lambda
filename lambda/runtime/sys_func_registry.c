@@ -2628,8 +2628,6 @@ JitImport jit_runtime_imports[] = {
     {"js_get_import_meta", FPTR(js_get_import_meta)},
     // Js57 P3 (Track B2): live binding for self-imported defaults
     {"js_get_live_binding_default", FPTR(js_get_live_binding_default)},
-    // Js57 P4 (Track B3): TLA module continuation queue
-    {"js_tla_register_continuation", FPTR(js_tla_register_continuation), JIT_IMPORT_VOID_PRESERVES},
     {"js_tla_enter_module", FPTR(js_tla_enter_module), JIT_IMPORT_VOID_PRESERVES},
     {"js_tla_exit_module", FPTR(js_tla_exit_module), JIT_IMPORT_VOID_PRESERVES},
     // Js57 P5: TLA awaited-target tracking for dynamic-import wait chains
@@ -2648,10 +2646,8 @@ JitImport jit_runtime_imports[] = {
     {"js_module_get_body_state", FPTR(js_module_get_body_state), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_module_set_body_state", FPTR(js_module_set_body_state), JIT_IMPORT_VOID_PRESERVES},
     {"js_module_assign_async_eval_order", FPTR(js_module_assign_async_eval_order), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    {"js_module_reset_aeo_counter", FPTR(js_module_reset_aeo_counter), JIT_IMPORT_VOID_PRESERVES},
     {"js_module_complete_tla_body", FPTR(js_module_complete_tla_body), JIT_IMPORT_VOID_PRESERVES},
     {"js_module_save_context", FPTR(js_module_save_context), JIT_IMPORT_VOID_PRESERVES},
-    {"js_module_get_saved_module_state_id", FPTR(js_module_get_saved_module_state_id), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     // CJS require() support
     {"js_require", FPTR(js_require)},
     // Dynamic import() support
