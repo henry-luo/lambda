@@ -25035,6 +25035,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     bool force_interp_init = !g_mir_interp_mode &&
         (lambda_mir_interp_env_enabled() || auto_interp_for_large_source);
     int saved_mir_interp_mode = g_mir_interp_mode;
+    bool mir_gen_initialized = saved_mir_interp_mode == 0 && !force_interp_init;
     if (force_interp_init) g_mir_interp_mode = 1;
     MIR_context_t ctx = jit_init(opt_level);
     if (force_interp_init) g_mir_interp_mode = saved_mir_interp_mode;
@@ -25088,6 +25089,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 
     // Store results in the transpiler and propagate back to script
     tp->jit_context = ctx;
+    tp->mir_gen_initialized = mir_gen_initialized;
     tp->main_func = (main_func_t)(use_mir_interp_for_script ? find_func(ctx, "main") : jit_gen_func(ctx, "main"));
 
 #ifdef _WIN32
@@ -25232,7 +25234,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     if (!tp->main_func) {
         log_error("MIR Direct: failed to generate 'main' for '%s'",
                   script_path ? script_path : "<unknown>");
-        jit_cleanup(ctx);
+        jit_cleanup_mode(ctx, mir_gen_initialized ? 1 : 0);
         tp->jit_context = NULL;
     }
 

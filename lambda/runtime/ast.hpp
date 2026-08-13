@@ -423,6 +423,7 @@ struct Script : Input {
     // JIT compilation (Script-specific)
     MIR_context_t jit_context;
     main_func_t main_func;      // transpiled main function
+    bool mir_gen_initialized;   // whether this context initialized MIR_gen
     mpd_context_t* decimal_ctx;  // libmpdec context for decimal operations
 
     // Debug info for stack traces (function address → source mapping)

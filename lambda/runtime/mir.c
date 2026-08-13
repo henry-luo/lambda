@@ -396,10 +396,16 @@ void* find_data(MIR_context_t ctx, const char *data_name) {
     return NULL;
 }
 
-void jit_cleanup(MIR_context_t ctx) {
-    // Cleanup
-    if (!g_mir_interp_mode) MIR_gen_finish(ctx);
+void jit_cleanup_mode(MIR_context_t ctx, int generator_initialized) {
+    // Cleanup must follow the context's initialization path, not the current
+    // process-global mode, because automatic O0 interpretation restores that
+    // global before the compiled Script is eventually torn down.
+    if (generator_initialized) MIR_gen_finish(ctx);
     MIR_finish(ctx);
+}
+
+void jit_cleanup(MIR_context_t ctx) {
+    jit_cleanup_mode(ctx, !g_mir_interp_mode);
 }
 
 bool prepare_context_module_state(void* mir_ctx, void* consts, void* type_list) {
