@@ -1004,21 +1004,22 @@ extern "C" Item py_stdlib_random_init(void) {
 // =========================================================================
 
 // functools.reduce(func, iterable, initializer=None)
-// Wraps Lambda's fn_reduce which takes (collection, function)
+// Lambda's reducer requires a Core boxed callable, while Python functions
+// publish the hosted MIR ABI; invoke through the Python dispatcher instead.
 static Item py_functools_reduce(Item func, Item iterable, Item initializer) {
-    if (initializer.item != ItemNull.item) {
-        // prepend initializer to the iterable
-        Item lst = py_list_new(0);
-        py_list_append(lst, initializer);
-        // iterate over the original iterable and append each element
-        int64_t len = py_list_length(iterable);
-        for (int64_t i = 0; i < len; i++) {
-            py_list_append(lst, py_list_get(iterable, mk_int(i)));
-        }
-        return fn_reduce(lst, func);
+    int64_t len = py_list_length(iterable);
+    int64_t index = 0;
+    Item accumulator = initializer;
+    if (initializer.item == ItemNull.item) {
+        if (len <= 0) return ItemNull;
+        accumulator = py_list_get(iterable, mk_int(0));
+        index = 1;
     }
-    // Lambda's reduce takes (collection, func) — reversed arg order
-    return fn_reduce(iterable, func);
+    for (; index < len; index++) {
+        Item pair[2] = {accumulator, py_list_get(iterable, mk_int(index))};
+        accumulator = py_call_function(func, pair, 2);
+    }
+    return accumulator;
 }
 
 // functools.partial(func, *args) — up to 5 pre-filled args

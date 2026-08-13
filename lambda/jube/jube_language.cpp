@@ -244,11 +244,12 @@ bool jube_load_hosted_module(void* host_context, const char* source_path,
     // part of Lambda or JavaScript evaluation/JIT dispatch.
     jube_register_builtin_modules();
     const JubeLanguageDef* language = jube_find_language_for_path(source_path);
-    if (!language || !language->load_module) return false;
+    if (!language || !language->load_module) {
+        return false;
+    }
 
     void* import_execution = jube_create_import_execution(host_context);
     if (!import_execution) {
-        log_error("JUBE_LANG: could not create import execution for '%s'", source_path);
         return false;
     }
 
@@ -262,7 +263,6 @@ bool jube_load_hosted_module(void* host_context, const char* source_path,
     JubeLanguageSession* session = NULL;
     int rc = language->create_session(&config, &session);
     if (rc != 0 || !session) {
-        log_error("JUBE_LANG: failed to create '%s' module session", language->name);
         jube_destroy_import_execution(import_execution);
         return false;
     }

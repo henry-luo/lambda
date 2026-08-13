@@ -305,6 +305,8 @@ extern "C" Item ts_type_info(Item value) {
     case LMD_TYPE_FUNC:      ts_name = "function"; break;
     case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_NUM: // packed numeric arrays have the same TS runtime surface
+        // numeric arrays share the JavaScript/TypeScript array surface; the
+        // packed numeric carrier is an internal Lambda representation.
         ts_name = "array";
         break;
     case LMD_TYPE_MAP:

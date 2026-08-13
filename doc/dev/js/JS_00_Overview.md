@@ -104,11 +104,11 @@ The set is organized in five parts. Read JS_01–JS_04 first for the engine; the
 A handful of decisions recur across the set and are worth knowing before diving in:
 
 - **`Item` everywhere.** Every JS value is a 64-bit tagged `Item`; objects are Lambda `Map` structs with a `TypeMap` shape. This is what makes interop with Lambda's parsers/formatters and Radiant free. ([JS_03](JS_03_Value_Model.md), [JS_06](JS_06_Objects_Properties_Prototypes.md))
-- **MapKind exotic dispatch.** A 4-bit `map_kind` in the object header gives plain objects an O(1) fast path and routes exotic objects (TypedArray, DOM, CSSOM, Proxy, iterator, process.env) to dedicated handlers. ([JS_06](JS_06_Objects_Properties_Prototypes.md))
+- **Metadata-selected object operations.** Immutable `TypeMap::js_meta` selects the semantic class/family and its `JsPropertyOps`; the 4-bit `map_kind` remains only a physical storage/tracing tag. ([JS_06](JS_06_Objects_Properties_Prototypes.md))
 - **Boxed-by-default, native-on-proof codegen.** MIR carries boxed `Item`s unless type inference proves a value and its consumer are numeric, enabling native arithmetic and shaped-slot access without losing generality. ([JS_04](JS_04_MIR_Lowering.md), [JS_15](JS_15_Performance.md))
 - **JIT with an interpreter escape hatch.** Native code is the default; large, cold, or document-embedded scripts link to the MIR interpreter because link-time codegen dominates their cost. ([JS_01](JS_01_Compilation_Pipeline.md), [JS_15](JS_15_Performance.md))
 - **Preamble + batch process model.** test262/Node conformance runs compile a shared harness once and then each test against that snapshot inside a persistent, crash-recoverable worker. ([JS_01](JS_01_Compilation_Pipeline.md), [JS_16](JS_16_Testing.md))
-- **An in-progress marker→shape-flag migration.** Property metadata is moving from string markers (`__nw_`/`__get_`/`__class_name__`) to `ShapeEntry` flags + `JsAccessorPair` + a `JsClass` byte; both schemes currently coexist. ([JS_06](JS_06_Objects_Properties_Prototypes.md))
+- **Shape and metadata ownership.** Property descriptors use `ShapeEntry` flags and `JsAccessorPair`; built-in identity uses immutable `TypeMap::js_meta`, while private names use NamePool identity. The Tune6 migration is complete under **D3.4.7**. ([JS_06](JS_06_Objects_Properties_Prototypes.md))
 - **Generator-based async.** Async functions reuse the generator state-machine transform; the event loop is libuv with a custom microtask queue layered on top. ([JS_08](JS_08_Iterators_Generators.md), [JS_09](JS_09_Async_Modules.md))
 
 ---
@@ -146,7 +146,7 @@ Regenerate everything with `bash utils/render_md_diagrams.sh doc/dev/js/diagram`
 - **Boxing** — tagging a native scalar into an `Item` (and unboxing the reverse).
 - **MIR** — the medium-level IR that the shared JIT/interpreter consumes.
 - **Preamble** — a pre-compiled shared harness reused across batch tests.
-- **Marker** — a legacy string property (e.g. `__nw_`, `__class_name__`) encoding metadata now carried by shape flags.
+- **Marker** — a retired string-property encoding; current descriptor and brand metadata is shape- or TypeMap-owned.
 - **Shaped slot** — a constructor-pre-allocated, offset-addressed object field.
 
 ---

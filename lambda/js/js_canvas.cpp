@@ -257,11 +257,7 @@ static float canvas_fallback_text_width(Item ctx_obj, String* s) {
 // ============================================================================
 
 extern "C" Item js_offscreen_canvas_new(Item width_arg, Item height_arg) {
-    Item obj = js_new_object();
-
-    // T5b: typed JsClass byte is the class identity; legacy `__class_name__`
-    // string write retired.
-    js_class_stamp(obj, JS_CLASS_OFFSCREEN_CANVAS);  // A3-T3b
+    Item obj = js_new_object_with_class(JS_CLASS_OFFSCREEN_CANVAS);
 
     // store width/height
     int64_t w = (get_type_id(width_arg) == LMD_TYPE_INT) ? it2i(width_arg) : 300;
@@ -279,10 +275,7 @@ extern "C" Item js_offscreen_canvas_new(Item width_arg, Item height_arg) {
 // ============================================================================
 
 extern "C" Item js_canvas_get_context(Item canvas) {
-    Item obj = js_new_object();
-
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(obj, JS_CLASS_CANVAS_RENDERING_CONTEXT_2D);  // A3-T3b
+    Item obj = js_new_object_with_class(JS_CLASS_CANVAS_RENDERING_CONTEXT_2D);
 
     // store canvas reference
     Item canvas_key = (Item){.item = s2it(heap_create_name("canvas"))};

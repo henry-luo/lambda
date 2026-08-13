@@ -63,6 +63,9 @@ VERIFIED_EXTERNAL_LEAVES = {
     "mpd_to_sci",
     "setjmp",
     "sigsetjmp",
+    # Item tagging is a representation-only macro; it does not allocate or
+    # enter the GC despite appearing as a call to the lexical scanner.
+    "s2it",
     "strtod",
     "strcmp",
     "u2it",

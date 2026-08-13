@@ -663,8 +663,7 @@ extern "C" Item js_get_https_namespace(void) {
     // Agent — share HTTP agent storage, but use HTTPS constructor/prototype and
     // TLS-specific cache key formatting.
     Item agent_ctor = js_new_native_constructor(js_https_Agent);
-    https_agent_prototype = js_new_object();
-    js_class_stamp(https_agent_prototype, JS_CLASS_AGENT);
+    https_agent_prototype = js_new_object_with_class(JS_CLASS_AGENT);
     js_set_key_default(https_agent_prototype, make_string_item("constructor"), agent_ctor);
     js_mark_non_enumerable(https_agent_prototype, make_string_item("constructor"));
     js_set_key_default(https_agent_prototype, make_string_item("getName"),

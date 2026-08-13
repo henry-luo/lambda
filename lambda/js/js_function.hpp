@@ -89,6 +89,12 @@ struct JsFunction {
     String* vm_stack_source;
     int64_t vm_stack_line_offset;
     int64_t vm_stack_column_offset;
+    // Source classes are functions with an explicit construct capability.
+    // Keeping their constructor body and instance prototype here removes the
+    // former callable-Map protocol and leaves ordinary properties observable.
+    Item class_constructor;
+    Item class_instance_prototype;
+    Item class_superclass;
     Context* runtime_context;
 };
 
@@ -128,6 +134,7 @@ static inline Item js_function_get_bound_this(JsFunction* fn) {
 #define JS_FUNC_FLAG_READS_NEW_TARGET 4096
 #define JS_FUNC_FLAG_ANALYSIS_KNOWN 8192
 #define JS_FUNC_FLAG_MIR_CONTEXT_ABI 16384
+#define JS_FUNC_FLAG_CLASS_CONSTRUCTOR 32768
 
 #define JS_FUNC_POOL_POINTER_ROOTS_REGISTERED 1
 #define JS_FUNC_FLAG_DATA_VIEW_ACCESSOR JS_FUNC_FLAG_METHOD

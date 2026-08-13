@@ -362,6 +362,11 @@ void jm_emit_error_lane_route(JsMirTranspiler* mt, JsMirCompletionKind kind) {
         jm_clear_active_arg_frames(mt);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
             MIR_new_label_op(mt->ctx, target)));
+        // An unconditional ERROR-lane jump leaves no fallthrough path. Keep
+        // later lowering unreachable until the handler label supplies its
+        // explicit lane state; otherwise dead statements after `throw` can
+        // corrupt the following join (D8.4.3).
+        jm_error_lane_set_state(mt, JS_ERROR_LANE_UNREACHABLE);
         return;
     }
     case JS_ERROR_LANE_UNKNOWN:
@@ -408,6 +413,9 @@ void jm_emit_error_lane_guard(JsMirTranspiler* mt, MIR_label_t target) {
     case JS_ERROR_LANE_SET:
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
             MIR_new_label_op(mt->ctx, target)));
+        // the unconditional completion edge consumes the current path; the
+        // target label restores the handler's explicit lane state (D8.4.3).
+        jm_error_lane_set_state(mt, JS_ERROR_LANE_UNREACHABLE);
         return;
     case JS_ERROR_LANE_UNKNOWN:
     default:

@@ -57,11 +57,6 @@ static inline Item make_str_n(const char* s, size_t n) {
 }
 #define JS_CLIPBOARD_REJECT(type_name, message) \
     return js_promise_reject(js_new_error_with_name(make_str(type_name), make_str(message)))
-static inline void mark_class(Item obj, const char* name) {
-    JsClass cls = js_class_from_name(name, (int)strlen(name));
-    if (cls != JS_CLASS_NONE) js_class_stamp(obj, cls);
-}
-
 // Browser-visible wrapper identity belongs to the active JS realm. This
 // prevents one document's constructors or drag payload from crossing into
 // another document's heap while retaining ordinary TLS loads on hot paths.
@@ -104,7 +99,7 @@ static const char* str_prop_get(Item obj, const char* key, size_t* out_len) {
 // =============================================================================
 //
 // We model a Blob as a plain object with:
-//   __class_name__ = "Blob"
+//   metadata class = Blob
 //   _text          : string contents (UTF-8 concatenation of input parts)
 //   size           : byte length (number)
 //   type           : MIME string (lowercased; empty if invalid char)
@@ -189,7 +184,7 @@ static Item blob_append_part(StrBuf* sb, Item part) {
     return js_status_ok();
 }
 
-extern "C" Item js_blob_new(Item parts, Item options) {
+static Item js_blob_new_with_class(Item parts, Item options, JsClass class_id) {
     StrBuf* sb = strbuf_new();
     if (get_type_id(parts) == LMD_TYPE_ARRAY) {
         int64_t n = js_array_length(parts);
@@ -228,8 +223,7 @@ extern "C" Item js_blob_new(Item parts, Item options) {
         }
     }
 
-    Item obj = js_new_object();
-    mark_class(obj, "Blob");
+    Item obj = js_new_object_with_class(class_id);
     attach_known_prototype(obj, g_blob_proto);
     Item text_str = make_str_n(sb->str ? sb->str : "", sb->length);
     js_set_key_default(obj, make_str("_text"), text_str);
@@ -241,6 +235,10 @@ extern "C" Item js_blob_new(Item parts, Item options) {
     js_set_key_default(obj, make_str("slice"), js_new_native_function(js_blob_slice));
     strbuf_free(sb);
     return obj;
+}
+
+extern "C" Item js_blob_new(Item parts, Item options) {
+    return js_blob_new_with_class(parts, options, JS_CLASS_BLOB);
 }
 
 extern "C" Item js_blob_text(void) {
@@ -300,9 +298,8 @@ extern "C" Item js_blob_slice(Item start_item, Item end_item, Item type_item) {
 // =============================================================================
 
 extern "C" Item js_file_new(Item parts, Item name_item, Item options) {
-    Item obj = js_blob_new(parts, options);
+    Item obj = js_blob_new_with_class(parts, options, JS_CLASS_FILE);
     if (get_type_id(obj) != LMD_TYPE_MAP) return obj;
-    mark_class(obj, "File");
     attach_known_prototype(obj, g_file_proto);
     const char* nm = "";
     if (get_type_id(name_item) == LMD_TYPE_STRING) {
@@ -340,8 +337,7 @@ extern "C" Item js_clipboard_item_new(Item items, Item options) {
     if (nk == 0) {
         return js_throw_type_error("ClipboardItem requires at least one representation");
     }
-    Item obj = js_new_object();
-    mark_class(obj, "ClipboardItem");
+    Item obj = js_new_object_with_class(JS_CLASS_CLIPBOARD_ITEM);
     attach_known_prototype(obj, g_clipboard_item_proto);
 
     Item types = js_array_new(0);
@@ -486,8 +482,7 @@ extern "C" Item js_clipboard_event_composed_path(void) {
 static Item js_make_data_transfer_object(void);
 
 extern "C" Item js_clipboard_event_new(Item type_item, Item init_item) {
-    Item ev = js_new_object();
-    mark_class(ev, "ClipboardEvent");
+    Item ev = js_new_object_with_class(JS_CLASS_CLIPBOARD_EVENT);
     attach_known_prototype(ev, g_clipboard_event_proto);
 
     const char* type = "";
@@ -539,7 +534,7 @@ extern "C" Item js_clipboard_event_new(Item type_item, Item init_item) {
 //
 // Native model:
 //   dt:
-//     __class_name__ = "DataTransfer"
+//     metadata class = DataTransfer
 //     dropEffect, effectAllowed       — strings
 //     _items                          — Array of records (Map: kind/type/value|file)
 //     items                           — Array view (DataTransferItemList) +
@@ -938,8 +933,7 @@ static Item js_make_data_transfer_object(void) {
     Rooted<Item> items_root(roots, ItemNull);
     Rooted<Item> files_root(roots, ItemNull);
     Rooted<Item> types_root(roots, ItemNull);
-    dt_root.set(js_new_object());
-    mark_class(dt_root.get(), "DataTransfer");
+    dt_root.set(js_new_object_with_class(JS_CLASS_DATA_TRANSFER));
     attach_known_prototype(dt_root.get(), g_data_transfer_proto);
     js_set_key_default(dt_root.get(), make_str("dropEffect"), make_str("none"));
     js_set_key_default(dt_root.get(), make_str("effectAllowed"), make_str("none"));
@@ -947,14 +941,12 @@ static Item js_make_data_transfer_object(void) {
 
     // Stable view arrays — mutated in place by dt_recompute_views.
     items_root.set(js_array_new(0));
-    files_root.set(js_array_new(0));
+    files_root.set(js_array_new_with_class(0, JS_CLASS_FILE_LIST));
     types_root.set(js_array_new(0));
     // FileList is array-backed internally, but its Web IDL prototype and brand
     // must survive input.files assignment and DataTransfer view recomputation.
     if (get_type_id(g_file_list_proto) == LMD_TYPE_MAP) {
         js_set_prototype(files_root.get(), g_file_list_proto);
-        Map* props = js_array_props(files_root.get().array);
-        if (props) js_class_stamp((Item){.map = props}, JS_CLASS_FILE_LIST);
     }
     js_set_key_default(items_root.get(), make_str("_owner"), dt_root.get());
     js_set_key_default(files_root.get(), make_str("_owner"), dt_root.get());
@@ -1536,8 +1528,7 @@ extern "C" Item js_clipboard_read(Item opts) {
 // =============================================================================
 
 extern "C" Item js_permissions_query(Item desc) {
-    Item status = js_new_object();
-    mark_class(status, "PermissionStatus");
+    Item status = js_new_object_with_class(JS_CLASS_PERMISSION_STATUS);
     const char* state = "prompt";
     if (get_type_id(desc) == LMD_TYPE_MAP) {
         size_t nl = 0;
@@ -1890,10 +1881,10 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     // typically does and the shim's previous direct-assignment behaviour).
     {
         RootFrame roots(3);
-        Rooted<Item> clipboard_root(roots, js_new_object());
+        Rooted<Item> clipboard_root(roots,
+            js_new_object_with_class(JS_CLASS_CLIPBOARD));
         Rooted<Item> permissions_root(roots, ItemNull);
         Rooted<Item> navigator_root(roots, ItemNull);
-        mark_class(clipboard_root.get(), "Clipboard");
         js_set_key_default(clipboard_root.get(), make_str("writeText"),
             js_get_key_default(clipboard_proto_root.get(), make_str("writeText")));
         js_set_key_default(clipboard_root.get(), make_str("readText"),

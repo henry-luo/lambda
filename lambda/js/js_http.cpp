@@ -30,6 +30,7 @@
 #include <cmath>
 
 extern "C" Item js_readable_new(Item opts);
+extern "C" Item js_readable_new_with_class(Item opts, int class_id);
 extern "C" Item js_readable_push(Item self, Item chunk);
 extern "C" Item js_stream_on(Item self, Item event_item, Item listener);
 extern "C" Item js_stream_destroy(Item self, Item err);
@@ -2151,9 +2152,7 @@ static Item js_http_res_inst_on(Item maybe_self, Item event_item, Item callback)
 
 // create a ServerResponse object for a connection
 static Item make_response_object(JsHttpConn* conn) {
-    Item res = js_new_object();
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(res, JS_CLASS_SERVER_RESPONSE);  // A3-T3b
+    Item res = js_new_object_with_class(JS_CLASS_SERVER_RESPONSE);
     if (get_type_id(http_server_response_prototype) == LMD_TYPE_MAP) {
         js_set_prototype(res, http_server_response_prototype);
     }
@@ -2262,9 +2261,7 @@ static Item js_http_server_req_destroy(Item maybe_self, Item err_item);
 static Item js_http_server_req_setTimeout(Item maybe_self, Item msecs_item, Item callback_item);
 
 static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
-    Item msg = js_readable_new(ItemNull);
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(msg, JS_CLASS_INCOMING_MESSAGE);  // A3-T3b
+    Item msg = js_readable_new_with_class(ItemNull, JS_CLASS_INCOMING_MESSAGE);
     if (get_type_id(http_incoming_message_prototype) == LMD_TYPE_MAP) {
         js_set_prototype(msg, http_incoming_message_prototype);
     }
@@ -2838,8 +2835,7 @@ static Item http_conn_socket_object(JsHttpConn* conn) {
     if (!conn) return make_js_undefined();
     if (conn->socket_object.item != 0) return conn->socket_object;
 
-    Item obj = js_new_object();
-    js_class_stamp(obj, JS_CLASS_SOCKET);
+    Item obj = js_new_object_with_class(JS_CLASS_SOCKET);
     Item net_proto = js_net_get_socket_prototype();
     if (get_type_id(net_proto) == LMD_TYPE_MAP) {
         // HTTP accepted sockets are net.Socket instances; missing the shared
@@ -3672,9 +3668,7 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
     srv->reject_nonstandard_body_writes =
         get_type_id(reject_body) == LMD_TYPE_BOOL && it2b(reject_body);
 
-    Item obj = js_new_object();
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(obj, JS_CLASS_SERVER);  // A3-T3b
+    Item obj = js_new_object_with_class(JS_CLASS_SERVER);
     if (get_type_id(http_server_prototype) == LMD_TYPE_MAP) {
         js_set_prototype(obj, http_server_prototype);
     }
@@ -3885,8 +3879,7 @@ static Item http_client_socket_object(JsHttpClientReq* creq) {
         return creq->socket_object;
     }
 
-    Item obj = js_new_object();
-    js_class_stamp(obj, JS_CLASS_SOCKET);
+    Item obj = js_new_object_with_class(JS_CLASS_SOCKET);
     Item net_proto = js_net_get_socket_prototype();
     if (get_type_id(net_proto) == LMD_TYPE_MAP) {
         js_set_prototype(obj, net_proto);
@@ -4398,9 +4391,7 @@ static bool js_http_client_try_emit_response(JsHttpClientReq* creq) {
         return js_http_client_try_emit_response(creq);
     }
 
-    Item res = js_readable_new(ItemNull);
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(res, JS_CLASS_INCOMING_MESSAGE);  // A3-T3b
+    Item res = js_readable_new_with_class(ItemNull, JS_CLASS_INCOMING_MESSAGE);
     js_set_key_default(res, make_string_item("__client__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)creq)});
     js_set_key_default(res, make_string_item("statusCode"), (Item){.item = i2it(status_code)});
@@ -4554,9 +4545,7 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                                           &status_code, &status_message,
                                           &headers, &raw_headers, &hdr_size) == 0) {
                 // create IncomingMessage-style response
-                Item res = js_readable_new(ItemNull);
-                // T5b: legacy `__class_name__` string write retired.
-                js_class_stamp(res, JS_CLASS_INCOMING_MESSAGE);  // A3-T3b
+                Item res = js_readable_new_with_class(ItemNull, JS_CLASS_INCOMING_MESSAGE);
                 js_set_key_default(res, make_string_item("__client__"),
                                 (Item){.item = i2it((int64_t)(uintptr_t)creq)});
                 js_set_key_default(res, make_string_item("statusCode"), (Item){.item = i2it(status_code)});
@@ -5150,8 +5139,7 @@ static Item js_http_client_inst_getRawHeaderNames(Item maybe_self) {
 static Item http_client_make_request_object(JsHttpClientReq* creq,
                                             const char* method,
                                             const char* path) {
-    Item obj = js_new_object();
-    js_class_stamp(obj, JS_CLASS_CLIENT_REQUEST);
+    Item obj = js_new_object_with_class(JS_CLASS_CLIENT_REQUEST);
     js_set_key_default(obj, make_string_item("__client_request__"), (Item){.item = b2it(true)});
     if (creq) {
         js_set_key_default(obj, make_string_item("__client__"),
@@ -5992,9 +5980,7 @@ extern "C" Item js_http_ClientRequest(Item options_item, Item callback) {
 
 // new http.Agent(options) constructor
 extern "C" Item js_http_Agent(Item options) {
-    Item agent = js_new_object();
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(agent, JS_CLASS_AGENT);  // A3-T3b
+    Item agent = js_new_object_with_class(JS_CLASS_AGENT);
 
     // defaults
     int max_sockets = 256;
@@ -6046,10 +6032,9 @@ static void http_set_method(Item ns, const char* name, Target target,
 static Item http_constructor_prototype(Item ctor, JsClass cls) {
     Item proto = js_get_key_default(ctor, make_string_item("prototype"));
     if (get_type_id(proto) != LMD_TYPE_MAP) {
-        proto = js_new_object();
+        proto = js_new_object_with_class(cls);
         js_set_key_default(ctor, make_string_item("prototype"), proto);
     }
-    js_class_stamp(proto, cls);
     js_set_key_default(proto, make_string_item("constructor"), ctor);
     js_mark_non_enumerable(proto, make_string_item("constructor"));
     if (get_type_id(ctor) == LMD_TYPE_FUNC) {

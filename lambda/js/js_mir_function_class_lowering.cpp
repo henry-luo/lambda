@@ -7,7 +7,7 @@
 // ============================================================================
 
 MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
-        MIR_reg_t proto_obj, JsClassEntry* static_superclass) {
+        MIR_reg_t cls_obj, MIR_reg_t proto_obj, JsClassEntry* static_superclass) {
     if (!static_superclass) return 0;
     // a synthetic superclass identifier must resolve through its definition-time entry.
     MIR_reg_t super_val = jm_emit_class_object_for_entry(mt, static_superclass);
@@ -19,8 +19,9 @@ MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
     jm_call_1(mt, "js_check_class_prototype_parent", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
     jm_emit_error_lane_propagate_check(mt);
+    MIR_reg_t current_proto = jm_emit_current_class_prototype(mt, cls_obj, proto_obj);
     jm_call_void_2(mt, "js_set_prototype",
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, current_proto),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
     return super_val;
 }
@@ -376,16 +377,21 @@ void jm_emit_class_constructor_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         MIR_reg_t function_item = constructor->fc->capture_count > 0
             ? jm_build_closure_for_method(mt, constructor->fc, constructor->param_count)
             : jm_create_method_function(mt, constructor->fc, constructor->param_count);
+        // The class carrier has its own callable metadata and starts with the
+        // zero-arity native guard; copy the source constructor's formal length
+        // or `Class.length` remains zero even though the body has parameters.
+        int constructor_length = constructor->fc->formal_length >= 0
+            ? constructor->fc->formal_length : constructor->param_count;
+        jm_call_void_2(mt, "js_set_formal_length",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, constructor_length));
         // The constructor function must survive home-class metadata allocation
         // until it is attached to the class object's own property map.
         jm_create_gc_root_slot(mt, cls_obj);
         jm_create_gc_root_slot(mt, function_item);
         if (set_home_class) jm_emit_set_function_home_class(mt, function_item, cls_obj);
-        MIR_reg_t constructor_key = jm_box_property_name_literal(mt, "__ctor__", 8);
-        jm_create_gc_root_slot(mt, constructor_key);
-        jm_call_3(mt, "js_set_key_default", MIR_T_I64,
+        jm_call_void_2(mt, "js_set_class_constructor",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, constructor_key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, function_item));
     }
 }

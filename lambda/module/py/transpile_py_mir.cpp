@@ -8198,11 +8198,12 @@ Item load_py_module(void* host_execution, const char* py_path) {
         char mir_name[140];
         snprintf(mir_name, sizeof(mir_name), "_%s", fc->name);
         void* func_ptr = pm_find_hosted_mir_function_current(mt, mir_name);
-
         if (func_ptr) {
-            // Use to_fn_n to create a Lambda Function* compatible with Python
-            // calling convention; a JavaScript function has a different layout.
-            Item val = {.function = to_fn_n((fn_ptr)func_ptr, fc->param_count)};
+            // Imported functions retain the generated trailing scalar home;
+            // publishing a legacy raw pointer dropped that operand and made
+            // the first call reinterpret its arguments (D3.4.7).
+            Item val = py_mark_mir_public_abi(py_new_function(func_ptr,
+                fc->param_count));
             Item key = pm_hosted_name_from_utf8_n(fc->name, strlen(fc->name));
             py_dict_set(ns, key, val);
             log_debug("py-mir: module export fn '%s' arity=%d", fc->name, fc->param_count);

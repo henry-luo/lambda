@@ -525,7 +525,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
-	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
+	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
 	    ensure-test262-gtest test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing \
@@ -638,6 +638,8 @@ help:
 	@echo "  check-lambda-dup  - Check lambda for duplicate code"
 	@echo "  check-radiant-dup - Check radiant for duplicate code"
 	@echo "  count-loc     - Count lines of code in the repository"
+	@echo "  struct-census - libclang census of every struct/class/union/enum with real sizes"
+	@echo "                  Incremental; reports to vibe/meta/ds/, viewer in make devtool"
 	@echo "  cheatsheet    - Regenerate Lambda_Cheatsheet.pdf from Markdown (requires pandoc, xelatex)"
 	@echo "  bench-compile - Run C/C++ compilation performance benchmark"
 	@echo "                  Tests single-file, template, multi-file, and full Lambda builds"
@@ -3012,6 +3014,16 @@ lint:
 # All Report_NNN.* still aggregate findings across every active backend.
 lint-full:
 	@utils/lint/run.sh --with-tidy $(ARGS)
+
+# libclang census of every struct/class/union/enum defined under lambda/, lib/
+# and radiant/, with real record sizes. Incremental: only TUs whose dependency
+# set changed are re-parsed. Config: utils/struct_census.config.json.
+# Reports: vibe/meta/ds/struct_census.{json,csv}; interactive view in `make devtool`.
+# See utils/Struct_Census.md
+#   make struct-census                 # incremental refresh
+#   make struct-census ARGS=--full     # ignore the cache, re-parse everything
+struct-census:
+	@python3 utils/struct_census.py $(ARGS)
 
 # Lizard duplicate-code reports with documented generated-file and block exclusions.
 check-code-dup:

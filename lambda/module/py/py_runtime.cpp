@@ -2251,6 +2251,7 @@ extern "C" Item py_call_function_kw(Item func, Item* args, int arg_count, Item k
     Function* fn = func.function;
     if (!fn || !fn->ptr) return ItemNull;
 
+
     // if the function doesn't take **kwargs, fall back to regular dispatch
     if (!fn->has_kwargs) {
         return py_call_function(func, args, arg_count);
@@ -2379,6 +2380,13 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
     }
     Function* fn = func.function;
     if (!fn || !fn->ptr) return ItemNull;
+
+    if (fn->requires_scalar_result_home) {
+        // MIR-backed Python functions publish a trailing scalar home; calling
+        // them through the legacy Item-only cast drops that operand (D3.4.7).
+        uint64_t scalar_home = 0;
+        return py_call_function_into(func, args, arg_count, &scalar_home);
+    }
 
     int arity = fn->arity;
     if (arity > 6) {

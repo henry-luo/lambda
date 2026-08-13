@@ -2424,14 +2424,27 @@ static Item js_dynamic_import_reject_type_error(const char* message) {
 
 // dynamic import() — synchronous load, wrapped in a resolved Promise
 extern "C" Item js_dynamic_import(Item specifier) {
-    Item specifier_string = js_to_string(specifier);
-    if (item_is_error(specifier_string) || get_type_id(specifier_string) != LMD_TYPE_STRING) {
-        return js_promise_reject(specifier_string);
+    RootFrame roots(5);
+    Rooted<Item> specifier_string_root(roots, js_to_string(specifier));
+    if (item_is_error(specifier_string_root.get()) ||
+            get_type_id(specifier_string_root.get()) != LMD_TYPE_STRING) {
+        return js_promise_reject(specifier_string_root.get());
     }
-    String* spec = it2s(specifier_string);
+    String* spec = it2s(specifier_string_root.get());
     if (!spec || spec->len == 0) {
         return js_dynamic_import_reject_type_error("import() requires a non-empty specifier");
     }
+
+    char resolved_path[2048];
+    const char* base_file = context ? context->current_file : NULL;
+    if (base_file && base_file[0] && base_file[0] != '<') {
+        jm_resolve_module_path(base_file, spec->chars, (int)spec->len,
+                               resolved_path, (int)sizeof(resolved_path));
+    } else {
+        snprintf(resolved_path, sizeof(resolved_path), "%.*s",
+                 (int)spec->len, spec->chars);
+    }
+    Rooted<Item> resolved_spec_root(roots, make_string_item(resolved_path));
 
     // Js56 P10: dynamic `import(...)` is ES-module-only — CommonJS uses
     // `require()`. The shared js_require() path treats unmarked .js files as
@@ -2442,17 +2455,17 @@ extern "C" Item js_dynamic_import(Item specifier) {
     // the dynamic import returns the real namespace.
     js_dynamic_import_suppress_module_drain++;
     Item ns;
-    Item existing = js_module_get(specifier_string);
+    Item existing = js_module_get(resolved_spec_root.get());
     if (get_type_id(existing) != LMD_TYPE_NULL) {
         ns = existing;
     } else {
-        char path_buf[512];
-        snprintf(path_buf, sizeof(path_buf), "%.*s", (int)spec->len, spec->chars);
+        char path_buf[2048];
+        snprintf(path_buf, sizeof(path_buf), "%s", resolved_path);
         char* source = read_text_file(path_buf);
         if (!source) {
             js_dynamic_import_suppress_module_drain--;
             char msg[256];
-            snprintf(msg, sizeof(msg), "Cannot find module '%.*s'", (int)spec->len, spec->chars);
+            snprintf(msg, sizeof(msg), "Cannot find module '%s'", resolved_path);
             return js_dynamic_import_reject_type_error(msg);
         }
         jm_track_active_js_transpile(NULL, NULL, source);
@@ -2468,12 +2481,16 @@ extern "C" Item js_dynamic_import(Item specifier) {
         mem_free(source);
     }
     js_dynamic_import_suppress_module_drain--;
+    Rooted<Item> namespace_root(roots, ns);
+    if (js_module_needs_async_settle(resolved_spec_root.get())) {
+        js_tla_flush_for_dynamic_import();
+    }
     if (item_is_error(ns)) {
         return js_promise_reject(ns);
     }
     if (get_type_id(ns) == LMD_TYPE_NULL) {
         char msg[256];
-        snprintf(msg, sizeof(msg), "Cannot find module '%.*s'", (int)spec->len, spec->chars);
+        snprintf(msg, sizeof(msg), "Cannot find module '%s'", resolved_path);
         return js_dynamic_import_reject_type_error(msg);
     }
 
@@ -2482,9 +2499,9 @@ extern "C" Item js_dynamic_import(Item specifier) {
     // target so dynamic-import .then/.finally callbacks fire in spec order
     // (importing modules' callbacks fire after the underlying TLA settles).
     extern Item js_p5_chain_dynamic_import(Item, Item);
-    Item awaited = js_module_get_awaited_target(specifier_string);
+    Item awaited = js_module_get_awaited_target(resolved_spec_root.get());
     if (get_type_id(awaited) == LMD_TYPE_NULL &&
-            js_module_needs_async_settle(specifier_string)) {
+            js_module_needs_async_settle(resolved_spec_root.get())) {
         // A nested module can suspend at a non-Promise await (for example
         // `await 1`) and therefore has no awaited target to chain.  The
         // importer is still required to see the module only after its deferred
@@ -2492,11 +2509,11 @@ extern "C" Item js_dynamic_import(Item specifier) {
         // before resolving the dynamic-import Promise (ECMA-262
         // ContinueDynamicImport).
         js_tla_drain_pending_modules();
-        awaited = js_module_get_awaited_target(specifier_string);
+        awaited = js_module_get_awaited_target(resolved_spec_root.get());
     }
     if (get_type_id(awaited) != LMD_TYPE_NULL) {
-        return js_p5_chain_dynamic_import(awaited, ns);
+        return js_p5_chain_dynamic_import(awaited, namespace_root.get());
     }
     // Wrap the namespace in a resolved Promise
-    return js_promise_resolve(ns);
+    return js_promise_resolve(namespace_root.get());
 }

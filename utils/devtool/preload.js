@@ -36,6 +36,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Get project root path
   getProjectRoot: () => ipcRenderer.invoke('get-project-root'),
 
+  // Struct census
+  loadStructCensus: () => ipcRenderer.invoke('load-struct-census'),
+  regenStructCensus: (full) => ipcRenderer.invoke('regen-struct-census', full),
+
   // Recent tests
   getRecentTests: () => ipcRenderer.invoke('get-recent-tests'),
   addRecentTest: (testInfo) => ipcRenderer.invoke('add-recent-test', testInfo),

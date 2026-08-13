@@ -127,6 +127,20 @@ function TestTree({ onTestSelect, selectedTest }) {
       </div>
 
       <div className="tree-content">
+        {/* Tools — not tests, so it stays outside the search filter */}
+        {!isSearching && (
+          <div className="section">
+            <div
+              className={`test-item ${selectedTest?.testType === 'struct-census' ? 'selected' : ''}`}
+              style={{ paddingLeft: '12px' }}
+              onClick={() => onTestSelect({ testType: 'struct-census' })}
+            >
+              <span className="status-icon">◧</span>
+              <span className="test-name">Struct Census</span>
+            </div>
+          </div>
+        )}
+
         {/* Render Tests Section */}
         {totalRenderTests > 0 && (
           <div className="section">

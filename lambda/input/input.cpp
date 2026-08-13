@@ -317,7 +317,7 @@ static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
     clone->is_shared_constructor_shape = false;
     clone->is_transition_shared_shape = false;
     clone->transitions = NULL;
-    clone->js_class = tm->js_class;
+    clone->js_meta = tm->js_meta;
     clone->has_array_index_shape = tm->has_array_index_shape;
 
     ShapeEntry* last_clone = NULL;
@@ -366,7 +366,7 @@ static TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool) {
     clone->is_shared_constructor_shape = false;
     clone->is_transition_shared_shape = false;
     clone->transitions = NULL;
-    clone->js_class = tm->js_class;
+    clone->js_meta = tm->js_meta;
     clone->has_array_index_shape = tm->has_array_index_shape;
     clone->name = tm->name;
     clone->content_length = tm->content_length;
@@ -452,7 +452,7 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
     child->is_shared_constructor_shape = false;
     child->is_transition_shared_shape = true;
     child->transitions = NULL;
-    child->js_class = parent->js_class;
+    child->js_meta = parent->js_meta;
     child->has_array_index_shape = parent->has_array_index_shape;
 
     typemap_hash_build(child, input->pool);
@@ -505,9 +505,11 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
     bool array_index_shape = map_kind_is_array_props(mp->map_kind) &&
         map_key_is_array_index_name(key);
     if (map_type == &EmptyMap) {
+        const struct JsClassMeta* js_meta = map_type->js_meta;
         // alloc map type and data chunk
         map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
         if (!map_type) { return; }
+        map_type->js_meta = js_meta;
         mp->type = map_type;
         arraylist_append(input->type_list, map_type);
         map_type->type_index = input->type_list->length - 1;
@@ -592,8 +594,10 @@ bool map_put_undefined_unique_absent_bulk_with_data_growth(Map* mp,
 
     TypeMap *map_type = (TypeMap*)mp->type;
     if (map_type == &EmptyMap) {
+        const struct JsClassMeta* js_meta = map_type->js_meta;
         map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
         if (!map_type) return false;
+        map_type->js_meta = js_meta;
         mp->type = map_type;
         arraylist_append(input->type_list, map_type);
         map_type->type_index = input->type_list->length - 1;

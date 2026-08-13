@@ -1,32 +1,5 @@
-/**
- * A3 — JsClass enum: typed replacement for `__class_name__` magic-string class identity.
- *
- * Stage A3 of the Transpile_Js38 refactor (see vibe/jube/Transpile_Js38_Refactor.md).
- * The legacy scheme stores a string property `__class_name__` on each built-in
- * prototype/instance to mark its built-in class for downstream dispatch
- * (js_proto_class_method_dispatch, instanceof name fallback, duck-typing in
- * builtins). This file introduces a typed alternative:
- *
- *   - `JsClass`: uint8_t enum covering every class name currently written via
- *     `__class_name__` across `lambda/js/` sources (snapshot from A3-T1
- *     reconnaissance — 50 distinct names).
- *   - `js_class` byte on `TypeMap` (declared in `lambda-data.hpp`) carries
- *     the class for any Map whose TypeMap is the per-Map private clone (A2-T1).
- *     Zero-init = JS_CLASS_NONE so every existing TypeMap is implicitly None.
- *   - `js_class_get(Item)` reader — returns JS_CLASS_NONE for non-MAP or when
- *     the byte hasn't been set.
- *   - `js_class_set_for_map(Map*, JsClass)` writer — clones the Map's TypeMap
- *     for private mutation (via the existing A2-T1 primitive) before stamping
- *     the byte, so sibling Maps sharing a callsite shape cache aren't
- *     contaminated.
- *
- * Migration plan (phased, each independently shippable):
- *   - A3-T1 (this file): foundation only. No call-site changes.
- *   - A3-T2: route `js_proto_class_method_dispatch` through the enum byte
- *     with the legacy string check as fallback.
- *   - A3-T3+: per-file writer migration, reader migration, then drop string
- *     writes/reads.
- */
+// Tune6 stable class identifiers. Semantic resolution is provided by the
+// immutable JsClassMeta attached to each published runtime TypeMap.
 #pragma once
 
 #include <string.h>
@@ -40,8 +13,7 @@
 // a different observable object kind.
 extern "C" bool js_is_ordinary_numeric_array(Item value);
 
-// JsClass — typed identity for built-in classes. Order is FROZEN once shipped
-// (the byte is stored on TypeMap; renumbering would corrupt existing maps).
+// JsClass — typed identity for built-in classes. Order is FROZEN once shipped.
 // Add new entries at the END before JS_CLASS__COUNT.
 enum JsClass : uint8_t {
     JS_CLASS_NONE = 0,        // not a built-in class (default for plain objects)
@@ -149,48 +121,29 @@ enum JsClass : uint8_t {
     JS_CLASS_TRANSITION_EVENT,
     JS_CLASS_ANIMATION_EVENT,
     JS_CLASS_FILE_LIST,
+    JS_CLASS_PROXY,
+    JS_CLASS_STRING_ITERATOR,
+    JS_CLASS_TYPED_ARRAY_ITERATOR,
+    JS_CLASS_PROCESS_ENV,
+    JS_CLASS_CSS_NAMESPACE,
+    JS_CLASS_CSSOM,
+    JS_CLASS_WEB_API_RESOURCE,
     JS_CLASS__COUNT  // sentinel
 };
 
-// Read the JsClass tag carried by an object. Returns JS_CLASS_NONE for
-// non-MAP items, for MAPs without a TypeMap (`type==NULL`), and for MAPs
-// whose TypeMap was zero-init'd (the common case until a writer stamps it).
-// Pure read — does not allocate.
-static inline JsClass js_class_get(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return JS_CLASS_NONE;
-    Map* m = obj.map;
-    if (!m || !m->type) return JS_CLASS_NONE;
-#ifndef NDEBUG
-    assert(typemap_ptr_is_plausible(m->type));
-#endif
-    return (JsClass)((TypeMap*)m->type)->js_class;
-}
+struct JsClassMeta;
+extern "C" const JsClassMeta* js_class_meta_for_id(JsClass cls);
+extern "C" JsClass js_class_id_from_meta(const JsClassMeta* meta);
+extern "C" const JsClassMeta* js_object_meta(Item obj);
+extern "C" struct TypeMap* js_error_carrier_type_map(void);
 
-// Forward declaration — defined in js_property_attrs.cpp (A2-T1).
-// Takes the user-facing Item (because shape mutation needs the wrapper-aware
-// underlying-map lookup) and returns the (possibly newly-cloned) TypeMap, or
-// nullptr if cloning is not possible. Exported via js_class.h so callers can
-// stamp typed class metadata without pulling in the broader property-attrs
-// surface.
+// Forward declaration for descriptor/shape detachment, defined in
+// js_property_attrs.cpp. It is unrelated to semantic class selection.
 struct TypeMap;
 extern "C" struct TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 
-// Stamp a JsClass tag on a Map. Clones the Map's TypeMap for private
-// mutation first so sibling Maps sharing a callsite shape cache stay on the
-// original (untagged) blueprint. Idempotent within a single Map: subsequent
-// calls reuse the already-private clone. No-op for non-MAP items or when
-// the underlying clone fails.
-static inline void js_class_stamp(Item obj, JsClass cls) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return;
-    TypeMap* tm = js_typemap_clone_for_mutation_pub(obj);
-    if (!tm) return;
-    tm->js_class = (uint8_t)cls;
-}
-
-// Map a built-in class-name string (the value previously stored in
-// `__class_name__`) to its JsClass tag. Returns JS_CLASS_NONE for unknown
-// names. Centralized here so writers and the legacy reader path stay in
-// sync as we migrate.
+// Map an explicit built-in constructor/error name to its JsClass tag. Returns
+// JS_CLASS_NONE for unknown names; this is not an object metadata resolver.
 static inline JsClass js_class_from_name(const char* nm, int nl) {
     if (!nm || nl <= 0) return JS_CLASS_NONE;
     switch (nl) {
@@ -328,13 +281,9 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
     return JS_CLASS_NONE;
 }
 
-// Reverse mapping: JsClass → const char* class-name string (the value previously
-// written to `__class_name__`). Returns NULL for JS_CLASS_NONE / unknown enum
-// values. The returned pointer is a static string literal — safe to use directly
-// or to copy via heap_create_name. Used by T5a string-OUTPUT readers
-// (Symbol.toStringTag synth, FUNC_TO_STRING, prototype-chain synth, etc.) to
-// derive the class-name string from the byte without consulting the legacy
-// `__class_name__` property.
+// Reverse mapping: JsClass → diagnostic/constructor name. Returns NULL for
+// JS_CLASS_NONE or unknown enum values. The returned pointer is a static string
+// literal and is never consulted to classify an object.
 static inline const char* js_class_to_name(JsClass cls) {
     switch (cls) {
         case JS_CLASS_OBJECT: return "Object";
@@ -433,6 +382,10 @@ static inline const char* js_class_to_name(JsClass cls) {
         // materialization, so their class-name mapping must be total (D6.2.2v2).
         case JS_CLASS_TRANSITION_EVENT: return "TransitionEvent";
         case JS_CLASS_ANIMATION_EVENT: return "AnimationEvent";
+        case JS_CLASS_PROCESS_ENV: return "ProcessEnv";
+        case JS_CLASS_CSS_NAMESPACE: return "CSS";
+        case JS_CLASS_CSSOM: return "CSSOM";
+        case JS_CLASS_WEB_API_RESOURCE: return "WebAPIResource";
         default: return NULL;
     }
 }
@@ -509,12 +462,11 @@ enum JsErrorOwnProperty : uint8_t {
 };
 
 // JR3.2 uses the same LambdaError allocation in two Item lanes: ERROR while
-// propagating and MAP while observable JS code holds the object. The map-kind
-// marker is the discriminator because the resting lane intentionally shares
-// the ordinary container tag.
+// propagating and MAP while observable JS code holds the object. The carrier's
+// TypeMap identity is the discriminator; its physical prefix is not semantic.
 static inline bool js_is_resting_error(Item obj) {
     return get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
-        obj.map->map_kind == MAP_KIND_ERROR;
+        obj.map->type == js_error_carrier_type_map();
 }
 
 static inline LambdaError* js_error_from_value(Item obj) {
@@ -537,24 +489,5 @@ Item js_error_properties_map(Item obj, bool create);
 // byte stamped on the Map's TypeMap; user properties with matching names are
 // ordinary JS properties and cannot spoof built-in brands.
 static inline JsClass js_class_id(Item obj) {
-    TypeId type = get_type_id(obj);
-    if (js_is_ordinary_numeric_array(obj)) return JS_CLASS_ARRAY;
-    Map* m = NULL;
-    if (type == LMD_TYPE_MAP && !js_is_resting_error(obj)) {
-        m = obj.map;
-    } else if (type == LMD_TYPE_ERROR || js_is_resting_error(obj)) {
-        return js_error_class_id(obj);
-    } else if (type == LMD_TYPE_ARRAY && obj.array && js_array_has_props(obj.array)) {
-        // Array-backed Web IDL collections carry their unforgeable brand on
-        // the companion property map because the Array payload has no TypeMap.
-        m = js_array_props(obj.array);
-    } else {
-        return JS_CLASS_NONE;
-    }
-    if (!m) return JS_CLASS_NONE;
-    if (!m->type) return JS_CLASS_NONE;
-#ifndef NDEBUG
-    assert(typemap_ptr_is_plausible(m->type));
-#endif
-    return (JsClass)((TypeMap*)m->type)->js_class;
+    return js_class_id_from_meta(js_object_meta(obj));
 }

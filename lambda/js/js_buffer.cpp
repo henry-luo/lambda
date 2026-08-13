@@ -160,8 +160,8 @@ static int buffer_decode_hex_bytes(const char* str, int str_len, uint8_t* out, i
 }
 
 // Helper: create a Buffer (Uint8Array)
-// We cannot set string properties on typed arrays (MAP_KIND_TYPED_ARRAY routes
-// property_set to typed_array_set which only handles numeric indices).
+// We cannot set string properties on typed-array carriers because their
+// metadata routes the operation through the indexed exotic lane.
 // Instead, Buffer identity is checked via js_is_typed_array().
 static Item create_buffer(int size) {
     Item buffer = js_typed_array_new(JS_TYPED_UINT8, size);

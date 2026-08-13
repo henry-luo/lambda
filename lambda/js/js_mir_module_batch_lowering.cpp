@@ -6357,7 +6357,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (ce) {
                     // TDZ: class x extends x {} → throw ReferenceError
                     jm_emit_class_self_extends_check(mt, ce, cls_node->name);
-                    MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                    MIR_reg_t cls_obj = jm_call_0(mt, "js_new_class_function", MIR_T_I64);
                     // Class initialization performs allocating metadata and
                     // method setup before its lexical binding is authoritative.
                     jm_create_gc_root_slot(mt, cls_obj);
@@ -6418,14 +6418,14 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     JsAstNode* heritage = class_setup.heritage;
                     JsClassEntry* static_superclass = class_setup.static_superclass;
 
-                    // Create __instance_proto__ with all instance methods
+                    // Create the instance prototype with all instance methods
                     {
                         MIR_reg_t proto_obj = class_proto_obj;
                         bool heritage_is_null = false;
                         jm_call_void_2(mt, "js_set_default_constructor_property",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
-                        ctor_super_val = jm_emit_class_prototype_chain(mt, ce, heritage,
+                        ctor_super_val = jm_emit_class_prototype_chain(mt, ce, cls_obj, heritage,
                             static_superclass, proto_obj, 0, &heritage_is_null);
                         jm_emit_class_instance_setup_tail(mt, cls_obj, ce, proto_obj,
                             ctor_super_val, heritage_is_null);
@@ -7532,9 +7532,20 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
 
     // Allocate per-module variable storage and switch to it.
     uint32_t prev_module_state_id = js_get_active_module_state_id();
+    const char* prev_module_current_file = context->current_file;
+    // Dynamic imports use the executing module's filename for relative
+    // resolution; the batch entry's previous filename would resolve against
+    // the worker instead of the module directory (D7.2.3, D8.5.1).
+    context->current_file = filename ? filename : prev_module_current_file;
     Item prev_namespace = js_set_active_module_namespace(namespace_obj);
-    if (!js_activate_module_state((uint32_t)mt->module_var_count)) return ItemNull;
-    if (!js_link_compiled_name_table(mt)) return ItemNull;
+    if (!js_activate_module_state((uint32_t)mt->module_var_count)) {
+        context->current_file = prev_module_current_file;
+        return ItemNull;
+    }
+    if (!js_link_compiled_name_table(mt)) {
+        context->current_file = prev_module_current_file;
+        return ItemNull;
+    }
     if (js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
@@ -7574,6 +7585,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     }
     js_set_active_module_state_id(prev_module_state_id);
     js_set_active_module_namespace(prev_namespace);
+    context->current_file = prev_module_current_file;
     // Js57 P4 (Track B3): decrement and (at depth 0) flush queued post-await
     // chunks. Sits AFTER the namespace/module-vars restore so
     // continuations that touch module-level state read whichever active

@@ -8,6 +8,7 @@
 
 #include "js_coerce.h"
 #include "js_runtime.h"
+#include "js_object_meta.h"
 #include "../lambda-data.hpp"
 
 // Engine globals/functions used here are declared in js_runtime.h. The
@@ -107,7 +108,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
             proto_type == LMD_TYPE_NULL || proto_type == LMD_TYPE_UNDEFINED;
         Map* object_proto = js_resolve_object_prototype();
         if (raw_proto_found && null_proto && value.map != object_proto &&
-            !js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
+            !js_object_uses_default_object_to_primitive(value)) {
             bool has_vo = false, has_ts = false;
             js_map_shape_lookup_ext(value.map, "valueOf", 7, &has_vo);
             js_map_shape_lookup_ext(value.map, "toString", 8, &has_ts);
@@ -143,7 +144,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     // (returning boolean ITEM_TRUE for feature detection). Fall through to
     // default string conversion instead of throwing.
     if (vt == LMD_TYPE_MAP && value.map &&
-        js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
+        js_object_uses_default_object_to_primitive(value)) {
         return (Item){.item = s2it(heap_create_name("[object Object]"))};
     }
     return js_throw_type_error("Cannot convert object to primitive value");

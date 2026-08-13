@@ -92,9 +92,6 @@ typedef enum JsAtomicsOp {
     JS_ATOMICS_OP_XOR,
 } JsAtomicsOp;
 
-// Sentinel markers for identifying typed arrays, array buffers, data views
-extern char js_typed_array_marker;
-
 // Core typed array operations
 Item js_typed_array_new(int type_id, int length);
 // Host-owned binary construction primitive. Node-facing modules consume this

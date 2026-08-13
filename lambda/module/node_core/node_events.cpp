@@ -140,7 +140,6 @@ static void node_events_set_named_property(Item object, const char* name, Item v
 #define js_function_set_prototype(FUNCTION, PROTOTYPE) node_events_host->script->function_set_prototype(FUNCTION, PROTOTYPE)
 #define js_get_prototype(OBJECT) node_events_host->script->get_prototype(OBJECT)
 #define js_set_prototype(OBJECT, PROTOTYPE) node_events_host->script->set_prototype(OBJECT, PROTOTYPE)
-#define js_class_stamp(OBJECT, CLASS) node_events_host->script->class_stamp(OBJECT, CLASS)
 #define js_alloc_env(COUNT) node_events_host->script->closure_env_new(COUNT)
 
 static void ensure_keys() {
@@ -902,10 +901,10 @@ extern "C" Item js_ee_constructor(void) {
     if (get_type_id(this_val) == LMD_TYPE_MAP) {
         Item proto = js_get_prototype(this_val);
         if (proto.item == ee_prototype.item && ee_prototype.item != 0) {
-            // Called via 'new' — initialize the pre-built object
-            // T5b: typed JsClass byte is now the class identity; legacy
-            // `__class_name__` string write retired.
-            js_class_stamp(this_val, JUBE_SCRIPT_CLASS_EVENT_EMITTER);
+            // Called via 'new' — replace the generic pre-built receiver with
+            // a metadata-qualified EventEmitter before initialization.
+            this_val = node_events_host->script->new_object_with_class(
+                JUBE_SCRIPT_CLASS_EVENT_EMITTER);
             Item events_map = js_new_object();
             *emitter_root = this_val.item;
             *events_root = events_map.item;
@@ -927,10 +926,9 @@ extern "C" Item js_ee_constructor(void) {
         }
     }
     // Direct call (not via new) — create a new object with prototype
-    Item emitter = js_new_object();
+    Item emitter = node_events_host->script->new_object_with_class(
+        JUBE_SCRIPT_CLASS_EVENT_EMITTER);
     *emitter_root = emitter.item;
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(emitter, JUBE_SCRIPT_CLASS_EVENT_EMITTER);
     Item events_map = js_new_object();
     *events_root = events_map.item;
     emitter = node_events_root_item(emitter_root);
@@ -1034,7 +1032,7 @@ static Item js_ee_static_getEventListeners(Item emitter, Item event_name) {
 
 template <typename Target>
 static void ee_set_method(Item ns, const char* name, Target target,
-        int adapter_arity) {
+        int adapter_arity, bool constructable = false) {
     JubeRootFrame frame = {};
     if (!node_events_roots_begin(&frame, 2)) return;
     uint64_t* key_root = node_events_host->node->roots->root_frame_take_slot(&frame);
@@ -1045,8 +1043,9 @@ static void ee_set_method(Item ns, const char* name, Target target,
     }
     Item key = make_string_item(name);
     *key_root = key.item;
-    Item fn = jube_new_function(node_events_host->script, target,
-        adapter_arity);
+    Item fn = constructable
+        ? jube_new_constructor(node_events_host->script, target, adapter_arity)
+        : jube_new_function(node_events_host->script, target, adapter_arity);
     *function_root = fn.item;
     js_set_key_default(ns, key, fn);
     node_events_host->node->roots->root_frame_end(&frame);
@@ -1056,7 +1055,8 @@ Item node_events_namespace(void) {
     if (events_namespace.item != 0) return events_namespace;
     ensure_keys();
 
-    events_namespace = js_new_object();
+    events_namespace = node_events_host->script->new_object_with_class(
+        JUBE_SCRIPT_CLASS_EVENT_EMITTER);
     JubeRootFrame frame = {};
     if (!node_events_roots_begin(&frame, 2)) return events_namespace;
     uint64_t* namespace_root = node_events_host->node->roots->root_frame_take_slot(&frame);
@@ -1066,11 +1066,10 @@ Item node_events_namespace(void) {
         return events_namespace;
     }
     *namespace_root = events_namespace.item;
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(events_namespace, JUBE_SCRIPT_CLASS_EVENT_EMITTER);
 
     // Create prototype object with instance methods (this-based wrappers)
-    ee_prototype = js_new_object();
+    ee_prototype = node_events_host->script->new_object_with_class(
+        JUBE_SCRIPT_CLASS_EVENT_EMITTER);
     *prototype_root = ee_prototype.item;
     ee_set_method(ee_prototype, "on",                  js_ee_inst_on, 2);
     ee_set_method(ee_prototype, "addListener",         js_ee_inst_on, 2);
@@ -1089,7 +1088,7 @@ Item node_events_namespace(void) {
     ee_set_method(ee_prototype, "rawListeners",        js_ee_inst_listeners, 1);
 
     // EventEmitter constructor
-    ee_set_method(events_namespace, "EventEmitter", js_ee_constructor, 0);
+    ee_set_method(events_namespace, "EventEmitter", js_ee_constructor, 0, true);
 
     // Also put methods on namespace for direct use (e.g. events.on(emitter, event, fn))
     ee_set_method(events_namespace, "on",                  js_ee_on, 3);
@@ -1110,12 +1109,7 @@ Item node_events_namespace(void) {
 
     // Set EventEmitter.prototype to the prototype object
     js_set_key_default(events_namespace, make_string_item("prototype"), ee_prototype);
-    // Set __instance_proto__ so 'new EventEmitter()' (MAP constructor path)
-    // sets up the prototype chain on instances correctly
-    js_set_key_default(events_namespace, make_string_item("__instance_proto__"), ee_prototype);
-    // Set __ctor__ so 'new EventEmitter()' calls the constructor to init storage
     Item ee_ctor = js_get_key_default(events_namespace, make_string_item("EventEmitter"));
-    js_set_key_default(events_namespace, make_string_item("__ctor__"), ee_ctor);
     // Also set prototype on the constructor function's internal field
     if (get_type_id(ee_ctor) == LMD_TYPE_FUNC) {
         js_function_set_prototype(ee_ctor, ee_prototype);
@@ -1175,7 +1169,7 @@ int node_events_init(const JubeHostAPI* host) {
             !host->script->function_set_prototype || !host->script->object_keys ||
             !host->script->call_function || !host->script->current_this ||
             !host->script->get_number || !host->script->is_truthy ||
-            !host->script->class_stamp || !host->script->to_string ||
+            !host->script->new_object_with_class || !host->script->to_string ||
             !host->script->new_error_with_name || !host->script->throw_value ||
             !host->script->throw_type_error_code ||
             !host->script->closure_env_new || !host->script->new_closure ||

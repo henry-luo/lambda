@@ -9,6 +9,7 @@
 #include "js_dom.h"
 #include "js_runtime.h"
 #include "js_class.h"
+#include "js_object_meta.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../../lib/log.h"
@@ -858,8 +859,7 @@ extern "C" Item js_cssom_rule_get_css_rules(Item rule_item) {
             if (!nr[i]) continue;
             if (nr[i]->type == CSS_RULE_NESTED_DECLARATIONS) {
                 Item style_decl = wrap_rule_decl(nr[i], pool);
-                Item nd_obj = js_new_object();
-                js_class_stamp(nd_obj, JS_CLASS_CSS_NESTED_DECLARATIONS);
+                Item nd_obj = js_new_object_with_class(JS_CLASS_CSS_NESTED_DECLARATIONS);
                 Item style_key = make_string_item("style");
                 js_set_key_default(nd_obj, style_key, style_decl);
                 array_push(arr, nd_obj);
@@ -1384,9 +1384,7 @@ extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
 // =============================================================================
 
 extern "C" bool js_is_css_namespace(Item item) {
-    if (get_type_id(item) != LMD_TYPE_MAP) return false;
-    Map* m = item.map;
-    return m && m->map_kind == MAP_KIND_CSS_NAMESPACE;
+    return js_object_has_class(item, JS_CLASS_CSS_NAMESPACE);
 }
 
 /**

@@ -91,7 +91,7 @@ Item js_own_keys(Item target);
 // adapter reports handled/not-handled through its return value and carries the
 // operation completion in out_result, so false, ordinary fallback, and ERROR
 // remain distinct.
-typedef enum JsPropertyExoticOperation {
+typedef enum JsPropertyOperation {
     JS_EXOTIC_GET = 0,
     JS_EXOTIC_SET = 1,
     JS_EXOTIC_DEFINE_OWN = 2,
@@ -100,9 +100,9 @@ typedef enum JsPropertyExoticOperation {
     JS_EXOTIC_HAS_OWN = 5,
     JS_EXOTIC_GET_OWN_PROPERTY_DESCRIPTOR = 6,
     JS_EXOTIC_OWN_KEYS = 7,
-} JsPropertyExoticOperation;
+} JsPropertyOperation;
 
-bool js_property_exotic_adapter(JsPropertyExoticOperation operation,
+bool js_dispatch_property_op(JsPropertyOperation operation,
                                 Item target, JsPropertyLane lane,
                                 Item observable_key, Item receiver,
                                 Item descriptor, Item value,

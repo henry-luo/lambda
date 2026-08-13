@@ -1870,9 +1870,7 @@ extern "C" Item js_tls_socket_getAuthorized(void) {
 // create a JS TLSSocket object
 static Item make_tls_socket_object(JsTlsSocket* sock) {
     if (sock->high_water_mark <= 0) sock->high_water_mark = 16 * 1024;
-    Item obj = js_new_object();
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(obj, JS_CLASS_TLS_SOCKET);  // A3-T3b
+    Item obj = js_new_object_with_class(JS_CLASS_TLS_SOCKET);
     js_set_key_default(obj, make_string_item("__handle__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)sock)});
     js_set_key_default(obj, make_string_item("on"),
@@ -1964,9 +1962,7 @@ extern "C" Item js_tls_createSecureContext(Item options_item) {
         return js_new_error(make_string_item("Failed to track TLS context"));
     }
 
-    Item result = js_new_object();
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(result, JS_CLASS_SECURE_CONTEXT);  // A3-T3b
+    Item result = js_new_object_with_class(JS_CLASS_SECURE_CONTEXT);
     js_set_key_default(result, make_string_item("__ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
     return result;
@@ -2835,9 +2831,7 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
         srv->ticket_keys_len = ticket_keys_len;
     }
 
-    Item obj = js_new_object();
-    // T5b: legacy `__class_name__` string write retired.
-    js_class_stamp(obj, JS_CLASS_TLS_SERVER);  // A3-T3b
+    Item obj = js_new_object_with_class(JS_CLASS_TLS_SERVER);
     js_set_key_default(obj, make_string_item("__server__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)srv)});
     js_set_key_default(obj, make_string_item("listen"),
@@ -2963,10 +2957,9 @@ static Item tls_constructor_prototype(Item ctor, JsClass cls) {
     Item proto_key = make_string_item("prototype");
     Item proto = js_get_key_default(ctor, proto_key);
     if (get_type_id(proto) != LMD_TYPE_MAP) {
-        proto = js_new_object();
+        proto = js_new_object_with_class(cls);
         js_set_key_default(ctor, proto_key, proto);
     }
-    js_class_stamp(proto, cls);
     js_set_key_default(proto, make_string_item("constructor"), ctor);
     js_mark_non_enumerable(proto, make_string_item("constructor"));
     if (get_type_id(ctor) == LMD_TYPE_FUNC) {

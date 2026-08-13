@@ -419,7 +419,9 @@ void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFuncti
 void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNode* cls_node);
 MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce);
 MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
-        MIR_reg_t proto_obj, JsClassEntry* static_superclass);
+        MIR_reg_t cls_obj, MIR_reg_t proto_obj, JsClassEntry* static_superclass);
+MIR_reg_t jm_emit_current_class_prototype(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+        MIR_reg_t fallback_proto);
 void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_class_instance_computed_field_metadata_keys(JsMirTranspiler* mt,
@@ -436,7 +438,7 @@ void jm_emit_class_constructor_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
 void jm_emit_class_self_extends_check(JsMirTranspiler* mt, JsClassEntry* ce,
     String* class_name);
 MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
-    JsAstNode* heritage, JsClassEntry* static_superclass, MIR_reg_t proto_obj,
+    MIR_reg_t cls_obj, JsAstNode* heritage, JsClassEntry* static_superclass, MIR_reg_t proto_obj,
     MIR_reg_t checked_heritage_val, bool* heritage_is_null_out);
 void jm_emit_class_length_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     JsClassEntry* ce);

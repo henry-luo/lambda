@@ -210,25 +210,11 @@ static void gc_destroy_vmap_object(void* obj, void* data) {
 }
 
 static JsTypedArray* gc_typed_array_from_map(Map* map) {
-    if (!map) return NULL;
-    if (map->data_cap == 0) {
-        return (JsTypedArray*)map->data;
-    }
-    bool found = false;
-    Item ta_val = js_map_shape_lookup_ext(map, "__ta__", 6, &found);
-    if (found) return (JsTypedArray*)(uintptr_t)it2i(ta_val);
-    return NULL;
+    return map ? js_get_typed_array_ptr(map) : NULL;
 }
 
 static JsDataView* gc_dataview_from_map(Map* map) {
-    if (!map) return NULL;
-    if (map->data_cap == 0) {
-        return (JsDataView*)map->data;
-    }
-    bool found = false;
-    Item dv_val = js_map_shape_lookup_ext(map, "__dv__", 6, &found);
-    if (found) return (JsDataView*)(uintptr_t)it2i(dv_val);
-    return NULL;
+    return map ? js_get_dataview_ptr((Item){.map = map}) : NULL;
 }
 
 static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
@@ -251,6 +237,13 @@ static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
         // DataView keeps its ArrayBuffer only in native metadata, so trace the
         // Item explicitly or a collection can free its live backing store.
         if (dv && dv->buffer_item) gc_mark_item(gc, dv->buffer_item);
+    } else if (js_is_proxy((Item){.map = map})) {
+        JsProxyData* proxy = js_get_proxy_data((Item){.map = map});
+        if (proxy) {
+            gc_mark_item(gc, proxy->target);
+            gc_mark_item(gc, proxy->handler);
+            gc_mark_item(gc, proxy->private_slots);
+        }
     }
 }
 
@@ -261,8 +254,8 @@ static void gc_finalize_arraybuffer(JsArrayBuffer* ab, gc_native_seen_t* seen_na
 }
 
 static void gc_finalize_typed_array(JsTypedArray* ta, gc_native_seen_t* seen_native) {
-    if (!ta || gc_native_seen_seen_or_add(seen_native, ta)) return;
-    mem_free(ta);
+    (void)ta;
+    (void)seen_native;
 }
 
 extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_native);
@@ -277,30 +270,19 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
     case MAP_KIND_TYPED_ARRAY: {
         JsTypedArray* ta = gc_typed_array_from_map(map);
         gc_finalize_typed_array(ta, seen_native);
-        map->data = NULL;
         break;
     }
     case MAP_KIND_ARRAYBUFFER: {
-        JsArrayBuffer* ab = NULL;
-        if (map->data_cap == 0) {
-            ab = (JsArrayBuffer*)map->data;
-        } else {
-            bool found = false;
-            Item ab_val = js_map_shape_lookup_ext(map, "__ab__", 6, &found);
-            if (found) ab = (JsArrayBuffer*)(uintptr_t)it2i(ab_val);
-        }
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item((Item){.map = map});
         gc_finalize_arraybuffer(ab, seen_native);
-        map->data = NULL;
         break;
     }
     case MAP_KIND_DATAVIEW: {
         JsDataView* dv = gc_dataview_from_map(map);
-        if (dv && !gc_native_seen_seen_or_add(seen_native, dv)) mem_free(dv);
-        map->data = NULL;
+        (void)dv;
         break;
     }
     case MAP_KIND_ITERATOR:
-    case MAP_KIND_PROXY:
         if (map->data && !gc_native_seen_seen_or_add(seen_native, map->data)) {
             mem_free(map->data);
         }

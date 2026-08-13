@@ -808,7 +808,7 @@ extern "C" Item js_worker_is_marked_as_untransferable(Item value);
 static Item jube_host_value_array_set(Item array, int64_t index, Item value);
 static Item jube_host_script_current_this(void);
 static Item jube_host_script_strict_equal(Item left, Item right);
-static bool jube_host_script_class_stamp(Item object, int class_id);
+static Item jube_host_script_new_object_with_class(int class_id);
 static bool jube_host_script_class_is(Item object, int class_id);
 static int jube_host_value_kind(Item value);
 static bool jube_host_value_string_copy(Item value, char* out, size_t out_size,
@@ -1435,7 +1435,7 @@ static const JubeHostScriptAPI jube_host_script_api = {
     js_object_freeze,
     jube_host_script_current_this,
     jube_host_script_strict_equal,
-    jube_host_script_class_stamp,
+    jube_host_script_new_object_with_class,
     jube_host_script_class_is,
     js_typeof,
     js_alloc_env,
@@ -2038,10 +2038,14 @@ static int jube_host_mir_function_frame_runtime_load(void* mir_context,
         void* function_item, void* function, void* frame_runtime_slot,
         uint32_t* out_runtime_register) {
     MIR_context_t context = jube_host_mir_context_from_argument(mir_context);
+    JubeGuestExecution* active = jube_active_guest_execution;
+    JubeGuestExecution* owner = active && active->reusing_context &&
+        active->previous_active_execution
+        ? active->previous_active_execution : active;
     if (!context || !function_item || !function || !frame_runtime_slot ||
-            !out_runtime_register || !jube_active_guest_execution ||
-            !jube_active_guest_execution->activation_active ||
-            frame_runtime_slot != (void*)&jube_active_guest_execution->frame_runtime) {
+            !out_runtime_register || !active || !active->activation_active ||
+            !owner || !owner->activation_active ||
+            frame_runtime_slot != (void*)&owner->frame_runtime) {
         return -1;
     }
     MIR_item_t item = (MIR_item_t)function_item;
@@ -3020,9 +3024,13 @@ static void* jube_host_execution_frame_runtime_slot(void* execution_context) {
             execution != jube_active_guest_execution) {
         return NULL;
     }
-    // The slot preserves the proven load-before-frame-prologue order while
-    // keeping the runtime pointer private to this activation.
-    return &execution->frame_runtime;
+    // Nested imports reuse the caller heap but their wrapper is released after
+    // loading; generated functions must therefore retain the caller's live
+    // runtime slot instead of the import wrapper's cleared slot (D3.4.7).
+    JubeGuestExecution* owner = execution->reusing_context &&
+        execution->previous_active_execution
+        ? execution->previous_active_execution : execution;
+    return owner->activation_active ? &owner->frame_runtime : NULL;
 }
 
 static Input* jube_host_data_input(void* session) {
@@ -3329,7 +3337,7 @@ static Item jube_host_script_strict_equal(Item left, Item right) {
     return js_strict_equal(left, right);
 }
 
-static bool jube_host_script_class_stamp(Item object, int class_id) {
+static Item jube_host_script_new_object_with_class(int class_id) {
     JsClass host_class = JS_CLASS_NONE;
     switch (class_id) {
         case JUBE_SCRIPT_CLASS_URL: host_class = JS_CLASS_URL; break;
@@ -3338,10 +3346,9 @@ static bool jube_host_script_class_stamp(Item object, int class_id) {
             break;
         case JUBE_SCRIPT_CLASS_BLOB: host_class = JS_CLASS_BLOB; break;
         case JUBE_SCRIPT_CLASS_EVENT_EMITTER: host_class = JS_CLASS_EVENT_EMITTER; break;
-        default: return false;
+        default: return ItemNull;
     }
-    js_class_stamp(object, host_class);
-    return true;
+    return js_new_object_with_class(host_class);
 }
 
 static bool jube_host_script_class_is(Item object, int class_id) {

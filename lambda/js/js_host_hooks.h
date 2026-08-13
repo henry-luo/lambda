@@ -23,6 +23,12 @@ Item js_host_hooks_format_console(Item args);
 // Shared JS runtime predicates and Unicode helpers live in js_runtime.cpp so
 // global builtins and runtime dispatch use one implementation of each rule.
 const JubeTypeDef* js_host_object_type(Item object);
+bool js_host_object_get_property(Item object, Item key, Item* out);
+bool js_host_object_set_property(Item object, Item key, Item value, Item* out);
+bool js_host_object_has_property(Item object, Item key, Item* out);
+bool js_host_object_delete_property(Item object, Item key, Item* out);
+bool js_host_object_own_property_names(Item object, Item* out);
+bool js_host_object_own_property_descriptor(Item object, Item key, Item* out);
 bool js_host_object_prototype(Item object, Item* out);
 bool js_is_arguments_exotic_array(Item value);
 int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii);

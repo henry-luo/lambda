@@ -106,10 +106,8 @@ static MIR_reg_t jm_emit_with_local_writeback(JsMirTranspiler* mt,
 
 static void jm_emit_class_prototype_properties(JsMirTranspiler* mt,
         MIR_reg_t cls_obj, MIR_reg_t proto_obj) {
-    MIR_reg_t ip_key = jm_box_property_name_literal(mt, "__instance_proto__", 18);
-    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
+    jm_call_void_2(mt, "js_set_class_instance_prototype",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, ip_key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
     MIR_reg_t pt_key = jm_box_property_name_literal(mt, "prototype", 9);
     jm_call_1(mt, "js_prepare_class_prototype_property", MIR_T_I64,
@@ -6228,7 +6226,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         // this merge the derived `this` would lack the base fields like `type`.
                         {
                             // Resolve the superclass from the class object's stored
-                            // __super_class__ (captured at class-definition time, when
+                            // the class heritage (captured at class-definition time, when
                             // the binding was in scope) rather than re-evaluating the
                             // identifier here — inside the constructor a captured outer
                             // binding (e.g. a function parameter used as `extends C`)
@@ -6242,11 +6240,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                 // global instead of its private class-body binding.
                                 MIR_reg_t class_obj = jm_emit_class_object_for_entry(
                                     mt, mt->current_class);
-                                MIR_reg_t super_key = jm_box_property_name_literal(mt,
-                                    "__super_class__", 15);
-                                parent_fn = jm_call_2(mt, "js_get_key_default", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, class_obj),
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_key));
+                                parent_fn = jm_call_1(mt, "js_get_class_superclass", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, class_obj));
                             } else {
                                 parent_fn = jm_emit_undefined(mt);
                             }
@@ -6290,11 +6285,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_reg_t parent_fn = 0;
                     if (mt->current_class->name) {
                         MIR_reg_t class_obj = jm_emit_class_object_for_entry(mt, mt->current_class);
-                        MIR_reg_t super_ctor_key = jm_box_property_name_literal(mt,
-                            "__super_ctor__", 14);
-                        parent_fn = jm_call_2(mt, "js_get_key_default", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, class_obj),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor_key));
+                        parent_fn = jm_call_1(mt, "js_get_class_superclass", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, class_obj));
                     } else {
                         parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
                     }
@@ -6304,7 +6296,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn));
                     // Use js_super_call_class: handles both FUNC and MAP (class expression) callee.
-                    // An empty class {} produces a MAP with no __ctor__, which js_call_function
+                    // An empty class {} has no explicit constructor body, so js_call_function
                     // would reject as "not a function". js_super_call_class treats that as a no-op.
                     MIR_reg_t super_result = jm_super_call_class_into(mt,
                         MIR_new_reg_op(mt->ctx, parent_fn), MIR_new_reg_op(mt->ctx, this_val),
@@ -6546,7 +6538,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     bool same_value_native =
                         (native_fn[10] == 's' && strcmp(native_fn, "js_assert_same_value") == 0) ||
                         (native_fn[10] == 'n' && strcmp(native_fn, "js_assert_not_same_value") == 0);
-                    MIR_reg_t msg_reg = (a3 && !same_value_native)
+                    MIR_reg_t msg_reg = a3
                         ? jm_transpile_box_item(mt, a3) : jm_emit_undefined(mt);
                     jm_call_3(mt, native_fn, MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, actual_reg),
@@ -10128,7 +10120,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
     case JS_AST_NODE_CLASS_EXPRESSION: {
         // Class expression: var X = class Y {} or var X = class {}
         JsClassNode* cls_expr = (JsClassNode*)expr;
-        MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+        MIR_reg_t cls_obj = jm_call_0(mt, "js_new_class_function", MIR_T_I64);
         // A class expression creates metadata and methods before assigning its
         // result, so keep the transient class object in the exact root frame.
         jm_create_gc_root_slot(mt, cls_obj);
@@ -10205,15 +10197,19 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 }
             }
 
-            // Store __ctor__ and __instance_proto__ on class object for dynamic instantiation
+            // Store constructor body and instance prototype on the class function
             // (new Type() where Type is a runtime variable holding this class object)
             if (ce) {
                 // Dynamic `new` calls use the stored constructor directly, so
                 // its lexical super lookup must retain this class as home object.
                 jm_emit_class_constructor_property(mt, cls_obj, ce, true);
-                // Create __instance_proto__ with all instance methods
+                // Create the instance prototype with all instance methods
                 MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
                 jm_create_gc_root_slot(mt, proto_obj);
+                // Publish the fresh prototype before setup helpers can compact
+                // it; subsequent operations refresh from the class carrier.
+                jm_emit_class_prototype_properties(mt, cls_obj, proto_obj);
+                proto_obj = jm_emit_current_class_prototype(mt, cls_obj, proto_obj);
                 jm_call_void_2(mt, "js_set_default_constructor_property",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
@@ -10222,8 +10218,10 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                 // Set up prototype's __proto__ chain for instanceof on parent classes.
                 bool heritage_is_null = false;
-                ctor_super_val = jm_emit_class_prototype_chain(mt, ce, heritage,
+                proto_obj = jm_emit_current_class_prototype(mt, cls_obj, proto_obj);
+                ctor_super_val = jm_emit_class_prototype_chain(mt, ce, cls_obj, heritage,
                     static_superclass, proto_obj, checked_heritage_val, &heritage_is_null);
+                proto_obj = jm_emit_current_class_prototype(mt, cls_obj, proto_obj);
                 // Add own instance methods (overrides parents)
                 for (int method_index = 0; method_index < ce->method_count; method_index++) {
                     JsMirClassMethodInstallPolicy policy = {
@@ -10232,7 +10230,6 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     };
                     jm_emit_class_method_install(mt, &policy);
                 }
-                jm_emit_class_prototype_properties(mt, cls_obj, proto_obj);
                 jm_call_void_2(mt, "js_set_default_constructor_property",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
@@ -10245,10 +10242,11 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             } else {
                 MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
                 jm_create_gc_root_slot(mt, proto_obj);
+                jm_emit_class_prototype_properties(mt, cls_obj, proto_obj);
+                proto_obj = jm_emit_current_class_prototype(mt, cls_obj, proto_obj);
                 jm_call_void_2(mt, "js_set_default_constructor_property",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
-                jm_emit_class_prototype_properties(mt, cls_obj, proto_obj);
             }
 
             // v18g: Set class .name property (ES spec §14.6.13 step 12)
@@ -10301,11 +10299,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 }
 
                 if (ctor_super_val) {
-                    MIR_reg_t super_key = jm_box_property_name_literal(mt,
-                        "__super_class__", 15);
-                    jm_call_3(mt, "js_set_key_default", MIR_T_I64,
+                    jm_call_void_2(mt, "js_set_class_superclass",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, super_key),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_super_val));
                 }
 

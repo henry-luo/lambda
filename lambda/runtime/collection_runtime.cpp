@@ -119,13 +119,16 @@ void js_elements_set_props(Array* arr, Map* props) {
         return;
     }
 
-    RootFrame roots(1);
+    RootFrame roots(2);
+    Rooted<Array*> rooted_arr(roots, arr);
     Rooted<Map*> rooted_props(roots, props);
+    arr = rooted_arr.get();
     int64_t dense_capacity = arr->capacity >= arr->extra ? arr->capacity - arr->extra : 0;
     int64_t dense_required = arr->length < dense_capacity ? arr->length : dense_capacity;
     while (!arr->items || dense_required + arr->extra + 2 > arr->capacity) {
         int64_t old_capacity = arr->capacity;
         expand_list((List*)arr, nullptr);
+        arr = rooted_arr.get();
         if (arr->capacity <= old_capacity) return;
     }
     props = rooted_props.get();

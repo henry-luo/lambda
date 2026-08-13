@@ -1,8 +1,9 @@
 /**
  * markup-format.h - Markup format enumeration
  *
- * This minimal header defines just the MarkupFormat enum to avoid
- * circular dependencies between input.hpp and markup-parser.h.
+ * This minimal header defines just the MarkupFormat enum so that input.hpp
+ * and input-parsers.h can name it in signatures without pulling in a parser
+ * header that includes input.hpp back.
  */
 #ifndef MARKUP_FORMAT_H
 #define MARKUP_FORMAT_H

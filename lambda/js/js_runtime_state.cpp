@@ -143,6 +143,14 @@ bool js_runtime_state_thread_initialize(EvalContext* runtime_context) {
         // so restore non-zero queue identities that C++ default initializers
         // would otherwise provide only for a constructed object.
         runtime_context->js_state->event_loop.next_raf_id = 1;
+        runtime_async_deque_init(
+            &runtime_context->js_state->event_loop.next_tick_deque,
+            &runtime_context->js_state->event_loop.queue_storage[0], 4);
+        runtime_async_deque_init(
+            &runtime_context->js_state->event_loop.microtask_deque,
+            &runtime_context->js_state->event_loop.queue_storage[1], 4);
+        runtime_async_deque_init(&runtime_context->js_state->promises.unhandled_deque,
+            &runtime_context->js_state->promises.unhandled_storage, 1);
         runtime_context->js_state->timers.next_id = 1;
         runtime_context->js_state->current_private_home_class_index = -1;
         runtime_context->js_state->call_stack_limit = js_initial_call_stack_limit();
@@ -254,12 +262,8 @@ void js_runtime_state_destroy_context(void) {
     if (runtime_context->js_state->operations.symbol_description_registry) {
         hashmap_free(runtime_context->js_state->operations.symbol_description_registry);
     }
-    // Promise records are allocated lazily outside the fixed state capsule.
-    // They must leave with their owning context so another context cannot
-    // inherit semantic state or retain a multi-megabyte unused table.
-    if (runtime_context->js_state->promises.records) {
-        mem_free(runtime_context->js_state->promises.records);
-    }
+    // Promise carriers are GC-owned; context teardown only drops queue and
+    // async owners before the heap itself is released.
     mem_free(runtime_context->js_state);
     runtime_context->js_state = NULL;
     if (was_active) js_active_runtime_state = NULL;
@@ -404,8 +408,7 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
         2 + JS_ASYNC_HOOK_STATE_MAX + JS_ASYNC_PENDING_DESTROY_STATE_MAX,
         "async hooks state");
     js_root_range_set_storage(&state->promises.roots,
-        state->promises.unhandled_queue,
-        JS_PROMISE_UNHANDLED_QUEUE_MAX + 2 + JS_DOMAIN_STACK_MAX,
+        &state->promises.unhandled_storage, 3,
         "Promise unhandled queue and domain state");
     js_root_range_set_storage(&state->promises.domain_stack.roots,
         state->promises.domain_stack_slots, JS_DOMAIN_STACK_MAX, "domain stack");
@@ -418,6 +421,8 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     js_root_range_set_storage(&state->async_local_storage.roots,
         state->async_local_storage.instances, JS_MAX_ALS_INSTANCES,
         "AsyncLocalStorage instances");
+    js_root_range_set_storage(&state->event_loop_queue_roots,
+        state->event_loop.queue_storage, 2, "JS async queue storage");
 }
 
 bool js_root_range_register_reset(JsRootRange* range, void* owner,
@@ -914,21 +919,28 @@ extern "C" Item js_to_property_key(Item key) {
     TypeId kt = get_type_id(key);
     if (kt == LMD_TYPE_STRING) {
         js_exec_profile_name_lookup_bypassed();
-        return js_canonical_property_string(key);
+        Item result = js_canonical_property_string(key);
+        return result;
     }
     if (key.item == 0 || kt == LMD_TYPE_NULL)
-        return (Item){.item = s2it(heap_create_name("null", 4))};
+        return js_canonical_property_string(
+            (Item){.item = s2it(heap_create_name("null", 4))});
     if (kt == LMD_TYPE_UNDEFINED)
-        return (Item){.item = s2it(heap_create_name("undefined", 9))};
+        return js_canonical_property_string(
+            (Item){.item = s2it(heap_create_name("undefined", 9))});
     if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT || kt == LMD_TYPE_FUNC) {
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_primitive(key, JS_HINT_STRING));
         if (js_key_is_symbol(key)) return js_symbol_to_key(key);
         kt = get_type_id(key);
-        if (kt == LMD_TYPE_STRING) return js_canonical_property_string(key);
+        if (kt == LMD_TYPE_STRING) {
+            return js_canonical_property_string(key);
+        }
         if (key.item == 0 || kt == LMD_TYPE_NULL)
-            return (Item){.item = s2it(heap_create_name("null", 4))};
+            return js_canonical_property_string(
+                (Item){.item = s2it(heap_create_name("null", 4))});
         if (kt == LMD_TYPE_UNDEFINED)
-            return (Item){.item = s2it(heap_create_name("undefined", 9))};
+            return js_canonical_property_string(
+                (Item){.item = s2it(heap_create_name("undefined", 9))});
     }
     Item string_value = js_to_string(key);
     return item_is_error(string_value) ? string_value
@@ -1181,7 +1193,7 @@ extern "C" Item js_error_lane_payload(Item lane) {
     if (error && error->is_static) {
         // Fault records have no shape while signals are being recovered; this
         // is the first safe boundary at which their Map-compatible view exists.
-        error->prologue_reserved = MAP_KIND_ERROR;
+        error->type = js_error_carrier_type_map();
     }
     return error ? js_error_as_object(error) : lane;
 }
@@ -1421,6 +1433,10 @@ extern "C" Item js_new_aggregate_error(Item errors, Item message) {
         message_root.set(message_string);
     }
     err_root.set(js_new_error_with_name(err_name, message_root.get()));
+    // ToString(message) is evaluated while allocating the error carrier; an
+    // abrupt completion must escape before IterableToList attempts to mutate
+    // that completion as if it were the new AggregateError (D8.3.2).
+    if (item_is_error(err_root.get())) return err_root.get();
     // AggregateError requires IterableToList. Array.from's no-argument
     // compatibility path returned [] for undefined and hid GetIterator's
     // required TypeError; use the iterator primitive directly (D6.2.2v2).
@@ -1766,6 +1782,7 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
     const char* message_chars = message_string ? message_string->chars : "";
     LambdaError* error = err_create_heap(ERR_RUNTIME_ERROR, message_chars, NULL);
     if (!error) return ItemError;
+    error->type = js_error_carrier_type_map();
     error->js_class_id = (uint8_t)error_class;
     error->js_name_item = name_string
         ? error_name_root.get().item
