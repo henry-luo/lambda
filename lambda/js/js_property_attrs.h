@@ -113,6 +113,10 @@ TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
                                         NameId operation_name_id,
                                         TypeId value_type);
 
+// Detach only when obj still carries an intrinsic snapshot's pristine TypeMap.
+// Returns false if detachment was required but allocation failed.
+bool js_typemap_detach_snapshot_for_mutation(Item obj);
+
 // Identity-preserving accessor lookup used by private and Symbol property
 // writes. Raw spelling lookups remain available for ordinary STRING keys.
 JsAccessorPair* js_find_accessor_pair_inheritable_name_id(Item obj, NameId name_id);

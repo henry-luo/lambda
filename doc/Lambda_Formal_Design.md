@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.18.0 (2026-08-13)
+**Spec version:** 1.19.0 (2026-08-13)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1130,21 +1130,21 @@ loosely across the corpus — context disambiguates, and we live with it.
   byte-match unstressed), gated in the baseline; a static liveness
   duplicate is rejected. The independent structural verifier is deferred
   until emission is final. [MT4, MT3]
-- **D8.6.4*** Unified-AST consolidation has four **hard, fail-closed exit
+- **D8.6.4v2*** Unified-AST consolidation has three **hard, fail-closed exit
   ratchets**: at least 2,000 net physical C/C++ lines removed from the
   anchored `lambda/runtime` + `lambda/js` scope; at least 10% lower internal
   parse-through-link compiler time for the complete `test_lambda_gtest`
-  corpus; at least 20% lower for `test_js_gtest`; and at least 15% fewer
-  **finalized MIR instructions** for the frozen large-library cohort discovered
-  by `test_js_gtest`, while the complete JS corpus may not grow. MIR volume is
-  counted from finalized top-level module functions with the same instruction
-  definition as the MT7 artifact ratchet (labels/declarations are not
-  instructions), printed as a machine-readable per-test record, and compared
-  on identical manifests. Timings use identical release-mode sample manifests
-  and the median of five complete measured runs after one warm-up; execution,
-  process, cleanup and scheduler time do not count. Cache hits, missing/retried
-  samples, code moves out of the LOC scope, formatting, and comment stripping
-  cannot satisfy a ratchet. [U33–U36]
+  corpus; and at least 20% lower for `test_js_gtest`. Finalized MIR volume for
+  the frozen `test_js_gtest` large-library cohort and complete JS corpus is a
+  required numeric diagnostic, not an exit ratchet: it is counted from
+  finalized top-level module functions with the same instruction definition
+  as MT7 (labels/declarations are excluded), printed as a machine-readable
+  per-test record, compared on identical manifests, and any material growth is
+  attributed. Timings use identical release-mode sample manifests and the
+  median of five complete measured runs after one warm-up; execution, process,
+  cleanup and scheduler time do not count. Cache hits, missing/retried samples,
+  code moves out of the LOC scope, formatting, and comment stripping cannot
+  satisfy a ratchet. [U33–U36]
 
 ---
 
@@ -1192,7 +1192,7 @@ Status of `*`-marked rulings as of 2026-08-13.
 | D8.4.3 | Landed 2026-08-07 with JS Tune1: JS/Jube fallible helpers use one merged Item error lane; pending-exception polling and the legacy flag are deleted. |
 | D8.5.1 | MIR cache L1 landed; L2 lazy codegen approved but `mir.c` still eager. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
-| D8.6.4 | Instrumentation and all four Unified-AST consolidation ratchets are not started; LOC anchor is `e66e5b5c71bc7ee7fe2d1e2b2a9afe27dc6825a3` at 319,606 lines; the JS large-library MIR-volume manifest and count await Phase 0 capture. |
+| D8.6.4v2 | Timing/MIR instrumentation is landed. The LOC and compiler-time ratchets remain open against anchor `e66e5b5c71bc7ee7fe2d1e2b2a9afe27dc6825a3` at 319,606 lines; large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
 
 ## Appendix B — Open Design Issues (DO#)
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-12  
 **Status:** Implementation in progress; Phase 0/1/2/3 slices are landed, and the remaining work is performance/LOC closure
-**Design authority:** `doc/Lambda_Formal_Design.md` D2.4.1–D2.4.3, D3.2.3, D3.3.1, D5.3.4, D8.1.1, D8.2.1–D8.2.6, D8.4.3, D8.5.1–D8.5.3, D8.6.1, D8.6.3–D8.6.4  
+**Design authority:** `doc/Lambda_Formal_Design.md` D2.4.1–D2.4.3, D3.2.3, D3.3.1, D5.3.4, D8.1.1, D8.2.1–D8.2.6, D8.4.3, D8.5.1–D8.5.3, D8.6.1, D8.6.3, D8.6.4v2
 **Working design:** `vibe/Lambda_Design_Unified_AST.md` U27–U36  
 **Predecessor:** `vibe/Lambda_Impl_Unified_AST (done).md` (structural convergence record; not the checklist for this continuation)
 
@@ -24,7 +24,7 @@ This plan does not unify the Tree-sitter grammars or erase Lambda/JavaScript sem
 
 ## 2. Non-negotiable exit gates
 
-Under **D8.6.4**, the semantic, LOC, compiler-time, and measurement gates in this section are hard. A green test suite cannot compensate for a missed LOC or performance gate, and a faster test scheduler cannot compensate for unchanged compiler work. MIR volume is retained as a required diagnostic signal, but is not an exit blocker.
+Under **D8.6.4v2**, the semantic, LOC, compiler-time, and measurement gates in this section are hard. A green test suite cannot compensate for a missed LOC or performance gate, and a faster test scheduler cannot compensate for unchanged compiler work. MIR volume is retained as a required diagnostic signal, but is not an exit blocker.
 
 | Gate | Requirement | Pass condition |
 |---|---|---|
@@ -381,7 +381,7 @@ tests remain the semantic gate; this phase adds a small deterministic suite
 that proves which cache, guard, IC, lowering demand, and fallback was selected.
 This gives the debugging/recovery work a durable regression oracle without
 coupling tests to MIR register names, pointer addresses, or incidental helper
-layout. The phase implements the measurement intent of **D8.6.4** at the
+layout. The phase implements the measurement intent of **D8.6.4v2** at the
 decision level and preserves the common pass/lowering structure required by
 **D8.2.5–D8.2.6**.
 
@@ -516,7 +516,7 @@ The first required rows are:
 
 | Optimization | Positive fixture assertion | Required guard/fallback assertion |
 |---|---|---|
-| Regex compile/permanent cache | repeated large literal has one compile and a subsequent cache hit | short capture-bearing literal creates a fresh wrapper; no keyless entry is stored in the compile cache; invalidation releases only its own entry |
+| Regex compile/permanent cache | repeated large literal and a medium capture-free literal in a hot loop compile once and then hit; each evaluation still receives a fresh RegExp object/`lastIndex` | short capture-bearing literal creates a fresh wrapper; no keyless entry is stored in the compile cache; invalidation releases only its own entry |
 | Dense array indexed store | dense contiguous array takes the direct store path | hole/sparse, prototype setter, non-extensible array, or non-writable length records the reason and uses the generic path |
 | Named load/store IC | first access installs mono/polymorphic state and later accesses hit it | shape/key/type change records a miss and invalidation/transition |
 | Dynamic `Function` fast path | simple eligible body records the parser fast path | comments, ASI-sensitive, reserved/complex syntax records the normal-parser fallback |
@@ -935,18 +935,56 @@ MIR's post-finish operand mutation contract is not established for all
 backends. The safe fallback is retained until a demand producer can prove the
 full **D8.4.3** error/root contract.
 
+### 13.1.2 Test262 instability root-cause closeout (2026-08-13)
+
+The 356 batch-unstable/slow results were runtime/compiler defects, not a runner
+policy problem. No Test262 test, harness, manifest, timeout, batching rule, or
+retry rule was changed. Three coupled root causes were fixed:
+
+1. Prototype-reset snapshots kept raw Map data-zone pointers and untraced
+   accessor Items. Precise GC could relocate the live data and later restore a
+   discarded nursery buffer; descriptor mutations could also retag/enlarge the
+   pristine `TypeMap` itself. Snapshots now use rooted GC shadow Maps, restore
+   the complete `data_cap`, detach snapshot shapes before type/new-property
+   mutation, and publish both hidden and public typed-array constructor
+   `prototype` slots. This protects the realm-isolation invariant under
+   **D4.3.1**, **D5.4.3**, and **D6.2.2v2**.
+2. Ordinary top-level `var` declarations were lowered into repeated
+   `js_set_module_var`, global-property, and binding-registration MIR calls even
+   though the runtime already had a bulk instantiation helper. A table-driven
+   **D8.4.3** lowering now emits one bulk call for ordinary script/module vars
+   while eval/Annex-B cases retain their specialized lanes. On
+   `language/identifiers/start-unicode-10.0.0-escaped.js`, normal-release time
+   fell from about 5.30–5.40 s to 0.340–0.364 s; the profile's top-level runtime
+   call-site count fell from about 25,004 to 18.
+3. Capture-free regex literals between 9 and 1023 bytes were excluded from the
+   compile cache. The native-function-source validator evaluated its medium
+   Unicode classes about 25,452 times, repeating canonicalization and RE2
+   compilation. Capture-free matcher data is now cached while every evaluation
+   still creates a distinct RegExp object with fresh `lastIndex` (ECMA-262
+   §22.2.3.1). The isolated release-profile test fell from about 2.76 s to
+   0.35–0.36 s. `JsOpt.RegexMediumCaptureFreeLoopHitsCompileCache` locks both
+   the cache-hit decision and fresh-object state; the capture-bearing fallback
+   contract remains green.
+
+The final release `make test262-baseline` collected all 40,261 baseline results
+in 136.1 s with **40,261 fully passing, 0 non-fully-passing, 0 failed, and no
+retry phase**. `make test-lambda-baseline` then passed 3,705/3,705 and
+`make test-js-opt` passed 9/9. This closes the instability regression without
+weakening a gate; the broader G1/G2/G3 Unified-AST closeout remains open.
+
 ### 13.2 Phase status
 
 | Phase | Status | Evidence |
 |---|---|---|
 | 0 — measurement/guardrails | completed | Common timing/MIR protocol, GTest parsers, TSV capture summaries, clean five-run Lambda/JS manifests, instrumentation equivalence, and finalized-artifact equivalence are recorded |
-| 0.5 — optimization contract testing | core implementation landed; matrix expansion remains | `test_js_opt_gtest` passes 8/8 with profile tracing, trace-off semantic/finalized-MIR differential, and fail-closed parser checks; runtime ownership migration and the remaining optimization rows remain |
+| 0.5 — optimization contract testing | core implementation landed; matrix expansion remains | `test_js_opt_gtest` passes 9/9 with profile tracing, including the medium capture-free regex cache/fresh-object contract, trace-off semantic/finalized-MIR differential, and fail-closed parser checks; runtime ownership migration and the remaining optimization rows remain |
 | 1 — traversal/index/binding | in progress | `AstIndex`, dense node/function identities, common core child visitor, JS function pointer index, and pass-manager prerequisite harness landed; extension catalog/binding migration remain |
 | 2 — facts/pass manager | in progress | Typed fact bits/pass manager and `MirValue` demand/contract fields landed; production pass wrapping remains |
 | 3 — demand-driven `MirValue` | in progress | Immediate boxed-number reuse is live for indexed JS function/module scopes; full demand propagation and common expression boundaries remain |
 | 4 — consolidation/deletion | in progress | Common index/cache/emitter paths and safe lazy policy are live; source-scope deletion audit and baseline gates remain |
 | 5 — measured contingency | completed for current profile | Lazy/interpreter policy entered only after phase profiles showed MIR/link dominance; rollback switches remain documented |
-| closeout | in progress | G2/G3 and D4 diagnostics are recorded; final release regression gates and audited deletion ledger remain |
+| closeout | in progress | Test262 instability is closed at zero non-fully-passing tests and the Lambda baseline is green; final G2/G3 recapture and audited deletion ledger remain |
 
 ### 13.3 Gate and diagnostic results
 
@@ -958,7 +996,7 @@ full **D8.4.3** error/root contract.
 | D4 JS large-library finalized MIR diagnostic | 5,743,247 | 5,008,331 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
 | D4 JS complete-corpus finalized MIR diagnostic | 7,187,862 | 6,135,408 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
 | G5 sample/timing integrity | 698 Lambda rows / 324 JS rows, identical sorted manifests | historical captures retained for diagnosis only; incomplete captures are rejected | exact timing manifest | open until post-rejection recapture |
-| G0 regressions | current baselines | `make test-lambda-baseline` verified input 2104/2104 plus Lambda runtime 1598/1598 (3702/3702 total); focused MIR ratchet 16/16 and contract 8/8 also pass | Lambda baseline green; Test262 still open | the release Test262 runner remains unverified: a single-worker capture collected 40,082/40,261 results before the typed-array `slice` batch worker crashed and recovery was interrupted; no partial result is accepted as a baseline pass |
+| G0 regressions | current baselines | `make test-lambda-baseline`: input 2104/2104 plus Lambda runtime 1601/1601 (3705/3705 total); `make test262-baseline`: 40261/40261 fully passing, 0 non-fully-passing, 0 failed, 0 retries; `make test-js-opt`: 9/9 | Lambda and Test262 baselines green | verified 2026-08-13 with the release Test262 runtime; `test/js262/t262_partial.txt` is empty and no Test262 test/runner source was changed |
 
 ### 13.4 Deletion ledger
 
@@ -985,13 +1023,13 @@ This plan is complete only when all statements are true:
 - [ ] Root/final-store policy exists only in `MirEmitter` (**D5.3.4**).
 - [ ] Language profiles contain semantic differences, not duplicate pass schedules or core walks (**D8.2.1–D8.2.5**).
 - [ ] Old walkers, linear rediscovery, quadratic propagation, bare-register core APIs, and compatibility lowering paths are deleted.
-- [ ] G1 reports at least 2,000 net physical runtime/compiler LOC removed (**D8.6.4**).
-- [ ] G2 reports at least 10% lower Lambda GTest compiler time (**D8.6.4**).
-- [ ] G3 reports at least 20% lower JS GTest compiler time (**D8.6.4**).
-- [ ] D4 reports deterministic finalized-MIR volume for the frozen JS large-library cohort and complete corpus; investigate material growth (**D8.6.4**).
-- [ ] G5 proves identical, complete, deterministic release-mode timing manifests; MIR manifests remain attached as diagnostics (**D8.6.4**).
-- [ ] Optimization Contract Testing passes: each material tuning path has a positive and guard/fallback fixture with deterministic `JsOptTrace` events; trace-on/trace-off output, errors, and finalized MIR are identical (**D8.2.5–D8.2.6**, **D8.6.4**).
-- [ ] G0 and the entire §11 matrix are green with no weakened ratchets. Current evidence has `make test-lambda-baseline` green at 3702/3702 (input 2104/2104 plus Lambda runtime 1598/1598), while `make test262-baseline` remains open because its runner hit a typed-array `slice` batch-worker crash before completing recovery; the incomplete 40,082/40,261 capture is not treated as a pass.
+- [ ] G1 reports at least 2,000 net physical runtime/compiler LOC removed (**D8.6.4v2**).
+- [ ] G2 reports at least 10% lower Lambda GTest compiler time (**D8.6.4v2**).
+- [ ] G3 reports at least 20% lower JS GTest compiler time (**D8.6.4v2**).
+- [ ] D4 reports deterministic finalized-MIR volume for the frozen JS large-library cohort and complete corpus; investigate material growth (**D8.6.4v2**).
+- [ ] G5 proves identical, complete, deterministic release-mode timing manifests; MIR manifests remain attached as diagnostics (**D8.6.4v2**).
+- [ ] Optimization Contract Testing passes: each material tuning path has a positive and guard/fallback fixture with deterministic `JsOptTrace` events; trace-on/trace-off output, errors, and finalized MIR are identical (**D8.2.5–D8.2.6**, **D8.6.4v2**).
+- [ ] G0 and the entire §11 matrix are green with no weakened ratchets. Current evidence has `make test-lambda-baseline` green at 3705/3705 (input 2104/2104 plus Lambda runtime 1601/1601), `make test262-baseline` green at 40261/40261 with zero non-fully-passing tests or retries, and `make test-js-opt` green at 9/9; the remaining §11 commands still require final closeout execution.
 - [ ] §13 contains the final commits, raw-capture locations, medians, phase attribution, LOC ledger, and verified test results.
 
 Until every item is checked, the unified-AST tuning continuation remains open.

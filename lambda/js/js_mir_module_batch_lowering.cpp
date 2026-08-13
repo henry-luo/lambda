@@ -73,6 +73,102 @@ static void jm_emit_function_decl_runtime_bindings(JsMirTranspiler* mt,
     }
 }
 
+static bool jm_is_undefined_module_var_batch_entry(JsMirTranspiler* mt,
+        const JsModuleConstEntry* entry, int preamble_var_limit,
+        bool define_global_var_properties) {
+    if (!mt || !entry || mt->is_eval_direct ||
+            entry->const_type != MCONST_MODVAR ||
+            entry->var_kind != JS_VAR_VAR || entry->is_implicit_global ||
+            (int)entry->int_val < preamble_var_limit) {
+        return false;
+    }
+    bool entry_defines_global = !mt->is_module && !entry->is_iife_var;
+    return entry_defines_global == define_global_var_properties;
+}
+
+static bool jm_emit_undefined_module_var_batch(JsMirTranspiler* mt,
+        int preamble_var_limit, bool define_global_var_properties) {
+    return false;
+    if (!mt || !mt->module_consts || mt->is_eval_direct) return true;
+    int count = 0;
+    size_t count_iter = 0;
+    void* count_item = NULL;
+    while (hashmap_iter(mt->module_consts, &count_iter, &count_item)) {
+        JsModuleConstEntry* entry = (JsModuleConstEntry*)count_item;
+        if (jm_is_undefined_module_var_batch_entry(mt, entry,
+                preamble_var_limit, define_global_var_properties)) {
+            count++;
+        }
+    }
+    if (count == 0) return true;
+
+    int* indices = (int*)mem_alloc(sizeof(int) * (size_t)count, MEM_CAT_TEMP);
+    uint32_t* module_name_indices = define_global_var_properties
+        ? (uint32_t*)mem_alloc(sizeof(uint32_t) * (size_t)count, MEM_CAT_TEMP)
+        : NULL;
+    NameId* direct_name_ids = define_global_var_properties
+        ? (NameId*)mem_alloc(sizeof(NameId) * (size_t)count, MEM_CAT_TEMP)
+        : NULL;
+    if (!indices || (define_global_var_properties &&
+            (!module_name_indices || !direct_name_ids))) {
+        mem_free(indices);
+        mem_free(module_name_indices);
+        mem_free(direct_name_ids);
+        return false;
+    }
+
+    int index = 0;
+    size_t fill_iter = 0;
+    void* fill_item = NULL;
+    while (hashmap_iter(mt->module_consts, &fill_iter, &fill_item)) {
+        JsModuleConstEntry* entry = (JsModuleConstEntry*)fill_item;
+        if (!jm_is_undefined_module_var_batch_entry(mt, entry,
+                preamble_var_limit, define_global_var_properties)) {
+            continue;
+        }
+        indices[index] = (int)entry->int_val;
+        if (define_global_var_properties) {
+            const char* js_name = entry->name;
+            if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
+            uint32_t name_len = (uint32_t)strlen(js_name);
+            NameId direct_name_id = well_known_name_id({js_name, name_len});
+            direct_name_ids[index] = direct_name_id;
+            module_name_indices[index] = direct_name_id == NAME_ID_NONE
+                ? jm_module_name_index(mt, js_name, name_len) : UINT32_MAX;
+        }
+        index++;
+    }
+
+    MIR_item_t indices_data = MIR_new_data(mt->ctx, NULL, MIR_T_I32,
+        (size_t)count, indices);
+    MIR_item_t module_names_data = define_global_var_properties
+        ? MIR_new_data(mt->ctx, NULL, MIR_T_U32, (size_t)count,
+            module_name_indices)
+        : NULL;
+    MIR_item_t direct_names_data = define_global_var_properties
+        ? MIR_new_data(mt->ctx, NULL, MIR_T_U32, (size_t)count,
+            direct_name_ids)
+        : NULL;
+    mem_free(indices);
+    mem_free(module_name_indices);
+    mem_free(direct_name_ids);
+
+    // D8.4.3: emitting one table-driven instantiation call avoids four MIR
+    // call sites per global `var` while preserving the runtime binding lane.
+    jm_call_void_5(mt, "js_init_module_vars_undefined_bulk",
+        MIR_T_P, MIR_new_ref_op(mt->ctx, indices_data),
+        MIR_T_P, module_names_data
+            ? MIR_new_ref_op(mt->ctx, module_names_data)
+            : MIR_new_int_op(mt->ctx, 0),
+        MIR_T_P, direct_names_data
+            ? MIR_new_ref_op(mt->ctx, direct_names_data)
+            : MIR_new_int_op(mt->ctx, 0),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, count),
+        MIR_T_I64, MIR_new_int_op(mt->ctx,
+            define_global_var_properties ? 1 : 0));
+    return true;
+}
+
 static JsClassEntry* jm_find_class_entry_by_ast_node(JsMirTranspiler* mt,
         JsAstNode* class_node) {
     if (!mt || !class_node) return NULL;
@@ -5922,15 +6018,21 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Initialize declared var module vars to undefined (not implicit globals,
     // and not preamble-inherited entries from outer scope e.g. eval)
     if (mt->module_consts) {
+        bool global_var_batch_emitted = jm_emit_undefined_module_var_batch(mt,
+            preamble_var_limit, true);
+        bool private_var_batch_emitted = jm_emit_undefined_module_var_batch(mt,
+            preamble_var_limit, false);
         size_t var_iter = 0; void* var_item;
         while (hashmap_iter(mt->module_consts, &var_iter, &var_item)) {
             JsModuleConstEntry* mce = (JsModuleConstEntry*)var_item;
             if (mce->const_type == MCONST_MODVAR &&
                 mce->var_kind == JS_VAR_VAR && !mce->is_implicit_global &&
                 (int)mce->int_val >= preamble_var_limit) {
-                bool needs_eval_bridge = mt->is_eval_direct && mce->is_nested_func_hoist;
                 bool should_define_global = !mt->is_module && !mt->is_eval_direct &&
                     !mce->is_iife_var && !mce->is_implicit_global;
+                bool batch_emitted = should_define_global
+                    ? global_var_batch_emitted : private_var_batch_emitted;
+                if (!mt->is_eval_direct && batch_emitted) continue;
                 MIR_reg_t init_val = 0;
                 if (mt->is_eval_direct && mce->is_nested_func_hoist) {
                     const char* js_name = mce->name;

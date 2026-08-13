@@ -756,6 +756,20 @@ static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item va
     }
 
     TypeId value_type = get_type_id(value);
+    TypeId entry_type = entry->type ? entry->type->type_id : LMD_TYPE_NULL;
+    if (entry_type != value_type) {
+        NameId entry_name_id = entry->name_id;
+        const char* entry_name = entry->name ? entry->name->str : NULL;
+        int entry_name_len = entry->name ? (int)entry->name->length : 0;
+        // Accessor-to-data conversion changes the slot's tracing/read type.
+        // Detach the intrinsic snapshot blueprint before retagging it, or a
+        // later reset inherits this test's descriptor mutation (D6.2.2v2).
+        if (!js_typemap_clone_for_mutation_pub(target)) return false;
+        entry = entry_name_id != NAME_ID_NONE
+            ? js_find_shape_entry_name_id(target, entry_name_id)
+            : js_find_shape_entry(target, entry_name, entry_name_len);
+        if (!entry) return false;
+    }
     int value_size = type_info[value_type].byte_size;
     if (value_size <= 0 ||
             entry->byte_offset + value_size > (int64_t)target.map->data_cap) {
@@ -999,6 +1013,14 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
     }
     String* name_key = it2s(name_item);
     bool identity_key = name_key && property_key_id(name_key) != NAME_ID_NONE;
+
+    if (is_new_property &&
+            !js_typemap_detach_snapshot_for_mutation(object)) {
+        // Adding a property appends to the active TypeMap. Detach the reset
+        // blueprint first, or the next test restores the enlarged shape and
+        // inherits this property (D6.2.2v2).
+        return js_throw_range_error("Out of memory while detaching property shape");
+    }
 
     // [[DefineOwnProperty]] — must NOT trigger inherited accessor logic.
 

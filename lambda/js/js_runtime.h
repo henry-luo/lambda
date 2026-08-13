@@ -759,7 +759,8 @@ void js_runtime_set_input(void* input);
 
 void js_set_module_var(int index, Item value);
 Item js_get_module_var(int index);
-void js_init_module_vars_undefined_bulk(const int* indices, const Item* keys,
+void js_init_module_vars_undefined_bulk(const int* indices,
+    const uint32_t* module_name_indices, const NameId* direct_name_ids,
     int count, int define_global_var_properties);
 void js_reset_module_vars(void);
 uint32_t js_alloc_module_state(uint32_t var_count);

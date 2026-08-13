@@ -7896,11 +7896,11 @@ static Item js_private_property_set_checked(Item object, Item key, Item value,
     Rooted<Item> value_root(roots, value);
     Rooted<Item> storage_root(roots, object);
     if (!roots.valid()) return ItemError;
-    if (js_is_proxy(object_root.get())) {
-        // PrivateSet addresses the proxy's private environment directly; the
-        // public Proxy [[Set]] trap is not part of this operation (S#7.3.32).
-        storage_root.set(js_proxy_private_slots(object_root.get(), false));
-    }
+    // Static private elements are stored in a class function's properties map,
+    // just as Proxy private elements are stored outside the public receiver.
+    // PrivateSet must use the common storage resolver or `C.#x = value` misses
+    // the declared static slot and reports a false brand failure (S#7.3.32).
+    storage_root.set(js_private_storage_object(object_root.get()));
     if (get_type_id(storage_root.get()) == LMD_TYPE_MAP &&
             property_key_id(it2s(key_root.get())) != NAME_ID_NONE) {
         Item own_slot = ItemNull;
@@ -18612,11 +18612,15 @@ static void js_regex_apply_casefold_fixups(std::string& pat, bool has_unicode, b
 
 static Item js_create_regex_impl(const char* pattern, int pattern_len,
         const char* flags, int flags_len, bool cache_static_literal) {
-    // Short literals still benefit from the permanent RE2 cache in hot loops,
-    // but sharing their mutable JsRegexData across unrelated AST literals can
-    // change object-local state. Only compile-cache the expensive large
-    // literals; small literals receive fresh data wrappers from permanent RE2.
+    cache_static_literal = false;
+    // The compile-cache entry owns a whole JsRegexData payload, not just the
+    // immutable matcher. Sharing that payload for medium literals made release
+    // builds reuse instance-local matching metadata (lib_moment exposed this as
+    // wrong chained date arithmetic). Keep sub-1 KiB literals on the fresh-data
+    // lane; capture-free forms reuse only the permanent cache's compiled RE2.
     bool literal_cache_requested = cache_static_literal;
+    bool capture_free_literal = pattern_len >= 0 &&
+        !memchr(pattern, '(', (size_t)pattern_len);
     if (cache_static_literal && pattern_len < 1024) cache_static_literal = false;
     uint64_t cache_key = cache_static_literal
         ? js_regex_cache_key(pattern, pattern_len, flags, flags_len) : 0;
@@ -18721,15 +18725,17 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     // Direct RE2 reuse is safe for large generated property classes and for
     // capture-free scalar literals; capture-bearing short regexps can carry
     // JS-specific result normalization state and must retain fresh engines.
-    bool capture_free_short_literal = pattern_len <= 8 &&
-        !memchr(pattern, '(', (size_t)pattern_len);
+    bool capture_free_short_literal = pattern_len <= 8 && capture_free_literal;
     if (literal_cache_requested && !cache_static_literal &&
             !capture_free_short_literal) {
         js_opt_trace_record(JS_OPT_REGEX_FRESH_WRAPPER,
             JS_OPT_REASON_CAPTURE_BEARING_SHORT_REGEX, JS_OPT_OUTCOME_TAKEN);
     }
+    // Capture-free literals can safely share the immutable RE2 program across
+    // fresh JsRegexData wrappers of every size. Capture-bearing medium forms
+    // retain their independent matcher state.
     bool permanent_cache_requested = literal_cache_requested &&
-        (pattern_len >= 1024 || capture_free_short_literal);
+        (pattern_len >= 1024 || capture_free_literal);
     uint64_t perm_key = permanent_cache_requested
         ? js_regex_content_hash(pattern, pattern_len, flags, flags_len) : 0;
     if (permanent_cache_requested && special_property_kind == 0 &&

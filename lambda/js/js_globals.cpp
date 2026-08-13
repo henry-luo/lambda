@@ -15828,13 +15828,26 @@ static bool js_define_global_var_properties_bulk_absent(Item global, const Item*
     return ok;
 }
 
-extern "C" void js_init_module_vars_undefined_bulk(const int* indices, const Item* keys,
+extern "C" void js_init_module_vars_undefined_bulk(const int* indices,
+        const uint32_t* module_name_indices, const NameId* direct_name_ids,
         int count, int define_global_var_properties) {
     if (!indices || count <= 0) return;
     Item undef = make_js_undefined();
     Item global = ItemNull;
-    if (define_global_var_properties && keys) {
+    Item* keys = NULL;
+    if (define_global_var_properties && module_name_indices && direct_name_ids) {
+        keys = (Item*)mem_alloc(sizeof(Item) * (size_t)count, MEM_CAT_JS_RUNTIME);
+        if (keys) {
+            for (int i = 0; i < count; i++) {
+                keys[i] = js_active_module_name_item(module_name_indices[i],
+                    direct_name_ids[i]);
+            }
+        }
+    }
+    if (define_global_var_properties) {
         global = js_get_global_this();
+    }
+    if (define_global_var_properties && keys) {
         if (js_define_global_var_properties_bulk_absent(global, keys, count)) {
             for (int i = 0; i < count; i++) {
                 int index = indices[i];
@@ -15842,6 +15855,7 @@ extern "C" void js_init_module_vars_undefined_bulk(const int* indices, const Ite
                 js_set_module_var(index, undef);
             }
             js_register_global_var_module_bindings_bulk(keys, indices, count);
+            mem_free(keys);
             return;
         }
     }
@@ -15849,15 +15863,24 @@ extern "C" void js_init_module_vars_undefined_bulk(const int* indices, const Ite
         int index = indices[i];
         if (index < 0 || index >= JS_MAX_MODULE_VARS) continue;
         js_set_module_var(index, undef);
-        if (define_global_var_properties && keys) {
-            if (!js_define_global_var_property_fast_absent(global, keys[i], undef)) {
-                js_define_global_var_property(keys[i], undef);
+        if (define_global_var_properties) {
+            // Allocation failure may disable only the bulk acceleration; it
+            // must not drop CreateGlobalVarBinding or its module-slot bridge.
+            Item key = keys ? keys[i]
+                : js_active_module_name_item(module_name_indices[i],
+                    direct_name_ids[i]);
+            if (!js_define_global_var_property_fast_absent(global, key, undef)) {
+                js_define_global_var_property(key, undef);
+            }
+            if (!keys) {
+                js_register_global_var_module_binding(key, index);
             }
         }
     }
     if (define_global_var_properties && keys) {
         js_register_global_var_module_bindings_bulk(keys, indices, count);
     }
+    mem_free(keys);
 }
 
 extern "C" void js_define_global_eval_var_property(Item key, Item value) {
@@ -16587,10 +16610,10 @@ using JsCtor = JsFunction;
 // cached references diverge from fresh `Int8Array.prototype` lookups → identity asserts fail
 // downstream (~1400 typed-array test failures).
 //
-// Instead, on the first reset (post-preamble), we take a deep snapshot of each ctor's
-// prototype Map contents (raw bytes of data buffer + type/data/cap pointers).  On subsequent
-// resets we restore that snapshot in-place, preserving the Map* address.  Tests that mutate
-// built-in prototypes are isolated from each other.
+// Instead, on the first reset (post-preamble), we take a deep snapshot of each
+// ctor's prototype Map contents. On subsequent resets we restore that snapshot
+// in-place, preserving the Map* address. Tests that mutate built-in prototypes
+// are isolated from each other.
 static void js_typed_array_base_reset(); // forward declaration
 
 // %TypedArray% intrinsic: shared base constructor for all TypedArray types.
@@ -16602,16 +16625,15 @@ static void js_typed_array_base_reset(); // forward declaration
 #define JS_TYPED_ARRAY_TYPE_COUNT JS_TYPED_ARRAY_CACHE_TYPE_COUNT
 #define js_typed_array_per_type_proto (js_runtime_state.constructors.typed_array_prototypes)
 
-// Map snapshot: captures all mutable Map fields plus a copy of its packed data buffer.
-// On restore, the Map's address is preserved; only its contents are reset.
+// Map snapshot: the pristine shadow is a rooted GC Map, rather than untraced raw
+// bytes, so accessors and other pointer fields remain alive across collections.
+// On restore, the observable Map's address is preserved; only its contents reset.
 struct MapSnapshot {
-    Map*     m;          // identity (NULL = no snapshot)
+    Map*     m;          // observable identity (NULL = no snapshot)
+    Item     pristine;   // rooted, private shadow Map carrying pristine data
     void*    type;       // TypeMap* at preamble
-    void*    data;       // data buffer pointer at preamble (still pool-allocated)
     int      data_cap;   // data buffer capacity at preamble
     uint8_t  flags;      // packed Map flags at the snapshot boundary
-    int      byte_size;  // TypeMap->byte_size at preamble
-    void*    bytes;      // copy of *data (size = byte_size); NULL if byte_size==0
 };
 
 struct CtorSnapshot {
@@ -16623,8 +16645,16 @@ struct CtorSnapshot {
     bool    valid;
 };
 
+struct GlobalBuiltinFunctionSnapshot {
+    JsFunction* function;
+    Item        properties_map;   // Item value (preserved)
+    MapSnapshot props_map;        // contents snapshot of properties_map Map
+    bool        valid;
+};
+
 struct JsPrototypeSnapshotState {
     CtorSnapshot ctor_snapshots[JS_CTOR_MAX] = {};
+    GlobalBuiltinFunctionSnapshot global_builtin_fn_snapshots[JS_BUILTIN_GLOBAL_MAX] = {};
     MapSnapshot typed_array_base_proto_snap = {};
     Item typed_array_base_snap = {};
     Item typed_array_base_proto_item_snap = {};
@@ -16651,6 +16681,7 @@ static JsPrototypeSnapshotState* js_proto_snapshot_state() {
 }
 
 #define js_ctor_snapshots (js_proto_snapshot_state()->ctor_snapshots)
+#define js_global_builtin_fn_snapshots (js_proto_snapshot_state()->global_builtin_fn_snapshots)
 #define js_typed_array_base_proto_snap (js_proto_snapshot_state()->typed_array_base_proto_snap)
 #define js_typed_array_base_snap (js_proto_snapshot_state()->typed_array_base_snap)
 #define js_typed_array_base_proto_item_snap (js_proto_snapshot_state()->typed_array_base_proto_item_snap)
@@ -16658,17 +16689,35 @@ static JsPrototypeSnapshotState* js_proto_snapshot_state() {
 #define js_typed_array_per_type_proto_map_snap (js_proto_snapshot_state()->typed_array_per_type_proto_map_snap)
 #define js_proto_snapshot_valid (js_proto_snapshot_state()->valid)
 
+typedef void (*JsSnapshotRootSlotOp)(uint64_t* slot);
+
+static void js_proto_snapshot_visit_root_slots(JsPrototypeSnapshotState* state,
+        JsSnapshotRootSlotOp op) {
+    if (!state || !op) return;
+    for (int i = 0; i < JS_CTOR_MAX; i++) {
+        op(&state->ctor_snapshots[i].prototype.item);
+        op(&state->ctor_snapshots[i].properties_map.item);
+        op(&state->ctor_snapshots[i].proto_map.pristine.item);
+        op(&state->ctor_snapshots[i].props_map.pristine.item);
+    }
+    for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
+        op(&state->global_builtin_fn_snapshots[i].properties_map.item);
+        op(&state->global_builtin_fn_snapshots[i].props_map.pristine.item);
+    }
+    op(&state->typed_array_base_snap.item);
+    op(&state->typed_array_base_proto_item_snap.item);
+    op(&state->typed_array_base_proto_snap.pristine.item);
+    for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
+        op(&state->typed_array_per_type_proto_map_snap[i].pristine.item);
+    }
+}
+
 static void js_proto_snapshot_ensure_roots() {
     JsPrototypeSnapshotState* state = js_proto_snapshot_state();
     if (!state || !context || !context->heap || !context->heap->gc) return;
     uint64_t epoch = js_get_heap_epoch();
     if (state->roots_epoch == epoch) return;
-    for (int i = 0; i < JS_CTOR_MAX; i++) {
-        heap_register_gc_root(&state->ctor_snapshots[i].prototype.item);
-        heap_register_gc_root(&state->ctor_snapshots[i].properties_map.item);
-    }
-    heap_register_gc_root(&state->typed_array_base_snap.item);
-    heap_register_gc_root(&state->typed_array_base_proto_item_snap.item);
+    js_proto_snapshot_visit_root_slots(state, heap_register_gc_root);
     heap_register_gc_root_range((uint64_t*)state->typed_array_per_type_proto_snap,
         JS_TYPED_ARRAY_TYPE_COUNT);
     state->roots_epoch = epoch;
@@ -16678,15 +16727,11 @@ extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* ru
     if (!runtime_state || !runtime_state->prototype_snapshot_state) return;
     JsPrototypeSnapshotState* state =
         (JsPrototypeSnapshotState*)runtime_state->prototype_snapshot_state;
-    for (int i = 0; i < JS_CTOR_MAX; i++) {
-        if (state->ctor_snapshots[i].proto_map.bytes) mem_free(state->ctor_snapshots[i].proto_map.bytes);
-        if (state->ctor_snapshots[i].props_map.bytes) mem_free(state->ctor_snapshots[i].props_map.bytes);
-    }
-    if (state->typed_array_base_proto_snap.bytes) mem_free(state->typed_array_base_proto_snap.bytes);
-    for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
-        if (state->typed_array_per_type_proto_map_snap[i].bytes) {
-            mem_free(state->typed_array_per_type_proto_map_snap[i].bytes);
-        }
+    if (state->roots_epoch != 0 && context && context->heap &&
+            context->heap->gc && state->roots_epoch == js_get_heap_epoch()) {
+        js_proto_snapshot_visit_root_slots(state, heap_unregister_gc_root);
+        heap_unregister_gc_root_range(
+            (uint64_t*)state->typed_array_per_type_proto_snap);
     }
     mem_free(state);
     runtime_state->prototype_snapshot_state = NULL;
@@ -16720,35 +16765,128 @@ static void js_proto_snapshot_bootstrap_constructors() {
     for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
         js_get_typed_array_per_type_proto(i);
     }
+    // The harness is compiled before its first test executes, so the initial
+    // reset can otherwise snapshot an empty global-function cache. Materialize
+    // the catalog functions here; later tests may delete configurable metadata
+    // such as encodeURI.length, which must be restored at the snapshot boundary
+    // (D6.2.2v2).
+    for (int i = 0; i < js_builtin_global_count(); i++) {
+        const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
+        if (!spec || spec->kind != JS_BUILTIN_GLOBAL_FUNCTION ||
+                !(spec->flags & JS_BUILTIN_GLOBAL_INSTALL)) continue;
+        js_get_global_builtin_fn_by_id((Item){.item = i2it(spec->id)});
+    }
+}
+
+static void js_proto_snapshot_clear_map(MapSnapshot* snap) {
+    if (!snap) return;
+    snap->m = NULL;
+    snap->pristine = (Item){0};
+    snap->type = NULL;
+    snap->data_cap = 0;
+    snap->flags = 0;
 }
 
 static void js_proto_snapshot_map(MapSnapshot* snap, Map* m) {
-    if (!m) { snap->m = NULL; return; }
-    TypeMap* tm = (TypeMap*)m->type;
-    int byte_size = tm ? (int)tm->byte_size : 0;
+    js_proto_snapshot_clear_map(snap);
+    if (!m) return;
     snap->m = m;
     snap->type = m->type;
-    snap->data = m->data;
     snap->data_cap = m->data_cap;
     snap->flags = m->flags;
-    snap->byte_size = byte_size;
-    snap->bytes = NULL;
-    if (byte_size > 0 && m->data) {
-        snap->bytes = mem_alloc(byte_size, MEM_CAT_JS_RUNTIME);
-        memcpy(snap->bytes, m->data, byte_size);
+
+    Map* pristine = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    if (!pristine) {
+        log_error("prototype-snapshot: failed to allocate pristine Map");
+        snap->m = NULL;
+        return;
+    }
+    pristine->type_id = LMD_TYPE_MAP;
+    pristine->flags = m->flags;
+    // The shadow owns only packed shape data, never a source Map's trailing
+    // native payload; descriptor kind keeps GC tracing on that exact contract.
+    pristine->map_kind = MAP_KIND_DESC;
+    pristine->type = m->type;
+    pristine->data_cap = m->data_cap;
+    snap->pristine = (Item){.map = pristine};
+    if (m->data_cap > 0 && m->data) {
+        pristine->data = heap_data_calloc((size_t)m->data_cap);
+        if (!pristine->data) {
+            log_error("prototype-snapshot: failed to allocate pristine Map data");
+            js_proto_snapshot_clear_map(snap);
+            return;
+        }
+        // D4.3.1: data_cap is the complete allocation contract, including
+        // constructor-reserved slots beyond the packed TypeMap byte_size.
+        memcpy(pristine->data, m->data, (size_t)m->data_cap);
     }
 }
 
 static void js_proto_restore_map(const MapSnapshot* snap) {
-    if (!snap->m) return;
+    if (!snap->m || get_type_id(snap->pristine) != LMD_TYPE_MAP ||
+            !snap->pristine.map) {
+        return;
+    }
     Map* m = snap->m;
+    if (snap->data_cap > 0 && (!m->data || m->data_cap < snap->data_cap)) {
+        void* data = heap_data_calloc((size_t)snap->data_cap);
+        if (!data) {
+            log_error("prototype-snapshot: failed to restore map data buffer");
+            return;
+        }
+        m->data = data;
+        m->data_cap = snap->data_cap;
+    }
     m->type = snap->type;
-    m->data = snap->data;
     m->data_cap = snap->data_cap;
     m->flags = snap->flags;
-    if (snap->byte_size > 0 && snap->data && snap->bytes) {
-        memcpy(snap->data, snap->bytes, snap->byte_size);
+    if (snap->data_cap > 0 && m->data && snap->pristine.map->data) {
+        // Raw external bytes do not participate in precise GC and allowed
+        // accessor pairs to be swept. The rooted shadow Map keeps every edge
+        // traced while its data buffer follows compaction (D4.3.1, D6.2.2v2).
+        memcpy(m->data, snap->pristine.map->data, (size_t)snap->data_cap);
     }
+}
+
+static bool js_proto_snapshot_map_requires_typemap_detach(const MapSnapshot* snap,
+        Map* map) {
+    return snap && map && snap->m == map && snap->type == map->type;
+}
+
+extern "C" bool js_proto_snapshot_requires_typemap_detach(Item object) {
+    if (!js_active_runtime_state) return false;
+    JsPrototypeSnapshotState* state =
+        (JsPrototypeSnapshotState*)js_runtime_state.prototype_snapshot_state;
+    if (!state || !state->valid) return false;
+    Map* map = js_obj_underlying_map(object);
+    if (!map) return false;
+    for (int i = 0; i < JS_CTOR_MAX; i++) {
+        const CtorSnapshot* snap = &state->ctor_snapshots[i];
+        if (snap->valid &&
+                (js_proto_snapshot_map_requires_typemap_detach(&snap->proto_map, map) ||
+                 js_proto_snapshot_map_requires_typemap_detach(&snap->props_map, map))) {
+            return true;
+        }
+    }
+    for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
+        const GlobalBuiltinFunctionSnapshot* snap =
+            &state->global_builtin_fn_snapshots[i];
+        if (snap->valid &&
+                js_proto_snapshot_map_requires_typemap_detach(&snap->props_map, map)) {
+            return true;
+        }
+    }
+    if (js_proto_snapshot_map_requires_typemap_detach(
+            &state->typed_array_base_proto_snap, map)) {
+        return true;
+    }
+    for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
+        if (js_proto_snapshot_map_requires_typemap_detach(
+                &state->typed_array_per_type_proto_map_snap[i], map)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void js_proto_snapshot_take_locked() {
@@ -16757,8 +16895,8 @@ static void js_proto_snapshot_take_locked() {
     for (int i = 0; i < JS_CTOR_MAX; i++) {
         CtorSnapshot* s = &js_ctor_snapshots[i];
         s->valid = false;
-        s->proto_map.m = NULL;
-        s->props_map.m = NULL;
+        js_proto_snapshot_clear_map(&s->proto_map);
+        js_proto_snapshot_clear_map(&s->props_map);
         Item ci = js_constructor_cache[i];
         if (ci.item == 0 || ci.item == ItemNull.item) continue;
         JsCtor* ctor = (JsCtor*)ci.function;
@@ -16787,17 +16925,33 @@ static void js_proto_snapshot_take_locked() {
             js_proto_snapshot_map(&s->props_map, ctor->properties_map.map);
         }
     }
+    for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
+        GlobalBuiltinFunctionSnapshot* s = &js_global_builtin_fn_snapshots[i];
+        s->valid = false;
+        js_proto_snapshot_clear_map(&s->props_map);
+        Item function_item = global_builtin_fn_cache[i];
+        if (get_type_id(function_item) != LMD_TYPE_FUNC) continue;
+        JsFunction* function = (JsFunction*)function_item.function;
+        if (!function) continue;
+        s->function = function;
+        s->properties_map = function->properties_map;
+        s->valid = true;
+        if (get_type_id(function->properties_map) == LMD_TYPE_MAP) {
+            js_proto_snapshot_map(&s->props_map, function->properties_map.map);
+        }
+    }
     // %TypedArray% intrinsic + its prototype + per-type prototypes
     js_typed_array_base_snap = js_typed_array_base;
     js_typed_array_base_proto_item_snap = js_typed_array_base_proto;
-    js_typed_array_base_proto_snap.m = NULL;
+    js_proto_snapshot_clear_map(&js_typed_array_base_proto_snap);
     if (js_typed_array_base_proto.item != 0 && get_type_id(js_typed_array_base_proto) == LMD_TYPE_MAP) {
         js_proto_snapshot_map(&js_typed_array_base_proto_snap, js_typed_array_base_proto.map);
     }
     for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
         Item p = js_typed_array_per_type_proto[i];
         js_typed_array_per_type_proto_snap[i] = p;
-        js_typed_array_per_type_proto_map_snap[i].m = NULL;
+        js_proto_snapshot_clear_map(
+            &js_typed_array_per_type_proto_map_snap[i]);
         if (p.item != 0 && get_type_id(p) == LMD_TYPE_MAP) {
             js_proto_snapshot_map(&js_typed_array_per_type_proto_map_snap[i], p.map);
         }
@@ -16812,6 +16966,15 @@ static void js_proto_snapshot_restore_locked() {
         ctor->prototype = s->prototype;
         ctor->properties_map = s->properties_map;
         if (s->proto_map.m) js_proto_restore_map(&s->proto_map);
+        if (s->props_map.m) js_proto_restore_map(&s->props_map);
+    }
+    for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
+        GlobalBuiltinFunctionSnapshot* s = &js_global_builtin_fn_snapshots[i];
+        if (!s->valid || !s->function) continue;
+        // Global catalog functions survive hot reset for identity. Their own
+        // maps must therefore be restored too: a test-local delete of
+        // encodeURI.length otherwise poisons the next test (D6.2.2v2).
+        s->function->properties_map = s->properties_map;
         if (s->props_map.m) js_proto_restore_map(&s->props_map);
     }
     js_typed_array_base = js_typed_array_base_snap;
@@ -16855,12 +17018,24 @@ extern "C" void js_proto_snapshot_invalidate() {
     js_intrinsic_proto_cache_reset();
     for (int i = 0; i < JS_CTOR_MAX; i++) {
         js_ctor_snapshots[i].valid = false;
-        js_ctor_snapshots[i].proto_map.m = NULL;
-        js_ctor_snapshots[i].props_map.m = NULL;
+        js_ctor_snapshots[i].prototype = (Item){0};
+        js_ctor_snapshots[i].properties_map = (Item){0};
+        js_proto_snapshot_clear_map(&js_ctor_snapshots[i].proto_map);
+        js_proto_snapshot_clear_map(&js_ctor_snapshots[i].props_map);
     }
-    js_typed_array_base_proto_snap.m = NULL;
+    for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
+        js_global_builtin_fn_snapshots[i].valid = false;
+        js_global_builtin_fn_snapshots[i].properties_map = (Item){0};
+        js_proto_snapshot_clear_map(
+            &js_global_builtin_fn_snapshots[i].props_map);
+    }
+    js_typed_array_base_snap = (Item){0};
+    js_typed_array_base_proto_item_snap = (Item){0};
+    js_proto_snapshot_clear_map(&js_typed_array_base_proto_snap);
     for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
-        js_typed_array_per_type_proto_map_snap[i].m = NULL;
+        js_typed_array_per_type_proto_snap[i] = (Item){0};
+        js_proto_snapshot_clear_map(
+            &js_typed_array_per_type_proto_map_snap[i]);
     }
 }
 
@@ -16986,9 +17161,12 @@ extern "C" Item js_get_typed_array_per_type_proto(int element_type) {
     js_mark_non_writable(ctor, bpe_key);
     js_mark_non_configurable(ctor, bpe_key);
 
-    // Set the constructor's .prototype to this per-type proto
-    JsFunctionLayout* fn = (JsFunctionLayout*)ctor.function;
-    fn->prototype = per_type;
+    // Publishing only the hidden construct payload left the public prototype
+    // slot null after a hot snapshot restore. Initialize both views in the
+    // shared native-constructor transaction (D5.4.3, D6.2.2v2).
+    Item initialized_proto =
+        js_initialize_native_constructor_prototype(ctor, per_type);
+    if (item_is_error(initialized_proto)) return initialized_proto;
 
     return per_type;
 }

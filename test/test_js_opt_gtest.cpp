@@ -458,6 +458,25 @@ TEST(JsOpt, RegexCompileCacheHit) {
     free(source);
 }
 
+TEST(JsOpt, RegexMediumCaptureFreeLoopReusesCompiledMatcher) {
+    const char* source =
+        "function makeRegex() { return /[A-Za-z0-9_\\u00A0-\\u00FF]/g; }\n"
+        "var first = makeRegex(); var second = makeRegex();\n"
+        "first.lastIndex = 4;\n"
+        "if (first === second || second.lastIndex !== 0) throw new Error('shared object state');\n"
+        "for (var i = 0; i < 32; i++) {\n"
+        "  if (!makeRegex().test('Z')) throw new Error('bad matcher');\n"
+        "}\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("regex_medium_capture_free_loop", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_REGEX_PERMANENT_CACHE_HIT][1], 16u);
+    expect_trace_off_same("regex_medium_capture_free_loop", source, output);
+}
+
 TEST(JsOpt, RegexShortCaptureUsesFreshWrapper) {
     const char* source =
         "var a = /(a)/; var b = /(a)/;\n"

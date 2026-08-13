@@ -5,7 +5,7 @@
 
 #include "js_property_attrs.h"
 
-extern "C" bool js_proto_snapshot_is_valid();
+extern "C" bool js_proto_snapshot_requires_typemap_detach(Item obj);
 #include "js_props.h"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
@@ -195,7 +195,11 @@ static TypeMap* js_typemap_clone_for_mutation_ex(Item obj, bool force_clone) {
 }
 
 static TypeMap* js_typemap_clone_for_mutation(Item obj) {
-    return js_typemap_clone_for_mutation_ex(obj, false);
+    // A snapshot Map may already own a private TypeMap. Private ownership is
+    // normally enough, but its shape is the reset blueprint while that exact
+    // TypeMap is installed; detach before changing it (D6.2.2v2).
+    return js_typemap_clone_for_mutation_ex(obj,
+        js_proto_snapshot_requires_typemap_detach(obj));
 }
 
 static void js_shape_entry_update_flags_impl(Item obj, NameId name_id,
@@ -244,6 +248,11 @@ extern "C" void js_shape_entry_update_flags_name_id(Item obj, NameId name_id,
 // metadata selection can detach a shared shape without duplicating it here.
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj) {
     return js_typemap_clone_for_mutation(obj);
+}
+
+extern "C" bool js_typemap_detach_snapshot_for_mutation(Item obj) {
+    if (!js_proto_snapshot_requires_typemap_detach(obj)) return true;
+    return js_typemap_clone_for_mutation_ex(obj, /*force_clone=*/true) != NULL;
 }
 
 static bool js_typemap_transition_matches(const TypeMapTransition* transition,
@@ -721,11 +730,13 @@ static bool js_accessor_half_same(Item left, Item right) {
 
 extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
                                             int is_setter, uint8_t attrs) {
-    RootFrame roots(4);
+    RootFrame roots(6);
     Rooted<Item> obj_root(roots, obj);
     Rooted<Item> name_root(roots, name);
     Rooted<Item> fn_root(roots, fn);
     Rooted<Item> pair_root(roots, ItemNull);
+    Rooted<Item> getter_root(roots, ItemNull);
+    Rooted<Item> setter_root(roots, ItemNull);
     obj = obj_root.get();
     name = name_root.get();
     fn = fn_root.get();
@@ -734,17 +745,17 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     if (!ns) return js_status_ok();
 
     // Accessor installation can add a new shape before setting its descriptor
-    // flags. Detach the target's TypeMap first so intrinsic prototype
-    // snapshots keep their immutable shape blueprint across hot-batch realm
-    // resets (D6.2.2v2).
-    js_typemap_clone_for_mutation_ex(obj_root.get(), js_proto_snapshot_is_valid());
+    // flags. Detach a snapshot-backed target so the intrinsic blueprint stays
+    // immutable across hot-batch realm resets (D6.2.2v2).
+    js_typemap_clone_for_mutation(obj_root.get());
 
     // Normalize "absent half" to ItemNull so read paths that gate on
     // `pair->getter.item != ItemNull.item` correctly treat an explicit-undefined
     // descriptor field (e.g. defineProperty with `{set: ...}` only) as absent.
     // Without this, Item-typed undefined leaks into pair->getter and dispatch
     // attempts to invoke `undefined` as a function.
-    fn = js_accessor_half_storage_value(fn);
+    fn_root.set(js_accessor_half_storage_value(fn));
+    fn = fn_root.get();
 
     // Look up any existing accessor pair under name X.
     // Every pooled NameId, including ordinary static/dynamic spellings, must
@@ -776,24 +787,20 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     }
 
     if (pair) {
-        // Merge into existing pair (in-place mutation; pair pointer unchanged).
-        if (is_setter) pair->setter = fn;
-        else           pair->getter = fn;
-        // Re-store to keep slot value canonical (idempotent — same pointer bits).
-        pair_root.set(js_accessor_pair_to_item(pair));
-        JS_ASSIGN_OR_RETURN(set_result, js_store_accessor_pair_slot(
-            obj_root.get(), name_root.get(), pair_root.get()));
-    } else {
-        // Allocate fresh pair with the requested half populated.
-        Item g = is_setter ? ItemNull : fn;
-        Item s = is_setter ? fn       : ItemNull;
-        pair = js_alloc_accessor_pair(g, s);
-        if (!pair) return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
-                                                   "accessor pair allocation failed");
-        pair_root.set(js_accessor_pair_to_item(pair));
-        JS_ASSIGN_OR_RETURN(set_result, js_store_accessor_pair_slot(
-            obj_root.get(), name_root.get(), pair_root.get()));
+        getter_root.set(pair->getter);
+        setter_root.set(pair->setter);
     }
+    if (is_setter) setter_root.set(fn_root.get());
+    else           getter_root.set(fn_root.get());
+    // Accessor pairs are mutable carriers outside the owning Map's data
+    // image. Replacing the pair keeps an intrinsic snapshot's native accessor
+    // intact when defineProperty installs a test-local getter (D6.2.2v2).
+    pair = js_alloc_accessor_pair(getter_root.get(), setter_root.get());
+    if (!pair) return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
+                                               "accessor pair allocation failed");
+    pair_root.set(js_accessor_pair_to_item(pair));
+    JS_ASSIGN_OR_RETURN(set_result, js_store_accessor_pair_slot(
+        obj_root.get(), name_root.get(), pair_root.get()));
 
     // Set IS_ACCESSOR + caller-requested attribute bits on the shape entry.
     uint8_t set_mask = JSPD_IS_ACCESSOR;
