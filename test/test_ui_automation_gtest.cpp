@@ -59,6 +59,9 @@ extern "C" {
     #include <dirent.h>
     #include <sys/stat.h>
     #include <sys/wait.h>
+    #ifdef __APPLE__
+        #include <sys/sysctl.h>
+    #endif
     #define LAMBDA_EXE "./lambda.exe"
     #define UI_TESTS_DIR "test/ui"
     #define PATH_SEP "/"
@@ -416,6 +419,90 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
 
 static std::vector<UiTestResult> g_ui_results;
 
+static bool ui_gtest_list_only_requested(int argc, char** argv) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--gtest_list_tests") == 0 ||
+            strcmp(argv[i], "--gtest_list_tests=1") == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static unsigned long long ui_physical_memory_bytes() {
+#ifdef _WIN32
+    MEMORYSTATUSEX status = {};
+    status.dwLength = sizeof(status);
+    return GlobalMemoryStatusEx(&status) ? status.ullTotalPhys : 0;
+#elif defined(__APPLE__)
+    unsigned long long bytes = 0;
+    size_t size = sizeof(bytes);
+    return sysctlbyname("hw.memsize", &bytes, &size, NULL, 0) == 0 ? bytes : 0;
+#else
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long page_size = sysconf(_SC_PAGESIZE);
+    if (pages <= 0 || page_size <= 0) return 0;
+    return (unsigned long long)pages * (unsigned long long)page_size;
+#endif
+}
+
+static int ui_memory_job_limit_for(unsigned long long physical_bytes,
+                                   int worker_mb) {
+    if (worker_mb <= 0) return 1;
+    if (physical_bytes == 0) return 1;
+    unsigned long long worker_bytes =
+        (unsigned long long)worker_mb * 1024ULL * 1024ULL;
+    int limit = (int)((physical_bytes / 2ULL) / worker_bytes);
+    return limit > 0 ? limit : 1;
+}
+
+static int ui_memory_job_limit() {
+    int worker_mb = 1024;
+    const char* env_worker_mb = getenv("LAMBDA_UI_TEST_WORKER_MB");
+    if (env_worker_mb && *env_worker_mb) {
+        int requested_mb = atoi(env_worker_mb);
+        if (requested_mb > 0) worker_mb = requested_mb;
+    }
+    return ui_memory_job_limit_for(ui_physical_memory_bytes(), worker_mb);
+}
+
+static int ui_memory_safe_jobs(int requested_jobs, int memory_job_limit,
+                               bool allow_oversubscribe) {
+    if (requested_jobs <= 0) requested_jobs = 1;
+    if (memory_job_limit <= 0) memory_job_limit = 1;
+    // CPU-derived parallelism must not outrun the resident-memory budget of
+    // compiler-heavy fixtures unless the caller explicitly accepts that risk.
+    return !allow_oversubscribe && requested_jobs > memory_job_limit
+        ? memory_job_limit : requested_jobs;
+}
+
+TEST(UIAutomationSchedulerTest, DetectsListOnlyBeforeGTestConsumesFlag) {
+    char executable[] = "ui-tests";
+    char list_flag[] = "--gtest_list_tests";
+    char list_value_flag[] = "--gtest_list_tests=1";
+    char filter_flag[] = "--gtest_filter=UIAutomation.*";
+    char* list_argv[] = {executable, list_flag};
+    char* list_value_argv[] = {executable, list_value_flag};
+    char* run_argv[] = {executable, filter_flag};
+
+    EXPECT_TRUE(ui_gtest_list_only_requested(2, list_argv));
+    EXPECT_TRUE(ui_gtest_list_only_requested(2, list_value_argv));
+    EXPECT_FALSE(ui_gtest_list_only_requested(2, run_argv));
+}
+
+TEST(UIAutomationSchedulerTest, MemoryBudgetClampsCpuDerivedWorkers) {
+    const unsigned long long gib = 1024ULL * 1024ULL * 1024ULL;
+    EXPECT_EQ(ui_memory_job_limit_for(16ULL * gib, 1024), 8);
+    EXPECT_EQ(ui_memory_job_limit_for(8ULL * gib, 1024), 4);
+    EXPECT_EQ(ui_memory_job_limit_for(1ULL * gib, 1024), 1);
+    EXPECT_EQ(ui_memory_job_limit_for(32ULL * gib, 2048), 8);
+    EXPECT_EQ(ui_memory_job_limit_for(0, 1024), 1);
+
+    EXPECT_EQ(ui_memory_safe_jobs(15, 8, false), 8);
+    EXPECT_EQ(ui_memory_safe_jobs(4, 8, false), 4);
+    EXPECT_EQ(ui_memory_safe_jobs(15, 8, true), 15);
+}
+
 static int compare_ui_indices_by_estimated_wait(const void* left, const void* right) {
     size_t left_index = *(const size_t*)left;
     size_t right_index = *(const size_t*)right;
@@ -564,7 +651,12 @@ INSTANTIATE_TEST_SUITE_P(
 // ============================================================================
 
 int main(int argc, char** argv) {
+    bool list_tests_only = ui_gtest_list_only_requested(argc, argv);
     ::testing::InitGoogleTest(&argc, argv);
+
+    // GTest listing is metadata-only; the old eager pre-run launched every UI
+    // child before printing names and could exhaust memory during discovery.
+    if (list_tests_only) return RUN_ALL_TESTS();
 
     // Child startup and event I/O leave CPU gaps, so 1.5x logical CPUs keeps
     // the worker pool busy without encoding a machine-specific job count.
@@ -583,6 +675,13 @@ int main(int argc, char** argv) {
             if (jobs <= 0) jobs = 1;
         }
     }
+    int memory_job_limit = ui_memory_job_limit();
+    const char* allow_oversubscribe = getenv("LAMBDA_UI_TEST_ALLOW_OVERSUBSCRIBE");
+    bool oversubscribe = allow_oversubscribe &&
+        strcmp(allow_oversubscribe, "1") == 0;
+    // Editor bundles peak near 0.7 GiB; reserving 1 GiB per child within half
+    // of physical RAM prevents the CPU-based pool from causing OOM.
+    jobs = ui_memory_safe_jobs(jobs, memory_job_limit, oversubscribe);
 
     std::cout << "\n";
     std::cout << "╔═══════════════════════════════════════════════════════════╗\n";

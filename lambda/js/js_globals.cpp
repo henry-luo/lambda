@@ -62,6 +62,8 @@ extern "C" uint64_t js_get_heap_epoch(void);
 extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_get_buffer_namespace(void);
 extern "C" Item js_get_crypto_namespace(void);
+extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
+                                                       Item value);
 
 static bool js_string_exotic_index_in_range(Item obj, String* key);
 
@@ -6980,6 +6982,13 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     key = key_root.get();
     value = value_root.get();
     receiver = receiver_root.get();
+    if (receiver.item == target.item &&
+            js_dom_dataset_set_object_property(target_root.get(), key_root.get(),
+                                               value_root.get())) {
+        // Dataset assignment otherwise takes the ordinary Map fast path and
+        // only mutates the temporary object returned by the getter.
+        return (Item){.item = b2it(true)};
+    }
     if ((get_type_id(target_root.get()) == LMD_TYPE_ERROR ||
          js_is_resting_error(target_root.get())) &&
         receiver_root.get().item == target_root.get().item) {

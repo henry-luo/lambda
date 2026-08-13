@@ -342,6 +342,11 @@ void dom_node_cancel_detached(DomDocument* doc, DomNode* root) {
 
 static bool dom_subtree_can_retire(DomDocument* doc, DomNode* node,
                                    DomNodeRecord** blocked) {
+    if (node && node->is_element() && node->as_element()->is_synthetic()) {
+        // Layout-only pseudo nodes are linked into the retained view tree, not
+        // the script DOM; keep their addresses stable for the next layout pass.
+        return true;
+    }
     DomNodeRegistry* registry = dom_registry(doc);
     DomNodeRecord* record = dom_record_find(registry, node);
     if (!record || record->state == DOM_NODE_RETIRED || record->id != node->id ||
@@ -365,6 +370,9 @@ static bool dom_subtree_can_retire(DomDocument* doc, DomNode* node,
 }
 
 static size_t dom_retire_subtree(DomDocument* doc, DomNode* node) {
+    if (node && node->is_element() && node->as_element()->is_synthetic()) {
+        return 0;
+    }
     DomNodeRegistry* registry = dom_registry(doc);
     size_t retired = 0;
     if (node->is_element()) {
@@ -406,6 +414,11 @@ size_t dom_retire_sweep(DomDocument* doc) {
             DomNode* root = record->address;
             if (!dom_node_ref_validate(doc, {root, record->id})) {
                 record->candidate = false;
+            } else if (root->is_element() && root->as_element()->is_synthetic()) {
+                // synthetic layout nodes are released by their view owner;
+                // lifecycle retirement must not recycle their DOM addresses.
+                record->candidate = false;
+                record->state = DOM_NODE_LIVE;
             } else if (root->parent) {
                 record->candidate = false;
                 record->state = DOM_NODE_LIVE;

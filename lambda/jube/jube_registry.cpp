@@ -903,6 +903,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
                                                 Item* args, int argc);
 extern "C" Item js_dom_create_tree_walker_bridge(Item root, Item what_to_show);
 extern "C" Item js_dom_document_create_event_bridge(Item interface_name);
+extern "C" Item js_dom_document_exec_command_bridge(Item command, Item value);
 extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name);
 extern "C" Item js_dom_get_prototype_value(Item obj);
 extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
@@ -1670,6 +1671,7 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_dom_has_committed_geometry_snapshot,
     js_dom_create_tree_walker_bridge,
     js_dom_document_create_event_bridge,
+    js_dom_document_exec_command_bridge,
 };
 
 // H7A source records are intentionally plain C data.  A language can retain

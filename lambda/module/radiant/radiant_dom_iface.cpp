@@ -372,7 +372,8 @@ const char radiant_dom_interface_decl[] =
     "    remove_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
     "    dispatch_event: fn(a0: any) any,\n"
     "    create_tree_walker: fn(a0: any, a1: any) any,\n"
-    "    create_event: fn(a0: any) any\n"
+    "    create_event: fn(a0: any) any,\n"
+    "    exec_command: fn(a0: any, a1: any, a2: any) bool\n"
     "}\n"
     "type foreign_document : document {\n"
     "}\n";
@@ -1457,6 +1458,7 @@ RADIANT_DOC_CALL_FN(radiant_doc_call_remove_event_listener, RADIANT_DOCUMENT_REM
 RADIANT_DOC_CALL_FN(radiant_doc_call_dispatch_event, RADIANT_DOCUMENT_DISPATCH_EVENT)
 RADIANT_DOC_CALL_FN(radiant_doc_call_create_tree_walker, RADIANT_DOCUMENT_CREATE_TREE_WALKER)
 RADIANT_DOC_CALL_FN(radiant_doc_call_create_event, RADIANT_DOCUMENT_CREATE_EVENT)
+RADIANT_DOC_CALL_FN(radiant_doc_call_exec_command, RADIANT_DOCUMENT_EXEC_COMMAND)
 
 #define DOC_FIELD(n, js, fn) \
     {n, js, NULL, NULL, fn, NULL, NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE}
@@ -1534,6 +1536,7 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_METHOD("dispatch_event", "dispatchEvent", radiant_doc_call_dispatch_event),
     DOC_METHOD("create_tree_walker", "createTreeWalker", radiant_doc_call_create_tree_walker),
     DOC_METHOD("create_event", "createEvent", radiant_doc_call_create_event),
+    DOC_METHOD("exec_command", "execCommand", radiant_doc_call_exec_command),
 };
 
 extern const JubeTypeBinding radiant_dom_type_bindings[];

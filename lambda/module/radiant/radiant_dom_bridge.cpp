@@ -34,6 +34,7 @@ RADIANT_C_API const void* radiant_dom_document_host_type(void);
 RADIANT_C_API void radiant_dom_host_invalidate(Item object);
 RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
+RADIANT_C_API Item js_dom_dataset_property(Item elem_item);
 
 // The Phase-3 DOM hook table preserves the legacy hook names at call sites
 // while routing every module-to-engine call through the checked host API.
@@ -161,6 +162,7 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_has_committed_geometry_snapshot radiant_host_api->dom->has_committed_geometry_snapshot
 #define js_dom_create_tree_walker_bridge radiant_host_api->dom->document_create_tree_walker_bridge
 #define js_dom_document_create_event_bridge radiant_host_api->dom->document_create_event_bridge
+#define js_dom_document_exec_command_bridge radiant_host_api->dom->document_exec_command_bridge
 
 static const int RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE = 4096;
 static const char s_radiant_dom_vmap_type_marker = 0;
@@ -2967,6 +2969,12 @@ static bool radiant_dom_get_element_property(Item receiver, DomElement* elem,
     if (radiant_dom_form_named_getter(elem, prop, out)) {
         return true;
     }
+    if (strcmp(prop, "dataset") == 0) {
+        // Dataset must stay connected to its owner; a snapshot would make
+        // `element.dataset.name = value` invisible to DOM attribute reads.
+        *out = js_dom_dataset_property(receiver);
+        return true;
+    }
     return false;
 }
 
@@ -4330,8 +4338,12 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
         return 1;
     }
 
-    // Legacy editing commands remain unsupported. Advertising inert member
-    // stubs bypasses the document feature gate and makes `typeof` report them.
+    if (operation == RADIANT_DOCUMENT_EXEC_COMMAND) {
+        Item command = argc >= 1 ? args[0] : radiant_dom_undefined_item();
+        Item value = argc >= 3 ? args[2] : radiant_dom_string_item("");
+        *out = js_dom_document_exec_command_bridge(command, value);
+        return 1;
+    }
 
     if (operation == RADIANT_DOCUMENT_CREATE_RANGE) {
         *out = js_dom_create_range();

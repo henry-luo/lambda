@@ -87,6 +87,8 @@ extern "C" void js_dom_event_handler_property_set(Item target,
                                                     const char* property_name,
                                                     int property_name_len,
                                                     Item value);
+extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
+                                                     Item value);
 extern "C" int js_intrinsic_initialization_begin_for_constructor(Item constructor);
 extern "C" void js_intrinsic_initialization_end_for_constructor(int active);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
@@ -6950,6 +6952,9 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
         // Bracket assignment keys use ToPropertyKey too; object wrappers like
         // new String("x") must address property "x", not an unnameable slot.
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
+    }
+    if (!bypass_accessor_dispatch && js_dom_dataset_set_object_property(object, key, value)) {
+        return value;
     }
     bool private_internal_property_key = js_is_private_internal_property_key(key);
     if (private_internal_property_key && js_is_proxy(object)) {
@@ -21225,11 +21230,32 @@ extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_
     ((JsCollectionMap*)map)->collection_data = NULL;
 }
 
+static void js_collection_weak_entry_clear(uint64_t key_item, void* context) {
+    JsCollectionData* cd = (JsCollectionData*)context;
+    if (!cd || !cd->hmap || key_item == 0) return;
+    Item key = (Item){.item = key_item};
+    JsCollectionEntry probe = {.key = key};
+    hashmap_delete(cd->hmap, &probe);
+    js_collection_order_remove(cd, key);
+}
+
 extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc) {
     if (!map || !gc || map->map_kind != MAP_KIND_COLLECTION) return;
     JsCollectionData* cd = ((JsCollectionMap*)map)->collection_data;
     if (!cd) return;
-    if (cd->is_weak) return;
+    if (cd->is_weak) {
+        for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
+            if (node->deleted) continue;
+            // A weak value is retained only after its key is independently
+            // reachable; dead keys are removed before sweep can reuse identity.
+            if (!gc_register_ephemeron(gc, &node->key.item, &node->value.item,
+                                       js_collection_weak_entry_clear, cd)) {
+                gc_mark_item(gc, node->key.item);
+                gc_mark_item(gc, node->value.item);
+            }
+        }
+        return;
+    }
 
     // Strong collection entries live in native insertion-order storage, which
     // the managed Map payload scan cannot see.
