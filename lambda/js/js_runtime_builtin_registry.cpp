@@ -252,25 +252,6 @@ const JsBuiltinMethodSpec* js_builtin_catalog_find(JsBuiltinOwner owner,
     return NULL;
 }
 
-const JsBuiltinMethodSpec* js_builtin_catalog_find_id(int builtin_id) {
-    if (builtin_id <= JS_BUILTIN_NONE || builtin_id >= JS_BUILTIN_MAX) return NULL;
-    js_builtin_catalog_initialize_index();
-    if (!js_builtin_catalog_valid) return NULL;
-    return js_builtin_id_index[builtin_id];
-}
-
-int js_builtin_catalog_lookup_id(JsBuiltinOwner owner, const char* name, int len) {
-    const JsBuiltinMethodSpec* spec = js_builtin_catalog_find(owner, name, len);
-    return spec ? spec->builtin_id : JS_BUILTIN_NONE;
-}
-
-JsBuiltinMirLoweringKind js_builtin_mir_kind(int builtin_id) {
-    if (builtin_id <= JS_BUILTIN_NONE || builtin_id >= JS_BUILTIN_MAX) {
-        return JS_BUILTIN_MIR_GENERIC;
-    }
-    return JS_INTRINSIC_TARGET_SPECS[builtin_id].mir_kind;
-}
-
 const JsIntrinsicTargetSpec* js_intrinsic_target_find(int catalog_id) {
     if (catalog_id <= JS_BUILTIN_NONE || catalog_id >= JS_BUILTIN_MAX) {
         return NULL;
@@ -442,18 +423,6 @@ static const JsBuiltinOwnerBinding* js_find_owner_binding(const char* name, int 
 static JsBuiltinOwner js_get_constructor_static_owner(const char* ctor_name, int ctor_len) {
     const JsBuiltinOwnerBinding* binding = js_find_owner_binding(ctor_name, ctor_len);
     return binding ? binding->member_owner : JS_BUILTIN_OWNER_NONE;
-}
-
-int js_builtin_catalog_lookup_constructor_id(const char* ctor_name, int ctor_len,
-                                             const char* prop_name, int prop_len) {
-    JsBuiltinOwner owner = js_get_constructor_static_owner(ctor_name, ctor_len);
-    return js_builtin_catalog_lookup_id(owner, prop_name, prop_len);
-}
-
-int js_builtin_catalog_lookup_member_id(const char* owner_name, int owner_len,
-                                        const char* prop_name, int prop_len) {
-    JsBuiltinOwner owner = js_get_constructor_static_owner(owner_name, owner_len);
-    return js_builtin_catalog_lookup_id(owner, prop_name, prop_len);
 }
 
 void js_populate_builtin_prototype_methods(Item prototype, const char* ctor_name, int ctor_len) {

@@ -110,7 +110,6 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
 /**
  * Test if a compiled regex matches anywhere in the input.
  */
-bool js_regex_wrapper_test(JsRegexCompiled* compiled, const char* input, int input_len, int start_pos);
 
 /**
  * Free a compiled regex and all its resources.

@@ -50,6 +50,8 @@ extern "C" Item js_blob_slice(Item start_item, Item end_item, Item type_item);
 // Local helpers --------------------------------------------------------------
 static inline Item make_str(const char* s) {
     if (!s) return ItemNull;
+    // registration keys outlive the allocating property writes that publish them;
+    // GC-managed strings can be reclaimed before ToPropertyKey finishes.
     return (Item){.item = s2it(heap_create_name(s, strlen(s)))};
 }
 static inline Item make_str_n(const char* s, size_t n) {

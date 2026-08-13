@@ -174,15 +174,7 @@ static Item tls_validate_material_options(Item options, bool allow_zero) {
 }
 
 // helper: extract C string from Item into stack buffer
-static const char* item_to_cstr(Item val, char* buf, int buf_size) {
-    if (get_type_id(val) != LMD_TYPE_STRING) return NULL;
-    String* s = it2s(val);
-    int len = (int)s->len;
-    if (len >= buf_size) len = buf_size - 1;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
-    return buf;
-}
+#define item_to_cstr js_item_to_cstr
 
 typedef struct TlsCipherNameMap {
     const char* node_name;

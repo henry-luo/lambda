@@ -143,29 +143,6 @@ extern "C" TypeMap* js_error_carrier_type_map(void) {
     return &js_error_carrier_type;
 }
 
-static JsClassFamily js_class_family(JsClassId id) {
-    if (id == JS_CLASS_ARRAY) return JS_CLASS_FAMILY_ARRAY;
-    if (id == JS_CLASS_FUNCTION || id == JS_CLASS_GENERATOR_FUNCTION ||
-            id == JS_CLASS_ASYNC_FUNCTION) return JS_CLASS_FAMILY_FUNCTION;
-    if (id == JS_CLASS_ERROR || id == JS_CLASS_AGGREGATE_ERROR ||
-            id == JS_CLASS_TYPE_ERROR || id == JS_CLASS_RANGE_ERROR ||
-            id == JS_CLASS_SYNTAX_ERROR || id == JS_CLASS_REFERENCE_ERROR ||
-            id == JS_CLASS_URI_ERROR || id == JS_CLASS_EVAL_ERROR ||
-            id == JS_CLASS_ABORT_ERROR) return JS_CLASS_FAMILY_ERROR;
-    if (id == JS_CLASS_TYPED_ARRAY || id == JS_CLASS_ARRAY_BUFFER ||
-            id == JS_CLASS_DATA_VIEW) return JS_CLASS_FAMILY_TYPED_ARRAY;
-    if (id == JS_CLASS_ARGUMENTS) return JS_CLASS_FAMILY_ARGUMENTS;
-    if (id == JS_CLASS_STRING) return JS_CLASS_FAMILY_STRING;
-    if (id == JS_CLASS_MAP_ITERATOR || id == JS_CLASS_SET_ITERATOR ||
-            id == JS_CLASS_STRING_ITERATOR || id == JS_CLASS_TYPED_ARRAY_ITERATOR ||
-            id == JS_CLASS_GENERATOR) return JS_CLASS_FAMILY_ITERATOR;
-    if (id == JS_CLASS_MAP || id == JS_CLASS_SET || id == JS_CLASS_WEAK_MAP ||
-            id == JS_CLASS_WEAK_SET || id == JS_CLASS_WEAK_REF ||
-            id == JS_CLASS_FINALIZATION_REGISTRY) return JS_CLASS_FAMILY_COLLECTION;
-    if (id == JS_CLASS_WEB_API_RESOURCE) return JS_CLASS_FAMILY_HOST;
-    return JS_CLASS_FAMILY_ORDINARY;
-}
-
 const JsClassMeta* js_class_meta_for_id(JsClassId id) {
     if (id >= JS_CLASS__COUNT) id = JS_CLASS_NONE;
     return &js_class_meta_table[id];
@@ -229,10 +206,6 @@ const JsClassMeta* js_object_meta(Item value) {
 
 bool js_object_has_class(Item value, JsClassId id) {
     return js_class_id_from_meta(js_object_meta(value)) == id;
-}
-
-bool js_object_has_family(Item value, JsClassFamily family) {
-    return js_class_family(js_class_id_from_meta(js_object_meta(value))) == family;
 }
 
 bool js_object_uses_ordinary_shape(Item value) {

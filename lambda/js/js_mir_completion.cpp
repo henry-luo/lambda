@@ -46,10 +46,7 @@ void jm_emit_suspend_env_save(JsMirTranspiler* mt) {
                 entry->var.env_reg = mt->gen_env_reg;
             }
             if (entry->var.env_slot < 0 || !entry->var.from_env) continue;
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    entry->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
-                MIR_new_reg_op(mt->ctx, entry->var.reg)));
+            jm_emit_store_i64(mt, entry->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, entry->var.reg);
         }
     }
 }
@@ -64,10 +61,7 @@ void jm_emit_resume_env_restore(JsMirTranspiler* mt) {
         while (hashmap_iter(scope, &iter, &item)) {
             JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
             if (entry->var.env_slot < 0 || !entry->var.from_env) continue;
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, entry->var.reg),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    entry->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
+            jm_emit_load_i64(mt, entry->var.reg, entry->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg);
         }
     }
 }
@@ -77,25 +71,17 @@ void jm_emit_try_state_reset(JsMirTranspiler* mt) {
     for (int td = 0; td < mt->try_ctx_depth; td++) {
         JsTryContext* context = jm_try_context_at(mt, td);
         if (context->has_return_reg) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, context->has_return_reg),
-                MIR_new_int_op(mt->ctx, 0)));
+            jm_emit_reg_op(mt, MIR_MOV, context->has_return_reg, MIR_new_int_op(mt->ctx, 0));
         }
         if (context->return_val_reg) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, context->return_val_reg),
-                MIR_new_int_op(mt->ctx, 0)));
+            jm_emit_reg_op(mt, MIR_MOV, context->return_val_reg, MIR_new_int_op(mt->ctx, 0));
         }
         if (context->saved_error_lane_flag_reg) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, context->saved_error_lane_flag_reg),
-                MIR_new_int_op(mt->ctx, 0)));
+            jm_emit_reg_op(mt, MIR_MOV, context->saved_error_lane_flag_reg, MIR_new_int_op(mt->ctx, 0));
         }
         if (context->saved_error_lane_val_reg) {
             MIR_reg_t null_value = jm_emit_null(mt);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, context->saved_error_lane_val_reg),
-                MIR_new_reg_op(mt->ctx, null_value)));
+            jm_emit_mov(mt, context->saved_error_lane_val_reg, null_value);
         }
     }
 }
@@ -197,9 +183,7 @@ static MIR_label_t jm_error_lane_route_target(JsMirTranspiler* mt,
 static MIR_reg_t jm_emit_error_lane_const(JsMirTranspiler* mt, int64_t value,
         const char* name) {
     MIR_reg_t result = jm_new_reg(mt, name, MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, value)));
+    jm_emit_reg_op(mt, MIR_MOV, result, MIR_new_int_op(mt->ctx, value));
     return result;
 }
 
@@ -220,18 +204,14 @@ static void jm_capture_routed_error_lane(JsMirTranspiler* mt, JsTryContext* cont
         // function-level exits are emitted after normal-path cleanup, so the
         // result must live in a dedicated register rather than the transient
         // last-call slot.
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, mt->func_error_lane_value_reg),
-            MIR_new_reg_op(mt->ctx, value)));
+        jm_emit_mov(mt, mt->func_error_lane_value_reg, value);
         return;
     }
     if (value) {
         if (!context->incoming_error_lane_val_reg) {
             context->incoming_error_lane_val_reg = jm_new_reg(mt, "_try_exc", MIR_T_I64);
         }
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, context->incoming_error_lane_val_reg),
-            MIR_new_reg_op(mt->ctx, value)));
+        jm_emit_mov(mt, context->incoming_error_lane_val_reg, value);
         return;
     }
     // Every fallible call publishes its merged lane in the result register;
@@ -244,9 +224,7 @@ static void jm_capture_routed_error_lane(JsMirTranspiler* mt, JsTryContext* cont
     // keep the context register stable: catch lowering retains the original
     // register, so a fallback value must be written into it rather than
     // replacing the context field after catch code has been emitted.
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, context->incoming_error_lane_val_reg),
-        MIR_new_reg_op(mt->ctx, fallback)));
+    jm_emit_mov(mt, context->incoming_error_lane_val_reg, fallback);
 }
 
 MIR_reg_t jm_emit_error_lane_return(JsMirTranspiler* mt) {
@@ -330,15 +308,9 @@ MIR_reg_t jm_emit_error_lane_test(JsMirTranspiler* mt) {
     default:
         if (mt->last_call_result_reg) {
             MIR_reg_t tag = jm_new_reg(mt, "exc_tag", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_URSH,
-                MIR_new_reg_op(mt->ctx, tag),
-                MIR_new_reg_op(mt->ctx, mt->last_call_result_reg),
-                MIR_new_int_op(mt->ctx, 56)));
+            jm_emit_reg_binary_op(mt, MIR_URSH, tag, mt->last_call_result_reg, MIR_new_int_op(mt->ctx, 56));
             MIR_reg_t is_error = jm_new_reg(mt, "exc_inband", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-                MIR_new_reg_op(mt->ctx, is_error),
-                MIR_new_reg_op(mt->ctx, tag),
-                MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
+            jm_emit_reg_binary_op(mt, MIR_EQ, is_error, tag, MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR));
             return is_error;
         }
         // Void fallible helpers are forbidden by the Tune1 catalog; an
@@ -449,12 +421,8 @@ bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
         context->end_label_error_lane_state = jm_error_lane_merge(
             context->end_label_error_lane_state, jm_error_lane_state(mt));
     }
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, context->return_val_reg),
-        MIR_new_reg_op(mt->ctx, value)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, context->has_return_reg),
-        MIR_new_int_op(mt->ctx, 1)));
+    jm_emit_mov(mt, context->return_val_reg, value);
+    jm_emit_reg_op(mt, MIR_MOV, context->has_return_reg, MIR_new_int_op(mt->ctx, 1));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
         MIR_new_label_op(mt->ctx, target)));
     return true;

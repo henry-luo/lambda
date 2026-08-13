@@ -2035,69 +2035,58 @@ static Item http_res_end_ex(Item self, Item data_item, Item encoding_item, Item 
 }
 
 // response.end([data], [callback]) — finalize and send
-static Item js_http_res_inst_writeHead(Item maybe_self, Item status_item, Item headers_item) {
-    Item self = js_http_receiver(maybe_self, "__conn__");
-    if (self.item != maybe_self.item) {
-        return http_response_writeHead(self, maybe_self, status_item, headers_item);
+#define JS_HTTP_RECEIVER_FORWARD0(name, target, marker) \
+    static Item name(Item maybe_self) { \
+        return target(js_http_receiver(maybe_self, marker)); \
     }
-    return http_response_writeHead(self, status_item, headers_item, make_js_undefined());
-}
-
-static Item js_http_res_inst_setHeader(Item maybe_self, Item name_item, Item value_item) {
-    Item self = js_http_receiver(maybe_self, "__conn__");
-    if (self.item != maybe_self.item) {
-        return js_http_res_setHeader(self, maybe_self, name_item);
+#define JS_HTTP_RECEIVER_FORWARD1(name, target, marker) \
+    static Item name(Item maybe_self, Item arg) { \
+        Item self = js_http_receiver(maybe_self, marker); \
+        return target(self, self.item == maybe_self.item ? arg : maybe_self); \
     }
-    return js_http_res_setHeader(self, name_item, value_item);
-}
-
-static Item js_http_res_inst_getHeader(Item maybe_self, Item name_item) {
-    Item self = js_http_receiver(maybe_self, "__conn__");
-    return js_http_res_getHeader(self, self.item == maybe_self.item ? name_item : maybe_self);
-}
-
-static Item js_http_res_inst_getHeaders(Item maybe_self) {
-    return js_http_res_getHeaders(js_http_receiver(maybe_self, "__conn__"));
-}
-
-static Item js_http_res_inst_getHeaderNames(Item maybe_self) {
-    return js_http_res_getHeaderNames(js_http_receiver(maybe_self, "__conn__"));
-}
-
-static Item js_http_res_inst_getRawHeaderNames(Item maybe_self) {
-    return js_http_res_getRawHeaderNames(js_http_receiver(maybe_self, "__conn__"));
-}
-
-static Item js_http_res_inst_hasHeader(Item maybe_self, Item name_item) {
-    Item self = js_http_receiver(maybe_self, "__conn__");
-    return js_http_res_hasHeader(self, self.item == maybe_self.item ? name_item : maybe_self);
-}
-
-static Item js_http_res_inst_removeHeader(Item maybe_self, Item name_item) {
-    Item self = js_http_receiver(maybe_self, "__conn__");
-    return js_http_res_removeHeader(self, self.item == maybe_self.item ? name_item : maybe_self);
-}
-
-static Item js_http_res_inst_write(Item maybe_self, Item chunk_item, Item encoding_or_callback) {
-    Item self = js_http_receiver(maybe_self, "__conn__");
-    if (self.item == maybe_self.item) {
-        return http_res_write_ex(self, chunk_item, encoding_or_callback, make_js_undefined());
+#define JS_HTTP_RECEIVER_FORWARD2(name, target, marker) \
+    static Item name(Item maybe_self, Item arg1, Item arg2) { \
+        Item self = js_http_receiver(maybe_self, marker); \
+        return self.item == maybe_self.item ? target(self, arg1, arg2) : \
+            target(self, maybe_self, arg1); \
     }
-    return http_res_write_ex(self, maybe_self, chunk_item, encoding_or_callback);
-}
-
-static Item js_http_res_inst_send_internal(Item maybe_self, Item chunk_item) {
-    Item self = js_http_receiver(maybe_self, "__conn__");
-    return js_http_res_send_internal(self, self.item == maybe_self.item ? chunk_item : maybe_self);
-}
-
-static Item js_http_res_inst_end(Item maybe_self, Item data_item, Item callback_item) {
-    Item self = js_http_receiver(maybe_self, "__conn__");
-    if (self.item == maybe_self.item) {
-        return http_res_end_ex(self, data_item, make_js_undefined(), callback_item);
+#define JS_HTTP_RECEIVER_FORWARD2_DEFAULT3(name, target, marker) \
+    static Item name(Item maybe_self, Item arg1, Item arg2) { \
+        Item self = js_http_receiver(maybe_self, marker); \
+        return self.item == maybe_self.item ? target(self, arg1, arg2, make_js_undefined()) : \
+            target(self, maybe_self, arg1, arg2); \
     }
-    return http_res_end_ex(self, maybe_self, data_item, callback_item);
-}
+#define JS_HTTP_RECEIVER_FORWARD2_DEFAULT_MIDDLE(name, target, marker) \
+    static Item name(Item maybe_self, Item arg1, Item arg2) { \
+        Item self = js_http_receiver(maybe_self, marker); \
+        return self.item == maybe_self.item ? target(self, arg1, make_js_undefined(), arg2) : \
+            target(self, maybe_self, arg1, arg2); \
+    }
+#define JS_HTTP_RECEIVER_FORWARD3_DEFAULT3(name, target, marker) \
+    static Item name(Item maybe_self, Item arg1, Item arg2, Item arg3) { \
+        Item self = js_http_receiver(maybe_self, marker); \
+        return self.item == maybe_self.item ? target(self, arg1, arg2, arg3) : \
+            target(self, maybe_self, arg1, arg2); \
+    }
+
+JS_HTTP_RECEIVER_FORWARD2_DEFAULT3(js_http_res_inst_writeHead,
+    http_response_writeHead, "__conn__")
+
+JS_HTTP_RECEIVER_FORWARD2(js_http_res_inst_setHeader, js_http_res_setHeader, "__conn__")
+JS_HTTP_RECEIVER_FORWARD1(js_http_res_inst_getHeader, js_http_res_getHeader, "__conn__")
+JS_HTTP_RECEIVER_FORWARD0(js_http_res_inst_getHeaders, js_http_res_getHeaders, "__conn__")
+JS_HTTP_RECEIVER_FORWARD0(js_http_res_inst_getHeaderNames, js_http_res_getHeaderNames, "__conn__")
+JS_HTTP_RECEIVER_FORWARD0(js_http_res_inst_getRawHeaderNames, js_http_res_getRawHeaderNames, "__conn__")
+JS_HTTP_RECEIVER_FORWARD1(js_http_res_inst_hasHeader, js_http_res_hasHeader, "__conn__")
+JS_HTTP_RECEIVER_FORWARD1(js_http_res_inst_removeHeader, js_http_res_removeHeader, "__conn__")
+
+JS_HTTP_RECEIVER_FORWARD2_DEFAULT3(js_http_res_inst_write, http_res_write_ex,
+    "__conn__")
+
+JS_HTTP_RECEIVER_FORWARD1(js_http_res_inst_send_internal, js_http_res_send_internal, "__conn__")
+
+JS_HTTP_RECEIVER_FORWARD2_DEFAULT_MIDDLE(js_http_res_inst_end, http_res_end_ex,
+    "__conn__")
 
 static Item js_http_res_inst_flushHeaders(Item maybe_self) {
     Item self = js_http_receiver(maybe_self, "__conn__");
@@ -3557,13 +3546,8 @@ extern "C" Item js_http_server_address(Item self) {
     return result;
 }
 
-static Item js_http_server_inst_listen(Item maybe_self, Item port_item, Item host_item, Item callback) {
-    Item self = js_http_receiver(maybe_self, "__server__");
-    if (self.item == maybe_self.item) {
-        return js_http_server_listen(self, port_item, host_item, callback);
-    }
-    return js_http_server_listen(self, maybe_self, port_item, host_item);
-}
+JS_HTTP_RECEIVER_FORWARD3_DEFAULT3(js_http_server_inst_listen,
+    js_http_server_listen, "__server__")
 
 static Item js_http_server_inst_close(Item maybe_self, Item callback) {
     Item this_obj = js_get_this();
@@ -3574,22 +3558,10 @@ static Item js_http_server_inst_close(Item maybe_self, Item callback) {
     return js_http_server_close(self, self.item == maybe_self.item ? callback : maybe_self);
 }
 
-static Item js_http_server_inst_getConnections(Item maybe_self, Item callback) {
-    Item self = js_http_receiver(maybe_self, "__server__");
-    return js_http_server_getConnections(self, self.item == maybe_self.item ? callback : maybe_self);
-}
-
-static Item js_http_server_inst_on(Item maybe_self, Item event_item, Item callback) {
-    Item self = js_http_receiver(maybe_self, "__server__");
-    if (self.item == maybe_self.item) {
-        return js_http_server_on(self, event_item, callback);
-    }
-    return js_http_server_on(self, maybe_self, event_item);
-}
-
-static Item js_http_server_inst_address(Item maybe_self) {
-    return js_http_server_address(js_http_receiver(maybe_self, "__server__"));
-}
+JS_HTTP_RECEIVER_FORWARD1(js_http_server_inst_getConnections,
+    js_http_server_getConnections, "__server__")
+JS_HTTP_RECEIVER_FORWARD2(js_http_server_inst_on, js_http_server_on, "__server__")
+JS_HTTP_RECEIVER_FORWARD0(js_http_server_inst_address, js_http_server_address, "__server__")
 
 static Item js_http_server_inst_ref(Item maybe_self) {
     Item self = js_http_receiver(maybe_self, "__server__");
@@ -4015,13 +3987,7 @@ extern "C" Item js_http_client_res_on(Item self2, Item ev2, Item cb2) {
     return js_stream_on(self2, ev2, cb2);
 }
 
-static Item js_http_client_res_inst_on(Item maybe_self, Item event_item, Item callback) {
-    Item self = js_http_receiver(maybe_self, "__client__");
-    if (self.item == maybe_self.item) {
-        return js_http_client_res_on(self, event_item, callback);
-    }
-    return js_http_client_res_on(self, maybe_self, event_item);
-}
+JS_HTTP_RECEIVER_FORWARD2(js_http_client_res_inst_on, js_http_client_res_on, "__client__")
 
 static void js_http_close_client_req(JsHttpClientReq* creq);
 
@@ -4055,10 +4021,7 @@ static Item js_http_client_res_destroy(Item maybe_self, Item err_item) {
     return self;
 }
 
-static Item js_http_client_res_inst_destroy(Item maybe_self, Item err_item) {
-    Item self = js_http_receiver(maybe_self, "__client__");
-    return js_http_client_res_destroy(self, self.item == maybe_self.item ? err_item : maybe_self);
-}
+JS_HTTP_RECEIVER_FORWARD1(js_http_client_res_inst_destroy, js_http_client_res_destroy, "__client__")
 
 static Item js_http_econnreset_error(Item err) {
     Item result = err;
@@ -5079,50 +5042,23 @@ extern "C" Item js_http_client_setHeader(Item self, Item name_item, Item value_i
     return self;
 }
 
-static Item js_http_client_inst_write(Item maybe_self, Item data_item, Item encoding_or_callback) {
-    Item self = js_http_receiver(maybe_self, "__client__");
-    if (self.item == maybe_self.item) {
-        return http_client_write_ex(self, data_item, encoding_or_callback, make_js_undefined());
-    }
-    return http_client_write_ex(self, maybe_self, data_item, encoding_or_callback);
-}
+JS_HTTP_RECEIVER_FORWARD2_DEFAULT3(js_http_client_inst_write, http_client_write_ex,
+    "__client__")
+JS_HTTP_RECEIVER_FORWARD2_DEFAULT_MIDDLE(js_http_client_inst_end, http_client_end_ex,
+    "__client__")
 
-static Item js_http_client_inst_end(Item maybe_self, Item data_item, Item encoding_or_callback) {
-    Item self = js_http_receiver(maybe_self, "__client__");
-    if (self.item == maybe_self.item) {
-        return http_client_end_ex(self, data_item, make_js_undefined(), encoding_or_callback);
-    }
-    return http_client_end_ex(self, maybe_self, data_item, encoding_or_callback);
-}
+JS_HTTP_RECEIVER_FORWARD2(js_http_client_inst_on, js_http_client_on, "__client__")
+JS_HTTP_RECEIVER_FORWARD1(js_http_client_inst_destroy, js_http_client_destroy, "__client__")
+JS_HTTP_RECEIVER_FORWARD2(js_http_client_inst_setHeader, js_http_client_setHeader, "__client__")
+JS_HTTP_RECEIVER_FORWARD0(js_http_client_inst_getHeaderNames, js_http_client_getHeaderNames, "__client__")
+JS_HTTP_RECEIVER_FORWARD0(js_http_client_inst_getRawHeaderNames, js_http_client_getRawHeaderNames, "__client__")
 
-static Item js_http_client_inst_on(Item maybe_self, Item event_item, Item callback) {
-    Item self = js_http_receiver(maybe_self, "__client__");
-    if (self.item == maybe_self.item) {
-        return js_http_client_on(self, event_item, callback);
-    }
-    return js_http_client_on(self, maybe_self, event_item);
-}
-
-static Item js_http_client_inst_destroy(Item maybe_self, Item err_item) {
-    Item self = js_http_receiver(maybe_self, "__client__");
-    return js_http_client_destroy(self, self.item == maybe_self.item ? err_item : maybe_self);
-}
-
-static Item js_http_client_inst_setHeader(Item maybe_self, Item name_item, Item value_item) {
-    Item self = js_http_receiver(maybe_self, "__client__");
-    if (self.item == maybe_self.item) {
-        return js_http_client_setHeader(self, name_item, value_item);
-    }
-    return js_http_client_setHeader(self, maybe_self, name_item);
-}
-
-static Item js_http_client_inst_getHeaderNames(Item maybe_self) {
-    return js_http_client_getHeaderNames(js_http_receiver(maybe_self, "__client__"));
-}
-
-static Item js_http_client_inst_getRawHeaderNames(Item maybe_self) {
-    return js_http_client_getRawHeaderNames(js_http_receiver(maybe_self, "__client__"));
-}
+#undef JS_HTTP_RECEIVER_FORWARD0
+#undef JS_HTTP_RECEIVER_FORWARD1
+#undef JS_HTTP_RECEIVER_FORWARD2
+#undef JS_HTTP_RECEIVER_FORWARD2_DEFAULT3
+#undef JS_HTTP_RECEIVER_FORWARD2_DEFAULT_MIDDLE
+#undef JS_HTTP_RECEIVER_FORWARD3_DEFAULT3
 
 static Item http_client_make_request_object(JsHttpClientReq* creq,
                                             const char* method,

@@ -22,10 +22,7 @@ MIR_reg_t jm_emit_iterator_step(JsMirTranspiler* mt, MIR_reg_t iterator) {
 
 MIR_reg_t jm_emit_iterator_done_test(JsMirTranspiler* mt, MIR_reg_t step_result, const char* prefix) {
     MIR_reg_t is_done = jm_new_reg(mt, prefix ? prefix : "itdone", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-        MIR_new_reg_op(mt->ctx, is_done),
-        MIR_new_reg_op(mt->ctx, step_result),
-        MIR_new_int_op(mt->ctx, (int64_t)JS_ITER_DONE_SENTINEL)));
+    jm_emit_reg_binary_op(mt, MIR_EQ, is_done, step_result, MIR_new_int_op(mt->ctx, (int64_t)JS_ITER_DONE_SENTINEL));
     return is_done;
 }
 

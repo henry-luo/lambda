@@ -487,11 +487,6 @@ bool js_item_stack_push(JsItemStack* stack, Item value) {
     return true;
 }
 
-Item js_item_stack_top(const JsItemStack* stack) {
-    if (!stack || !stack->roots.slots || stack->depth <= 0) return ItemNull;
-    return stack->roots.slots[stack->depth - 1];
-}
-
 void js_item_stack_pop(JsItemStack* stack) {
     if (!stack || !stack->roots.slots || stack->depth <= 0) return;
     // The registered fixed range is scanned in full, so vacated slots must not

@@ -809,7 +809,6 @@ bool js_root_range_register_reset(JsRootRange* range, void* owner,
                                   JsRootRangeResetFn reset);
 void js_root_range_reset_all(void);
 bool js_item_stack_push(JsItemStack* stack, Item value);
-Item js_item_stack_top(const JsItemStack* stack);
 void js_item_stack_pop(JsItemStack* stack);
 void js_item_stack_clear(JsItemStack* stack);
 void js_item_stack_shrink(JsItemStack* stack, int depth);

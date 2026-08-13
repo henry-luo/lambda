@@ -733,13 +733,9 @@ void jm_emit_begin_lexical_this_rebind(JsMirTranspiler* mt, MIR_reg_t value,
         state->var_reg = js_this_var->reg;
         if (restore_binding) {
             state->saved_var_reg = jm_new_reg(mt, "prev_jt", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, state->saved_var_reg),
-                MIR_new_reg_op(mt->ctx, state->var_reg)));
+            jm_emit_mov(mt, state->saved_var_reg, state->var_reg);
         }
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, state->var_reg),
-            MIR_new_reg_op(mt->ctx, value)));
+        jm_emit_mov(mt, state->var_reg, value);
     }
 
     int scope_slot = -1;
@@ -758,15 +754,9 @@ void jm_emit_begin_lexical_this_rebind(JsMirTranspiler* mt, MIR_reg_t value,
         state->scope_env_slot = scope_slot;
         if (restore_binding) {
             state->saved_scope_env_value_reg = jm_new_reg(mt, "prev_jt_env", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, state->saved_scope_env_value_reg),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    scope_slot * (int)sizeof(uint64_t), scope_reg, 0, 1)));
+            jm_emit_load_i64(mt, state->saved_scope_env_value_reg, scope_slot * (int)sizeof(uint64_t), scope_reg);
         }
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                scope_slot * (int)sizeof(uint64_t), scope_reg, 0, 1),
-            MIR_new_reg_op(mt->ctx, value)));
+        jm_emit_store_i64(mt, scope_slot * (int)sizeof(uint64_t), scope_reg, value);
     }
 }
 
@@ -776,16 +766,10 @@ void jm_emit_end_lexical_this_rebind(JsMirTranspiler* mt,
     if (state->restore_binding) {
         if (state->scope_env_reg != 0 && state->scope_env_slot >= 0 &&
                 state->saved_scope_env_value_reg != 0) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    state->scope_env_slot * (int)sizeof(uint64_t),
-                    state->scope_env_reg, 0, 1),
-                MIR_new_reg_op(mt->ctx, state->saved_scope_env_value_reg)));
+            jm_emit_store_i64(mt, state->scope_env_slot * (int)sizeof(uint64_t), state->scope_env_reg, state->saved_scope_env_value_reg);
         }
         if (state->var_reg != 0 && state->saved_var_reg != 0) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, state->var_reg),
-                MIR_new_reg_op(mt->ctx, state->saved_var_reg)));
+            jm_emit_mov(mt, state->var_reg, state->saved_var_reg);
         }
     }
     mt->force_closure_env_copy = state->saved_force_closure_env_copy;
@@ -795,9 +779,7 @@ void jm_emit_end_lexical_this_rebind(JsMirTranspiler* mt,
 // Called at the point where the ES spec says "Let V = undefined" for compound statements.
 void jm_eval_cptn_reset(JsMirTranspiler* mt) {
     if (mt->eval_completion_reg) {
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, mt->eval_completion_reg),
-            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+        jm_emit_reg_op(mt, MIR_MOV, mt->eval_completion_reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED));
     }
 }
 

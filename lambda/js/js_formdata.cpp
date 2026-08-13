@@ -50,20 +50,10 @@ extern "C" bool js_dom_is_disabled(void* dom_elem);
 // Helpers
 // ============================================================================
 
-static inline Item make_bool(bool v) {
-    return (Item){.item = b2it(v ? 1 : 0)};
-}
-
-static inline Item make_int_item(int64_t v) {
-    return (Item){.item = i2it(v)};
-}
-
-static inline Item make_str(const char* s) {
-    if (!s) return ItemNull;
-    return (Item){.item = s2it(heap_create_name(s))};
-}
-
-static inline Item make_key(const char* s) { return make_str(s); }
+#define make_bool(v) ((Item){.item = b2it((v) ? 1 : 0)})
+#define make_int_item(v) ((Item){.item = i2it(v)})
+#define make_str make_string_item
+#define make_key make_string_item
 
 static inline Item prop_get(Item obj, const char* key) {
     return js_get_key_default(obj, make_key(key));
@@ -287,6 +277,20 @@ static Item js_fd_delete(Item name_item) {
     return make_js_undefined();
 }
 
+static bool js_fd_entry_matches(Item pair, const char* name) {
+    if (get_type_id(pair) != LMD_TYPE_ARRAY) return false;
+    const char* entry_name = fn_to_cstr(js_elements_get_int(pair, 0));
+    return entry_name && strcmp(entry_name, name) == 0;
+}
+
+static int64_t js_fd_find_entry(Item entries, const char* name) {
+    int64_t len = js_array_length(entries);
+    for (int64_t i = 0; i < len; i++) {
+        if (js_fd_entry_matches(js_elements_get_int(entries, i), name)) return i;
+    }
+    return -1;
+}
+
 static Item js_fd_get(Item name_item) {
     Item this_fd = js_get_this();
     Item entries = fd_get_entries(this_fd);
@@ -295,16 +299,8 @@ static Item js_fd_get(Item name_item) {
     const char* name_cs = fn_to_cstr(name_item);
     if (!name_cs) name_cs = "undefined";
 
-    int64_t len = js_array_length(entries);
-    for (int64_t i = 0; i < len; i++) {
-        Item pair = js_elements_get_int(entries, i);
-        if (get_type_id(pair) != LMD_TYPE_ARRAY) continue;
-        Item pair_name = js_elements_get_int(pair, 0);
-        const char* n = fn_to_cstr(pair_name);
-        if (n && strcmp(n, name_cs) == 0) {
-            return js_elements_get_int(pair, 1);
-        }
-    }
+    int64_t index = js_fd_find_entry(entries, name_cs);
+    if (index >= 0) return js_elements_get_int(js_elements_get_int(entries, index), 1);
     return ItemNull;
 }
 
@@ -320,10 +316,7 @@ static Item js_fd_getAll(Item name_item) {
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len; i++) {
         Item pair = js_elements_get_int(entries, i);
-        if (get_type_id(pair) != LMD_TYPE_ARRAY) continue;
-        Item pair_name = js_elements_get_int(pair, 0);
-        const char* n = fn_to_cstr(pair_name);
-        if (n && strcmp(n, name_cs) == 0) {
+        if (js_fd_entry_matches(pair, name_cs)) {
             js_array_push(result, js_elements_get_int(pair, 1));
         }
     }
@@ -338,17 +331,7 @@ static Item js_fd_has(Item name_item) {
     const char* name_cs = fn_to_cstr(name_item);
     if (!name_cs) name_cs = "undefined";
 
-    int64_t len = js_array_length(entries);
-    for (int64_t i = 0; i < len; i++) {
-        Item pair = js_elements_get_int(entries, i);
-        if (get_type_id(pair) != LMD_TYPE_ARRAY) continue;
-        Item pair_name = js_elements_get_int(pair, 0);
-        const char* n = fn_to_cstr(pair_name);
-        if (n && strcmp(n, name_cs) == 0) {
-            return make_bool(true);
-        }
-    }
-    return make_bool(false);
+    return make_bool(js_fd_find_entry(entries, name_cs) >= 0);
 }
 
 static Item js_fd_set(Item name_item, Item value_item, Item filename_item) {

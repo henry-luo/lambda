@@ -34,7 +34,6 @@ union JsNativeTarget {
     JsNativeP8 p8;
     JsNativeSpan span;
     JsNativeThisSpan this_span;
-    JsNativeEnvSpan env_span;
     uint64_t bits;
 };
 
@@ -44,7 +43,6 @@ enum JsNativeCallPolicy : uint8_t {
     JS_NATIVE_CALL_REST = 2,
     JS_NATIVE_CALL_SPAN = 3,
     JS_NATIVE_CALL_THIS_SPAN = 4,
-    JS_NATIVE_CALL_ENV_SPAN = 5,
     JS_NATIVE_CALL_BODY = 6,
 };
 

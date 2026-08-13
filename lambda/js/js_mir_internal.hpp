@@ -177,6 +177,47 @@ uint32_t jm_module_ic_index(JsMirTranspiler* mt);
 MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type);
 MIR_label_t jm_new_label(JsMirTranspiler* mt);
 void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn);
+static inline void jm_emit_mov(JsMirTranspiler* mt, MIR_reg_t target, MIR_reg_t source) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, target), MIR_new_reg_op(mt->ctx, source)));
+}
+static inline void jm_emit_dmov(JsMirTranspiler* mt, MIR_reg_t target, MIR_reg_t source) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+        MIR_new_reg_op(mt->ctx, target), MIR_new_reg_op(mt->ctx, source)));
+}
+static inline void jm_emit_load_i64(JsMirTranspiler* mt, MIR_reg_t target,
+        int64_t offset, MIR_reg_t base) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, target),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offset, base, 0, 1)));
+}
+static inline void jm_emit_store_i64(JsMirTranspiler* mt, int64_t offset,
+        MIR_reg_t base, MIR_reg_t source) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offset, base, 0, 1),
+        MIR_new_reg_op(mt->ctx, source)));
+}
+static inline void jm_emit_reg_binary(JsMirTranspiler* mt, MIR_insn_code_t opcode,
+        MIR_reg_t target, MIR_reg_t left, MIR_reg_t right) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, opcode,
+        MIR_new_reg_op(mt->ctx, target), MIR_new_reg_op(mt->ctx, left),
+        MIR_new_reg_op(mt->ctx, right)));
+}
+static inline void jm_emit_reg_op(JsMirTranspiler* mt, MIR_insn_code_t opcode,
+        MIR_reg_t target, MIR_op_t source) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, opcode,
+        MIR_new_reg_op(mt->ctx, target), source));
+}
+static inline void jm_emit_reg_binary_op(JsMirTranspiler* mt, MIR_insn_code_t opcode,
+        MIR_reg_t target, MIR_reg_t left, MIR_op_t right) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, opcode,
+        MIR_new_reg_op(mt->ctx, target), MIR_new_reg_op(mt->ctx, left), right));
+}
+static inline void jm_emit_reg_op_binary(JsMirTranspiler* mt, MIR_insn_code_t opcode,
+        MIR_reg_t target, MIR_op_t left, MIR_reg_t right) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, opcode,
+        MIR_new_reg_op(mt->ctx, target), left, MIR_new_reg_op(mt->ctx, right)));
+}
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label);
 void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsErrorLaneTrack state);
 void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
@@ -362,9 +403,6 @@ MIR_reg_t jm_call_function_discard(JsMirTranspiler* mt, MIR_op_t func,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
 MIR_reg_t jm_apply_function_discard(JsMirTranspiler* mt, MIR_op_t func,
         MIR_op_t this_value, MIR_op_t args);
-MIR_reg_t jm_call_constructor_body_into(JsMirTranspiler* mt, MIR_op_t func,
-        MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count,
-        MIR_op_t new_target);
 MIR_reg_t jm_construct_value_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_op_t args, MIR_op_t arg_count, MIR_op_t new_target);
 MIR_reg_t jm_apply_function_into(JsMirTranspiler* mt, MIR_op_t func,
@@ -429,8 +467,6 @@ void jm_emit_class_instance_computed_field_metadata_keys(JsMirTranspiler* mt,
     MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_class_computed_field_module_keys(JsMirTranspiler* mt,
     MIR_reg_t cls_obj, JsClassEntry* ce);
-void jm_emit_private_instance_method_brands(JsMirTranspiler* mt, MIR_reg_t obj,
-    MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_set_function_home_class(JsMirTranspiler* mt, MIR_reg_t fn_item, MIR_reg_t cls_obj);
 bool jm_emit_class_method_install(JsMirTranspiler* mt,
     const JsMirClassMethodInstallPolicy* policy);
@@ -447,7 +483,6 @@ void jm_emit_begin_lexical_this_rebind(JsMirTranspiler* mt, MIR_reg_t value,
     JsMirLexicalThisRebind* state, bool restore_binding);
 void jm_emit_end_lexical_this_rebind(JsMirTranspiler* mt,
     const JsMirLexicalThisRebind* state);
-MIR_reg_t jm_build_error_stack_string(JsMirTranspiler* mt, const char* error_type);
 MIR_reg_t jm_emit_unbox_int(JsMirTranspiler* mt, MIR_reg_t item);
 MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item);
 MIR_reg_t jm_emit_int_to_double(JsMirTranspiler* mt, MIR_reg_t int_reg);
@@ -591,7 +626,6 @@ MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, MIR_reg_t val_boxed,
                                                int ta_type,
                                                MIR_reg_t h_data, MIR_reg_t h_len);
-MIR_reg_t jm_transpile_typed_array_length(JsMirTranspiler* mt, MIR_reg_t arr_reg);
 MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem);
 MIR_reg_t jm_transpile_array(JsMirTranspiler* mt, JsArrayNode* arr);
 MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj);
@@ -650,7 +684,6 @@ void jm_abandon_active_mir_after_signal(void);
 void jm_defer_mir_cleanup(MIR_context_t ctx);
 void jm_cleanup_deferred_mir();
 void* jm_get_last_deferred_mir_ctx();
-void jm_finish_last_deferred_mir();
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size);
 void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,

@@ -887,6 +887,32 @@ extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
 //
 // op codes:  0=LT (a<b)  1=GT (a>b)  2=LE (a<=b)  3=GE (a>=b)
 static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst = true); // forward declaration
+static Item js_compare_boxed(int64_t op, Item left, Item right) {
+    switch (op) {
+    case 0: {  // LT — Abstract Relational Comparison (left, right, leftFirst=true)
+        JS_ASSIGN_OR_RETURN(result, js_abstract_relational_lt(left, right));
+        if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
+        return result;
+    }
+    case 1: {  // GT — a > b => ARC(right, left, leftFirst=false)
+        JS_ASSIGN_OR_RETURN(result, js_abstract_relational_lt(right, left, false));
+        if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
+        return result;
+    }
+    case 2: {  // LE — a <= b => !(b < a); NaN → false
+        JS_ASSIGN_OR_RETURN(result, js_abstract_relational_lt(right, left, false));
+        if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(!it2b(result))};
+    }
+    case 3: {  // GE — a >= b => !(a < b); NaN → false
+        JS_ASSIGN_OR_RETURN(result, js_abstract_relational_lt(left, right));
+        if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(!it2b(result))};
+    }
+    default: return (Item){.item = b2it(false)};
+    }
+}
+
 extern "C" int64_t js_cmp_raw(int64_t op, Item left, Item right) {
     TypeId lt = get_type_id(left), rt = get_type_id(right);
     bool l_num = js_number_like_type(lt);
@@ -903,32 +929,11 @@ extern "C" int64_t js_cmp_raw(int64_t op, Item left, Item right) {
         default: return 0;
         }
     }
-    // Boxed fallback. The argument order and inversion are op-specific to
-    // preserve original semantics (a > b is !(a < b) with NaN handling; spec
-    // evaluation order matters for the leftFirst flag).
-    switch (op) {
-    case 0: {  // LT — uses public js_less_than path (matches pre-fold js_lt_raw)
-        Item result = js_less_than(left, right);
-        if (result.item == ITEM_JS_UNDEFINED) return 0;
-        return (int64_t)it2b(result);
-    }
-    case 1: {  // GT — a > b => ARC(b, a, leftFirst=false)
-        Item result = js_abstract_relational_lt(right, left, false);
-        if (item_is_error(result) || result.item == ITEM_JS_UNDEFINED) return 0;
-        return (int64_t)it2b(result);
-    }
-    case 2: {  // LE — a <= b => !(b < a); NaN→false
-        Item gt = js_abstract_relational_lt(right, left, false);
-        if (item_is_error(gt) || gt.item == ITEM_JS_UNDEFINED) return 0;
-        return it2b(gt) ? 0 : 1;
-    }
-    case 3: {  // GE — a >= b => !(a < b); NaN→false
-        Item lt_result = js_abstract_relational_lt(left, right, true);
-        if (item_is_error(lt_result) || lt_result.item == ITEM_JS_UNDEFINED) return 0;
-        return it2b(lt_result) ? 0 : 1;
-    }
-    default: return 0;
-    }
+    // Boxed fallback uses the same operation kernel as the boxed facade.
+    Item result = js_compare_boxed(op, left, right);
+    if (item_is_error(result)) return op == 0 ? (int64_t)it2b(result) : 0;
+    if (result.item == ITEM_JS_UNDEFINED) return 0;
+    return (int64_t)it2b(result);
 }
 
 extern "C" int64_t js_eq_raw(Item left, Item right) {
@@ -1746,29 +1751,7 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
 //   op = 2: LE (a <= b)
 //   op = 3: GE (a >= b)
 extern "C" Item js_compare(int64_t op, Item left, Item right) {
-    switch (op) {
-    case 0: {  // LT — Abstract Relational Comparison (left, right, leftFirst=true)
-        JS_ASSIGN_OR_RETURN(result, js_abstract_relational_lt(left, right));
-        if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
-        return result;
-    }
-    case 1: {  // GT — a > b => ARC(right, left, leftFirst=false)
-        JS_ASSIGN_OR_RETURN(result, js_abstract_relational_lt(right, left, false));
-        if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
-        return result;
-    }
-    case 2: {  // LE — a <= b => !(b < a); NaN → false
-        JS_ASSIGN_OR_RETURN(gt, js_abstract_relational_lt(right, left, false));
-        if (gt.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it(!it2b(gt))};
-    }
-    case 3: {  // GE — a >= b => !(a < b); NaN → false
-        JS_ASSIGN_OR_RETURN(lt, js_abstract_relational_lt(left, right));
-        if (lt.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it(!it2b(lt))};
-    }
-    default: return (Item){.item = b2it(false)};
-    }
+    return js_compare_boxed(op, left, right);
 }
 
 // C wrappers retained for direct callers in js_runtime.cpp.

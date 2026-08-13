@@ -25,7 +25,6 @@ typedef Item (*JsNativeP7)(Item, Item, Item, Item, Item, Item, Item);
 typedef Item (*JsNativeP8)(Item, Item, Item, Item, Item, Item, Item, Item);
 typedef Item (*JsNativeSpan)(Item*, int);
 typedef Item (*JsNativeThisSpan)(Item, Item*, int);
-typedef Item (*JsNativeEnvSpan)(Item, Item*, int);
 typedef Item (*JsNativeCallBody)(Item, Item, Item*, int, uint64_t*);
 typedef Item (*JsNativeConstructBody)(Item, Item*, int, Item, uint64_t*);
 
@@ -1278,6 +1277,49 @@ void js_canvas_cleanup(void);
 bool js_array_runtime_items_release(Item* items);
 void js_array_runtime_items_cleanup_all(void);
 
+// Runtime entry points shared by the JIT import registry and JS subsystems.
+void js_set_strict_mode(int64_t strict);
+Item js_with_push(Item obj);
+void js_with_pop(void);
+int js_with_save_depth(void);
+void js_with_restore_depth(int depth);
+Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
+void js_define_global_property_v(int64_t kind, Item key, Item value);
+Item js_evalscript_check_global_var_decl(Item key);
+Item js_evalscript_check_global_function_decl(Item key);
+void js_set_private_class_index(Item class_item, int index);
+Item js_object_group_by(Item items, Item callback);
+Item js_map_group_by(Item items, Item callback);
+void js_set_formal_length(Item fn_item, int length);
+void* js_function_get_ptr(Item fn_item);
+Item js_object_set_prototype_of(Item obj, Item proto);
+void js_set_class_name(Item cls_item, Item name_item);
+void js_set_default_constructor_property(Item proto_item, Item cls_item);
+Item js_prepare_class_prototype_property(Item cls_item);
+Item js_check_class_static_field_key(Item key_item);
+int64_t js_typeof_is(Item value, uint32_t type_name_id);
+Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value);
+Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value);
+int64_t js_cmp_raw(int64_t op, Item left, Item right);
+int64_t js_eq_raw(Item left, Item right);
+int64_t js_loose_eq_raw(Item left, Item right);
+Item js_assert_same_value(Item actual, Item expected, Item message);
+Item js_assert_not_same_value(Item actual, Item unexpected, Item message);
+Item js_assert_compare_array(Item actual, Item expected, Item message);
+Item js_assert_deep_equal(Item actual, Item expected, Item message);
+Item js_compare_array(Item a, Item b);
+Item js_verify_property(Item obj, Item name, Item desc, Item options);
+Item js_assert_throws(Item expected_ctor, Item func, Item message);
+Item js_assert_base(Item must_be_true, Item message);
+Item js_donotevaluate(void);
+Item js_is_constructor(Item fn);
+Item js_decimal_to_percent_hex_string(Item n);
+Item js_test262_build_string(Item args);
+uint64_t lambda_mir_double_bits(double dval);
+double lambda_mir_bits_double(uint64_t bits);
+void js_private_field_init_begin(void);
+void js_private_field_init_end(void);
+
 #ifdef __cplusplus
 }
 
@@ -1367,7 +1409,6 @@ Item js_new_native_rest_function(JsNativeP7 target);
 Item js_new_native_rest_function(JsNativeP8 target);
 Item js_new_native_span_function(JsNativeSpan target);
 Item js_new_native_this_span_function(JsNativeThisSpan target);
-Item js_new_native_span_constructor(JsNativeSpan target);
 Item js_new_native_body_constructor(JsNativeCallBody call_body,
                                      JsNativeConstructBody construct_body,
                                      int formal_length);
@@ -1429,6 +1470,5 @@ Item js_new_native_closure(JsNativeP4 target, int adapter_arity,
                            Item* env, int env_size);
 Item js_new_native_closure(JsNativeP5 target, int adapter_arity,
                            Item* env, int env_size);
-Item js_new_native_env_span_closure(JsNativeEnvSpan target, int formal_length,
-                                    Item* env, int env_size);
+
 #endif

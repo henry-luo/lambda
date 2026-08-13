@@ -1648,23 +1648,24 @@ static int buffer_find_needle(const uint8_t* data, int blen,
     return -1;
 }
 
-extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item enc_item) {
+static Item js_buffer_search(Item buf, Item value, Item offset_item, Item enc_item,
+                             bool reverse) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
     if (!data || blen == 0) return (Item){.item = i2it(-1)};
 
-    // if offset_item is a string, treat it as encoding, offset = 0
+    // a string offset is the encoding argument for both search directions.
     if (get_type_id(offset_item) == LMD_TYPE_STRING && get_type_id(enc_item) != LMD_TYPE_STRING) {
         enc_item = offset_item;
         offset_item = (Item){.item = ITEM_NULL};
     }
 
-    int start = resolve_byte_offset(offset_item, blen, 0);
+    int offset = resolve_byte_offset(offset_item, blen, reverse ? blen - 1 : 0);
+    if (offset < 0) return (Item){.item = i2it(-1)};
 
-    // validate value type
     TypeId vtid = get_type_id(value);
-    if (vtid != LMD_TYPE_INT && vtid != LMD_TYPE_FLOAT && vtid != LMD_TYPE_STRING
-        && !js_is_typed_array(value)) {
+    if (!reverse && vtid != LMD_TYPE_INT && vtid != LMD_TYPE_FLOAT &&
+        vtid != LMD_TYPE_STRING && !js_is_typed_array(value)) {
         char msg[256];
         int pos = snprintf(msg, sizeof(msg),
             "The \"value\" argument must be one of type number or string "
@@ -1673,16 +1674,17 @@ extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item e
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
     }
 
-    if (vtid == LMD_TYPE_INT || vtid == LMD_TYPE_FLOAT) {
-        if (start >= blen) return (Item){.item = i2it(-1)};
+    if (vtid == LMD_TYPE_INT || (!reverse && vtid == LMD_TYPE_FLOAT)) {
+        if (offset >= blen) return (Item){.item = i2it(-1)};
         int byte_val;
         if (vtid == LMD_TYPE_INT) byte_val = (int)(it2i(value) & 0xFF);
         else byte_val = (int)((int64_t)it2d(value) & 0xFF);
-        int found = buffer_find_byte(data, start, blen - 1, 1, (uint8_t)byte_val);
+        int found = reverse
+            ? buffer_find_byte(data, offset, 0, -1, (uint8_t)byte_val)
+            : buffer_find_byte(data, offset, blen - 1, 1, (uint8_t)byte_val);
         return (Item){.item = i2it(found)};
     }
 
-    // search for string value
     char enc[32];
     Item search_error;
     const uint8_t* needle = NULL;
@@ -1692,9 +1694,13 @@ extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item e
         enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error));
     if (!needle) return (Item){.item = i2it(-1)};
 
-    int found = buffer_find_needle(data, blen, needle, needle_len, start, false,
+    int found = buffer_find_needle(data, blen, needle, needle_len, offset, reverse,
         is_ucs2_enc(enc));
     return (Item){.item = i2it(found)};
+}
+
+extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item enc_item) {
+    return js_buffer_search(buf, value, offset_item, enc_item, false);
 }
 
 // ─── buf.slice(start?, end?) — returns a new Buffer ─────────────────────────
@@ -1753,39 +1759,7 @@ extern "C" Item js_buffer_includes(Item buf, Item value, Item offset_item, Item 
 
 // ─── buf.lastIndexOf(value[, byteOffset[, encoding]]) ──────────────────────
 extern "C" Item js_buffer_lastIndexOf(Item buf, Item value, Item offset_item, Item enc_item) {
-    int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
-    if (!data || blen == 0) return (Item){.item = i2it(-1)};
-
-    // if offset_item is a string, treat it as encoding, offset = default
-    if (get_type_id(offset_item) == LMD_TYPE_STRING && get_type_id(enc_item) != LMD_TYPE_STRING) {
-        enc_item = offset_item;
-        offset_item = (Item){.item = ITEM_NULL};
-    }
-
-    int end = resolve_byte_offset(offset_item, blen, blen - 1);
-    if (end < 0) return (Item){.item = i2it(-1)};
-
-    if (get_type_id(value) == LMD_TYPE_INT) {
-        int byte_val = (int)(it2i(value) & 0xFF);
-        int limit = (end < blen - 1) ? end : blen - 1;
-        int found = buffer_find_byte(data, limit, 0, -1, (uint8_t)byte_val);
-        return (Item){.item = i2it(found)};
-    }
-
-    // search for string or buffer value
-    char enc[32];
-    Item search_error;
-    const uint8_t* needle = NULL;
-    int needle_len = 0;
-    uint8_t enc_buf[4096];
-    JS_ASSIGN_OR_RETURN(preparation, buffer_prepare_search_needle(value, enc_item, enc, sizeof(enc),
-        enc_buf, (int)sizeof(enc_buf), &needle, &needle_len, &search_error));
-    if (!needle) return (Item){.item = i2it(-1)};
-
-    int found = buffer_find_needle(data, blen, needle, needle_len, end, true,
-        is_ucs2_enc(enc));
-    return (Item){.item = i2it(found)};
+    return js_buffer_search(buf, value, offset_item, enc_item, true);
 }
 
 // ─── Offset validation helper for read/write methods ────────────────────────
@@ -2300,19 +2274,31 @@ extern "C" Item js_buffer_allocUnsafeSlow(Item size_item) {
 
 #define THIS js_get_current_this()
 
-// each instance wrapper reads this from js_get_current_this() and forwards
-extern "C" Item js_buf_inst_toString(Item encoding, Item start_item, Item end_item) {
-    return js_buffer_toString(THIS, encoding, start_item, end_item);
-}
-extern "C" Item js_buf_inst_write(Item str_item, Item offset_item, Item length_item, Item enc_item) {
-    return js_buffer_write(THIS, str_item, offset_item, length_item, enc_item);
-}
-extern "C" Item js_buf_inst_copy(Item dst_buf, Item target_start_item, Item source_start_item, Item source_end_item) {
-    return js_buffer_copy(THIS, dst_buf, target_start_item, source_start_item, source_end_item);
-}
-extern "C" Item js_buf_inst_equals(Item other) {
-    return js_buffer_equals(THIS, other);
-}
+// these adapters only bind the receiver; the target owns argument validation.
+#define JS_BUF_INST_FORWARD1(name) \
+    extern "C" Item js_buf_inst_##name(Item a) { return js_buffer_##name(THIS, a); }
+#define JS_BUF_INST_FORWARD2(name) \
+    extern "C" Item js_buf_inst_##name(Item a, Item b) { return js_buffer_##name(THIS, a, b); }
+#define JS_BUF_INST_FORWARD3(name) \
+    extern "C" Item js_buf_inst_##name(Item a, Item b, Item c) { return js_buffer_##name(THIS, a, b, c); }
+#define JS_BUF_INST_FORWARD4(name) \
+    extern "C" Item js_buf_inst_##name(Item a, Item b, Item c, Item d) { return js_buffer_##name(THIS, a, b, c, d); }
+
+JS_BUF_INST_FORWARD3(toString)
+JS_BUF_INST_FORWARD4(write)
+JS_BUF_INST_FORWARD4(copy)
+JS_BUF_INST_FORWARD1(equals)
+JS_BUF_INST_FORWARD3(indexOf)
+JS_BUF_INST_FORWARD3(lastIndexOf)
+JS_BUF_INST_FORWARD3(includes)
+JS_BUF_INST_FORWARD2(slice)
+JS_BUF_INST_FORWARD2(subarray)
+JS_BUF_INST_FORWARD1(fill)
+#undef JS_BUF_INST_FORWARD1
+#undef JS_BUF_INST_FORWARD2
+#undef JS_BUF_INST_FORWARD3
+#undef JS_BUF_INST_FORWARD4
+
 extern "C" Item js_buf_inst_compare(Item other) {
     if (!js_is_typed_array(other)) {
         char msg[256];
@@ -2321,24 +2307,6 @@ extern "C" Item js_buf_inst_compare(Item other) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
     }
     return js_buffer_compare(THIS, other);
-}
-extern "C" Item js_buf_inst_indexOf(Item value, Item offset_item, Item enc_item) {
-    return js_buffer_indexOf(THIS, value, offset_item, enc_item);
-}
-extern "C" Item js_buf_inst_lastIndexOf(Item value, Item offset_item, Item enc_item) {
-    return js_buffer_lastIndexOf(THIS, value, offset_item, enc_item);
-}
-extern "C" Item js_buf_inst_includes(Item value, Item offset_item, Item enc_item) {
-    return js_buffer_includes(THIS, value, offset_item, enc_item);
-}
-extern "C" Item js_buf_inst_slice(Item start_item, Item end_item) {
-    return js_buffer_slice(THIS, start_item, end_item);
-}
-extern "C" Item js_buf_inst_subarray(Item start_item, Item end_item) {
-    return js_buffer_subarray(THIS, start_item, end_item);
-}
-extern "C" Item js_buf_inst_fill(Item value) {
-    return js_buffer_fill(THIS, value);
 }
 extern "C" Item js_buf_inst_keys() {
     return js_buffer_iterator_new(THIS, 0);

@@ -150,22 +150,6 @@ static bool jm_args_are_prerooted(JsMirTranspiler* mt, MIR_op_t args,
         mt->arg_stack_scope->slot_count > 0;
 }
 
-MIR_reg_t jm_call_constructor_body_into(JsMirTranspiler* mt, MIR_op_t func,
-        MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count,
-        MIR_op_t new_target) {
-    JsMirScalarResultHome home = jm_new_scalar_result_home(mt,
-        "constructor-body");
-    if (!home.reg) return 0;
-    bool prerooted_args = jm_args_are_prerooted(mt, args, arg_count);
-    MIR_reg_t result = jm_call_6(mt, prerooted_args
-            ? "js_call_constructor_body_prerooted_args_into"
-            : "js_call_constructor_body_into", MIR_T_I64,
-        MIR_T_I64, func, MIR_T_I64, this_value, MIR_T_I64, args,
-        MIR_T_I64, arg_count, MIR_T_I64, new_target,
-        MIR_T_P, MIR_new_reg_op(mt->ctx, home.reg));
-    return jm_finish_scalar_result_home(mt, home, result);
-}
-
 MIR_reg_t jm_construct_value_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_op_t args, MIR_op_t arg_count, MIR_op_t new_target) {
     JsMirScalarResultHome home = jm_new_scalar_result_home(mt, "construct");
@@ -278,9 +262,7 @@ MIR_reg_t jm_boxed_immediate_const(JsMirTranspiler* mt, uint64_t item,
     bool reusable = item == ITEM_NULL_VAL || item == ITEM_JS_UNDEFINED;
     if (!js_ast_tune_boxed_const_reuse_enabled() || !reusable) {
         MIR_reg_t result = jm_new_reg(mt, prefix, MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx,
-                (int64_t)item)));
+        jm_emit_reg_op(mt, MIR_MOV, result, MIR_new_int_op(mt->ctx, (int64_t)item));
         return result;
     }
     if (mt->em.func_item != mt->boxed_float_const_cache_func) {
@@ -293,9 +275,7 @@ MIR_reg_t jm_boxed_immediate_const(JsMirTranspiler* mt, uint64_t item,
             return mt->boxed_float_const_cache[i].reg;
     }
     MIR_reg_t result = jm_new_reg(mt, prefix, MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx,
-            (int64_t)item)));
+    jm_emit_reg_op(mt, MIR_MOV, result, MIR_new_int_op(mt->ctx, (int64_t)item));
     if (mt->boxed_float_const_cache_count <
             (int)(sizeof(mt->boxed_float_const_cache) /
                   sizeof(mt->boxed_float_const_cache[0]))) {
@@ -372,10 +352,7 @@ static MIR_reg_t jm_emit_bits_double(JsMirTranspiler* mt, MIR_reg_t bits_reg) {
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg) {
     MIR_reg_t bits = jm_emit_double_bits(mt, d_reg);
     MIR_reg_t in_band = jm_new_reg(mt, "jfdmask", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, in_band),
-        MIR_new_reg_op(mt->ctx, bits),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK)));
+    jm_emit_reg_binary_op(mt, MIR_AND, in_band, bits, MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
 
     MIR_reg_t result = jm_new_reg(mt, "boxf", MIR_T_I64);
     MIR_label_t l_in_band = jm_new_label(mt);
@@ -388,39 +365,26 @@ MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg) {
         MIR_new_reg_op(mt->ctx, in_band)));
 
     MIR_reg_t is_zero = jm_new_reg(mt, "jfzero", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DEQ,
-        MIR_new_reg_op(mt->ctx, is_zero),
-        MIR_new_reg_op(mt->ctx, d_reg),
-        MIR_new_double_op(mt->ctx, 0.0)));
+    jm_emit_reg_binary_op(mt, MIR_DEQ, is_zero, d_reg, MIR_new_double_op(mt->ctx, 0.0));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
         MIR_new_label_op(mt->ctx, l_zero),
         MIR_new_reg_op(mt->ctx, is_zero)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_cold)));
 
     jm_emit_label(mt, l_in_band);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, bits)));
+    jm_emit_mov(mt, result, bits);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     jm_emit_label(mt, l_zero);
     MIR_reg_t sign = jm_new_reg(mt, "jfsign", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_URSH,
-        MIR_new_reg_op(mt->ctx, sign),
-        MIR_new_reg_op(mt->ctx, bits),
-        MIR_new_int_op(mt->ctx, 63)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_FLOAT_P0),
-        MIR_new_reg_op(mt->ctx, sign)));
+    jm_emit_reg_binary_op(mt, MIR_URSH, sign, bits, MIR_new_int_op(mt->ctx, 63));
+    jm_emit_reg_op_binary(mt, MIR_OR, result, MIR_new_int_op(mt->ctx, (int64_t)ITEM_FLOAT_P0), sign);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     jm_emit_label(mt, l_cold);
     MIR_reg_t boxed = jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64, MIR_T_D,
         MIR_new_reg_op(mt->ctx, d_reg));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, boxed)));
+    jm_emit_mov(mt, result, boxed);
 
     jm_emit_label(mt, l_end);
     return result;
@@ -444,8 +408,7 @@ MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value) {
         // Out-of-band IEEE patterns require a managed numeric cell; retain the
         // dynamic boxing path only for constants that cannot live in Item bits.
         MIR_reg_t d = jm_new_reg(mt, "dbl", MIR_T_D);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-            MIR_new_reg_op(mt->ctx, d), MIR_new_double_op(mt->ctx, value)));
+        jm_emit_reg_op(mt, MIR_DMOV, d, MIR_new_double_op(mt->ctx, value));
         return jm_box_float(mt, d);
     }
 
@@ -496,9 +459,7 @@ void jm_seed_boxed_float_const_cache(JsMirTranspiler* mt, JsAstNode* scope_root)
                 (int)(sizeof(mt->boxed_float_const_cache) /
                       sizeof(mt->boxed_float_const_cache[0]))) break;
         MIR_reg_t reg = jm_new_reg(mt, "boxfc_seed", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, reg),
-            MIR_new_int_op(mt->ctx, (int64_t)keys[k])));
+        jm_emit_reg_op(mt, MIR_MOV, reg, MIR_new_int_op(mt->ctx, (int64_t)keys[k]));
         int slot = mt->boxed_float_const_cache_seed_count++;
         mt->boxed_float_const_cache[slot].bits = keys[k];
         mt->boxed_float_const_cache[slot].reg = reg;
@@ -513,12 +474,10 @@ MIR_reg_t jm_box_string(JsMirTranspiler* mt, MIR_reg_t ptr_reg) {
     MIR_label_t l_end = jm_new_label(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_nn),
         MIR_new_reg_op(mt->ctx, ptr_reg)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+    jm_emit_reg_op(mt, MIR_MOV, result, MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
     jm_emit_label(mt, l_nn);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)STR_TAG), MIR_new_reg_op(mt->ctx, ptr_reg)));
+    jm_emit_reg_op_binary(mt, MIR_OR, result, MIR_new_int_op(mt->ctx, (int64_t)STR_TAG), ptr_reg);
     jm_emit_label(mt, l_end);
     return result;
 }
@@ -711,9 +670,7 @@ MIR_reg_t jm_module_name_id(JsMirTranspiler* mt,
             }
         }
         MIR_reg_t id = jm_new_reg(mt, "nameid", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, id),
-            MIR_new_int_op(mt->ctx, (int64_t)generated_id)));
+        jm_emit_reg_op(mt, MIR_MOV, id, MIR_new_int_op(mt->ctx, (int64_t)generated_id));
         if (mt->module_name_id_cache_count <
                 (int)(sizeof(mt->module_name_id_cache) /
                       sizeof(mt->module_name_id_cache[0]))) {
@@ -798,9 +755,7 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
     if (is_getter || is_setter) {
         MIR_reg_t is_set = jm_new_reg(mt, "is_set", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, is_set),
-            MIR_new_int_op(mt->ctx, is_setter ? 1 : 0)));
+        jm_emit_reg_op(mt, MIR_MOV, is_set, MIR_new_int_op(mt->ctx, is_setter ? 1 : 0));
         jm_call_4(mt, "js_install_user_accessor", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
@@ -1039,31 +994,6 @@ void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNod
         MIR_T_I64, MIR_new_reg_op(mt->ctx, src_reg));
 }
 
-// v12: Build a compile-time stack trace string from the lexical function chain.
-// Walks from current function up through parent_index to build:
-//   "Error\n    at FuncName1\n    at FuncName2\n..."
-MIR_reg_t jm_build_error_stack_string(JsMirTranspiler* mt, const char* error_type) {
-    char buf[1024];
-    int pos = 0;
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", error_type);
-
-    // Walk the lexical function chain from current to top-level
-    int fi = mt->current_func_index;
-    while (fi >= 0 && fi < mt->func_count && pos < (int)sizeof(buf) - 32) {
-        JsFuncCollected* fc = &mt->func_entries[fi];
-        const char* js_name = NULL;
-        if (fc->node && fc->node->name) {
-            js_name = fc->node->name->chars;
-        }
-        if (js_name && js_name[0]) {
-            pos += snprintf(buf + pos, sizeof(buf) - pos, "\n    at %s", js_name);
-        }
-        fi = fc->parent_index;
-    }
-
-    return jm_box_string_literal(mt, buf, pos);
-}
-
 // ============================================================================
 // Inline unboxing helpers (MIR instructions, no function calls)
 // ============================================================================
@@ -1072,10 +1002,8 @@ MIR_reg_t jm_build_error_stack_string(JsMirTranspiler* mt, const char* error_typ
 MIR_reg_t jm_emit_unbox_int(JsMirTranspiler* mt, MIR_reg_t item) {
     MIR_reg_t result = jm_new_reg(mt, "ubi", MIR_T_I64);
     // shift left 8, arithmetic shift right 8 for sign extension
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, item), MIR_new_int_op(mt->ctx, 8)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, 8)));
+    jm_emit_reg_binary_op(mt, MIR_LSH, result, item, MIR_new_int_op(mt->ctx, 8));
+    jm_emit_reg_binary_op(mt, MIR_RSH, result, result, MIR_new_int_op(mt->ctx, 8));
     return result;
 }
 
@@ -1091,10 +1019,7 @@ MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
         return d;
     }
     MIR_reg_t in_band = jm_new_reg(mt, "jfumask", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, in_band),
-        MIR_new_reg_op(mt->ctx, item),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK)));
+    jm_emit_reg_binary_op(mt, MIR_AND, in_band, item, MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
     MIR_reg_t result = jm_new_reg(mt, "junboxf", MIR_T_D);
     MIR_label_t l_inline = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
@@ -1103,15 +1028,11 @@ MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
         MIR_new_reg_op(mt->ctx, in_band)));
     MIR_reg_t cold = jm_call_1(mt, JS_PROFILED_IT2D_NAME, MIR_T_D, MIR_T_I64,
         MIR_new_reg_op(mt->ctx, item));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, cold)));
+    jm_emit_dmov(mt, result, cold);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
     jm_emit_label(mt, l_inline);
     MIR_reg_t inline_d = jm_emit_bits_double(mt, item);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, inline_d)));
+    jm_emit_dmov(mt, result, inline_d);
     jm_emit_label(mt, l_end);
     return result;
 }
@@ -1192,8 +1113,7 @@ static MIR_reg_t jm_box_native_impl(JsMirTranspiler* mt, MIR_reg_t reg,
     case LMD_TYPE_BOOL: {
         MIR_reg_t result = jm_new_reg(mt, "boxb", MIR_T_I64);
         uint64_t BOOL_TAG = (uint64_t)LMD_TYPE_BOOL << 56;
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_int_op(mt->ctx, (int64_t)BOOL_TAG), MIR_new_reg_op(mt->ctx, reg)));
+        jm_emit_reg_op_binary(mt, MIR_OR, result, MIR_new_int_op(mt->ctx, (int64_t)BOOL_TAG), reg);
         return result;
     }
     default: return reg;  // already boxed
@@ -1270,7 +1190,6 @@ MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t idx_native, MIR_reg_t val_boxed,
                                                int ta_type,
                                                MIR_reg_t h_data , MIR_reg_t h_len );
-MIR_reg_t jm_transpile_typed_array_length(JsMirTranspiler* mt, MIR_reg_t arr_reg);
 // A2 forward declarations
 JsMirVarEntry* jm_get_js_array_var(JsMirTranspiler* mt, JsAstNode* obj_node);
 MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
@@ -1602,10 +1521,7 @@ void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_
         MIR_reg_t val = val_reg;
         if (jm_is_native_type(type_id))
             val = jm_box_native(mt, val_reg, type_id);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                active_var->scope_env_slot * (int)sizeof(uint64_t), active_var->scope_env_reg, 0, 1),
-            MIR_new_reg_op(mt->ctx, val)));
+        jm_emit_store_i64(mt, active_var->scope_env_slot * (int)sizeof(uint64_t), active_var->scope_env_reg, val);
         return;
     }
     // Check if this var name is in the current function's scope env.
@@ -1653,9 +1569,7 @@ void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_
             MIR_reg_t val = val_reg;
             if (jm_is_native_type(type_id))
                 val = jm_box_native(mt, val_reg, type_id);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
-                MIR_new_reg_op(mt->ctx, val)));
+            jm_emit_store_i64(mt, slot * (int)sizeof(uint64_t), mt->scope_env_reg, val);
 
             return;
         }
@@ -1684,9 +1598,7 @@ void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* na
         MIR_reg_t val = val_reg;
         if (jm_is_native_type(type_id))
             val = jm_box_native(mt, val_reg, type_id);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
-            MIR_new_reg_op(mt->ctx, val)));
+        jm_emit_store_i64(mt, s * (int)sizeof(uint64_t), mt->scope_env_reg, val);
         return;
     }
     jm_scope_env_mark_and_writeback(mt, name, val_reg, type_id);
@@ -1699,29 +1611,17 @@ MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* expr)
     TypeId expr_type = expr ? jm_get_effective_type(mt, expr) : LMD_TYPE_ANY;
     if (expr_type == LMD_TYPE_BOOL) {
         MIR_reg_t result = jm_new_reg(mt, "trthy", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
-            MIR_new_reg_op(mt->ctx, result),
-            MIR_new_reg_op(mt->ctx, val),
-            MIR_new_int_op(mt->ctx, 1)));
+        jm_emit_reg_binary_op(mt, MIR_AND, result, val, MIR_new_int_op(mt->ctx, 1));
         return result;
     }
     if (expr_type == LMD_TYPE_FLOAT && MIR_reg_type(mt->ctx, val, mt->em.func) == MIR_T_D) {
         MIR_reg_t nonzero = jm_new_reg(mt, "dtruth_nz", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DNE,
-            MIR_new_reg_op(mt->ctx, nonzero),
-            MIR_new_reg_op(mt->ctx, val),
-            MIR_new_double_op(mt->ctx, 0.0)));
+        jm_emit_reg_binary_op(mt, MIR_DNE, nonzero, val, MIR_new_double_op(mt->ctx, 0.0));
         MIR_reg_t notnan = jm_new_reg(mt, "dtruth_nn", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DEQ,
-            MIR_new_reg_op(mt->ctx, notnan),
-            MIR_new_reg_op(mt->ctx, val),
-            MIR_new_reg_op(mt->ctx, val)));
+        jm_emit_reg_binary(mt, MIR_DEQ, notnan, val, val);
         MIR_reg_t result = jm_new_reg(mt, "dtruth", MIR_T_I64);
         // JS Number truthiness treats +0, -0, and NaN as false; all other doubles are true.
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
-            MIR_new_reg_op(mt->ctx, result),
-            MIR_new_reg_op(mt->ctx, nonzero),
-            MIR_new_reg_op(mt->ctx, notnan)));
+        jm_emit_reg_binary(mt, MIR_AND, result, nonzero, notnan);
         return result;
     }
     return jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
@@ -1756,15 +1656,11 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         if (lit->literal_type == JS_LITERAL_NUMBER) {
             if (target_type == LMD_TYPE_FLOAT) {
                 MIR_reg_t r = jm_new_reg(mt, "dlit", MIR_T_D);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                    MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_double_op(mt->ctx, lit->value.number_value)));
+                jm_emit_reg_op(mt, MIR_DMOV, r, MIR_new_double_op(mt->ctx, lit->value.number_value));
                 return r;
             } else {
                 MIR_reg_t r = jm_new_reg(mt, "ilit", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, (int64_t)lit->value.number_value)));
+                jm_emit_reg_op(mt, MIR_MOV, r, MIR_new_int_op(mt->ctx, (int64_t)lit->value.number_value));
                 return r;
             }
         }
@@ -1773,17 +1669,11 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
             // returns; unboxing the boxed Item here turned both arms into 0.
             if (target_type == LMD_TYPE_FLOAT) {
                 MIR_reg_t r = jm_new_reg(mt, "dbool", MIR_T_D);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                    MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_double_op(mt->ctx,
-                        lit->value.boolean_value ? 1.0 : 0.0)));
+                jm_emit_reg_op(mt, MIR_DMOV, r, MIR_new_double_op(mt->ctx, lit->value.boolean_value ? 1.0 : 0.0));
                 return r;
             }
             MIR_reg_t r = jm_new_reg(mt, "ibool", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, r),
-                MIR_new_int_op(mt->ctx,
-                    lit->value.boolean_value ? 1 : 0)));
+            jm_emit_reg_op(mt, MIR_MOV, r, MIR_new_int_op(mt->ctx, lit->value.boolean_value ? 1 : 0));
             return r;
         }
     }
@@ -1831,17 +1721,13 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
             } else if (mc && mc->const_type == MCONST_INT) {
                 // constant int: emit directly as native
                 MIR_reg_t r = jm_new_reg(mt, "mcint", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, mc->int_val)));
+                jm_emit_reg_op(mt, MIR_MOV, r, MIR_new_int_op(mt->ctx, mc->int_val));
                 if (target_type == LMD_TYPE_FLOAT)
                     return jm_ensure_native_float(mt, r, LMD_TYPE_INT);
                 return r;
             } else if (mc && mc->const_type == MCONST_FLOAT) {
                 MIR_reg_t r = jm_new_reg(mt, "mcflt", MIR_T_D);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                    MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_double_op(mt->ctx, mc->float_val)));
+                jm_emit_reg_op(mt, MIR_DMOV, r, MIR_new_double_op(mt->ctx, mc->float_val));
                 if (target_type == LMD_TYPE_INT)
                     return jm_ensure_native_int(mt, r, LMD_TYPE_FLOAT);
                 return r;
