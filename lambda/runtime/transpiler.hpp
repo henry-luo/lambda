@@ -87,7 +87,7 @@ struct Runtime {
     TSParser* parser;
     char* current_dir;
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)
-    unsigned int optimize_level;  // MIR JIT optimization level (0-2, default: 2)
+    unsigned int optimize_level;  // MIR optimization level (0-3, default: 2)
     bool dry_run;        // dry-run mode: IO functions return fabricated results instead of real IO
     void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)
     void* dom_ui_context; // UiContext* borrowed by the document execution realm (NULL outside DOM sessions)

@@ -26,7 +26,8 @@ These options apply when running a script directly (i.e., `lambda <script.ls>`).
 |------|-----------|-------------|---------|
 | `-h` | `--help` | Show help message | |
 | | `--max-errors N` | Max type errors before stopping (0 = unlimited) | `10` |
-| | `--optimize=N` | MIR JIT optimization level | `2` |
+| | `--optimize=N` / `--opt-level=N` | MIR optimization level; large modules may automatically use the interpreter | `2` |
+| | `--mir-interp` | Use the MIR interpreter instead of native code generation | |
 | `-O0` | | Optimization level 0 (debug, stack traces) | |
 | `-O1` | | Optimization level 1 (basic) | |
 | `-O2` | | Optimization level 2 (full) | |

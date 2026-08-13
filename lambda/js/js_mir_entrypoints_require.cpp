@@ -354,20 +354,6 @@ extern "C" void js_mir_volume_counters_get(JsMirVolumeCounters* out) {
     if (out) *out = g_last_js_mir_volume;
 }
 
-static bool js_mir_large_source_interp_enabled(void) {
-    const char* flag = getenv("LAMBDA_JS_LARGE_INTERP");
-    return !flag || (strcmp(flag, "0") != 0 && strcmp(flag, "false") != 0);
-}
-
-static size_t js_mir_large_source_interp_threshold(void) {
-    const char* value = getenv("LAMBDA_JS_LARGE_INTERP_BYTES");
-    if (!value || !value[0]) return 15000;
-    char* end = NULL;
-    long parsed = strtol(value, &end, 10);
-    if (end == value || parsed <= 0) return 15000;
-    return (size_t)parsed;
-}
-
 static void js_mir_destroy_unowned_eval_context(Runtime* runtime,
         EvalContext* local_context, bool reusing_context) {
     if (!reusing_context && local_context) {
@@ -914,8 +900,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     bool auto_interp_for_large_source = false;
     int saved_mir_interp_mode = g_mir_interp_mode;
     if (!use_mir_interp_for_script && g_js_mir_optimize_level == 0 &&
-        js_mir_large_source_interp_enabled() &&
-        js_source_len >= js_mir_large_source_interp_threshold()) {
+        mir_large_interp_enabled() &&
+        js_source_len >= mir_large_source_interp_threshold()) {
         g_mir_interp_mode = 1;
         use_mir_interp_for_script = true;
         auto_interp_for_large_source = true;
@@ -1119,7 +1105,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // paired — only the MIR_link interface differs. Disable with LAMBDA_JS_LARGE_INTERP=0.
     unsigned int effective_opt = g_js_mir_optimize_level;
     bool document_context = (runtime && runtime->dom_doc != NULL);
-    if (!use_mir_interp_for_script && js_mir_large_source_interp_enabled() &&
+    if (!use_mir_interp_for_script && mir_large_interp_enabled() &&
         (total_insns > JM_LARGE_MODULE_INSN_THRESHOLD ||
          (document_context && (g_js_force_document_interp ||
                                total_insns > JM_RADIANT_INTERP_INSN_THRESHOLD)))) {
