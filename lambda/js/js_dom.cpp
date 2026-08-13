@@ -1474,6 +1474,9 @@ extern "C" bool js_dom_is_connected(void* dom_elem) {
 
 static void register_named_elements_recursive(DomElement* elem, Item global) {
     if (!elem) return;
+    // Generated layout nodes are not script-visible DOM and can outlive a
+    // source subtree; never expose their retained storage as Window globals.
+    if (elem->is_synthetic()) return;
 
     if (elem->id && elem->id[0] != '\0') {
         Item key = (Item){.item = s2it(heap_create_name(elem->id))};
@@ -4671,6 +4674,30 @@ static bool js_dom_data_attr_to_dataset_key(const char* attr, char* out, size_t 
     return len > 0;
 }
 
+extern "C" Item js_dom_dataset_property(Item elem_item) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    if (!elem) return ItemNull;
+    RootFrame roots(4);
+    Rooted<Item> elem_root(roots, elem_item);
+    Rooted<Item> dataset_root(roots, js_new_object());
+    Rooted<Item> key_root(roots, js_string_key("__lambda_dataset_element"));
+    Rooted<Item> value_root(roots, elem_item);
+    // Dataset construction allocates keys and shapes; root the unfinished view
+    // and owner so a collection cannot leave an asynchronously retained wrapper stale.
+    js_define_own_key_storage(dataset_root.get(), key_root.get(), elem_root.get());
+    int attr_count = 0;
+    const char** names = elem->attribute_names(&attr_count);
+    for (int i = 0; i < attr_count; i++) {
+        char key_buf[128];
+        if (!js_dom_data_attr_to_dataset_key(names[i], key_buf, sizeof(key_buf))) continue;
+        const char* value = elem->get_attribute(names[i]);
+        key_root.set((Item){.item = s2it(heap_create_name(key_buf))});
+        value_root.set((Item){.item = s2it(heap_create_name(value ? value : ""))});
+        js_define_own_key_storage(dataset_root.get(), key_root.get(), value_root.get());
+    }
+    return dataset_root.get();
+}
+
 static bool js_dom_has_valid_int_attr(DomElement* elem, const char* attr, long* out) {
     if (!elem || !attr) return false;
     const char* value = elem->get_attribute(attr);
@@ -5489,15 +5516,27 @@ static Item js_dom_xml_serializer_serialize_to_string(Item node_item) {
 }
 
 static void js_dom_install_xml_serializer_global(void) {
-    Item global = js_get_global_this();
-    Item ctor = js_new_native_constructor(js_dom_xml_serializer_constructor);
-    js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("XMLSerializer"))});
-    Item proto = js_new_object();
-    js_set_key_default(proto, js_string_key("constructor"), ctor);
-    js_set_key_default(proto, js_string_key("serializeToString"),
+    RootFrame roots(4);
+    Rooted<Item> global_root(roots, js_get_global_this());
+    Rooted<Item> ctor_root(roots,
+        js_new_native_constructor(js_dom_xml_serializer_constructor));
+    Rooted<Item> proto_root(roots, js_new_object());
+    Rooted<Item> method_root(roots,
         js_new_native_function(js_dom_xml_serializer_serialize_to_string));
-    js_set_key_default(ctor, js_string_key("prototype"), proto);
-    js_set_key_default(global, js_string_key("XMLSerializer"), ctor);
+    js_set_function_name(ctor_root.get(),
+        (Item){.item = s2it(heap_create_name("XMLSerializer"))});
+    js_set_key_default(proto_root.get(), js_string_key("constructor"),
+        ctor_root.get());
+    js_set_key_default(proto_root.get(), js_string_key("serializeToString"),
+        method_root.get());
+    // Native constructors keep their own prototype descriptor non-writable;
+    // initializing it through the constructor helper is required for `new
+    // XMLSerializer()` to inherit serializeToString instead of returning a
+    // receiver with a missing method.
+    js_initialize_native_constructor_prototype(ctor_root.get(),
+        proto_root.get());
+    js_set_key_default(global_root.get(), js_string_key("XMLSerializer"),
+        ctor_root.get());
 }
 
 static void js_dom_collapse_selection_before_child_replace(DomElement* elem,
@@ -5602,6 +5641,116 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
     log_debug("js_dom_replace_inner_html: replaced <%s>",
               elem->tag_name ? elem->tag_name : "?");
     return true;
+}
+
+static DomElement* js_dom_parse_html_fragment(DomDocument* doc,
+                                              const char* html_str) {
+    if (!doc || !doc->input || !html_str) return nullptr;
+
+    Html5Parser* parser = html5_fragment_parser_create(
+        doc->document_pool, doc->node_arena, doc->input);
+    if (!parser) return nullptr;
+    html5_fragment_parse(parser, html_str);
+    Element* body_elem = html5_fragment_get_body(parser);
+    if (!body_elem) return nullptr;
+
+    DomElement* fragment = dom_document_fragment_create(doc);
+    if (!fragment) return nullptr;
+    for (int64_t i = 0; i < body_elem->length; i++) {
+        TypeId type = get_type_id(body_elem->items[i]);
+        if (type == LMD_TYPE_ELEMENT) {
+            DomElement* child = build_dom_tree_from_element(
+                body_elem->items[i].element, doc, nullptr);
+            if (child) ((DomNode*)fragment)->append_child((DomNode*)child);
+        } else if (type == LMD_TYPE_STRING) {
+            String* text = js_dom_fragment_text(body_elem->items[i]);
+            if (!text) continue;
+            DomText* child = dom_text_create_detached(text, doc);
+            if (child) ((DomNode*)fragment)->append_child((DomNode*)child);
+        }
+    }
+    return fragment;
+}
+
+static bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) {
+    if (!doc || !html_str) return false;
+    DocState* state = doc->state ? doc->state : js_dom_current_state();
+    DomSelection* selection = state ? state->dom_selection : nullptr;
+    if (!selection || selection->range_count == 0 || !selection->ranges[0]) {
+        return false;
+    }
+    DomRange* range = selection->ranges[0];
+    if (!range->start.node || !range->end.node) return false;
+
+    DomElement* fragment = js_dom_parse_html_fragment(doc, html_str);
+    if (!fragment) return false;
+
+    ArrayList* inserted = arraylist_new(8);
+    if (!inserted) return false;
+    for (DomNode* child = fragment->first_child; child; child = child->next_sibling) {
+        if (!arraylist_append(inserted, child)) {
+            arraylist_free(inserted);
+            return false;
+        }
+    }
+
+    bool replaced_selection = !dom_range_collapsed(range);
+    DomNode* replace_root = replaced_selection ? dom_range_common_ancestor(range) : nullptr;
+    const char* exception = nullptr;
+    if (replaced_selection && !dom_range_delete_contents(range, &exception)) {
+        arraylist_free(inserted);
+        return false;
+    }
+    if (inserted->length > 0 &&
+        !dom_range_insert_node(range, (DomNode*)fragment, &exception)) {
+        arraylist_free(inserted);
+        return false;
+    }
+
+    // Editor.js delegates inline paste to execCommand; the bridge removed by
+    // DOM API consolidation must report the Range mutation that saves editor state.
+    if (replaced_selection && replace_root) {
+        js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
+                               replace_root, replace_root);
+    }
+    for (int i = 0; i < inserted->length; i++) {
+        DomNode* child = (DomNode*)inserted->data[i];
+        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child, child->parent);
+    }
+
+    if (inserted->length > 0) {
+        DomNode* last = (DomNode*)inserted->data[inserted->length - 1];
+        uint32_t end = dom_node_boundary_length(last);
+        if (!dom_selection_collapse(selection, last, end, &exception)) {
+            arraylist_free(inserted);
+            return false;
+        }
+        js_dom_queue_selectionchange(selection);
+    }
+    arraylist_free(inserted);
+    return true;
+}
+
+extern "C" Item js_dom_document_exec_command_bridge(Item command_item,
+                                                      Item value_item) {
+    RootFrame roots(3);
+    Rooted<Item> command_root(roots, command_item);
+    Rooted<Item> value_root(roots, value_item);
+    Rooted<Item> string_root(roots, js_to_string(value_root.get()));
+    const char* command = fn_to_cstr(command_root.get());
+    const char* value = fn_to_cstr(string_root.get());
+    if (!command || !value || strcasecmp(command, "insertHTML") != 0) {
+        return (Item){.item = ITEM_FALSE};
+    }
+
+    // A precise root keeps the JS string live, while this owned copy keeps the
+    // parser input stable if fragment construction triggers a moving collection.
+    char* stable_value = mem_strdup(value, MEM_CAT_JS_RUNTIME);
+    if (!stable_value) return (Item){.item = ITEM_FALSE};
+    bool inserted = js_dom_exec_insert_html(
+        (DomDocument*)js_dom_get_document(), stable_value);
+    mem_free(stable_value);
+    return (Item){.item = b2it(inserted ? 1 : 0)};
 }
 
 // ============================================================================
@@ -9688,18 +9837,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = s2it(heap_create_name(js_dom_get_writing_suggestions(elem)))};
     }
     if (strcmp(prop, "dataset") == 0) {
-        Item dataset = js_new_object();
-        int attr_count = 0;
-        const char** names = elem->attribute_names(&attr_count);
-        for (int i = 0; i < attr_count; i++) {
-            char key_buf[128];
-            if (!js_dom_data_attr_to_dataset_key(names[i], key_buf, sizeof(key_buf))) continue;
-            const char* value = elem->get_attribute(names[i]);
-            js_set_key_default(dataset,
-                (Item){.item = s2it(heap_create_name(key_buf))},
-                (Item){.item = s2it(heap_create_name(value ? value : ""))});
-        }
-        return dataset;
+        return js_dom_dataset_property(elem_item);
     }
     // autofocus boolean reflection (HTML global attribute).
     if (strcmp(prop, "autofocus") == 0) {
@@ -10496,6 +10634,13 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // above, and setAttribute() remains the DOM attribute mutation path.
     {
         expando_set_property((DomNode*)elem, prop_name, value);
+        if (prop[0] == 'o' && prop[1] == 'n' && prop[2] != '\0') {
+            // DOM host setters store on* values in the expando side table;
+            // register the same write in the listener list so assignment
+            // order relative to addEventListener() remains observable.
+            js_dom_event_handler_property_set_for_node(
+                elem, prop, (int)strlen(prop), value);
+        }
     }
     return value;
 }
@@ -13992,12 +14137,8 @@ extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem_ptr, Item position
     const char* html_str = fn_to_cstr(html_arg);
     if (!position || !html_str || !elem->doc) return ItemNull;
     DomDocument* doc = elem->doc;
-    if (!doc->input) return ItemNull;
-    Html5Parser* parser = html5_fragment_parser_create(doc->document_pool, doc->node_arena, doc->input);
-    if (!parser) return ItemNull;
-    html5_fragment_parse(parser, html_str);
-    Element* body_elem = html5_fragment_get_body(parser);
-    if (!body_elem) return ItemNull;
+    DomElement* fragment = js_dom_parse_html_fragment(doc, html_str);
+    if (!fragment) return ItemNull;
 
     DomElement* target_parent = nullptr;
     DomNode* ref_node = nullptr;
@@ -14020,28 +14161,13 @@ extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem_ptr, Item position
         return ItemNull;
     }
 
-    for (int64_t i = 0; i < body_elem->length; i++) {
-        TypeId type = get_type_id(body_elem->items[i]);
-        if (type == LMD_TYPE_ELEMENT) {
-            DomElement* child_dom = build_dom_tree_from_element(
-                body_elem->items[i].element, doc, nullptr);
-            if (child_dom) {
-                if (ref_node)
-                    ((DomNode*)target_parent)->insert_before((DomNode*)child_dom, ref_node);
-                else
-                    ((DomNode*)target_parent)->append_child((DomNode*)child_dom);
-            }
-        } else if (type == LMD_TYPE_STRING) {
-            String* s = js_dom_fragment_text(body_elem->items[i]);
-            if (!s) continue;
-            DomText* text_node = dom_text_create_detached(s, doc);
-            if (text_node) {
-                if (ref_node)
-                    ((DomNode*)target_parent)->insert_before((DomNode*)text_node, ref_node);
-                else
-                    ((DomNode*)target_parent)->append_child((DomNode*)text_node);
-            }
-        }
+    while (fragment->first_child) {
+        DomNode* child = fragment->first_child;
+        fragment->remove_child(child);
+        if (ref_node)
+            ((DomNode*)target_parent)->insert_before(child, ref_node);
+        else
+            ((DomNode*)target_parent)->append_child(child);
     }
     return ItemNull;
 }
@@ -14575,6 +14701,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         if (!attr_name) return (Item){.item = ITEM_FALSE};
 
         bool has = elem->has_attribute(attr_name);
+        const char* old_value = has ? elem->get_attribute(attr_name) : nullptr;
         bool should_have;
         if (argc >= 2) {
             should_have = js_is_truthy(args[1]);
@@ -14591,7 +14718,10 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
             }
         }
         if (should_have != has) {
-            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            // MutationObserver filters depend on toggleAttribute preserving the
+            // changed name; a null name turns self-filtered updates into feedback loops.
+            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+                                   elem->parent, attr_name, old_value);
         }
         return (Item){.item = b2it(should_have ? 1 : 0)};
     }
@@ -15101,8 +15231,36 @@ extern "C" Item js_dataset_set_property(Item elem_item, Item prop_name, Item val
     char attr_name[256];
     camel_to_data_attr(prop, attr_name, sizeof(attr_name));
 
+    const char* old_value = elem->get_attribute(attr_name);
     elem->set_attribute(attr_name, val_str);
+    // Dataset writes must expose their data-* name so MutationObserver
+    // consumers can suppress their own bookkeeping mutations.
+    js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+                           elem->parent, attr_name, old_value);
     return value;
+}
+
+extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
+                                                       Item value) {
+    RootFrame roots(4);
+    Rooted<Item> dataset_root(roots, dataset);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> owner_root(roots, ItemNull);
+    if (get_type_id(key_root.get()) != LMD_TYPE_STRING) return false;
+    String* key_string = it2s(key_root.get());
+    if (!key_string ||
+        (key_string->len == 24 &&
+         strncmp(key_string->chars, "__lambda_dataset_element", 24) == 0)) {
+        return false;
+    }
+    // Property lookup may collect while an async handler owns the only
+    // references to this dataset view; keep the receiver and operands precise.
+    owner_root.set(js_get_key_default(dataset_root.get(),
+        js_string_key("__lambda_dataset_element")));
+    if (!js_dom_unwrap_element(owner_root.get())) return false;
+    js_dataset_set_property(owner_root.get(), key_root.get(), value_root.get());
+    return true;
 }
 
 // ============================================================================

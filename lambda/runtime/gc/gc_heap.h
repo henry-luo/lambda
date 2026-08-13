@@ -97,6 +97,14 @@ typedef int (*gc_js_function_compact_fn)(void* data, gc_heap_t* gc);
 // Implementations must clear the released field so repeated teardown is safe.
 typedef void (*gc_external_destroy_fn)(void* data, uint16_t type_tag);
 typedef void (*gc_weak_clear_fn)(uint64_t* slot, void* context);
+typedef void (*gc_ephemeron_clear_fn)(uint64_t key, void* context);
+
+typedef struct gc_ephemeron {
+    uint64_t* key_slot;
+    uint64_t* value_slot;
+    gc_ephemeron_clear_fn on_clear;
+    void* context;
+} gc_ephemeron_t;
 
 /**
  * Small per-cleanup native-pointer set used by runtime finalizers that own
@@ -229,6 +237,13 @@ typedef struct gc_heap {
     gc_weak_slot_t* weak_slots;
     int weak_slot_count;
     int weak_slot_capacity;
+
+    // Ephemerons mark values only after their keys are independently live.
+    // Entries are registered while tracing a live native weak collection and
+    // discarded after the current collection's weak-processing phase.
+    gc_ephemeron_t* ephemerons;
+    int ephemeron_count;
+    int ephemeron_capacity;
 
     // Collection trigger
     size_t gc_threshold;            // data zone bytes that trigger auto-collection
@@ -428,6 +443,13 @@ void gc_defer_collection_end(gc_heap_t* gc);
 void gc_register_weak(gc_heap_t* gc, uint64_t* slot,
                       gc_weak_clear_fn on_clear, void* context);
 void gc_unregister_weak(gc_heap_t* gc, uint64_t* slot);
+
+/** Register a key/value ephemeron for the current collection. Returns zero
+ * only when the registry cannot grow; callers must then preserve safety by
+ * tracing the native entry strongly for that collection. */
+int gc_register_ephemeron(gc_heap_t* gc, uint64_t* key_slot,
+                          uint64_t* value_slot,
+                          gc_ephemeron_clear_fn on_clear, void* context);
 
 /**
  * Register a contiguous range of Items as GC roots.

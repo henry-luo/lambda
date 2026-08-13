@@ -476,6 +476,9 @@ gc_heap_t* gc_heap_create(void) {
     gc->weak_slots = NULL;
     gc->weak_slot_count = 0;
     gc->weak_slot_capacity = 0;
+    gc->ephemerons = NULL;
+    gc->ephemeron_count = 0;
+    gc->ephemeron_capacity = 0;
 
     // initialize root range registry (for JS closure env arrays)
     gc->root_ranges = NULL;
@@ -563,6 +566,10 @@ void gc_heap_destroy(gc_heap_t* gc) {
     if (gc->weak_slots) {
         mem_free(gc->weak_slots);
         gc->weak_slots = NULL;
+    }
+    if (gc->ephemerons) {
+        mem_free(gc->ephemerons);
+        gc->ephemerons = NULL;
     }
 
     gc_dump_tune_stats(gc);
@@ -1000,6 +1007,32 @@ void gc_unregister_weak(gc_heap_t* gc, uint64_t* slot) {
     }
 }
 
+int gc_register_ephemeron(gc_heap_t* gc, uint64_t* key_slot,
+                          uint64_t* value_slot,
+                          gc_ephemeron_clear_fn on_clear, void* context) {
+    if (!gc || !key_slot || !value_slot) return 0;
+    if (gc->ephemeron_count >= gc->ephemeron_capacity) {
+        int new_capacity = gc->ephemeron_capacity
+            ? gc->ephemeron_capacity * 2 : GC_ROOT_SLOTS_INITIAL;
+        gc_ephemeron_t* entries = (gc_ephemeron_t*)mem_realloc(
+            gc->ephemerons,
+            (size_t)new_capacity * sizeof(gc_ephemeron_t),
+            MEM_CAT_CONTAINER);
+        if (!entries) {
+            log_error("gc-ephemeron: failed to grow registry to %d", new_capacity);
+            return 0;
+        }
+        gc->ephemerons = entries;
+        gc->ephemeron_capacity = new_capacity;
+    }
+    gc_ephemeron_t* entry = &gc->ephemerons[gc->ephemeron_count++];
+    entry->key_slot = key_slot;
+    entry->value_slot = value_slot;
+    entry->on_clear = on_clear;
+    entry->context = context;
+    return 1;
+}
+
 void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count) {
     if (!gc || !base || count <= 0) return;
     for (int i = 0; i < gc->root_range_count; i++) {
@@ -1254,6 +1287,68 @@ void gc_mark_object_ptr(gc_heap_t* gc, void* ptr) {
 
     header->marked = 1;
     mark_stack_push(gc, header);
+}
+
+static int gc_drain_mark_stack(gc_heap_t* gc);
+
+static int gc_ephemeron_key_is_live(gc_heap_t* gc, uint64_t item) {
+    void* ptr = item_to_ptr(gc, item);
+    // Non-GC host objects and immediate unregistered symbols have no object
+    // header whose death this collector can observe, so they remain live.
+    if (!ptr || !is_gc_object(gc, ptr)) return 1;
+    gc_header_t* header = gc_get_header(ptr);
+    return header && header->marked && !(header->gc_flags & GC_FLAG_FREED);
+}
+
+static int gc_ephemeron_mark_value(gc_heap_t* gc, uint64_t item) {
+    void* ptr = item_to_ptr(gc, item);
+    if (!ptr || !is_gc_object(gc, ptr)) return 0;
+    gc_header_t* header = gc_get_header(ptr);
+    if (!header || header->marked || (header->gc_flags & GC_FLAG_FREED)) return 0;
+    header->marked = 1;
+    mark_stack_push(gc, header);
+    return 1;
+}
+
+static int gc_process_ephemerons(gc_heap_t* gc) {
+    if (!gc || !gc->ephemerons || gc->ephemeron_count <= 0) return 0;
+    int traced_count = 0;
+    int made_progress = 1;
+    while (made_progress) {
+        made_progress = 0;
+        int snapshot_count = gc->ephemeron_count;
+        for (int i = 0; i < snapshot_count; i++) {
+            gc_ephemeron_t* entry = &gc->ephemerons[i];
+            if (!entry->key_slot || !entry->value_slot) continue;
+            if (!gc_ephemeron_key_is_live(gc, *entry->key_slot)) continue;
+            if (gc_ephemeron_mark_value(gc, *entry->value_slot)) {
+                made_progress = 1;
+            }
+        }
+        if (gc->mark_top > 0) {
+            traced_count += gc_drain_mark_stack(gc);
+            made_progress = 1;
+        }
+        // Tracing an ephemeron value can discover another live WeakMap.
+        if (gc->ephemeron_count > snapshot_count) made_progress = 1;
+    }
+
+    int snapshot_count = gc->ephemeron_count;
+    for (int i = 0; i < snapshot_count; i++) {
+        gc_ephemeron_t* entry = &gc->ephemerons[i];
+        if (!entry->key_slot || !entry->value_slot ||
+            gc_ephemeron_key_is_live(gc, *entry->key_slot)) {
+            continue;
+        }
+        uint64_t dead_key = *entry->key_slot;
+        // Native collection indices must drop the key before its object slot
+        // can be swept and reused for a different identity.
+        if (entry->on_clear) entry->on_clear(dead_key, entry->context);
+        *entry->key_slot = 0;
+        *entry->value_slot = 0;
+    }
+    gc->ephemeron_count = 0;
+    return traced_count;
 }
 
 static void gc_process_weak_slots(gc_heap_t* gc) {
@@ -2184,6 +2279,7 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
 
     uint64_t gc_trace_token = GC_PROFILE_ENTER("gc_trace_objects");
     int traced_count = gc_drain_mark_stack(gc);
+    traced_count += gc_process_ephemerons(gc);
     GC_PROFILE_LEAVE("gc_trace_objects", gc_trace_token);
     gc->tune.mark_nanos += gc_now_nanos() - mark_start_ns;
     gc->tune.mark_collections++;

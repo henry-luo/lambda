@@ -949,6 +949,7 @@ struct JubeHostDomAPI {
     // direct operations; property names are resolved before invocation (D6.2.2v2).
     Item (*document_create_tree_walker_bridge)(Item root, Item what_to_show);
     Item (*document_create_event_bridge)(Item interface_name);
+    Item (*document_exec_command_bridge)(Item command, Item value);
 };
 
 // Each hosted service table evolves independently. A module checks both the
