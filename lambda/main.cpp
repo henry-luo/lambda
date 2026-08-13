@@ -3865,6 +3865,16 @@ int main(int argc, char *argv[]) {
             } else if (strncmp(argv[i], "--timeout=", 10) == 0) {
                 batch_timeout = atoi(argv[i] + 10);
                 if (batch_timeout <= 0) batch_timeout = 60;
+            } else if (strcmp(argv[i], "--mir-interp") == 0) {
+                g_mir_interp_mode = 1;
+            } else if (strncmp(argv[i], "--opt-level=", 12) == 0 ||
+                       strncmp(argv[i], "--optimize=", 11) == 0) {
+                const char* value = strchr(argv[i], '=');
+                int level = value ? atoi(value + 1) : -1;
+                if (level >= 0 && level <= 3) runtime.optimize_level = (unsigned int)level;
+            } else if (strcmp(argv[i], "-O0") == 0 || strcmp(argv[i], "-O1") == 0 ||
+                       strcmp(argv[i], "-O2") == 0 || strcmp(argv[i], "-O3") == 0) {
+                runtime.optimize_level = (unsigned int)(argv[i][2] - '0');
             }
         }
 
@@ -4780,9 +4790,13 @@ int main(int argc, char *argv[]) {
                 ret_code = 1;
             }
         }
-        else if (strncmp(argv[i], "--optimize=", 11) == 0) {
-            // Parse --optimize=N format
-            optimize_level = (int)str_to_int64_default(argv[i] + 11, strlen(argv[i] + 11), 0);
+        else if (strncmp(argv[i], "--optimize=", 11) == 0 ||
+                 strncmp(argv[i], "--opt-level=", 12) == 0) {
+            // Parse the Lambda and LambdaJS spellings of --optimize=N.
+            const char* value = strchr(argv[i], '=');
+            size_t value_len = value ? strlen(value + 1) : 0;
+            optimize_level = value
+                ? (int)str_to_int64_default(value + 1, value_len, 0) : 0;
             if (optimize_level < 0 || optimize_level > 3) {
                 printf("Error: --optimize level must be 0-3 (got %d)\n", optimize_level);
                 help_only = true;
